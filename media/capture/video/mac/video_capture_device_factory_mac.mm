@@ -18,6 +18,7 @@
 #include "base/task_runner_util.h"
 #import "media/capture/video/mac/video_capture_device_avfoundation_mac.h"
 #import "media/capture/video/mac/video_capture_device_decklink_mac.h"
+#import "media/capture/video/mac/video_capture_device_syphon_mac.h"
 #include "media/capture/video/mac/video_capture_device_mac.h"
 
 namespace media {
@@ -58,7 +59,7 @@ std::unique_ptr<VideoCaptureDevice> VideoCaptureDeviceFactoryMac::CreateDevice(
   if (descriptor.capture_api == VideoCaptureApi::MACOSX_DECKLINK) {
     capture_device.reset(new VideoCaptureDeviceDeckLinkMac(descriptor));
   } else if (descriptor.capture_api == VideoCaptureApi::MACOSX_SYPHON) {
-//      capture_device.reset(new VideoCaptureDeviceDeckLinkMac(descriptor));
+      capture_device.reset(new VideoCaptureDeviceSyphonMac(descriptor));
   } else {
     VideoCaptureDeviceMac* device = new VideoCaptureDeviceMac(descriptor);
     capture_device.reset(device);
