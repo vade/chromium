@@ -506,7 +506,7 @@ std::string VideoCaptureDeviceMac::GetDeviceModelId(
   if (capture_api == VideoCaptureApi::MACOSX_AVFOUNDATION &&
       transport_type != VideoCaptureTransportType::MACOSX_USB_OR_BUILT_IN)
     return "";
-  if (capture_api == VideoCaptureApi::MACOSX_DECKLINK)
+    if (capture_api == VideoCaptureApi::MACOSX_DECKLINK || capture_api == VideoCaptureApi::MACOSX_SYPHON)
     return "";
   // Both PID and VID are 4 characters.
   if (device_id.size() < 2 * kVidPidSize)
