@@ -106,6 +106,8 @@ void VideoCaptureDeviceFactoryMac::GetDeviceDescriptors(
   }
   // Also retrieve Blackmagic devices, if present, via DeckLink SDK API.
   VideoCaptureDeviceDeckLinkMac::EnumerateDevices(device_descriptors);
+  // Also retrieve Syphon Servers, if present, via Syphon SDK API.
+  VideoCaptureDeviceSyphonMac::EnumerateDevices(device_descriptors);
 }
 
 void VideoCaptureDeviceFactoryMac::GetSupportedFormats(
