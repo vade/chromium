@@ -4,8 +4,7 @@
 
 if (is_mac) {
   loadable_module("Syphon") {
-#ldflags = ["-L", "//third_party/Syphon/mac/"]
-    lib_dirs = ["//third_party/Syphon/mac/"]
+    ldflags = ["-F"+"../../third_party/Syphon/mac/"]
     libs = [
       "Syphon.framework",
     ]

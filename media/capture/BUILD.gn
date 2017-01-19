@@ -130,6 +130,7 @@ component("capture") {
       "//third_party/decklink",
       "//third_party/Syphon"
     ]
+    ldflags = ["-F"+"../../third_party/Syphon/mac/"]
     libs = [
       "AVFoundation.framework",
       "CoreFoundation.framework",
@@ -137,6 +138,7 @@ component("capture") {
       "CoreMedia.framework",
       "CoreVideo.framework",
       "Foundation.framework",
+      "Syphon.framework"
     ]
   }
 
