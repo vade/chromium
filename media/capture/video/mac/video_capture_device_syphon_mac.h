@@ -11,6 +11,8 @@
 #include "media/capture/video/video_capture_device.h"
 
 #import <Foundation/Foundation.h>
+#import <OpenGL/OpenGL.h>
+#include "third_party/Syphon/mac/Syphon.framework/Headers/Syphon.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -69,6 +71,9 @@ namespace media {
         
         // Checks for Device (a.k.a. Audio) thread.
         base::ThreadChecker thread_checker_;
+        
+        SyphonClient* syphonClient;
+        NSOpenGLContext* context;
         
         DISALLOW_COPY_AND_ASSIGN(VideoCaptureDeviceSyphonMac);
     };

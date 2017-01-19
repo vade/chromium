@@ -6,6 +6,8 @@ if (is_mac) {
   loadable_module("Syphon") {
     ldflags = ["-F"+"../../third_party/Syphon/mac/"]
     libs = [
+      "AppKit.framework",
+      "OpenGL.framework",
       "Syphon.framework",
     ]
   }
