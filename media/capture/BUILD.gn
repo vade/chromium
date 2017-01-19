@@ -165,7 +165,9 @@ component("capture_lib") {
       "CoreMedia.framework",
       "CoreVideo.framework",
       "Foundation.framework",
-      "Syphon.framework"
+      "AppKit.framework",
+      "OpenGL.framework",
+      "Syphon.framework",
     ]
   }
 

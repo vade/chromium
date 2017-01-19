@@ -88,7 +88,7 @@ void VideoCaptureDeviceFactoryMac::GetDeviceDescriptors(
   for (NSString* key in capture_devices) {
     const std::string device_id = [key UTF8String];
     const VideoCaptureApi capture_api = VideoCaptureApi::MACOSX_AVFOUNDATION;
-    int transport_type = [[capture_devices valueForKey:key] transportType];
+    int transport_type = [(AVCaptureDevice*)[capture_devices valueForKey:key] transportType];
     // Transport types are defined for Audio devices and reused for video.
     VideoCaptureTransportType device_transport_type =
         (transport_type == kIOAudioDeviceTransportTypeBuiltIn ||
@@ -121,12 +121,20 @@ void VideoCaptureDeviceFactoryMac::GetSupportedFormats(
                                supportedFormats:supported_formats];
       break;
     case VideoCaptureApi::MACOSX_DECKLINK:
-      DVLOG(1) << "Enumerating video capture capabilities "
+      DVLOG(1) << "Enumerating video capture capabilities, Decklink "
                << device.display_name;
       VideoCaptureDeviceDeckLinkMac::EnumerateDeviceCapabilities(
           device, supported_formats);
       break;
-    default:
+
+    case VideoCaptureApi::MACOSX_SYPHON:
+      DVLOG(1) << "Enumerating video capture capabilities, Syphon "
+          << device.display_name;
+      VideoCaptureDeviceSyphonMac::EnumerateDeviceCapabilities(
+          device, supported_formats);
+      break;
+
+      default:
       NOTREACHED();
   }
 }
