@@ -74,7 +74,7 @@ namespace media {
         
         SyphonClient* syphonClient;
         NSOpenGLContext* context;
-        
+        bool run;
         DISALLOW_COPY_AND_ASSIGN(VideoCaptureDeviceSyphonMac);
     };
     

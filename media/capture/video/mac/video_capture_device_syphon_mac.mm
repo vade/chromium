@@ -55,7 +55,7 @@ namespace media {
         
         const media::VideoCaptureFormat format(
                                                gfx::Size(640, 480),
-                                               60.0,
+                                               0.0f,
                                                PIXEL_FORMAT_RGB32);
         VLOG(3) << device.display_name << " "
         << VideoCaptureFormat::ToString(format);
@@ -66,8 +66,26 @@ namespace media {
                                                                  const VideoCaptureDeviceDescriptor& device_descriptor)
      {
         NSLog(@"Request to init Syphon Server with device display name:");
+         // Because we set up our callback in our initializer,
+         run = false;
          
          @autoreleasepool {
+             
+             // Initialize our GL Context
+             NSOpenGLPixelFormatAttribute attributes[] = {
+                 NSOpenGLPFAAllowOfflineRenderers,
+                 NSOpenGLPFAAccelerated,
+                 NSOpenGLPFAColorSize, 32,
+                 NSOpenGLPFADepthSize, 24,
+                 NSOpenGLPFANoRecovery,
+                 NSOpenGLPFAOpenGLProfile, NSOpenGLProfileVersionLegacy
+             };
+             
+             NSOpenGLPixelFormat* format = [[NSOpenGLPixelFormat alloc] initWithAttributes:attributes];
+             
+             context = [[NSOpenGLContext alloc] initWithFormat:format shareContext:nil];
+             [context retain];
+
              // Enumerate Syphon Server Directories to match our Device Descriptors device_id, in which we placed the Syphon Servers UUID
              NSDictionary* selectedServerDictionary = nil;
              NSString* uuidToMatch = [NSString stringWithUTF8String:device_descriptor.device_id.c_str()];
@@ -79,22 +97,126 @@ namespace media {
                  }
              }
              if (selectedServerDictionary) {
-                 syphonClient = [[SyphonClient alloc] initWithServerDescription:selectedServerDictionary options:nil newFrameHandler:NULL];
+                 syphonClient = [[SyphonClient alloc] initWithServerDescription:selectedServerDictionary options:nil newFrameHandler:^(SyphonClient *client) {
+                     @autoreleasepool {
+                         
+                         if(run && context) {
+                             [context makeCurrentContext];
+                             
+                             SyphonImage* image = [client newFrameImageForContext:context.CGLContextObj];
+                             
+                             if(image) {
+                                 GLuint tempFBO;
+                                 GLuint tempTexture;
+                                 
+                                 glGenTextures(1, &tempTexture);
+                                 glBindTexture(GL_TEXTURE_RECTANGLE_EXT, tempTexture);
+                                 glTexImage2D(GL_TEXTURE_RECTANGLE_EXT,
+                                              0,
+                                              GL_RGBA8,
+                                              image.textureSize.width,
+                                              image.textureSize.height,
+                                              0,
+                                              GL_BGRA,
+                                              GL_UNSIGNED_INT_8_8_8_8_REV,
+                                              NULL);
+                                 
+                                 glGenFramebuffers(1, &tempFBO);
+                                 glBindFramebuffer(GL_FRAMEBUFFER, tempFBO);
+                                 glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE_EXT, tempTexture, 0);
+                                 
+                                 // things go according to plan?
+                                 GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+                                 if(status != GL_FRAMEBUFFER_COMPLETE)
+                                 {
+                                     NSLog(@"could not create FBO - bailing");
+                                 }
+                                 
+                                 glViewport(0, 0, image.textureSize.width, image.textureSize.height);
+                                 glOrtho(0, image.textureSize.width, 0, image.textureSize.height, -1, 1);
+                                 
+                                 glMatrixMode(GL_PROJECTION);
+                                 glLoadIdentity();
+                                 
+                                 glMatrixMode(GL_MODELVIEW);
+                                 glLoadIdentity();
+                                 
+                                 // render into FBO
+                                 glColor4f(1.0, 1.0, 1.0, 1.0);
+                                 glClearColor(1.0, 0, 0, 0);
+                                 
+                                 glClear(GL_COLOR_BUFFER_BIT);
+                                 
+                                 GLfloat tex_coords[] =
+                                 {
+                                     image.textureSize.width,image.textureSize.height,
+                                     0.0,image.textureSize.height,
+                                     0.0,0.0,
+                                     image.textureSize.width,0.0
+                                 };
+                                 
+                                 GLfloat vertexCoords[8] =
+                                 {
+                                     1.0,	-1.0,
+                                     -1.0,	-1.0,
+                                     -1.0,	 1.0,
+                                     1.0,	 1.0
+                                 };
+                                 
+                                 GLuint textureName = image.textureName;
+                                 glEnable(GL_TEXTURE_RECTANGLE_EXT);
+                                 glBindTexture(GL_TEXTURE_RECTANGLE_EXT, textureName);
+                                 glTexParameterf(GL_TEXTURE_RECTANGLE_EXT, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+                                 glTexParameterf(GL_TEXTURE_RECTANGLE_EXT, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                                 glTexParameterf(GL_TEXTURE_RECTANGLE_EXT, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                                 glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+                                 glDisable(GL_BLEND);
+                                 
+                                 glEnableClientState( GL_TEXTURE_COORD_ARRAY );
+                                 glTexCoordPointer(2, GL_FLOAT, 0, tex_coords );
+                                 glEnableClientState(GL_VERTEX_ARRAY);
+                                 glVertexPointer(2, GL_FLOAT, 0, vertexCoords );
+                                 glDrawArrays( GL_TRIANGLE_FAN, 0, 4 );
+                                 glDisableClientState( GL_TEXTURE_COORD_ARRAY );
+                                 glDisableClientState(GL_VERTEX_ARRAY);
+                                 
+                                 // GL Syncronize contents of FBO
+                                 //glFlushRenderAPPLE();
+                                 glFinish();
+                                 
+                                 size_t textureDataLength = 4 * sizeof(int) * image.textureSize.width * image.textureSize.height;
+                                 const uint8_t* textureData = (const uint8_t*)malloc(textureDataLength);
+                                 
+                                 //                         memset((void*)textureData, 255, textureDataLength);
+                                 glEnable(GL_TEXTURE_RECTANGLE_EXT);
+                                 glBindTexture(GL_TEXTURE_RECTANGLE_EXT, tempTexture);
+                                 //glGetTexImage(<#GLenum target#>, <#GLint level#>, <#GLenum format#>, <#GLenum type#>, <#GLvoid *pixels#>)
+                                 glGetTexImage(GL_TEXTURE_RECTANGLE_EXT, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, (void*)textureData);
+                                 // flush GL to syncronize
+                                 glFinish();
+                                 
+                                 const media::VideoCaptureFormat capture_format(
+                                                                                gfx::Size(image.textureSize.width, image.textureSize.height),
+                                                                                0.0f,
+                                                                                media::PIXEL_FORMAT_ARGB);
+                                 
+                                 this->OnIncomingCapturedData(textureData,
+                                                              textureDataLength,
+                                                              capture_format,
+                                                              0,
+                                                              base::TimeTicks::Now(),
+                                                              base::TimeDelta::FromMilliseconds(1));
+                                 
+                                 free((void*)textureData);
+                                 
+                                 glDeleteFramebuffers(1, &tempFBO);
+                                 glDeleteTextures(1, &tempTexture);
+                             }
+                         }
+                     }
+                 }];
+              
                  [syphonClient retain];
-                 
-                 NSOpenGLPixelFormatAttribute attributes[] = {
-                     NSOpenGLPFAAllowOfflineRenderers,
-                     NSOpenGLPFAAccelerated,
-                     NSOpenGLPFAColorSize, 32,
-                     NSOpenGLPFADepthSize, 24,
-                     NSOpenGLPFANoRecovery,
-                     NSOpenGLPFAOpenGLProfile, NSOpenGLProfileVersionLegacy
-                 };
-                 
-                 NSOpenGLPixelFormat* format = [[NSOpenGLPixelFormat alloc] initWithAttributes:attributes];
-                 
-                 context = [[NSOpenGLContext alloc] initWithFormat:format shareContext:nil];
-                 [context retain];
              }
          }
      }
@@ -120,6 +242,7 @@ namespace media {
                                                                int rotation,  // Clockwise.
                                                                base::TimeTicks reference_time,
                                                                base::TimeDelta timestamp) {
+        
         base::AutoLock lock(lock_);
         if (client_) {
             client_->OnIncomingCapturedData(data, length, frame_format, rotation,
@@ -150,7 +273,7 @@ namespace media {
         client_ = std::move(client);
         
         NSLog(@"Request to allocate and start Syphon Server");
-
+        run = true;
         
 //        if (decklink_capture_delegate_.get())
 //            decklink_capture_delegate_->AllocateAndStart(params);
