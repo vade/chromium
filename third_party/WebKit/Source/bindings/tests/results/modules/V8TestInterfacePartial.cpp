@@ -310,7 +310,7 @@ static void partialVoidTestEnumModulesArgMethodMethod(const v8::FunctionCallback
   TestInterfacePartial3Implementation::partialVoidTestEnumModulesArgMethod(*impl, arg);
 }
 
-void partialVoidTestEnumModulesArgMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+ void partialVoidTestEnumModulesArgMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
   TestInterfaceImplementationPartialV8Internal::partialVoidTestEnumModulesArgMethodMethod(info);
 }
 
@@ -351,7 +351,7 @@ static void unscopableVoidMethodMethod(const v8::FunctionCallbackInfo<v8::Value>
   TestInterfacePartial3Implementation::unscopableVoidMethod(*impl);
 }
 
-void unscopableVoidMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+ void unscopableVoidMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
   TestInterfaceImplementationPartialV8Internal::unscopableVoidMethodMethod(info);
 }
 
@@ -361,7 +361,7 @@ static void partial4VoidMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& 
   TestInterfacePartial4::partial4VoidMethod(*impl);
 }
 
-void partial4VoidMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+ void partial4VoidMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
   TestInterfaceImplementationPartialV8Internal::partial4VoidMethodMethod(info);
 }
 
@@ -369,7 +369,7 @@ static void partial4StaticVoidMethodMethod(const v8::FunctionCallbackInfo<v8::Va
   TestInterfacePartial4::partial4StaticVoidMethod();
 }
 
-void partial4StaticVoidMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+ void partial4StaticVoidMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
   TestInterfaceImplementationPartialV8Internal::partial4StaticVoidMethodMethod(info);
 }
 
@@ -407,9 +407,9 @@ void V8TestInterfacePartial::installOriginTrialPartialFeature(v8::Isolate* isola
   v8::Local<v8::FunctionTemplate> interfaceTemplate = V8TestInterface::wrapperTypeInfo.domTemplate(isolate, world);
   v8::Local<v8::Signature> signature = v8::Signature::New(isolate, interfaceTemplate);
   ALLOW_UNUSED_LOCAL(signature);
-  const V8DOMConfiguration::AccessorConfiguration accessorpartial4LongAttributeConfiguration = {"partial4LongAttribute", TestInterfaceImplementationPartialV8Internal::partial4LongAttributeAttributeGetterCallback, TestInterfaceImplementationPartialV8Internal::partial4LongAttributeAttributeSetterCallback, 0, 0, nullptr, 0, v8::DEFAULT, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder};
+  const V8DOMConfiguration::AccessorConfiguration accessorpartial4LongAttributeConfiguration = {"partial4LongAttribute", TestInterfaceImplementationPartialV8Internal::partial4LongAttributeAttributeGetterCallback, TestInterfaceImplementationPartialV8Internal::partial4LongAttributeAttributeSetterCallback, 0, 0, nullptr, 0, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder};
   V8DOMConfiguration::installAccessor(isolate, world, instance, prototype, interface, signature, accessorpartial4LongAttributeConfiguration);
-  const V8DOMConfiguration::AccessorConfiguration accessorpartial4StaticLongAttributeConfiguration = {"partial4StaticLongAttribute", TestInterfaceImplementationPartialV8Internal::partial4StaticLongAttributeAttributeGetterCallback, TestInterfaceImplementationPartialV8Internal::partial4StaticLongAttributeAttributeSetterCallback, 0, 0, nullptr, 0, v8::DEFAULT, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::OnInterface, V8DOMConfiguration::CheckHolder};
+  const V8DOMConfiguration::AccessorConfiguration accessorpartial4StaticLongAttributeConfiguration = {"partial4StaticLongAttribute", TestInterfaceImplementationPartialV8Internal::partial4StaticLongAttributeAttributeGetterCallback, TestInterfaceImplementationPartialV8Internal::partial4StaticLongAttributeAttributeSetterCallback, 0, 0, nullptr, 0, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::OnInterface, V8DOMConfiguration::CheckHolder};
   V8DOMConfiguration::installAccessor(isolate, world, instance, prototype, interface, signature, accessorpartial4StaticLongAttributeConfiguration);
   const V8DOMConfiguration::ConstantConfiguration constantPartial4UnsignedShortConfiguration = {"PARTIAL4_UNSIGNED_SHORT", 4, 0, V8DOMConfiguration::ConstantTypeUnsignedShort};
   V8DOMConfiguration::installConstant(isolate, interface, prototype, constantPartial4UnsignedShortConfiguration);

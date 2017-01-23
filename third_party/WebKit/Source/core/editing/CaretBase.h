@@ -27,7 +27,7 @@
 #ifndef CaretBase_h
 #define CaretBase_h
 
-#include "core/editing/VisiblePosition.h"
+#include "core/editing/PositionWithAffinity.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/geometry/LayoutRect.h"
 #include "platform/graphics/paint/DisplayItem.h"
@@ -45,31 +45,16 @@ class CaretBase final : public DisplayItemClient {
   CaretBase();
   virtual ~CaretBase();
 
-  void invalidateCaretRect(Node*, const LayoutRect&);
   // Creating VisiblePosition causes synchronous layout so we should use the
   // PositionWithAffinity version if possible.
   // A position in HTMLTextFromControlElement is a typical example.
   static LayoutRect computeCaretRect(const PositionWithAffinity& caretPosition);
 
-  // TODO(yosin): We should move |computeCaretRect()| with |VisiblePosition| to
-  // "FrameCaret.cpp" as static file local function.
-  static LayoutRect computeCaretRect(const VisiblePosition& caretPosition);
-
-  // TODO(yosin): We should move |absoluteBoundsForLocalRect()| with
-  // |VisiblePosition| to "FrameCaret.cpp" as static file local function.
-  static IntRect absoluteBoundsForLocalRect(Node*, const LayoutRect&);
-
-  // TODO(yosin): We should move |shouldRepaintCaret()| to "FrameCaret.cpp" as
-  // static file local function.
-  static bool shouldRepaintCaret(Node&);
-  // TODO(yosin): We should make |paintCaret()| to non-static member and get rid
-  // |DisplayItemClient| parameter.
-  static void paintCaret(Node*,
-                         GraphicsContext&,
-                         const DisplayItemClient&,
-                         const LayoutRect& caretLocalRect,
-                         const LayoutPoint&,
-                         DisplayItem::Type);
+  void paintCaret(Node*,
+                  GraphicsContext&,
+                  const LayoutRect& caretLocalRect,
+                  const LayoutPoint&,
+                  DisplayItem::Type);
 
   static LayoutBlock* caretLayoutObject(Node*);
   void invalidateLocalCaretRect(Node*, const LayoutRect&);

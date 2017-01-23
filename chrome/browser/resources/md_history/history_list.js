@@ -29,6 +29,7 @@ Polymer({
 
   listeners: {
     'remove-bookmark-stars': 'removeBookmarkStars_',
+    'open-menu': 'onOpenMenu_',
   },
 
   /** @override */
@@ -101,7 +102,20 @@ Polymer({
     if (this.resultLoadingDisabled_ || this.querying)
       return;
 
-    this.fire('load-more-history');
+    this.fire('query-history', true);
+  },
+
+  /**
+   * Ensure that the item is visible in the scroll pane when its menu is
+   * opened (it is possible to open off-screen items using keyboard shortcuts).
+   * @param {Event} e
+   * @private
+   */
+  onOpenMenu_: function(e) {
+    var index = e.detail.index;
+    var list = /** @type {IronListElement} */ (this.$['infinite-list']);
+    if (index < list.firstVisibleIndex || index > list.lastVisibleIndex)
+      list.scrollToIndex(index);
   },
 
   /**

@@ -143,7 +143,7 @@ class WebSharedWorkerImpl final : public WorkerReportingProxy,
   void didReceiveScriptLoaderResponse();
   void onScriptLoaderFinished();
 
-  static void connectTask(WebMessagePortChannelUniquePtr, ExecutionContext*);
+  void connectTask(WebMessagePortChannelUniquePtr);
 
   // Tasks that are run on the main thread.
   void didCloseWorkerGlobalScopeOnMainThread();
@@ -156,7 +156,7 @@ class WebSharedWorkerImpl final : public WorkerReportingProxy,
                         std::unique_ptr<ExecutionContextTask>) override;
   void postTaskToWorkerGlobalScope(
       const WebTraceLocation&,
-      std::unique_ptr<ExecutionContextTask>) override;
+      std::unique_ptr<WTF::CrossThreadClosure>) override;
 
   // 'shadow page' - created to proxy loading requests from the worker.
   Persistent<ExecutionContext> m_loadingDocument;

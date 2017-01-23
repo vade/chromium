@@ -31,7 +31,8 @@ GpuSurfacelessBrowserCompositorOutputSurface::
         gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager)
     : GpuBrowserCompositorOutputSurface(std::move(context),
                                         update_vsync_parameters_callback,
-                                        std::move(overlay_candidate_validator)),
+                                        std::move(overlay_candidate_validator),
+                                        true  /* support_stencil */),
       gpu_memory_buffer_manager_(gpu_memory_buffer_manager) {
   capabilities_.uses_default_gl_framebuffer = false;
   capabilities_.flipped_output_surface = true;
@@ -91,12 +92,13 @@ void GpuSurfacelessBrowserCompositorOutputSurface::Reshape(
     const gfx::Size& size,
     float device_scale_factor,
     const gfx::ColorSpace& color_space,
-    bool has_alpha) {
+    bool has_alpha,
+    bool use_stencil) {
   reshape_size_ = size;
-  GpuBrowserCompositorOutputSurface::Reshape(size, device_scale_factor,
-                                             color_space, has_alpha);
+  GpuBrowserCompositorOutputSurface::Reshape(
+      size, device_scale_factor, color_space, has_alpha, use_stencil);
   DCHECK(buffer_queue_);
-  buffer_queue_->Reshape(size, device_scale_factor, color_space);
+  buffer_queue_->Reshape(size, device_scale_factor, color_space, use_stencil);
 }
 
 void GpuSurfacelessBrowserCompositorOutputSurface::OnGpuSwapBuffersCompleted(

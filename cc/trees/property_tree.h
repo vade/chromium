@@ -65,13 +65,11 @@ class CC_EXPORT PropertyTree {
   int Insert(const T& tree_node, int parent_id);
 
   T* Node(int i) {
-    // TODO(vollick): remove this.
-    CHECK(i < static_cast<int>(nodes_.size()));
+    DCHECK(i < static_cast<int>(nodes_.size()));
     return i > kInvalidNodeId ? &nodes_[i] : nullptr;
   }
   const T* Node(int i) const {
-    // TODO(vollick): remove this.
-    CHECK(i < static_cast<int>(nodes_.size()));
+    DCHECK(i < static_cast<int>(nodes_.size()));
     return i > kInvalidNodeId ? &nodes_[i] : nullptr;
   }
 
@@ -367,7 +365,6 @@ class CC_EXPORT ScrollTree final : public PropertyTree<ScrollNode> {
 
   gfx::ScrollOffset MaxScrollOffset(int scroll_node_id) const;
   void OnScrollOffsetAnimated(int layer_id,
-                              int transform_tree_index,
                               int scroll_tree_index,
                               const gfx::ScrollOffset& scroll_offset,
                               LayerTreeImpl* layer_tree_impl);
@@ -533,7 +530,7 @@ struct DrawTransformData {
   // performance.
   DrawTransformData()
       : update_number(-1),
-        target_id(-1),
+        target_id(EffectTree::kInvalidNodeId),
         transforms(gfx::Transform(), gfx::Transform()) {}
 };
 

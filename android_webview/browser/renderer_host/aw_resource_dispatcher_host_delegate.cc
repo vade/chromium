@@ -12,17 +12,19 @@
 #include "android_webview/browser/aw_contents_io_thread_client.h"
 #include "android_webview/browser/aw_login_delegate.h"
 #include "android_webview/browser/aw_resource_context.h"
+#include "android_webview/browser/aw_resource_throttle.h"
+#include "android_webview/browser/aw_safe_browsing_config_helper.h"
 #include "android_webview/browser/net/aw_web_resource_request.h"
 #include "android_webview/browser/renderer_host/auto_login_parser.h"
 #include "android_webview/common/url_constants.h"
 #include "base/memory/scoped_vector.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
+#include "components/safe_browsing_db/safe_browsing_api_handler.h"
 #include "components/web_restrictions/browser/web_restrictions_resource_throttle.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/browser/resource_dispatcher_host_login_delegate.h"
 #include "content/public/browser/resource_request_info.h"
-#include "content/public/browser/resource_throttle.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
@@ -254,8 +256,7 @@ void AwResourceDispatcherHostDelegate::ResourceDispatcherHostCreated() {
 }
 
 AwResourceDispatcherHostDelegate::AwResourceDispatcherHostDelegate()
-    : content::ResourceDispatcherHostDelegate() {
-}
+    : content::ResourceDispatcherHostDelegate() {}
 
 AwResourceDispatcherHostDelegate::~AwResourceDispatcherHostDelegate() {
 }
@@ -270,6 +271,20 @@ void AwResourceDispatcherHostDelegate::RequestBeginning(
 
   const content::ResourceRequestInfo* request_info =
       content::ResourceRequestInfo::ForRequest(request);
+
+  if (AwSafeBrowsingConfigHelper::GetSafeBrowsingEnabled()) {
+    content::ResourceThrottle* throttle =
+        AwSafeBrowsingResourceThrottle::MaybeCreate(
+            request, resource_type,
+            AwBrowserContext::GetDefault()->GetSafeBrowsingDBManager(),
+            AwBrowserContext::GetDefault()->GetSafeBrowsingUIManager());
+    if (throttle == nullptr) {
+      // Should not happen
+      DLOG(WARNING) << "Failed creating safebrowsing throttle";
+    } else {
+      throttles->push_back(base::WrapUnique(throttle));
+    }
+  }
 
   // We always push the throttles here. Checking the existence of io_client
   // is racy when a popup window is created. That is because RequestBeginning

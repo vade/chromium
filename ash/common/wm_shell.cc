@@ -46,9 +46,11 @@
 #include "ash/common/wm/root_window_finder.h"
 #include "ash/common/wm/system_modal_container_layout_manager.h"
 #include "ash/common/wm/window_cycle_controller.h"
+#include "ash/common/wm_activation_observer.h"
 #include "ash/common/wm_window.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
+#include "ash/shell.h"
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
@@ -58,11 +60,16 @@
 #include "ui/app_list/presenter/app_list.h"
 #include "ui/display/display.h"
 #include "ui/views/focus/focus_manager_factory.h"
+#include "ui/wm/public/activation_client.h"
 
 namespace ash {
 
 // static
 WmShell* WmShell::instance_ = nullptr;
+
+WmShell::~WmShell() {
+  session_controller_->RemoveSessionStateObserver(this);
+}
 
 // static
 void WmShell::Set(WmShell* instance) {
@@ -107,6 +114,9 @@ void WmShell::Initialize(const scoped_refptr<base::SequencedWorkerPool>& pool) {
 }
 
 void WmShell::Shutdown() {
+  if (added_activation_observer_)
+    Shell::GetInstance()->activation_client()->RemoveObserver(this);
+
   // These members access WmShell in their destructors.
   wallpaper_controller_.reset();
   accessibility_delegate_.reset();
@@ -143,14 +153,14 @@ void WmShell::ShowContextMenu(const gfx::Point& location_in_screen,
                                                    source_type);
 }
 
-void WmShell::CreateShelf() {
+void WmShell::CreateShelfView() {
   // Must occur after SessionStateDelegate creation and user login.
   DCHECK(GetSessionStateDelegate());
   DCHECK_GT(GetSessionStateDelegate()->NumberOfLoggedInUsers(), 0);
   CreateShelfDelegate();
 
   for (WmWindow* root_window : GetAllRootWindows())
-    root_window->GetRootWindowController()->CreateShelf();
+    root_window->GetRootWindowController()->CreateShelfView();
 }
 
 void WmShell::CreateShelfDelegate() {
@@ -214,6 +224,18 @@ void WmShell::NotifyShelfAutoHideBehaviorChanged(WmWindow* root_window) {
     observer.OnShelfAutoHideBehaviorChanged(root_window);
 }
 
+void WmShell::AddActivationObserver(WmActivationObserver* observer) {
+  if (!added_activation_observer_) {
+    added_activation_observer_ = true;
+    Shell::GetInstance()->activation_client()->AddObserver(this);
+  }
+  activation_observers_.AddObserver(observer);
+}
+
+void WmShell::RemoveActivationObserver(WmActivationObserver* observer) {
+  activation_observers_.RemoveObserver(observer);
+}
+
 void WmShell::AddShellObserver(ShellObserver* observer) {
   shell_observers_.AddObserver(observer);
 }
@@ -271,17 +293,13 @@ WmShell::WmShell(std::unique_ptr<ShellDelegate> shell_delegate)
           base::MakeUnique<WindowSelectorController>()) {
   session_controller_->AddSessionStateObserver(this);
 
-  prefs::mojom::PreferencesManagerPtr pref_manager_ptr;
+  prefs::mojom::PreferencesFactoryPtr pref_factory_ptr;
   // Can be null in tests.
   if (!delegate_->GetShellConnector())
     return;
   delegate_->GetShellConnector()->BindInterface(prefs::mojom::kServiceName,
-                                                &pref_manager_ptr);
-  pref_store_ = new preferences::PrefObserverStore(std::move(pref_manager_ptr));
-}
-
-WmShell::~WmShell() {
-  session_controller_->RemoveSessionStateObserver(this);
+                                                &pref_factory_ptr);
+  pref_store_ = new preferences::PrefObserverStore(std::move(pref_factory_ptr));
 }
 
 RootWindowController* WmShell::GetPrimaryRootWindowController() {
@@ -420,7 +438,27 @@ void WmShell::SessionStateChanged(session_manager::SessionState state) {
   // Create the shelf when a session becomes active. It's safe to do this
   // multiple times (e.g. initial login vs. multiprofile add session).
   if (state == session_manager::SessionState::ACTIVE)
-    CreateShelf();
+    CreateShelfView();
+}
+
+void WmShell::OnWindowActivated(
+    aura::client::ActivationChangeObserver::ActivationReason reason,
+    aura::Window* gained_active,
+    aura::Window* lost_active) {
+  WmWindow* gained_active_wm = WmWindow::Get(gained_active);
+  WmWindow* lost_active_wm = WmWindow::Get(lost_active);
+  if (gained_active_wm)
+    set_root_window_for_new_windows(gained_active_wm->GetRootWindow());
+  for (auto& observer : activation_observers_)
+    observer.OnWindowActivated(gained_active_wm, lost_active_wm);
+}
+
+void WmShell::OnAttemptToReactivateWindow(aura::Window* request_active,
+                                          aura::Window* actual_active) {
+  for (auto& observer : activation_observers_) {
+    observer.OnAttemptToReactivateWindow(WmWindow::Get(request_active),
+                                         WmWindow::Get(actual_active));
+  }
 }
 
 }  // namespace ash

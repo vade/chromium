@@ -143,6 +143,7 @@ class CC_EXPORT RenderSurfaceImpl {
   void NoteAncestorPropertyChanged();
 
   DamageTracker* damage_tracker() const { return damage_tracker_.get(); }
+  gfx::Rect GetDamageRect();
 
   int GetRenderPassId();
 
@@ -162,8 +163,6 @@ class CC_EXPORT RenderSurfaceImpl {
       const gfx::Transform& target_to_surface);
 
   const EffectNode* OwningEffectNode() const;
-
-  LayerImpl* owning_layer_;
 
   LayerTreeImpl* layer_tree_impl_;
   int stable_effect_id_;

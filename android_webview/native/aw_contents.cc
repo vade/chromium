@@ -179,6 +179,19 @@ AwBrowserPermissionRequestDelegate* AwBrowserPermissionRequestDelegate::FromID(
   return aw_contents;
 }
 
+// static
+AwSafeBrowsingUIManager::UIManagerClient*
+AwSafeBrowsingUIManager::UIManagerClient::FromWebContents(
+    WebContents* web_contents) {
+  return AwContents::FromWebContents(web_contents);
+}
+
+// static
+AwRenderProcessGoneDelegate* AwRenderProcessGoneDelegate::FromWebContents(
+    content::WebContents* web_contents) {
+  return AwContents::FromWebContents(web_contents);
+}
+
 AwContents::AwContents(std::unique_ptr<WebContents> web_contents)
     : content::WebContentsObserver(web_contents.get()),
       functor_(nullptr),
@@ -1287,6 +1300,8 @@ void AwContents::DidAttachInterstitialPage() {
 
 void AwContents::DidDetachInterstitialPage() {
   CompositorID compositor_id;
+  if (!web_contents_)
+    return;
   if (web_contents_->GetRenderProcessHost() &&
       web_contents_->GetRenderViewHost()) {
     compositor_id.process_id = web_contents_->GetRenderProcessHost()->GetID();
@@ -1296,6 +1311,36 @@ void AwContents::DidDetachInterstitialPage() {
     LOG(WARNING) << "failed setting the compositor on detaching interstitital";
   }
   browser_view_renderer_.SetActiveCompositorID(compositor_id);
+}
+
+bool AwContents::CanShowInterstitial() {
+  JNIEnv* env = AttachCurrentThread();
+  const ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return false;
+  return Java_AwContents_canShowInterstitial(env, obj);
+}
+
+void AwContents::OnRenderProcessGone(int child_process_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return;
+
+  Java_AwContents_onRenderProcessGone(env, obj, child_process_id);
+}
+
+bool AwContents::OnRenderProcessGoneDetail(int child_process_id,
+                                           bool crashed) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return false;
+
+  return Java_AwContents_onRenderProcessGoneDetail(env, obj,
+      child_process_id, crashed);
 }
 
 }  // namespace android_webview

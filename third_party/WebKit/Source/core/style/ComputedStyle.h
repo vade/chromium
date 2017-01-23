@@ -193,7 +193,7 @@ class CORE_EXPORT ComputedStyle : public ComputedStyleBase,
   DataRef<SVGComputedStyle> m_svgStyle;
 
   // !START SYNC!: Keep this in sync with the copy constructor in
-  // ComputedStyle.cpp and implicitlyInherited() in StyleResolver.cpp
+  // ComputedStyle.cpp.
 
   // inherit
   struct InheritedData {
@@ -301,7 +301,8 @@ class CORE_EXPORT ComputedStyle : public ComputedStyleBase,
     ComputedStyleBase::setBitDefaults();
     m_inheritedData.m_hasSimpleUnderline = false;
     m_inheritedData.m_cursorStyle = static_cast<unsigned>(initialCursor());
-    m_inheritedData.m_insideLink = NotInsideLink;
+    m_inheritedData.m_insideLink =
+        static_cast<unsigned>(EInsideLink::kNotInsideLink);
 
     m_nonInheritedData.m_effectiveDisplay =
         m_nonInheritedData.m_originalDisplay =
@@ -758,9 +759,11 @@ class CORE_EXPORT ComputedStyle : public ComputedStyleBase,
   void setBoxShadow(PassRefPtr<ShadowList>);
 
   // box-sizing (aka -webkit-box-sizing)
-  static EBoxSizing initialBoxSizing() { return BoxSizingContentBox; }
+  static EBoxSizing initialBoxSizing() { return EBoxSizing::kContentBox; }
   EBoxSizing boxSizing() const { return m_box->boxSizing(); }
-  void setBoxSizing(EBoxSizing s) { SET_VAR(m_box, m_boxSizing, s); }
+  void setBoxSizing(EBoxSizing s) {
+    SET_VAR(m_box, m_boxSizing, static_cast<unsigned>(s));
+  }
 
   // clear
   static EClear initialClear() { return ClearNone; }
@@ -1990,7 +1993,7 @@ class CORE_EXPORT ComputedStyle : public ComputedStyleBase,
   void setVerticalBorderSpacing(short);
 
   // cursor
-  static ECursor initialCursor() { return ECursor::Auto; }
+  static ECursor initialCursor() { return ECursor::kAuto; }
   ECursor cursor() const {
     return static_cast<ECursor>(m_inheritedData.m_cursorStyle);
   }
@@ -2592,7 +2595,7 @@ class CORE_EXPORT ComputedStyle : public ComputedStyleBase,
     return static_cast<EInsideLink>(m_inheritedData.m_insideLink);
   }
   void setInsideLink(EInsideLink insideLink) {
-    m_inheritedData.m_insideLink = insideLink;
+    m_inheritedData.m_insideLink = static_cast<unsigned>(insideLink);
   }
 
   bool hasExplicitlyInheritedProperties() const {

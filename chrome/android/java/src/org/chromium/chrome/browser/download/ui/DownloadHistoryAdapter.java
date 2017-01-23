@@ -271,7 +271,16 @@ public class DownloadHistoryAdapter extends DateDividedAdapter
                 filter(mFilter);
                 for (TestObserver observer : mObservers) observer.onDownloadItemUpdated(item);
             } else if (isUpdated) {
-                notifyItemChanged(existingWrapper.getPosition());
+                // Directly alert DownloadItemViews displaying information about the item that it
+                // has changed instead of notifying the RecyclerView that a particular item has
+                // changed.  This prevents the RecyclerView from detaching and immediately
+                // reattaching the same view, causing janky animations.
+                for (DownloadItemView view : mViews) {
+                    if (TextUtils.equals(item.getId(), view.getItem().getId())) {
+                        view.displayItem(mBackendProvider, existingWrapper);
+                    }
+                }
+
                 for (TestObserver observer : mObservers) observer.onDownloadItemUpdated(item);
             }
         }
@@ -345,6 +354,32 @@ public class DownloadHistoryAdapter extends DateDividedAdapter
     /** Unregisters a {@link TestObserver} that was monitoring internal changes. */
     void unregisterObserverForTest(TestObserver observer) {
         mObservers.removeObserver(observer);
+    }
+
+    /**
+     * Called to perform a search. If the query is empty all items matching the current filter will
+     * be displayed.
+     * @param query The text to search for.
+     */
+    void search(String query) {
+        if (TextUtils.isEmpty(query)) {
+            filter(mFilter);
+            return;
+        }
+
+        mFilteredItems.clear();
+        mRegularDownloadItems.filter(mFilter, query, mFilteredItems);
+        mIncognitoDownloadItems.filter(mFilter, query, mFilteredItems);
+        mOfflinePageItems.filter(mFilter, query, mFilteredItems);
+        clear(false);
+        loadItems(mFilteredItems);
+    }
+
+    /**
+     * Called when a search is ended.
+     */
+    void onEndSearch() {
+        filter(mFilter);
     }
 
     private DownloadDelegate getDownloadDelegate() {

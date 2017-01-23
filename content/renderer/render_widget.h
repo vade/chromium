@@ -19,6 +19,7 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -69,6 +70,7 @@ namespace blink {
 namespace scheduler {
 class RenderWidgetSchedulingState;
 }
+struct WebActiveWheelFlingParameters;
 struct WebDeviceEmulationParams;
 class WebDragData;
 class WebFrameWidget;
@@ -87,6 +89,7 @@ class SwapPromise;
 }
 
 namespace gfx {
+class ICCProfile;
 class Range;
 }
 
@@ -243,7 +246,6 @@ class CONTENT_EXPORT RenderWidget
   void DidCommitCompositorFrame() override;
   void DidCompletePageScaleAnimation() override;
   void DidReceiveCompositorFrameAck() override;
-  void ForwardCompositorProto(const std::vector<uint8_t>& proto) override;
   bool IsClosing() const override;
   void RequestScheduleAnimation() override;
   void UpdateVisualState() override;
@@ -387,7 +389,7 @@ class CONTENT_EXPORT RenderWidget
   void UpdateCompositionInfo(bool immediate_request);
 
   // Change the device ICC color profile while running a layout test.
-  void SetDeviceColorProfileForTesting(const std::vector<char>& color_profile);
+  void SetDeviceColorProfileForTesting(const gfx::ICCProfile& color_profile);
 
   // Called when the Widget has changed size as a result of an auto-resize.
   void DidAutoResize(const gfx::Size& new_size);
@@ -411,6 +413,9 @@ class CONTENT_EXPORT RenderWidget
 
   // Helper to convert |point| using ConvertWindowToViewport().
   gfx::Point ConvertWindowPointToViewport(const gfx::Point& point);
+
+  virtual void TransferActiveWheelFlingAnimation(
+      const blink::WebActiveWheelFlingParameters& params) {}
 
  protected:
   // Friend RefCounted so that the dtor can be non-public. Using this class
@@ -512,7 +517,6 @@ class CONTENT_EXPORT RenderWidget
                            const gfx::Rect& window_screen_rect);
   void OnUpdateWindowScreenRect(const gfx::Rect& window_screen_rect);
   void OnSetViewportIntersection(const gfx::Rect& viewport_intersection);
-  void OnHandleCompositorProto(const std::vector<uint8_t>& proto);
   // Real data that is dragged is not included at DragEnter time.
   void OnDragTargetDragEnter(
       const std::vector<DropData::Metadata>& drop_meta_data,
@@ -787,6 +791,8 @@ class CONTENT_EXPORT RenderWidget
   // Wraps the |webwidget_| as a MouseLockDispatcher::LockTarget interface.
   std::unique_ptr<MouseLockDispatcher::LockTarget> webwidget_mouse_lock_target_;
 
+  bool has_added_input_handler_;
+
  private:
   // Applies/Removes the DevTools device emulation transformation to/from a
   // window rect.
@@ -837,6 +843,8 @@ class CONTENT_EXPORT RenderWidget
   // being handled. If the current event results in starting a drag/drop
   // session, this info is sent to the browser along with other drag/drop info.
   DragEventSourceInfo possible_drag_event_info_;
+
+  base::WeakPtrFactory<RenderWidget> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidget);
 };

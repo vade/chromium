@@ -177,6 +177,7 @@
 <translation id="2899328121302785497">{COUNT,plural, =1{kapcsos nyitó zárójel}other{# kapcsos nyitó zárójel}}</translation>
 <translation id="2911433807131383493">A ChromeVox útmutatójának megnyitása</translation>
 <translation id="2932083475399492303">Váltás a strukturális és elrendezési vonalak között</translation>
+<translation id="2944762337049891859">Oldal automatikus felolvasása a betöltés befejezése után.</translation>
 <translation id="2964026537669811554">Címsorcsoport</translation>
 <translation id="296951647852255825">{COUNT,plural, =1{tabulátor}other{# tabulátor}}</translation>
 <translation id="2972078295414139404">Nincs előző felkeresett link.</translation>
@@ -230,7 +231,6 @@ Ha végzett az útmutatóval, a ChromeVox segítségével navigáljon a Bezárá
 <translation id="3321460131042519426">Szavak egyben tartásának engedélyezése</translation>
 <translation id="3322936298410871309">Előző 1. szintű fejléc</translation>
 <translation id="3323447499041942178">Szövegmező</translation>
-<translation id="3329854757664111426">A továbblépéshez nyomja le az Entert.</translation>
 <translation id="3353420241558113817">{"ar": "arab",
         "bg": "bolgár",
         "ca": "katalán",
@@ -307,6 +307,7 @@ Ha végzett az útmutatóval, a ChromeVox segítségével navigáljon a Bezárá
 <translation id="3712520970944678024">Beszéd vezérlése</translation>
 <translation id="3716845769494773620">Többsoros</translation>
 <translation id="3731746171184829332">Nincs előző címsor.</translation>
+<translation id="3735039640698208086">Hang lejátszásakor…</translation>
 <translation id="3762198587642264450">Ugrás az aktuális sor végére</translation>
 <translation id="3777255250339039212">h1</translation>
 <translation id="3793710123303304873">Kilépett a párbeszédpanelből.</translation>
@@ -547,6 +548,7 @@ A Chrome böngésző menüjének megnyitásához nyomja le az Alt + F billentyű
 <translation id="5876817486144482042">Beszéd hangerejének csökkentése</translation>
 <translation id="5887397643266327462">Braille-feliratok engedélyezve.</translation>
 <translation id="5891934789323004067">Táblázat</translation>
+<translation id="5899860758576822363">Lejátszás alacsonyabb hangerőn, amikor a ChromeVox beszél</translation>
 <translation id="5937336320314038555">{COUNT,plural, =1{egyenlőségjel}other{# egyenlőségjel}}</translation>
 <translation id="5939518447894949180">Visszaállítás</translation>
 <translation id="5948123859135882163">Váltás a matematikai kifejezések strukturális és szemantikai értelmezése között</translation>
@@ -579,6 +581,7 @@ A Chrome böngésző menüjének megnyitásához nyomja le az Alt + F billentyű
 <translation id="6281876499889881039">Következő hasonló elem.</translation>
 <translation id="6282062888058716985">nav</translation>
 <translation id="6290434000785343030">Nincs következő legördülő lista.</translation>
+<translation id="6305702903308659374">Lejátszás normál hangerőn akkor is, ha a ChromeVox beszél</translation>
 <translation id="6307969636681130414">Megnyomva</translation>
 <translation id="6322856989298155004">Hangok</translation>
 <translation id="6324551002951139333">Észlelt nyelvtani hiba</translation>
@@ -769,6 +772,7 @@ A Chrome böngésző menüjének megnyitásához nyomja le az Alt + F billentyű
 <translation id="8455868257606149352">Max <ph name="X" /></translation>
 <translation id="84575901236241018">hozzáférési kulccsal rendelkezik: <ph name="KEY" /></translation>
 <translation id="847154984256717791">elfoglalt</translation>
+<translation id="8476408756881832830">Lejátszás szüneteltetése, amikor a ChromeVox beszél</translation>
 <translation id="8476508772960940536">ablakáttekintési mód</translation>
 <translation id="8503360654911991865">Navigáció részletezettségének csökkentése</translation>
 <translation id="8520472399088452386">Léptetőnyíl</translation>

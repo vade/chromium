@@ -84,6 +84,9 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
         const EmbeddedWorkerStartParams& params,
         mojom::ServiceWorkerEventDispatcherRequest dispatcher_request) override;
     void StopWorker(const StopWorkerCallback& callback) override;
+    void ResumeAfterDownload() override;
+    void AddMessageToConsole(blink::WebConsoleMessage::Level level,
+                             const std::string& message) override;
 
     base::WeakPtr<EmbeddedWorkerTestHelper> helper_;
     mojo::Binding<mojom::EmbeddedWorkerInstanceClient> binding_;
@@ -194,6 +197,10 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
       const PushEventPayload& payload,
       const mojom::ServiceWorkerEventDispatcher::DispatchPushEventCallback&
           callback);
+  virtual void OnPaymentRequestEvent(
+      payments::mojom::PaymentAppRequestDataPtr data,
+      const mojom::ServiceWorkerEventDispatcher::
+          DispatchPaymentRequestEventCallback& callback);
 
   // These functions simulate sending an EmbeddedHostMsg message through the
   // legacy IPC system to the browser.
@@ -209,7 +216,6 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
   EmbeddedWorkerRegistry* registry();
 
  private:
-  class MockEmbeddedWorkerSetup;
   class MockServiceWorkerEventDispatcher;
 
   void OnStartWorkerStub(const EmbeddedWorkerStartParams& params,
@@ -235,6 +241,10 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
       const PushEventPayload& payload,
       const mojom::ServiceWorkerEventDispatcher::DispatchPushEventCallback&
           callback);
+  void OnPaymentRequestEventStub(
+      payments::mojom::PaymentAppRequestDataPtr data,
+      const mojom::ServiceWorkerEventDispatcher::
+          DispatchPaymentRequestEventCallback& callback);
 
   MessagePortMessageFilter* NewMessagePortMessageFilter();
 

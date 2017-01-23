@@ -205,17 +205,18 @@ class XMLHttpRequest::BlobLoader final
 XMLHttpRequest* XMLHttpRequest::create(ScriptState* scriptState) {
   ExecutionContext* context = scriptState->getExecutionContext();
   DOMWrapperWorld& world = scriptState->world();
-  RefPtr<SecurityOrigin> isolatedWorldSecurityOrigin =
-      world.isIsolatedWorld() ? world.isolatedWorldSecurityOrigin() : nullptr;
+  if (!world.isIsolatedWorld())
+    return create(context);
+
   XMLHttpRequest* xmlHttpRequest =
-      new XMLHttpRequest(context, isolatedWorldSecurityOrigin);
+      new XMLHttpRequest(context, true, world.isolatedWorldSecurityOrigin());
   xmlHttpRequest->suspendIfNeeded();
 
   return xmlHttpRequest;
 }
 
 XMLHttpRequest* XMLHttpRequest::create(ExecutionContext* context) {
-  XMLHttpRequest* xmlHttpRequest = new XMLHttpRequest(context, nullptr);
+  XMLHttpRequest* xmlHttpRequest = new XMLHttpRequest(context, false, nullptr);
   xmlHttpRequest->suspendIfNeeded();
 
   return xmlHttpRequest;
@@ -223,6 +224,7 @@ XMLHttpRequest* XMLHttpRequest::create(ExecutionContext* context) {
 
 XMLHttpRequest::XMLHttpRequest(
     ExecutionContext* context,
+    bool isIsolatedWorld,
     PassRefPtr<SecurityOrigin> isolatedWorldSecurityOrigin)
     : SuspendableObject(context),
       m_timeoutMilliseconds(0),
@@ -236,6 +238,7 @@ XMLHttpRequest::XMLHttpRequest(
       m_progressEventThrottle(
           XMLHttpRequestProgressEventThrottle::create(this)),
       m_responseTypeCode(ResponseTypeDefault),
+      m_isIsolatedWorld(isIsolatedWorld),
       m_isolatedWorldSecurityOrigin(isolatedWorldSecurityOrigin),
       m_eventDispatchRecursionLevel(0),
       m_async(true),
@@ -949,6 +952,12 @@ void XMLHttpRequest::createRequest(PassRefPtr<EncodedFormData> httpBody,
       if (!m_sendFlag || m_loader)
         return;
     }
+    if (!getExecutionContext()) {
+      handleNetworkError();
+      throwForLoadFailureIfNeeded(exceptionState,
+                                  "Document is already detached.");
+      return;
+    }
   }
 
   m_sameOriginRequest = getSecurityOrigin()->canRequestNoSuborigin(m_url);
@@ -981,7 +990,7 @@ void XMLHttpRequest::createRequest(PassRefPtr<EncodedFormData> httpBody,
   request.setFetchCredentialsMode(
       includeCredentials ? WebURLRequest::FetchCredentialsModeInclude
                          : WebURLRequest::FetchCredentialsModeSameOrigin);
-  request.setSkipServiceWorker(m_isolatedWorldSecurityOrigin.get()
+  request.setSkipServiceWorker(m_isIsolatedWorld
                                    ? WebURLRequest::SkipServiceWorker::All
                                    : WebURLRequest::SkipServiceWorker::None);
   request.setExternalRequestStateFromRequestorAddressSpace(
@@ -1041,25 +1050,19 @@ void XMLHttpRequest::createRequest(PassRefPtr<EncodedFormData> httpBody,
     if (m_upload)
       request.setReportUploadProgress(true);
 
-    // TODO(yhirano): Turn this CHECK into DCHECK once https://crbug.com/667254
-    // is fixed.
-    CHECK(!m_loader);
+    DCHECK(!m_loader);
     DCHECK(m_sendFlag);
     m_loader = ThreadableLoader::create(executionContext, this, options,
-                                        resourceLoaderOptions,
-                                        ThreadableLoader::ClientSpec::kXHR);
+                                        resourceLoaderOptions);
     m_loader->start(request);
 
     return;
   }
 
-  // TODO(yhirano): Remove this CHECK once https://crbug.com/667254 is fixed.
-  CHECK(!m_loader);
   // Use count for XHR synchronous requests.
   UseCounter::count(&executionContext, UseCounter::XMLHttpRequestSynchronous);
-  ThreadableLoader::loadResourceSynchronously(
-      executionContext, request, *this, options, resourceLoaderOptions,
-      ThreadableLoader::ClientSpec::kXHR);
+  ThreadableLoader::loadResourceSynchronously(executionContext, request, *this,
+                                              options, resourceLoaderOptions);
 
   throwForLoadFailureIfNeeded(exceptionState, String());
 }
@@ -1094,6 +1097,13 @@ void XMLHttpRequest::abort() {
   }
   if (m_state == kDone)
     m_state = kUnsent;
+}
+
+void XMLHttpRequest::dispose() {
+  if (m_loader) {
+    m_error = true;
+    m_loader->cancel();
+  }
 }
 
 void XMLHttpRequest::clearVariablesForLoading() {

@@ -82,6 +82,7 @@ LayerTreeImpl::LayerTreeImpl(
       needs_full_tree_sync_(true),
       next_activation_forces_redraw_(false),
       has_ever_been_drawn_(false),
+      handle_visibility_changed_(false),
       have_scroll_event_handlers_(false),
       event_listener_properties_(),
       browser_controls_shrink_blink_size_(false),
@@ -156,7 +157,7 @@ void LayerTreeImpl::DidUpdateScrollOffset(int layer_id) {
   DidUpdateScrollState(layer_id);
   TransformTree& transform_tree = property_trees()->transform_tree;
   ScrollTree& scroll_tree = property_trees()->scroll_tree;
-  int transform_id = -1;
+  int transform_id = TransformTree::kInvalidNodeId;
 
   // If pending tree topology changed and we still want to notify the pending
   // tree about scroll offset in the active tree, we may not find the
@@ -171,7 +172,7 @@ void LayerTreeImpl::DidUpdateScrollOffset(int layer_id) {
     return;
   }
 
-  if (transform_id != -1) {
+  if (transform_id != TransformTree::kInvalidNodeId) {
     TransformNode* node = transform_tree.Node(transform_id);
     if (node->scroll_offset != scroll_tree.current_scroll_offset(layer_id)) {
       node->scroll_offset = scroll_tree.current_scroll_offset(layer_id);
@@ -543,18 +544,25 @@ LayerImpl* LayerTreeImpl::LayerByElementId(ElementId element_id) const {
 }
 
 void LayerTreeImpl::AddToElementMap(LayerImpl* layer) {
-  if (!layer->element_id())
+  ElementId element_id = layer->element_id();
+  if (!element_id)
     return;
 
   TRACE_EVENT2(TRACE_DISABLED_BY_DEFAULT("compositor-worker"),
                "LayerTreeImpl::AddToElementMap", "element",
-               layer->element_id().AsValue().release(), "layer_id",
-               layer->id());
+               element_id.AsValue().release(), "layer_id", layer->id());
 
-  element_layers_map_[layer->element_id()] = layer->id();
+#if DCHECK_IS_ON()
+  LayerImpl* existing_layer = LayerByElementId(element_id);
+  bool element_id_collision_detected =
+      existing_layer && existing_layer != layer;
+  DCHECK(!element_id_collision_detected);
+#endif
+
+  element_layers_map_[element_id] = layer->id();
 
   layer_tree_host_impl_->mutator_host()->RegisterElement(
-      layer->element_id(),
+      element_id,
       IsActiveTree() ? ElementListType::ACTIVE : ElementListType::PENDING);
 }
 
@@ -617,7 +625,8 @@ void LayerTreeImpl::SetCurrentlyScrollingLayer(LayerImpl* layer) {
   ScrollNode* scroll_node = scroll_tree.CurrentlyScrollingNode();
   int old_id = scroll_node ? scroll_node->owning_layer_id : Layer::INVALID_ID;
   int new_id = layer ? layer->id() : Layer::INVALID_ID;
-  int new_scroll_node_id = layer ? layer->scroll_tree_index() : -1;
+  int new_scroll_node_id =
+      layer ? layer->scroll_tree_index() : ScrollTree::kInvalidNodeId;
   if (layer)
     last_scrolled_layer_id_ = new_id;
 
@@ -1791,7 +1800,8 @@ static bool PointIsClippedByAncestorClipNode(
     return true;
 
   for (const ClipNode* clip_node = clip_tree.Node(layer->clip_tree_index());
-       clip_node->id > 1; clip_node = clip_tree.parent(clip_node)) {
+       clip_node->id > ClipTree::kViewportNodeId;
+       clip_node = clip_tree.parent(clip_node)) {
     if (clip_node->clip_type == ClipNode::ClipType::APPLIES_LOCAL_CLIP) {
       const TransformNode* transform_node =
           transform_tree.Node(clip_node->target_transform_id);
@@ -1800,10 +1810,11 @@ static bool PointIsClippedByAncestorClipNode(
 
       const LayerImpl* target_layer =
           layer->layer_tree_impl()->LayerById(transform_node->owning_layer_id);
-      DCHECK(transform_node->id == 0 || target_layer->render_surface() ||
+      DCHECK(transform_node->id == TransformTree::kRootNodeId ||
+             target_layer->render_surface() ||
              layer->layer_tree_impl()->is_in_resourceless_software_draw_mode());
       gfx::Transform surface_screen_space_transform =
-          transform_node->id == 0 ||
+          transform_node->id == TransformTree::kRootNodeId ||
                   (layer->layer_tree_impl()
                        ->is_in_resourceless_software_draw_mode())
               ? gfx::Transform()
@@ -1984,7 +1995,17 @@ LayerImpl* LayerTreeImpl::FindLayerThatIsHitByPointInTouchHandlerRegion(
 }
 
 void LayerTreeImpl::RegisterSelection(const LayerSelection& selection) {
+  if (selection_ == selection)
+    return;
+
+  handle_visibility_changed_ = true;
   selection_ = selection;
+}
+
+bool LayerTreeImpl::GetAndResetHandleVisibilityChanged() {
+  bool curr_handle_visibility_changed = handle_visibility_changed_;
+  handle_visibility_changed_ = false;
+  return curr_handle_visibility_changed;
 }
 
 static gfx::SelectionBound ComputeViewportSelectionBound(
@@ -2077,10 +2098,6 @@ void LayerTreeImpl::SetPendingPageScaleAnimation(
 std::unique_ptr<PendingPageScaleAnimation>
 LayerTreeImpl::TakePendingPageScaleAnimation() {
   return std::move(pending_page_scale_animation_);
-}
-
-void LayerTreeImpl::ScrollAnimationAbort(bool needs_completion) {
-  layer_tree_host_impl_->mutator_host()->ScrollAnimationAbort(needs_completion);
 }
 
 void LayerTreeImpl::ResetAllChangeTracking() {

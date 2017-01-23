@@ -44,6 +44,7 @@ static void SetRuntimeFeatureDefaultsForPlatform() {
   WebRuntimeFeatures::enableAutoplayMutedVideos(true);
   // Android does not yet support SystemMonitor.
   WebRuntimeFeatures::enableOnDeviceChange(false);
+  WebRuntimeFeatures::enableMediaSession(true);
 #else  // defined(OS_ANDROID)
   WebRuntimeFeatures::enableNavigatorContentUtils(true);
   if (base::FeatureList::IsEnabled(
@@ -99,9 +100,9 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   if (!base::FeatureList::IsEnabled(features::kNotificationContentImage))
     WebRuntimeFeatures::enableNotificationContentImage(false);
 
-  // For the time being, enable wasm serialization when wasm is enabled,
-  // since the whole wasm space is experimental. We have the flexibility
-  // to decouple the two.
+  // For the time being, wasm serialization is separately controlled
+  // by this flag. WebAssembly APIs and compilation is now enabled
+  // unconditionally in V8.
   if (base::FeatureList::IsEnabled(features::kWebAssembly))
     WebRuntimeFeatures::enableWebAssemblySerialization(true);
 
@@ -252,6 +253,9 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
 
   if (command_line.HasSwitch(switches::kEnableSlimmingPaintV2))
     WebRuntimeFeatures::enableSlimmingPaintV2(true);
+
+  if (base::FeatureList::IsEnabled(features::kSlimmingPaintInvalidation))
+    WebRuntimeFeatures::enableSlimmingPaintInvalidation(true);
 
   if (command_line.HasSwitch(switches::kEnableSlimmingPaintInvalidation))
     WebRuntimeFeatures::enableSlimmingPaintInvalidation(true);

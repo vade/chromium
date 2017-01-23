@@ -98,6 +98,7 @@
 #include "core/dom/NodeWithIndex.h"
 #include "core/dom/NthIndexCache.h"
 #include "core/dom/ProcessingInstruction.h"
+#include "core/dom/ResizeObserverController.h"
 #include "core/dom/ScriptRunner.h"
 #include "core/dom/ScriptedAnimationController.h"
 #include "core/dom/ScriptedIdleTaskController.h"
@@ -201,7 +202,6 @@
 #include "core/loader/NavigationScheduler.h"
 #include "core/loader/PrerendererClient.h"
 #include "core/loader/appcache/ApplicationCacheHost.h"
-#include "core/observer/ResizeObserverController.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/EventWithHitTestResults.h"
 #include "core/page/FocusController.h"
@@ -451,7 +451,6 @@ Document::Document(const DocumentInit& initializer,
       m_hasXMLDeclaration(0),
       m_designMode(false),
       m_isRunningExecCommand(false),
-      m_hasReceivedUserGesture(false),
       m_hasAnnotatedRegions(false),
       m_annotatedRegionsDirty(false),
       m_documentClasses(documentClasses),
@@ -1369,13 +1368,13 @@ Element* Document::scrollingElementNoLayout() {
 // We use HashMap::set over HashMap::add here as we want to
 // replace the ComputedStyle but not the Node if the Node is
 // already present.
-void Document::addStyleReattachData(Node& node,
+void Document::addStyleReattachData(const Node& node,
                                     StyleReattachData& styleReattachData) {
   DCHECK(node.isElementNode() || node.isTextNode());
   m_styleReattachDataMap.set(&node, styleReattachData);
 }
 
-StyleReattachData Document::getStyleReattachData(Node& node) {
+StyleReattachData Document::getStyleReattachData(const Node& node) const {
   return m_styleReattachDataMap.get(&node);
 }
 
@@ -2487,10 +2486,8 @@ void Document::shutdown() {
 
   frameHost()->eventHandlerRegistry().documentDetached(*this);
 
-  // Since |Document| class has multiple |LifecycleNotifier| as base class,
-  // we need to have |static_cast<SynchronousMutationNotifier>| here.
-  static_cast<SynchronousMutationNotifier*>(this)->notifyContextDestroyed();
-  m_frame->selection().documentDetached(*this);
+  // Signal destruction to mutation observers.
+  SynchronousMutationNotifier::notifyContextDestroyed();
 
   // If this Document is associated with a live DocumentLoader, the
   // DocumentLoader will take care of clearing the FetchContext. Deferring
@@ -3366,6 +3363,11 @@ void Document::didLoadAllImports() {
   didLoadAllScriptBlockingResources();
 }
 
+void Document::didAddPendingStylesheetInBody() {
+  if (ScriptableDocumentParser* parser = scriptableDocumentParser())
+    parser->didAddPendingStylesheetInBody();
+}
+
 void Document::didRemoveAllPendingStylesheet() {
   styleResolverMayHaveChanged();
 
@@ -3375,6 +3377,11 @@ void Document::didRemoveAllPendingStylesheet() {
   if (!haveImportsLoaded())
     return;
   didLoadAllScriptBlockingResources();
+}
+
+void Document::didRemoveAllPendingBodyStylesheets() {
+  if (ScriptableDocumentParser* parser = scriptableDocumentParser())
+    parser->didLoadAllBodyStylesheets();
 }
 
 void Document::didLoadAllScriptBlockingResources() {
@@ -4200,12 +4207,12 @@ void Document::moveNodeIteratorsToNewDocument(Node& node,
 
 void Document::didMoveTreeToNewDocument(const Node& root) {
   DCHECK_NE(root.document(), this);
-  if (m_ranges.isEmpty())
-    return;
-
-  AttachedRangeSet ranges = m_ranges;
-  for (Range* range : ranges)
-    range->updateOwnerDocumentIfNeeded();
+  if (!m_ranges.isEmpty()) {
+    AttachedRangeSet ranges = m_ranges;
+    for (Range* range : ranges)
+      range->updateOwnerDocumentIfNeeded();
+  }
+  notifyMoveTreeToNewDocument(root);
 }
 
 void Document::nodeChildrenWillBeRemoved(ContainerNode& container) {
@@ -4219,8 +4226,6 @@ void Document::nodeChildrenWillBeRemoved(ContainerNode& container) {
   }
 
   notifyNodeChildrenWillBeRemoved(container);
-  if (LocalFrame* frame = this->frame())
-    frame->selection().nodeChildrenWillBeRemoved(container);
 
   if (containsV1ShadowTree()) {
     for (Node& n : NodeTraversal::childrenOf(container))
@@ -4236,10 +4241,6 @@ void Document::nodeWillBeRemoved(Node& n) {
     range->nodeWillBeRemoved(n);
 
   notifyNodeWillBeRemoved(n);
-
-  if (LocalFrame* frame = this->frame()) {
-    frame->selection().nodeWillBeRemoved(n);
-  }
 
   if (containsV1ShadowTree())
     n.checkSlotChangeBeforeRemoved();
@@ -4268,16 +4269,16 @@ void Document::didRemoveText(Node* text, unsigned offset, unsigned length) {
   m_markers->shiftMarkers(text, offset + length, 0 - length);
 }
 
-void Document::didMergeTextNodes(Text& oldNode, unsigned offset) {
+void Document::didMergeTextNodes(const Text& mergedNode,
+                                 const Text& nodeToBeRemoved,
+                                 unsigned oldLength) {
+  NodeWithIndex nodeToBeRemovedWithIndex(const_cast<Text&>(nodeToBeRemoved));
   if (!m_ranges.isEmpty()) {
-    NodeWithIndex oldNodeWithIndex(oldNode);
     for (Range* range : m_ranges)
-      range->didMergeTextNodes(oldNodeWithIndex, offset);
+      range->didMergeTextNodes(nodeToBeRemovedWithIndex, oldLength);
   }
 
-  notifyMergeTextNodes(oldNode, offset);
-  if (m_frame)
-    m_frame->selection().didMergeTextNodes(oldNode, offset);
+  notifyMergeTextNodes(mergedNode, nodeToBeRemovedWithIndex, oldLength);
 
   // FIXME: This should update markers for spelling and grammar checking.
 }
@@ -4287,8 +4288,6 @@ void Document::didSplitTextNode(const Text& oldNode) {
     range->didSplitTextNode(oldNode);
 
   notifySplitTextNode(oldNode);
-  if (m_frame)
-    m_frame->selection().didSplitTextNode(oldNode);
 
   // FIXME: This should update markers for spelling and grammar checking.
 }
@@ -4427,8 +4426,14 @@ Event* Document::createEvent(ExecutionContext* executionContext,
   Event* event = nullptr;
   for (const auto& factory : eventFactories()) {
     event = factory->create(executionContext, eventType);
-    if (event)
+    if (event) {
+      // createEvent for TouchEvent should throw DOM exception if touch event
+      // feature detection is not enabled. See crbug.com/392584#c22
+      if (equalIgnoringCase(eventType, "TouchEvent") &&
+          !RuntimeEnabledFeatures::touchEventFeatureDetectionEnabled())
+        break;
       return event;
+    }
   }
   exceptionState.throwDOMException(
       NotSupportedError,
@@ -4946,20 +4951,27 @@ void Document::setEncodingData(const DocumentEncodingData& newData) {
 }
 
 KURL Document::completeURL(const String& url) const {
-  String trimmed = url.stripWhiteSpace();
-  bool newline = trimmed.contains('\n') || trimmed.contains('\r');
-  bool brace = trimmed.contains('<');
-  if (newline)
-    UseCounter::count(*this, UseCounter::DocumentCompleteURLContainingNewline);
-  if (brace) {
-    UseCounter::count(*this,
-                      UseCounter::DocumentCompleteURLContainingOpenBrace);
+  KURL completed = completeURLWithOverride(url, m_baseURL);
+
+  if (completed.whitespaceRemoved()) {
+    if (completed.protocolIsInHTTPFamily()) {
+      UseCounter::count(*this,
+                        UseCounter::DocumentCompleteURLHTTPContainingNewline);
+      bool lessThan = url.contains('<');
+      if (lessThan) {
+        UseCounter::count(
+            *this,
+            UseCounter::DocumentCompleteURLHTTPContainingNewlineAndLessThan);
+
+        if (RuntimeEnabledFeatures::restrictCompleteURLCharacterSetEnabled())
+          return KURL();
+      }
+    } else {
+      UseCounter::count(
+          *this, UseCounter::DocumentCompleteURLNonHTTPContainingNewline);
+    }
   }
-  if (newline && brace) {
-    UseCounter::count(
-        *this, UseCounter::DocumentCompleteURLContainingNewlineAndOpenBrace);
-  }
-  return completeURLWithOverride(url, m_baseURL);
+  return completed;
 }
 
 KURL Document::completeURLWithOverride(const String& url,
@@ -5804,6 +5816,14 @@ void Document::decrementLoadEventDelayCount() {
 
   if (!m_loadEventDelayCount)
     checkLoadEventSoon();
+}
+
+void Document::decrementLoadEventDelayCountAndCheckLoadEvent() {
+  DCHECK(m_loadEventDelayCount);
+  --m_loadEventDelayCount;
+
+  if (!m_loadEventDelayCount && frame())
+    frame()->loader().checkCompleted();
 }
 
 void Document::checkLoadEventSoon() {

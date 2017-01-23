@@ -24,9 +24,11 @@
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_synthetic_delay.h"
 #include "build/build_config.h"
+#include "cc/animation/animation_host.h"
 #include "cc/output/compositor_frame_sink.h"
 #include "cc/output/copy_output_request.h"
 #include "cc/scheduler/begin_frame_source.h"
+#include "cc/trees/layer_tree_host.h"
 #include "content/common/content_switches_internal.h"
 #include "content/common/drag_event_source_info.h"
 #include "content/common/drag_messages.h"
@@ -95,6 +97,7 @@
 
 #if defined(OS_ANDROID)
 #include <android/keycodes.h>
+#include "base/time/time.h"
 #endif
 
 #if defined(OS_POSIX)
@@ -123,7 +126,6 @@ using blink::WebImage;
 using blink::WebInputEvent;
 using blink::WebInputEventResult;
 using blink::WebInputMethodController;
-using blink::WebKeyboardEvent;
 using blink::WebLocalFrame;
 using blink::WebMouseEvent;
 using blink::WebMouseWheelEvent;
@@ -177,22 +179,6 @@ bool IsDateTimeInput(ui::TextInputType type) {
          type == ui::TEXT_INPUT_TYPE_DATE_TIME_LOCAL ||
          type == ui::TEXT_INPUT_TYPE_MONTH ||
          type == ui::TEXT_INPUT_TYPE_TIME || type == ui::TEXT_INPUT_TYPE_WEEK;
-}
-
-content::RenderWidgetInputHandlerDelegate* GetRenderWidgetInputHandlerDelegate(
-    content::RenderWidget* widget) {
-#if defined(USE_AURA)
-  const base::CommandLine& cmdline = *base::CommandLine::ForCurrentProcess();
-  if (content::ServiceManagerConnection::GetForProcess() &&
-      cmdline.HasSwitch(switches::kUseMusInRenderer)) {
-    return content::RenderWidgetMusConnection::GetOrCreate(
-        widget->routing_id());
-  }
-#endif
-  // If we don't have a connection to the Service Manager, then we want to route
-  // IPCs back to the browser process rather than Mus so we use the |widget| as
-  // the RenderWidgetInputHandlerDelegate.
-  return widget;
 }
 
 WebDragData DropMetaDataToWebDragData(
@@ -380,11 +366,13 @@ RenderWidget::RenderWidget(int32_t widget_routing_id,
       frame_swap_message_queue_(new FrameSwapMessageQueue()),
       resizing_mode_selector_(new ResizingModeSelector()),
       has_host_context_menu_location_(false),
+      has_added_input_handler_(false),
       has_focus_(false),
 #if defined(OS_MACOSX)
       text_input_client_observer_(new TextInputClientObserver(this)),
 #endif
-      focused_pepper_plugin_(nullptr) {
+      focused_pepper_plugin_(nullptr),
+      weak_ptr_factory_(this) {
   DCHECK_NE(routing_id_, MSG_ROUTING_NONE);
   if (!swapped_out)
     RenderProcess::current()->AddRefProcess();
@@ -433,7 +421,7 @@ RenderWidget* RenderWidget::CreateForPopup(
       new RenderWidget(routing_id, compositor_deps, popup_type, screen_info,
                        false, false, false));
   ShowCallback opener_callback =
-      base::Bind(&RenderViewImpl::ShowCreatedPopupWidget, opener->AsWeakPtr());
+      base::Bind(&RenderViewImpl::ShowCreatedPopupWidget, opener->GetWeakPtr());
   widget->Init(opener_callback, RenderWidget::CreateWebWidget(widget.get()));
   DCHECK(!widget->HasOneRef());  // RenderWidget::Init() adds a reference.
   return widget.get();
@@ -523,8 +511,7 @@ void RenderWidget::Init(const ShowCallback& show_callback,
   DCHECK(!webwidget_internal_);
   DCHECK_NE(routing_id_, MSG_ROUTING_NONE);
 
-  input_handler_.reset(new RenderWidgetInputHandler(
-      GetRenderWidgetInputHandlerDelegate(this), this));
+  input_handler_ = base::MakeUnique<RenderWidgetInputHandler>(this, this);
 
   show_callback_ = show_callback;
 
@@ -624,7 +611,6 @@ bool RenderWidget::OnMessageReceived(const IPC::Message& message) {
                         OnWaitNextFrameForTests)
     IPC_MESSAGE_HANDLER(InputMsg_RequestCompositionUpdate,
                         OnRequestCompositionUpdate)
-    IPC_MESSAGE_HANDLER(ViewMsg_HandleCompositorProto, OnHandleCompositorProto)
     IPC_MESSAGE_HANDLER(DragMsg_TargetDragEnter, OnDragTargetDragEnter)
     IPC_MESSAGE_HANDLER(DragMsg_TargetDragOver, OnDragTargetDragOver)
     IPC_MESSAGE_HANDLER(DragMsg_TargetDragLeave, OnDragTargetDragLeave)
@@ -908,10 +894,6 @@ void RenderWidget::DidReceiveCompositorFrameAck() {
   Send(new ViewHostMsg_UpdateRect(routing_id_, params));
   next_paint_flags_ = 0;
   need_update_rect_for_auto_resize_ = false;
-}
-
-void RenderWidget::ForwardCompositorProto(const std::vector<uint8_t>& proto) {
-  Send(new ViewHostMsg_ForwardCompositorProto(routing_id_, proto));
 }
 
 bool RenderWidget::IsClosing() const {
@@ -1236,8 +1218,16 @@ void RenderWidget::AutoResizeCompositor()  {
 blink::WebLayerTreeView* RenderWidget::initializeLayerTreeView() {
   DCHECK(!host_closing_);
 
-  compositor_ = RenderWidgetCompositor::Create(this, device_scale_factor_,
-                                               screen_info_, compositor_deps_);
+  compositor_ = RenderWidgetCompositor::Create(this, compositor_deps_);
+  auto animation_host = cc::AnimationHost::CreateMainInstance();
+
+  auto layer_tree_host = RenderWidgetCompositor::CreateLayerTreeHost(
+      compositor_.get(), compositor_.get(), animation_host.get(),
+      compositor_deps_, device_scale_factor_, screen_info_);
+  compositor_->Initialize(std::move(layer_tree_host),
+                          std::move(animation_host));
+
+  compositor_->SetIsForOopif(for_oopif_);
   compositor_->setViewportSize(physical_backing_size_);
   OnDeviceScaleFactorChanged();
   compositor_->SetDeviceColorSpace(screen_info_.icc_profile.GetColorSpace());
@@ -1250,6 +1240,18 @@ blink::WebLayerTreeView* RenderWidget::initializeLayerTreeView() {
   DCHECK_NE(MSG_ROUTING_NONE, routing_id_);
   compositor_->SetFrameSinkId(
       cc::FrameSinkId(RenderThread::Get()->GetClientId(), routing_id_));
+
+  RenderThreadImpl* render_thread = RenderThreadImpl::current();
+  // render_thread may be NULL in tests.
+  InputHandlerManager* input_handler_manager =
+      render_thread ? render_thread->input_handler_manager() : NULL;
+  if (input_handler_manager) {
+    input_handler_manager->AddInputHandler(
+        routing_id_, compositor()->GetInputHandler(),
+        weak_ptr_factory_.GetWeakPtr(),
+        compositor_deps_->IsScrollAnimatorEnabled());
+    has_added_input_handler_ = true;
+  }
 
   return compositor_.get();
 }
@@ -1672,11 +1674,6 @@ void RenderWidget::OnSetViewportIntersection(
   }
 }
 
-void RenderWidget::OnHandleCompositorProto(const std::vector<uint8_t>& proto) {
-  if (compositor_)
-    compositor_->OnHandleCompositorProto(proto);
-}
-
 void RenderWidget::OnDragTargetDragEnter(
     const std::vector<DropData::Metadata>& drop_meta_data,
     const gfx::Point& client_point,
@@ -1973,7 +1970,7 @@ void RenderWidget::UpdateSelectionBounds() {
 }
 
 void RenderWidget::SetDeviceColorProfileForTesting(
-    const std::vector<char>& color_profile) {
+    const gfx::ICCProfile& color_profile) {
   if (owner_delegate_)
     owner_delegate_->RenderWidgetDidSetColorProfile(color_profile);
 }
@@ -2187,7 +2184,6 @@ void RenderWidget::hasTouchEventHandlers(bool has_handlers) {
 
 void RenderWidget::setTouchAction(
     blink::WebTouchAction web_touch_action) {
-
   // Ignore setTouchAction calls that result from synthetic touch events (eg.
   // when blink is emulating touch with mouse).
   if (input_handler_->handling_event_type() != WebInputEvent::TouchStart)

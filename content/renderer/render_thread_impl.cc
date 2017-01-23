@@ -74,7 +74,6 @@
 #include "content/common/frame_owner_properties.h"
 #include "content/common/render_process_messages.h"
 #include "content/common/resource_messages.h"
-#include "content/common/service_worker/embedded_worker_setup.mojom.h"
 #include "content/common/site_isolation_policy.h"
 #include "content/common/view_messages.h"
 #include "content/common/worker_messages.h"
@@ -364,36 +363,6 @@ void CreateFrameFactory(mojom::FrameFactoryRequest request) {
                           std::move(request));
 }
 
-void SetupEmbeddedWorkerOnWorkerThread(
-    mojom::ServiceWorkerEventDispatcherRequest request) {
-  ServiceWorkerContextClient* client =
-      ServiceWorkerContextClient::ThreadSpecificInstance();
-  // It is possible for client to be null if for some reason the worker died
-  // before this call made it to the worker thread. In that case just do
-  // nothing and let mojo close the connection.
-  if (!client)
-    return;
-  client->BindEventDispatcher(std::move(request));
-}
-
-class EmbeddedWorkerSetupImpl : public mojom::EmbeddedWorkerSetup {
- public:
-  EmbeddedWorkerSetupImpl() = default;
-
-  void AttachServiceWorkerEventDispatcher(
-      int32_t thread_id,
-      mojom::ServiceWorkerEventDispatcherRequest request) override {
-    WorkerThreadRegistry::Instance()->GetTaskRunnerFor(thread_id)->PostTask(
-        FROM_HERE,
-        base::Bind(&SetupEmbeddedWorkerOnWorkerThread, base::Passed(&request)));
-  }
-};
-
-void CreateEmbeddedWorkerSetup(mojom::EmbeddedWorkerSetupRequest request) {
-  mojo::MakeStrongBinding(base::MakeUnique<EmbeddedWorkerSetupImpl>(),
-                          std::move(request));
-}
-
 scoped_refptr<ui::ContextProviderCommandBuffer> CreateOffscreenContext(
     scoped_refptr<gpu::GpuChannelHost> gpu_channel_host,
     const gpu::SharedMemoryLimits& limits,
@@ -419,7 +388,8 @@ scoped_refptr<ui::ContextProviderCommandBuffer> CreateOffscreenContext(
   return make_scoped_refptr(new ui::ContextProviderCommandBuffer(
       std::move(gpu_channel_host), stream_id, stream_priority,
       gpu::kNullSurfaceHandle,
-      GURL("chrome://gpu/RenderThreadImpl::CreateOffscreenContext"),
+      GURL("chrome://gpu/RenderThreadImpl::CreateOffscreenContext/" +
+           ui::command_buffer_metrics::ContextTypeToString(type)),
       automatic_flushes, support_locking, limits, attributes, nullptr, type));
 }
 
@@ -624,6 +594,7 @@ RenderThreadImpl::RenderThreadImpl(
       renderer_scheduler_(std::move(scheduler)),
       main_message_loop_(std::move(main_message_loop)),
       categorized_worker_pool_(new CategorizedWorkerPool()),
+      is_scroll_animator_enabled_(false),
       renderer_binding_(this) {
   scoped_refptr<base::SingleThreadTaskRunner> test_task_counter;
   DCHECK(base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -906,7 +877,6 @@ void RenderThreadImpl::Init(
       GetInterfaceRegistry());
 
   GetInterfaceRegistry()->AddInterface(base::Bind(&CreateFrameFactory));
-  GetInterfaceRegistry()->AddInterface(base::Bind(&CreateEmbeddedWorkerSetup));
   GetInterfaceRegistry()->AddInterface(
       base::Bind(&EmbeddedWorkerInstanceClientImpl::Create,
                  base::Unretained(embedded_worker_dispatcher_.get())));
@@ -923,6 +893,9 @@ void RenderThreadImpl::Init(
 
   record_purge_suspend_metric_closure_.Reset(base::Bind(
       &RenderThreadImpl::RecordPurgeAndSuspendMetrics, base::Unretained(this)));
+  record_purge_suspend_growth_metric_closure_.Reset(
+      base::Bind(&RenderThreadImpl::RecordPurgeAndSuspendMemoryGrowthMetrics,
+                 base::Unretained(this)));
 
   base::MemoryCoordinatorClientRegistry::GetInstance()->Register(this);
 
@@ -1191,8 +1164,7 @@ void RenderThreadImpl::InitializeWebKit(
       resource_task_queue2);
   resource_dispatcher()->SetMainThreadTaskRunner(resource_task_queue2);
 
-  if (!command_line.HasSwitch(switches::kDisableThreadedCompositing) &&
-      !command_line.HasSwitch(switches::kUseRemoteCompositing))
+  if (!command_line.HasSwitch(switches::kDisableThreadedCompositing))
     InitializeCompositorThread();
 
   if (!input_event_filter_.get()) {
@@ -1260,8 +1232,6 @@ void RenderThreadImpl::RegisterSchemes() {
   WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(chrome_scheme);
   WebSecurityPolicy::registerURLSchemeAsNotAllowingJavascriptURLs(
       chrome_scheme);
-  WebSecurityPolicy::registerURLSchemeAsSecure(chrome_scheme);
-  WebSecurityPolicy::registerURLSchemeAsCORSEnabled(chrome_scheme);
 
   // chrome-devtools:
   WebString devtools_scheme(WebString::fromASCII(kChromeDevToolsScheme));
@@ -1502,6 +1472,16 @@ int32_t RenderThreadImpl::GetClientId() {
   return client_id_;
 }
 
+scoped_refptr<base::SingleThreadTaskRunner>
+RenderThreadImpl::GetTimerTaskRunner() {
+  return renderer_scheduler_->TimerTaskRunner();
+}
+
+scoped_refptr<base::SingleThreadTaskRunner>
+RenderThreadImpl::GetLoadingTaskRunner() {
+  return renderer_scheduler_->LoadingTaskRunner();
+}
+
 void RenderThreadImpl::OnAssociatedInterfaceRequest(
     const std::string& name,
     mojo::ScopedInterfaceEndpointHandle handle) {
@@ -1596,11 +1576,6 @@ RenderThreadImpl::CreateExternalBeginFrameSource(int routing_id) {
       compositor_message_filter_.get(), sync_message_filter(), routing_id);
 }
 
-cc::ImageSerializationProcessor*
-RenderThreadImpl::GetImageSerializationProcessor() {
-  return GetContentClient()->renderer()->GetImageSerializationProcessor();
-}
-
 cc::TaskGraphRunner* RenderThreadImpl::GetTaskGraphRunner() {
   return categorized_worker_pool_->GetTaskGraphRunner();
 }
@@ -1611,6 +1586,10 @@ bool RenderThreadImpl::AreImageDecodeTasksEnabled() {
 
 bool RenderThreadImpl::IsThreadedAnimationEnabled() {
   return is_threaded_animation_enabled_;
+}
+
+bool RenderThreadImpl::IsScrollAnimatorEnabled() {
+  return is_scroll_animator_enabled_;
 }
 
 void RenderThreadImpl::OnRAILModeChanged(v8::RAILMode rail_mode) {
@@ -1669,6 +1648,10 @@ void RenderThreadImpl::OnProcessBackgrounded(bool backgrounded) {
     record_purge_suspend_metric_closure_.Cancel();
     record_purge_suspend_metric_closure_.Reset(
         base::Bind(&RenderThreadImpl::RecordPurgeAndSuspendMetrics,
+                   base::Unretained(this)));
+    record_purge_suspend_growth_metric_closure_.Cancel();
+    record_purge_suspend_growth_metric_closure_.Reset(
+        base::Bind(&RenderThreadImpl::RecordPurgeAndSuspendMemoryGrowthMetrics,
                    base::Unretained(this)));
   }
 }
@@ -1784,7 +1767,7 @@ void RenderThreadImpl::GetRendererMemoryMetrics(
 // we should collect the metrics using memory-infra.
 // TODO(tasak): We should also report a difference between the memory usages
 // before and after purging by using memory-infra.
-void RenderThreadImpl::RecordPurgeAndSuspendMetrics() const {
+void RenderThreadImpl::RecordPurgeAndSuspendMetrics() {
   // If this renderer is resumed, we should not update UMA.
   if (!RendererIsHidden())
     return;
@@ -1805,6 +1788,56 @@ void RenderThreadImpl::RecordPurgeAndSuspendMetrics() const {
                           memory_metrics.v8_main_thread_isolate_mb);
   UMA_HISTOGRAM_MEMORY_MB("PurgeAndSuspend.Memory.TotalAllocatedMB",
                           memory_metrics.total_allocated_mb);
+  purge_and_suspend_memory_metrics_ = memory_metrics;
+
+  // record how many memory usage increases after purged.
+  GetRendererScheduler()->DefaultTaskRunner()->PostDelayedTask(
+      FROM_HERE, record_purge_suspend_growth_metric_closure_.callback(),
+      base::TimeDelta::FromMinutes(5));
+  GetRendererScheduler()->DefaultTaskRunner()->PostDelayedTask(
+      FROM_HERE, record_purge_suspend_growth_metric_closure_.callback(),
+      base::TimeDelta::FromMinutes(10));
+  GetRendererScheduler()->DefaultTaskRunner()->PostDelayedTask(
+      FROM_HERE, record_purge_suspend_growth_metric_closure_.callback(),
+      base::TimeDelta::FromMinutes(15));
+}
+
+#define GET_MEMORY_GROWTH(current, previous, allocator) \
+  (current.allocator > previous.allocator               \
+       ? current.allocator - previous.allocator         \
+       : 0)
+
+void RenderThreadImpl::RecordPurgeAndSuspendMemoryGrowthMetrics() const {
+  // If this renderer is resumed, we should not update UMA.
+  if (!RendererIsHidden())
+    return;
+
+  RendererMemoryMetrics memory_metrics;
+  GetRendererMemoryMetrics(&memory_metrics);
+  UMA_HISTOGRAM_MEMORY_KB(
+      "PurgeAndSuspend.Experimental.MemoryGrowth.PartitionAllocKB",
+      GET_MEMORY_GROWTH(memory_metrics, purge_and_suspend_memory_metrics_,
+                        partition_alloc_kb));
+  UMA_HISTOGRAM_MEMORY_KB(
+      "PurgeAndSuspend.Experimental.MemoryGrowth.BlinkGCKB",
+      GET_MEMORY_GROWTH(memory_metrics, purge_and_suspend_memory_metrics_,
+                        blink_gc_kb));
+  UMA_HISTOGRAM_MEMORY_MB(
+      "PurgeAndSuspend.Experimental.MemoryGrowth.MallocKB",
+      GET_MEMORY_GROWTH(memory_metrics, purge_and_suspend_memory_metrics_,
+                        malloc_mb) * 1024);
+  UMA_HISTOGRAM_MEMORY_KB(
+      "PurgeAndSuspend.Experimental.MemoryGrowth.DiscardableKB",
+      GET_MEMORY_GROWTH(memory_metrics, purge_and_suspend_memory_metrics_,
+                        discardable_kb));
+  UMA_HISTOGRAM_MEMORY_MB(
+      "PurgeAndSuspend.Experimental.MemoryGrowth.V8MainThreadIsolateKB",
+      GET_MEMORY_GROWTH(memory_metrics, purge_and_suspend_memory_metrics_,
+                        v8_main_thread_isolate_mb) * 1024);
+  UMA_HISTOGRAM_MEMORY_MB(
+      "PurgeAndSuspend.Experimental.MemoryGrowth.TotalAllocatedKB",
+      GET_MEMORY_GROWTH(memory_metrics, purge_and_suspend_memory_metrics_,
+                        total_allocated_mb) * 1024);
 }
 
 void RenderThreadImpl::OnProcessResume() {
@@ -2034,6 +2067,7 @@ gpu::GpuChannelHost* RenderThreadImpl::GetGpuChannel() {
 
 void RenderThreadImpl::CreateView(mojom::CreateViewParamsPtr params) {
   CompositorDependencies* compositor_deps = this;
+  is_scroll_animator_enabled_ = params->web_preferences.enable_scroll_animator;
   // When bringing in render_view, also bring in webkit's glue and jsbindings.
   RenderViewImpl::Create(compositor_deps, *params,
                          RenderWidget::ShowCallback());
@@ -2189,10 +2223,8 @@ void RenderThreadImpl::OnMemoryStateChange(base::MemoryState state) {
   }
   switch (state) {
     case base::MemoryState::NORMAL:
-      ResumeRenderer();
       break;
     case base::MemoryState::THROTTLED:
-      ResumeRenderer();
       // TODO(bashi): Figure out what kind of strategy is suitable on
       // THROTTLED state. crbug.com/674815
 #if defined(OS_ANDROID)
@@ -2204,31 +2236,14 @@ void RenderThreadImpl::OnMemoryStateChange(base::MemoryState state) {
       ReleaseFreeMemory();
       break;
     case base::MemoryState::SUSPENDED:
-      SuspendRenderer();
+      OnTrimMemoryImmediately();
+      ReleaseFreeMemory();
+      ClearMemory();
       break;
     case base::MemoryState::UNKNOWN:
       NOTREACHED();
       break;
   }
-}
-
-void RenderThreadImpl::SuspendRenderer() {
-  DCHECK(IsMainThread());
-  OnTrimMemoryImmediately();
-  ReleaseFreeMemory();
-  ClearMemory();
-  // TODO(bashi): Enable the tab suspension when MemoryCoordinator is enabled.
-  if (!base::FeatureList::IsEnabled(features::kMemoryCoordinator) &&
-      base::FeatureList::IsEnabled(features::kPurgeAndSuspend))
-    renderer_scheduler_->SuspendRenderer();
-}
-
-void RenderThreadImpl::ResumeRenderer() {
-  DCHECK(IsMainThread());
-  // TODO(bashi): Enable the tab suspension when MemoryCoordinator is enabled.
-  if (!base::FeatureList::IsEnabled(features::kMemoryCoordinator) &&
-      base::FeatureList::IsEnabled(features::kPurgeAndSuspend))
-    renderer_scheduler_->ResumeRenderer();
 }
 
 void RenderThreadImpl::ClearMemory() {

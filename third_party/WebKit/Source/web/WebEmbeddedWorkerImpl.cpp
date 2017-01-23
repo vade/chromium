@@ -233,11 +233,11 @@ void WebEmbeddedWorkerImpl::addMessageToConsole(
     const WebConsoleMessage& message) {
   MessageLevel webCoreMessageLevel;
   switch (message.level) {
-    case WebConsoleMessage::LevelDebug:
-      webCoreMessageLevel = DebugMessageLevel;
+    case WebConsoleMessage::LevelVerbose:
+      webCoreMessageLevel = VerboseMessageLevel;
       break;
-    case WebConsoleMessage::LevelLog:
-      webCoreMessageLevel = LogMessageLevel;
+    case WebConsoleMessage::LevelInfo:
+      webCoreMessageLevel = InfoMessageLevel;
       break;
     case WebConsoleMessage::LevelWarning:
       webCoreMessageLevel = WarningMessageLevel;
@@ -274,7 +274,7 @@ void WebEmbeddedWorkerImpl::postTaskToLoader(
 
 void WebEmbeddedWorkerImpl::postTaskToWorkerGlobalScope(
     const WebTraceLocation& location,
-    std::unique_ptr<ExecutionContextTask> task) {
+    std::unique_ptr<WTF::CrossThreadClosure> task) {
   if (m_askedToTerminate || !m_workerThread)
     return;
   m_workerThread->postTask(location, std::move(task));

@@ -55,7 +55,7 @@ FloatingObject::FloatingObject(LayoutBox* layoutObject)
       m_isDescendant(false),
       m_isPlaced(false),
       m_isLowestNonOverhangingFloatInChild(false)
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
       ,
       m_isInPlacedTree(false)
 #endif
@@ -81,7 +81,7 @@ FloatingObject::FloatingObject(LayoutBox* layoutObject,
       m_isDescendant(isDescendant),
       m_isPlaced(true),
       m_isLowestNonOverhangingFloatInChild(isLowestNonOverhangingFloatInChild)
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
       ,
       m_isInPlacedTree(false)
 #endif
@@ -527,7 +527,7 @@ void FloatingObjects::addPlacedObject(FloatingObject& floatingObject) {
   if (m_placedFloatsTree.isInitialized())
     m_placedFloatsTree.add(intervalForFloatingObject(floatingObject));
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   floatingObject.setIsInPlacedTree(true);
 #endif
   markLowestFloatLogicalBottomCacheAsDirty();
@@ -543,7 +543,7 @@ void FloatingObjects::removePlacedObject(FloatingObject& floatingObject) {
   }
 
   floatingObject.setIsPlaced(false);
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   floatingObject.setIsInPlacedTree(false);
 #endif
   markLowestFloatLogicalBottomCacheAsDirty();

@@ -1480,8 +1480,9 @@ class TileManagerTest : public TestLayerTreeHostBase {
                                 task_runner_provider,
                                 task_graph_runner) {}
 
-    MOCK_METHOD0(NotifyAllTileTasksCompleted, void());
+    MOCK_METHOD0(NotifyReadyToActivate, void());
     MOCK_METHOD0(NotifyReadyToDraw, void());
+    MOCK_METHOD0(NotifyAllTileTasksCompleted, void());
   };
 
   std::unique_ptr<FakeLayerTreeHostImpl> CreateHostImpl(
@@ -1504,12 +1505,14 @@ class TileManagerTest : public TestLayerTreeHostBase {
 
 // Test to ensure that we call NotifyAllTileTasksCompleted when PrepareTiles is
 // called.
-TEST_F(TileManagerTest, AllWorkFinishedTest) {
+TEST_F(TileManagerTest, AllWorkFinished) {
   // Check with no tile work enqueued.
   {
     base::RunLoop run_loop;
     EXPECT_FALSE(
         host_impl()->tile_manager()->HasScheduledTileTasksForTesting());
+    EXPECT_CALL(MockHostImpl(), NotifyReadyToActivate());
+    EXPECT_CALL(MockHostImpl(), NotifyReadyToDraw());
     EXPECT_CALL(MockHostImpl(), NotifyAllTileTasksCompleted())
         .WillOnce(testing::Invoke([&run_loop]() { run_loop.Quit(); }));
     host_impl()->tile_manager()->PrepareTiles(host_impl()->global_tile_state());
@@ -1523,11 +1526,47 @@ TEST_F(TileManagerTest, AllWorkFinishedTest) {
     base::RunLoop run_loop;
     EXPECT_FALSE(
         host_impl()->tile_manager()->HasScheduledTileTasksForTesting());
+    EXPECT_CALL(MockHostImpl(), NotifyReadyToActivate());
+    EXPECT_CALL(MockHostImpl(), NotifyReadyToDraw());
     EXPECT_CALL(MockHostImpl(), NotifyAllTileTasksCompleted())
         .WillOnce(testing::Invoke([&run_loop]() { run_loop.Quit(); }));
     host_impl()->tile_manager()->PrepareTiles(host_impl()->global_tile_state());
     host_impl()->tile_manager()->SetMoreTilesNeedToBeRasterizedForTesting();
     EXPECT_TRUE(host_impl()->tile_manager()->HasScheduledTileTasksForTesting());
+    run_loop.Run();
+  }
+
+  // Check that if callbacks are called by CheckIfMoreTilesNeedToBePrepared if
+  // they haven't been called already.
+  {
+    base::RunLoop run_loop;
+    EXPECT_FALSE(
+        host_impl()->tile_manager()->HasScheduledTileTasksForTesting());
+    EXPECT_CALL(MockHostImpl(), NotifyReadyToActivate());
+    EXPECT_CALL(MockHostImpl(), NotifyReadyToDraw());
+    EXPECT_CALL(MockHostImpl(), NotifyAllTileTasksCompleted())
+        .WillOnce(testing::Invoke([&run_loop]() { run_loop.Quit(); }));
+    host_impl()->tile_manager()->ResetSignalsForTesting();
+    host_impl()->tile_manager()->SetMoreTilesNeedToBeRasterizedForTesting();
+    host_impl()->tile_manager()->CheckIfMoreTilesNeedToBePreparedForTesting();
+    run_loop.Run();
+  }
+
+  // Same test as above but with SMOOTHNESS_TAKES_PRIORITY.
+  {
+    base::RunLoop run_loop;
+    EXPECT_FALSE(
+        host_impl()->tile_manager()->HasScheduledTileTasksForTesting());
+    EXPECT_CALL(MockHostImpl(), NotifyReadyToActivate());
+    EXPECT_CALL(MockHostImpl(), NotifyReadyToDraw());
+    EXPECT_CALL(MockHostImpl(), NotifyAllTileTasksCompleted())
+        .WillOnce(testing::Invoke([&run_loop]() { run_loop.Quit(); }));
+    host_impl()->tile_manager()->ResetSignalsForTesting();
+    auto global_state = host_impl()->global_tile_state();
+    global_state.tree_priority = SMOOTHNESS_TAKES_PRIORITY;
+    host_impl()->tile_manager()->SetGlobalStateForTesting(global_state);
+    host_impl()->tile_manager()->SetMoreTilesNeedToBeRasterizedForTesting();
+    host_impl()->tile_manager()->CheckIfMoreTilesNeedToBePreparedForTesting();
     run_loop.Run();
   }
 }
@@ -1543,6 +1582,8 @@ TEST_F(TileManagerTest, ActivateAndDrawWhenOOM) {
     base::RunLoop run_loop;
     EXPECT_FALSE(
         host_impl()->tile_manager()->HasScheduledTileTasksForTesting());
+    EXPECT_CALL(MockHostImpl(), NotifyReadyToActivate());
+    EXPECT_CALL(MockHostImpl(), NotifyReadyToDraw());
     EXPECT_CALL(MockHostImpl(), NotifyAllTileTasksCompleted())
         .WillOnce(testing::Invoke([&run_loop]() { run_loop.Quit(); }));
     host_impl()->tile_manager()->PrepareTiles(global_state);
@@ -1559,6 +1600,8 @@ TEST_F(TileManagerTest, ActivateAndDrawWhenOOM) {
   {
     base::RunLoop run_loop;
     host_impl()->set_notify_tile_state_changed_called(false);
+    EXPECT_CALL(MockHostImpl(), NotifyReadyToActivate());
+    EXPECT_CALL(MockHostImpl(), NotifyReadyToDraw());
     EXPECT_CALL(MockHostImpl(), NotifyAllTileTasksCompleted())
         .WillOnce(testing::Invoke([&run_loop]() { run_loop.Quit(); }));
     host_impl()->tile_manager()->PrepareTiles(global_state);

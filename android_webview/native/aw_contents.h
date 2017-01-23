@@ -13,6 +13,8 @@
 #include <utility>
 
 #include "android_webview/browser/aw_browser_permission_request_delegate.h"
+#include "android_webview/browser/aw_render_process_gone_delegate.h"
+#include "android_webview/browser/aw_safe_browsing_ui_manager.h"
 #include "android_webview/browser/browser_view_renderer.h"
 #include "android_webview/browser/browser_view_renderer_client.h"
 #include "android_webview/browser/find_helper.h"
@@ -63,7 +65,9 @@ class AwContents : public FindHelper::Listener,
                    public BrowserViewRendererClient,
                    public PermissionRequestHandlerClient,
                    public AwBrowserPermissionRequestDelegate,
-                   public content::WebContentsObserver {
+                   public AwRenderProcessGoneDelegate,
+                   public content::WebContentsObserver,
+                   public AwSafeBrowsingUIManager::UIManagerClient {
  public:
   // Returns the AwContents instance associated with |web_contents|, or NULL.
   static AwContents* FromWebContents(content::WebContents* web_contents);
@@ -338,6 +342,13 @@ class AwContents : public FindHelper::Listener,
                              content::RenderViewHost* new_host) override;
   void DidAttachInterstitialPage() override;
   void DidDetachInterstitialPage() override;
+
+  // AwSafeBrowsingUIManager::UIManagerClient implementation
+  bool CanShowInterstitial() override;
+
+  // AwRenderProcessGoneDelegate overrides
+  void OnRenderProcessGone(int child_process_id) override;
+  bool OnRenderProcessGoneDetail(int child_process_id, bool crashed) override;
 
  private:
   void InitAutofillIfNecessary(bool enabled);

@@ -89,7 +89,7 @@ const base::Feature kFontCacheScaling{"FontCacheScaling",
 // same-origin to the top frame, or if a user gesture is being processed.
 const base::Feature kFramebustingNeedsSameOriginOrUserGesture{
     "FramebustingNeedsSameOriginOrUserGesture",
-    base::FEATURE_DISABLED_BY_DEFAULT};
+    base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Enables extended Gamepad API features like motion tracking and haptics.
 const base::Feature kGamepadExtensions{"GamepadExtensions",
@@ -177,8 +177,14 @@ const base::Feature kRafAlignedTouchInputEvents{
 
 // If Pepper 3D Image Chromium is allowed, this feature controls whether it is
 // enabled.
-const base::Feature kPepper3DImageChromium{"Pepper3DImageChromium",
-                                           base::FEATURE_ENABLED_BY_DEFAULT};
+const base::Feature kPepper3DImageChromium {
+  "Pepper3DImageChromium",
+#if defined(OS_MACOSX)
+      base::FEATURE_ENABLED_BY_DEFAULT
+#else
+      base::FEATURE_DISABLED_BY_DEFAULT
+#endif
+};
 
 // Throttle Blink's rendering pipeline based on frame visibility.
 const base::Feature kRenderingPipelineThrottling{
@@ -199,6 +205,10 @@ const base::Feature kServiceWorkerNavigationPreload{
 // http://tc39.github.io/ecmascript_sharedmem/shmem.html
 const base::Feature kSharedArrayBuffer{"SharedArrayBuffer",
                                        base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Paint invalidation based on slimming paint. See https://goo.gl/eQczQW
+const base::Feature kSlimmingPaintInvalidation{
+    "SlimmingPaintInvalidation", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Speculatively launches Service Workers on mouse/touch events.
 const base::Feature kSpeculativeLaunchServiceWorker{

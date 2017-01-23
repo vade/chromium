@@ -30,11 +30,6 @@
 #include "base/trace_event/trace_event_argument.h"
 #include "cc/base/histograms.h"
 #include "cc/base/math_util.h"
-#include "cc/blimp/client_picture_cache.h"
-#include "cc/blimp/engine_picture_cache.h"
-#include "cc/blimp/image_serialization_processor.h"
-#include "cc/blimp/picture_data.h"
-#include "cc/blimp/picture_data_conversions.h"
 #include "cc/debug/devtools_instrumentation.h"
 #include "cc/debug/frame_viewer_instrumentation.h"
 #include "cc/debug/rendering_stats_instrumentation.h"
@@ -122,11 +117,9 @@ LayerTreeHostInProcess::LayerTreeHostInProcess(
       did_complete_scale_animation_(false),
       id_(s_layer_tree_host_sequence_number.GetNext() + 1),
       task_graph_runner_(params->task_graph_runner),
-      image_serialization_processor_(params->image_serialization_processor),
       image_worker_task_runner_(params->image_worker_task_runner) {
   DCHECK(task_graph_runner_);
   DCHECK(layer_tree_);
-  DCHECK_NE(compositor_mode_, CompositorMode::REMOTE);
 
   rendering_stats_instrumentation_->set_record_rendering_stats(
       debug_state_.RecordRenderingStats());
@@ -154,24 +147,7 @@ void LayerTreeHostInProcess::InitializeForTesting(
     std::unique_ptr<TaskRunnerProvider> task_runner_provider,
     std::unique_ptr<Proxy> proxy_for_testing) {
   task_runner_provider_ = std::move(task_runner_provider);
-
-  InitializePictureCacheForTesting();
-
   InitializeProxy(std::move(proxy_for_testing));
-}
-
-void LayerTreeHostInProcess::InitializePictureCacheForTesting() {
-  if (!image_serialization_processor_)
-    return;
-
-  // Initialize both engine and client cache to ensure serialization tests
-  // with a single LayerTreeHostInProcess can work correctly.
-  engine_picture_cache_ =
-      image_serialization_processor_->CreateEnginePictureCache();
-  layer_tree_->set_engine_picture_cache(engine_picture_cache_.get());
-  client_picture_cache_ =
-      image_serialization_processor_->CreateClientPictureCache();
-  layer_tree_->set_client_picture_cache(client_picture_cache_.get());
 }
 
 void LayerTreeHostInProcess::SetTaskRunnerProviderForTesting(
@@ -197,6 +173,9 @@ void LayerTreeHostInProcess::InitializeProxy(std::unique_ptr<Proxy> proxy) {
 }
 
 LayerTreeHostInProcess::~LayerTreeHostInProcess() {
+  // Track when we're inside a main frame to see if compositor is being
+  // destroyed midway which causes a crash. crbug.com/654672
+  CHECK(!inside_main_frame_);
   TRACE_EVENT0("cc", "LayerTreeHostInProcess::~LayerTreeHostInProcess");
 
   // Clear any references into the LayerTreeHostInProcess.
@@ -258,12 +237,14 @@ LayerTreeHostInProcess::GetSurfaceSequenceGenerator() {
 }
 
 void LayerTreeHostInProcess::WillBeginMainFrame() {
+  inside_main_frame_ = true;
   devtools_instrumentation::WillBeginMainThreadFrame(GetId(),
                                                      SourceFrameNumber());
   client_->WillBeginMainFrame();
 }
 
 void LayerTreeHostInProcess::DidBeginMainFrame() {
+  inside_main_frame_ = false;
   client_->DidBeginMainFrame();
 }
 
@@ -321,10 +302,7 @@ void LayerTreeHostInProcess::FinishCommitOnImplThread(
   if (layer_tree_->needs_full_tree_sync())
     TreeSynchronizer::SynchronizeTrees(layer_tree_->root_layer(), sync_tree);
 
-  float page_scale_delta = 1.f;
-  if (reflected_main_frame_state_)
-    page_scale_delta = reflected_main_frame_state_->page_scale_delta;
-  layer_tree_->PushPropertiesTo(sync_tree, page_scale_delta);
+  layer_tree_->PushPropertiesTo(sync_tree);
 
   sync_tree->PassSwapPromises(swap_promise_manager_.TakeSwapPromises());
 
@@ -345,19 +323,6 @@ void LayerTreeHostInProcess::FinishCommitOnImplThread(
 
     TreeSynchronizer::PushLayerProperties(layer_tree_.get(), sync_tree);
 
-    if (reflected_main_frame_state_) {
-      for (const auto& scroll_update : reflected_main_frame_state_->scrolls) {
-        int layer_id = scroll_update.layer_id;
-        gfx::Vector2dF scroll_delta = scroll_update.scroll_delta;
-
-        PropertyTrees* property_trees = layer_tree_->property_trees();
-        property_trees->scroll_tree.SetScrollOffset(
-            layer_id, gfx::ScrollOffsetWithDelta(
-                          layer_tree_->LayerById(layer_id)->scroll_offset(),
-                          scroll_delta));
-      }
-    }
-
     // This must happen after synchronizing property trees and after pushing
     // properties, which updates the clobber_active_value flag.
     sync_tree->property_trees()->scroll_tree.PushScrollUpdatesFromMainThread(
@@ -377,7 +342,6 @@ void LayerTreeHostInProcess::FinishCommitOnImplThread(
 
   micro_benchmark_controller_.ScheduleImplBenchmarks(host_impl);
   layer_tree_->property_trees()->ResetAllChangeTracking();
-  reflected_main_frame_state_ = nullptr;
 }
 
 void LayerTreeHostInProcess::WillCommit() {
@@ -794,14 +758,6 @@ void LayerTreeHostInProcess::ApplyScrollAndScale(ScrollAndScaleSet* info) {
   // controls from clamping the layout viewport both on the compositor and
   // on the main thread.
   ApplyViewportDeltas(info);
-}
-
-void LayerTreeHostInProcess::SetReflectedMainFrameState(
-    std::unique_ptr<ReflectedMainFrameState> reflected_main_frame_state) {
-  DCHECK(IsThreaded());
-
-  reflected_main_frame_state_ = std::move(reflected_main_frame_state);
-  SetNeedsCommit();
 }
 
 const base::WeakPtr<InputHandler>& LayerTreeHostInProcess::GetInputHandler()

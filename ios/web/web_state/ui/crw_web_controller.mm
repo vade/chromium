@@ -49,7 +49,6 @@
 #include "ios/web/net/cert_host_pair.h"
 #import "ios/web/net/crw_cert_verification_controller.h"
 #import "ios/web/net/crw_ssl_status_updater.h"
-#import "ios/web/net/request_group_util.h"
 #include "ios/web/public/browser_state.h"
 #include "ios/web/public/favicon_url.h"
 #import "ios/web/public/java_script_dialog_presenter.h"
@@ -994,7 +993,6 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   if (self) {
     _webStateImpl = webState;
     DCHECK(_webStateImpl);
-    _webStateImpl->InitializeRequestTracker(self);
     // Load phase when no WebView present is 'loaded' because this represents
     // the idle state.
     _loadPhase = web::PAGE_LOADED;
@@ -1226,7 +1224,6 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   // (since this may be called from within the handling loop) to prevent any
   // asynchronous JavaScript invocation handling from continuing.
   [NSObject cancelPreviousPerformRequestsWithTarget:self];
-  _webStateImpl->CloseRequestTracker();
 }
 
 - (void)dismissModals {
@@ -2157,10 +2154,6 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
       // and the delegate is called.
       _loadPhase = web::PAGE_LOADED;
       if (!_isHalted) {
-        // RequestTracker expects StartPageLoad to be followed by
-        // FinishPageLoad, passing the exact same URL.
-        self.webStateImpl->GetRequestTracker()->FinishPageLoad(
-            _URLOnStartLoading, false);
         _webStateImpl->SetIsLoading(false);
       }
       [_delegate webLoadCancelled:_URLOnStartLoading];
@@ -2272,16 +2265,6 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
 
 - (void)didFinishWithURL:(const GURL&)currentURL loadSuccess:(BOOL)loadSuccess {
   DCHECK(_loadPhase == web::PAGE_LOADED);
-  _webStateImpl->GetRequestTracker()->FinishPageLoad(currentURL, loadSuccess);
-  // Reset the navigation type to the default value.
-  // Note: it is possible that the web view has already started loading the
-  // next page when this is called. In that case the cache mode can leak to
-  // (some of) the requests of the next page. It's expected to be an edge case,
-  // but if it becomes a problem it should be possible to notice it afterwards
-  // and react to it (by warning the user or reloading the page for example).
-  _webStateImpl->GetRequestTracker()->SetCacheModeFromUIThread(
-      net::RequestTracker::CACHE_NORMAL);
-
   // Rather than creating a new WKBackForwardListItem when loading WebUI pages,
   // WKWebView will cache the WebUI HTML in the previous WKBackForwardListItem
   // since it's loaded via |-loadHTML:forURL:| instead of an NSURLRequest.  As a
@@ -3165,8 +3148,6 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   _pageHasZoomed = NO;
 
   [[self sessionController] commitPendingEntry];
-  _webStateImpl->GetRequestTracker()->StartPageLoad(
-      url, [[self sessionController] currentEntry]);
   [_delegate webDidStartLoadingURL:url shouldUpdateHistory:updateHistory];
 }
 
@@ -3506,76 +3487,6 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
 }
 
 #pragma mark -
-#pragma mark CRWRequestTrackerDelegate
-
-- (BOOL)isForStaticFileRequests {
-  return NO;
-}
-
-- (void)updatedSSLStatus:(const web::SSLStatus&)sslStatus
-              forPageUrl:(const GURL&)url
-                userInfo:(id)userInfo {
-  // |userInfo| is a CRWSessionEntry.
-  web::NavigationItem* item =
-      [static_cast<CRWSessionEntry*>(userInfo) navigationItem];
-  if (!item)
-    return;  // This is a request update for an entry that no longer exists.
-
-  // This condition happens infrequently when a page load is misinterpreted as
-  // a resource load from a previous page. This can happen when moving quickly
-  // back and forth through history, the notifications from the web view on the
-  // UI thread and the one from the requests at the net layer may get out of
-  // sync. This catches this case and prevent updating an entry with the wrong
-  // SSL data.
-  if (item->GetURL().GetOrigin() != url.GetOrigin())
-    return;
-
-  if (item->GetSSL().Equals(sslStatus))
-    return;  // No need to update with the same data.
-
-  item->GetSSL() = sslStatus;
-
-  // Notify the UI it needs to refresh if the updated entry is the current
-  // entry.
-  if (userInfo == self.currentSessionEntry) {
-    [self didUpdateSSLStatusForCurrentNavigationItem];
-  }
-}
-
-- (void)handleResponseHeaders:(net::HttpResponseHeaders*)headers
-                   requestUrl:(const GURL&)requestUrl {
-  _webStateImpl->OnHttpResponseHeadersReceived(headers, requestUrl);
-}
-
-- (void)presentSSLError:(const net::SSLInfo&)info
-           forSSLStatus:(const web::SSLStatus&)status
-                  onUrl:(const GURL&)url
-            recoverable:(BOOL)recoverable
-               callback:(SSLErrorCallback)shouldContinue {
-  // This is a UIWebView callback, which is no longer called.
-  NOTREACHED();
-}
-
-- (void)updatedProgress:(float)progress {
-  // This is a UIWebView callback, which is no longer called.
-  NOTREACHED();
-}
-
-- (void)certificateUsed:(net::X509Certificate*)certificate
-                forHost:(const std::string&)host
-                 status:(net::CertStatus)status {
-  [[[self sessionController] sessionCertificatePolicyManager]
-      registerAllowedCertificate:certificate
-                         forHost:host
-                          status:status];
-}
-
-- (void)clearCertificates {
-  [[[self sessionController] sessionCertificatePolicyManager]
-      clearCertificates];
-}
-
-#pragma mark -
 #pragma mark Popup handling
 
 - (BOOL)shouldBlockPopupWithURL:(const GURL&)popupURL
@@ -3674,25 +3585,13 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
     return;
   }
 
-  SEL selector = @selector(webController:
-         runAuthDialogForProtectionSpace:
-                      proposedCredential:
-                       completionHandler:);
-  if (![self.UIDelegate respondsToSelector:selector]) {
-    // Embedder does not support HTTP Authentication.
-    completionHandler(NSURLSessionAuthChallengeRejectProtectionSpace, nil);
-    return;
-  }
-
-  [self.UIDelegate webController:self
-      runAuthDialogForProtectionSpace:space
-                   proposedCredential:challenge.proposedCredential
-                    completionHandler:^(NSString* user, NSString* password) {
-                      [CRWWebController
-                          processHTTPAuthForUser:user
+  _webStateImpl->OnAuthRequired(
+      space, challenge.proposedCredential,
+      base::BindBlock(^(NSString* user, NSString* password) {
+        [CRWWebController processHTTPAuthForUser:user
                                         password:password
                                completionHandler:completionHandler];
-                    }];
+      }));
 }
 
 + (void)processHTTPAuthForUser:(NSString*)user
@@ -4310,7 +4209,6 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
 }
 
 - (void)didUpdateHistoryStateWithPageURL:(const GURL&)url {
-  _webStateImpl->GetRequestTracker()->HistoryStateChange(url);
   [_delegate webDidUpdateHistoryStateWithPageURL:url];
 }
 
@@ -4552,9 +4450,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
     [self.UIDelegate cancelDialogsForWebController:self];
   _webStateImpl->CancelDialogs();
 
-  SEL rendererCrashSelector = @selector(webControllerWebProcessDidCrash:);
-  if ([self.delegate respondsToSelector:rendererCrashSelector])
-    [self.delegate webControllerWebProcessDidCrash:self];
+  _webStateImpl->OnRenderProcessGone();
 }
 
 - (web::WKWebViewConfigurationProvider&)webViewConfigurationProvider {

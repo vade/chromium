@@ -397,8 +397,7 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
             // The dataset has already been created, we need to initialize our state.
             mTabModelSelectorImpl.notifyChanged();
 
-            getWindow().setFeatureInt(Window.FEATURE_INDETERMINATE_PROGRESS,
-                    Window.PROGRESS_VISIBILITY_OFF);
+            ApiCompatibilityUtils.setWindowIndeterminateProgress(getWindow());
 
             // Check for incognito tabs to handle the case where Chrome was swiped away in the
             // background.
@@ -1251,7 +1250,7 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
         } else if (id == R.id.enter_vr_id) {
             mVrShellDelegate.enterVRIfNecessary();
         } else if (id == R.id.content_suggestions_standalone_ui) {
-            ContentSuggestionsActivity.launch(getApplicationContext());
+            ContentSuggestionsActivity.launch(this);
         } else {
             return super.onMenuOrKeyboardAction(id, fromMenu);
         }

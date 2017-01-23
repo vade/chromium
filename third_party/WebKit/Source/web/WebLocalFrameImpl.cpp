@@ -701,22 +701,19 @@ void WebLocalFrameImpl::setIsolatedWorldHumanReadableName(
 void WebLocalFrameImpl::addMessageToConsole(const WebConsoleMessage& message) {
   DCHECK(frame());
 
-  MessageLevel webCoreMessageLevel = LogMessageLevel;
+  MessageLevel webCoreMessageLevel = InfoMessageLevel;
   switch (message.level) {
-    case WebConsoleMessage::LevelDebug:
-      webCoreMessageLevel = DebugMessageLevel;
+    case WebConsoleMessage::LevelVerbose:
+      webCoreMessageLevel = VerboseMessageLevel;
       break;
-    case WebConsoleMessage::LevelLog:
-      webCoreMessageLevel = LogMessageLevel;
+    case WebConsoleMessage::LevelInfo:
+      webCoreMessageLevel = InfoMessageLevel;
       break;
     case WebConsoleMessage::LevelWarning:
       webCoreMessageLevel = WarningMessageLevel;
       break;
     case WebConsoleMessage::LevelError:
       webCoreMessageLevel = ErrorMessageLevel;
-      break;
-    // Unsupported values.
-    case WebConsoleMessage::LevelInfo:
       break;
   }
 
@@ -1458,6 +1455,7 @@ WebLocalFrameImpl* WebLocalFrameImpl::createProvisional(
     WebFrameClient* client,
     WebRemoteFrame* oldWebFrame,
     WebSandboxFlags flags) {
+  DCHECK(client);
   WebLocalFrameImpl* webFrame = new WebLocalFrameImpl(oldWebFrame, client);
   Frame* oldFrame = oldWebFrame->toImplBase()->frame();
   webFrame->setParent(oldWebFrame->parent());
@@ -1471,8 +1469,7 @@ WebLocalFrameImpl* WebLocalFrameImpl::createProvisional(
   // reuse it here.
   LocalFrame* frame = LocalFrame::create(
       webFrame->m_frameLoaderClientImpl.get(), oldFrame->host(), tempOwner,
-      client ? client->interfaceProvider() : nullptr,
-      client ? client->interfaceRegistry() : nullptr);
+      client->interfaceProvider(), client->interfaceRegistry());
   // Set the name and unique name directly, bypassing any of the normal logic
   // to calculate unique name.
   frame->tree().setPrecalculatedName(
@@ -2042,7 +2039,7 @@ void WebLocalFrameImpl::setCommittedFirstRealLoad() {
 
 void WebLocalFrameImpl::setHasReceivedUserGesture() {
   if (frame())
-    frame()->document()->setHasReceivedUserGesture();
+    frame()->setDocumentHasReceivedUserGesture();
 }
 
 void WebLocalFrameImpl::sendOrientationChangeEvent() {

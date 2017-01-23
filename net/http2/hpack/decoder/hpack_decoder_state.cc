@@ -4,10 +4,9 @@
 
 #include "net/http2/hpack/decoder/hpack_decoder_state.h"
 
-#include <algorithm>
-#include <utility>
-
 #include "base/logging.h"
+#include "net/http2/hpack/hpack_string.h"
+#include "net/http2/http2_constants.h"
 
 using base::StringPiece;
 
@@ -41,6 +40,11 @@ HpackDecoderState::~HpackDecoderState() {}
 void HpackDecoderState::set_listener(HpackDecoderListener* listener) {
   CHECK(listener);
   listener_ = listener;
+}
+
+void HpackDecoderState::set_tables_debug_listener(
+    HpackDecoderTablesDebugListener* debug_listener) {
+  decoder_tables_.set_debug_listener(debug_listener);
 }
 
 void HpackDecoderState::ApplyHeaderTableSizeSetting(
@@ -150,7 +154,11 @@ void HpackDecoderState::OnLiteralNameAndValue(
 }
 
 void HpackDecoderState::OnDynamicTableSizeUpdate(size_t size_limit) {
-  DVLOG(2) << "HpackDecoderState::OnDynamicTableSizeUpdate " << size_limit;
+  DVLOG(2) << "HpackDecoderState::OnDynamicTableSizeUpdate " << size_limit
+           << ", required="
+           << (require_dynamic_table_size_update_ ? "true" : "false")
+           << ", allowed="
+           << (allow_dynamic_table_size_update_ ? "true" : "false");
   if (error_detected_) {
     return;
   }
@@ -206,6 +214,9 @@ void HpackDecoderState::OnHeaderBlockEnd() {
 }
 
 void HpackDecoderState::ReportError(StringPiece error_message) {
+  DVLOG(2) << "HpackDecoderState::ReportError is new="
+           << (!error_detected_ ? "true" : "false")
+           << ", error_message: " << error_message;
   if (!error_detected_) {
     listener_->OnHeaderErrorDetected(error_message);
     error_detected_ = true;

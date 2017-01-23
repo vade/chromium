@@ -5,12 +5,14 @@
 #include "content/browser/service_worker/embedded_worker_test_helper.h"
 
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "base/atomic_sequence_num.h"
 #include "base/bind.h"
-#include "base/memory/scoped_vector.h"
+#include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "content/browser/message_port_message_filter.h"
@@ -20,7 +22,6 @@
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/common/service_worker/embedded_worker_messages.h"
-#include "content/common/service_worker/embedded_worker_setup.mojom.h"
 #include "content/common/service_worker/embedded_worker_start_params.h"
 #include "content/common/service_worker/service_worker_messages.h"
 #include "content/common/service_worker/service_worker_utils.h"
@@ -46,33 +47,17 @@ class MockMessagePortMessageFilter : public MessagePortMessageFilter {
                        base::Unretained(&next_routing_id_))) {}
 
   bool Send(IPC::Message* message) override {
-    message_queue_.push_back(message);
+    message_queue_.push_back(base::WrapUnique(message));
     return true;
   }
 
  private:
   ~MockMessagePortMessageFilter() override {}
   base::AtomicSequenceNumber next_routing_id_;
-  ScopedVector<IPC::Message> message_queue_;
+  std::vector<std::unique_ptr<IPC::Message>> message_queue_;
 };
 
 }  // namespace
-
-class EmbeddedWorkerTestHelper::MockEmbeddedWorkerSetup
-    : public mojom::EmbeddedWorkerSetup {
- public:
-  static void Create(const base::WeakPtr<EmbeddedWorkerTestHelper>& helper,
-                     mojom::EmbeddedWorkerSetupRequest request) {
-    // TODO(shimazu): Remove this mock after EmbeddedWorkerSetup is removed.
-    NOTREACHED();
-  }
-
-  void AttachServiceWorkerEventDispatcher(
-      int32_t thread_id,
-      mojom::ServiceWorkerEventDispatcherRequest request) override {
-    NOTREACHED();
-  }
-};
 
 EmbeddedWorkerTestHelper::MockEmbeddedWorkerInstanceClient::
     MockEmbeddedWorkerInstanceClient(
@@ -111,6 +96,18 @@ void EmbeddedWorkerTestHelper::MockEmbeddedWorkerInstanceClient::StopWorker(
   if (worker)
     EXPECT_EQ(EmbeddedWorkerStatus::STOPPING, worker->status());
   helper_->OnStopWorkerStub(callback);
+}
+
+void EmbeddedWorkerTestHelper::MockEmbeddedWorkerInstanceClient::
+    ResumeAfterDownload() {
+  helper_->OnResumeAfterDownloadStub(embedded_worker_id_.value());
+}
+
+void EmbeddedWorkerTestHelper::MockEmbeddedWorkerInstanceClient::
+    AddMessageToConsole(blink::WebConsoleMessage::Level level,
+                        const std::string& message) {
+  // TODO(shimazu): Pass these arguments to the test helper when a test is
+  // necessary to check them individually.
 }
 
 // static
@@ -179,7 +176,9 @@ class EmbeddedWorkerTestHelper::MockServiceWorkerEventDispatcher
   void DispatchPaymentRequestEvent(
       payments::mojom::PaymentAppRequestDataPtr data,
       const DispatchPaymentRequestEventCallback& callback) override {
-    NOTIMPLEMENTED();
+    if (!helper_)
+      return;
+    helper_->OnPaymentRequestEventStub(std::move(data), callback);
   }
 
   void DispatchExtendableMessageEvent(
@@ -246,8 +245,6 @@ bool EmbeddedWorkerTestHelper::Send(IPC::Message* message) {
 bool EmbeddedWorkerTestHelper::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(EmbeddedWorkerTestHelper, message)
-    IPC_MESSAGE_HANDLER(EmbeddedWorkerMsg_ResumeAfterDownload,
-                        OnResumeAfterDownloadStub)
     IPC_MESSAGE_HANDLER(EmbeddedWorkerContextMsg_MessageToWorker,
                         OnMessageToWorkerStub)
     IPC_MESSAGE_UNHANDLED(handled = false)
@@ -384,6 +381,13 @@ void EmbeddedWorkerTestHelper::OnPushEvent(
     const PushEventPayload& payload,
     const mojom::ServiceWorkerEventDispatcher::DispatchPushEventCallback&
         callback) {
+  callback.Run(SERVICE_WORKER_OK, base::Time::Now());
+}
+
+void EmbeddedWorkerTestHelper::OnPaymentRequestEvent(
+    payments::mojom::PaymentAppRequestDataPtr data,
+    const mojom::ServiceWorkerEventDispatcher::
+        DispatchPaymentRequestEventCallback& callback) {
   callback.Run(SERVICE_WORKER_OK, base::Time::Now());
 }
 
@@ -545,6 +549,16 @@ void EmbeddedWorkerTestHelper::OnPushEventStub(
                             payload, callback));
 }
 
+void EmbeddedWorkerTestHelper::OnPaymentRequestEventStub(
+    payments::mojom::PaymentAppRequestDataPtr data,
+    const mojom::ServiceWorkerEventDispatcher::
+        DispatchPaymentRequestEventCallback& callback) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::Bind(&EmbeddedWorkerTestHelper::OnPaymentRequestEvent, AsWeakPtr(),
+                 base::Passed(std::move(data)), callback));
+}
+
 EmbeddedWorkerRegistry* EmbeddedWorkerTestHelper::registry() {
   DCHECK(context());
   return context()->embedded_worker_registry();
@@ -562,8 +576,6 @@ std::unique_ptr<service_manager::InterfaceRegistry>
 EmbeddedWorkerTestHelper::CreateInterfaceRegistry(MockRenderProcessHost* rph) {
   auto registry =
       base::MakeUnique<service_manager::InterfaceRegistry>(std::string());
-  registry->AddInterface(
-      base::Bind(&MockEmbeddedWorkerSetup::Create, AsWeakPtr()));
   registry->AddInterface(
       base::Bind(&MockEmbeddedWorkerInstanceClient::Bind, AsWeakPtr()));
 

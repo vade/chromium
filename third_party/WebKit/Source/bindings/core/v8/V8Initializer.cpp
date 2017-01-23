@@ -123,17 +123,15 @@ namespace {
 MessageLevel MessageLevelFromNonFatalErrorLevel(int errorLevel) {
   MessageLevel level = ErrorMessageLevel;
   switch (errorLevel) {
+    case v8::Isolate::kMessageDebug:
+      level = VerboseMessageLevel;
+      break;
     case v8::Isolate::kMessageLog:
-      level = LogMessageLevel;
+    case v8::Isolate::kMessageInfo:
+      level = InfoMessageLevel;
       break;
     case v8::Isolate::kMessageWarning:
       level = WarningMessageLevel;
-      break;
-    case v8::Isolate::kMessageDebug:
-      level = DebugMessageLevel;
-      break;
-    case v8::Isolate::kMessageInfo:
-      level = InfoMessageLevel;
       break;
     case v8::Isolate::kMessageError:
       level = InfoMessageLevel;
@@ -365,7 +363,7 @@ class ArrayBufferAllocator : public v8::ArrayBuffer::Allocator {
 }  // namespace
 
 static void adjustAmountOfExternalAllocatedMemory(int64_t diff) {
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   DEFINE_THREAD_SAFE_STATIC_LOCAL(int64_t, processTotal, new int64_t(0));
   DEFINE_THREAD_SAFE_STATIC_LOCAL(Mutex, mutex, new Mutex);
   {
@@ -394,8 +392,12 @@ void V8Initializer::initializeMainThread() {
 
   // NOTE: Some threads (namely utility threads) don't have a scheduler.
   WebScheduler* scheduler = Platform::current()->currentThread()->scheduler();
+  // When timer task runner is used for PerIsolateData, GC tasks are getting
+  // throttled and memory usage goes up. For now we're using loading task queue
+  // to prevent this.
+  // TODO(altimin): Consider switching to timerTaskRunner here.
   v8::Isolate* isolate = V8PerIsolateData::initialize(
-      scheduler ? scheduler->timerTaskRunner()
+      scheduler ? scheduler->loadingTaskRunner()
                 : Platform::current()->currentThread()->getWebTaskRunner());
 
   initializeV8Common(isolate);
@@ -419,9 +421,11 @@ void V8Initializer::initializeMainThread() {
 
   isolate->SetPromiseRejectCallback(promiseRejectHandlerInMainThread);
 
-  if (v8::HeapProfiler* profiler = isolate->GetHeapProfiler())
+  if (v8::HeapProfiler* profiler = isolate->GetHeapProfiler()) {
     profiler->SetWrapperClassInfoProvider(
         WrapperTypeInfo::NodeClassId, &RetainedDOMInfo::createRetainedDOMInfo);
+    profiler->SetGetRetainerInfosCallback(&V8GCController::getRetainerInfos);
+  }
 
   ASSERT(ThreadState::mainThreadState());
   ThreadState::mainThreadState()->addInterruptor(

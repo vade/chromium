@@ -10,6 +10,12 @@
 
 // Adds a new empty SuggestionItem.
 - (void)addEmptyItem;
+// Opens the Reading List.
+- (void)openReadingList;
+// Opens the first page of the Reading List.
+- (void)openFirstPageOfReadingList;
+// Opens the favicon associated with the cell with the |index|.
+- (void)openFaviconAtIndex:(NSInteger)index;
 
 @end
 

@@ -32,6 +32,7 @@
 #endif
 
 #if defined(OS_WIN)
+#include "chrome/common/extensions/wifi_credentials_getter.mojom.h"
 #include "chrome/utility/media_galleries/itunes_pref_parser_win.h"
 #include "components/wifi/wifi_service.h"
 #endif  // defined(OS_WIN)
@@ -44,10 +45,6 @@
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
 
 namespace {
-
-bool Send(IPC::Message* message) {
-  return content::UtilityThread::Get()->Send(message);
-}
 
 void ReleaseProcessIfNeeded() {
   content::UtilityThread::Get()->ReleaseProcessIfNeeded();
@@ -90,10 +87,62 @@ class MediaParserImpl : public extensions::mojom::MediaParser {
     ReleaseProcessIfNeeded();
   }
 
+  void CheckMediaFile(base::TimeDelta decode_time,
+                      base::File file,
+                      const CheckMediaFileCallback& callback) override {
+#if !defined(MEDIA_DISABLE_FFMPEG)
+    media::MediaFileChecker checker(std::move(file));
+    callback.Run(checker.Start(decode_time));
+#else
+    callback.Run(false);
+#endif
+    ReleaseProcessIfNeeded();
+  }
+
   ChromeContentUtilityClient* const utility_client_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaParserImpl);
 };
+
+#if defined(OS_WIN)
+class WiFiCredentialsGetterImpl
+    : public extensions::mojom::WiFiCredentialsGetter {
+ public:
+  WiFiCredentialsGetterImpl() = default;
+  ~WiFiCredentialsGetterImpl() override = default;
+
+  static void Create(extensions::mojom::WiFiCredentialsGetterRequest request) {
+    mojo::MakeStrongBinding(base::MakeUnique<WiFiCredentialsGetterImpl>(),
+                            std::move(request));
+  }
+
+ private:
+  // extensions::mojom::WiFiCredentialsGetter:
+  void GetWiFiCredentials(const std::string& ssid,
+                          const GetWiFiCredentialsCallback& callback) override {
+    if (ssid == kWiFiTestNetwork) {
+      callback.Run(true, ssid);  // test-mode: return the ssid in key_data.
+      return;
+    }
+
+    std::unique_ptr<wifi::WiFiService> wifi_service(
+        wifi::WiFiService::Create());
+    wifi_service->Initialize(nullptr);
+
+    std::string key_data;
+    std::string error;
+    wifi_service->GetKeyFromSystem(ssid, &key_data, &error);
+
+    const bool success = error.empty();
+    if (!success)
+      key_data.clear();
+
+    callback.Run(success, key_data);
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(WiFiCredentialsGetterImpl);
+};
+#endif  // defined(OS_WIN)
 
 }  // namespace
 
@@ -117,10 +166,14 @@ void ExtensionsHandler::ExposeInterfacesToBrowser(
     service_manager::InterfaceRegistry* registry,
     ChromeContentUtilityClient* utility_client,
     bool running_elevated) {
-  // If our process runs with elevated privileges, only add elevated
-  // Mojo services to the interface registry.
-  if (running_elevated)
+  // If our process runs with elevated privileges, only add elevated Mojo
+  // services to the interface registry.
+  if (running_elevated) {
+#if defined(OS_WIN)
+    registry->AddInterface(base::Bind(&WiFiCredentialsGetterImpl::Create));
+#endif
     return;
+  }
 
   registry->AddInterface(base::Bind(&MediaParserImpl::Create, utility_client));
 }
@@ -128,8 +181,6 @@ void ExtensionsHandler::ExposeInterfacesToBrowser(
 bool ExtensionsHandler::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ExtensionsHandler, message)
-    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_CheckMediaFile, OnCheckMediaFile)
-
 #if defined(OS_WIN)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_ParseITunesPrefXml,
                         OnParseITunesPrefXml)
@@ -144,30 +195,10 @@ bool ExtensionsHandler::OnMessageReceived(const IPC::Message& message) {
                         OnIndexPicasaAlbumsContents)
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
 
-#if defined(OS_WIN)
-    IPC_MESSAGE_HANDLER(ChromeUtilityHostMsg_GetWiFiCredentials,
-                        OnGetWiFiCredentials)
-#endif  // defined(OS_WIN)
-
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
   return handled || utility_handler_.OnMessageReceived(message);
-}
-
-void ExtensionsHandler::OnCheckMediaFile(
-    int64_t milliseconds_of_decoding,
-    const IPC::PlatformFileForTransit& media_file) {
-#if !defined(MEDIA_DISABLE_FFMPEG)
-  media::MediaFileChecker checker(
-      IPC::PlatformFileForTransitToFile(media_file));
-  const bool check_success = checker.Start(
-      base::TimeDelta::FromMilliseconds(milliseconds_of_decoding));
-  Send(new ChromeUtilityHostMsg_CheckMediaFile_Finished(check_success));
-#else
-  Send(new ChromeUtilityHostMsg_CheckMediaFile_Finished(false));
-#endif
-  ReleaseProcessIfNeeded();
 }
 
 #if defined(OS_WIN)
@@ -175,7 +206,8 @@ void ExtensionsHandler::OnParseITunesPrefXml(
     const std::string& itunes_xml_data) {
   base::FilePath library_path(
       itunes::FindLibraryLocationInPrefXml(itunes_xml_data));
-  Send(new ChromeUtilityHostMsg_GotITunesDirectory(library_path));
+  content::UtilityThread::Get()->Send(
+      new ChromeUtilityHostMsg_GotITunesDirectory(library_path));
   ReleaseProcessIfNeeded();
 }
 #endif  // defined(OS_WIN)
@@ -186,7 +218,8 @@ void ExtensionsHandler::OnParseITunesLibraryXmlFile(
   itunes::ITunesLibraryParser parser;
   base::File file = IPC::PlatformFileForTransitToFile(itunes_library_file);
   bool result = parser.Parse(iapps::ReadFileAsString(std::move(file)));
-  Send(new ChromeUtilityHostMsg_GotITunesLibrary(result, parser.library()));
+  content::UtilityThread::Get()->Send(
+      new ChromeUtilityHostMsg_GotITunesLibrary(result, parser.library()));
   ReleaseProcessIfNeeded();
 }
 
@@ -210,8 +243,9 @@ void ExtensionsHandler::OnParsePicasaPMPDatabase(
 
   picasa::PicasaAlbumTableReader reader(std::move(files));
   bool parse_success = reader.Init();
-  Send(new ChromeUtilityHostMsg_ParsePicasaPMPDatabase_Finished(
-      parse_success, reader.albums(), reader.folders()));
+  content::UtilityThread::Get()->Send(
+      new ChromeUtilityHostMsg_ParsePicasaPMPDatabase_Finished(
+          parse_success, reader.albums(), reader.folders()));
   ReleaseProcessIfNeeded();
 }
 
@@ -220,24 +254,11 @@ void ExtensionsHandler::OnIndexPicasaAlbumsContents(
     const std::vector<picasa::FolderINIContents>& folders_inis) {
   picasa::PicasaAlbumsIndexer indexer(album_uids);
   indexer.ParseFolderINI(folders_inis);
-
-  Send(new ChromeUtilityHostMsg_IndexPicasaAlbumsContents_Finished(
-      indexer.albums_images()));
+  content::UtilityThread::Get()->Send(
+      new ChromeUtilityHostMsg_IndexPicasaAlbumsContents_Finished(
+          indexer.albums_images()));
   ReleaseProcessIfNeeded();
 }
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
-
-#if defined(OS_WIN)
-void ExtensionsHandler::OnGetWiFiCredentials(const std::string& network_guid) {
-  std::unique_ptr<wifi::WiFiService> wifi_service(wifi::WiFiService::Create());
-  wifi_service->Initialize(NULL);
-
-  std::string key_data;
-  std::string error;
-  wifi_service->GetKeyFromSystem(network_guid, &key_data, &error);
-
-  Send(new ChromeUtilityHostMsg_GotWiFiCredentials(key_data, error.empty()));
-}
-#endif  // defined(OS_WIN)
 
 }  // namespace extensions

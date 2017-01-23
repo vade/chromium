@@ -8,7 +8,7 @@ import org.chromium.base.Callback;
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.ntp.NewTabPage.DestructionObserver;
-import org.chromium.chrome.browser.ntp.NewTabPageView.NewTabPageManager;
+import org.chromium.chrome.browser.ntp.NewTabPageUma;
 import org.chromium.chrome.browser.ntp.snippets.CategoryInt;
 import org.chromium.chrome.browser.ntp.snippets.CategoryStatus.CategoryStatusEnum;
 import org.chromium.chrome.browser.ntp.snippets.SectionHeader;
@@ -19,6 +19,8 @@ import org.chromium.chrome.browser.ntp.snippets.SuggestionsSource;
 import org.chromium.chrome.browser.offlinepages.ClientId;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
 import org.chromium.chrome.browser.offlinepages.OfflinePageItem;
+import org.chromium.chrome.browser.suggestions.SuggestionsRanker;
+import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegate;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -44,12 +46,9 @@ public class SuggestionsSection extends InnerNode {
 
     private boolean mIsNtpDestroyed;
 
-    // Keep track of impressions of the suggestions so that we replace only suggestions that
-    // have not been impressed, yet. We keep track of the first suggestion separately as the
-    // first is often impressed in the form of a peeking card and we still want to be able to
-    // replace something in this case.
-    private boolean mFirstSuggestionSeen;
-    private boolean mSubsequentSuggestionsSeen;
+    // Keep track of how many suggestions have been seen by the user so that we replace only
+    // suggestions that have not been seen, yet.
+    private int mNumberOfSuggestionsSeen;
 
     /**
      * Delegate interface that allows dismissing this section without introducing
@@ -59,31 +58,36 @@ public class SuggestionsSection extends InnerNode {
         void dismissSection(SuggestionsSection section);
     }
 
-    public SuggestionsSection(Delegate delegate, NewTabPageManager manager,
-            OfflinePageBridge offlinePageBridge, SuggestionsCategoryInfo info) {
+    public SuggestionsSection(Delegate delegate, SuggestionsUiDelegate uiDelegate,
+            SuggestionsRanker ranker, OfflinePageBridge offlinePageBridge,
+            SuggestionsCategoryInfo info) {
         mDelegate = delegate;
         mCategoryInfo = info;
         mOfflinePageBridge = offlinePageBridge;
 
         mHeader = new SectionHeader(info.getTitle());
-        mSuggestionsList = new SuggestionsList(manager, info);
+        mSuggestionsList = new SuggestionsList(uiDelegate, ranker, info);
         mStatus = StatusItem.createNoSuggestionsItem(info);
-        mMoreButton = new ActionItem(this);
+        mMoreButton = new ActionItem(this, ranker);
         mProgressIndicator = new ProgressItem();
         addChildren(mHeader, mSuggestionsList, mStatus, mMoreButton, mProgressIndicator);
 
-        setupOfflinePageBridgeObserver(manager);
+        setupOfflinePageBridgeObserver(uiDelegate);
         refreshChildrenVisibility();
     }
 
     private static class SuggestionsList extends ChildNode implements Iterable<SnippetArticle> {
         private final List<SnippetArticle> mSuggestions = new ArrayList<>();
-        private final NewTabPageManager mNewTabPageManager;
+
+        // TODO(crbug.com/677672): Replace by SuggestionSource when it handles destruction.
+        private final SuggestionsUiDelegate mUiDelegate;
+        private final SuggestionsRanker mSuggestionsRanker;
         private final SuggestionsCategoryInfo mCategoryInfo;
 
-        public SuggestionsList(NewTabPageManager newTabPageManager,
+        public SuggestionsList(SuggestionsUiDelegate uiDelegate, SuggestionsRanker ranker,
                 SuggestionsCategoryInfo categoryInfo) {
-            mNewTabPageManager = newTabPageManager;
+            mUiDelegate = uiDelegate;
+            mSuggestionsRanker = ranker;
             mCategoryInfo = categoryInfo;
         }
 
@@ -104,8 +108,10 @@ public class SuggestionsSection extends InnerNode {
                 NewTabPageViewHolder holder, int position, List<Object> payloads) {
             checkIndex(position);
             assert holder instanceof SnippetArticleViewHolder;
+            SnippetArticle suggestion = getSuggestionAt(position);
+            mSuggestionsRanker.rankSuggestion(suggestion);
             ((SnippetArticleViewHolder) holder)
-                    .onBindViewHolder(getSuggestionAt(position), mCategoryInfo, payloads);
+                    .onBindViewHolder(suggestion, mCategoryInfo, payloads);
         }
 
         @Override
@@ -128,13 +134,13 @@ public class SuggestionsSection extends InnerNode {
         }
 
         /**
-         * Clears all suggestions except the first one.
+         * Clears all suggestions except for the first {@code n} suggestions.
          */
-        private void clearAllButFirst() {
+        private void clearAllButFirstN(int n) {
             int itemCount = mSuggestions.size();
-            if (itemCount > 1) {
-                mSuggestions.subList(1, itemCount).clear();
-                notifyItemRangeRemoved(1, itemCount - 1);
+            if (itemCount > n) {
+                mSuggestions.subList(n, itemCount).clear();
+                notifyItemRangeRemoved(n, itemCount - 1);
             }
         }
 
@@ -160,7 +166,7 @@ public class SuggestionsSection extends InnerNode {
         @Override
         public void dismissItem(int position, Callback<String> itemRemovedCallback) {
             checkIndex(position);
-            SuggestionsSource suggestionsSource = mNewTabPageManager.getSuggestionsSource();
+            SuggestionsSource suggestionsSource = mUiDelegate.getSuggestionsSource();
             if (suggestionsSource == null) {
                 // It is possible for this method to be called after the NewTabPage has had
                 // destroy() called. This can happen when
@@ -176,16 +182,19 @@ public class SuggestionsSection extends InnerNode {
         }
 
         public void updateSuggestionOfflineId(SnippetArticle article, Long newId) {
+            int index = mSuggestions.indexOf(article);
+            // The suggestions could have been removed / replaced in the meantime.
+            if (index == -1) return;
+
             Long oldId = article.getOfflinePageOfflineId();
             article.setOfflinePageOfflineId(newId);
 
             if ((oldId == null) == (newId == null)) return;
-            notifyItemChanged(mSuggestions.indexOf(article),
-                    SnippetArticleViewHolder.PARTIAL_UPDATE_OFFLINE_ID);
+            notifyItemChanged(index, SnippetArticleViewHolder.PARTIAL_UPDATE_OFFLINE_ID);
         }
     }
 
-    private void setupOfflinePageBridgeObserver(NewTabPageManager manager) {
+    private void setupOfflinePageBridgeObserver(SuggestionsUiDelegate uiDelegate) {
         final OfflinePageBridge.OfflinePageModelObserver observer =
                 new OfflinePageBridge.OfflinePageModelObserver() {
                     @Override
@@ -215,7 +224,7 @@ public class SuggestionsSection extends InnerNode {
 
         mOfflinePageBridge.addObserver(observer);
 
-        manager.addDestructionObserver(new DestructionObserver() {
+        uiDelegate.addDestructionObserver(new DestructionObserver() {
             @Override
             public void onDestroy() {
                 mIsNtpDestroyed = true;
@@ -257,18 +266,15 @@ public class SuggestionsSection extends InnerNode {
      * @param position Position in the list being shown (the first suggestion being at index 1,
      * as at index 0, there is a non-suggestion).
      */
-    @VisibleForTesting
-    public void childSeen(int position) {
+    private void childSeen(int position) {
         Log.d(TAG, "childSeen: position %d in category %d", position, mCategoryInfo.getCategory());
         assert getStartingOffsetForChild(mSuggestionsList) == 1;
+        // We assume all non-snippet cards come after all cards of type SNIPPET.
         if (getItemViewType(position) == ItemViewType.SNIPPET) {
-            // We assume all non-snippet cards come after all cards of type SNIPPET.
-            int positionAmongSuggestions = position - 1;
-            if (positionAmongSuggestions == 0) {
-                mFirstSuggestionSeen = true;
-            } else if (positionAmongSuggestions > 0) {
-                mSubsequentSuggestionsSeen = true;
-            }
+            // As asserted above, first suggestion has position 1, etc., so the position of this
+            // child coincides with the number of suggestions above this child (including this one).
+            mNumberOfSuggestionsSeen =
+                    Math.max(mNumberOfSuggestionsSeen, position);
         }
     }
 
@@ -321,27 +327,42 @@ public class SuggestionsSection extends InnerNode {
 
         // Remove suggestions to be replaced.
         if (replaceExisting && hasSuggestions()) {
-            if (CardsVariationParameters.ignoreUpdatesForExistingSuggestions()
-                    || mSubsequentSuggestionsSeen) {
-                Log.d(TAG, "setSuggestions: replacing existing suggestion not possible");
+            if (CardsVariationParameters.ignoreUpdatesForExistingSuggestions()) {
+                Log.d(TAG, "setSuggestions: replacing existing suggestion disabled");
+                NewTabPageUma.recordUIUpdateResult(NewTabPageUma.UI_UPDATE_FAIL_DISABLED);
                 return;
             }
 
-            if (mFirstSuggestionSeen) {
-                Log.d(TAG, "setSuggestions: keeping the first suggestion");
-                mSuggestionsList.clearAllButFirst();
-
-                // Make sure that {@code mSuggestionsList} will contain as many elements as newly
-                // provided in {@code suggestions}. Remove the kept first element from the new
-                // collection, if it repeats there. Otherwise, remove the last element of the new
-                // collection.
-                if (!suggestions.remove(mSuggestionsList.getSuggestionAt(0))) {
-                    suggestions.remove(suggestions.size() - 1);
-                }
-            } else {
-                Log.d(TAG, "setSuggestions: removing all suggestions");
-                mSuggestionsList.clear();
+            if (mNumberOfSuggestionsSeen >= getSuggestionsCount()) {
+                Log.d(TAG, "setSuggestions: replacing existing suggestion not possible, all seen");
+                NewTabPageUma.recordUIUpdateResult(NewTabPageUma.UI_UPDATE_FAIL_ALL_SEEN);
+                return;
             }
+
+            Log.d(TAG, "setSuggestions: keeping the first %d suggestion",
+                        mNumberOfSuggestionsSeen);
+            mSuggestionsList.clearAllButFirstN(mNumberOfSuggestionsSeen);
+
+            if (mNumberOfSuggestionsSeen > 0) {
+                // Make sure that mSuggestionsList will contain as many elements as newly provided
+                // in suggestions. Remove the kept first element from the new collection, if it
+                // repeats there. Otherwise, remove the last element of the new collection.
+                int targetCountToAppend =
+                        Math.max(0, suggestions.size() - mNumberOfSuggestionsSeen);
+                for (SnippetArticle suggestion : mSuggestionsList) {
+                    suggestions.remove(suggestion);
+                }
+                if (suggestions.size() > targetCountToAppend) {
+                    Log.d(TAG, "setSuggestions: removing %d excess elements from the end",
+                            suggestions.size() - targetCountToAppend);
+                    suggestions.subList(targetCountToAppend, suggestions.size()).clear();
+                }
+            }
+            NewTabPageUma.recordNumberOfSuggestionsSeenBeforeUIUpdateSuccess(
+                    mNumberOfSuggestionsSeen);
+            NewTabPageUma.recordUIUpdateResult(NewTabPageUma.UI_UPDATE_SUCCESS_REPLACED);
+        } else {
+            NewTabPageUma.recordUIUpdateResult(NewTabPageUma.UI_UPDATE_SUCCESS_APPENDED);
         }
 
         mProgressIndicator.setVisible(SnippetsBridge.isCategoryLoading(status));

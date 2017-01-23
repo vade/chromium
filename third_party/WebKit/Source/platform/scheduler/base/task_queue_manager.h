@@ -143,6 +143,10 @@ class BLINK_PLATFORM_EXPORT TaskQueueManager
   // Removes all canceled delayed tasks.
   void SweepCanceledDelayedTasks();
 
+  // There is a small overhead to recording task delay histograms. If you don't
+  // need them, you can turn them off.
+  void SetRecordTaskDelayHistograms(bool record_task_delay_histograms);
+
  private:
   friend class LazyNow;
   friend class internal::TaskQueueImpl;
@@ -176,23 +180,28 @@ class BLINK_PLATFORM_EXPORT TaskQueueManager
 
   // Delayed Tasks with run_times <= Now() are enqueued onto the work queue and
   // reloads any empty work queues.
-  void UpdateWorkQueues(LazyNow lazy_now);
+  void UpdateWorkQueues(LazyNow* lazy_now);
 
   // Chooses the next work queue to service. Returns true if |out_queue|
   // indicates the queue from which the next task should be run, false to
   // avoid running any tasks.
   bool SelectWorkQueueToService(internal::WorkQueue** out_work_queue);
 
-  // Runs a single nestable task from the |queue|. On exit, |out_task| will
-  // contain the task which was executed. Non-nestable task are reposted on the
-  // run loop. The queue must not be empty.
   enum class ProcessTaskResult {
     DEFERRED,
     EXECUTED,
     TASK_QUEUE_MANAGER_DELETED
   };
+
+  // Runs a single nestable task from the |queue|. On exit, |out_task| will
+  // contain the task which was executed. Non-nestable task are reposted on the
+  // run loop. The queue must not be empty.  On exit |time_after_task| may get
+  // set (not guaranteed), sampling |real_time_domain()->Now()| immediately
+  // after running the task.
   ProcessTaskResult ProcessTaskFromWorkQueue(internal::WorkQueue* work_queue,
-                                             LazyNow*);
+                                             bool is_nested,
+                                             LazyNow time_before_task,
+                                             base::TimeTicks* time_after_task);
 
   bool RunsTasksOnCurrentThread() const;
   bool PostNonNestableDelayedTask(const tracked_objects::Location& from_here,
@@ -201,9 +210,9 @@ class BLINK_PLATFORM_EXPORT TaskQueueManager
 
   internal::EnqueueOrder GetNextSequenceNumber();
 
-  // Calls MaybeAdvanceTime on all time domains and returns true if one of them
-  // was able to advance.
-  bool TryAdvanceTimeDomains();
+  // Calls DelayTillNextTask on all time domains and returns the smallest delay
+  // requested if any.
+  base::Optional<base::TimeDelta> ComputeDelayTillNextTask(LazyNow* lazy_now);
 
   void MaybeRecordTaskDelayHistograms(
       const internal::TaskQueueImpl::Task& pending_task,
@@ -241,6 +250,8 @@ class BLINK_PLATFORM_EXPORT TaskQueueManager
   // Protects |other_thread_pending_wakeup_|.
   mutable base::Lock other_thread_lock_;
   bool other_thread_pending_wakeup_;
+
+  bool record_task_delay_histograms_;
 
   int work_batch_size_;
   size_t task_count_;

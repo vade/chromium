@@ -16,7 +16,7 @@
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/variations/child_process_field_trial_syncer.h"
 #include "content/public/renderer/render_thread_observer.h"
-#include "mojo/public/cpp/bindings/associated_binding.h"
+#include "mojo/public/cpp/bindings/associated_binding_set.h"
 
 namespace content {
 class ResourceDispatcherDelegate;
@@ -65,7 +65,7 @@ class ChromeRenderThreadObserver : public content::RenderThreadObserver,
   void SetContentSettingRules(
       const RendererContentSettingRules& rules) override;
 
-  void OnRendererInterfaceRequest(
+  void OnRendererConfigurationAssociatedRequest(
       chrome::mojom::RendererConfigurationAssociatedRequest request);
 
   void OnSetFieldTrialGroup(const std::string& trial_name,
@@ -78,8 +78,8 @@ class ChromeRenderThreadObserver : public content::RenderThreadObserver,
 
   std::unique_ptr<visitedlink::VisitedLinkSlave> visited_link_slave_;
 
-  mojo::AssociatedBinding<chrome::mojom::RendererConfiguration>
-      renderer_configuration_binding_;
+  mojo::AssociatedBindingSet<chrome::mojom::RendererConfiguration>
+      renderer_configuration_bindings_;
 
   base::WeakPtrFactory<ChromeRenderThreadObserver> weak_factory_;
 

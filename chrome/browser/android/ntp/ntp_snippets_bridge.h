@@ -76,7 +76,7 @@ class NTPSnippetsBridge
       const base::android::JavaParamRef<jstring>& jurl,
       jint global_position,
       jint j_category_id,
-      jint category_position,
+      jint position_in_category,
       const base::android::JavaParamRef<jstring>& id_within_category);
 
   void DismissCategory(JNIEnv* env,
@@ -97,7 +97,7 @@ class NTPSnippetsBridge
                          const base::android::JavaParamRef<jobject>& obj,
                          jint global_position,
                          jint j_category_id,
-                         jint category_position,
+                         jint position_in_category,
                          jlong publish_timestamp_ms,
                          jfloat score);
 
@@ -105,7 +105,8 @@ class NTPSnippetsBridge
                           const base::android::JavaParamRef<jobject>& obj,
                           jint global_position,
                           jint j_category_id,
-                          jint category_position,
+                          jint category_index,
+                          jint position_in_category,
                           jlong publish_timestamp_ms,
                           jfloat score,
                           int windowOpenDisposition);
@@ -114,7 +115,7 @@ class NTPSnippetsBridge
                               const base::android::JavaParamRef<jobject>& obj,
                               jint global_position,
                               jint j_category_id,
-                              jint category_position,
+                              jint position_in_category,
                               jlong publish_timestamp_ms,
                               jfloat score);
 

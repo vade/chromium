@@ -13,7 +13,6 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
 
 class AppDistributionProvider;
@@ -68,8 +67,6 @@ class ChromeBrowserProvider {
   // This is called after web startup.
   virtual void Initialize() const;
 
-  // Asserts all iOS-specific |BrowserContextKeyedServiceFactory| are built.
-  virtual void AssertBrowserContextKeyedFactoriesBuilt();
   // Returns an instance of a signing error provider.
   virtual SigninErrorProvider* GetSigninErrorProvider();
   // Returns an instance of a signin resources provider.
@@ -81,10 +78,6 @@ class ChromeBrowserProvider {
   virtual ChromeIdentityService* GetChromeIdentityService();
   // Returns an instance of a GeolocationUpdaterProvider.
   virtual GeolocationUpdaterProvider* GetGeolocationUpdaterProvider();
-  // Returns "enabled", "disabled", or "default".
-  virtual std::string DataReductionProxyAvailability();
-  // Returns the distribution brand code.
-  virtual std::string GetDistributionBrandCode();
   // Returns risk data used in Wallet requests.
   virtual std::string GetRiskData();
   // Creates and returns a new styled text field with the given |frame|.
@@ -96,22 +89,12 @@ class ChromeBrowserProvider {
 
   // Initializes the cast service.  Should be called soon after the given
   // |main_tab_model| is created.
-  // TODO(rohitrao): Change from |id| to |TabModel*| once TabModel is moved into
-  // the Chromium tree.
-  virtual void InitializeCastService(id main_tab_model) const;
   virtual void InitializeCastService(TabModel* main_tab_model) const;
 
   // Attaches any embedder-specific tab helpers to the given |web_state|.  The
   // owning |tab| is included for helpers that need access to information that
   // is not yet available through web::WebState.
-  // TODO(rohitrao): Change from |id| to |Tab*| once Tab is moved into the
-  // Chromium tree.
-  virtual void AttachTabHelpers(web::WebState* web_state, id tab) const;
   virtual void AttachTabHelpers(web::WebState* web_state, Tab* tab) const;
-
-  // Returns whether safe browsing is enabled. See the comment on
-  // metrics_services_manager_client.h for details on |on_update_callback|.
-  virtual bool IsSafeBrowsingEnabled(const base::Closure& on_update_callback);
 
   // Returns an instance of the voice search provider, if one exists.
   virtual VoiceSearchProvider* GetVoiceSearchProvider() const;

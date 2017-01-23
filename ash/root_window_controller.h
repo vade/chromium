@@ -7,6 +7,7 @@
 
 #include <map>
 #include <memory>
+#include <vector>
 
 #include "ash/ash_export.h"
 #include "ash/common/shell_observer.h"
@@ -66,7 +67,7 @@ class WmShelf;
 class WorkspaceController;
 
 namespace mus {
-class RootWindowController;
+class WindowManager;
 }
 
 namespace wm {
@@ -100,6 +101,11 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
 
   // Returns the RootWindowController of the target root window.
   static RootWindowController* ForTargetRootWindow();
+
+  static std::vector<RootWindowController*> root_window_controllers() {
+    return root_window_controllers_ ? *root_window_controllers_
+                                    : std::vector<RootWindowController*>();
+  }
 
   // Configures |init_params| prior to initializing |widget|.
   // |shell_container_id| is the id of the container to parent |widget| to.
@@ -138,8 +144,8 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
 
   WmShelf* GetShelf();
 
-  // Creates the shelf for this root window and notifies observers.
-  void CreateShelf();
+  // Creates the shelf view for this root window and notifies observers.
+  void CreateShelfView();
 
   // Get touch HUDs associated with this root window controller.
   TouchHudDebug* touch_hud_debug() const { return touch_hud_debug_; }
@@ -285,7 +291,7 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
  private:
   // TODO(sky): remove this. Temporary during ash-mus unification.
   // http://crbug.com/671246.
-  friend class mus::RootWindowController;
+  friend class mus::WindowManager;
 
   // Creates a new RootWindowController with the specified host. Only one of
   // |ash_host| or |window_tree_host| should be specified. This takes ownership
@@ -370,6 +376,8 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   std::unique_ptr<ui::EventHandler> panel_container_handler_;
 
   std::unique_ptr<::wm::ScopedCaptureClient> capture_client_;
+
+  static std::vector<RootWindowController*>* root_window_controllers_;
 
   DISALLOW_COPY_AND_ASSIGN(RootWindowController);
 };

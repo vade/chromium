@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ios/web/public/web_state/web_state_delegate.h"
+#import "ios/web/public/web_state/web_state_delegate.h"
 
 #import "ios/web/public/web_state/web_state.h"
 
@@ -33,6 +33,13 @@ bool WebStateDelegate::HandleContextMenu(WebState*, const ContextMenuParams&) {
 JavaScriptDialogPresenter* WebStateDelegate::GetJavaScriptDialogPresenter(
     WebState*) {
   return nullptr;
+}
+
+void WebStateDelegate::OnAuthRequired(WebState* source,
+                                      NSURLProtectionSpace* protection_space,
+                                      NSURLCredential* proposed_credential,
+                                      const AuthCallback& callback) {
+  callback.Run(nil, nil);
 }
 
 void WebStateDelegate::Attach(WebState* source) {

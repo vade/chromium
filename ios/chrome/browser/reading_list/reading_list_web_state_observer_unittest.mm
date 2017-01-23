@@ -19,6 +19,7 @@ namespace {
 const char kTestURL[] = "http://foo.bar";
 const char kTestTitle[] = "title";
 const char kTestDistilledPath[] = "distilled/page.html";
+const char kTestDistilledURL[] = "http://foo.bar/distilled";
 }
 
 // A Test navigation manager that checks if Reload was called.
@@ -87,15 +88,14 @@ TEST_F(ReadingListWebStateObserverTest, TestLoadReadingListFailure) {
   EXPECT_FALSE(entry->IsRead());
 }
 
-// Tests that loading an online version of an entry.
+// Tests that loading an online version of an entry does not alter navigation
+// stack and mark entry read.
 TEST_F(ReadingListWebStateObserverTest, TestLoadReadingListOnline) {
   GURL url(kTestURL);
   std::string distilled_path = kTestDistilledPath;
-  reading_list_model_->SetEntryDistilledPath(url,
-                                             base::FilePath(distilled_path));
+  reading_list_model_->SetEntryDistilledInfo(
+      url, base::FilePath(distilled_path), GURL(kTestDistilledURL));
   const ReadingListEntry* entry = reading_list_model_->GetEntryByURL(url);
-  GURL distilled_url =
-      reading_list::DistilledURLForPath(entry->DistilledPath(), entry->URL());
 
   test_navigation_manager_->GetPendingItem()->SetURL(url);
   test_web_state_.SetLoading(true);
@@ -110,35 +110,42 @@ TEST_F(ReadingListWebStateObserverTest, TestLoadReadingListOnline) {
   EXPECT_TRUE(entry->IsRead());
 }
 
-// Tests that loading a distilled version of an entry from a commited entry.
+// Tests that loading an online version of an entry does update navigation
+// stack and mark entry read.
 TEST_F(ReadingListWebStateObserverTest, TestLoadReadingListDistilledCommitted) {
   GURL url(kTestURL);
   std::string distilled_path = kTestDistilledPath;
-  reading_list_model_->SetEntryDistilledPath(url,
-                                             base::FilePath(distilled_path));
+  reading_list_model_->SetEntryDistilledInfo(
+      url, base::FilePath(distilled_path), GURL(kTestDistilledURL));
   const ReadingListEntry* entry = reading_list_model_->GetEntryByURL(url);
-  GURL distilled_url =
-      reading_list::DistilledURLForPath(entry->DistilledPath(), entry->URL());
+  GURL distilled_url = reading_list::OfflineURLForPath(
+      entry->DistilledPath(), entry->URL(), entry->DistilledURL());
 
-  test_navigation_manager_->GetPendingItem()->SetURL(url);
+  // Test on commited entry, there must be no pending item.
+  test_navigation_manager_->SetPendingItem(nullptr);
+  test_navigation_manager_->GetLastCommittedItem()->SetURL(url);
   test_web_state_.SetLoading(true);
   test_web_state_.OnPageLoaded(web::PageLoadCompletionStatus::FAILURE);
   test_web_state_.SetLoading(false);
 
-  EXPECT_FALSE(test_navigation_manager_->ReloadCalled());
-  EXPECT_EQ(test_web_state_.LastOpenedUrl(), distilled_url);
+  EXPECT_TRUE(test_navigation_manager_->ReloadCalled());
+  EXPECT_EQ(test_navigation_manager_->GetLastCommittedItem()->GetVirtualURL(),
+            url);
+  EXPECT_EQ(test_navigation_manager_->GetLastCommittedItem()->GetURL(),
+            distilled_url);
   EXPECT_TRUE(entry->IsRead());
 }
 
-// Tests that loading a distilled version of an entry.
+// Tests that loading an online version of a pending entry on reload does update
+// committed entry, reload, and mark entry read.
 TEST_F(ReadingListWebStateObserverTest, TestLoadReadingListDistilledPending) {
   GURL url(kTestURL);
   std::string distilled_path = kTestDistilledPath;
-  reading_list_model_->SetEntryDistilledPath(url,
-                                             base::FilePath(distilled_path));
+  reading_list_model_->SetEntryDistilledInfo(
+      url, base::FilePath(distilled_path), GURL(kTestDistilledURL));
   const ReadingListEntry* entry = reading_list_model_->GetEntryByURL(url);
-  GURL distilled_url =
-      reading_list::DistilledURLForPath(entry->DistilledPath(), entry->URL());
+  GURL distilled_url = reading_list::OfflineURLForPath(
+      entry->DistilledPath(), entry->URL(), entry->DistilledURL());
 
   test_navigation_manager_->SetPendingItem(nil);
   test_navigation_manager_->GetLastCommittedItem()->SetURL(url);

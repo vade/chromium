@@ -32,7 +32,9 @@
 
 #include "platform/KeyboardCodes.h"
 #include "public/platform/WebGestureEvent.h"
+#include "public/platform/WebKeyboardEvent.h"
 #include "public/platform/WebMouseWheelEvent.h"
+#include "public/platform/WebTouchEvent.h"
 #include "wtf/ASCIICType.h"
 #include "wtf/Assertions.h"
 #include "wtf/StringExtras.h"
@@ -49,7 +51,7 @@ struct SameSizeAsWebKeyboardEvent : public SameSizeAsWebInputEvent {
 };
 
 struct SameSizeAsWebMouseEvent : public SameSizeAsWebInputEvent {
-  int mouseData[15];
+  int mouseData[17];
 };
 
 struct SameSizeAsWebMouseWheelEvent : public SameSizeAsWebMouseEvent {

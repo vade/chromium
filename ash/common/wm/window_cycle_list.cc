@@ -14,7 +14,6 @@
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "base/command_line.h"
-#include "base/memory/ptr_util.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/display/display.h"
@@ -247,9 +246,9 @@ class WindowCycleView : public views::WidgetDelegateView {
     // because the layer animates bounds changes but the View's bounds change
     // immediately.
     highlight_view_->set_background(new LayerFillBackgroundPainter(
-        base::WrapUnique(views::Painter::CreateRoundRectWith1PxBorderPainter(
+        views::Painter::CreateRoundRectWith1PxBorderPainter(
             SkColorSetA(SK_ColorWHITE, 0x4D), SkColorSetA(SK_ColorWHITE, 0x33),
-            kBackgroundCornerRadius))));
+            kBackgroundCornerRadius)));
     highlight_view_->SetPaintToLayer(true);
     highlight_view_->layer()->SetFillsBoundsOpaquely(false);
 
@@ -287,6 +286,11 @@ class WindowCycleView : public views::WidgetDelegateView {
     // works correctly when it's calculating highlight bounds.
     parent->Layout();
     SetTargetWindow(new_target);
+  }
+
+  void DestroyContents() {
+    window_view_map_.clear();
+    RemoveAllChildViews(true);
   }
 
   // views::WidgetDelegateView overrides:
@@ -418,6 +422,14 @@ WindowCycleList::~WindowCycleList() {
 
   if (cycle_ui_widget_)
     cycle_ui_widget_->Close();
+
+  // |this| is responsible for notifying |cycle_view_| when windows are
+  // destroyed. Since |this| is going away, clobber |cycle_view_|. Otherwise
+  // there will be a race where a window closes after now but before the
+  // Widget::Close() call above actually destroys |cycle_view_|. See
+  // crbug.com/681207
+  if (cycle_view_)
+    cycle_view_->DestroyContents();
 }
 
 void WindowCycleList::Step(WindowCycleController::Direction direction) {

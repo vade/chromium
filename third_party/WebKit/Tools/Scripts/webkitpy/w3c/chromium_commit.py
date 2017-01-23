@@ -4,9 +4,8 @@
 
 from webkitpy.common.memoized import memoized
 from webkitpy.common.webkit_finder import WebKitFinder
-from webkitpy.w3c.deps_updater import DepsUpdater
 
-CHROMIUM_WPT_DIR = 'third_party/WebKit/LayoutTests/imported/wpt/'
+CHROMIUM_WPT_DIR = 'third_party/WebKit/LayoutTests/external/wpt/'
 
 
 class ChromiumCommit(object):
@@ -81,7 +80,13 @@ class ChromiumCommit(object):
             self.host.filesystem.join('resources', 'testharnessreport.js'),
         ]
         qualified_blacklist = [CHROMIUM_WPT_DIR + f for f in blacklist]
-        return [f for f in changed_files if f not in qualified_blacklist and not DepsUpdater.is_baseline(f)]
+
+        return [f for f in changed_files if f not in qualified_blacklist and not self.is_baseline(f)]
+
+    @staticmethod
+    def is_baseline(basename):
+        # TODO(qyearsley): Find a better, centralized place for this.
+        return basename.endswith('-expected.txt')
 
     def format_patch(self):
         """Makes a patch with only exportable changes."""
@@ -97,7 +102,7 @@ class ChromiumCommit(object):
     @memoized
     def absolute_chromium_wpt_dir(self):
         finder = WebKitFinder(self.host.filesystem)
-        return finder.path_from_webkit_base('LayoutTests', 'imported', 'wpt')
+        return finder.path_from_webkit_base('LayoutTests', 'external', 'wpt')
 
     @memoized
     def absolute_chromium_dir(self):

@@ -87,25 +87,22 @@ struct PaintInvalidatorContext {
 class PaintInvalidator {
  public:
   void invalidatePaintIfNeeded(FrameView&, PaintInvalidatorContext&);
-  void invalidatePaintIfNeeded(const LayoutObject&,
-                               const LayoutPoint& oldPaintOffset,
-                               PaintInvalidatorContext&);
+  void invalidatePaintIfNeeded(const LayoutObject&, PaintInvalidatorContext&);
 
   // Process objects needing paint invalidation on the next frame.
   // See the definition of PaintInvalidationDelayedFull for more details.
   void processPendingDelayedPaintInvalidations();
 
  private:
-  LayoutRect mapLocalRectToPaintInvalidationBacking(
-      const LayoutObject&,
-      const FloatRect&,
-      const PaintInvalidatorContext&);
-  LayoutRect computeVisualRectInBacking(const LayoutObject&,
-                                        const PaintInvalidatorContext&);
-  LayoutPoint computeLocationInBacking(const LayoutObject&,
-                                       const PaintInvalidatorContext&);
-  void updatePaintingLayer(const LayoutObject&, PaintInvalidatorContext&);
-  void updateContext(const LayoutObject&, PaintInvalidatorContext&);
+  ALWAYS_INLINE LayoutRect
+  computeVisualRectInBacking(const LayoutObject&,
+                             const PaintInvalidatorContext&);
+  ALWAYS_INLINE LayoutPoint
+  computeLocationInBacking(const LayoutObject&, const PaintInvalidatorContext&);
+  ALWAYS_INLINE void updatePaintingLayer(const LayoutObject&,
+                                         PaintInvalidatorContext&);
+  ALWAYS_INLINE void updateContext(const LayoutObject&,
+                                   PaintInvalidatorContext&);
 
   Vector<const LayoutObject*> m_pendingDelayedPaintInvalidations;
   GeometryMapper m_geometryMapper;

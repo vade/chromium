@@ -41,10 +41,6 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     self.Skip('deqp/functional/gles3/builtinprecision/*.html', bug=619403)
 
     # All platforms.
-
-    self.Fail('conformance/extensions/webgl-compressed-texture-etc.html',
-        bug=679678)
-
     self.Flaky('conformance2/query/occlusion-query.html', bug=603168)
     self.Fail('conformance2/glsl3/tricky-loop-conditions.html', bug=483282)
 
@@ -66,6 +62,9 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['win', 'nvidia'], bug=631317)
     self.Fail('conformance/glsl/bugs/unary-minus-operator-float-bug.html',
         ['win', 'nvidia'], bug=672380)
+    self.Fail('conformance2/rendering/' +
+        'draw-with-integer-texture-base-level.html',
+        ['win', 'nvidia'], bug=679639)
 
     # Win / AMD
     self.Fail('conformance2/rendering/blitframebuffer-stencil-only.html',
@@ -197,16 +196,10 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
 
     self.Fail('conformance2/reading/format-r11f-g11f-b10f.html',
         ['mac'], bug=1832) # khronos WebGL issue
-    self.Fail('deqp/functional/gles3/fborender/recreate_color_02.html',
-        ['mac'], bug=679682)
-    self.Fail('deqp/functional/gles3/fborender/resize_01.html',
-        ['mac'], bug=679682)
-    self.Fail('deqp/functional/gles3/fragmentoutput/basic.float.html',
-        ['mac'], bug=679684)
-    self.Fail('deqp/functional/gles3/fragmentoutput/array.float.html',
-        ['mac'], bug=679684)
 
     # Mac Retina NVIDIA
+    self.Fail('conformance/textures/misc/cube-map-uploads-out-of-order.html',
+        ['mac', ('nvidia', 0xfe9)], bug=473739)
     self.Fail('deqp/functional/gles3/fbomultisample*',
         ['mac', ('nvidia', 0xfe9)], bug=641209)
     self.Fail('deqp/functional/gles3/framebufferblit/' +
@@ -226,6 +219,9 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['mac', ('nvidia', 0xfe9)], bug=483282)
     self.Fail('conformance2/textures/misc/tex-input-validation.html',
         ['mac', ('nvidia', 0xfe9), 'no_angle'], bug=483282)
+    self.Flaky('conformance2/textures/image_bitmap_from_video/' +
+        'tex-2d-rgba16f-rgba-half_float.html',
+        ['mac', ('nvidia', 0xfe9)], bug=682834)
 
     self.Fail('deqp/functional/gles3/framebufferblit/conversion_04.html',
         ['mac', ('nvidia', 0xfe9)], bug=483282)
@@ -486,6 +482,14 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
         ['mac', ('amd', 0x679e)], bug=483282)
 
     # Mac Multi-vendor failures.
+    self.Fail('deqp/functional/gles3/fborender/recreate_color_02.html',
+        ['mac', 'nvidia', 'amd'], bug=679682)
+    self.Fail('deqp/functional/gles3/fborender/resize_01.html',
+        ['mac', 'nvidia', 'amd'], bug=679682)
+    self.Fail('deqp/functional/gles3/fragmentoutput/basic.float.html',
+        ['mac', 'nvidia', 'amd'], bug=679684)
+    self.Fail('deqp/functional/gles3/fragmentoutput/array.float.html',
+        ['mac', 'nvidia', 'amd'], bug=679684)
     self.Fail('deqp/functional/gles3/fragmentoutput/random_00.html',
         ['mac', 'amd', 'intel'], bug=679690)
     self.Fail('deqp/functional/gles3/fragmentoutput/random_02.html',
@@ -678,6 +682,8 @@ class WebGL2ConformanceExpectations(WebGLConformanceExpectations):
     self.Fail('conformance2/textures/image/' +
         'tex-3d-rg8ui-rg_integer-unsigned_byte.html',
         ['linux', ('nvidia', 0xf02)], bug=680282)
+    self.Fail('conformance2/textures/image_data/tex-2d-rg32f-rg-float.html',
+        ['linux', 'nvidia'], bug=682190)
 
     # Linux Intel
     self.Fail('conformance2/extensions/ext-color-buffer-float.html',

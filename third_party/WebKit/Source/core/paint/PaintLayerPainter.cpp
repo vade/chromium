@@ -813,7 +813,7 @@ PaintResult PaintLayerPainter::paintChildren(
   if (!m_paintLayer.hasSelfPaintingLayerDescendant())
     return result;
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   LayerListMutationDetector mutationChecker(m_paintLayer.stackingNode());
 #endif
 
@@ -1173,14 +1173,14 @@ void PaintLayerPainter::paintOverlayScrollbars(
 
 void PaintLayerPainter::fillMaskingFragment(GraphicsContext& context,
                                             const ClipRect& clipRect) {
-  const LayoutBox* layoutBox = toLayoutBox(m_paintLayer.layoutObject());
+  const LayoutObject& layoutObject = *m_paintLayer.layoutObject();
   if (LayoutObjectDrawingRecorder::useCachedDrawingIfPossible(
-          context, *layoutBox, PaintPhaseClippingMask))
+          context, layoutObject, PaintPhaseClippingMask))
     return;
 
   IntRect snappedClipRect = pixelSnappedIntRect(clipRect.rect());
   LayoutObjectDrawingRecorder drawingRecorder(
-      context, *layoutBox, PaintPhaseClippingMask, snappedClipRect);
+      context, layoutObject, PaintPhaseClippingMask, snappedClipRect);
   context.fillRect(snappedClipRect, Color::black);
 }
 

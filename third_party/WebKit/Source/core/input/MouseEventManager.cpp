@@ -8,6 +8,7 @@
 #include "core/clipboard/DataTransfer.h"
 #include "core/dom/Element.h"
 #include "core/dom/ElementTraversal.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/editing/FrameSelection.h"
 #include "core/editing/SelectionController.h"
 #include "core/events/DragEvent.h"
@@ -79,6 +80,7 @@ MouseEventManager::MouseEventManager(LocalFrame& frame,
     : m_frame(frame),
       m_scrollManager(scrollManager),
       m_fakeMouseMoveEventTimer(
+          TaskRunnerHelper::get(TaskType::UserInteraction, &frame),
           this,
           &MouseEventManager::fakeMouseMoveEventTimerFired) {
   clear();
@@ -730,7 +732,11 @@ WebInputEventResult MouseEventManager::handleMouseDraggedEvent(
       event, m_mouseDownPos, m_dragStartPos, m_mousePressNode.get(),
       m_lastKnownMousePosition);
 
-  if (m_mouseDownMayStartAutoscroll &&
+  // The call into handleMouseDraggedEvent may have caused a re-layout,
+  // so get the LayoutObject again.
+  layoutObject = targetNode->layoutObject();
+
+  if (layoutObject && m_mouseDownMayStartAutoscroll &&
       !m_scrollManager->middleClickAutoscrollInProgress() &&
       !m_frame->selection().selectedHTMLForClipboard().isEmpty()) {
     if (AutoscrollController* controller =
@@ -788,8 +794,10 @@ bool MouseEventManager::handleDrag(const MouseEventWithHitTestResults& event,
   m_frame->view()->setCursor(pointerCursor());
 
   if (initiator == DragInitiator::Mouse &&
-      !dragThresholdExceeded(event.event().position()))
+      !dragThresholdExceeded(event.event().position())) {
+    dragState().m_dragSrc = nullptr;
     return true;
+  }
 
   // Once we're past the drag threshold, we don't want to treat this gesture as
   // a click.

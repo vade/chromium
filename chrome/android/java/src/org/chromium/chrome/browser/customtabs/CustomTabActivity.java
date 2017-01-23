@@ -173,6 +173,8 @@ public class CustomTabActivity extends ChromeActivity {
         public void didAddTab(Tab tab, TabLaunchType type) {
             PageLoadMetrics.addObserver(mMetricsObserver);
             tab.addObserver(mTabObserver);
+            getFullscreenManager().setBottomControlsHeight(mBottomBarDelegate.getBottomBarHeight());
+            getFullscreenManager().addListener(mBottomBarDelegate);
         }
 
         @Override
@@ -433,6 +435,7 @@ public class CustomTabActivity extends ChromeActivity {
                         finishAndClose(false);
                     }
                 });
+        getFullscreenManager().setBottomControlsHeight(mBottomBarDelegate.getBottomBarHeight());
 
         mCustomTabContentHandler = new CustomTabContentHandler() {
             @Override
@@ -689,7 +692,9 @@ public class CustomTabActivity extends ChromeActivity {
         return new CustomTabAppMenuPropertiesDelegate(this, mIntentDataProvider.getMenuTitles(),
                 mIntentDataProvider.shouldShowShareMenuItem(),
                 mIntentDataProvider.isOpenedByChrome(),
-                mIntentDataProvider.isMediaViewer());
+                mIntentDataProvider.isMediaViewer(),
+                mIntentDataProvider.shouldShowStarButton(),
+                mIntentDataProvider.shouldShowDownloadButton());
     }
 
     @Override
@@ -959,6 +964,8 @@ public class CustomTabActivity extends ChromeActivity {
             };
 
             mMainTab = null;
+            // mHasCreatedTabEarly == true => mMainTab != null in the rest of the code.
+            mHasCreatedTabEarly = false;
             tab.detachAndStartReparenting(intent, startActivityOptions, finalizeCallback);
         } else {
             // Temporarily allowing disk access while fixing. TODO: http://crbug.com/581860
@@ -1037,7 +1044,9 @@ public class CustomTabActivity extends ChromeActivity {
         // use Chrome strings here as EmbedContentViewActivity does.
         CustomTabsIntent customTabIntent = new CustomTabsIntent.Builder()
                 .setShowTitle(true)
-                .setToolbarColor(context.getResources().getColor(R.color.dark_action_bar_color))
+                .setToolbarColor(ApiCompatibilityUtils.getColor(
+                        context.getResources(),
+                        R.color.dark_action_bar_color))
                 .build();
         customTabIntent.intent.setData(Uri.parse(url));
 

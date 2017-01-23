@@ -50,6 +50,11 @@ class DataUseUserData : public base::SupportsUserData::Data {
     CLOUD_PRINT,
     SEARCH_PROVIDER_LOGOS,
     UPDATE_CLIENT,
+    GCM_DRIVER,
+    WEB_HISTORY_SERVICE,
+    NETWORK_TIME_TRACKER,
+    SUPERVISED_USER,
+    IMAGE_FETCHER_UNTAGGED,
   };
 
   // Data use broken by content type. This enum must remain synchronized

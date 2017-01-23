@@ -21,6 +21,7 @@ var BookmarksStore = Polymer({
 
     searchTerm: {
       type: String,
+      value: '',
       observer: 'updateSearchDisplay_',
       notify: true,
     },
@@ -72,8 +73,8 @@ var BookmarksStore = Polymer({
     chrome.bookmarks.onChanged.addListener(this.onBookmarkChanged_.bind(this));
   },
 
-////////////////////////////////////////////////////////////////////////////////
-// bookmarks-store, private:
+  //////////////////////////////////////////////////////////////////////////////
+  // bookmarks-store, private:
 
   /**
    * @param {BookmarkTreeNode} rootNode
@@ -85,7 +86,12 @@ var BookmarksStore = Polymer({
     this.rootNode.path = 'rootNode';
     BookmarksStore.generatePaths(rootNode, 0);
     BookmarksStore.initNodes(this.rootNode, this.idToNodeMap_);
-    this.fire('selected-folder-changed', this.rootNode.children[0].id);
+
+    // Initialize the store's fields from the router.
+    if (this.$.router.searchTerm)
+      this.searchTerm = this.$.router.searchTerm;
+    else
+      this.fire('selected-folder-changed', this.$.router.selectedId);
   },
 
   /** @private */
@@ -110,7 +116,10 @@ var BookmarksStore = Polymer({
 
   /** @private */
   updateSearchDisplay_: function() {
-    if (this.searchTerm == '') {
+    if (!this.rootNode)
+      return;
+
+    if (!this.searchTerm) {
       this.fire('selected-folder-changed', this.rootNode.children[0].id);
     } else {
       chrome.bookmarks.search(this.searchTerm, function(results) {
@@ -150,8 +159,8 @@ var BookmarksStore = Polymer({
     delete this.idToNodeMap_[id];
   },
 
-////////////////////////////////////////////////////////////////////////////////
-// bookmarks-store, bookmarks API event listeners:
+  //////////////////////////////////////////////////////////////////////////////
+  // bookmarks-store, bookmarks API event listeners:
 
   /**
    * Callback for when a bookmark node is removed.
@@ -191,8 +200,8 @@ var BookmarksStore = Polymer({
       this.updateSearchDisplay_();
   },
 
-////////////////////////////////////////////////////////////////////////////////
-// bookmarks-store, bookmarks app event listeners:
+  //////////////////////////////////////////////////////////////////////////////
+  // bookmarks-store, bookmarks app event listeners:
 
   /**
    * @param {Event} e
@@ -216,10 +225,14 @@ var BookmarksStore = Polymer({
     if (this.selectedId)
       this.set(this.idToNodeMap_[this.selectedId].path + '.isSelected', false);
 
-    var selectedId = /** @type {string} */ (e.detail);
-    var newFolder = this.idToNodeMap_[selectedId];
+    // Check if the selected id is that of a defined folder.
+    var id = /** @type {string} */ (e.detail);
+    if (!this.idToNodeMap_[id] || this.idToNodeMap_[id].url)
+      id = this.rootNode.children[0].id;
+
+    var newFolder = this.idToNodeMap_[id];
     this.set(newFolder.path + '.isSelected', true);
-    this.selectedId = selectedId;
+    this.selectedId = id;
   },
 
   /**

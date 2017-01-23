@@ -347,8 +347,8 @@ class CORE_EXPORT Document : public ContainerNode,
   // just for the web IDL implementation.
   Element* scrollingElementNoLayout();
 
-  void addStyleReattachData(Node&, StyleReattachData&);
-  StyleReattachData getStyleReattachData(Node&);
+  void addStyleReattachData(const Node&, StyleReattachData&);
+  StyleReattachData getStyleReattachData(const Node&) const;
 
   String readyState() const;
 
@@ -758,7 +758,9 @@ class CORE_EXPORT Document : public ContainerNode,
 
   void didInsertText(Node*, unsigned offset, unsigned length);
   void didRemoveText(Node*, unsigned offset, unsigned length);
-  void didMergeTextNodes(Text& oldNode, unsigned offset);
+  void didMergeTextNodes(const Text& mergedNode,
+                         const Text& nodeToBeRemoved,
+                         unsigned oldLength);
   void didSplitTextNode(const Text& oldNode);
 
   void clearDOMWindow() { m_domWindow = nullptr; }
@@ -1098,6 +1100,8 @@ class CORE_EXPORT Document : public ContainerNode,
   void checkLoadEventSoon();
   bool isDelayingLoadEvent();
   void loadPluginsSoon();
+  // This calls checkCompleted() sync and thus can cause JavaScript execution.
+  void decrementLoadEventDelayCountAndCheckLoadEvent();
 
   Touch* createTouch(DOMWindow*,
                      EventTarget*,
@@ -1168,7 +1172,9 @@ class CORE_EXPORT Document : public ContainerNode,
   ElementDataCache* elementDataCache() { return m_elementDataCache.get(); }
 
   void didLoadAllScriptBlockingResources();
+  void didAddPendingStylesheetInBody();
   void didRemoveAllPendingStylesheet();
+  void didRemoveAllPendingBodyStylesheets();
 
   bool inStyleRecalc() const {
     return m_lifecycle.state() == DocumentLifecycle::InStyleRecalc;
@@ -1300,10 +1306,6 @@ class CORE_EXPORT Document : public ContainerNode,
 
   const PropertyRegistry* propertyRegistry() const;
   PropertyRegistry* propertyRegistry();
-
-  // Indicates whether the user has interacted with this particular Document.
-  void setHasReceivedUserGesture() { m_hasReceivedUserGesture = true; }
-  bool hasReceivedUserGesture() const { return m_hasReceivedUserGesture; }
 
   // Document maintains a counter of visible non-secure password
   // fields in the page. Used to notify the embedder when all visible
@@ -1450,7 +1452,7 @@ class CORE_EXPORT Document : public ContainerNode,
   // This HashMap is used to stash information (ComputedStyle, nextTextSibling)
   // generated in the Style Resolution phase that is required in the
   // Layout Tree construction phase.
-  HeapHashMap<Member<Node>, StyleReattachData> m_styleReattachDataMap;
+  HeapHashMap<Member<const Node>, StyleReattachData> m_styleReattachDataMap;
 
   bool m_wellFormed;
 
@@ -1562,7 +1564,6 @@ class CORE_EXPORT Document : public ContainerNode,
 
   bool m_designMode;
   bool m_isRunningExecCommand;
-  bool m_hasReceivedUserGesture;
 
   HeapHashSet<WeakMember<const LiveNodeListBase>> m_listsInvalidatedAtDocument;
   // Oilpan keeps track of all registered NodeLists.

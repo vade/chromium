@@ -157,7 +157,7 @@ class CORE_EXPORT LayoutTableCell final : public LayoutBlockFlow {
     // add in the border and padding.
     // Call computedCSSPadding* directly to avoid including implicitPadding.
     if (!document().inQuirksMode() &&
-        style()->boxSizing() != BoxSizingBorderBox)
+        style()->boxSizing() != EBoxSizing::kBorderBox)
       styleLogicalHeight +=
           (computedCSSPaddingBefore() + computedCSSPaddingAfter()).floor() +
           borderBefore() + borderAfter();
@@ -278,7 +278,7 @@ class CORE_EXPORT LayoutTableCell final : public LayoutBlockFlow {
     return style()->borderEnd();
   }
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   bool isFirstOrLastCellInRow() const {
     return !table()->cellAfter(this) || !table()->cellBefore(this);
   }

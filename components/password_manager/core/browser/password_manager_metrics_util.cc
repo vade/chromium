@@ -110,6 +110,10 @@ void LogShouldBlockPasswordForSameOriginButDifferentScheme(bool should_block) {
       should_block);
 }
 
+void LogCountHttpMigratedPasswords(int count) {
+  UMA_HISTOGRAM_COUNTS_100("PasswordManager.HttpPasswordMigrationCount", count);
+}
+
 void LogAccountChooserUsability(AccountChooserUsabilityMetric usability) {
   UMA_HISTOGRAM_ENUMERATION("PasswordManager.AccountChooserDialogUsability",
                             usability, ACCOUNT_CHOOSER_USABILITY_COUNT);
@@ -131,13 +135,18 @@ void LogCredentialManagerGetResult(CredentialManagerGetResult result,
 
 void LogPasswordReuse(int password_length,
                       int saved_passwords,
-                      int number_matches) {
+                      int number_matches,
+                      bool password_field_detected) {
   UMA_HISTOGRAM_COUNTS_100("PasswordManager.PasswordReuse.PasswordLength",
                            password_length);
   UMA_HISTOGRAM_COUNTS_1000("PasswordManager.PasswordReuse.TotalPasswords",
                             saved_passwords);
   UMA_HISTOGRAM_COUNTS_1000("PasswordManager.PasswordReuse.NumberOfMatches",
                             number_matches);
+  UMA_HISTOGRAM_ENUMERATION(
+      "PasswordManager.PasswordReuse.PasswordFieldDetected",
+      password_field_detected ? HAS_PASSWORD_FIELD : NO_PASSWORD_FIELD,
+      PASSWORD_REUSE_PASSWORD_FIELD_DETECTED_COUNT);
 }
 
 }  // namespace metrics_util

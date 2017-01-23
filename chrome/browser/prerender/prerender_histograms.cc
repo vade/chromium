@@ -13,7 +13,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/prerender/prerender_manager.h"
-#include "chrome/browser/prerender/prerender_util.h"
+#include "components/google/core/browser/google_util.h"
 #include "net/http/http_cache.h"
 
 namespace prerender {
@@ -34,31 +34,6 @@ enum NoStatePrefetchResponseType {
 int GetResourceType(bool is_main_resource, bool is_redirect, bool is_no_store) {
   return (is_no_store * NO_STORE) + (is_redirect * REDIRECT) +
          (is_main_resource * MAIN_RESOURCE);
-}
-
-// Similar to UMA_HISTOGRAM_ENUMERATION but allows a dynamic histogram name.
-// Records a sample such as 0 <= sample < bucket_count, in a histogram with
-// |bucket_count| buckets of width 1 each.
-void RecordHistogramEnum(const std::string& histogram_name,
-                         base::HistogramBase::Sample sample,
-                         base::HistogramBase::Sample bucket_count) {
-  DCHECK_LT(sample, bucket_count);
-  base::HistogramBase* histogram_pointer = base::LinearHistogram::FactoryGet(
-      histogram_name, 1, bucket_count, bucket_count + 1,
-      base::HistogramBase::kUmaTargetedHistogramFlag);
-  histogram_pointer->Add(sample);
-}
-
-// Similar to UMA_HISTOGRAM_CUSTOM_TIMES but allows a dynamic histogram name.
-void RecordHistogramTime(const std::string& histogram_name,
-                         base::TimeDelta time_min,
-                         base::TimeDelta time_max,
-                         base::TimeDelta sample,
-                         base::HistogramBase::Sample bucket_count) {
-  base::HistogramBase* histogram_pointer = base::Histogram::FactoryTimeGet(
-      histogram_name, time_min, time_max, bucket_count,
-      base::HistogramBase::kUmaTargetedHistogramFlag);
-  histogram_pointer->AddTime(sample);
 }
 
 // Time window for which we will record windowed PLTs from the last observed
@@ -266,7 +241,9 @@ void PrerenderHistograms::RecordPerceivedPageLoadTime(
   if (!url.SchemeIsHTTPOrHTTPS())
     return;
   bool within_window = WithinWindow();
-  bool is_google_url = IsGoogleDomain(url);
+  bool is_google_url =
+      google_util::IsGoogleDomainUrl(url, google_util::DISALLOW_SUBDOMAIN,
+                                     google_util::ALLOW_NON_STANDARD_PORTS);
   RECORD_PLT("PerceivedPLT", perceived_page_load_time);
   if (within_window)
     RECORD_PLT("PerceivedPLTWindowed", perceived_page_load_time);
@@ -322,8 +299,11 @@ void PrerenderHistograms::RecordPageLoadTimeNotSwappedIn(
     const GURL& url) const {
   // If the URL to be prerendered is not a http[s] URL, or is a Google URL,
   // do not record.
-  if (!url.SchemeIsHTTPOrHTTPS() || IsGoogleDomain(url))
+  if (!url.SchemeIsHTTPOrHTTPS() ||
+      google_util::IsGoogleDomainUrl(url, google_util::DISALLOW_SUBDOMAIN,
+                                     google_util::ALLOW_NON_STANDARD_PORTS)) {
     return;
+  }
   RECORD_PLT("PrerenderNotSwappedInPLT", page_load_time);
 }
 
@@ -440,8 +420,8 @@ void PrerenderHistograms::RecordPrefetchResponseReceived(
   int sample = GetResourceType(is_main_resource, is_redirect, is_no_store);
   std::string histogram_name =
       GetHistogramName(origin, IsOriginWash(), "NoStatePrefetchResponseTypes");
-  RecordHistogramEnum(histogram_name, sample,
-                      NO_STATE_PREFETCH_RESPONSE_TYPE_COUNT);
+  base::UmaHistogramExactLinear(histogram_name, sample,
+                                NO_STATE_PREFETCH_RESPONSE_TYPE_COUNT);
 }
 
 void PrerenderHistograms::RecordPrefetchRedirectCount(
@@ -455,7 +435,8 @@ void PrerenderHistograms::RecordPrefetchRedirectCount(
       "NoStatePrefetch%sResourceRedirects", is_main_resource ? "Main" : "Sub");
   std::string histogram_name =
       GetHistogramName(origin, IsOriginWash(), histogram_base_name);
-  RecordHistogramEnum(histogram_name, redirect_count, kMaxRedirectCount);
+  base::UmaHistogramExactLinear(histogram_name, redirect_count,
+                                kMaxRedirectCount);
 }
 
 void PrerenderHistograms::RecordPrefetchFirstContentfulPaintTime(
@@ -468,9 +449,10 @@ void PrerenderHistograms::RecordPrefetchFirstContentfulPaintTime(
 
   if (!prefetch_age.is_zero()) {
     DCHECK_NE(origin, ORIGIN_NONE);
-    RecordHistogramTime(GetHistogramName(origin, IsOriginWash(), "PrefetchAge"),
-                        base::TimeDelta::FromMilliseconds(10),
-                        base::TimeDelta::FromMinutes(30), prefetch_age, 50);
+    base::UmaHistogramCustomTimes(
+        GetHistogramName(origin, IsOriginWash(), "PrefetchAge"), prefetch_age,
+        base::TimeDelta::FromMilliseconds(10), base::TimeDelta::FromMinutes(30),
+        50);
   }
 
   std::string histogram_base_name;
@@ -488,8 +470,9 @@ void PrerenderHistograms::RecordPrefetchFirstContentfulPaintTime(
   std::string histogram_name =
       GetHistogramName(origin, IsOriginWash(), histogram_base_name);
 
-  RecordHistogramTime(histogram_name, base::TimeDelta::FromMilliseconds(10),
-                      base::TimeDelta::FromMinutes(2), time, 50);
+  base::UmaHistogramCustomTimes(histogram_name, time,
+                                base::TimeDelta::FromMilliseconds(10),
+                                base::TimeDelta::FromMinutes(2), 50);
 }
 
 bool PrerenderHistograms::IsOriginWash() const {

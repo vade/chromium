@@ -11,7 +11,7 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
@@ -156,7 +156,8 @@ bool AndroidVideoEncodeAccelerator::Initialize(
 
   if (!(MediaCodecUtil::SupportsSetParameters() &&
         format == PIXEL_FORMAT_I420)) {
-    DLOG(ERROR) << "Unexpected combo: " << format << ", " << output_profile;
+    DLOG(ERROR) << "Unexpected combo: " << format << ", "
+                << GetProfileName(output_profile);
     return false;
   }
 

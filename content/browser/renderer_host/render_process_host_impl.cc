@@ -187,6 +187,9 @@
 #include "services/service_manager/public/cpp/interface_registry.h"
 #include "services/service_manager/runner/common/client_util.h"
 #include "services/service_manager/runner/common/switches.h"
+#include "services/shape_detection/public/interfaces/barcodedetection.mojom.h"
+#include "services/shape_detection/public/interfaces/facedetection_provider.mojom.h"
+#include "services/shape_detection/public/interfaces/textdetection.mojom.h"
 #include "storage/browser/fileapi/sandbox_file_system_backend.h"
 #include "third_party/WebKit/public/public_features.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -198,7 +201,6 @@
 #include "ui/native_theme/native_theme_switches.h"
 
 #if defined(OS_ANDROID)
-#include "content/browser/android/child_process_launcher_android.h"
 #include "content/browser/screen_orientation/screen_orientation_listener_android.h"
 #include "content/public/browser/android/java_interfaces.h"
 #include "ipc/ipc_sync_channel.h"
@@ -1202,6 +1204,18 @@ void RenderProcessHostImpl::RegisterMojoInterfaces() {
   AddUIThreadInterface(registry.get(),
                        GetGlobalJavaInterfaces()
                            ->CreateInterfaceFactory<device::BatteryMonitor>());
+  AddUIThreadInterface(
+      registry.get(), GetGlobalJavaInterfaces()
+                          ->CreateInterfaceFactory<
+                              shape_detection::mojom::FaceDetectionProvider>());
+  AddUIThreadInterface(
+      registry.get(),
+      GetGlobalJavaInterfaces()
+          ->CreateInterfaceFactory<shape_detection::mojom::BarcodeDetection>());
+  AddUIThreadInterface(
+      registry.get(),
+      GetGlobalJavaInterfaces()
+          ->CreateInterfaceFactory<shape_detection::mojom::TextDetection>());
 #else
   AddUIThreadInterface(
       registry.get(), base::Bind(&device::BatteryMonitorImpl::Create));
@@ -1795,7 +1809,6 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kUseGL,
     switches::kUseGpuInTests,
     switches::kUseMobileUserAgent,
-    switches::kUseRemoteCompositing,
     switches::kV,
     switches::kV8CacheStrategiesForCacheStorage,
     switches::kVideoThreads,
@@ -1827,7 +1840,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
 #endif
 #if BUILDFLAG(ENABLE_WEBRTC)
     switches::kDisableWebRtcHWDecoding,
-    switches::kDisableWebRtcHWVP8Encoding,
+    switches::kDisableWebRtcHWEncoding,
     switches::kEnableWebRtcStunOrigin,
     switches::kEnforceWebRtcIPPermissionCheck,
     switches::kForceWebRtcIPHandlingPolicy,
@@ -1940,16 +1953,10 @@ bool RenderProcessHostImpl::Shutdown(int exit_code, bool wait) {
   if (run_renderer_in_process())
     return false;  // Single process mode never shuts down the renderer.
 
-#if defined(OS_ANDROID)
-  // Android requires a different approach for killing.
-  StopChildProcess(GetHandle());
-  return true;
-#else
-  if (!child_process_launcher_.get() || child_process_launcher_->IsStarting())
+  if (!child_process_launcher_.get())
     return false;
 
-  return child_process_launcher_->GetProcess().Terminate(exit_code, wait);
-#endif
+  return child_process_launcher_->Terminate(exit_code, wait);
 }
 
 bool RenderProcessHostImpl::FastShutdownIfPossible() {

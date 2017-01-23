@@ -258,7 +258,7 @@ by a child template that "extends" this file.
             </intent-filter>
             <meta-data android:name="android.app.searchable"
                 android:resource="@xml/searchable" />
-            {% if target_sdk_version|int > 24 %}
+            {% if target_sdk_version|int > 24 or target_sdk_version == 'O' %}
             <meta-data android:name="android.app.shortcuts"
                 android:resource="@xml/launchershortcuts" />
             {% endif %}
@@ -695,23 +695,6 @@ by a child template that "extends" this file.
         <service android:name="org.chromium.chrome.browser.download.DownloadNotificationService"
             android:exported="false">
         </service>
-
-        <service android:name="org.chromium.components.variations.firstrun.VariationsSeedService"
-            android:exported="false" />
-
-        <receiver android:name="org.chromium.components.variations.firstrun.VariationsSeedServiceLauncher"
-            android:permission="{{ manifest_package }}.TOS_ACKED">
-            <intent-filter>
-                <action android:name="{{ manifest_package }}.TOS_ACKED" />
-            </intent-filter>
-        </receiver>
-
-        <receiver android:name="org.chromium.chrome.browser.firstrun.ToSAckedReceiver"
-            android:permission="{{ manifest_package }}.TOS_ACKED">
-            <intent-filter>
-                <action android:name="{{ manifest_package }}.TOS_ACKED" />
-            </intent-filter>
-        </receiver>
 
         <!-- Bookmarks widget -->
         <receiver android:name="com.google.android.apps.chrome.appwidget.bookmarks.BookmarkThumbnailWidgetProvider"

@@ -70,7 +70,6 @@ class Thread;
 
 namespace cc {
 class BeginFrameSource;
-class ImageSerializationProcessor;
 class CompositorFrameSink;
 class TaskGraphRunner;
 }
@@ -209,6 +208,8 @@ class CONTENT_EXPORT RenderThreadImpl
   bool ResolveProxy(const GURL& url, std::string* proxy_list) override;
   base::WaitableEvent* GetShutdownEvent() override;
   int32_t GetClientId() override;
+  scoped_refptr<base::SingleThreadTaskRunner> GetTimerTaskRunner() override;
+  scoped_refptr<base::SingleThreadTaskRunner> GetLoadingTaskRunner() override;
 
   // IPC::Listener implementation via ChildThreadImpl:
   void OnAssociatedInterfaceRequest(
@@ -232,10 +233,10 @@ class CONTENT_EXPORT RenderThreadImpl
   scoped_refptr<base::SingleThreadTaskRunner>
   GetCompositorImplThreadTaskRunner() override;
   blink::scheduler::RendererScheduler* GetRendererScheduler() override;
-  cc::ImageSerializationProcessor* GetImageSerializationProcessor() override;
   cc::TaskGraphRunner* GetTaskGraphRunner() override;
   bool AreImageDecodeTasksEnabled() override;
   bool IsThreadedAnimationEnabled() override;
+  bool IsScrollAnimatorEnabled() override;
 
   // blink::scheduler::RendererScheduler::RAILModeObserver implementation.
   void OnRAILModeChanged(v8::RAILMode rail_mode) override;
@@ -518,12 +519,6 @@ class CONTENT_EXPORT RenderThreadImpl
 
   bool IsMainThread();
 
-  // Purges memory and suspends the renderer.
-  void SuspendRenderer();
-
-  // Resumes the renderer if it is suspended.
-  void ResumeRenderer();
-
   // base::MemoryCoordinatorClient implementation:
   void OnMemoryStateChange(base::MemoryState state) override;
 
@@ -568,7 +563,8 @@ class CONTENT_EXPORT RenderThreadImpl
   void OnRendererHidden();
   void OnRendererVisible();
 
-  void RecordPurgeAndSuspendMetrics() const;
+  void RecordPurgeAndSuspendMetrics();
+  void RecordPurgeAndSuspendMemoryGrowthMetrics() const;
 
   void ReleaseFreeMemory();
 
@@ -725,6 +721,7 @@ class CONTENT_EXPORT RenderThreadImpl
   cc::BufferToTextureTargetMap buffer_to_texture_target_map_;
   bool are_image_decode_tasks_enabled_;
   bool is_threaded_animation_enabled_;
+  bool is_scroll_animator_enabled_;
 
   class PendingFrameCreate : public base::RefCounted<PendingFrameCreate> {
    public:
@@ -767,6 +764,8 @@ class CONTENT_EXPORT RenderThreadImpl
       thread_safe_render_message_filter_;
 
   base::CancelableClosure record_purge_suspend_metric_closure_;
+  RendererMemoryMetrics purge_and_suspend_memory_metrics_;
+  base::CancelableClosure record_purge_suspend_growth_metric_closure_;
 
   int32_t client_id_;
 

@@ -23,6 +23,17 @@ namespace blink {
 
 namespace CSSPropertyParserHelpers {
 
+void complete4Sides(CSSValue* side[4]) {
+  if (side[3])
+    return;
+  if (!side[2]) {
+    if (!side[1])
+      side[1] = side[0];
+    side[2] = side[0];
+  }
+  side[3] = side[1];
+}
+
 bool consumeCommaIncludingWhitespace(CSSParserTokenRange& range) {
   CSSParserToken value = range.peek();
   if (value.type() != CommaToken)
@@ -376,11 +387,13 @@ StringView consumeUrlAsStringView(CSSParserTokenRange& range) {
   return StringView();
 }
 
-CSSURIValue* consumeUrl(CSSParserTokenRange& range) {
+CSSURIValue* consumeUrl(CSSParserTokenRange& range,
+                        const CSSParserContext* context) {
   StringView url = consumeUrlAsStringView(range);
   if (url.isNull())
     return nullptr;
-  return CSSURIValue::create(url.toString());
+  String urlString = url.toString();
+  return CSSURIValue::create(urlString, context->completeURL(urlString));
 }
 
 static int clampRGBComponent(const CSSPrimitiveValue& value) {
@@ -528,6 +541,15 @@ CSSValue* consumeColor(CSSParserTokenRange& range,
       !parseColorFunction(range, color))
     return nullptr;
   return CSSColorValue::create(color);
+}
+
+CSSValue* consumeLineWidth(CSSParserTokenRange& range,
+                           CSSParserMode cssParserMode,
+                           UnitlessQuirk unitless) {
+  CSSValueID id = range.peek().id();
+  if (id == CSSValueThin || id == CSSValueMedium || id == CSSValueThick)
+    return consumeIdent(range);
+  return consumeLength(range, cssParserMode, ValueRangeNonNegative, unitless);
 }
 
 static CSSValue* consumePositionComponent(CSSParserTokenRange& range,

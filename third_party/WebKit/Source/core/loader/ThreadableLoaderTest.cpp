@@ -30,6 +30,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "wtf/Assertions.h"
+#include "wtf/Functional.h"
 #include "wtf/PtrUtil.h"
 #include "wtf/RefPtr.h"
 #include <memory>
@@ -128,9 +129,8 @@ class DocumentThreadableLoaderTestHelper : public ThreadableLoaderTestHelper {
     ThreadableLoaderOptions options;
     options.crossOriginRequestPolicy = crossOriginRequestPolicy;
     ResourceLoaderOptions resourceLoaderOptions;
-    m_loader = DocumentThreadableLoader::create(
-        document(), client, options, resourceLoaderOptions,
-        ThreadableLoader::ClientSpec::kTesting);
+    m_loader = DocumentThreadableLoader::create(document(), client, options,
+                                                resourceLoaderOptions);
   }
 
   void startLoader(const ResourceRequest& request) override {
@@ -178,11 +178,11 @@ class WorkerThreadableLoaderTestHelper : public ThreadableLoaderTestHelper,
         WTF::makeUnique<WaitableEvent>();
     postTaskToWorkerGlobalScope(
         BLINK_FROM_HERE,
-        createCrossThreadTask(
-            &WorkerThreadableLoaderTestHelper::workerCreateLoader,
-            crossThreadUnretained(this), crossThreadUnretained(client),
-            crossThreadUnretained(completionEvent.get()),
-            crossOriginRequestPolicy));
+        crossThreadBind(&WorkerThreadableLoaderTestHelper::workerCreateLoader,
+                        crossThreadUnretained(this),
+                        crossThreadUnretained(client),
+                        crossThreadUnretained(completionEvent.get()),
+                        crossOriginRequestPolicy));
     completionEvent->wait();
   }
 
@@ -191,10 +191,9 @@ class WorkerThreadableLoaderTestHelper : public ThreadableLoaderTestHelper,
         WTF::makeUnique<WaitableEvent>();
     postTaskToWorkerGlobalScope(
         BLINK_FROM_HERE,
-        createCrossThreadTask(
-            &WorkerThreadableLoaderTestHelper::workerStartLoader,
-            crossThreadUnretained(this),
-            crossThreadUnretained(completionEvent.get()), request));
+        crossThreadBind(&WorkerThreadableLoaderTestHelper::workerStartLoader,
+                        crossThreadUnretained(this),
+                        crossThreadUnretained(completionEvent.get()), request));
     completionEvent->wait();
   }
 
@@ -228,10 +227,9 @@ class WorkerThreadableLoaderTestHelper : public ThreadableLoaderTestHelper,
         WTF::makeUnique<WaitableEvent>();
     postTaskToWorkerGlobalScope(
         BLINK_FROM_HERE,
-        createCrossThreadTask(
-            &WorkerThreadableLoaderTestHelper::workerCallCheckpoint,
-            crossThreadUnretained(this),
-            crossThreadUnretained(completionEvent.get()), n));
+        crossThreadBind(&WorkerThreadableLoaderTestHelper::workerCallCheckpoint,
+                        crossThreadUnretained(this),
+                        crossThreadUnretained(completionEvent.get()), n));
     completionEvent->wait();
   }
 
@@ -254,12 +252,12 @@ class WorkerThreadableLoaderTestHelper : public ThreadableLoaderTestHelper,
   void onTearDown() override {
     postTaskToWorkerGlobalScope(
         BLINK_FROM_HERE,
-        createCrossThreadTask(&WorkerThreadableLoaderTestHelper::clearLoader,
-                              crossThreadUnretained(this)));
+        crossThreadBind(&WorkerThreadableLoaderTestHelper::clearLoader,
+                        crossThreadUnretained(this)));
     WaitableEvent event;
     postTaskToWorkerGlobalScope(
-        BLINK_FROM_HERE, createCrossThreadTask(&WaitableEvent::signal,
-                                               crossThreadUnretained(&event)));
+        BLINK_FROM_HERE,
+        crossThreadBind(&WaitableEvent::signal, crossThreadUnretained(&event)));
     event.wait();
     m_workerThread->terminateAndWait();
 
@@ -301,8 +299,7 @@ class WorkerThreadableLoaderTestHelper : public ThreadableLoaderTestHelper,
     DCHECK(m_workerThread->globalScope()->isWorkerGlobalScope());
 
     m_loader = ThreadableLoader::create(*m_workerThread->globalScope(), client,
-                                        options, resourceLoaderOptions,
-                                        ThreadableLoader::ClientSpec::kTesting);
+                                        options, resourceLoaderOptions);
     DCHECK(m_loader);
     event->signal();
   }
@@ -340,7 +337,7 @@ class WorkerThreadableLoaderTestHelper : public ThreadableLoaderTestHelper,
 
   void postTaskToWorkerGlobalScope(
       const WebTraceLocation& location,
-      std::unique_ptr<ExecutionContextTask> task) override {
+      std::unique_ptr<WTF::CrossThreadClosure> task) override {
     DCHECK(m_workerThread);
     m_workerThread->postTask(location, std::move(task));
   }

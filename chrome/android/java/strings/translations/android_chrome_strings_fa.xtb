@@ -25,7 +25,6 @@
 
 برای استفاده از «وب فیزیکی»، باید بلوتوث و «مکان» شما روشن باشد.</translation>
 <translation id="124678866338384709">بستن برگه کنونی</translation>
-<translation id="1254090737195733114">داده‌ها وارد شوند؟</translation>
 <translation id="1258753120186372309">‏Google doodle: ‏<ph name="DOODLE_DESCRIPTION" /></translation>
 <translation id="1272079795634619415">توقف</translation>
 <translation id="1285320974508926690">این سایت هرگز ترجمه نشود</translation>
@@ -241,6 +240,8 @@
 <translation id="3527085408025491307">پوشه</translation>
 <translation id="3542235761944717775"><ph name="KILOBYTES" /> کیلوبایت دردسترس است</translation>
 <translation id="3549644494707163724">رمزگذاری همه داده‌های همگام‌سازی‌شده با رمزعبارتی همگام‌سازی خودتان</translation>
+<translation id="3549657413697417275">جستجو در سابقه</translation>
+<translation id="3557336313807607643">افزودن به مخاطبین</translation>
 <translation id="3582930987043644930">افزودن نام</translation>
 <translation id="3590487821116122040">‏فضای ذخیره‌سازی سایت که از نظر Chrome مهم نیست (مثلاً سایت‌هایی که تنظیمات ذخیره‌شده ندارند یا شما مرتب بازدید نمی‌کنید)</translation>
 <translation id="360480449234699036">‏بدون ترک صفحه با موضوعات موجود در وب‌سایت‌ها آشنا شوید. لمس کردن برای جستجو، کلمه و نوشتار اطراف آن را به جستجوی Google ارسال می‌کند و معانی، تصاویر، نتایج جستجو و سایر جزئیات را برمی‌گرداند.
@@ -257,6 +258,7 @@
 <translation id="3714981814255182093">باز کردن «نوار پیدا کردن»</translation>
 <translation id="3716158070938632480">صفحات وب در نزدیکی هستند</translation>
 <translation id="3738139272394829648">لمس کردن برای جستجو</translation>
+<translation id="3739899004075612870">در <ph name="PRODUCT_NAME" /> نشانک‌گذاری شد</translation>
 <translation id="3744111309925758534"><ph name="MEGABYTES" /> مگابایت توسط برنامه‌های دیگر</translation>
 <translation id="3744111561329211289">همگام‌سازی پس‌زمینه</translation>
 <translation id="3789841737615482174">نصب</translation>
@@ -268,6 +270,7 @@
 <translation id="3828029223314399057">جستجوی نشانک‌ها</translation>
 <translation id="3845539888601087042">در حال نمایش سابقه از دستگاه‌هایی که در آن‌ها به سیستم وارد شده‌اید. <ph name="BEGIN_LINK" />بیشتر بدانید<ph name="END_LINK" />.</translation>
 <translation id="3859306556332390985">جستجو به جلو</translation>
+<translation id="3890664840433101773">افزودن رایانامه</translation>
 <translation id="3894427358181296146">افزودن پوشه</translation>
 <translation id="3895926599014793903">فعال کردن اجباری بزرگ‌نمایی</translation>
 <translation id="3917783807003067648">مکان مسدود است</translation>
@@ -280,6 +283,7 @@
 <translation id="3967822245660637423">بارگیری کامل شد</translation>
 <translation id="397583555483684758">همگام‌سازی متوقف شده است</translation>
 <translation id="3985215325736559418">می‌خواهید دوباره <ph name="FILE_NAME" /> را بارگیری کنید؟</translation>
+<translation id="3987993985790029246">کپی پیوند</translation>
 <translation id="3988213473815854515">مکان مجاز است</translation>
 <translation id="3997476611815694295">فضای ذخیره غیرمهم</translation>
 <translation id="4002066346123236978">عنوان</translation>
@@ -317,7 +321,7 @@
 <translation id="4384468725000734951">‏استفاده از Sogou برای جستجو</translation>
 <translation id="4412992751769744546">اجازه به کوکی‌های طرف ثالث</translation>
 <translation id="4452548195519783679">در <ph name="FOLDER_NAME" /> نشانک گذاشته شد</translation>
-<translation id="4457399174246232812">صفحه‌های «وب فیزیکی» اطراف در آینده در فهرست اعلان‌ها نشان داده می‌شوند</translation>
+<translation id="4453340223357552416"><ph name="FILE_NAME" /> در <ph name="PRODUCT_NAME" /> بارگیری شد</translation>
 <translation id="4479647676395637221">قبل از اجازه به سایت‌ها برای استفاده از دوربین، ابتدا سؤال شود (توصیه می‌شود)</translation>
 <translation id="4508440807153586353">‏فقط فردی که عبارت عبور شما را دارد می‌تواند اطلاعات رمزگذاری‌شده شما را بخواند. این عبارت عبور به Google ارسال یا در سرورهای آن ذخیره نمی‌شود. اگر عبارت عبورتان را فراموش کنید، باید همگام‌سازی را بازنشانی کنید. <ph name="BEGIN_LINK" />بیشتر بدانید<ph name="END_LINK" /></translation>
 <translation id="4513387527876475750">{DAYS,plural, =1{۱ روز قبل}one{#  روز قبل}other{#  روز قبل}}</translation>
@@ -325,7 +329,6 @@
 <translation id="4526249700380860531">‏مشاهده و مدیریت گذرواژه‌های ذخیره شده در <ph name="BEGIN_LINK" />passwords.google.com<ph name="END_LINK" /></translation>
 <translation id="4532845899244822526">انتخاب پوشه</translation>
 <translation id="4535858793016067060">‏با روشن کردن «منابع ناشناخته» در تنظیمات امنیت Android، آزمایش «افزودن بهبودیافته به صفحه اصلی» را امتحان کنید. حتماً بعد از امتحان آن، این تنظیم را غیرفعال کنید.</translation>
-<translation id="4543661749405994812">کپی آدرس رایانامه</translation>
 <translation id="4558311620361989323">میان‌برهای صفحه وب</translation>
 <translation id="4572422548854449519">به حساب مدیریت‌شده وارد شوید</translation>
 <translation id="457875822857220463">ارسال</translation>
@@ -370,12 +373,12 @@
 <translation id="4988526792673242964">صفحات</translation>
 <translation id="4996978546172906250">اشتراک‌گذاری از طریق</translation>
 <translation id="5000922062037820727">مسدود (توصیه می‌شود)</translation>
+<translation id="5004339818306944878">‏تا ۶۰٪ کمتر داده مصرف کنید و به وب سرعت ببخشید. سرورهای Google صفحاتی را که بازدید می‌کنید بهینه‌سازی می‌کند.</translation>
 <translation id="5005498671520578047">کپی گذرواژه</translation>
 <translation id="5011311129201317034"><ph name="SITE" /> می‌خواهد مرتبط شود</translation>
 <translation id="5016205925109358554">Serif</translation>
 <translation id="5039804452771397117">اجازه دادن</translation>
 <translation id="5040262127954254034">حریم خصوصی</translation>
-<translation id="5053110706349648690">بلوتوث را در <ph name="BEGIN_LINK" />تنظیمات دستگاه<ph name="END_LINK" /> روشن کنید تا مرتبط‌‌سازی امکان‌پذیر شود</translation>
 <translation id="5063480226653192405">کاربر </translation>
 <translation id="5087580092889165836">افزودن کارت</translation>
 <translation id="5100237604440890931">کوچک شده - برای بزرگ کردن کلیک کنید.</translation>
@@ -392,10 +395,12 @@
 <translation id="5171045022955879922">‏جستجو یا تایپ URL</translation>
 <translation id="5184329579814168207">‏باز کردن در Chrome</translation>
 <translation id="5199929503336119739">نمایه کاری</translation>
+<translation id="5205222826937269299">نام ضروری است</translation>
 <translation id="5209320130288484488">دستگاهی یافت نشد</translation>
 <translation id="5210286577605176222">رفتن به برگه قبلی</translation>
 <translation id="5210365745912300556">بستن برگه</translation>
 <translation id="5222676887888702881">خروج از سیستم</translation>
+<translation id="5222812217790122047">رایانامه ضروری است</translation>
 <translation id="5233638681132016545">برگه جدید</translation>
 <translation id="5271967389191913893">دستگاه نمی‌تواند محتوا را برای بارگیری باز کند.</translation>
 <translation id="528192093759286357">برای خروج از حالت تمام صفحه، از بالا صفحه را بکشید و دکمه برگشت را لمس کنید.</translation>
@@ -521,7 +526,6 @@
 <translation id="6447842834002726250">کوکی‌ها</translation>
 <translation id="6448273550210938826">پیشنهادات جستجو و نشانی وب</translation>
 <translation id="6463070039183944536">درحال افزودن...</translation>
-<translation id="6464825623202322042">این دستگاه</translation>
 <translation id="6475951671322991020">بارگیری ویدیو</translation>
 <translation id="6477460825583319731">آدرس رایانامه نامعتبر</translation>
 <translation id="6482749332252372425">به‌دلیل نبودن فضای ذخیره‌سازی، بارگیری <ph name="FILE_NAME" /> انجام نشد.</translation>
@@ -568,6 +572,7 @@
 <translation id="6868088497967843822">برای دریافت نشانک‌ها، سابقه، گذرواژه‌ها و سایر تنظیماتتان در همه دستگاه‌هایتان، به سیستم وارد شوید</translation>
 <translation id="688738109438487280">افزودن داده‌های موجود به <ph name="TO_ACCOUNT" />.</translation>
 <translation id="6891858906296486776">{OPEN_TABS,plural, =1{‏%1$d برگه باز}one{‏%1$d برگه باز}other{‏%1$d برگه باز}}</translation>
+<translation id="6896758677409633944">کپی</translation>
 <translation id="6937422995269576720">شماره کارت معتبر نیست</translation>
 <translation id="6945221475159498467">انتخاب</translation>
 <translation id="6963766334940102469">حذف نشانک‌ها</translation>
@@ -590,11 +595,15 @@
 <translation id="7063006564040364415">اتصال به سرور همگام‌سازی ممکن نیست.</translation>
 <translation id="7064851114919012435">اطلاعات تماس</translation>
 <translation id="7094922512924405309">هیچ صفحه وب فیزیکی در اطراف پیدا نشد</translation>
+<translation id="7128222689758636196">مجاز کردن موتور جستجوی کنونی</translation>
 <translation id="7138678301420049075">دیگر</translation>
 <translation id="7180611975245234373">بازخوانی</translation>
+<translation id="7189372733857464326">‏در انتظار «سرویس‌های Google Play» برای اتمام به‌روزرسانی است</translation>
 <translation id="7191430249889272776">برگه در پس‌زمینه باز شد.</translation>
 <translation id="7243308994586599757">گزینه‌ها در نزدیک پایین صفحه نمایش در دسترس هستند</translation>
 <translation id="7244362611678346589"><ph name="SEARCH_ENGINE_URL" /> از موقعیت مکانی شما برای نمایش نتایج جستجوی محلی استفاده می‌کند</translation>
+<translation id="7274013316676448362">سایت مسدودشده</translation>
+<translation id="7333031090786104871">همچنان درحال افزودن سایت قبلی</translation>
 <translation id="7353894246028566792">{NUM_SELECTED,plural, =1{اشتراک‌گذاری ۱ مورد انتخاب‌شده}one{اشتراک‌گذاری # مورد انتخاب‌شده}other{اشتراک‌گذاری # مورد انتخاب‌شده}}</translation>
 <translation id="7366340029385295517">درحال فرستادن به <ph name="SCREEN_NAME" /></translation>
 <translation id="7375125077091615385">نوع:</translation>
@@ -619,6 +628,7 @@
 <translation id="7562080006725997899">پاک کردن داده‌های مرور</translation>
 <translation id="756809126120519699">‏داده‌های Chrome پاک شد</translation>
 <translation id="7588950540487816470">وب فیزیکی</translation>
+<translation id="7589445247086920869">مسدود کردن موتور جستجوی کنونی</translation>
 <translation id="7593557518625677601">‏برای شروع همگام‌سازی Chrome، تنظیمات Android را باز کنید و همگام‌سازی سیستم Android را دوباره فعال کنید</translation>
 <translation id="7596558890252710462">سیستم عامل</translation>
 <translation id="7605594153474022051">همگام‌سازی کار نمی‌کند</translation>
@@ -652,6 +662,7 @@
 <translation id="7851858861565204677">دستگاه‌های دیگر</translation>
 <translation id="7875915731392087153">ایجاد رایانامه</translation>
 <translation id="7876243839304621966">حذف همه</translation>
+<translation id="7882131421121961860">هیچ سابقه‌ای پیدا نشد</translation>
 <translation id="7929962904089429003">باز کردن منو</translation>
 <translation id="7942131818088350342"><ph name="PRODUCT_NAME" /> قدیمی است.</translation>
 <translation id="7947953824732555851">پذیرش و ورود به سیستم</translation>
@@ -699,6 +710,7 @@
 <translation id="8321376388213838985">مقاله‌های بیشتر به‌زودی نشان داده می‌شوند. از بعدازظهرتان لذت ببرید.</translation>
 <translation id="8372893542064058268">«همگام‌سازی پس‌زمینه» را برای یک سایت خاص مجاز کنید.</translation>
 <translation id="8374821112118309944">‏باید TalkBack را به نسخه جدیدتری به‌روزرسانی کنید.</translation>
+<translation id="8393700583063109961">ارسال پیام</translation>
 <translation id="8396312449826231789">فقط سایت‌های تأیید شده</translation>
 <translation id="8413126021676339697">نمایش کل سابقه</translation>
 <translation id="8428213095426709021">تنظیمات</translation>
@@ -764,6 +776,7 @@
 <translation id="9070377983101773829">شروع جستجوی صوتی</translation>
 <translation id="9078964945751709336">اطلاعات بیشتری نیاز است</translation>
 <translation id="9086455579313502267">دسترسی به شبکه امکان‌پذیر نیست</translation>
+<translation id="9094175695478007090">برنامه پرداخت راه‌اندازی نشد.</translation>
 <translation id="9099018167121903954"><ph name="KILOBYTES" /> کیلوبایت بارگیری شد</translation>
 <translation id="9099292894781394535">ذخیره داده‌ها</translation>
 <translation id="9100610230175265781">عبارت عبور لازم است</translation>
@@ -778,6 +791,7 @@
 <translation id="9206873250291191720">A</translation>
 <translation id="9219103736887031265">تصاویر</translation>
 <translation id="932327136139879170">منزل</translation>
+<translation id="932599481871055447">ذخیره داده و مرور سریع‌تر</translation>
 <translation id="938850635132480979">خطا: <ph name="ERROR_CODE" /></translation>
 <translation id="945632385593298557">دسترسی به میکروفن</translation>
 <translation id="951339005376969845">حذف داده‌های موجود. می‌توانید با جابه‌جایی به <ph name="FROM_ACCOUNT" /> آن را بازیابی کنید.</translation>

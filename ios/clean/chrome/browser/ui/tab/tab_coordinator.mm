@@ -17,6 +17,8 @@
 #import "ios/clean/chrome/browser/ui/tab/tab_container_view_controller.h"
 #import "ios/clean/chrome/browser/ui/toolbar/toolbar_coordinator.h"
 #import "ios/clean/chrome/browser/ui/web_contents/web_coordinator.h"
+#import "ios/clean/chrome/browser/web/web_mediator.h"
+#import "ios/shared/chrome/browser/coordinator_context/coordinator_context.h"
 #import "ios/web/public/web_state/web_state_observer_bridge.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -37,9 +39,9 @@ const BOOL kUseBottomToolbar = NO;
   std::unique_ptr<web::WebStateObserverBridge> _webStateObserver;
 }
 
-@synthesize webState = _webState;
 @synthesize presentationKey = _presentationKey;
 @synthesize viewController = _viewController;
+@synthesize webMediator = _webMediator;
 
 - (void)start {
   self.viewController = [self newTabContainer];
@@ -47,11 +49,11 @@ const BOOL kUseBottomToolbar = NO;
   self.viewController.modalPresentationStyle = UIModalPresentationCustom;
 
   WebCoordinator* webCoordinator = [[WebCoordinator alloc] init];
-  webCoordinator.webState = self.webState;
+  webCoordinator.webMediator = self.webMediator;
   [self addChildCoordinator:webCoordinator];
-  // Unset the root view controller, so |webCoordinator| doesn't present its
+  // Unset the base view controller, so |webCoordinator| doesn't present its
   // view controller.
-  webCoordinator.rootViewController = nil;
+  webCoordinator.baseViewController = nil;
   [webCoordinator start];
 
   ToolbarCoordinator* toolbarCoordinator = [[ToolbarCoordinator alloc] init];
@@ -59,22 +61,23 @@ const BOOL kUseBottomToolbar = NO;
   // TODO: Instead of this, let WebMediator maintain a set of webStateObservers
   // and just provide -addObserver and -stopObserving methods.
   _webStateObserver = base::MakeUnique<web::WebStateObserverBridge>(
-      self.webState, toolbarCoordinator);
-  // Unset the .base view controller, so |toolbarCoordinator| doesn't present
+      self.webMediator.webState, toolbarCoordinator);
+  // Unset the base view controller, so |toolbarCoordinator| doesn't present
   // its view controller.
-  toolbarCoordinator.rootViewController = nil;
+  toolbarCoordinator.baseViewController = nil;
   [toolbarCoordinator start];
 
   self.viewController.toolbarViewController = toolbarCoordinator.viewController;
   self.viewController.contentViewController = webCoordinator.viewController;
 
-  [self.rootViewController presentViewController:self.viewController
-                                        animated:YES
+  [self.baseViewController presentViewController:self.viewController
+                                        animated:self.context.animated
                                       completion:nil];
 }
 
 - (void)stop {
-  [self.viewController dismissViewControllerAnimated:YES completion:nil];
+  [self.viewController dismissViewControllerAnimated:self.context.animated
+                                          completion:nil];
   _webStateObserver.reset();
 }
 

@@ -149,10 +149,7 @@ SkColor SkColorFromColorId(ui::NativeTheme::ColorId color_id) {
 
     // Separator
     case ui::NativeTheme::kColorId_SeparatorColor:
-      if (GtkVersionCheck(3, 20))
-        return GetBgColor("GtkSeparator#separator.horizontal");
-      else
-        return GetFgColor("GtkSeparator#separator.horizontal");
+      return GetSeparatorColor("GtkSeparator#separator.horizontal");
 
     // Button
     case ui::NativeTheme::kColorId_ButtonEnabledColor:
@@ -228,6 +225,15 @@ SkColor SkColorFromColorId(ui::NativeTheme::ColorId color_id) {
     case ui::NativeTheme::kColorId_TreeSelectionBackgroundFocused:
     case ui::NativeTheme::kColorId_TreeSelectionBackgroundUnfocused:
       return GetBgColor("GtkTreeView#treeview.view .view.cell:selected:focus");
+
+    // Table Header
+    case ui::NativeTheme::kColorId_TableHeaderText:
+      return GetFgColor(
+          "GtkTreeView#treeview.view GtkButton#button GtkLabel#label");
+    case ui::NativeTheme::kColorId_TableHeaderBackground:
+      return GetBgColor("GtkTreeView#treeview.view GtkButton#button");
+    case ui::NativeTheme::kColorId_TableHeaderSeparator:
+      return GetBorderColor("GtkTreeView#treeview.view GtkButton#button");
 
     // Results Table
     // TODO(thomasanderson): The GtkEntry selectors was how the gtk2 theme got

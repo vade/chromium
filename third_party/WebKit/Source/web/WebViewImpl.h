@@ -224,7 +224,7 @@ class WEB_EXPORT WebViewImpl final
   void setDeviceScaleFactor(float) override;
   void setZoomFactorForDeviceScaleFactor(float) override;
 
-  void setDeviceColorProfile(const WebVector<char>&) override;
+  void setDeviceColorProfile(const gfx::ICCProfile&) override;
 
   void enableAutoResizeMode(const WebSize& minSize,
                             const WebSize& maxSize) override;
@@ -331,8 +331,6 @@ class WEB_EXPORT WebViewImpl final
                                bool useAnchor,
                                float newScale,
                                double durationInSeconds);
-
-  void hasTouchEventHandlers(bool);
 
   // WebGestureCurveTarget implementation for fling.
   bool scrollBy(const WebFloatSize& delta,

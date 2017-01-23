@@ -58,6 +58,10 @@ class CORE_EXPORT SVGElement : public Element {
   int tabIndex() const override;
   bool supportsFocus() const override { return false; }
 
+  // The TreeScope this element should resolve id's against. This differs from
+  // the regular Node::treeScope() by taking <use> into account.
+  TreeScope& treeScopeForIdResolution() const;
+
   bool isOutermostSVGSVGElement() const;
 
   bool hasTagName(const SVGQualifiedName& name) const {
@@ -269,8 +273,8 @@ class CORE_EXPORT SVGElement : public Element {
       AttributeToPropertyMap;
   AttributeToPropertyMap m_attributeToPropertyMap;
 
-#if ENABLE(ASSERT)
-  bool m_inRelativeLengthClientsInvalidation;
+#if DCHECK_IS_ON()
+  bool m_inRelativeLengthClientsInvalidation = false;
 #endif
 
   Member<SVGElementRareData> m_SVGRareData;

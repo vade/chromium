@@ -4,6 +4,8 @@
 
 #include "components/payments/payment_request.h"
 
+#include "base/memory/ptr_util.h"
+#include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/payments/payment_details_validation.h"
 #include "components/payments/payment_request_delegate.h"
 #include "components/payments/payment_request_web_contents_manager.h"
@@ -71,6 +73,38 @@ CurrencyFormatter* PaymentRequest::GetOrCreateCurrencyFormatter(
   }
 
   return currency_formatter_.get();
+}
+
+autofill::AutofillProfile* PaymentRequest::GetCurrentlySelectedProfile() {
+  // TODO(tmartino): Implement more sophisticated algorithm for populating
+  // this when it starts empty.
+  if (!profile_) {
+    autofill::PersonalDataManager* data_manager =
+        delegate_->GetPersonalDataManager();
+    auto profiles = data_manager->GetProfiles();
+    if (!profiles.empty())
+      profile_ = base::MakeUnique<autofill::AutofillProfile>(*profiles[0]);
+  }
+  return profile_ ? profile_.get() : nullptr;
+}
+
+autofill::CreditCard* PaymentRequest::GetCurrentlySelectedCreditCard() {
+  // TODO(anthonyvd): Change this code to prioritize server cards and implement
+  // a way to modify this function's return value.
+  autofill::PersonalDataManager* data_manager =
+      delegate_->GetPersonalDataManager();
+
+  const std::vector<autofill::CreditCard*> cards =
+      data_manager->GetCreditCardsToSuggest();
+
+  auto first_complete_card = std::find_if(
+      cards.begin(),
+      cards.end(),
+      [] (autofill::CreditCard* card) {
+        return card->IsValid();
+  });
+
+  return first_complete_card == cards.end() ? nullptr : *first_complete_card;
 }
 
 }  // namespace payments

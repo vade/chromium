@@ -124,6 +124,9 @@
 #include "chrome/browser/android/data_usage/external_data_use_observer.h"
 #include "chrome/browser/android/net/external_estimate_provider_android.h"
 #include "components/data_usage/android/traffic_stats_amortizer.h"
+#include "net/cert/cert_net_fetcher.h"
+#include "net/cert/cert_verify_proc_android.h"
+#include "net/cert_net/cert_net_fetcher_impl.h"
 #endif  // defined(OS_ANDROID)
 
 #if defined(OS_CHROMEOS)
@@ -186,6 +189,10 @@ class SystemURLRequestContext : public net::URLRequestContext {
   SystemURLRequestContext() {
 #if defined(USE_NSS_CERTS)
     net::SetURLRequestContextForNSSHttpIO(this);
+#endif
+#if defined(OS_ANDROID)
+    net::CertVerifyProcAndroid::SetCertNetFetcher(
+        net::CreateCertNetFetcher(this));
 #endif
   }
 
@@ -565,7 +572,8 @@ void IOThread::Init() {
 #endif  // defined(OS_ANDROID)
   // Pass ownership.
   globals_->network_quality_estimator.reset(new net::NetworkQualityEstimator(
-      std::move(external_estimate_provider), network_quality_estimator_params));
+      std::move(external_estimate_provider), network_quality_estimator_params,
+      net_log_));
 
   UpdateDnsClientEnabled();
 #if defined(OS_CHROMEOS)
@@ -688,6 +696,10 @@ void IOThread::CleanUp() {
 
 #if defined(USE_NSS_CERTS)
   net::ShutdownNSSHttpIO();
+#endif
+
+#if defined(OS_ANDROID)
+  net::CertVerifyProcAndroid::ShutdownCertNetFetcher();
 #endif
 
   system_url_request_context_getter_ = NULL;
@@ -1015,8 +1027,12 @@ void IOThread::ConfigureParamsFromFieldTrialsAndCommandLine(
   if (command_line.HasSwitch(switches::kEnableUserAlternateProtocolPorts)) {
     params->enable_user_alternate_protocol_ports = true;
   }
-  if (command_line.HasSwitch(switches::kIgnoreCertificateErrors))
+  if (command_line.HasSwitch(switches::kIgnoreCertificateErrors)) {
     params->ignore_certificate_errors = true;
+  }
+  UMA_HISTOGRAM_BOOLEAN(
+      "Net.Certificate.IgnoreErrors",
+      command_line.HasSwitch(switches::kIgnoreCertificateErrors));
   if (command_line.HasSwitch(switches::kTestingFixedHttpPort)) {
     params->testing_fixed_http_port =
         GetSwitchValueAsInt(command_line, switches::kTestingFixedHttpPort);

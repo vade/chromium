@@ -257,6 +257,13 @@ interface AudioTrackList : EventTarget
     setter onaddtrack
     setter onchange
     setter onremovetrack
+interface AuthenticationAssertion
+    attribute @@toStringTag
+    getter authenticatorData
+    getter clientData
+    getter credential
+    getter signature
+    method constructor
 interface BarProp
     attribute @@toStringTag
     getter visible
@@ -347,7 +354,7 @@ interface BlobEvent : Event
     getter data
     getter timecode
     method constructor
-interface Bluetooth
+interface Bluetooth : EventTarget
     attribute @@toStringTag
     method constructor
     method requestDevice
@@ -1142,12 +1149,14 @@ interface DOMPointReadOnly
     method matrixTransform
     method toJSON
 interface DOMQuad
+    static method fromRect
     attribute @@toStringTag
     getter p1
     getter p2
     getter p3
     getter p4
     method constructor
+    method toJSON
 interface DOMRect : DOMRectReadOnly
     attribute @@toStringTag
     getter height
@@ -1869,6 +1878,7 @@ interface FocusEvent : UIEvent
     method constructor
 interface FontFace
     attribute @@toStringTag
+    getter display
     getter family
     getter featureSettings
     getter loaded
@@ -1880,6 +1890,7 @@ interface FontFace
     getter weight
     method constructor
     method load
+    setter display
     setter family
     setter featureSettings
     setter stretch
@@ -3841,7 +3852,7 @@ interface MediaDevices : EventTarget
     method getSupportedConstraints
     method getUserMedia
     setter ondevicechange
-interface MediaElementAudioSourceNode : AudioSourceNode
+interface MediaElementAudioSourceNode : AudioNode
     attribute @@toStringTag
     getter mediaElement
     method constructor
@@ -4021,7 +4032,7 @@ interface MediaStreamAudioDestinationNode : AudioNode
     attribute @@toStringTag
     getter stream
     method constructor
-interface MediaStreamAudioSourceNode : AudioSourceNode
+interface MediaStreamAudioSourceNode : AudioNode
     attribute @@toStringTag
     getter mediaStream
     method constructor
@@ -4177,6 +4188,7 @@ interface Navigator
     getter appCodeName
     getter appName
     getter appVersion
+    getter authentication
     getter bluetooth
     getter budget
     getter connection
@@ -4744,8 +4756,10 @@ interface PointerEvent : MouseEvent
     getter pointerId
     getter pointerType
     getter pressure
+    getter tangentialPressure
     getter tiltX
     getter tiltY
+    getter twist
     getter width
     method constructor
     method getCoalescedEvents
@@ -4774,6 +4788,7 @@ interface PresentationConnection : EventTarget
     getter onmessage
     getter onterminate
     getter state
+    getter url
     method close
     method constructor
     method send
@@ -6006,8 +6021,10 @@ interface SVGSVGElement : SVGGraphicsElement
 interface SVGScriptElement : SVGElement
     attribute @@toStringTag
     getter href
+    getter nonce
     getter type
     method constructor
+    setter nonce
     setter type
 interface SVGSetElement : SVGAnimationElement
     attribute @@toStringTag
@@ -6154,6 +6171,16 @@ interface SVGViewElement : SVGElement
     getter zoomAndPan
     method constructor
     setter zoomAndPan
+interface ScopedCredential
+    attribute @@toStringTag
+    getter id
+    getter type
+    method constructor
+interface ScopedCredentialInfo
+    attribute @@toStringTag
+    getter attestation
+    getter clientData
+    method constructor
 interface Screen
     attribute @@toStringTag
     getter availHeight
@@ -6486,9 +6513,10 @@ interface SyncManager
     method register
 interface TaskAttributionTiming : PerformanceEntry
     attribute @@toStringTag
-    getter frameId
-    getter frameName
-    getter frameSrc
+    getter containerId
+    getter containerName
+    getter containerSrc
+    getter containerType
     method constructor
 interface Text : CharacterData
     attribute @@toStringTag
@@ -6994,6 +7022,11 @@ interface WaveShaperNode : AudioNode
     method constructor
     setter curve
     setter oversample
+interface WebAuthentication
+    attribute @@toStringTag
+    method constructor
+    method getAssertion
+    method makeCredential
 interface WebGL2RenderingContext
     attribute @@toStringTag
     attribute ACTIVE_ATTRIBUTES
@@ -8674,11 +8707,11 @@ interface webkitURL
     attribute eventSender
     attribute frames
     attribute gamepadController
+    attribute gin
     attribute internals
     attribute layoutTestController
     attribute length
     attribute location
-    attribute mojo
     attribute opener
     attribute parent
     attribute propertyNamesInGlobal

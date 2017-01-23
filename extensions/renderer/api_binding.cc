@@ -15,6 +15,7 @@
 #include "extensions/common/extension_api.h"
 #include "extensions/renderer/api_binding_hooks.h"
 #include "extensions/renderer/api_event_handler.h"
+#include "extensions/renderer/api_request_handler.h"
 #include "extensions/renderer/api_signature.h"
 #include "extensions/renderer/v8_helpers.h"
 #include "gin/arguments.h"
@@ -71,6 +72,9 @@ void CallbackHelper(const v8::FunctionCallbackInfo<v8::Value>& info) {
 
 }  // namespace
 
+APIBinding::Request::Request() {}
+APIBinding::Request::~Request() {}
+
 struct APIBinding::MethodData {
   MethodData(std::string full_name,
              const base::ListValue& method_signature)
@@ -92,13 +96,15 @@ APIBinding::APIBinding(const std::string& api_name,
                        const base::ListValue* function_definitions,
                        const base::ListValue* type_definitions,
                        const base::ListValue* event_definitions,
-                       const APIMethodCallback& callback,
+                       const SendRequestMethod& callback,
                        std::unique_ptr<APIBindingHooks> binding_hooks,
-                       ArgumentSpec::RefMap* type_refs)
+                       ArgumentSpec::RefMap* type_refs,
+                       APIRequestHandler* request_handler)
     : api_name_(api_name),
       method_callback_(callback),
       binding_hooks_(std::move(binding_hooks)),
       type_refs_(type_refs),
+      request_handler_(request_handler),
       weak_factory_(this) {
   DCHECK(!method_callback_.is_null());
   if (function_definitions) {
@@ -258,6 +264,7 @@ void APIBinding::HandleCall(const std::string& name,
   }
 
   bool invalid_invocation = false;
+  v8::Local<v8::Function> custom_callback;
   {
     v8::TryCatch try_catch(isolate);
     APIBindingHooks::RequestResult hooks_result =
@@ -280,6 +287,7 @@ void APIBinding::HandleCall(const std::string& name,
       case APIBindingHooks::RequestResult::NOT_HANDLED:
         break;  // Handle in the default manner.
     }
+    custom_callback = hooks_result.custom_callback;
   }
 
   if (invalid_invocation) {
@@ -305,9 +313,34 @@ void APIBinding::HandleCall(const std::string& name,
     return;
   }
 
-  DCHECK(converted_arguments);
-  method_callback_.Run(name, std::move(converted_arguments), isolate, context,
-                       callback);
+  auto request = base::MakeUnique<Request>();
+  if (!callback.IsEmpty()) {
+    // In the JS bindings, custom callbacks are called with the arguments of
+    // name, the full request object (see below), the original callback, and
+    // the responses from the API. The responses from the API are handled by the
+    // APIRequestHandler, but we need to curry in the other values.
+    std::vector<v8::Local<v8::Value>> callback_args;
+    if (!custom_callback.IsEmpty()) {
+      // TODO(devlin): The |request| object in the JS bindings includes
+      // properties for callback, callbackSchema, args, stack, id, and
+      // customCallback. Of those, it appears that we only use stack, args, and
+      // id (since callback is curried in separately). We may be able to update
+      // bindings to get away from some of those. For now, just pass in an empty
+      // object (most APIs don't rely on it).
+      v8::Local<v8::Object> request = v8::Object::New(isolate);
+      callback_args = { gin::StringToSymbol(isolate, name), request, callback };
+      callback = custom_callback;
+    }
+    request->request_id = request_handler_->AddPendingRequest(
+        isolate, callback, context, callback_args);
+    request->has_callback = true;
+  }
+  // TODO(devlin): Query and curry user gestures around.
+  request->has_user_gesture = false;
+  request->arguments = std::move(converted_arguments);
+  request->method_name = name;
+
+  method_callback_.Run(std::move(request), context);
 }
 
 }  // namespace extensions

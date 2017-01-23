@@ -5478,6 +5478,18 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_GL_COMPOSITED_TEXTURE_QUAD_BORDERS_DESCRIPTION" desc="Description of the 'Composited layer borders' lab.">
         Renders a border around GL composited texture quads to help debug and study overlay support.
       </message>
+      <message name="IDS_FLAGS_SHOW_OVERDRAW_FEEDBACK" desc="Name of the 'Overdraw feedback' lab.">
+        Show overdraw feedback
+      </message>
+      <message name="IDS_FLAGS_SHOW_OVERDRAW_FEEDBACK_DESCRIPTION" desc="Description of the 'Overdraw feedback' lab.">
+        Visualize overdraw by color-coding elements based on if they have other elements drawn underneath.
+      </message>
+      <message name="IDS_FLAGS_UI_PARTIAL_SWAP_NAME" desc="Name for the flag that sets partial swap behavior.">
+          Partial swap
+        </message>
+        <message name="IDS_FLAGS_UI_PARTIAL_SWAP_DESCRIPTION" desc="Description for the flag that sets partial swap behavior.">
+          Sets partial swap behavior.
+        </message>
       <message name="IDS_FLAGS_DEBUG_SHORTCUTS_NAME" desc="Name of the 'Debugging keyboard shortcuts' lab.">
         Debugging keyboard shortcuts
       </message>
@@ -5697,6 +5709,12 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
       <message name="IDS_FLAGS_WEBRTC_HW_DECODING_DESCRIPTION" desc="Description of chrome:flags option to turn off WebRTC hardware video decoding support.">
         Support in WebRTC for decoding video streams using platform hardware.
+      </message>
+      <message name="IDS_FLAGS_WEBRTC_HW_ENCODING_NAME" desc="Name of chrome:flags option to turn off WebRTC hardware video encoding support.">
+        WebRTC hardware video encoding
+      </message>
+      <message name="IDS_FLAGS_WEBRTC_HW_ENCODING_DESCRIPTION" desc="Description of chrome:flags option to turn off WebRTC hardware video encoding support.">
+        Support in WebRTC for encoding video streams using platform hardware.
       </message>
       <message name="IDS_FLAGS_WEBRTC_HW_VP8_ENCODING_NAME" desc="Name of chrome:flags option to turn off WebRTC vp8 hardware video encoding support.">
         WebRTC hardware vp8 video encoding
@@ -5924,11 +5942,11 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_JAVASCRIPT_HARMONY_DESCRIPTION" desc="Description for the flag to enable JavaScript Harmony features.">
         Enable web pages to use experimental JavaScript features.
       </message>
-      <message name="IDS_FLAGS_V8_IGNITION_NAME" desc="Title for the flag to enable the Ignition interpreter.">
-        Experimental JavaScript Interpreter
+      <message name="IDS_FLAGS_V8_FUTURE_NAME" desc="Title for the flag to enable the future V8 compilation pipeline.">
+        Experimental JavaScript Compilation Pipeline
       </message>
-      <message name="IDS_FLAGS_V8_IGNITION_DESCRIPTION" desc="Description for the flag to enable the JavaScript interpreter.">
-        Enable V8 to use the experimental Ignition interpreter for JavaScript execution.
+      <message name="IDS_FLAGS_V8_FUTURE_DESCRIPTION" desc="Description for the flag to enable the future V8 compilation pipeline.">
+        Enable V8 to use the experimental Ignition interpreter and TurboFan compiler for JavaScript execution.
       </message>
       <message name="IDS_FLAGS_ENABLE_ASM_WASM_NAME" desc="Title for the flag to enable Asm.js to WebAssembly.">
         Experimental Validate Asm.js and convert to WebAssembly when valid.
@@ -5942,11 +5960,11 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_ENABLE_SHARED_ARRAY_BUFFER_DESCRIPTION" desc="Description for the flag to enable SharedArrayBuffers in JavaScript.">
         Enable SharedArrayBuffer support in JavaScript.
       </message>
-      <message name="IDS_FLAGS_ENABLE_WASM_NAME" desc="Title for the flag to enable WebAssembly.">
-        Experimental WebAssembly
+      <message name="IDS_FLAGS_ENABLE_WASM_NAME" desc="Title for the flag to enable WebAssembly structured cloning.">
+        WebAssembly structured cloning support.
       </message>
       <message name="IDS_FLAGS_ENABLE_WASM_DESCRIPTION" desc="Description for the flag to enable WebAssembly.">
-        Enable web pages to use experimental WebAssembly.
+        Enable web pages to use WebAssembly structured cloning.
       </message>
       <if expr="is_android">
         <message name="IDS_FLAGS_MEDIA_DOCUMENT_DOWNLOAD_BUTTON_NAME" desc="Title for the flag to enable the download button on MediaDocument.">
@@ -11462,8 +11480,11 @@ Tell us what happened exactly before you got the profile error message:
       <message name="IDS_SYNC_ACCOUNT_INFO" desc="The message that appears in the options dialog indicating that the user is signed in with the given email address.">
         Signed in as <ph name="USER_EMAIL_ADDRESS">$1<ex>foo@gmail.com</ex></ph>.
       </message>
-      <message name="IDS_SYNC_ACCOUNT_SYNCING" desc="The message that appears in the settings page indicating that account is syncing.">
+      <message name="IDS_SYNC_ACCOUNT_SYNCING" desc="The message that appears in the settings page indicating that account is syncing all data types.">
         On - sync everything
+      </message>
+      <message name="IDS_SYNC_ACCOUNT_SYNCING_CUSTOM_DATA_TYPES" desc="The message that appears in the settings page indicating that account is syncing with a custom set of data types.">
+        On - custom settings
       </message>
 
       <!-- Sync/sign-in error messages -->
@@ -13496,6 +13517,12 @@ Please check your email at <ph name="ACCOUNT_EMAIL">$2<ex>jane.doe@gmail.com</ex
         <message name="IDS_FLAGS_CAPTIVE_PORTAL_BYPASS_PROXY_DESCRIPTION" desc="Description of about::flags option for bypass proxy for captive portal authorization on Chrome OS.">
           If proxy is configured, it usually prevents from authorization on different captive portals. This enables opening captive portal authorization dialog in a separate window, which ignores proxy settings.
         </message>
+        <message name="IDS_FLAGS_TOUCHSCREEN_CALIBRATION_NAME" desc="Name of option to enable touch screen calibration settings in chrome://md-settings/display.">
+          Enable/Disable touchscreen calibration md settings option
+        </message>
+        <message name="IDS_FLAGS_TOUCHSCREEN_CALIBRATION_DESCRIPTION" desc="Description of option to enable touch screen calibration settings in chrome://md-settings/display.">
+          If enabled, the user can calibrate the touch screen displays in chrome://md-settings/display.
+        </message>
       </if>
 
       <!-- Strings for controlling credit card assist feature in about:flags. -->
@@ -15169,6 +15196,18 @@ Please check your email at <ph name="ACCOUNT_EMAIL">$2<ex>jane.doe@gmail.com</ex
       <message name="IDS_FLAGS_ENABLE_NTP_FOREIGN_SESSIONS_SUGGESTIONS_DESCRIPTION" desc="Description for the flag to enable foreign sessions suggestions on the New Tab page." translateable="false">
         If enabled, the list of content suggestions on the New Tab page (see #enable-ntp-snippets) will contain recent foreign tabs.
       </message>
+      <message name="IDS_FLAGS_ENABLE_NTP_STANDALONE_SUGGESTIONS_UI_NAME" desc="Name for the flag to enable a standalone content suggestions UI." translateable="false">
+        Standalone content suggestions UI
+      </message>
+      <message name="IDS_FLAGS_ENABLE_NTP_STANDALONE_SUGGESTIONS_UI_DESCRIPTION" desc="Description for the flag to enable a standalone content suggestions UI." translateable="false">
+        Show a menu item to open a standalone content suggestions UI for testing.
+      </message>
+      <message name="IDS_FLAGS_ENABLE_NTP_SUGGESTIONS_NOTIFICATIONS_NAME" desc="Name for the flag to enable notifications for content suggestions on the New Tab page." translateable="false">
+        Notify about new content suggestions available at the New Tab page
+      </message>
+      <message name="IDS_FLAGS_ENABLE_NTP_SUGGESTIONS_NOTIFICATIONS_DESCRIPTION" desc="Description for the flag to enable notifications for content suggestions on the New Tab page." translateable="false">
+        If enabled, notifications will inform about new content suggestions on the New Tab page (see #enable-ntp-snippets).
+      </message>
     </if>
 
     <if expr="is_android">
@@ -15580,6 +15619,16 @@ read aloud to screenreader users to announce that a completion is available.">
       <message name="IDS_NATIVE_ANDROID_HISTORY_MANAGER_DESCRIPTION" desc="Description of the flag that enables the native Android history UI." translateable="false">
         Show the native Android UI for browsing history.
       </message>
+
+    <!-- Play Services LSD permission prompt chrome://flags strings -->
+    <if expr="is_android">
+      <message name="IDS_FLAGS_LSD_PERMISSION_PROMPT_NAME" desc="Name for the flag to enable LSD permission prompts on Android" translateable="false">
+        Location Settings Dialog Permission Prompt
+      </message>
+      <message name="IDS_FLAGS_LSD_PERMISSION_PROMPT_DESCRIPTION" desc="Description for the flag to enable LSD permission prompts on Android." translateable="false">
+        Whether to use the Google Play Services Location Settings Dialog permission dialog.
+      </message>
+    </if>
     </if>
   </messages>
  </release>

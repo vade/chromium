@@ -206,11 +206,6 @@ String Deprecation::deprecationMessage(UseCounter::Feature feature) {
              "deprecated. Please pass the index argument as well: "
              "insertRule(x, 0).";
 
-    case UseCounter::MapNameMatchingASCIICaseless:
-    case UseCounter::MapNameMatchingUnicodeLower:
-      return willBeRemoved("Case-insensitive matching for usemap attribute",
-                           M58, "5760965337415680");
-
     case UseCounter::PrefixedVideoSupportsFullscreen:
       return replacedBy("'HTMLVideoElement.webkitSupportsFullscreen'",
                         "'Document.fullscreenEnabled'");
@@ -393,6 +388,24 @@ String Deprecation::deprecationMessage(UseCounter::Feature feature) {
           "The service worker responded to the navigation request with a "
           "redirected response. This will result in an error in %s.",
           milestoneString(M59));
+
+    case UseCounter::CSSSelectorInternalMediaControlsCastButton:
+      return willBeRemoved("-internal-media-controls-cast-button selector", M59,
+                           "5734009183141888");
+
+    case UseCounter::CSSSelectorInternalMediaControlsOverlayCastButton:
+      return willBeRemoved(
+          "-internal-media-controls-overlay-cast-button selector", M59,
+          "5714245488476160");
+
+    case UseCounter::CSSSelectorInternalMediaControlsTextTrackList:
+    case UseCounter::CSSSelectorInternalMediaControlsTextTrackListItem:
+    case UseCounter::CSSSelectorInternalMediaControlsTextTrackListItemInput:
+    case UseCounter::CSSSelectorInternalMediaControlsTextTrackListKindCaptions:
+    case UseCounter::CSSSelectorInternalMediaControlsTextTrackListKindSubtitles:
+      return willBeRemoved(
+          "-internal-media-controls-text-track-list* selectors", M59,
+          "5661431349379072");
 
     // Features that aren't deprecated don't have a deprecation message.
     default:

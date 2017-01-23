@@ -28,6 +28,7 @@ namespace blink {
 class PLATFORM_EXPORT EffectPaintPropertyNode
     : public RefCounted<EffectPaintPropertyNode> {
  public:
+  // This node is really a sentinel, and does not represent a real effect.
   static EffectPaintPropertyNode* root();
 
   static PassRefPtr<EffectPaintPropertyNode> create(
@@ -102,6 +103,8 @@ class PLATFORM_EXPORT EffectPaintPropertyNode
            m_directCompositingReasons == o.m_directCompositingReasons &&
            m_compositorElementId == o.m_compositorElementId;
   }
+
+  String toTreeString() const;
 #endif
 
   String toString() const;

@@ -8,6 +8,7 @@
 #include "core/layout/LayoutTestHelper.h"
 #include "core/layout/LayoutView.h"
 #include "core/paint/PaintLayer.h"
+#include "platform/LayoutTestSupport.h"
 #include "platform/testing/RuntimeEnabledFeaturesTestHelpers.h"
 #include "platform/testing/UnitTestHelpers.h"
 
@@ -20,6 +21,16 @@ class PaintLayerClipperTest : public ::testing::WithParamInterface<bool>,
   PaintLayerClipperTest()
       : ScopedSlimmingPaintV2ForTest(GetParam()),
         RenderingTest(EmptyFrameLoaderClient::create()) {}
+
+  void SetUp() override {
+    LayoutTestSupport::setMockThemeEnabledForTest(true);
+    RenderingTest::SetUp();
+  }
+
+  void TearDown() override {
+    LayoutTestSupport::setMockThemeEnabledForTest(false);
+    RenderingTest::TearDown();
+  }
 
   bool geometryMapperCacheEmpty(const PaintLayerClipper& clipper) {
     return clipper.m_geometryMapper->m_data.isEmpty();
@@ -53,6 +64,72 @@ TEST_P(PaintLayerClipperTest, LayoutSVGRoot) {
   EXPECT_EQ(LayoutRect(8, 8, 200, 300), backgroundRect.rect());
   EXPECT_EQ(LayoutRect(8, 8, 200, 300), foregroundRect.rect());
   EXPECT_EQ(LayoutRect(8, 8, 200, 300), layerBounds);
+}
+
+TEST_P(PaintLayerClipperTest, ControlClip) {
+  setBodyInnerHTML(
+      "<!DOCTYPE html>"
+      "<input id=target style='position:absolute; width: 200px; height: 300px'"
+      "    type=button>");
+  Element* target = document().getElementById("target");
+  PaintLayer* targetPaintLayer =
+      toLayoutBoxModelObject(target->layoutObject())->layer();
+  ClipRectsContext context(document().layoutView()->layer(), UncachedClipRects);
+  // When RLS is enabled, the LayoutView will have a composited scrolling layer,
+  // so don't apply an overflow clip.
+  if (RuntimeEnabledFeatures::rootLayerScrollingEnabled())
+    context.setIgnoreOverflowClip();
+  LayoutRect layerBounds;
+  ClipRect backgroundRect, foregroundRect;
+  targetPaintLayer->clipper().calculateRects(
+      context, LayoutRect(LayoutRect::infiniteIntRect()), layerBounds,
+      backgroundRect, foregroundRect);
+#if OS(MACOSX)
+  // If the PaintLayer clips overflow, the background rect is intersected with
+  // the PaintLayer bounds...
+  EXPECT_EQ(LayoutRect(3, 4, 210, 28), backgroundRect.rect());
+  // and the foreground rect is intersected with the control clip in this case.
+  EXPECT_EQ(LayoutRect(8, 8, 200, 18), foregroundRect.rect());
+  EXPECT_EQ(LayoutRect(8, 8, 200, 18), layerBounds);
+#else
+  // If the PaintLayer clips overflow, the background rect is intersected with
+  // the PaintLayer bounds...
+  EXPECT_EQ(LayoutRect(8, 8, 200, 300), backgroundRect.rect());
+  // and the foreground rect is intersected with the control clip in this case.
+  EXPECT_EQ(LayoutRect(10, 10, 196, 296), foregroundRect.rect());
+  EXPECT_EQ(LayoutRect(8, 8, 200, 300), layerBounds);
+#endif
+}
+
+TEST_P(PaintLayerClipperTest, ControlClipSelect) {
+  setBodyInnerHTML(
+      "<select id='target' style='position: relative; width: 100px; "
+      "    background: none; border: none; padding: 0px 15px 0px 5px;'>"
+      "  <option>"
+      "    Test long texttttttttttttttttttttttttttttttt"
+      "  </option>"
+      "</select>");
+  Element* target = document().getElementById("target");
+  PaintLayer* targetPaintLayer =
+      toLayoutBoxModelObject(target->layoutObject())->layer();
+  ClipRectsContext context(document().layoutView()->layer(), UncachedClipRects);
+  // When RLS is enabled, the LayoutView will have a composited scrolling layer,
+  // so don't apply an overflow clip.
+  if (RuntimeEnabledFeatures::rootLayerScrollingEnabled())
+    context.setIgnoreOverflowClip();
+  LayoutRect layerBounds;
+  ClipRect backgroundRect, foregroundRect;
+  targetPaintLayer->clipper().calculateRects(
+      context, LayoutRect(LayoutRect::infiniteIntRect()), layerBounds,
+      backgroundRect, foregroundRect);
+// The control clip for a select excludes the area for the down arrow.
+#if OS(MACOSX)
+  EXPECT_EQ(LayoutRect(16, 9, 79, 13), foregroundRect.rect());
+#elif OS(WIN)
+  EXPECT_EQ(LayoutRect(17, 9, 60, 16), foregroundRect.rect());
+#else
+  EXPECT_EQ(LayoutRect(17, 9, 60, 15), foregroundRect.rect());
+#endif
 }
 
 TEST_P(PaintLayerClipperTest, LayoutSVGRootChild) {
@@ -154,9 +231,9 @@ TEST_P(PaintLayerClipperTest, LocalClipRectFixedUnderTransform) {
       toLayoutBoxModelObject(getLayoutObjectByElementId("fixed"))->layer();
 
   EXPECT_EQ(LayoutRect(0, 0, 100, 100),
-            transformed->clipper().localClipRect(transformed));
+            transformed->clipper().localClipRect(*transformed));
   EXPECT_EQ(LayoutRect(0, 50, 100, 100),
-            fixed->clipper().localClipRect(transformed));
+            fixed->clipper().localClipRect(*transformed));
 }
 
 TEST_P(PaintLayerClipperTest, ClearClipRectsRecursive) {

@@ -111,6 +111,10 @@
 #include "ui/gfx/gdi_util.h"
 #endif
 
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_X11)
+#include "content/browser/accessibility/browser_accessibility_auralinux.h"
+#endif
+
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
 #include "ui/base/ime/linux/text_edit_command_auralinux.h"
 #include "ui/base/ime/linux/text_edit_key_bindings_delegate_auralinux.h"
@@ -625,6 +629,11 @@ gfx::NativeViewAccessible RenderWidgetHostViewAura::GetNativeViewAccessible() {
       host_->GetOrCreateRootBrowserAccessibilityManager();
   if (manager)
     return ToBrowserAccessibilityWin(manager->GetRoot());
+#elif defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_X11)
+  BrowserAccessibilityManager* manager =
+      host_->GetOrCreateRootBrowserAccessibilityManager();
+  if (manager)
+    return ToBrowserAccessibilityAuraLinux(manager->GetRoot())->GetAtkObject();
 #endif
 
   NOTIMPLEMENTED();
@@ -933,8 +942,8 @@ void RenderWidgetHostViewAura::OnSwapCompositorFrame(
     delegated_frame_host_->SwapDelegatedFrame(compositor_frame_sink_id,
                                               std::move(frame));
   }
-  SelectionUpdated(selection.is_editable, selection.is_empty_text_form_control,
-                   selection.start, selection.end);
+  selection_controller_->OnSelectionBoundsChanged(selection.start,
+                                                  selection.end);
 }
 
 void RenderWidgetHostViewAura::ClearCompositorFrame() {
@@ -2241,16 +2250,6 @@ void RenderWidgetHostViewAura::ForwardKeyboardEvent(
 #endif
 
   target_host->ForwardKeyboardEvent(event);
-}
-
-void RenderWidgetHostViewAura::SelectionUpdated(
-    bool is_editable,
-    bool is_empty_text_form_control,
-    const gfx::SelectionBound& start,
-    const gfx::SelectionBound& end) {
-  selection_controller_->OnSelectionEditable(is_editable);
-  selection_controller_->OnSelectionEmpty(is_empty_text_form_control);
-  selection_controller_->OnSelectionBoundsChanged(start, end);
 }
 
 void RenderWidgetHostViewAura::CreateSelectionController() {

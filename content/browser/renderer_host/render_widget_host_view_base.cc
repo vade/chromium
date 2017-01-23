@@ -161,8 +161,13 @@ ui::TextInputClient* RenderWidgetHostViewBase::GetTextInputClient() {
   return NULL;
 }
 
-void RenderWidgetHostViewBase::SetShowingOverscrollGlow(bool showing) {
+void RenderWidgetHostViewBase::SetIsInVR(bool is_in_vr) {
   NOTIMPLEMENTED();
+}
+
+bool RenderWidgetHostViewBase::IsInVR() const {
+  NOTIMPLEMENTED();
+  return false;
 }
 
 bool RenderWidgetHostViewBase::IsShowingContextMenu() const {
@@ -478,11 +483,8 @@ void RenderWidgetHostViewBase::TextInputStateChanged(
 }
 
 void RenderWidgetHostViewBase::ImeCancelComposition() {
-// TODO(ekaramad): Use TextInputManager code paths for IME on other platforms.
-#if !defined(OS_ANDROID)
   if (GetTextInputManager())
     GetTextInputManager()->ImeCancelComposition(this);
-#endif
 }
 
 void RenderWidgetHostViewBase::ImeCompositionRangeChanged(

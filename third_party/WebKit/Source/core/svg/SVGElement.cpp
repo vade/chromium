@@ -48,6 +48,7 @@
 #include "core/svg/SVGGraphicsElement.h"
 #include "core/svg/SVGSVGElement.h"
 #include "core/svg/SVGTitleElement.h"
+#include "core/svg/SVGTreeScopeResources.h"
 #include "core/svg/SVGUseElement.h"
 #include "core/svg/properties/SVGProperty.h"
 #include "wtf/AutoReset.h"
@@ -62,9 +63,6 @@ SVGElement::SVGElement(const QualifiedName& tagName,
                        Document& document,
                        ConstructionType constructionType)
     : Element(tagName, &document, constructionType),
-#if ENABLE(ASSERT)
-      m_inRelativeLengthClientsInvalidation(false),
-#endif
       m_SVGRareData(nullptr),
       m_className(SVGAnimatedString::create(this, HTMLNames::classAttr)) {
   addToPropertyMap(m_className);
@@ -87,6 +85,13 @@ void SVGElement::attachLayoutTree(const AttachContext& context) {
     element->mapInstanceToElement(this);
 }
 
+TreeScope& SVGElement::treeScopeForIdResolution() const {
+  const SVGElement* treeScopeElement = this;
+  if (const SVGElement* element = correspondingElement())
+    treeScopeElement = element;
+  return treeScopeElement->treeScope();
+}
+
 int SVGElement::tabIndex() const {
   if (supportsFocus())
     return Element::tabIndex();
@@ -104,20 +109,20 @@ void SVGElement::willRecalcStyle(StyleRecalcChange change) {
 }
 
 void SVGElement::buildPendingResourcesIfNeeded() {
-  Document& document = this->document();
   if (!needsPendingResourceHandling() || !isConnected() || inUseShadowTree())
     return;
 
-  SVGDocumentExtensions& extensions = document.accessSVGExtensions();
+  SVGTreeScopeResources& treeScopeResources =
+      treeScope().ensureSVGTreeScopedResources();
   AtomicString resourceId = getIdAttribute();
-  if (!extensions.hasPendingResource(resourceId))
+  if (!treeScopeResources.hasPendingResource(resourceId))
     return;
   // Guaranteed by hasPendingResource.
   DCHECK(!resourceId.isEmpty());
 
   // Get pending elements for this id.
-  SVGDocumentExtensions::SVGPendingElements* pendingElements =
-      extensions.removePendingResource(resourceId);
+  SVGTreeScopeResources::SVGPendingElements* pendingElements =
+      treeScopeResources.removePendingResource(resourceId);
   if (!pendingElements || pendingElements->isEmpty())
     return;
 
@@ -134,7 +139,7 @@ void SVGElement::buildPendingResourcesIfNeeded() {
       toSVGUseElement(clientElement)->invalidateShadowTree();
     else
       clientElement->buildPendingResource();
-    extensions.clearHasPendingResourcesIfPossible(clientElement);
+    treeScopeResources.clearHasPendingResourcesIfPossible(clientElement);
   }
 }
 
@@ -554,7 +559,7 @@ void SVGElement::invalidateRelativeLengthClients(
     return;
 
   ASSERT(!m_inRelativeLengthClientsInvalidation);
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   AutoReset<bool> inRelativeLengthClientsInvalidationChange(
       &m_inRelativeLengthClientsInvalidation, true);
 #endif
@@ -921,8 +926,19 @@ void SVGElement::attributeChanged(const AttributeModificationParams& params) {
       AttributeModificationParams(params.name, params.oldValue, params.newValue,
                                   AttributeModificationReason::kDirectly));
 
-  if (params.name == HTMLNames::idAttr)
+  if (params.name == HTMLNames::idAttr) {
     rebuildAllIncomingReferences();
+
+    LayoutObject* object = layoutObject();
+    // Notify resources about id changes, this is important as we cache
+    // resources by id in SVGDocumentExtensions
+    if (object && object->isSVGResourceContainer())
+      toLayoutSVGResourceContainer(object)->idChanged();
+    if (isConnected())
+      buildPendingResourcesIfNeeded();
+    invalidateInstances();
+    return;
+  }
 
   // Changes to the style attribute are processed lazily (see
   // Element::getAttribute() and related methods), so we don't want changes to
@@ -942,18 +958,6 @@ void SVGElement::svgAttributeChanged(const QualifiedName& attrName) {
 
   if (attrName == HTMLNames::classAttr) {
     classAttributeChanged(AtomicString(m_className->currentValue()->value()));
-    invalidateInstances();
-    return;
-  }
-
-  if (attrName == HTMLNames::idAttr) {
-    LayoutObject* object = layoutObject();
-    // Notify resources about id changes, this is important as we cache
-    // resources by id in SVGDocumentExtensions
-    if (object && object->isSVGResourceContainer())
-      toLayoutSVGResourceContainer(object)->idChanged();
-    if (isConnected())
-      buildPendingResourcesIfNeeded();
     invalidateInstances();
     return;
   }

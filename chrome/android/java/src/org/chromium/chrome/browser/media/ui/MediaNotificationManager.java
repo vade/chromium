@@ -30,10 +30,9 @@ import android.support.v7.app.NotificationCompat;
 import android.support.v7.media.MediaRouter;
 import android.text.TextUtils;
 import android.util.SparseArray;
-import android.util.TypedValue;
 import android.view.KeyEvent;
 
-import org.chromium.base.ContextUtils;
+import org.chromium.base.SysUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.blink.mojom.MediaSessionAction;
 import org.chromium.chrome.R;
@@ -59,12 +58,11 @@ public class MediaNotificationManager {
     @VisibleForTesting
     static final int CUSTOM_MEDIA_SESSION_ACTION_STOP = MediaSessionAction.LAST + 1;
 
-    // MediaStyle large icon size for pre-N.
-    private static final int PRE_N_LARGE_ICON_SIZE_DP = 128;
-    // MediaStyle large icon size for N.
-    // TODO(zqzhang): use android.R.dimen.media_notification_expanded_image_max_size when Android
-    // SDK is rolled to level 24. See https://crbug.com/645059
-    private static final int N_LARGE_ICON_SIZE_DP = 94;
+    // The media artwork image resolution on high-end devices.
+    private static final int HIGH_IMAGE_SIZE_PX = 512;
+
+    // The media artwork image resolution on high-end devices.
+    private static final int LOW_IMAGE_SIZE_PX = 256;
 
     // The maximum number of actions in CompactView media notification.
     private static final int COMPACT_VIEW_ACTIONS_COUNT = 3;
@@ -485,27 +483,22 @@ public class MediaNotificationManager {
     }
 
     /**
-     * Scale a given bitmap to a proper size for display.
-     * @param icon The bitmap to be resized, can be null.
-     * @return A scaled icon to be used in media notification. Returns null if |icon| is null.
+     * Downscale |icon| for display in the notification if needed. Returns null if |icon| is null.
+     * If |icon| is larger than {@link getIdealMediaImageSize()}, scale it down to
+     * {@link getIdealMediaImageSize()} and return. Otherwise return the original |icon|.
+     * @param icon The icon to be scaled.
      */
     @Nullable
-    public static Bitmap scaleIconForDisplay(@Nullable Bitmap icon) {
+    public static Bitmap downscaleIconToIdealSize(@Nullable Bitmap icon) {
         if (icon == null) return null;
 
-        int largeIconSizePx = getMaximumLargeIconSize();
+        int targetSize = getIdealMediaImageSize();
 
-        if (icon.getWidth() > largeIconSizePx || icon.getHeight() > largeIconSizePx
-                || icon.getWidth() != icon.getHeight()) {
-            return scaleIconInternal(icon, largeIconSizePx);
-        }
-
-        return icon;
-    }
-
-    private static Bitmap scaleIconInternal(Bitmap icon, int targetSize) {
         Matrix m = new Matrix();
         int dominantLength = Math.max(icon.getWidth(), icon.getHeight());
+
+        if (dominantLength < getIdealMediaImageSize()) return icon;
+
         // Move the center to (0,0).
         m.postTranslate(icon.getWidth() / -2.0f, icon.getHeight() / -2.0f);
         // Scale to desired size.
@@ -523,21 +516,13 @@ public class MediaNotificationManager {
     }
 
     /**
-     * @return Prefered maximum large icon size. If the large icon is larger than this size, then it
-     * needs to be scaled.
+     * @returns The ideal size of the media image.
      */
-    public static int getMaximumLargeIconSize() {
-        int maxLargeIconSizePx;
-        if (isRunningN()) {
-            maxLargeIconSizePx = (int) TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_DIP, N_LARGE_ICON_SIZE_DP,
-                ContextUtils.getApplicationContext().getResources().getDisplayMetrics());
-        } else {
-            maxLargeIconSizePx = (int) TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_DIP, PRE_N_LARGE_ICON_SIZE_DP,
-                ContextUtils.getApplicationContext().getResources().getDisplayMetrics());
+    public static int getIdealMediaImageSize() {
+        if (SysUtils.isLowEndDevice()) {
+            return LOW_IMAGE_SIZE_PX;
         }
-        return maxLargeIconSizePx;
+        return HIGH_IMAGE_SIZE_PX;
     }
 
     private static MediaNotificationManager getManager(int notificationId) {
@@ -862,8 +847,8 @@ public class MediaNotificationManager {
                 int resourceId = (mMediaNotificationInfo.defaultNotificationLargeIcon != 0)
                         ? mMediaNotificationInfo.defaultNotificationLargeIcon
                         : R.drawable.audio_playing_square;
-                mDefaultNotificationLargeIcon = scaleIconForDisplay(
-                        BitmapFactory.decodeResource(mContext.getResources(), resourceId));
+                mDefaultNotificationLargeIcon = downscaleIconToIdealSize(
+                    BitmapFactory.decodeResource(mContext.getResources(), resourceId));
             }
             builder.setLargeIcon(mDefaultNotificationLargeIcon);
         }

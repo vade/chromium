@@ -8,11 +8,15 @@
 #import <UIKit/UIKit.h>
 
 #import "ios/chrome/browser/ui/collection_view/collection_view_controller.h"
+#import "ios/chrome/browser/ui/suggestions/suggestions_expandable_item.h"
+#import "ios/chrome/browser/ui/suggestions/suggestions_favicon_item.h"
 
 @protocol SuggestionsCommands;
 
 // CollectionViewController to display the suggestions items.
-@interface SuggestionsViewController : CollectionViewController
+@interface SuggestionsViewController
+    : CollectionViewController<SuggestionsExpandableCellDelegate,
+                               SuggestionsFaviconCellDelegate>
 
 // Handler for the commands sent by the SuggestionsViewController.
 @property(nonatomic, weak) id<SuggestionsCommands> suggestionCommandHandler;

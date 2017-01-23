@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef COMPONENTS_CRYPTAUTH_FAKE_WIRE_MESSAGE_H
-#define COMPONENTS_CRYPTAUTH_FAKE_WIRE_MESSAGE_H
+#ifndef COMPONENTS_CRYPTAUTH_FAKE_WIRE_MESSAGE_H_
+#define COMPONENTS_CRYPTAUTH_FAKE_WIRE_MESSAGE_H_
 
 #include <memory>
 #include <string>
@@ -15,17 +15,15 @@ namespace cryptauth {
 
 class FakeWireMessage : public WireMessage {
  public:
-  FakeWireMessage(const std::string& payload);
+  FakeWireMessage(const std::string& payload, const std::string& feature);
 
-  static std::unique_ptr<FakeWireMessage> Deserialize(
-      const std::string& serialized_message,
-      bool* is_incomplete_message);
-
+  // WireMessage:
   std::string Serialize() const override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FakeWireMessage);
 };
-}
 
-#endif  // COMPONENTS_CRYPTAUTH_WIRE_MESSAGE_H
+}  // namespace cryptauth
+
+#endif  // COMPONENTS_CRYPTAUTH_FAKE_WIRE_MESSAGE_H_

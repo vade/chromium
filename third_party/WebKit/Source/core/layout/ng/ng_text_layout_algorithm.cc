@@ -26,15 +26,12 @@ NGTextLayoutAlgorithm::NGTextLayoutAlgorithm(
   DCHECK(inline_box_);
 }
 
-NGLayoutStatus NGTextLayoutAlgorithm::Layout(NGPhysicalFragment*,
-                                             NGPhysicalFragment** fragment_out,
-                                             NGLayoutAlgorithm**) {
+NGPhysicalFragment* NGTextLayoutAlgorithm::Layout() {
   ASSERT_NOT_REACHED();
-  *fragment_out = nullptr;
-  return kNewFragment;
+  return nullptr;
 }
 
-bool NGTextLayoutAlgorithm::LayoutInline(NGLineBuilder* line_builder) {
+void NGTextLayoutAlgorithm::LayoutInline(NGLineBuilder* line_builder) {
   // TODO(kojii): Make this tickable. Each line is easy. Needs more thoughts
   // for each fragment in a line. Bidi reordering is probably atomic.
   // TODO(kojii): oof is not well-thought yet. The bottom static position may be
@@ -57,7 +54,10 @@ bool NGTextLayoutAlgorithm::LayoutInline(NGLineBuilder* line_builder) {
     for (; i < items.size(); i++) {
       const NGLayoutInlineItem& item = items[i];
       // Split chunks before bidi controls, or at bidi level boundaries.
-      if (!item.Style() || item.BidiLevel() != start_item.BidiLevel()) {
+      // Also split at LayoutObject boundaries to generate InlineBox in
+      // |CopyFragmentDataToLayoutBlockFlow()|.
+      if (item.GetLayoutObject() != start_item.GetLayoutObject() ||
+          !item.Style() || item.BidiLevel() != start_item.BidiLevel()) {
         break;
       }
       inline_size += item.InlineSize();
@@ -66,7 +66,6 @@ bool NGTextLayoutAlgorithm::LayoutInline(NGLineBuilder* line_builder) {
     start_index = i;
   }
   line_builder->CreateLine();
-  return true;
 }
 
 DEFINE_TRACE(NGTextLayoutAlgorithm) {

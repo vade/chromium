@@ -7,7 +7,6 @@
 #include <set>
 #include <utility>
 
-#include "base/memory/ptr_util.h"
 #include "base/rand_util.h"
 #include "base/stl_util.h"
 #include "build/build_config.h"
@@ -18,6 +17,7 @@
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_stream.h"
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/platform/api/quic_ptr_util.h"
 #include "net/quic/platform/api/quic_str_cat.h"
 #include "net/quic/test_tools/quic_config_peer.h"
 #include "net/quic/test_tools/quic_connection_peer.h"
@@ -130,7 +130,7 @@ class TestSession : public QuicSpdySession {
   TestStream* CreateOutgoingDynamicStream(SpdyPriority priority) override {
     TestStream* stream = new TestStream(GetNextOutgoingStreamId(), this);
     stream->SetPriority(priority);
-    ActivateStream(base::WrapUnique(stream));
+    ActivateStream(QuicWrapUnique(stream));
     return stream;
   }
 
@@ -143,7 +143,7 @@ class TestSession : public QuicSpdySession {
       return nullptr;
     } else {
       TestStream* stream = new TestStream(id, this);
-      ActivateStream(base::WrapUnique(stream));
+      ActivateStream(QuicWrapUnique(stream));
       return stream;
     }
   }
@@ -529,8 +529,7 @@ TEST_P(QuicSessionTestServer, OnCanWriteBundlesStreams) {
 
   // Drive congestion control manually.
   MockSendAlgorithm* send_algorithm = new StrictMock<MockSendAlgorithm>;
-  QuicConnectionPeer::SetSendAlgorithm(session_.connection(), kDefaultPathId,
-                                       send_algorithm);
+  QuicConnectionPeer::SetSendAlgorithm(session_.connection(), send_algorithm);
 
   TestStream* stream2 = session_.CreateOutgoingDynamicStream(kDefaultPriority);
   TestStream* stream4 = session_.CreateOutgoingDynamicStream(kDefaultPriority);
@@ -574,8 +573,7 @@ TEST_P(QuicSessionTestServer, OnCanWriteCongestionControlBlocks) {
 
   // Drive congestion control manually.
   MockSendAlgorithm* send_algorithm = new StrictMock<MockSendAlgorithm>;
-  QuicConnectionPeer::SetSendAlgorithm(session_.connection(), kDefaultPathId,
-                                       send_algorithm);
+  QuicConnectionPeer::SetSendAlgorithm(session_.connection(), send_algorithm);
 
   TestStream* stream2 = session_.CreateOutgoingDynamicStream(kDefaultPriority);
   TestStream* stream4 = session_.CreateOutgoingDynamicStream(kDefaultPriority);
@@ -628,8 +626,7 @@ TEST_P(QuicSessionTestServer, OnCanWriteWriterBlocks) {
   // Drive congestion control manually in order to ensure that
   // application-limited signaling is handled correctly.
   MockSendAlgorithm* send_algorithm = new StrictMock<MockSendAlgorithm>;
-  QuicConnectionPeer::SetSendAlgorithm(session_.connection(), kDefaultPathId,
-                                       send_algorithm);
+  QuicConnectionPeer::SetSendAlgorithm(session_.connection(), send_algorithm);
   EXPECT_CALL(*send_algorithm, TimeUntilSend(_, _))
       .WillRepeatedly(Return(QuicTime::Delta::Zero()));
 
@@ -734,8 +731,7 @@ TEST_P(QuicSessionTestServer, OnCanWriteLimitsNumWritesIfFlowControlBlocked) {
   // Drive congestion control manually in order to ensure that
   // application-limited signaling is handled correctly.
   MockSendAlgorithm* send_algorithm = new StrictMock<MockSendAlgorithm>;
-  QuicConnectionPeer::SetSendAlgorithm(session_.connection(), kDefaultPathId,
-                                       send_algorithm);
+  QuicConnectionPeer::SetSendAlgorithm(session_.connection(), send_algorithm);
   EXPECT_CALL(*send_algorithm, TimeUntilSend(_, _))
       .WillRepeatedly(Return(QuicTime::Delta::Zero()));
 

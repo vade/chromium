@@ -403,7 +403,11 @@ std::unique_ptr<HistogramBase> PersistentHistogramAllocator::AllocateHistogram(
     result = CREATE_HISTOGRAM_ALLOCATOR_ERROR;
   }
   RecordCreateHistogramResult(result);
-  NOTREACHED() << "error=" << result;
+
+  // Crash for failures caused by internal bugs but not "full" which is
+  // dependent on outside code.
+  if (result != CREATE_HISTOGRAM_ALLOCATOR_FULL)
+    NOTREACHED() << memory_allocator_->Name() << ", error=" << result;
 
   return nullptr;
 }
@@ -656,7 +660,9 @@ PersistentHistogramAllocator::GetOrCreateStatisticsRecorderHistogram(
 
   // Adding the passed histogram to the SR would cause a problem if the
   // allocator that holds it eventually goes away. Instead, create a new
-  // one from a serialized version.
+  // one from a serialized version. Deserialization calls the appropriate
+  // FactoryGet() which will create the histogram in the global persistent-
+  // histogram allocator if such is set.
   base::Pickle pickle;
   if (!histogram->SerializeInfo(&pickle))
     return nullptr;

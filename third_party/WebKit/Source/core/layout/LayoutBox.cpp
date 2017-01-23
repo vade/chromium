@@ -1342,7 +1342,7 @@ LayoutUnit LayoutBox::adjustBorderBoxLogicalWidthForBoxSizing(
     float width) const {
   LayoutUnit bordersPlusPadding = collapsedBorderAndCSSPaddingLogicalWidth();
   LayoutUnit result(width);
-  if (style()->boxSizing() == BoxSizingContentBox)
+  if (style()->boxSizing() == EBoxSizing::kContentBox)
     return result + bordersPlusPadding;
   return std::max(result, bordersPlusPadding);
 }
@@ -1351,7 +1351,7 @@ LayoutUnit LayoutBox::adjustBorderBoxLogicalHeightForBoxSizing(
     float height) const {
   LayoutUnit bordersPlusPadding = collapsedBorderAndCSSPaddingLogicalHeight();
   LayoutUnit result(height);
-  if (style()->boxSizing() == BoxSizingContentBox)
+  if (style()->boxSizing() == EBoxSizing::kContentBox)
     return result + bordersPlusPadding;
   return std::max(result, bordersPlusPadding);
 }
@@ -1359,7 +1359,7 @@ LayoutUnit LayoutBox::adjustBorderBoxLogicalHeightForBoxSizing(
 LayoutUnit LayoutBox::adjustContentBoxLogicalWidthForBoxSizing(
     float width) const {
   LayoutUnit result(width);
-  if (style()->boxSizing() == BoxSizingBorderBox)
+  if (style()->boxSizing() == EBoxSizing::kBorderBox)
     result -= collapsedBorderAndCSSPaddingLogicalWidth();
   return std::max(LayoutUnit(), result);
 }
@@ -1367,7 +1367,7 @@ LayoutUnit LayoutBox::adjustContentBoxLogicalWidthForBoxSizing(
 LayoutUnit LayoutBox::adjustContentBoxLogicalHeightForBoxSizing(
     float height) const {
   LayoutUnit result(height);
-  if (style()->boxSizing() == BoxSizingBorderBox)
+  if (style()->boxSizing() == EBoxSizing::kBorderBox)
     result -= collapsedBorderAndCSSPaddingLogicalHeight();
   return std::max(LayoutUnit(), result);
 }
@@ -1504,7 +1504,7 @@ bool LayoutBox::getBackgroundPaintedExtent(LayoutRect& paintedExtent) const {
   // TODO(jchaffraix): This function should be rethought as it's called during
   // and outside of the paint phase. Potentially returning different results at
   // different phases.
-  geometry.calculate(*this, nullptr, GlobalPaintNormalPhase,
+  geometry.calculate(*this, nullptr, nullptr, GlobalPaintNormalPhase,
                      style()->backgroundLayers(), backgroundRect);
   if (geometry.hasNonLocalGeometry())
     return false;
@@ -2334,10 +2334,8 @@ bool LayoutBox::mapToVisualRectInAncestorSpace(
   if (ancestor == this)
     return true;
 
-  bool ancestorSkipped;
-  bool filterSkipped;
-  LayoutObject* container =
-      this->container(ancestor, &ancestorSkipped, &filterSkipped);
+  AncestorSkipInfo skipInfo(ancestor, true);
+  LayoutObject* container = this->container(&skipInfo);
   LayoutBox* tableRowContainer = nullptr;
   // Skip table row because cells and rows are in the same coordinate space (see
   // below, however for more comments about when |ancestor| is the table row).
@@ -2351,7 +2349,7 @@ bool LayoutBox::mapToVisualRectInAncestorSpace(
   if (!container)
     return true;
 
-  if (filterSkipped)
+  if (skipInfo.filterSkipped())
     inflateVisualRectForFilterUnderContainer(rect, *container, ancestor);
 
   // We are now in our parent container's coordinate space. Apply our transform
@@ -2407,7 +2405,7 @@ bool LayoutBox::mapToVisualRectInAncestorSpace(
           rect, visualRectFlags))
     return false;
 
-  if (ancestorSkipped) {
+  if (skipInfo.ancestorSkipped()) {
     // If the ancestor is below the container, then we need to map the rect into
     // ancestor's coordinates.
     LayoutSize containerOffset =
@@ -2446,7 +2444,7 @@ void LayoutBox::updateLogicalWidth() {
 }
 
 static float getMaxWidthListMarker(const LayoutBox* layoutObject) {
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   ASSERT(layoutObject);
   Node* parentNode = layoutObject->generatingNode();
   ASSERT(parentNode);
@@ -3250,7 +3248,7 @@ LayoutUnit LayoutBox::computePercentageLogicalHeight(
   bool subtractBorderAndPadding =
       isTable() || (cb->isTableCell() && !skippedAutoHeightContainingBlock &&
                     cb->hasOverrideLogicalContentHeight() &&
-                    style()->boxSizing() == BoxSizingContentBox);
+                    style()->boxSizing() == EBoxSizing::kContentBox);
   if (subtractBorderAndPadding) {
     result -= borderAndPaddingLogicalHeight();
     return std::max(LayoutUnit(), result);
@@ -4711,9 +4709,11 @@ bool LayoutBox::shouldBeConsideredAsReplaced() const {
 
 DISABLE_CFI_PERF
 bool LayoutBox::avoidsFloats() const {
+  // crbug.com/460704: This should be merged with createsNewFormattingContext().
   return shouldBeConsideredAsReplaced() || hasOverflowClip() || isHR() ||
          isLegend() || isWritingModeRoot() || isFlexItemIncludingDeprecated() ||
-         style()->containsPaint() || style()->containsLayout();
+         style()->containsPaint() || style()->containsLayout() ||
+         style()->display() == EDisplay::FlowRoot;
 }
 
 bool LayoutBox::hasNonCompositedScrollbars() const {

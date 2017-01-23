@@ -73,6 +73,7 @@
 #include "public/platform/WebDragOperation.h"
 #include "public/platform/WebFloatPoint.h"
 #include "public/platform/WebInputEvent.h"
+#include "public/platform/WebKeyboardEvent.h"
 #include "public/platform/WebLayerTreeView.h"
 #include "public/platform/WebMockClipboard.h"
 #include "public/platform/WebSize.h"
@@ -3353,8 +3354,8 @@ TEST_P(WebViewTest, AddFrameInChildInNavigateUnload) {
   m_webViewHelper.reset();
 }
 
-class TouchEventHandlerWebViewClient
-    : public FrameTestHelpers::TestWebViewClient {
+class TouchEventHandlerWebWidgetClient
+    : public FrameTestHelpers::TestWebWidgetClient {
  public:
   // WebWidgetClient methods
   void hasTouchEventHandlers(bool state) override {
@@ -3362,7 +3363,7 @@ class TouchEventHandlerWebViewClient
   }
 
   // Local methods
-  TouchEventHandlerWebViewClient() : m_hasTouchEventHandlerCount() {}
+  TouchEventHandlerWebWidgetClient() : m_hasTouchEventHandlerCount() {}
 
   int getAndResetHasTouchEventHandlerCallCount(bool state) {
     int value = m_hasTouchEventHandlerCount[state];
@@ -3379,20 +3380,24 @@ class TouchEventHandlerWebViewClient
 // RemoveAll}EventHandler(..., TouchEvent). Verifying that those calls are made
 // correctly is the job of LayoutTests/fast/events/event-handler-count.html.
 TEST_P(WebViewTest, HasTouchEventHandlers) {
-  TouchEventHandlerWebViewClient client;
+  TouchEventHandlerWebWidgetClient client;
+  // We need to create a LayerTreeView for the client before loading the page,
+  // otherwise ChromeClient will default to assuming there are touch handlers.
+  WebLayerTreeView* layerTreeView = client.initializeLayerTreeView();
   std::string url = m_baseURL + "has_touch_event_handlers.html";
   URLTestHelpers::registerMockedURLLoad(toKURL(url),
                                         "has_touch_event_handlers.html");
   WebViewImpl* webViewImpl =
-      m_webViewHelper.initializeAndLoad(url, true, 0, &client);
+      m_webViewHelper.initializeAndLoad(url, true, 0, 0, &client);
+  ASSERT_TRUE(layerTreeView);
   const EventHandlerRegistry::EventHandlerClass touchEvent =
       EventHandlerRegistry::TouchStartOrMoveEventBlocking;
 
   // The page is initialized with at least one no-handlers call.
   // In practice we get two such calls because WebViewHelper::initializeAndLoad
-  // first initializes and empty frame, and then loads a document into it, so
+  // first initializes an empty frame, and then loads a document into it, so
   // there are two FrameLoader::commitProvisionalLoad calls.
-  EXPECT_GE(client.getAndResetHasTouchEventHandlerCallCount(false), 1);
+  EXPECT_LT(0, client.getAndResetHasTouchEventHandlerCallCount(false));
   EXPECT_EQ(0, client.getAndResetHasTouchEventHandlerCallCount(true));
 
   // Adding the first document handler results in a has-handlers call.
@@ -4335,7 +4340,10 @@ TEST_P(WebViewTest, ResizeForPrintingViewportUnits) {
 
   WebURL baseURL = URLTestHelpers::toKURL("http://example.com/");
   FrameTestHelpers::loadHTMLString(webView->mainFrame(),
-                                   "<style>#vw { width: 100vw }</style>"
+                                   "<style>"
+                                   "  body { margin: 0px; }"
+                                   "  #vw { width: 100vw; height: 100vh; }"
+                                   "</style>"
                                    "<div id=vw></div>",
                                    baseURL);
 
@@ -4345,16 +4353,36 @@ TEST_P(WebViewTest, ResizeForPrintingViewportUnits) {
 
   EXPECT_EQ(800, vwElement->offsetWidth());
 
+  FloatSize pageSize(300, 360);
+
   WebPrintParams printParams;
-  printParams.printContentArea.width = 500;
-  printParams.printContentArea.height = 500;
+  printParams.printContentArea.width = pageSize.width();
+  printParams.printContentArea.height = pageSize.height();
+
+  // This needs to match printingMinimumShrinkFactor in PrintContext.cpp. The
+  // layout is scaled by this factor for printing.
+  constexpr float minimumShrinkFactor = 1.333f;
+
+  // The expected layout size comes from the calculation done in
+  // resizePageRectsKeepingRatio which is used from PrintContext::begin to
+  // scale the page size.
+  const float ratio = pageSize.height() / (float)pageSize.width();
+  const int expectedWidth = floor(pageSize.width() * minimumShrinkFactor);
+  const int expectedHeight = floor(expectedWidth * ratio);
 
   frame->printBegin(printParams, WebNode());
-  webView->resize(WebSize(500, 500));
-  EXPECT_EQ(500, vwElement->offsetWidth());
+
+  EXPECT_EQ(expectedWidth, vwElement->offsetWidth());
+  EXPECT_EQ(expectedHeight, vwElement->offsetHeight());
+
+  webView->resize(flooredIntSize(pageSize));
+
+  EXPECT_EQ(expectedWidth, vwElement->offsetWidth());
+  EXPECT_EQ(expectedHeight, vwElement->offsetHeight());
 
   webView->resize(WebSize(800, 600));
   frame->printEnd();
+
   EXPECT_EQ(800, vwElement->offsetWidth());
 }
 

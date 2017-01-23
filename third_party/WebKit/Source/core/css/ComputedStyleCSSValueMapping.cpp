@@ -1082,7 +1082,7 @@ static LayoutRect sizingBox(const LayoutObject* layoutObject) {
     return LayoutRect();
 
   const LayoutBox* box = toLayoutBox(layoutObject);
-  return box->style()->boxSizing() == BoxSizingBorderBox
+  return box->style()->boxSizing() == EBoxSizing::kBorderBox
              ? box->borderBoxRect()
              : box->computedCSSContentBoxRect();
 }
@@ -1691,7 +1691,7 @@ static CSSValue* adjustSVGPaintForCurrentColor(SVGPaintType paintType,
                                                const Color& currentColor) {
   if (paintType >= SVG_PAINTTYPE_URI_NONE) {
     CSSValueList* values = CSSValueList::createSpaceSeparated();
-    values->append(*CSSURIValue::create(url));
+    values->append(*CSSURIValue::create(AtomicString(url)));
     if (paintType == SVG_PAINTTYPE_URI_NONE)
       values->append(*CSSIdentifierValue::create(CSSValueNone));
     else if (paintType == SVG_PAINTTYPE_URI_CURRENTCOLOR)
@@ -1708,7 +1708,7 @@ static CSSValue* adjustSVGPaintForCurrentColor(SVGPaintType paintType,
   return CSSColorValue::create(color.rgb());
 }
 
-static inline String serializeAsFragmentIdentifier(
+static inline AtomicString serializeAsFragmentIdentifier(
     const AtomicString& resource) {
   return "#" + resource;
 }
@@ -2862,7 +2862,7 @@ const CSSValue* ComputedStyleCSSValueMapping::get(
       return CSSPrimitiveValue::create(style.zoom(),
                                        CSSPrimitiveValue::UnitType::Number);
     case CSSPropertyBoxSizing:
-      if (style.boxSizing() == BoxSizingContentBox)
+      if (style.boxSizing() == EBoxSizing::kContentBox)
         return CSSIdentifierValue::create(CSSValueContentBox);
       return CSSIdentifierValue::create(CSSValueBorderBox);
     case CSSPropertyWebkitAppRegion:
@@ -3196,9 +3196,10 @@ const CSSValue* ComputedStyleCSSValueMapping::get(
         if (operation->type() == ClipPathOperation::SHAPE)
           return valueForBasicShape(
               style, toShapeClipPathOperation(operation)->basicShape());
-        if (operation->type() == ClipPathOperation::REFERENCE)
+        if (operation->type() == ClipPathOperation::REFERENCE) {
           return CSSURIValue::create(
-              toReferenceClipPathOperation(operation)->url());
+              AtomicString(toReferenceClipPathOperation(operation)->url()));
+        }
       }
       return CSSIdentifierValue::create(CSSValueNone);
     case CSSPropertyShapeMargin:

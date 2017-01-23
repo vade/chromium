@@ -83,8 +83,6 @@ static_library("common") {
     "conflicts/module_watcher_win.cc",
     "conflicts/module_watcher_win.h",
     "content_restriction.h",
-    "content_settings_pattern_serializer.cc",
-    "content_settings_pattern_serializer.h",
     "crash_keys.cc",
     "crash_keys.h",
     "custom_handlers/protocol_handler.cc",
@@ -126,7 +124,6 @@ static_library("common") {
     "profiling.cc",
     "profiling.h",
     "ref_counted_util.h",
-    "render_messages.cc",
     "render_messages.h",
     "resource_usage_reporter_type_converters.cc",
     "resource_usage_reporter_type_converters.h",
@@ -214,7 +211,6 @@ static_library("common") {
     "//crypto",
     "//extensions/common:common_constants",
     "//extensions/features",
-    "//gin",
     "//google_apis",
     "//gpu/command_buffer/service",
     "//gpu/config",
@@ -677,11 +673,12 @@ source_set("app_mode_app_support") {
 
 mojom("mojo_bindings") {
   sources = [
-    "conflicts/module_database_win.mojom",
-    "conflicts/module_event_win.mojom",
+    "conflicts/module_event_sink_win.mojom",
     "field_trial_recorder.mojom",
+    "file_patcher.mojom",
     "net_benchmarking.mojom",
     "network_diagnostics.mojom",
+    "prerender.mojom",
     "renderer_configuration.mojom",
     "resource_usage_reporter.mojom",
     "shell_handler_win.mojom",
@@ -689,6 +686,7 @@ mojom("mojo_bindings") {
 
   public_deps = [
     "//components/content_settings/core/common:mojo_bindings",
+    "//mojo/common:common_custom_types",
     "//url/mojo:url_mojom_gurl",
   ]
 }

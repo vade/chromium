@@ -22,11 +22,15 @@ SyntheticTouchDriver::~SyntheticTouchDriver() {}
 void SyntheticTouchDriver::DispatchEvent(SyntheticGestureTarget* target,
                                          const base::TimeTicks& timestamp) {
   touch_event_.setTimeStampSeconds(ConvertTimestampToSeconds(timestamp));
-  target->DispatchInputEventToPlatform(touch_event_);
+  if (touch_event_.type() != blink::WebInputEvent::Undefined)
+    target->DispatchInputEventToPlatform(touch_event_);
   touch_event_.ResetPoints();
 }
 
-void SyntheticTouchDriver::Press(float x, float y, int index) {
+void SyntheticTouchDriver::Press(float x,
+                                 float y,
+                                 int index,
+                                 SyntheticPointerActionParams::Button button) {
   DCHECK_GE(index, 0);
   DCHECK_LT(index, blink::WebTouchEvent::kTouchesLengthCap);
   int touch_index = touch_event_.PressPoint(x, y);
@@ -39,7 +43,9 @@ void SyntheticTouchDriver::Move(float x, float y, int index) {
   touch_event_.MovePoint(index_map_[index], x, y);
 }
 
-void SyntheticTouchDriver::Release(int index) {
+void SyntheticTouchDriver::Release(
+    int index,
+    SyntheticPointerActionParams::Button button) {
   DCHECK_GE(index, 0);
   DCHECK_LT(index, blink::WebTouchEvent::kTouchesLengthCap);
   touch_event_.ReleasePoint(index_map_[index]);

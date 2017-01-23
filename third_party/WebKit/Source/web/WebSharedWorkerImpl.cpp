@@ -317,25 +317,27 @@ void WebSharedWorkerImpl::postTaskToLoader(
 
 void WebSharedWorkerImpl::postTaskToWorkerGlobalScope(
     const WebTraceLocation& location,
-    std::unique_ptr<ExecutionContextTask> task) {
+    std::unique_ptr<WTF::CrossThreadClosure> task) {
   m_workerThread->postTask(location, std::move(task));
 }
 
 void WebSharedWorkerImpl::connect(WebMessagePortChannel* webChannel) {
+  DCHECK(isMainThread());
   workerThread()->postTask(
       BLINK_FROM_HERE,
-      createCrossThreadTask(
-          &connectTask,
-          WTF::passed(WebMessagePortChannelUniquePtr(webChannel))));
+      crossThreadBind(&WebSharedWorkerImpl::connectTask,
+                      WTF::crossThreadUnretained(this),
+                      WTF::passed(WebMessagePortChannelUniquePtr(webChannel))));
 }
 
-void WebSharedWorkerImpl::connectTask(WebMessagePortChannelUniquePtr channel,
-                                      ExecutionContext* context) {
+void WebSharedWorkerImpl::connectTask(WebMessagePortChannelUniquePtr channel) {
   // Wrap the passed-in channel in a MessagePort, and send it off via a connect
   // event.
-  MessagePort* port = MessagePort::create(*context);
+  DCHECK(m_workerThread->isCurrentThread());
+  WorkerGlobalScope* workerGlobalScope =
+      toWorkerGlobalScope(m_workerThread->globalScope());
+  MessagePort* port = MessagePort::create(*workerGlobalScope);
   port->entangle(std::move(channel));
-  WorkerGlobalScope* workerGlobalScope = toWorkerGlobalScope(context);
   SECURITY_DCHECK(workerGlobalScope->isSharedWorkerGlobalScope());
   workerGlobalScope->dispatchEvent(createConnectEvent(port));
 }

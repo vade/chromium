@@ -80,11 +80,6 @@ FakeCompositorDependencies::GetRendererScheduler() {
   return &renderer_scheduler_;
 }
 
-cc::ImageSerializationProcessor*
-FakeCompositorDependencies::GetImageSerializationProcessor() {
-  return nullptr;
-}
-
 cc::TaskGraphRunner* FakeCompositorDependencies::GetTaskGraphRunner() {
   return &task_graph_runner_;
 }
@@ -95,6 +90,10 @@ bool FakeCompositorDependencies::AreImageDecodeTasksEnabled() {
 
 bool FakeCompositorDependencies::IsThreadedAnimationEnabled() {
   return true;
+}
+
+bool FakeCompositorDependencies::IsScrollAnimatorEnabled() {
+  return false;
 }
 
 }  // namespace content

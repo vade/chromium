@@ -27,16 +27,13 @@ void TimeDomain::RegisterQueue(internal::TaskQueueImpl* queue) {
 void TimeDomain::UnregisterQueue(internal::TaskQueueImpl* queue) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
   DCHECK_EQ(queue->GetTimeDomain(), this);
-  UnregisterAsUpdatableTaskQueue(queue);
 
-  // If no wakeup has been requested then bail out.
-  if (!queue->heap_handle().IsValid())
-    return;
+  {
+    base::AutoLock lock(has_incoming_immediate_work_lock_);
+    has_incoming_immediate_work_.erase(queue);
+  }
 
-  DCHECK_NE(queue->scheduled_time_domain_wakeup(), base::TimeTicks());
-
-  // O(log n)
-  delayed_wakeup_queue_.erase(queue->heap_handle());
+  CancelDelayedWork(queue);
 }
 
 void TimeDomain::MigrateQueue(internal::TaskQueueImpl* queue,
@@ -47,8 +44,16 @@ void TimeDomain::MigrateQueue(internal::TaskQueueImpl* queue,
 
   // Make sure we remember to update |queue| if it's got incoming immediate
   // work.
-  if (UnregisterAsUpdatableTaskQueue(queue))
-    destination_time_domain->updatable_queue_set_.insert(queue);
+  bool has_incoming_immediate_work;
+  {
+    base::AutoLock lock(has_incoming_immediate_work_lock_);
+    has_incoming_immediate_work = has_incoming_immediate_work_.erase(queue);
+  }
+  if (has_incoming_immediate_work) {
+    base::AutoLock lock(
+        destination_time_domain->has_incoming_immediate_work_lock_);
+    destination_time_domain->has_incoming_immediate_work_.insert(queue);
+  }
 
   // If no wakeup has been requested then bail out.
   if (!queue->heap_handle().IsValid())
@@ -94,64 +99,46 @@ void TimeDomain::ScheduleDelayedWork(internal::TaskQueueImpl* queue,
     observer_->OnTimeDomainHasDelayedWork(queue);
 }
 
-void TimeDomain::RegisterAsUpdatableTaskQueue(internal::TaskQueueImpl* queue) {
+void TimeDomain::OnQueueHasIncomingImmediateWork(
+    internal::TaskQueueImpl* queue) {
   {
-    base::AutoLock lock(newly_updatable_lock_);
-    newly_updatable_.push_back(queue);
+    base::AutoLock lock(has_incoming_immediate_work_lock_);
+    has_incoming_immediate_work_.insert(queue);
   }
+
   if (observer_)
     observer_->OnTimeDomainHasImmediateWork(queue);
 }
 
-bool TimeDomain::UnregisterAsUpdatableTaskQueue(
-    internal::TaskQueueImpl* queue) {
+void TimeDomain::CancelDelayedWork(internal::TaskQueueImpl* queue) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
+  DCHECK_EQ(queue->GetTimeDomain(), this);
 
-  bool was_updatable = updatable_queue_set_.erase(queue) != 0;
+  // If no wakeup has been requested then bail out.
+  if (!queue->heap_handle().IsValid())
+    return;
 
-  base::AutoLock lock(newly_updatable_lock_);
-  // Remove all copies of |queue| from |newly_updatable_|.
-  for (size_t i = 0; i < newly_updatable_.size();) {
-    if (newly_updatable_[i] == queue) {
-      // Move last element into slot #i and then compact.
-      newly_updatable_[i] = newly_updatable_.back();
-      newly_updatable_.pop_back();
-      was_updatable = true;
-    } else {
-      i++;
-    }
-  }
-  return was_updatable;
+  DCHECK_NE(queue->scheduled_time_domain_wakeup(), base::TimeTicks());
+
+  // O(log n)
+  delayed_wakeup_queue_.erase(queue->heap_handle());
 }
 
-void TimeDomain::UpdateWorkQueues(LazyNow lazy_now) {
+void TimeDomain::UpdateWorkQueues(LazyNow* lazy_now) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
 
   // Move any ready delayed tasks into the Incoming queues.
-  WakeupReadyDelayedQueues(&lazy_now);
+  WakeupReadyDelayedQueues(lazy_now);
 
-  MoveNewlyUpdatableQueuesIntoUpdatableQueueSet();
+  std::set<internal::TaskQueueImpl*> queues_to_reload_if_empty;
 
-  std::set<internal::TaskQueueImpl*>::iterator iter =
-      updatable_queue_set_.begin();
-  while (iter != updatable_queue_set_.end()) {
-    std::set<internal::TaskQueueImpl*>::iterator queue_it = iter++;
-    internal::TaskQueueImpl* queue = *queue_it;
-
-    // Update the queue and remove from the set if subsequent updates are not
-    // required.
-    if (!queue->MaybeUpdateImmediateWorkQueues())
-      updatable_queue_set_.erase(queue_it);
+  {
+    base::AutoLock lock(has_incoming_immediate_work_lock_);
+    std::swap(queues_to_reload_if_empty, has_incoming_immediate_work_);
   }
-}
 
-void TimeDomain::MoveNewlyUpdatableQueuesIntoUpdatableQueueSet() {
-  DCHECK(main_thread_checker_.CalledOnValidThread());
-  base::AutoLock lock(newly_updatable_lock_);
-  while (!newly_updatable_.empty()) {
-    updatable_queue_set_.insert(newly_updatable_.back());
-    newly_updatable_.pop_back();
-  }
+  for (internal::TaskQueueImpl* queue : queues_to_reload_if_empty)
+    queue->ReloadImmediateWorkQueueIfEmpty();
 }
 
 void TimeDomain::WakeupReadyDelayedQueues(LazyNow* lazy_now) {
@@ -162,10 +149,18 @@ void TimeDomain::WakeupReadyDelayedQueues(LazyNow* lazy_now) {
   while (!delayed_wakeup_queue_.empty() &&
          delayed_wakeup_queue_.min().time <= lazy_now->Now()) {
     internal::TaskQueueImpl* queue = delayed_wakeup_queue_.min().queue;
-    // O(log n)
-    delayed_wakeup_queue_.pop();
+    base::Optional<base::TimeTicks> next_wakeup =
+        queue->WakeUpForDelayedWork(lazy_now);
 
-    queue->WakeUpForDelayedWork(lazy_now);
+    if (next_wakeup) {
+      // O(log n)
+      delayed_wakeup_queue_.ReplaceMin({next_wakeup.value(), queue});
+      queue->set_scheduled_time_domain_wakeup(next_wakeup.value());
+    } else {
+      // O(log n)
+      delayed_wakeup_queue_.pop();
+      DCHECK_EQ(queue->scheduled_time_domain_wakeup(), base::TimeTicks());
+    }
   }
 }
 
@@ -190,10 +185,13 @@ bool TimeDomain::NextScheduledTaskQueue(TaskQueue** out_task_queue) const {
 void TimeDomain::AsValueInto(base::trace_event::TracedValue* state) const {
   state->BeginDictionary();
   state->SetString("name", GetName());
-  state->BeginArray("updatable_queue_set");
-  for (auto* queue : updatable_queue_set_)
-    state->AppendString(queue->GetName());
-  state->EndArray();
+  {
+    base::AutoLock lock(has_incoming_immediate_work_lock_);
+    state->BeginArray("has_incoming_immediate_work");
+    for (internal::TaskQueueImpl* queue : has_incoming_immediate_work_)
+      state->AppendString(queue->GetName());
+    state->EndArray();
+  }
   state->SetInteger("registered_delay_count", delayed_wakeup_queue_.size());
   if (!delayed_wakeup_queue_.empty()) {
     base::TimeDelta delay = delayed_wakeup_queue_.min().time - Now();

@@ -4,6 +4,7 @@
 
 #include "modules/payments/PaymentRequest.h"
 
+#include "bindings/core/v8/ConditionalFeatures.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "bindings/core/v8/ScriptState.h"
@@ -14,6 +15,7 @@
 #include "core/EventTypeNames.h"
 #include "core/dom/DOMException.h"
 #include "core/dom/ExceptionCode.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/events/Event.h"
 #include "core/events/EventQueue.h"
 #include "core/frame/FrameOwner.h"
@@ -63,7 +65,7 @@ struct TypeConverter<PaymentCurrencyAmountPtr, blink::PaymentCurrencyAmount> {
     output->currency = input.currency();
     output->value = input.value();
     if (input.hasCurrencySystem())
-      output->currencySystem = input.currencySystem();
+      output->currency_system = input.currencySystem();
     return output;
   }
 };
@@ -559,19 +561,54 @@ bool allowedToUsePaymentRequest(const Frame* frame) {
   if (!frame)
     return false;
 
-  // 2. If |document|'s browsing context is a top-level browsing context, then
-  // return true.
-  if (frame->isMainFrame())
+  if (!RuntimeEnabledFeatures::featurePolicyEnabled()) {
+    // 2. If |document|'s browsing context is a top-level browsing context, then
+    // return true.
+    if (frame->isMainFrame())
+      return true;
+
+    // 3. If |document|'s browsing context has a browsing context container that
+    // is an iframe element with an |allowpaymentrequest| attribute specified,
+    // and whose node document is allowed to use the feature indicated by
+    // |allowpaymentrequest|, then return true.
+    if (frame->owner() && frame->owner()->allowPaymentRequest())
+      return allowedToUsePaymentRequest(frame->tree().parent());
+
+    // 4. Return false.
+    return false;
+  }
+
+  // If Feature Policy is enabled. then we need this hack to support it, until
+  // we have proper support for <iframe allowfullscreen> in FP:
+  // TODO(lunalu): clean up the code once FP iframe is supported
+  // crbug.com/682280
+
+  // 1. If FP, by itself, enables paymentrequest in this document, then
+  // paymentrequest is allowed.
+  if (frame->securityContext()->getFeaturePolicy()->isFeatureEnabled(
+          kPaymentFeature)) {
     return true;
+  }
 
-  // 3. If |document|'s browsing context has a browsing context container that
-  // is an iframe element with an |allowpaymentrequest| attribute specified, and
-  // whose node document is allowed to use the feature indicated by
-  // |allowpaymentrequest|, then return true.
-  if (frame->owner() && frame->owner()->allowPaymentRequest())
-    return allowedToUsePaymentRequest(frame->tree().parent());
+  // 2. Otherwise, if the embedding frame's document is allowed to use
+  // paymentrequest (either through FP or otherwise), and either:
+  //   a) this is a same-origin embedded document, or
+  //   b) this document's iframe has the allowpayment attribute set,
+  // then paymentrequest is allowed.
+  if (!frame->isMainFrame()) {
+    if (allowedToUsePaymentRequest(frame->tree().parent())) {
+      return (frame->owner() && frame->owner()->allowPaymentRequest()) ||
+             frame->tree()
+                 .parent()
+                 ->securityContext()
+                 ->getSecurityOrigin()
+                 ->isSameSchemeHostPortAndSuborigin(
+                     frame->securityContext()->getSecurityOrigin());
+    }
+  }
 
-  // 4. Return false.
+  // Otherwise, paymentrequest is not allowed. (If we reach here and this is
+  // the main frame, then paymentrequest must have been disabled by FP.)
   return false;
 }
 
@@ -755,7 +792,10 @@ PaymentRequest::PaymentRequest(Document& document,
     : ContextLifecycleObserver(&document),
       m_options(options),
       m_clientBinding(this),
-      m_completeTimer(this, &PaymentRequest::onCompleteTimeout) {
+      m_completeTimer(
+          TaskRunnerHelper::get(TaskType::MiscPlatformAPI, document.frame()),
+          this,
+          &PaymentRequest::onCompleteTimeout) {
   Vector<payments::mojom::blink::PaymentMethodDataPtr> validatedMethodData;
   validateAndConvertPaymentMethodData(methodData, validatedMethodData,
                                       exceptionState);
@@ -817,8 +857,8 @@ void PaymentRequest::OnShippingAddressChange(PaymentAddressPtr address) {
   }
 
   m_shippingAddress = new PaymentAddress(std::move(address));
-  PaymentRequestUpdateEvent* event =
-      PaymentRequestUpdateEvent::create(EventTypeNames::shippingaddresschange);
+  PaymentRequestUpdateEvent* event = PaymentRequestUpdateEvent::create(
+      getExecutionContext(), EventTypeNames::shippingaddresschange);
   event->setTarget(this);
   event->setPaymentDetailsUpdater(this);
   bool success = getExecutionContext()->getEventQueue()->enqueueEvent(event);
@@ -830,8 +870,8 @@ void PaymentRequest::OnShippingOptionChange(const String& shippingOptionId) {
   DCHECK(m_showResolver);
   DCHECK(!m_completeResolver);
   m_shippingOption = shippingOptionId;
-  PaymentRequestUpdateEvent* event =
-      PaymentRequestUpdateEvent::create(EventTypeNames::shippingoptionchange);
+  PaymentRequestUpdateEvent* event = PaymentRequestUpdateEvent::create(
+      getExecutionContext(), EventTypeNames::shippingoptionchange);
   event->setTarget(this);
   event->setPaymentDetailsUpdater(this);
   bool success = getExecutionContext()->getEventQueue()->enqueueEvent(event);

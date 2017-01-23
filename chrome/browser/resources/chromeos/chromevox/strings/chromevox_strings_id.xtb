@@ -177,6 +177,7 @@
 <translation id="2899328121302785497">{COUNT,plural, =1{kurung kurawal buka}other{# kurung kurawal buka}}</translation>
 <translation id="2911433807131383493">Membuka tutorial ChromeVox</translation>
 <translation id="2932083475399492303">Jenis baris pengalih antara struktural atau tata letak</translation>
+<translation id="2944762337049891859">Baca halaman secara otomatis setelah selesai dimuat.</translation>
 <translation id="2964026537669811554">Grup judul</translation>
 <translation id="296951647852255825">{COUNT,plural, =1{tab}other{# tab}}</translation>
 <translation id="2972078295414139404">Tidak ada tautan yang dikunjungi sebelumnya.</translation>
@@ -230,7 +231,6 @@ Jika telah menyelesaikan tutorial, gunakan ChromeVox untuk menavigasi ke tombol 
 <translation id="3321460131042519426">Aktifkan pelipatan kata</translation>
 <translation id="3322936298410871309">Judul tingkat 1 sebelumnya</translation>
 <translation id="3323447499041942178">Kotak teks</translation>
-<translation id="3329854757664111426">Untuk melanjutkan, tekan Enter.</translation>
 <translation id="3353420241558113817">{"ar": "Arab",
         "bg": "Bulgaria",
         "ca": "Katala",
@@ -307,6 +307,7 @@ Jika telah menyelesaikan tutorial, gunakan ChromeVox untuk menavigasi ke tombol 
 <translation id="3712520970944678024">Ucapan Pengontrol</translation>
 <translation id="3716845769494773620">Multi-baris</translation>
 <translation id="3731746171184829332">Tidak ada judul sebelumnya.</translation>
+<translation id="3735039640698208086">Saat memutar audio...</translation>
 <translation id="3762198587642264450">Berpindah ke akhir baris saat ini</translation>
 <translation id="3777255250339039212">h1</translation>
 <translation id="3793710123303304873">Keluar dari dialog.</translation>
@@ -547,6 +548,7 @@ Untuk membuka menu browser Chrome, tekan Alt+F.</translation>
 <translation id="5876817486144482042">Mengurangi volume ucapan</translation>
 <translation id="5887397643266327462">Teks braille diaktifkan.</translation>
 <translation id="5891934789323004067">Tabel</translation>
+<translation id="5899860758576822363">Putar dengan volume rendah saat ChromeVox sedang berbicara</translation>
 <translation id="5937336320314038555">{COUNT,plural, =1{sama dengan}other{# tanda sama dengan}}</translation>
 <translation id="5939518447894949180">Setel ulang</translation>
 <translation id="5948123859135882163">Beralih interpretasi persamaan matematika antara struktur dan semantik</translation>
@@ -579,6 +581,7 @@ Untuk membuka menu browser Chrome, tekan Alt+F.</translation>
 <translation id="6281876499889881039">Elemen sama berikutnya.</translation>
 <translation id="6282062888058716985">nav</translation>
 <translation id="6290434000785343030">Tidak ada kotak kombo berikutnya.</translation>
+<translation id="6305702903308659374">Putar dengan volume normal meskipun ChromeVox sedang berbicara</translation>
 <translation id="6307969636681130414">Ditekan</translation>
 <translation id="6322856989298155004">Suara</translation>
 <translation id="6324551002951139333">Kesalahan tata bahasa terdeteksi</translation>
@@ -769,6 +772,7 @@ Untuk membuka menu browser Chrome, tekan Alt+F.</translation>
 <translation id="8455868257606149352">Maks <ph name="X" /></translation>
 <translation id="84575901236241018">memiliki tombol akses, <ph name="KEY" /></translation>
 <translation id="847154984256717791">sibuk</translation>
+<translation id="8476408756881832830">Jeda pemutaran saat ChromeVox sedang berbicara</translation>
 <translation id="8476508772960940536">ringkasan jendela</translation>
 <translation id="8503360654911991865">Menurunkan granularitas navigasi</translation>
 <translation id="8520472399088452386">Tombol putar</translation>

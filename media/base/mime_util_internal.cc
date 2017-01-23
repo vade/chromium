@@ -13,6 +13,7 @@
 #include "media/base/media_client.h"
 #include "media/base/media_switches.h"
 #include "media/base/video_codecs.h"
+#include "media/media_features.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/build_info.h"
@@ -246,7 +247,7 @@ SupportsType MimeUtil::AreSupportedCodecs(
 }
 
 void MimeUtil::InitializeMimeTypeMaps() {
-#if defined(USE_PROPRIETARY_CODECS)
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
   allow_proprietary_codecs_ = true;
 #endif
 
@@ -291,7 +292,7 @@ void MimeUtil::AddSupportedMediaFormats() {
   CodecSet webm_codecs(webm_audio_codecs);
   webm_codecs.insert(webm_video_codecs.begin(), webm_video_codecs.end());
 
-#if defined(USE_PROPRIETARY_CODECS)
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
   CodecSet mp3_codecs;
   mp3_codecs.insert(MP3);
 
@@ -319,7 +320,7 @@ void MimeUtil::AddSupportedMediaFormats() {
   mp4_video_codecs.insert(VP9);
   CodecSet mp4_codecs(mp4_audio_codecs);
   mp4_codecs.insert(mp4_video_codecs.begin(), mp4_video_codecs.end());
-#endif  // defined(USE_PROPRIETARY_CODECS)
+#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 
   AddContainerWithCodecs("audio/wav", wav_codecs, false);
   AddContainerWithCodecs("audio/x-wav", wav_codecs, false);
@@ -335,7 +336,7 @@ void MimeUtil::AddSupportedMediaFormats() {
   AddContainerWithCodecs("application/ogg", ogg_codecs, false);
   AddContainerWithCodecs("audio/flac", implicit_codec, false);
 
-#if defined(USE_PROPRIETARY_CODECS)
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
   AddContainerWithCodecs("audio/mpeg", mp3_codecs, true);  // Allow "mp3".
   AddContainerWithCodecs("audio/mp3", implicit_codec, true);
   AddContainerWithCodecs("audio/x-mp3", implicit_codec, true);
@@ -360,14 +361,19 @@ void MimeUtil::AddSupportedMediaFormats() {
   hls_codecs.insert(MP3);
   AddContainerWithCodecs("application/x-mpegurl", hls_codecs, true);
   AddContainerWithCodecs("application/vnd.apple.mpegurl", hls_codecs, true);
+  AddContainerWithCodecs("audio/mpegurl", hls_codecs, true);
+  // Not documented by Apple, but unfortunately used extensively by Apple and
+  // others for both audio-only and audio+video playlists. See
+  // https://crbug.com/675552 for details and examples.
+  AddContainerWithCodecs("audio/x-mpegurl", hls_codecs, true);
 #endif  // defined(OS_ANDROID)
-#endif  // defined(USE_PROPRIETARY_CODECS)
+#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 }
 
 void MimeUtil::AddContainerWithCodecs(const std::string& mime_type,
                                       const CodecSet& codecs,
                                       bool is_proprietary_mime_type) {
-#if !defined(USE_PROPRIETARY_CODECS)
+#if !BUILDFLAG(USE_PROPRIETARY_CODECS)
   DCHECK(!is_proprietary_mime_type);
 #endif
 
@@ -502,9 +508,9 @@ bool MimeUtil::IsCodecSupportedOnPlatform(
     case MPEG2_AAC:
       // MPEG-2 variants of AAC are not supported on Android unless the unified
       // media pipeline can be used and the container is not HLS. These codecs
-      // will be decoded in software. See https:crbug.com/544268 for details.
-      if (mime_type_lower_case == "application/x-mpegurl" ||
-          mime_type_lower_case == "application/vnd.apple.mpegurl") {
+      // will be decoded in software. See https://crbug.com/544268 for details.
+      if (base::EndsWith(mime_type_lower_case, "mpegurl",
+                         base::CompareCase::SENSITIVE)) {
         return false;
       }
       return !is_encrypted && platform_info.is_unified_media_pipeline_enabled;

@@ -17,6 +17,7 @@ import org.chromium.chrome.browser.download.DownloadNotificationService;
 import org.chromium.chrome.browser.download.DownloadUtils;
 import org.chromium.chrome.browser.offlinepages.downloads.OfflinePageDownloadItem;
 import org.chromium.chrome.browser.widget.DateDividedAdapter.TimedItem;
+import org.chromium.components.url_formatter.UrlFormatter;
 import org.chromium.content_public.browser.DownloadState;
 import org.chromium.ui.widget.Toast;
 
@@ -124,6 +125,11 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
         return mFile;
     }
 
+    /** @return String to display for the hostname. */
+    public final String getDisplayHostname() {
+        return UrlFormatter.formatUrlForSecurityDisplay(getUrl(), false);
+    }
+
     /** @return String to display for the file. */
     abstract String getDisplayFileName();
 
@@ -145,8 +151,11 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
     /** @return How much of the download has completed, or -1 if there is no progress. */
     abstract int getDownloadProgress();
 
-    /** @return ID of the String indicating the status of the download. */
-    abstract int getStatusString();
+    /** @return Whether the download has an unknown file size. */
+    abstract boolean isIndeterminate();
+
+    /** @return String indicating the status of the download. */
+    abstract String getStatusString();
 
     /** @return Whether the file for this item has been removed through an external action. */
     abstract boolean hasBeenExternallyRemoved();
@@ -252,7 +261,7 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
         @Override
         public long getFileSize() {
             if (mItem.getDownloadInfo().state() == DownloadState.COMPLETE) {
-                return mItem.getDownloadInfo().getContentLength();
+                return mItem.getDownloadInfo().getBytesReceived();
             } else {
                 return 0;
             }
@@ -301,8 +310,13 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
         }
 
         @Override
-        public int getStatusString() {
-            return DownloadUtils.getStatusStringId(mItem);
+        public boolean isIndeterminate() {
+            return mItem.isIndeterminate();
+        }
+
+        @Override
+        public String getStatusString() {
+            return DownloadUtils.getStatusString(mItem);
         }
 
         @Override
@@ -392,6 +406,7 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
             DownloadInfo newInfo = newItem.getDownloadInfo();
 
             if (oldInfo.getPercentCompleted() != newInfo.getPercentCompleted()) return true;
+            if (oldInfo.getBytesReceived() != newInfo.getBytesReceived()) return true;
             if (oldInfo.state() != newInfo.state()) return true;
             if (oldInfo.isPaused() != newInfo.isPaused()) return true;
             if (!TextUtils.equals(oldInfo.getFilePath(), newInfo.getFilePath())) return true;
@@ -479,12 +494,19 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
 
         @Override
         public int getDownloadProgress() {
-            return -1;
+            // Only completed offline page downloads are shown.
+            return 100;
         }
 
         @Override
-        public int getStatusString() {
-            return R.string.download_notification_completed;
+        public boolean isIndeterminate() {
+            return true;
+        }
+
+        @Override
+        public String getStatusString() {
+            Context context = ContextUtils.getApplicationContext();
+            return context.getString(R.string.download_notification_completed);
         }
 
         @Override

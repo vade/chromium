@@ -35,6 +35,7 @@
 #include "bindings/core/v8/V8ObjectBuilder.h"
 #include "core/dom/Document.h"
 #include "core/dom/QualifiedName.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/frame/DOMWindow.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/UseCounter.h"
@@ -48,7 +49,7 @@ static const double kLongTaskThreshold = 0.05;
 static const char kUnknownAttribution[] = "unknown";
 static const char kAmbiguousAttribution[] = "multiple-contexts";
 static const char kSameOriginAttribution[] = "same-origin";
-static const char kSameOriginSelfAttribution[] = "same-origin-self";
+static const char kSameOriginSelfAttribution[] = "self";
 static const char kSameOriginAncestorAttribution[] = "same-origin-ancestor";
 static const char kSameOriginDescendantAttribution[] = "same-origin-descendant";
 static const char kCrossOriginAncestorAttribution[] = "cross-origin-ancestor";
@@ -100,7 +101,9 @@ static double toTimeOrigin(LocalFrame* frame) {
 }
 
 Performance::Performance(LocalFrame* frame)
-    : PerformanceBase(toTimeOrigin(frame)),
+    : PerformanceBase(
+          toTimeOrigin(frame),
+          TaskRunnerHelper::get(TaskType::PerformanceTimeline, frame)),
       ContextLifecycleObserver(frame ? frame->document() : nullptr) {}
 
 Performance::~Performance() {

@@ -190,19 +190,13 @@ bool WorkerThread::isCurrentThread() {
 }
 
 void WorkerThread::postTask(const WebTraceLocation& location,
-                            std::unique_ptr<ExecutionContextTask> task,
-                            bool isInstrumented) {
+                            std::unique_ptr<WTF::CrossThreadClosure> task) {
   if (isInShutdown())
     return;
-  if (isInstrumented) {
-    DCHECK(isCurrentThread());
-    InspectorInstrumentation::asyncTaskScheduled(globalScope(), "Worker task",
-                                                 task.get());
-  }
   workerBackingThread().backingThread().postTask(
       location, crossThreadBind(&WorkerThread::performTaskOnWorkerThread,
                                 crossThreadUnretained(this),
-                                WTF::passed(std::move(task)), isInstrumented));
+                                WTF::passed(std::move(task))));
 }
 
 void WorkerThread::appendDebuggerTask(
@@ -564,20 +558,17 @@ void WorkerThread::performShutdownOnWorkerThread() {
 }
 
 void WorkerThread::performTaskOnWorkerThread(
-    std::unique_ptr<ExecutionContextTask> task,
-    bool isInstrumented) {
+    std::unique_ptr<WTF::CrossThreadClosure> task) {
   DCHECK(isCurrentThread());
   if (m_threadState != ThreadState::Running)
     return;
 
-  InspectorInstrumentation::AsyncTask asyncTask(globalScope(), task.get(),
-                                                isInstrumented);
   {
     DEFINE_THREAD_SAFE_STATIC_LOCAL(
         CustomCountHistogram, scopedUsCounter,
         new CustomCountHistogram("WorkerThread.Task.Time", 0, 10000000, 50));
     ScopedUsHistogramTimer timer(scopedUsCounter);
-    task->performTask(globalScope());
+    (*task)();
   }
 }
 
@@ -645,8 +636,8 @@ void WorkerThread::setExitCode(const MutexLocker& lock, ExitCode exitCode) {
 }
 
 bool WorkerThread::isThreadStateMutexLocked(const MutexLocker& /* unused */) {
-#if ENABLE(ASSERT)
-  // Mutex::locked() is available only if ENABLE(ASSERT) is true.
+#if DCHECK_IS_ON()
+  // Mutex::locked() is available only if DCHECK_IS_ON() is true.
   return m_threadStateMutex.locked();
 #else
   // Otherwise, believe the given MutexLocker holds |m_threadStateMutex|.

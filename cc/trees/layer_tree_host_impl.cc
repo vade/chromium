@@ -782,18 +782,25 @@ DrawResult LayerTreeHostImpl::CalculateRenderPasses(FrameData* frame) {
   // frame at all.
   RenderSurfaceImpl* root_surface = active_tree_->RootRenderSurface();
   bool root_surface_has_no_visible_damage =
-      !root_surface->damage_tracker()->current_damage_rect().Intersects(
-          root_surface->content_rect());
+      !root_surface->GetDamageRect().Intersects(root_surface->content_rect());
   bool root_surface_has_contributing_layers =
       !root_surface->layer_list().empty();
   bool hud_wants_to_draw_ = active_tree_->hud_layer() &&
                             active_tree_->hud_layer()->IsAnimatingHUDContents();
   bool resources_must_be_resent =
       compositor_frame_sink_->capabilities().can_force_reclaim_resources;
+  // When touch handle visibility changes there is no visible damage
+  // because touch handles are composited in the browser. However we
+  // still want the browser to be notified that the handles changed
+  // through the |ViewHostMsg_SwapCompositorFrame| IPC so we keep
+  // track of handle visibility changes through |handle_visibility_changed|.
+  bool handle_visibility_changed =
+      active_tree_->GetAndResetHandleVisibilityChanged();
   if (root_surface_has_contributing_layers &&
       root_surface_has_no_visible_damage &&
       !active_tree_->property_trees()->effect_tree.HasCopyRequests() &&
-      !resources_must_be_resent && !hud_wants_to_draw_) {
+      !resources_must_be_resent && !hud_wants_to_draw_ &&
+      !handle_visibility_changed) {
     TRACE_EVENT0("cc",
                  "LayerTreeHostImpl::CalculateRenderPasses::EmptyDamageRect");
     frame->has_no_damage = true;
@@ -2613,7 +2620,7 @@ InputHandler::ScrollStatus LayerTreeHostImpl::ScrollBeginImpl(
     return scroll_status;
   }
   scroll_status.thread = SCROLL_ON_IMPL_THREAD;
-  ScrollAnimationAbort(scrolling_layer_impl);
+  mutator_host_->ScrollAnimationAbort();
 
   browser_controls_offset_manager_->ScrollBegin();
 
@@ -2995,6 +3002,7 @@ void LayerTreeHostImpl::ApplyScroll(ScrollNode* scroll_node,
   // we want to scroll the inner viewport -- to allow panning while zoomed --
   // but also move browser controls if needed.
   bool is_inner_viewport_scroll_layer =
+      InnerViewportScrollLayer() &&
       scroll_node->owning_layer_id == InnerViewportScrollLayer()->id();
 
   if (is_viewport_scroll_layer || is_inner_viewport_scroll_layer) {
@@ -3851,10 +3859,6 @@ void LayerTreeHostImpl::UpdateRootLayerStateForSynchronousInputHandler() {
       active_tree_->max_page_scale_factor());
 }
 
-void LayerTreeHostImpl::ScrollAnimationAbort(LayerImpl* layer_impl) {
-  return mutator_host_->ScrollAnimationAbort(false /* needs_completion */);
-}
-
 bool LayerTreeHostImpl::ScrollAnimationUpdateTarget(
     ScrollNode* scroll_node,
     const gfx::Vector2dF& scroll_delta,
@@ -3949,18 +3953,12 @@ void LayerTreeHostImpl::SetTreeLayerScrollOffsetMutated(
 
   const int layer_id = tree->LayerIdByElementId(element_id);
   PropertyTrees* property_trees = tree->property_trees();
-  DCHECK(property_trees->IsInIdToIndexMap(PropertyTrees::TreeType::SCROLL,
-                                          layer_id));
-  DCHECK_EQ(
-      1u, property_trees->element_id_to_transform_node_index.count(element_id));
-  int transform_node_index =
-      property_trees->element_id_to_transform_node_index[element_id];
   DCHECK_EQ(1u,
             property_trees->element_id_to_scroll_node_index.count(element_id));
   const int scroll_node_index =
       property_trees->element_id_to_scroll_node_index[element_id];
   property_trees->scroll_tree.OnScrollOffsetAnimated(
-      layer_id, transform_node_index, scroll_node_index, scroll_offset, tree);
+      layer_id, scroll_node_index, scroll_offset, tree);
   // Run mutation callbacks to respond to updated scroll offset.
   Mutate(CurrentBeginFrameArgs().frame_time);
 }

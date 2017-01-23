@@ -5,6 +5,7 @@
 #include "components/crash/content/app/fallback_crash_handler_win.h"
 
 #include <dbghelp.h>
+#include <psapi.h>
 
 #include <algorithm>
 #include <map>
@@ -31,6 +32,40 @@ using FilePosition = uint32_t;
 const FilePosition kInvalidFilePos = static_cast<FilePosition>(-1);
 
 using StringStringMap = std::map<std::string, std::string>;
+
+void AcquireMemoryMetrics(const base::Process& process,
+                          StringStringMap* crash_keys) {
+  // Grab the process private memory.
+  // This is best effort, though really shouldn't ever fail.
+  PROCESS_MEMORY_COUNTERS_EX process_memory = {sizeof(process_memory)};
+  if (GetProcessMemoryInfo(
+          process.Handle(),
+          reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&process_memory),
+          sizeof(process_memory))) {
+    // This is in units of bytes, re-scale to pages for consistency with
+    // system metrics.
+    const uint64_t kPageSize = 4096;
+    crash_keys->insert(std::make_pair(
+        "ProcessPrivateUsage",
+        base::Uint64ToString(process_memory.PrivateUsage / kPageSize)));
+
+    crash_keys->insert(std::make_pair(
+        "ProcessPeakWorkingSetSize",
+        base::Uint64ToString(process_memory.PeakWorkingSetSize / kPageSize)));
+  }
+
+  // Grab system commit memory. Also best effort.
+  PERFORMANCE_INFORMATION perf_info = {sizeof(perf_info)};
+  if (GetPerformanceInfo(&perf_info, sizeof(perf_info))) {
+    // Record the remaining committable memory and the limit. This is in units
+    // of system pages.
+    crash_keys->insert(std::make_pair(
+        "SystemCommitRemaining",
+        base::UintToString(perf_info.CommitLimit - perf_info.CommitTotal)));
+    crash_keys->insert(std::make_pair(
+        "SystemCommitLimit", base::UintToString(perf_info.CommitLimit)));
+  }
+}
 
 // This class is a helper to edit minidump files written by MiniDumpWriteDump.
 // It assumes the minidump file it operates on has a directory entry pointing to
@@ -161,23 +196,30 @@ bool MinidumpUpdater::AppendSimpleDictionary(
   // Write the key/value pairs and collect their locations.
   std::vector<crashpad::MinidumpSimpleStringDictionaryEntry> entries;
   for (const auto& kv : crash_keys) {
+    // The key of a key/value pair should never be empty.
+    DCHECK(!kv.first.empty());
+
     crashpad::MinidumpSimpleStringDictionaryEntry entry = {0};
 
-    entry.key = next_available_byte;
-    uint32_t key_len = base::saturated_cast<uint32_t>(kv.first.size());
-    if (!WriteAndAdvance(&key_len, sizeof(key_len), &next_available_byte) ||
-        !WriteAndAdvance(&kv.first[0], key_len, &next_available_byte)) {
-      return false;
-    }
+    // Skip this key/value if the value is empty.
+    if (!kv.second.empty()) {
+      entry.key = next_available_byte;
+      uint32_t key_len = base::saturated_cast<uint32_t>(kv.first.size());
+      if (!WriteAndAdvance(&key_len, sizeof(key_len), &next_available_byte) ||
+          !WriteAndAdvance(&kv.first[0], key_len, &next_available_byte)) {
+        return false;
+      }
 
-    entry.value = next_available_byte;
-    uint32_t value_len = base::saturated_cast<uint32_t>(kv.second.size());
-    if (!WriteAndAdvance(&value_len, sizeof(value_len), &next_available_byte) ||
-        !WriteAndAdvance(&kv.second[0], value_len, &next_available_byte)) {
-      return false;
-    }
+      entry.value = next_available_byte;
+      uint32_t value_len = base::saturated_cast<uint32_t>(kv.second.size());
+      if (!WriteAndAdvance(&value_len, sizeof(value_len),
+                           &next_available_byte) ||
+          !WriteAndAdvance(&kv.second[0], value_len, &next_available_byte)) {
+        return false;
+      }
 
-    entries.push_back(entry);
+      entries.push_back(entry);
+    }
   }
 
   // Write the dictionary array itself - note the array is count-prefixed.
@@ -340,10 +382,11 @@ bool FallbackCrashHandler::ParseCommandLine(const base::CommandLine& cmd_line) {
     return false;
 
   // Retrieve the thread id argument.
-  unsigned thread_id = 0;
+  unsigned int thread_id = 0;
   if (!base::StringToUint(cmd_line.GetSwitchValueASCII("thread"), &thread_id)) {
     return false;
   }
+  thread_id_ = thread_id;
 
   // Retrieve the "exception-pointers" argument.
   uint64_t uint_exc_ptrs = 0;
@@ -384,11 +427,6 @@ bool FallbackCrashHandler::GenerateCrashDump(const std::string& product,
   crashpad::CrashReportDatabase::CallErrorWritingCrashReport on_error(
       database.get(), report);
 
-  // TODO(siggi): Go big on the detail here for Canary/Dev channels.
-  const uint32_t kMinidumpType = MiniDumpWithUnloadedModules |
-                                 MiniDumpWithProcessThreadData |
-                                 MiniDumpWithThreadInfo;
-
   MINIDUMP_EXCEPTION_INFORMATION exc_info = {};
   exc_info.ThreadId = thread_id_;
   exc_info.ExceptionPointers =
@@ -408,6 +446,9 @@ bool FallbackCrashHandler::GenerateCrashDump(const std::string& product,
                                                    {"channel", channel},
                                                    {"plat", platform},
                                                    {"ptype", process_type}};
+
+  // Add memory metrics relating to system-wide and target process memory usage.
+  AcquireMemoryMetrics(process_, &crash_keys);
 
   crashpad::UUID client_id;
   crashpad::Settings* settings = database->GetSettings();
@@ -430,9 +471,18 @@ bool FallbackCrashHandler::GenerateCrashDump(const std::string& product,
   if (!dump_file.IsValid())
     return false;
 
+  uint32_t minidump_type = MiniDumpWithUnloadedModules |
+                           MiniDumpWithProcessThreadData |
+                           MiniDumpWithThreadInfo;
+
+  // Capture more detail for canary and dev channels. The prefix search caters
+  // for the soon to be outdated "-m" suffixed multi-install channels.
+  if (channel.find("canary") == 0 || channel.find("dev") == 0)
+    minidump_type |= MiniDumpWithIndirectlyReferencedMemory;
+
   // Write the minidump to the temp file, and then copy the data to the
   // Crashpad-provided handle, as the latter is only open for write.
-  if (!MiniDumpWriteDumpWithCrashpadInfo(process_, kMinidumpType, &exc_info,
+  if (!MiniDumpWriteDumpWithCrashpadInfo(process_, minidump_type, &exc_info,
                                          crash_keys, client_id, report->uuid,
                                          &dump_file) ||
       !AppendFileContents(&dump_file, report->handle)) {

@@ -3150,7 +3150,7 @@ interface MediaDevices : EventTarget
     method getSupportedConstraints
     method getUserMedia
     setter ondevicechange
-interface MediaElementAudioSourceNode : AudioSourceNode
+interface MediaElementAudioSourceNode : AudioNode
     attribute @@toStringTag
     getter mediaElement
     method constructor
@@ -3302,7 +3302,7 @@ interface MediaStreamAudioDestinationNode : AudioNode
     attribute @@toStringTag
     getter stream
     method constructor
-interface MediaStreamAudioSourceNode : AudioSourceNode
+interface MediaStreamAudioSourceNode : AudioNode
     attribute @@toStringTag
     getter mediaStream
     method constructor
@@ -3722,6 +3722,20 @@ interface PerformanceNavigation
     getter type
     method constructor
     method toJSON
+interface PerformanceNavigationTiming : PerformanceResourceTiming
+    attribute @@toStringTag
+    getter domComplete
+    getter domContentLoadedEventEnd
+    getter domContentLoadedEventStart
+    getter domInteractive
+    getter loadEventEnd
+    getter loadEventStart
+    getter redirectCount
+    getter type
+    getter unloadEventEnd
+    getter unloadEventStart
+    method constructor
+    method toJSON
 interface PerformanceObserver
     attribute @@toStringTag
     method constructor
@@ -3815,8 +3829,10 @@ interface PointerEvent : MouseEvent
     getter pointerId
     getter pointerType
     getter pressure
+    getter tangentialPressure
     getter tiltX
     getter tiltY
+    getter twist
     getter width
     method constructor
 interface PopStateEvent : Event
@@ -3843,6 +3859,7 @@ interface PresentationConnection : EventTarget
     getter onmessage
     getter onterminate
     getter state
+    getter url
     method close
     method constructor
     method send
@@ -7348,11 +7365,11 @@ interface webkitURL
     attribute eventSender
     attribute frames
     attribute gamepadController
+    attribute gin
     attribute internals
     attribute layoutTestController
     attribute length
     attribute location
-    attribute mojo
     attribute opener
     attribute parent
     attribute propertyNamesInGlobal

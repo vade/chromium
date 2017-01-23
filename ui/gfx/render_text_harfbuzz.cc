@@ -205,6 +205,12 @@ inline hb_script_t ICUScriptToHBScript(UScriptCode script) {
   return hb_script_from_string(uscript_getShortName(script), -1);
 }
 
+// Whether |segment| corresponds to the newline character.
+bool IsNewlineSegment(const base::string16& text,
+                      const internal::LineSegment& segment) {
+  return text[segment.char_range.start()] == '\n';
+}
+
 // Helper template function for |TextRunHarfBuzz::GetClusterAt()|. |Iterator|
 // can be a forward or reverse iterator type depending on the text direction.
 template <class Iterator>
@@ -231,6 +237,32 @@ void GetClusterAtImpl(size_t pos,
   DCHECK(!chars->is_empty());
   DCHECK(!glyphs->is_reversed());
   DCHECK(!glyphs->is_empty());
+}
+
+// Returns the line segment index for the |line|, |text_x| pair. |text_x| is
+// relative to text in the given line. Returns -1 if |text_x| is to the left
+// of text in the line and |line|.segments.size() if it's to the right.
+// |offset_relative_segment| will contain the offset of |text_x| relative to
+// the start of the segment it is contained in.
+int GetLineSegmentContainingXCoord(const internal::Line& line,
+                                   float line_x,
+                                   float* offset_relative_segment) {
+  DCHECK(offset_relative_segment);
+
+  *offset_relative_segment = 0;
+  if (line_x < 0)
+    return -1;
+  for (size_t i = 0; i < line.segments.size(); i++) {
+    const internal::LineSegment& segment = line.segments[i];
+
+    // segment.x_range is not used because it is in text space.
+    if (line_x < segment.width()) {
+      *offset_relative_segment = line_x;
+      return i;
+    }
+    line_x -= segment.width();
+  }
+  return line.segments.size();
 }
 
 // Internal class to generate Line structures. If |multiline| is true, the text
@@ -289,13 +321,14 @@ class HarfBuzzLineBreaker {
       // the word to the current line.
       bool new_line = false;
       if (!word_segments.empty() &&
-          text_[word_segments.back().char_range.start()] == '\n') {
+          IsNewlineSegment(text_, word_segments.back())) {
         new_line = true;
 
         // Since the line should at least contain some information regarding the
         // text range it corresponds to, don't pop the newline segment, if it's
         // the only segment in the line. This ensures that every line has a non-
-        // empty segments vector (except the last in some cases).
+        // empty segments vector (except the last in some cases). This segment
+        // won't be drawn though.
         if (word_segments.size() != 1u || available_width_ != max_width_) {
           word_width -= word_segments.back().width();
           word_segments.pop_back();
@@ -1216,6 +1249,10 @@ void RenderTextHarfBuzz::DrawVisualText(internal::SkiaTextRenderer* renderer) {
     const Vector2d origin = GetLineOffset(i) + Vector2d(0, line.baseline);
     SkScalar preceding_segment_widths = 0;
     for (const internal::LineSegment& segment : line.segments) {
+      // Don't draw the newline glyph (crbug.com/680430).
+      if (IsNewlineSegment(GetDisplayText(), segment))
+        continue;
+
       const internal::TextRunHarfBuzz& run = *run_list->runs()[segment.run];
       renderer->SetTypeface(run.skia_face);
       renderer->SetTextSize(SkIntToScalar(run.font_size));
@@ -1285,43 +1322,6 @@ size_t RenderTextHarfBuzz::GetRunContainingCaret(
       return i;
   }
   return run_list->size();
-}
-
-int RenderTextHarfBuzz::GetLineContainingYCoord(float text_y) {
-  if (text_y < 0)
-    return -1;
-
-  for (size_t i = 0; i < lines().size(); i++) {
-    const internal::Line& line = lines()[i];
-
-    if (text_y <= line.size.height())
-      return i;
-    text_y -= line.size.height();
-  }
-
-  return lines().size();
-}
-
-int RenderTextHarfBuzz::GetLineSegmentContainingXCoord(
-    const internal::Line& line,
-    float line_x,
-    float* offset_relative_segment) {
-  DCHECK(offset_relative_segment);
-
-  *offset_relative_segment = 0;
-  if (line_x < 0)
-    return -1;
-  for (size_t i = 0; i < line.segments.size(); i++) {
-    const internal::LineSegment& segment = line.segments[i];
-
-    // segment.x_range is not used because it is in text space.
-    if (line_x < segment.width()) {
-      *offset_relative_segment = line_x;
-      return i;
-    }
-    line_x -= segment.width();
-  }
-  return line.segments.size();
 }
 
 SelectionModel RenderTextHarfBuzz::FirstSelectionModelInsideRun(

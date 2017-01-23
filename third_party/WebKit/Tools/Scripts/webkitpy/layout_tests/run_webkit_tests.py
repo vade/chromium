@@ -265,12 +265,6 @@ def parse_args(args):
                 "--child-processes",
                 help="Number of drivers to run in parallel."),
             optparse.make_option(
-                "--enable-wptserve",
-                dest="enable_wptserve",
-                action="store_true",
-                default=False,
-                help="Enable running web-platform-tests using WPTserve instead of Apache."),
-            optparse.make_option(
                 "--disable-breakpad",
                 action="store_true",
                 help="Don't use breakpad to symbolize unexpected crashes."),

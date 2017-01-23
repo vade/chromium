@@ -185,7 +185,7 @@ SPECIAL_CASES = {
     os.path.join('third_party', 'WebKit'): {
         "Name": "WebKit",
         "URL": "http://webkit.org/",
-        "License": "BSD and GPL v2",
+        "License": "BSD and LGPL v2 and LGPL v2.1",
         # Absolute path here is resolved as relative to the source root.
         "License File": "/third_party/WebKit/LICENSE_FOR_ABOUT_CREDITS",
     },
@@ -271,7 +271,6 @@ KNOWN_NON_IOS_LIBRARIES = set([
     os.path.join('third_party', 'bspatch'),
     os.path.join('third_party', 'cacheinvalidation'),
     os.path.join('third_party', 'cld'),
-    os.path.join('third_party', 'codesighs'),
     os.path.join('third_party', 'flot'),
     os.path.join('third_party', 'gtk+'),
     os.path.join('third_party', 'iaccessible2'),

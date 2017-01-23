@@ -88,6 +88,12 @@ WebUIDataSource* CreateVersionUIDataSource() {
                                   version_info::IsOfficialBuild()
                                       ? IDS_VERSION_UI_OFFICIAL
                                       : IDS_VERSION_UI_UNOFFICIAL);
+
+#if defined(OS_CHROMEOS)
+  html_source->AddLocalizedString(version_ui::kCustomizationId,
+                                  IDS_VERSION_UI_CUSTOMIZATION_ID);
+#endif  // OS_CHROMEOS
+
 #if defined(ARCH_CPU_64_BITS)
   html_source->AddLocalizedString(version_ui::kVersionBitSize,
                                   IDS_VERSION_UI_64BIT);
@@ -138,6 +144,12 @@ WebUIDataSource* CreateVersionUIDataSource() {
   html_source->AddString("compiler", "MSVC 2015 (PGO)");
 #else
   html_source->AddString("compiler", "MSVC 2015");
+#endif
+#elif defined(_MSC_VER) && _MSC_VER == 1910
+#if BUILDFLAG(PGO_BUILD)
+  html_source->AddString("compiler", "MSVC 2017 (PGO)");
+#else
+  html_source->AddString("compiler", "MSVC 2017");
 #endif
 #elif defined(_MSC_VER)
 #error "Unsupported version of MSVC."

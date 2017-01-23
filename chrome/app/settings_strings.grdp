@@ -517,6 +517,12 @@
     <message name="IDS_SETTINGS_BLUETOOTH_CONFIRM_PASSKEY" desc="Bluetooth pairing message typically shown when pairing with a device that has a display.">
       Please confirm this passkey is shown on "<ph name="DEVICE_NAME">$1<ex>Nexus S</ex></ph>":
     </message>
+    <message name="IDS_SETTINGS_BLUETOOTH_CONNECTED" desc="In Bluetooth device list, this label is shown below a device which is already connected.">
+      Connected
+    </message>
+    <message name="IDS_SETTINGS_BLUETOOTH_NOT_CONNECTED" desc="In Bluetooth device list, this label is shown below a device which is not connected.">
+      Not connected
+    </message>
     <message name="IDS_SETTINGS_BLUETOOTH_CONNECTING">
       Connecting...
     </message>
@@ -1049,6 +1055,9 @@
     <message name="IDS_SETTINGS_INTERNET_ADD_CONNECTION_EXPAND_ACCESSIBILITY_LABEL" desc="Label for the button that toggles showing the options for a new connection. Only visible by screen reader software.">
       Add network connection
     </message>
+    <message name="IDS_SETTINGS_INTERNET_ADD_CONNECTION_NOT_ALLOWED" desc="Settings > Internet > Message when Add connection is not allowed.">
+      Add connection is disabled by your administrator.
+    </message>
     <message name="IDS_SETTINGS_INTERNET_ADD_WIFI" desc="Settings > Internet > Add Wi-Fi label.">
       Add Wi-Fi...
     </message>
@@ -1221,20 +1230,8 @@
     <message name="IDS_SETTINGS_INTERNET_BUTTON_DISCONNECT" desc="Settings > Internet > Network details: The label for the button to disconnect from a network.">
       Disconnect
     </message>
-    <message name="IDS_SETTINGS_NETWORK_TYPE_ETHERNET" desc="The ethernet network type.">
-      Ethernet
-    </message>
-    <message name="IDS_SETTINGS_NETWORK_TYPE_WIFI" desc="The wifi network type.">
-      Wi-Fi
-    </message>
-    <message name="IDS_SETTINGS_NETWORK_TYPE_WIMAX" desc="The wimax network type.">
-      WiMAX
-    </message>
-    <message name="IDS_SETTINGS_NETWORK_TYPE_CELLULAR" desc="The cellular network type.">
-      Cellular
-    </message>
-    <message name="IDS_SETTINGS_NETWORK_TYPE_VPN" desc="The vpn network type.">
-      VPN
+    <message name="IDS_SETTINGS_INTERNET_CONNECT_NOT_ALLOWED" desc="Settings > Internet > Message when connecting to a non policy network is not allowed.">
+      Connecting to this network is disabled by your administrator.
     </message>
     <message name="IDS_SETTINGS_INTERNET_KNOWN_NETWORKS_BUTTON" desc="Text for button that opens the known networks subpage.">
       Known networks
@@ -1250,23 +1247,6 @@
     </message>
     <message name="IDS_SETTINGS_INTERNET_KNOWN_NETWORKS_ALL" desc="Title for list of all other (non preferred) networks.">
       All networks
-    </message>
-
-    <!-- Strings used in <cr-network-list>, used in Settings and OOBE -->
-    <message name="IDS_NETWORK_LIST_DISABLED" desc="Settings > Internet, text in network summary when the network type is connected">
-      Disabled
-    </message>
-    <message name="IDS_NETWORK_LIST_NOT_CONNECTED" desc="Settings > Internet, text in network summary when there is no network for the type.">
-      No network
-    </message>
-    <message name="IDS_NETWORK_LIST_CONNECTED" desc="Settings > Internet, text to show in a network list item that is connected.">
-      connected
-    </message>
-    <message name="IDS_NETWORK_LIST_CONNECTING" desc="Settings > Internet, text in network summary when the primary network is connecting.">
-      Connecting to <ph name="NAME">$1<ex>GoogleGuest</ex></ph>
-    </message>
-    <message name="IDS_NETWORK_LIST_THIRD_PARTY_VPN_NAME_TEMPLATE" desc="Template for constructing the name of a VPN network that is handled by a third-party VPN provider from the provider name and the network name.">
-      <ph name="PROVIDER_NAME">$1<ex>OpenVPN</ex></ph>: <ph name="NETWORK_NAME">$2<ex>Work Network</ex></ph>
     </message>
 
      <!-- Strings translating ONC (Open Network Configuration) properties -->

@@ -117,6 +117,7 @@ cr.define('cr.ui.Oobe', function() {
       login.ControllerPairingScreen.register();
       login.HostPairingScreen.register();
       login.DeviceDisabledScreen.register();
+      login.ActiveDirectoryPasswordChangeScreen.register(/* lazyInit= */ true);
 
       cr.ui.Bubble.decorate($('bubble'));
       login.HeaderBar.decorate($('login-header-bar'));
@@ -331,8 +332,12 @@ cr.define('cr.ui.Oobe', function() {
     setMDMode_: function() {
       if (loadTimeData.getString('newOobeUI') == 'on') {
         $('oobe').setAttribute('md-mode', 'true');
+        $('oobe-shield').setAttribute('md-mode', 'true');
+        $('popup-overlay').setAttribute('md-mode', 'true');
       } else {
         $('oobe').removeAttribute('md-mode');
+        $('oobe-shield').removeAttribute('md-mode');
+        $('popup-overlay').removeAttribute('md-mode');
       }
     },
   };

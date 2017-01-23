@@ -213,7 +213,7 @@ void StyleBuilderFunctions::applyValueCSSPropertyCursor(
     const CSSValue& value) {
   state.style()->clearCursorList();
   if (value.isValueList()) {
-    state.style()->setCursor(ECursor::Auto);
+    state.style()->setCursor(ECursor::kAuto);
     for (const auto& item : toCSSValueList(value)) {
       if (item->isCursorImageValue()) {
         const CSSCursorImageValue& cursor = toCSSCursorImageValue(*item);
@@ -927,6 +927,7 @@ void StyleBuilderFunctions::applyValueCSSPropertyVariable(
     else
       initial = true;
   }
+  DCHECK(initial ^ inherit);
 
   state.style()->removeVariable(name, isInheritedProperty);
   if (initial) {

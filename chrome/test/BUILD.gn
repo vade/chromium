@@ -568,6 +568,15 @@ if (!is_android) {
           "base/interactive_test_utils_views.cc",
         ]
       }
+      if (is_win || is_linux) {
+        # TODO(crbug.com/679127): Enable these tests on "mac_views_browser" once
+        # it is supported.
+        sources += [
+          "../browser/ui/views/payments/payment_request_interactive_uitest.cc",
+          "../browser/ui/views/payments/payment_request_interactive_uitest_base.cc",
+          "../browser/ui/views/payments/payment_request_interactive_uitest_base.h",
+        ]
+      }
       if (is_linux) {
         if (!is_chromeos) {
           # Desktop linux.
@@ -929,7 +938,13 @@ if (!is_android) {
     test_type = "webui"
 
     sources = [
+      "data/webui/cr_elements/cr_elements_focus_test.js",
       "data/webui/md_history/md_history_focus_test.js",
+    ]
+
+    gen_include_files = [
+      "data/webui/polymer_browser_test_base.js",
+      "data/webui/polymer_interactive_ui_test.js",
     ]
 
     deps = [
@@ -1338,6 +1353,7 @@ test("browser_tests") {
       "../browser/chrome_security_exploit_browsertest.cc",
       "../browser/chrome_site_per_process_browsertest.cc",
       "../browser/chrome_switches_browsertest.cc",
+      "../browser/component_updater/component_patcher_operation_out_of_process_browsertest.cc",
       "../browser/content_settings/content_settings_browsertest.cc",
       "../browser/crash_recovery_browsertest.cc",
       "../browser/custom_handlers/protocol_handler_registry_browsertest.cc",
@@ -1458,6 +1474,7 @@ test("browser_tests") {
       "../browser/extensions/api/webrtc_logging_private/webrtc_event_log_apitest.cc",
       "../browser/extensions/api/webrtc_logging_private/webrtc_logging_private_apitest.cc",
       "../browser/extensions/api/webstore_private/webstore_private_apitest.cc",
+      "../browser/extensions/api_binding_perf_browsertest.cc",
       "../browser/extensions/app_background_page_apitest.cc",
       "../browser/extensions/app_process_apitest.cc",
       "../browser/extensions/app_window_overrides_browsertest.cc",
@@ -1954,6 +1971,7 @@ test("browser_tests") {
       "//chrome/browser/policy/test/policy_testserver.py",
       "//chrome/common/extensions/docs/examples/apps/calculator/",
       "//chrome/third_party/mock4js/",
+      "//components/test/data/update_client/",
       "//content/test/data/",
       "//google_apis/test/",
       "//media/test/data/",
@@ -1994,10 +2012,8 @@ test("browser_tests") {
     # TODO(crbug.com/679127): Enable these tests on "mac_views_browser" once it
     # is supported.
     if (is_linux || is_win) {
-      sources += [
-        "../browser/payments/payment_request_web_contents_manager_browsertest.cc",
-        "../browser/payments/site_per_process_payments_browsertest.cc",
-      ]
+      sources +=
+          [ "../browser/payments/site_per_process_payments_browsertest.cc" ]
     }
 
     if (!enable_one_click_signin) {
@@ -2526,6 +2542,9 @@ test("browser_tests") {
         ]
       }
     }
+    if (is_win) {
+      sources += [ "../browser/extensions/api/networking_private/networking_private_credentials_getter_browsertest.cc" ]
+    }
     if (is_mac || is_win) {
       sources += [
         "../browser/extensions/api/networking_private/networking_private_apitest.cc",
@@ -3041,6 +3060,7 @@ test("unit_tests") {
 
     # TODO(newt): move this to test_support_unit?
     "../browser/android/chrome_backup_agent_unittest.cc",
+    "../browser/android/favicon_helper_unittest.cc",
     "../browser/android/mock_location_settings.cc",
     "../browser/android/mock_location_settings.h",
     "../browser/android/net/external_estimate_provider_android_unittest.cc",
@@ -3074,10 +3094,11 @@ test("unit_tests") {
     "../browser/browsing_data/browsing_data_local_storage_helper_unittest.cc",
     "../browser/browsing_data/browsing_data_media_license_helper_unittest.cc",
     "../browser/browsing_data/browsing_data_quota_helper_unittest.cc",
+    "../browser/browsing_data/browsing_data_remover_impl_unittest.cc",
     "../browser/browsing_data/browsing_data_remover_test_util.cc",
     "../browser/browsing_data/browsing_data_remover_test_util.h",
-    "../browser/browsing_data/browsing_data_remover_unittest.cc",
     "../browser/browsing_data/browsing_data_service_worker_helper_unittest.cc",
+    "../browser/browsing_data/chrome_browsing_data_remover_delegate_unittest.cc",
     "../browser/browsing_data/cookies_tree_model_unittest.cc",
     "../browser/browsing_data/origin_filter_builder_unittest.cc",
     "../browser/browsing_data/registrable_domain_filter_builder_unittest.cc",
@@ -3094,6 +3115,8 @@ test("unit_tests") {
     "../browser/component_updater/subresource_filter_component_installer_unittest.cc",
     "../browser/component_updater/supervised_user_whitelist_installer_unittest.cc",
     "../browser/component_updater/sw_reporter_installer_win_unittest.cc",
+    "../browser/conflicts/module_database_win_unittest.cc",
+    "../browser/conflicts/module_event_sink_impl_win_unittest.cc",
     "../browser/content_settings/content_settings_default_provider_unittest.cc",
     "../browser/content_settings/content_settings_mock_observer.cc",
     "../browser/content_settings/content_settings_mock_observer.h",
@@ -3524,11 +3547,11 @@ test("unit_tests") {
       "../browser/android/offline_pages/prerendering_loader_unittest.cc",
       "../browser/android/offline_pages/prerendering_offliner_unittest.cc",
       "../browser/android/offline_pages/recent_tab_helper_unittest.cc",
-      "../browser/android/offline_pages/request_coordinator_factory_unittest.cc",
       "../browser/android/offline_pages/test_offline_page_model_builder.cc",
       "../browser/android/offline_pages/test_offline_page_model_builder.h",
       "../browser/android/offline_pages/test_request_coordinator_builder.cc",
       "../browser/android/offline_pages/test_request_coordinator_builder.h",
+      "../browser/android/search_geolocation/search_geolocation_service_unittest.cc",
       "../browser/autofill/autofill_credit_card_filling_infobar_delegate_mobile_unittest.cc",
       "../browser/autofill/autofill_save_card_infobar_delegate_mobile_unittest.cc",
       "../browser/password_manager/account_chooser_dialog_android_unittest.cc",
@@ -4247,6 +4270,7 @@ test("unit_tests") {
       "../browser/safe_browsing/incident_reporting/variations_seed_signature_incident_unittest.cc",
       "../browser/safe_browsing/local_database_manager_unittest.cc",
       "../browser/safe_browsing/local_two_phase_testserver.cc",
+      "../browser/safe_browsing/notification_image_reporter_unittest.cc",
       "../browser/safe_browsing/path_sanitizer_unittest.cc",
       "../browser/safe_browsing/permission_reporter_unittest.cc",
       "../browser/safe_browsing/protocol_manager_unittest.cc",
@@ -4620,7 +4644,6 @@ test("unit_tests") {
         "../browser/ui/cocoa/tab_contents/sad_tab_mac_unittest.mm",
         "../browser/ui/cocoa/tabs/alert_indicator_button_cocoa_unittest.mm",
         "../browser/ui/cocoa/tabs/tab_controller_unittest.mm",
-        "../browser/ui/cocoa/tabs/tab_strip_background_view_unittest.mm",
         "../browser/ui/cocoa/tabs/tab_strip_controller_unittest.mm",
         "../browser/ui/cocoa/tabs/tab_strip_view_unittest.mm",
         "../browser/ui/cocoa/tabs/tab_view_unittest.mm",

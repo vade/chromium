@@ -51,6 +51,8 @@ size_t LayoutGrid::Grid::numTracks(GridTrackSizingDirection direction) const {
 
 void LayoutGrid::Grid::ensureGridSize(size_t maximumRowSize,
                                       size_t maximumColumnSize) {
+  DCHECK(maximumRowSize <= kGridMaxTracks * 2);
+  DCHECK(maximumColumnSize <= kGridMaxTracks * 2);
   const size_t oldRowSize = numTracks(ForRows);
   if (maximumRowSize > oldRowSize) {
     m_grid.grow(maximumRowSize);
@@ -105,7 +107,7 @@ void LayoutGrid::Grid::setGridItemPaintOrder(const LayoutBox& item,
   m_gridItemsIndexesMap.set(&item, order);
 }
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
 bool LayoutGrid::Grid::hasAnyGridItemPaintOrder() const {
   return !m_gridItemsIndexesMap.isEmpty();
 }
@@ -836,7 +838,7 @@ void LayoutGrid::computeTrackSizesForIndefiniteSize(
   minIntrinsicSize += totalGuttersSize;
   maxIntrinsicSize += totalGuttersSize;
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   DCHECK(tracksAreWiderThanMinTrackBreadth(direction, sizingData));
 #endif
 }
@@ -1922,7 +1924,7 @@ void LayoutGrid::distributeSpaceToTracks(
             : std::max(track->plannedSize(), track->sizeDuringDistribution()));
 }
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
 bool LayoutGrid::tracksAreWiderThanMinTrackBreadth(
     GridTrackSizingDirection direction,
     GridSizingData& sizingData) const {
@@ -2100,7 +2102,7 @@ void LayoutGrid::placeItemsOnGrid(LayoutGrid::Grid& grid,
 
   Vector<LayoutBox*> autoMajorAxisAutoGridItems;
   Vector<LayoutBox*> specifiedMajorAxisAutoGridItems;
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   DCHECK(!grid.hasAnyGridItemPaintOrder());
 #endif
   DCHECK(!grid.hasAnyOrthogonalGridItem());
@@ -2136,7 +2138,7 @@ void LayoutGrid::placeItemsOnGrid(LayoutGrid::Grid& grid,
   }
   grid.setHasAnyOrthogonalGridItem(hasAnyOrthogonalGridItem);
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   if (grid.hasGridItems()) {
     DCHECK_GE(grid.numTracks(ForRows),
               GridPositionsResolver::explicitGridRowCount(
@@ -2157,7 +2159,7 @@ void LayoutGrid::placeItemsOnGrid(LayoutGrid::Grid& grid,
 
   grid.setNeedsItemsPlacement(false);
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   for (LayoutBox* child = grid.orderIterator().first(); child;
        child = grid.orderIterator().next()) {
     if (child->isOutOfFlowPositioned())
@@ -2564,7 +2566,7 @@ void LayoutGrid::layoutGridItems(GridSizingData& sizingData) {
     updateAutoMarginsInRowAxisIfNeeded(*child);
 
     const GridArea& area = sizingData.grid().gridItemArea(*child);
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
     ASSERT(area.columns.startLine() < sizingData.columnTracks.size());
     ASSERT(area.rows.startLine() < sizingData.rowTracks.size());
 #endif
@@ -2605,6 +2607,7 @@ void LayoutGrid::layoutPositionedObjects(bool relayoutChildren,
   for (auto* child : *positionedDescendants) {
     if (isOrthogonalChild(*child)) {
       // FIXME: Properly support orthogonal writing mode.
+      layoutPositionedObject(child, relayoutChildren, info);
       continue;
     }
 
@@ -2626,9 +2629,9 @@ void LayoutGrid::layoutPositionedObjects(bool relayoutChildren,
       childLayer->setStaticInlinePosition(borderStart() + columnOffset);
       childLayer->setStaticBlockPosition(borderBefore() + rowOffset);
     }
-  }
 
-  LayoutBlock::layoutPositionedObjects(relayoutChildren, info);
+    layoutPositionedObject(child, relayoutChildren, info);
+  }
 }
 
 void LayoutGrid::offsetAndBreadthForPositionedChild(

@@ -55,23 +55,22 @@ class CORE_EXPORT NGFragmentBuilder final
   // Part 2: layout algorithm positions out-of-flow descendants.
   //
   // builder->SetInlineSize/SetBlockSize
-  // builder->GetAndClearOutOfFlowDescendantCandidates(oof_candidates)
+  // builder->GetAndClearOutOfFlowDescendantCandidates(oof_candidates);
   // NGOutOfFlowLayoutPart out_of_flow_layout(container_style,
   //                                          builder->Size());
   // while (oof_candidates.size() > 0)
   // {
-  //   candidate = oof_candidates.shift()
-  //   if (out_of_flow_layout.StartLayout(candidate))
+  //   candidate = oof_candidates.shift();
+  //   if (IsContainingBlockForAbsoluteChild(style, candidate_style)) {
   //     NGFragmentBase* fragment;
   //     NGLogicalOffset* fragment_offset;
-  //     while (out_of_flow_layout.Layout(&fragment, &fragment_offset) ==
-  //         kNotFinished)
-  //          ;
+  //     out_of_flow_layout.Layout(candidate, &fragment, &offset);
   //     builder->AddChild(fragment);
-  //     builder->GetAndClearOutOfFlowDescendantCandidates(child_oof_candidates)
-  //     oof_candidates.prepend(child_oof_candidates)
-  //   else
+  //     builder->GetAndClearOutOfFlowDescendantCandidates(child_oof_candidates);
+  //     oof_candidates.prepend(child_oof_candidates);
+  //   } else {
   //     builder->AddOutOfFlowDescendant();
+  //   }
   // }
   NGFragmentBuilder& AddOutOfFlowChildCandidate(NGBlockNode*, NGLogicalOffset);
 
@@ -80,6 +79,12 @@ class CORE_EXPORT NGFragmentBuilder final
 
   NGFragmentBuilder& AddOutOfFlowDescendant(NGBlockNode*,
                                             const NGStaticPosition&);
+
+  void SetBreakToken(NGBreakToken* token) {
+    DCHECK(!break_token_);
+    break_token_ = token;
+  }
+  bool HasBreakToken() const { return break_token_; }
 
   // Sets MarginStrut for the resultant fragment.
   NGFragmentBuilder& SetMarginStrutBlockStart(const NGMarginStrut& from);
@@ -132,6 +137,8 @@ class CORE_EXPORT NGFragmentBuilder final
 
   WeakBoxList out_of_flow_descendants_;
   Vector<NGStaticPosition> out_of_flow_positions_;
+
+  Member<NGBreakToken> break_token_;
 };
 
 }  // namespace blink

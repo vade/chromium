@@ -62,7 +62,7 @@ static void typeAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& info)
   v8SetReturnValueString(info, impl->fastGetAttribute(SVGNames::typeAttr), info.GetIsolate());
 }
 
-void typeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+CORE_EXPORT void typeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
   SVGTestInterfaceV8Internal::typeAttributeGetter(info);
 }
 
@@ -81,7 +81,7 @@ static void typeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::Function
   impl->setAttribute(SVGNames::typeAttr, cppValue);
 }
 
-void typeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+CORE_EXPORT void typeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
   v8::Local<v8::Value> v8Value = info[0];
 
   V0CustomElementProcessingStack::CallbackDeliveryScope deliveryScope;
@@ -92,7 +92,7 @@ void typeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info
 } // namespace SVGTestInterfaceV8Internal
 
 const V8DOMConfiguration::AccessorConfiguration V8SVGTestInterfaceAccessors[] = {
-    {"type", SVGTestInterfaceV8Internal::typeAttributeGetterCallback, SVGTestInterfaceV8Internal::typeAttributeSetterCallback, 0, 0, nullptr, 0, v8::DEFAULT, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder},
+    {"type", SVGTestInterfaceV8Internal::typeAttributeGetterCallback, SVGTestInterfaceV8Internal::typeAttributeSetterCallback, 0, 0, nullptr, 0, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder},
 };
 
 static void installV8SVGTestInterfaceTemplate(v8::Isolate* isolate, const DOMWrapperWorld& world, v8::Local<v8::FunctionTemplate> interfaceTemplate) {

@@ -196,22 +196,9 @@ void GLHelperHolder::Initialize() {
   // reasonable but small limit.
   limits.start_transfer_buffer_size = 4 * 1024;
   limits.min_transfer_buffer_size = 4 * 1024;
-
-  // Use the largest available display size as the max texture size.
-  constexpr size_t kBytesPerPixel = 4;
-  size_t max_screen_texture_size_in_bytes = limits.min_transfer_buffer_size;
-  for (auto& display : display::Screen::GetScreen()->GetAllDisplays()) {
-    gfx::Size size = display.GetSizeInPixel();
-    size_t display_size_in_bytes =
-        kBytesPerPixel * size.width() * size.height();
-    if (display_size_in_bytes > max_screen_texture_size_in_bytes)
-      max_screen_texture_size_in_bytes = display_size_in_bytes;
-  }
-
-  limits.max_transfer_buffer_size = max_screen_texture_size_in_bytes;
-  // This context is used for doing async readbacks, so allow at least a full
-  // screen readback to be mapped.
-  limits.mapped_memory_reclaim_limit = max_screen_texture_size_in_bytes;
+  limits.max_transfer_buffer_size = 128 * 1024;
+  // Very few allocations from mapped memory pool, so this can be really low.
+  limits.mapped_memory_reclaim_limit = 4 * 1024;
 
   constexpr bool automatic_flushes = false;
   constexpr bool support_locking = false;
@@ -443,7 +430,7 @@ RenderWidgetHostViewAndroid::RenderWidgetHostViewAndroid(
       is_showing_(!widget_host->is_hidden()),
       is_window_visible_(true),
       is_window_activity_started_(true),
-      is_showing_overscroll_glow_(true),
+      is_in_vr_(false),
       content_view_core_(nullptr),
       ime_adapter_android_(this),
       cached_background_color_(SK_ColorWHITE),
@@ -776,7 +763,7 @@ void RenderWidgetHostViewAndroid::OnUpdateTextInputStateCalled(
           ? *GetTextInputManager()->GetTextInputState()
           : TextInputState();
 
-  if (!content_view_core_)
+  if (!content_view_core_ || is_in_vr_)
     return;
 
   content_view_core_->UpdateImeAdapter(
@@ -800,6 +787,13 @@ void RenderWidgetHostViewAndroid::OnImeCompositionRangeChanged(
     character_bounds.emplace_back(rect);
 
   ime_adapter_android_.SetCharacterBounds(character_bounds);
+}
+
+void RenderWidgetHostViewAndroid::OnImeCancelComposition(
+    TextInputManager* text_input_manager,
+    RenderWidgetHostViewBase* updated_view) {
+  DCHECK_EQ(text_input_manager_, text_input_manager);
+  ime_adapter_android_.CancelComposition();
 }
 
 void RenderWidgetHostViewAndroid::UpdateBackgroundColor(SkColor color) {
@@ -920,11 +914,6 @@ void RenderWidgetHostViewAndroid::SetMultiTouchZoomSupportEnabled(
   gesture_provider_.SetMultiTouchZoomSupportEnabled(enabled);
 }
 
-void RenderWidgetHostViewAndroid::ImeCancelComposition() {
-  ime_adapter_android_.CancelComposition();
-}
-
-
 void RenderWidgetHostViewAndroid::FocusedNodeChanged(
     bool is_editable_node,
     const gfx::Rect& node_bounds_in_screen) {
@@ -958,6 +947,11 @@ void RenderWidgetHostViewAndroid::SetTooltipText(
 void RenderWidgetHostViewAndroid::SelectionChanged(const base::string16& text,
                                                    size_t offset,
                                                    const gfx::Range& range) {
+  // TODO(asimjour): remove the flag and fix text selection popup for
+  // virtual reality mode.
+  if (is_in_vr_)
+    return;
+
   RenderWidgetHostViewBase::SelectionChanged(text, offset, range);
 
   if (!content_view_core_)
@@ -1345,10 +1339,6 @@ void RenderWidgetHostViewAndroid::OnFrameMetadataUpdated(
     overscroll_controller_->OnFrameMetadataUpdated(frame_metadata);
 
   if (selection_controller_) {
-    selection_controller_->OnSelectionEditable(
-        frame_metadata.selection.is_editable);
-    selection_controller_->OnSelectionEmpty(
-        frame_metadata.selection.is_empty_text_form_control);
     selection_controller_->OnSelectionBoundsChanged(
         frame_metadata.selection.start, frame_metadata.selection.end);
 
@@ -1546,7 +1536,7 @@ void RenderWidgetHostViewAndroid::SendBeginFrame(cc::BeginFrameArgs args) {
 
 bool RenderWidgetHostViewAndroid::Animate(base::TimeTicks frame_time) {
   bool needs_animate = false;
-  if (overscroll_controller_ && is_showing_overscroll_glow_) {
+  if (overscroll_controller_ && !is_in_vr_) {
     needs_animate |= overscroll_controller_->Animate(
         frame_time, content_view_core_->GetViewAndroid()->GetLayer());
   }
@@ -1601,20 +1591,16 @@ InputEventAckState RenderWidgetHostViewAndroid::FilterInputEvent(
         static_cast<const blink::WebGestureEvent&>(input_event);
     switch (gesture_event.type()) {
       case blink::WebInputEvent::GestureLongPress:
-        if (selection_controller_->WillHandleLongPressEvent(
-                base::TimeTicks() + base::TimeDelta::FromSecondsD(
-                                        input_event.timeStampSeconds()),
-                gfx::PointF(gesture_event.x, gesture_event.y))) {
-          return INPUT_EVENT_ACK_STATE_CONSUMED;
-        }
+        selection_controller_->HandleLongPressEvent(
+            base::TimeTicks() +
+            base::TimeDelta::FromSecondsD(input_event.timeStampSeconds()),
+            gfx::PointF(gesture_event.x, gesture_event.y));
         break;
 
       case blink::WebInputEvent::GestureTap:
-        if (selection_controller_->WillHandleTapEvent(
-                gfx::PointF(gesture_event.x, gesture_event.y),
-                gesture_event.data.tap.tapCount)) {
-          return INPUT_EVENT_ACK_STATE_CONSUMED;
-        }
+        selection_controller_->HandleTapEvent(
+            gfx::PointF(gesture_event.x, gesture_event.y),
+            gesture_event.data.tap.tapCount);
         break;
 
       case blink::WebInputEvent::GestureScrollBegin:
@@ -1761,8 +1747,12 @@ SkColor RenderWidgetHostViewAndroid::GetCachedBackgroundColor() const {
   return cached_background_color_;
 }
 
-void RenderWidgetHostViewAndroid::SetShowingOverscrollGlow(bool showing_glow) {
-  is_showing_overscroll_glow_ = showing_glow;
+void RenderWidgetHostViewAndroid::SetIsInVR(bool is_in_vr) {
+  is_in_vr_ = is_in_vr;
+}
+
+bool RenderWidgetHostViewAndroid::IsInVR() const {
+  return is_in_vr_;
 }
 
 void RenderWidgetHostViewAndroid::DidOverscroll(
@@ -2007,11 +1997,6 @@ void RenderWidgetHostViewAndroid::OnStylusSelectUpdate(float x, float y) {
   MoveRangeSelectionExtent(gfx::PointF(x, y));
 }
 
-void RenderWidgetHostViewAndroid::OnStylusSelectEnd() {
-  if (selection_controller_)
-    selection_controller_->AllowShowingFromCurrentSelection();
-}
-
 void RenderWidgetHostViewAndroid::OnStylusSelectTap(base::TimeTicks time,
                                                     float x,
                                                     float y) {
@@ -2086,7 +2071,6 @@ void RenderWidgetHostViewAndroid::CreateOverscrollControllerIfPossible() {
   overscroll_controller_ = base::MakeUnique<OverscrollControllerAndroid>(
       overscroll_refresh_handler, compositor,
       ui::GetScaleFactorForNativeView(GetNativeView()));
-  is_showing_overscroll_glow_ = true;
 }
 
 }  // namespace content

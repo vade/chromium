@@ -62,6 +62,23 @@ class DepsUpdaterTest(unittest.TestCase):
 
     # Tests for protected methods - pylint: disable=protected-access
 
+    def test_commit_changes(self):
+        host = MockHost()
+        updater = DepsUpdater(host)
+        updater._has_changes = lambda: True
+        updater._commit_changes('dummy message')
+        self.assertEqual(
+            host.executive.calls,
+            [['git', 'commit', '--all', '-F', '-']])
+
+    def test_commit_message(self):
+        updater = DepsUpdater(MockHost())
+        self.assertEqual(
+            updater._commit_message('aaaa', '1111'),
+            'Import 1111\n\n'
+            'Using update-w3c-deps in Chromium aaaa.\n\n'
+            'NOEXPORT=true')
+
     def test_cl_description_with_empty_environ(self):
         host = MockHost()
         host.executive = MockExecutive(output='Last commit message\n')
@@ -90,14 +107,24 @@ class DepsUpdaterTest(unittest.TestCase):
              'NOEXPORT=true'))
         self.assertEqual(host.executive.calls, [['git', 'log', '-1', '--format=%B']])
 
+    def test_cl_description_moves_noexport_tag(self):
+        host = MockHost()
+        host.executive = MockExecutive(output='Summary\n\nNOEXPORT=true')
+        updater = DepsUpdater(host)
+        description = updater._cl_description()
+        self.assertEqual(
+            description,
+            ('Summary\n\n'
+             'TBR=qyearsley@chromium.org\n'
+             'NOEXPORT=true'))
+
     def test_generate_manifest_command_not_found(self):
         # If we're updating csswg-test, then the manifest file won't be found.
         host = MockHost()
         host.filesystem.files = {}
         updater = DepsUpdater(host)
         updater._generate_manifest(
-            '/mock-checkout/third_party/WebKit/css',
-            '/mock-checkout/third_party/WebKit/LayoutTests/imported/csswg-test')
+            '/mock-checkout/third_party/WebKit/LayoutTests/external/csswg-test')
         self.assertEqual(host.executive.calls, [])
 
     def test_generate_manifest_successful_run(self):
@@ -106,8 +133,7 @@ class DepsUpdaterTest(unittest.TestCase):
         host = MockHost()
         updater = DepsUpdater(host)
         updater._generate_manifest(
-            '/mock-checkout/third_party/WebKit/wpt',
-            '/mock-checkout/third_party/WebKit/LayoutTests/imported/wpt')
+            '/mock-checkout/third_party/WebKit/LayoutTests/external/wpt')
         self.assertEqual(
             host.executive.calls,
             [
@@ -115,11 +141,11 @@ class DepsUpdaterTest(unittest.TestCase):
                     '/mock-checkout/third_party/WebKit/Tools/Scripts/webkitpy/thirdparty/wpt/wpt/manifest',
                     '--work',
                     '--tests-root',
-                    '/mock-checkout/third_party/WebKit/LayoutTests/imported/wpt'
+                    '/mock-checkout/third_party/WebKit/LayoutTests/external/wpt'
                 ],
                 [
                     'git',
                     'add',
-                    '/mock-checkout/third_party/WebKit/LayoutTests/imported/wpt/MANIFEST.json'
+                    '/mock-checkout/third_party/WebKit/LayoutTests/external/wpt/MANIFEST.json'
                 ]
             ])

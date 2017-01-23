@@ -1,22 +1,21 @@
 # These tests currently fail when run with --enable-browser-side-navigation
 # See https://crbug.com/576261
 # https://crbug.com/608372: PlzNavigate: support POST navigations
-crbug.com/608372 fast/forms/submit-to-url-fragment.html [ Failure ]
 crbug.com/608372 fast/forms/xss-auditor-doesnt-crash-on-post-submit.html [ Timeout ]
+#  Layout test does not end for unknown reasons.
 crbug.com/608372 http/tests/history/back-to-post.html [ Timeout ]
-crbug.com/608372 http/tests/navigation/post-goback-same-url.html [ Failure ]
-crbug.com/608372 virtual/stable/http/tests/navigation/post-goback-same-url.html [ Failure ]
 crbug.com/608372 virtual/mojo-loading/http/tests/history/back-to-post.html [ Timeout ]
-crbug.com/608372 virtual/mojo-loading/http/tests/navigation/post-goback-same-url.html [ Failure ]
+#  Layout test ending too soon.
+crbug.com/608372 fast/forms/submit-to-url-fragment.html [ Failure ]
 
 # https://crbug.com/575210: PlzNavigate: history navigation support
 crbug.com/575210 fast/history/history-length-append-subframe-with-hash.html [ Failure ]
 crbug.com/575210 fast/loader/stateobjects/pushstate-with-fragment-urls-and-hashchange.html [ Crash Timeout ]
 crbug.com/575210 http/tests/navigation/history-back-across-form-submission-to-fragment.html [ Timeout ]
-crbug.com/575210 imported/wpt/html/browsers/browsing-the-web/history-traversal/popstate_event.html [ Crash Failure Timeout ]
-crbug.com/575210 imported/wpt/html/browsers/browsing-the-web/unloading-documents/beforeunload-on-navigation-of-parent.html [ Failure ]
-crbug.com/575210 imported/wpt/html/browsers/history/the-history-interface/004.html [ Failure ]
-crbug.com/575210 imported/wpt/html/browsers/history/the-location-interface/security_location_0.htm [ Failure ]
+crbug.com/575210 external/wpt/html/browsers/browsing-the-web/history-traversal/popstate_event.html [ Crash Failure Timeout ]
+crbug.com/575210 external/wpt/html/browsers/browsing-the-web/unloading-documents/beforeunload-on-navigation-of-parent.html [ Failure ]
+crbug.com/575210 external/wpt/html/browsers/history/the-history-interface/004.html [ Failure ]
+crbug.com/575210 external/wpt/html/browsers/history/the-location-interface/security_location_0.htm [ Failure ]
 crbug.com/575210 virtual/stable/http/tests/navigation/history-back-across-form-submission-to-fragment.html [ Timeout ]
 crbug.com/575210 virtual/mojo-loading/http/tests/navigation/history-back-across-form-submission-to-fragment.html [ Timeout ]
 
@@ -27,9 +26,6 @@ crbug.com/551000 http/tests/inspector/network/x-frame-options-deny.html [ Failur
 crbug.com/551000 virtual/mojo-loading/http/tests/inspector/extensions-ignore-cache.html [ Failure ]
 crbug.com/551000 virtual/mojo-loading/http/tests/inspector/extensions-network-redirect.html [ Timeout ]
 crbug.com/551000 virtual/mojo-loading/http/tests/inspector/network/x-frame-options-deny.html [ Failure ]
-#  Encoded bytes received & encoded data length mismatch.
-crbug.com/551000 http/tests/inspector/network/network-datareceived.html [ Failure ]
-crbug.com/551000 virtual/mojo-loading/http/tests/inspector/network/network-datareceived.html [ Failure ]
 #  Console error messages are wrongly ordered.
 crbug.com/551000 http/tests/inspector/console-resource-errors.html [ Failure ]
 crbug.com/551000 virtual/mojo-loading/http/tests/inspector/console-resource-errors.html [ Failure ]
@@ -54,7 +50,7 @@ crbug.com/625765 http/tests/security/XFrameOptions/x-frame-options-multiple-head
 crbug.com/625765 http/tests/security/XFrameOptions/x-frame-options-none.html [ Failure ]
 crbug.com/625765 http/tests/security/XFrameOptions/x-frame-options-parent-same-origin-allow.html [ Failure ]
 crbug.com/625765 fast/loader/main-document-url-for-non-http-loads.html [ Failure ]
-crbug.com/625765 imported/wpt/shadow-dom/untriaged/html-elements-in-shadow-trees/html-forms/test-003.html [ Failure ]
+crbug.com/625765 external/wpt/shadow-dom/untriaged/html-elements-in-shadow-trees/html-forms/test-003.html [ Failure ]
 crbug.com/625765 virtual/stable/http/tests/navigation/location-reload-after-post.php [ Failure ]
 crbug.com/625765 virtual/mojo-loading/http/tests/cache/iframe-304-crash.html [ Failure ]
 crbug.com/625765 virtual/mojo-loading/http/tests/history/post-replace-state-reload.html [ Failure ]
@@ -144,14 +140,8 @@ Bug(none) http/tests/navigation/response204.html [ Timeout ]
 Bug(none) virtual/stable/http/tests/navigation/response204.html [ Timeout ]
 Bug(none) virtual/mojo-loading/http/tests/navigation/response204.html [ Timeout ]
 
-# https://crbug.com/673748 Cross frame access should work
-crbug.com/673748 http/tests/security/cross-frame-access-parent-isolated-world.html [ Timeout ]
-crbug.com/673748 http/tests/security/cross-frame-access-parent-explicit-domain-isolated-world.html [ Timeout ]
-crbug.com/673748 virtual/mojo-loading/http/tests/security/cross-frame-access-parent-isolated-world.html [ Timeout ]
-crbug.com/673748 virtual/mojo-loading/http/tests/security/cross-frame-access-parent-explicit-domain-isolated-world.html [ Timeout ]
-
 # This test seems to be partially failing without PlzNavigate as well.
-Bug(none) imported/wpt/html/browsers/origin/cross-origin-objects/cross-origin-objects-exceptions.html [ Failure ]
+Bug(none) external/wpt/html/browsers/origin/cross-origin-objects/cross-origin-objects-exceptions.html [ Failure ]
 
 # https://crbug.com/673751 Policy delegate is called twice
 crbug.com/673751 http/tests/misc/policy-delegate-called-twice.html [ Failure ]
@@ -159,5 +149,5 @@ crbug.com/673751 virtual/mojo-loading/http/tests/misc/policy-delegate-called-twi
 
 # These tests are flaky.
 Bug(none) http/tests/misc/window-open-then-write.html [ Timeout ]
-Bug(none) imported/wpt/html/browsers/browsing-the-web/unloading-documents/beforeunload-on-history-back.html [ Failure ]
+Bug(none) external/wpt/html/browsers/browsing-the-web/unloading-documents/beforeunload-on-history-back.html [ Failure ]
 Bug(none) virtual/mojo-loading/http/tests/misc/window-open-then-write.html [ Timeout ]

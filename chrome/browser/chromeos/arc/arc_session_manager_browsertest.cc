@@ -61,6 +61,7 @@ constexpr char kManagedAuthToken[] = "managed-auth-token";
 constexpr char kUnmanagedAuthToken[] = "unmanaged-auth-token";
 constexpr char kWellKnownConsumerName[] = "test@gmail.com";
 constexpr char kFakeUserName[] = "test@example.com";
+constexpr char kFakeGaiaId[] = "1234567890";
 
 }  // namespace
 
@@ -183,7 +184,7 @@ class ArcSessionManagerTest : public InProcessBrowserTest {
     profile()->GetPrefs()->SetBoolean(prefs::kArcTermsAccepted, true);
 
     const AccountId account_id(
-        AccountId::FromUserEmailGaiaId(kFakeUserName, "1234567890"));
+        AccountId::FromUserEmailGaiaId(kFakeUserName, kFakeGaiaId));
     GetFakeUserManager()->AddUser(account_id);
     GetFakeUserManager()->LoginUser(account_id);
 
@@ -192,6 +193,13 @@ class ArcSessionManagerTest : public InProcessBrowserTest {
   }
 
   void TearDownOnMainThread() override {
+    // Explicitly removing the user is required; otherwise ProfileHelper keeps
+    // a dangling pointer to the User.
+    // TODO(nya): Consider removing all users from ProfileHelper in the
+    // destructor of FakeChromeUserManager.
+    const AccountId account_id(
+        AccountId::FromUserEmailGaiaId(kFakeUserName, kFakeGaiaId));
+    GetFakeUserManager()->RemoveUserFromList(account_id);
     ArcSessionManager::Get()->Shutdown();
     ArcServiceManager::Get()->Shutdown();
     profile_.reset();
@@ -253,7 +261,13 @@ IN_PROC_BROWSER_TEST_F(ArcSessionManagerTest, ManagedChromeAccount) {
             ArcSessionManager::Get()->state());
 }
 
-IN_PROC_BROWSER_TEST_F(ArcSessionManagerTest, ManagedAndroidAccount) {
+#if defined(OS_CHROMEOS)
+// https://crbug.com/681547 - flaky segfault on linux_chromium_chromeos_rel_ng
+#define MAYBE_ManagedAndroidAccount DISABLED_ManagedAndroidAccount
+#else
+#define MAYBE_ManagedAndroidAccount ManagedAndroidAccount
+#endif
+IN_PROC_BROWSER_TEST_F(ArcSessionManagerTest, MAYBE_ManagedAndroidAccount) {
   EnableArc();
   token_service()->IssueTokenForAllPendingRequests(kManagedAuthToken,
                                                    base::Time::Max());

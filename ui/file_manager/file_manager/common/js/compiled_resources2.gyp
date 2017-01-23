@@ -15,10 +15,19 @@
       'target_name': 'file_type',
       'includes': ['../../../compile_js2.gypi'],
     },
-#    {
-#      'target_name': 'importer_common',
-#      'includes': ['../../../compile_js2.gypi'],
-#    },
+    {
+      'target_name': 'importer_common',
+      'dependencies': [
+        '../../../externs/compiled_resources2.gyp:background_window',
+        '../../../externs/compiled_resources2.gyp:file_browser_background',
+        '<(DEPTH)/third_party/analytics/compiled_resources2.gyp:externs',
+        '<(EXTERNS_GYP):chrome_extensions',
+        '<(EXTERNS_GYP):command_line_private',
+        'file_type',
+        'volume_manager_common',
+      ],
+      'includes': ['../../../compile_js2.gypi'],
+    },
     {
       'target_name': 'lru_cache',
       'includes': ['../../../compile_js2.gypi'],
@@ -56,9 +65,9 @@
     {
       'target_name': 'util',
       'dependencies': [
-        '<(DEPTH)/ui/file_manager/externs/compiled_resources2.gyp:app_window_common',
-        '<(DEPTH)/ui/file_manager/externs/compiled_resources2.gyp:entry_location',
-        '<(DEPTH)/ui/file_manager/externs/compiled_resources2.gyp:platform',
+        '../../../externs/compiled_resources2.gyp:app_window_common',
+        '../../../externs/compiled_resources2.gyp:entry_location',
+        '../../../externs/compiled_resources2.gyp:platform',
         '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:load_time_data',
         '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:util',
         '<(DEPTH)/ui/webui/resources/js/cr/compiled_resources2.gyp:event_target',
@@ -72,8 +81,8 @@
     {
       'target_name': 'volume_manager_common',
       'dependencies': [
-        '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:assert',
         '../../../externs/compiled_resources2.gyp:volume_info',
+        '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:assert',
       ],
       'includes': ['../../../compile_js2.gypi'],
     },

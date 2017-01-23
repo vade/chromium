@@ -6,6 +6,7 @@
 
 #include "bindings/core/v8/SourceLocation.h"
 #include "core/dom/Document.h"
+#include "core/dom/ExecutionContextTask.h"
 #include "core/frame/Deprecation.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/workers/ParentFrameTaskRunners.h"
@@ -62,7 +63,7 @@ void ThreadedMessagingProxyBase::initializeWorkerThread(
 
 void ThreadedMessagingProxyBase::postTaskToWorkerGlobalScope(
     const WebTraceLocation& location,
-    std::unique_ptr<ExecutionContextTask> task) {
+    std::unique_ptr<WTF::CrossThreadClosure> task) {
   if (m_askedToTerminate)
     return;
 

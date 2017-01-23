@@ -7,6 +7,7 @@
 
 #include "core/CoreExport.h"
 #include "core/layout/ng/ng_layout_input_node.h"
+#include "core/layout/ng/ng_physical_box_fragment.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -14,11 +15,10 @@ namespace blink {
 class ComputedStyle;
 class LayoutBox;
 class LayoutObject;
+class NGBreakToken;
 class NGConstraintSpace;
-class NGFragment;
-class NGLayoutAlgorithm;
-class NGLayoutCoordinator;
-class NGPhysicalBoxFragment;
+struct NGLogicalOffset;
+class NGPhysicalFragment;
 struct MinAndMaxContentSizes;
 
 // Represents a node to be laid out.
@@ -33,7 +33,8 @@ class CORE_EXPORT NGBlockNode final : public NGLayoutInputNode {
 
   ~NGBlockNode() override;
 
-  bool Layout(NGConstraintSpace*, NGFragment**) override;
+  NGPhysicalFragment* Layout(NGConstraintSpace* constraint_space) override;
+
   NGBlockNode* NextSibling() override;
 
   // Computes the value of min-content and max-content for this box.
@@ -46,6 +47,7 @@ class CORE_EXPORT NGBlockNode final : public NGLayoutInputNode {
   // often enough that it returns true before calling
   // ComputeOrSynthesizeMinAndMaxContentSizes)
   bool ComputeMinAndMaxContentSizes(MinAndMaxContentSizes*);
+  MinAndMaxContentSizes ComputeMinAndMaxContentSizesSync();
 
   const ComputedStyle* Style() const;
   ComputedStyle* MutableStyle();
@@ -54,6 +56,12 @@ class CORE_EXPORT NGBlockNode final : public NGLayoutInputNode {
 
   void SetNextSibling(NGBlockNode*);
   void SetFirstChild(NGLayoutInputNode*);
+
+  void SetFragment(NGPhysicalBoxFragment* fragment) { fragment_ = fragment; }
+  NGBreakToken* CurrentBreakToken() const;
+  bool IsLayoutFinished() const {
+    return fragment_ && !fragment_->BreakToken();
+  }
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -65,15 +73,15 @@ class CORE_EXPORT NGBlockNode final : public NGLayoutInputNode {
   // positioned with legacy layout.
   void UseOldOutOfFlowPositioning();
 
-  void UpdateLayoutBox(NGPhysicalBoxFragment* fragment,
-                       const NGConstraintSpace* constraint_space);
+  // Save static position for legacy AbsPos layout.
+  void SaveStaticOffsetForLegacy(const NGLogicalOffset&);
 
- private:
   // This is necessary for interop between old and new trees -- after our parent
   // positions us, it calls this function so we can store the position on the
   // underlying LayoutBox.
   void PositionUpdated();
 
+ private:
   bool CanUseNewLayout();
   bool HasInlineChildren();
 
@@ -87,8 +95,9 @@ class CORE_EXPORT NGBlockNode final : public NGLayoutInputNode {
   RefPtr<ComputedStyle> style_;
   Member<NGBlockNode> next_sibling_;
   Member<NGLayoutInputNode> first_child_;
-  Member<NGLayoutCoordinator> layout_coordinator_;
-  Member<NGLayoutAlgorithm> minmax_algorithm_;
+  // TODO(mstensho): An input node may produce multiple fragments, so this
+  // should probably be renamed to last_fragment_ or something like that, since
+  // the last fragment is all we care about when resuming layout.
   Member<NGPhysicalBoxFragment> fragment_;
 };
 

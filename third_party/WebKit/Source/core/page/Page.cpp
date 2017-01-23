@@ -135,9 +135,6 @@ Page::Page(PageClients& pageClients)
       m_deviceScaleFactor(1),
       m_visibilityState(PageVisibilityStateVisible),
       m_isCursorVisible(true),
-#if ENABLE(ASSERT)
-      m_isPainting(false),
-#endif
       m_frameHost(FrameHost::create(*this)) {
   ASSERT(m_editorClient);
 
@@ -510,14 +507,16 @@ DEFINE_TRACE(Page) {
   PageVisibilityNotifier::trace(visitor);
 }
 
-void Page::layerTreeViewInitialized(WebLayerTreeView& layerTreeView) {
+void Page::layerTreeViewInitialized(WebLayerTreeView& layerTreeView,
+                                    FrameView* view) {
   if (scrollingCoordinator())
-    scrollingCoordinator()->layerTreeViewInitialized(layerTreeView);
+    scrollingCoordinator()->layerTreeViewInitialized(layerTreeView, view);
 }
 
-void Page::willCloseLayerTreeView(WebLayerTreeView& layerTreeView) {
+void Page::willCloseLayerTreeView(WebLayerTreeView& layerTreeView,
+                                  FrameView* view) {
   if (m_scrollingCoordinator)
-    m_scrollingCoordinator->willCloseLayerTreeView(layerTreeView);
+    m_scrollingCoordinator->willCloseLayerTreeView(layerTreeView, view);
 }
 
 void Page::willBeDestroyed() {

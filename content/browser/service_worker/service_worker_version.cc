@@ -52,6 +52,7 @@
 #include "content/public/common/result_codes.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
+#include "third_party/WebKit/public/web/WebConsoleMessage.h"
 
 namespace content {
 
@@ -661,9 +662,6 @@ void ServiceWorkerVersion::RunAfterStartWorker(
     const StatusCallback& error_callback) {
   if (running_status() == EmbeddedWorkerStatus::RUNNING) {
     DCHECK(start_callbacks_.empty());
-    // TODO(falken): Remove this CHECK once https://crbug.com/485900 is
-    // resolved.
-    CHECK(GetMainScriptHttpResponseInfo());
     task.Run();
     return;
   }
@@ -1520,9 +1518,6 @@ void ServiceWorkerVersion::DidEnsureLiveRegistrationForStartWorker(
 
   switch (running_status()) {
     case EmbeddedWorkerStatus::RUNNING:
-      // TODO(falken): Remove this CHECK once https://crbug.com/485900 is
-      // resolved.
-      CHECK(GetMainScriptHttpResponseInfo());
       RunSoon(base::Bind(callback, SERVICE_WORKER_OK));
       return;
     case EmbeddedWorkerStatus::STARTING:
@@ -1726,7 +1721,7 @@ void ServiceWorkerVersion::OnPingTimeout() {
   DCHECK(running_status() == EmbeddedWorkerStatus::STARTING ||
          running_status() == EmbeddedWorkerStatus::RUNNING);
   // TODO(falken): Change the error code to SERVICE_WORKER_ERROR_TIMEOUT.
-  embedded_worker_->AddMessageToConsole(CONSOLE_MESSAGE_LEVEL_DEBUG,
+  embedded_worker_->AddMessageToConsole(blink::WebConsoleMessage::LevelVerbose,
                                         kNotRespondingErrorMesage);
   StopWorkerIfIdle();
 }
@@ -1953,11 +1948,6 @@ void ServiceWorkerVersion::OnBeginEvent() {
 
 void ServiceWorkerVersion::FinishStartWorker(ServiceWorkerStatusCode status) {
   start_worker_first_purpose_ = base::nullopt;
-  if (status == SERVICE_WORKER_OK) {
-    // TODO(falken): Remove this CHECK once https://crbug.com/485900 is
-    // resolved.
-    CHECK(GetMainScriptHttpResponseInfo());
-  }
   RunCallbacks(this, &start_callbacks_, status);
 }
 

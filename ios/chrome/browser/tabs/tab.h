@@ -12,6 +12,7 @@
 
 #import "components/signin/ios/browser/manage_accounts_delegate.h"
 #include "ios/net/request_tracker.h"
+#import "ios/shared/chrome/browser/tabs/web_state_handle.h"
 #import "ios/web/public/web_state/ui/crw_web_delegate.h"
 #include "ui/base/page_transition_types.h"
 
@@ -63,7 +64,6 @@ namespace web {
 class NavigationManagerImpl;
 struct Referrer;
 class WebState;
-class WebStateImpl;
 }
 
 // Notification sent by a Tab when it starts to load a new URL. This
@@ -98,7 +98,8 @@ extern NSString* const kProxyPassthroughHeaderValue;
 // desktop Chrome's TabContents in that it encapsulates rendering. Acts as the
 // delegate for the CRWWebController in order to process info about pages having
 // loaded.
-@interface Tab : NSObject<CRWWebDelegate, ManageAccountsDelegate>
+@interface Tab
+    : NSObject<CRWWebDelegate, ManageAccountsDelegate, WebStateHandle>
 
 // Browser state associated with this Tab.
 @property(nonatomic, readonly) ios::ChromeBrowserState* browserState;
@@ -125,10 +126,6 @@ extern NSString* const kProxyPassthroughHeaderValue;
 
 // |YES| if snapshot overlay should load from the grey image cache.
 @property(nonatomic, assign) BOOL useGreyImageCache;
-
-// webStateImpl is deprecated: use webState instead.
-@property(nonatomic, readonly) web::WebStateImpl* webStateImpl;
-@property(nonatomic, readonly) web::WebState* webState;
 
 @property(nonatomic, readonly) CRWWebController* webController;
 @property(nonatomic, readonly) PasswordController* passwordController;
@@ -191,9 +188,6 @@ extern NSString* const kProxyPassthroughHeaderValue;
                         desktopUserAgent:(BOOL)desktopUserAgent
                            configuration:(void (^)(Tab*))configuration;
 
-// The current ID of the session (each Tab represents a session).
-- (NSString*)currentSessionID;
-
 // Sets the parent tab model for this tab.  Can only be called if the tab does
 // not already have a parent tab model set.
 // TODO(crbug.com/228575): Create a delegate interface and remove this.
@@ -201,9 +195,6 @@ extern NSString* const kProxyPassthroughHeaderValue;
 
 // Replace the content of the tab with the content described by |SessionTab|.
 - (void)loadSessionTab:(const sessions::SessionTab*)sessionTab;
-
-// Evaluate JavaScript asynchronously in the tab.
-- (void)openJavascript:(NSString*)javascript;
 
 // Stop the page loading.
 // Equivalent to the user pressing 'stop', or a window.stop() command.
@@ -273,9 +264,6 @@ extern NSString* const kProxyPassthroughHeaderValue;
 
 // Returns the infobars::InfoBarManager object for this tab.
 - (infobars::InfoBarManager*)infoBarManager;
-
-// Returns the URLs in the entries that are redirected to the current entry.
-- (std::vector<GURL>)currentRedirectedUrls;
 
 // Whether the content of the current tab is compatible with reader mode.
 - (BOOL)canSwitchToReaderMode;

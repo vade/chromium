@@ -15,6 +15,11 @@
 #include "cc/surfaces/surface.h"
 #include "cc/surfaces/surface_factory_client.h"
 #include "cc/surfaces/surface_id_allocator.h"
+#include "cc/surfaces/surface_info.h"
+
+#if DCHECK_IS_ON()
+#include <sstream>
+#endif
 
 namespace cc {
 
@@ -41,6 +46,19 @@ SurfaceManager::SurfaceManager(LifetimeType lifetime_type)
 
 SurfaceManager::~SurfaceManager() {
   DCHECK(thread_checker_.CalledOnValidThread());
+
+  if (lifetime_type_ == LifetimeType::REFERENCES) {
+    // Remove all temporary references on shutdown.
+    for (const auto& map_entry : temp_references_) {
+      const FrameSinkId& frame_sink_id = map_entry.first;
+      for (const auto& local_frame_id : map_entry.second) {
+        RemoveSurfaceReferenceImpl(GetRootSurfaceId(),
+                                   SurfaceId(frame_sink_id, local_frame_id));
+      }
+    }
+    GarbageCollectSurfaces();
+  }
+
   for (SurfaceDestroyList::iterator it = surfaces_to_destroy_.begin();
        it != surfaces_to_destroy_.end();
        ++it) {
@@ -53,6 +71,14 @@ SurfaceManager::~SurfaceManager() {
   DCHECK_EQ(frame_sink_source_map_.size(), 0u);
   DCHECK_EQ(registered_sources_.size(), 0u);
 }
+
+#if DCHECK_IS_ON()
+std::string SurfaceManager::SurfaceReferencesToString() {
+  std::stringstream str;
+  SurfaceReferencesToStringImpl(root_surface_id_, "", &str);
+  return str.str();
+}
+#endif
 
 void SurfaceManager::RegisterSurface(Surface* surface) {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -115,18 +141,68 @@ void SurfaceManager::AddSurfaceReference(const SurfaceId& parent_id,
   // Check some conditions that should never happen. We don't want to crash on
   // bad input from a compromised client so just return early.
   if (parent_id == child_id) {
-    LOG(ERROR) << "Cannot add self reference for " << parent_id.ToString();
+    DLOG(ERROR) << "Cannot add self reference for " << parent_id.ToString();
     return;
   }
   if (parent_id != root_surface_id_ && surface_map_.count(parent_id) == 0) {
-    LOG(ERROR) << "No surface in map for " << parent_id.ToString();
+    DLOG(ERROR) << "No surface in map for " << parent_id.ToString();
     return;
   }
   if (surface_map_.count(child_id) == 0) {
-    LOG(ERROR) << "No surface in map for " << child_id.ToString();
+    DLOG(ERROR) << "No surface in map for " << child_id.ToString();
     return;
   }
 
+  // There could be a temporary reference to |child_id| which we should now
+  // remove because a real reference is being added to it. To find out whether
+  // or not a temporary reference exists, we need to first look up the
+  // FrameSinkId of |child_id| in |temp_references_|, which returns a vector of
+  // LocalFrameIds, and then search for the LocalFrameId of |child_id| in the
+  // said vector. If there is no temporary reference, we can immediately add the
+  // reference from |parent_id| and return.
+  auto refs_iter = temp_references_.find(child_id.frame_sink_id());
+  if (refs_iter == temp_references_.end()) {
+    AddSurfaceReferenceImpl(parent_id, child_id);
+    return;
+  }
+  std::vector<LocalFrameId>& refs = refs_iter->second;
+  auto temp_ref_iter =
+      std::find(refs.begin(), refs.end(), child_id.local_frame_id());
+  if (temp_ref_iter == refs.end()) {
+    AddSurfaceReferenceImpl(parent_id, child_id);
+    return;
+  }
+
+  // Temporary references are implemented by holding a reference from the top
+  // level root to the child. If |parent_id| is the top level root, we do
+  // nothing because the reference already exists. Otherwise, remove the
+  // temporary reference and add the reference.
+  if (parent_id != GetRootSurfaceId()) {
+    AddSurfaceReferenceImpl(parent_id, child_id);
+    RemoveSurfaceReference(GetRootSurfaceId(), child_id);
+  }
+
+  // Remove temporary references for surfaces with the same FrameSinkId that
+  // were created before |child_id|. The earlier surfaces were never embedded in
+  // the parent and the parent is embedding a later surface, so we know the
+  // parent doesn't need them anymore.
+  for (auto iter = refs.begin(); iter != temp_ref_iter; ++iter) {
+    SurfaceId id = SurfaceId(child_id.frame_sink_id(), *iter);
+    RemoveSurfaceReference(GetRootSurfaceId(), id);
+  }
+
+  // Remove markers for temporary references up to |child_id|, as the temporary
+  // references they correspond to were removed above. If |temp_ref_iter| points
+  // at the last element in |refs| then we are removing all temporary references
+  // for the FrameSinkId and can remove the map entry entirely.
+  if (++temp_ref_iter == refs.end())
+    temp_references_.erase(child_id.frame_sink_id());
+  else
+    refs.erase(refs.begin(), temp_ref_iter);
+}
+
+void SurfaceManager::AddSurfaceReferenceImpl(const SurfaceId& parent_id,
+                                             const SurfaceId& child_id) {
   parent_to_child_refs_[parent_id].insert(child_id);
   child_to_parent_refs_[child_id].insert(parent_id);
 }
@@ -139,8 +215,8 @@ void SurfaceManager::RemoveSurfaceReference(const SurfaceId& parent_id,
   // want to crash on bad input from a compromised client so just return early.
   if (parent_to_child_refs_.count(parent_id) == 0 ||
       parent_to_child_refs_[parent_id].count(child_id) == 0) {
-    LOG(ERROR) << "No reference from " << parent_id.ToString() << " to "
-               << child_id.ToString();
+    DLOG(ERROR) << "No reference from " << parent_id.ToString() << " to "
+                << child_id.ToString();
     return;
   }
 
@@ -170,7 +246,7 @@ void SurfaceManager::GarbageCollectSurfacesFromRoot() {
   if (surfaces_to_destroy_.empty())
     return;
 
-  std::unordered_set<SurfaceId, SurfaceIdHash> reachable_surfaces;
+  SurfaceIdSet reachable_surfaces;
 
   // Walk down from the root and mark each SurfaceId we encounter as reachable.
   std::queue<SurfaceId> surface_queue;
@@ -504,8 +580,56 @@ bool SurfaceManager::SurfaceModified(const SurfaceId& surface_id) {
 
 void SurfaceManager::SurfaceCreated(const SurfaceInfo& surface_info) {
   CHECK(thread_checker_.CalledOnValidThread());
+
+  if (lifetime_type_ == LifetimeType::REFERENCES) {
+    // We can get into a situation where multiple CompositorFrames arrive for a
+    // CompositorFrameSink before the client can add any references for the
+    // frame. When the second frame with a new size arrives, the first will be
+    // destroyed in SurfaceFactory and then if there are no references it will
+    // be deleted during surface GC. A temporary reference, removed when a real
+    // reference is received, is added to prevent this from happening.
+    AddSurfaceReferenceImpl(GetRootSurfaceId(), surface_info.id());
+    temp_references_[surface_info.id().frame_sink_id()].push_back(
+        surface_info.id().local_frame_id());
+  }
+
   for (auto& observer : observer_list_)
     observer.OnSurfaceCreated(surface_info);
 }
+
+#if DCHECK_IS_ON()
+void SurfaceManager::SurfaceReferencesToStringImpl(const SurfaceId& surface_id,
+                                                   std::string indent,
+                                                   std::stringstream* str) {
+  *str << indent;
+
+  // Print the current line for |surface_id|.
+  Surface* surface = GetSurfaceForId(surface_id);
+  if (surface) {
+    *str << surface->surface_id().ToString();
+    *str << (surface->destroyed() ? " destroyed " : " live ");
+
+    if (surface->HasFrame()) {
+      // This provides the surface size from the root render pass.
+      const CompositorFrame& frame = surface->GetEligibleFrame();
+      *str << frame.render_pass_list.back()->output_rect.size().ToString();
+    }
+  } else {
+    *str << surface_id;
+  }
+  *str << "\n";
+
+  // If the current surface has references to children, sort children and print
+  // references for each child.
+  auto iter = parent_to_child_refs_.find(surface_id);
+  if (iter != parent_to_child_refs_.end()) {
+    std::vector<SurfaceId> children(iter->second.begin(), iter->second.end());
+    std::sort(children.begin(), children.end());
+
+    for (const SurfaceId& child_id : children)
+      SurfaceReferencesToStringImpl(child_id, indent + "  ", str);
+  }
+}
+#endif  // DCHECK_IS_ON()
 
 }  // namespace cc

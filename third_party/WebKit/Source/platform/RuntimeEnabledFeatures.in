@@ -112,7 +112,7 @@ FeaturePolicy status=experimental
 FileAPIBlobClose status=experimental
 FileSystem status=stable
 ForeignFetch status=experimental, origin_trial_feature_name=ForeignFetch
-FramebustingNeedsSameOriginOrUserGesture status=experimental, settable_from_internals=True
+FramebustingNeedsSameOriginOrUserGesture status=stable, settable_from_internals=True
 FullscreenUnprefixed status=test, settable_from_internals=True
 FrameTimingSupport status=experimental
 GamepadExtensions status=test, origin_trial_feature_name=WebVR
@@ -144,7 +144,8 @@ MediaCaptureFromVideo status=experimental
 MediaConstraints status=stable
 MediaDocumentDownloadButton
 MediaGetSettings status=test
-MediaSession status=experimental
+// MediaSession is enabled by default on Android only.
+MediaSession status=test
 MediaSourceExperimental status=experimental
 MediaSourceNewAbortAndDuration status=experimental
 MediaStreamSpeech status=experimental
@@ -219,7 +220,7 @@ ScrollAnchoring status=experimental, settable_from_internals=True
 ScrollTopLeftInterop status=experimental
 Sensor status=experimental
 ServiceWorkerNavigationPreload origin_trial_feature_name=ServiceWorkerNavigationPreload
-SetRootScroller status=experimental
+SetRootScroller status=experimental, origin_trial_feature_name=RootScroller
 ShadowPiercingDescendantCombinator status=experimental
 ShapeDetection status=experimental
 SharedArrayBuffer
@@ -241,6 +242,7 @@ StorageEstimate status=experimental
 Suborigins status=experimental
 TimerThrottlingForBackgroundTabs status=stable
 TimerThrottlingForHiddenFrames status=stable
+TopNavWithUserActivationInSandbox status=experimental
 // Many websites disable mouse support when touch APIs are available.  We'd
 // like to enable this always but can't until more websites fix this bug.
 // Chromium sets this conditionally (eg. based on the presence of a
@@ -250,7 +252,6 @@ TouchEventFeatureDetection status=stable
 TraceWrappables status=stable
 TrueColorRendering status=experimental
 TrustedEventsDefaultAction status=stable
-UserSelectAll status=stable
 WebAnimationsAPI status=experimental
 WebAnimationsSVG status=experimental
 WebAssemblySerialization status=test
@@ -271,6 +272,7 @@ ScrollCustomization
 AutoplayMutedVideos settable_from_internals=True
 VisualViewportAPI status=experimental
 WakeLock status=experimental
+WebAuth status=experimental
 WebFontsCacheAwareTimeoutAdaptation status=experimental
 WebFontsInterventionV2With2G
 WebFontsInterventionV2With3G
@@ -281,8 +283,9 @@ Worklet status=experimental
 LazyParseCSS status=experimental
 ParseHTMLOnMainThread status=test
 SendBeaconThrowForBlobWithNonSimpleType status=experimental
-PerformanceNavigationTiming2 status=experimental
+PerformanceNavigationTiming2 status=stable
 BackgroundVideoTrackOptimization status=stable
 PerformancePaintTiming status=test
 HideNonceContentAttribute status=experimental
 UnclosedFormControlIsInvalid status=experimental
+RestrictCompleteURLCharacterSet status=experimental

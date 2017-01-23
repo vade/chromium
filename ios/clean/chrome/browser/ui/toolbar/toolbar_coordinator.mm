@@ -13,6 +13,7 @@
 #import "ios/clean/chrome/browser/ui/commands/toolbar_commands.h"
 #import "ios/clean/chrome/browser/ui/toolbar/toolbar_view_controller.h"
 #import "ios/clean/chrome/browser/ui/tools/tools_coordinator.h"
+#import "ios/shared/chrome/browser/coordinator_context/coordinator_context.h"
 #include "ios/web/public/web_state/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -32,8 +33,8 @@
   self.viewController = [[ToolbarViewController alloc] init];
   self.viewController.toolbarCommandHandler = self;
 
-  [self.rootViewController presentViewController:self.viewController
-                                        animated:YES
+  [self.baseViewController presentViewController:self.viewController
+                                        animated:self.context.animated
                                       completion:nil];
 }
 

@@ -106,7 +106,6 @@
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
-#include "services/shape_detection/public/interfaces/facedetection_provider.mojom.h"
 #include "ui/accessibility/ax_tree.h"
 #include "ui/accessibility/ax_tree_update.h"
 #include "ui/gfx/geometry/quad_f.h"
@@ -760,6 +759,8 @@ bool RenderFrameHostImpl::OnMessageReceived(const IPC::Message &msg) {
                         OnSerializeAsMHTMLResponse)
     IPC_MESSAGE_HANDLER(FrameHostMsg_SelectionChanged, OnSelectionChanged)
     IPC_MESSAGE_HANDLER(FrameHostMsg_FocusedNodeChanged, OnFocusedNodeChanged)
+    IPC_MESSAGE_HANDLER(FrameHostMsg_SetHasReceivedUserGesture,
+                        OnSetHasReceivedUserGesture)
 #if defined(USE_EXTERNAL_POPUP_MENU)
     IPC_MESSAGE_HANDLER(FrameHostMsg_ShowPopup, OnShowPopup)
     IPC_MESSAGE_HANDLER(FrameHostMsg_HidePopup, OnHidePopup)
@@ -2199,6 +2200,10 @@ void RenderFrameHostImpl::OnFocusedNodeChanged(
                       bounds_in_frame_widget.size()));
 }
 
+void RenderFrameHostImpl::OnSetHasReceivedUserGesture() {
+  frame_tree_node_->OnSetHasReceivedUserGesture();
+}
+
 #if defined(USE_EXTERNAL_POPUP_MENU)
 void RenderFrameHostImpl::OnShowPopup(
     const FrameHostMsg_ShowPopup_Params& params) {
@@ -2279,11 +2284,6 @@ void RenderFrameHostImpl::RegisterMojoInterfaces() {
       base::Bind(&MediaSessionServiceImpl::Create, base::Unretained(this)));
 
 #if defined(OS_ANDROID)
-  GetInterfaceRegistry()->AddInterface(
-      GetGlobalJavaInterfaces()
-          ->CreateInterfaceFactory<
-              shape_detection::mojom::FaceDetectionProvider>());
-
   GetInterfaceRegistry()->AddInterface(
       GetGlobalJavaInterfaces()
           ->CreateInterfaceFactory<device::VibrationManager>());
@@ -2557,6 +2557,17 @@ void RenderFrameHostImpl::UpdateOpener() {
 
 void RenderFrameHostImpl::SetFocusedFrame() {
   Send(new FrameMsg_SetFocusedFrame(routing_id_));
+}
+
+void RenderFrameHostImpl::AdvanceFocus(blink::WebFocusType type,
+                                       RenderFrameProxyHost* source_proxy) {
+  DCHECK(!source_proxy ||
+         (source_proxy->GetProcess()->GetID() == GetProcess()->GetID()));
+  int32_t source_proxy_routing_id = MSG_ROUTING_NONE;
+  if (source_proxy)
+    source_proxy_routing_id = source_proxy->GetRoutingID();
+  Send(
+      new FrameMsg_AdvanceFocus(GetRoutingID(), type, source_proxy_routing_id));
 }
 
 void RenderFrameHostImpl::ExtendSelectionAndDelete(size_t before,

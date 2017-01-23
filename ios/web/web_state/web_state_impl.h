@@ -19,13 +19,12 @@
 #include "base/values.h"
 #import "ios/web/navigation/navigation_manager_delegate.h"
 #import "ios/web/navigation/navigation_manager_impl.h"
-#import "ios/web/net/request_tracker_impl.h"
 #import "ios/web/public/java_script_dialog_callback.h"
 #include "ios/web/public/java_script_dialog_type.h"
 #import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state/web_state_delegate.h"
 #include "url/gurl.h"
 
-@protocol CRWRequestTrackerDelegate;
 @class CRWWebController;
 @protocol CRWWebViewProxy;
 @class NSURLRequest;
@@ -45,7 +44,6 @@ struct LoadCommittedDetails;
 class NavigationManager;
 class ImageDataFetcher;
 class WebInterstitialImpl;
-class WebStateDelegate;
 class WebStateFacadeDelegate;
 class WebStatePolicyDecider;
 class WebUIIOS;
@@ -93,6 +91,9 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
 
   // Notifies the observers that the history state of the current page changed.
   void OnHistoryStateChanged();
+
+  // Notifies the observers that the render process was terminated.
+  void OnRenderProcessGone();
 
   // Called when a script command is received.
   // Returns true if the command was handled.
@@ -192,27 +193,6 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   // allowed to continue by asking its policy deciders. Defaults to true.
   bool ShouldAllowResponse(NSURLResponse* response);
 
-  // Request tracker management. For now, this exposes the RequestTracker for
-  // embedders to use.
-  // TODO(stuartmorgan): RequestTracker should become an internal detail of this
-  // class.
-
-  // Create a new tracker using |delegate| as its delegate.
-  void InitializeRequestTracker(id<CRWRequestTrackerDelegate> delegate);
-
-  // Close the request tracker and delete it.
-  void CloseRequestTracker();
-
-  // Returns the tracker for this WebStateImpl.
-  RequestTrackerImpl* GetRequestTracker();
-
-  // Lazily creates (if necessary) and returns |request_group_id_|.
-  // IMPORTANT: This should not be used for anything other than associating this
-  // instance to network requests.
-  // This function is only intended to be used in web/.
-  // TODO(stuartmorgan): Move this method in an implementation file in web/.
-  NSString* GetRequestGroupID();
-
   // WebState:
   WebStateDelegate* GetDelegate() override;
   void SetDelegate(WebStateDelegate* delegate) override;
@@ -274,6 +254,12 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
                            NSString* default_prompt_text,
                            const DialogClosedCallback& callback);
 
+  // Notifies the delegate that request receives an authentication challenge
+  // and is unable to respond using cached credentials.
+  void OnAuthRequired(NSURLProtectionSpace* protection_space,
+                      NSURLCredential* proposed_credential,
+                      const WebStateDelegate::AuthCallback& callback);
+
   // Cancels all dialogs associated with this web_state.
   void CancelDialogs();
 
@@ -295,7 +281,7 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
  private:
   // Creates a WebUIIOS object for |url| that is owned by the caller. Returns
   // nullptr if |url| does not correspond to a WebUI page.
-  WebUIIOS* CreateWebUIIOS(const GURL& url);
+  std::unique_ptr<web::WebUIIOS> CreateWebUIIOS(const GURL& url);
 
   // Updates the HTTP response headers for the main page using the headers
   // passed to the OnHttpResponseHeadersReceived() function below.
@@ -350,14 +336,6 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
 
   // Returned by reference.
   base::string16 empty_string16_;
-
-  // Request tracker associted with this object.
-  scoped_refptr<RequestTrackerImpl> request_tracker_;
-
-  // A number identifying this object. This number is injected into the user
-  // agent to allow the network layer to know which web view requests originated
-  // from.
-  base::scoped_nsobject<NSString> request_group_id_;
 
   // Callbacks associated to command prefixes.
   std::map<std::string, ScriptCommandCallback> script_command_callbacks_;

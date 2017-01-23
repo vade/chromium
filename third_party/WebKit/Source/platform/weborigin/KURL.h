@@ -136,9 +136,9 @@ class PLATFORM_EXPORT KURL {
 
   String baseAsString() const;
 
-  // Returns true if the current URL's protocol is the same as the null-
-  // terminated ASCII argument. The argument must be lower-case.
-  bool protocolIs(const char*) const;
+  // Returns true if the current URL's protocol is the same as the StringView
+  // argument. The argument must be lower-case.
+  bool protocolIs(const StringView protocol) const;
   bool protocolIsData() const { return protocolIs("data"); }
   // This includes at least about:blank and about:srcdoc.
   bool protocolIsAbout() const { return protocolIs("about"); }
@@ -190,6 +190,8 @@ class PLATFORM_EXPORT KURL {
   const KURL* innerURL() const { return m_innerURL.get(); }
 
   bool isSafeToSendToAnotherThread() const;
+
+  bool whitespaceRemoved() const { return m_parsed.whitespace_removed; }
 
  private:
   void init(const KURL& base,

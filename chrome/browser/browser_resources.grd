@@ -102,6 +102,8 @@
       <include name="IDR_BLUETOOTH_INTERNALS_CSS" file="resources\bluetooth_internals\bluetooth_internals.css" type="BINDATA" compress="gzip" />
       <include name="IDR_BLUETOOTH_INTERNALS_ADAPTER_BROKER_JS" file="resources\bluetooth_internals\adapter_broker.js" type="BINDATA" compress="gzip" />
       <include name="IDR_BLUETOOTH_INTERNALS_ADAPTER_PAGE_JS" file="resources\bluetooth_internals\adapter_page.js" type="BINDATA" compress="gzip" />
+      <include name="IDR_BLUETOOTH_INTERNALS_CHARACTERISTIC_LIST_JS" file="resources\bluetooth_internals\characteristic_list.js" type="BINDATA" compress="gzip" />
+      <include name="IDR_BLUETOOTH_INTERNALS_DEVICE_BROKER_JS" file="resources\bluetooth_internals\device_broker.js" type="BINDATA" compress="gzip" />
       <include name="IDR_BLUETOOTH_INTERNALS_DEVICE_COLLECTION_JS" file="resources\bluetooth_internals\device_collection.js" type="BINDATA" compress="gzip" />
       <include name="IDR_BLUETOOTH_INTERNALS_DEVICE_DETAILS_PAGE_JS" file="resources\bluetooth_internals\device_details_page.js" type="BINDATA" compress="gzip" />
       <include name="IDR_BLUETOOTH_INTERNALS_DEVICE_TABLE_JS" file="resources\bluetooth_internals\device_table.js" type="BINDATA" compress="gzip" />
@@ -259,6 +261,8 @@
         <include name="IDR_MD_BOOKMARKS_ITEM_JS" file="resources\md_bookmarks\item.js" type="BINDATA" />
         <include name="IDR_MD_BOOKMARKS_LIST_HTML" file="resources\md_bookmarks\list.html" type="BINDATA" />
         <include name="IDR_MD_BOOKMARKS_LIST_JS" file="resources\md_bookmarks\list.js" type="BINDATA" />
+        <include name="IDR_MD_BOOKMARKS_ROUTER_HTML" file="resources\md_bookmarks\router.html" type="BINDATA" />
+        <include name="IDR_MD_BOOKMARKS_ROUTER_JS" file="resources\md_bookmarks\router.js" type="BINDATA" />
         <include name="IDR_MD_BOOKMARKS_SHARED_STYLE_HTML" file="resources\md_bookmarks\shared_style.html" type="BINDATA" />
         <include name="IDR_MD_BOOKMARKS_SHARED_VARS_HTML" file="resources\md_bookmarks\shared_vars.html" type="BINDATA" />
         <include name="IDR_MD_BOOKMARKS_SIDEBAR_HTML" file="resources\md_bookmarks\sidebar.html" type="BINDATA" />
@@ -301,6 +305,8 @@
             <include name="IDR_MD_HISTORY_LAZY_LOAD_HTML" file="resources\md_history\lazy_load.html" type="BINDATA" />
             <include name="IDR_MD_HISTORY_LIST_CONTAINER_HTML" file="resources\md_history\list_container.html" type="BINDATA" />
             <include name="IDR_MD_HISTORY_LIST_CONTAINER_JS" file="resources\md_history\list_container.js" type="BINDATA" />
+            <include name="IDR_MD_HISTORY_QUERY_MANAGER_HTML" file="resources\md_history\query_manager.html" type="BINDATA" />
+            <include name="IDR_MD_HISTORY_QUERY_MANAGER_JS" file="resources\md_history\query_manager.js" type="BINDATA" />
             <include name="IDR_MD_HISTORY_ROUTER_HTML" file="resources\md_history\router.html" type="BINDATA" />
             <include name="IDR_MD_HISTORY_ROUTER_JS" file="resources\md_history\router.js" type="BINDATA" />
             <include name="IDR_MD_HISTORY_SEARCHED_LABEL_HTML" file="resources\md_history\searched_label.html" type="BINDATA" />
@@ -403,6 +409,8 @@
                  file="resources\print_preview\images\printer.png" type="BINDATA" />
         <include name="IDR_PRINT_PREVIEW_IMAGES_PRINTER_SHARED"
                  file="resources\print_preview\images\printer_shared.png" type="BINDATA" />
+        <include name="IDR_PRINT_PREVIEW_IMAGES_ENTERPRISE_PRINTER"
+                 file="../../ui/webui/resources/images/business.svg" type="BINDATA" />
         <include name="IDR_PRINT_PREVIEW_IMAGES_GOOGLE_DOC"
                  file="resources\print_preview\images\google_doc.png" type="BINDATA" />
         <include name="IDR_PRINT_PREVIEW_IMAGES_PDF"

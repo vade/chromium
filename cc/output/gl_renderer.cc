@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <set>
 #include <string>
 #include <vector>
@@ -403,6 +404,7 @@ GLRenderer::GLRenderer(const RendererSettings* settings,
   use_blend_equation_advanced_ = context_caps.blend_equation_advanced;
   use_blend_equation_advanced_coherent_ =
       context_caps.blend_equation_advanced_coherent;
+  use_occlusion_query_ = context_caps.occlusion_query;
 
   InitializeSharedObjects();
 }
@@ -488,7 +490,9 @@ void GLRenderer::ClearFramebuffer(DrawingFrame* frame) {
   else
     gl_->ClearColor(0, 0, 1, 1);
 
-  bool always_clear = false;
+  gl_->ClearStencil(0);
+
+  bool always_clear = overdraw_feedback_;
 #ifndef NDEBUG
   always_clear = true;
 #endif
@@ -605,7 +609,8 @@ void GLRenderer::DrawDebugBorderQuad(const DrawingFrame* frame,
 
   static float gl_matrix[16];
   const Program* program = GetProgram(ProgramKey::DebugBorder());
-  DCHECK(program && (program->initialized() || IsContextLost()));
+  DCHECK(program);
+  DCHECK(program->initialized() || IsContextLost());
   SetUseProgram(program->program());
 
   // Use the full quad_rect for debug quads to not move the edges based on
@@ -2083,6 +2088,74 @@ void GLRenderer::DrawContentQuadNoAA(const DrawingFrame* frame,
   gl_->DrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
 }
 
+// TODO(ccameron): This has been replicated in ui/gfx/color_transform.cc. Delete
+// one of the instances.
+void ComputeYUVToRGBMatrices(YUVVideoDrawQuad::ColorSpace color_space,
+                             uint32_t bits_per_channel,
+                             float resource_multiplier,
+                             float resource_offset,
+                             float* yuv_to_rgb_multiplied,
+                             float* yuv_adjust_with_offset) {
+  // These values are magic numbers that are used in the transformation from YUV
+  // to RGB color values.  They are taken from the following webpage:
+  // http://www.fourcc.org/fccyvrgb.php
+  float yuv_to_rgb_rec601[9] = {
+      1.164f, 1.164f, 1.164f, 0.0f, -.391f, 2.018f, 1.596f, -.813f, 0.0f,
+  };
+  float yuv_to_rgb_jpeg[9] = {
+      1.f, 1.f, 1.f, 0.0f, -.34414f, 1.772f, 1.402f, -.71414f, 0.0f,
+  };
+  float yuv_to_rgb_rec709[9] = {
+      1.164f, 1.164f, 1.164f, 0.0f, -0.213f, 2.112f, 1.793f, -0.533f, 0.0f,
+  };
+
+  // They are used in the YUV to RGBA conversion formula:
+  //   Y - 16   : Gives 16 values of head and footroom for overshooting
+  //   U - 128  : Turns unsigned U into signed U [-128,127]
+  //   V - 128  : Turns unsigned V into signed V [-128,127]
+  float yuv_adjust_constrained[3] = {
+      -16.f, -128.f, -128.f,
+  };
+
+  // Same as above, but without the head and footroom.
+  float yuv_adjust_full[3] = {
+      0.0f, -128.f, -128.f,
+  };
+
+  float* yuv_to_rgb = NULL;
+  float* yuv_adjust = NULL;
+
+  switch (color_space) {
+    case YUVVideoDrawQuad::REC_601:
+      yuv_to_rgb = yuv_to_rgb_rec601;
+      yuv_adjust = yuv_adjust_constrained;
+      break;
+    case YUVVideoDrawQuad::REC_709:
+      yuv_to_rgb = yuv_to_rgb_rec709;
+      yuv_adjust = yuv_adjust_constrained;
+      break;
+    case YUVVideoDrawQuad::JPEG:
+      yuv_to_rgb = yuv_to_rgb_jpeg;
+      yuv_adjust = yuv_adjust_full;
+      break;
+  }
+
+  // Formula according to BT.601-7 section 2.5.3.
+  DCHECK_LE(YUVVideoDrawQuad::kMinBitsPerChannel, bits_per_channel);
+  DCHECK_LE(bits_per_channel, YUVVideoDrawQuad::kMaxBitsPerChannel);
+  float adjustment_multiplier =
+      (1 << (bits_per_channel - 8)) * 1.0f / ((1 << bits_per_channel) - 1);
+
+  for (int i = 0; i < 9; ++i)
+    yuv_to_rgb_multiplied[i] = yuv_to_rgb[i] * resource_multiplier;
+
+  for (int i = 0; i < 3; ++i) {
+    yuv_adjust_with_offset[i] =
+        yuv_adjust[i] * adjustment_multiplier / resource_multiplier -
+        resource_offset;
+  }
+}
+
 void GLRenderer::DrawYUVVideoQuad(const DrawingFrame* frame,
                                   const YUVVideoDrawQuad* quad,
                                   const gfx::QuadF* clip_region) {
@@ -2091,13 +2164,17 @@ void GLRenderer::DrawYUVVideoQuad(const DrawingFrame* frame,
   TexCoordPrecision tex_coord_precision = TexCoordPrecisionRequired(
       gl_, &highp_threshold_cache_, highp_threshold_min_,
       quad->shared_quad_state->visible_quad_layer_rect.bottom_right());
-
-  bool use_alpha_plane = quad->a_plane_resource_id() != 0;
-  bool use_nv12 = quad->v_plane_resource_id() == quad->u_plane_resource_id();
-  bool use_color_lut =
-      base::FeatureList::IsEnabled(media::kVideoColorManagement);
-  DCHECK(!(use_nv12 && use_alpha_plane));
-
+  YUVAlphaTextureMode alpha_texture_mode = quad->a_plane_resource_id()
+                                               ? YUV_HAS_ALPHA_TEXTURE
+                                               : YUV_NO_ALPHA_TEXTURE;
+  UVTextureMode uv_texture_mode =
+      quad->v_plane_resource_id() == quad->u_plane_resource_id()
+          ? UV_TEXTURE_MODE_UV
+          : UV_TEXTURE_MODE_U_V;
+  ColorConversionMode color_conversion_mode =
+      base::FeatureList::IsEnabled(media::kVideoColorManagement)
+          ? COLOR_CONVERSION_MODE_LUT_FROM_YUV
+          : COLOR_CONVERSION_MODE_NONE;
   ResourceProvider::ScopedSamplerGL y_plane_lock(
       resource_provider_, quad->y_plane_resource_id(), GL_TEXTURE1, GL_LINEAR);
   ResourceProvider::ScopedSamplerGL u_plane_lock(
@@ -2105,14 +2182,15 @@ void GLRenderer::DrawYUVVideoQuad(const DrawingFrame* frame,
   DCHECK_EQ(y_plane_lock.target(), u_plane_lock.target());
   // TODO(jbauman): Use base::Optional when available.
   std::unique_ptr<ResourceProvider::ScopedSamplerGL> v_plane_lock;
-  if (!use_nv12) {
+
+  if (uv_texture_mode == UV_TEXTURE_MODE_U_V) {
     v_plane_lock.reset(new ResourceProvider::ScopedSamplerGL(
         resource_provider_, quad->v_plane_resource_id(), GL_TEXTURE3,
         GL_LINEAR));
     DCHECK_EQ(y_plane_lock.target(), v_plane_lock->target());
   }
   std::unique_ptr<ResourceProvider::ScopedSamplerGL> a_plane_lock;
-  if (use_alpha_plane) {
+  if (alpha_texture_mode == YUV_HAS_ALPHA_TEXTURE) {
     a_plane_lock.reset(new ResourceProvider::ScopedSamplerGL(
         resource_provider_, quad->a_plane_resource_id(), GL_TEXTURE4,
         GL_LINEAR));
@@ -2122,50 +2200,11 @@ void GLRenderer::DrawYUVVideoQuad(const DrawingFrame* frame,
   // All planes must have the same sampler type.
   SamplerType sampler = SamplerTypeFromTextureTarget(y_plane_lock.target());
 
-  int matrix_location = -1;
-  int ya_tex_scale_location = -1;
-  int ya_tex_offset_location = -1;
-  int uv_tex_scale_location = -1;
-  int uv_tex_offset_location = -1;
-  int ya_clamp_rect_location = -1;
-  int uv_clamp_rect_location = -1;
-  int y_texture_location = -1;
-  int u_texture_location = -1;
-  int v_texture_location = -1;
-  int uv_texture_location = -1;
-  int a_texture_location = -1;
-  int lut_texture_location = -1;
-  int yuv_matrix_location = -1;
-  int yuv_adj_location = -1;
-  int alpha_location = -1;
-  int resource_multiplier_location = -1;
-  int resource_offset_location = -1;
-  const Program* program = GetProgram(ProgramKey::YUVVideo(
-      tex_coord_precision, sampler,
-      use_alpha_plane ? YUV_HAS_ALPHA_TEXTURE : YUV_NO_ALPHA_TEXTURE,
-      use_nv12 ? UV_TEXTURE_MODE_UV : UV_TEXTURE_MODE_U_V,
-      use_color_lut ? COLOR_CONVERSION_MODE_2D_LUT_AS_3D_FROM_YUV
-                    : COLOR_CONVERSION_MODE_NONE));
+  const Program* program = GetProgram(
+      ProgramKey::YUVVideo(tex_coord_precision, sampler, alpha_texture_mode,
+                           uv_texture_mode, color_conversion_mode));
   DCHECK(program && (program->initialized() || IsContextLost()));
   SetUseProgram(program->program());
-  matrix_location = program->matrix_location();
-  ya_tex_scale_location = program->ya_tex_scale_location();
-  ya_tex_offset_location = program->ya_tex_offset_location();
-  uv_tex_scale_location = program->uv_tex_scale_location();
-  uv_tex_offset_location = program->uv_tex_offset_location();
-  y_texture_location = program->y_texture_location();
-  u_texture_location = program->u_texture_location();
-  v_texture_location = program->v_texture_location();
-  uv_texture_location = program->uv_texture_location();
-  a_texture_location = program->a_texture_location();
-  lut_texture_location = program->lut_texture_location();
-  yuv_matrix_location = program->yuv_matrix_location();
-  yuv_adj_location = program->yuv_adj_location();
-  ya_clamp_rect_location = program->ya_clamp_rect_location();
-  uv_clamp_rect_location = program->uv_clamp_rect_location();
-  alpha_location = program->alpha_location();
-  resource_multiplier_location = program->resource_multiplier_location();
-  resource_offset_location = program->resource_offset_location();
 
   gfx::SizeF ya_tex_scale(1.0f, 1.0f);
   gfx::SizeF uv_tex_scale(1.0f, 1.0f);
@@ -2196,13 +2235,13 @@ void GLRenderer::DrawYUVVideoQuad(const DrawingFrame* frame,
   float uv_vertex_tex_scale_y =
       quad->uv_tex_coord_rect.height() * uv_tex_scale.height();
 
-  gl_->Uniform2f(ya_tex_scale_location, ya_vertex_tex_scale_x,
+  gl_->Uniform2f(program->ya_tex_scale_location(), ya_vertex_tex_scale_x,
                  ya_vertex_tex_scale_y);
-  gl_->Uniform2f(ya_tex_offset_location, ya_vertex_tex_translate_x,
+  gl_->Uniform2f(program->ya_tex_offset_location(), ya_vertex_tex_translate_x,
                  ya_vertex_tex_translate_y);
-  gl_->Uniform2f(uv_tex_scale_location, uv_vertex_tex_scale_x,
+  gl_->Uniform2f(program->uv_tex_scale_location(), uv_vertex_tex_scale_x,
                  uv_vertex_tex_scale_y);
-  gl_->Uniform2f(uv_tex_offset_location, uv_vertex_tex_translate_x,
+  gl_->Uniform2f(program->uv_tex_offset_location(), uv_vertex_tex_translate_x,
                  uv_vertex_tex_translate_y);
 
   gfx::RectF ya_clamp_rect(ya_vertex_tex_translate_x, ya_vertex_tex_translate_y,
@@ -2213,98 +2252,44 @@ void GLRenderer::DrawYUVVideoQuad(const DrawingFrame* frame,
                            uv_vertex_tex_scale_x, uv_vertex_tex_scale_y);
   uv_clamp_rect.Inset(0.5f * uv_tex_scale.width(),
                       0.5f * uv_tex_scale.height());
-  gl_->Uniform4f(ya_clamp_rect_location, ya_clamp_rect.x(), ya_clamp_rect.y(),
-                 ya_clamp_rect.right(), ya_clamp_rect.bottom());
-  gl_->Uniform4f(uv_clamp_rect_location, uv_clamp_rect.x(), uv_clamp_rect.y(),
-                 uv_clamp_rect.right(), uv_clamp_rect.bottom());
+  gl_->Uniform4f(program->ya_clamp_rect_location(), ya_clamp_rect.x(),
+                 ya_clamp_rect.y(), ya_clamp_rect.right(),
+                 ya_clamp_rect.bottom());
+  gl_->Uniform4f(program->uv_clamp_rect_location(), uv_clamp_rect.x(),
+                 uv_clamp_rect.y(), uv_clamp_rect.right(),
+                 uv_clamp_rect.bottom());
 
-  gl_->Uniform1i(y_texture_location, 1);
-  if (use_nv12) {
-    gl_->Uniform1i(uv_texture_location, 2);
+  gl_->Uniform1i(program->y_texture_location(), 1);
+  if (uv_texture_mode == UV_TEXTURE_MODE_UV) {
+    gl_->Uniform1i(program->uv_texture_location(), 2);
   } else {
-    gl_->Uniform1i(u_texture_location, 2);
-    gl_->Uniform1i(v_texture_location, 3);
+    gl_->Uniform1i(program->u_texture_location(), 2);
+    gl_->Uniform1i(program->v_texture_location(), 3);
   }
-  if (use_alpha_plane)
-    gl_->Uniform1i(a_texture_location, 4);
+  if (alpha_texture_mode == YUV_HAS_ALPHA_TEXTURE)
+    gl_->Uniform1i(program->a_texture_location(), 4);
 
-  // These values are magic numbers that are used in the transformation from YUV
-  // to RGB color values.  They are taken from the following webpage:
-  // http://www.fourcc.org/fccyvrgb.php
-  float yuv_to_rgb_rec601[9] = {
-      1.164f, 1.164f, 1.164f, 0.0f, -.391f, 2.018f, 1.596f, -.813f, 0.0f,
-  };
-  float yuv_to_rgb_jpeg[9] = {
-      1.f, 1.f, 1.f, 0.0f, -.34414f, 1.772f, 1.402f, -.71414f, 0.0f,
-  };
-  float yuv_to_rgb_rec709[9] = {
-      1.164f, 1.164f, 1.164f, 0.0f, -0.213f, 2.112f, 1.793f, -0.533f, 0.0f,
-  };
-
-  // They are used in the YUV to RGBA conversion formula:
-  //   Y - 16   : Gives 16 values of head and footroom for overshooting
-  //   U - 128  : Turns unsigned U into signed U [-128,127]
-  //   V - 128  : Turns unsigned V into signed V [-128,127]
-  float yuv_adjust_constrained[3] = {
-      -16.f, -128.f, -128.f,
-  };
-
-  // Same as above, but without the head and footroom.
-  float yuv_adjust_full[3] = {
-      0.0f, -128.f, -128.f,
-  };
-
-  float* yuv_to_rgb = NULL;
-  float* yuv_adjust = NULL;
-
-  switch (quad->color_space) {
-    case YUVVideoDrawQuad::REC_601:
-      yuv_to_rgb = yuv_to_rgb_rec601;
-      yuv_adjust = yuv_adjust_constrained;
-      break;
-    case YUVVideoDrawQuad::REC_709:
-      yuv_to_rgb = yuv_to_rgb_rec709;
-      yuv_adjust = yuv_adjust_constrained;
-      break;
-    case YUVVideoDrawQuad::JPEG:
-      yuv_to_rgb = yuv_to_rgb_jpeg;
-      yuv_adjust = yuv_adjust_full;
-      break;
-  }
-
-  float yuv_to_rgb_multiplied[9];
-  float yuv_adjust_with_offset[3];
-
-  // Formula according to BT.601-7 section 2.5.3.
-  DCHECK_LE(YUVVideoDrawQuad::kMinBitsPerChannel, quad->bits_per_channel);
-  DCHECK_LE(quad->bits_per_channel, YUVVideoDrawQuad::kMaxBitsPerChannel);
-  float adjustment_multiplier = (1 << (quad->bits_per_channel - 8)) * 1.0f /
-                                ((1 << quad->bits_per_channel) - 1);
-
-  for (int i = 0; i < 9; ++i)
-    yuv_to_rgb_multiplied[i] = yuv_to_rgb[i] * quad->resource_multiplier;
-
-  for (int i = 0; i < 3; ++i) {
-    yuv_adjust_with_offset[i] =
-        yuv_adjust[i] * adjustment_multiplier / quad->resource_multiplier -
-        quad->resource_offset;
-  }
-
-  if (lut_texture_location != -1) {
+  if (color_conversion_mode == COLOR_CONVERSION_MODE_LUT_FROM_YUV) {
+    const int kLUTSize = 17;
     unsigned int lut_texture = color_lut_cache_.GetLUT(
-        quad->video_color_space, frame->device_color_space, 17);
+        quad->video_color_space, frame->device_color_space, kLUTSize);
     gl_->ActiveTexture(GL_TEXTURE5);
     gl_->BindTexture(GL_TEXTURE_2D, lut_texture);
-    gl_->Uniform1i(lut_texture_location, 5);
+    gl_->Uniform1i(program->lut_texture_location(), 5);
+    gl_->Uniform1f(program->lut_size_location(), kLUTSize);
     gl_->ActiveTexture(GL_TEXTURE0);
-  }
-
-  if (resource_multiplier_location != -1) {
-    gl_->Uniform1f(resource_multiplier_location, quad->resource_multiplier);
-  }
-
-  if (resource_offset_location != -1) {
-    gl_->Uniform1f(resource_offset_location, quad->resource_offset);
+    gl_->Uniform1f(program->resource_multiplier_location(),
+                   quad->resource_multiplier);
+    gl_->Uniform1f(program->resource_offset_location(), quad->resource_offset);
+  } else {
+    float yuv_to_rgb_multiplied[9] = {0};
+    float yuv_adjust_with_offset[3] = {0};
+    ComputeYUVToRGBMatrices(quad->color_space, quad->bits_per_channel,
+                            quad->resource_multiplier, quad->resource_offset,
+                            yuv_to_rgb_multiplied, yuv_adjust_with_offset);
+    gl_->UniformMatrix3fv(program->yuv_matrix_location(), 1, 0,
+                          yuv_to_rgb_multiplied);
+    gl_->Uniform3fv(program->yuv_adj_location(), 1, yuv_adjust_with_offset);
   }
 
   // The transform and vertex data are used to figure out the extents that the
@@ -2312,19 +2297,12 @@ void GLRenderer::DrawYUVVideoQuad(const DrawingFrame* frame,
   // quad passed in via uniform is the actual geometry that gets used to draw
   // it. This is why this centered rect is used and not the original quad_rect.
   auto tile_rect = gfx::RectF(quad->rect);
-  if (yuv_matrix_location != -1) {
-    gl_->UniformMatrix3fv(yuv_matrix_location, 1, 0, yuv_to_rgb_multiplied);
-  }
 
-  if (yuv_adj_location) {
-    gl_->Uniform3fv(yuv_adj_location, 1, yuv_adjust_with_offset);
-  }
-
-  SetShaderOpacity(quad->shared_quad_state->opacity, alpha_location);
+  SetShaderOpacity(quad->shared_quad_state->opacity, program->alpha_location());
   if (!clip_region) {
     DrawQuadGeometry(frame->projection_matrix,
                      quad->shared_quad_state->quad_to_target_transform,
-                     tile_rect, matrix_location);
+                     tile_rect, program->matrix_location());
   } else {
     float uvs[8] = {0};
     GetScaledUVs(quad->visible_rect, clip_region, uvs);
@@ -2333,7 +2311,7 @@ void GLRenderer::DrawYUVVideoQuad(const DrawingFrame* frame,
     region_quad -= gfx::Vector2dF(0.5f, 0.5f);
     DrawQuadGeometryClippedByQuadF(
         frame, quad->shared_quad_state->quad_to_target_transform, tile_rect,
-        region_quad, matrix_location, uvs);
+        region_quad, program->matrix_location(), uvs);
   }
 }
 
@@ -2448,7 +2426,8 @@ void GLRenderer::FlushTextureQuadCache(BoundGeometry flush_binding) {
     DCHECK_EQ(1u, draw_cache_.matrix_data.size());
     SetBlendEnabled(false);
     const Program* program = GetProgram(ProgramKey::DebugBorder());
-    DCHECK(program && (program->initialized() || IsContextLost()));
+    DCHECK(program);
+    DCHECK(program->initialized() || IsContextLost());
     SetUseProgram(program->program());
 
     gl_->UniformMatrix4fv(
@@ -2588,8 +2567,11 @@ void GLRenderer::FinishDrawingFrame(DrawingFrame* frame) {
     pending_sync_queries_.push_back(std::move(current_sync_query_));
   }
 
-  current_framebuffer_lock_ = nullptr;
   swap_buffer_rect_.Union(frame->root_damage_rect);
+  if (overdraw_feedback_)
+    FlushOverdrawFeedback(frame, swap_buffer_rect_);
+
+  current_framebuffer_lock_ = nullptr;
 
   gl_->Disable(GL_BLEND);
   blend_shadow_ = false;
@@ -2827,6 +2809,9 @@ void GLRenderer::GetFramebufferPixelsAsync(
   if (rect.IsEmpty())
     return;
 
+  if (overdraw_feedback_)
+    FlushOverdrawFeedback(frame, rect);
+
   gfx::Rect window_rect = MoveFromDrawToWindowSpace(frame, rect);
   DCHECK_GE(window_rect.x(), 0);
   DCHECK_GE(window_rect.y(), 0);
@@ -3018,7 +3003,13 @@ void GLRenderer::BindFramebufferToOutputSurface(DrawingFrame* frame) {
   current_framebuffer_lock_ = nullptr;
   output_surface_->BindFramebuffer();
 
-  if (output_surface_->HasExternalStencilTest()) {
+  if (overdraw_feedback_) {
+    // Output surfaces that require an external stencil test should not allow
+    // overdraw feedback by setting |supports_stencil| to false.
+    DCHECK(!output_surface_->HasExternalStencilTest());
+    SetupOverdrawFeedback();
+    SetStencilEnabled(true);
+  } else if (output_surface_->HasExternalStencilTest()) {
     output_surface_->ApplyExternalStencil();
     SetStencilEnabled(true);
   } else {
@@ -3034,7 +3025,6 @@ bool GLRenderer::BindFramebufferToTexture(DrawingFrame* frame,
   // same texture again.
   current_framebuffer_lock_ = nullptr;
 
-  SetStencilEnabled(false);
   gl_->BindFramebuffer(GL_FRAMEBUFFER, offscreen_framebuffer_id_);
   current_framebuffer_lock_ =
       base::MakeUnique<ResourceProvider::ScopedWriteLockGL>(
@@ -3043,10 +3033,33 @@ bool GLRenderer::BindFramebufferToTexture(DrawingFrame* frame,
   unsigned texture_id = current_framebuffer_lock_->texture_id();
   gl_->FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                             texture_id, 0);
+  if (overdraw_feedback_) {
+    if (!offscreen_stencil_renderbuffer_id_)
+      gl_->GenRenderbuffers(1, &offscreen_stencil_renderbuffer_id_);
+    if (texture->size() != offscreen_stencil_renderbuffer_size_) {
+      gl_->BindRenderbuffer(GL_RENDERBUFFER,
+                            offscreen_stencil_renderbuffer_id_);
+      gl_->RenderbufferStorage(GL_RENDERBUFFER, GL_STENCIL_INDEX8,
+                               texture->size().width(),
+                               texture->size().height());
+      gl_->BindRenderbuffer(GL_RENDERBUFFER, 0);
+      offscreen_stencil_renderbuffer_size_ = texture->size();
+    }
+    gl_->FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT,
+                                 GL_RENDERBUFFER,
+                                 offscreen_stencil_renderbuffer_id_);
+  }
 
   DCHECK(gl_->CheckFramebufferStatus(GL_FRAMEBUFFER) ==
              GL_FRAMEBUFFER_COMPLETE ||
          IsContextLost());
+
+  if (overdraw_feedback_) {
+    SetupOverdrawFeedback();
+    SetStencilEnabled(true);
+  } else {
+    SetStencilEnabled(false);
+  }
   return true;
 }
 
@@ -3126,6 +3139,9 @@ void GLRenderer::CleanupSharedObjects() {
 
   if (offscreen_framebuffer_id_)
     gl_->DeleteFramebuffers(1, &offscreen_framebuffer_id_);
+
+  if (offscreen_stencil_renderbuffer_id_)
+    gl_->DeleteRenderbuffers(1, &offscreen_stencil_renderbuffer_id_);
 
   ReleaseRenderPassTextures();
 }
@@ -3457,6 +3473,125 @@ void GLRenderer::ScheduleRenderPassDrawQuad(
   gl_->ScheduleCALayerCHROMIUM(
       texture_id, contents_rect, ca_layer_overlay->background_color,
       ca_layer_overlay->edge_aa_mask, bounds_rect, filter);
+}
+
+void GLRenderer::SetupOverdrawFeedback() {
+  gl_->StencilFunc(GL_ALWAYS, 1, 0xffffffff);
+  // First two values are ignored as test always passes.
+  gl_->StencilOp(GL_KEEP, GL_KEEP, GL_INCR);
+  gl_->StencilMask(0xffffffff);
+}
+
+void GLRenderer::FlushOverdrawFeedback(const DrawingFrame* frame,
+                                       const gfx::Rect& output_rect) {
+  DCHECK(stencil_shadow_);
+
+  // Test only, keep everything.
+  gl_->StencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+
+  EnsureScissorTestDisabled();
+  SetBlendEnabled(true);
+
+  PrepareGeometry(SHARED_BINDING);
+
+  const Program* program = GetProgram(ProgramKey::DebugBorder());
+  DCHECK(program);
+  DCHECK(program->initialized() || IsContextLost());
+  SetUseProgram(program->program());
+
+  gfx::Transform render_matrix;
+  render_matrix.Translate(0.5 * output_rect.width() + output_rect.x(),
+                          0.5 * output_rect.height() + output_rect.y());
+  render_matrix.Scale(output_rect.width(), output_rect.height());
+  static float gl_matrix[16];
+  GLRenderer::ToGLMatrix(&gl_matrix[0],
+                         frame->projection_matrix * render_matrix);
+  gl_->UniformMatrix4fv(program->matrix_location(), 1, false, &gl_matrix[0]);
+
+  // Produce hinting for the amount of overdraw on screen for each pixel by
+  // drawing hint colors to the framebuffer based on the current stencil value.
+  struct {
+    int multiplier;
+    GLenum func;
+    GLint ref;
+    SkColor color;
+  } stencil_tests[] = {
+      {1, GL_EQUAL, 2, 0x2f0000ff},  // Blue: Overdrawn once.
+      {2, GL_EQUAL, 3, 0x2f00ff00},  // Green: Overdrawn twice.
+      {3, GL_EQUAL, 4, 0x3fff0000},  // Pink: Overdrawn three times.
+      {4, GL_LESS, 4, 0x7fff0000},   // Red: Overdrawn four or more times.
+  };
+
+  // Occlusion queries can be expensive, so only collect trace data if we select
+  // cc.debug.overdraw.
+  bool tracing_enabled;
+  TRACE_EVENT_CATEGORY_GROUP_ENABLED(
+      TRACE_DISABLED_BY_DEFAULT("cc.debug.overdraw"), &tracing_enabled);
+
+  // Trace only the root render pass.
+  if (frame->current_render_pass != frame->root_render_pass)
+    tracing_enabled = false;
+
+  // ARB_occlusion_query is required for tracing.
+  if (!use_occlusion_query_)
+    tracing_enabled = false;
+
+  // Use the current surface area as max result. The effect is that overdraw
+  // is reported as a percentage of the output surface size. ie. 2x overdraw
+  // for the whole screen is reported as 200.
+  int max_result = current_surface_size_.GetArea();
+  DCHECK_GT(max_result, 0);
+
+  OverdrawFeedbackCallback overdraw_feedback_callback = base::Bind(
+      &GLRenderer::ProcessOverdrawFeedback, weak_ptr_factory_.GetWeakPtr(),
+      base::Owned(new std::vector<int>), arraysize(stencil_tests), max_result);
+
+  for (const auto& test : stencil_tests) {
+    GLuint query = 0;
+    if (tracing_enabled) {
+      gl_->GenQueriesEXT(1, &query);
+      gl_->BeginQueryEXT(GL_SAMPLES_PASSED_ARB, query);
+    }
+
+    gl_->StencilFunc(test.func, test.ref, 0xffffffff);
+    // Transparent color unless color-coding of overdraw is enabled.
+    Float4 color =
+        PremultipliedColor(settings_->show_overdraw_feedback ? test.color : 0);
+    gl_->Uniform4fv(program->color_location(), 1, color.data);
+    gl_->DrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+
+    if (query) {
+      gl_->EndQueryEXT(GL_SAMPLES_PASSED_ARB);
+      context_support_->SignalQuery(
+          query,
+          base::Bind(overdraw_feedback_callback, query, test.multiplier));
+    }
+  }
+}
+
+void GLRenderer::ProcessOverdrawFeedback(std::vector<int>* overdraw,
+                                         size_t num_expected_results,
+                                         int max_result,
+                                         unsigned query,
+                                         int multiplier) {
+  unsigned result = 0;
+  if (query) {
+    gl_->GetQueryObjectuivEXT(query, GL_QUERY_RESULT_EXT, &result);
+    gl_->DeleteQueriesEXT(1, &query);
+  }
+
+  // Apply multiplier to get the amount of overdraw.
+  overdraw->push_back(result * multiplier);
+
+  // Return early if we are expecting more results.
+  if (overdraw->size() < num_expected_results)
+    return;
+
+  // Report GPU overdraw as a percentage of |max_result|.
+  TRACE_COUNTER1(
+      TRACE_DISABLED_BY_DEFAULT("cc.debug.overdraw"), "GPU Overdraw",
+      (std::accumulate(overdraw->begin(), overdraw->end(), 0) * 100) /
+          max_result);
 }
 
 }  // namespace cc

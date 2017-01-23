@@ -14,6 +14,8 @@ namespace blink {
 class CharacterData;
 class ContainerNode;
 class Document;
+class Element;
+class NodeWithIndex;
 class Text;
 
 // This class is a base class for classes which observe DOM tree mutation
@@ -39,13 +41,20 @@ class CORE_EXPORT SynchronousMutationObserver
   //  - didInsertText(Node*, unsigned offset, unsigned length);
   //  - didRemoveText(Node*, unsigned offset, unsigned length);
 
+  // Called just after attribute is changed.
+  virtual void didChangeAttribute(const Element&);
+
   // Called after child nodes changed.
   virtual void didChangeChildren(const ContainerNode&);
 
-  // TODO(yosin): We should use |const Text& oldNode|.
-  // Called after characters in |oldNode| is appended at |offset| in
-  // |oldNdoe->previousSibling()|.
-  virtual void didMergeTextNodes(Text& oldNode, unsigned offset);
+  // Called after characters in |nodeToBeRemoved| is appended into |mergedNode|.
+  // |oldLength| holds length of |mergedNode| before merge.
+  virtual void didMergeTextNodes(const Text& mergedNode,
+                                 const NodeWithIndex& nodeToBeRemovedWithIndex,
+                                 unsigned oldLength);
+
+  // Called just after node tree |root| is moved to new document.
+  virtual void didMoveTreeToNewDocument(const Node& root);
 
   // Called when |Text| node is split, next sibling |oldNode| contains
   // characters after split point.

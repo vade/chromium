@@ -80,28 +80,11 @@ class MarkingVisitorImpl {
         const_cast<void*>(closure), iterationCallback, iterationDoneCallback);
   }
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   inline bool weakTableRegistered(const void* closure) {
     return toDerived()->heap().weakTableRegistered(closure);
   }
 #endif
-
-  inline void registerMovingObjectReference(MovableReference* slot) {
-    if (toDerived()->getMarkingMode() !=
-        VisitorMarkingMode::GlobalMarkingWithCompaction)
-      return;
-    toDerived()->heap().registerMovingObjectReference(slot);
-  }
-
-  inline void registerMovingObjectCallback(MovableReference reference,
-                                           MovingObjectCallback callback,
-                                           void* callbackData) {
-    if (toDerived()->getMarkingMode() !=
-        VisitorMarkingMode::GlobalMarkingWithCompaction)
-      return;
-    toDerived()->heap().registerMovingObjectCallback(reference, callback,
-                                                     callbackData);
-  }
 
   inline bool ensureMarked(const void* objectPointer) {
     if (!objectPointer)
@@ -110,7 +93,7 @@ class MarkingVisitorImpl {
     HeapObjectHeader* header = HeapObjectHeader::fromPayload(objectPointer);
     if (header->isMarked())
       return false;
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
     toDerived()->markNoTracing(objectPointer);
 #else
     // Inline what the above markNoTracing() call expands to,

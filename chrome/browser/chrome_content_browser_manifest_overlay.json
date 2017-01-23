@@ -11,6 +11,7 @@
           "chrome::mojom::FieldTrialRecorder",
           "extensions::StashService",
           "metrics::mojom::LeakDetector",
+          "mojom::ModuleEventSink",
           "rappor::mojom::RapporRecorder",
           "startup_metric_utils::mojom::StartupMetricHost",
           "translate::mojom::ContentTranslateDriver"
@@ -59,6 +60,7 @@
           "autofill::mojom::PasswordManagerDriver",
           "blink::mojom::ShareService",
           "bluetooth::mojom::AdapterFactory",
+          "chrome::mojom::PrerenderCanceler",
           "device::usb::ChooserService",
           "device::usb::DeviceManager",
           "contextual_search::mojom::ContextualSearchJsApiService",
@@ -69,8 +71,6 @@
           "media_router::mojom::MediaRouter",
           "mojom::OmniboxPageHandler",
           "password_manager::mojom::CredentialManager",
-          "shape_detection::mojom::BarcodeDetection",
-          "shape_detection::mojom::TextDetection",
           "translate::mojom::ContentTranslateDriver",
 
           // TODO(beng): These should be moved to a separate capability.

@@ -27,6 +27,8 @@ namespace blink {
 class PLATFORM_EXPORT TransformPaintPropertyNode
     : public RefCounted<TransformPaintPropertyNode> {
  public:
+  // This node is really a sentinel, and does not represent a real transform
+  // space.
   static TransformPaintPropertyNode* root();
 
   static PassRefPtr<TransformPaintPropertyNode> create(
@@ -109,6 +111,8 @@ class PLATFORM_EXPORT TransformPaintPropertyNode
            m_directCompositingReasons == o.m_directCompositingReasons &&
            m_compositorElementId == o.m_compositorElementId;
   }
+
+  String toTreeString() const;
 #endif
 
   String toString() const;

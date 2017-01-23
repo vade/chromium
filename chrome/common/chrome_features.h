@@ -68,6 +68,8 @@ extern const base::Feature kHappinessTrackingSystem;
 extern const base::Feature kLinuxObsoleteSystemIsEndOfTheLine;
 #endif
 
+extern const base::Feature kLsdPermissionPrompt;
+
 extern const base::Feature kMaterialDesignBookmarks;
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
@@ -84,6 +86,10 @@ extern const base::Feature kMediaRemotingEncrypted;
 #endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
 
 extern const base::Feature kModalPermissionPrompts;
+
+#if defined(OS_WIN)
+extern const base::Feature kModuleDatabase;
+#endif
 
 #if defined(OS_MACOSX)
 extern const base::Feature kNativeNotifications;

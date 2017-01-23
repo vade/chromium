@@ -37,9 +37,6 @@ class CONTENT_EXPORT URLResponseBodyConsumer final
       mojo::ScopedDataPipeConsumerHandle handle,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
-  // Starts watching the handle.
-  void Start();
-
   // Sets the completion status. The completion status is dispatched to the
   // ResourceDispatcher when the both following conditions hold:
   //  1) This function has been called and the completion status is set, and
@@ -53,6 +50,13 @@ class CONTENT_EXPORT URLResponseBodyConsumer final
 
   void SetDefersLoading();
   void UnsetDefersLoading();
+
+  // The maximal number of bytes consumed in a task. When there are more bytes
+  // in the data pipe, they will be consumed in following tasks. Setting a too
+  // small number will generate ton of tasks but setting a too large number will
+  // lead to thread janks. Also, some clients cannot handle too large chunks
+  // (512k for example).
+  static constexpr uint32_t kMaxNumConsumedBytesInTask = 64 * 1024;
 
  private:
   friend class base::RefCounted<URLResponseBodyConsumer>;

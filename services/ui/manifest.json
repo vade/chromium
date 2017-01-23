@@ -48,6 +48,7 @@
           "ui::mojom::Gpu",
           "ui::mojom::IMEServer",
           "ui::mojom::InputDeviceServer",
+          "ui::mojom::UserActivityMonitor",
           "ui::mojom::WindowManagerWindowTreeFactory"
         ],
         "window_tree_host_factory": [
@@ -56,7 +57,7 @@
       },
       "requires": {
         "*": [ "app" ],
-        "catalog": [ "catalog:catalog" ],
+        "catalog": [ "app" ],
         "service_manager": [ "service_manager:all_users" ],
         "ui": [ "ozone" ]
       }

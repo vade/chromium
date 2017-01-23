@@ -899,6 +899,8 @@ component("platform") {
     "graphics/WebGraphicsContext3DProviderWrapper.h",
     "graphics/compositing/PaintArtifactCompositor.cpp",
     "graphics/compositing/PaintArtifactCompositor.h",
+    "graphics/compositing/PropertyTreeManager.cpp",
+    "graphics/compositing/PropertyTreeManager.h",
     "graphics/cpu/arm/WebGLImageConversionNEON.h",
     "graphics/cpu/mips/WebGLImageConversionMSA.h",
     "graphics/cpu/x86/WebGLImageConversionSSE.h",
@@ -1122,7 +1124,6 @@ component("platform") {
     "mhtml/MHTMLParser.h",
     "mojo/BluetoothStructTraits.cpp",
     "mojo/CommonCustomTypesStructTraits.cpp",
-    "mojo/GeometryStructTraits.cpp",
     "mojo/MojoHelper.h",
     "network/ContentSecurityPolicyParsers.cpp",
     "network/ContentSecurityPolicyParsers.h",
@@ -1513,14 +1514,6 @@ component("platform") {
       "/wd4334",  # Result of 32-bit shift implicitly converted to 64 bits.
       "/wd4724",  # Modulo by 0.
     ]
-
-    # crbug.com/654776: Suppress symbol import warnings.
-    if (is_component_build) {
-      ldflags = [
-        "/ignore:4217",
-        "/ignore:4049",
-      ]
-    }
   } else {
     sources -= [
       "clipboard/ClipboardUtilitiesWin.cpp",
@@ -1698,6 +1691,7 @@ test("blink_platform_unittests") {
     "blob/BlobDataTest.cpp",
     "clipboard/ClipboardUtilitiesTest.cpp",
     "exported/FilePathConversionTest.cpp",
+    "exported/WebStringTest.cpp",
     "feature_policy/FeaturePolicyTest.cpp",
     "fonts/AcceptLanguagesResolverTest.cpp",
     "fonts/FontCacheTest.cpp",
@@ -1776,7 +1770,6 @@ test("blink_platform_unittests") {
     "network/LinkHeaderTest.cpp",
     "network/NetworkUtilsTest.cpp",
     "network/ResourceRequestTest.cpp",
-    "network/ResourceResponseTest.cpp",
     "network/mime/MIMETypeRegistryTest.cpp",
     "scheduler/base/intrusive_heap_unittest.cc",
     "scheduler/base/queueing_time_estimator_unittest.cc",
@@ -2009,9 +2002,8 @@ fuzzer_test("mhtml_parser_fuzzer") {
     "mhtml/MHTMLFuzzer.cpp",
   ]
   deps = [
-    ":blink_common",
+    ":blink_fuzzer_test_support",
     ":platform",
-    ":test_support",
   ]
   dict = "//testing/libfuzzer/fuzzers/dicts/mhtml.dict"
   seed_corpus = "//third_party/WebKit/LayoutTests/mhtml"
@@ -2089,6 +2081,7 @@ source_set("unit_tests") {
     "graphics/test/FakeGLES2Interface.h",
     "graphics/test/FakeWebGraphicsContext3DProvider.h",
     "graphics/test/MockImageDecoder.h",
+    "network/ResourceResponseTest.cpp",
   ]
 
   configs += [

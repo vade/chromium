@@ -101,6 +101,7 @@
 #include "chrome/browser/webshare/share_service_impl.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/env_vars.h"
@@ -186,7 +187,6 @@
 #include "device/usb/public/interfaces/chooser_service.mojom.h"
 #include "device/usb/public/interfaces/device_manager.mojom.h"
 #include "extensions/features/features.h"
-#include "gin/v8_initializer.h"
 #include "media/media_features.h"
 #include "net/base/mime_util.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
@@ -201,8 +201,6 @@
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "services/service_manager/public/cpp/interface_registry.h"
 #include "services/service_manager/public/cpp/service.h"
-#include "services/shape_detection/public/interfaces/barcodedetection.mojom.h"
-#include "services/shape_detection/public/interfaces/textdetection.mojom.h"
 #include "storage/browser/fileapi/external_mount_points.h"
 #include "third_party/WebKit/public/platform/modules/webshare/webshare.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -214,6 +212,8 @@
 #if defined(OS_WIN)
 #include "base/strings/string_tokenizer.h"
 #include "chrome/browser/chrome_browser_main_win.h"
+#include "chrome/browser/conflicts/module_database_win.h"
+#include "chrome/browser/conflicts/module_event_sink_impl_win.h"
 #include "sandbox/win/src/sandbox_policy.h"
 #elif defined(OS_MACOSX)
 #include "chrome/browser/chrome_browser_main_mac.h"
@@ -285,6 +285,7 @@
 #if defined(USE_AURA)
 #include "services/service_manager/runner/common/client_util.h"
 #include "services/ui/public/cpp/gpu/gpu.h"
+#include "ui/aura/mus/window_tree_client.h"
 #include "ui/views/mus/mus_client.h"
 #endif
 
@@ -509,6 +510,24 @@ bool RemoveUberHost(GURL* url) {
 
   DCHECK(url->is_valid());
 
+  return true;
+}
+
+// Handles the rewriting of the new tab page URL based on group policy.
+bool HandleNewTabPageLocationOverride(
+    GURL* url,
+    content::BrowserContext* browser_context) {
+  if (!url->SchemeIs(content::kChromeUIScheme) ||
+      url->host() != chrome::kChromeUINewTabHost)
+    return false;
+
+  Profile* profile = Profile::FromBrowserContext(browser_context);
+  std::string ntp_location =
+      profile->GetPrefs()->GetString(prefs::kNewTabPageLocationOverride);
+  if (ntp_location.empty())
+    return false;
+
+  *url = GURL(ntp_location);
   return true;
 }
 
@@ -1445,8 +1464,7 @@ bool IsAutoReloadVisibleOnlyEnabled() {
   return true;
 }
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_WIN) || \
-    defined(OS_ANDROID)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_WIN)
 bool AreExperimentalWebPlatformFeaturesEnabled() {
   const base::CommandLine& browser_command_line =
       *base::CommandLine::ForCurrentProcess();
@@ -2554,6 +2572,11 @@ void ChromeContentBrowserClient::BrowserURLHandlerCreated(
   handler->AddHandlerPair(&WillHandleBrowserAboutURL,
                           BrowserURLHandler::null_handler());
 
+  // The group policy NTP URL handler must be registered before the other NTP
+  // URL handlers below.
+  handler->AddHandlerPair(&HandleNewTabPageLocationOverride,
+                          BrowserURLHandler::null_handler());
+
 #if defined(OS_ANDROID)
   // Handler to rewrite chrome://newtab on Android.
   handler->AddHandlerPair(&chrome::android::HandleAndroidNativePageURL,
@@ -2703,7 +2726,7 @@ gpu::GpuChannelEstablishFactory*
 ChromeContentBrowserClient::GetGpuChannelEstablishFactory() {
 #if defined(USE_AURA)
   if (views::MusClient::Exists())
-    return views::MusClient::Get()->gpu();
+    return views::MusClient::Get()->window_tree_client()->gpu();
 #endif
   return nullptr;
 }
@@ -2925,6 +2948,28 @@ void ChromeContentBrowserClient::ExposeInterfacesToRenderer(
     registry->AddInterface(
         base::Bind(&NetBenchmarking::Create, profile, context));
   }
+#if defined(OS_WIN)
+  if (base::FeatureList::IsEnabled(features::kModuleDatabase)) {
+    // Add the ModuleDatabase interface. This is the interface used by renderer
+    // processes to notify the browser of modules in their address space. It
+    // ultimately drives the chrome://conflicts UI. The process handle is not
+    // yet available at this point so pass in a callback to allow it to be
+    // retrieved at the time the interface is actually created. It is safe to
+    // pass a raw pointer to |render_process_host|: the callback will be invoked
+    // in the context of ModuleDatabase::GetInstance, which is invoked by Mojo
+    // initialization, which occurs while the |render_process_host| is alive.
+    auto get_process = base::Bind(&content::RenderProcessHost::GetHandle,
+                                  base::Unretained(render_process_host));
+    // The ModuleDatabase is a global singleton so passing an unretained pointer
+    // is safe.
+    registry->AddInterface(
+        base::Bind(&ModuleEventSinkImpl::Create, std::move(get_process),
+                   content::PROCESS_TYPE_RENDERER,
+                   base::Unretained(ModuleDatabase::GetInstance())),
+        ui_task_runner);
+  }
+#endif
+
 #if defined(OS_CHROMEOS)
   registry->AddInterface<metrics::mojom::LeakDetector>(
       base::Bind(&metrics::LeakDetectorRemoteController::Create),
@@ -3001,15 +3046,6 @@ void ChromeContentBrowserClient::RegisterRenderFrameMojoInterfaces(
     registry->AddInterface(
         base::Bind(&ForwardShareServiceRequest,
                    web_contents->GetJavaInterfaces()->GetWeakPtr()));
-    if (AreExperimentalWebPlatformFeaturesEnabled()) {
-      registry->AddInterface(
-          web_contents->GetJavaInterfaces()
-              ->CreateInterfaceFactory<
-                  shape_detection::mojom::BarcodeDetection>());
-      registry->AddInterface(web_contents->GetJavaInterfaces()
-                                 ->CreateInterfaceFactory<
-                                     shape_detection::mojom::TextDetection>());
-    }
   }
 #elif defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_WIN)
   // TODO(crbug.com/679127): Enable for MacViews implementation.

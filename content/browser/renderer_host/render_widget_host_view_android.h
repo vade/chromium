@@ -104,7 +104,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   float GetBottomControlsHeight() const override;
   void UpdateCursor(const WebCursor& cursor) override;
   void SetIsLoading(bool is_loading) override;
-  void ImeCancelComposition() override;
   void FocusedNodeChanged(bool is_editable_node,
                           const gfx::Rect& node_bounds_in_screen) override;
   void RenderProcessGone(base::TerminationStatus status,
@@ -141,7 +140,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   void OnSwapCompositorFrame(uint32_t compositor_frame_sink_id,
                              cc::CompositorFrame frame) override;
   void ClearCompositorFrame() override;
-  void SetShowingOverscrollGlow(bool showing_glow) override;
+  void SetIsInVR(bool is_in_vr) override;
+  bool IsInVR() const override;
   void DidOverscroll(const ui::DidOverscrollParams& params) override;
   void DidStopFlinging() override;
   cc::FrameSinkId GetFrameSinkId() override;
@@ -177,7 +177,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   // StylusTextSelectorClient implementation.
   void OnStylusSelectBegin(float x0, float y0, float x1, float y1) override;
   void OnStylusSelectUpdate(float x, float y) override;
-  void OnStylusSelectEnd() override;
+  void OnStylusSelectEnd() override {};
   void OnStylusSelectTap(base::TimeTicks time, float x, float y) override;
 
   // ui::TouchSelectionControllerClient implementation.
@@ -253,6 +253,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   void OnImeCompositionRangeChanged(
       TextInputManager* text_input_manager,
       RenderWidgetHostViewBase* updated_view) override;
+  void OnImeCancelComposition(TextInputManager* text_input_manager,
+                              RenderWidgetHostViewBase* updated_view) override;
 
  private:
   void RunAckCallbacks();
@@ -329,8 +331,9 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   bool is_window_visible_;
   bool is_window_activity_started_;
 
-  // Used to control the appearance of overscroll glow.
-  bool is_showing_overscroll_glow_;
+  // Used to customize behavior for virtual reality mode, such as the
+  // appearance of overscroll glow and the keyboard.
+  bool is_in_vr_;
 
   // ContentViewCoreImpl is our interface to the view system.
   ContentViewCoreImpl* content_view_core_;

@@ -280,17 +280,19 @@ class VisitorHelper {
     Derived::fromHelper(this)->registerWeakMembers(object, object, callback);
   }
 
-  template <typename T>
-  void registerBackingStoreReference(T** slot) {
-    Derived::fromHelper(this)->registerMovingObjectReference(
+  void registerBackingStoreReference(void* slot) {
+    if (getMarkingMode() != VisitorMarkingMode::GlobalMarkingWithCompaction)
+      return;
+    heap().registerMovingObjectReference(
         reinterpret_cast<MovableReference*>(slot));
   }
 
-  template <typename T>
-  void registerBackingStoreCallback(T* backingStore,
+  void registerBackingStoreCallback(void* backingStore,
                                     MovingObjectCallback callback,
                                     void* callbackData) {
-    Derived::fromHelper(this)->registerMovingObjectCallback(
+    if (getMarkingMode() != VisitorMarkingMode::GlobalMarkingWithCompaction)
+      return;
+    heap().registerMovingObjectCallback(
         reinterpret_cast<MovableReference>(backingStore), callback,
         callbackData);
   }
@@ -379,17 +381,11 @@ class PLATFORM_EXPORT Visitor : public VisitorHelper<Visitor> {
   virtual void registerWeakTable(const void*,
                                  EphemeronCallback,
                                  EphemeronCallback) = 0;
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   virtual bool weakTableRegistered(const void*) = 0;
 #endif
 
   virtual bool ensureMarked(const void*) = 0;
-
-  virtual void registerMovingObjectReference(MovableReference*) = 0;
-
-  virtual void registerMovingObjectCallback(MovableReference,
-                                            MovingObjectCallback,
-                                            void*) = 0;
 
   virtual void registerWeakCellWithCallback(void**, WeakCallback) = 0;
 

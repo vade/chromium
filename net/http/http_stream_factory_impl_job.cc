@@ -46,6 +46,7 @@
 #include "net/socket/socks_client_socket_pool.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/ssl_client_socket_pool.h"
+#include "net/socket/stream_socket.h"
 #include "net/spdy/bidirectional_stream_spdy_impl.h"
 #include "net/spdy/spdy_http_stream.h"
 #include "net/spdy/spdy_protocol.h"
@@ -265,6 +266,7 @@ int HttpStreamFactoryImpl::Job::Preconnect(int num_streams) {
   DCHECK_GT(num_streams, 0);
   HttpServerProperties* http_server_properties =
       session_->http_server_properties();
+  // Preconnect one connection if the server supports H2 or QUIC.
   if (http_server_properties &&
       http_server_properties->SupportsRequestPriority(
           url::SchemeHostPort(request_info_.url))) {
@@ -332,6 +334,13 @@ NextProto HttpStreamFactoryImpl::Job::negotiated_protocol() const {
 
 bool HttpStreamFactoryImpl::Job::using_spdy() const {
   return using_spdy_;
+}
+
+size_t HttpStreamFactoryImpl::Job::EstimateMemoryUsage() const {
+  StreamSocket::SocketMemoryStats stats;
+  if (connection_)
+    connection_->DumpMemoryStats(&stats);
+  return stats.total_size;
 }
 
 const SSLConfig& HttpStreamFactoryImpl::Job::server_ssl_config() const {

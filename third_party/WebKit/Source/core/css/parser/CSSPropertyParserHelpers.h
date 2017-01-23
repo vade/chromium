@@ -26,6 +26,8 @@ class CSSValuePair;
 // will not be modified.
 namespace CSSPropertyParserHelpers {
 
+void complete4Sides(CSSValue* side[4]);
+
 // TODO(timloh): These should probably just be consumeComma and consumeSlash.
 bool consumeCommaIncludingWhitespace(CSSParserTokenRange&);
 bool consumeSlashIncludingWhitespace(CSSParserTokenRange&);
@@ -66,11 +68,13 @@ CSSIdentifierValue* consumeIdent(CSSParserTokenRange&);
 CSSCustomIdentValue* consumeCustomIdent(CSSParserTokenRange&);
 CSSStringValue* consumeString(CSSParserTokenRange&);
 StringView consumeUrlAsStringView(CSSParserTokenRange&);
-CSSURIValue* consumeUrl(CSSParserTokenRange&);
+CSSURIValue* consumeUrl(CSSParserTokenRange&, const CSSParserContext*);
 
 CSSValue* consumeColor(CSSParserTokenRange&,
                        CSSParserMode,
                        bool acceptQuirkyColors = false);
+
+CSSValue* consumeLineWidth(CSSParserTokenRange&, CSSParserMode, UnitlessQuirk);
 
 CSSValuePair* consumePosition(CSSParserTokenRange&,
                               CSSParserMode,

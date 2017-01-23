@@ -74,9 +74,6 @@ AXNodeObject::AXNodeObject(Node* node, AXObjectCacheImpl& axObjectCache)
     : AXObject(axObjectCache),
       m_ariaRole(UnknownRole),
       m_childrenDirty(false),
-#if ENABLE(ASSERT)
-      m_initialized(false),
-#endif
       m_node(node) {
 }
 
@@ -124,7 +121,7 @@ AXObject* AXNodeObject::activeDescendant() {
 
 bool AXNodeObject::computeAccessibilityIsIgnored(
     IgnoredReasons* ignoredReasons) const {
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   // Double-check that an AXObject is never accessed before
   // it's been initialized.
   ASSERT(m_initialized);
@@ -741,7 +738,7 @@ AccessibilityRole AXNodeObject::remapAriaRoleDueToParent(
 }
 
 void AXNodeObject::init() {
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   ASSERT(!m_initialized);
   m_initialized = true;
 #endif
@@ -1736,6 +1733,19 @@ bool AXNodeObject::nameFromLabelElement() const {
   return false;
 }
 
+bool AXNodeObject::nameFromContents() const {
+  Node* node = getNode();
+  if (!node || !node->isElementNode())
+    return AXObject::nameFromContents();
+  // AXObject::nameFromContents determines whether an element should take its
+  // name from its descendant contents based on role. However, <select> is a
+  // special case, as unlike a typical pop-up button it contains its own pop-up
+  // menu's contents, which should not be used as the name.
+  if (isHTMLSelectElement(node))
+    return false;
+  return AXObject::nameFromContents();
+}
+
 void AXNodeObject::getRelativeBounds(AXObject** outContainer,
                                      FloatRect& outBoundsInContainer,
                                      SkMatrix44& outContainerTransform) const {
@@ -2259,10 +2269,12 @@ String AXNodeObject::nativeTextAlternative(
            ++labelIndex) {
         Element* label = labels->item(labelIndex);
         if (nameSources) {
-          if (label->getAttribute(forAttr) == htmlElement->getIdAttribute())
+          if (!label->getAttribute(forAttr).isEmpty() &&
+              label->getAttribute(forAttr) == htmlElement->getIdAttribute()) {
             nameSources->back().nativeSource = AXTextFromNativeHTMLLabelFor;
-          else
+          } else {
             nameSources->back().nativeSource = AXTextFromNativeHTMLLabelWrapped;
+          }
         }
         labelElements.push_back(label);
       }
@@ -2301,6 +2313,28 @@ String AXNodeObject::nativeTextAlternative(
         *foundTextAlternative = true;
       } else {
         return textAlternative;
+      }
+    }
+
+    // Get default value if object is not laid out.
+    // If object is laid out, it will have a layout object for the label.
+    if (!getLayoutObject()) {
+      String defaultLabel = inputElement->valueOrDefaultLabel();
+      if (value.isNull() && !defaultLabel.isNull()) {
+        // default label
+        nameFrom = AXNameFromContents;
+        if (nameSources) {
+          nameSources->append(NameSource(*foundTextAlternative));
+          nameSources->back().type = nameFrom;
+        }
+        textAlternative = defaultLabel;
+        if (nameSources) {
+          NameSource& source = nameSources->back();
+          source.text = textAlternative;
+          *foundTextAlternative = true;
+        } else {
+          return textAlternative;
+        }
       }
     }
     return textAlternative;

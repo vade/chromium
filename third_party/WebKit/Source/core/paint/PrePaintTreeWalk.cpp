@@ -53,6 +53,8 @@ bool PrePaintTreeWalk::walk(FrameView& frameView,
   }
 
   PrePaintTreeWalkContext context(parentContext);
+  // ancestorOverflowLayer does not cross frame boundaries.
+  context.ancestorOverflowPaintLayer = nullptr;
   m_propertyTreeBuilder.updateProperties(frameView, context.treeBuilderContext);
   m_paintInvalidator.invalidatePaintIfNeeded(frameView,
                                              context.paintInvalidatorContext);
@@ -72,30 +74,24 @@ bool PrePaintTreeWalk::walk(FrameView& frameView,
 
 static void updateAuxiliaryObjectProperties(const LayoutObject& object,
                                             PrePaintTreeWalkContext& context) {
-  PaintLayer* paintLayer = nullptr;
+  if (!object.hasLayer())
+    return;
 
-  if (object.isBoxModelObject() && object.hasLayer())
-    paintLayer = object.enclosingLayer();
+  PaintLayer* paintLayer = object.enclosingLayer();
+  paintLayer->updateAncestorOverflowLayer(context.ancestorOverflowPaintLayer);
 
-  if (paintLayer) {
-    paintLayer->updateAncestorOverflowLayer(context.ancestorOverflowPaintLayer);
-  }
-
-  if (object.styleRef().position() == StickyPosition && paintLayer) {
+  if (object.styleRef().position() == StickyPosition) {
     paintLayer->layoutObject()->updateStickyPositionConstraints();
 
-    // Sticky position constraints and ancestor overflow scroller affect
-    // the sticky layer position, so we need to update it again here.
-    // TODO(flackr): This should be refactored in the future to be clearer
-    // (i.e. update layer position and ancestor inputs updates in the
-    // same walk)
+    // Sticky position constraints and ancestor overflow scroller affect the
+    // sticky layer position, so we need to update it again here.
+    // TODO(flackr): This should be refactored in the future to be clearer (i.e.
+    // update layer position and ancestor inputs updates in the same walk).
     paintLayer->updateLayerPosition();
   }
 
-  if (object.hasOverflowClip() || (paintLayer && paintLayer->isRootLayer())) {
-    DCHECK(paintLayer);
+  if (paintLayer->isRootLayer() || object.hasOverflowClip())
     context.ancestorOverflowPaintLayer = paintLayer;
-  }
 }
 
 bool PrePaintTreeWalk::walk(const LayoutObject& object,
@@ -109,7 +105,6 @@ bool PrePaintTreeWalk::walk(const LayoutObject& object,
   // Ensure the current context takes into account the box's position. This can
   // force a subtree update due to paint offset changes and must precede any
   // early out from the treewalk.
-  LayoutPoint oldPaintOffset = object.paintOffset();
   m_propertyTreeBuilder.updateContextForBoxPosition(object,
                                                     context.treeBuilderContext);
 
@@ -127,7 +122,7 @@ bool PrePaintTreeWalk::walk(const LayoutObject& object,
 
   m_propertyTreeBuilder.updatePropertiesForSelf(object,
                                                 context.treeBuilderContext);
-  m_paintInvalidator.invalidatePaintIfNeeded(object, oldPaintOffset,
+  m_paintInvalidator.invalidatePaintIfNeeded(object,
                                              context.paintInvalidatorContext);
   m_propertyTreeBuilder.updatePropertiesForChildren(object,
                                                     context.treeBuilderContext);

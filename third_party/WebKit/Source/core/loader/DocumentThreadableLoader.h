@@ -62,13 +62,11 @@ class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader,
                                         const ResourceRequest&,
                                         ThreadableLoaderClient&,
                                         const ThreadableLoaderOptions&,
-                                        const ResourceLoaderOptions&,
-                                        ThreadableLoader::ClientSpec);
+                                        const ResourceLoaderOptions&);
   static DocumentThreadableLoader* create(Document&,
                                           ThreadableLoaderClient*,
                                           const ThreadableLoaderOptions&,
-                                          const ResourceLoaderOptions&,
-                                          ThreadableLoader::ClientSpec);
+                                          const ResourceLoaderOptions&);
   ~DocumentThreadableLoader() override;
 
   void start(const ResourceRequest&) override;
@@ -87,8 +85,7 @@ class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader,
                            ThreadableLoaderClient*,
                            BlockingBehavior,
                            const ThreadableLoaderOptions&,
-                           const ResourceLoaderOptions&,
-                           ClientSpec);
+                           const ResourceLoaderOptions&);
 
   void clear();
 
@@ -188,7 +185,6 @@ class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader,
   Document& document() const;
 
   ThreadableLoaderClient* m_client;
-  const ClientSpec m_clientSpec;
   Member<Document> m_document;
 
   const ThreadableLoaderOptions m_options;
@@ -224,7 +220,7 @@ class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader,
   // stores request headers in case of a cross-origin redirect.
   HTTPHeaderMap m_requestHeaders;
 
-  Timer<DocumentThreadableLoader> m_timeoutTimer;
+  TaskRunnerTimer<DocumentThreadableLoader> m_timeoutTimer;
   double
       m_requestStartedSeconds;  // Time an asynchronous fetch request is started
 

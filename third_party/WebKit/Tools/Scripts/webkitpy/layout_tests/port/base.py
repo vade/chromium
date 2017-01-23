@@ -169,7 +169,6 @@ class Port(object):
 
         self._http_server = None
         self._websocket_server = None
-        self._is_wptserve_enabled = getattr(options, 'enable_wptserve', False)
         self._wpt_server = None
         self._image_differ = None
         self.server_process_constructor = server_process.ServerProcess  # overridable for testing
@@ -705,7 +704,7 @@ class Port(object):
         return extension in Port._supported_file_extensions
 
     def is_test_file(self, filesystem, dirname, filename):
-        match = re.search(r'[/\\]imported[/\\]wpt([/\\].*)?$', dirname)
+        match = re.search(r'[/\\]external[/\\]wpt([/\\].*)?$', dirname)
         if match:
             if match.group(1):
                 path_in_wpt = match.group(1)[1:].replace('\\', '/') + '/' + filename
@@ -721,7 +720,7 @@ class Port(object):
         tests = []
         for file_path in files:
             # Path separators are normalized by relative_test_filename().
-            match = re.search(r'imported/wpt/(.*)$', file_path)
+            match = re.search(r'external/wpt/(.*)$', file_path)
             if not match:
                 tests.append(file_path)
                 continue
@@ -740,7 +739,7 @@ class Port(object):
 
     @memoized
     def _wpt_manifest(self):
-        path = self._filesystem.join(self.layout_tests_dir(), 'imported', 'wpt', 'MANIFEST.json')
+        path = self._filesystem.join(self.layout_tests_dir(), 'external', 'wpt', 'MANIFEST.json')
         return json.loads(self._filesystem.read_text_file(path))
 
     def _manifest_items_for_path(self, path_in_wpt):
@@ -1147,17 +1146,13 @@ class Port(object):
         server.start()
         self._websocket_server = server
 
-    def is_wptserve_enabled(self):
-        """Used as feature flag for WPT Serve feature."""
-        return self._is_wptserve_enabled
-
     @staticmethod
     def is_wptserve_test(test):
         """Whether wptserve should be used for a given test if enabled."""
-        return test.startswith("imported/wpt/")
+        return test.startswith("external/wpt/")
 
     def should_use_wptserve(self, test):
-        return self.is_wptserve_enabled() and self.is_wptserve_test(test)
+        return self.is_wptserve_test(test)
 
     def start_wptserve(self):
         """Start a WPT web server. Raise an error if it can't start or is already running.
@@ -1165,7 +1160,6 @@ class Port(object):
         Ports can stub this out if they don't need a WPT web server to be running.
         """
         assert not self._wpt_server, 'Already running an http server.'
-        assert self.is_wptserve_enabled(), 'Cannot start server if WPT is not enabled.'
 
         # We currently don't support any output mechanism for the WPT server.
         server = wptserve.WPTServe(self, self.results_directory())
@@ -1321,8 +1315,6 @@ class Port(object):
             self._filesystem.join(self.layout_tests_dir(), 'StaleTestExpectations'),
             self._filesystem.join(self.layout_tests_dir(), 'SlowTests'),
         ]
-        if self.is_wptserve_enabled():
-            paths.append(self._filesystem.join(self.layout_tests_dir(), 'WPTServeExpectations'))
         paths.extend(self._flag_specific_expectations_files())
         return paths
 

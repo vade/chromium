@@ -6,6 +6,7 @@
 #define COMPONENTS_DOM_DISTILLER_IOS_DISTILLER_PAGE_IOS_H_
 
 #include <memory>
+#include <objc/objc.h>
 #include <string>
 
 #include "base/memory/weak_ptr.h"
@@ -40,6 +41,9 @@ class DistillerPageIOS : public DistillerPage {
   // Release the WebState used for distillation. Do not call between
   // |DistillPageImpl| and |OnDistillationDone|.
   virtual std::unique_ptr<web::WebState> DetachWebState();
+
+  // Return the current WebState.
+  virtual web::WebState* CurrentWebState();
 
   // Called by |web_state_observer_| once the page has finished loading.
   virtual void OnLoadURLDone(

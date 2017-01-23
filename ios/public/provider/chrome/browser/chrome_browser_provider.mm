@@ -31,8 +31,6 @@ ChromeBrowserProvider::~ChromeBrowserProvider() {}
 
 void ChromeBrowserProvider::Initialize() const {}
 
-void ChromeBrowserProvider::AssertBrowserContextKeyedFactoriesBuilt() {}
-
 SigninErrorProvider* ChromeBrowserProvider::GetSigninErrorProvider() {
   return nullptr;
 }
@@ -53,14 +51,6 @@ ChromeBrowserProvider::GetGeolocationUpdaterProvider() {
   return nullptr;
 }
 
-std::string ChromeBrowserProvider::DataReductionProxyAvailability() {
-  return "default";
-}
-
-std::string ChromeBrowserProvider::GetDistributionBrandCode() {
-  return std::string();
-}
-
 std::string ChromeBrowserProvider::GetRiskData() {
   return std::string();
 }
@@ -74,29 +64,11 @@ id<AppRatingPrompt> ChromeBrowserProvider::CreateAppRatingPrompt() const {
   return nil;
 }
 
-void ChromeBrowserProvider::InitializeCastService(id main_tab_model) const {}
-
 void ChromeBrowserProvider::InitializeCastService(
-    TabModel* main_tab_model) const {
-  // Invokes the version taking an "id" as this is the only version currently
-  // overridden by the downstream provider.
-  InitializeCastService(static_cast<id>(main_tab_model));
-}
+    TabModel* main_tab_model) const {}
 
 void ChromeBrowserProvider::AttachTabHelpers(web::WebState* web_state,
-                                             id tab) const {}
-
-void ChromeBrowserProvider::AttachTabHelpers(web::WebState* web_state,
-                                             Tab* tab) const {
-  // Invokes the version taking an "id" as this is the only version currently
-  // overridden by the downstream provider.
-  AttachTabHelpers(web_state, static_cast<id>(tab));
-}
-
-bool ChromeBrowserProvider::IsSafeBrowsingEnabled(
-    const base::Closure& on_update_callback) {
-  return false;
-}
+                                             Tab* tab) const {}
 
 VoiceSearchProvider* ChromeBrowserProvider::GetVoiceSearchProvider() const {
   return nullptr;

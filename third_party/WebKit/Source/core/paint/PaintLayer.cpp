@@ -917,13 +917,15 @@ LayoutPoint PaintLayer::computeOffsetFromTransformedAncestor() const {
 }
 
 PaintLayer* PaintLayer::compositingContainer() const {
-  // Floats have special painting order, which has complicated semantics.
-  // See the comments around FloatObject::setShouldPaint.
-  if (m_layoutObject->isFloating() && m_layoutObject->parent() &&
-      !m_layoutObject->parent()->isLayoutBlockFlow())
-    return m_layoutObject->containingBlock()->enclosingLayer();
-  if (!stackingNode()->isStacked())
+  if (!stackingNode()->isStacked()) {
+    // Floats have special painting order, which has complicated semantics.
+    // See the comments around FloatObject::setShouldPaint.
+    if (m_layoutObject->isFloating() && m_layoutObject->parent() &&
+        !m_layoutObject->parent()->isLayoutBlockFlow())
+      return m_layoutObject->containingBlock()->enclosingLayer();
+
     return parent();
+  }
   if (PaintLayerStackingNode* ancestorStackingNode =
           stackingNode()->ancestorStackingContextNode())
     return ancestorStackingNode->layer();
@@ -1229,7 +1231,7 @@ void PaintLayer::addChild(PaintLayer* child, PaintLayer* beforeChild) {
 
   // The ancestor overflow layer is calculated during compositing inputs update
   // and should not be set yet.
-  DCHECK(!child->ancestorOverflowLayer());
+  CHECK(!child->ancestorOverflowLayer());
 
   setNeedsCompositingInputsUpdate();
 
@@ -1925,10 +1927,6 @@ PaintLayer* PaintLayer::hitTestLayer(
   if (hitTestClippedOutByClipPath(rootLayer, hitTestLocation))
     return nullptr;
 
-  // Ensure our lists and 3d status are up to date.
-  m_stackingNode->updateLayerListsIfNeeded();
-  update3DTransformedDescendantStatus();
-
   // The natural thing would be to keep HitTestingTransformState on the stack,
   // but it's big, so we heap-allocate.
   RefPtr<HitTestingTransformState> localTransformState;
@@ -2446,7 +2444,7 @@ LayoutRect PaintLayer::boundingBoxForCompositingOverlapTest() const {
   // assume fragmented layers always overlap?
   return overlapBoundsIncludeChildren()
              ? boundingBoxForCompositingInternal(
-                   this, nullptr, NeverIncludeTransformForAncestorLayer)
+                   *this, nullptr, NeverIncludeTransformForAncestorLayer)
              : fragmentsBoundingBox(this);
 }
 
@@ -2455,7 +2453,7 @@ bool PaintLayer::overlapBoundsIncludeChildren() const {
 }
 
 void PaintLayer::expandRectForStackingChildren(
-    const PaintLayer* compositedLayer,
+    const PaintLayer& compositedLayer,
     LayoutRect& result,
     PaintLayer::CalculateBoundsOptions options) const {
   DCHECK(stackingNode()->isStackingContext() ||
@@ -2489,7 +2487,7 @@ LayoutRect PaintLayer::physicalBoundingBoxIncludingStackingChildren(
 
   const_cast<PaintLayer*>(this)->stackingNode()->updateLayerListsIfNeeded();
 
-  expandRectForStackingChildren(this, result, options);
+  expandRectForStackingChildren(*this, result, options);
 
   result.moveBy(offsetFromRoot);
   return result;
@@ -2497,11 +2495,11 @@ LayoutRect PaintLayer::physicalBoundingBoxIncludingStackingChildren(
 
 LayoutRect PaintLayer::boundingBoxForCompositing() const {
   return boundingBoxForCompositingInternal(
-      this, nullptr, MaybeIncludeTransformForAncestorLayer);
+      *this, nullptr, MaybeIncludeTransformForAncestorLayer);
 }
 
 LayoutRect PaintLayer::boundingBoxForCompositingInternal(
-    const PaintLayer* compositedLayer,
+    const PaintLayer& compositedLayer,
     const PaintLayer* stackingParent,
     CalculateBoundsOptions options) const {
   if (!isSelfPaintingLayer())
@@ -2509,12 +2507,13 @@ LayoutRect PaintLayer::boundingBoxForCompositingInternal(
 
   // FIXME: This could be improved to do a check like
   // hasVisibleNonCompositingDescendantLayers() (bug 92580).
-  if (this != compositedLayer && !hasVisibleContent() &&
+  if (this != &compositedLayer && !hasVisibleContent() &&
       !hasVisibleDescendant())
     return LayoutRect();
 
-  // Without composited scrolling, the root layer is the size of the document.
-  if (isRootLayer() && !needsCompositedScrolling()) {
+  // The root layer is the size of the document, plus any additional area due
+  // to layout viewport being different than initial containing block.
+  if (isRootLayer()) {
     IntRect documentRect = layoutObject()->view()->documentRect();
 
     if (FrameView* frameView = layoutObject()->document().view()) {
@@ -2548,12 +2547,13 @@ LayoutRect PaintLayer::boundingBoxForCompositingInternal(
 
   if (transform() && (options == IncludeTransformsAndCompositedChildLayers ||
                       ((paintsWithTransform(GlobalPaintNormalPhase) &&
-                        (this != compositedLayer ||
+                        (this != &compositedLayer ||
                          options == MaybeIncludeTransformForAncestorLayer)))))
     result = transform()->mapRect(result);
 
-  if (shouldFragmentCompositedBounds(compositedLayer)) {
-    convertFromFlowThreadToVisualBoundingBoxInAncestor(compositedLayer, result);
+  if (shouldFragmentCompositedBounds(&compositedLayer)) {
+    convertFromFlowThreadToVisualBoundingBoxInAncestor(&compositedLayer,
+                                                       result);
     return result;
   }
 

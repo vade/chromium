@@ -37,6 +37,7 @@
 #include "core/dom/IntersectionObserverCallback.h"
 #include "core/dom/IntersectionObserverController.h"
 #include "core/dom/IntersectionObserverInit.h"
+#include "core/dom/ResizeObserverController.h"
 #include "core/dom/StyleChangeReason.h"
 #include "core/dom/TaskRunnerHelper.h"
 #include "core/editing/EditingUtilities.h"
@@ -85,7 +86,6 @@
 #include "core/loader/DocumentLoader.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/FrameLoaderClient.h"
-#include "core/observer/ResizeObserverController.h"
 #include "core/page/AutoscrollController.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/FocusController.h"
@@ -178,9 +178,6 @@ FrameView::FrameView(LocalFrame& frame)
       m_layoutSizeFixedToFrameSize(true),
       m_didScrollTimer(this, &FrameView::didScrollTimerFired),
       m_needsUpdateWidgetGeometries(false),
-#if ENABLE(ASSERT)
-      m_hasBeenDisposed(false),
-#endif
       m_horizontalScrollbarMode(ScrollbarAuto),
       m_verticalScrollbarMode(ScrollbarAuto),
       m_horizontalScrollbarLock(false),
@@ -369,7 +366,7 @@ void FrameView::dispose() {
   if (ownerElement && ownerElement->ownedWidget() == this)
     ownerElement->setWidget(nullptr);
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   m_hasBeenDisposed = true;
 #endif
 }
@@ -569,11 +566,30 @@ ScrollingCoordinator* FrameView::scrollingCoordinator() const {
 }
 
 CompositorAnimationHost* FrameView::compositorAnimationHost() const {
+  // When m_animationHost is not nullptr, this is the FrameView for an OOPIF.
+  if (m_animationHost)
+    return m_animationHost.get();
+
+  if (m_frame->localFrameRoot() != m_frame)
+    return m_frame->localFrameRoot()->view()->compositorAnimationHost();
+
+  if (!m_frame->isMainFrame())
+    return nullptr;
+
   ScrollingCoordinator* c = scrollingCoordinator();
   return c ? c->compositorAnimationHost() : nullptr;
 }
 
 CompositorAnimationTimeline* FrameView::compositorAnimationTimeline() const {
+  if (m_animationTimeline)
+    return m_animationTimeline.get();
+
+  if (m_frame->localFrameRoot() != m_frame)
+    return m_frame->localFrameRoot()->view()->compositorAnimationTimeline();
+
+  if (!m_frame->isMainFrame())
+    return nullptr;
+
   ScrollingCoordinator* c = scrollingCoordinator();
   return c ? c->compositorAnimationTimeline() : nullptr;
 }
@@ -593,6 +609,10 @@ FloatQuad FrameView::localToVisibleContentQuad(
   FloatQuad result = localObject->localToAncestorQuad(quad, box, flags);
   result.move(-getScrollOffset());
   return result;
+}
+
+RefPtr<WebTaskRunner> FrameView::getTimerTaskRunner() const {
+  return TaskRunnerHelper::get(TaskType::UnspecedTimer, m_frame.get());
 }
 
 void FrameView::setCanHaveScrollbars(bool canHaveScrollbars) {
@@ -1319,8 +1339,7 @@ void FrameView::invalidatePaintIfNeeded(
   if (!RuntimeEnabledFeatures::rootLayerScrollingEnabled())
     invalidatePaintOfScrollControlsIfNeeded(paintInvalidationState);
 
-  if (m_frame->selection().isCaretBoundsDirty())
-    m_frame->selection().invalidateCaretRect();
+  m_frame->selection().invalidateCaretRect();
 }
 
 void FrameView::setNeedsPaintPropertyUpdate() {
@@ -1358,37 +1377,32 @@ IntRect FrameView::computeVisibleArea() {
 FloatSize FrameView::viewportSizeForViewportUnits() const {
   float zoom = frame().pageZoomFactor();
 
-  if (m_frame->settings() &&
-      !RuntimeEnabledFeatures::inertTopControlsEnabled()) {
-    FloatSize viewportSize;
+  FloatSize layoutSize;
 
-    LayoutViewItem layoutViewItem = this->layoutViewItem();
-    if (layoutViewItem.isNull())
-      return viewportSize;
+  LayoutViewItem layoutViewItem = this->layoutViewItem();
+  if (layoutViewItem.isNull())
+    return layoutSize;
 
-    viewportSize.setWidth(layoutViewItem.viewWidth(IncludeScrollbars) / zoom);
-    viewportSize.setHeight(layoutViewItem.viewHeight(IncludeScrollbars) / zoom);
-    return viewportSize;
+  layoutSize.setWidth(layoutViewItem.viewWidth(IncludeScrollbars) / zoom);
+  layoutSize.setHeight(layoutViewItem.viewHeight(IncludeScrollbars) / zoom);
+
+  if (RuntimeEnabledFeatures::inertTopControlsEnabled()) {
+    // We use the layoutSize rather than frameRect to calculate viewport units
+    // so that we get correct results on mobile where the page is laid out into
+    // a rect that may be larger than the viewport (e.g. the 980px fallback
+    // width for desktop pages). Since the layout height is statically set to
+    // be the viewport with browser controls showing, we add the browser
+    // controls height, compensating for page scale as well, since we want to
+    // use the viewport with browser controls hidden for vh (to match Safari).
+    BrowserControls& browserControls = m_frame->host()->browserControls();
+    int viewportWidth = m_frame->host()->visualViewport().size().width();
+    if (m_frame->isMainFrame() && layoutSize.width() && viewportWidth) {
+      float pageScaleAtLayoutWidth = viewportWidth / layoutSize.width();
+      layoutSize.expand(0, browserControls.height() / pageScaleAtLayoutWidth);
+    }
   }
 
-  FloatSize size(layoutSize(IncludeScrollbars));
-
-  // We use the layoutSize rather than frameRect to calculate viewport units
-  // so that we get correct results on mobile where the page is laid out into
-  // a rect that may be larger than the viewport (e.g. the 980px fallback
-  // width for desktop pages). Since the layout height is statically set to
-  // be the viewport with browser controls showing, we add the browser controls
-  // height, compensating for page scale as well, since we want to use the
-  // viewport with browser controls hidden for vh (to match Safari).
-  BrowserControls& browserControls = m_frame->host()->browserControls();
-  int viewportWidth = m_frame->host()->visualViewport().size().width();
-  if (m_frame->isMainFrame() && size.width() && viewportWidth) {
-    float pageScaleAtLayoutWidth = viewportWidth / size.width();
-    size.expand(0, browserControls.height() / pageScaleAtLayoutWidth);
-  }
-
-  size.scale(1 / zoom);
-  return size;
+  return layoutSize;
 }
 
 DocumentLifecycle& FrameView::lifecycle() const {
@@ -1958,7 +1972,7 @@ bool FrameView::computeCompositedSelection(LocalFrame& frame,
     return false;
 
   const VisibleSelection& visibleSelection = frame.selection().selection();
-  if (visibleSelection.isNone())
+  if (visibleSelection.isNone() || !frame.selection().isHandleVisible())
     return false;
 
   // Non-editable caret selections lack any kind of UI affordance, and
@@ -2425,8 +2439,7 @@ void FrameView::performPostLayoutTasks() {
 
   m_postLayoutTasksTimer.stop();
 
-  m_frame->selection().setCaretRectNeedsUpdate();
-  m_frame->selection().updateAppearance();
+  m_frame->selection().didLayout();
 
   ASSERT(m_frame->document());
 
@@ -2939,6 +2952,14 @@ void FrameView::updateLifecyclePhasesInternal(
             scrollingCoordinator()->updateAfterCompositingChangeIfNeeded();
         }
 
+        if (LocalFrame* localFrame = m_frame->localFrameRoot()) {
+          // This is needed since, at present, the ScrollingCoordinator doesn't
+          // send rects for oopif sub-frames.
+          // TODO(wjmaclean): Remove this pathway when ScrollingCoordinator
+          // operates on a per-frame basis. https://crbug.com/680606
+          frame().page()->chromeClient().updateTouchRectsForSubframeIfNecessary(
+              localFrame);
+        }
         updateCompositedSelectionIfNeeded();
       }
 
@@ -3200,7 +3221,11 @@ void FrameView::updateStyleAndLayoutIfNeededRecursiveInternal() {
 
 void FrameView::invalidateTreeIfNeededRecursive() {
   SCOPED_BLINK_UMA_HISTOGRAM_TIMER("Blink.PaintInvalidation.UpdateTime");
-  invalidateTreeIfNeededRecursiveInternal();
+  {
+    // For comparison to SlimmingPaintInvalidation.
+    SCOPED_BLINK_UMA_HISTOGRAM_TIMER("Blink.PrePaint.UpdateTime");
+    invalidateTreeIfNeededRecursiveInternal();
+  }
 }
 
 void FrameView::invalidateTreeIfNeededRecursiveInternal() {
@@ -5003,6 +5028,16 @@ void FrameView::applyTransformForTopFrameSpace(TransformState& transformState) {
   LayoutRect viewportIntersectionRect(remoteViewportIntersection());
   transformState.move(
       LayoutSize(-viewportIntersectionRect.x(), -viewportIntersectionRect.y()));
+}
+
+void FrameView::setAnimationTimeline(
+    std::unique_ptr<CompositorAnimationTimeline> timeline) {
+  m_animationTimeline = std::move(timeline);
+}
+
+void FrameView::setAnimationHost(
+    std::unique_ptr<CompositorAnimationHost> host) {
+  m_animationHost = std::move(host);
 }
 
 }  // namespace blink

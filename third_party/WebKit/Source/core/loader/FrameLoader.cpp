@@ -816,7 +816,8 @@ void FrameLoader::updateForSameDocumentNavigation(
   if (!m_currentItem)
     historyCommitType = HistoryInertCommit;
   if (m_frame->settings()->getHistoryEntryRequiresUserGesture() &&
-      initiatingDocument && !initiatingDocument->hasReceivedUserGesture()) {
+      initiatingDocument &&
+      !initiatingDocument->frame()->hasReceivedUserGesture()) {
     historyCommitType = HistoryInertCommit;
   }
 
@@ -948,11 +949,11 @@ FrameLoadType FrameLoader::determineFrameLoadType(
     return FrameLoadTypeReplaceCurrentItem;
 
   if (request.resourceRequest().url() == m_documentLoader->urlForHistory()) {
+    if (request.resourceRequest().httpMethod() == HTTPNames::POST)
+      return FrameLoadTypeStandard;
     if (!request.originDocument())
       return FrameLoadTypeReloadMainResource;
-    return request.resourceRequest().httpMethod() == HTTPNames::POST
-               ? FrameLoadTypeStandard
-               : FrameLoadTypeReplaceCurrentItem;
+    return FrameLoadTypeReplaceCurrentItem;
   }
 
   if (request.substituteData().failingURL() ==
@@ -962,7 +963,7 @@ FrameLoadType FrameLoader::determineFrameLoadType(
 
   if (m_frame->settings()->getHistoryEntryRequiresUserGesture() &&
       request.originDocument() &&
-      !request.originDocument()->hasReceivedUserGesture())
+      !request.originDocument()->frame()->hasReceivedUserGesture())
     return FrameLoadTypeReplaceCurrentItem;
 
   return FrameLoadTypeStandard;
@@ -1342,19 +1343,30 @@ void FrameLoader::commitProvisionalLoad() {
   if (!prepareForCommit())
     return;
 
-  if (isLoadingMainFrame()) {
+  // If we are loading the mainframe, or a frame that is a local root, it is
+  // important to explicitly set the event listenener properties to Nothing as
+  // this triggers notifications to the client. Clients may assume the presence
+  // of handlers for touch and wheel events, so these notifications tell it
+  // there are (presently) no handlers.
+  if (m_frame->isLocalRoot()) {
     m_frame->page()->chromeClient().setEventListenerProperties(
-        WebEventListenerClass::TouchStartOrMove,
+        m_frame, WebEventListenerClass::TouchStartOrMove,
         WebEventListenerProperties::Nothing);
     m_frame->page()->chromeClient().setEventListenerProperties(
-        WebEventListenerClass::MouseWheel, WebEventListenerProperties::Nothing);
+        m_frame, WebEventListenerClass::MouseWheel,
+        WebEventListenerProperties::Nothing);
     m_frame->page()->chromeClient().setEventListenerProperties(
-        WebEventListenerClass::TouchEndOrCancel,
+        m_frame, WebEventListenerClass::TouchEndOrCancel,
         WebEventListenerProperties::Nothing);
   }
 
   client()->transitionToCommittedForNewPage();
-  m_frame->navigationScheduler().cancel();
+
+  // PlzNavigate: We need to ensure that script initiated navigations are
+  // honored.
+  if (!m_isNavigationHandledByClient)
+    m_frame->navigationScheduler().cancel();
+
   m_frame->editor().clearLastEditCommand();
 
   // If we are still in the process of initializing an empty document then its
@@ -1683,6 +1695,11 @@ void FrameLoader::startLoad(FrameLoadRequest& frameLoadRequest,
   // request.
   recordLatestRequiredCSP();
   modifyRequestForCSP(resourceRequest, nullptr);
+
+  // We remember this flag here because shouldContinueForNavigationPolicy()
+  // resets it.
+  bool navigationWasHandledByClient = m_isNavigationHandledByClient;
+
   if (!shouldContinueForNavigationPolicy(
           resourceRequest, frameLoadRequest.substituteData(), nullptr,
           frameLoadRequest.shouldCheckMainWorldContentSecurityPolicy(),
@@ -1710,8 +1727,13 @@ void FrameLoader::startLoad(FrameLoadRequest& frameLoadRequest,
   m_provisionalDocumentLoader->setNavigationType(navigationType);
   m_provisionalDocumentLoader->setReplacesCurrentHistoryItem(
       type == FrameLoadTypeReplaceCurrentItem);
-  m_frame->navigationScheduler().cancel();
-  m_checkTimer.stop();
+
+  // PlzNavigate: We need to ensure that script initiated navigations are
+  // honored.
+  if (!navigationWasHandledByClient) {
+    m_frame->navigationScheduler().cancel();
+    m_checkTimer.stop();
+  }
 
   m_loadType = type;
 

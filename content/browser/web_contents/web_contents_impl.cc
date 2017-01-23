@@ -514,10 +514,7 @@ WebContentsImpl::~WebContentsImpl() {
 
   // Clear out any JavaScript state.
   if (dialog_manager_) {
-    // This object is being destructed, so make sure that no callbacks happen.
-    dialog_manager_->CancelDialogs(this,
-                                   true,   // suppress_callbacks,
-                                   true);  // reset_state
+    dialog_manager_->CancelDialogs(this, /*reset_state=*/true);
   }
 
   if (color_chooser_info_.get())
@@ -898,9 +895,7 @@ RenderViewHostImpl* WebContentsImpl::GetRenderViewHost() const {
 
 void WebContentsImpl::CancelActiveAndPendingDialogs() {
   if (dialog_manager_) {
-    dialog_manager_->CancelDialogs(this,
-                                   false,   // suppress_callbacks,
-                                   false);  // reset_state
+    dialog_manager_->CancelDialogs(this, /*reset_state=*/false);
   }
   if (browser_plugin_embedder_)
     browser_plugin_embedder_->CancelGuestDialogs();
@@ -1984,13 +1979,6 @@ bool WebContentsImpl::HasMouseLock(RenderWidgetHostImpl* render_widget_host) {
          GetTopLevelRenderWidgetHostView()->IsMouseLocked();
 }
 
-void WebContentsImpl::ForwardCompositorProto(
-    RenderWidgetHostImpl* render_widget_host,
-    const std::vector<uint8_t>& proto) {
-  if (delegate_)
-    delegate_->ForwardCompositorProto(render_widget_host, proto);
-}
-
 void WebContentsImpl::OnRenderFrameProxyVisibilityChanged(bool visible) {
   if (visible && !GetOuterWebContents()->IsHidden())
     WasShown();
@@ -2116,6 +2104,8 @@ void WebContentsImpl::CreateNewWindow(
     // Save the created window associated with the route so we can show it
     // later.
     DCHECK_NE(MSG_ROUTING_NONE, main_frame_widget_route_id);
+    CHECK(RenderWidgetHostImpl::FromID(render_process_id,
+                                       main_frame_widget_route_id));
     pending_contents_[std::make_pair(
         render_process_id, main_frame_widget_route_id)] = new_contents;
     AddDestructionObserver(new_contents);
@@ -2216,6 +2206,14 @@ void WebContentsImpl::ShowCreatedWindow(int process_id,
   WebContentsImpl* contents =
       GetCreatedWindow(process_id, main_frame_widget_route_id);
   if (contents) {
+    RenderWidgetHostImpl* rwh =
+        RenderWidgetHostImpl::FromID(process_id, main_frame_widget_route_id);
+    if (!rwh) {
+      // TODO(nick): Temporary for https://crbug.com/680876
+      base::debug::DumpWithoutCrashing();
+      return;
+    }
+
     WebContentsDelegate* delegate = GetDelegate();
     contents->is_resume_pending_ = true;
     if (!delegate || delegate->ShouldResumeRequestsForCreatedWindow())
@@ -2226,8 +2224,6 @@ void WebContentsImpl::ShowCreatedWindow(int process_id,
                                user_gesture, NULL);
     }
 
-    RenderWidgetHostImpl* rwh = contents->GetMainFrame()->GetRenderWidgetHost();
-    DCHECK_EQ(main_frame_widget_route_id, rwh->GetRoutingID());
     rwh->Send(new ViewMsg_Move_ACK(rwh->GetRoutingID()));
   }
 }
@@ -3470,9 +3466,7 @@ void WebContentsImpl::DidNavigateAnyFramePostCommit(
   // If this is a user-initiated navigation, start allowing JavaScript dialogs
   // again.
   if (params.gesture == NavigationGestureUser && dialog_manager_) {
-    dialog_manager_->CancelDialogs(this,
-                                   false,  // suppress_callbacks,
-                                   true);  // reset_state
+    dialog_manager_->CancelDialogs(this, /*reset_state=*/true);
   }
 
   // Notify observers about navigation.
@@ -4737,6 +4731,13 @@ void WebContentsImpl::SetAsFocusedWebContentsIfNecessary() {
   // and focus this contents to activate it.
   if (old_contents)
     old_contents->GetMainFrame()->GetRenderWidgetHost()->SetPageFocus(false);
+
+  // Make sure the outer web contents knows our frame is focused. Otherwise, the
+  // outer renderer could have the element before or after the frame element
+  // focused which would return early without actually advancing focus.
+  if (GetRenderManager()->GetProxyToOuterDelegate())
+    GetRenderManager()->GetProxyToOuterDelegate()->SetFocusedFrame();
+
   GetMainFrame()->GetRenderWidgetHost()->SetPageFocus(true);
   GetOutermostWebContents()->node_->SetFocusedWebContents(this);
 }
@@ -4942,9 +4943,7 @@ void WebContentsImpl::CancelModalDialogsForRenderManager() {
   // cross-process navigation will either destroy the browser plugins or not
   // require their dialogs to close.
   if (dialog_manager_) {
-    dialog_manager_->CancelDialogs(this,
-                                   false,  // suppress_callbacks,
-                                   true);  // reset_state
+    dialog_manager_->CancelDialogs(this, /*reset_state=*/true);
   }
 }
 

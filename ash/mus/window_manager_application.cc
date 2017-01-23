@@ -20,15 +20,14 @@
 #include "chromeos/network/network_connect.h"
 #include "chromeos/network/network_handler.h"
 #include "chromeos/system/fake_statistics_provider.h"
-#include "device/bluetooth/dbus/bluez_dbus_manager.h"  // nogncheck
+#include "device/bluetooth/bluetooth_adapter_factory.h"
+#include "device/bluetooth/dbus/bluez_dbus_manager.h"
 #include "services/service_manager/public/cpp/connection.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "services/service_manager/public/cpp/service_context.h"
 #include "services/tracing/public/cpp/provider.h"
 #include "services/ui/common/accelerator_util.h"
-#include "services/ui/public/cpp/gpu/gpu.h"
 #include "ui/aura/env.h"
-#include "ui/aura/mus/mus_context_factory.h"
 #include "ui/aura/mus/window_tree_client.h"
 #include "ui/events/event.h"
 #include "ui/message_center/message_center.h"
@@ -53,7 +52,6 @@ WindowManagerApplication::~WindowManagerApplication() {
     blocking_pool_->Shutdown(kMaxNewShutdownBlockingTasks);
   }
 
-  gpu_.reset();
   statistics_provider_.reset();
   ShutdownComponents();
 }
@@ -94,15 +92,15 @@ void WindowManagerApplication::InitializeComponents() {
   chromeos::NetworkConnect::Initialize(network_connect_delegate_.get());
   // TODO(jamescook): Initialize real audio handler.
   chromeos::CrasAudioHandler::InitializeForTesting();
-  PowerStatus::Initialize();
 }
 
 void WindowManagerApplication::ShutdownComponents() {
-  PowerStatus::Shutdown();
+  // NOTE: PowerStatus is shutdown by Shell.
   chromeos::CrasAudioHandler::Shutdown();
   chromeos::NetworkConnect::Shutdown();
   network_connect_delegate_.reset();
   chromeos::NetworkHandler::Shutdown();
+  device::BluetoothAdapterFactory::Shutdown();
   bluez::BluezDBusManager::Shutdown();
   chromeos::DBusThreadManager::Shutdown();
   message_center::MessageCenter::Shutdown();
@@ -113,11 +111,6 @@ void WindowManagerApplication::OnStart() {
       context()->connector(), context()->identity(), "ash_mus_resources.pak",
       "ash_mus_resources_200.pak", nullptr,
       views::AuraInit::Mode::AURA_MUS_WINDOW_MANAGER);
-  gpu_ = ui::Gpu::Create(context()->connector());
-  compositor_context_factory_ =
-      base::MakeUnique<aura::MusContextFactory>(gpu_.get());
-  aura::Env::GetInstance()->set_context_factory(
-      compositor_context_factory_.get());
   window_manager_.reset(new WindowManager(context()->connector()));
 
   MaterialDesignController::Initialize();

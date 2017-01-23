@@ -14,6 +14,7 @@ namespace blink {
 class AddEventListenerOptions;
 class Document;
 class EventTarget;
+class LocalFrame;
 
 typedef HashCountedSet<UntracedMember<EventTarget>> EventTargetSet;
 
@@ -36,7 +37,7 @@ class CORE_EXPORT EventHandlerRegistry final
     TouchStartOrMoveEventPassive,
     TouchEndOrCancelEventBlocking,
     TouchEndOrCancelEventPassive,
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
     // Additional event categories for verifying handler tracking logic.
     EventsForTesting,
 #endif
@@ -95,7 +96,9 @@ class CORE_EXPORT EventHandlerRegistry final
   // clients when we have added the first handler or removed the last one for
   // a given event class. |hasActiveHandlers| can be used to distinguish
   // between the two cases.
-  void notifyHasHandlersChanged(EventHandlerClass, bool hasActiveHandlers);
+  void notifyHasHandlersChanged(LocalFrame*,
+                                EventHandlerClass,
+                                bool hasActiveHandlers);
 
   // Called to notify clients whenever a single event handler target is
   // registered or unregistered. If several handlers are registered for the

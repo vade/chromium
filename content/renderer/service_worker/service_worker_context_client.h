@@ -89,18 +89,11 @@ class ServiceWorkerContextClient : public blink::WebServiceWorkerContextClient,
       const GURL& script_url,
       mojom::ServiceWorkerEventDispatcherRequest dispatcher_request,
       std::unique_ptr<EmbeddedWorkerInstanceClientImpl> embedded_worker_client);
-  ServiceWorkerContextClient(int embedded_worker_id,
-                             int64_t service_worker_version_id,
-                             const GURL& service_worker_scope,
-                             const GURL& script_url);
   ~ServiceWorkerContextClient() override;
 
   void OnMessageReceived(int thread_id,
                          int embedded_worker_id,
                          const IPC::Message& message);
-
-  // Called after the worker has started.
-  void BindEventDispatcher(mojom::ServiceWorkerEventDispatcherRequest request);
 
   // WebServiceWorkerContextClient overrides.
   blink::WebURL scope() const override;
@@ -264,10 +257,17 @@ class ServiceWorkerContextClient : public blink::WebServiceWorkerContextClient,
                            const base::string16& message);
   void OnPing();
 
+  // Called to resolve the FetchEvent.preloadResponse promise.
   void OnNavigationPreloadResponse(
       int fetch_event_id,
       std::unique_ptr<blink::WebURLResponse> response,
       std::unique_ptr<blink::WebDataConsumerHandle> data_consumer_handle);
+  // Called when the navigation preload request completed. Either
+  // OnNavigationPreloadComplete() or OnNavigationPreloadError() must be called
+  // to release the preload related resources.
+  void OnNavigationPreloadComplete(int fetch_event_id);
+  // Called when an error occurred while receiving the response of the
+  // navigation preload request.
   void OnNavigationPreloadError(
       int fetch_event_id,
       std::unique_ptr<blink::WebServiceWorkerError> error);

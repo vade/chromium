@@ -27,6 +27,7 @@
 #include "components/sync/protocol/sync.pb.h"
 
 namespace syncer {
+
 class CommitQueue;
 class ProcessorEntityTracker;
 
@@ -36,7 +37,9 @@ class SharedModelTypeProcessor : public ModelTypeProcessor,
                                  public ModelTypeChangeProcessor,
                                  base::NonThreadSafe {
  public:
-  SharedModelTypeProcessor(ModelType type, ModelTypeSyncBridge* bridge);
+  SharedModelTypeProcessor(ModelType type,
+                           ModelTypeSyncBridge* bridge,
+                           const base::RepeatingClosure& dump_stack);
   ~SharedModelTypeProcessor() override;
 
   // Whether the processor is allowing changes to its model type. If this is
@@ -52,7 +55,7 @@ class SharedModelTypeProcessor : public ModelTypeProcessor,
            MetadataChangeList* metadata_change_list) override;
   void Delete(const std::string& storage_key,
               MetadataChangeList* metadata_change_list) override;
-  void OnMetadataLoaded(std::unique_ptr<MetadataBatch> batch) override;
+  void ModelReadyToSync(std::unique_ptr<MetadataBatch> batch) override;
   void OnSyncStarting(const ModelErrorHandler& error_handler,
                       const StartCallback& callback) override;
   void DisableSync() override;
@@ -73,13 +76,8 @@ class SharedModelTypeProcessor : public ModelTypeProcessor,
   friend class ModelTypeDebugInfo;
   friend class SharedModelTypeProcessorTest;
 
-  using EntityMap =
-      std::map<std::string, std::unique_ptr<ProcessorEntityTracker>>;
-  using UpdateMap = std::map<std::string, std::unique_ptr<UpdateResponseData>>;
-
-  // Whether the preconditions to connect are met. Note: returns true if we have
-  // already connected.
-  bool ConnectPreconditionsMet() const;
+  // Returns true if the model is ready or encountered an error.
+  bool IsModelReadyOrError() const;
 
   // If preconditions are met, inform sync that we are ready to connect.
   void ConnectIfReady();
@@ -146,15 +144,16 @@ class SharedModelTypeProcessor : public ModelTypeProcessor,
   // Stores the start callback in between OnSyncStarting() and ReadyToConnect().
   StartCallback start_callback_;
 
-  // A cache for any error that may occur during startup and should be passed
-  // into the |start_callback_|.
-  base::Optional<ModelError> start_error_;
+  // The first model error that occurred, if any. Stored to track model state
+  // and so it can be passed to sync if it happened prior to sync being ready.
+  base::Optional<ModelError> model_error_;
 
-  // Indicates whether the metadata has finished loading.
-  bool is_metadata_loaded_ = false;
+  // Whether we're waiting for the model to provide metadata.
+  bool waiting_for_metadata_ = true;
 
-  // Indicates whether data for any initial pending commits has been loaded.
-  bool is_initial_pending_data_loaded_ = false;
+  // Whether we're waiting for the model to provide initial commit data. Starts
+  // as false but will be set to true if we detect it's necessary to load data.
+  bool waiting_for_pending_data_ = false;
 
   // Reference to the CommitQueue.
   //
@@ -166,7 +165,7 @@ class SharedModelTypeProcessor : public ModelTypeProcessor,
   // A map of client tag hash to sync entities known to this processor. This
   // should contain entries and metadata for most everything, although the
   // entities may not always contain model type data/specifics.
-  EntityMap entities_;
+  std::map<std::string, std::unique_ptr<ProcessorEntityTracker>> entities_;
 
   // The bridge wants to communicate entirely via storage keys that is free to
   // define and can understand more easily. All of the sync machinery wants to
@@ -178,12 +177,17 @@ class SharedModelTypeProcessor : public ModelTypeProcessor,
   // processor instance so the pointer should never become invalid.
   ModelTypeSyncBridge* const bridge_;
 
+  // Function to capture and upload a stack trace when an error occurs.
+  const base::RepeatingClosure dump_stack_;
+
   // The callback used for informing sync of errors; will be non-null after
   // OnSyncStarting has been called.
   ModelErrorHandler error_handler_;
 
   // WeakPtrFactory for this processor which will be sent to sync thread.
   base::WeakPtrFactory<SharedModelTypeProcessor> weak_ptr_factory_;
+
+  DISALLOW_COPY_AND_ASSIGN(SharedModelTypeProcessor);
 };
 
 }  // namespace syncer

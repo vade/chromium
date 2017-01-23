@@ -69,6 +69,12 @@ void SetV8FlagIfFeature(const base::Feature& feature, const char* v8_flag) {
   }
 }
 
+void SetV8FlagIfNotFeature(const base::Feature& feature, const char* v8_flag) {
+  if (!base::FeatureList::IsEnabled(feature)) {
+    v8::V8::SetFlagsFromString(v8_flag, strlen(v8_flag));
+  }
+}
+
 void SetV8FlagIfHasSwitch(const char* switch_name, const char* v8_flag) {
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(switch_name)) {
     v8::V8::SetFlagsFromString(v8_flag, strlen(v8_flag));
@@ -126,33 +132,6 @@ size_t DefaultRendererWorkerPoolIndexForTraits(const base::TaskTraits& traits) {
   return is_background ? BACKGROUND : FOREGROUND;
 }
 
-void InitializeTaskScheduler() {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kSingleProcess)) {
-    // There should already be a TaskScheduler when the renderer runs inside the
-    // browser process.
-    DCHECK(base::TaskScheduler::GetInstance());
-    return;
-  }
-  DCHECK(!base::TaskScheduler::GetInstance());
-
-  std::vector<base::SchedulerWorkerPoolParams> params_vector;
-  base::TaskScheduler::WorkerPoolIndexForTraitsCallback
-      index_to_traits_callback;
-  content::GetContentClient()->renderer()->GetTaskSchedulerInitializationParams(
-      &params_vector, &index_to_traits_callback);
-
-  if (params_vector.empty()) {
-    params_vector = GetDefaultSchedulerWorkerPoolParams();
-    index_to_traits_callback =
-        base::Bind(&DefaultRendererWorkerPoolIndexForTraits);
-  }
-  DCHECK(index_to_traits_callback);
-
-  base::TaskScheduler::CreateAndSetDefaultTaskScheduler(
-      params_vector, index_to_traits_callback);
-}
-
 }  // namespace
 
 namespace content {
@@ -198,7 +177,8 @@ RenderProcessImpl::RenderProcessImpl()
                        "--noharmony-shipping");
   SetV8FlagIfHasSwitch(switches::kJavaScriptHarmony, "--harmony");
   SetV8FlagIfFeature(features::kAsmJsToWebAssembly, "--validate-asm");
-  SetV8FlagIfFeature(features::kWebAssembly, "--expose-wasm");
+  SetV8FlagIfNotFeature(features::kWebAssembly,
+                        "--wasm-disable-structured-cloning");
   SetV8FlagIfFeature(features::kSharedArrayBuffer,
                      "--harmony-sharedarraybuffer");
 
@@ -213,8 +193,6 @@ RenderProcessImpl::RenderProcessImpl()
 
   SiteIsolationStatsGatherer::SetEnabled(
       GetContentClient()->renderer()->ShouldGatherSiteIsolationStats());
-
-  InitializeTaskScheduler();
 }
 
 RenderProcessImpl::~RenderProcessImpl() {
@@ -223,12 +201,6 @@ RenderProcessImpl::~RenderProcessImpl() {
   if (count)
     DLOG(ERROR) << "WebFrame LEAKED " << count << " TIMES";
 #endif
-
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kSingleProcess)) {
-    DCHECK(base::TaskScheduler::GetInstance());
-    base::TaskScheduler::GetInstance()->Shutdown();
-  }
 
   GetShutDownEvent()->Signal();
 }
@@ -239,6 +211,24 @@ void RenderProcessImpl::AddBindings(int bindings) {
 
 int RenderProcessImpl::GetEnabledBindings() const {
   return enabled_bindings_;
+}
+
+void RenderProcessImpl::InitializeTaskScheduler() {
+  std::vector<base::SchedulerWorkerPoolParams> params_vector;
+  base::TaskScheduler::WorkerPoolIndexForTraitsCallback
+      index_to_traits_callback;
+  content::GetContentClient()->renderer()->GetTaskSchedulerInitializationParams(
+      &params_vector, &index_to_traits_callback);
+
+  if (params_vector.empty()) {
+    params_vector = GetDefaultSchedulerWorkerPoolParams();
+    index_to_traits_callback =
+        base::Bind(&DefaultRendererWorkerPoolIndexForTraits);
+  }
+  DCHECK(index_to_traits_callback);
+
+  base::TaskScheduler::CreateAndSetDefaultTaskScheduler(
+      params_vector, index_to_traits_callback);
 }
 
 }  // namespace content

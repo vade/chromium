@@ -83,11 +83,13 @@ public class ChromeFullscreenManager
         public void onContentOffsetChanged(float offset);
 
         /**
-         * Called whenever the content's visible offset changes.
-         * @param offset The new offset of the visible content from the top of the screen.
+         * Called whenever the controls' offset changes.
+         * @param topOffset    The new value of the offset from the top of the top control.
+         * @param bottomOffset The new value of the offset from the top of the bottom control.
          * @param needsAnimate Whether the caller is driving an animation with further updates.
          */
-        public void onVisibleContentOffsetChanged(float offset, boolean needsAnimate);
+        public void onControlsOffsetChanged(float topOffset, float bottomOffset,
+                boolean needsAnimate);
 
         /**
          * Called when a ContentVideoView is created/destroyed.
@@ -121,7 +123,17 @@ public class ChromeFullscreenManager
         mActivity = activity;
         mWindow = activity.getWindow();
         mIsBottomControls = isBottomControls;
-        mBrowserVisibilityDelegate = new BrowserStateBrowserControlsVisibilityDelegate();
+        mBrowserVisibilityDelegate = new BrowserStateBrowserControlsVisibilityDelegate(
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        if (getTab() != null) {
+                            getTab().updateFullscreenEnabledState();
+                        } else if (!mBrowserVisibilityDelegate.isHidingBrowserControlsEnabled()) {
+                            setPositionsForTabToNonFullscreen();
+                        }
+                    }
+                });
     }
 
     /**
@@ -156,6 +168,11 @@ public class ChromeFullscreenManager
 
             @Override
             public void didSelectTab(Tab tab, TabSelectionType type, int lastId) {
+                setTab(mTabModelSelector.getCurrentTab());
+            }
+
+            @Override
+            public void didCloseTab(int tabId, boolean incognito) {
                 setTab(mTabModelSelector.getCurrentTab());
             }
         };
@@ -196,9 +213,11 @@ public class ChromeFullscreenManager
     public void setTab(Tab tab) {
         Tab previousTab = getTab();
         super.setTab(tab);
-        mBrowserVisibilityDelegate.setTab(getTab());
         if (tab != null && previousTab != getTab()) {
             mBrowserVisibilityDelegate.showControlsTransient();
+        }
+        if (tab == null && !mBrowserVisibilityDelegate.isHidingBrowserControlsEnabled()) {
+            setPositionsForTabToNonFullscreen();
         }
     }
 
@@ -310,6 +329,13 @@ public class ChromeFullscreenManager
      */
     public boolean drawControlsAsTexture() {
         return getBrowserControlHiddenRatio() > 0;
+    }
+
+    /**
+     * Sets the height of the bottom controls.
+     */
+    public void setBottomControlsHeight(int bottomControlsHeight) {
+        mBottomControlContainerHeight = bottomControlsHeight;
     }
 
     @Override
@@ -462,11 +488,8 @@ public class ChromeFullscreenManager
             // scrolling.
             boolean needsAnimate = shouldShowAndroidControls();
             for (int i = 0; i < mListeners.size(); i++) {
-                // Since, in the case of bottom controls, the view is never translated, we don't
-                // need to change the information passed into this method.
-                // getTopVisibleContentOffset will return 0 which is the expected result.
-                mListeners.get(i).onVisibleContentOffsetChanged(
-                        getTopVisibleContentOffset(), needsAnimate);
+                mListeners.get(i).onControlsOffsetChanged(
+                        getTopControlOffset(), getBottomControlOffset(), needsAnimate);
             }
         }
 

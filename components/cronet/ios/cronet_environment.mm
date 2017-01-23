@@ -22,6 +22,8 @@
 #include "base/path_service.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/sys_info.h"
+#include "base/task_scheduler/task_scheduler.h"
 #include "base/threading/worker_pool.h"
 #include "components/cronet/histogram_manager.h"
 #include "components/cronet/ios/version.h"
@@ -116,6 +118,9 @@ void CronetEnvironment::Initialize() {
   // This method must be called once from the main thread.
   if (!g_at_exit_)
     g_at_exit_ = new base::AtExitManager;
+
+  base::TaskScheduler::CreateAndSetSimpleTaskScheduler(
+      base::SysInfo::NumberOfProcessors());
 
   url::Initialize();
   base::CommandLine::Init(0, nullptr);
@@ -216,6 +221,7 @@ CronetEnvironment::CronetEnvironment(const std::string& user_agent,
                                      bool user_agent_partial)
     : http2_enabled_(false),
       quic_enabled_(false),
+      http_cache_(URLRequestContextConfig::HttpCacheType::DISK),
       user_agent_(user_agent),
       user_agent_partial_(user_agent_partial),
       net_log_(new net::NetLog) {}
@@ -246,6 +252,13 @@ void CronetEnvironment::Start() {
 
 CronetEnvironment::~CronetEnvironment() {
   // net::HTTPProtocolHandlerDelegate::SetInstance(nullptr);
+
+  // TODO(lilyhoughton) right now this is relying on there being
+  // only one CronetEnvironment (per process).  if (when?) that
+  // changes, so will this have to.
+  base::TaskScheduler* ts = base::TaskScheduler::GetInstance();
+  if (ts)
+    ts->Shutdown();
 }
 
 void CronetEnvironment::InitializeOnNetworkThread() {
@@ -275,7 +288,7 @@ void CronetEnvironment::InitializeOnNetworkThread() {
   URLRequestContextConfigBuilder context_config_builder;
   context_config_builder.enable_quic = quic_enabled_;   // Enable QUIC.
   context_config_builder.enable_spdy = http2_enabled_;  // Enable HTTP/2.
-  context_config_builder.http_cache = URLRequestContextConfig::DISK;
+  context_config_builder.http_cache = http_cache_;      // Set HTTP cache
   context_config_builder.storage_path =
       cache_path.value();  // Storage path for http cache and cookie storage.
   context_config_builder.user_agent =

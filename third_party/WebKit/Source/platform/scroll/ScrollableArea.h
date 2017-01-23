@@ -364,6 +364,12 @@ class PLATFORM_EXPORT ScrollableArea : public GarbageCollectedMixin {
 
   virtual ScrollAnchor* scrollAnchor() { return nullptr; }
 
+  virtual void didScrollWithScrollbar(ScrollbarPart, ScrollbarOrientation) {}
+
+  // Returns the task runner to be used for scrollable area timers.
+  // Ideally a frame-specific throttled one can be used.
+  virtual RefPtr<WebTaskRunner> getTimerTaskRunner() const = 0;
+
  protected:
   ScrollableArea();
 
@@ -418,7 +424,7 @@ class PLATFORM_EXPORT ScrollableArea : public GarbageCollectedMixin {
   mutable Member<ScrollAnimatorBase> m_scrollAnimator;
   mutable Member<ProgrammaticScrollAnimator> m_programmaticScrollAnimator;
 
-  std::unique_ptr<Timer<ScrollableArea>> m_fadeOverlayScrollbarsTimer;
+  std::unique_ptr<TaskRunnerTimer<ScrollableArea>> m_fadeOverlayScrollbarsTimer;
 
   unsigned m_scrollbarOverlayColorTheme : 2;
 

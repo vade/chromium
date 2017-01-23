@@ -16,6 +16,7 @@ import org.chromium.base.BuildInfo;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.appmenu.AppMenuPropertiesDelegate;
 import org.chromium.chrome.browser.download.DownloadUtils;
 import org.chromium.chrome.browser.firstrun.FirstRunStatus;
@@ -35,6 +36,8 @@ public class CustomTabAppMenuPropertiesDelegate extends AppMenuPropertiesDelegat
 
     private final boolean mShowShare;
     private final boolean mIsMediaViewer;
+    private final boolean mShowStar;
+    private final boolean mShowDownload;
 
     private final List<String> mMenuEntries;
     private final Map<MenuItem, Integer> mItemToIndexMap = new HashMap<MenuItem, Integer>();
@@ -47,11 +50,13 @@ public class CustomTabAppMenuPropertiesDelegate extends AppMenuPropertiesDelegat
      */
     public CustomTabAppMenuPropertiesDelegate(final ChromeActivity activity,
             List<String> menuEntries, boolean showShare, final boolean isOpenedByChrome,
-            final boolean isMediaViewer) {
+            final boolean isMediaViewer, boolean showStar, boolean showDownload) {
         super(activity);
         mMenuEntries = menuEntries;
         mShowShare = showShare;
         mIsMediaViewer = isMediaViewer;
+        mShowStar = showStar;
+        mShowDownload = showDownload;
 
         mDefaultBrowserFetcher = new AsyncTask<Void, Void, String>() {
             @Override
@@ -123,7 +128,8 @@ public class CustomTabAppMenuPropertiesDelegate extends AppMenuPropertiesDelegat
                 }
                 updateBookmarkMenuItem(bookmarkItem, currentTab);
             }
-
+            bookmarkItem.setVisible(mShowStar);
+            downloadItem.setVisible(mShowDownload);
             if (!FirstRunStatus.getFirstRunFlowComplete()) {
                 openInChromeItem.setVisible(false);
                 bookmarkItem.setVisible(false);
@@ -132,6 +138,13 @@ public class CustomTabAppMenuPropertiesDelegate extends AppMenuPropertiesDelegat
             }
 
             downloadItem.setEnabled(DownloadUtils.isAllowedToDownloadPage(currentTab));
+
+            String url = currentTab.getUrl();
+            boolean isChromeScheme = url.startsWith(UrlConstants.CHROME_SCHEME)
+                    || url.startsWith(UrlConstants.CHROME_NATIVE_SCHEME);
+            if (isChromeScheme) {
+                addToHomeScreenItem.setVisible(false);
+            }
 
             // Add custom menu items. Make sure they are only added once.
             if (!mIsCustomEntryAdded) {

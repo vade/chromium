@@ -454,10 +454,12 @@ bool ScriptLoader::doExecuteScript(const ScriptSourceCode& sourceCode) {
     return true;
 
   LocalFrame* frame = contextDocument->frame();
+  if (!frame)
+    return true;
 
   const ContentSecurityPolicy* csp = elementDocument->contentSecurityPolicy();
   bool shouldBypassMainWorldCSP =
-      (frame && frame->script().shouldBypassMainWorldCSP()) ||
+      (frame->script().shouldBypassMainWorldCSP()) ||
       csp->allowScriptWithHash(sourceCode.source(),
                                ContentSecurityPolicy::InlineType::Block);
 
@@ -510,11 +512,6 @@ bool ScriptLoader::doExecuteScript(const ScriptSourceCode& sourceCode) {
     }
   }
 
-  // FIXME: Can this be moved earlier in the function?
-  // Why are we ever attempting to execute scripts without a frame?
-  if (!frame)
-    return true;
-
   AccessControlStatus accessControlStatus = NotSharableCrossOrigin;
   if (!m_isExternalScript) {
     accessControlStatus = SharableCrossOrigin;
@@ -549,10 +546,6 @@ bool ScriptLoader::doExecuteScript(const ScriptSourceCode& sourceCode) {
     DCHECK(contextDocument->currentScript() == m_element);
     contextDocument->popCurrentScript();
   }
-
-  // "Number used _once_", so, clear it out after execution.
-  if (RuntimeEnabledFeatures::hideNonceContentAttributeEnabled())
-    client()->clearNonce();
 
   return true;
 }

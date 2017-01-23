@@ -24,6 +24,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/process/process_handle.h"
+#include "base/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "content/common/accessibility_mode_enums.h"
 #include "content/common/associated_interface_registry_impl.h"
@@ -454,6 +455,9 @@ class CONTENT_EXPORT RenderFrameImpl
   bool IsPasting() const override;
   blink::WebPageVisibilityState GetVisibilityState() const override;
   bool IsBrowserSideNavigationPending() override;
+  base::SingleThreadTaskRunner* GetTimerTaskRunner() override;
+  base::SingleThreadTaskRunner* GetLoadingTaskRunner() override;
+  base::SingleThreadTaskRunner* GetUnthrottledTaskRunner() override;
 
   // blink::mojom::EngagementClient implementation:
   void SetEngagementLevel(const url::Origin& origin,
@@ -519,6 +523,7 @@ class CONTENT_EXPORT RenderFrameImpl
       const blink::WebVector<blink::WebString>& newly_matching_selectors,
       const blink::WebVector<blink::WebString>& stopped_matching_selectors)
       override;
+  void setHasReceivedUserGesture() override;
   bool shouldReportDetailedMessageForSource(
       const blink::WebString& source) override;
   void didAddMessageToConsole(const blink::WebConsoleMessage& message,
@@ -767,7 +772,8 @@ class CONTENT_EXPORT RenderFrameImpl
   };
 
   typedef std::map<GURL, double> HostZoomLevels;
-  typedef std::map<url::Origin, blink::mojom::EngagementLevel> EngagementLevels;
+  typedef std::pair<url::Origin, blink::mojom::EngagementLevel>
+      EngagementOriginAndLevel;
 
   // Creates a new RenderFrame. |render_view| is the RenderView object that this
   // frame belongs to.
@@ -889,7 +895,6 @@ class CONTENT_EXPORT RenderFrameImpl
   void OnStopFinding(StopFindAction action);
   void OnEnableViewSourceMode();
   void OnSuppressFurtherDialogs();
-  void OnSetHasReceivedUserGesture();
   void OnFileChooserResponse(
       const std::vector<content::FileChooserFileInfo>& files);
   void OnClearFocusedElement();
@@ -1356,7 +1361,7 @@ class CONTENT_EXPORT RenderFrameImpl
 #endif
 
   HostZoomLevels host_zoom_levels_;
-  EngagementLevels engagement_levels_;
+  EngagementOriginAndLevel engagement_level_;
 
   mojo::AssociatedBinding<blink::mojom::EngagementClient> engagement_binding_;
   mojo::Binding<mojom::Frame> frame_binding_;

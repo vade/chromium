@@ -285,6 +285,8 @@ VISIT_PROTO_FIELDS(const sync_pb::WalletMetadataSpecifics& proto) {
   VISIT(id);
   VISIT(use_count);
   VISIT(use_date);
+  VISIT(card_billing_address_id);
+  VISIT(address_has_converted);
 }
 
 VISIT_PROTO_FIELDS(const sync_pb::AutofillWalletSpecifics& proto) {
@@ -572,6 +574,7 @@ VISIT_PROTO_FIELDS(const sync_pb::WalletMaskedCreditCard& proto) {
   VISIT(exp_month);
   VISIT(exp_year);
   VISIT(billing_address_id);
+  VISIT_ENUM(card_class);
 }
 
 VISIT_PROTO_FIELDS(const sync_pb::WalletPostalAddress& proto) {

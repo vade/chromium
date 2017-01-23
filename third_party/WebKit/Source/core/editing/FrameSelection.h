@@ -29,6 +29,7 @@
 
 #include "core/CoreExport.h"
 #include "core/dom/Range.h"
+#include "core/dom/SynchronousMutationObserver.h"
 #include "core/editing/EditingStyle.h"
 #include "core/editing/EphemeralRange.h"
 #include "core/editing/VisiblePosition.h"
@@ -66,9 +67,13 @@ enum class SelectionDirectionalMode { NonDirectional, Directional };
 
 enum class CaretVisibility;
 
+enum class HandleVisibility { NotVisible, Visible };
+
 class CORE_EXPORT FrameSelection final
-    : public GarbageCollectedFinalized<FrameSelection> {
+    : public GarbageCollectedFinalized<FrameSelection>,
+      public SynchronousMutationObserver {
   WTF_MAKE_NONCOPYABLE(FrameSelection);
+  USING_GARBAGE_COLLECTED_MIXIN(FrameSelection);
 
  public:
   static FrameSelection* create(LocalFrame& frame) {
@@ -85,6 +90,7 @@ class CORE_EXPORT FrameSelection final
     DoNotUpdateAppearance = 1 << 4,
     DoNotClearStrategy = 1 << 5,
     DoNotAdjustInFlatTree = 1 << 6,
+    HandleVisible = 1 << 7,
   };
   // Union of values in SetSelectionOption and EUserTriggered
   typedef unsigned SetSelectionOptions;
@@ -204,22 +210,12 @@ class CORE_EXPORT FrameSelection final
   Range* firstRange() const;
 
   void documentAttached(Document*);
-  void documentDetached(const Document&);
-  void nodeChildrenWillBeRemoved(ContainerNode&);
-  void nodeWillBeRemoved(Node&);
   void dataWillChange(const CharacterData& node);
-  void didUpdateCharacterData(CharacterData*,
-                              unsigned offset,
-                              unsigned oldLength,
-                              unsigned newLength);
-  void didMergeTextNodes(const Text& oldNode, unsigned offset);
-  void didSplitTextNode(const Text& oldNode);
 
+  void didLayout();
   bool isAppearanceDirty() const;
   void commitAppearanceIfNeeded(LayoutView&);
-  void updateAppearance();
   void setCaretVisible(bool caretIsVisible);
-  bool isCaretBoundsDirty() const;
   void setCaretRectNeedsUpdate();
   void scheduleVisualUpdate() const;
   void invalidateCaretRect(bool forceInvalidation = false);
@@ -236,6 +232,11 @@ class CORE_EXPORT FrameSelection final
   void pageActivationChanged();
 
   void setUseSecureKeyboardEntryWhenActive(bool);
+
+  bool isHandleVisible() const {
+    return m_handleVisibility == HandleVisibility::Visible;
+  }
+
   void updateSecureKeyboardEntryIfActive();
 
   // Returns true if a word is selected.
@@ -269,6 +270,7 @@ class CORE_EXPORT FrameSelection final
       RevealExtentOption = DoNotRevealExtent);
   void setSelectionFromNone();
 
+  void updateAppearance();
   bool shouldShowBlockCursor() const;
   void setShouldShowBlockCursor(bool);
 
@@ -323,6 +325,19 @@ class CORE_EXPORT FrameSelection final
 
   GranularityStrategy* granularityStrategy();
 
+  // Implementation of |SynchronousMutationObserver| member functions.
+  void contextDestroyed(Document*) final;
+  void nodeChildrenWillBeRemoved(ContainerNode&) final;
+  void nodeWillBeRemoved(Node&) final;
+  void didUpdateCharacterData(CharacterData*,
+                              unsigned offset,
+                              unsigned oldLength,
+                              unsigned newLength) final;
+  void didMergeTextNodes(const Text& mergedNode,
+                         const NodeWithIndex& nodeToBeRemovedWithIndex,
+                         unsigned oldLength) final;
+  void didSplitTextNode(const Text& oldNode) final;
+
   // For unittests
   bool shouldPaintCaretForTesting() const;
   bool isPreviousCaretDirtyForTesting() const;
@@ -338,6 +353,8 @@ class CORE_EXPORT FrameSelection final
   Member<EditingStyle> m_typingStyle;
 
   bool m_focused : 1;
+
+  HandleVisibility m_handleVisibility = HandleVisibility::NotVisible;
 
   // Controls text granularity used to adjust the selection's extent in
   // moveRangeSelectionExtent.

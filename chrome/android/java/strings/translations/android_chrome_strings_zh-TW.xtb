@@ -25,7 +25,6 @@
 
 您必須開啟藍牙和定位功能，才能使用實體化網路。</translation>
 <translation id="124678866338384709">關閉目前的分頁</translation>
-<translation id="1254090737195733114">要匯入資料嗎？</translation>
 <translation id="1258753120186372309">Google Doodle：<ph name="DOODLE_DESCRIPTION" /></translation>
 <translation id="1272079795634619415">停止</translation>
 <translation id="1285320974508926690">一律不翻譯此網站</translation>
@@ -242,6 +241,7 @@
 <translation id="3542235761944717775">可用空間：<ph name="KILOBYTES" /> KB</translation>
 <translation id="3549644494707163724">使用您的通關密語對所有已同步處理的資料進行加密</translation>
 <translation id="3549657413697417275">搜尋您的紀錄</translation>
+<translation id="3557336313807607643">新增為聯絡人</translation>
 <translation id="3582930987043644930">新增名稱</translation>
 <translation id="3590487821116122040">Chrome 認定為不重要的網站 (例如未儲存任何設定的網站，或是您不常造訪的網站) 所儲存的資料</translation>
 <translation id="360480449234699036">不需離開網頁即可瞭解網站上的主題。「輕觸搜尋」可將特定字詞及其上下文內容傳送至 Google 搜尋，並傳回字詞定義、相關圖片、搜尋結果和其他詳細資料。
@@ -258,6 +258,7 @@
 <translation id="3714981814255182093">開啟搜尋列</translation>
 <translation id="3716158070938632480">附近有裝置在播送網頁</translation>
 <translation id="3738139272394829648">輕觸搜尋</translation>
+<translation id="3739899004075612870">已加入 <ph name="PRODUCT_NAME" /> 書籤</translation>
 <translation id="3744111309925758534">其他應用程式佔 <ph name="MEGABYTES" /> MB</translation>
 <translation id="3744111561329211289">背景同步處理</translation>
 <translation id="3789841737615482174">安裝</translation>
@@ -269,6 +270,7 @@
 <translation id="3828029223314399057">搜尋書籤</translation>
 <translation id="3845539888601087042">目前顯示的歷史紀錄來源包括您已登入帳戶的所有裝置。<ph name="BEGIN_LINK" />瞭解詳情<ph name="END_LINK" /></translation>
 <translation id="3859306556332390985">快轉到特定的播放時間點</translation>
+<translation id="3890664840433101773">新增電子郵件地址</translation>
 <translation id="3894427358181296146">新增資料夾</translation>
 <translation id="3895926599014793903">強制啟用縮放功能</translation>
 <translation id="3917783807003067648">位置資訊遭到封鎖</translation>
@@ -281,6 +283,7 @@
 <translation id="3967822245660637423">下載完成</translation>
 <translation id="397583555483684758">同步處理功能已停止運作</translation>
 <translation id="3985215325736559418">你要再次下載 <ph name="FILE_NAME" /> 嗎？</translation>
+<translation id="3987993985790029246">複製連結</translation>
 <translation id="3988213473815854515">禁止存取位置資訊</translation>
 <translation id="3997476611815694295">不重要網站的儲存資料量</translation>
 <translation id="4002066346123236978">標題</translation>
@@ -318,7 +321,7 @@
 <translation id="4384468725000734951">現已使用 Sogou 搜尋</translation>
 <translation id="4412992751769744546">允許第三方 Cookie</translation>
 <translation id="4452548195519783679">已將書籤加入「<ph name="FOLDER_NAME" />」</translation>
-<translation id="4457399174246232812">日後附近的實體化網路網頁會顯示在您的通知清單中</translation>
+<translation id="4453340223357552416"><ph name="PRODUCT_NAME" /> 已下載「<ph name="FILE_NAME" />」</translation>
 <translation id="4479647676395637221">允許網站使用您的攝影機前，必須先詢問您 (建議)</translation>
 <translation id="4508440807153586353">只有知道您通關密語的使用者，才能讀取加密保護的資料。系統不會將通關密語傳送給 Google，Google 也不會儲存通關密語。如果您忘記自己的通關密語，或是想變更這項設定，則必須重設同步功能。<ph name="BEGIN_LINK" />瞭解詳情<ph name="END_LINK" /></translation>
 <translation id="4513387527876475750">{DAYS,plural, =1{# 天前}other{# 天前}}</translation>
@@ -326,7 +329,6 @@
 <translation id="4526249700380860531">您可以前往 <ph name="BEGIN_LINK" />passwords.google.com<ph name="END_LINK" /> 查看及管理已儲存的密碼</translation>
 <translation id="4532845899244822526">選擇資料夾</translation>
 <translation id="4535858793016067060">開啟 Android 安全性設定中的「不明來源」即可體驗「增強型新增至主畫面」實驗功能。體驗結束後請務必停用這項設定。</translation>
-<translation id="4543661749405994812">複製電子郵件地址</translation>
 <translation id="4558311620361989323">網頁快速鍵</translation>
 <translation id="4572422548854449519">登入受管理的帳戶</translation>
 <translation id="457875822857220463">快遞</translation>
@@ -371,12 +373,12 @@
 <translation id="4988526792673242964">頁數</translation>
 <translation id="4996978546172906250">分享方式：</translation>
 <translation id="5000922062037820727">已封鎖 (建議)</translation>
+<translation id="5004339818306944878">Google 伺服器會對你造訪的網頁進行最佳化處理，最多可減少 60% 的數據用量，並加快網頁載入速度。</translation>
 <translation id="5005498671520578047">複製密碼</translation>
 <translation id="5011311129201317034"><ph name="SITE" /> 要求連線</translation>
 <translation id="5016205925109358554">Serif</translation>
 <translation id="5039804452771397117">允許</translation>
 <translation id="5040262127954254034">隱私權</translation>
-<translation id="5053110706349648690">如要允許配對，請在<ph name="BEGIN_LINK" />裝置設定<ph name="END_LINK" />中開啟藍牙功能</translation>
 <translation id="5063480226653192405">用量</translation>
 <translation id="5087580092889165836">新增信用卡</translation>
 <translation id="5100237604440890931">已收合 - 按一下即可展開。</translation>
@@ -393,10 +395,12 @@
 <translation id="5171045022955879922">搜尋或輸入網址</translation>
 <translation id="5184329579814168207">在 Chrome 中開啟</translation>
 <translation id="5199929503336119739">Work 設定檔</translation>
+<translation id="5205222826937269299">請輸入名稱</translation>
 <translation id="5209320130288484488">找不到裝置</translation>
 <translation id="5210286577605176222">跳至上一個分頁</translation>
 <translation id="5210365745912300556">關閉分頁</translation>
 <translation id="5222676887888702881">登出</translation>
+<translation id="5222812217790122047">請輸入電子郵件地址</translation>
 <translation id="5233638681132016545">新增分頁</translation>
 <translation id="5271967389191913893">裝置無法開啟您要下載的這項內容。</translation>
 <translation id="528192093759286357">從頂端拖曳並輕觸返回按鈕即可結束全螢幕模式。</translation>
@@ -523,7 +527,6 @@
 <translation id="6447842834002726250">Cookie</translation>
 <translation id="6448273550210938826">搜尋與網址建議</translation>
 <translation id="6463070039183944536">新增中…</translation>
-<translation id="6464825623202322042">這個裝置</translation>
 <translation id="6475951671322991020">下載影片</translation>
 <translation id="6477460825583319731">電子郵件地址無效</translation>
 <translation id="6482749332252372425">儲存空間不足，因此無法下載 <ph name="FILE_NAME" />。</translation>
@@ -570,6 +573,7 @@
 <translation id="6868088497967843822">登入後，即可從任何裝置取得自己的書籤、歷史紀錄、密碼和其他設定</translation>
 <translation id="688738109438487280">將現有資料新增至 <ph name="TO_ACCOUNT" />。</translation>
 <translation id="6891858906296486776">{OPEN_TABS,plural, =1{%1$d 個開啟的分頁}other{%1$d 個開啟的分頁}}</translation>
+<translation id="6896758677409633944">複製</translation>
 <translation id="6937422995269576720">信用卡號碼無效</translation>
 <translation id="6945221475159498467">選取</translation>
 <translation id="6963766334940102469">刪除書籤</translation>
@@ -592,11 +596,15 @@
 <translation id="7063006564040364415">無法連線至同步處理伺服器。</translation>
 <translation id="7064851114919012435">聯絡資訊</translation>
 <translation id="7094922512924405309">找不到附近的實體化網路網頁</translation>
+<translation id="7128222689758636196">對目前的搜尋引擎開放</translation>
 <translation id="7138678301420049075">其他</translation>
 <translation id="7180611975245234373">重新整理</translation>
+<translation id="7189372733857464326">正在等待 Google Play 服務完成更新</translation>
 <translation id="7191430249889272776">已在背景開啟分頁。</translation>
 <translation id="7243308994586599757">選項在接近畫面底部的位置</translation>
 <translation id="7244362611678346589"><ph name="SEARCH_ENGINE_URL" /> 會使用您的位置資訊來顯示當地搜尋結果</translation>
+<translation id="7274013316676448362">已封鎖網站</translation>
+<translation id="7333031090786104871">仍在新增先前的網站</translation>
 <translation id="7353894246028566792">{NUM_SELECTED,plural, =1{分享 1 個選取的項目}other{分享 # 個選取的項目}}</translation>
 <translation id="7366340029385295517">正在投放到 <ph name="SCREEN_NAME" /></translation>
 <translation id="7375125077091615385">類型：</translation>
@@ -621,6 +629,7 @@
 <translation id="7562080006725997899">正在清除瀏覽資料</translation>
 <translation id="756809126120519699">已清除 Chrome 資料</translation>
 <translation id="7588950540487816470">實體化網路</translation>
+<translation id="7589445247086920869">對目前的搜尋引擎封鎖</translation>
 <translation id="7593557518625677601">如要啟動 Chrome 同步功能，請開啟 Android 設定並重新啟用 Android 系統同步處理設定</translation>
 <translation id="7596558890252710462">作業系統</translation>
 <translation id="7605594153474022051">同步處理功能無法正常運作</translation>
@@ -654,6 +663,7 @@
 <translation id="7851858861565204677">其他裝置</translation>
 <translation id="7875915731392087153">建立電子郵件</translation>
 <translation id="7876243839304621966">全部移除</translation>
+<translation id="7882131421121961860">找不到瀏覽紀錄</translation>
 <translation id="7929962904089429003">開啟選單</translation>
 <translation id="7942131818088350342"><ph name="PRODUCT_NAME" /> 版本過舊。</translation>
 <translation id="7947953824732555851">接受並登入</translation>
@@ -701,6 +711,7 @@
 <translation id="8321376388213838985">系統即將顯示更多文章供您閱覽，伴你度過美好的午後時光。</translation>
 <translation id="8372893542064058268">允許特定網站執行背景同步處理作業。</translation>
 <translation id="8374821112118309944">請更新至新版 TalkBack。</translation>
+<translation id="8393700583063109961">傳送訊息</translation>
 <translation id="8396312449826231789">僅限核准的網站</translation>
 <translation id="8413126021676339697">顯示完整記錄</translation>
 <translation id="8428213095426709021">設定</translation>
@@ -766,6 +777,7 @@
 <translation id="9070377983101773829">開始語音搜尋</translation>
 <translation id="9078964945751709336">請提供詳細資訊</translation>
 <translation id="9086455579313502267">無法存取網路</translation>
+<translation id="9094175695478007090">無法啟動付款應用程式。</translation>
 <translation id="9099018167121903954">下載內容佔 <ph name="KILOBYTES" /> KB</translation>
 <translation id="9099292894781394535">節省數據流量</translation>
 <translation id="9100610230175265781">請提供通關密語</translation>
@@ -780,6 +792,7 @@
 <translation id="9206873250291191720">A</translation>
 <translation id="9219103736887031265">圖片</translation>
 <translation id="932327136139879170">首頁</translation>
+<translation id="932599481871055447">節省數據用量，加快瀏覽速度</translation>
 <translation id="938850635132480979">錯誤：<ph name="ERROR_CODE" /></translation>
 <translation id="945632385593298557">存取您的麥克風</translation>
 <translation id="951339005376969845">刪除現有資料。你可以切換回 <ph name="FROM_ACCOUNT" />，重新取得現有資料。</translation>

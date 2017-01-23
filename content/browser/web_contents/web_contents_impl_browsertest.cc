@@ -158,9 +158,7 @@ class RenderViewSizeObserver : public WebContentsObserver {
     rwhv_create_size_ = rvh->GetWidget()->GetView()->GetViewBounds().size();
   }
 
-  void DidStartProvisionalLoadForFrame(RenderFrameHost* render_frame_host,
-                                       const GURL& url,
-                                       bool is_error_page) override {
+  void DidStartNavigation(NavigationHandle* navigation_handle) override {
     ResizeWebContentsView(shell_, wcv_new_size_, false);
   }
 
@@ -982,7 +980,6 @@ class TestJavaScriptDialogManager : public JavaScriptDialogManager,
   }
 
   void CancelDialogs(WebContents* web_contents,
-                     bool suppress_callbacks,
                      bool reset_state) override {}
 
  private:

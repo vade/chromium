@@ -30,6 +30,7 @@
 #define EmptyClients_h
 
 #include "core/CoreExport.h"
+#include "core/frame/RemoteFrameClient.h"
 #include "core/loader/FrameLoaderClient.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/ContextMenuClient.h"
@@ -199,14 +200,16 @@ class CORE_EXPORT EmptyChromeClient : public ChromeClient {
   void attachRootGraphicsLayer(GraphicsLayer*, LocalFrame* localRoot) override;
   void attachRootLayer(WebLayer*, LocalFrame* localRoot) override {}
 
-  void setEventListenerProperties(WebEventListenerClass,
+  void setEventListenerProperties(LocalFrame*,
+                                  WebEventListenerClass,
                                   WebEventListenerProperties) override {}
   WebEventListenerProperties eventListenerProperties(
-      WebEventListenerClass) const override {
+      LocalFrame*,
+      WebEventListenerClass eventClass) const override {
     return WebEventListenerProperties::Nothing;
   }
-  void setHasScrollEventHandlers(bool) override {}
-  bool hasScrollEventHandlers() const override { return false; }
+  void updateTouchRectsForSubframeIfNecessary(LocalFrame* frame) override {}
+  void setHasScrollEventHandlers(LocalFrame*, bool) override {}
 
   void setTouchAction(LocalFrame*, TouchAction) override {}
 
@@ -421,6 +424,41 @@ class EmptyContextMenuClient final : public ContextMenuClient {
   ~EmptyContextMenuClient() override {}
   bool showContextMenu(const ContextMenu*, bool) override { return false; }
   void clearContextMenu() override {}
+};
+
+class CORE_EXPORT EmptyRemoteFrameClient
+    : NON_EXPORTED_BASE(public RemoteFrameClient) {
+  WTF_MAKE_NONCOPYABLE(EmptyRemoteFrameClient);
+
+ public:
+  EmptyRemoteFrameClient();
+
+  // RemoteFrameClient implementation.
+  void navigate(const ResourceRequest&,
+                bool shouldReplaceCurrentEntry) override {}
+  void reload(FrameLoadType, ClientRedirectPolicy) override {}
+  unsigned backForwardLength() override { return 0; }
+  void forwardPostMessage(MessageEvent*,
+                          PassRefPtr<SecurityOrigin> target,
+                          LocalFrame* sourceFrame) const override {}
+  void forwardInputEvent(Event*) override {}
+  void frameRectsChanged(const IntRect& frameRect) override {}
+  void updateRemoteViewportIntersection(
+      const IntRect& viewportIntersection) override {}
+  void advanceFocus(WebFocusType, LocalFrame* source) override {}
+  void visibilityChanged(bool visible) override {}
+
+  // FrameClient implementation.
+  bool inShadowTree() const override { return false; }
+  void willBeDetached() override {}
+  void detached(FrameDetachType) override {}
+  Frame* opener() const override { return nullptr; }
+  void setOpener(Frame*) override {}
+  Frame* parent() const override { return nullptr; }
+  Frame* top() const override { return nullptr; }
+  Frame* nextSibling() const override { return nullptr; }
+  Frame* firstChild() const override { return nullptr; }
+  void frameFocused() const override {}
 };
 
 CORE_EXPORT void fillWithEmptyClients(Page::PageClients&);

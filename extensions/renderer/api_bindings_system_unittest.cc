@@ -86,7 +86,7 @@ class APIBindingsSystemTestBase : public APIBindingTest {
       const std::string& api_name) = 0;
 
   // Stores the request in |last_request_|.
-  void OnAPIRequest(std::unique_ptr<APIBindingsSystem::Request> request,
+  void OnAPIRequest(std::unique_ptr<APIBinding::Request> request,
                     v8::Local<v8::Context> context) {
     ASSERT_FALSE(last_request_);
     last_request_ = std::move(request);
@@ -121,7 +121,7 @@ class APIBindingsSystemTestBase : public APIBindingTest {
   void ValidateLastRequest(const std::string& expected_name,
                            const std::string& expected_arguments);
 
-  const APIBindingsSystem::Request* last_request() const {
+  const APIBinding::Request* last_request() const {
     return last_request_.get();
   }
   void reset_last_request() { last_request_.reset(); }
@@ -134,7 +134,7 @@ class APIBindingsSystemTestBase : public APIBindingTest {
 
   // The last request to be received from the APIBindingsSystem, or null if
   // there is none.
-  std::unique_ptr<APIBindingsSystem::Request> last_request_;
+  std::unique_ptr<APIBinding::Request> last_request_;
 
   DISALLOW_COPY_AND_ASSIGN(APIBindingsSystemTestBase);
 };
@@ -346,6 +346,60 @@ TEST_F(APIBindingsSystemTest, TestCustomHooks) {
     EXPECT_TRUE(did_call);
 
     EXPECT_EQ("[\"bar\"]",
+              GetStringPropertyFromObject(context->Global(), context,
+                                          "callbackArguments"));
+  }
+}
+
+// Tests the setCustomCallback hook.
+TEST_F(APIBindingsSystemTest, TestSetCustomCallback) {
+  v8::HandleScope handle_scope(isolate());
+  v8::Local<v8::Context> context = ContextLocal();
+
+  const char kHook[] =
+      "(function(hooks) {\n"
+      "  hooks.setCustomCallback(\n"
+      "      'functionWithCallback', (name, request, originalCallback,\n"
+      "                               firstResult, secondResult) => {\n"
+      "    this.methodName = name;\n"
+      // TODO(devlin): Currently, we don't actually pass anything useful in for
+      // the |request| object. If/when we do, we should test it.
+      "    this.results = [firstResult, secondResult];\n"
+      "    originalCallback(secondResult);\n"
+      "  });\n"
+      "})";
+
+  APIBindingHooks* hooks = bindings_system()->GetHooksForAPI(kAlphaAPIName);
+  ASSERT_TRUE(hooks);
+  v8::Local<v8::String> source_string = gin::StringToV8(isolate(), kHook);
+  v8::Local<v8::String> source_name = gin::StringToV8(isolate(), "custom_hook");
+  hooks->RegisterJsSource(v8::Global<v8::String>(isolate(), source_string),
+                          v8::Global<v8::String>(isolate(), source_name));
+
+  v8::Local<v8::Object> alpha_api = bindings_system()->CreateAPIInstance(
+      kAlphaAPIName, context, isolate(), base::Bind(&AllowAllAPIs), nullptr);
+  ASSERT_FALSE(alpha_api.IsEmpty());
+
+  {
+    const char kTestCall[] =
+        "obj.functionWithCallback('foo', function() {\n"
+        "  this.callbackArguments = Array.from(arguments);\n"
+        "});";
+    CallFunctionOnObject(context, alpha_api, kTestCall);
+
+    ValidateLastRequest("alpha.functionWithCallback", "['foo']");
+
+    std::unique_ptr<base::ListValue> response =
+        ListValueFromString("['alpha','beta']");
+    bindings_system()->CompleteRequest(last_request()->request_id, *response);
+
+    EXPECT_EQ(
+        "\"alpha.functionWithCallback\"",
+        GetStringPropertyFromObject(context->Global(), context, "methodName"));
+    EXPECT_EQ(
+        "[\"alpha\",\"beta\"]",
+        GetStringPropertyFromObject(context->Global(), context, "results"));
+    EXPECT_EQ("[\"beta\"]",
               GetStringPropertyFromObject(context->Global(), context,
                                           "callbackArguments"));
   }

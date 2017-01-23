@@ -66,13 +66,15 @@ using PerformanceObserverVector = HeapVector<Member<PerformanceObserver>>;
 static const size_t defaultResourceTimingBufferSize = 150;
 static const size_t defaultFrameTimingBufferSize = 150;
 
-PerformanceBase::PerformanceBase(double timeOrigin)
+PerformanceBase::PerformanceBase(double timeOrigin,
+                                 RefPtr<WebTaskRunner> taskRunner)
     : m_frameTimingBufferSize(defaultFrameTimingBufferSize),
       m_resourceTimingBufferSize(defaultResourceTimingBufferSize),
       m_userTiming(nullptr),
       m_timeOrigin(timeOrigin),
       m_observerFilterOptions(PerformanceEntry::Invalid),
       m_deliverObservationsTimer(
+          std::move(taskRunner),
           this,
           &PerformanceBase::deliverObservationsTimerFired) {}
 
@@ -578,8 +580,7 @@ DOMHighResTimeStamp PerformanceBase::monotonicTimeToDOMHighResTimeStamp(
     return 0.0;
 
   double timeInSeconds = monotonicTime - timeOrigin;
-  if (timeInSeconds < 0)
-    return 0.0;
+  DCHECK_GE(timeInSeconds, 0);
   return convertSecondsToDOMHighResTimeStamp(
       clampTimeResolution(timeInSeconds));
 }

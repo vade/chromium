@@ -324,8 +324,8 @@ void WebViewImpl::setCredentialManagerClient(
 void WebViewImpl::setPrerendererClient(
     WebPrerendererClient* prerendererClient) {
   DCHECK(m_page);
-  providePrerendererClientTo(*m_page,
-                             new PrerendererClientImpl(prerendererClient));
+  providePrerendererClientTo(
+      *m_page, new PrerendererClientImpl(*m_page, prerendererClient));
 }
 
 void WebViewImpl::setSpellCheckClient(WebSpellCheckClient* spellCheckClient) {
@@ -407,7 +407,7 @@ WebViewImpl::WebViewImpl(WebViewClient* client,
   m_page->setValidationMessageClient(
       ValidationMessageClientImpl::create(*this));
   provideDedicatedWorkerMessagingProxyProviderTo(
-      *m_page, DedicatedWorkerMessagingProxyProviderImpl::create());
+      *m_page, DedicatedWorkerMessagingProxyProviderImpl::create(*m_page));
   StorageNamespaceController::provideStorageNamespaceTo(*m_page,
                                                         &m_storageClientImpl);
 
@@ -442,7 +442,7 @@ WebViewImpl::UserGestureNotifier::UserGestureNotifier(WebViewImpl* view)
 
 WebViewImpl::UserGestureNotifier::~UserGestureNotifier() {
   if (!*m_userGestureObserved && m_frame &&
-      m_frame->frame()->document()->hasReceivedUserGesture()) {
+      m_frame->frame()->hasReceivedUserGesture()) {
     *m_userGestureObserved = true;
     if (m_frame && m_frame->autofillClient())
       m_frame->autofillClient()->firstUserGestureObserved();
@@ -1392,7 +1392,7 @@ static Node* findCursorDefiningAncestor(Node* node, LocalFrame* frame) {
   while (node) {
     if (node->layoutObject()) {
       ECursor cursor = node->layoutObject()->style()->cursor();
-      if (cursor != ECursor::Auto ||
+      if (cursor != ECursor::kAuto ||
           frame->eventHandler().useHandCursor(node, node->isLink()))
         break;
     }
@@ -1407,8 +1407,8 @@ static bool showsHandCursor(Node* node, LocalFrame* frame) {
     return false;
 
   ECursor cursor = node->layoutObject()->style()->cursor();
-  return cursor == ECursor::Pointer ||
-         (cursor == ECursor::Auto &&
+  return cursor == ECursor::kPointer ||
+         (cursor == ECursor::kAuto &&
           frame->eventHandler().useHandCursor(node, node->isLink()));
 }
 
@@ -1587,11 +1587,6 @@ bool WebViewImpl::zoomToMultipleTargetsRect(const WebRect& rectInRootFrame) {
   startPageScaleAnimation(scroll, false, scale,
                           multipleTargetsZoomAnimationDurationInSeconds);
   return true;
-}
-
-void WebViewImpl::hasTouchEventHandlers(bool hasTouchHandlers) {
-  if (m_client)
-    m_client->hasTouchEventHandlers(hasTouchHandlers);
 }
 
 bool WebViewImpl::hasTouchEventHandlersAt(const WebPoint& point) {
@@ -2515,7 +2510,7 @@ void WebViewImpl::willCloseLayerTreeView() {
   }
 
   if (m_layerTreeView)
-    page()->willCloseLayerTreeView(*m_layerTreeView);
+    page()->willCloseLayerTreeView(*m_layerTreeView, nullptr);
 
   setRootLayer(nullptr);
   m_animationHost = nullptr;
@@ -3022,7 +3017,7 @@ void WebViewImpl::setZoomFactorForDeviceScaleFactor(
   setZoomLevel(m_zoomLevel);
 }
 
-void WebViewImpl::setDeviceColorProfile(const WebVector<char>& colorProfile) {
+void WebViewImpl::setDeviceColorProfile(const gfx::ICCProfile& colorProfile) {
   ColorBehavior::setGlobalTargetColorProfile(colorProfile);
 }
 
@@ -3956,7 +3951,7 @@ void WebViewImpl::initializeLayerTreeView() {
 
   m_page->settings().setAcceleratedCompositingEnabled(m_layerTreeView);
   if (m_layerTreeView)
-    m_page->layerTreeViewInitialized(*m_layerTreeView);
+    m_page->layerTreeViewInitialized(*m_layerTreeView, nullptr);
 
   // FIXME: only unittests, click to play, Android printing, and printing (for
   // headers and footers) make this assert necessary. We should make them not

@@ -161,7 +161,6 @@
 #include "ios/public/provider/chrome/browser/voice/voice_search_controller.h"
 #include "ios/public/provider/chrome/browser/voice/voice_search_controller_delegate.h"
 #include "ios/public/provider/chrome/browser/voice/voice_search_provider.h"
-#import "ios/third_party/material_components_ios/src/components/Snackbar/src/MaterialSnackbar.h"
 #import "ios/web/navigation/crw_session_controller.h"
 #import "ios/web/navigation/crw_session_entry.h"
 #include "ios/web/navigation/navigation_manager_impl.h"
@@ -287,8 +286,6 @@ bool IsURLAllowedInIncognito(const GURL& url) {
 // Temporary key to use when storing native controllers vended to tabs before
 // they are added to the tab model.
 NSString* const kNativeControllerTemporaryKey = @"NativeControllerTemporaryKey";
-
-NSString* const kReadingListSnackbarCategory = @"ReadingListSnackbarCategory";
 
 }  // anonymous namespace
 
@@ -941,7 +938,8 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   _tabStripController.reset();
   _infoBarContainer.reset();
   _readingListMenuNotifier.reset();
-  _bookmarkModel->RemoveObserver(_bookmarkModelBridge.get());
+  if (_bookmarkModel)
+    _bookmarkModel->RemoveObserver(_bookmarkModelBridge.get());
   [_model removeObserver:self];
   [[UpgradeCenter sharedInstance] unregisterClient:self];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
@@ -1656,10 +1654,13 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   _imageFetcher->SetRequestContextGetter(_browserState->GetRequestContext());
   _dominantColorCache.reset([[NSMutableDictionary alloc] init]);
 
-  // Register for bookmark changed notification.
-  _bookmarkModelBridge.reset(new BrowserBookmarkModelBridge(self));
+  // Register for bookmark changed notification (BookmarkModel may be null
+  // during testing, so explicitly support this).
   _bookmarkModel = ios::BookmarkModelFactory::GetForBrowserState(_browserState);
-  _bookmarkModel->AddObserver(_bookmarkModelBridge.get());
+  if (_bookmarkModel) {
+    _bookmarkModelBridge.reset(new BrowserBookmarkModelBridge(self));
+    _bookmarkModel->AddObserver(_bookmarkModelBridge.get());
+  }
 }
 
 - (void)ensureViewCreated {
@@ -2155,7 +2156,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
   // TODO(noyau): this is incorrect, the caller should know that the model is
   // not loaded yet.
-  if (!_bookmarkModel->loaded())
+  if (!_bookmarkModel || !_bookmarkModel->loaded())
     return filesReferencedByTabs;
 
   std::vector<bookmarks::BookmarkModel::URLAndTitle> bookmarks;
@@ -2455,20 +2456,6 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     if (web::UrlHasWebScheme(link)) {
       web::Referrer referrer([_model currentTab].url, params.referrer_policy);
 
-      if (reading_list::switches::IsReadingListEnabled()) {
-        NSString* innerText = params.link_text;
-        if ([innerText length] > 0) {
-          // Add to reading list.
-          title = l10n_util::GetNSStringWithFixup(
-              IDS_IOS_CONTENT_CONTEXT_ADDTOREADINGLIST);
-          action = ^{
-            Record(ACTION_READ_LATER, isImage, isLink);
-            [weakSelf addToReadingListURL:link title:innerText];
-          };
-          [_contextMenuCoordinator addItemWithTitle:title action:action];
-        }
-      }
-
       // Open in New Tab.
       title = l10n_util::GetNSStringWithFixup(
           IDS_IOS_CONTENT_CONTEXT_OPENLINKNEWTAB);
@@ -2493,6 +2480,20 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
                            inIncognito:YES
                           inBackground:NO
                               appendTo:kCurrentTab];
+        };
+        [_contextMenuCoordinator addItemWithTitle:title action:action];
+      }
+    }
+    if (link.SchemeIsHTTPOrHTTPS() &&
+        reading_list::switches::IsReadingListEnabled()) {
+      NSString* innerText = params.link_text;
+      if ([innerText length] > 0) {
+        // Add to reading list.
+        title = l10n_util::GetNSStringWithFixup(
+            IDS_IOS_CONTENT_CONTEXT_ADDTOREADINGLIST);
+        action = ^{
+          Record(ACTION_READ_LATER, isImage, isLink);
+          [weakSelf addToReadingListURL:link title:innerText];
         };
         [_contextMenuCoordinator addItemWithTitle:title action:action];
       }
@@ -2571,6 +2572,17 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 - (web::JavaScriptDialogPresenter*)javaScriptDialogPresenterForWebState:
     (web::WebState*)webState {
   return _javaScriptDialogPresenter.get();
+}
+
+- (void)webState:(web::WebState*)webState
+    didRequestHTTPAuthForProtectionSpace:(NSURLProtectionSpace*)protectionSpace
+                      proposedCredential:(NSURLCredential*)proposedCredential
+                       completionHandler:(void (^)(NSString* username,
+                                                   NSString* password))handler {
+  [self.dialogPresenter runAuthDialogForProtectionSpace:protectionSpace
+                                     proposedCredential:proposedCredential
+                                               webState:webState
+                                      completionHandler:handler];
 }
 
 #pragma mark - FullScreenControllerDelegate methods
@@ -2652,8 +2664,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 }
 
 - (BOOL)isTabWithIDCurrent:(NSString*)sessionID {
-  return self.visible &&
-         [sessionID isEqualToString:[[_model currentTab] currentSessionID]];
+  return self.visible && [sessionID isEqualToString:[_model currentTab].tabId];
 }
 
 - (CGFloat)currentHeaderOffset {
@@ -3500,12 +3511,8 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   readingModel->AddEntry(URL, base::SysNSStringToUTF8(title),
                          reading_list::ADDED_VIA_CURRENT_APP);
 
-  NSString* snackBarMessage =
-      l10n_util::GetNSString(IDS_IOS_READING_LIST_SNACKBAR_MESSAGE);
-  MDCSnackbarMessage* message =
-      [MDCSnackbarMessage messageWithText:snackBarMessage];
-  message.category = kReadingListSnackbarCategory;
-  [MDCSnackbarManager showMessage:message];
+  [self showSnackbar:l10n_util::GetNSString(
+                         IDS_IOS_READING_LIST_SNACKBAR_MESSAGE)];
 }
 
 #pragma mark - Keyboard commands management
@@ -3790,7 +3797,12 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 }
 
 - (void)openJavascript:(NSString*)javascript {
-  [[_model currentTab] openJavascript:javascript];
+  DCHECK(javascript);
+  javascript = [javascript stringByRemovingPercentEncoding];
+  web::WebState* webState = [[_model currentTab] webState];
+  if (webState) {
+    webState->ExecuteJavaScript(base::SysNSStringToUTF16(javascript));
+  }
 }
 
 #pragma mark - WebToolbarDelegate methods
@@ -5083,17 +5095,6 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 }
 
 #pragma mark - TabDialogDelegate methods
-
-- (void)tab:(Tab*)tab
-    runAuthDialogForProtectionSpace:(NSURLProtectionSpace*)protectionSpace
-                 proposedCredential:(NSURLCredential*)credential
-                  completionHandler:
-                      (void (^)(NSString* user, NSString* password))handler {
-  [self.dialogPresenter runAuthDialogForProtectionSpace:protectionSpace
-                                     proposedCredential:credential
-                                               webState:tab.webState
-                                      completionHandler:handler];
-}
 
 - (void)cancelDialogForTab:(Tab*)tab {
   [self.dialogPresenter cancelDialogForWebState:tab.webState];

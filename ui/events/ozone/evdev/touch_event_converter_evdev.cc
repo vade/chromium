@@ -96,18 +96,19 @@ const int kTrackingIdForUnusedSlot = -1;
 namespace ui {
 
 TouchEventConverterEvdev::TouchEventConverterEvdev(
-    int fd,
+    ScopedInputDevice fd,
     base::FilePath path,
     int id,
     const EventDeviceInfo& devinfo,
     DeviceEventDispatcherEvdev* dispatcher)
-    : EventConverterEvdev(fd,
+    : EventConverterEvdev(fd.get(),
                           path,
                           id,
                           devinfo.device_type(),
                           devinfo.name(),
                           devinfo.vendor_id(),
                           devinfo.product_id()),
+      input_device_fd_(std::move(fd)),
       dispatcher_(dispatcher) {
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kExtraTouchNoiseFiltering)) {
@@ -167,7 +168,7 @@ void TouchEventConverterEvdev::Initialize(const EventDeviceInfo& info) {
   // TODO(denniskempin): Use EVIOCGKEY to synchronize key state.
 
   events_.resize(touch_points_);
-
+  bool cancelled_state = false;
   if (has_mt_) {
     for (size_t i = 0; i < events_.size(); ++i) {
       events_[i].x = info.GetAbsMtSlotValueWithDefault(ABS_MT_POSITION_X, i, 0);
@@ -188,7 +189,9 @@ void TouchEventConverterEvdev::Initialize(const EventDeviceInfo& info) {
           info.GetAbsMtSlotValueWithDefault(ABS_MT_TOUCH_MINOR, i, 0) / 2.0f;
       events_[i].pressure = ScalePressure(
           info.GetAbsMtSlotValueWithDefault(ABS_MT_PRESSURE, i, 0));
-      events_[i].cancelled = (major_max_ > 0 && touch_major == major_max_);
+      events_[i].cancelled = major_max_ > 0 && touch_major == major_max_;
+      if (events_[i].cancelled)
+        cancelled_state = true;
     }
   } else {
     // TODO(spang): Add key state to EventDeviceInfo to allow initial contact.
@@ -204,6 +207,8 @@ void TouchEventConverterEvdev::Initialize(const EventDeviceInfo& info) {
     events_[0].tool_code = 0;
     events_[0].cancelled = false;
   }
+  if (cancelled_state)
+    CancelAllTouches();
 }
 
 void TouchEventConverterEvdev::Reinitialize() {
@@ -445,6 +450,18 @@ void TouchEventConverterEvdev::ReportTouchEvent(
                        gfx::PointF(event.x, event.y), details, timestamp));
 }
 
+void TouchEventConverterEvdev::CancelAllTouches() {
+  // TODO(denniskempin): Remove once upper layers properly handle single
+  // cancelled touches.
+  for (size_t i = 0; i < events_.size(); i++) {
+    InProgressTouchEvdev* event = &events_[i];
+    if (event->was_touching || event->touching) {
+      event->cancelled = true;
+      event->altered = true;
+    }
+  }
+}
+
 void TouchEventConverterEvdev::ReportEvents(base::TimeTicks timestamp) {
   if (dropped_events_) {
     Reinitialize();
@@ -456,14 +473,21 @@ void TouchEventConverterEvdev::ReportEvents(base::TimeTicks timestamp) {
 
   for (size_t i = 0; i < events_.size(); i++) {
     InProgressTouchEvdev* event = &events_[i];
+    if (event->altered && (event->cancelled ||
+                           (touch_noise_finder_ &&
+                            touch_noise_finder_->SlotHasNoise(event->slot)))) {
+      CancelAllTouches();
+      break;
+    }
+  }
+
+  for (size_t i = 0; i < events_.size(); i++) {
+    InProgressTouchEvdev* event = &events_[i];
     if (!event->altered)
       continue;
 
     if (enable_palm_suppression_callback_)
       enable_palm_suppression_callback_.Run(event->tool_code > 0);
-
-    if (touch_noise_finder_ && touch_noise_finder_->SlotHasNoise(event->slot))
-      event->cancelled = true;
 
     EventType event_type = GetEventTypeForTouch(*event);
     // The tool type is fixed with the touch pressed event and does not change.

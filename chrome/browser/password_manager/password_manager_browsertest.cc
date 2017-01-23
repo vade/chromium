@@ -108,10 +108,10 @@ std::unique_ptr<net::test_server::HttpResponse> HandleTestAuthRequest(
   }
 }
 
-class ObservingAutofillClient : public autofill::TestAutofillClient {
+class ObservingAutofillClient
+    : public autofill::TestAutofillClient,
+      public content::WebContentsUserData<ObservingAutofillClient> {
  public:
-  ObservingAutofillClient()
-      : message_loop_runner_(new content::MessageLoopRunner) {}
   ~ObservingAutofillClient() override {}
 
   void Wait() { message_loop_runner_->Run(); }
@@ -125,6 +125,10 @@ class ObservingAutofillClient : public autofill::TestAutofillClient {
   }
 
  private:
+  explicit ObservingAutofillClient(content::WebContents* web_contents)
+      : message_loop_runner_(new content::MessageLoopRunner) {}
+  friend class content::WebContentsUserData<ObservingAutofillClient>;
+
   scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(ObservingAutofillClient);
@@ -163,6 +167,8 @@ void TestPromptNotShown(const char* failure_message,
 }
 
 }  // namespace
+
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(ObservingAutofillClient);
 
 namespace password_manager {
 
@@ -1712,12 +1718,14 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTestBase,
   password_manager::ContentPasswordManagerDriverFactory* driver_factory =
       password_manager::ContentPasswordManagerDriverFactory::FromWebContents(
           WebContents());
-  ObservingAutofillClient observing_autofill_client;
+  ObservingAutofillClient::CreateForWebContents(WebContents());
+  ObservingAutofillClient* observing_autofill_client =
+      ObservingAutofillClient::FromWebContents(WebContents());
   password_manager::ContentPasswordManagerDriver* driver =
       driver_factory->GetDriverForFrame(RenderViewHost()->GetMainFrame());
   DCHECK(driver);
   driver->GetPasswordAutofillManager()->set_autofill_client(
-      &observing_autofill_client);
+      observing_autofill_client);
 
   NavigateToFile("/password/password_form.html");
 
@@ -1761,7 +1769,7 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTestBase,
       WebContents(), 0, blink::WebMouseEvent::Button::Left, gfx::Point(left + 1,
                                                                      top + 1));
   // Make sure the popup would be shown.
-  observing_autofill_client.Wait();
+  observing_autofill_client->Wait();
 }
 
 IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTestBase,
@@ -2023,8 +2031,14 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTestBase,
 
 // Check that a password form in an iframe of same origin will not be
 // filled in until user interact with the iframe.
+// TODO(crbug.com/683209): Flaky on Win7 dbg.
+#if defined(OS_WIN)
+#define MAYBE_SameOriginIframeAutoFillTest DISABLED_SameOriginIframeAutoFillTest
+#else
+#define MAYBE_SameOriginIframeAutoFillTest SameOriginIframeAutoFillTest
+#endif
 IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTestBase,
-                       SameOriginIframeAutoFillTest) {
+                       MAYBE_SameOriginIframeAutoFillTest) {
   // Visit the sign-up form to store a password for autofill later
   NavigateToFile("/password/password_form_in_same_origin_iframe.html");
   NavigationObserver observer(WebContents());

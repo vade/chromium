@@ -413,7 +413,6 @@ void RenderWidgetHostViewEventHandler::OnScrollEvent(ui::ScrollEvent* event) {
       host_->ForwardWheelEventWithLatencyInfo(mouse_wheel_event,
                                               *event->latency());
     }
-    RecordAction(base::UserMetricsAction("TrackpadScroll"));
   } else if (event->type() == ui::ET_SCROLL_FLING_START ||
              event->type() == ui::ET_SCROLL_FLING_CANCEL) {
     blink::WebGestureEvent gesture_event = ui::MakeWebGestureEvent(
@@ -524,9 +523,7 @@ void RenderWidgetHostViewEventHandler::OnGestureEvent(ui::GestureEvent* event) {
       host_->ForwardGestureEventWithLatencyInfo(gesture, *event->latency());
     }
 
-    if (event->type() == ui::ET_GESTURE_SCROLL_BEGIN ||
-        event->type() == ui::ET_GESTURE_SCROLL_UPDATE ||
-        event->type() == ui::ET_GESTURE_SCROLL_END) {
+    if (event->type() == ui::ET_GESTURE_SCROLL_BEGIN) {
       RecordAction(base::UserMetricsAction("TouchscreenScroll"));
     } else if (event->type() == ui::ET_SCROLL_FLING_START) {
       RecordAction(base::UserMetricsAction("TouchscreenScrollFling"));
@@ -641,16 +638,12 @@ void RenderWidgetHostViewEventHandler::HandleGestureForTouchSelection(
     ui::GestureEvent* event) {
   switch (event->type()) {
     case ui::ET_GESTURE_LONG_PRESS:
-      if (delegate_->selection_controller()->WillHandleLongPressEvent(
-              event->time_stamp(), event->location_f())) {
-        event->SetHandled();
-      }
+      delegate_->selection_controller()->HandleLongPressEvent(
+          event->time_stamp(), event->location_f());
       break;
     case ui::ET_GESTURE_TAP:
-      if (delegate_->selection_controller()->WillHandleTapEvent(
-              event->location_f(), event->details().tap_count())) {
-        event->SetHandled();
-      }
+      delegate_->selection_controller()->HandleTapEvent(
+          event->location_f(), event->details().tap_count());
       break;
     case ui::ET_GESTURE_SCROLL_BEGIN:
       delegate_->selection_controller_client()->OnScrollStarted();

@@ -54,9 +54,9 @@
 
     var localPathRegExp;
     if (document.URL.startsWith("file:///")) {
-        var index = document.URL.indexOf("/imported/wpt");
+        var index = document.URL.indexOf("/external/wpt");
         if (index >= 0) {
-            var localPath = document.URL.substring("file:///".length, index + "/imported/wpt".length);
+            var localPath = document.URL.substring("file:///".length, index + "/external/wpt".length);
             localPathRegExp = new RegExp(localPath.replace(/(\W)/g, "\\$1"), "g");
         }
     }
@@ -76,18 +76,6 @@
         return text;
     }
 
-    // If the test has a meta tag named flags and the content contains "dom",
-    // then it's a CSSWG test.
-    function isCSSWGTest() {
-        var flags = document.querySelector('meta[name=flags]'),
-            content = flags ? flags.getAttribute('content') : null;
-        return content && content.match(/\bdom\b/);
-    }
-
-    function isJSTest() {
-        return !!document.querySelector('script[src*="/resources/testharness"]');
-    }
-
     function isWPTManualTest() {
         var path = location.pathname;
         if (location.hostname == 'web-platform.test' && path.endsWith('-manual.html'))
@@ -97,7 +85,7 @@
 
     // Returns a directory part relative to WPT root and a basename part of the
     // current test. e.g.
-    // Current test: file:///.../LayoutTests/imported/wpt/pointerevents/foobar.html
+    // Current test: file:///.../LayoutTests/external/wpt/pointerevents/foobar.html
     // Output: "/pointerevents/foobar"
     function pathAndBaseNameInWPT() {
         var path = location.pathname;
@@ -113,7 +101,7 @@
         var pathAndBase = pathAndBaseNameInWPT();
         if (!pathAndBase)
             return;
-        var automationPath = location.pathname.replace(/\/imported\/wpt\/.*$/, '/imported/wpt_automation');
+        var automationPath = location.pathname.replace(/\/imported\/wpt\/.*$/, '/external/wpt_automation');
         if (location.hostname == 'web-platform.test')
             automationPath = '/wpt_automation';
 
@@ -213,18 +201,24 @@
         results.textContent = resultStr;
 
         function done() {
-            if (self.testRunner) {
+            // A temporary workaround since |window.self| property lookup starts
+            // failing if the frame is detached. |output_document| may be an
+            // ancestor of |self| so clearing |textContent| may detach |self|.
+            // To get around this, cache window.self now and use the cached
+            // value.
+            // TODO(dcheng): Remove this hack after fixing window/self/frames
+            // lookup in https://crbug.com/618672
+            var cachedSelf = window.self;
+            if (cachedSelf.testRunner) {
                 // The following DOM operations may show console messages.  We
                 // suppress them because they are not related to the running
                 // test.
                 testRunner.setDumpConsoleMessages(false);
 
-                if (isCSSWGTest() || isJSTest()) {
-                    // Anything isn't material to the testrunner output, so
-                    // should be hidden from the text dump.
-                    if (output_document.body && output_document.body.tagName == 'BODY')
-                        output_document.body.textContent = '';
-                }
+                // Anything isn't material to the testrunner output, so should
+                // be hidden from the text dump.
+                if (output_document.body && output_document.body.tagName == 'BODY')
+                    output_document.body.textContent = '';
             }
 
             // Add results element to output_document.
@@ -237,7 +231,7 @@
             }
             output_document.body.appendChild(results);
 
-            if (self.testRunner)
+            if (cachedSelf.testRunner)
                 testRunner.notifyDone();
         }
 

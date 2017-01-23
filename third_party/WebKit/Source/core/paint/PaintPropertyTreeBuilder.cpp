@@ -38,10 +38,11 @@ PaintPropertyTreeBuilder::setupInitialContext() {
 }
 
 // True if a new property was created, false if an existing one was updated.
-bool updatePreTranslation(FrameView& frameView,
-                          PassRefPtr<const TransformPaintPropertyNode> parent,
-                          const TransformationMatrix& matrix,
-                          const FloatPoint3D& origin) {
+static bool updatePreTranslation(
+    FrameView& frameView,
+    PassRefPtr<const TransformPaintPropertyNode> parent,
+    const TransformationMatrix& matrix,
+    const FloatPoint3D& origin) {
   DCHECK(!RuntimeEnabledFeatures::rootLayerScrollingEnabled());
   if (auto* existingPreTranslation = frameView.preTranslation()) {
     existingPreTranslation->update(std::move(parent), matrix, origin);
@@ -53,7 +54,7 @@ bool updatePreTranslation(FrameView& frameView,
 }
 
 // True if a new property was created, false if an existing one was updated.
-bool updateContentClip(
+static bool updateContentClip(
     FrameView& frameView,
     PassRefPtr<const ClipPaintPropertyNode> parent,
     PassRefPtr<const TransformPaintPropertyNode> localTransformSpace,
@@ -70,7 +71,7 @@ bool updateContentClip(
 }
 
 // True if a new property was created, false if an existing one was updated.
-bool updateScrollTranslation(
+static bool updateScrollTranslation(
     FrameView& frameView,
     PassRefPtr<const TransformPaintPropertyNode> parent,
     const TransformationMatrix& matrix,
@@ -85,32 +86,43 @@ bool updateScrollTranslation(
   return true;
 }
 
+static CompositorElementId createDomNodeBasedCompositorElementId(
+    const LayoutObject& object) {
+  return createCompositorElementId(DOMNodeIds::idForNode(object.node()),
+                                   CompositorSubElementId::Primary);
+}
+
 // True if a new property was created or a main thread scrolling reason changed
 // (which can affect descendants), false if an existing one was updated.
-bool updateScroll(FrameView& frameView,
-                  PassRefPtr<const ScrollPaintPropertyNode> parent,
-                  PassRefPtr<const TransformPaintPropertyNode> scrollOffset,
-                  const IntSize& clip,
-                  const IntSize& bounds,
-                  bool userScrollableHorizontal,
-                  bool userScrollableVertical,
-                  MainThreadScrollingReasons mainThreadScrollingReasons) {
+static bool updateScroll(
+    FrameView& frameView,
+    PassRefPtr<const ScrollPaintPropertyNode> parent,
+    PassRefPtr<const TransformPaintPropertyNode> scrollOffset,
+    const IntSize& clip,
+    const IntSize& bounds,
+    bool userScrollableHorizontal,
+    bool userScrollableVertical,
+    MainThreadScrollingReasons mainThreadScrollingReasons) {
   DCHECK(!RuntimeEnabledFeatures::rootLayerScrollingEnabled());
+
+  CompositorElementId compositorElementId =
+      createDomNodeBasedCompositorElementId(*frameView.layoutView());
   if (auto* existingScroll = frameView.scroll()) {
     auto existingReasons = existingScroll->mainThreadScrollingReasons();
     existingScroll->update(std::move(parent), std::move(scrollOffset), clip,
                            bounds, userScrollableHorizontal,
-                           userScrollableVertical, mainThreadScrollingReasons);
+                           userScrollableVertical, mainThreadScrollingReasons,
+                           compositorElementId);
     return existingReasons != mainThreadScrollingReasons;
   }
   frameView.setScroll(ScrollPaintPropertyNode::create(
       std::move(parent), std::move(scrollOffset), clip, bounds,
       userScrollableHorizontal, userScrollableVertical,
-      mainThreadScrollingReasons));
+      mainThreadScrollingReasons, compositorElementId));
   return true;
 }
 
-MainThreadScrollingReasons mainThreadScrollingReasons(
+static MainThreadScrollingReasons mainThreadScrollingReasons(
     const FrameView& frameView,
     MainThreadScrollingReasons ancestorReasons) {
   auto reasons = ancestorReasons;
@@ -346,16 +358,6 @@ static FloatPoint3D transformOrigin(const LayoutBox& box) {
       floatValueForLength(style.transformOriginY(), borderBoxSize.height()),
       style.transformOriginZ());
 }
-
-namespace {
-
-CompositorElementId createDomNodeBasedCompositorElementId(
-    const LayoutObject& object) {
-  return createCompositorElementId(DOMNodeIds::idForNode(object.node()),
-                                   CompositorSubElementId::Primary);
-}
-
-}  // namespace
 
 void PaintPropertyTreeBuilder::updateTransform(
     const LayoutObject& object,
@@ -744,7 +746,7 @@ void PaintPropertyTreeBuilder::updateSvgLocalToBorderBoxTransform(
   context.current.paintOffset = LayoutPoint();
 }
 
-MainThreadScrollingReasons mainThreadScrollingReasons(
+static MainThreadScrollingReasons mainThreadScrollingReasons(
     const LayoutObject& object,
     MainThreadScrollingReasons ancestorReasons) {
   // The current main thread scrolling reasons implementation only changes
@@ -796,10 +798,13 @@ void PaintPropertyTreeBuilder::updateScrollAndScrollTranslation(
             context.forceSubtreeUpdate = true;
         }
 
+        CompositorElementId compositorElementId =
+            createDomNodeBasedCompositorElementId(object);
+
         context.forceSubtreeUpdate |= properties.updateScroll(
             context.current.scroll, properties.scrollTranslation(), scrollClip,
             scrollBounds, userScrollableHorizontal, userScrollableVertical,
-            reasons);
+            reasons, compositorElementId);
       }
     }
 
@@ -962,14 +967,22 @@ void PaintPropertyTreeBuilder::updatePropertiesForSelf(
   if (object.isBoxModelObject() || object.isSVG()) {
     updatePaintOffsetTranslation(object, context);
     updateTransform(object, context);
-    updateEffect(object, context);
+    if (RuntimeEnabledFeatures::slimmingPaintV2Enabled())
+      updateEffect(object, context);
     updateCssClip(object, context);
     updateLocalBorderBoxContext(object, context);
-    updateScrollbarPaintOffset(object, context);
+    if (RuntimeEnabledFeatures::slimmingPaintV2Enabled())
+      updateScrollbarPaintOffset(object, context);
   }
 
-  if (object.needsPaintPropertyUpdate() || context.forceSubtreeUpdate)
+  if (object.needsPaintPropertyUpdate() || context.forceSubtreeUpdate) {
+    if (RuntimeEnabledFeatures::slimmingPaintV2Enabled() &&
+        object.paintOffset() != context.current.paintOffset) {
+      object.getMutableForPainting().setShouldDoFullPaintInvalidation(
+          PaintInvalidationLocationChange);
+    }
     object.getMutableForPainting().setPaintOffset(context.current.paintOffset);
+  }
 }
 
 void PaintPropertyTreeBuilder::updatePropertiesForChildren(

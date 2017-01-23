@@ -12,7 +12,6 @@
 #include "base/trace_event/trace_event_argument.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/output/copy_output_request.h"
-#include "cc/proto/gfx_conversions.h"
 #include "cc/trees/clip_node.h"
 #include "cc/trees/effect_node.h"
 #include "cc/trees/layer_tree_host_common.h"
@@ -49,6 +48,7 @@ TransformTree::TransformTree()
       device_scale_factor_(1.f),
       device_transform_scale_factor_(1.f) {
   cached_data_.push_back(TransformCachedNodeData());
+  cached_data_[kRootNodeId].target_id = kRootNodeId;
 }
 
 TransformTree::~TransformTree() = default;
@@ -117,6 +117,7 @@ void TransformTree::clear() {
   nodes_affected_by_outer_viewport_bounds_delta_.clear();
   cached_data_.clear();
   cached_data_.push_back(TransformCachedNodeData());
+  cached_data_[kRootNodeId].target_id = kRootNodeId;
   sticky_position_data_.clear();
 
 #if DCHECK_IS_ON()
@@ -198,7 +199,8 @@ bool TransformTree::NeedsSourceToParentUpdate(TransformNode* node) {
 }
 
 void TransformTree::ResetChangeTracking() {
-  for (int id = 1; id < static_cast<int>(size()); ++id) {
+  for (int id = TransformTree::kContentsRootNodeId;
+       id < static_cast<int>(size()); ++id) {
     TransformNode* node = Node(id);
     node->transform_changed = false;
   }
@@ -923,7 +925,7 @@ void EffectTree::TakeCopyRequestsAndTransformToSurface(
     // the surface to the space of the surface itself.
     int destination_id = effect_node->transform_id;
     int source_id;
-    if (effect_node->parent_id != -1) {
+    if (effect_node->parent_id != EffectTree::kInvalidNodeId) {
       // For non-root surfaces, transform only by sub-layer scale.
       source_id = destination_id;
     } else {
@@ -956,9 +958,9 @@ void EffectTree::ClearCopyRequests() {
 }
 
 int EffectTree::ClosestAncestorWithCopyRequest(int id) const {
-  DCHECK_GE(id, 0);
+  DCHECK_GE(id, EffectTree::kRootNodeId);
   const EffectNode* node = Node(id);
-  while (node->id > 1) {
+  while (node->id > EffectTree::kContentsRootNodeId) {
     if (node->has_copy_request)
       return node->id;
 
@@ -968,7 +970,7 @@ int EffectTree::ClosestAncestorWithCopyRequest(int id) const {
   if (node->has_copy_request)
     return node->id;
   else
-    return -1;
+    return EffectTree::kInvalidNodeId;
 }
 
 void EffectTree::AddMaskLayerId(int id) {
@@ -985,7 +987,8 @@ bool EffectTree::ContributesToDrawnSurface(int id) {
 }
 
 void EffectTree::ResetChangeTracking() {
-  for (int id = 1; id < static_cast<int>(size()); ++id) {
+  for (int id = EffectTree::kContentsRootNodeId; id < static_cast<int>(size());
+       ++id) {
     EffectNode* node = Node(id);
     node->effect_changed = false;
   }
@@ -1202,7 +1205,6 @@ gfx::ScrollOffset ScrollTree::MaxScrollOffset(int scroll_node_id) const {
 }
 
 void ScrollTree::OnScrollOffsetAnimated(int layer_id,
-                                        int transform_tree_index,
                                         int scroll_tree_index,
                                         const gfx::ScrollOffset& scroll_offset,
                                         LayerTreeImpl* layer_tree_impl) {
@@ -1720,12 +1722,14 @@ bool PropertyTrees::IsInIdToIndexMap(TreeType tree_type, int id) {
 }
 
 void PropertyTrees::UpdateChangeTracking() {
-  for (int id = 1; id < static_cast<int>(effect_tree.size()); ++id) {
+  for (int id = EffectTree::kContentsRootNodeId;
+       id < static_cast<int>(effect_tree.size()); ++id) {
     EffectNode* node = effect_tree.Node(id);
     EffectNode* parent_node = effect_tree.parent(node);
     effect_tree.UpdateEffectChanged(node, parent_node);
   }
-  for (int i = 1; i < static_cast<int>(transform_tree.size()); ++i) {
+  for (int i = TransformTree::kContentsRootNodeId;
+       i < static_cast<int>(transform_tree.size()); ++i) {
     TransformNode* node = transform_tree.Node(i);
     TransformNode* parent_node = transform_tree.parent(node);
     TransformNode* source_node = transform_tree.Node(node->source_node_id);
@@ -1734,14 +1738,16 @@ void PropertyTrees::UpdateChangeTracking() {
 }
 
 void PropertyTrees::PushChangeTrackingTo(PropertyTrees* tree) {
-  for (int id = 1; id < static_cast<int>(effect_tree.size()); ++id) {
+  for (int id = EffectTree::kContentsRootNodeId;
+       id < static_cast<int>(effect_tree.size()); ++id) {
     EffectNode* node = effect_tree.Node(id);
     if (node->effect_changed) {
       EffectNode* target_node = tree->effect_tree.Node(node->id);
       target_node->effect_changed = true;
     }
   }
-  for (int id = 1; id < static_cast<int>(transform_tree.size()); ++id) {
+  for (int id = TransformTree::kContentsRootNodeId;
+       id < static_cast<int>(transform_tree.size()); ++id) {
     TransformNode* node = transform_tree.Node(id);
     if (node->transform_changed) {
       TransformNode* target_node = tree->transform_tree.Node(node->id);
@@ -1981,9 +1987,10 @@ DrawTransformData& PropertyTrees::FetchDrawTransformsDataFromCache(
     int dest_id) const {
   for (auto& transform_data : cached_data_.draw_transforms[transform_id]) {
     // We initialize draw_transforms with 1 element vectors when
-    // ResetCachedData, so if we hit a -1 target id, it means it's the first
-    // time we compute draw transforms after reset.
-    if (transform_data.target_id == dest_id || transform_data.target_id == -1) {
+    // ResetCachedData, so if we hit an invalid target id, it means it's the
+    // first time we compute draw transforms after reset.
+    if (transform_data.target_id == dest_id ||
+        transform_data.target_id == EffectTree::kInvalidNodeId) {
       return transform_data;
     }
   }
@@ -2004,7 +2011,7 @@ DrawTransforms& PropertyTrees::GetDrawTransforms(int transform_id,
       FetchDrawTransformsDataFromCache(transform_id, dest_id);
 
   DCHECK(data.update_number != cached_data_.property_tree_update_number ||
-         data.target_id != -1);
+         data.target_id != EffectTree::kInvalidNodeId);
   if (data.update_number == cached_data_.property_tree_update_number)
     return data.transforms;
 
@@ -2066,8 +2073,7 @@ void PropertyTrees::UpdateCachedNumber() {
 gfx::Transform PropertyTrees::ToScreenSpaceTransformWithoutSurfaceContentsScale(
     int transform_id,
     int effect_id) const {
-  DCHECK_GT(transform_id, 0);
-  if (transform_id == 1) {
+  if (transform_id == TransformTree::kRootNodeId) {
     return gfx::Transform();
   }
   gfx::Transform screen_space_transform = transform_tree.ToScreen(transform_id);

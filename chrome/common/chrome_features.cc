@@ -107,6 +107,11 @@ const base::Feature kLinuxObsoleteSystemIsEndOfTheLine{
     "LinuxObsoleteSystemIsEndOfTheLine", base::FEATURE_DISABLED_BY_DEFAULT};
 #endif
 
+// Enables or disables the Location Settings Dialog (LSD). The LSD is an Android
+// system-level geolocation permission prompt.
+const base::Feature kLsdPermissionPrompt{"LsdPermissionPrompt",
+                                         base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Enables or disables the Material Design version of chrome://bookmarks.
 const base::Feature kMaterialDesignBookmarks{"MaterialDesignBookmarks",
                                              base::FEATURE_DISABLED_BY_DEFAULT};
@@ -139,6 +144,12 @@ const base::Feature kMediaRemotingEncrypted{"MediaRemotingEncrypted",
 // Enables or disables modal permission prompts.
 const base::Feature kModalPermissionPrompts{"ModalPermissionPrompts",
                                             base::FEATURE_DISABLED_BY_DEFAULT};
+
+#if defined(OS_WIN)
+// Enables or disables the ModuleDatabase backend for the conflicts UI.
+const base::Feature kModuleDatabase{"ModuleDatabase",
+                                    base::FEATURE_DISABLED_BY_DEFAULT};
+#endif
 
 // Enables the use of native notification centers instead of using the Message
 // Center for displaying the toasts.
@@ -237,7 +248,7 @@ const base::Feature kEHVInputOnImeMenu{"EmojiHandwritingVoiceInput",
 
 // Enables or disables flash component updates on Chrome OS.
 const base::Feature kCrosCompUpdates{"CrosCompUpdates",
-                                     base::FEATURE_DISABLED_BY_DEFAULT};
+                                     base::FEATURE_ENABLED_BY_DEFAULT};
 #endif  // defined(OS_CHROMEOS)
 
 }  // namespace features

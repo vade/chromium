@@ -491,6 +491,7 @@ source_set("blink_headers") {
     "web/WebInputMethodController.h",
     "web/WebKit.h",
     "web/WebLabelElement.h",
+    "web/WebLanguageDetectionDetails.h",
     "web/WebLeakDetector.h",
     "web/WebLocalFrame.h",
     "web/WebMeaningfulLayout.h",
@@ -544,7 +545,7 @@ source_set("blink_headers") {
     "web/WebSettings.h",
     "web/WebSharedWorker.h",
     "web/WebSharedWorkerClient.h",
-    "web/WebSharedWorkerConnector.h",
+    "web/WebSharedWorkerConnectListener.h",
     "web/WebSharedWorkerCreationErrors.h",
     "web/WebSharedWorkerRepositoryClient.h",
     "web/WebSpeechGrammar.h",
@@ -666,6 +667,7 @@ mojom("mojo_bindings") {
     "platform/modules/websockets/websocket.mojom",
     "platform/referrer.mojom",
     "platform/site_engagement.mojom",
+    "web/console_message.mojom",
     "web/window_features.mojom",
   ]
   public_deps = [
@@ -673,7 +675,6 @@ mojom("mojo_bindings") {
     "//device/bluetooth/public/interfaces",
     "//mojo/common:common_custom_types",
     "//ui/gfx/geometry/mojo",
-    "//ui/gfx/geometry/mojo:mojo",
     "//url/mojo:url_mojom_gurl",
     "//url/mojo:url_mojom_origin",
   ]
@@ -749,6 +750,7 @@ group("generate_mojo_bindings") {
 source_set("shared_typemap_traits") {
   visibility = [ ":*" ]
   sources = [
+    "web/ConsoleMessageStructTraits.cpp",
     "web/WindowFeaturesStructTraits.cpp",
   ]
   deps = [

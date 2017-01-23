@@ -181,9 +181,6 @@
                   'content/test/data/battery_status/|'\
                   'device/battery/',
     },
-    'blimp': {
-      'filepath': '^blimp/',
-    },
     'bookmarks': {
       'filepath': 'chrome/browser/bookmarks/' \
                   '|chrome/browser/extensions/api/bookmark_manager_private/' \
@@ -555,6 +552,9 @@
     },
     'ios_showcase': {
       'filepath': 'ios/showcase',
+    },
+    'ios_web': {
+      'filepath': 'ios/web',
     },
     'ipc': {
       'filepath': 'ipc/ipc',
@@ -1404,7 +1404,7 @@
                   '|third_party/WebKit/Source/core/page/scrolling'
     },
     'blink_w3ctests': {
-      'filepath': 'third_party/WebKit/LayoutTests/imported/' \
+      'filepath': 'third_party/WebKit/LayoutTests/external/' \
                   '|third_party/WebKit/Tools/Scripts/webkitpy/w3c/'
     },
     'blink_web': {
@@ -1530,21 +1530,6 @@
                  'wfh+watch@chromium.org'],
     'base': ['vmpstr+watch@chromium.org'],
     'battery_status': ['timvolodine@chromium.org'],
-    'blimp' : ['anandc+watch-blimp@chromium.org',
-               'bgoldman+watch-blimp@chromium.org',
-               'dtrainor+watch-blimp@chromium.org',
-               'gcasto+watch-blimp@chromium.org',
-               'kmarshall+watch-blimp@chromium.org',
-               'khushalsagar+watch-blimp@chromium.org',
-               'lethalantidote+watch-blimp@chromium.org',
-               'maniscalco+watch-blimp@chromium.org',
-               'marcinjb+watch-blimp@chromium.org',
-               'nyquist+watch-blimp@chromium.org',
-               'perumaal+watch-blimp@chromium.org',
-               'scf+watch-blimp@chromium.org',
-               'shaktisahu+watch-blimp@chromium.org',
-               'sriramsr+watch-blimp@chromium.org',
-               'steimel+watch-blimp@chromium.org'],
     'blink': ['blink-reviews@chromium.org'],
     'blink_accessibility': ['aboxhall@chromium.org',
                             'dmazzoni@chromium.org',
@@ -1636,6 +1621,7 @@
     'blink_layout_ng': ['ojan+watch@chromium.org',
                         'cbiesinger@chromium.org',
                         'glebl+reviews@chromium.org',
+                        'dgrogan+ng@chromium.org',
                         'atotic+reviews@chromium.org'],
     'blink_loader': ['gavinp+loader@chromium.org',
                      'japhet@chromium.org',
@@ -1899,11 +1885,12 @@
     'ios_chrome': ['pkl@chromium.org',
                    'sdefresne+watch@chromium.org',
                    'noyau+watch@chromium.org',
-									 'marq+watch@chromium.org'],
+                   'marq+watch@chromium.org'],
     'ios_clean': ['marq+scrutinize@chromium.org',
                   'lpromero+watch@chromium.org'],
     'ios_showcase': ['marq+watch@chromium.org',
                      'lpromero+watch@chromium.org'],
+    'ios_web': ['eugenebut@chromium.org'],
     'ipc': ['darin-cc@chromium.org',
             'jam@chromium.org'],
     'libwebp': ['jzern@chromium.org',

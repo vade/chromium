@@ -64,7 +64,7 @@ static const size_t defaultPendingTokenLimit = 1000;
 
 using namespace HTMLNames;
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
 
 static void checkThatTokensAreSafeToSendToAnotherThread(
     const CompactHTMLTokenStream* tokens) {
@@ -291,6 +291,8 @@ void BackgroundHTMLParser::pumpTokenizer() {
     m_token->clear();
 
     if (simulatedToken == HTMLTreeBuilderSimulator::ScriptEnd ||
+        simulatedToken == HTMLTreeBuilderSimulator::StyleEnd ||
+        simulatedToken == HTMLTreeBuilderSimulator::Link ||
         m_pendingTokens->size() >= m_pendingTokenLimit) {
       shouldNotifyMainThread |= queueChunkForMainThread();
       // If we're far ahead of the main thread, yield for a bit to avoid
@@ -319,7 +321,7 @@ bool BackgroundHTMLParser::queueChunkForMainThread() {
   if (m_pendingTokens->isEmpty())
     return false;
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   checkThatTokensAreSafeToSendToAnotherThread(m_pendingTokens.get());
   checkThatPreloadsAreSafeToSendToAnotherThread(m_pendingPreloads);
   checkThatXSSInfosAreSafeToSendToAnotherThread(m_pendingXSSInfos);

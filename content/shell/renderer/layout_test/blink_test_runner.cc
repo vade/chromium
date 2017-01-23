@@ -218,12 +218,15 @@ class MockAudioCapturerSource : public media::AudioCapturerSource {
   ~MockAudioCapturerSource() override {}
 };
 
-// Tests in web-platform-tests use absolute path links such as
+// Tests in csswg-test use absolute path links such as
 //   <script src="/resources/testharness.js">.
 // Because we load the tests as local files, such links don't work.
 // This function fixes this issue by rewriting file: URLs which were produced
-// from such links so that they point actual files in wpt/.
-WebURL RewriteAbsolutePathInWPT(const std::string& utf8_url) {
+// from such links so that they point actual files in LayoutTests/resources/.
+//
+// Note that this isn't applied to external/wpt because tests in external/wpt
+// are accessed via http.
+WebURL RewriteAbsolutePathInCsswgTest(const std::string& utf8_url) {
   const char kFileScheme[] = "file:///";
   const int kFileSchemeLen = arraysize(kFileScheme) - 1;
   if (utf8_url.compare(0, kFileSchemeLen, kFileScheme, kFileSchemeLen) != 0)
@@ -242,7 +245,7 @@ WebURL RewriteAbsolutePathInWPT(const std::string& utf8_url) {
   base::FilePath new_path =
       LayoutTestRenderThreadObserver::GetInstance()
           ->webkit_source_dir()
-          .Append(FILE_PATH_LITERAL("LayoutTests/imported/wpt/"))
+          .Append(FILE_PATH_LITERAL("LayoutTests/"))
           .AppendASCII(path);
   return WebURL(net::FilePathToFileURL(new_path));
 }
@@ -333,7 +336,7 @@ WebString BlinkTestRunner::GetAbsoluteWebStringFromUTF8Path(
             FILE_PATH_LITERAL("foo")));
     net::FileURLToFilePath(base_url.Resolve(utf8_path), &path);
   }
-  return path.AsUTF16Unsafe();
+  return blink::FilePathToWebString(path);
 }
 
 WebURL BlinkTestRunner::LocalFileToDataURL(const WebURL& file_url) {
@@ -355,7 +358,7 @@ WebURL BlinkTestRunner::LocalFileToDataURL(const WebURL& file_url) {
 WebURL BlinkTestRunner::RewriteLayoutTestsURL(const std::string& utf8_url,
                                               bool is_wpt_mode) {
   if (is_wpt_mode) {
-    WebURL rewritten_url = RewriteAbsolutePathInWPT(utf8_url);
+    WebURL rewritten_url = RewriteAbsolutePathInCsswgTest(utf8_url);
     if (!rewritten_url.isEmpty())
       return rewritten_url;
     return WebURL(GURL(utf8_url));
@@ -370,12 +373,7 @@ WebURL BlinkTestRunner::RewriteLayoutTestsURL(const std::string& utf8_url,
   base::FilePath replace_path =
       LayoutTestRenderThreadObserver::GetInstance()->webkit_source_dir()
           .Append(FILE_PATH_LITERAL("LayoutTests/"));
-#if defined(OS_WIN)
-  std::string utf8_path = base::WideToUTF8(replace_path.value());
-#else
-  std::string utf8_path =
-      base::WideToUTF8(base::SysNativeMBToWide(replace_path.value()));
-#endif
+  std::string utf8_path = replace_path.AsUTF8Unsafe();
   std::string new_url =
       std::string("file://") + utf8_path + utf8_url.substr(kPrefixLen);
   return WebURL(GURL(new_url));

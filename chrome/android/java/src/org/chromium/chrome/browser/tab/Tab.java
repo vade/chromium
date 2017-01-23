@@ -17,6 +17,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Browser;
 import android.support.annotation.Nullable;
+import android.support.v4.view.ViewCompat;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.ContextThemeWrapper;
@@ -1691,11 +1692,11 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
                     new TabContextMenuPopulator(
                             mDelegateFactory.createContextMenuPopulator(this), this));
 
-            final ViewGroup bottomContainer = (ViewGroup) getActivity()
-                    .findViewById(R.id.bottom_container);
             // In the case where restoring a Tab or showing a prerendered one we already have a
             // valid infobar container, no need to recreate one.
             if (mInfoBarContainer == null) {
+                ViewGroup bottomContainer = (ViewGroup) getActivity()
+                        .findViewById(R.id.bottom_container);
                 // The InfoBarContainer needs to be created after the ContentView has been natively
                 // initialized.
                 mInfoBarContainer = new InfoBarContainer(mThemedApplicationContext, bottomContainer,
@@ -2134,6 +2135,16 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
      */
     public boolean isHidden() {
         return mIsHidden;
+    }
+
+    /**
+     * @return Whether the tab can currently be interacted with by the user.  This requires the
+     *         view owned by the Tab to be visible and in a state where the user can interact with
+     *         it (i.e. not in something like the phone tab switcher).
+     */
+    @CalledByNative
+    public boolean isUserInteractable() {
+        return !mIsHidden && ViewCompat.isAttachedToWindow(getView());
     }
 
     /**
@@ -2818,6 +2829,15 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
      */
     public TabRedirectHandler getTabRedirectHandler() {
         return mTabRedirectHandler;
+    }
+
+    /**
+     * Sets the TabRedirectHandler for the tab.
+     *
+     * @param tabRedirectHandler the TabRedirectHandler
+     */
+    public void setTabRedirectHandler(TabRedirectHandler tabRedirectHandler) {
+        mTabRedirectHandler = tabRedirectHandler;
     }
 
     /**

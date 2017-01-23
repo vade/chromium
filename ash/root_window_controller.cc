@@ -4,6 +4,7 @@
 
 #include "ash/root_window_controller.h"
 
+#include <algorithm>
 #include <queue>
 #include <vector>
 
@@ -271,6 +272,10 @@ bool ShouldDestroyWindowInCloseChildWindows(WmWindow* window) {
 
 }  // namespace
 
+// static
+std::vector<RootWindowController*>*
+    RootWindowController::root_window_controllers_ = nullptr;
+
 RootWindowController::~RootWindowController() {
   Shutdown();
   ash_host_.reset();
@@ -280,6 +285,9 @@ RootWindowController::~RootWindowController() {
   capture_client_.reset();
   if (animating_wallpaper_widget_controller_.get())
     animating_wallpaper_widget_controller_->StopAnimating();
+  root_window_controllers_->erase(std::find(root_window_controllers_->begin(),
+                                            root_window_controllers_->end(),
+                                            this));
 }
 
 void RootWindowController::CreateForPrimaryDisplay(AshWindowTreeHost* host) {
@@ -347,11 +355,13 @@ WmShelf* RootWindowController::GetShelf() {
   return wm_shelf_.get();
 }
 
-void RootWindowController::CreateShelf() {
+void RootWindowController::CreateShelfView() {
   if (wm_shelf_->IsShelfInitialized())
     return;
-  wm_shelf_->InitializeShelf();
+  wm_shelf_->CreateShelfView();
 
+  // TODO(jamescook): Pass |wm_shelf_| into the constructors for these layout
+  // managers.
   if (panel_layout_manager_)
     panel_layout_manager_->SetShelf(wm_shelf_.get());
   if (docked_window_layout_manager_) {
@@ -748,6 +758,11 @@ RootWindowController::RootWindowController(
                                  : window_tree_host),
       wm_shelf_(base::MakeUnique<WmShelf>()) {
   DCHECK((ash_host && !window_tree_host) || (!ash_host && window_tree_host));
+
+  if (!root_window_controllers_)
+    root_window_controllers_ = new std::vector<RootWindowController*>;
+  root_window_controllers_->push_back(this);
+
   aura::Window* root_window = GetRootWindow();
   GetRootWindowSettings(root_window)->controller = this;
 
@@ -760,11 +775,8 @@ RootWindowController::RootWindowController(
 void RootWindowController::Init(RootWindowType root_window_type) {
   aura::Window* root_window = GetRootWindow();
   WmShell* wm_shell = WmShell::Get();
-  Shell* shell = nullptr;
-  if (!wm_shell->IsRunningInMash()) {
-    shell = Shell::GetInstance();
-    shell->InitRootWindow(root_window);
-  }
+  Shell* shell = Shell::GetInstance();
+  shell->InitRootWindow(root_window);
 
   CreateContainers();
 
@@ -790,11 +802,10 @@ void RootWindowController::Init(RootWindowType root_window_type) {
 
     // Create a shelf if a user is already logged in.
     if (wm_shell->GetSessionStateDelegate()->NumberOfLoggedInUsers())
-      CreateShelf();
+      CreateShelfView();
 
     // Notify shell observers about new root window.
-    if (!wm_shell->IsRunningInMash())
-      shell->OnRootWindowAdded(WmWindow::Get(root_window));
+    shell->OnRootWindowAdded(WmWindow::Get(root_window));
   }
 
   // TODO: AshTouchExplorationManager doesn't work with mus.

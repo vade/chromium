@@ -80,7 +80,6 @@ content::WebUIDataSource* CreateMdHistoryUIHTMLSource(Profile* profile,
                              IDS_MD_HISTORY_HAS_SYNCED_RESULTS);
   source->AddLocalizedString("hasSyncedResultsDescription",
                              IDS_MD_HISTORY_HAS_SYNCED_RESULTS_DESCRIPTION);
-  source->AddLocalizedString("historyInterval", IDS_HISTORY_INTERVAL);
   source->AddLocalizedString("historyMenuButton",
                              IDS_MD_HISTORY_HISTORY_MENU_DESCRIPTION);
   source->AddLocalizedString("historyMenuItem",
@@ -173,6 +172,8 @@ content::WebUIDataSource* CreateMdHistoryUIHTMLSource(Profile* profile,
     {"lazy_load.html", IDR_MD_HISTORY_LAZY_LOAD_HTML},
     {"list_container.html", IDR_MD_HISTORY_LIST_CONTAINER_HTML},
     {"list_container.js", IDR_MD_HISTORY_LIST_CONTAINER_JS},
+    {"query_manager.html", IDR_MD_HISTORY_QUERY_MANAGER_HTML},
+    {"query_manager.js", IDR_MD_HISTORY_QUERY_MANAGER_JS},
     {"router.html", IDR_MD_HISTORY_ROUTER_HTML},
     {"router.js", IDR_MD_HISTORY_ROUTER_JS},
     {"searched_label.html", IDR_MD_HISTORY_SEARCHED_LABEL_HTML},

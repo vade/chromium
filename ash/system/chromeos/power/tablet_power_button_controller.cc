@@ -25,9 +25,6 @@ namespace {
 // animation when in tablet mode.
 constexpr int kShutdownTimeoutMs = 500;
 
-// Amount of time to delay locking screen after display is forced off.
-constexpr int kLockScreenTimeoutMs = 1000;
-
 // Amount of time since last SuspendDone() that power button event needs to be
 // ignored.
 constexpr int kIgnorePowerButtonAfterResumeMs = 2000;
@@ -67,16 +64,6 @@ void TabletPowerButtonController::TestApi::TriggerShutdownTimeout() {
   controller_->shutdown_timer_.Stop();
 }
 
-bool TabletPowerButtonController::TestApi::LockScreenTimerIsRunning() const {
-  return controller_->lock_screen_timer_.IsRunning();
-}
-
-void TabletPowerButtonController::TestApi::TriggerLockScreenTimeout() {
-  DCHECK(LockScreenTimerIsRunning());
-  controller_->OnLockScreenTimeout();
-  controller_->lock_screen_timer_.Stop();
-}
-
 TabletPowerButtonController::TabletPowerButtonController(
     LockStateController* controller)
     : tick_clock_(new base::DefaultTickClock()),
@@ -87,7 +74,10 @@ TabletPowerButtonController::TabletPowerButtonController(
   chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(
       this);
   WmShell::Get()->AddShellObserver(this);
-  ui::InputDeviceManager::GetInstance()->AddObserver(this);
+  // TODO(mash): Provide a way for this class to observe stylus events:
+  // http://crbug.com/682460
+  if (ui::InputDeviceManager::HasInstance())
+    ui::InputDeviceManager::GetInstance()->AddObserver(this);
   Shell::GetInstance()->PrependPreTargetHandler(this);
 
   GetInitialBacklightsForcedOff();
@@ -95,7 +85,8 @@ TabletPowerButtonController::TabletPowerButtonController(
 
 TabletPowerButtonController::~TabletPowerButtonController() {
   Shell::GetInstance()->RemovePreTargetHandler(this);
-  ui::InputDeviceManager::GetInstance()->RemoveObserver(this);
+  if (ui::InputDeviceManager::HasInstance())
+    ui::InputDeviceManager::GetInstance()->RemoveObserver(this);
   WmShell::Get()->RemoveShellObserver(this);
   chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(
       this);
@@ -121,7 +112,6 @@ void TabletPowerButtonController::OnPowerButtonEvent(
     }
     screen_off_when_power_button_down_ = brightness_level_is_zero_;
     SetDisplayForcedOff(false);
-    lock_screen_timer_.Stop();
     StartShutdownTimer();
   } else {
     if (shutdown_timer_.IsRunning()) {
@@ -173,27 +163,22 @@ void TabletPowerButtonController::OnKeyEvent(ui::KeyEvent* event) {
   if (event->key_code() == ui::VKEY_POWER)
     return;
 
-  if (!IsTabletModeActive() && backlights_forced_off_) {
+  if (!IsTabletModeActive() && backlights_forced_off_)
     SetDisplayForcedOff(false);
-    lock_screen_timer_.Stop();
-  }
 }
 
 void TabletPowerButtonController::OnMouseEvent(ui::MouseEvent* event) {
   if (event->flags() & ui::EF_IS_SYNTHESIZED)
     return;
 
-  if (!IsTabletModeActive() && backlights_forced_off_) {
+  if (!IsTabletModeActive() && backlights_forced_off_)
     SetDisplayForcedOff(false);
-    lock_screen_timer_.Stop();
-  }
 }
 
 void TabletPowerButtonController::OnStylusStateChanged(ui::StylusState state) {
   if (IsTabletModeSupported() && state == ui::StylusState::REMOVED &&
       backlights_forced_off_) {
     SetDisplayForcedOff(false);
-    lock_screen_timer_.Stop();
   }
 }
 
@@ -253,14 +238,8 @@ void TabletPowerButtonController::LockScreenIfRequired() {
       session_state_delegate->CanLockScreen() &&
       !session_state_delegate->IsUserSessionBlocked() &&
       !controller_->LockRequested()) {
-    lock_screen_timer_.Start(
-        FROM_HERE, base::TimeDelta::FromMilliseconds(kLockScreenTimeoutMs),
-        this, &TabletPowerButtonController::OnLockScreenTimeout);
+    session_state_delegate->LockScreen();
   }
-}
-
-void TabletPowerButtonController::OnLockScreenTimeout() {
-  WmShell::Get()->GetSessionStateDelegate()->LockScreen();
 }
 
 }  // namespace ash

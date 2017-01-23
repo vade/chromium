@@ -577,6 +577,57 @@ id<GREYMatcher> goButtonMatcher() {
       assertWithMatcher:grey_notNil()];
 }
 
+// Tap the text field indicated by |ID| to open the keyboard, and then
+// press the keyboard's "Go" button.
+- (void)openKeyboardAndTapGoButtonWithTextFieldID:(const std::string&)ID {
+  // Disable EarlGrey's synchronization since it is blocked by opening the
+  // keyboard from a web view.
+  [[GREYConfiguration sharedInstance]
+          setValue:@NO
+      forConfigKey:kGREYConfigKeySynchronizationEnabled];
+
+  // Wait for web view to be interactable before tapping.
+  GREYCondition* interactableCondition = [GREYCondition
+      conditionWithName:@"Wait for web view to be interactable."
+                  block:^BOOL {
+                    NSError* error = nil;
+                    id<GREYMatcher> webViewMatcher = webViewInWebState(
+                        chrome_test_util::GetCurrentWebState());
+                    [[EarlGrey selectElementWithMatcher:webViewMatcher]
+                        assertWithMatcher:grey_interactable()
+                                    error:&error];
+                    return !error;
+                  }];
+  GREYAssert(
+      [interactableCondition waitWithTimeout:testing::kWaitForUIElementTimeout],
+      @"Web view did not become interactable.");
+
+  web::WebState* currentWebState = chrome_test_util::GetCurrentWebState();
+  [[EarlGrey selectElementWithMatcher:web::webViewInWebState(currentWebState)]
+      performAction:web::webViewTapElement(currentWebState, ID)];
+
+  // Wait until the keyboard shows up before tapping.
+  GREYCondition* condition = [GREYCondition
+      conditionWithName:@"Wait for the keyboard to show up."
+                  block:^BOOL {
+                    NSError* error = nil;
+                    [[EarlGrey selectElementWithMatcher:goButtonMatcher()]
+                        assertWithMatcher:grey_notNil()
+                                    error:&error];
+                    return (error == nil);
+                  }];
+  GREYAssert([condition waitWithTimeout:10],
+             @"No keyboard with 'Go' button showed up.");
+
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(@"Go")]
+      performAction:grey_tap()];
+
+  // Reenable synchronization now that the keyboard has been closed.
+  [[GREYConfiguration sharedInstance]
+          setValue:@YES
+      forConfigKey:kGREYConfigKeySynchronizationEnabled];
+}
+
 // Tests that submitting a POST-based form by tapping the 'Go' button on the
 // keyboard navigates to the correct URL and the back button works as expected
 // afterwards.
@@ -603,36 +654,7 @@ id<GREYMatcher> goButtonMatcher() {
   [[EarlGrey selectElementWithMatcher:webViewContainingText("hello!")]
       assertWithMatcher:grey_notNil()];
 
-  web::WebState* currentWebState = chrome_test_util::GetCurrentWebState();
-  [[EarlGrey selectElementWithMatcher:web::webViewInWebState(currentWebState)]
-      performAction:web::webViewTapElement(currentWebState, "textfield")];
-
-  // Disable EarlGrey's synchronization since it is blocked by opening the
-  // keyboard from a web view.
-  [[GREYConfiguration sharedInstance]
-          setValue:@NO
-      forConfigKey:kGREYConfigKeySynchronizationEnabled];
-
-  // Wait until the keyboard shows up before tapping.
-  GREYCondition* condition = [GREYCondition
-      conditionWithName:@"Wait for the keyboard to show up."
-                  block:^BOOL {
-                    NSError* error = nil;
-                    [[EarlGrey selectElementWithMatcher:goButtonMatcher()]
-                        assertWithMatcher:grey_notNil()
-                                    error:&error];
-                    return (error == nil);
-                  }];
-  GREYAssert([condition waitWithTimeout:10],
-             @"No keyboard with 'Go' button showed up.");
-
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(@"Go")]
-      performAction:grey_tap()];
-
-  // Reenable synchronization now that the keyboard has been closed.
-  [[GREYConfiguration sharedInstance]
-          setValue:@YES
-      forConfigKey:kGREYConfigKeySynchronizationEnabled];
+  [self openKeyboardAndTapGoButtonWithTextFieldID:"textfield"];
 
   // Verify that the browser navigates to the expected URL.
   [[EarlGrey selectElementWithMatcher:omniboxText(destinationURL.GetContent())]

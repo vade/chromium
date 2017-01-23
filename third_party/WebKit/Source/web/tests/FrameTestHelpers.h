@@ -141,6 +141,10 @@ class TestWebWidgetClient : public WebWidgetClient {
  public:
   virtual ~TestWebWidgetClient() {}
   bool allowsBrokenNullLayerTreeView() const override { return true; }
+  WebLayerTreeView* initializeLayerTreeView() override;
+
+ private:
+  std::unique_ptr<WebLayerTreeView> m_layerTreeView;
 };
 
 class TestWebViewWidgetClient : public TestWebWidgetClient {
@@ -237,6 +241,7 @@ class TestWebFrameClient : public WebFrameClient {
  public:
   TestWebFrameClient();
 
+  void frameDetached(WebLocalFrame*, DetachType) override;
   WebLocalFrame* createChildFrame(WebLocalFrame* parent,
                                   WebTreeScopeType,
                                   const WebString& name,

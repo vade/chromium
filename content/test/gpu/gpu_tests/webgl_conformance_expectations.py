@@ -343,6 +343,8 @@ class WebGLConformanceExpectations(GpuTestExpectations):
         ['win', 'passthrough', 'd3d11'], bug=1639) # angle bug ID
     self.Fail('WebglExtension_OES_texture_float_linear',
         ['win', 'passthrough', 'd3d11'], bug=1523) # angle bug ID
+    self.Fail('WebglExtension_OES_element_index_uint',
+        ['win', 'passthrough', 'd3d11'], bug=671217) # angle bug ID
     self.Fail('WebglExtension_OES_texture_half_float_linear',
         ['win', 'passthrough', 'd3d11'], bug=1523) # angle bug ID
 
@@ -379,6 +381,16 @@ class WebGLConformanceExpectations(GpuTestExpectations):
         ['mac', ('nvidia', 0xfe9)], bug=635081)
     self.Fail('conformance/textures/misc/tex-input-validation.html',
         ['mac', ('nvidia', 0xfe9)], bug=635081)
+
+    # Mac Intel
+
+    # ASAN only
+    self.Fail(
+      'conformance/more/functions/copyTexImage2D.html',
+      ['mac', 'intel', 'asan'], bug=681641)
+    self.Fail(
+      'conformance/more/functions/copyTexSubImage2D.html',
+      ['mac', 'intel', 'asan'], bug=681641)
 
     # Linux failures
     self.Flaky('conformance/textures/video/' +

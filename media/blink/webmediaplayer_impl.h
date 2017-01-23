@@ -178,7 +178,6 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
       blink::WebContentDecryptionModule* cdm,
       blink::WebContentDecryptionModuleResult result) override;
 
-  void SetEnableFullscreenOverlays(bool enable_overlays);
   bool supportsOverlayFullscreenVideo() override;
   void enteredFullscreen() override;
   void exitedFullscreen() override;
@@ -301,9 +300,6 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   void SetNetworkState(blink::WebMediaPlayer::NetworkState state);
   void SetReadyState(blink::WebMediaPlayer::ReadyState state);
 
-  // Gets the duration value reported by the pipeline.
-  double GetPipelineDuration() const;
-
   // Returns the current video frame from |compositor_|. Blocks until the
   // compositor can return the frame.
   scoped_refptr<VideoFrame> GetCurrentFrameFromCompositor();
@@ -381,13 +377,35 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   // is intended for android.
   bool DoesOverlaySupportMetadata() const;
 
-  // Whether the media should be paused when hidden. Uses metadata so has
+  // Whether the video should be paused when hidden. Uses metadata so has
   // meaning only after the pipeline has started, otherwise returns false.
-  bool ShouldPauseWhenHidden() const;
+  // Doesn't check if the video can actually be paused depending on the
+  // pipeline's state.
+  bool ShouldPauseVideoWhenHidden() const;
 
   // Whether the video track should be disabled when hidden. Uses metadata so
   // has meaning only after the pipeline has started, otherwise returns false.
+  // Doesn't check if the video track can actually be disabled depending on the
+  // pipeline's state.
   bool ShouldDisableVideoWhenHidden() const;
+
+  // Whether the video is suitable for background playback optimizations (either
+  // pausing it or disabling the video track). Uses metadata so has meaning only
+  // after the pipeline has started, otherwise returns false.
+  // The logical OR between the two methods above that is also used as their
+  // common implementation.
+  bool IsBackgroundOptimizationCandidate() const;
+
+  // If enabling or disabling background video optimization has been delayed,
+  // because of the pipeline not running, seeking or resuming, this method
+  // needs to be called to update the optimization state.
+  void UpdateBackgroundVideoOptimizationState();
+
+  // Pauses a hidden video only player to save power if possible.
+  // Must be called when either of the following happens:
+  // - right after the video was hidden,
+  // - right ater the pipeline has resumed if the video is hidden.
+  void PauseVideoIfNeeded();
 
   // Disables the video track to save power if possible.
   // Must be called when either of the following happens:
@@ -405,11 +423,22 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   // - right after the pipeline has resumed if the video is not hidden.
   void EnableVideoTrackIfNeeded();
 
-  // Overrides the pipeline statistics returned by GetStatistics() for tests.
+  // Overrides the pipeline statistics returned by GetPiplineStatistics() for
+  // tests.
   void SetPipelineStatisticsForTest(const PipelineStatistics& stats);
 
   // Returns the pipeline statistics or the value overridden by tests.
   PipelineStatistics GetPipelineStatistics() const;
+
+  // Overrides the pipeline media duration returned by
+  // GetPipelineMediaDuration() for tests.
+  void SetPipelineMediaDurationForTest(base::TimeDelta duration);
+
+  // Return the pipeline media duration or the value overridden by tests.
+  base::TimeDelta GetPipelineMediaDuration() const;
+
+  void ReportTimeFromForegroundToFirstFrame(base::TimeTicks foreground_time,
+                                            base::TimeTicks new_frame_time);
 
   blink::WebLocalFrame* frame_;
 
@@ -638,9 +667,7 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
 
   // The maximum video keyframe distance that allows triggering background
   // playback optimizations.
-  // 10 seconds by default but can be overridden by a Finch experiment.
-  base::TimeDelta max_keyframe_distance_to_disable_background_video_ =
-      base::TimeDelta::FromSeconds(10);
+  base::TimeDelta max_keyframe_distance_to_disable_background_video_;
 
   // Whether disabled the video track as an optimization.
   bool video_track_disabled_ = false;
@@ -650,6 +677,9 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
 
   // Pipeline statistics overridden by tests.
   base::Optional<PipelineStatistics> pipeline_statistics_for_test_;
+
+  // Pipeline media duration overridden by tests.
+  base::Optional<base::TimeDelta> pipeline_media_duration_for_test_;
 
   DISALLOW_COPY_AND_ASSIGN(WebMediaPlayerImpl);
 };

@@ -70,11 +70,11 @@
 #include "ios/chrome/browser/metrics/ios_chrome_origins_seen_service_factory.h"
 #import "ios/chrome/browser/metrics/tab_usage_recorder.h"
 #import "ios/chrome/browser/native_app_launcher/native_app_navigation_controller.h"
-#import "ios/chrome/browser/net/metrics_network_client_manager.h"
 #import "ios/chrome/browser/passwords/credential_manager.h"
 #import "ios/chrome/browser/passwords/js_credential_manager.h"
 #import "ios/chrome/browser/passwords/password_controller.h"
 #import "ios/chrome/browser/passwords/passwords_ui_delegate_impl.h"
+#import "ios/chrome/browser/web/form_resubmission_tab_helper.h"
 #include "ios/chrome/browser/pref_names.h"
 #include "ios/chrome/browser/reading_list/reading_list_model_factory.h"
 #include "ios/chrome/browser/reading_list/reading_list_web_state_observer.h"
@@ -99,7 +99,6 @@
 #import "ios/chrome/browser/tabs/tab_snapshotting_delegate.h"
 #include "ios/chrome/browser/translate/chrome_ios_translate_client.h"
 #import "ios/chrome/browser/u2f/u2f_controller.h"
-#import "ios/chrome/browser/ui/alert_coordinator/form_resubmission_coordinator.h"
 #import "ios/chrome/browser/ui/commands/UIKit+ChromeExecuteCommand.h"
 #import "ios/chrome/browser/ui/commands/generic_chrome_command.h"
 #include "ios/chrome/browser/ui/commands/ios_command_ids.h"
@@ -114,7 +113,6 @@
 #import "ios/chrome/browser/ui/reader_mode/reader_mode_controller.h"
 #import "ios/chrome/browser/ui/sad_tab/sad_tab_view.h"
 #include "ios/chrome/browser/ui/ui_util.h"
-#import "ios/chrome/browser/ui/util/top_view_controller.h"
 #import "ios/chrome/browser/web/auto_reload_bridge.h"
 #import "ios/chrome/browser/web/blocked_popup_handler.h"
 #import "ios/chrome/browser/web/external_app_launcher.h"
@@ -130,7 +128,6 @@
 #import "ios/web/navigation/crw_session_entry.h"
 #import "ios/web/navigation/navigation_item_impl.h"
 #import "ios/web/navigation/navigation_manager_impl.h"
-#include "ios/web/net/request_tracker_impl.h"
 #include "ios/web/public/favicon_status.h"
 #include "ios/web/public/favicon_url.h"
 #include "ios/web/public/interstitials/web_interstitial.h"
@@ -299,10 +296,6 @@ enum class RendererTerminationTabState {
   base::scoped_nsobject<WebControllerSnapshotHelper>
       webControllerSnapshotHelper_;
 
-  // Coordinates Form Resubmission dialog presentation.
-  base::scoped_nsobject<FormResubmissionCoordinator>
-      formResubmissionCoordinator_;
-
   // Handles support for window.print JavaScript calls.
   std::unique_ptr<PrintObserver> printObserver_;
 
@@ -333,10 +326,6 @@ enum class RendererTerminationTabState {
 
   // C++ observer to implement the credential management JavaScript API.
   std::unique_ptr<CredentialManager> credentialManager_;
-
-  // Client factory created for metrics tracking. The Tab will signal page
-  // load starts and finishes to this.
-  base::scoped_nsobject<MetricsNetworkClientManager> metricsClientManager_;
 }
 
 // Returns the current sessionEntry for the sesionController associated with
@@ -506,16 +495,6 @@ void TabInfoBarObserver::OnInfoBarReplaced(infobars::InfoBar* old_infobar,
   [owner_ updateSnapshotWithOverlay:YES visibleFrameOnly:YES];
 }
 
-// Registers |factory| with |tracker| on the IO thread.
-void AddNetworkClientFactoryOnIOThread(
-    web::RequestTrackerImpl* tracker,
-    CRNForwardingNetworkClientFactory* factory) {
-  base::scoped_nsobject<CRNForwardingNetworkClientFactory> scoped_factory(
-      [factory retain]);
-  tracker->PostIOTask(base::Bind(&net::RequestTracker::AddNetworkClientFactory,
-                                 tracker, scoped_factory));
-}
-
 }  // anonymous namespace
 
 @implementation Tab
@@ -542,7 +521,7 @@ void AddNetworkClientFactoryOnIOThread(
   std::unique_ptr<web::WebStateImpl> webState(
       new web::WebStateImpl(browserState));
   webState->GetNavigationManagerImpl().InitializeSession(
-      windowName, [opener currentSessionID], openedByDOM, openerIndex);
+      windowName, opener.tabId, openedByDOM, openerIndex);
 
   return [self initWithWebState:std::move(webState) model:parentModel];
 }
@@ -565,7 +544,7 @@ void AddNetworkClientFactoryOnIOThread(
     [self.webController setDelegate:self];
     [self.webController setUIDelegate:self];
 
-    NSString* sessionID = [self currentSessionID];
+    NSString* sessionID = self.tabId;
     DCHECK(sessionID);
     snapshotManager_.reset([[SnapshotManager alloc] init]);
 
@@ -586,6 +565,7 @@ void AddNetworkClientFactoryOnIOThread(
     IOSChromeSyncedTabDelegate::CreateForWebState(self.webState);
     InfoBarManagerImpl::CreateForWebState(self.webState);
     IOSSecurityStateTabHelper::CreateForWebState(self.webState);
+    FormResubmissionTabHelper::CreateForWebState(self.webState);
 
     if (reading_list::switches::IsReadingListEnabled()) {
       ReadingListModel* model =
@@ -649,11 +629,6 @@ void AddNetworkClientFactoryOnIOThread(
         self.webState,
         ios::TopSitesFactory::GetForBrowserState(original_browser_state).get());
     [self setShouldObserveFaviconChanges:YES];
-    web::RequestTrackerImpl* requestTracker =
-        webStateImpl_->GetRequestTracker();
-
-    metricsClientManager_.reset([[MetricsNetworkClientManager alloc] init]);
-    AddNetworkClientFactoryOnIOThread(requestTracker, metricsClientManager_);
 
     if (parentModel && parentModel.syncedWindowDelegate) {
       IOSChromeSessionTabHelper::FromWebState(self.webState)
@@ -780,7 +755,7 @@ void AddNetworkClientFactoryOnIOThread(
 - (void)retrieveSnapshot:(void (^)(UIImage*))callback {
   [webControllerSnapshotHelper_
       retrieveSnapshotForWebController:self.webController
-                             sessionID:[self currentSessionID]
+                             sessionID:self.tabId
                           withOverlays:[self snapshotOverlays]
                               callback:callback];
 }
@@ -921,7 +896,7 @@ void AddNetworkClientFactoryOnIOThread(
     fullScreenController_.reset([[FullScreenController alloc]
          initWithDelegate:fullScreenControllerDelegate_
         navigationManager:&(self.webStateImpl->GetNavigationManagerImpl())
-                sessionID:[self currentSessionID]]);
+                sessionID:self.tabId]);
     [self.webController addObserver:fullScreenController_];
     // If the content of the page was loaded without knowledge of the
     // toolbar position it will be misplaced under the toolbar instead of
@@ -983,7 +958,7 @@ void AddNetworkClientFactoryOnIOThread(
     fullScreenController_.reset([[FullScreenController alloc]
          initWithDelegate:fullScreenControllerDelegate
         navigationManager:navigationManager
-                sessionID:[self currentSessionID]]);
+                sessionID:self.tabId]);
     if (fullScreenController_) {
       [self.webController addObserver:fullScreenController_];
     }
@@ -1197,13 +1172,6 @@ void AddNetworkClientFactoryOnIOThread(
                          currentIndex:sessionTab->current_navigation_index];
 }
 
-- (void)openJavascript:(NSString*)javaScript {
-  DCHECK(javaScript);
-  javaScript = [javaScript stringByRemovingPercentEncoding];
-  if (webStateImpl_)
-    webStateImpl_->ExecuteJavaScript(base::SysNSStringToUTF16(javaScript));
-}
-
 - (void)reload {
   // TODO(crbug.com/661671): Convert callers to go through CRWWebController
   // directly and remove this passthrough method.
@@ -1262,12 +1230,9 @@ void AddNetworkClientFactoryOnIOThread(
   [readerModeController_ detachFromWebState];
   readerModeController_.reset();
 
-  formResubmissionCoordinator_.reset();
-
   // Invalidate any snapshot stored for this session.
-  NSString* sessionID = [self currentSessionID];
-  DCHECK(sessionID);
-  [snapshotManager_ removeImageWithSessionID:sessionID];
+  DCHECK(self.tabId);
+  [snapshotManager_ removeImageWithSessionID:self.tabId];
   // Reset association with the webController.
   [self.webController setDelegate:nil];
   [self.webController setUIDelegate:nil];
@@ -1602,12 +1567,6 @@ void AddNetworkClientFactoryOnIOThread(
   [storeKitLauncher_ openAppStore:appId];
 }
 
-- (std::vector<GURL>)currentRedirectedUrls {
-  DCHECK([self navigationManager]);
-  return
-      [[self navigationManager]->GetSessionController() currentRedirectedUrls];
-}
-
 - (BOOL)useDesktopUserAgent {
   web::NavigationItem* currentItem = self.currentSessionEntry.navigationItem;
   return currentItem && currentItem->IsOverridingUserAgent();
@@ -1674,20 +1633,13 @@ void AddNetworkClientFactoryOnIOThread(
   [U2FController_ evaluateU2FResultFromU2FURL:URL webState:self.webState];
 }
 
-- (NSString*)currentSessionID {
-  return [self tabId];
-}
-
 #pragma mark - CRWWebDelegate and CRWWebStateObserver protocol methods.
 
 - (CRWWebController*)webPageOrderedOpen:(const GURL&)URL
                                referrer:(const web::Referrer&)referrer
                              windowName:(NSString*)windowName
                            inBackground:(BOOL)inBackground {
-  // Prerendered Tabs cannot open child windows.
-  // TODO(crbug.com/661673): Should we kill prerendering in this case?
-  if (!parentTabModel_)
-    return nil;
+  DCHECK(parentTabModel_);
   if (!inBackground)
     [self updateSnapshotWithOverlay:YES visibleFrameOnly:YES];
   // Open a new tab or update an existing one. Tabs opened from a web page are
@@ -1721,28 +1673,20 @@ void AddNetworkClientFactoryOnIOThread(
     onFormResubmissionForRequest:(NSURLRequest*)request
                    continueBlock:(ProceduralBlock)continueBlock
                      cancelBlock:(ProceduralBlock)cancelBlock {
-  UIViewController* topController =
-      top_view_controller::TopPresentedViewControllerFrom(
-          [UIApplication sharedApplication].keyWindow.rootViewController);
-
   // Display the action sheet with the arrow pointing at the top center of the
   // web contents.
   CGPoint dialogLocation =
       CGPointMake(CGRectGetMidX(webController.view.frame),
                   CGRectGetMinY(webController.view.frame) +
                       [self.tabHeadersDelegate headerHeightForTab:self]);
-
-  formResubmissionCoordinator_.reset([[FormResubmissionCoordinator alloc]
-      initWithBaseViewController:topController
-                  dialogLocation:dialogLocation
-                        webState:webController.webState
-               completionHandler:^(BOOL shouldContinue) {
-                 if (shouldContinue)
-                   continueBlock();
-                 else
-                   cancelBlock();
-               }]);
-  [formResubmissionCoordinator_ start];
+  auto helper = FormResubmissionTabHelper::FromWebState(webController.webState);
+  helper->PresentFormResubmissionDialog(dialogLocation,
+                                        base::BindBlock(^(bool shouldContinue) {
+                                          if (shouldContinue)
+                                            continueBlock();
+                                          else
+                                            cancelBlock();
+                                        }));
 }
 
 // The web page wants to close its own window.
@@ -1765,7 +1709,6 @@ void AddNetworkClientFactoryOnIOThread(
                   transition:(ui::PageTransition)transition {
   DCHECK(self.webController.loadPhase == web::LOAD_REQUESTED);
   DCHECK([self navigationManager]);
-  formResubmissionCoordinator_.reset();
 
   // Move the toolbar to visible during page load.
   [fullScreenController_ disableFullScreen];
@@ -1798,7 +1741,6 @@ void AddNetworkClientFactoryOnIOThread(
       postNotificationName:
           kTabClosingCurrentDocumentNotificationForCrashReporting
                     object:self];
-  [metricsClientManager_ pageLoadStarted:URL];
 }
 
 - (void)webCancelStartLoadingRequest {
@@ -1806,17 +1748,16 @@ void AddNetworkClientFactoryOnIOThread(
   [parentTabModel_ notifyTabChanged:self];
 }
 
-// Called when the page URL has changed.
-- (void)webDidStartLoadingURL:(const GURL&)currentUrl
-          shouldUpdateHistory:(BOOL)updateHistory {
-  DCHECK(self.webController.loadPhase == web::PAGE_LOADING);
+- (void)webState:(web::WebState*)webState
+    didCommitNavigationWithDetails:(const web::LoadCommittedDetails&)details {
   DCHECK([self navigationManager]);
-  // |webWillStartLoading:| is not called for native page loads.
+  // |webWillAddPendingURL:transition:| is not called for native page loads.
   // TODO(crbug.com/381201): Move this call there once that bug is fixed so that
   // |disableFullScreen| is called only from one place.
   [fullScreenController_ disableFullScreen];
   [findInPageController_ disableFindInPageWithCompletionHandler:nil];
-  [autoReloadBridge_ loadStartedForURL:currentUrl];
+  GURL lastCommittedURL = webState->GetLastCommittedURL();
+  [autoReloadBridge_ loadStartedForURL:lastCommittedURL];
 
   if (isUserNavigationEvent_) {
     [[NSNotificationCenter defaultCenter]
@@ -1827,41 +1768,40 @@ void AddNetworkClientFactoryOnIOThread(
     [[NSNotificationCenter defaultCenter]
         postNotificationName:kTabModelTabWillStartLoadingNotification
                       object:parentTabModel_
-                    userInfo:[NSDictionary
-                                 dictionaryWithObject:self
-                                               forKey:kTabModelTabKey]];
+                    userInfo:@{kTabModelTabKey : self}];
   }
   favicon::FaviconDriver* faviconDriver =
-      favicon::WebFaviconDriver::FromWebState(self.webState);
+      favicon::WebFaviconDriver::FromWebState(webState);
   if (faviconDriver) {
-    faviconDriver->FetchFavicon(currentUrl);
+    faviconDriver->FetchFavicon(lastCommittedURL);
   }
   [parentTabModel_ notifyTabChanged:self];
   if (parentTabModel_) {
     [[NSNotificationCenter defaultCenter]
         postNotificationName:kTabModelTabDidStartLoadingNotification
                       object:parentTabModel_
-                    userInfo:[NSDictionary
-                                 dictionaryWithObject:self
-                                               forKey:kTabModelTabKey]];
+                    userInfo:@{kTabModelTabKey : self}];
   }
-
   [parentTabModel_ navigationCommittedInTab:self];
-  if (updateHistory) {
-    [self addCurrentEntryToHistoryDB];
-    [self countMainFrameLoad];
-  }
 
   // Sending a notification about the url change for crash reporting.
   // TODO(crbug.com/661675): Consider using the navigation entry committed
   // notification now that it's in the right place.
-  NSString* urlString = base::SysUTF8ToNSString(currentUrl.spec());
-  if ([urlString length]) {
+  NSString* URLSpec = base::SysUTF8ToNSString(lastCommittedURL.spec());
+  if (URLSpec.length) {
     [[NSNotificationCenter defaultCenter]
         postNotificationName:kTabUrlStartedLoadingNotificationForCrashReporting
                       object:self
-                    userInfo:[NSDictionary dictionaryWithObject:urlString
-                                                         forKey:kTabUrlKey]];
+                    userInfo:@{kTabUrlKey : URLSpec}];
+  }
+}
+
+// Called when the page URL has changed.
+- (void)webDidStartLoadingURL:(const GURL&)currentUrl
+          shouldUpdateHistory:(BOOL)updateHistory {
+  if (updateHistory) {
+    [self addCurrentEntryToHistoryDB];
+    [self countMainFrameLoad];
   }
 }
 
@@ -1902,7 +1842,6 @@ void AddNetworkClientFactoryOnIOThread(
     [self handleExportableFile:headers.get()];
   }
 
-  [metricsClientManager_ pageLoadCompleted];
   [parentTabModel_ notifyTabChanged:self];
 
   if (parentTabModel_) {
@@ -2050,7 +1989,7 @@ void AddNetworkClientFactoryOnIOThread(
 
 - (void)webController:(CRWWebController*)webController
     retrievePlaceholderOverlayImage:(void (^)(UIImage*))block {
-  NSString* sessionID = [self currentSessionID];
+  NSString* sessionID = self.tabId;
   // The snapshot is always grey, even if |useGreyImageCache_| is NO, as this
   // overlay represents an out-of-date website and is shown only until the
   // has begun loading. However, if |useGreyImageCache_| is YES, the grey image
@@ -2159,7 +2098,7 @@ void AddNetworkClientFactoryOnIOThread(
   [self updateFullscreenWithToolbarVisible:YES];
 }
 
-- (void)webControllerWebProcessDidCrash:(CRWWebController*)webController {
+- (void)renderProcessGoneForWebState:(web::WebState*)webState {
   if (browserState_ && !browserState_->IsOffTheRecord()) {
     // Report the crash.
     GetApplicationContext()
@@ -2217,21 +2156,6 @@ void AddNetworkClientFactoryOnIOThread(
 }
 
 #pragma mark - WebUserInterfaceDelegate methods.
-
-- (void)webController:(CRWWebController*)webController
-    runAuthDialogForProtectionSpace:(NSURLProtectionSpace*)protectionSpace
-                 proposedCredential:(NSURLCredential*)credential
-                  completionHandler:
-                      (void (^)(NSString* user, NSString* password))handler {
-  if (self.dialogDelegate) {
-    [self.dialogDelegate tab:self
-        runAuthDialogForProtectionSpace:protectionSpace
-                     proposedCredential:credential
-                      completionHandler:handler];
-  } else if (handler) {
-    handler(nil, nil);
-  }
-}
 
 - (void)cancelDialogsForWebController:(CRWWebController*)webController {
   [self.dialogDelegate cancelDialogForTab:self];

@@ -8,6 +8,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
+#include "cc/output/begin_frame_args.h"
 
 namespace content {
 
@@ -34,6 +35,18 @@ SyntheticGestureParams::GestureSourceType ToSyntheticGestureSourceType(
     return SyntheticGestureParams::MOUSE_INPUT;
   else
     return SyntheticGestureParams::DEFAULT_INPUT;
+}
+
+SyntheticPointerActionParams::Button ToSyntheticMouseButton(
+    std::string button) {
+  if (button == "left")
+    return SyntheticPointerActionParams::Button::LEFT;
+  if (button == "middle")
+    return SyntheticPointerActionParams::Button::MIDDLE;
+  if (button == "right")
+    return SyntheticPointerActionParams::Button::RIGHT;
+  NOTREACHED() << "Unexpected button";
+  return SyntheticPointerActionParams::Button();
 }
 
 }  // namespace
@@ -131,9 +144,6 @@ bool ActionsParser::ParsePointerActions(const base::DictionaryValue& pointer) {
     return false;
   }
 
-  if (actions->GetSize() > longest_action_sequence_)
-    longest_action_sequence_ = actions->GetSize();
-
   if (!ParseActions(*actions))
     return false;
 
@@ -152,6 +162,10 @@ bool ActionsParser::ParseActions(const base::ListValue& actions) {
       return false;
     }
   }
+
+  if (param_list.size() > longest_action_sequence_)
+    longest_action_sequence_ = param_list.size();
+
   pointer_actions_list_.push_back(param_list);
   return true;
 }
@@ -190,15 +204,62 @@ bool ActionsParser::ParseAction(
     return false;
   }
 
+  std::string button_name = "left";
+  if (action.HasKey("button") && !action.GetString("button", &button_name)) {
+    error_message_ = base::StringPrintf(
+        "actions[%d].actions.button is not a string", action_index_);
+    return false;
+  } else if (button_name != "left" && button_name != "middle" &&
+             button_name != "right") {
+    error_message_ = base::StringPrintf(
+        "actions[%d].actions.button is an unsupported button", action_index_);
+    return false;
+  }
+  SyntheticPointerActionParams::Button button =
+      ToSyntheticMouseButton(button_name);
+
+  double duration = 0;
+  int num_idle = 0;
+  if (pointer_action_type ==
+      SyntheticPointerActionParams::PointerActionType::IDLE) {
+    num_idle = 1;
+    if (action.HasKey("duration") && !action.GetDouble("duration", &duration)) {
+      error_message_ = base::StringPrintf(
+          "actions[%d].actions.x is not a number", action_index_);
+      return false;
+    }
+  }
+
+  // If users pause for given seconds, we convert to the number of idle frames.
+  if (duration > 0) {
+    num_idle = static_cast<int>(std::ceil(
+        duration / cc::BeginFrameArgs::DefaultInterval().InSecondsF()));
+  }
+
   SyntheticPointerActionParams action_param(pointer_action_type);
   action_param.set_index(action_index_);
-  if (pointer_action_type ==
-          SyntheticPointerActionParams::PointerActionType::PRESS ||
-      pointer_action_type ==
-          SyntheticPointerActionParams::PointerActionType::MOVE) {
-    action_param.set_position(gfx::PointF(position_x, position_y));
+  switch (pointer_action_type) {
+    case SyntheticPointerActionParams::PointerActionType::PRESS:
+      action_param.set_position(gfx::PointF(position_x, position_y));
+      action_param.set_button(button);
+      break;
+    case SyntheticPointerActionParams::PointerActionType::MOVE:
+      action_param.set_position(gfx::PointF(position_x, position_y));
+      break;
+    case SyntheticPointerActionParams::PointerActionType::RELEASE:
+      action_param.set_button(button);
+      break;
+    case SyntheticPointerActionParams::PointerActionType::IDLE:
+    case SyntheticPointerActionParams::PointerActionType::NOT_INITIALIZED:
+      break;
   }
   param_list.push_back(action_param);
+
+  // We queue all the IDLE actions in the action parameter list to make sure we
+  // will pause long enough on the given pointer.
+  for (int count = 1; count < num_idle; ++count)
+    param_list.push_back(action_param);
+
   return true;
 }
 

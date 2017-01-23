@@ -68,6 +68,10 @@
       'includes': ['../../../third_party/closure_compiler/include_js.gypi'],
     },
     {
+      'target_name': 'file_browser_background',
+      'includes': ['../../../third_party/closure_compiler/include_js.gypi'],
+    },
+    {
       'target_name': 'file_operation_progress_event',
       'includes': ['../../../third_party/closure_compiler/include_js.gypi'],
     },
@@ -112,11 +116,23 @@
       'includes': ['../../../third_party/closure_compiler/include_js.gypi'],
     },
     {
+      'target_name': 'progress_center_panel',
+      'includes': ['../../../third_party/closure_compiler/include_js.gypi'],
+    },
+    {
       'target_name': 'video_player_foreground',
       'includes': ['../../../third_party/closure_compiler/include_js.gypi'],
     },
     {
       'target_name': 'volume_info',
+      'includes': ['../../../third_party/closure_compiler/include_js.gypi'],
+    },
+    {
+      'target_name': 'volume_info_list',
+      'includes': ['../../../third_party/closure_compiler/include_js.gypi'],
+    },
+    {
+      'target_name': 'volume_manager',
       'includes': ['../../../third_party/closure_compiler/include_js.gypi'],
     },
     {

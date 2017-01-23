@@ -53,7 +53,6 @@ class JavaScriptDialogTabHelper
                               bool accept,
                               const base::string16* prompt_override) override;
   void CancelDialogs(content::WebContents* web_contents,
-                     bool suppress_callbacks,
                      bool reset_state) override;
 
   // WebContentsObserver:
@@ -79,8 +78,7 @@ class JavaScriptDialogTabHelper
                       bool success,
                       const base::string16& user_input);
 
-  void CloseDialog(bool suppress_callback,
-                   bool success,
+  void CloseDialog(bool success,
                    const base::string16& user_input,
                    DismissalCause cause);
 

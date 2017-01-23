@@ -424,7 +424,8 @@ bool AXLayoutObject::isVisited() const {
   // FIXME: Is it a privacy violation to expose visited information to
   // accessibility APIs?
   return m_layoutObject->style()->isLink() &&
-         m_layoutObject->style()->insideLink() == InsideVisitedLink;
+         m_layoutObject->style()->insideLink() ==
+             EInsideLink::kInsideVisitedLink;
 }
 
 //
@@ -503,7 +504,7 @@ AXObjectInclusion AXLayoutObject::defaultObjectInclusion(
 
 bool AXLayoutObject::computeAccessibilityIsIgnored(
     IgnoredReasons* ignoredReasons) const {
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   ASSERT(m_initialized);
 #endif
 

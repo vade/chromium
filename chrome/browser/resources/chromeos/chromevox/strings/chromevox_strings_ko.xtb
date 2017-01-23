@@ -177,6 +177,7 @@
 <translation id="2899328121302785497">{COUNT,plural, =1{왼쪽 중괄호}other{왼쪽 중괄호 #개}}</translation>
 <translation id="2911433807131383493">ChromeVox 가이드 열기</translation>
 <translation id="2932083475399492303">구조 선/레이아웃 선 간의 선 유형 전환</translation>
+<translation id="2944762337049891859">로드가 끝나면 자동으로 페이지를 읽습니다.</translation>
 <translation id="2964026537669811554">제목 그룹</translation>
 <translation id="296951647852255825">{COUNT,plural, =1{탭}other{탭 #개}}</translation>
 <translation id="2972078295414139404">이전 방문한 링크가 없습니다.</translation>
@@ -230,7 +231,6 @@
 <translation id="3321460131042519426">줄바꿈 사용</translation>
 <translation id="3322936298410871309">이전 수준 1 제목</translation>
 <translation id="3323447499041942178">입력란</translation>
-<translation id="3329854757664111426">계속하려면 Enter 키를 누릅니다.</translation>
 <translation id="3353420241558113817">{"ar": "아랍어",
         "bg": "불가리아어",
         "ca": "카탈로니아어",
@@ -307,6 +307,7 @@
 <translation id="3712520970944678024">음성 관리</translation>
 <translation id="3716845769494773620">여러 행</translation>
 <translation id="3731746171184829332">이전 제목이 없습니다.</translation>
+<translation id="3735039640698208086">오디오 재생 시...</translation>
 <translation id="3762198587642264450">현재 행의 마지막으로 이동</translation>
 <translation id="3777255250339039212">h1</translation>
 <translation id="3793710123303304873">대화상자를 종료했습니다.</translation>
@@ -547,6 +548,7 @@ Chrome 브라우저 메뉴를 열려면 Alt+F를 누릅니다.</translation>
 <translation id="5876817486144482042">음성 볼륨 줄이기</translation>
 <translation id="5887397643266327462">점자 캡션을 사용 설정했습니다.</translation>
 <translation id="5891934789323004067">표</translation>
+<translation id="5899860758576822363">ChromeVox 음성이 나올 때는 낮은 볼륨으로 재생합니다.</translation>
 <translation id="5937336320314038555">{COUNT,plural, =1{등호}other{등호 #개}}</translation>
 <translation id="5939518447894949180">초기화</translation>
 <translation id="5948123859135882163">수식 해석을 구조 해석과 의미 해석 간에 전환</translation>
@@ -579,6 +581,7 @@ Chrome 브라우저 메뉴를 열려면 Alt+F를 누릅니다.</translation>
 <translation id="6281876499889881039">다음 유사한 요소</translation>
 <translation id="6282062888058716985">nav</translation>
 <translation id="6290434000785343030">다음 콤보 상자가 없습니다.</translation>
+<translation id="6305702903308659374">ChromeVox 음성이 나올 때도 보통 볼륨으로 재생합니다.</translation>
 <translation id="6307969636681130414">누름</translation>
 <translation id="6322856989298155004">사운드</translation>
 <translation id="6324551002951139333">문법 오류 발견됨</translation>
@@ -769,6 +772,7 @@ Chrome 브라우저 메뉴를 열려면 Alt+F를 누릅니다.</translation>
 <translation id="8455868257606149352">최대 <ph name="X" /></translation>
 <translation id="84575901236241018">액세스 키(<ph name="KEY" />) 있음</translation>
 <translation id="847154984256717791">바쁨</translation>
+<translation id="8476408756881832830">ChromeVox 음성이 나올 때는 재생을 일시중지합니다.</translation>
 <translation id="8476508772960940536">창 전체보기</translation>
 <translation id="8503360654911991865">탐색 세밀도 낮추기</translation>
 <translation id="8520472399088452386">스핀 버튼</translation>

@@ -48,6 +48,7 @@ class ParentFrameTaskRunners;
 class ThreadedMessagingProxyBase;
 class WorkerGlobalScope;
 class WorkerOrWorkletGlobalScope;
+class WorkerThread;
 
 // A proxy to talk to the parent worker object. See class comments on
 // ThreadedObjectProxyBase.h for lifetime of this class etc.
@@ -66,8 +67,11 @@ class CORE_EXPORT InProcessWorkerObjectProxy : public ThreadedObjectProxyBase {
 
   void postMessageToWorkerObject(PassRefPtr<SerializedScriptValue>,
                                  std::unique_ptr<MessagePortChannelArray>);
-  void confirmMessageFromWorkerObject();
-  void startPendingActivityTimer();
+  void processUnhandledException(int exceptionId, WorkerThread*);
+  void processMessageFromWorkerObject(
+      PassRefPtr<SerializedScriptValue> message,
+      std::unique_ptr<MessagePortChannelArray> channels,
+      WorkerThread*);
 
   // ThreadedMessagingProxyBase overrides.
   void reportException(const String& errorMessage,
@@ -86,6 +90,7 @@ class CORE_EXPORT InProcessWorkerObjectProxy : public ThreadedObjectProxyBase {
  private:
   friend class InProcessWorkerMessagingProxyForTest;
 
+  void startPendingActivityTimer();
   void checkPendingActivity(TimerBase*);
 
   // No guarantees about the lifetimes of tasks posted by this proxy wrt the
@@ -95,7 +100,7 @@ class CORE_EXPORT InProcessWorkerObjectProxy : public ThreadedObjectProxyBase {
 
   // Used for checking pending activities on the worker global scope. This is
   // cancelled when the worker global scope is destroyed.
-  std::unique_ptr<Timer<InProcessWorkerObjectProxy>> m_timer;
+  std::unique_ptr<TaskRunnerTimer<InProcessWorkerObjectProxy>> m_timer;
 
   // The default interval duration of the timer. This is usually
   // kDefaultIntervalInSec but made as a member variable for testing.

@@ -22,7 +22,7 @@
 #include "ios/web/public/test/web_test.h"
 #import "ios/web/public/web_state/context_menu_params.h"
 #include "ios/web/public/web_state/global_web_state_observer.h"
-#include "ios/web/public/web_state/web_state_delegate.h"
+#import "ios/web/public/web_state/web_state_delegate.h"
 #include "ios/web/public/web_state/web_state_observer.h"
 #import "ios/web/public/web_state/web_state_policy_decider.h"
 #include "ios/web/web_state/global_web_state_event_tracker.h"
@@ -437,6 +437,23 @@ TEST_F(WebStateTest, DelegateTest) {
   EXPECT_FALSE(presenter->cancel_dialogs_called());
   web_state_->CancelDialogs();
   EXPECT_TRUE(presenter->cancel_dialogs_called());
+
+  // Test that OnAuthRequired() is called.
+  EXPECT_FALSE(delegate.last_authentication_request());
+  base::scoped_nsobject<NSURLProtectionSpace> protection_space(
+      [[NSURLProtectionSpace alloc] init]);
+  base::scoped_nsobject<NSURLCredential> credential(
+      [[NSURLCredential alloc] init]);
+  WebStateDelegate::AuthCallback callback;
+  web_state_->OnAuthRequired(protection_space.get(), credential.get(),
+                             callback);
+  ASSERT_TRUE(delegate.last_authentication_request());
+  EXPECT_EQ(delegate.last_authentication_request()->web_state,
+            web_state_.get());
+  EXPECT_EQ(delegate.last_authentication_request()->protection_space,
+            protection_space.get());
+  EXPECT_EQ(delegate.last_authentication_request()->credential,
+            credential.get());
 }
 
 // Verifies that GlobalWebStateObservers are called when expected.

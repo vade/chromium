@@ -4,6 +4,8 @@
 
 #include "platform/graphics/paint/ScrollPaintPropertyNode.h"
 
+#include "platform/graphics/paint/PropertyTreeState.h"
+
 namespace blink {
 
 ScrollPaintPropertyNode* ScrollPaintPropertyNode::root() {
@@ -23,12 +25,23 @@ String ScrollPaintPropertyNode::toString() const {
   return String::format(
       "parent=%p scrollOffsetTranslation=%s clip=%s bounds=%s "
       "userScrollableHorizontal=%s"
-      " userScrollableVertical=%s mainThreadScrollingReasons=%s",
+      " userScrollableVertical=%s mainThreadScrollingReasons=%s"
+      "compositorElementId=(%d, %d)",
       m_parent.get(), scrollOffset.toString().ascii().data(),
       m_clip.toString().ascii().data(), m_bounds.toString().ascii().data(),
       m_userScrollableHorizontal ? "yes" : "no",
       m_userScrollableVertical ? "yes" : "no",
-      mainThreadScrollingReasonsAsText.c_str());
+      mainThreadScrollingReasonsAsText.c_str(), m_compositorElementId.primaryId,
+      m_compositorElementId.secondaryId);
 }
+
+#if DCHECK_IS_ON()
+
+String ScrollPaintPropertyNode::toTreeString() const {
+  return blink::PropertyTreeStatePrinter<blink::ScrollPaintPropertyNode>()
+      .pathAsString(this);
+}
+
+#endif
 
 }  // namespace blink

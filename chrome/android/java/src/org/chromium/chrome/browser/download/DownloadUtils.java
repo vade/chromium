@@ -25,6 +25,7 @@ import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ContentUriUtils;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
@@ -51,13 +52,23 @@ import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.widget.Toast;
 
 import java.io.File;
+import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * A class containing some utility static methods.
  */
 public class DownloadUtils {
+
+    /** Strings indicating how many bytes have been downloaded for different units. */
+    @VisibleForTesting
+    static final int[] BYTES_DOWNLOADED_STRINGS = {
+        R.string.file_size_downloaded_kb,
+        R.string.file_size_downloaded_mb,
+        R.string.file_size_downloaded_gb
+    };
 
     private static final String TAG = "download";
 
@@ -69,6 +80,10 @@ public class DownloadUtils {
 
     private static final String PREF_IS_DOWNLOAD_HOME_ENABLED =
             "org.chromium.chrome.browser.download.IS_DOWNLOAD_HOME_ENABLED";
+
+    private static final long BYTES_PER_KILOBYTE = 1024;
+    private static final long BYTES_PER_MEGABYTE = 1024 * 1024;
+    private static final long BYTES_PER_GIGABYTE = 1024 * 1024 * 1024;
 
     /**
      * @return Whether or not the Download Home is enabled.
@@ -215,6 +230,11 @@ public class DownloadUtils {
     public static boolean isAllowedToDownloadPage(Tab tab) {
         if (tab == null) return false;
 
+        // Offline pages isn't supported in Incognito. This should be checked before calling
+        // OfflinePageBridge.getForProfile because OfflinePageBridge instance will not be found
+        // for incognito profile.
+        if (tab.isIncognito()) return false;
+
         // Check if the page url is supported for saving. Only HTTP and HTTPS pages are allowed.
         if (!OfflinePageBridge.canSavePage(tab.getUrl())) return false;
 
@@ -228,9 +248,6 @@ public class DownloadUtils {
 
         // Don't allow re-downloading the currently displayed offline page.
         if (tab.isOfflinePage()) return false;
-
-        // Offline pages isn't supported in Incognito.
-        if (tab.isIncognito()) return false;
 
         return true;
     }
@@ -534,26 +551,52 @@ public class DownloadUtils {
     }
 
     /**
+     * Create a string that represents the percentage of the file that has downloaded.
+     * @param percentage Current percentage of the file.
+     * @return String representing the percentage of the file that has been downloaded.
+     */
+    public static String getPercentageString(int percentage) {
+        NumberFormat formatter = NumberFormat.getPercentInstance(Locale.getDefault());
+        return formatter.format(percentage / 100.0);
+    }
+
+    /**
      * Determine what String to show for a given download.
      * @param item Download to check the status of.
      * @return ID of a String resource to use, or 0 if the status couldn't be determined.
      */
-    public static int getStatusStringId(DownloadItem item) {
-        int state = item.getDownloadInfo().state();
-        if (state == DownloadState.COMPLETE) return R.string.download_notification_completed;
+    public static String getStatusString(DownloadItem item) {
+        Context context = ContextUtils.getApplicationContext();
+        DownloadInfo info = item.getDownloadInfo();
+
+        int state = info.state();
+        if (state == DownloadState.COMPLETE) {
+            return context.getString(R.string.download_notification_completed);
+        }
 
         DownloadSharedPreferenceHelper helper = DownloadSharedPreferenceHelper.getInstance();
         DownloadSharedPreferenceEntry entry = helper.getDownloadSharedPreferenceEntry(item.getId());
+        boolean isDownloadPending =
+                entry != null && state == DownloadState.INTERRUPTED && entry.isAutoResumable;
 
-        if (entry != null && state == DownloadState.INTERRUPTED && entry.isAutoResumable) {
-            return R.string.download_notification_pending;
+        if (isDownloadPending) {
+            return context.getString(R.string.download_notification_pending);
         } else if (isDownloadPaused(item)) {
-            return R.string.download_notification_paused;
-        } else if (state == DownloadState.IN_PROGRESS) {
-            return R.string.download_started;
+            return context.getString(R.string.download_notification_paused);
+        }
+
+        if (info.getBytesReceived() == 0
+                || (!item.isIndeterminate() && info.getTimeRemainingInMillis() == 0)) {
+            // We lack enough information about the download to display a useful string.
+            return context.getString(R.string.download_started);
+        } else if (item.isIndeterminate()) {
+            // Count up the bytes.
+            long bytes = info.getBytesReceived();
+            return DownloadUtils.getStringForBytes(context, BYTES_DOWNLOADED_STRINGS, bytes);
         } else {
-            assert false : "Unable to determine state of the download";
-            return 0;
+            // Count down the time.
+            long msRemaining = info.getTimeRemainingInMillis();
+            return DownloadNotificationService.formatRemainingTime(context, msRemaining);
         }
     }
 
@@ -581,5 +624,31 @@ public class DownloadUtils {
                 return item.getDownloadInfo().state() == DownloadState.INTERRUPTED;
             }
         }
+    }
+
+    /**
+     * Format the number of bytes into KB, or MB, or GB and return the corresponding string
+     * resource.
+     * @param context Context to use.
+     * @param stringSet The string resources for displaying bytes in KB, MB and GB.
+     * @param bytes Number of bytes.
+     * @return A formatted string to be displayed.
+     */
+    public static String getStringForBytes(Context context, int[] stringSet, long bytes) {
+        int resourceId;
+        float bytesInCorrectUnits;
+
+        if (bytes < BYTES_PER_MEGABYTE) {
+            resourceId = stringSet[0];
+            bytesInCorrectUnits = bytes / (float) BYTES_PER_KILOBYTE;
+        } else if (bytes < BYTES_PER_GIGABYTE) {
+            resourceId = stringSet[1];
+            bytesInCorrectUnits = bytes / (float) BYTES_PER_MEGABYTE;
+        } else {
+            resourceId = stringSet[2];
+            bytesInCorrectUnits = bytes / (float) BYTES_PER_GIGABYTE;
+        }
+
+        return context.getResources().getString(resourceId, bytesInCorrectUnits);
     }
 }

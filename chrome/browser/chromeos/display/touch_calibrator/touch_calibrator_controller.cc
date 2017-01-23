@@ -5,7 +5,9 @@
 #include "chrome/browser/chromeos/display/touch_calibrator/touch_calibrator_controller.h"
 
 #include "ash/shell.h"
+#include "ash/touch/ash_touch_transform_controller.h"
 #include "base/memory/ptr_util.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chromeos/display/touch_calibrator/touch_calibrator_view.h"
 #include "ui/display/screen.h"
 #include "ui/events/event.h"
@@ -32,8 +34,11 @@ void TouchCalibratorController::OnDisplayConfigurationChanged() {
 }
 
 void TouchCalibratorController::StartCalibration(
-    const display::Display& target_display) {
+    const display::Display& target_display,
+    const TouchCalibratorController::TouchCalibrationCallback& callback) {
   is_calibrating_ = true;
+  callback_ = callback;
+
   ash::Shell::GetInstance()->window_tree_host_manager()->AddObserver(this);
   target_display_ = target_display;
 
@@ -52,7 +57,8 @@ void TouchCalibratorController::StartCalibration(
         base::MakeUnique<TouchCalibratorView>(display, is_primary_view);
   }
 
-  // TODO(malaykeshav): Call TouchTransformController::SetForCalibration()
+  ash::Shell::GetInstance()->touch_transformer_controller()->SetForCalibration(
+      true);
 
   // Add self as an event handler target.
   ash::Shell::GetInstance()->AddPreTargetHandler(this);
@@ -62,9 +68,11 @@ void TouchCalibratorController::StopCalibration() {
   if (!is_calibrating_)
     return;
   is_calibrating_ = false;
+
   ash::Shell::GetInstance()->window_tree_host_manager()->RemoveObserver(this);
 
-  // TODO(malaykeshav): Call TouchTransformController::SetForCalibration()
+  ash::Shell::GetInstance()->touch_transformer_controller()->SetForCalibration(
+      false);
 
   // Remove self as the event handler.
   ash::Shell::GetInstance()->RemovePreTargetHandler(this);
@@ -73,6 +81,12 @@ void TouchCalibratorController::StopCalibration() {
   // exit.
   for (const auto& it : touch_calibrator_views_)
     it.second->SkipToFinalState();
+
+  if (callback_) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                  base::Bind(callback_, false));
+    callback_.Reset();
+  }
 }
 
 // ui::EventHandler:
@@ -82,6 +96,7 @@ void TouchCalibratorController::OnKeyEvent(ui::KeyEvent* key) {
   // Detect ESC key press.
   if (key->type() == ui::ET_KEY_PRESSED && key->key_code() == ui::VKEY_ESCAPE)
     StopCalibration();
+
   key->StopPropagation();
 }
 
@@ -92,11 +107,26 @@ void TouchCalibratorController::OnTouchEvent(ui::TouchEvent* touch) {
     return;
   if (base::Time::Now() - last_touch_timestamp_ < kTouchIntervalThreshold)
     return;
-
   last_touch_timestamp_ = base::Time::Now();
 
   TouchCalibratorView* target_screen_calibration_view =
       touch_calibrator_views_[target_display_.id()].get();
+
+  // If this is the final state, then store all calibration data and stop
+  // calibration.
+  if (target_screen_calibration_view->state() ==
+      TouchCalibratorView::CALIBRATION_COMPLETE) {
+    if (callback_) {
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
+          FROM_HERE, base::Bind(callback_, true));
+      callback_.Reset();
+    }
+    StopCalibration();
+    ash::Shell::GetInstance()->display_manager()->SetTouchCalibrationData(
+        target_display_.id(), touch_point_quad_,
+        target_screen_calibration_view->size());
+    return;
+  }
 
   int state_index;
   // Maps the state to an integer value. Assigns a non negative integral value
@@ -129,17 +159,6 @@ void TouchCalibratorController::OnTouchEvent(ui::TouchEvent* touch) {
     // TODO(malaykeshav): Display some kind of error for the user.
     NOTREACHED() << "Touch calibration failed. Could not retrieve location for"
                     " display point. Retry calibration.";
-  }
-
-  // If this is the final state, then store all calibration data and stop
-  // calibration.
-  if (target_screen_calibration_view->state() ==
-      TouchCalibratorView::CALIBRATION_COMPLETE) {
-    ash::Shell::GetInstance()->display_manager()->SetTouchCalibrationData(
-        target_display_.id(), touch_point_quad_,
-        target_screen_calibration_view->size());
-    StopCalibration();
-    return;
   }
 
   target_screen_calibration_view->AdvanceToNextState();

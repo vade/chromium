@@ -82,7 +82,13 @@ public class MediaSessionTabHelper implements MediaImageCallback {
                     MediaSessionTabHelper.convertMediaActionSourceToUMA(actionSource));
 
             if (mMediaSessionObserver.getMediaSession() != null) {
-                mMediaSessionObserver.getMediaSession().resume();
+                if (mMediaSessionActions != null
+                        && mMediaSessionActions.contains(MediaSessionAction.PLAY)) {
+                    mMediaSessionObserver.getMediaSession()
+                            .didReceiveAction(MediaSessionAction.PLAY);
+                } else {
+                    mMediaSessionObserver.getMediaSession().resume();
+                }
             }
         }
 
@@ -94,7 +100,13 @@ public class MediaSessionTabHelper implements MediaImageCallback {
                     MediaSessionTabHelper.convertMediaActionSourceToUMA(actionSource));
 
             if (mMediaSessionObserver.getMediaSession() != null) {
-                mMediaSessionObserver.getMediaSession().suspend();
+                if (mMediaSessionActions != null
+                        && mMediaSessionActions.contains(MediaSessionAction.PAUSE)) {
+                    mMediaSessionObserver.getMediaSession()
+                            .didReceiveAction(MediaSessionAction.PAUSE);
+                } else {
+                    mMediaSessionObserver.getMediaSession().suspend();
+                }
             }
         }
 
@@ -292,6 +304,7 @@ public class MediaSessionTabHelper implements MediaImageCallback {
 
             mNotificationInfoBuilder.setOrigin(mOrigin);
             mNotificationInfoBuilder.setNotificationLargeIcon(mFavicon);
+            mNotificationInfoBuilder.setMediaSessionImage(mPageMediaImage);
             showNotification();
         }
 
@@ -328,7 +341,7 @@ public class MediaSessionTabHelper implements MediaImageCallback {
         mTab = tab;
         mTab.addObserver(mTabObserver);
         mMediaImageManager = new MediaImageManager(
-            MINIMAL_FAVICON_SIZE, MediaNotificationManager.getMaximumLargeIconSize());
+                MINIMAL_FAVICON_SIZE, MediaNotificationManager.getIdealMediaImageSize());
         if (mTab.getWebContents() != null) setWebContents(tab.getWebContents());
 
         Activity activity = getActivityFromTab(mTab);
@@ -399,7 +412,7 @@ public class MediaSessionTabHelper implements MediaImageCallback {
                                         || icon.getHeight() < mFavicon.getHeight())) {
             return false;
         }
-        mFavicon = MediaNotificationManager.scaleIconForDisplay(icon);
+        mFavicon = MediaNotificationManager.downscaleIconToIdealSize(icon);
         return true;
     }
 
@@ -452,7 +465,7 @@ public class MediaSessionTabHelper implements MediaImageCallback {
 
     @Override
     public void onImageDownloaded(Bitmap image) {
-        mPageMediaImage = MediaNotificationManager.scaleIconForDisplay(image);
+        mPageMediaImage = MediaNotificationManager.downscaleIconToIdealSize(image);
         updateNotificationImage();
     }
 
@@ -464,6 +477,7 @@ public class MediaSessionTabHelper implements MediaImageCallback {
 
         if (isNotificationHiddingOrHidden()) return;
         mNotificationInfoBuilder.setNotificationLargeIcon(mCurrentMediaImage);
+        mNotificationInfoBuilder.setMediaSessionImage(mPageMediaImage);
         showNotification();
     }
 

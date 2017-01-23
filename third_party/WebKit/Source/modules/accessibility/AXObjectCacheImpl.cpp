@@ -31,6 +31,7 @@
 #include "core/HTMLNames.h"
 #include "core/InputTypeNames.h"
 #include "core/dom/Document.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
@@ -93,12 +94,10 @@ AXObjectCache* AXObjectCacheImpl::create(Document& document) {
 AXObjectCacheImpl::AXObjectCacheImpl(Document& document)
     : m_document(document),
       m_modificationCount(0),
-#if ENABLE(ASSERT)
-      m_hasBeenDisposed(false),
-#endif
-      m_notificationPostTimer(this,
-                              &AXObjectCacheImpl::notificationPostTimerFired) {
-}
+      m_notificationPostTimer(
+          TaskRunnerHelper::get(TaskType::UnspecedTimer, &document),
+          this,
+          &AXObjectCacheImpl::notificationPostTimerFired) {}
 
 AXObjectCacheImpl::~AXObjectCacheImpl() {
   ASSERT(m_hasBeenDisposed);
@@ -113,7 +112,7 @@ void AXObjectCacheImpl::dispose() {
     removeAXID(obj);
   }
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
   m_hasBeenDisposed = true;
 #endif
 }
@@ -640,7 +639,7 @@ void AXObjectCacheImpl::notificationPostTimerFired(TimerBase*) {
     if (obj->isDetached())
       continue;
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
     // Make sure none of the layout views are in the process of being layed out.
     // Notifications should only be sent after the layoutObject has finished
     if (obj->isAXLayoutObject()) {

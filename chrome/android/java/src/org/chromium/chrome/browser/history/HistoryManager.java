@@ -39,8 +39,10 @@ import org.chromium.chrome.browser.signin.SigninManager.SignInStateObserver;
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.chrome.browser.widget.FadingShadowView;
 import org.chromium.chrome.browser.widget.selection.SelectableListLayout;
+import org.chromium.chrome.browser.widget.selection.SelectableListToolbar.SearchDelegate;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate.SelectionObserver;
+import org.chromium.ui.base.Clipboard;
 import org.chromium.ui.base.DeviceFormFactor;
 
 import java.util.List;
@@ -49,7 +51,7 @@ import java.util.List;
  * Displays and manages the UI for browsing history.
  */
 public class HistoryManager implements OnMenuItemClickListener, SignInStateObserver,
-        SelectionObserver<HistoryItem> {
+        SelectionObserver<HistoryItem>, SearchDelegate {
     private static final int FAVICON_MAX_CACHE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
     private static final int MEGABYTES_TO_BYTES =  1024 * 1024;
     private static final String METRICS_PREFIX = "Android.HistoryPage.";
@@ -72,6 +74,7 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
      * Creates a new HistoryManager.
      * @param activity The Activity associated with the HistoryManager.
      */
+    @SuppressWarnings("unchecked")  // mSelectableListLayout
     public HistoryManager(Activity activity) {
         mActivity = activity;
 
@@ -90,6 +93,7 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
                 R.id.normal_menu_group, R.id.selection_mode_menu_group,
                 R.color.default_primary_color, false, this);
         mToolbar.setManager(this);
+        mToolbar.initializeSearchView(this, R.string.history_manager_search, R.id.search_menu_id);
         mToolbarShadow = (FadingShadowView) mSelectableListLayout.findViewById(R.id.shadow);
         mToolbarShadow.setVisibility(View.GONE);
 
@@ -141,6 +145,11 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
         } else if (item.getItemId() == R.id.selection_mode_open_in_new_tab) {
             openItemsInNewTabs(mSelectionDelegate.getSelectedItems(), false);
             mSelectionDelegate.clearSelection();
+            return true;
+        } else if (item.getItemId() == R.id.selection_mode_copy_link) {
+            recordUserActionWithOptionalSearch("CopyLink");
+            Clipboard clipboard = new Clipboard(mActivity);
+            clipboard.setText(mSelectionDelegate.getSelectedItems().get(0).getUrl());
             return true;
         } else if (item.getItemId() == R.id.selection_mode_open_in_incognito) {
             openItemsInNewTabs(mSelectionDelegate.getSelectedItems(), true);
@@ -251,17 +260,12 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
         IntentUtils.safeStartActivity(mActivity, intent);
     }
 
-    /**
-     * Called to perform a search.
-     * @param query The text to search for.
-     */
-    public void performSearch(String query) {
+    @Override
+    public void onSearchTextChanged(String query) {
         mHistoryAdapter.search(query);
     }
 
-    /**
-     * Called when a search is ended.
-     */
+    @Override
     public void onEndSearch() {
         mHistoryAdapter.onEndSearch();
         mSelectableListLayout.setEmptyViewText(R.string.history_manager_empty);

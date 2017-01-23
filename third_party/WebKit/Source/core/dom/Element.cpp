@@ -40,9 +40,9 @@
 #include "core/animation/CustomCompositorAnimations.h"
 #include "core/animation/css/CSSAnimations.h"
 #include "core/css/CSSIdentifierValue.h"
-#include "core/css/CSSImageValue.h"
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/CSSStyleSheet.h"
+#include "core/css/CSSValue.h"
 #include "core/css/PropertySetCSSStyleDeclaration.h"
 #include "core/css/StylePropertySet.h"
 #include "core/css/parser/CSSParser.h"
@@ -70,6 +70,7 @@
 #include "core/dom/NodeComputedStyle.h"
 #include "core/dom/PresentationAttributeStyle.h"
 #include "core/dom/PseudoElement.h"
+#include "core/dom/ResizeObservation.h"
 #include "core/dom/ScriptableDocumentParser.h"
 #include "core/dom/SelectorQuery.h"
 #include "core/dom/StyleChangeReason.h"
@@ -121,7 +122,6 @@
 #include "core/layout/api/LayoutBoxItem.h"
 #include "core/layout/api/LayoutViewItem.h"
 #include "core/loader/DocumentLoader.h"
-#include "core/observer/ResizeObservation.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
@@ -134,8 +134,8 @@
 #include "core/page/scrolling/TopDocumentRootScrollerController.h"
 #include "core/paint/PaintLayer.h"
 #include "core/svg/SVGAElement.h"
-#include "core/svg/SVGDocumentExtensions.h"
 #include "core/svg/SVGElement.h"
+#include "core/svg/SVGTreeScopeResources.h"
 #include "platform/EventDispatchForbiddenScope.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/graphics/CompositorMutableProperties.h"
@@ -1290,15 +1290,14 @@ void Element::attributeChanged(const AttributeModificationParams& params) {
       parentElementShadow->setNeedsDistributionRecalc();
   }
   if (name == HTMLNames::slotAttr && params.oldValue != params.newValue) {
-    if (ShadowRoot* root = v1ShadowRootOfParent()) {
-      root->ensureSlotAssignment().hostChildSlotNameChanged(params.oldValue,
-                                                            params.newValue);
-    }
+    if (ShadowRoot* root = v1ShadowRootOfParent())
+      root->didChangeHostChildSlotName(params.oldValue, params.newValue);
   }
 
   parseAttribute(params);
 
   document().incDOMTreeVersion();
+  document().notifyChangeAttribute(*this);
 
   if (name == HTMLNames::idAttr) {
     AtomicString oldId = elementData()->idForStyleResolution();
@@ -1665,8 +1664,11 @@ void Element::removedFrom(ContainerNode* insertionPoint) {
     if (this == document().cssTarget())
       document().setCSSTarget(nullptr);
 
-    if (hasPendingResources())
-      document().accessSVGExtensions().removeElementFromPendingResources(this);
+    if (hasPendingResources()) {
+      treeScope()
+          .ensureSVGTreeScopedResources()
+          .removeElementFromPendingResources(this);
+    }
 
     if (getCustomElementState() == CustomElementState::Custom)
       CustomElement::enqueueDisconnectedCallback(this);
@@ -2661,7 +2663,7 @@ void Element::focus(const FocusParams& params) {
     return;
 
   if (document().focusedElement() == this &&
-      document().hasReceivedUserGesture()) {
+      document().frame()->hasReceivedUserGesture()) {
     // Bring up the keyboard in the context of anything triggered by a user
     // gesture. Since tracking that across arbitrary boundaries (eg.
     // animations) is difficult, for now we match IE's heuristic and bring
@@ -3606,9 +3608,7 @@ static bool needsURLResolutionForInlineStyle(const Element& element,
   if (!style)
     return false;
   for (unsigned i = 0; i < style->propertyCount(); ++i) {
-    // FIXME: Should handle all URL-based properties: CSSImageSetValue,
-    // CSSCursorImageValue, etc.
-    if (style->propertyAt(i).value().isImageValue())
+    if (style->propertyAt(i).value().mayContainUrl())
       return true;
   }
   return false;
@@ -3617,11 +3617,9 @@ static bool needsURLResolutionForInlineStyle(const Element& element,
 static void reResolveURLsInInlineStyle(const Document& document,
                                        MutableStylePropertySet& style) {
   for (unsigned i = 0; i < style.propertyCount(); ++i) {
-    StylePropertySet::PropertyReference property = style.propertyAt(i);
-    // FIXME: Should handle all URL-based properties: CSSImageSetValue,
-    // CSSCursorImageValue, etc.
-    if (property.value().isImageValue())
-      toCSSImageValue(property.value()).reResolveURL(document);
+    const CSSValue& value = style.propertyAt(i).value();
+    if (value.mayContainUrl())
+      value.reResolveUrl(document);
   }
 }
 

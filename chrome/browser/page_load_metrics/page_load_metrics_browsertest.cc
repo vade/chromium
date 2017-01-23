@@ -49,6 +49,7 @@ class PageLoadMetricsBrowserTest : public InProcessBrowserTest {
 
   base::HistogramTester histogram_tester_;
 
+ private:
   DISALLOW_COPY_AND_ASSIGN(PageLoadMetricsBrowserTest);
 };
 
@@ -85,6 +86,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, NewPage) {
       internal::kHistogramParseBlockedOnScriptLoad, 1);
   histogram_tester_.ExpectTotalCount(
       internal::kHistogramParseBlockedOnScriptExecution, 1);
+  histogram_tester_.ExpectTotalCount(internal::kHistogramTotalBytes, 1);
 
   // Verify that NoPageLoadMetricsRecorded returns false when PageLoad metrics
   // have been recorded.
@@ -227,6 +229,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, NoDocumentWrite) {
       internal::kHistogramDocWriteParseStartToFirstContentfulPaint, 0);
   histogram_tester_.ExpectTotalCount(
       internal::kHistogramDocWriteBlockParseStartToFirstContentfulPaint, 0);
+  histogram_tester_.ExpectTotalCount(internal::kHistogramDocWriteBlockCount, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, DocumentWriteBlock) {
@@ -239,6 +242,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, DocumentWriteBlock) {
 
   histogram_tester_.ExpectTotalCount(
       internal::kHistogramDocWriteBlockParseStartToFirstContentfulPaint, 1);
+  histogram_tester_.ExpectTotalCount(internal::kHistogramDocWriteBlockCount, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, DocumentWriteReload) {
@@ -267,6 +271,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, DocumentWriteReload) {
 
   histogram_tester_.ExpectTotalCount(
       internal::kHistogramDocWriteBlockReloadCount, 2);
+  histogram_tester_.ExpectTotalCount(internal::kHistogramDocWriteBlockCount, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, DocumentWriteAsync) {
@@ -279,6 +284,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, DocumentWriteAsync) {
 
   histogram_tester_.ExpectTotalCount(
       internal::kHistogramDocWriteBlockParseStartToFirstContentfulPaint, 0);
+  histogram_tester_.ExpectTotalCount(internal::kHistogramDocWriteBlockCount, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, DocumentWriteSameDomain) {
@@ -291,6 +297,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, DocumentWriteSameDomain) {
 
   histogram_tester_.ExpectTotalCount(
       internal::kHistogramDocWriteBlockParseStartToFirstContentfulPaint, 0);
+  histogram_tester_.ExpectTotalCount(internal::kHistogramDocWriteBlockCount, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, NoDocumentWriteScript) {
@@ -303,6 +310,7 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, NoDocumentWriteScript) {
 
   histogram_tester_.ExpectTotalCount(
       internal::kHistogramDocWriteBlockParseStartToFirstContentfulPaint, 0);
+  histogram_tester_.ExpectTotalCount(internal::kHistogramDocWriteBlockCount, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, BadXhtml) {
@@ -371,7 +379,13 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, AbortReload) {
       internal::kHistogramAbortReloadBeforeCommit, 1);
 }
 
-IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, AbortClose) {
+// TODO(crbug.com/675061): Flaky on Win7 dbg.
+#if defined(OS_WIN)
+#define MAYBE_AbortClose DISABLED_AbortClose
+#else
+#define MAYBE_AbortClose AbortClose
+#endif
+IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, MAYBE_AbortClose) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   GURL url(embedded_test_server()->GetURL("/title1.html"));
@@ -548,4 +562,18 @@ IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, CSSTiming) {
       "PageLoad.CSSTiming.Update.BeforeFirstContentfulPaint", 1);
   histogram_tester_.ExpectTotalCount(
       "PageLoad.CSSTiming.ParseAndUpdate.BeforeFirstContentfulPaint", 1);
+}
+
+IN_PROC_BROWSER_TEST_F(PageLoadMetricsBrowserTest, PayloadSize) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  ui_test_utils::NavigateToURL(browser(), embedded_test_server()->GetURL(
+                                              "/page_load_metrics/large.html"));
+  NavigateToUntrackedUrl();
+
+  histogram_tester_.ExpectTotalCount(internal::kHistogramTotalBytes, 1);
+
+  // Verify that there is a single sample recorded in the 10kB bucket (the size
+  // of the main HTML response).
+  histogram_tester_.ExpectBucketCount(internal::kHistogramTotalBytes, 10, 1);
 }

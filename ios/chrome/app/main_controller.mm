@@ -727,6 +727,8 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
   if (switchFromIncognito)
     startInIncognito = NO;
 
+  [MDCTypography setFontLoader:[MDFRobotoFontLoader sharedInstance]];
+
   [self createInitialUI:(startInIncognito ? ApplicationMode::INCOGNITO
                                           : ApplicationMode::NORMAL)];
 
@@ -737,8 +739,6 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
   [self scheduleLowPriorityStartupTasks];
 
   [_browserViewWrangler updateDeviceSharingManager];
-
-  [MDCTypography setFontLoader:[MDFRobotoFontLoader sharedInstance]];
 
   [self openTabFromLaunchOptions:_launchOptions
               startupInformation:self
@@ -2492,8 +2492,9 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
 
 - (NSMutableSet*)liveSessionsForTabModel:(TabModel*)tabModel {
   NSMutableSet* result = [NSMutableSet setWithCapacity:[tabModel count]];
-  for (size_t i = 0; i < [tabModel count]; ++i)
-    [result addObject:[[tabModel tabAtIndex:i] currentSessionID]];
+  for (Tab* tab in tabModel) {
+    [result addObject:tab.tabId];
+  }
   return result;
 }
 

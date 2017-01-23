@@ -48,6 +48,7 @@
 #include "core/dom/AXObjectCache.h"
 #include "core/dom/DOMNodeIds.h"
 #include "core/dom/Node.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/editing/FrameSelection.h"
 #include "core/frame/FrameHost.h"
@@ -882,6 +883,10 @@ FloatQuad PaintLayerScrollableArea::localToVisibleContentQuad(
   return localObject->localToAncestorQuad(quad, box, flags);
 }
 
+RefPtr<WebTaskRunner> PaintLayerScrollableArea::getTimerTaskRunner() const {
+  return TaskRunnerHelper::get(TaskType::UnspecedTimer, box().frame());
+}
+
 ScrollBehavior PaintLayerScrollableArea::scrollBehaviorStyle() const {
   return box().style()->getScrollBehavior();
 }
@@ -1574,7 +1579,7 @@ void PaintLayerScrollableArea::resize(const IntPoint& pos,
       (currentSize + newOffset - adjustedOldOffset).expandedTo(minimumSize) -
       currentSize);
 
-  bool isBoxSizingBorder = box().style()->boxSizing() == BoxSizingBorderBox;
+  bool isBoxSizingBorder = box().style()->boxSizing() == EBoxSizing::kBorderBox;
 
   EResize resize = box().style()->resize();
   if (resize != RESIZE_VERTICAL && difference.width()) {
@@ -1820,7 +1825,7 @@ void PaintLayerScrollableArea::removeStyleRelatedMainThreadScrollingReasons() {
   if (!frameView)
     return;
 
-  // Decrese the number of layers that have any main thread
+  // Decrease the number of layers that have any main thread
   // scrolling reasons stored in FrameView
   for (uint32_t i = 0;
        i < MainThreadScrollingReason::kMainThreadScrollingReasonCount; ++i) {
@@ -1882,18 +1887,12 @@ void PaintLayerScrollableArea::resetRebuildScrollbarLayerFlags() {
 
 CompositorAnimationHost* PaintLayerScrollableArea::compositorAnimationHost()
     const {
-  if (ScrollingCoordinator* coordinator = getScrollingCoordinator())
-    return coordinator->compositorAnimationHost();
-
-  return nullptr;
+  return m_layer.layoutObject()->frameView()->compositorAnimationHost();
 }
 
 CompositorAnimationTimeline*
 PaintLayerScrollableArea::compositorAnimationTimeline() const {
-  if (ScrollingCoordinator* coordinator = getScrollingCoordinator())
-    return coordinator->compositorAnimationTimeline();
-
-  return nullptr;
+  return m_layer.layoutObject()->frameView()->compositorAnimationTimeline();
 }
 
 PaintLayerScrollableArea*

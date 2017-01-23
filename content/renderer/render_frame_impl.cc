@@ -171,6 +171,7 @@
 #include "third_party/WebKit/public/platform/URLConversion.h"
 #include "third_party/WebKit/public/platform/WebCachePolicy.h"
 #include "third_party/WebKit/public/platform/WebData.h"
+#include "third_party/WebKit/public/platform/WebKeyboardEvent.h"
 #include "third_party/WebKit/public/platform/WebMediaPlayer.h"
 #include "third_party/WebKit/public/platform/WebMediaPlayerSource.h"
 #include "third_party/WebKit/public/platform/WebPoint.h"
@@ -1348,8 +1349,9 @@ RenderWidgetFullscreenPepper* RenderFrameImpl::CreatePepperFullscreenContainer(
                                     &fullscreen_widget_routing_id)) {
     return nullptr;
   }
-  RenderWidget::ShowCallback show_callback = base::Bind(
-      &RenderViewImpl::ShowCreatedFullscreenWidget, render_view()->AsWeakPtr());
+  RenderWidget::ShowCallback show_callback =
+      base::Bind(&RenderViewImpl::ShowCreatedFullscreenWidget,
+                 render_view()->GetWeakPtr());
 
   RenderWidgetFullscreenPepper* widget = RenderWidgetFullscreenPepper::Create(
       fullscreen_widget_routing_id, show_callback,
@@ -1571,8 +1573,6 @@ bool RenderFrameImpl::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(FrameMsg_EnableViewSourceMode, OnEnableViewSourceMode)
     IPC_MESSAGE_HANDLER(FrameMsg_SuppressFurtherDialogs,
                         OnSuppressFurtherDialogs)
-    IPC_MESSAGE_HANDLER(FrameMsg_SetHasReceivedUserGesture,
-                        OnSetHasReceivedUserGesture)
     IPC_MESSAGE_HANDLER(FrameMsg_RunFileChooserResponse, OnFileChooserResponse)
     IPC_MESSAGE_HANDLER(FrameMsg_ClearFocusedElement, OnClearFocusedElement)
 #if defined(OS_ANDROID)
@@ -2256,7 +2256,7 @@ void RenderFrameImpl::OnReload(bool bypass_cache) {
 }
 
 void RenderFrameImpl::OnReloadLoFiImages() {
-  previews_state_ = PREVIEWS_OFF;
+  previews_state_ = PREVIEWS_NO_TRANSFORM;
   GetWebFrame()->reloadLoFiImages();
 }
 
@@ -2645,13 +2645,13 @@ void RenderFrameImpl::EnsureMojoBuiltinsAreAvailable(
 void RenderFrameImpl::AddMessageToConsole(ConsoleMessageLevel level,
                                           const std::string& message) {
   blink::WebConsoleMessage::Level target_level =
-      blink::WebConsoleMessage::LevelLog;
+      blink::WebConsoleMessage::LevelInfo;
   switch (level) {
-    case CONSOLE_MESSAGE_LEVEL_DEBUG:
-      target_level = blink::WebConsoleMessage::LevelDebug;
+    case CONSOLE_MESSAGE_LEVEL_VERBOSE:
+      target_level = blink::WebConsoleMessage::LevelVerbose;
       break;
-    case CONSOLE_MESSAGE_LEVEL_LOG:
-      target_level = blink::WebConsoleMessage::LevelLog;
+    case CONSOLE_MESSAGE_LEVEL_INFO:
+      target_level = blink::WebConsoleMessage::LevelInfo;
       break;
     case CONSOLE_MESSAGE_LEVEL_WARNING:
       target_level = blink::WebConsoleMessage::LevelWarning;
@@ -2684,7 +2684,7 @@ void RenderFrameImpl::SetEngagementLevel(const url::Origin& origin,
     return;
   }
 
-  engagement_levels_[origin] = level;
+  engagement_level_ = std::make_pair(origin, level);
 }
 
 // mojom::Frame implementation -------------------------------------------------
@@ -2840,7 +2840,10 @@ blink::WebMediaPlayer* RenderFrameImpl::createMediaPlayer(
       render_thread->compositor_task_runner(), context_3d_cb,
       base::Bind(&v8::Isolate::AdjustAmountOfExternalAllocatedMemory,
                  base::Unretained(blink::mainThreadIsolate())),
-      initial_cdm, media_surface_manager_, media_observer);
+      initial_cdm, media_surface_manager_, media_observer,
+      // TODO(avayvod, asvitkine): Query the value directly when it is available
+      // in the renderer process. See https://crbug.com/681160.
+      GetWebkitPreferences().max_keyframe_distance_to_disable_background_video);
 
   bool use_fallback_path = false;
 #if defined(OS_ANDROID)
@@ -2895,13 +2898,6 @@ blink::WebMediaPlayer* RenderFrameImpl::createMediaPlayer(
       frame_, client, encrypted_client,
       GetWebMediaPlayerDelegate()->AsWeakPtr(),
       std::move(media_renderer_factory), url_index_, params);
-
-  // TODO(http://crbug.com/673886): Re-enable overlays with VR shell enabled
-  // when VR shell's video reprojection surface is enabled. Remove the setter
-  // and put the overlay feature check back in the constructor at that time.
-  media_player->SetEnableFullscreenOverlays(
-      base::FeatureList::IsEnabled(media::kOverlayFullscreenVideo) &&
-      !base::FeatureList::IsEnabled(features::kVrShell));
 
 #if defined(OS_ANDROID)  // WMPI_CAST
   media_player->SetMediaPlayerManager(GetMediaPlayerManager());
@@ -3231,6 +3227,10 @@ void RenderFrameImpl::didMatchCSS(
     observer.DidMatchCSS(newly_matching_selectors, stopped_matching_selectors);
 }
 
+void RenderFrameImpl::setHasReceivedUserGesture() {
+  Send(new FrameHostMsg_SetHasReceivedUserGesture(routing_id_));
+}
+
 bool RenderFrameImpl::shouldReportDetailedMessageForSource(
     const blink::WebString& source) {
   return GetContentClient()->renderer()->ShouldReportDetailedMessageForSource(
@@ -3244,10 +3244,9 @@ void RenderFrameImpl::didAddMessageToConsole(
     const blink::WebString& stack_trace) {
   logging::LogSeverity log_severity = logging::LOG_VERBOSE;
   switch (message.level) {
-    case blink::WebConsoleMessage::LevelDebug:
+    case blink::WebConsoleMessage::LevelVerbose:
       log_severity = logging::LOG_VERBOSE;
       break;
-    case blink::WebConsoleMessage::LevelLog:
     case blink::WebConsoleMessage::LevelInfo:
       log_severity = logging::LOG_INFO;
       break;
@@ -4826,13 +4825,12 @@ void RenderFrameImpl::SendDidCommitProvisionalLoad(
   InternalDocumentStateData* internal_data =
       InternalDocumentStateData::FromDocumentState(document_state);
 
-  // Set the correct engagement level on the frame.
-  EngagementLevels::iterator engagement_level =
-      engagement_levels_.find(url::Origin(frame_->getSecurityOrigin()));
-
-  if (engagement_level != engagement_levels_.end())
-    frame_->setEngagementLevel(engagement_level->second);
-  engagement_levels_.clear();
+  // Set the correct engagement level on the frame, and wipe the cached origin
+  // so this will not be reused accidentally.
+  if (url::Origin(frame_->getSecurityOrigin()) == engagement_level_.first) {
+    frame_->setEngagementLevel(engagement_level_.second);
+    engagement_level_.first = url::Origin();
+  }
 
   FrameHostMsg_DidCommitProvisionalLoad_Params params;
   params.http_status_code = response.httpStatusCode();
@@ -5680,11 +5678,6 @@ void RenderFrameImpl::OnEnableViewSourceMode() {
 
 void RenderFrameImpl::OnSuppressFurtherDialogs() {
   suppress_further_dialogs_ = true;
-}
-
-void RenderFrameImpl::OnSetHasReceivedUserGesture() {
-  DCHECK(frame_);
-  frame_->setHasReceivedUserGesture();
 }
 
 void RenderFrameImpl::OnFileChooserResponse(
@@ -6742,6 +6735,18 @@ blink::WebPageVisibilityState RenderFrameImpl::GetVisibilityState() const {
 
 bool RenderFrameImpl::IsBrowserSideNavigationPending() {
   return browser_side_navigation_pending_;
+}
+
+base::SingleThreadTaskRunner* RenderFrameImpl::GetTimerTaskRunner() {
+  return GetWebFrame()->timerTaskRunner();
+}
+
+base::SingleThreadTaskRunner* RenderFrameImpl::GetLoadingTaskRunner() {
+  return GetWebFrame()->loadingTaskRunner();
+}
+
+base::SingleThreadTaskRunner* RenderFrameImpl::GetUnthrottledTaskRunner() {
+  return GetWebFrame()->unthrottledTaskRunner();
 }
 
 blink::WebPlugin* RenderFrameImpl::GetWebPluginForFind() {

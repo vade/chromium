@@ -22,27 +22,9 @@ The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
 The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
 Code distributed by Google as part of the polymer project is also
 subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
---><meta charset="UTF-8"><link rel="import" href="chrome://resources/html/polymer.html">
-<style>
-/* Copyright 2016 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file. */
+--><meta charset="UTF-8">
 
-:root {
-  /* This is a custom, Chrome-specific color that does not have a --paper or
-   * --google equivalent. */
-  --md-background-color: #f1f1f1;
-  --md-loading-message-color: #6e6e6e;
-  /* This is --google-blue-700, rewritten as a native custom property for speed.
-   */
-  --md-toolbar-color: rgb(51, 103, 214);
-}
-
-</style>
-
-
-
-</head><body><div hidden="" by-vulcanize=""><dom-module id="iron-pages" assetpath="chrome://resources/polymer/v1_0/iron-pages/" css-build="shadow">
+</head><body><div hidden="" by-vulcanize=""><link rel="import" href="chrome://resources/html/polymer.html"><dom-module id="iron-pages" assetpath="chrome://resources/polymer/v1_0/iron-pages/" css-build="shadow">
 
   <template>
     <style scope="iron-pages">:host {
@@ -64,9 +46,7 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
   [hidden] {
     display: none !important;
   }
-</style>
-
-<style is="custom-style" css-build="shadow">html {
+</style><style is="custom-style" css-build="shadow">html {
   --layout_-_display:  flex;;
 
     --layout-inline_-_display:  inline-flex;;
@@ -184,10 +164,7 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
     --layout-fixed-left_-_position:  fixed; --layout-fixed-left_-_top:  0; --layout-fixed-left_-_bottom:  0; --layout-fixed-left_-_left:  0;;
 }
 
-</style>
-
-
-<dom-module id="iron-icon" assetpath="chrome://resources/polymer/v1_0/iron-icon/" css-build="shadow">
+</style><dom-module id="iron-icon" assetpath="chrome://resources/polymer/v1_0/iron-icon/" css-build="shadow">
   <template>
     <style scope="iron-icon">:host {
   display: var(--layout-inline_-_display);
@@ -213,6 +190,7 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
     <defs>
       
       <g id="add"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"></path></g>
+      <g id="arrow-drop-up"><path d="M7 14l5-5 5 5z"></path></g>
       <g id="arrow-drop-down"><path d="M7 10l5 5 5-5z"></path></g>
       <g id="cancel"><path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z"></path></g>
 <if expr="chromeos">
@@ -227,6 +205,7 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
       <g id="expand-more"><path d="M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z"></path></g>
       <g id="extension"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z"></path></g>
       <g id="file-download"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"></path></g>
+      <g id="folder"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"></path></g>
       <g id="fullscreen"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"></path></g>
       <g id="group"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"></path></g>
       <g id="menu"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"></path></g>
@@ -612,10 +591,7 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
     --light-primary-opacity: 1.0;
 }
 
-</style>
-
-
-<style is="custom-style" css-build="shadow">html {
+</style><style is="custom-style" css-build="shadow">html {
   --primary-text-color: var(--light-theme-text-color);
     --primary-background-color: var(--light-theme-background-color);
     --secondary-text-color: var(--light-theme-secondary-color);
@@ -654,10 +630,7 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
     --default-primary-color: var(--primary-color);
 }
 
-</style>
-
-
-<dom-module id="paper-icon-button" assetpath="chrome://resources/polymer/v1_0/paper-icon-button/" css-build="shadow">
+</style><dom-module id="paper-icon-button" assetpath="chrome://resources/polymer/v1_0/paper-icon-button/" css-build="shadow">
   <template strip-whitespace="">
     <style scope="paper-icon-button">:host {
   display: inline-block;
@@ -686,12 +659,12 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
 }
 
 :host #ink {
-  color: var(--paper-icon-button-ink-color,var(--primary-text-color));;
+  color: var(--paper-icon-button-ink-color,var(--primary-text-color));
         opacity: 0.6;
 }
 
 :host([disabled]) {
-  color: var(--paper-icon-button-disabled-text,var(--disabled-text-color));;
+  color: var(--paper-icon-button-disabled-text,var(--disabled-text-color));
         pointer-events: none;
         cursor: auto;
 
@@ -767,23 +740,23 @@ to {
         height: 100%;
         opacity: 0;
         white-space: nowrap;
-        border-color: var(--paper-spinner-color,var(--google-blue-500));;
+        border-color: var(--paper-spinner-color,var(--google-blue-500));
 }
 
 .layer-1 {
-  border-color: var(--paper-spinner-layer-1-color,var(--google-blue-500));;
+  border-color: var(--paper-spinner-layer-1-color,var(--google-blue-500));
 }
 
 .layer-2 {
-  border-color: var(--paper-spinner-layer-2-color,var(--google-red-500));;
+  border-color: var(--paper-spinner-layer-2-color,var(--google-red-500));
 }
 
 .layer-3 {
-  border-color: var(--paper-spinner-layer-3-color,var(--google-yellow-500));;
+  border-color: var(--paper-spinner-layer-3-color,var(--google-yellow-500));
 }
 
 .layer-4 {
-  border-color: var(--paper-spinner-layer-4-color,var(--google-green-500));;
+  border-color: var(--paper-spinner-layer-4-color,var(--google-green-500));
 }
 
 .active .spinner-layer {
@@ -1251,8 +1224,6 @@ to {
 </style>
   </template>
 </dom-module>
-
-
 <dom-module id="paper-spinner-lite" assetpath="chrome://resources/polymer/v1_0/paper-spinner/" css-build="shadow">
   <template strip-whitespace="">
     <style scope="paper-spinner-lite">:host {
@@ -1307,23 +1278,23 @@ to {
         height: 100%;
         opacity: 0;
         white-space: nowrap;
-        border-color: var(--paper-spinner-color,var(--google-blue-500));;
+        border-color: var(--paper-spinner-color,var(--google-blue-500));
 }
 
 .layer-1 {
-  border-color: var(--paper-spinner-layer-1-color,var(--google-blue-500));;
+  border-color: var(--paper-spinner-layer-1-color,var(--google-blue-500));
 }
 
 .layer-2 {
-  border-color: var(--paper-spinner-layer-2-color,var(--google-red-500));;
+  border-color: var(--paper-spinner-layer-2-color,var(--google-red-500));
 }
 
 .layer-3 {
-  border-color: var(--paper-spinner-layer-3-color,var(--google-yellow-500));;
+  border-color: var(--paper-spinner-layer-3-color,var(--google-yellow-500));
 }
 
 .layer-4 {
-  border-color: var(--paper-spinner-layer-4-color,var(--google-green-500));;
+  border-color: var(--paper-spinner-layer-4-color,var(--google-green-500));
 }
 
 .active .spinner-layer {
@@ -1867,7 +1838,7 @@ label {
         white-space: nowrap;
 }
 
-:host([has-search-text_]) label {
+:host([has-search-text]) label {
   visibility: hidden;
 }
 
@@ -1924,10 +1895,10 @@ input[type='search']::-webkit-search-decoration, input[type='search']::-webkit-s
     </paper-icon-button>
     <div id="searchTerm">
       <label id="prompt" for="searchInput">[[label]]</label>
-      <input id="searchInput" type="search" on-input="onSearchInput_" on-search="onSearchTermSearch" on-keydown="onSearchTermKeydown_" on-focus="onInputFocus_" on-blur="onInputBlur_" incremental="" autofocus="">
+      <input id="searchInput" type="search" on-input="onSearchTermInput" on-search="onSearchTermSearch" on-keydown="onSearchTermKeydown_" on-focus="onInputFocus_" on-blur="onInputBlur_" incremental="" autofocus="">
       
     </div>
-    <template is="dom-if" if="[[hasSearchText_]]">
+    <template is="dom-if" if="[[hasSearchText]]">
       <paper-icon-button icon="cr:cancel" id="clearSearch" title="[[clearLabel]]" on-tap="clearSearch_">
       </paper-icon-button>
     </template>
@@ -2083,8 +2054,7 @@ h1 {
     </div>
   </template>
   </dom-module>
-<link rel="import" href="chrome://history/constants.html">
-<iron-iconset-svg size="24" name="history">
+<link rel="import" href="chrome://history/constants.html"><iron-iconset-svg size="24" name="history">
   <svg>
     <defs>
       
@@ -2117,8 +2087,7 @@ h1 {
     --toolbar-height: 56px;
 }
 
-</style>
-<dom-module id="shared-style" assetpath="chrome://history/" css-build="shadow">
+</style><dom-module id="shared-style" assetpath="chrome://history/" css-build="shadow">
   <template>
     <style scope="shared-style">[hidden] {
   display: none !important;
@@ -2200,8 +2169,6 @@ button.more-vert-button div {
 </style>
   </template>
 </dom-module>
-
-
 <dom-module id="history-toolbar" assetpath="chrome://history/" css-build="shadow">
   <template>
     <style scope="history-toolbar">[hidden] {
@@ -2463,7 +2430,7 @@ paper-tab {
         </paper-tabs>
         <div id="grouped-nav-container">
           <span id="grouped-date">
-            {{getHistoryInterval_(queryStartTime, queryEndTime)}}
+            [[getHistoryInterval_(queryInfo)]]
           </span>
           <button is="paper-icon-button-light" id="today-button" class="icon-button" title="$i18n{rangeToday}" on-tap="onTodayTap_" disabled="[[isToday_(groupedOffset)]]">
             <iron-icon icon="history:today"></iron-icon>
@@ -2479,6 +2446,9 @@ paper-tab {
     </template>
   </template>
   </dom-module>
+
+
+
 
 <style is="custom-style" css-build="shadow">html {
   --cr-actionable_-_cursor:  pointer;;
@@ -2499,9 +2469,7 @@ paper-tab {
     --paper-checkbox-ink-size: 40px;
 }
 
-</style>
-
-<dom-module id="cr-shared-style" assetpath="chrome://resources/cr_elements/" css-build="shadow">
+</style><dom-module id="cr-shared-style" assetpath="chrome://resources/cr_elements/" css-build="shadow">
   <template>
     <style scope="cr-shared-style">paper-spinner {
   --paper-spinner-layer-1-color: var(--google-blue-500);
@@ -2710,13 +2678,9 @@ paper-icon-button.subpage-arrow {
                   0  8px 10px -5px rgba(0, 0, 0, 0.4);;
 }
 
-</style>
-<link rel="import" href="chrome://resources/html/util.html">
-<dom-module id="history-searched-label" assetpath="chrome://history/" css-build="shadow">
+</style><link rel="import" href="chrome://resources/html/util.html"><dom-module id="history-searched-label" assetpath="" css-build="shadow">
   </dom-module>
-
-
-<dom-module id="history-item" assetpath="chrome://history/" css-build="shadow">
+<dom-module id="history-item" assetpath="" css-build="shadow">
   <template>
     <style scope="history-item">[hidden] {
   display: none !important;
@@ -3125,8 +3089,6 @@ iron-list {
     </iron-scroll-threshold>
   </template>
   </dom-module>
-
-
 <dom-module id="history-list-container" assetpath="chrome://history/" css-build="shadow">
   <template>
     <style scope="history-list-container">[hidden] {
@@ -3322,7 +3284,7 @@ dialog .body {
       <history-list id="infinite-list" querying="[[queryState.querying]]" searched-term="[[queryResult.info.term]]">
       </history-list>
       <template is="dom-if" if="[[grouped]]">
-        <history-grouped-list id="grouped-list" range="[[groupedRange]]" query-start-time="[[queryResult.info.queryStartTime]]" query-end-time="[[queryResult.info.queryEndTime]]" searched-term="[[queryResult.info.term]]">
+        <history-grouped-list id="grouped-list" range="[[groupedRange]]" query-interval="[[queryResult.info.queryInterval]]" searched-term="[[queryResult.info.term]]">
         </history-grouped-list>
       </template>
     </iron-pages>
@@ -3354,7 +3316,6 @@ dialog .body {
     </template>
   </template>
   </dom-module>
-
 <dom-module id="history-router" assetpath="chrome://history/" css-build="shadow">
   <template>
     <iron-location path="{{path_}}" query="{{query_}}"></iron-location>
@@ -3434,8 +3395,7 @@ dialog .body {
     --paper-font-code1_-_font-family:  var(--paper-font-common-code_-_font-family); --paper-font-code1_-_-webkit-font-smoothing:  var(--paper-font-common-code_-_-webkit-font-smoothing); --paper-font-code1_-_font-size:  14px; --paper-font-code1_-_font-weight:  500; --paper-font-code1_-_line-height:  20px;;
 }
 
-</style>
-<dom-module id="history-side-bar" assetpath="chrome://history/" css-build="shadow">
+</style><dom-module id="history-side-bar" assetpath="chrome://history/" css-build="shadow">
   <template>
     <style scope="history-side-bar">[hidden] {
   display: none !important;
@@ -3520,10 +3480,6 @@ button.more-vert-button div {
         overflow-x: hidden;
         overflow-y: auto;
         width: var(--side-bar-width);
-}
-
-:host([drawer]) {
-  height: calc(100% - var(--toolbar-height));
 }
 
 div.separator {
@@ -3622,7 +3578,22 @@ iron-selector > a.iron-selected {
     </iron-selector>
   </template>
   </dom-module>
-</div><dom-module id="history-app" css-build="shadow">
+<style>
+/* Copyright 2016 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file. */
+
+:root {
+  /* This is a custom, Chrome-specific color that does not have a --paper or
+   * --google equivalent. */
+  --md-background-color: #f1f1f1;
+  --md-loading-message-color: #6e6e6e;
+  /* This is --google-blue-700, rewritten as a native custom property for speed.
+   */
+  --md-toolbar-color: rgb(51, 103, 214);
+}
+
+</style></div><dom-module id="history-app" css-build="shadow">
   <template>
     <style scope="history-app">[hidden] {
   display: none !important;
@@ -3736,29 +3707,6 @@ history-toolbar {
   height: 100%;
 }
 
-#drawer:unresolved {
-  display: none;
-}
-
-#drawer {
-  z-index: 3;
-}
-
-#drawer-header {
-  align-items: center;
-        border-bottom: 1px solid var(--separator-color);
-        box-sizing: border-box;
-        display: flex;
-        height: var(--toolbar-height);
-}
-
-h1 {
-  -webkit-padding-start: 24px;
-        color: var(--primary-text-color);
-        font-size: 123%;
-        font-weight: 400;
-}
-
 #drop-shadow {
   box-shadow: inset 0 5px 6px -3px rgba(0, 0, 0, 0.4);
         height: 6px;
@@ -3776,9 +3724,11 @@ h1 {
 }
 
 </style>
+    <history-query-manager query-state="{{queryState_}}" query-result="[[queryResult_]]">
+    </history-query-manager>
     <history-router selected-page="{{selectedPage_}}" query-state="{{queryState_}}">
     </history-router>
-    <history-toolbar id="toolbar" grouped-offset="{{queryState_.groupedOffset}}" grouped-range="{{queryState_.range}}" has-drawer="[[hasDrawer_]]" is-grouped-mode="{{grouped_}}" query-end-time="[[queryResult_.info.queryEndTime]]" has-more-results="[[!queryResult_.info.finished]]" query-start-time="[[queryResult_.info.queryStartTime]]" querying="[[queryState_.querying]]" search-term="{{queryState_.searchTerm}}" show-menu-promo="[[showMenuPromo_]]" show-sync-notice="[[showSyncNotice_(hasSyncedResults, selectedPage_)]]" spinner-active="[[shouldShowSpinner_(queryState_.querying,
+    <history-toolbar id="toolbar" grouped-offset="{{queryState_.groupedOffset}}" grouped-range="{{queryState_.range}}" has-drawer="[[hasDrawer_]]" has-more-results="[[!queryResult_.info.finished]]" is-grouped-mode="{{grouped_}}" query-info="[[queryResult_.info]]" querying="[[queryState_.querying]]" search-term="{{queryState_.searchTerm}}" show-menu-promo="[[showMenuPromo_]]" show-sync-notice="[[showSyncNotice_(hasSyncedResults, selectedPage_)]]" spinner-active="[[shouldShowSpinner_(queryState_.querying,
                                              queryState_.incremental,
                                              queryState_.searchTerm)]]">
     </history-toolbar>
@@ -3797,14 +3747,12 @@ h1 {
       <div id="drop-shadow"></div>
     </div>
 
-    <template is="dom-if" if="[[hasDrawer_]]">
-      <app-drawer id="drawer" swipe-open="" align="start" tabindex="0">
-        <div id="drawer-header">
-          <h1>$i18n{title}</h1>
-        </div>
-        <history-side-bar id="drawer-side-bar" selected-page="{{selectedPage_}}" show-footer="[[showSidebarFooter]]" drawer="">
+    <template is="cr-lazy-render" id="drawer">
+      <dialog is="cr-drawer" swipe-open="">
+        <div class="drawer-header">$i18n{title}</div>
+        <history-side-bar id="drawer-side-bar" class="drawer-content" selected-page="{{selectedPage_}}" show-footer="[[showSidebarFooter]]">
         </history-side-bar>
-      </app-drawer>
+      </dialog>
     </template>
 
     <iron-media-query query="(max-width: 1023px)" query-matches="{{hasDrawer_}}">

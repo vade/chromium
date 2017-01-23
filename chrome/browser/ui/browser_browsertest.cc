@@ -283,11 +283,23 @@ class RenderViewSizeObserver : public content::WebContentsObserver {
         render_view_host->GetWidget()->GetView()->GetViewBounds().size();
   }
 
-  // Enlarge WebContentsView by |wcv_resize_insets_| while the navigation entry
-  // is pending.
   void DidStartNavigationToPendingEntry(
       const GURL& url,
       content::ReloadType reload_type) override {
+    // TODO: remove this method when PlzNavigate is turned on by default.
+    if (!content::IsBrowserSideNavigationEnabled())
+      Resize();
+  }
+
+  // Enlarge WebContentsView by |wcv_resize_insets_| while the navigation entry
+  // is pending.
+  void DidStartNavigation(
+      content::NavigationHandle* navigation_handle) override {
+    if (content::IsBrowserSideNavigationEnabled())
+      Resize();
+  }
+
+  void Resize() {
     if (wcv_resize_insets_.IsEmpty())
       return;
     // Resizing the main browser window by |wcv_resize_insets_| will
@@ -327,7 +339,7 @@ class RenderViewSizeObserver : public content::WebContentsObserver {
   typedef std::map<content::RenderViewHost*, Sizes> RenderViewSizes;
   RenderViewSizes render_view_sizes_;
   // Enlarge WebContentsView by this size insets in
-  // DidStartNavigationToPendingEntry.
+  // DidStartNavigation.
   gfx::Size wcv_resize_insets_;
   BrowserWindow* browser_window_;  // Weak ptr.
 
@@ -2389,11 +2401,11 @@ class ClickModifierTest : public InProcessBrowserTest {
       base::FilePath(FILE_PATH_LITERAL("href.html")));
   }
 
-  base::string16 getFirstPageTitle() {
+  base::string16 GetFirstPageTitle() {
     return ASCIIToUTF16(kFirstPageTitle);
   }
 
-  base::string16 getSecondPageTitle() {
+  base::string16 GetSecondPageTitle() {
     return ASCIIToUTF16(kSecondPageTitle);
   }
 
@@ -2421,15 +2433,14 @@ class ClickModifierTest : public InProcessBrowserTest {
       same_tab_observer.Wait();
       EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile()));
       EXPECT_EQ(1, browser->tab_strip_model()->count());
-      EXPECT_EQ(getSecondPageTitle(), web_contents->GetTitle());
+      EXPECT_EQ(GetSecondPageTitle(), web_contents->GetTitle());
       return;
     }
 
-    content::WindowedNotificationObserver observer(
-        chrome::NOTIFICATION_TAB_ADDED,
-        content::NotificationService::AllSources());
+    content::TestNavigationObserver new_tab_observer(nullptr);
+    new_tab_observer.StartWatchingNewWebContents();
     SimulateMouseClick(web_contents, modifiers, button);
-    observer.Wait();
+    new_tab_observer.Wait();
 
     if (disposition == WindowOpenDisposition::NEW_WINDOW) {
       EXPECT_EQ(2u, chrome::GetBrowserCount(browser->profile()));
@@ -2439,12 +2450,11 @@ class ClickModifierTest : public InProcessBrowserTest {
     EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile()));
     EXPECT_EQ(2, browser->tab_strip_model()->count());
     web_contents = browser->tab_strip_model()->GetActiveWebContents();
-    WaitForLoadStop(web_contents);
     if (disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB) {
-      EXPECT_EQ(getSecondPageTitle(), web_contents->GetTitle());
+      EXPECT_EQ(GetSecondPageTitle(), web_contents->GetTitle());
     } else {
       ASSERT_EQ(WindowOpenDisposition::NEW_BACKGROUND_TAB, disposition);
-      EXPECT_EQ(getFirstPageTitle(), web_contents->GetTitle());
+      EXPECT_EQ(GetFirstPageTitle(), web_contents->GetTitle());
     }
   }
 

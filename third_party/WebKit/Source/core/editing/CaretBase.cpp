@@ -113,22 +113,6 @@ LayoutRect CaretBase::computeCaretRect(
                                     caretLocalRect);
 }
 
-LayoutRect CaretBase::computeCaretRect(const VisiblePosition& caretPosition) {
-  return computeCaretRect(caretPosition.toPositionWithAffinity());
-}
-
-IntRect CaretBase::absoluteBoundsForLocalRect(Node* node,
-                                              const LayoutRect& rect) {
-  LayoutBlock* caretPainter = caretLayoutObject(node);
-  if (!caretPainter)
-    return IntRect();
-
-  LayoutRect localRect(rect);
-  caretPainter->flipForWritingMode(localRect);
-  return caretPainter->localToAbsoluteQuad(FloatRect(localRect))
-      .enclosingBoundingBox();
-}
-
 // TODO(yoichio): |node| is FrameSelection::m_previousCaretNode and this is bad
 // design. We should use only previous layoutObject or Rectangle to invalidate
 // old caret.
@@ -150,29 +134,12 @@ void CaretBase::invalidateLocalCaretRect(Node* node, const LayoutRect& rect) {
       node->layoutObject()->invalidatePaintRectangle(inflatedRect, this);
 }
 
-bool CaretBase::shouldRepaintCaret(Node& node) {
-  // If PositionAnchorType::BeforeAnchor or PositionAnchorType::AfterAnchor,
-  // carets need to be repainted not only when the node is contentEditable but
-  // also when its parentNode() is contentEditable.
-  node.document().updateStyleAndLayoutTree();
-  return hasEditableStyle(node) ||
-         (node.parentNode() && hasEditableStyle(*node.parentNode()));
-}
-
-void CaretBase::invalidateCaretRect(Node* node,
-                                    const LayoutRect& caretLocalRect) {
-  node->document().updateStyleAndLayoutTree();
-  if (hasEditableStyle(*node))
-    invalidateLocalCaretRect(node, caretLocalRect);
-}
-
 void CaretBase::paintCaret(Node* node,
                            GraphicsContext& context,
-                           const DisplayItemClient& client,
                            const LayoutRect& caretLocalRect,
                            const LayoutPoint& paintOffset,
                            DisplayItem::Type displayItemType) {
-  if (DrawingRecorder::useCachedDrawingIfPossible(context, client,
+  if (DrawingRecorder::useCachedDrawingIfPossible(context, *this,
                                                   displayItemType))
     return;
 
@@ -184,7 +151,7 @@ void CaretBase::paintCaret(Node* node,
   const Color caretColor =
       node->layoutObject()->resolveColor(CSSPropertyCaretColor);
   IntRect paintRect = pixelSnappedIntRect(drawingRect);
-  DrawingRecorder drawingRecorder(context, client, DisplayItem::kCaret,
+  DrawingRecorder drawingRecorder(context, *this, DisplayItem::kCaret,
                                   paintRect);
   context.fillRect(paintRect, caretColor);
 }

@@ -52,6 +52,7 @@ HttpStreamFactoryImpl::JobController::JobController(
       main_job_is_blocked_(false),
       bound_job_(nullptr),
       can_start_alternative_proxy_job_(false),
+      privacy_mode_(PRIVACY_MODE_DISABLED),
       ptr_factory_(this) {
   DCHECK(factory);
 }
@@ -79,6 +80,8 @@ HttpStreamFactoryImpl::Request* HttpStreamFactoryImpl::JobController::Start(
   DCHECK(factory_);
   DCHECK(!request_);
 
+  privacy_mode_ = request_info.privacy_mode;
+
   request_ = new Request(request_info.url, this, delegate,
                          websocket_handshake_stream_create_helper, net_log,
                          stream_type);
@@ -96,6 +99,8 @@ void HttpStreamFactoryImpl::JobController::Preconnect(
     const SSLConfig& proxy_ssl_config) {
   DCHECK(!main_job_);
   DCHECK(!alternative_job_);
+
+  privacy_mode_ = request_info.privacy_mode;
 
   is_preconnect_ = true;
   HostPortPair destination(HostPortPair::FromURL(request_info.url));
@@ -152,13 +157,6 @@ void HttpStreamFactoryImpl::JobController::OnRequestComplete() {
     } else {
       DCHECK(bound_job_->job_type() == ALTERNATIVE);
       alternative_job_.reset();
-      // If ResumeMainJob() is not executed, reset |main_job_|. Otherwise,
-      // OnOrphanedJobComplete() will clean up |this| when the job completes.
-      // Use |main_job_is_blocked_| and |!main_job_wait_time_.is_zero()| instead
-      // of |main_job_|->is_waiting() because |main_job_| can be in proxy
-      // resolution step.
-      if (main_job_ && (main_job_is_blocked_ || !main_job_wait_time_.is_zero()))
-        main_job_.reset();
     }
     bound_job_ = nullptr;
   }
@@ -186,7 +184,7 @@ void HttpStreamFactoryImpl::JobController::OnStreamReady(
     const SSLConfig& used_ssl_config) {
   DCHECK(job);
 
-  factory_->OnStreamReady(job->proxy_info());
+  factory_->OnStreamReady(job->proxy_info(), privacy_mode_);
 
   if (IsJobOrphaned(job)) {
     // We have bound a job to the associated Request, |job| has been orphaned.
@@ -382,7 +380,7 @@ void HttpStreamFactoryImpl::JobController::OnNeedsProxyAuth(
 
 bool HttpStreamFactoryImpl::JobController::OnInitConnection(
     const ProxyInfo& proxy_info) {
-  return factory_->OnInitConnection(*this, proxy_info);
+  return factory_->OnInitConnection(*this, proxy_info, privacy_mode_);
 }
 
 void HttpStreamFactoryImpl::JobController::OnResolveProxyComplete(
@@ -635,6 +633,23 @@ void HttpStreamFactoryImpl::JobController::MaybeSetWaitTimeForMainJob(
     main_job_wait_time_ = delay;
 }
 
+bool HttpStreamFactoryImpl::JobController::HasPendingMainJob() const {
+  return main_job_.get() != nullptr;
+}
+
+bool HttpStreamFactoryImpl::JobController::HasPendingAltJob() const {
+  return alternative_job_.get() != nullptr;
+}
+
+size_t HttpStreamFactoryImpl::JobController::EstimateMemoryUsage() const {
+  size_t estimated_size = 0;
+  if (main_job_)
+    estimated_size += main_job_->EstimateMemoryUsage();
+  if (alternative_job_)
+    estimated_size += alternative_job_->EstimateMemoryUsage();
+  return estimated_size;
+}
+
 WebSocketHandshakeStreamBase::CreateHelper* HttpStreamFactoryImpl::
     JobController::websocket_handshake_stream_create_helper() {
   DCHECK(request_);
@@ -743,7 +758,17 @@ void HttpStreamFactoryImpl::JobController::OrphanUnboundJob() {
   } else if (bound_job_->job_type() == ALTERNATIVE && main_job_) {
     // Orphan main job.
     factory_->request_map_.erase(main_job_.get());
-    main_job_->Orphan();
+    // If ResumeMainJob() is not executed, reset |main_job_|. Otherwise,
+    // OnOrphanedJobComplete() will clean up |this| when the job completes.
+    // Use |main_job_is_blocked_| and |!main_job_wait_time_.is_zero()| instead
+    // of |main_job_|->is_waiting() because |main_job_| can be in proxy
+    // resolution step.
+    if (main_job_ && (main_job_is_blocked_ || !main_job_wait_time_.is_zero())) {
+      DCHECK(alternative_job_);
+      main_job_.reset();
+    } else {
+      main_job_->Orphan();
+    }
   }
 }
 

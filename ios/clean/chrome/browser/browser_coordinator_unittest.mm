@@ -5,10 +5,8 @@
 #import "ios/clean/chrome/browser/browser_coordinator.h"
 #import "ios/clean/chrome/browser/browser_coordinator+internal.h"
 
-#include "base/logging.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
-#include "testing/platform_test.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -49,6 +47,8 @@
 
 @end
 
+namespace {
+
 TEST(BrowserCoordinatorTest, TestStopOnDealloc) {
   __block BOOL called = NO;
 
@@ -69,13 +69,13 @@ TEST(BrowserCoordinatorTest, TestChildren) {
   [parent addChildCoordinator:child];
   EXPECT_TRUE([parent.children containsObject:child]);
   EXPECT_EQ(parent, child.parentCoordinator);
-  EXPECT_EQ(parent.viewController, child.rootViewController);
+  EXPECT_EQ(parent.viewController, child.baseViewController);
 
   [parent removeChildCoordinator:child];
   EXPECT_FALSE([parent.children containsObject:child]);
   EXPECT_EQ(nil, child.parentCoordinator);
-  // Unparenting shouldn't change a child's rootViewController.
-  EXPECT_EQ(parent.viewController, child.rootViewController);
+  // Unparenting shouldn't change a child's baseViewController.
+  EXPECT_EQ(parent.viewController, child.baseViewController);
 
   TestCoordinator* otherParent = [[TestCoordinator alloc] init];
   TestCoordinator* otherChild = [[TestCoordinator alloc] init];
@@ -135,3 +135,5 @@ TEST(BrowserCoordinatorTest, TestOverlay) {
   [noOverlays addOverlayCoordinator:thirdOverlay];
   EXPECT_FALSE(thirdOverlay.overlaying);
 }
+
+}  // namespace

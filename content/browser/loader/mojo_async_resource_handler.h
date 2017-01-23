@@ -18,11 +18,13 @@
 #include "content/common/content_export.h"
 #include "content/common/url_loader.mojom.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
+#include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/cpp/system/watcher.h"
 #include "net/base/io_buffer.h"
 #include "url/gurl.h"
 
 namespace net {
+class IOBufferWithSize;
 class URLRequest;
 }
 
@@ -74,6 +76,7 @@ class CONTENT_EXPORT MojoAsyncResourceHandler
   // These functions can be overriden only for tests.
   virtual MojoResult BeginWrite(void** data, uint32_t* available);
   virtual MojoResult EndWrite(uint32_t written);
+  virtual net::IOBufferWithSize* GetResponseMetadata(net::URLRequest* request);
 
  private:
   class SharedWriter;
@@ -119,6 +122,7 @@ class CONTENT_EXPORT MojoAsyncResourceHandler
   size_t buffer_offset_ = 0;
   size_t buffer_bytes_read_ = 0;
   scoped_refptr<SharedWriter> shared_writer_;
+  mojo::ScopedDataPipeConsumerHandle response_body_consumer_handle_;
 
   base::WeakPtrFactory<MojoAsyncResourceHandler> weak_factory_;
   DISALLOW_COPY_AND_ASSIGN(MojoAsyncResourceHandler);

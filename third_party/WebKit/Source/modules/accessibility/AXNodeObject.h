@@ -55,8 +55,8 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
   // Protected data.
   AccessibilityRole m_ariaRole;
   bool m_childrenDirty;
-#if ENABLE(ASSERT)
-  bool m_initialized;
+#if DCHECK_IS_ON()
+  bool m_initialized = false;
 #endif
 
   bool computeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override;
@@ -177,6 +177,7 @@ class MODULES_EXPORT AXNodeObject : public AXObject {
                      AXRelatedObjectVector*) const override;
   String placeholder(AXNameFrom) const override;
   bool nameFromLabelElement() const override;
+  bool nameFromContents() const override;
 
   // Location
   void getRelativeBounds(AXObject** outContainer,

@@ -229,6 +229,7 @@ static_library("test_support") {
     "//cc/surfaces",
     "//components/display_compositor",
     "//components/leveldb/public/interfaces",
+    "//components/payments:payment_app",
     "//content/app:both_for_content_tests",
     "//content/browser:for_content_tests",
     "//content/browser/speech/proto",
@@ -1234,6 +1235,7 @@ test("content_unittests") {
     "../browser/service_worker/service_worker_dispatcher_host_unittest.cc",
     "../browser/service_worker/service_worker_handle_unittest.cc",
     "../browser/service_worker/service_worker_job_unittest.cc",
+    "../browser/service_worker/service_worker_metrics_unittest.cc",
     "../browser/service_worker/service_worker_process_manager_unittest.cc",
     "../browser/service_worker/service_worker_provider_host_unittest.cc",
     "../browser/service_worker/service_worker_read_from_cache_job_unittest.cc",
@@ -1688,12 +1690,10 @@ test("content_unittests") {
 
   if (use_aura) {
     deps += [
-      "//services/ui/public/cpp/tests:unittest_support",
       "//ui/aura:test_support",
       "//ui/aura_extra",
       "//ui/wm",
     ]
-    sources += [ "../renderer/mus/compositor_mus_connection_unittest.cc" ]
   } else {
     sources -= [
       "../browser/renderer_host/render_widget_host_view_aura_unittest.cc",

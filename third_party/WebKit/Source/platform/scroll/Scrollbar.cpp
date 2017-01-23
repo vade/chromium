@@ -58,7 +58,9 @@ Scrollbar::Scrollbar(ScrollableArea* scrollableArea,
       m_draggingDocument(false),
       m_documentDragPos(0),
       m_enabled(true),
-      m_scrollTimer(this, &Scrollbar::autoscrollTimerFired),
+      m_scrollTimer(scrollableArea->getTimerTaskRunner(),
+                    this,
+                    &Scrollbar::autoscrollTimerFired),
       m_elasticOverscroll(0),
       m_trackNeedsRepaint(true),
       m_thumbNeedsRepaint(true) {
@@ -317,6 +319,10 @@ void Scrollbar::setPressedPart(ScrollbarPart part) {
       || m_hoveredPart != NoPart)
     setNeedsPaintInvalidation(
         static_cast<ScrollbarPart>(m_pressedPart | m_hoveredPart | part));
+
+  if (getScrollableArea())
+    getScrollableArea()->didScrollWithScrollbar(part, orientation());
+
   m_pressedPart = part;
 }
 

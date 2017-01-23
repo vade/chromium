@@ -63,9 +63,22 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
     }
   </style>
 </head>
-<body><div hidden="" by-vulcanize=""><script src="chrome://resources/js/load_time_data.js"></script>
+<body>
+  <downloads-manager></downloads-manager>
+<if expr="is_macosx">
+  <command id="clear-all-command" shortcut="Alt|c Alt|ç"></command>
+  <command id="undo-command" shortcut="Meta|z"></command>
+  <command id="find-command" shortcut="Meta|f"></command>
+</if>
+<if expr="not is_macosx">
+  <command id="clear-all-command" shortcut="Alt|c"></command>
+  <command id="undo-command" shortcut="Ctrl|z"></command>
+  <command id="find-command" shortcut="Ctrl|f"></command>
+</if>
+  <div hidden="" by-vulcanize=""></div><link rel="import" href="chrome://resources/html/polymer.html">
+  <div hidden="" by-vulcanize=""><script src="chrome://resources/js/load_time_data.js"></script>
 <script src="chrome://downloads/strings.js"></script>
-<dom-module id="iron-list" assetpath="chrome://resources/polymer/v1_0/iron-list/" css-build="shadow">
+</div><div hidden="" by-vulcanize=""><dom-module id="iron-list" assetpath="chrome://resources/polymer/v1_0/iron-list/" css-build="shadow">
   <template>
     <style scope="iron-list">:host {
   display: block;
@@ -113,9 +126,7 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
   [hidden] {
     display: none !important;
   }
-</style>
-
-<style is="custom-style" css-build="shadow">html {
+</style><style is="custom-style" css-build="shadow">html {
   --layout_-_display:  flex;;
 
     --layout-inline_-_display:  inline-flex;;
@@ -233,10 +244,7 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
     --layout-fixed-left_-_position:  fixed; --layout-fixed-left_-_top:  0; --layout-fixed-left_-_bottom:  0; --layout-fixed-left_-_left:  0;;
 }
 
-</style>
-
-
-<dom-module id="iron-icon" assetpath="chrome://resources/polymer/v1_0/iron-icon/" css-build="shadow">
+</style><dom-module id="iron-icon" assetpath="chrome://resources/polymer/v1_0/iron-icon/" css-build="shadow">
   <template>
     <style scope="iron-icon">:host {
   display: var(--layout-inline_-_display);
@@ -350,8 +358,7 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
                   0  8px 10px -5px rgba(0, 0, 0, 0.4);;
 }
 
-</style>
-<dom-module id="paper-material-shared-styles" assetpath="chrome://resources/polymer/v1_0/paper-material/" css-build="shadow">
+</style><dom-module id="paper-material-shared-styles" assetpath="chrome://resources/polymer/v1_0/paper-material/" css-build="shadow">
   <template>
     <style scope="paper-material-shared-styles">:host {
   display: block;
@@ -381,8 +388,6 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
 </style>
   </template>
 </dom-module>
-
-
 <dom-module id="paper-button" assetpath="chrome://resources/polymer/v1_0/paper-button/" css-build="shadow">
   <template strip-whitespace="">
     <style scope="paper-button">:host {
@@ -503,7 +508,6 @@ paper-ripple {
 paper-ripple {
   opacity: 0.6;
         color: currentColor;
-        ;
 }
 
 </style>
@@ -824,10 +828,7 @@ paper-ripple {
     --light-primary-opacity: 1.0;
 }
 
-</style>
-
-
-<dom-module id="paper-progress" assetpath="chrome://resources/polymer/v1_0/paper-progress/" css-build="shadow">
+</style><dom-module id="paper-progress" assetpath="chrome://resources/polymer/v1_0/paper-progress/" css-build="shadow">
   <template>
     <style scope="paper-progress">:host {
   display: block;
@@ -854,7 +855,7 @@ paper-ripple {
 }
 
 #progressContainer, .indeterminate::after {
-  background: var(--paper-progress-container-color,var(--google-grey-300));;
+  background: var(--paper-progress-container-color,var(--google-grey-300));
 }
 
 :host(.transiting) #primaryProgress, :host(.transiting) #secondaryProgress {
@@ -884,19 +885,19 @@ paper-ripple {
 }
 
 #primaryProgress {
-  background: var(--paper-progress-active-color,var(--google-green-500));;
+  background: var(--paper-progress-active-color,var(--google-green-500));
 }
 
 #secondaryProgress {
-  background: var(--paper-progress-secondary-color,var(--google-green-100));;
+  background: var(--paper-progress-secondary-color,var(--google-green-100));
 }
 
 :host([disabled]) #primaryProgress {
-  background: var(--paper-progress-disabled-active-color,var(--google-grey-500));;
+  background: var(--paper-progress-disabled-active-color,var(--google-grey-500));
 }
 
 :host([disabled]) #secondaryProgress {
-  background: var(--paper-progress-disabled-secondary-color,var(--google-grey-300));;
+  background: var(--paper-progress-disabled-secondary-color,var(--google-grey-300));
 }
 
 :host(:not([disabled])) #primaryProgress.indeterminate {
@@ -1313,6 +1314,8 @@ paper-button {
   </dom-module>
 
 
+
+
 <style is="custom-style" css-build="shadow">html {
   --primary-text-color: var(--light-theme-text-color);
     --primary-background-color: var(--light-theme-background-color);
@@ -1352,8 +1355,7 @@ paper-button {
     --default-primary-color: var(--primary-color);
 }
 
-</style>
-<style>
+</style><style>
 /* Copyright 2015 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
@@ -1425,8 +1427,7 @@ paper-button {
     --paper-font-code1_-_font-family:  var(--paper-font-common-code_-_font-family); --paper-font-code1_-_-webkit-font-smoothing:  var(--paper-font-common-code_-_-webkit-font-smoothing); --paper-font-code1_-_font-size:  14px; --paper-font-code1_-_font-weight:  500; --paper-font-code1_-_line-height:  20px;;
 }
 
-</style>
-<dom-module id="paper-item-shared-styles" assetpath="chrome://resources/polymer/v1_0/paper-item/" css-build="shadow">
+</style><dom-module id="paper-item-shared-styles" assetpath="chrome://resources/polymer/v1_0/paper-item/" css-build="shadow">
   <template>
     <style scope="paper-item-shared-styles">:host, .paper-item {
   display: block;
@@ -1455,7 +1456,7 @@ paper-button {
 }
 
 :host([disabled]), .paper-item[disabled] {
-  color: var(--paper-item-disabled-color,var(--disabled-text-color));;
+  color: var(--paper-item-disabled-color,var(--disabled-text-color));
 
         ;
 }
@@ -1481,8 +1482,6 @@ paper-button {
 </style>
   </template>
 </dom-module>
-
-
 <dom-module id="paper-item" assetpath="chrome://resources/polymer/v1_0/paper-item/" css-build="shadow">
   <template>
     
@@ -1513,7 +1512,7 @@ paper-button {
 }
 
 :host([disabled]), .paper-item[disabled] {
-  color: var(--paper-item-disabled-color,var(--disabled-text-color));;
+  color: var(--paper-item-disabled-color,var(--disabled-text-color));
 
         ;
 }
@@ -1559,7 +1558,7 @@ paper-button {
 }
 
 .selectable-content > ::content > [disabled] {
-  color: var(--paper-menu-disabled-color,var(--disabled-text-color));;
+  color: var(--paper-menu-disabled-color,var(--disabled-text-color));
 }
 
 .selectable-content > ::content > *:focus {
@@ -1586,8 +1585,6 @@ paper-button {
 </style>
   </template>
 </dom-module>
-
-
 <dom-module id="paper-menu" assetpath="chrome://resources/polymer/v1_0/paper-menu/" css-build="shadow">
   <template>
     
@@ -1598,7 +1595,7 @@ paper-button {
 }
 
 .selectable-content > ::content > [disabled] {
-  color: var(--paper-menu-disabled-color,var(--disabled-text-color));;
+  color: var(--paper-menu-disabled-color,var(--disabled-text-color));
 }
 
 .selectable-content > ::content > *:focus {
@@ -1626,8 +1623,8 @@ paper-button {
   display: block;
         padding: 8px 0;
 
-        background: var(--paper-menu-background-color,var(--primary-background-color));;
-        color: var(--paper-menu-color,var(--primary-text-color));;
+        background: var(--paper-menu-background-color,var(--primary-background-color));
+        color: var(--paper-menu-color,var(--primary-text-color));
 
         ;
 }
@@ -1640,7 +1637,7 @@ paper-button {
   </template>
 
   </dom-module>
-<dom-module id="iron-overlay-backdrop" assetpath="chrome://resources/polymer/v1_0/iron-overlay-behavior/" css-build="shadow">
+<dom-module id="iron-overlay-backdrop" assetpath="" css-build="shadow">
 
   <template>
     <style scope="iron-overlay-backdrop">:host {
@@ -1670,8 +1667,6 @@ paper-button {
 </dom-module>
 
 <script src="chrome://resources/polymer/v1_0/web-animations-js/web-animations-next-lite.min.js"></script>
-
-
 <dom-module id="iron-dropdown" assetpath="chrome://resources/polymer/v1_0/iron-dropdown/" css-build="shadow">
   <template>
     <style scope="iron-dropdown">:host {
@@ -1721,7 +1716,7 @@ iron-dropdown {
 
         position: relative;
         border-radius: 2px;
-        background-color: var(--paper-menu-button-dropdown-background,var(--primary-background-color));;
+        background-color: var(--paper-menu-button-dropdown-background,var(--primary-background-color));
 
         ;
 }
@@ -1785,12 +1780,12 @@ iron-dropdown {
 }
 
 :host #ink {
-  color: var(--paper-icon-button-ink-color,var(--primary-text-color));;
+  color: var(--paper-icon-button-ink-color,var(--primary-text-color));
         opacity: 0.6;
 }
 
 :host([disabled]) {
-  color: var(--paper-icon-button-disabled-text,var(--disabled-text-color));;
+  color: var(--paper-icon-button-disabled-text,var(--disabled-text-color));
         pointer-events: none;
         cursor: auto;
 
@@ -1866,23 +1861,23 @@ to {
         height: 100%;
         opacity: 0;
         white-space: nowrap;
-        border-color: var(--paper-spinner-color,var(--google-blue-500));;
+        border-color: var(--paper-spinner-color,var(--google-blue-500));
 }
 
 .layer-1 {
-  border-color: var(--paper-spinner-layer-1-color,var(--google-blue-500));;
+  border-color: var(--paper-spinner-layer-1-color,var(--google-blue-500));
 }
 
 .layer-2 {
-  border-color: var(--paper-spinner-layer-2-color,var(--google-red-500));;
+  border-color: var(--paper-spinner-layer-2-color,var(--google-red-500));
 }
 
 .layer-3 {
-  border-color: var(--paper-spinner-layer-3-color,var(--google-yellow-500));;
+  border-color: var(--paper-spinner-layer-3-color,var(--google-yellow-500));
 }
 
 .layer-4 {
-  border-color: var(--paper-spinner-layer-4-color,var(--google-green-500));;
+  border-color: var(--paper-spinner-layer-4-color,var(--google-green-500));
 }
 
 .active .spinner-layer {
@@ -2350,8 +2345,6 @@ to {
 </style>
   </template>
 </dom-module>
-
-
 <dom-module id="paper-spinner-lite" assetpath="chrome://resources/polymer/v1_0/paper-spinner/" css-build="shadow">
   <template strip-whitespace="">
     <style scope="paper-spinner-lite">:host {
@@ -2406,23 +2399,23 @@ to {
         height: 100%;
         opacity: 0;
         white-space: nowrap;
-        border-color: var(--paper-spinner-color,var(--google-blue-500));;
+        border-color: var(--paper-spinner-color,var(--google-blue-500));
 }
 
 .layer-1 {
-  border-color: var(--paper-spinner-layer-1-color,var(--google-blue-500));;
+  border-color: var(--paper-spinner-layer-1-color,var(--google-blue-500));
 }
 
 .layer-2 {
-  border-color: var(--paper-spinner-layer-2-color,var(--google-red-500));;
+  border-color: var(--paper-spinner-layer-2-color,var(--google-red-500));
 }
 
 .layer-3 {
-  border-color: var(--paper-spinner-layer-3-color,var(--google-yellow-500));;
+  border-color: var(--paper-spinner-layer-3-color,var(--google-yellow-500));
 }
 
 .layer-4 {
-  border-color: var(--paper-spinner-layer-4-color,var(--google-green-500));;
+  border-color: var(--paper-spinner-layer-4-color,var(--google-green-500));
 }
 
 .active .spinner-layer {
@@ -2903,6 +2896,7 @@ to {
     <defs>
       
       <g id="add"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"></path></g>
+      <g id="arrow-drop-up"><path d="M7 14l5-5 5 5z"></path></g>
       <g id="arrow-drop-down"><path d="M7 10l5 5 5-5z"></path></g>
       <g id="cancel"><path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z"></path></g>
 <if expr="chromeos">
@@ -2917,6 +2911,7 @@ to {
       <g id="expand-more"><path d="M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z"></path></g>
       <g id="extension"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z"></path></g>
       <g id="file-download"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"></path></g>
+      <g id="folder"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"></path></g>
       <g id="fullscreen"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"></path></g>
       <g id="group"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"></path></g>
       <g id="menu"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"></path></g>
@@ -2999,7 +2994,7 @@ label {
         white-space: nowrap;
 }
 
-:host([has-search-text_]) label {
+:host([has-search-text]) label {
   visibility: hidden;
 }
 
@@ -3056,10 +3051,10 @@ input[type='search']::-webkit-search-decoration, input[type='search']::-webkit-s
     </paper-icon-button>
     <div id="searchTerm">
       <label id="prompt" for="searchInput">[[label]]</label>
-      <input id="searchInput" type="search" on-input="onSearchInput_" on-search="onSearchTermSearch" on-keydown="onSearchTermKeydown_" on-focus="onInputFocus_" on-blur="onInputBlur_" incremental="" autofocus="">
+      <input id="searchInput" type="search" on-input="onSearchTermInput" on-search="onSearchTermSearch" on-keydown="onSearchTermKeydown_" on-focus="onInputFocus_" on-blur="onInputBlur_" incremental="" autofocus="">
       
     </div>
-    <template is="dom-if" if="[[hasSearchText_]]">
+    <template is="dom-if" if="[[hasSearchText]]">
       <paper-icon-button icon="cr:cancel" id="clearSearch" title="[[clearLabel]]" on-tap="clearSearch_">
       </paper-icon-button>
     </template>
@@ -3290,9 +3285,7 @@ paper-item {
   --md-toolbar-color: rgb(51, 103, 214);
 }
 
-</style>
-
-<dom-module id="downloads-manager" assetpath="chrome://downloads/" css-build="shadow">
+</style><dom-module id="downloads-manager" assetpath="chrome://downloads/" css-build="shadow">
   <template>
     <style scope="downloads-manager">:host {
   display: flex;
@@ -3384,17 +3377,4 @@ paper-item {
     </div>
   </template>
   </dom-module>
-</div>
-  <downloads-manager></downloads-manager>
-<if expr="is_macosx">
-  <command id="clear-all-command" shortcut="Alt|c Alt|ç"></command>
-  <command id="undo-command" shortcut="Meta|z"></command>
-  <command id="find-command" shortcut="Meta|f"></command>
-</if>
-<if expr="not is_macosx">
-  <command id="clear-all-command" shortcut="Alt|c"></command>
-  <command id="undo-command" shortcut="Ctrl|z"></command>
-  <command id="find-command" shortcut="Ctrl|f"></command>
-</if>
-  <link rel="import" href="chrome://resources/html/polymer.html">
-  <script src="crisper.js"></script></body></html>
+</div><script src="crisper.js"></script></body></html>

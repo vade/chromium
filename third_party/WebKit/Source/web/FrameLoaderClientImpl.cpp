@@ -680,6 +680,8 @@ DocumentLoader* FrameLoaderClientImpl::createDocumentLoader(
     const ResourceRequest& request,
     const SubstituteData& data,
     ClientRedirectPolicy clientRedirectPolicy) {
+  DCHECK(frame);
+
   WebDataSourceImpl* ds =
       WebDataSourceImpl::create(frame, request, data, clientRedirectPolicy);
   if (m_webFrame->client())
@@ -994,6 +996,11 @@ WebDevToolsAgentImpl* FrameLoaderClientImpl::devToolsAgent() {
 
 KURL FrameLoaderClientImpl::overrideFlashEmbedWithHTML(const KURL& url) {
   return m_webFrame->client()->overrideFlashEmbedWithHTML(WebURL(url));
+}
+
+void FrameLoaderClientImpl::setHasReceivedUserGesture() {
+  if (m_webFrame->client())
+    m_webFrame->client()->setHasReceivedUserGesture();
 }
 
 }  // namespace blink

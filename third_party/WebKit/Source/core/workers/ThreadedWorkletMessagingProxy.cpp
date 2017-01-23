@@ -5,9 +5,7 @@
 #include "core/workers/ThreadedWorkletMessagingProxy.h"
 
 #include "bindings/core/v8/ScriptSourceCode.h"
-#include "bindings/core/v8/WorkerOrWorkletScriptController.h"
 #include "core/dom/Document.h"
-#include "core/dom/ExecutionContextTask.h"
 #include "core/dom/SecurityContext.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/origin_trials/OriginTrialContext.h"
@@ -15,21 +13,10 @@
 #include "core/workers/WorkerInspectorProxy.h"
 #include "core/workers/WorkerThreadStartupData.h"
 #include "core/workers/WorkletGlobalScope.h"
+#include "platform/CrossThreadFunctional.h"
 #include "platform/WebTaskRunner.h"
 
 namespace blink {
-
-namespace {
-
-void evaluateScriptOnWorkletGlobalScope(const String& source,
-                                        const KURL& scriptURL,
-                                        ExecutionContext* executionContext) {
-  WorkletGlobalScope* globalScope = toWorkletGlobalScope(executionContext);
-  globalScope->scriptController()->evaluate(
-      ScriptSourceCode(source, scriptURL));
-}
-
-}  // namespace
 
 ThreadedWorkletMessagingProxy::ThreadedWorkletMessagingProxy(
     ExecutionContext* executionContext)
@@ -73,8 +60,10 @@ void ThreadedWorkletMessagingProxy::evaluateScript(
     const ScriptSourceCode& scriptSourceCode) {
   postTaskToWorkerGlobalScope(
       BLINK_FROM_HERE,
-      createCrossThreadTask(&evaluateScriptOnWorkletGlobalScope,
-                            scriptSourceCode.source(), scriptSourceCode.url()));
+      crossThreadBind(&ThreadedWorkletObjectProxy::evaluateScript,
+                      crossThreadUnretained(m_workletObjectProxy.get()),
+                      scriptSourceCode.source(), scriptSourceCode.url(),
+                      crossThreadUnretained(workerThread())));
 }
 
 void ThreadedWorkletMessagingProxy::terminateWorkletGlobalScope() {

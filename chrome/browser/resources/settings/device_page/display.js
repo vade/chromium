@@ -184,7 +184,7 @@ Polymer({
    * @return {boolean}
    * @private
    */
-  showDisplayTabMenu_: function(displays) {
+  hasMultipleDisplays_: function(displays) {
     return displays.length > 1;
   },
 
@@ -315,7 +315,7 @@ Polymer({
    * @private
    */
   onTouchCalibrationTap_: function(e) {
-    settings.display.systemDisplayApi.touchCalibrationStart(
+    settings.display.systemDisplayApi.showNativeTouchCalibration(
         this.selectedDisplay.id);
   },
 
