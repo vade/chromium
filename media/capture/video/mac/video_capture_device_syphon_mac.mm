@@ -280,6 +280,8 @@ namespace media {
     }
     
     void VideoCaptureDeviceSyphonMac::StopAndDeAllocate() {
+        run = false;
+        [syphonClient stop];
 //        if (decklink_capture_delegate_.get())
 //            decklink_capture_delegate_->StopAndDeAllocate();
     }
