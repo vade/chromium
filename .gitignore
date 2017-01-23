@@ -361,13 +361,17 @@ vs-chromium-project.txt
 /third_party/gvr-android-sdk/libgvr_shim_static_arm64.a
 /third_party/gvr-android-sdk/src
 /third_party/gperf
+/third_party/grpc
 /third_party/guava/lib/*.jar
 /third_party/hamcrest/lib/*.jar
+/third_party/httpcomponents-client
+/third_party/httpcomponents-core
 /third_party/hunspell_dictionaries
 /third_party/icu
 /third_party/icu4j/lib/*.jar
 /third_party/intellij/lib/*.jar
 /third_party/inspector_protocol
+/third_party/jarjar
 /third_party/javax_inject/lib/*.jar
 /third_party/jsoncpp/source
 /third_party/jsr-305/src
