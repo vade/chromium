@@ -58,7 +58,6 @@ TaskQueueManager::TaskQueueManager(
     : real_time_domain_(new RealTimeDomain(tracing_category)),
       delegate_(delegate),
       task_was_run_on_quiescence_monitored_queue_(false),
-      other_thread_pending_wakeup_(false),
       record_task_delay_histograms_(true),
       work_batch_size_(1),
       task_count_(0),
@@ -100,6 +99,8 @@ TaskQueueManager::~TaskQueueManager() {
 
   delegate_->RemoveNestingObserver(this);
 }
+
+TaskQueueManager::AnyThread::AnyThread() : other_thread_pending_wakeup(false) {}
 
 void TaskQueueManager::RegisterTimeDomain(TimeDomain* time_domain) {
   time_domains_.insert(time_domain);
@@ -146,18 +147,35 @@ void TaskQueueManager::UnregisterTaskQueue(
   queues_.erase(task_queue);
 
   selector_.RemoveQueue(task_queue.get());
+
+  {
+    base::AutoLock lock(any_thread_lock_);
+    any_thread().has_incoming_immediate_work.erase(task_queue.get());
+  }
 }
 
-void TaskQueueManager::UpdateWorkQueues(LazyNow* lazy_now) {
+void TaskQueueManager::ReloadEmptyWorkQueues(
+    const std::unordered_set<internal::TaskQueueImpl*>& queues_to_reload)
+    const {
+  // There are two cases where a queue needs reloading.  First, it might be
+  // completely empty and we've just posted a task (this method handles that
+  // case). Secondly if the work queue becomes empty in when calling
+  // WorkQueue::TakeTaskFromWorkQueue (handled there).
+  for (internal::TaskQueueImpl* queue : queues_to_reload) {
+    queue->ReloadImmediateWorkQueueIfEmpty();
+  }
+}
+
+void TaskQueueManager::WakeupReadyDelayedQueues(LazyNow* lazy_now) {
   TRACE_EVENT0(disabled_by_default_tracing_category_,
-               "TaskQueueManager::UpdateWorkQueues");
+               "TaskQueueManager::WakeupReadyDelayedQueues");
 
   for (TimeDomain* time_domain : time_domains_) {
     if (time_domain == real_time_domain_.get()) {
-      time_domain->UpdateWorkQueues(lazy_now);
+      time_domain->WakeupReadyDelayedQueues(lazy_now);
     } else {
       LazyNow time_domain_lazy_now = time_domain->CreateLazyNow();
-      time_domain->UpdateWorkQueues(&time_domain_lazy_now);
+      time_domain->WakeupReadyDelayedQueues(&time_domain_lazy_now);
     }
   }
 }
@@ -166,6 +184,37 @@ void TaskQueueManager::OnBeginNestedMessageLoop() {
   // We just entered a nested message loop, make sure there's a DoWork posted or
   // the system will grind to a halt.
   delegate_->PostTask(FROM_HERE, from_main_thread_immediate_do_work_closure_);
+}
+
+void TaskQueueManager::OnQueueHasIncomingImmediateWork(
+    internal::TaskQueueImpl* queue,
+    bool queue_is_blocked) {
+  bool on_main_thread = delegate_->BelongsToCurrentThread();
+
+  {
+    base::AutoLock lock(any_thread_lock_);
+    any_thread().has_incoming_immediate_work.insert(queue);
+
+    if (queue_is_blocked)
+      return;
+
+    // De-duplicate DoWork posts.
+    if (on_main_thread) {
+      if (!main_thread_pending_wakeups_.insert(base::TimeTicks()).second)
+        return;
+    } else {
+      if (any_thread().other_thread_pending_wakeup)
+        return;
+      any_thread().other_thread_pending_wakeup = true;
+    }
+  }
+
+  if (on_main_thread) {
+    delegate_->PostTask(FROM_HERE, from_main_thread_immediate_do_work_closure_);
+  } else {
+    delegate_->PostTask(FROM_HERE,
+                        from_other_thread_immediate_do_work_closure_);
+  }
 }
 
 void TaskQueueManager::MaybeScheduleImmediateWork(
@@ -179,10 +228,10 @@ void TaskQueueManager::MaybeScheduleImmediateWork(
     delegate_->PostTask(from_here, from_main_thread_immediate_do_work_closure_);
   } else {
     {
-      base::AutoLock lock(other_thread_lock_);
-      if (other_thread_pending_wakeup_)
+      base::AutoLock lock(any_thread_lock_);
+      if (any_thread().other_thread_pending_wakeup)
         return;
-      other_thread_pending_wakeup_ = true;
+      any_thread().other_thread_pending_wakeup = true;
     }
     delegate_->PostTask(from_here,
                         from_other_thread_immediate_do_work_closure_);
@@ -224,8 +273,8 @@ void TaskQueueManager::DoWork(base::TimeTicks run_time, bool from_main_thread) {
   if (from_main_thread) {
     main_thread_pending_wakeups_.erase(run_time);
   } else {
-    base::AutoLock lock(other_thread_lock_);
-    other_thread_pending_wakeup_ = false;
+    base::AutoLock lock(any_thread_lock_);
+    any_thread().other_thread_pending_wakeup = false;
   }
 
   // Posting a DoWork while a DoWork is running leads to spurious DoWorks.
@@ -236,9 +285,20 @@ void TaskQueueManager::DoWork(base::TimeTicks run_time, bool from_main_thread) {
     queues_to_delete_.clear();
 
   LazyNow lazy_now(real_time_domain()->CreateLazyNow());
-  UpdateWorkQueues(&lazy_now);
+  WakeupReadyDelayedQueues(&lazy_now);
 
   for (int i = 0; i < work_batch_size_; i++) {
+    std::unordered_set<internal::TaskQueueImpl*> queues_to_reload;
+
+    {
+      base::AutoLock lock(any_thread_lock_);
+      std::swap(queues_to_reload, any_thread().has_incoming_immediate_work);
+    }
+
+    // It's important we call ReloadEmptyWorkQueues out side of the lock to
+    // avoid a lock order inversion.
+    ReloadEmptyWorkQueues(queues_to_reload);
+
     internal::WorkQueue* work_queue;
     if (!SelectWorkQueueToService(&work_queue))
       break;
@@ -259,7 +319,7 @@ void TaskQueueManager::DoWork(base::TimeTicks run_time, bool from_main_thread) {
 
     lazy_now = time_after_task.is_null() ? real_time_domain()->CreateLazyNow()
                                          : LazyNow(time_after_task);
-    UpdateWorkQueues(&lazy_now);
+    WakeupReadyDelayedQueues(&lazy_now);
 
     // Only run a single task per batch in nested run loops so that we can
     // properly exit the nested loop when someone calls RunLoop::Quit().
@@ -288,6 +348,18 @@ void TaskQueueManager::DoWork(base::TimeTicks run_time, bool from_main_thread) {
 
 base::Optional<base::TimeDelta> TaskQueueManager::ComputeDelayTillNextTask(
     LazyNow* lazy_now) {
+  DCHECK(main_thread_checker_.CalledOnValidThread());
+
+  std::unordered_set<internal::TaskQueueImpl*> queues_to_reload;
+  {
+    base::AutoLock lock(any_thread_lock_);
+    std::swap(queues_to_reload, any_thread().has_incoming_immediate_work);
+  }
+
+  // It's important we call ReloadEmptyWorkQueues out side of the lock to
+  // avoid a lock order inversion.
+  ReloadEmptyWorkQueues(queues_to_reload);
+
   // If the selector has non-empty queues we trivially know there is immediate
   // work to be done.
   if (!selector_.EnabledWorkQueuesEmpty())
@@ -504,6 +576,15 @@ TaskQueueManager::AsValueWithSelectorResult(
   for (auto* time_domain : time_domains_)
     time_domain->AsValueInto(state.get());
   state->EndArray();
+  {
+    base::AutoLock lock(any_thread_lock_);
+    state->BeginArray("has_incoming_immediate_work");
+    for (internal::TaskQueueImpl* task_queue :
+         any_thread().has_incoming_immediate_work) {
+      state->AppendString(task_queue->GetName());
+    }
+    state->EndArray();
+  }
   return std::move(state);
 }
 

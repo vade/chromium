@@ -7,18 +7,24 @@
 namespace blink {
 
 NGPhysicalBoxFragment::NGPhysicalBoxFragment(
+    LayoutObject* layout_object,
     NGPhysicalSize size,
     NGPhysicalSize overflow,
-    HeapVector<Member<const NGPhysicalFragment>>& children,
+    HeapVector<Member<NGPhysicalFragment>>& children,
     HeapLinkedHashSet<WeakMember<NGBlockNode>>& out_of_flow_descendants,
     Vector<NGStaticPosition>& out_of_flow_positions,
-    NGMarginStrut margin_strut,
+    NGDeprecatedMarginStrut margin_strut,
+    HeapVector<Member<NGFloatingObject>>& unpositioned_floats,
+    HeapVector<Member<NGFloatingObject>>& positioned_floats,
     NGBreakToken* break_token)
-    : NGPhysicalFragment(size,
+    : NGPhysicalFragment(layout_object,
+                         size,
                          overflow,
                          kFragmentBox,
                          out_of_flow_descendants,
                          out_of_flow_positions,
+                         unpositioned_floats,
+                         positioned_floats,
                          break_token),
       margin_strut_(margin_strut) {
   children_.swap(children);

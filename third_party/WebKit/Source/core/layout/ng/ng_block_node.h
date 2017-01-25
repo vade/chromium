@@ -34,8 +34,8 @@ class CORE_EXPORT NGBlockNode final : public NGLayoutInputNode {
   ~NGBlockNode() override;
 
   NGPhysicalFragment* Layout(NGConstraintSpace* constraint_space) override;
-
   NGBlockNode* NextSibling() override;
+  LayoutObject* GetLayoutObject() override;
 
   // Computes the value of min-content and max-content for this box.
   // The return value has the same meaning as for Layout.
@@ -75,13 +75,8 @@ class CORE_EXPORT NGBlockNode final : public NGLayoutInputNode {
 
   // Save static position for legacy AbsPos layout.
   void SaveStaticOffsetForLegacy(const NGLogicalOffset&);
-
-  // This is necessary for interop between old and new trees -- after our parent
-  // positions us, it calls this function so we can store the position on the
-  // underlying LayoutBox.
-  void PositionUpdated();
-
  private:
+
   bool CanUseNewLayout();
   bool HasInlineChildren();
 

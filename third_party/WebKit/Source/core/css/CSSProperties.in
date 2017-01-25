@@ -176,7 +176,7 @@ font-stretch inherited, font, type_name=FontStretch, name_for_methods=Stretch, p
 font-style inherited, font, type_name=FontStyle, name_for_methods=Style, priority=High
 font-variant-ligatures inherited, font, type_name=VariantLigatures, name_for_methods=VariantLigatures, converter=convertFontVariantLigatures, priority=High, api_class
 font-variant-caps inherited, font, name_for_methods=VariantCaps, converter=convertFontVariantCaps, priority=High, api_class
-font-variant-numeric inherited, font, name_for_methods=VariantNumeric, converter=convertFontVariantNumeric, priority=High
+font-variant-numeric inherited, font, name_for_methods=VariantNumeric, converter=convertFontVariantNumeric, priority=High, api_class
 font-weight interpolable, inherited, font, type_name=FontWeight, name_for_methods=Weight, converter=convertFontWeight, priority=High
 font-feature-settings inherited, font, name_for_methods=FeatureSettings, converter=convertFontFeatureSettings, priority=High
 font-variation-settings runtime_flag=CSSVariableFonts, inherited, font, name_for_methods=VariationSettings, converter=convertFontVariationSettings, api_class, priority=High
@@ -216,7 +216,7 @@ border-collapse inherited, independent, keyword_only, keywords=[separate|collaps
 border-image-outset interpolable, custom_all
 border-image-repeat custom_all
 border-image-slice interpolable, custom_all
-border-image-source interpolable, custom_value, typedom_types=[Image], keywords=[none]
+border-image-source interpolable, custom_value, typedom_types=[Image], keywords=[none], api_class=CSSPropertyAPIImage
 border-image-width interpolable, custom_all
 border-left-color interpolable, custom_all
 border-left-style type_name=EBorderStyle, initial=initialBorderStyle
@@ -258,7 +258,7 @@ display
 dominant-baseline inherited, svg
 empty-cells inherited, independent, type_name=EEmptyCells, keyword_only, keywords=[show|hide], initial_keyword=show
 fill interpolable, inherited, svg, setter=setFillPaint, custom_all, api_class=CSSPropertyAPIPaintStroke
-fill-opacity interpolable, inherited, svg, converter=convertNumberOrPercentage
+fill-opacity interpolable, inherited, svg, converter=convertNumberOrPercentage, api_class=CSSPropertyAPIOpacity
 fill-rule inherited, svg, type_name=WindRule
 filter interpolable, converter=convertFilterOperations
 flex-basis interpolable, converter=convertLengthOrAuto, api_class
@@ -267,8 +267,8 @@ flex-grow interpolable, type_name=float
 flex-shrink interpolable, type_name=float
 flex-wrap
 float type_name=EFloat, name_for_methods=Floating, keyword_only, keywords=[none|left|right], initial_keyword=none
-flood-color interpolable, svg, converter=convertColor
-flood-opacity interpolable, svg, converter=convertNumberOrPercentage
+flood-color interpolable, svg, converter=convertColor, api_class=CSSPropertyAPIColor
+flood-opacity interpolable, svg, converter=convertNumberOrPercentage, api_class=CSSPropertyAPIOpacity
 grid-auto-columns runtime_flag=CSSGridLayout, converter=convertGridTrackSizeList
 grid-auto-flow runtime_flag=CSSGridLayout, converter=convertGridAutoFlow, type_name=GridAutoFlow, api_class
 grid-auto-rows runtime_flag=CSSGridLayout, converter=convertGridTrackSizeList
@@ -284,16 +284,16 @@ grid-template-rows runtime_flag=CSSGridLayout, custom_all
 height typedom_types=[Length], keywords=[auto], supports_percentage, interpolable, initial=initialSize, converter=convertLengthSizing
 hyphens runtime_flag=CSSHyphens, inherited, type_name=Hyphens
 image-rendering inherited
-image-orientation runtime_flag=ImageOrientation, inherited, name_for_methods=RespectImageOrientation, converter=convertImageOrientation
+image-orientation runtime_flag=ImageOrientation, inherited, name_for_methods=RespectImageOrientation, converter=convertImageOrientation, api_class
 isolation
 justify-content initial=initialContentAlignment, converter=convertContentAlignmentData
 justify-items runtime_flag=CSSGridLayout, initial=initialSelfAlignment, converter=convertSelfOrDefaultAlignmentData
 justify-self runtime_flag=CSSGridLayout, initial=initialSelfAlignment, converter=convertSelfOrDefaultAlignmentData
 left typedom_types=[Length], keywords=[auto], supports_percentage, interpolable, initial=initialOffset, converter=convertLengthOrAuto
 letter-spacing interpolable, inherited, initial=initialLetterWordSpacing, converter=convertSpacing, api_class=CSSPropertyAPILetterAndWordSpacing
-lighting-color interpolable, svg, converter=convertColor
+lighting-color interpolable, svg, converter=convertColor, api_class=CSSPropertyAPIColor
 line-height interpolable, inherited, getter=specifiedLineHeight, converter=convertLineHeight
-list-style-image interpolable, inherited, custom_value, typedom_types=[Image]
+list-style-image interpolable, inherited, custom_value, typedom_types=[Image], api_class=CSSPropertyAPIImage
 list-style-position inherited, independent, keyword_only, keywords=[outside|inside], initial_keyword=outside
 list-style-type inherited, keyword_only, keywords=[disc|circle|square|decimal|decimal-leading-zero|arabic-indic|bengali|cambodian|khmer|devanagari|gujarati|gurmukhi|kannada|lao|malayalam|mongolian|myanmar|oriya|persian|urdu|telugu|tibetan|thai|lower-roman|upper-roman|lower-greek|lower-alpha|lower-latin|upper-alpha|upper-latin|cjk-earthly-branch|cjk-heavenly-stem|ethiopic-halehame|ethiopic-halehame-am|ethiopic-halehame-ti-er|ethiopic-halehame-ti-et|hangul|hangul-consonant|korean-hangul-formal|korean-hanja-formal|korean-hanja-informal|hebrew|armenian|lower-armenian|upper-armenian|georgian|cjk-ideographic|simp-chinese-formal|simp-chinese-informal|trad-chinese-formal|trad-chinese-informal|hiragana|katakana|hiragana-iroha|katakana-iroha|none], initial_keyword=disc
 margin-bottom interpolable, initial=initialMargin, converter=convertQuirkyLength
@@ -322,8 +322,8 @@ offset-path converter=convertPathOrNone
 offset-position runtime_flag=CSSOffsetPositionAnchor, interpolable, converter=convertPositionOrAuto, api_class
 offset-rotate runtime_flag=CSSOffsetRotate, interpolable, converter=convertOffsetRotate
 offset-rotation runtime_flag=CSSOffsetRotation, interpolable, converter=convertOffsetRotate
-opacity interpolable, type_name=float
-order type_name=int
+opacity interpolable, type_name=float, api_class=CSSPropertyAPIOpacity
+order type_name=int, api_class
 orphans interpolable, inherited, type_name=short
 outline-color interpolable, custom_all, api_class
 outline-offset interpolable, converter=convertComputedLength<int>, api_class
@@ -346,8 +346,8 @@ quotes inherited, converter=convertQuotes, api_class
 resize custom_value
 right typedom_types=[Length], keywords=[auto], supports_percentage, interpolable, initial=initialOffset, converter=convertLengthOrAuto
 r interpolable, svg, converter=convertLength
-rx interpolable, svg, converter=convertLengthOrAuto
-ry interpolable, svg, converter=convertLengthOrAuto
+rx interpolable, svg, converter=convertLengthOrAuto, api_class=CSSPropertyAPIRadius
+ry interpolable, svg, converter=convertLengthOrAuto, api_class=CSSPropertyAPIRadius
 scroll-behavior runtime_flag=CSSOMSmoothScroll, type_name=ScrollBehavior
 scroll-snap-type runtime_flag=CSSScrollSnapPoints, type_name=ScrollSnapType
 scroll-snap-points-x runtime_flag=CSSScrollSnapPoints, converter=convertSnapPoints
@@ -361,15 +361,15 @@ shape-rendering inherited, svg
 size custom_all, api_class
 snap-height runtime_flag=CSSSnapSize, inherited, custom_all, api_class
 speak inherited
-stop-color interpolable, svg, converter=convertColor
-stop-opacity interpolable, svg, converter=convertNumberOrPercentage
+stop-color interpolable, svg, converter=convertColor, api_class=CSSPropertyAPIColor
+stop-opacity interpolable, svg, converter=convertNumberOrPercentage, api_class=CSSPropertyAPIOpacity
 stroke interpolable, inherited, svg, setter=setStrokePaint, custom_all, api_class=CSSPropertyAPIPaintStroke
 stroke-dasharray interpolable, inherited, svg, name_for_methods=StrokeDashArray, converter=convertStrokeDasharray, api_class
 stroke-dashoffset interpolable, inherited, svg, name_for_methods=StrokeDashOffset, converter=convertLength
 stroke-linecap svg, inherited, type_name=LineCap, name_for_methods=CapStyle
 stroke-linejoin svg, inherited, type_name=LineJoin, name_for_methods=JoinStyle
 stroke-miterlimit interpolable, inherited, svg, type_name=float, name_for_methods=StrokeMiterLimit, api_class
-stroke-opacity interpolable, inherited, svg, converter=convertNumberOrPercentage
+stroke-opacity interpolable, inherited, svg, converter=convertNumberOrPercentage, api_class=CSSPropertyAPIOpacity
 stroke-width interpolable, inherited, svg, converter=convertUnzoomedLength
 table-layout
 tab-size inherited, converter=convertLengthOrTabSpaces, type_name=TabSize, api_class
@@ -423,7 +423,7 @@ y interpolable, svg, converter=convertLength
 -webkit-box-reflect converter=convertBoxReflect
 column-count interpolable, type_name=unsigned short, custom_all
 column-gap interpolable, converter=convertComputedLength<float>, custom_all, api_class
-column-rule-color interpolable, custom_all
+column-rule-color interpolable, custom_all, api_class=CSSPropertyAPIColor
 column-rule-style type_name=EBorderStyle, initial=initialBorderStyle
 column-rule-width interpolable, converter=convertLineWidth<unsigned short>, api_class
 column-span type_name=ColumnSpan, api_class
@@ -439,7 +439,7 @@ column-width interpolable, converter=convertComputedLength<float>, custom_all
 -webkit-mask-box-image-outset interpolable, custom_all
 -webkit-mask-box-image-repeat custom_all
 -webkit-mask-box-image-slice interpolable, custom_all
--webkit-mask-box-image-source interpolable, custom_value
+-webkit-mask-box-image-source interpolable, custom_value, api_class=CSSPropertyAPIImage
 -webkit-mask-box-image-width interpolable, custom_all
 -webkit-mask-clip custom_all
 -webkit-mask-composite custom_all
@@ -455,14 +455,14 @@ column-width interpolable, converter=convertComputedLength<float>, custom_all
 -webkit-print-color-adjust inherited, independent, keyword_only, keywords=[economy|exact], initial_keyword=economy
 -webkit-rtl-ordering inherited, independent, type_name=EOrder, setter=setRtlOrdering, initial=initialRtlOrdering, keyword_only, keywords=[logical|visual], initial_keyword=logical
 -webkit-ruby-position inherited, type_name=RubyPosition
--webkit-tap-highlight-color inherited, converter=convertColor
+-webkit-tap-highlight-color inherited, converter=convertColor, api_class=CSSPropertyAPIColor
 -webkit-text-combine inherited, type_name=TextCombine, name_for_methods=TextCombine
--webkit-text-emphasis-color inherited, custom_all
+-webkit-text-emphasis-color inherited, custom_all, api_class=CSSPropertyAPIColor
 -webkit-text-emphasis-position inherited, type_name=TextEmphasisPosition
 -webkit-text-emphasis-style inherited, custom_all, api_class
--webkit-text-fill-color inherited, custom_all
+-webkit-text-fill-color inherited, custom_all, api_class=CSSPropertyAPIColor
 -webkit-text-security inherited
--webkit-text-stroke-color interpolable, inherited, custom_all
+-webkit-text-stroke-color interpolable, inherited, custom_all, api_class=CSSPropertyAPIColor
 -webkit-text-stroke-width inherited, converter=convertTextStrokeWidth, api_class
 -webkit-transform-origin-x interpolable, converter=convertLength
 -webkit-transform-origin-y interpolable, converter=convertLength
@@ -485,21 +485,21 @@ inline-size direction_aware
 block-size direction_aware
 min-inline-size direction_aware
 min-block-size direction_aware
-max-inline-size direction_aware
-max-block-size direction_aware
+max-inline-size direction_aware, api_class=CSSPropertyAPIWebkitMaxLogicalWidthOrHeight
+max-block-size direction_aware, api_class=CSSPropertyAPIWebkitMaxLogicalWidthOrHeight
 
 // Non-standard direction aware properties
 
--webkit-border-end-color direction_aware
+-webkit-border-end-color direction_aware, api_class=CSSPropertyAPIColor
 -webkit-border-end-style direction_aware
 -webkit-border-end-width direction_aware
--webkit-border-start-color direction_aware
+-webkit-border-start-color direction_aware, api_class=CSSPropertyAPIColor
 -webkit-border-start-style direction_aware
 -webkit-border-start-width direction_aware
--webkit-border-before-color direction_aware
+-webkit-border-before-color direction_aware, api_class=CSSPropertyAPIColor
 -webkit-border-before-style direction_aware
 -webkit-border-before-width direction_aware
--webkit-border-after-color direction_aware
+-webkit-border-after-color direction_aware, api_class=CSSPropertyAPIColor
 -webkit-border-after-style direction_aware
 -webkit-border-after-width direction_aware
 -webkit-margin-end direction_aware
@@ -514,8 +514,8 @@ max-block-size direction_aware
 -webkit-logical-height direction_aware
 -webkit-min-logical-width direction_aware
 -webkit-min-logical-height direction_aware
--webkit-max-logical-width direction_aware
--webkit-max-logical-height direction_aware
+-webkit-max-logical-width direction_aware, api_class=CSSPropertyAPIWebkitMaxLogicalWidthOrHeight
+-webkit-max-logical-height direction_aware, api_class=CSSPropertyAPIWebkitMaxLogicalWidthOrHeight
 
 // Properties that we ignore in the StyleBuilder.
 // TODO(timloh): This seems wrong, most of these shouldn't reach the StyleBuilder

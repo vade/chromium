@@ -35,12 +35,6 @@
 #include "core/dom/DOMArrayBufferView.h"
 #include "core/dom/Document.h"
 #include "core/dom/SecurityContext.h"
-#include "core/fetch/CrossOriginAccessControl.h"
-#include "core/fetch/FetchContext.h"
-#include "core/fetch/FetchInitiatorTypeNames.h"
-#include "core/fetch/FetchUtils.h"
-#include "core/fetch/ResourceFetcher.h"
-#include "core/fetch/UniqueIdentifier.h"
 #include "core/fileapi/File.h"
 #include "core/frame/FrameConsole.h"
 #include "core/frame/LocalFrame.h"
@@ -56,6 +50,12 @@
 #include "platform/WebFrameScheduler.h"
 #include "platform/exported/WrappedResourceRequest.h"
 #include "platform/exported/WrappedResourceResponse.h"
+#include "platform/loader/fetch/CrossOriginAccessControl.h"
+#include "platform/loader/fetch/FetchContext.h"
+#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
+#include "platform/loader/fetch/FetchUtils.h"
+#include "platform/loader/fetch/ResourceFetcher.h"
+#include "platform/loader/fetch/UniqueIdentifier.h"
 #include "platform/network/EncodedFormData.h"
 #include "platform/network/ParsedContentType.h"
 #include "platform/network/ResourceError.h"
@@ -345,7 +345,7 @@ void PingLoaderImpl::didReceiveResponse(const WebURLResponse& response) {
                  InspectorResourceFinishEvent::data(m_identifier, 0, true, 0));
     const ResourceResponse& resourceResponse = response.toResourceResponse();
     InspectorInstrumentation::didReceiveResourceResponse(
-        frame(), m_identifier, 0, resourceResponse, 0);
+        frame()->document(), m_identifier, 0, resourceResponse, 0);
     didFailLoading(frame());
   }
   dispose();
@@ -396,7 +396,7 @@ void PingLoaderImpl::timeout(TimerBase*) {
 
 void PingLoaderImpl::didFailLoading(LocalFrame* frame) {
   InspectorInstrumentation::didFailLoading(
-      frame, m_identifier, ResourceError::cancelledError(m_url));
+      frame->document(), m_identifier, ResourceError::cancelledError(m_url));
   frame->console().didFailLoading(m_identifier,
                                   ResourceError::cancelledError(m_url));
 }

@@ -27,7 +27,6 @@ Polymer({
     searchTerm: {
       type: String,
       observer: 'searchTermChanged_',
-      notify: true,
     },
 
     // True if the backend is processing and a spinner should be shown in the
@@ -52,12 +51,21 @@ Polymer({
     groupedRange: {
       type: Number,
       reflectToAttribute: true,
-      notify: true,
     },
 
-    groupedOffset: {
-      type: Number,
-      notify: true,
+    groupedOffset: Number,
+
+    // Show an (i) button on the right of the toolbar to display a notice about
+    // synced history.
+    showSyncNotice: {
+      type: Boolean,
+      observer: 'showSyncNoticeChanged_',
+    },
+
+    // Sync notice is currently visible.
+    syncNoticeVisible_: {
+      type: Boolean,
+      value: false
     },
 
     hasMoreResults: Boolean,
@@ -69,8 +77,27 @@ Polymer({
     // Whether to show the menu promo (a tooltip that points at the menu button
     // in narrow mode).
     showMenuPromo: Boolean,
+  },
 
-    showSyncNotice: Boolean,
+  /**
+   * True if the document currently has listeners to dismiss the sync notice,
+   * which are added when the notice is first opened.
+   * @private{boolean}
+   */
+  hasDismissListeners_: false,
+
+  /** @private{?function(!Event)} */
+  boundOnDocumentClick_: null,
+
+  /** @private{?function(!Event)} */
+  boundOnDocumentKeydown_: null,
+
+  /** @override */
+  detached: function() {
+    if (this.hasDismissListeners_) {
+      document.removeEventListener('click', this.boundOnDocumentClick_);
+      document.removeEventListener('keydown', this.boundOnDocumentKeydown_);
+    }
   },
 
   /** @return {CrToolbarSearchFieldElement} */
@@ -104,22 +131,55 @@ Polymer({
     }
   },
 
+  /** @private */
+  showSyncNoticeChanged_: function() {
+    if (!this.showSyncNotice)
+      this.syncNoticeVisible_ = false;
+  },
+
   /**
    * @param {!CustomEvent} event
    * @private
    */
   onSearchChanged_: function(event) {
-    this.searchTerm = /** @type {string} */ (event.detail);
+    this.fire('change-query', {search: event.detail});
   },
 
-  /** @private */
-  onInfoButtonTap_: function() {
-    var dropdown = this.$.syncNotice.get();
-    dropdown.positionTarget = this.$$('#info-button-icon');
-    // It is possible for this listener to trigger while the dialog is
-    // closing. Ensure the dialog is fully closed before reopening it.
-    if (dropdown.style.display == 'none')
-      dropdown.open();
+  /**
+   * @param {!MouseEvent} e
+   * @private
+   */
+  onInfoButtonTap_: function(e) {
+    this.syncNoticeVisible_ = !this.syncNoticeVisible_;
+    e.stopPropagation();
+
+    if (this.hasDismissListeners_)
+      return;
+
+    this.boundOnDocumentClick_ = this.onDocumentClick_.bind(this);
+    this.boundOnDocumentKeydown_ = this.onDocumentKeydown_.bind(this);
+    document.addEventListener('click', this.boundOnDocumentClick_);
+    document.addEventListener('keydown', this.boundOnDocumentKeydown_);
+
+    this.hasDismissListeners_ = true;
+  },
+
+  /**
+   * @param {!Event} e
+   * @private
+   */
+  onDocumentClick_: function(e) {
+    if (e.path.indexOf(this.$['sync-notice']) == -1)
+      this.syncNoticeVisible_ = false;
+  },
+
+  /**
+   * @param {!Event} e
+   * @private
+   */
+  onDocumentKeydown_: function(e) {
+    if (e.key == 'Escape')
+      this.syncNoticeVisible_ = false;
   },
 
   /** @private */
@@ -155,22 +215,37 @@ Polymer({
       return info.queryStartMonth;
   },
 
+  /**
+   * @param {Event} e
+   * @private
+   */
+  onTabSelected_: function(e) {
+    this.fire(
+        'change-query', {range: Number(e.detail.item.getAttribute('value'))});
+  },
+
+  /**
+   * @param {number} newOffset
+   * @private
+   */
+  changeOffset_: function(newOffset) {
+    if (!this.querying)
+      this.fire('change-query', {offset: newOffset});
+  },
+
   /** @private */
   onTodayTap_: function() {
-    if (!this.querying)
-      this.groupedOffset = 0;
+    this.changeOffset_(0);
   },
 
   /** @private */
   onPrevTap_: function() {
-    if (!this.querying)
-      this.groupedOffset = this.groupedOffset + 1;
+    this.changeOffset_(this.groupedOffset + 1);
   },
 
   /** @private */
   onNextTap_: function() {
-    if (!this.querying)
-      this.groupedOffset = this.groupedOffset - 1;
+    this.changeOffset_(this.groupedOffset - 1);
   },
 
   /**

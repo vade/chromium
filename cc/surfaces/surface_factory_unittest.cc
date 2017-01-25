@@ -87,6 +87,7 @@ class SurfaceFactoryTest : public testing::Test, public SurfaceObserver {
   void OnSurfaceCreated(const SurfaceInfo& surface_info) override {
     EXPECT_EQ(kArbitraryFrameSinkId, surface_info.id().frame_sink_id());
     last_created_surface_id_ = surface_info.id();
+    last_surface_info_ = surface_info;
   }
 
   void OnSurfaceDamaged(const SurfaceId& id, bool* changed) override {
@@ -155,6 +156,7 @@ class SurfaceFactoryTest : public testing::Test, public SurfaceObserver {
   std::unique_ptr<SurfaceFactory> factory_;
   LocalFrameId local_frame_id_;
   SurfaceId last_created_surface_id_;
+  SurfaceInfo last_surface_info_;
 
   // This is the sync token submitted with the frame. It should never be
   // returned to the client.
@@ -500,11 +502,16 @@ TEST_F(SurfaceFactoryTest, Reset) {
                                   SurfaceFactory::DrawCallback());
   EXPECT_EQ(last_created_surface_id().local_frame_id(), id);
 
+  manager_.RegisterFrameSinkId(kAnotherArbitraryFrameSinkId);
+
   SurfaceId surface_id(kArbitraryFrameSinkId, id);
-  manager_.AddSurfaceReference(manager_.GetRootSurfaceId(), surface_id);
+  Surface* surface = manager_.GetSurfaceForId(surface_id);
+  surface->AddDestructionDependency(
+      SurfaceSequence(kAnotherArbitraryFrameSinkId, 4));
   factory_->Reset();
   EXPECT_TRUE(client_.returned_resources().empty());
-  manager_.RemoveSurfaceReference(manager_.GetRootSurfaceId(), surface_id);
+
+  manager_.SatisfySequence(SurfaceSequence(kAnotherArbitraryFrameSinkId, 4));
   EXPECT_TRUE(client_.returned_resources().empty());
   local_frame_id_ = LocalFrameId();
 }
@@ -667,6 +674,29 @@ TEST_F(SurfaceFactoryTest, DuplicateCopyRequest) {
   EXPECT_TRUE(called1);
   EXPECT_TRUE(called2);
   EXPECT_TRUE(called3);
+}
+
+// Check whether the SurfaceInfo object is created and populated correctly
+// after the frame submission.
+TEST_F(SurfaceFactoryTest, SurfaceInfo) {
+  CompositorFrame frame;
+
+  auto render_pass = RenderPass::Create();
+  render_pass->SetNew(1, gfx::Rect(5, 6), gfx::Rect(), gfx::Transform());
+  frame.render_pass_list.push_back(std::move(render_pass));
+
+  render_pass = RenderPass::Create();
+  render_pass->SetNew(2, gfx::Rect(7, 8), gfx::Rect(), gfx::Transform());
+  frame.render_pass_list.push_back(std::move(render_pass));
+
+  frame.metadata.device_scale_factor = 2.5f;
+
+  factory_->SubmitCompositorFrame(local_frame_id_, std::move(frame),
+                                  SurfaceFactory::DrawCallback());
+  SurfaceId expected_surface_id(factory_->frame_sink_id(), local_frame_id_);
+  EXPECT_EQ(expected_surface_id, last_surface_info_.id());
+  EXPECT_EQ(2.5f, last_surface_info_.device_scale_factor());
+  EXPECT_EQ(gfx::Size(7, 8), last_surface_info_.size_in_pixels());
 }
 
 }  // namespace

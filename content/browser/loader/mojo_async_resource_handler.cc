@@ -4,13 +4,16 @@
 
 #include "content/browser/loader/mojo_async_resource_handler.h"
 
+#include <algorithm>
 #include <utility>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/command_line.h"
-#include "base/containers/hash_tables.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
 #include "content/browser/loader/downloaded_temp_file_impl.h"
@@ -18,6 +21,7 @@
 #include "content/browser/loader/resource_controller.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/loader/resource_request_info_impl.h"
+#include "content/browser/loader/upload_progress_tracker.h"
 #include "content/common/resource_request_completion_status.h"
 #include "content/public/browser/global_request_id.h"
 #include "content/public/browser/resource_dispatcher_host_delegate.h"
@@ -25,7 +29,6 @@
 #include "mojo/public/c/system/data_pipe.h"
 #include "mojo/public/cpp/bindings/message.h"
 #include "net/base/io_buffer.h"
-#include "net/base/load_flags.h"
 #include "net/base/mime_sniffer.h"
 #include "net/url_request/redirect_info.h"
 
@@ -55,6 +58,11 @@ void InitializeResourceBufferConstants() {
   did_init = true;
 
   GetNumericArg("resource-buffer-size", &g_allocation_size);
+}
+
+void NotReached(mojom::URLLoaderAssociatedRequest mojo_request,
+                mojom::URLLoaderClientAssociatedPtr url_loader_client) {
+  NOTREACHED();
 }
 
 }  // namespace
@@ -108,7 +116,8 @@ MojoAsyncResourceHandler::MojoAsyncResourceHandler(
     net::URLRequest* request,
     ResourceDispatcherHostImpl* rdh,
     mojom::URLLoaderAssociatedRequest mojo_request,
-    mojom::URLLoaderClientAssociatedPtr url_loader_client)
+    mojom::URLLoaderClientAssociatedPtr url_loader_client,
+    ResourceType resource_type)
     : ResourceHandler(request),
       rdh_(rdh),
       binding_(this, std::move(mojo_request)),
@@ -121,8 +130,12 @@ MojoAsyncResourceHandler::MojoAsyncResourceHandler(
   binding_.set_connection_error_handler(
       base::Bind(&MojoAsyncResourceHandler::Cancel, base::Unretained(this)));
 
-  GetRequestInfo()->set_on_transfer(base::Bind(
-      &MojoAsyncResourceHandler::OnTransfer, weak_factory_.GetWeakPtr()));
+  if (IsResourceTypeFrame(resource_type)) {
+    GetRequestInfo()->set_on_transfer(base::Bind(
+        &MojoAsyncResourceHandler::OnTransfer, weak_factory_.GetWeakPtr()));
+  } else {
+    GetRequestInfo()->set_on_transfer(base::Bind(&NotReached));
+  }
 }
 
 MojoAsyncResourceHandler::~MojoAsyncResourceHandler() {
@@ -156,8 +169,12 @@ bool MojoAsyncResourceHandler::OnRequestRedirected(
 
 bool MojoAsyncResourceHandler::OnResponseStarted(ResourceResponse* response,
                                                  bool* defer) {
-  const ResourceRequestInfoImpl* info = GetRequestInfo();
+  if (upload_progress_tracker_) {
+    upload_progress_tracker_->OnUploadCompleted();
+    upload_progress_tracker_ = nullptr;
+  }
 
+  const ResourceRequestInfoImpl* info = GetRequestInfo();
   if (rdh_->delegate()) {
     rdh_->delegate()->OnResponseStarted(request(), info->GetContext(),
                                         response);
@@ -171,10 +188,10 @@ bool MojoAsyncResourceHandler::OnResponseStarted(ResourceResponse* response,
   response->head.response_start = base::TimeTicks::Now();
   sent_received_response_message_ = true;
 
-  mojom::DownloadedTempFilePtr downloaded_file_ptr;
+  mojom::DownloadedTempFileAssociatedPtrInfo downloaded_file_ptr;
   if (!response->head.download_file_path.empty()) {
-    downloaded_file_ptr = DownloadedTempFileImpl::Create(info->GetChildID(),
-                                                         info->GetRequestID());
+    downloaded_file_ptr = DownloadedTempFileImpl::Create(
+        binding_.associated_group(), info->GetChildID(), info->GetRequestID());
     rdh_->RegisterDownloadedTempFile(info->GetChildID(), info->GetRequestID(),
                                      response->head.download_file_path);
   }
@@ -193,6 +210,14 @@ bool MojoAsyncResourceHandler::OnResponseStarted(ResourceResponse* response,
 }
 
 bool MojoAsyncResourceHandler::OnWillStart(const GURL& url, bool* defer) {
+  if (GetRequestInfo()->is_upload_progress_enabled() &&
+      request()->has_upload()) {
+    upload_progress_tracker_ = CreateUploadProgressTracker(
+        FROM_HERE,
+        base::BindRepeating(&MojoAsyncResourceHandler::SendUploadProgress,
+                            base::Unretained(this)));
+  }
+
   return true;
 }
 
@@ -345,6 +370,14 @@ net::IOBufferWithSize* MojoAsyncResourceHandler::GetResponseMetadata(
 void MojoAsyncResourceHandler::OnResponseCompleted(
     const net::URLRequestStatus& status,
     bool* defer) {
+  // Ensure sending the final upload progress message here, since
+  // OnResponseCompleted can be called without OnResponseStarted on cancellation
+  // or error cases.
+  if (upload_progress_tracker_) {
+    upload_progress_tracker_->OnUploadCompleted();
+    upload_progress_tracker_ = nullptr;
+  }
+
   shared_writer_ = nullptr;
   buffer_ = nullptr;
   handle_watcher_.Cancel();
@@ -486,6 +519,14 @@ void MojoAsyncResourceHandler::ReportBadMessage(const std::string& error) {
   mojo::ReportBadMessage(error);
 }
 
+std::unique_ptr<UploadProgressTracker>
+MojoAsyncResourceHandler::CreateUploadProgressTracker(
+    const tracked_objects::Location& from_here,
+    UploadProgressTracker::UploadProgressReportCallback callback) {
+  return base::MakeUnique<UploadProgressTracker>(from_here, std::move(callback),
+                                                 request());
+}
+
 void MojoAsyncResourceHandler::OnTransfer(
     mojom::URLLoaderAssociatedRequest mojo_request,
     mojom::URLLoaderClientAssociatedPtr url_loader_client) {
@@ -494,6 +535,19 @@ void MojoAsyncResourceHandler::OnTransfer(
   binding_.set_connection_error_handler(
       base::Bind(&MojoAsyncResourceHandler::Cancel, base::Unretained(this)));
   url_loader_client_ = std::move(url_loader_client);
+}
+
+void MojoAsyncResourceHandler::SendUploadProgress(
+    const net::UploadProgress& progress) {
+  url_loader_client_->OnUploadProgress(
+      progress.position(), progress.size(),
+      base::Bind(&MojoAsyncResourceHandler::OnUploadProgressACK,
+                 weak_factory_.GetWeakPtr()));
+}
+
+void MojoAsyncResourceHandler::OnUploadProgressACK() {
+  if (upload_progress_tracker_)
+    upload_progress_tracker_->OnAckReceived();
 }
 
 }  // namespace content

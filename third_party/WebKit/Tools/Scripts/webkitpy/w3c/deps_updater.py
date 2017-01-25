@@ -15,13 +15,15 @@ upload a CL, trigger try jobs, and make any changes that are required for
 new failing tests before committing.
 """
 
-import logging
 import argparse
 import json
+import logging
+import re
 
 from webkitpy.common.net.git_cl import GitCL
 from webkitpy.common.webkit_finder import WebKitFinder
 from webkitpy.layout_tests.models.test_expectations import TestExpectations, TestExpectationParser
+from webkitpy.w3c.update_w3c_test_expectations import W3CExpectationsLineAdder
 from webkitpy.w3c.test_importer import TestImporter
 from webkitpy.w3c.common import WPT_REPO_URL, CSS_REPO_URL, WPT_DEST_NAME, CSS_DEST_NAME
 
@@ -225,7 +227,7 @@ class DepsUpdater(object):
 
     def _commit_message(self, chromium_commit, import_commit):
         return ('Import %s\n\n'
-                'Using update-w3c-deps in Chromium %s.\n\n'
+                'Using wpt-import in Chromium %s.\n\n'
                 'NOEXPORT=true' %
                 (import_commit, chromium_commit))
 
@@ -340,6 +342,7 @@ class DepsUpdater(object):
         description += 'TBR=qyearsley@chromium.org\n'
         # Move any NOEXPORT tag to the end of the description.
         description = description.replace('NOEXPORT=true', '')
+        description = description.replace('\n\n\n\n', '\n\n')
         description += 'NOEXPORT=true'
         return description
 
@@ -389,15 +392,19 @@ class DepsUpdater(object):
                 continue
             test_dir = self.fs.dirname(test_path)
             if test_dir in directory_to_owner:
-                email_addresses.add(directory_to_owner[test_dir])
+                address = directory_to_owner[test_dir]
+                if not re.match(r'\S+@\S+', address):
+                    _log.warning('%s appears not be an email address, skipping.', address)
+                    continue
+                email_addresses.add(address)
         return sorted(email_addresses)
 
     def fetch_new_expectations_and_baselines(self):
         """Adds new expectations and downloads baselines based on try job results, then commits and uploads the change."""
         _log.info('Adding test expectations lines to LayoutTests/TestExpectations.')
-        script_path = self.path_from_webkit_base('Tools', 'Scripts', 'update-w3c-test-expectations')
-        self.run([self.host.executable, script_path, '--verbose'])
-        message = 'Modify TestExpectations or download new baselines for tests.'
+        line_adder = W3CExpectationsLineAdder(self.host)
+        line_adder.run()
+        message = 'Update test expectations and baselines.'
         self.check_run(['git', 'commit', '-a', '-m', message])
         self.git_cl.run(['upload', '-m', message, '--rietveld'])
 
@@ -405,7 +412,6 @@ class DepsUpdater(object):
         """Updates all test expectations files for tests that have been deleted or renamed."""
         port = self.host.port_factory.get()
         for path, file_contents in port.all_expectations_dict().iteritems():
-
             parser = TestExpectationParser(port, all_tests=None, is_lint_mode=False)
             expectation_lines = parser.parse(path, file_contents)
             self._update_single_test_expectations_file(path, expectation_lines, deleted_tests, renamed_tests)

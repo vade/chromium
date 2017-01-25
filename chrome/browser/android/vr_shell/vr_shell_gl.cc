@@ -720,7 +720,9 @@ void VrShellGl::DrawVrShell(const gvr::Mat4f& head_pose,
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
 
-    glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+    glClearColor(BackgroundRenderer::kFogBrightness,
+                 BackgroundRenderer::kFogBrightness,
+                 BackgroundRenderer::kFogBrightness, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   }
   if (!world_elements.empty()) {
@@ -781,6 +783,10 @@ void VrShellGl::DrawUiView(const gvr::Mat4f* head_pose,
             buffer_viewport_->GetSourceFov(), kZNear, kZFar),
         view_matrix);
 
+    if (!web_vr_mode_) {
+      // TODO(tiborg): Enable through the UI API.
+      // DrawBackground(render_matrix);
+    }
     DrawElements(render_matrix, elements);
     if (head_pose != nullptr && !web_vr_mode_) {
       DrawCursor(render_matrix);
@@ -902,6 +908,10 @@ void VrShellGl::DrawWebVr() {
                                            *webvr_left_viewport_);
   buffer_viewport_list_->SetBufferViewport(GVR_RIGHT_EYE,
                                            *webvr_right_viewport_);
+}
+
+void VrShellGl::DrawBackground(const gvr::Mat4f& render_matrix) {
+  vr_shell_renderer_->GetBackgroundRenderer()->Draw(render_matrix);
 }
 
 void VrShellGl::OnTriggerEvent() {

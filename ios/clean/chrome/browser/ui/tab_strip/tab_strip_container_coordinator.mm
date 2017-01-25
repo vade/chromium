@@ -43,7 +43,7 @@
   [self addChildCoordinator:tabCoordinator];
   // Unset the base view controller, so |tabCoordinator| doesn't present
   // its view controller.
-  tabCoordinator.baseViewController = nil;
+  tabCoordinator.context.baseViewController = nil;
   [tabCoordinator start];
 
   // PLACEHOLDER: Replace this placeholder with an actual tab strip view
@@ -61,14 +61,15 @@
   self.viewController.tabStripViewController = tabStripViewController;
   self.viewController.contentViewController = tabCoordinator.viewController;
 
-  [self.baseViewController presentViewController:self.viewController
-                                        animated:self.context.animated
-                                      completion:nil];
+  [self.context.baseViewController presentViewController:self.viewController
+                                                animated:self.context.animated
+                                              completion:nil];
 }
 
 - (void)stop {
-  [self.viewController dismissViewControllerAnimated:self.context.animated
-                                          completion:nil];
+  [self.viewController.presentingViewController
+      dismissViewControllerAnimated:self.context.animated
+                         completion:nil];
   self.viewController = nil;
 }
 

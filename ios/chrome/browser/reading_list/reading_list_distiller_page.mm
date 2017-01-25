@@ -21,27 +21,30 @@
 #include "url/url_constants.h"
 
 namespace {
-// The delay between the page load and the distillation in seconds.
-const int64_t kDistillationDelayInSeconds = 2;
+// The delay given to the web page to render after the PageLoaded callback.
+const int64_t kPageLoadDelayInSeconds = 2;
+
 const char* kGetIframeURLJavaScript =
     "document.getElementsByTagName('iframe')[0].src;";
 }  // namespace
 
 namespace reading_list {
 
+ReadingListDistillerPageDelegate::ReadingListDistillerPageDelegate() {}
+ReadingListDistillerPageDelegate::~ReadingListDistillerPageDelegate() {}
+
 ReadingListDistillerPage::ReadingListDistillerPage(
     web::BrowserState* browser_state,
-    FaviconWebStateDispatcher* web_state_dispatcher)
+    FaviconWebStateDispatcher* web_state_dispatcher,
+    ReadingListDistillerPageDelegate* delegate)
     : dom_distiller::DistillerPageIOS(browser_state),
       web_state_dispatcher_(web_state_dispatcher),
-      weak_ptr_factory_(this) {}
+      delegate_(delegate),
+      weak_ptr_factory_(this) {
+  DCHECK(delegate);
+}
 
 ReadingListDistillerPage::~ReadingListDistillerPage() {}
-
-void ReadingListDistillerPage::SetRedirectionCallback(
-    RedirectionCallback redirection_callback) {
-  redirection_callback_ = redirection_callback;
-}
 
 void ReadingListDistillerPage::DistillPageImpl(const GURL& url,
                                                const std::string& script) {
@@ -105,30 +108,40 @@ void ReadingListDistillerPage::OnLoadURLDone(
     DistillerPageIOS::OnLoadURLDone(load_completion_status);
     return;
   }
-  if (IsGoogleCachedAMPPage()) {
-    // Workaround for Google AMP pages.
-    HandleGoogleCachedAMPPage();
-  } else {
-    WaitForPageLoadCompletion();
+  delegate_->DistilledPageHasMimeType(original_url_,
+                                      CurrentWebState()->GetContentsMimeType());
+  if (!CurrentWebState()->ContentIsHTML()) {
+    // If content is not HTML, distillation will fail immediatly.
+    // Call the handler to make sure cleaning methods are called correctly.
+    // There is no need to wait for rendering either.
+    DistillerPageIOS::OnLoadURLDone(load_completion_status);
+    return;
   }
-}
-
-void ReadingListDistillerPage::WaitForPageLoadCompletion() {
+  // Page is loaded but rendering may not be done yet. Give a delay to the page.
   base::WeakPtr<ReadingListDistillerPage> weak_this =
       weak_ptr_factory_.GetWeakPtr();
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&ReadingListDistillerPage::DelayedOnLoadURLDone, weak_this),
-      base::TimeDelta::FromSeconds(kDistillationDelayInSeconds));
+      base::TimeDelta::FromSeconds(kPageLoadDelayInSeconds));
 }
 
 void ReadingListDistillerPage::DelayedOnLoadURLDone() {
+  if (IsGoogleCachedAMPPage()) {
+    // Workaround for Google AMP pages.
+    HandleGoogleCachedAMPPage();
+  } else {
+    ContinuePageDistillation();
+  }
+}
+
+void ReadingListDistillerPage::ContinuePageDistillation() {
   // The page is ready to be distilled.
   // If the visible URL is not the original URL, notify the caller that URL
   // changed.
   GURL redirected_url = CurrentWebState()->GetVisibleURL();
-  if (redirected_url != original_url_ && !redirection_callback_.is_null()) {
-    redirection_callback_.Run(original_url_, redirected_url);
+  if (redirected_url != original_url_ && delegate_) {
+    delegate_->DistilledPageRedirectedToURL(original_url_, redirected_url);
   }
   DistillerPageIOS::OnLoadURLDone(web::PageLoadCompletionStatus::SUCCESS);
 }
@@ -170,7 +183,7 @@ void ReadingListDistillerPage::HandleGoogleCachedAMPPage() {
             !weak_this->HandleGoogleCachedAMPPageJavaScriptResult(result,
                                                                   error)) {
           // If there is an error on navigation, continue normal distillation.
-          weak_this->WaitForPageLoadCompletion();
+          weak_this->ContinuePageDistillation();
         }
         // If there is no error, the navigation completion will trigger a new
         // |OnLoadURLDone| call that will resume the distillation.

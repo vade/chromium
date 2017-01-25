@@ -2293,17 +2293,22 @@ cr-toolbar {
         width: 20px;
 }
 
-iron-dropdown {
-  margin-top: 28px;
-}
-
-.dropdown-content {
+#sync-notice {
   box-shadow: var(--shadow-elevation-2dp_-_box-shadow);
         background-color: white;
         border-radius: 2px;
         color: var(--primary-text-color);
         overflow: hidden;
         padding: 12px 20px;
+        position: absolute;
+        right: 24px;
+        top: 46px;
+        z-index: 1;
+}
+
+:host-context([dir=rtl]) #sync-notice {
+  right: auto;
+        left: 24px;
 }
 
 :host(:not([has-drawer])) #overlay-wrapper {
@@ -2397,13 +2402,9 @@ paper-tab {
           </template>
         </div>
       </cr-toolbar>
-      <template is="cr-lazy-render" id="syncNotice">
-        <iron-dropdown vertical-align="top" horizontal-align="right" allow-outside-scroll="">
-          <div class="dropdown-content">
-            $i18nRaw{hasSyncedResults}
-          </div>
-        </iron-dropdown>
-      </template>
+      <div id="sync-notice" hidden="[[!syncNoticeVisible_]]">
+        $i18nRaw{hasSyncedResults}
+      </div>
       <template is="dom-if" if="[[itemsSelected_]]">
         <div id="overlay-wrapper" hidden$="[[!itemsSelected_]]">
           <div id="overlay-buttons">
@@ -2423,7 +2424,7 @@ paper-tab {
     </div>
     <template is="dom-if" if="[[isGroupedMode]]">
       <div id="grouped-buttons-container">
-        <paper-tabs attr-for-selected="value" selected="{{groupedRange}}">
+        <paper-tabs attr-for-selected="value" selected="[[groupedRange]]" on-iron-select="onTabSelected_">
           <paper-tab value="0">$i18n{rangeAllTime}</paper-tab>
           <paper-tab value="1">$i18n{rangeWeek}</paper-tab>
           <paper-tab value="2">$i18n{rangeMonth}</paper-tab>
@@ -3284,7 +3285,7 @@ dialog .body {
       <history-list id="infinite-list" querying="[[queryState.querying]]" searched-term="[[queryResult.info.term]]">
       </history-list>
       <template is="dom-if" if="[[grouped]]">
-        <history-grouped-list id="grouped-list" range="[[groupedRange]]" query-interval="[[queryResult.info.queryInterval]]" searched-term="[[queryResult.info.term]]">
+        <history-grouped-list id="grouped-list" range="[[queryState.range]]" query-interval="[[queryResult.info.queryInterval]]" searched-term="[[queryResult.info.term]]">
         </history-grouped-list>
       </template>
     </iron-pages>
@@ -3677,18 +3678,15 @@ button.more-vert-button div {
         display: block;
         height: 100%;
         overflow: hidden;
-        z-index: 0;
 }
 
 history-toolbar {
   background: var(--md-toolbar-color);
-        z-index: 2;
 }
 
 #main-container {
   height: calc(100% - var(--toolbar-height));
         position: relative;
-        z-index: 1;
 }
 
 :host([grouped_]) #main-container {
@@ -3726,9 +3724,9 @@ history-toolbar {
 </style>
     <history-query-manager query-state="{{queryState_}}" query-result="[[queryResult_]]">
     </history-query-manager>
-    <history-router selected-page="{{selectedPage_}}" query-state="{{queryState_}}">
+    <history-router selected-page="{{selectedPage_}}" query-state="[[queryState_]]">
     </history-router>
-    <history-toolbar id="toolbar" grouped-offset="{{queryState_.groupedOffset}}" grouped-range="{{queryState_.range}}" has-drawer="[[hasDrawer_]]" has-more-results="[[!queryResult_.info.finished]]" is-grouped-mode="{{grouped_}}" query-info="[[queryResult_.info]]" querying="[[queryState_.querying]]" search-term="{{queryState_.searchTerm}}" show-menu-promo="[[showMenuPromo_]]" show-sync-notice="[[showSyncNotice_(hasSyncedResults, selectedPage_)]]" spinner-active="[[shouldShowSpinner_(queryState_.querying,
+    <history-toolbar id="toolbar" grouped-offset="[[queryState_.groupedOffset]]" grouped-range="[[queryState_.range]]" has-drawer="[[hasDrawer_]]" has-more-results="[[!queryResult_.info.finished]]" is-grouped-mode="[[grouped_]]" query-info="[[queryResult_.info]]" querying="[[queryState_.querying]]" search-term="[[queryState_.searchTerm]]" show-menu-promo="[[showMenuPromo_]]" show-sync-notice="[[showSyncNotice_(hasSyncedResults, selectedPage_)]]" spinner-active="[[shouldShowSpinner_(queryState_.querying,
                                              queryState_.incremental,
                                              queryState_.searchTerm)]]">
     </history-toolbar>
@@ -3737,7 +3735,7 @@ history-toolbar {
       <history-side-bar id="content-side-bar" selected-page="{{selectedPage_}}" show-footer="[[showSidebarFooter]]" hidden$="[[hasDrawer_]]">
       </history-side-bar>
       <iron-pages id="content" attr-for-selected="path" fallback-selection="history" selected="[[getSelectedPage_(selectedPage_, items)]]" items="{{items}}">
-        <history-list-container id="history" query-state="{{queryState_}}" query-result="[[queryResult_]]" grouped="[[grouped_]]" grouped-range="{{queryState_.range}}" path="history">
+        <history-list-container id="history" query-state="[[queryState_]]" query-result="[[queryResult_]]" grouped="[[grouped_]]" path="history">
         </history-list-container>
         <template is="dom-if" if="[[syncedTabsSelected_(selectedPage_)]]">
           <history-synced-device-manager id="synced-devices" session-list="[[queryResult_.sessionList]]" search-term="[[queryState_.searchTerm]]" sign-in-state="[[isUserSignedIn_]]" path="syncedTabs">

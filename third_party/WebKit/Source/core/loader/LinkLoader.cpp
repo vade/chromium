@@ -34,9 +34,6 @@
 #include "core/css/MediaList.h"
 #include "core/css/MediaQueryEvaluator.h"
 #include "core/dom/Document.h"
-#include "core/fetch/FetchInitiatorTypeNames.h"
-#include "core/fetch/FetchRequest.h"
-#include "core/fetch/ResourceFetcher.h"
 #include "core/frame/Settings.h"
 #include "core/frame/UseCounter.h"
 #include "core/html/CrossOriginAttribute.h"
@@ -49,6 +46,9 @@
 #include "core/loader/resource/LinkFetchResource.h"
 #include "platform/Prerender.h"
 #include "platform/RuntimeEnabledFeatures.h"
+#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
+#include "platform/loader/fetch/FetchRequest.h"
+#include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/network/LinkHeader.h"
 #include "platform/network/NetworkHints.h"
 #include "platform/network/mime/MIMETypeRegistry.h"
@@ -72,10 +72,13 @@ static unsigned prerenderRelTypesFromRelAttribute(
   return result;
 }
 
-LinkLoader::LinkLoader(LinkLoaderClient* client)
+LinkLoader::LinkLoader(LinkLoaderClient* client,
+                       RefPtr<WebTaskRunner> taskRunner)
     : m_client(client),
-      m_linkLoadTimer(this, &LinkLoader::linkLoadTimerFired),
-      m_linkLoadingErrorTimer(this, &LinkLoader::linkLoadingErrorTimerFired) {
+      m_linkLoadTimer(taskRunner, this, &LinkLoader::linkLoadTimerFired),
+      m_linkLoadingErrorTimer(taskRunner,
+                              this,
+                              &LinkLoader::linkLoadingErrorTimerFired) {
   DCHECK(m_client);
 }
 

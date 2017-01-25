@@ -28,6 +28,8 @@ crbug.com/569901 crbug.com/24182 [ Debug ] jquery/manipulation.html [ Timeout Pa
 #  transforms
 # Some additional bugs that are caused by painting problems are also within this section.
 
+crbug.com/646176 virtual/stable/paint/invalidation [ Skip ]
+
 # Failures due to SPV2, that don't also fail without SPV2. DO NOT REBASELINE.
 # SPv2 paint properties are still being implemented.
 #
@@ -117,6 +119,9 @@ crbug.com/645389 [ Win ] fast/canvas/canvas-hit-regions-event-test.html [ Timeou
 crbug.com/645389 [ Win ] virtual/display_list_2d_canvas/fast/canvas/canvas-hit-regions-fallback-element-test.html [ Timeout ]
 crbug.com/645389 [ Win ] virtual/display_list_2d_canvas/fast/canvas/canvas-hit-regions-event-test.html [ Timeout ]
 
+crbug.com/683339 paint/invalidation/paged-with-overflowing-block-rl.html [ Failure ]
+crbug.com/683339 virtual/stable/paint/invalidation/paged-with-overflowing-block-rl.html [ Failure ]
+
 crbug.com/646010 paint/selection/text-selection-newline-rtl-double-linebreak.html [ Failure ]
 crbug.com/646015 paint/invalidation/hover-invalidation-table.html [ Failure ]
 crbug.com/646015 virtual/stable/paint/invalidation/hover-invalidation-table.html [ Failure ]
@@ -139,8 +144,6 @@ crbug.com/664852 virtual/gpu/fast/canvas/canvas-lose-restore-googol-size.html [ 
 crbug.com/664852 virtual/gpu/fast/canvas/canvas-lost-gpu-context.html [ Pass Failure ]
 crbug.com/664852 virtual/gpu/fast/canvas/OffscreenCanvas-2d-drawImage.html [ Pass Failure ]
 
-crbug.com/669693 svg/text/combining-character-queries.html [ Pass Failure ]
-
 # Added 2016-12-14
 crbug.com/674396 [ Win ] compositing/reflections/nested-reflection-transition.html [ Pass Failure ]
 
@@ -154,6 +157,114 @@ crbug.com/681369 editing/selection/select-delete-in-event-handler.html [ NeedsRe
 
 # ====== LayoutNG-only failures from here ======
 # LayoutNG - is a new layout system for Blink.
+
+# TODO(glebl): remove once new float/margin collapsing algorithm checked in.
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/float-non-replaced-width-005.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/float-replaced-width-001.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-038.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-015.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-008.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/margin-collapse/block-inside-inline/012.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/table-height-algorithm-024.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/table-caption-optional-001.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/overflow-applies-to-004.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/overflow-applies-to-003.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/float/split-inline-sibling-of-float-crash.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/float/intruding-float-not-removed-from-next-sibling-crash.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/outline-color-applies-to-001.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/float/float-change-composited-scrolling.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-031.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-style-088.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/margin-collapse/block-inside-inline/010.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-style-079.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-020.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-028.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/margin-collapse/006.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/float-non-replaced-width-002.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/float-non-replaced-width-001.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/table-height-algorithm-023.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/overflow-applies-to-007.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/absolute-replaced-height-001.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-spacing-applies-to-015.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/float/positioned-float-crash.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/outline-color-applies-to-002.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/margin-collapse/block-inside-inline/006.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-023.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/outline-color-applies-to-015.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/outline-color-applies-to-007.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/margin-collapse/019.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/outline-color-applies-to-006.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/overflow-applies-to-001.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-017.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-011.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/overflow-applies-to-006.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-037.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/block-non-replaced-width-003.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/margin-collapse/010.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/outline-color-applies-to-004.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/absolute-non-replaced-height-001.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-collapse-offset-002.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-006.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-030.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-009.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-034.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/float/canvas-with-floats-marked-for-layout.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/margin-collapse/011.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-022.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/float/float-not-removed-crash2.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/margin-collapse/041.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-001d.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-005.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-021.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-039.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-016.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-026.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/outline-color-applies-to-013.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-025.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/table-height-algorithm-012.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/overflow-applies-to-002.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/margin-collapse/012.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/fixed-table-layout-015.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/margin-collapse/017.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/margin-collapse/056.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/table-caption-horizontal-alignment-001.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/clip-001.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-032.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/outline-color-applies-to-009.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-035.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/overflow-applies-to-013.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-036.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/float-replaced-width-003.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/outline-color-applies-to-012.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-024.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-004.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/block-non-replaced-width-002.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/outline-color-applies-to-005.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-029.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-033.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/fixed-table-layout-006.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-018.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-014.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/table-caption-001.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-027.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-003.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/table-caption-002.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/outline-color-applies-to-003.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/fixed-table-layout-013.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/margin-collapse/034.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/absolute-non-replaced-max-height-001.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-021a.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/margin-collapse/020.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/margin-collapse/block-inside-inline/011.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/abspos-containing-block-initial-009e.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/margin-collapse/059.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/border-conflict-element-019.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/overflow-applies-to-008.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/float-non-replaced-width-003.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/overflow-applies-to-015.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/fast/block/margin-collapse/018.html [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/float-replaced-width-005.htm [ Skip ]
+crbug.com/635619 virtual/layout_ng/css2.1/20110323/table-columns-example-001.htm [ Skip ]
 
 #### css2.1/20110323
 #### Passed: 262
@@ -581,6 +692,8 @@ crbug.com/538697 [ Win7 Debug ] printing/webgl-oversized-printing.html [ Failure
 
 crbug.com/617152 external/wpt/mediacapture-streams/GUM-impossible-constraint.https.html [ Skip ]
 
+Bug(none) virtual/stable/paint/invalidation/control-clip.html [ NeedsRebaseline ]
+
 crbug.com/417782 [ Linux Win ] virtual/rootlayerscrolls/fast/scrolling/fractional-scroll-offset-fixed-position-non-composited.html [ Failure ]
 crbug.com/492664 [ Linux ] external/csswg-test/css-writing-modes-3/box-offsets-rel-pos-vlr-005.xht [ Failure ]
 crbug.com/492664 [ Linux ] external/csswg-test/css-writing-modes-3/box-offsets-rel-pos-vrl-004.xht [ Failure ]
@@ -591,7 +704,8 @@ crbug.com/492664 [ Win ] external/csswg-test/css-writing-modes-3/bidi-plaintext-
 
 crbug.com/267206 [ Mac ] virtual/rootlayerscrolls/fast/scrolling/scrollbar-tickmarks-hittest.html [ Timeout ]
 
-crbug.com/280342 [ Linux Win ] virtual/mojo-loading/http/tests/media/progress-events-generated-correctly.html [ Failure ]
+crbug.com/280342 [ Linux Win ] http/tests/media/progress-events-generated-correctly.html [ Failure Pass ]
+crbug.com/280342 [ Linux Win ] virtual/mojo-loading/http/tests/media/progress-events-generated-correctly.html [ Failure Pass ]
 
 crbug.com/520739 [ Mac ] http/tests/websocket/close-code-and-reason.html [ Failure Pass Timeout ]
 crbug.com/520739 [ Mac ] virtual/mojo-loading/http/tests/websocket/close-code-and-reason.html [ Failure Pass Timeout ]
@@ -654,7 +768,6 @@ crbug.com/248938 virtual/threaded/animations/animation-iteration-event-destroy-r
 crbug.com/446385 [ Win7 Debug ] http/tests/xmlhttprequest/xmlhttprequest-json-response-overflow.html [ Crash Pass Timeout ]
 crbug.com/446385 [ Win7 Debug ] virtual/mojo-loading/http/tests/xmlhttprequest/xmlhttprequest-json-response-overflow.html [ Crash Pass Timeout ]
 crbug.com/248938 virtual/threaded/animations/dynamic-stylesheet-loading.html [ Pass Failure Timeout ]
-crbug.com/248938 virtual/threaded/transitions/change-duration-during-transition.html [ Pass Failure ]
 crbug.com/638693 virtual/threaded/animations/display-inline-style-adjust.html [ Pass Crash Failure ]
 crbug.com/421283 fast/html/marquee-scrollamount.html [ Pass Failure ]
 
@@ -1082,6 +1195,7 @@ crbug.com/658305 css3/filters/effect-reference-delete-crash.html [ Failure Pass 
 crbug.com/658305 css3/filters/effect-reference-delete.html [ Failure Pass ]
 crbug.com/658305 css3/filters/effect-reference-displacement-negative-scale.html [ Failure Pass ]
 crbug.com/658305 css3/filters/effect-reference-external.html [ Failure Pass ]
+crbug.com/658305 css3/filters/effect-reference-external-stylesheet.html [ Failure Pass ]
 crbug.com/658305 css3/filters/effect-reference-hidpi.html [ Failure Pass ]
 crbug.com/658305 css3/filters/effect-reference-hidpi-hw.html [ Failure Pass ]
 crbug.com/658305 css3/filters/effect-reference.html [ Failure Pass ]
@@ -1695,8 +1809,8 @@ crbug.com/490015 virtual/stable/http/tests/navigation/beacon-blob-with-non-simpl
 crbug.com/490015 virtual/stable/http/tests/navigation/same-and-different-back.html [ Skip ]
 
 # ====== New tests from w3c-test-autoroller added here ======
-crbug.com/626703 [ Win10 ] external/csswg-test/css-flexbox-1/flex-minimum-width-flex-items-001.xht [ Failure ]
-crbug.com/626703 [ Win10 ] external/csswg-test/css-flexbox-1/flex-minimum-width-flex-items-003.xht [ Failure ]
+crbug.com/626703 [ Win ] external/csswg-test/css-flexbox-1/flex-minimum-width-flex-items-001.xht [ Failure ]
+crbug.com/626703 [ Win ] external/csswg-test/css-flexbox-1/flex-minimum-width-flex-items-003.xht [ Failure ]
 crbug.com/626703 [ Win10 ] external/csswg-test/css-flexbox-1/flexbox_flex-natural-mixed-basis-auto.html [ Failure ]
 crbug.com/626703 [ Trusty Mac10.11 Mac10.10 Retina Win7 Win10 Mac10.9 ] external/wpt/selection/dir-manual.html [ Timeout ]
 crbug.com/626703 [ Trusty Mac10.11 Mac10.10 Retina Win7 Win10 Mac10.9 ] external/wpt/html/semantics/forms/constraints/tooShort-input-email-add-manual.html [ Timeout ]
@@ -1870,18 +1984,6 @@ crbug.com/602693 external/wpt/service-workers/service-worker/referer.https.html 
 
 # mojo-loading: This is an experimental feature. failing virtual tests are
 # listed below.
-crbug.com/659917 virtual/mojo-loading/http/tests/xmlhttprequest/upload-onload-event.html [ Failure Timeout ]
-crbug.com/659917 virtual/mojo-loading/http/tests/xmlhttprequest/upload-onloadend-event-after-load.html [ Failure Timeout ]
-crbug.com/659917 virtual/mojo-loading/http/tests/xmlhttprequest/upload-onprogress-event.html [ Failure ]
-crbug.com/659917 virtual/mojo-loading/http/tests/xmlhttprequest/upload-progress-events.html [ Failure Timeout ]
-crbug.com/659917 virtual/mojo-loading/http/tests/xmlhttprequest/workers/upload-onprogress-event.html [ Failure ]
-crbug.com/659917 virtual/mojo-loading/http/tests/xmlhttprequest/upload-onloadend-event-after-abort.html [ Timeout ]
-crbug.com/659917 virtual/mojo-loading/http/tests/xmlhttprequest/workers/xmlhttprequest-response-type-blob.html [ Pass Timeout ]
-crbug.com/659917 virtual/mojo-loading/http/tests/xmlhttprequest/workers/xmlhttprequest-response-type-blob-sync.html [ Pass Timeout ]
-crbug.com/659917 virtual/mojo-loading/http/tests/xmlhttprequest/workers/shared-worker-response-type-blob.html [ Pass Timeout ]
-crbug.com/659917 virtual/mojo-loading/http/tests/xmlhttprequest/workers/shared-worker-response-type-blob-sync.html [ Pass Timeout ]
-
-crbug.com/669357 virtual/mojo-loading/http/tests/local/formdata/upload-events.html [ Failure ]
 
 crbug.com/664873 http/tests/xmlhttprequest/small-chunks-response-text.html [ Failure Pass ]
 crbug.com/664873 virtual/mojo-loading/http/tests/xmlhttprequest/small-chunks-response-text.html [ Failure Pass ]
@@ -2007,10 +2109,6 @@ crbug.com/673526 external/wpt/webmessaging/message-channels/close.html [ Failure
 # Added 2016-12-06
 crbug.com/671618 http/tests/websocket/workers/worker-reload.html [ Pass Timeout ]
 crbug.com/671618 virtual/mojo-loading/http/tests/websocket/workers/worker-reload.html [ Pass Timeout ]
-crbug.com/671618 virtual/mojo-loading/http/tests/websocket/workers/worker-shutdown-race.html [ Pass Timeout ]
-
-# Added 2016-12-07
-crbug.com/672493 [ Linux ] http/tests/websocket/workers/worker-shutdown-race.html [ Pass Timeout ]
 
 # Added 2016-12-12
 crbug.com/610835 http/tests/security/XFrameOptions/x-frame-options-deny-multiple-clients.html [ Failure Pass ]
@@ -2148,16 +2246,8 @@ crbug.com/672204 media/avtrack/video-track-selected.html [ Pass Failure ]
 crbug.com/664844 media/track/track-cue-rendering-tree-is-removed-properly.html [ Pass Failure ]
 crbug.com/664844 media/track/track-default-attribute.html [ Pass Failure ]
 crbug.com/664844 media/track/track-kind-user-preference.html [ Pass Failure ]
-crbug.com/664853 virtual/mojo-loading/webexposed/css-properties-as-js-properties.html [ Pass Failure ]
-crbug.com/664853 virtual/mojo-loading/webexposed/web-animations-api.html [ Pass Failure ]
 crbug.com/664855 virtual/scroll_customization/fast/scroll-behavior/main-frame-interrupted-scroll.html [ Pass Failure ]
 crbug.com/664856 virtual/sharedarraybuffer/fast/workers/worker-gc.html [ Pass Failure ]
-
-crbug.com/583193 inspector-protocol/debugger/stepping-with-blackboxed-ranges.html [ NeedsManualRebaseline ]
-crbug.com/583193 inspector/sources/debugger-frameworks/frameworks-jquery.html [ NeedsManualRebaseline ]
-crbug.com/583193 inspector/sources/debugger-frameworks/frameworks-steppings.html [ NeedsManualRebaseline ]
-crbug.com/583193 inspector/sources/debugger-frameworks/frameworks-skip-step-in.html [ NeedsManualRebaseline ]
-crbug.com/583193 inspector/sources/debugger-frameworks/frameworks-step-into-skips-setTimeout.html [ NeedsManualRebaseline ]
 
 # Possible duplicate of crbug.com/665577
 # crbug.com/664858 virtual/threaded/fast/scroll-behavior/overflow-scroll-animates.html [ Pass Failure ]
@@ -2166,6 +2256,9 @@ crbug.com/583193 inspector/sources/debugger-frameworks/frameworks-step-into-skip
 # crbug.com/664858 virtual/threaded/fast/scroll-behavior/smooth-scroll/ongoing-smooth-scroll-anchors.html [ Pass Failure ]
 # crbug.com/664858 virtual/threaded/fast/scroll-behavior/smooth-scroll/ongoing-smooth-scroll-vertical-rl-anchors.html [ Pass Failure ]
 # crbug.com/664858 virtual/threaded/fast/scroll-behavior/smooth-scroll/scroll-during-selection.html [ Pass Failure ]
+
+crbug.com/684874 virtual/threaded/fast/scroll-behavior/smooth-scroll/scroll-during-selection.html [ Pass Failure ]
+
 # ====== Random order flaky tests end here ======
 
 # ====== Begin of display:contents tests ======
@@ -2200,6 +2293,8 @@ crbug.com/657748 external/csswg-test/css-display-3/display-contents-table-002.ht
 crbug.com/657748 external/csswg-test/css-display-3/display-contents-text-only-001.html [ Failure ]
 
 # ====== End of display: contents tests ======
+
+crbug.com/682521 inspector/console/console-tests.html [ NeedsManualRebaseline ]
 
 crbug.com/676229 [ Linux ] plugins/mouse-click-plugin-clears-selection.html [ Failure Pass ]
 
@@ -2238,3 +2333,14 @@ crbug.com/681471 virtual/stable/paint/invalidation/media-audio-no-spurious-repai
 
 crbug.com/683800 [ Win7 Debug ] external/wpt/selection/ [ Failure Pass ]
 
+# CQ and Rebaseline-cl for crrev.com/2626973005 does not include this
+crbug.com/680407 [ Mac ] fast/forms/select/menulist-appearance-basic.html [ NeedsManualRebaseline ]
+
+# No mock Mojo interface for services yet
+crbug.com/659139 [ Mac ] http/tests/shapedetection/shapedetection-cross-origin.html [ Skip ]
+crbug.com/659139 [ Mac ] shapedetection/detection-HTMLCanvasElement.html [ Skip ]
+crbug.com/659139 [ Mac ] shapedetection/detection-HTMLImageElement.html [ Skip ]
+crbug.com/659139 [ Mac ] shapedetection/detection-HTMLVideoElement.html [ Skip ]
+crbug.com/659139 [ Mac ] shapedetection/detection-ImageBitmap.html [ Skip ]
+crbug.com/659139 [ Mac ] shapedetection/detection-ImageData.html [ Skip ]
+crbug.com/659139 [ Mac ] shapedetection/detection-options.html [ Skip ]

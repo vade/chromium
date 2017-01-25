@@ -86,9 +86,9 @@
             ],
             "experiments": [
                 {
-                    "name": "EnabledFive",
+                    "name": "EnabledThree",
                     "params": {
-                        "impression_limit": "5"
+                        "impression_limit": "3"
                     },
                     "enable_features": [
                         "AutofillCreditCardSigninPromo"
@@ -783,6 +783,25 @@
             ]
         }
     ],
+    "FasterLocationReload": [
+        {
+            "platforms": [
+                "android",
+                "chromeos",
+                "linux",
+                "mac",
+                "win"
+            ],
+            "experiments": [
+                {
+                    "name": "Enabled",
+                    "enable_features": [
+                        "FasterLocationReload"
+                    ]
+                }
+            ]
+        }
+    ],
     "GoogleBrandedContextMenu": [
         {
             "platforms": [
@@ -1067,6 +1086,21 @@
             ]
         }
     ],
+    "MidiManagerAndroid": [
+        {
+            "platforms": [
+                "android"
+            ],
+            "experiments": [
+                {
+                    "name": "Enabled",
+                    "enable_features": [
+                        "MidiManagerAndroid"
+                    ]
+                }
+            ]
+        }
+    ],
     "ModerateBindingOnBackgroundTabCreation": [
         {
             "platforms": [
@@ -1211,7 +1245,10 @@
             ],
             "experiments": [
                 {
-                    "name": "NetworkTimeQueriesEnabled",
+                    "name": "NetworkTimeQueriesEnabledBackgroundAndOnDemand",
+                    "params": {
+                        "FetchBehavior": "background-and-on-demand"
+                    },
                     "enable_features": [
                         "NetworkTimeServiceQuerying"
                     ]
@@ -2436,6 +2473,21 @@
                         "enable_update_menu_item": "true",
                         "show_summary": "true"
                     }
+                }
+            ]
+        }
+    ],
+    "UseConsolidatedStartupFlow": [
+        {
+            "platforms": [
+                "win"
+            ],
+            "experiments": [
+                {
+                    "name": "Enabled",
+                    "enable_features": [
+                        "UseConsolidatedStartupFlow"
+                    ]
                 }
             ]
         }

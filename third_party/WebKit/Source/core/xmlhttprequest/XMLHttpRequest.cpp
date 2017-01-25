@@ -41,10 +41,6 @@
 #include "core/editing/serializers/Serialization.h"
 #include "core/events/Event.h"
 #include "core/events/ProgressEvent.h"
-#include "core/fetch/CrossOriginAccessControl.h"
-#include "core/fetch/FetchInitiatorTypeNames.h"
-#include "core/fetch/FetchUtils.h"
-#include "core/fetch/ResourceLoaderOptions.h"
 #include "core/fileapi/Blob.h"
 #include "core/fileapi/File.h"
 #include "core/fileapi/FileReaderLoader.h"
@@ -68,6 +64,10 @@
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/SharedBuffer.h"
 #include "platform/blob/BlobData.h"
+#include "platform/loader/fetch/CrossOriginAccessControl.h"
+#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
+#include "platform/loader/fetch/FetchUtils.h"
+#include "platform/loader/fetch/ResourceLoaderOptions.h"
 #include "platform/network/HTTPParsers.h"
 #include "platform/network/NetworkLog.h"
 #include "platform/network/ParsedContentType.h"
@@ -952,12 +952,6 @@ void XMLHttpRequest::createRequest(PassRefPtr<EncodedFormData> httpBody,
       if (!m_sendFlag || m_loader)
         return;
     }
-    if (!getExecutionContext()) {
-      handleNetworkError();
-      throwForLoadFailureIfNeeded(exceptionState,
-                                  "Document is already detached.");
-      return;
-    }
   }
 
   m_sameOriginRequest = getSecurityOrigin()->canRequestNoSuborigin(m_url);
@@ -1818,6 +1812,10 @@ void XMLHttpRequest::contextDestroyed(ExecutionContext*) {
                                               m_method, m_url);
   m_progressEventThrottle->stop();
   internalAbort();
+
+  // In case we are in the middle of send() function, unset the send flag to
+  // stop the operation.
+  m_sendFlag = false;
 }
 
 bool XMLHttpRequest::hasPendingActivity() const {

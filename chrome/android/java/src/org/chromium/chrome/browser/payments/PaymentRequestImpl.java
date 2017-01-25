@@ -22,6 +22,7 @@ import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.autofill.PersonalDataManager;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.browser.favicon.FaviconHelper;
+import org.chromium.chrome.browser.pageinfo.CertificateChainHelper;
 import org.chromium.chrome.browser.payments.ui.Completable;
 import org.chromium.chrome.browser.payments.ui.ContactDetailsSection;
 import org.chromium.chrome.browser.payments.ui.LineItem;
@@ -32,7 +33,7 @@ import org.chromium.chrome.browser.payments.ui.PaymentRequestUI;
 import org.chromium.chrome.browser.payments.ui.SectionInformation;
 import org.chromium.chrome.browser.payments.ui.ShoppingCart;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
-import org.chromium.chrome.browser.preferences.autofill.AutofillPreferences;
+import org.chromium.chrome.browser.preferences.autofill.AutofillAndPaymentsPreferences;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelObserver;
@@ -213,6 +214,7 @@ public class PaymentRequestImpl
     private final WebContents mWebContents;
     private final String mMerchantName;
     private final String mOrigin;
+    private final byte[][] mCertificateChain;
     private final AddressEditor mAddressEditor;
     private final CardEditor mCardEditor;
     private final PaymentRequestJourneyLogger mJourneyLogger = new PaymentRequestJourneyLogger();
@@ -277,6 +279,14 @@ public class PaymentRequestImpl
      */
     private boolean mCanMakePayment;
 
+    /**
+     * True if we should skip showing PaymentRequest UI.
+     *
+     * <p>In cases where there is a single payment app and the merchant does not request shipping
+     * or billing, we can skip showing UI as Payment Request UI is not benefiting the user at all.
+     */
+    private boolean mShouldSkipShowingPaymentRequestUi;
+
     /** The helper to create and fill the response to send to the merchant. */
     private PaymentResponseHelper mPaymentResponseHelper;
 
@@ -298,6 +308,7 @@ public class PaymentRequestImpl
         // The feature is available only in secure context, so it's OK to not show HTTPS.
         mOrigin = UrlFormatter.formatUrlForSecurityDisplay(
                 webContents.getLastCommittedUrl(), false);
+        mCertificateChain = CertificateChainHelper.getCertificateChain(mWebContents);
 
         final FaviconHelper faviconHelper = new FaviconHelper();
         faviconHelper.getLocalFaviconImageForURL(Profile.getLastUsedProfile(),
@@ -367,6 +378,20 @@ public class PaymentRequestImpl
         boolean requestPayerName = options != null && options.requestPayerName;
         boolean requestPayerPhone = options != null && options.requestPayerPhone;
         boolean requestPayerEmail = options != null && options.requestPayerEmail;
+
+        // If there is a single payment method and the merchant has not requested any other
+        // information, we can safely go directly to the payment app instead of showing
+        // Payment Request UI.
+        mShouldSkipShowingPaymentRequestUi =
+                ChromeFeatureList.isEnabled(ChromeFeatureList.WEB_PAYMENTS_SINGLE_APP_UI_SKIP)
+                && mMethodData.size() == 1 && !requestShipping && !requestPayerName
+                && !requestPayerPhone && !requestPayerEmail
+                // Only allowing payment apps that own their own UIs.
+                // This excludes AutofillPaymentApp as its UI is rendered inline in
+                // the payment request UI, thus can't be skipped.
+                && mMethodData.keySet().iterator().next() != null
+                && mMethodData.keySet().iterator().next().startsWith(
+                           AndroidPaymentAppFactory.METHOD_PREFIX);
 
         List<AutofillProfile> profiles = null;
         if (requestShipping || requestPayerName || requestPayerPhone || requestPayerEmail) {
@@ -477,8 +502,20 @@ public class PaymentRequestImpl
         mContext.getTabModelSelector().addObserver(mSelectorObserver);
         mContext.getCurrentTabModel().addObserver(mTabModelObserver);
 
-        mUI.show();
+        if (!mShouldSkipShowingPaymentRequestUi) mUI.show();
         recordSuccessFunnelHistograms("Shown");
+        triggerPaymentAppUiSkipIfApplicable();
+    }
+
+    private void triggerPaymentAppUiSkipIfApplicable() {
+        // If we are skipping showing the Payment Request UI, we should call into the
+        // PaymentApp immediately after we determine the instruments are ready and UI is shown.
+        if (mShouldSkipShowingPaymentRequestUi && isFinishedQueryingPaymentApps()
+                && getIsShowing()) {
+            assert !mPaymentMethodsSection.isEmpty();
+            onPayClicked(null /* selectedShippingAddress */, null /* selectedShippingOption */,
+                    mPaymentMethodsSection.getItem(0));
+        }
     }
 
     private static Map<String, PaymentMethodData> getValidatedMethodData(
@@ -537,7 +574,7 @@ public class PaymentRequestImpl
         // so a fast response from a non-autofill payment app at the front of the app list does not
         // cause NOT_SUPPORTED payment rejection.
         for (Map.Entry<PaymentApp, Map<String, PaymentMethodData>> q : queryApps.entrySet()) {
-            q.getKey().getInstruments(q.getValue(), mOrigin, this);
+            q.getKey().getInstruments(q.getValue(), mOrigin, mCertificateChain, this);
         }
     }
 
@@ -1050,8 +1087,9 @@ public class PaymentRequestImpl
             }
         }
 
-        instrument.invokePaymentApp(mMerchantName, mOrigin, Collections.unmodifiableMap(methodData),
-                mRawTotal, mRawLineItems, Collections.unmodifiableMap(modifiers), this);
+        instrument.invokePaymentApp(mMerchantName, mOrigin, mCertificateChain,
+                Collections.unmodifiableMap(methodData), mRawTotal, mRawLineItems,
+                Collections.unmodifiableMap(modifiers), this);
 
         recordSuccessFunnelHistograms("PayClicked");
         return !(instrument instanceof AutofillPaymentInstrument);
@@ -1115,7 +1153,7 @@ public class PaymentRequestImpl
     @Override
     public void onCardAndAddressSettingsClicked() {
         Intent intent = PreferencesLauncher.createIntentForSettingsPage(
-                mContext, AutofillPreferences.class.getName());
+                mContext, AutofillAndPaymentsPreferences.class.getName());
         mContext.startActivity(intent);
         disconnectFromClientWithDebugMessage("Card and address settings clicked");
         recordAbortReasonHistogram(PaymentRequestMetrics.ABORT_REASON_ABORTED_BY_USER);
@@ -1232,7 +1270,7 @@ public class PaymentRequestImpl
 
             // If there's a card on file with a valid number and a name, then
             // PaymentRequest.canMakePayment() returns true.
-            mCanMakePayment |= creditCard.isValid();
+            mCanMakePayment |= creditCard.isValidCard();
         }
 
         // List order:
@@ -1275,6 +1313,8 @@ public class PaymentRequestImpl
 
         // UI has requested the full list of payment instruments. Provide it now.
         if (mPaymentInformationCallback != null) providePaymentInformation();
+
+        triggerPaymentAppUiSkipIfApplicable();
     }
 
     /**
@@ -1351,6 +1391,10 @@ public class PaymentRequestImpl
                     PaymentRequestMetrics.SELECTED_METHOD_OTHER_PAYMENT_APP);
         }
 
+        // Showing the payment request UI if we were previously skipping it so the loading
+        // spinner shows up until the merchant notifies that payment was completed.
+        if (mShouldSkipShowingPaymentRequestUi) mUI.showProcessingMessageAfterUiSkip();
+
         recordSuccessFunnelHistograms("ReceivedInstrumentDetails");
 
         mPaymentResponseHelper.onInstrumentDetailsReceived(methodName, stringifiedDetails);
@@ -1369,8 +1413,14 @@ public class PaymentRequestImpl
     @Override
     public void onInstrumentDetailsError() {
         if (mClient == null) return;
-        mUI.onPayButtonProcessingCancelled();
         mPaymentAppRunning = false;
+        // When skipping UI, any errors/cancel from fetching instrument details should be
+        // equivalent to a cancel.
+        if (mShouldSkipShowingPaymentRequestUi) {
+            onDismiss();
+        } else {
+            mUI.onPayButtonProcessingCancelled();
+        }
     }
 
     @Override

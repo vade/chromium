@@ -145,6 +145,18 @@ std::unique_ptr<base::Value> NetLogHttpStreamProtoCallback(
   return std::move(dict);
 }
 
+// Returns parameters associated with the proxy resolution.
+std::unique_ptr<base::Value> NetLogHttpStreamJobProxyServerResolved(
+    const ProxyServer& proxy_server,
+    NetLogCaptureMode /* capture_mode */) {
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
+
+  dict->SetString("proxy_server", proxy_server.is_valid()
+                                      ? proxy_server.ToPacString()
+                                      : std::string());
+  return std::move(dict);
+}
+
 HttpStreamFactoryImpl::Job::Job(Delegate* delegate,
                                 JobType job_type,
                                 HttpNetworkSession* session,
@@ -739,6 +751,12 @@ int HttpStreamFactoryImpl::Job::DoResolveProxy() {
 int HttpStreamFactoryImpl::Job::DoResolveProxyComplete(int result) {
   pac_request_ = NULL;
 
+  net_log_.AddEvent(
+      NetLogEventType::HTTP_STREAM_JOB_PROXY_SERVER_RESOLVED,
+      base::Bind(
+          &NetLogHttpStreamJobProxyServerResolved,
+          proxy_info_.is_empty() ? ProxyServer() : proxy_info_.proxy_server()));
+
   if (result == OK) {
     // Remove unsupported proxies from the list.
     int supported_proxies =
@@ -1173,8 +1191,16 @@ int HttpStreamFactoryImpl::Job::DoCreateStream() {
   if (connection_->socket() && !connection_->is_reused())
     SetSocketMotivation();
 
-  if (!using_spdy_) {
+  if (!using_spdy_)
     DCHECK(!IsSpdyAlternative());
+
+  // While websockets over HTTP/2 are not supported, it is still valid to have
+  // websockets tunneled through HTTP/2 proxy (via CONNECT). If websockets are
+  // secure (wss://), ProxyClientSocket with established tunnel is wrapped with
+  // yet another socket (SSLClientSocket), and |using_spdy_| will be false, but
+  // for ws: scheme, ProxyClientSocket is not wrapped into anything.
+  if (!using_spdy_ ||
+      (using_spdy_ && proxy_info_.is_https() && delegate_->for_websockets())) {
     // We may get ftp scheme when fetching ftp resources through proxy.
     bool using_proxy = (proxy_info_.is_http() || proxy_info_.is_https()) &&
                        (request_info_.url.SchemeIs(url::kHttpScheme) ||
@@ -1195,6 +1221,12 @@ int HttpStreamFactoryImpl::Job::DoCreateStream() {
 
   CHECK(!stream_.get());
 
+  SpdySessionKey spdy_session_key = GetSpdySessionKey();
+  if (!existing_spdy_session_) {
+    existing_spdy_session_ =
+        session_->spdy_session_pool()->FindAvailableSession(
+            spdy_session_key, origin_url_, net_log_);
+  }
   bool direct = !IsHttpsProxyAndHttpUrl();
   if (existing_spdy_session_.get()) {
     // We picked up an existing session, so we don't need our socket.
@@ -1208,15 +1240,7 @@ int HttpStreamFactoryImpl::Job::DoCreateStream() {
     return set_result;
   }
 
-  SpdySessionKey spdy_session_key = GetSpdySessionKey();
   base::WeakPtr<SpdySession> spdy_session =
-      session_->spdy_session_pool()->FindAvailableSession(
-          spdy_session_key, origin_url_, net_log_);
-  if (spdy_session) {
-    return SetSpdyHttpStreamOrBidirectionalStreamImpl(spdy_session, direct);
-  }
-
-  spdy_session =
       session_->spdy_session_pool()->CreateAvailableSessionFromSocket(
           spdy_session_key, std::move(connection_), net_log_, using_ssl_);
 

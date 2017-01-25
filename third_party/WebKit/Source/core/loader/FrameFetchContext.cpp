@@ -33,11 +33,7 @@
 #include "bindings/core/v8/ScriptController.h"
 #include "bindings/core/v8/V8DOMActivityLogger.h"
 #include "core/dom/Document.h"
-#include "core/fetch/ClientHintsPreferences.h"
-#include "core/fetch/FetchInitiatorTypeNames.h"
-#include "core/fetch/Resource.h"
-#include "core/fetch/ResourceLoadingLog.h"
-#include "core/fetch/UniqueIdentifier.h"
+#include "core/frame/Deprecation.h"
 #include "core/frame/FrameConsole.h"
 #include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
@@ -69,6 +65,11 @@
 #include "core/timing/Performance.h"
 #include "platform/WebFrameScheduler.h"
 #include "platform/instrumentation/tracing/TracedValue.h"
+#include "platform/loader/fetch/ClientHintsPreferences.h"
+#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
+#include "platform/loader/fetch/Resource.h"
+#include "platform/loader/fetch/ResourceLoadingLog.h"
+#include "platform/loader/fetch/UniqueIdentifier.h"
 #include "platform/mhtml/MHTMLArchive.h"
 #include "platform/network/NetworkUtils.h"
 #include "platform/network/ResourceLoadPriority.h"
@@ -412,7 +413,7 @@ void FrameFetchContext::dispatchWillSendRequest(
     frame()->loader().progress().willStartLoading(identifier,
                                                   request.priority());
   }
-  InspectorInstrumentation::willSendRequest(frame(), identifier,
+  InspectorInstrumentation::willSendRequest(frame()->document(), identifier,
                                             masterDocumentLoader(), request,
                                             redirectResponse, initiatorInfo);
   if (frame()->frameScheduler())
@@ -466,8 +467,8 @@ void FrameFetchContext::dispatchDidFinishLoading(unsigned long identifier,
                InspectorResourceFinishEvent::data(identifier, finishTime, false,
                                                   encodedDataLength));
   frame()->loader().progress().completeProgress(identifier);
-  InspectorInstrumentation::didFinishLoading(frame(), identifier, finishTime,
-                                             encodedDataLength);
+  InspectorInstrumentation::didFinishLoading(frame()->document(), identifier,
+                                             finishTime, encodedDataLength);
   if (frame()->frameScheduler())
     frame()->frameScheduler()->didStopLoading(identifier);
 }
@@ -480,7 +481,8 @@ void FrameFetchContext::dispatchDidFail(unsigned long identifier,
                InspectorResourceFinishEvent::data(identifier, 0, true,
                                                   encodedDataLength));
   frame()->loader().progress().completeProgress(identifier);
-  InspectorInstrumentation::didFailLoading(frame(), identifier, error);
+  InspectorInstrumentation::didFailLoading(frame()->document(), identifier,
+                                           error);
   // Notification to FrameConsole should come AFTER InspectorInstrumentation
   // call, DevTools front-end relies on this.
   if (!isInternalRequest)
@@ -763,11 +765,11 @@ ResourceRequestBlockedReason FrameFetchContext::canRequestInternal(
     if (SchemeRegistry::shouldTreatURLSchemeAsLegacy(url.protocol()) &&
         !SchemeRegistry::shouldTreatURLSchemeAsLegacy(
             frame()->document()->getSecurityOrigin()->protocol())) {
-      UseCounter::count(frame()->document(),
-                        UseCounter::LegacyProtocolEmbeddedAsSubresource);
+      Deprecation::countDeprecation(
+          frame()->document(), UseCounter::LegacyProtocolEmbeddedAsSubresource);
     }
     if (!url.user().isEmpty() || !url.pass().isEmpty()) {
-      UseCounter::count(
+      Deprecation::countDeprecation(
           frame()->document(),
           UseCounter::RequestedSubresourceWithEmbeddedCredentials);
     }
@@ -1051,7 +1053,7 @@ void FrameFetchContext::dispatchDidReceiveResponseInternal(
   frameLoaderClient()->dispatchDidReceiveResponse(response);
   DocumentLoader* documentLoader = masterDocumentLoader();
   InspectorInstrumentation::didReceiveResourceResponse(
-      frame(), identifier, documentLoader, response, resource);
+      frame()->document(), identifier, documentLoader, response, resource);
   // It is essential that inspector gets resource response BEFORE console.
   frame()->console().reportResourceResponseReceived(documentLoader, identifier,
                                                     response);

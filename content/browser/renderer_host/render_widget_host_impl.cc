@@ -87,6 +87,7 @@
 #include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/geometry/vector2d_conversions.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "ui/snapshot/snapshot.h"
@@ -451,10 +452,6 @@ void RenderWidgetHostImpl::SendScreenRects() {
   Send(new ViewMsg_UpdateScreenRects(
       GetRoutingID(), last_view_screen_rect_, last_window_screen_rect_));
   waiting_for_screen_rects_ack_ = true;
-}
-
-void RenderWidgetHostImpl::SuppressEventsUntilKeyDown() {
-  suppress_events_until_keydown_ = true;
 }
 
 void RenderWidgetHostImpl::FlushInput() {
@@ -1179,6 +1176,12 @@ void RenderWidgetHostImpl::ForwardTouchEventWithLatencyInfo(
 
 void RenderWidgetHostImpl::ForwardKeyboardEvent(
     const NativeWebKeyboardEvent& key_event) {
+  ForwardKeyboardEventWithCommands(key_event, nullptr);
+}
+
+void RenderWidgetHostImpl::ForwardKeyboardEventWithCommands(
+    const NativeWebKeyboardEvent& key_event,
+    const std::vector<EditCommand>* commands) {
   TRACE_EVENT0("input", "RenderWidgetHostImpl::ForwardKeyboardEvent");
   if (owner_delegate_ &&
       !owner_delegate_->MayRenderWidgetForwardKeyboardEvent(key_event)) {
@@ -1245,6 +1248,15 @@ void RenderWidgetHostImpl::ForwardKeyboardEvent(
                                                                latency_info);
   key_event_with_latency.event.isBrowserShortcut = is_shortcut;
   DispatchInputEventWithLatencyInfo(key_event, &key_event_with_latency.latency);
+  // TODO(foolip): |InputRouter::SendKeyboardEvent()| may filter events, in
+  // which the commands will be treated as belonging to the next key event.
+  // InputMsg_SetEditCommandsForNextKeyEvent should only be sent if
+  // InputMsg_HandleInputEvent is, but has to be sent first.
+  // https://crbug.com/684298
+  if (commands && !commands->empty()) {
+    Send(
+        new InputMsg_SetEditCommandsForNextKeyEvent(GetRoutingID(), *commands));
+  }
   input_router_->SendKeyboardEvent(key_event_with_latency);
 }
 
@@ -2245,11 +2257,6 @@ void RenderWidgetHostImpl::SetBackgroundOpaque(bool opaque) {
   Send(new ViewMsg_SetBackgroundOpaque(GetRoutingID(), opaque));
 }
 
-void RenderWidgetHostImpl::SetEditCommandsForNextKeyEvent(
-    const std::vector<EditCommand>& commands) {
-  Send(new InputMsg_SetEditCommandsForNextKeyEvent(GetRoutingID(), commands));
-}
-
 void RenderWidgetHostImpl::ExecuteEditCommand(const std::string& command,
                                               const std::string& value) {
   Send(new InputMsg_ExecuteEditCommand(GetRoutingID(), command, value));
@@ -2364,49 +2371,36 @@ void RenderWidgetHostImpl::WindowSnapshotReachedScreen(int snapshot_id) {
   gfx::Rect snapshot_bounds(GetView()->GetViewBounds().size());
 #endif
 
-  std::vector<unsigned char> png;
-  if (ui::GrabViewSnapshot(
-      GetView()->GetNativeView(), &png, snapshot_bounds)) {
-    OnSnapshotDataReceived(snapshot_id, &png.front(), png.size());
+  gfx::Image image;
+  if (ui::GrabViewSnapshot(GetView()->GetNativeView(), snapshot_bounds,
+                           &image)) {
+    OnSnapshotReceived(snapshot_id, image);
     return;
   }
 
   ui::GrabViewSnapshotAsync(
-      GetView()->GetNativeView(),
-      snapshot_bounds,
-      base::ThreadTaskRunnerHandle::Get(),
-      base::Bind(&RenderWidgetHostImpl::OnSnapshotDataReceivedAsync,
-                 weak_factory_.GetWeakPtr(),
-                 snapshot_id));
+      GetView()->GetNativeView(), snapshot_bounds,
+      base::Bind(&RenderWidgetHostImpl::OnSnapshotReceived,
+                 weak_factory_.GetWeakPtr(), snapshot_id));
 }
 
-void RenderWidgetHostImpl::OnSnapshotDataReceived(int snapshot_id,
-                                                  const unsigned char* data,
-                                                  size_t size) {
+void RenderWidgetHostImpl::OnSnapshotReceived(int snapshot_id,
+                                              const gfx::Image& image) {
   // Any pending snapshots with a lower ID than the one received are considered
   // to be implicitly complete, and returned the same snapshot data.
   PendingSnapshotMap::iterator it = pending_browser_snapshots_.begin();
   while (it != pending_browser_snapshots_.end()) {
-      if (it->first <= snapshot_id) {
-        it->second.Run(data, size);
-        pending_browser_snapshots_.erase(it++);
-      } else {
-        ++it;
-      }
+    if (it->first <= snapshot_id) {
+      it->second.Run(image);
+      pending_browser_snapshots_.erase(it++);
+    } else {
+      ++it;
+    }
   }
 #if defined(OS_MACOSX)
   if (pending_browser_snapshots_.empty())
     power_save_blocker_.reset();
 #endif
-}
-
-void RenderWidgetHostImpl::OnSnapshotDataReceivedAsync(
-    int snapshot_id,
-    scoped_refptr<base::RefCountedBytes> png_data) {
-  if (png_data.get())
-    OnSnapshotDataReceived(snapshot_id, png_data->front(), png_data->size());
-  else
-    OnSnapshotDataReceived(snapshot_id, NULL, 0);
 }
 
 // static

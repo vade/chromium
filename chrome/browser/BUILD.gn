@@ -153,8 +153,9 @@ split_static_library("browser") {
     "browsing_data/browsing_data_database_helper.h",
     "browsing_data/browsing_data_file_system_helper.cc",
     "browsing_data/browsing_data_file_system_helper.h",
-    "browsing_data/browsing_data_filter_builder.cc",
     "browsing_data/browsing_data_filter_builder.h",
+    "browsing_data/browsing_data_filter_builder_impl.cc",
+    "browsing_data/browsing_data_filter_builder_impl.h",
     "browsing_data/browsing_data_helper.cc",
     "browsing_data/browsing_data_helper.h",
     "browsing_data/browsing_data_indexed_db_helper.cc",
@@ -189,9 +190,6 @@ split_static_library("browser") {
     "browsing_data/local_data_container.h",
     "browsing_data/media_licenses_counter.cc",
     "browsing_data/media_licenses_counter.h",
-    "browsing_data/origin_filter_builder.cc",
-    "browsing_data/origin_filter_builder.h",
-    "browsing_data/registrable_domain_filter_builder.cc",
     "browsing_data/site_data_size_collector.cc",
     "browsing_data/site_data_size_collector.h",
     "budget_service/budget_database.cc",
@@ -792,6 +790,8 @@ split_static_library("browser") {
     "page_load_metrics/observers/previews_page_load_metrics_observer.h",
     "page_load_metrics/observers/protocol_page_load_metrics_observer.cc",
     "page_load_metrics/observers/protocol_page_load_metrics_observer.h",
+    "page_load_metrics/observers/resource_prefetch_predictor_page_load_metrics_observer.cc",
+    "page_load_metrics/observers/resource_prefetch_predictor_page_load_metrics_observer.h",
     "page_load_metrics/observers/service_worker_page_load_metrics_observer.cc",
     "page_load_metrics/observers/service_worker_page_load_metrics_observer.h",
     "page_load_metrics/page_load_metrics_embedder_interface.h",
@@ -1499,6 +1499,7 @@ split_static_library("browser") {
     "//components/translate/content/browser",
     "//components/translate/core/browser",
     "//components/translate/core/common",
+    "//components/ukm:observers",
     "//components/undo",
     "//components/update_client",
     "//components/upload_list",
@@ -1589,9 +1590,6 @@ split_static_library("browser") {
     "//ui/surface",
     "//ui/web_dialogs",
     "//v8",
-  ]
-  data_deps = [
-    ":preferences_manifest",
   ]
 
   if (is_chromeos && use_cras) {
@@ -4135,7 +4133,7 @@ grit("resources") {
 
     # Depend only on the generated mojo bindings since we read the .mojom.js
     # file, rather than the whole mojo target which will link the C++ bindings.
-    "//chrome/app:chrome_content_browser_manifest_overlay",
+    "//chrome/app:chrome_content_manifest_overlays",
     "//chrome/browser/ui/webui/engagement:mojo_bindings__generator",
     "//chrome/browser/ui/webui/omnibox:mojo_bindings__generator",
     "//chrome/browser/ui/webui/usb_internals:mojo_bindings__generator",
@@ -4144,6 +4142,10 @@ grit("resources") {
     "//url/mojo:url_mojom_gurl__generator",
     "//url/mojo:url_mojom_origin__generator",
   ]
+
+  if (use_vulcanize) {
+    deps += [ "//chrome/browser/resources/md_downloads:vulcanize" ]
+  }
 
   if (safe_browsing_mode > 0) {
     deps +=

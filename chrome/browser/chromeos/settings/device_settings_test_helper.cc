@@ -192,7 +192,8 @@ void DeviceSettingsTestHelper::StartArcInstance(
 
 void DeviceSettingsTestHelper::StopArcInstance(const ArcCallback& callback) {}
 
-void DeviceSettingsTestHelper::PrioritizeArcInstance(
+void DeviceSettingsTestHelper::SetArcCpuRestriction(
+    login_manager::ContainerCpuRestrictionState restriction_state,
     const ArcCallback& callback) {}
 
 void DeviceSettingsTestHelper::EmitArcBooted() {}

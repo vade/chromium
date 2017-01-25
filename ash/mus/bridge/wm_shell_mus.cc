@@ -63,7 +63,11 @@ class SessionStateDelegateStub : public SessionStateDelegate {
   int GetMaximumNumberOfLoggedInUsers() const override { return 3; }
   int NumberOfLoggedInUsers() const override { return 1; }
   bool IsActiveUserSessionStarted() const override { return true; }
-  bool CanLockScreen() const override { return true; }
+  bool CanLockScreen() const override {
+    // The Chrome OS session_manager process currently rejects screen-lock
+    // requests due to no user being logged in.
+    return false;
+  }
   bool IsScreenLocked() const override { return screen_locked_; }
   bool ShouldLockScreenAutomatically() const override { return false; }
   void LockScreen() override {
@@ -389,10 +393,6 @@ void WmShellMus::RemovePointerWatcher(views::PointerWatcher* watcher) {
   pointer_watcher_event_router_->RemovePointerWatcher(watcher);
 }
 
-void WmShellMus::RequestShutdown() {
-  NOTIMPLEMENTED();
-}
-
 bool WmShellMus::IsTouchDown() {
   // TODO: implement me, http://crbug.com/634967.
   // NOTIMPLEMENTED is too spammy here.
@@ -404,6 +404,10 @@ void WmShellMus::ToggleIgnoreExternalKeyboard() {
 }
 
 void WmShellMus::SetLaserPointerEnabled(bool enabled) {
+  NOTIMPLEMENTED();
+}
+
+void WmShellMus::SetPartialMagnifierEnabled(bool enabled) {
   NOTIMPLEMENTED();
 }
 

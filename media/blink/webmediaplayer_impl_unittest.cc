@@ -103,9 +103,7 @@ class DummyWebMediaPlayerClient : public blink::WebMediaPlayerClient {
   DISALLOW_COPY_AND_ASSIGN(DummyWebMediaPlayerClient);
 };
 
-class MockWebMediaPlayerDelegate
-    : public WebMediaPlayerDelegate,
-      public base::SupportsWeakPtr<MockWebMediaPlayerDelegate> {
+class MockWebMediaPlayerDelegate : public WebMediaPlayerDelegate {
  public:
   MockWebMediaPlayerDelegate() = default;
   ~MockWebMediaPlayerDelegate() = default;
@@ -190,7 +188,9 @@ class WebMediaPlayerImplTest : public testing::Test {
                                          blink::WebPageVisibilityStateVisible)),
         web_local_frame_(
             blink::WebLocalFrame::create(blink::WebTreeScopeType::Document,
-                                         &web_frame_client_)),
+                                         &web_frame_client_,
+                                         nullptr,
+                                         nullptr)),
         media_log_(new MediaLog()),
         audio_parameters_(TestAudioParameters::Normal()) {
     web_view_->setMainFrame(web_local_frame_);
@@ -199,7 +199,7 @@ class WebMediaPlayerImplTest : public testing::Test {
 
   void InitializeWebMediaPlayerImpl() {
     wmpi_.reset(new WebMediaPlayerImpl(
-        web_local_frame_, &client_, nullptr, delegate_.AsWeakPtr(),
+        web_local_frame_, &client_, nullptr, &delegate_,
         base::MakeUnique<DefaultRendererFactory>(
             media_log_, nullptr, DefaultRendererFactory::GetGpuFactoriesCB()),
         url_index_,

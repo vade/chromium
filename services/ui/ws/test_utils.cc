@@ -154,15 +154,9 @@ TestPlatformDisplayFactory::CreatePlatformDisplay(
 
 // TestFrameGeneratorDelegate -------------------------------------------------
 
-TestFrameGeneratorDelegate::TestFrameGeneratorDelegate(
-    ServerWindow* root_window)
-    : root_window_(root_window) {}
+TestFrameGeneratorDelegate::TestFrameGeneratorDelegate() {}
 
 TestFrameGeneratorDelegate::~TestFrameGeneratorDelegate() {}
-
-ServerWindow* TestFrameGeneratorDelegate::GetActiveRootWindow() {
-  return root_window_;
-}
 
 bool TestFrameGeneratorDelegate::IsInHighContrastMode() {
   return false;
@@ -246,6 +240,8 @@ void TestWindowManager::WmPerformMoveLoop(uint32_t change_id,
 void TestWindowManager::WmCancelMoveLoop(uint32_t window_id) {}
 
 void TestWindowManager::WmDeactivateWindow(uint32_t window_id) {}
+
+void TestWindowManager::WmStackAtTop(uint32_t change_id, uint32_t window_id) {}
 
 void TestWindowManager::OnAccelerator(uint32_t ack_id,
                                       uint32_t accelerator_id,

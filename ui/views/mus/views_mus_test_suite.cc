@@ -9,11 +9,15 @@
 
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/json/json_reader.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/simple_thread.h"
 #include "base/threading/thread.h"
+#include "mojo/edk/embedder/embedder.h"
+#include "mojo/edk/embedder/scoped_ipc_support.h"
+#include "services/catalog/catalog.h"
 #include "services/service_manager/background/background_service_manager.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "services/service_manager/public/cpp/service.h"
@@ -31,6 +35,9 @@
 #include "ui/views/test/views_test_helper_aura.h"
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
+
+// Generated within the ":views_mus_tests_catalog_source" target.
+extern const char kViewsMusTestCatalog[];
 
 namespace views {
 namespace {
@@ -99,7 +106,17 @@ std::unique_ptr<PlatformTestHelper> CreatePlatformTestHelper(
 class ServiceManagerConnection {
  public:
   ServiceManagerConnection()
-      : thread_("Persistent service_manager connections") {
+      : thread_("Persistent service_manager connections"),
+        ipc_thread_("IPC thread") {
+    catalog::Catalog::SetDefaultCatalogManifest(
+        base::JSONReader::Read(kViewsMusTestCatalog));
+    mojo::edk::Init();
+    ipc_thread_.StartWithOptions(
+        base::Thread::Options(base::MessageLoop::TYPE_IO, 0));
+    ipc_support_ = base::MakeUnique<mojo::edk::ScopedIPCSupport>(
+        ipc_thread_.task_runner(),
+        mojo::edk::ScopedIPCSupport::ShutdownPolicy::CLEAN);
+
     base::WaitableEvent wait(base::WaitableEvent::ResetPolicy::AUTOMATIC,
                              base::WaitableEvent::InitialState::NOT_SIGNALED);
     base::Thread::Options options;
@@ -149,11 +166,16 @@ class ServiceManagerConnection {
 
   void SetUpConnections(base::WaitableEvent* wait) {
     background_service_manager_ =
-        base::MakeUnique<service_manager::BackgroundServiceManager>();
-    background_service_manager_->Init(nullptr);
+        base::MakeUnique<service_manager::BackgroundServiceManager>(
+            nullptr, nullptr);
+    service_manager::mojom::ServicePtr service;
     context_ = base::MakeUnique<service_manager::ServiceContext>(
         base::MakeUnique<DefaultService>(),
-        background_service_manager_->CreateServiceRequest(GetTestName()));
+        service_manager::mojom::ServiceRequest(&service));
+    background_service_manager_->RegisterService(
+        service_manager::Identity(
+            GetTestName(), service_manager::mojom::kRootUserID),
+        std::move(service), nullptr);
 
     // ui/views/mus requires a WindowManager running, so launch test_wm.
     service_manager::Connector* connector = context_->connector();
@@ -179,6 +201,8 @@ class ServiceManagerConnection {
   }
 
   base::Thread thread_;
+  base::Thread ipc_thread_;
+  std::unique_ptr<mojo::edk::ScopedIPCSupport> ipc_support_;
   std::unique_ptr<service_manager::BackgroundServiceManager>
       background_service_manager_;
   std::unique_ptr<service_manager::ServiceContext> context_;

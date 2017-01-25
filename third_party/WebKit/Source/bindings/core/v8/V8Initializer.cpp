@@ -44,7 +44,6 @@
 #include "bindings/core/v8/V8Window.h"
 #include "bindings/core/v8/WorkerOrWorkletScriptController.h"
 #include "core/dom/Document.h"
-#include "core/fetch/AccessControlStatus.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
@@ -54,6 +53,7 @@
 #include "platform/EventDispatchForbiddenScope.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
+#include "platform/loader/fetch/AccessControlStatus.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebScheduler.h"
 #include "public/platform/WebThread.h"
@@ -321,14 +321,12 @@ static bool codeGenerationCheckCallbackInMainThread(
 static void initializeV8Common(v8::Isolate* isolate) {
   isolate->AddGCPrologueCallback(V8GCController::gcPrologue);
   isolate->AddGCEpilogueCallback(V8GCController::gcEpilogue);
-  if (RuntimeEnabledFeatures::traceWrappablesEnabled()) {
-    std::unique_ptr<ScriptWrappableVisitor> visitor(
-        new ScriptWrappableVisitor(isolate));
-    V8PerIsolateData::from(isolate)->setScriptWrappableVisitor(
-        std::move(visitor));
-    isolate->SetEmbedderHeapTracer(
-        V8PerIsolateData::from(isolate)->scriptWrappableVisitor());
-  }
+  std::unique_ptr<ScriptWrappableVisitor> visitor(
+      new ScriptWrappableVisitor(isolate));
+  V8PerIsolateData::from(isolate)->setScriptWrappableVisitor(
+      std::move(visitor));
+  isolate->SetEmbedderHeapTracer(
+      V8PerIsolateData::from(isolate)->scriptWrappableVisitor());
 
   v8::Debug::SetLiveEditEnabled(isolate, false);
 

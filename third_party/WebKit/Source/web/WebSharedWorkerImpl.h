@@ -84,7 +84,6 @@ class WebSharedWorkerImpl final : public WorkerReportingProxy,
                             const String& message,
                             SourceLocation*) override;
   void postMessageToPageInspector(const WTF::String&) override;
-  ParentFrameTaskRunners* getParentFrameTaskRunners() override;
   void didEvaluateWorkerScript(bool success) override {}
   void didCloseWorkerGlobalScope() override;
   void willDestroyWorkerGlobalScope() override {}
@@ -97,7 +96,6 @@ class WebSharedWorkerImpl final : public WorkerReportingProxy,
   void didFinishDocumentLoad(WebLocalFrame*) override;
   bool isControlledByServiceWorker(WebDataSource&) override;
   int64_t serviceWorkerID(WebDataSource&) override;
-  InterfaceProvider* interfaceProvider() override;
 
   // WebDevToolsAgentClient overrides.
   void sendProtocolMessage(int sessionId,

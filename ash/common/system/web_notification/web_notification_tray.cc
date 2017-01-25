@@ -124,7 +124,7 @@ class WebNotificationItem : public views::View, public gfx::AnimationDelegate {
   WebNotificationItem(gfx::AnimationContainer* container,
                       WebNotificationTray* tray)
       : tray_(tray) {
-    SetPaintToLayer(true);
+    SetPaintToLayer();
     layer()->SetFillsBoundsOpaquely(false);
     views::View::SetVisible(false);
     set_owned_by_client();
@@ -440,10 +440,6 @@ bool WebNotificationTray::ShouldBlockShelfAutoHide() const {
 bool WebNotificationTray::IsMessageCenterBubbleVisible() const {
   return (message_center_bubble() &&
           message_center_bubble()->bubble()->IsVisible());
-}
-
-bool WebNotificationTray::IsMouseInNotificationBubble() const {
-  return false;
 }
 
 void WebNotificationTray::ShowMessageCenterBubble() {

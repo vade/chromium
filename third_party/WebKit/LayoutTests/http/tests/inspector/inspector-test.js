@@ -448,9 +448,9 @@ InspectorTest.waitForUISourceCodeRemoved = function(callback)
     }
 }
 
-InspectorTest.createMockTarget = function(name, capabilities)
+InspectorTest.createMockTarget = function(name, capabilities, dontAttachToMain)
 {
-    return SDK.targetManager.createTarget(name, capabilities || SDK.Target.Capability.AllForTests, params => new SDK.StubConnection(params), null);
+    return SDK.targetManager.createTarget(name, capabilities || SDK.Target.Capability.AllForTests, params => new SDK.StubConnection(params), dontAttachToMain ? null : InspectorTest.mainTarget);
 }
 
 InspectorTest.assertGreaterOrEqual = function(a, b, message)
@@ -997,12 +997,12 @@ InspectorTest.preloadModule = function(moduleName)
 
 InspectorTest.isDedicatedWorker = function(target)
 {
-    return target && !target.hasBrowserCapability() && target.hasJSCapability() && !target.hasNetworkCapability() && !target.hasTargetCapability();
+    return target && !target.hasBrowserCapability() && target.hasJSCapability() && !target.hasTargetCapability();
 }
 
 InspectorTest.isServiceWorker = function(target)
 {
-    return target && !target.hasBrowserCapability() && !target.hasJSCapability() && target.hasNetworkCapability() && target.hasTargetCapability();
+    return target && !target.hasBrowserCapability() && !target.hasJSCapability() && target.hasTargetCapability();
 }
 
 InspectorTest.describeTargetType = function(target)

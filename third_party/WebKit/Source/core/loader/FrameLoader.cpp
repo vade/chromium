@@ -49,7 +49,6 @@
 #include "core/events/KeyboardEvent.h"
 #include "core/events/MouseEvent.h"
 #include "core/events/PageTransitionEvent.h"
-#include "core/fetch/ResourceFetcher.h"
 #include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalDOMWindow.h"
@@ -90,6 +89,7 @@
 #include "platform/UserGestureIndicator.h"
 #include "platform/feature_policy/FeaturePolicy.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
+#include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/network/HTTPParsers.h"
 #include "platform/network/ResourceRequest.h"
 #include "platform/scroll/ScrollAnimatorBase.h"
@@ -1514,7 +1514,7 @@ bool FrameLoader::shouldPerformFragmentNavigation(bool isFormSubmission,
   // We don't do this if we are submitting a form with method other than "GET",
   // explicitly reloading, currently displaying a frameset, or if the URL does
   // not have a fragment.
-  return (!isFormSubmission || equalIgnoringCase(httpMethod, HTTPNames::GET)) &&
+  return equalIgnoringCase(httpMethod, HTTPNames::GET) &&
          !isReloadLoadType(loadType) && loadType != FrameLoadTypeBackForward &&
          url.hasFragmentIdentifier() &&
          equalIgnoringFragmentIdentifier(m_frame->document()->url(), url)
@@ -1610,8 +1610,6 @@ bool FrameLoader::shouldContinueForNavigationPolicy(
     bool replacesCurrentHistoryItem,
     bool isClientRedirect,
     HTMLFormElement* form) {
-  m_isNavigationHandledByClient = false;
-
   // Don't ask if we are loading an empty URL.
   if (request.url().isEmpty() || substituteData.isValid())
     return true;
@@ -1673,14 +1671,47 @@ bool FrameLoader::shouldContinueForNavigationPolicy(
   return false;
 }
 
+bool FrameLoader::checkLoadCanStart(FrameLoadRequest& frameLoadRequest,
+                                    FrameLoadType type,
+                                    NavigationPolicy navigationPolicy,
+                                    NavigationType navigationType) {
+  if (m_frame->document()->pageDismissalEventBeingDispatched() !=
+      Document::NoDismissal) {
+    return false;
+  }
+
+  // Record the latest requiredCSP value that will be used when sending this
+  // request.
+  ResourceRequest& resourceRequest = frameLoadRequest.resourceRequest();
+  recordLatestRequiredCSP();
+  modifyRequestForCSP(resourceRequest, nullptr);
+
+  if (!shouldContinueForNavigationPolicy(
+          resourceRequest, frameLoadRequest.substituteData(), nullptr,
+          frameLoadRequest.shouldCheckMainWorldContentSecurityPolicy(),
+          navigationType, navigationPolicy,
+          type == FrameLoadTypeReplaceCurrentItem,
+          frameLoadRequest.clientRedirect() ==
+              ClientRedirectPolicy::ClientRedirect,
+          frameLoadRequest.form())) {
+    return false;
+  }
+
+  m_frame->document()->cancelParsing();
+  detachDocumentLoader(m_provisionalDocumentLoader);
+
+  // beforeunload fired above, and detaching a DocumentLoader can fire events,
+  // which can detach this frame.
+  if (!m_frame->host())
+    return false;
+
+  return true;
+}
+
 void FrameLoader::startLoad(FrameLoadRequest& frameLoadRequest,
                             FrameLoadType type,
                             NavigationPolicy navigationPolicy) {
   DCHECK(client()->hasWebView());
-  if (m_frame->document()->pageDismissalEventBeingDispatched() !=
-      Document::NoDismissal)
-    return;
-
   ResourceRequest& resourceRequest = frameLoadRequest.resourceRequest();
   NavigationType navigationType = determineNavigationType(
       type, resourceRequest.httpBody() || frameLoadRequest.form(),
@@ -1691,32 +1722,17 @@ void FrameLoader::startLoad(FrameLoadRequest& frameLoadRequest,
                                    ? WebURLRequest::FrameTypeTopLevel
                                    : WebURLRequest::FrameTypeNested);
 
-  // Record the latest requiredCSP value that will be used when sending this
-  // request.
-  recordLatestRequiredCSP();
-  modifyRequestForCSP(resourceRequest, nullptr);
-
-  // We remember this flag here because shouldContinueForNavigationPolicy()
-  // resets it.
-  bool navigationWasHandledByClient = m_isNavigationHandledByClient;
-
-  if (!shouldContinueForNavigationPolicy(
-          resourceRequest, frameLoadRequest.substituteData(), nullptr,
-          frameLoadRequest.shouldCheckMainWorldContentSecurityPolicy(),
-          navigationType, navigationPolicy,
-          type == FrameLoadTypeReplaceCurrentItem,
-          frameLoadRequest.clientRedirect() ==
-              ClientRedirectPolicy::ClientRedirect,
-          frameLoadRequest.form()))
+  if (!checkLoadCanStart(frameLoadRequest, type, navigationPolicy,
+                         navigationType)) {
+    // PlzNavigate: if the navigation is a commit of a client-handled
+    // navigation, record that there is no longer a navigation handled by the
+    // client.
+    if (m_isNavigationHandledByClient &&
+        !frameLoadRequest.resourceRequest().checkForBrowserSideNavigation()) {
+      m_isNavigationHandledByClient = false;
+    }
     return;
-
-  m_frame->document()->cancelParsing();
-  detachDocumentLoader(m_provisionalDocumentLoader);
-
-  // beforeunload fired above, and detaching a DocumentLoader can fire events,
-  // which can detach this frame.
-  if (!m_frame->host())
-    return;
+  }
 
   m_provisionalDocumentLoader = client()->createDocumentLoader(
       m_frame, resourceRequest,
@@ -1730,7 +1746,7 @@ void FrameLoader::startLoad(FrameLoadRequest& frameLoadRequest,
 
   // PlzNavigate: We need to ensure that script initiated navigations are
   // honored.
-  if (!navigationWasHandledByClient) {
+  if (!m_isNavigationHandledByClient) {
     m_frame->navigationScheduler().cancel();
     m_checkTimer.stop();
   }
@@ -1740,7 +1756,14 @@ void FrameLoader::startLoad(FrameLoadRequest& frameLoadRequest,
   if (frameLoadRequest.form())
     client()->dispatchWillSubmitForm(frameLoadRequest.form());
 
-  m_progressTracker->progressStarted();
+  // If the loader wasn't waiting for the client to handle a navigation, update
+  // the progress tracker. Otherwise don't, as it was already notified before
+  // sending the navigation to teh client.
+  if (!m_isNavigationHandledByClient)
+    m_progressTracker->progressStarted();
+  else
+    m_isNavigationHandledByClient = false;
+
   m_provisionalDocumentLoader->appendRedirect(
       m_provisionalDocumentLoader->getRequest().url());
   client()->dispatchDidStartProvisionalLoad();

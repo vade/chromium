@@ -34,7 +34,6 @@
 #include "core/dom/Document.h"
 #include "core/dom/ExecutionContextTask.h"
 #include "core/dom/SecurityContext.h"
-#include "core/fetch/SubstituteData.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/InspectorInstrumentation.h"
@@ -51,6 +50,7 @@
 #include "platform/Histogram.h"
 #include "platform/SharedBuffer.h"
 #include "platform/heap/Handle.h"
+#include "platform/loader/fetch/SubstituteData.h"
 #include "platform/network/ContentSecurityPolicyParsers.h"
 #include "platform/network/ContentSecurityPolicyResponseHeaders.h"
 #include "platform/network/NetworkUtils.h"
@@ -299,8 +299,8 @@ void WebEmbeddedWorkerImpl::prepareShadowPageForLoader() {
   settings->setStrictMixedContentChecking(true);
   settings->setAllowRunningOfInsecureContent(false);
   settings->setDataSaverEnabled(m_workerStartData.dataSaverEnabled);
-  m_mainFrame = toWebLocalFrameImpl(
-      WebLocalFrame::create(WebTreeScopeType::Document, this));
+  m_mainFrame = toWebLocalFrameImpl(WebLocalFrame::create(
+      WebTreeScopeType::Document, this, nullptr, nullptr));
   m_webView->setMainFrame(m_mainFrame.get());
   m_mainFrame->setDevToolsAgentClient(this);
 
@@ -461,7 +461,7 @@ void WebEmbeddedWorkerImpl::startWorkerThread() {
           m_mainScriptLoader->getReferrerPolicy(), starterOrigin, workerClients,
           m_mainScriptLoader->responseAddressSpace(),
           m_mainScriptLoader->originTrialTokens(), std::move(workerSettings),
-          workerV8Settings);
+          workerV8Settings, true /* inspectorNetworkCapability */);
 
   m_mainScriptLoader.clear();
 
@@ -474,8 +474,8 @@ void WebEmbeddedWorkerImpl::startWorkerThread() {
   m_workerGlobalScopeProxy = ServiceWorkerGlobalScopeProxy::create(
       *this, *document, *m_workerContextClient);
   m_loaderProxy = WorkerLoaderProxy::create(this);
-  m_workerThread =
-      ServiceWorkerThread::create(m_loaderProxy, *m_workerGlobalScopeProxy);
+  m_workerThread = ServiceWorkerThread::create(
+      m_loaderProxy, *m_workerGlobalScopeProxy, m_mainThreadTaskRunners.get());
   m_workerThread->start(std::move(startupData));
   m_workerInspectorProxy->workerThreadCreated(document, m_workerThread.get(),
                                               scriptURL);

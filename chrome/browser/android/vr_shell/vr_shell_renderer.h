@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_ANDROID_VR_SHELL_VR_SHELL_RENDERER_H_
 
 #include <memory>
+#include <vector>
 
 #include "base/macros.h"
 #include "chrome/browser/android/vr_shell/vr_math.h"
@@ -26,7 +27,20 @@ enum ShaderID {
   RETICLE_FRAGMENT_SHADER,
   LASER_VERTEX_SHADER,
   LASER_FRAGMENT_SHADER,
+  BACKGROUND_VERTEX_SHADER,
+  BACKGROUND_FRAGMENT_SHADER,
   SHADER_ID_MAX
+};
+
+struct Vertex3d {
+  float x;
+  float y;
+  float z;
+};
+
+struct Line3d {
+  Vertex3d start;
+  Vertex3d end;
 };
 
 class BaseRenderer {
@@ -36,8 +50,8 @@ class BaseRenderer {
  protected:
   BaseRenderer(ShaderID vertex_id, ShaderID fragment_id);
 
-  void PrepareToDraw(GLuint combined_matrix_handle,
-                     const gvr::Mat4f& combined_matrix);
+  void PrepareToDraw(GLuint view_proj_matrix_handle,
+                     const gvr::Mat4f& view_proj_matrix);
 
   GLuint program_handle_;
   GLuint position_handle_;
@@ -52,11 +66,13 @@ class TexturedQuadRenderer : public BaseRenderer {
   ~TexturedQuadRenderer() override;
 
   // Draw the content rect in the texture quad.
-  void Draw(int texture_data_handle, const gvr::Mat4f& combined_matrix,
-            const Rectf& copy_rect, float opacity);
+  void Draw(int texture_data_handle,
+            const gvr::Mat4f& view_proj_matrix,
+            const Rectf& copy_rect,
+            float opacity);
 
  private:
-  GLuint combined_matrix_handle_;
+  GLuint model_view_proj_matrix_handle_;
   GLuint copy_rect_uniform_handle_;
   GLuint tex_uniform_handle_;
   GLuint opacity_handle_;
@@ -88,10 +104,10 @@ class ReticleRenderer : public BaseRenderer {
   ReticleRenderer();
   ~ReticleRenderer() override;
 
-  void Draw(const gvr::Mat4f& combined_matrix);
+  void Draw(const gvr::Mat4f& view_proj_matrix);
 
  private:
-  GLuint combined_matrix_handle_;
+  GLuint model_view_proj_matrix_handle_;
   GLuint color_handle_;
   GLuint ring_diameter_handle_;
   GLuint inner_hole_handle_;
@@ -108,10 +124,10 @@ class LaserRenderer : public BaseRenderer {
   LaserRenderer();
   ~LaserRenderer() override;
 
-  void Draw(const gvr::Mat4f& combined_matrix);
+  void Draw(const gvr::Mat4f& view_proj_matrix);
 
  private:
-  GLuint combined_matrix_handle_;
+  GLuint model_view_proj_matrix_handle_;
   GLuint texture_unit_handle_;
   GLuint texture_data_handle_;
   GLuint color_handle_;
@@ -119,6 +135,31 @@ class LaserRenderer : public BaseRenderer {
   GLuint fade_end_handle_;
 
   DISALLOW_COPY_AND_ASSIGN(LaserRenderer);
+};
+
+class BackgroundRenderer : public BaseRenderer {
+ public:
+  static constexpr float kFogBrightness = 0.57f;
+  static constexpr float kGroundCeilingBrightness = 0.48f;
+  static constexpr float kGridBrightness = 0.57f;
+
+  BackgroundRenderer();
+  ~BackgroundRenderer() override;
+
+  void Draw(const gvr::Mat4f& view_proj_matrix);
+
+ private:
+  GLuint model_view_proj_matrix_handle_;
+  GLuint scene_radius_handle_;
+  GLuint center_color_handle_;
+  GLuint edge_color_handle_;
+  std::vector<Line3d>  ground_grid_lines_;
+  std::vector<float> ground_ceiling_plane_positions_;
+  gvr::Mat4f ground_plane_transform_mat_;
+  gvr::Mat4f ceiling_plane_transform_mat_;
+  float scene_radius_;
+
+  DISALLOW_COPY_AND_ASSIGN(BackgroundRenderer);
 };
 
 class VrShellRenderer {
@@ -142,11 +183,16 @@ class VrShellRenderer {
     return laser_renderer_.get();
   }
 
+  BackgroundRenderer* GetBackgroundRenderer() {
+    return background_renderer_.get();
+  }
+
  private:
   std::unique_ptr<TexturedQuadRenderer> textured_quad_renderer_;
   std::unique_ptr<WebVrRenderer> webvr_renderer_;
   std::unique_ptr<ReticleRenderer> reticle_renderer_;
   std::unique_ptr<LaserRenderer> laser_renderer_;
+  std::unique_ptr<BackgroundRenderer> background_renderer_;
 
   DISALLOW_COPY_AND_ASSIGN(VrShellRenderer);
 };

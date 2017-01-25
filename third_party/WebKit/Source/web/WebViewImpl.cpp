@@ -49,7 +49,6 @@
 #include "core/events/KeyboardEvent.h"
 #include "core/events/UIEventWithKeyState.h"
 #include "core/events/WheelEvent.h"
-#include "core/fetch/UniqueIdentifier.h"
 #include "core/frame/BrowserControls.h"
 #include "core/frame/EventHandlerRegistry.h"
 #include "core/frame/FrameHost.h"
@@ -115,6 +114,7 @@
 #include "platform/graphics/paint/DrawingRecorder.h"
 #include "platform/image-decoders/ImageDecoder.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
+#include "platform/loader/fetch/UniqueIdentifier.h"
 #include "platform/scroll/ScrollbarTheme.h"
 #include "platform/weborigin/SchemeRegistry.h"
 #include "public/platform/Platform.h"
@@ -961,7 +961,7 @@ WebInputEventResult WebViewImpl::handleSyntheticWheelFromTouchpadPinchEvent(
   wheelEvent.wheelTicksX = 0;
   wheelEvent.wheelTicksY = pinchEvent.data.pinchUpdate.scale > 1 ? 1 : -1;
 
-  return handleInputEvent(wheelEvent);
+  return handleInputEvent(blink::WebCoalescedInputEvent(wheelEvent));
 }
 
 void WebViewImpl::transferActiveWheelFlingAnimation(
@@ -1798,12 +1798,14 @@ void WebViewImpl::updateBrowserControlsState(WebBrowserControlsState constraint,
 
   browserControls().updateConstraintsAndState(constraint, current, animate);
 
-  // If the controls are going from a locked to an unlocked state, or
-  // vice-versa, then we need to force a recompute of the ICB size since that
-  // depends on the permitted browser controls state.
-  if (oldPermittedState != constraint &&
-      (oldPermittedState == WebBrowserControlsBoth ||
-       constraint == WebBrowserControlsBoth)) {
+  // If the controls are going from a locked hidden to unlocked state, or vice
+  // versa, the ICB size needs to change but we can't rely on getting a
+  // WebViewImpl::resize since the top controls shown state may not have
+  // changed.
+  if ((oldPermittedState == WebBrowserControlsHidden &&
+       constraint == WebBrowserControlsBoth) ||
+      (oldPermittedState == WebBrowserControlsBoth &&
+       constraint == WebBrowserControlsHidden)) {
     performResize();
   }
 
@@ -2104,7 +2106,8 @@ bool WebViewImpl::hasVerticalScrollbar() {
 const WebInputEvent* WebViewImpl::m_currentInputEvent = nullptr;
 
 WebInputEventResult WebViewImpl::handleInputEvent(
-    const WebInputEvent& inputEvent) {
+    const WebCoalescedInputEvent& coalescedEvent) {
+  const WebInputEvent& inputEvent = coalescedEvent.event();
   // TODO(dcheng): The fact that this is getting called when there is no local
   // main frame is problematic and probably indicates a bug in the input event
   // routing code.
@@ -2208,7 +2211,7 @@ WebInputEventResult WebViewImpl::handleInputEvent(
 
   // FIXME: This should take in the intended frame, not the local frame root.
   WebInputEventResult result = PageWidgetDelegate::handleInputEvent(
-      *this, WebCoalescedInputEvent(inputEvent), mainFrameImpl()->frame());
+      *this, coalescedEvent, mainFrameImpl()->frame());
   if (result != WebInputEventResult::NotHandled)
     return result;
 

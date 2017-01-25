@@ -10,6 +10,7 @@
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/client/drag_drop_client.h"
 #include "ui/aura/client/focus_client.h"
+#include "ui/aura/client/transient_window_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/mus/window_port_mus.h"
 #include "ui/aura/mus/window_tree_host_mus.h"
@@ -177,7 +178,6 @@ DesktopWindowTreeHostMus::DesktopWindowTreeHostMus(
                               mus_properties),
       native_widget_delegate_(native_widget_delegate),
       desktop_native_widget_aura_(desktop_native_widget_aura),
-      fullscreen_restore_state_(ui::SHOW_STATE_DEFAULT),
       close_widget_factory_(this) {
   aura::Env::GetInstance()->AddObserver(this);
   MusClient::Get()->AddObserver(this);
@@ -271,6 +271,11 @@ void DesktopWindowTreeHostMus::Init(aura::Window* content_window,
       base::MakeUnique<NativeCursorManagerMus>(window()));
   aura::client::SetCursorClient(window(), cursor_manager_.get());
   InitHost();
+
+  if (params.parent) {
+    aura::client::GetTransientWindowClient()->AddTransientChild(params.parent,
+                                                                window());
+  }
 }
 
 void DesktopWindowTreeHostMus::OnNativeWidgetCreated(
@@ -606,16 +611,7 @@ void DesktopWindowTreeHostMus::SetFullscreen(bool fullscreen) {
   if (IsFullscreen() == fullscreen)
     return;  // Nothing to do.
 
-  // Save window state before entering full screen so that it could restored
-  // when exiting full screen.
-  if (fullscreen) {
-    fullscreen_restore_state_ =
-        window()->GetProperty(aura::client::kShowStateKey);
-  }
-
-  window()->SetProperty(
-      aura::client::kShowStateKey,
-      fullscreen ? ui::SHOW_STATE_FULLSCREEN : fullscreen_restore_state_);
+  wm::SetWindowFullscreen(window(), fullscreen);
 }
 
 bool DesktopWindowTreeHostMus::IsFullscreen() const {

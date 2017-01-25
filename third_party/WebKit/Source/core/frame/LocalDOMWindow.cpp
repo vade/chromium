@@ -50,7 +50,6 @@
 #include "core/events/PageTransitionEvent.h"
 #include "core/events/PopStateEvent.h"
 #include "core/events/ScopedEventQueue.h"
-#include "core/fetch/ResourceFetcher.h"
 #include "core/frame/BarProp.h"
 #include "core/frame/DOMVisualViewport.h"
 #include "core/frame/EventHandlerRegistry.h"
@@ -82,6 +81,7 @@
 #include "core/timing/Performance.h"
 #include "platform/EventDispatchForbiddenScope.h"
 #include "platform/WebFrameScheduler.h"
+#include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/weborigin/Suborigin.h"
 #include "public/platform/Platform.h"
@@ -104,7 +104,7 @@ class PostMessageTimer final
                    PassRefPtr<SecurityOrigin> targetOrigin,
                    std::unique_ptr<SourceLocation> location,
                    UserGestureToken* userGestureToken)
-      : SuspendableTimer(window.document()),
+      : SuspendableTimer(window.document(), TaskType::Timer),
         m_event(event),
         m_window(&window),
         m_targetOrigin(targetOrigin),

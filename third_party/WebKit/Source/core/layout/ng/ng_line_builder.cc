@@ -42,7 +42,8 @@ void NGLineBuilder::CreateLine() {
   if (inline_box_->IsBidiEnabled())
     BidiReorder();
 
-  NGFragmentBuilder text_builder(NGPhysicalFragment::kFragmentText);
+  NGFragmentBuilder text_builder(NGPhysicalFragment::kFragmentText,
+                                 inline_box_->GetLayoutObject());
   text_builder.SetWritingMode(constraint_space_->WritingMode());
   LayoutUnit inline_offset;
   const Vector<NGLayoutInlineItem>& items = inline_box_->Items();
@@ -178,7 +179,7 @@ void NGLineBuilder::CopyFragmentDataToLayoutBlockFlow() {
                             LineLayoutItem(layout_object));
         }
         bidi_runs.addRun(run);
-        fragments_for_bidi_runs.append(fragment);
+        fragments_for_bidi_runs.push_back(fragment);
       }
     }
     // TODO(kojii): bidi needs to find the logical last run.

@@ -268,13 +268,16 @@ CHAR-LIMIT guidelines:
       </message>
 
       <!-- Autofill preferences -->
-      <message name="IDS_PREFS_AUTOFILL" desc="Title for 'Autofill forms' settings, which control what personal data can be automatically filled into web page forms. [CHAR-LIMIT=32]">
+      <message name="IDS_PREFS_AUTOFILL_AND_PAYMENTS" desc="Title of Autofill and payments settings prefrences. [CHAR-LIMIT=32]">
+        Autofill and payments
+      </message>      
+      <message name="IDS_AUTOFILL_SWITCH" desc="Title for 'Autofill forms' switch preference, which controls whether personal data can be automatically filled into web page forms. [CHAR-LIMIT=32]">
         Autofill forms
       </message>
-      <message name="IDS_AUTOFILL_PROFILES_TITLE" desc="Header above the list of profiles (which contain the user's name, address, etc) that can be automatically filled into web page forms. [CHAR-LIMIT=32]">
+      <message name="IDS_AUTOFILL_PROFILES_TITLE" desc="Title of the preference to list profiles (which contain the user's name, address, etc) that can be automatically filled into web page forms. [CHAR-LIMIT=32]">
         Addresses
-      </message>
-      <message name="IDS_AUTOFILL_CREDIT_CARDS_TITLE" desc="Header above the list of the user's credit cards that can be automatically filled into web page forms. [CHAR-LIMIT=32]">
+      </message>       
+      <message name="IDS_AUTOFILL_CREDIT_CARDS_TITLE" desc="Title of the preference to list the user's credit cards that can be automatically filled into web page forms. [CHAR-LIMIT=32]">
         Credit cards
       </message>
       <message name="IDS_AUTOFILL_CREATE_PROFILE" desc="Button that allows the user to create a new profile (which contains the user's name, address, etc) that will be automatically filled into web page forms. [CHAR-LIMIT=32]">
@@ -542,6 +545,9 @@ Your Google account may have other forms of browsing history like searches and a
       </message>
       <message name="IDS_OPEN_CLEAR_BROWSING_DATA_DIALOG_BUTTON" desc="Title of the button that will open the clear browsing data dialog.">
         Clear browsing data…
+      </message>
+      <message name="IDS_CLEAR_BROWSING_DATA_BASIC_TAB_TITLE" desc="The title of the tab showing the basic clear browsing data options.">
+        Basic
       </message>
       <message name="IDS_ANDROID_HISTORY_NO_SYNCED_RESULTS" desc="The notification at the top of the history page indicating that it does not include visits from other devices.">
         Showing history from this device. <ph name="BEGIN_LINK">&lt;link&gt;</ph>Learn more<ph name="END_LINK">&lt;/link&gt;</ph>.

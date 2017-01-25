@@ -73,8 +73,11 @@ class DelegatingURLLoader final : public mojom::URLLoader {
 // wrapped client.
 class DelegatingURLLoaderClient final : public mojom::URLLoaderClient {
  public:
-  explicit DelegatingURLLoaderClient(mojom::URLLoaderClientPtr client)
-      : binding_(this), client_(std::move(client)) {}
+  explicit DelegatingURLLoaderClient(mojom::URLLoaderClientPtr client,
+                                     base::OnceClosure on_response)
+      : binding_(this),
+        client_(std::move(client)),
+        on_response_(std::move(on_response)) {}
   ~DelegatingURLLoaderClient() override {
     if (!completed_) {
       // Let the service worker know that the request has been canceled.
@@ -87,6 +90,11 @@ class DelegatingURLLoaderClient final : public mojom::URLLoaderClient {
   void OnDataDownloaded(int64_t data_length, int64_t encoded_length) override {
     client_->OnDataDownloaded(data_length, encoded_length);
   }
+  void OnUploadProgress(int64_t current_position,
+                        int64_t total_size,
+                        const base::Closure& ack_callback) override {
+    client_->OnUploadProgress(current_position, total_size, ack_callback);
+  }
   void OnReceiveCachedMetadata(const std::vector<uint8_t>& data) override {
     client_->OnReceiveCachedMetadata(data);
   }
@@ -95,8 +103,10 @@ class DelegatingURLLoaderClient final : public mojom::URLLoaderClient {
   }
   void OnReceiveResponse(
       const ResourceResponseHead& head,
-      mojom::DownloadedTempFilePtr downloaded_file) override {
+      mojom::DownloadedTempFileAssociatedPtrInfo downloaded_file) override {
     client_->OnReceiveResponse(head, std::move(downloaded_file));
+    DCHECK(on_response_);
+    std::move(on_response_).Run();
   }
   void OnReceiveRedirect(const net::RedirectInfo& redirect_info,
                          const ResourceResponseHead& head) override {
@@ -120,6 +130,7 @@ class DelegatingURLLoaderClient final : public mojom::URLLoaderClient {
  private:
   mojo::AssociatedBinding<mojom::URLLoaderClient> binding_;
   mojom::URLLoaderClientPtr client_;
+  base::OnceClosure on_response_;
   bool completed_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(DelegatingURLLoaderClient);
@@ -402,7 +413,8 @@ void ServiceWorkerFetchDispatcher::Complete(
 }
 
 bool ServiceWorkerFetchDispatcher::MaybeStartNavigationPreload(
-    net::URLRequest* original_request) {
+    net::URLRequest* original_request,
+    base::OnceClosure on_response) {
   if (resource_type_ != RESOURCE_TYPE_MAIN_FRAME &&
       resource_type_ != RESOURCE_TYPE_SUB_FRAME) {
     return false;
@@ -460,13 +472,16 @@ bool ServiceWorkerFetchDispatcher::MaybeStartNavigationPreload(
   request.render_frame_id = original_info->GetRenderFrameID();
   request.is_main_frame = original_info->IsMainFrame();
   request.parent_is_main_frame = original_info->ParentIsMainFrame();
+  request.enable_load_timing = original_info->is_load_timing_enabled();
+  request.report_raw_headers = original_info->ShouldReportRawHeaders();
 
   DCHECK(net::HttpUtil::IsValidHeaderValue(
       version_->navigation_preload_state().header));
   ServiceWorkerMetrics::RecordNavigationPreloadRequestHeaderSize(
       version_->navigation_preload_state().header.length());
   request.headers = "Service-Worker-Navigation-Preload: " +
-                    version_->navigation_preload_state().header;
+                    version_->navigation_preload_state().header + "\r\n" +
+                    original_request->extra_request_headers().ToString();
 
   const int request_id = ResourceDispatcherHostImpl::Get()->MakeRequestID();
   DCHECK_LT(request_id, -1);
@@ -476,7 +491,7 @@ bool ServiceWorkerFetchDispatcher::MaybeStartNavigationPreload(
   preload_handle_->url_loader_client_request =
       mojo::MakeRequest(&url_loader_client_ptr);
   auto url_loader_client = base::MakeUnique<DelegatingURLLoaderClient>(
-      std::move(url_loader_client_ptr));
+      std::move(url_loader_client_ptr), std::move(on_response));
   mojom::URLLoaderClientAssociatedPtrInfo url_loader_client_associated_ptr_info;
   url_loader_client->Bind(&url_loader_client_associated_ptr_info,
                           url_loader_factory.associated_group());

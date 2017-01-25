@@ -532,7 +532,7 @@
                   'ui/events/blink/'
     },
     'installer': {
-      'filepath': 'chrome/installer/',
+      'filepath': 'chrome/install(_static|er)/',
     },
     'installer_linux': {
       'filepath': 'chrome/installer/linux/',
@@ -830,8 +830,8 @@
                   'ios/chrome/browser/ui/reading_list',
     },
     'remoting': {
-      'filepath': 'remoting/' \
-                  '|testing/chromoting'
+      'filepath': '^remoting/' \
+                  '|^testing/chromoting'
     },
     'rlz_id': {
       'filepath' :'rlz/lib/machine_id.cc|'\
@@ -1512,7 +1512,8 @@
                  'rouslan+autofill@chromium.org',
                  'vabr+watchlistautofill@chromium.org',
                  'mathp+autofillwatch@chromium.org',
-                 'sebsg+autofillwatch@chromium.org'],
+                 'sebsg+autofillwatch@chromium.org',
+                 'rogerm+autofillwatch@chromium.org'],
     'background_sync': ['chasej+watch@chromium.org',
                         'iclelland+watch@chromium.org',
                         'jkarlin+watch@chromium.org',
@@ -1703,8 +1704,7 @@
     'blink_track': ['eric.carlson@apple.com',
                     'fs@opera.com',
                     'glenn@chromium.org',
-                    'silviapf@chromium.org',
-                    'vcarbune@chromium.org'],
+                    'silviapf@chromium.org'],
     'blink_vibration': ['mlamouri+watch-blink@chromium.org',
                         'mvanouwerkerk+watch@chromium.org'],
     'blink_viewport_interaction': ['kenneth.christiansen@gmail.com'],

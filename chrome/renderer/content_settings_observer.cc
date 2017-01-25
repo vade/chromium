@@ -216,8 +216,8 @@ bool ContentSettingsObserver::allowDatabase(const WebString& name,
   bool result = false;
   Send(new ChromeViewHostMsg_AllowDatabase(
       routing_id(), url::Origin(frame->getSecurityOrigin()).GetURL(),
-      url::Origin(frame->top()->getSecurityOrigin()).GetURL(), name,
-      display_name, &result));
+      url::Origin(frame->top()->getSecurityOrigin()).GetURL(), name.utf16(),
+      display_name.utf16(), &result));
   return result;
 }
 
@@ -275,7 +275,8 @@ bool ContentSettingsObserver::allowIndexedDB(const WebString& name,
   bool result = false;
   Send(new ChromeViewHostMsg_AllowIndexedDB(
       routing_id(), url::Origin(frame->getSecurityOrigin()).GetURL(),
-      url::Origin(frame->top()->getSecurityOrigin()).GetURL(), name, &result));
+      url::Origin(frame->top()->getSecurityOrigin()).GetURL(), name.utf16(),
+      &result));
   return result;
 }
 
@@ -481,8 +482,7 @@ bool ContentSettingsObserver::IsPlatformApp() {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 const extensions::Extension* ContentSettingsObserver::GetExtension(
     const WebSecurityOrigin& origin) const {
-  if (!base::EqualsASCII(base::StringPiece16(origin.protocol()),
-                         extensions::kExtensionScheme))
+  if (origin.protocol().ascii() != extensions::kExtensionScheme)
     return NULL;
 
   const std::string extension_id = origin.host().utf8().data();
@@ -502,38 +502,38 @@ bool ContentSettingsObserver::IsWhitelistedForContentSettings() const {
   if (render_frame()->IsFTPDirectoryListing())
     return true;
 
-  WebFrame* web_frame = render_frame()->GetWebFrame();
-  return IsWhitelistedForContentSettings(
-      web_frame->document().getSecurityOrigin(), web_frame->document().url());
+  const WebDocument& document = render_frame()->GetWebFrame()->document();
+  return IsWhitelistedForContentSettings(document.getSecurityOrigin(),
+                                         document.url());
 }
 
 bool ContentSettingsObserver::IsWhitelistedForContentSettings(
     const WebSecurityOrigin& origin,
-    const GURL& document_url) {
-  if (document_url == content::kUnreachableWebDataURL)
+    const WebURL& document_url) {
+  if (document_url.string() == content::kUnreachableWebDataURL)
     return true;
 
   if (origin.isUnique())
     return false;  // Uninitialized document?
 
-  base::string16 protocol = origin.protocol();
-  if (base::EqualsASCII(protocol, content::kChromeUIScheme))
+  blink::WebString protocol = origin.protocol();
+
+  if (protocol == content::kChromeUIScheme)
     return true;  // Browser UI elements should still work.
 
-  if (base::EqualsASCII(protocol, content::kChromeDevToolsScheme))
+  if (protocol == content::kChromeDevToolsScheme)
     return true;  // DevTools UI elements should still work.
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-  if (base::EqualsASCII(protocol, extensions::kExtensionScheme))
+  if (protocol == extensions::kExtensionScheme)
     return true;
 #endif
 
   // If the scheme is file:, an empty file name indicates a directory listing,
   // which requires JavaScript to function properly.
-  if (base::EqualsASCII(protocol, url::kFileScheme)) {
-    return document_url.SchemeIs(url::kFileScheme) &&
-           document_url.ExtractFileName().empty();
+  if (protocol == url::kFileScheme &&
+      document_url.protocolIs(url::kFileScheme)) {
+    return GURL(document_url).ExtractFileName().empty();
   }
-
   return false;
 }

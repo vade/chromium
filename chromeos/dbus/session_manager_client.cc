@@ -343,15 +343,19 @@ class SessionManagerClientImpl : public SessionManagerClient {
                    login_manager::kSessionManagerStopArcInstance, callback));
   }
 
-  void PrioritizeArcInstance(const ArcCallback& callback) override {
+  void SetArcCpuRestriction(
+      login_manager::ContainerCpuRestrictionState restriction_state,
+      const ArcCallback& callback) override {
     dbus::MethodCall method_call(
         login_manager::kSessionManagerInterface,
-        login_manager::kSessionManagerPrioritizeArcInstance);
+        login_manager::kSessionManagerSetArcCpuRestriction);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendUint32(restriction_state);
     session_manager_proxy_->CallMethod(
         &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
         base::Bind(&SessionManagerClientImpl::OnArcMethod,
                    weak_ptr_factory_.GetWeakPtr(),
-                   login_manager::kSessionManagerPrioritizeArcInstance,
+                   login_manager::kSessionManagerSetArcCpuRestriction,
                    callback));
   }
 
@@ -946,7 +950,9 @@ class SessionManagerClientStubImpl : public SessionManagerClient {
     callback.Run(StartArcInstanceResult::UNKNOWN_ERROR);
   }
 
-  void PrioritizeArcInstance(const ArcCallback& callback) override {
+  void SetArcCpuRestriction(
+      login_manager::ContainerCpuRestrictionState restriction_state,
+      const ArcCallback& callback) override {
     callback.Run(false);
   }
 
