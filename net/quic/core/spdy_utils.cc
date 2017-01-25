@@ -7,17 +7,16 @@
 #include <memory>
 #include <vector>
 
-#include "base/stl_util.h"
 #include "net/quic/platform/api/quic_logging.h"
+#include "net/quic/platform/api/quic_map_util.h"
 #include "net/quic/platform/api/quic_text_utils.h"
+#include "net/quic/platform/api/quic_url_utils.h"
 #include "net/spdy/spdy_flags.h"
 #include "net/spdy/spdy_frame_builder.h"
 #include "net/spdy/spdy_framer.h"
 #include "net/spdy/spdy_protocol.h"
-#include "url/gurl.h"
 
 using base::StringPiece;
-using base::ContainsKey;
 using std::string;
 
 namespace net {
@@ -43,7 +42,7 @@ bool SpdyUtils::ParseHeaders(const char* data,
     return false;  // Headers were invalid.
   }
 
-  if (!ContainsKey(*headers, "content-length")) {
+  if (!QuicContainsKey(*headers, "content-length")) {
     return true;
   }
 
@@ -144,7 +143,7 @@ bool SpdyUtils::CopyAndValidateHeaders(const QuicHeaderList& header_list,
     headers->AppendValueOrAddHeader(name, p.second);
   }
 
-  if (ContainsKey(*headers, "content-length") &&
+  if (QuicContainsKey(*headers, "content-length") &&
       !ExtractContentLengthFromHeaders(content_length, headers)) {
     return false;
   }
@@ -229,13 +228,15 @@ string SpdyUtils::GetUrlFromHeaderBlock(const SpdyHeaderBlock& headers) {
 
 // static
 string SpdyUtils::GetHostNameFromHeaderBlock(const SpdyHeaderBlock& headers) {
-  return GURL(GetUrlFromHeaderBlock(headers)).host();
+  // TODO(fayang): Consider just checking out the value of the ":authority" key
+  // in headers.
+  return QuicUrlUtils::HostName(GetUrlFromHeaderBlock(headers));
 }
 
 // static
 bool SpdyUtils::UrlIsValid(const SpdyHeaderBlock& headers) {
   string url(GetUrlFromHeaderBlock(headers));
-  return url != "" && GURL(url).is_valid();
+  return url != "" && QuicUrlUtils::IsValidUrl(url);
 }
 
 // static

@@ -544,6 +544,7 @@ NSString* const kWindowNameKey = @"windowName";
   currentItem->SetURL(url);
   currentItem->SetSerializedStateObject(stateObject);
   currentItem->SetHasStateBeenReplaced(true);
+  currentItem->SetPostData(nil);
   currentEntry.navigationItem->SetURL(url);
   // If the change is to a committed entry, notify interested parties.
   if (currentEntry != self.pendingEntry && _navigationManager)
@@ -733,6 +734,7 @@ NSString* const kWindowNameKey = @"windowName";
         &loaded_url, _browserState);
   }
   std::unique_ptr<web::NavigationItemImpl> item(new web::NavigationItemImpl());
+  item->SetOriginalRequestURL(loaded_url);
   item->SetURL(loaded_url);
   item->SetReferrer(referrer);
   item->SetTransitionType(transition);

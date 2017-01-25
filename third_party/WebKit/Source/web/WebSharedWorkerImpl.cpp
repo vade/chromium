@@ -132,7 +132,8 @@ void WebSharedWorkerImpl::initializeLoader() {
   // Browser process when the worker is created (similar to
   // RenderThread::OnCreateNewView).
   m_mainFrame = toWebLocalFrameImpl(
-      WebLocalFrame::create(WebTreeScopeType::Document, this));
+      WebLocalFrame::create(WebTreeScopeType::Document, this,
+                            Platform::current()->interfaceProvider(), nullptr));
   m_webView->setMainFrame(m_mainFrame.get());
   m_mainFrame->setDevToolsAgentClient(this);
 
@@ -200,10 +201,6 @@ int64_t WebSharedWorkerImpl::serviceWorkerID(WebDataSource& dataSource) {
   return m_networkProvider->serviceWorkerID(dataSource);
 }
 
-InterfaceProvider* WebSharedWorkerImpl::interfaceProvider() {
-  return Platform::current()->interfaceProvider();
-}
-
 void WebSharedWorkerImpl::sendProtocolMessage(int sessionId,
                                               int callId,
                                               const WebString& message,
@@ -253,8 +250,7 @@ void WebSharedWorkerImpl::reportConsoleMessage(MessageSource,
 void WebSharedWorkerImpl::postMessageToPageInspector(const String& message) {
   // The TaskType of Inspector tasks need to be Unthrottled because they need to
   // run even on a suspended page.
-  getParentFrameTaskRunners()
-      ->get(TaskType::Unthrottled)
+  m_parentFrameTaskRunners->get(TaskType::Unthrottled)
       ->postTask(
           BLINK_FROM_HERE,
           crossThreadBind(
@@ -267,13 +263,8 @@ void WebSharedWorkerImpl::postMessageToPageInspectorOnMainThread(
   m_workerInspectorProxy->dispatchMessageFromWorker(message);
 }
 
-ParentFrameTaskRunners* WebSharedWorkerImpl::getParentFrameTaskRunners() {
-  return m_parentFrameTaskRunners.get();
-}
-
 void WebSharedWorkerImpl::didCloseWorkerGlobalScope() {
-  getParentFrameTaskRunners()
-      ->get(TaskType::UnspecedTimer)
+  m_parentFrameTaskRunners->get(TaskType::UnspecedTimer)
       ->postTask(
           BLINK_FROM_HERE,
           crossThreadBind(
@@ -288,8 +279,7 @@ void WebSharedWorkerImpl::didCloseWorkerGlobalScopeOnMainThread() {
 }
 
 void WebSharedWorkerImpl::didTerminateWorkerThread() {
-  getParentFrameTaskRunners()
-      ->get(TaskType::UnspecedTimer)
+  m_parentFrameTaskRunners->get(TaskType::UnspecedTimer)
       ->postTask(BLINK_FROM_HERE,
                  crossThreadBind(
                      &WebSharedWorkerImpl::didTerminateWorkerThreadOnMainThread,
@@ -405,7 +395,7 @@ void WebSharedWorkerImpl::onScriptLoaderFinished() {
           m_mainScriptLoader->getReferrerPolicy(), starterOrigin, workerClients,
           m_mainScriptLoader->responseAddressSpace(),
           m_mainScriptLoader->originTrialTokens(), std::move(workerSettings),
-          WorkerV8Settings::Default());
+          WorkerV8Settings::Default(), false /* inspectorNetworkCapability */);
 
   // SharedWorker can sometimes run tasks that are initiated by/associated with
   // a document's frame but these documents can be from a different process. So
@@ -416,7 +406,8 @@ void WebSharedWorkerImpl::onScriptLoaderFinished() {
   m_parentFrameTaskRunners = ParentFrameTaskRunners::create(nullptr);
 
   m_loaderProxy = WorkerLoaderProxy::create(this);
-  m_workerThread = SharedWorkerThread::create(m_name, m_loaderProxy, *this);
+  m_workerThread = SharedWorkerThread::create(m_name, m_loaderProxy, *this,
+                                              m_parentFrameTaskRunners.get());
   InspectorInstrumentation::scriptImported(m_loadingDocument.get(),
                                            m_mainScriptLoader->identifier(),
                                            m_mainScriptLoader->script());

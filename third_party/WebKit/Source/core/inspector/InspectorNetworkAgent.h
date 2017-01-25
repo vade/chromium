@@ -36,7 +36,6 @@
 #include "core/inspector/InspectorBaseAgent.h"
 #include "core/inspector/InspectorPageAgent.h"
 #include "core/inspector/protocol/Network.h"
-#include "platform/Timer.h"
 #include "platform/heap/Handle.h"
 #include "wtf/text/WTFString.h"
 
@@ -82,20 +81,18 @@ class CORE_EXPORT InspectorNetworkAgent final
                        ResourceRequestBlockedReason);
   void didChangeResourcePriority(unsigned long identifier,
                                  ResourceLoadPriority);
-  void willSendRequest(LocalFrame*,
-                       unsigned long identifier,
+  void willSendRequest(unsigned long identifier,
                        DocumentLoader*,
                        ResourceRequest&,
                        const ResourceResponse& redirectResponse,
                        const FetchInitiatorInfo&);
   void markResourceAsCached(unsigned long identifier);
-  void didReceiveResourceResponse(LocalFrame*,
+  void didReceiveResourceResponse(ExecutionContext*,
                                   unsigned long identifier,
                                   DocumentLoader*,
                                   const ResourceResponse&,
                                   Resource*);
-  void didReceiveData(LocalFrame*,
-                      unsigned long identifier,
+  void didReceiveData(unsigned long identifier,
                       const char* data,
                       int dataLength);
   void didReceiveEncodedDataLength(LocalFrame*,
@@ -233,8 +230,7 @@ class CORE_EXPORT InspectorNetworkAgent final
   explicit InspectorNetworkAgent(InspectedFrames*);
 
   void enable(int totalBufferSize, int resourceBufferSize);
-  void willSendRequestInternal(LocalFrame*,
-                               unsigned long identifier,
+  void willSendRequestInternal(unsigned long identifier,
                                DocumentLoader*,
                                const ResourceRequest&,
                                const ResourceResponse& redirectResponse,
@@ -280,7 +276,8 @@ class CORE_EXPORT InspectorNetworkAgent final
 
   HeapHashSet<Member<XMLHttpRequest>> m_replayXHRs;
   HeapHashSet<Member<XMLHttpRequest>> m_replayXHRsToBeDeleted;
-  Timer<InspectorNetworkAgent> m_removeFinishedReplayXHRTimer;
+  std::unique_ptr<TaskRunnerTimer<InspectorNetworkAgent>>
+      m_removeFinishedReplayXHRTimer;
 };
 
 }  // namespace blink

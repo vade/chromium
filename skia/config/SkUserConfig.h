@@ -124,9 +124,6 @@
 #define SK_REF_CNT_MIXIN_INCLUDE "sk_ref_cnt_ext_release.h"
 #endif
 
-#define SK_SCALAR_IS_FLOAT
-#undef SK_SCALAR_IS_FIXED
-
 #define SK_MSCALAR_IS_FLOAT
 #undef SK_MSCALAR_IS_DOUBLE
 
@@ -225,6 +222,10 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 
 #ifndef    SK_SUPPORT_LEGACY_CLIPOP_EXOTIC_NAMES
 #   define SK_SUPPORT_LEGACY_CLIPOP_EXOTIC_NAMES
+#endif
+
+#ifndef    SK_SUPPORT_LEGACY_GETCLIPBOUNDS
+#   define SK_SUPPORT_LEGACY_GETCLIPBOUNDS
 #endif
 
 ///////////////////////// Imported from BUILD.gn and skia_common.gypi

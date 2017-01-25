@@ -112,9 +112,9 @@ void URLLoaderClientImpl::FlushDeferredMessages() {
 
 void URLLoaderClientImpl::OnReceiveResponse(
     const ResourceResponseHead& response_head,
-    mojom::DownloadedTempFilePtr downloaded_file) {
+    mojom::DownloadedTempFileAssociatedPtrInfo downloaded_file) {
   has_received_response_ = true;
-  downloaded_file_ = std::move(downloaded_file);
+  downloaded_file_.Bind(std::move(downloaded_file));
   Dispatch(ResourceMsg_ReceivedResponse(request_id_, response_head));
 }
 
@@ -176,6 +176,14 @@ void URLLoaderClientImpl::Dispatch(const IPC::Message& message) {
   } else {
     resource_dispatcher_->DispatchMessage(message);
   }
+}
+
+void URLLoaderClientImpl::OnUploadProgress(int64_t current_position,
+                                           int64_t total_size,
+                                           const base::Closure& ack_callback) {
+  Dispatch(
+      ResourceMsg_UploadProgress(request_id_, current_position, total_size));
+  ack_callback.Run();
 }
 
 }  // namespace content

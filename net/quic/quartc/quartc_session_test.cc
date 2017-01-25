@@ -21,6 +21,7 @@
 #include "net/quic/platform/impl/quic_chromium_clock.h"
 #include "net/quic/quartc/quartc_alarm_factory.h"
 #include "net/quic/quartc/quartc_packet_writer.h"
+#include "net/quic/test_tools/quic_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace net {
@@ -450,6 +451,7 @@ class QuartcSessionTest : public ::testing::Test,
   std::unique_ptr<QuicAlarmFactory> alarm_factory_;
   SimpleBufferAllocator buffer_allocator_;
   QuicChromiumClock clock_;
+  QuicFlagSaver flags_;  // Save/restore all QUIC flag values.
 
   std::unique_ptr<FakeTransportChannel> client_channel_;
   std::unique_ptr<FakeTransportChannel> server_channel_;
@@ -461,20 +463,20 @@ class QuartcSessionTest : public ::testing::Test,
   std::unique_ptr<QuartcSessionForTest> server_peer_;
 };
 
-TEST_F(QuartcSessionTest, StreamConnection) {
+TEST_F(QuartcSessionTest, DISABLED_StreamConnection) {
   CreateClientAndServerSessions();
   StartHandshake();
   TestStreamConnection();
 }
 
-TEST_F(QuartcSessionTest, ClientRejection) {
+TEST_F(QuartcSessionTest, DISABLED_ClientRejection) {
   CreateClientAndServerSessions(false /*client_handshake_success*/,
                                 true /*server_handshake_success*/);
   StartHandshake();
   TestDisconnectAfterFailedHandshake();
 }
 
-TEST_F(QuartcSessionTest, ServerRejection) {
+TEST_F(QuartcSessionTest, DISABLED_ServerRejection) {
   CreateClientAndServerSessions(true /*client_handshake_success*/,
                                 false /*server_handshake_success*/);
   StartHandshake();
@@ -488,7 +490,7 @@ TEST_F(QuartcSessionTest, CannotCreateDataStreamBeforeHandshake) {
   EXPECT_EQ(nullptr, client_peer_->CreateOutgoingStream(kDefaultStreamParam));
 }
 
-TEST_F(QuartcSessionTest, CloseQuartcStream) {
+TEST_F(QuartcSessionTest, DISABLED_CloseQuartcStream) {
   CreateClientAndServerSessions();
   StartHandshake();
   ASSERT_TRUE(client_peer_->IsCryptoHandshakeConfirmed() &&

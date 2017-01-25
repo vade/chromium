@@ -114,7 +114,7 @@
 #import "ios/chrome/browser/ui/sad_tab/sad_tab_view.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/browser/web/auto_reload_bridge.h"
-#import "ios/chrome/browser/web/blocked_popup_handler.h"
+#import "ios/chrome/browser/web/blocked_popup_tab_helper.h"
 #import "ios/chrome/browser/web/external_app_launcher.h"
 #include "ios/chrome/browser/web/network_activity_indicator_tab_helper.h"
 #import "ios/chrome/browser/web/passkit_dialog_provider.h"
@@ -137,7 +137,6 @@
 #include "ios/web/public/url_scheme_util.h"
 #include "ios/web/public/url_util.h"
 #include "ios/web/public/web_client.h"
-#import "ios/web/public/web_state/crw_web_user_interface_delegate.h"
 #import "ios/web/public/web_state/js/crw_js_injection_receiver.h"
 #import "ios/web/public/web_state/ui/crw_generic_content_view.h"
 #include "ios/web/public/web_state/web_state.h"
@@ -199,9 +198,7 @@ enum class RendererTerminationTabState {
 };
 }  // namespace
 
-@interface Tab ()<BlockedPopupHandlerDelegate,
-                  CRWWebStateObserver,
-                  CRWWebUserInterfaceDelegate,
+@interface Tab ()<CRWWebStateObserver,
                   FindInPageControllerDelegate,
                   ReaderModeControllerDelegate> {
   TabModel* parentTabModel_;               // weak
@@ -278,9 +275,6 @@ enum class RendererTerminationTabState {
   // Handles autofill.
   base::scoped_nsobject<AutofillController> autofillController_;
 
-  // The popup blocker to show blocked popup to the user.
-  std::unique_ptr<BlockedPopupHandler> popupHandler_;
-
   // Handles find on page.
   base::scoped_nsobject<FindInPageController> findInPageController_;
 
@@ -355,9 +349,6 @@ enum class RendererTerminationTabState {
 
 // Saves the current title to the history database.
 - (void)saveTitleToHistoryDB;
-
-// Returns a lazily instantiated popup handler.
-- (BlockedPopupHandler*)popupHandler;
 
 // Adds the current session entry to this history database.
 - (void)addCurrentEntryToHistoryDB;
@@ -542,7 +533,6 @@ void TabInfoBarObserver::OnInfoBarReplaced(infobars::InfoBar* old_infobar,
         new web::WebStateObserverBridge(webStateImpl_.get(), self));
 
     [self.webController setDelegate:self];
-    [self.webController setUIDelegate:self];
 
     NSString* sessionID = self.tabId;
     DCHECK(sessionID);
@@ -560,12 +550,14 @@ void TabInfoBarObserver::OnInfoBarReplaced(infobars::InfoBar* old_infobar,
     // IOSChromeSessionTabHelper comes first because it sets up the tab ID, and
     // other helpers may rely on that.
     IOSChromeSessionTabHelper::CreateForWebState(self.webState);
+
     NetworkActivityIndicatorTabHelper::CreateForWebState(self.webState,
                                                          self.tabId);
     IOSChromeSyncedTabDelegate::CreateForWebState(self.webState);
     InfoBarManagerImpl::CreateForWebState(self.webState);
     IOSSecurityStateTabHelper::CreateForWebState(self.webState);
     FormResubmissionTabHelper::CreateForWebState(self.webState);
+    BlockedPopupTabHelper::CreateForWebState(self.webState);
 
     if (reading_list::switches::IsReadingListEnabled()) {
       ReadingListModel* model =
@@ -1042,7 +1034,6 @@ void TabInfoBarObserver::OnInfoBarReplaced(infobars::InfoBar* old_infobar,
   if (browserState_->IsOffTheRecord())
     return;
 
-  CRWSessionEntry* sessionEntry = self.currentSessionEntry;
   web::NavigationItem* item = [self navigationManager]->GetVisibleItem();
 
   // Do not update the history db for back/forward navigations.
@@ -1069,20 +1060,20 @@ void TabInfoBarObserver::OnInfoBarReplaced(infobars::InfoBar* old_infobar,
 #endif
 
   history::RedirectList redirects;
-  if (item->GetURL() != sessionEntry.originalUrl) {
+  GURL originalURL = item->GetOriginalRequestURL();
+  if (item->GetURL() != originalURL) {
     // Simulate a valid redirect chain in case of URL that have been modified
     // in |CRWWebController finishHistoryNavigationFromEntry:|.
     const std::string& urlSpec = item->GetURL().spec();
     size_t urlSpecLength = urlSpec.size();
     if (item->GetTransitionType() & ui::PAGE_TRANSITION_CLIENT_REDIRECT ||
         (urlSpecLength && (urlSpec.at(urlSpecLength - 1) == '#') &&
-         !urlSpec.compare(0, urlSpecLength - 1,
-                          sessionEntry.originalUrl.spec()))) {
+         !urlSpec.compare(0, urlSpecLength - 1, originalURL.spec()))) {
       redirects.push_back(referrer.url);
     }
     // TODO(crbug.com/661670): the redirect chain is not constructed the same
     // way as upstream so this part needs to be revised.
-    redirects.push_back(sessionEntry.originalUrl);
+    redirects.push_back(originalURL);
     redirects.push_back(url);
   }
 
@@ -1235,7 +1226,6 @@ void TabInfoBarObserver::OnInfoBarReplaced(infobars::InfoBar* old_infobar,
   [snapshotManager_ removeImageWithSessionID:self.tabId];
   // Reset association with the webController.
   [self.webController setDelegate:nil];
-  [self.webController setUIDelegate:nil];
 
   webStateImpl_->ClearTransientContentView();
   // Terminate the network activity before notifying the parent model, because
@@ -1268,18 +1258,6 @@ void TabInfoBarObserver::OnInfoBarReplaced(infobars::InfoBar* old_infobar,
 - (void)dismissModals {
   [openInController_ disable];
   [self.webController dismissModals];
-}
-
-- (void)updateDesktopUserAgentForEntry:(CRWSessionEntry*)entry
-                             fromEntry:(CRWSessionEntry*)fromEntry {
-  web::NavigationItemImpl* item = entry.navigationItemImpl;
-  web::NavigationItemImpl* fromItem = fromEntry.navigationItemImpl;
-  if (!item || !fromItem)
-    return;
-  bool useDesktopUserAgent = item->IsOverridingUserAgent();
-  if (useDesktopUserAgent != fromItem->IsOverridingUserAgent()) {
-    [self.webController requirePageReconstruction];
-  }
 }
 
 - (CRWSessionEntry*)currentSessionEntry {
@@ -1397,9 +1375,6 @@ void TabInfoBarObserver::OnInfoBarReplaced(infobars::InfoBar* old_infobar,
 }
 
 - (void)webWillFinishHistoryNavigationFromEntry:(CRWSessionEntry*)fromEntry {
-  DCHECK(fromEntry);
-  [self updateDesktopUserAgentForEntry:self.currentSessionEntry
-                             fromEntry:fromEntry];
   [parentTabModel_ notifyTabChanged:self];
 }
 
@@ -1598,7 +1573,7 @@ void TabInfoBarObserver::OnInfoBarReplaced(infobars::InfoBar* old_infobar,
     return;
 
   // |originalUrl| will be empty if a page was open by DOM.
-  GURL reloadURL(lastUserEntry.originalUrl);
+  GURL reloadURL(lastUserEntry.navigationItem->GetOriginalRequestURL());
   if (reloadURL.is_empty()) {
     DCHECK(sessionController.openedByDOM);
     reloadURL = [lastUserEntry navigationItem]->GetVirtualURL();
@@ -1618,14 +1593,6 @@ void TabInfoBarObserver::OnInfoBarReplaced(infobars::InfoBar* old_infobar,
 - (void)setSnapshotOverlayProvider:
     (id<SnapshotOverlayProvider>)snapshotOverlayProvider {
   snapshotOverlayProvider_.reset(snapshotOverlayProvider);
-}
-
-- (BlockedPopupHandler*)popupHandler {
-  if (!popupHandler_.get()) {
-    popupHandler_.reset(new BlockedPopupHandler(self.browserState));
-    popupHandler_->SetDelegate(self);
-  }
-  return popupHandler_.get();
 }
 
 - (void)evaluateU2FResultFromURL:(const GURL&)URL {
@@ -1667,26 +1634,6 @@ void TabInfoBarObserver::OnInfoBarReplaced(infobars::InfoBar* old_infobar,
                            atIndex:TabModelConstants::kTabPositionAutomatically
                       inBackground:NO];
   return tab.webController;
-}
-
-- (void)webController:(CRWWebController*)webController
-    onFormResubmissionForRequest:(NSURLRequest*)request
-                   continueBlock:(ProceduralBlock)continueBlock
-                     cancelBlock:(ProceduralBlock)cancelBlock {
-  // Display the action sheet with the arrow pointing at the top center of the
-  // web contents.
-  CGPoint dialogLocation =
-      CGPointMake(CGRectGetMidX(webController.view.frame),
-                  CGRectGetMinY(webController.view.frame) +
-                      [self.tabHeadersDelegate headerHeightForTab:self]);
-  auto helper = FormResubmissionTabHelper::FromWebState(webController.webState);
-  helper->PresentFormResubmissionDialog(dialogLocation,
-                                        base::BindBlock(^(bool shouldContinue) {
-                                          if (shouldContinue)
-                                            continueBlock();
-                                          else
-                                            cancelBlock();
-                                        }));
 }
 
 // The web page wants to close its own window.
@@ -1735,6 +1682,7 @@ void TabInfoBarObserver::OnInfoBarReplaced(infobars::InfoBar* old_infobar,
 
 - (void)webState:(web::WebState*)webState
     didStartProvisionalNavigationForURL:(const GURL&)URL {
+  [self.dialogDelegate cancelDialogForTab:self];
   [parentTabModel_ notifyTabChanged:self];
   [openInController_ disable];
   [[NSNotificationCenter defaultCenter]
@@ -2077,7 +2025,8 @@ void TabInfoBarObserver::OnInfoBarReplaced(infobars::InfoBar* old_infobar,
 
 - (void)webController:(CRWWebController*)webController
         didBlockPopup:(const web::BlockedPopupInfo&)blockedPopupInfo {
-  [self popupHandler]->HandlePopup(blockedPopupInfo);
+  BlockedPopupTabHelper::FromWebState(self.webState)
+      ->HandlePopup(blockedPopupInfo);
 }
 
 - (CGFloat)headerHeightForWebController:(CRWWebController*)webController {
@@ -2148,17 +2097,12 @@ void TabInfoBarObserver::OnInfoBarReplaced(infobars::InfoBar* old_infobar,
   // work when the app becomes active because there is nothing to trigger
   // a view redisplay in that scenario.
   requireReloadAfterBecomingActive_ = visible_ && applicationIsBackgrounded;
+  [self.dialogDelegate cancelDialogForTab:self];
 }
 
 - (void)webController:(CRWWebController*)webController
     didLoadPassKitObject:(NSData*)data {
   [self.passKitDialogProvider presentPassKitDialog:data];
-}
-
-#pragma mark - WebUserInterfaceDelegate methods.
-
-- (void)cancelDialogsForWebController:(CRWWebController*)webController {
-  [self.dialogDelegate cancelDialogForTab:self];
 }
 
 #pragma mark - PrerenderDelegate

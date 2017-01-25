@@ -12,11 +12,11 @@
 namespace blink {
 
 class ComputedStyle;
+class LayoutObject;
 class NGBreakToken;
 class NGConstraintSpace;
 class NGFragmentBuilder;
 class NGInlineNode;
-class NGLineBuilder;
 
 // A class for inline layout (e.g. a anonymous block with inline-level children
 // only).
@@ -27,12 +27,14 @@ class NGLineBuilder;
 class CORE_EXPORT NGInlineLayoutAlgorithm : public NGLayoutAlgorithm {
  public:
   // Default constructor.
+  // @param layout_object The LayoutObject associated with this anonymous block.
   // @param style Style reference of the block that is being laid out.
   // @param first_child Our first child; the algorithm will use its NextSibling
   //                    method to access all the children.
   // @param space The constraint space which the algorithm should generate a
   //              fragment within.
-  NGInlineLayoutAlgorithm(PassRefPtr<const ComputedStyle>,
+  NGInlineLayoutAlgorithm(LayoutObject* layout_object,
+                          PassRefPtr<const ComputedStyle> style,
                           NGInlineNode* first_child,
                           NGConstraintSpace* space,
                           NGBreakToken* break_token = nullptr);
@@ -45,17 +47,13 @@ class CORE_EXPORT NGInlineLayoutAlgorithm : public NGLayoutAlgorithm {
   // Read-only Getters.
   const ComputedStyle& Style() const { return *style_; }
 
-  bool LayoutCurrentChild();
-  NGConstraintSpace* CreateConstraintSpaceForCurrentChild() const;
+  NGConstraintSpace* CreateConstraintSpaceForChild(const NGInlineNode&) const;
 
   RefPtr<const ComputedStyle> style_;
   Member<NGInlineNode> first_child_;
   Member<NGConstraintSpace> constraint_space_;
   Member<NGBreakToken> break_token_;
   Member<NGFragmentBuilder> builder_;
-  Member<NGConstraintSpace> space_for_current_child_;
-  Member<NGInlineNode> current_child_;
-  Member<NGLineBuilder> line_builder_;
 };
 
 }  // namespace blink

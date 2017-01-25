@@ -161,7 +161,10 @@ class ChannelAssociatedGroupController
     return CreateScopedInterfaceEndpointHandle(id, true);
   }
 
-  void CloseEndpointHandle(mojo::InterfaceId id, bool is_local) override {
+  void CloseEndpointHandle(
+      mojo::InterfaceId id,
+      bool is_local,
+      const base::Optional<mojo::DisconnectReason>& reason) override {
     if (!mojo::IsValidInterfaceId(id))
       return;
 
@@ -182,8 +185,8 @@ class ChannelAssociatedGroupController
     MarkClosedAndMaybeRemove(endpoint);
 
     base::AutoUnlock unlocker(lock_);
-    if (!mojo::IsMasterInterfaceId(id))
-      control_message_proxy_.NotifyPeerEndpointClosed(id);
+    if (!mojo::IsMasterInterfaceId(id) || reason)
+      control_message_proxy_.NotifyPeerEndpointClosed(id, reason);
   }
 
   mojo::InterfaceEndpointController* AttachEndpointClient(
@@ -262,6 +265,15 @@ class ChannelAssociatedGroupController
     void set_peer_closed() {
       controller_->lock_.AssertAcquired();
       peer_closed_ = true;
+    }
+
+    const base::Optional<mojo::DisconnectReason>& disconnect_reason() const {
+      return disconnect_reason_;
+    }
+
+    void set_disconnect_reason(
+        const base::Optional<mojo::DisconnectReason>& disconnect_reason) {
+      disconnect_reason_ = disconnect_reason;
     }
 
     base::SingleThreadTaskRunner* task_runner() const {
@@ -436,6 +448,7 @@ class ChannelAssociatedGroupController
 
     bool closed_ = false;
     bool peer_closed_ = false;
+    base::Optional<mojo::DisconnectReason> disconnect_reason_;
     mojo::InterfaceEndpointClient* client_ = nullptr;
     scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
     std::unique_ptr<mojo::SyncHandleWatcher> sync_watcher_;
@@ -471,8 +484,17 @@ class ChannelAssociatedGroupController
       Endpoint* endpoint = iter->second.get();
       ++iter;
 
-      DCHECK(endpoint->closed());
-      MarkPeerClosedAndMaybeRemove(endpoint);
+      if (!endpoint->closed()) {
+        // This happens when a NotifyPeerEndpointClosed message been received,
+        // but (1) the interface ID hasn't been used to create local endpoint
+        // handle; and (2) a NotifyEndpointClosedBeforeSent hasn't been
+        // received.
+        DCHECK(!endpoint->client());
+        DCHECK(endpoint->peer_closed());
+        MarkClosedAndMaybeRemove(endpoint);
+      } else {
+        MarkPeerClosedAndMaybeRemove(endpoint);
+      }
     }
 
     DCHECK(endpoints_.empty());
@@ -538,9 +560,11 @@ class ChannelAssociatedGroupController
     DCHECK(endpoint->task_runner() && endpoint->client());
     if (endpoint->task_runner()->BelongsToCurrentThread() && !force_async) {
       mojo::InterfaceEndpointClient* client = endpoint->client();
+      base::Optional<mojo::DisconnectReason> reason(
+          endpoint->disconnect_reason());
 
       base::AutoUnlock unlocker(lock_);
-      client->NotifyError();
+      client->NotifyError(reason);
     } else {
       endpoint->task_runner()->PostTask(
           FROM_HERE,
@@ -721,15 +745,18 @@ class ChannelAssociatedGroupController
   }
 
   // mojo::PipeControlMessageHandlerDelegate:
-  bool OnPeerAssociatedEndpointClosed(mojo::InterfaceId id) override {
+  bool OnPeerAssociatedEndpointClosed(
+      mojo::InterfaceId id,
+      const base::Optional<mojo::DisconnectReason>& reason) override {
     DCHECK(thread_checker_.CalledOnValidThread());
 
-    if (mojo::IsMasterInterfaceId(id))
-      return false;
+    DCHECK(!mojo::IsMasterInterfaceId(id) || reason);
 
     scoped_refptr<ChannelAssociatedGroupController> keepalive(this);
     base::AutoLock locker(lock_);
     scoped_refptr<Endpoint> endpoint = FindOrInsertEndpoint(id, nullptr);
+    if (reason)
+      endpoint->set_disconnect_reason(reason);
     if (!endpoint->peer_closed()) {
       if (endpoint->client())
         NotifyEndpointOfError(endpoint.get(), false /* force_async */);
@@ -752,7 +779,7 @@ class ChannelAssociatedGroupController
       MarkClosedAndMaybeRemove(endpoint);
     }
 
-    control_message_proxy_.NotifyPeerEndpointClosed(id);
+    control_message_proxy_.NotifyPeerEndpointClosed(id, base::nullopt);
     return true;
   }
 

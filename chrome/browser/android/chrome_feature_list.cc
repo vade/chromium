@@ -57,8 +57,10 @@ const base::Feature* kFeaturesExposedToJava[] = {
     &kPhysicalWebIgnoreOtherClientsFeature,
     &kSpecialLocaleFeature,
     &kSpecialLocaleWrapper,
+    &kTabsInCBD,
     &kTabReparenting,
     &kWebPaymentsModifiers,
+    &kWebPaymentsSingleAppUiSkip,
     &ntp_snippets::kContentSuggestionsFeature,
     &ntp_snippets::kIncreasedVisibility,
     &ntp_snippets::kForeignSessionsSuggestionsFeature,
@@ -133,6 +135,8 @@ const base::Feature kSpecialLocaleFeature{"SpecialLocale",
 const base::Feature kSpecialLocaleWrapper{"SpecialLocaleWrapper",
                                           base::FEATURE_ENABLED_BY_DEFAULT};
 
+const base::Feature kTabsInCBD{"TabsInCBD", base::FEATURE_DISABLED_BY_DEFAULT};
+
 const base::Feature kTabReparenting{"TabReparenting",
                                     base::FEATURE_ENABLED_BY_DEFAULT};
 
@@ -141,6 +145,9 @@ const base::Feature kUserMediaScreenCapturing{
 
 const base::Feature kWebPaymentsModifiers{"WebPaymentsModifiers",
                                           base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kWebPaymentsSingleAppUiSkip{
+    "WebPaymentsSingleAppUiSkip", base::FEATURE_DISABLED_BY_DEFAULT};
 
 static jboolean IsEnabled(JNIEnv* env,
                           const JavaParamRef<jclass>& clazz,

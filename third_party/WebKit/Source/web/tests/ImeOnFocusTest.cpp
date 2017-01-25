@@ -28,7 +28,9 @@ class ImeRequestTrackingWebViewClient
   ImeRequestTrackingWebViewClient() : m_virtualKeyboardRequestCount(0) {}
 
   // WebWidgetClient methods
-  void showVirtualKeyboard() override { ++m_virtualKeyboardRequestCount; }
+  void showVirtualKeyboardOnElementFocus() override {
+    ++m_virtualKeyboardRequestCount;
+  }
 
   // Local methds
   void reset() { m_virtualKeyboardRequestCount = 0; }
@@ -76,7 +78,7 @@ void ImeOnFocusTest::sendGestureTap(WebView* webView, IntPoint clientPoint) {
   webGestureEvent.data.tap.width = 10;
   webGestureEvent.data.tap.height = 10;
 
-  webView->handleInputEvent(webGestureEvent);
+  webView->handleInputEvent(WebCoalescedInputEvent(webGestureEvent));
   runPendingTasks();
 }
 

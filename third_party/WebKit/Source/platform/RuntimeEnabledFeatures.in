@@ -143,7 +143,7 @@ MediaCaptureFromCanvas status=stable
 MediaCaptureFromVideo status=experimental
 MediaConstraints status=stable
 MediaDocumentDownloadButton
-MediaGetSettings status=test
+MediaGetSettings status=experimental
 // MediaSession is enabled by default on Android only.
 MediaSession status=test
 MediaSourceExperimental status=experimental
@@ -225,7 +225,7 @@ ShadowPiercingDescendantCombinator status=experimental
 ShapeDetection status=experimental
 SharedArrayBuffer
 SharedWorker status=stable
-SlimmingPaintInvalidation implied_by=SlimmingPaintV2, status=experimental
+SlimmingPaintInvalidation implied_by=SlimmingPaintV2, status=stable
 SlimmingPaintV2
 SlimmingPaintStrictCullRectClipping
 // Used as argument in attribute of stable-release functions/interfaces where
@@ -249,7 +249,6 @@ TopNavWithUserActivationInSandbox status=experimental
 // touchscreen) in ApplyWebPreferences. "Touch events" themselves are always
 // enabled since they're a feature always supported by Chrome.
 TouchEventFeatureDetection status=stable
-TraceWrappables status=stable
 TrueColorRendering status=experimental
 TrustedEventsDefaultAction status=stable
 WebAnimationsAPI status=experimental

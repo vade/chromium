@@ -148,10 +148,6 @@ class WebGLConformanceExpectations(GpuTestExpectations):
               'copy-tex-image-and-sub-image-2d.html',
               ['win7', 'intel', 'no_passthrough'])
 
-    # Win / Intel failures
-    self.Skip('conformance/uniforms/gl-uniform-arrays.html',
-        ['win', 'debug', 'intel'], bug=678382)
-
     # Win / Intel HD 530 failures
     self.Fail('conformance/canvas/to-data-url-test.html',
         ['win', 'intel'], bug=680797)
@@ -382,15 +378,13 @@ class WebGLConformanceExpectations(GpuTestExpectations):
     self.Fail('conformance/textures/misc/tex-input-validation.html',
         ['mac', ('nvidia', 0xfe9)], bug=635081)
 
-    # Mac Intel
-
-    # ASAN only
+    # Mac ASAN only
     self.Fail(
       'conformance/more/functions/copyTexImage2D.html',
-      ['mac', 'intel', 'asan'], bug=681641)
+      ['mac', 'asan'], bug=681641)
     self.Fail(
       'conformance/more/functions/copyTexSubImage2D.html',
-      ['mac', 'intel', 'asan'], bug=681641)
+      ['mac', 'asan'], bug=681641)
 
     # Linux failures
     self.Flaky('conformance/textures/video/' +
@@ -459,8 +453,6 @@ class WebGLConformanceExpectations(GpuTestExpectations):
     # See https://bugs.freedesktop.org/show_bug.cgi?id=94477
     self.Skip('conformance/glsl/bugs/temp-expressions-should-not-crash.html',
         ['linux', 'intel'], bug=540543)  # GPU timeout
-    self.Skip('conformance/uniforms/gl-uniform-arrays.html',
-        ['linux', 'debug', 'intel'], bug=603906)
     # Fixed on Mesa 12.0
     self.Fail('conformance/rendering/clipping-wide-points.html',
         ['linux', 'intel'], bug=642822)

@@ -416,8 +416,12 @@
             {
                 "name": "captureScreenshot",
                 "description": "Capture page screenshot.",
+                "parameters": [
+                    { "name": "format", "type": "string", "optional": true, "enum": ["jpeg", "png"], "description": "Image compression format (defaults to png)." },
+                    { "name": "quality", "type": "integer", "optional": true, "description": "Compression quality from range [0..100] (jpeg only)." }
+                ],
                 "returns": [
-                    { "name": "data", "type": "string", "description": "Base64-encoded image data (PNG)." }
+                    { "name": "data", "type": "string", "description": "Base64-encoded image data." }
                 ],
                 "experimental": true
             },
@@ -1110,7 +1114,7 @@
                 "type": "object",
                 "description": "Information about the request initiator.",
                 "properties": [
-                    { "name": "type", "type": "string", "enum": ["parser", "script", "other"], "description": "Type of this initiator." },
+                    { "name": "type", "type": "string", "enum": ["parser", "script", "preload", "other"], "description": "Type of this initiator." },
                     { "name": "stack", "$ref": "Runtime.StackTrace", "optional": true, "description": "Initiator JavaScript stack trace, set for Script only." },
                     { "name": "url", "type": "string", "optional": true, "description": "Initiator URL, set for Parser type only." },
                     { "name": "lineNumber", "type": "number", "optional": true, "description": "Initiator line number, set for Parser type only (0-based)." }
@@ -1229,6 +1233,9 @@
             },
             {
                 "name": "getCookies",
+                "parameters": [
+                    { "name": "urls", "type": "array", "items": { "type": "string" }, "optional": true, "description": "The list of URLs for which applicable cookies will be fetched" }
+                ],
                 "returns": [
                     { "name": "cookies", "type": "array", "items": { "$ref": "Cookie" }, "description": "Array of cookie objects." }
                 ],

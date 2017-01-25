@@ -299,7 +299,7 @@ class CONTENT_EXPORT RenderWidget
                      const blink::WebFloatSize& accumulatedOverscroll,
                      const blink::WebFloatPoint& position,
                      const blink::WebFloatSize& velocity) override;
-  void showVirtualKeyboard() override;
+  void showVirtualKeyboardOnElementFocus() override;
   void convertViewportToWindow(blink::WebRect* rect) override;
   void convertWindowToViewport(blink::WebFloatRect* rect) override;
   bool requestPointerLock() override;
@@ -474,9 +474,11 @@ class CONTENT_EXPORT RenderWidget
 #endif
 
   // RenderWidget IPC message handlers
-  void OnHandleInputEvent(const blink::WebInputEvent* event,
-                          const ui::LatencyInfo& latency_info,
-                          InputEventDispatchType dispatch_type);
+  void OnHandleInputEvent(
+      const blink::WebInputEvent* event,
+      const std::vector<const blink::WebInputEvent*>& coalesced_events,
+      const ui::LatencyInfo& latency_info,
+      InputEventDispatchType dispatch_type);
   void OnCursorVisibilityChange(bool is_visible);
   void OnMouseCaptureLost();
   void OnSetEditCommandsForNextKeyEvent(const EditCommands& edit_commands);

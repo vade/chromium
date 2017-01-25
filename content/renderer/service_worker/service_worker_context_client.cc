@@ -271,9 +271,9 @@ class ServiceWorkerContextClient::NavigationPreloadRequest final
 
   void OnReceiveResponse(
       const ResourceResponseHead& response_head,
-      mojom::DownloadedTempFilePtr downloaded_file) override {
+      mojom::DownloadedTempFileAssociatedPtrInfo downloaded_file) override {
     DCHECK(!response_);
-    DCHECK(!downloaded_file);
+    DCHECK(!downloaded_file.is_valid());
     response_ = base::MakeUnique<blink::WebURLResponse>();
     // TODO(horo): Set report_security_info to true when DevTools is attached.
     const bool report_security_info = false;
@@ -286,7 +286,7 @@ class ServiceWorkerContextClient::NavigationPreloadRequest final
                          const ResourceResponseHead& response_head) override {
     // This will delete |this|.
     ReportErrorToClient(
-        "Service Worker navigation preload doesn't suport redirect.");
+        "Service Worker navigation preload doesn't support redirects.");
   }
 
   void OnDataDownloaded(int64_t data_length,
@@ -294,10 +294,16 @@ class ServiceWorkerContextClient::NavigationPreloadRequest final
     NOTREACHED();
   }
 
+  void OnUploadProgress(int64_t current_position,
+                        int64_t total_size,
+                        const base::Closure& ack_callback) override {
+    NOTREACHED();
+  }
+
   void OnReceiveCachedMetadata(const std::vector<uint8_t>& data) override {}
 
   void OnTransferSizeUpdated(int32_t transfer_size_diff) override {
-    NOTREACHED();
+    // TODO(horo): Send this transfer size update notification to DevTools.
   }
 
   void OnStartLoadingResponseBody(
@@ -319,7 +325,8 @@ class ServiceWorkerContextClient::NavigationPreloadRequest final
     if (!client)
       return;
     // This will delete |this|.
-    client->OnNavigationPreloadComplete(fetch_event_id_);
+    client->OnNavigationPreloadComplete(fetch_event_id_,
+                                        status.encoded_data_length);
   }
 
  private:
@@ -952,11 +959,12 @@ void ServiceWorkerContextClient::DispatchFetchEvent(
     const ServiceWorkerFetchRequest& request,
     mojom::FetchEventPreloadHandlePtr preload_handle,
     const DispatchFetchEventCallback& callback) {
-  std::unique_ptr<NavigationPreloadRequest> preload_request =
-      preload_handle
-          ? base::MakeUnique<NavigationPreloadRequest>(
-                fetch_event_id, request.url, std::move(preload_handle))
-          : nullptr;
+  std::unique_ptr<NavigationPreloadRequest> preload_request;
+  if (preload_handle) {
+    proxy_->onNavigationPreloadSent(fetch_event_id, request.url);
+    preload_request = base::MakeUnique<NavigationPreloadRequest>(
+        fetch_event_id, request.url, std::move(preload_handle));
+  }
   const bool navigation_preload_sent = !!preload_request;
   blink::WebServiceWorkerRequest webRequest;
   TRACE_EVENT0("ServiceWorker",
@@ -1245,7 +1253,9 @@ void ServiceWorkerContextClient::OnNavigationPreloadError(
 }
 
 void ServiceWorkerContextClient::OnNavigationPreloadComplete(
-    int fetch_event_id) {
+    int fetch_event_id,
+    int64_t encoded_data_length) {
+  proxy_->onNavigationPreloadCompleted(fetch_event_id, encoded_data_length);
   context_->preload_requests.Remove(fetch_event_id);
 }
 

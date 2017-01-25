@@ -41,6 +41,7 @@
 #include "core/css/parser/CSSPropertyParserHelpers.h"
 #include "core/css/parser/CSSVariableParser.h"
 #include "core/css/parser/FontVariantLigaturesParser.h"
+#include "core/css/parser/FontVariantNumericParser.h"
 #include "core/css/properties/CSSPropertyAlignmentUtils.h"
 #include "core/css/properties/CSSPropertyColumnUtils.h"
 #include "core/css/properties/CSSPropertyDescriptor.h"
@@ -338,87 +339,6 @@ static CSSValue* consumeWebkitHighlight(CSSParserTokenRange& range) {
   if (range.peek().id() == CSSValueNone)
     return consumeIdent(range);
   return consumeString(range);
-}
-
-class FontVariantNumericParser {
-  STACK_ALLOCATED();
-
- public:
-  FontVariantNumericParser()
-      : m_sawNumericFigureValue(false),
-        m_sawNumericSpacingValue(false),
-        m_sawNumericFractionValue(false),
-        m_sawOrdinalValue(false),
-        m_sawSlashedZeroValue(false),
-        m_result(CSSValueList::createSpaceSeparated()) {}
-
-  enum class ParseResult { ConsumedValue, DisallowedValue, UnknownValue };
-
-  ParseResult consumeNumeric(CSSParserTokenRange& range) {
-    CSSValueID valueID = range.peek().id();
-    switch (valueID) {
-      case CSSValueLiningNums:
-      case CSSValueOldstyleNums:
-        if (m_sawNumericFigureValue)
-          return ParseResult::DisallowedValue;
-        m_sawNumericFigureValue = true;
-        break;
-      case CSSValueProportionalNums:
-      case CSSValueTabularNums:
-        if (m_sawNumericSpacingValue)
-          return ParseResult::DisallowedValue;
-        m_sawNumericSpacingValue = true;
-        break;
-      case CSSValueDiagonalFractions:
-      case CSSValueStackedFractions:
-        if (m_sawNumericFractionValue)
-          return ParseResult::DisallowedValue;
-        m_sawNumericFractionValue = true;
-        break;
-      case CSSValueOrdinal:
-        if (m_sawOrdinalValue)
-          return ParseResult::DisallowedValue;
-        m_sawOrdinalValue = true;
-        break;
-      case CSSValueSlashedZero:
-        if (m_sawSlashedZeroValue)
-          return ParseResult::DisallowedValue;
-        m_sawSlashedZeroValue = true;
-        break;
-      default:
-        return ParseResult::UnknownValue;
-    }
-    m_result->append(*consumeIdent(range));
-    return ParseResult::ConsumedValue;
-  }
-
-  CSSValue* finalizeValue() {
-    if (!m_result->length())
-      return CSSIdentifierValue::create(CSSValueNormal);
-    return m_result.release();
-  }
-
- private:
-  bool m_sawNumericFigureValue;
-  bool m_sawNumericSpacingValue;
-  bool m_sawNumericFractionValue;
-  bool m_sawOrdinalValue;
-  bool m_sawSlashedZeroValue;
-  Member<CSSValueList> m_result;
-};
-
-static CSSValue* consumeFontVariantNumeric(CSSParserTokenRange& range) {
-  if (range.peek().id() == CSSValueNormal)
-    return consumeIdent(range);
-
-  FontVariantNumericParser numericParser;
-  do {
-    if (numericParser.consumeNumeric(range) !=
-        FontVariantNumericParser::ParseResult::ConsumedValue)
-      return nullptr;
-  } while (!range.atEnd());
-
-  return numericParser.finalizeValue();
 }
 
 static CSSIdentifierValue* consumeFontVariantCSS21(CSSParserTokenRange& range) {
@@ -1243,13 +1163,6 @@ static CSSValue* consumeBaselineShift(CSSParserTokenRange& range) {
   return consumeLengthOrPercent(range, SVGAttributeMode, ValueRangeAll);
 }
 
-static CSSValue* consumeRxOrRy(CSSParserTokenRange& range) {
-  if (range.peek().id() == CSSValueAuto)
-    return consumeIdent(range);
-  return consumeLengthOrPercent(range, SVGAttributeMode, ValueRangeAll,
-                                UnitlessQuirk::Forbid);
-}
-
 static CSSValue* consumePerspective(CSSParserTokenRange& range,
                                     const CSSParserContext* context,
                                     CSSPropertyID unresolvedProperty) {
@@ -1518,17 +1431,6 @@ static CSSValue* consumeReflect(CSSParserTokenRange& range,
       return nullptr;
   }
   return CSSReflectValue::create(direction, offset, mask);
-}
-
-static CSSValue* consumeImageOrientation(CSSParserTokenRange& range) {
-  if (range.peek().id() == CSSValueFromImage)
-    return consumeIdent(range);
-  if (range.peek().type() != NumberToken) {
-    CSSPrimitiveValue* angle = consumeAngle(range);
-    if (angle && angle->getDoubleValue() == 0)
-      return angle;
-  }
-  return nullptr;
 }
 
 static CSSValue* consumeBackgroundBlendMode(CSSParserTokenRange& range) {
@@ -2183,8 +2085,6 @@ const CSSValue* CSSPropertyParser::parseSingleValue(
   switch (property) {
     case CSSPropertyWebkitHighlight:
       return consumeWebkitHighlight(m_range);
-    case CSSPropertyFontVariantNumeric:
-      return consumeFontVariantNumeric(m_range);
     case CSSPropertyFontFeatureSettings:
       return consumeFontFeatureSettings(m_range);
     case CSSPropertyFontFamily:
@@ -2206,12 +2106,6 @@ const CSSValue* CSSPropertyParser::parseSingleValue(
     case CSSPropertyMaxHeight:
       return CSSPropertyLengthUtils::consumeMaxWidthOrHeight(
           m_range, m_context, UnitlessQuirk::Allow);
-    case CSSPropertyMaxInlineSize:
-    case CSSPropertyMaxBlockSize:
-    case CSSPropertyWebkitMaxLogicalWidth:
-    case CSSPropertyWebkitMaxLogicalHeight:
-      return CSSPropertyLengthUtils::consumeMaxWidthOrHeight(m_range,
-                                                             m_context);
     case CSSPropertyMinWidth:
     case CSSPropertyMinHeight:
     case CSSPropertyWidth:
@@ -2277,19 +2171,6 @@ const CSSValue* CSSPropertyParser::parseSingleValue(
     case CSSPropertyOrphans:
     case CSSPropertyWidows:
       return consumePositiveInteger(m_range);
-    case CSSPropertyWebkitTextFillColor:
-    case CSSPropertyWebkitTapHighlightColor:
-    case CSSPropertyWebkitTextEmphasisColor:
-    case CSSPropertyWebkitBorderStartColor:
-    case CSSPropertyWebkitBorderEndColor:
-    case CSSPropertyWebkitBorderBeforeColor:
-    case CSSPropertyWebkitBorderAfterColor:
-    case CSSPropertyWebkitTextStrokeColor:
-    case CSSPropertyStopColor:
-    case CSSPropertyFloodColor:
-    case CSSPropertyLightingColor:
-    case CSSPropertyColumnRuleColor:
-      return consumeColor(m_range, m_context->mode());
     case CSSPropertyColor:
     case CSSPropertyBackgroundColor:
       return consumeColor(m_range, m_context->mode(), inQuirksMode());
@@ -2368,11 +2249,6 @@ const CSSValue* CSSPropertyParser::parseSingleValue(
     case CSSPropertyFlexGrow:
     case CSSPropertyFlexShrink:
       return consumeNumber(m_range, ValueRangeNonNegative);
-    case CSSPropertyStrokeOpacity:
-    case CSSPropertyFillOpacity:
-    case CSSPropertyStopOpacity:
-    case CSSPropertyFloodOpacity:
-    case CSSPropertyOpacity:
     case CSSPropertyWebkitBoxFlex:
       return consumeNumber(m_range, ValueRangeAll);
     case CSSPropertyBaselineShift:
@@ -2386,20 +2262,11 @@ const CSSValue* CSSPropertyParser::parseSingleValue(
     case CSSPropertyR:
       return consumeLengthOrPercent(m_range, SVGAttributeMode, ValueRangeAll,
                                     UnitlessQuirk::Forbid);
-    case CSSPropertyRx:
-    case CSSPropertyRy:
-      return consumeRxOrRy(m_range);
-    case CSSPropertyListStyleImage:
-    case CSSPropertyBorderImageSource:
-    case CSSPropertyWebkitMaskBoxImageSource:
-      return consumeImageOrNone(m_range, m_context);
     case CSSPropertyPerspective:
       return consumePerspective(m_range, m_context, unresolvedProperty);
     case CSSPropertyScrollSnapPointsX:
     case CSSPropertyScrollSnapPointsY:
       return consumeScrollSnapPoints(m_range, m_context->mode());
-    case CSSPropertyOrder:
-      return consumeInteger(m_range);
     case CSSPropertyJustifyContent:
     case CSSPropertyAlignContent:
       ASSERT(RuntimeEnabledFeatures::cssGridLayoutEnabled());
@@ -2420,9 +2287,6 @@ const CSSValue* CSSPropertyParser::parseSingleValue(
       return consumeWebkitBorderImage(property, m_range, m_context);
     case CSSPropertyWebkitBoxReflect:
       return consumeReflect(m_range, m_context);
-    case CSSPropertyImageOrientation:
-      ASSERT(RuntimeEnabledFeatures::imageOrientationEnabled());
-      return consumeImageOrientation(m_range);
     case CSSPropertyBackgroundAttachment:
     case CSSPropertyBackgroundBlendMode:
     case CSSPropertyBackgroundClip:

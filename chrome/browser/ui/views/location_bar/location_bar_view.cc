@@ -176,7 +176,7 @@ void LocationBarView::Init() {
   DCHECK(GetWidget());
 
   // Make sure children with layers are clipped. See http://crbug.com/589497
-  SetPaintToLayer(true);
+  SetPaintToLayer();
   layer()->SetFillsBoundsOpaquely(false);
   layer()->SetMasksToBounds(true);
 
@@ -639,6 +639,7 @@ void LocationBarView::OnNativeThemeChanged(const ui::NativeTheme* theme) {
   if (!is_popup_mode_) {
     set_background(
         new BackgroundWith1PxBorder(GetColor(BACKGROUND), kBorderColor));
+    SchedulePaint();
   }
 }
 

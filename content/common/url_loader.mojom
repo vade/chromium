@@ -35,7 +35,8 @@ interface DownloadedTempFile {
 interface URLLoaderClient {
   // Called when the response head is received. |downloaded_file| is non-null in
   // the 'download_to_file' case.
-  OnReceiveResponse(URLResponseHead head, DownloadedTempFile? downloaded_file);
+  OnReceiveResponse(URLResponseHead head,
+                    associated DownloadedTempFile? downloaded_file);
 
   // Called when the request has been redirected. The receiver is expected to
   // call FollowRedirect or cancel the request.
@@ -47,6 +48,12 @@ interface URLLoaderClient {
   // TODO(yhirano): Remove |encoded_length| and use OnTransferSizeUpdated
   // instead.
   OnDataDownloaded(int64 data_length, int64 encoded_length);
+
+  // Called when the service made some progress on the file upload. This is
+  // called only when the request has an upload data.
+  // The implementation should call the response closure when the client is
+  // ready to receive the next upload progress.
+  OnUploadProgress(int64 current_position, int64 total_size) => ();
 
   // Called when cached metadata from a resource request is ready.
   OnReceiveCachedMetadata(array<uint8> data);

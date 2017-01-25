@@ -15,6 +15,7 @@
 
 #include "build/build_config.h"
 #include "cc/surfaces/surface_id.h"
+#include "cc/surfaces/surface_info.h"
 #include "cc/surfaces/surface_sequence.h"
 #include "content/common/content_export.h"
 #include "content/common/content_param_traits.h"
@@ -486,6 +487,9 @@ IPC_STRUCT_BEGIN(FrameMsg_SerializeAsMHTML_Params)
   IPC_STRUCT_MEMBER(blink::WebFrameSerializerCacheControlPolicy,
                     mhtml_cache_control_policy)
 
+  // Whether to remove popup overlay while serializing.
+  IPC_STRUCT_MEMBER(bool, mhtml_popup_overlay_removal)
+
   // Frame to content-id map.
   // Keys are routing ids of either RenderFrames or RenderFrameProxies.
   // Values are MHTML content-ids - see WebFrameSerializer::generateMHTMLParts.
@@ -610,10 +614,8 @@ IPC_STRUCT_TRAITS_END()
 // -----------------------------------------------------------------------------
 // Messages sent from the browser to the renderer.
 
-IPC_MESSAGE_ROUTED4(FrameMsg_SetChildFrameSurface,
-                    cc::SurfaceId /* surface_id */,
-                    gfx::Size /* frame_size */,
-                    float /* scale_factor */,
+IPC_MESSAGE_ROUTED2(FrameMsg_SetChildFrameSurface,
+                    cc::SurfaceInfo /* surface_info */,
                     cc::SurfaceSequence /* sequence */)
 
 // Notifies the embedding frame that the process rendering the child frame's

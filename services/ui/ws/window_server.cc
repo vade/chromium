@@ -532,6 +532,10 @@ cc::mojom::DisplayCompositor* WindowServer::GetDisplayCompositor() {
   return display_compositor_.get();
 }
 
+mojo::AssociatedGroup* WindowServer::GetDisplayCompositorAssociatedGroup() {
+  return display_compositor_.associated_group();
+}
+
 bool WindowServer::GetFrameDecorationsForUser(
     const UserId& user_id,
     mojom::FrameDecorationValuesPtr* values) {
@@ -783,10 +787,11 @@ void WindowServer::OnSurfaceCreated(const cc::SurfaceInfo& surface_info) {
 
   // FrameGenerator will add an appropriate reference for the new surface.
   DCHECK(display_manager_->GetDisplayContaining(window));
-  display_manager_->GetDisplayContaining(window)
-      ->platform_display()
-      ->GetFrameGenerator()
-      ->OnSurfaceCreated(surface_info.id(), window);
+  auto display = display_manager_->GetDisplayContaining(window);
+  if (window == display->GetActiveRootWindow()) {
+    display->platform_display()->GetFrameGenerator()->OnSurfaceCreated(
+        surface_info);
+  }
 
   // This is only used for testing to observe that a window has a
   // CompositorFrame.

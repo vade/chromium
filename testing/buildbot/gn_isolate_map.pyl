@@ -323,6 +323,10 @@
     "label": "//components:components_unittests",
     "type": "windowed_test_launcher",
   },
+  "components_variations_junit_tests": {
+    "label": "//components/variations/android:components_variations_junit_tests",
+    "type": "junit_test",
+  },
   "components_web_restrictions_junit_tests": {
     "label": "//components/web_restrictions:components_web_restrictions_junit_tests",
     "type": "junit_test",
@@ -757,6 +761,10 @@
   "skia_unittests": {
     "label": "//skia:skia_unittests",
     "type": "console_test_launcher",
+  },
+  "snapshot_unittests": {
+    "label": "//ui/snapshot:snapshot_unittests",
+    "type": "windowed_test_launcher",
   },
   "sql_unittests": {
     "label": "//sql:sql_unittests",

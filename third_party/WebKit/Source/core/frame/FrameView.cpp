@@ -45,7 +45,6 @@
 #include "core/editing/RenderedPosition.h"
 #include "core/editing/markers/DocumentMarkerController.h"
 #include "core/events/ErrorEvent.h"
-#include "core/fetch/ResourceFetcher.h"
 #include "core/frame/BrowserControls.h"
 #include "core/frame/EventHandlerRegistry.h"
 #include "core/frame/FrameHost.h"
@@ -122,6 +121,7 @@
 #include "platform/instrumentation/tracing/TraceEvent.h"
 #include "platform/instrumentation/tracing/TracedValue.h"
 #include "platform/json/JSONValues.h"
+#include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/scroll/ScrollAnimatorBase.h"
 #include "platform/scroll/ScrollbarTheme.h"
 #include "platform/text/TextStream.h"
@@ -1055,6 +1055,16 @@ void FrameView::performLayout(bool inSubtreeLayout) {
 
   ScriptForbiddenScope forbidScript;
 
+  if (inSubtreeLayout && hasOrthogonalWritingModeRoots()) {
+    // If we're going to lay out from each subtree root, rather than once from
+    // LayoutView, we need to merge the depth-ordered orthogonal writing mode
+    // root list into the depth-ordered list of subtrees scheduled for
+    // layout. Otherwise, during layout of one such subtree, we'd risk skipping
+    // over a subtree of objects needing layout.
+    DCHECK(!m_layoutSubtreeRootList.isEmpty());
+    scheduleOrthogonalWritingModeRootsForLayout();
+  }
+
   ASSERT(!isInPerformLayout());
   lifecycle().advanceTo(DocumentLifecycle::InPerformLayout);
 
@@ -1064,9 +1074,6 @@ void FrameView::performLayout(bool inSubtreeLayout) {
   // doing.
 
   forceLayoutParentViewIfNeeded();
-
-  if (hasOrthogonalWritingModeRoots())
-    layoutOrthogonalWritingModeRoots();
 
   if (inSubtreeLayout) {
     if (m_analyzer)
@@ -1085,6 +1092,8 @@ void FrameView::performLayout(bool inSubtreeLayout) {
     }
     m_layoutSubtreeRootList.clear();
   } else {
+    if (hasOrthogonalWritingModeRoots())
+      layoutOrthogonalWritingModeRoots();
     layoutFromRootObject(*layoutView());
   }
 
@@ -2138,17 +2147,28 @@ static inline void removeFloatingObjectsForSubtreeRoot(LayoutObject& root) {
   }
 }
 
+static bool prepareOrthogonalWritingModeRootForLayout(LayoutObject& root) {
+  DCHECK(root.isBox() && toLayoutBox(root).isOrthogonalWritingModeRoot());
+  if (!root.needsLayout() || root.isOutOfFlowPositioned() ||
+      root.isColumnSpanAll() ||
+      !root.styleRef().logicalHeight().isIntrinsicOrAuto())
+    return false;
+
+  removeFloatingObjectsForSubtreeRoot(root);
+  return true;
+}
+
 void FrameView::layoutOrthogonalWritingModeRoots() {
   for (auto& root : m_orthogonalWritingModeRootList.ordered()) {
-    ASSERT(root->isBox() && toLayoutBox(*root).isOrthogonalWritingModeRoot());
-    if (!root->needsLayout() || root->isOutOfFlowPositioned() ||
-        root->isColumnSpanAll() ||
-        !root->styleRef().logicalHeight().isIntrinsicOrAuto()) {
-      continue;
-    }
+    if (prepareOrthogonalWritingModeRootForLayout(*root))
+      layoutFromRootObject(*root);
+  }
+}
 
-    removeFloatingObjectsForSubtreeRoot(*root);
-    layoutFromRootObject(*root);
+void FrameView::scheduleOrthogonalWritingModeRootsForLayout() {
+  for (auto& root : m_orthogonalWritingModeRootList.ordered()) {
+    if (prepareOrthogonalWritingModeRootForLayout(*root))
+      m_layoutSubtreeRootList.add(*root);
   }
 }
 
@@ -3016,12 +3036,18 @@ void FrameView::prePaint() {
   if (!m_paintController)
     m_paintController = PaintController::create();
 
+  if (!m_geometryMapper)
+    m_geometryMapper.reset(new GeometryMapper());
+  // TODO(chrishtr): the cache only needs to be invalidated if one or more of
+  // the property tree nodes changed.
+  m_geometryMapper->clearCache();
+
   forAllNonThrottledFrameViews([](FrameView& frameView) {
     frameView.lifecycle().advanceTo(DocumentLifecycle::InPrePaint);
   });
 
   if (RuntimeEnabledFeatures::slimmingPaintInvalidationEnabled())
-    PrePaintTreeWalk().walk(*this);
+    PrePaintTreeWalk(*m_geometryMapper).walk(*this);
 
   forAllNonThrottledFrameViews([](FrameView& frameView) {
     frameView.lifecycle().advanceTo(DocumentLifecycle::PrePaintClean);
@@ -3127,10 +3153,11 @@ void FrameView::pushPaintArtifactToCompositor() {
 
   SCOPED_BLINK_UMA_HISTOGRAM_TIMER("Blink.Compositing.UpdateTime");
 
+  DCHECK(m_geometryMapper.get());
   m_paintArtifactCompositor->update(
       m_paintController->paintArtifact(),
       m_paintController->paintChunksRasterInvalidationTrackingMap(),
-      m_isStoringCompositedLayerDebugInfo);
+      m_isStoringCompositedLayerDebugInfo, *m_geometryMapper);
 }
 
 std::unique_ptr<JSONObject> FrameView::compositedLayersAsJSON(

@@ -1297,7 +1297,6 @@ void Element::attributeChanged(const AttributeModificationParams& params) {
   parseAttribute(params);
 
   document().incDOMTreeVersion();
-  document().notifyChangeAttribute(*this);
 
   if (name == HTMLNames::idAttr) {
     AtomicString oldId = elementData()->idForStyleResolution();
@@ -2668,7 +2667,7 @@ void Element::focus(const FocusParams& params) {
     // gesture. Since tracking that across arbitrary boundaries (eg.
     // animations) is difficult, for now we match IE's heuristic and bring
     // up the keyboard if there's been any gesture since load.
-    document().page()->chromeClient().showVirtualKeyboard();
+    document().page()->chromeClient().showVirtualKeyboardOnElementFocus();
   }
 }
 

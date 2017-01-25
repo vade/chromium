@@ -50,9 +50,6 @@
 #include "core/editing/markers/DocumentMarkerController.h"
 #include "core/editing/spellcheck/SpellChecker.h"
 #include "core/events/MouseEvent.h"
-#include "core/fetch/FetchRequest.h"
-#include "core/fetch/MemoryCache.h"
-#include "core/fetch/ResourceFetcher.h"
 #include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
@@ -87,6 +84,9 @@
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/UserGestureIndicator.h"
 #include "platform/geometry/FloatRect.h"
+#include "platform/loader/fetch/FetchRequest.h"
+#include "platform/loader/fetch/MemoryCache.h"
+#include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/network/ResourceError.h"
 #include "platform/scroll/Scrollbar.h"
 #include "platform/scroll/ScrollbarTestSuite.h"
@@ -5846,7 +5846,7 @@ class DisambiguationPopupTestWebViewClient
   bool m_triggered;
 };
 
-static WebGestureEvent fatTap(int x, int y) {
+static WebCoalescedInputEvent fatTap(int x, int y) {
   WebGestureEvent event(WebInputEvent::GestureTap, WebInputEvent::NoModifiers,
                         WebInputEvent::TimeStampForTesting);
   event.sourceDevice = WebGestureDeviceTouchscreen;
@@ -5854,7 +5854,7 @@ static WebGestureEvent fatTap(int x, int y) {
   event.y = y;
   event.data.tap.width = 50;
   event.data.tap.height = 50;
-  return event;
+  return WebCoalescedInputEvent(event);
 }
 
 TEST_P(ParameterizedWebFrameTest, DisambiguationPopup) {
@@ -7075,7 +7075,8 @@ class TestCachePolicyWebFrameClient
       const WebFrameOwnerProperties& frameOwnerProperties) {
     DCHECK(m_childClient);
     m_childFrameCreationCount++;
-    WebLocalFrame* frame = WebLocalFrame::create(scope, m_childClient);
+    WebLocalFrame* frame =
+        WebLocalFrame::create(scope, m_childClient, nullptr, nullptr);
     parent->appendChild(frame);
     return frame;
   }
@@ -8488,7 +8489,7 @@ TEST_F(WebFrameSwapTest, SwapMainFrame) {
 
   FrameTestHelpers::TestWebFrameClient client;
   WebLocalFrame* localFrame = WebLocalFrame::createProvisional(
-      &client, remoteFrame, WebSandboxFlags::None);
+      &client, nullptr, nullptr, remoteFrame, WebSandboxFlags::None);
   FrameTestHelpers::TestWebWidgetClient webWidgetClient;
   WebFrameWidget::create(&webWidgetClient, localFrame);
   remoteFrame->swap(localFrame);
@@ -8518,7 +8519,7 @@ TEST_F(WebFrameSwapTest, ValidateSizeOnRemoteToLocalMainFrameSwap) {
 
   FrameTestHelpers::TestWebFrameClient client;
   WebLocalFrame* localFrame = WebLocalFrame::createProvisional(
-      &client, remoteFrame, WebSandboxFlags::None);
+      &client, nullptr, nullptr, remoteFrame, WebSandboxFlags::None);
   remoteFrame->swap(localFrame);
 
   // Verify that the size that was set with a remote main frame is correct
@@ -8597,7 +8598,7 @@ TEST_F(WebFrameSwapTest, SwapFirstChild) {
 
   FrameTestHelpers::TestWebFrameClient client;
   WebLocalFrame* localFrame = WebLocalFrame::createProvisional(
-      &client, remoteFrame, WebSandboxFlags::None);
+      &client, nullptr, nullptr, remoteFrame, WebSandboxFlags::None);
   swapAndVerifyFirstChildConsistency("remote->local", mainFrame(), localFrame);
 
   // FIXME: This almost certainly fires more load events on the iframe element
@@ -8640,7 +8641,7 @@ TEST_F(WebFrameSwapTest, SwapMiddleChild) {
 
   FrameTestHelpers::TestWebFrameClient client;
   WebLocalFrame* localFrame = WebLocalFrame::createProvisional(
-      &client, remoteFrame, WebSandboxFlags::None);
+      &client, nullptr, nullptr, remoteFrame, WebSandboxFlags::None);
   swapAndVerifyMiddleChildConsistency("remote->local", mainFrame(), localFrame);
 
   // FIXME: This almost certainly fires more load events on the iframe element
@@ -8678,7 +8679,7 @@ TEST_F(WebFrameSwapTest, SwapLastChild) {
 
   FrameTestHelpers::TestWebFrameClient client;
   WebLocalFrame* localFrame = WebLocalFrame::createProvisional(
-      &client, remoteFrame, WebSandboxFlags::None);
+      &client, nullptr, nullptr, remoteFrame, WebSandboxFlags::None);
   swapAndVerifyLastChildConsistency("remote->local", mainFrame(), localFrame);
 
   // FIXME: This almost certainly fires more load events on the iframe element
@@ -8705,7 +8706,7 @@ TEST_F(WebFrameSwapTest, DetachProvisionalFrame) {
 
   FrameTestHelpers::TestWebFrameClient client;
   WebLocalFrameImpl* provisionalFrame = WebLocalFrameImpl::createProvisional(
-      &client, remoteFrame, WebSandboxFlags::None);
+      &client, nullptr, nullptr, remoteFrame, WebSandboxFlags::None);
 
   // The provisional frame should have a local frame owner.
   FrameOwner* owner = provisionalFrame->frame()->owner();
@@ -8758,7 +8759,7 @@ TEST_F(WebFrameSwapTest, SwapParentShouldDetachChildren) {
 
   FrameTestHelpers::TestWebFrameClient client;
   WebLocalFrame* localFrame = WebLocalFrame::createProvisional(
-      &client, remoteFrame, WebSandboxFlags::None);
+      &client, nullptr, nullptr, remoteFrame, WebSandboxFlags::None);
   swapAndVerifySubframeConsistency("remote->local", targetFrame, localFrame);
 
   // FIXME: This almost certainly fires more load events on the iframe element
@@ -8806,7 +8807,7 @@ TEST_F(WebFrameSwapTest, SwapPreservesGlobalContext) {
   // code path.
   FrameTestHelpers::TestWebFrameClient client;
   WebLocalFrame* localFrame = WebLocalFrame::createProvisional(
-      &client, remoteFrame, WebSandboxFlags::None);
+      &client, nullptr, nullptr, remoteFrame, WebSandboxFlags::None);
   remoteFrame->swap(localFrame);
   v8::Local<v8::Value> localWindow = mainFrame()->executeScriptAndReturnValue(
       WebScriptSource("document.querySelector('#frame2').contentWindow;"));
@@ -8843,7 +8844,7 @@ TEST_F(WebFrameSwapTest, SwapInitializesGlobal) {
 
   FrameTestHelpers::TestWebFrameClient client;
   WebLocalFrame* localFrame = WebLocalFrame::createProvisional(
-      &client, remoteFrame, WebSandboxFlags::None);
+      &client, nullptr, nullptr, remoteFrame, WebSandboxFlags::None);
   remoteFrame->swap(localFrame);
   v8::Local<v8::Value> localWindowTop =
       mainFrame()->executeScriptAndReturnValue(WebScriptSource("saved.top"));
@@ -9000,7 +9001,7 @@ TEST_F(WebFrameSwapTest, HistoryCommitTypeAfterNewRemoteToLocalSwap) {
 
   RemoteToLocalSwapWebFrameClient client(remoteFrame);
   WebLocalFrame* localFrame = WebLocalFrame::createProvisional(
-      &client, remoteFrame, WebSandboxFlags::None);
+      &client, nullptr, nullptr, remoteFrame, WebSandboxFlags::None);
   FrameTestHelpers::loadFrame(localFrame, m_baseURL + "subframe-hello.html");
   EXPECT_EQ(WebInitialCommitInChildFrame, client.historyCommitType());
 
@@ -9025,7 +9026,7 @@ TEST_F(WebFrameSwapTest, HistoryCommitTypeAfterExistingRemoteToLocalSwap) {
 
   RemoteToLocalSwapWebFrameClient client(remoteFrame);
   WebLocalFrame* localFrame = WebLocalFrame::createProvisional(
-      &client, remoteFrame, WebSandboxFlags::None);
+      &client, nullptr, nullptr, remoteFrame, WebSandboxFlags::None);
   localFrame->setCommittedFirstRealLoad();
   FrameTestHelpers::loadFrame(localFrame, m_baseURL + "subframe-hello.html");
   EXPECT_EQ(WebStandardCommit, client.historyCommitType());
@@ -9058,7 +9059,7 @@ TEST_F(WebFrameSwapTest, UniqueNameAfterRemoteToLocalSwap) {
   // Swap back to a LocalFrame.
   RemoteToLocalSwapWebFrameClient client(remoteFrame);
   WebLocalFrame* localFrame = WebLocalFrame::createProvisional(
-      &client, remoteFrame, WebSandboxFlags::None);
+      &client, nullptr, nullptr, remoteFrame, WebSandboxFlags::None);
   FrameTestHelpers::loadFrame(localFrame, m_baseURL + "subframe-hello.html");
   EXPECT_EQ(uniqueName.utf8(), localFrame->uniqueName().utf8());
   EXPECT_EQ(uniqueName.utf8(), WebString(toWebLocalFrameImpl(localFrame)
@@ -9085,7 +9086,7 @@ TEST_F(WebFrameSwapTest, UniqueNameAfterRemoteToLocalSwap) {
 
   RemoteToLocalSwapWebFrameClient client2(remoteFrame2);
   WebLocalFrame* localFrame2 = WebLocalFrame::createProvisional(
-      &client2, remoteFrame2, WebSandboxFlags::None);
+      &client2, nullptr, nullptr, remoteFrame2, WebSandboxFlags::None);
   FrameTestHelpers::loadFrame(localFrame2, m_baseURL + "subframe-hello.html");
   EXPECT_EQ(uniqueName2.utf8(), localFrame2->uniqueName().utf8());
   EXPECT_EQ(uniqueName2.utf8(), WebString(toWebLocalFrameImpl(localFrame2)
@@ -9230,8 +9231,9 @@ TEST_F(WebFrameTest, NavigateRemoteToLocalWithOpener) {
 
   // Do a remote-to-local swap in the popup.
   FrameTestHelpers::TestWebFrameClient popupLocalClient;
-  WebLocalFrame* popupLocalFrame = WebLocalFrame::createProvisional(
-      &popupLocalClient, popupRemoteFrame, WebSandboxFlags::None);
+  WebLocalFrame* popupLocalFrame =
+      WebLocalFrame::createProvisional(&popupLocalClient, nullptr, nullptr,
+                                       popupRemoteFrame, WebSandboxFlags::None);
   popupRemoteFrame->swap(popupLocalFrame);
 
   // The initial document created during the remote-to-local swap should have
@@ -9254,7 +9256,7 @@ TEST_F(WebFrameTest, SwapWithOpenerCycle) {
   // Now swap in a local frame. It shouldn't crash.
   FrameTestHelpers::TestWebFrameClient localClient;
   WebLocalFrame* localFrame = WebLocalFrame::createProvisional(
-      &localClient, remoteFrame, WebSandboxFlags::None);
+      &localClient, nullptr, nullptr, remoteFrame, WebSandboxFlags::None);
   remoteFrame->swap(localFrame);
 
   // And the opener cycle should still be preserved.
@@ -9660,7 +9662,7 @@ TEST_P(ParameterizedWebFrameTest,
   // Do a remote-to-local swap of the top frame.
   FrameTestHelpers::TestWebFrameClient localClient;
   WebLocalFrame* localRoot = WebLocalFrame::createProvisional(
-      &localClient, remoteRoot, WebSandboxFlags::None);
+      &localClient, nullptr, nullptr, remoteRoot, WebSandboxFlags::None);
   FrameTestHelpers::TestWebWidgetClient webWidgetClient;
   WebFrameWidget::create(&webWidgetClient, localRoot);
   remoteRoot->swap(localRoot);
@@ -9726,9 +9728,9 @@ class WebFrameOverscrollTest
     : public WebFrameTest,
       public ::testing::WithParamInterface<blink::WebGestureDevice> {
  protected:
-  WebGestureEvent generateEvent(WebInputEvent::Type type,
-                                float deltaX = 0.0,
-                                float deltaY = 0.0) {
+  WebCoalescedInputEvent generateEvent(WebInputEvent::Type type,
+                                       float deltaX = 0.0,
+                                       float deltaY = 0.0) {
     WebGestureEvent event(type, WebInputEvent::NoModifiers,
                           WebInputEvent::TimeStampForTesting);
     // TODO(wjmaclean): Make sure that touchpad device is only ever used for
@@ -9740,7 +9742,7 @@ class WebFrameOverscrollTest
       event.data.scrollUpdate.deltaX = deltaX;
       event.data.scrollUpdate.deltaY = deltaY;
     }
-    return event;
+    return WebCoalescedInputEvent(event);
   }
 
   void ScrollBegin(FrameTestHelpers::WebViewHelper* webViewHelper) {
@@ -10583,7 +10585,7 @@ TEST_F(WebFrameTest, ImageDocumentDecodeError) {
   Document* document =
       toLocalFrame(helper.webView()->page()->mainFrame())->document();
   EXPECT_TRUE(document->isImageDocument());
-  EXPECT_EQ(Resource::DecodeError,
+  EXPECT_EQ(ResourceStatus::DecodeError,
             toImageDocument(document)->cachedImage()->getStatus());
 }
 
@@ -10684,13 +10686,15 @@ TEST_F(WebFrameTest, ScrollBeforeLayoutDoesntCrash) {
 
   // Try GestureScrollEnd and GestureScrollUpdate first to make sure that not
   // seeing a Begin first doesn't break anything. (This currently happens).
-  webViewHelper.webView()->handleInputEvent(endEvent);
-  webViewHelper.webView()->handleInputEvent(updateEvent);
+  webViewHelper.webView()->handleInputEvent(WebCoalescedInputEvent(endEvent));
+  webViewHelper.webView()->handleInputEvent(
+      WebCoalescedInputEvent(updateEvent));
 
   // Try a full Begin/Update/End cycle.
-  webViewHelper.webView()->handleInputEvent(beginEvent);
-  webViewHelper.webView()->handleInputEvent(updateEvent);
-  webViewHelper.webView()->handleInputEvent(endEvent);
+  webViewHelper.webView()->handleInputEvent(WebCoalescedInputEvent(beginEvent));
+  webViewHelper.webView()->handleInputEvent(
+      WebCoalescedInputEvent(updateEvent));
+  webViewHelper.webView()->handleInputEvent(WebCoalescedInputEvent(endEvent));
 }
 
 TEST_F(WebFrameTest, HidingScrollbarsOnScrollableAreaDisablesScrollbars) {
@@ -11208,7 +11212,8 @@ TEST_F(WebFrameTest, NoLoadingCompletionCallbacksInDetach) {
                                     const WebString& uniqueName,
                                     WebSandboxFlags sandboxFlags,
                                     const WebFrameOwnerProperties&) override {
-      WebLocalFrame* frame = WebLocalFrame::create(scope, &m_childClient);
+      WebLocalFrame* frame =
+          WebLocalFrame::create(scope, &m_childClient, nullptr, nullptr);
       parent->appendChild(frame);
       return frame;
     }

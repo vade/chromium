@@ -135,7 +135,6 @@
 #include "core/events/ScopedEventQueue.h"
 #include "core/events/VisualViewportResizeEvent.h"
 #include "core/events/VisualViewportScrollEvent.h"
-#include "core/fetch/ResourceFetcher.h"
 #include "core/frame/DOMTimer.h"
 #include "core/frame/DOMVisualViewport.h"
 #include "core/frame/EventHandlerRegistry.h"
@@ -232,6 +231,7 @@
 #include "platform/ScriptForbiddenScope.h"
 #include "platform/WebFrameScheduler.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
+#include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/network/ContentSecurityPolicyParsers.h"
 #include "platform/network/HTTPParsers.h"
 #include "platform/scroll/Scrollbar.h"
@@ -3426,18 +3426,16 @@ void Document::maybeHandleHttpRefresh(const String& content,
     return;
 
   double delay;
-  String refreshURL;
+  String refreshURLString;
   if (!parseHTTPRefresh(content, httpRefreshType == HttpRefreshFromMetaTag
                                      ? isHTMLSpace<UChar>
                                      : nullptr,
-                        delay, refreshURL))
+                        delay, refreshURLString))
     return;
-  if (refreshURL.isEmpty())
-    refreshURL = url().getString();
-  else
-    refreshURL = completeURL(refreshURL).getString();
+  KURL refreshURL =
+      refreshURLString.isEmpty() ? url() : completeURL(refreshURLString);
 
-  if (protocolIsJavaScript(refreshURL)) {
+  if (refreshURL.protocolIsJavaScript()) {
     String message =
         "Refused to refresh " + m_url.elidedString() + " to a javascript: URL";
     addConsoleMessage(ConsoleMessage::create(SecurityMessageSource,

@@ -35,7 +35,6 @@
 #include "core/inspector/WorkerInspectorController.h"
 #include "core/inspector/WorkerThreadDebugger.h"
 #include "core/origin_trials/OriginTrialContext.h"
-#include "core/workers/ParentFrameTaskRunners.h"
 #include "core/workers/ThreadedWorkletGlobalScope.h"
 #include "core/workers/WorkerBackingThread.h"
 #include "core/workers/WorkerClients.h"
@@ -288,12 +287,14 @@ bool WorkerThread::isForciblyTerminated() {
 }
 
 WorkerThread::WorkerThread(PassRefPtr<WorkerLoaderProxy> workerLoaderProxy,
-                           WorkerReportingProxy& workerReportingProxy)
+                           WorkerReportingProxy& workerReportingProxy,
+                           ParentFrameTaskRunners* parentFrameTaskRunners)
     : m_workerThreadId(getNextWorkerThreadId()),
       m_forcibleTerminationDelayInMs(kForcibleTerminationDelayInMs),
       m_inspectorTaskRunner(WTF::makeUnique<InspectorTaskRunner>()),
       m_workerLoaderProxy(workerLoaderProxy),
       m_workerReportingProxy(workerReportingProxy),
+      m_parentFrameTaskRunners(parentFrameTaskRunners),
       m_shutdownEvent(WTF::wrapUnique(
           new WaitableEvent(WaitableEvent::ResetPolicy::Manual,
                             WaitableEvent::InitialState::NonSignaled))),
@@ -346,9 +347,7 @@ void WorkerThread::terminateInternal(TerminationMode mode) {
         case TerminationMode::Graceful:
           DCHECK(!m_forcibleTerminationTaskHandle.isActive());
           m_forcibleTerminationTaskHandle =
-              workerReportingProxy()
-                  .getParentFrameTaskRunners()
-                  ->get(TaskType::UnspecedTimer)
+              m_parentFrameTaskRunners->get(TaskType::UnspecedTimer)
                   ->postDelayedCancellableTask(
                       BLINK_FROM_HERE,
                       WTF::bind(&WorkerThread::mayForciblyTerminateExecution,
@@ -451,6 +450,7 @@ void WorkerThread::initializeOnWorkerThread(
   bool heapLimitIncreasedForDebugging =
       startupData->m_workerV8Settings.m_heapLimitMode ==
       WorkerV8Settings::HeapLimitMode::IncreasedForDebugging;
+  bool inspectorNetworkCapability = startupData->m_inspectorNetworkCapability;
 
   {
     MutexLocker lock(m_threadStateMutex);
@@ -469,7 +469,8 @@ void WorkerThread::initializeOnWorkerThread(
     m_consoleMessageStorage = new ConsoleMessageStorage();
     m_globalScope = createWorkerGlobalScope(std::move(startupData));
     m_workerReportingProxy.didCreateWorkerGlobalScope(globalScope());
-    m_workerInspectorController = WorkerInspectorController::create(this);
+    m_workerInspectorController =
+        WorkerInspectorController::create(this, inspectorNetworkCapability);
 
     // TODO(nhiroki): Handle a case where the script controller fails to
     // initialize the context.

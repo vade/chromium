@@ -13,15 +13,21 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/timer/timer.h"
 #include "content/browser/loader/resource_handler.h"
+#include "content/browser/loader/upload_progress_tracker.h"
 #include "content/common/content_export.h"
 #include "content/common/url_loader.mojom.h"
+#include "content/public/common/resource_type.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/cpp/system/watcher.h"
 #include "net/base/io_buffer.h"
-#include "url/gurl.h"
+
+class GURL;
+
+namespace tracked_objects {
+class Location;
+}
 
 namespace net {
 class IOBufferWithSize;
@@ -48,7 +54,8 @@ class CONTENT_EXPORT MojoAsyncResourceHandler
       net::URLRequest* request,
       ResourceDispatcherHostImpl* rdh,
       mojom::URLLoaderAssociatedRequest mojo_request,
-      mojom::URLLoaderClientAssociatedPtr url_loader_client);
+      mojom::URLLoaderClientAssociatedPtr url_loader_client,
+      ResourceType resource_type);
   ~MojoAsyncResourceHandler() override;
 
   // ResourceHandler implementation:
@@ -65,7 +72,7 @@ class CONTENT_EXPORT MojoAsyncResourceHandler
                            bool* defer) override;
   void OnDataDownloaded(int bytes_downloaded) override;
 
-  // mojom::URLLoader implementation
+  // mojom::URLLoader implementation:
   void FollowRedirect() override;
 
   void OnWritableForTesting();
@@ -98,11 +105,17 @@ class CONTENT_EXPORT MojoAsyncResourceHandler
   // |reported_total_received_bytes_|, returns it, and updates
   // |reported_total_received_bytes_|.
   int64_t CalculateRecentlyReceivedBytes();
-  // This function can be overriden only for tests.
+
+  // These functions can be overriden only for tests.
   virtual void ReportBadMessage(const std::string& error);
+  virtual std::unique_ptr<UploadProgressTracker> CreateUploadProgressTracker(
+      const tracked_objects::Location& from_here,
+      UploadProgressTracker::UploadProgressReportCallback callback);
 
   void OnTransfer(mojom::URLLoaderAssociatedRequest mojo_request,
                   mojom::URLLoaderClientAssociatedPtr url_loader_client);
+  void SendUploadProgress(const net::UploadProgress& progress);
+  void OnUploadProgressACK();
 
   ResourceDispatcherHostImpl* rdh_;
   mojo::AssociatedBinding<mojom::URLLoader> binding_;
@@ -123,6 +136,8 @@ class CONTENT_EXPORT MojoAsyncResourceHandler
   size_t buffer_bytes_read_ = 0;
   scoped_refptr<SharedWriter> shared_writer_;
   mojo::ScopedDataPipeConsumerHandle response_body_consumer_handle_;
+
+  std::unique_ptr<UploadProgressTracker> upload_progress_tracker_;
 
   base::WeakPtrFactory<MojoAsyncResourceHandler> weak_factory_;
   DISALLOW_COPY_AND_ASSIGN(MojoAsyncResourceHandler);

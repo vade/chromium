@@ -104,6 +104,7 @@ Main.Main = class {
     Runtime.experiments.register('inputEventsOnTimelineOverview', 'Input events on Timeline overview', true);
     Runtime.experiments.register('liveSASS', 'Live SASS');
     Runtime.experiments.register('networkGroupingRequests', 'Network request groups support', true);
+    Runtime.experiments.register('objectPreviews', 'Object previews', true);
     Runtime.experiments.register('persistence2', 'Persistence 2.0');
     Runtime.experiments.register('persistenceValidation', 'Validate persistence bindings');
     Runtime.experiments.register('requestBlocking', 'Request blocking', true);
@@ -333,12 +334,6 @@ Main.Main = class {
       shortcut.makeDescriptor(']', shortcut.Modifiers.CtrlOrMeta)
     ];
     section.addRelatedKeys(keys, Common.UIString('Go to the panel to the left/right'));
-
-    keys = [
-      shortcut.makeDescriptor('[', shortcut.Modifiers.CtrlOrMeta | shortcut.Modifiers.Alt),
-      shortcut.makeDescriptor(']', shortcut.Modifiers.CtrlOrMeta | shortcut.Modifiers.Alt)
-    ];
-    section.addRelatedKeys(keys, Common.UIString('Go back/forward in panel history'));
 
     var toggleConsoleLabel = Common.UIString('Show console');
     section.addKey(shortcut.makeDescriptor(shortcut.Keys.Tilde, shortcut.Modifiers.Ctrl), toggleConsoleLabel);

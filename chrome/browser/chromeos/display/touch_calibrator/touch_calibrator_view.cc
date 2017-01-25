@@ -67,6 +67,18 @@ constexpr int kHintRectBorderRadius = 4;
 
 constexpr float kBackgroundFinalOpacity = 0.75f;
 
+constexpr int kTouchTargetWidth = 64;
+constexpr int kTouchTargetHeight = kTouchTargetWidth + kTouchTargetWidth / 2;
+
+constexpr float kTouchTargetVerticalOffsetFactor = 5.f / 12.f;
+
+const SkColor kTouchTargetInnerCircleColor =
+    SkColorSetARGBInline(255, 66, 133, 244);
+const SkColor kTouchTargetOuterCircleColor =
+    SkColorSetA(kTouchTargetInnerCircleColor, 255 * 0.2);
+const SkColor kHandIconColor = SkColorSetARGBInline(255, 201, 201, 201);
+constexpr float kHandIconHorizontalOffsetFactor = 7.f / 32.f;
+
 // Returns the initialization params for the widget that contains the touch
 // calibrator view.
 views::Widget::InitParams GetWidgetParams(aura::Window* root_window) {
@@ -189,6 +201,53 @@ void CircularThrobberView::AnimationProgressed(
   outer_radius_ = animation->CurrentValueBetween(
       smallest_radius_animated_circle_, largest_radius_animated_circle_);
   SchedulePaint();
+}
+
+class TouchTargetThrobberView : public CircularThrobberView {
+ public:
+  TouchTargetThrobberView(const gfx::Rect& bounds,
+                          const SkColor& inner_circle_color,
+                          const SkColor& outer_circle_color,
+                          const SkColor& hand_icon_color,
+                          int animation_duration);
+  ~TouchTargetThrobberView() override;
+
+  // views::View overrides:
+  void OnPaint(gfx::Canvas* canvas) override;
+
+ private:
+  const int horizontal_offset_;
+
+  const int icon_width_;
+
+  gfx::ImageSkia hand_icon_;
+
+  DISALLOW_COPY_AND_ASSIGN(TouchTargetThrobberView);
+};
+
+TouchTargetThrobberView::TouchTargetThrobberView(
+    const gfx::Rect& bounds,
+    const SkColor& inner_circle_color,
+    const SkColor& outer_circle_color,
+    const SkColor& hand_icon_color,
+    int animation_duration)
+    : CircularThrobberView(bounds.width(),
+                           inner_circle_color,
+                           outer_circle_color,
+                           animation_duration),
+      horizontal_offset_(bounds.width() * kHandIconHorizontalOffsetFactor),
+      icon_width_(bounds.width() * 0.5f) {
+  SetBoundsRect(bounds);
+
+  hand_icon_ =
+      gfx::CreateVectorIcon(ash::kTouchCalibrationHandIcon, kHandIconColor);
+}
+
+TouchTargetThrobberView::~TouchTargetThrobberView() {}
+
+void TouchTargetThrobberView::OnPaint(gfx::Canvas* canvas) {
+  CircularThrobberView::OnPaint(canvas);
+  canvas->DrawImageInt(hand_icon_, horizontal_offset_, icon_width_);
 }
 
 //   Circular      _________________________________
@@ -456,7 +515,7 @@ void TouchCalibratorView::InitViewContents() {
   touch_point_view_->SetBounds(kTouchPointViewOffset, kTouchPointViewOffset,
                                kTapLabelWidth, kTouchPointViewHeight);
   touch_point_view_->SetVisible(false);
-  touch_point_view_->SetPaintToLayer(true);
+  touch_point_view_->SetPaintToLayer();
   touch_point_view_->layer()->SetFillsBoundsOpaquely(false);
   touch_point_view_->layer()->GetAnimator()->AddObserver(this);
   touch_point_view_->set_background(
@@ -490,6 +549,17 @@ void TouchCalibratorView::InitViewContents() {
 
   AddChildView(hint_box_view_);
 
+  // Initialize the animated hint box throbber view.
+  TouchTargetThrobberView* target_view = new TouchTargetThrobberView(
+      gfx::Rect((size.width() - kTouchTargetWidth) / 2,
+                size.height() * kTouchTargetVerticalOffsetFactor,
+                kTouchTargetWidth, kTouchTargetHeight),
+      kTouchTargetInnerCircleColor, kTouchTargetOuterCircleColor,
+      kHandIconColor, kCircleAnimationDurationMs);
+  target_view->SetVisible(true);
+
+  hint_box_view_->AddChildView(target_view);
+
   // Initialize the view that contains the calibration complete message which
   // will be displayed at the end.
   base::string16 finish_msg_text =
@@ -502,7 +572,7 @@ void TouchCalibratorView::InitViewContents() {
   completion_message_view_ =
       new CompletionMessageView(msg_view_bounds, finish_msg_text);
   completion_message_view_->SetVisible(false);
-  completion_message_view_->SetPaintToLayer(true);
+  completion_message_view_->SetPaintToLayer();
   completion_message_view_->layer()->SetFillsBoundsOpaquely(false);
   completion_message_view_->layer()->GetAnimator()->AddObserver(this);
   completion_message_view_->set_background(

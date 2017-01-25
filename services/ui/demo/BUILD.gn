@@ -2,8 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//services/catalog/public/tools/catalog.gni")
 import("//services/service_manager/public/cpp/service.gni")
 import("//services/service_manager/public/service_manifest.gni")
+import("//services/service_manager/public/tools/test/service_test.gni")
 import("//testing/test.gni")
 
 source_set("lib") {
@@ -41,7 +43,6 @@ service("mus_demo") {
   ]
 
   data_deps = [
-    ":manifest",
     "//services/ui",
   ]
 }
@@ -56,31 +57,40 @@ service_manifest("test_manifest") {
   source = "test_manifest.json"
 }
 
-test("mus_demo_unittests") {
+service_test("mus_demo_unittests") {
   testonly = true
 
   sources = [
     "mus_demo_unittests.cc",
   ]
 
+  catalog = ":mus_demo_unittests_catalog"
+
   deps = [
     ":demo",
     "//base",
     "//services/service_manager/public/cpp",
     "//services/service_manager/public/cpp:service_test_support",
-    "//services/ui/common:run_all_service_tests",
     "//services/ui/public/interfaces",
     "//testing/gtest",
   ]
 
   data_deps = [
     ":mus_demo",
-    ":test_manifest",
   ]
 }
 
 group("demo") {
   deps = [
     ":mus_demo",
+  ]
+}
+
+catalog("mus_demo_unittests_catalog") {
+  embedded_services = [ ":test_manifest" ]
+
+  standalone_services = [
+    ":manifest",
+    "//services/ui:manifest",
   ]
 }

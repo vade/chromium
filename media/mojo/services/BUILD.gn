@@ -3,8 +3,10 @@
 # found in the LICENSE file.
 
 import("//media/media_options.gni")
+import("//services/catalog/public/tools/catalog.gni")
 import("//services/service_manager/public/cpp/service.gni")
 import("//services/service_manager/public/service_manifest.gni")
+import("//services/service_manager/public/tools/test/service_test.gni")
 import("//testing/test.gni")
 
 config("mojo_media_config") {
@@ -151,38 +153,35 @@ service("media") {
     "//mojo/public/c/system",
     "//services/service_manager/public/cpp",
   ]
-
-  data_deps = [
-    ":media_manifest",
-  ]
 }
 
 # crbug.com/676055: media_service_unittests currently fails to link in Windows
 # component builds, so don't declare it, otherwise the "all" target will still
 # try to build it.
 if (!(is_win && is_component_build)) {
-  test("media_service_unittests") {
+  service_test("media_service_unittests") {
     testonly = true
 
     sources = [
       "media_service_unittest.cc",
     ]
 
+    catalog = ":media_service_unittests_catalog"
+
     deps = [
+      "//base",
       "//media",
       "//media/base:test_support",
       "//media/mojo/clients",
       "//media/mojo/common",
       "//media/mojo/interfaces",
       "//services/service_manager/public/cpp:service_test_support",
-      "//services/service_manager/public/cpp/test:run_all_service_tests",
       "//testing/gmock",
       "//testing/gtest",
     ]
 
     data_deps = [
       ":media",
-      ":test_manifest",
     ]
   }
 }  # !(is_win && is_component_build)
@@ -207,11 +206,15 @@ test("media_pipeline_integration_unittests") {
 
   data_deps = [
     ":media",
-    ":pipeline_test_manifest",
   ]
 }
 
 service_manifest("pipeline_test_manifest") {
   name = "media_pipeline_integration_unittests"
   source = "pipeline_test_manifest.json"
+}
+
+catalog("media_service_unittests_catalog") {
+  embedded_services = [ ":test_manifest" ]
+  standalone_services = [ ":media_manifest" ]
 }

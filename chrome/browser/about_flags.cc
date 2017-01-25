@@ -911,7 +911,7 @@ const FeatureEntry kFeatureEntries[] = {
 #if BUILDFLAG(ENABLE_SPELLCHECK) && defined(OS_ANDROID)
     {"enable-android-spellchecker", IDS_OPTIONS_ENABLE_SPELLCHECK,
      IDS_OPTIONS_ENABLE_ANDROID_SPELLCHECKER_DESCRIPTION, kOsAndroid,
-     FEATURE_VALUE_TYPE(spellcheck::kAndroidSpellChecker)},
+     FEATURE_VALUE_TYPE(spellcheck::kAndroidSpellCheckerNonLowEnd)},
 #endif  // ENABLE_SPELLCHECK && OS_ANDROID
     {"enable-scroll-prediction", IDS_FLAGS_SCROLL_PREDICTION_NAME,
      IDS_FLAGS_SCROLL_PREDICTION_DESCRIPTION, kOsDesktop,
@@ -2003,6 +2003,9 @@ const FeatureEntry kFeatureEntries[] = {
     {"important-sites-in-cbd", IDS_FLAGS_IMPORTANT_SITES_IN_CBD_NAME,
      IDS_FLAGS_IMPORTANT_SITES_IN_CBD_DESCRIPTION, kOsAndroid,
      FEATURE_VALUE_TYPE(chrome::android::kImportantSitesInCBD)},
+    {"tabs-in-cbd", IDS_FLAGS_TABS_IN_CBD_NAME,
+     IDS_FLAGS_TABS_IN_CBD_DESCRIPTION, kOsAndroid,
+     FEATURE_VALUE_TYPE(chrome::android::kTabsInCBD)},
 #endif  // OS_ANDROID
     {"enable-pointer-events", IDS_FLAGS_EXPERIMENTAL_POINTER_EVENT_NAME,
      IDS_FLAGS_EXPERIMENTAL_POINTER_EVENT_DESCRIPTION, kOsAll,
@@ -2037,6 +2040,10 @@ const FeatureEntry kFeatureEntries[] = {
      IDS_FLAGS_ENABLE_ANDROID_PAY_INTEGRATION_V2_NAME,
      IDS_FLAGS_ENABLE_ANDROID_PAY_INTEGRATION_V2_DESCRIPTION, kOsAndroid,
      FEATURE_VALUE_TYPE(chrome::android::kAndroidPayIntegrationV2)},
+    {"enable-web-payments-single-app-ui-skip",
+     IDS_FLAGS_ENABLE_WEB_PAYMENTS_SINGLE_APP_UI_SKIP_NAME,
+     IDS_FLAGS_ENABLE_WEB_PAYMENTS_SINGLE_APP_UI_SKIP_DESCRIPTION, kOsAndroid,
+     FEATURE_VALUE_TYPE(chrome::android::kWebPaymentsSingleAppUiSkip)},
     {"android-payment-apps", IDS_FLAGS_ANDROID_PAYMENT_APPS_NAME,
      IDS_FLAGS_ANDROID_PAYMENT_APPS_DESCRIPTION, kOsAndroid,
      FEATURE_VALUE_TYPE(chrome::android::kAndroidPaymentApps)},
@@ -2206,7 +2213,7 @@ const FeatureEntry kFeatureEntries[] = {
 #endif
 
 #if defined(OS_CHROMEOS)
-     {"enable-touchscreen-calibration", IDS_FLAGS_TOUCHSCREEN_CALIBRATION_NAME,
+    {"enable-touchscreen-calibration", IDS_FLAGS_TOUCHSCREEN_CALIBRATION_NAME,
      IDS_FLAGS_TOUCHSCREEN_CALIBRATION_DESCRIPTION, kOsCrOS,
      SINGLE_VALUE_TYPE(chromeos::switches::kEnableTouchCalibrationSetting)},
 #endif // defined(OS_CHROMEOS)

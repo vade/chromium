@@ -146,6 +146,10 @@ void FakeSessionManagerClient::StoreDeviceLocalAccountPolicy(
                                                 base::Bind(callback, true));
 }
 
+bool FakeSessionManagerClient::SupportsRestartToApplyUserFlags() const {
+  return false;
+}
+
 void FakeSessionManagerClient::SetFlagsForUser(
     const cryptohome::Identification& cryptohome_id,
     const std::vector<std::string>& flags) {}
@@ -178,7 +182,8 @@ void FakeSessionManagerClient::StopArcInstance(const ArcCallback& callback) {
       FROM_HERE, base::Bind(callback, arc_available_));
 }
 
-void FakeSessionManagerClient::PrioritizeArcInstance(
+void FakeSessionManagerClient::SetArcCpuRestriction(
+    login_manager::ContainerCpuRestrictionState restriction_state,
     const ArcCallback& callback) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(callback, arc_available_));

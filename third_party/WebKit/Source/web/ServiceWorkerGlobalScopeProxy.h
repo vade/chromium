@@ -44,6 +44,7 @@ namespace blink {
 
 class Document;
 class FetchEvent;
+class ParentFrameTaskRunners;
 class ServiceWorkerGlobalScope;
 class WebDataConsumerHandle;
 class WebEmbeddedWorkerImpl;
@@ -111,6 +112,7 @@ class ServiceWorkerGlobalScopeProxy final
   void dispatchPaymentRequestEvent(int,
                                    const WebPaymentAppRequestData&) override;
   bool hasFetchEventHandler() override;
+  void onNavigationPreloadSent(int fetchEventID, const WebURL&) override;
   void onNavigationPreloadResponse(
       int fetchEventID,
       std::unique_ptr<WebURLResponse>,
@@ -118,6 +120,8 @@ class ServiceWorkerGlobalScopeProxy final
   void onNavigationPreloadError(
       int fetchEventID,
       std::unique_ptr<WebServiceWorkerError>) override;
+  void onNavigationPreloadCompleted(int fetchEventID,
+                                    int64_t encodedDataLength) override;
 
   // WorkerReportingProxy overrides:
   void countFeature(UseCounter::Feature) override;
@@ -130,7 +134,6 @@ class ServiceWorkerGlobalScopeProxy final
                             const String& message,
                             SourceLocation*) override;
   void postMessageToPageInspector(const String&) override;
-  ParentFrameTaskRunners* getParentFrameTaskRunners() override;
   void didCreateWorkerGlobalScope(WorkerOrWorkletGlobalScope*) override;
   void didInitializeWorkerContext() override;
   void willEvaluateWorkerScript(size_t scriptSize,

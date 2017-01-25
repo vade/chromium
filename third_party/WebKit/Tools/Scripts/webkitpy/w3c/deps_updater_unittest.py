@@ -20,13 +20,13 @@ class DepsUpdaterTest(unittest.TestCase):
             'some/non-test.file',
         ]
         directory_to_owner = {
-            'foo/bar': 'me@gmail.com',
-            'foo/baz': 'you@gmail.com',
+            'foo/bar': 'someone@gmail.com',
+            'foo/baz': 'not an email address',
             'foo/bat': 'noone@gmail.com',
         }
         self.assertEqual(
             updater.generate_email_list(changed_files, directory_to_owner),
-            ['me@gmail.com', 'you@gmail.com'])
+            ['someone@gmail.com'])
 
     def test_parse_directory_owners(self):
         updater = DepsUpdater(MockHost())
@@ -76,17 +76,17 @@ class DepsUpdaterTest(unittest.TestCase):
         self.assertEqual(
             updater._commit_message('aaaa', '1111'),
             'Import 1111\n\n'
-            'Using update-w3c-deps in Chromium aaaa.\n\n'
+            'Using wpt-import in Chromium aaaa.\n\n'
             'NOEXPORT=true')
 
     def test_cl_description_with_empty_environ(self):
         host = MockHost()
-        host.executive = MockExecutive(output='Last commit message\n')
+        host.executive = MockExecutive(output='Last commit message\n\n')
         updater = DepsUpdater(host)
         description = updater._cl_description()
         self.assertEqual(
             description,
-            ('Last commit message\n'
+            ('Last commit message\n\n'
              'TBR=qyearsley@chromium.org\n'
              'NOEXPORT=true'))
         self.assertEqual(host.executive.calls, [['git', 'log', '-1', '--format=%B']])
@@ -109,7 +109,7 @@ class DepsUpdaterTest(unittest.TestCase):
 
     def test_cl_description_moves_noexport_tag(self):
         host = MockHost()
-        host.executive = MockExecutive(output='Summary\n\nNOEXPORT=true')
+        host.executive = MockExecutive(output='Summary\n\nNOEXPORT=true\n\n')
         updater = DepsUpdater(host)
         description = updater._cl_description()
         self.assertEqual(

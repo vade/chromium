@@ -268,11 +268,12 @@
 
 #if BUILDFLAG(ENABLE_MEDIA_REMOTING)
 #include "content/renderer/image_downloader/single_image_downloader.h"  // nogncheck
+#include "media/remoting/adaptive_renderer_factory.h"     // nogncheck
 #include "media/remoting/remoting_cdm_controller.h"       // nogncheck
 #include "media/remoting/remoting_cdm_factory.h"          // nogncheck
-#include "media/remoting/remoting_renderer_controller.h"  // nogncheck
-#include "media/remoting/remoting_renderer_factory.h"     // nogncheck
-#include "media/remoting/remoting_sink_observer.h"        // nogncheck
+#include "media/remoting/renderer_controller.h"           // nogncheck
+#include "media/remoting/shared_session.h"                // nogncheck
+#include "media/remoting/sink_availability_observer.h"    // nogncheck
 #endif
 
 using base::Time;
@@ -783,6 +784,10 @@ class MHTMLPartsGenerationDelegate
 
   bool useBinaryEncoding() override { return params_.mhtml_binary_encoding; }
 
+  bool removePopupOverlay() override {
+    return params_.mhtml_popup_overlay_removal;
+  }
+
  private:
   const FrameMsg_SerializeAsMHTML_Params& params_;
   std::set<std::string>* serialized_resources_uri_digests_;
@@ -937,7 +942,9 @@ RenderFrameImpl* RenderFrameImpl::CreateMainFrame(
       RenderFrameImpl::Create(render_view, routing_id);
   render_frame->InitializeBlameContext(nullptr);
   WebLocalFrame* web_frame = WebLocalFrame::create(
-      blink::WebTreeScopeType::Document, render_frame, opener);
+      blink::WebTreeScopeType::Document, render_frame,
+      render_frame->blink_interface_provider_.get(),
+      render_frame->blink_interface_registry_.get(), opener);
   render_frame->BindToWebFrame(web_frame);
   render_view->webview()->setMainFrame(web_frame);
   render_frame->render_widget_ = RenderWidget::CreateForFrame(
@@ -984,6 +991,8 @@ void RenderFrameImpl::CreateFrame(
         replicated_state.scope, WebString::fromUTF8(replicated_state.name),
         WebString::fromUTF8(replicated_state.unique_name),
         replicated_state.sandbox_flags, render_frame,
+        render_frame->blink_interface_provider_.get(),
+        render_frame->blink_interface_registry_.get(),
         previous_sibling_web_frame,
         frame_owner_properties.ToWebFrameOwnerProperties(),
         ResolveOpener(opener_routing_id));
@@ -1004,8 +1013,11 @@ void RenderFrameImpl::CreateFrame(
     render_frame = RenderFrameImpl::Create(proxy->render_view(), routing_id);
     render_frame->InitializeBlameContext(nullptr);
     render_frame->proxy_routing_id_ = proxy_routing_id;
+    proxy->set_provisional_frame_routing_id(routing_id);
     web_frame = blink::WebLocalFrame::createProvisional(
-        render_frame, proxy->web_frame(), replicated_state.sandbox_flags);
+        render_frame, render_frame->blink_interface_provider_.get(),
+        render_frame->blink_interface_registry_.get(), proxy->web_frame(),
+        replicated_state.sandbox_flags);
   }
   render_frame->BindToWebFrame(web_frame);
   CHECK(parent_routing_id != MSG_ROUTING_NONE || !web_frame->parent());
@@ -1154,14 +1166,16 @@ RenderFrameImpl::RenderFrameImpl(const CreateParams& params)
   manifest_manager_ = new ManifestManager(this);
 
 #if BUILDFLAG(ENABLE_MEDIA_REMOTING)
-  // Create the RemotingSinkObserver to monitor the remoting sink availablity.
+  // Create the SinkAvailabilityObserver to monitor the remoting sink
+  // availablity.
   media::mojom::RemotingSourcePtr remoting_source;
   media::mojom::RemotingSourceRequest remoting_source_request(&remoting_source);
   media::mojom::RemoterPtr remoter;
   GetRemoterFactory()->Create(std::move(remoting_source),
                               mojo::MakeRequest(&remoter));
-  remoting_sink_observer_ = base::MakeUnique<media::RemotingSinkObserver>(
-      std::move(remoting_source_request), std::move(remoter));
+  remoting_sink_observer_ =
+      base::MakeUnique<media::remoting::SinkAvailabilityObserver>(
+          std::move(remoting_source_request), std::move(remoter));
 #endif  // BUILDFLAG(ENABLE_MEDIA_REMOTING)
 }
 
@@ -1609,19 +1623,6 @@ void RenderFrameImpl::OnNavigate(
     const CommonNavigationParams& common_params,
     const StartNavigationParams& start_params,
     const RequestNavigationParams& request_params) {
-  // If this RenderFrame is going to replace a RenderFrameProxy, it is possible
-  // that the proxy was detached before this navigation request was received.
-  // In that case, abort the navigation.  See https://crbug.com/526304 and
-  // https://crbug.com/568676.
-  // TODO(nasko, alexmos): Eventually, the browser process will send an IPC to
-  // clean this frame up after https://crbug.com/548275 is fixed.
-  if (proxy_routing_id_ != MSG_ROUTING_NONE) {
-    RenderFrameProxy* proxy =
-        RenderFrameProxy::FromRoutingID(proxy_routing_id_);
-    if (!proxy)
-      return;
-  }
-
   RenderThreadImpl* render_thread_impl = RenderThreadImpl::current();
   // Can be NULL in tests.
   if (render_thread_impl)
@@ -2764,20 +2765,6 @@ blink::WebPlugin* RenderFrameImpl::createPlugin(
 #endif  // BUILDFLAG(ENABLE_PLUGINS)
 }
 
-#if BUILDFLAG(ENABLE_MEDIA_REMOTING)
-std::unique_ptr<media::RemotingRendererController>
-RenderFrameImpl::CreateRemotingRendererController() {
-  media::mojom::RemotingSourcePtr remoting_source;
-  media::mojom::RemotingSourceRequest remoting_source_request(&remoting_source);
-  media::mojom::RemoterPtr remoter;
-  GetRemoterFactory()->Create(std::move(remoting_source),
-                              mojo::MakeRequest(&remoter));
-  return base::MakeUnique<media::RemotingRendererController>(
-      make_scoped_refptr(new media::RemotingSourceImpl(
-          std::move(remoting_source_request), std::move(remoter))));
-}
-#endif
-
 blink::WebMediaPlayer* RenderFrameImpl::createMediaPlayer(
     const blink::WebMediaPlayerSource& source,
     WebMediaPlayerClient* client,
@@ -2822,8 +2809,15 @@ blink::WebMediaPlayer* RenderFrameImpl::createMediaPlayer(
 #endif  // defined(OS_ANDROID)
 
 #if BUILDFLAG(ENABLE_MEDIA_REMOTING)
-  std::unique_ptr<media::RemotingRendererController> remoting_controller =
-      CreateRemotingRendererController();
+  media::mojom::RemotingSourcePtr remoting_source;
+  media::mojom::RemotingSourceRequest remoting_source_request(&remoting_source);
+  media::mojom::RemoterPtr remoter;
+  GetRemoterFactory()->Create(std::move(remoting_source),
+                              mojo::MakeRequest(&remoter));
+  using RemotingController = media::remoting::RendererController;
+  std::unique_ptr<RemotingController> remoting_controller(
+      new RemotingController(new media::remoting::SharedSession(
+          std::move(remoting_source_request), std::move(remoter))));
   base::WeakPtr<media::MediaObserver> media_observer =
       remoting_controller->GetWeakPtr();
 #else
@@ -2885,18 +2879,17 @@ blink::WebMediaPlayer* RenderFrameImpl::createMediaPlayer(
   }
 
 #if BUILDFLAG(ENABLE_MEDIA_REMOTING)
-  media::RemotingRendererController* remoting_controller_ptr =
-      remoting_controller.get();
-  media_renderer_factory = base::MakeUnique<media::RemotingRendererFactory>(
-      std::move(media_renderer_factory), std::move(remoting_controller));
+  auto* const remoting_controller_ptr = remoting_controller.get();
+  media_renderer_factory =
+      base::MakeUnique<media::remoting::AdaptiveRendererFactory>(
+          std::move(media_renderer_factory), std::move(remoting_controller));
 #endif
 
   if (!url_index_.get() || url_index_->frame() != frame_)
     url_index_.reset(new media::UrlIndex(frame_));
 
   media::WebMediaPlayerImpl* media_player = new media::WebMediaPlayerImpl(
-      frame_, client, encrypted_client,
-      GetWebMediaPlayerDelegate()->AsWeakPtr(),
+      frame_, client, encrypted_client, GetWebMediaPlayerDelegate(),
       std::move(media_renderer_factory), url_index_, params);
 
 #if defined(OS_ANDROID)  // WMPI_CAST
@@ -3058,8 +3051,10 @@ blink::WebLocalFrame* RenderFrameImpl::createChildFrame(
   RenderFrameImpl* child_render_frame =
       RenderFrameImpl::Create(render_view_, child_routing_id);
   child_render_frame->InitializeBlameContext(this);
-  blink::WebLocalFrame* web_frame =
-      WebLocalFrame::create(scope, child_render_frame);
+  blink::WebLocalFrame* web_frame = WebLocalFrame::create(
+      scope, child_render_frame,
+      child_render_frame->blink_interface_provider_.get(),
+      child_render_frame->blink_interface_registry_.get());
   child_render_frame->BindToWebFrame(web_frame);
 
   // Add the frame to the frame tree and initialize it.
@@ -3136,6 +3131,21 @@ void RenderFrameImpl::frameDetached(blink::WebLocalFrame* frame,
   frame->close();
   frame_ = nullptr;
 
+  // If this was a provisional frame with an associated proxy, tell the proxy
+  // that it's no longer associated with this frame.
+  if (proxy_routing_id_ != MSG_ROUTING_NONE) {
+    RenderFrameProxy* proxy =
+        RenderFrameProxy::FromRoutingID(proxy_routing_id_);
+
+    // |proxy| should always exist.  Detaching the proxy would've also detached
+    // this provisional frame.  The proxy should also not be associated with
+    // another provisional frame at this point.
+    CHECK(proxy);
+    CHECK_EQ(routing_id_, proxy->provisional_frame_routing_id());
+
+    proxy->set_provisional_frame_routing_id(MSG_ROUTING_NONE);
+  }
+
   delete this;
   // Object is invalid after this point.
 }
@@ -3153,20 +3163,10 @@ void RenderFrameImpl::willCommitProvisionalLoad(blink::WebLocalFrame* frame) {
 
 void RenderFrameImpl::didChangeName(const blink::WebString& name,
                                     const blink::WebString& unique_name) {
-  // TODO(alexmos): According to https://crbug.com/169110, sending window.name
-  // updates may have performance implications for benchmarks like SunSpider.
-  // For now, send these updates only for --site-per-process, which needs to
-  // replicate frame names to frame proxies, and when
-  // |report_frame_name_changes| is set (used by <webview>).  If needed, this
-  // can be optimized further by only sending the update if there are any
-  // remote frames in the frame tree, or delaying and batching up IPCs if
-  // updates are happening too frequently.
-  if (SiteIsolationPolicy::AreCrossProcessFramesPossible() ||
-      render_view_->renderer_preferences_.report_frame_name_changes) {
-    Send(new FrameHostMsg_DidChangeName(
-        routing_id_, base::UTF16ToUTF8(base::StringPiece16(name)),
-        base::UTF16ToUTF8(base::StringPiece16(unique_name))));
-  }
+  // TODO(creis): Remove report_frame_name_changes from RendererPreferences.
+  Send(new FrameHostMsg_DidChangeName(
+      routing_id_, base::UTF16ToUTF8(base::StringPiece16(name)),
+      base::UTF16ToUTF8(base::StringPiece16(unique_name))));
 
   if (!committed_first_load_)
     name_changed_before_first_commit_ = true;
@@ -5057,14 +5057,13 @@ void RenderFrameImpl::SendDidCommitProvisionalLoad(
 bool RenderFrameImpl::SwapIn() {
   CHECK_NE(proxy_routing_id_, MSG_ROUTING_NONE);
   CHECK(!in_frame_tree_);
-  RenderFrameProxy* proxy = RenderFrameProxy::FromRoutingID(proxy_routing_id_);
 
-  // The proxy might have been detached while the provisional LocalFrame was
-  // being navigated.  In that case, don't swap the frame back in the tree
-  // and return early (to avoid sending confusing IPCs to the browser
-  // process).  See https://crbug.com/526304 and https://crbug.com/568676.
-  if (!proxy)
-    return false;
+  // The proxy should always exist.  If it was detached while the provisional
+  // LocalFrame was being navigated, the provisional frame would've been
+  // cleaned up by RenderFrameProxy::frameDetached.  See
+  // https://crbug.com/526304 and https://crbug.com/568676 for context.
+  RenderFrameProxy* proxy = RenderFrameProxy::FromRoutingID(proxy_routing_id_);
+  CHECK(proxy);
 
   int proxy_routing_id = proxy_routing_id_;
   if (!proxy->web_frame()->swap(frame_))
@@ -5176,10 +5175,13 @@ void RenderFrameImpl::OnCommitNavigation(
       request_params.has_user_gesture ? new blink::WebScopedUserGesture(frame_)
                                       : nullptr);
 
+  browser_side_navigation_pending_ = false;
+
   NavigateInternal(common_params, StartNavigationParams(), request_params,
                    std::move(stream_override));
 
-  browser_side_navigation_pending_ = false;
+  // Don't add code after this since NavigateInternal may have destroyed this
+  // RenderFrameImpl.
 }
 
 // PlzNavigate
@@ -5475,15 +5477,6 @@ WebNavigationPolicy RenderFrameImpl::decidePolicyForNavigation(
       info.urlRequest.checkForBrowserSideNavigation() &&
       ShouldMakeNetworkRequestForURL(url)) {
     if (info.defaultPolicy == blink::WebNavigationPolicyCurrentTab) {
-      if (RenderThreadImpl::current() &&
-          RenderThreadImpl::current()->layout_test_mode()) {
-        // Layout tests sometimes attempt to load urls of the form
-        // about:blank?foo which the browser doesn't expect and will convert to
-        // about:blank. Don't send these to the browser.
-        if (url.SchemeIs(url::kAboutScheme) && url.path() == "blank")
-          return info.defaultPolicy;
-      }
-
       BeginNavigation(info);
       return blink::WebNavigationPolicyHandledByClient;
     } else {
@@ -6187,7 +6180,7 @@ WebMediaPlayer* RenderFrameImpl::CreateWebMediaPlayerForMediaStream(
     compositor_task_runner = base::ThreadTaskRunnerHandle::Get();
 
   return new WebMediaPlayerMS(
-      frame_, client, GetWebMediaPlayerDelegate()->AsWeakPtr(),
+      frame_, client, GetWebMediaPlayerDelegate(),
       new RenderMediaLog(url::Origin(security_origin).GetURL()),
       CreateRendererFactory(), render_thread->GetIOTaskRunner(),
       compositor_task_runner, render_thread->GetMediaThreadTaskRunner(),
@@ -6541,9 +6534,9 @@ WebMediaPlayer* RenderFrameImpl::CreateAndroidWebMediaPlayer(
   bool enable_texture_copy =
       RenderThreadImpl::current()->EnableStreamTextureCopy();
   return new WebMediaPlayerAndroid(
-      frame_, client, encrypted_client,
-      GetWebMediaPlayerDelegate()->AsWeakPtr(), GetMediaPlayerManager(),
-      stream_texture_factory, routing_id_, enable_texture_copy, params);
+      frame_, client, encrypted_client, GetWebMediaPlayerDelegate(),
+      GetMediaPlayerManager(), stream_texture_factory, routing_id_,
+      enable_texture_copy, params);
 }
 
 RendererMediaPlayerManager* RenderFrameImpl::GetMediaPlayerManager() {
@@ -6610,7 +6603,7 @@ media::CdmFactory* RenderFrameImpl::GetCdmFactory() {
 #endif  // BUILDFLAG(ENABLE_PEPPER_CDMS)
 
 #if BUILDFLAG(ENABLE_MEDIA_REMOTING)
-  cdm_factory_.reset(new media::RemotingCdmFactory(
+  cdm_factory_.reset(new media::remoting::RemotingCdmFactory(
       std::move(cdm_factory_), GetRemoterFactory(),
       std::move(remoting_sink_observer_)));
 #endif  // BUILDFLAG(ENABLE_MEDIA_REMOTING)
@@ -6652,7 +6645,8 @@ void RenderFrameImpl::HandlePepperImeCommit(const base::string16& text) {
       }
 
       if (GetRenderWidget()->GetWebWidget())
-        GetRenderWidget()->GetWebWidget()->handleInputEvent(char_event);
+        GetRenderWidget()->GetWebWidget()->handleInputEvent(
+            blink::WebCoalescedInputEvent(char_event));
     }
   } else {
     // Mimics the order of events sent by WebKit.
@@ -6706,14 +6700,6 @@ void RenderFrameImpl::checkIfAudioSinkExistsAndIsAuthorized(
   callback.Run(AudioDeviceFactory::GetOutputDeviceInfo(
                    routing_id_, 0, sink_id.utf8(), security_origin)
                    .device_status());
-}
-
-blink::InterfaceProvider* RenderFrameImpl::interfaceProvider() {
-  return blink_interface_provider_.get();
-}
-
-blink::InterfaceRegistry* RenderFrameImpl::interfaceRegistry() {
-  return blink_interface_registry_.get();
 }
 
 blink::WebPageVisibilityState RenderFrameImpl::visibilityState() const {

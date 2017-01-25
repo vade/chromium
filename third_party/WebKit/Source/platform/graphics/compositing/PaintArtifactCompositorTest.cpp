@@ -96,6 +96,20 @@ class PaintArtifactCompositorTestWithPropertyTrees
                 ->property_trees();
   }
 
+  int elementIdToEffectNodeIndex(CompositorElementId elementId) {
+    return m_webLayerTreeView->layerTreeHost()
+        ->GetLayerTree()
+        ->property_trees()
+        ->element_id_to_effect_node_index[elementId];
+  }
+
+  int elementIdToTransformNodeIndex(CompositorElementId elementId) {
+    return m_webLayerTreeView->layerTreeHost()
+        ->GetLayerTree()
+        ->property_trees()
+        ->element_id_to_transform_node_index[elementId];
+  }
+
   int elementIdToScrollNodeIndex(CompositorElementId elementId) {
     return m_webLayerTreeView->layerTreeHost()
         ->GetLayerTree()
@@ -108,7 +122,8 @@ class PaintArtifactCompositorTestWithPropertyTrees
   }
 
   void update(const PaintArtifact& artifact) {
-    m_paintArtifactCompositor->update(artifact, nullptr, false);
+    GeometryMapper geometryMapper;
+    m_paintArtifactCompositor->update(artifact, nullptr, false, geometryMapper);
     m_webLayerTreeView->layerTreeHost()->LayoutAndUpdateLayers();
   }
 
@@ -1615,6 +1630,43 @@ TEST_F(PaintArtifactCompositorTestWithPropertyTrees, PendingLayerKnownOpaque) {
 
   // Chunk 3 covers the entire layer, so now it's opaque.
   EXPECT_TRUE(pendingLayer.knownToBeOpaque);
+}
+
+TEST_F(PaintArtifactCompositorTestWithPropertyTrees, TransformWithElementId) {
+  CompositorElementId expectedCompositorElementId(2, 0);
+  RefPtr<TransformPaintPropertyNode> transform =
+      TransformPaintPropertyNode::create(
+          TransformPaintPropertyNode::root(), TransformationMatrix().rotate(90),
+          FloatPoint3D(100, 100, 0), false, 0, CompositingReason3DTransform,
+          expectedCompositorElementId);
+
+  TestPaintArtifact artifact;
+  artifact
+      .chunk(transform, ClipPaintPropertyNode::root(),
+             EffectPaintPropertyNode::root())
+      .rectDrawing(FloatRect(100, 100, 200, 100), Color::black);
+  update(artifact.build());
+
+  EXPECT_EQ(2, elementIdToTransformNodeIndex(expectedCompositorElementId));
+}
+
+TEST_F(PaintArtifactCompositorTestWithPropertyTrees, EffectWithElementId) {
+  CompositorElementId expectedCompositorElementId(2, 0);
+  float opacity = 2.0 / 255.0;
+  RefPtr<EffectPaintPropertyNode> effect = EffectPaintPropertyNode::create(
+      EffectPaintPropertyNode::root(), TransformPaintPropertyNode::root(),
+      ClipPaintPropertyNode::root(), CompositorFilterOperations(), opacity,
+      SkBlendMode::kSrcOver, CompositingReasonNone,
+      expectedCompositorElementId);
+
+  TestPaintArtifact artifact;
+  artifact
+      .chunk(TransformPaintPropertyNode::root(), ClipPaintPropertyNode::root(),
+             effect.get())
+      .rectDrawing(FloatRect(100, 100, 200, 100), Color::black);
+  update(artifact.build());
+
+  EXPECT_EQ(2, elementIdToEffectNodeIndex(expectedCompositorElementId));
 }
 
 }  // namespace blink
