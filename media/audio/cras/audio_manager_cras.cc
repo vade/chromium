@@ -12,7 +12,7 @@
 #include "base/environment.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/nix/xdg_util.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -23,7 +23,7 @@
 #include "media/audio/cras/cras_input.h"
 #include "media/audio/cras/cras_unified.h"
 #include "media/base/channel_layout.h"
-#include "media/base/media_resources.h"
+#include "media/base/localized_strings.h"
 
 // cras_util.h headers pull in min/max macros...
 // TODO(dgreid): Fix headers such that these aren't imported.

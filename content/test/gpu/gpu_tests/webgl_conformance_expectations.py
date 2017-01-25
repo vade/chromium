@@ -352,6 +352,8 @@ class WebGLConformanceExpectations(GpuTestExpectations):
     self.Fail('conformance/textures/misc/' +
         'copytexsubimage2d-large-partial-copy-corruption.html',
         ['win', 'intel', 'passthrough', 'd3d11'], bug=602688)
+    self.Flaky('conformance/textures/misc/copytexsubimage2d-subrects.html',
+        ['win10', 'intel', 'passthrough', 'd3d11'], bug=685232)
 
     # Mac failures
     self.Flaky('conformance/extensions/oes-texture-float-with-video.html',
@@ -377,6 +379,9 @@ class WebGLConformanceExpectations(GpuTestExpectations):
         ['mac', ('nvidia', 0xfe9)], bug=635081)
     self.Fail('conformance/textures/misc/tex-input-validation.html',
         ['mac', ('nvidia', 0xfe9)], bug=635081)
+    self.Flaky('conformance/uniforms/' +
+        'no-over-optimization-on-uniform-array-12.html',
+        ['mac', ('nvidia', 0xfe9)], bug=684903)
 
     # Mac ASAN only
     self.Fail(

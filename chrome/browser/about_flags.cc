@@ -825,10 +825,6 @@ const FeatureEntry kFeatureEntries[] = {
      IDS_FLAGS_SHOW_AUTOFILL_TYPE_PREDICTIONS_NAME,
      IDS_FLAGS_SHOW_AUTOFILL_TYPE_PREDICTIONS_DESCRIPTION, kOsAll,
      SINGLE_VALUE_TYPE(autofill::switches::kShowAutofillTypePredictions)},
-    {"enable-credit-card-signin-promo",
-     IDS_FLAGS_ENABLE_AUTOFILL_CREDIT_CARD_SIGNIN_PROMO_NAME,
-     IDS_FLAGS_ENABLE_AUTOFILL_CREDIT_CARD_SIGNIN_PROMO_DESCRIPTION, kOsAll,
-     FEATURE_VALUE_TYPE(autofill::kAutofillCreditCardSigninPromo)},
     {"smooth-scrolling", IDS_FLAGS_SMOOTH_SCROLLING_NAME,
      IDS_FLAGS_SMOOTH_SCROLLING_DESCRIPTION,
      // Mac has a separate implementation with its own setting to disable.
@@ -2218,6 +2214,11 @@ const FeatureEntry kFeatureEntries[] = {
      SINGLE_VALUE_TYPE(chromeos::switches::kEnableTouchCalibrationSetting)},
 #endif // defined(OS_CHROMEOS)
 
+#if defined(OS_WIN)
+     {"gdi-text-printing", IDS_FLAGS_GDI_TEXT_PRINTING,
+       IDS_FLAGS_GDI_TEXT_PRINTING_DESCRIPTION, kOsWin,
+       FEATURE_VALUE_TYPE(features::kGdiTextPrinting)}
+#endif
     // NOTE: Adding new command-line switches requires adding corresponding
     // entries to enum "LoginCustomFlags" in histograms.xml. See note in
     // histograms.xml and don't forget to run AboutFlagsHistogramTest unit test.

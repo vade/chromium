@@ -5634,13 +5634,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_SHOW_AUTOFILL_TYPE_PREDICTIONS_DESCRIPTION" desc="Description for the flag to show Autofill field type predictions for all forms">
         Annotates web forms with Autofill field type predictions as placeholder text.
       </message>
-      <!-- Autofill credit card signin promo -->
-      <message name="IDS_FLAGS_ENABLE_AUTOFILL_CREDIT_CARD_SIGNIN_PROMO_NAME" desc="Title for the flag to enable autofill credit card signin promo">
-        Enable Autofill Credit Card Signin Promo
-      </message>
-      <message name="IDS_FLAGS_ENABLE_AUTOFILL_CREDIT_CARD_SIGNIN_PROMO_DESCRIPTION" desc="Description for the flag to enable autofill credit card signin promo">
-        Enable showing the credit card signin promo inside the Autofill dropdown.
-      </message>
       <message name="IDS_FLAGS_TCP_FAST_OPEN_NAME" desc="Name of the flag that enables TCP Fast Open.">
         TCP Fast Open
       </message>
@@ -15541,6 +15534,15 @@ read aloud to screenreader users to announce that a completion is available.">
         <message name="IDS_FLAGS_ENABLE_DEFAULT_MEDIA_SESSION_ENABLED_DUCK_FLASH" desc="Option for enabling the default MediaSession with Flash">
             Enabled (Flash lowers volume when interrupted by other sound, experimental)
         </message>
+    </if>
+    
+    <if expr="is_win">
+      <message name="IDS_FLAGS_GDI_TEXT_PRINTING" desc="Name for the flag that enables using GDI to print text">
+        GDI Text Printing
+      </message>
+      <message name="IDS_FLAGS_GDI_TEXT_PRINTING_DESCRIPTION" desc="Description of the flag that enables using GDI to print text.">
+        Use GDI to print text as simply text
+      </message>
     </if>
 
     <if expr="is_android">
