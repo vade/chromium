@@ -2275,13 +2275,12 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, ProcessTransferAfterError) {
   GURL url_a = child->current_url();
 
   // Disable host resolution in the test server and try to navigate the subframe
-  // cross-site, which will lead to a committed net error (which looks like
-  // success to the TestNavigationObserver).
+  // cross-site, which will lead to a committed net error.
   GURL url_b = embedded_test_server()->GetURL("b.com", "/title3.html");
   host_resolver()->ClearRules();
   TestNavigationObserver observer(shell()->web_contents());
   NavigateIframeToURL(shell()->web_contents(), "child-0", url_b);
-  EXPECT_TRUE(observer.last_navigation_succeeded());
+  EXPECT_FALSE(observer.last_navigation_succeeded());
   EXPECT_EQ(url_b, observer.last_navigation_url());
   EXPECT_EQ(2, shell()->web_contents()->GetController().GetEntryCount());
 
@@ -3915,8 +3914,20 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, DynamicWindowName) {
   EXPECT_EQ(root->child_at(0)->frame_name(), "updated-name");
 
   // The proxy in the parent process should also receive the updated name.
-  // Check that it can reference the child frame by its new name.
+  // Now iframe's name and the content window's name differ, so it shouldn't
+  // be possible to access to the content window with the updated name.
   bool success = false;
+  EXPECT_TRUE(
+      ExecuteScriptAndExtractBool(shell(),
+                                  "window.domAutomationController.send("
+                                  "    frames['updated-name'] === undefined);",
+                                  &success));
+  EXPECT_TRUE(success);
+  // Change iframe's name to match the content window's name so that it can
+  // reference the child frame by its new name in case of cross origin.
+  EXPECT_TRUE(
+      ExecuteScript(root, "window['3-1-id'].name = 'updated-name';"));
+  success = false;
   EXPECT_TRUE(
       ExecuteScriptAndExtractBool(shell(),
                                   "window.domAutomationController.send("

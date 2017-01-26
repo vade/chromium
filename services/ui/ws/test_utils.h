@@ -341,6 +341,7 @@ class TestWindowManager : public mojom::WindowManager {
       uint32_t window_id,
       const std::string& name,
       const base::Optional<std::vector<uint8_t>>& value) override {}
+  void WmSetCanFocus(uint32_t window_id, bool can_focus) override {}
   void WmCreateTopLevelWindow(
       uint32_t change_id,
       ClientSpecificId requesting_client_id,
@@ -354,6 +355,8 @@ class TestWindowManager : public mojom::WindowManager {
                          const gfx::Point& cursor_location) override;
   void WmCancelMoveLoop(uint32_t window_id) override;
   void WmDeactivateWindow(uint32_t window_id) override;
+  void WmStackAbove(uint32_t change_id, uint32_t above_id,
+                    uint32_t below_id) override;
   void WmStackAtTop(uint32_t change_id, uint32_t window_id) override;
   void OnAccelerator(uint32_t ack_id,
                      uint32_t accelerator_id,

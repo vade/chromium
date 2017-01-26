@@ -427,14 +427,11 @@ void FrameView::ScrollbarManager::setHasVerticalScrollbar(bool hasScrollbar) {
 Scrollbar* FrameView::ScrollbarManager::createScrollbar(
     ScrollbarOrientation orientation) {
   Element* customScrollbarElement = nullptr;
-  LocalFrame* customScrollbarFrame = nullptr;
-
   LayoutBox* box = m_scrollableArea->layoutBox();
-  if (box->document().view()->shouldUseCustomScrollbars(customScrollbarElement,
-                                                        customScrollbarFrame)) {
+  if (box->document().view()->shouldUseCustomScrollbars(
+          customScrollbarElement)) {
     return LayoutScrollbar::createCustomScrollbar(
-        m_scrollableArea.get(), orientation, customScrollbarElement,
-        customScrollbarFrame);
+        m_scrollableArea.get(), orientation, customScrollbarElement);
   }
 
   // Nobody set a custom style, so we just use a native scrollbar.
@@ -634,19 +631,14 @@ void FrameView::setCanHaveScrollbars(bool canHaveScrollbars) {
 }
 
 bool FrameView::shouldUseCustomScrollbars(
-    Element*& customScrollbarElement,
-    LocalFrame*& customScrollbarFrame) const {
+    Element*& customScrollbarElement) const {
   customScrollbarElement = nullptr;
-  customScrollbarFrame = nullptr;
 
   if (Settings* settings = m_frame->settings()) {
     if (!settings->getAllowCustomScrollbarInMainFrame() &&
         m_frame->isMainFrame())
       return false;
   }
-
-  // FIXME: We need to update the scrollbar dynamically as documents change (or
-  // as doc elements and bodies get discovered that have custom styles).
   Document* doc = m_frame->document();
 
   // Try the <body> element first as a scrollbar source.
@@ -1438,7 +1430,7 @@ LayoutReplaced* FrameView::embeddedReplacedContent() const {
 }
 
 void FrameView::addPart(LayoutPart* object) {
-  m_parts.add(object);
+  m_parts.insert(object);
 }
 
 void FrameView::removePart(LayoutPart* object) {
@@ -1477,7 +1469,7 @@ void FrameView::addPartToUpdate(LayoutEmbeddedObject& object) {
   if (isHTMLObjectElement(*node) || isHTMLEmbedElement(*node))
     toHTMLPlugInElement(node)->setNeedsWidgetUpdate(true);
 
-  m_partUpdateSet.add(&object);
+  m_partUpdateSet.insert(&object);
 }
 
 void FrameView::setDisplayMode(WebDisplayMode mode) {
@@ -1539,7 +1531,7 @@ bool FrameView::contentsInCompositedLayer() const {
 void FrameView::addBackgroundAttachmentFixedObject(LayoutObject* object) {
   ASSERT(!m_backgroundAttachmentFixedObjects.contains(object));
 
-  m_backgroundAttachmentFixedObjects.add(object);
+  m_backgroundAttachmentFixedObjects.insert(object);
   if (ScrollingCoordinator* scrollingCoordinator = this->scrollingCoordinator())
     scrollingCoordinator->frameViewHasBackgroundAttachmentFixedObjectsDidChange(
         this);
@@ -1575,7 +1567,7 @@ void FrameView::addViewportConstrainedObject(LayoutObject* object) {
   }
 
   if (!m_viewportConstrainedObjects->contains(object)) {
-    m_viewportConstrainedObjects->add(object);
+    m_viewportConstrainedObjects->insert(object);
 
     if (ScrollingCoordinator* scrollingCoordinator =
             this->scrollingCoordinator())
@@ -3044,6 +3036,13 @@ void FrameView::prePaint() {
 
   forAllNonThrottledFrameViews([](FrameView& frameView) {
     frameView.lifecycle().advanceTo(DocumentLifecycle::InPrePaint);
+    if (frameView.canThrottleRendering()) {
+      // This frame can be throttled but not throttled, meaning we are not in an
+      // AllowThrottlingScope. Now this frame may contain dirty paint flags, and
+      // we need to propagate the flags into the ancestor chain so that
+      // PrePaintTreeWalk can reach this frame.
+      frameView.setNeedsPaintPropertyUpdate();
+    }
   });
 
   if (RuntimeEnabledFeatures::slimmingPaintInvalidationEnabled())
@@ -3599,7 +3598,7 @@ std::unique_ptr<JSONArray> FrameView::trackedObjectPaintInvalidationsAsJSON()
 void FrameView::addResizerArea(LayoutBox& resizerBox) {
   if (!m_resizerAreas)
     m_resizerAreas = WTF::wrapUnique(new ResizerAreaSet);
-  m_resizerAreas->add(&resizerBox);
+  m_resizerAreas->insert(&resizerBox);
 }
 
 void FrameView::removeResizerArea(LayoutBox& resizerBox) {
@@ -3615,7 +3614,7 @@ void FrameView::addScrollableArea(ScrollableArea* scrollableArea) {
   ASSERT(scrollableArea);
   if (!m_scrollableAreas)
     m_scrollableAreas = new ScrollableAreaSet;
-  m_scrollableAreas->add(scrollableArea);
+  m_scrollableAreas->insert(scrollableArea);
 
   if (ScrollingCoordinator* scrollingCoordinator = this->scrollingCoordinator())
     scrollingCoordinator->scrollableAreasDidChange();
@@ -3634,7 +3633,7 @@ void FrameView::addAnimatingScrollableArea(ScrollableArea* scrollableArea) {
   ASSERT(scrollableArea);
   if (!m_animatingScrollableAreas)
     m_animatingScrollableAreas = new ScrollableAreaSet;
-  m_animatingScrollableAreas->add(scrollableArea);
+  m_animatingScrollableAreas->insert(scrollableArea);
 }
 
 void FrameView::removeAnimatingScrollableArea(ScrollableArea* scrollableArea) {
@@ -3759,7 +3758,7 @@ IntSize FrameView::maximumScrollOffsetInt() const {
 void FrameView::addChild(Widget* child) {
   ASSERT(child != this && !child->parent());
   child->setParent(this);
-  m_children.add(child);
+  m_children.insert(child);
 }
 
 void FrameView::setScrollbarModes(ScrollbarMode horizontalMode,
@@ -4087,17 +4086,32 @@ bool FrameView::adjustScrollbarExistence(
 }
 
 bool FrameView::needsScrollbarReconstruction() const {
-  Element* customScrollbarElement = nullptr;
-  LocalFrame* customScrollbarFrame = nullptr;
-  bool shouldUseCustom =
-      shouldUseCustomScrollbars(customScrollbarElement, customScrollbarFrame);
-
-  bool hasAnyScrollbar = horizontalScrollbar() || verticalScrollbar();
-  bool hasCustom =
-      (horizontalScrollbar() && horizontalScrollbar()->isCustomScrollbar()) ||
-      (verticalScrollbar() && verticalScrollbar()->isCustomScrollbar());
-
-  return hasAnyScrollbar && (shouldUseCustom != hasCustom);
+  Scrollbar* scrollbar = horizontalScrollbar();
+  if (!scrollbar)
+    scrollbar = verticalScrollbar();
+  if (!scrollbar) {
+    // We have no scrollbar to reconstruct.
+    return false;
+  }
+  Element* styleSource = nullptr;
+  bool needsCustom = shouldUseCustomScrollbars(styleSource);
+  bool isCustom = scrollbar->isCustomScrollbar();
+  if (needsCustom != isCustom) {
+    // We have a native scrollbar that should be custom, or vice versa.
+    return true;
+  }
+  if (!needsCustom) {
+    // We have a native scrollbar that should remain native.
+    return false;
+  }
+  DCHECK(needsCustom && isCustom);
+  DCHECK(styleSource);
+  if (toLayoutScrollbar(scrollbar)->styleSource() !=
+      styleSource->layoutObject()) {
+    // We have a custom scrollbar with a stale m_owner.
+    return true;
+  }
+  return false;
 }
 
 bool FrameView::shouldIgnoreOverflowHidden() const {
@@ -4642,6 +4656,13 @@ void FrameView::updateViewportIntersectionsForSubtree(
         ->intersectionObserverController()
         ->computeTrackedIntersectionObservations();
 
+  // Don't throttle display:none frames (see updateRenderThrottlingStatus).
+  HTMLFrameOwnerElement* ownerElement = m_frame->deprecatedLocalOwner();
+  if (m_hiddenForThrottling && ownerElement && !ownerElement->layoutObject()) {
+    updateRenderThrottlingStatus(m_hiddenForThrottling, m_subtreeThrottled);
+    DCHECK(!canThrottleRendering());
+  }
+
   for (Frame* child = m_frame->tree().firstChild(); child;
        child = child->tree().nextSibling()) {
     if (!child->isLocalFrame())
@@ -4662,9 +4683,11 @@ void FrameView::updateRenderThrottlingStatus(bool hidden,
   DCHECK(!m_frame->document() || !m_frame->document()->inStyleRecalc());
   bool wasThrottled = canThrottleRendering();
 
-  // Note that we disallow throttling of 0x0 frames because some sites use
-  // them to drive UI logic.
-  m_hiddenForThrottling = hidden && !frameRect().isEmpty();
+  // Note that we disallow throttling of 0x0 and display:none frames because
+  // some sites use them to drive UI logic.
+  HTMLFrameOwnerElement* ownerElement = m_frame->deprecatedLocalOwner();
+  m_hiddenForThrottling = hidden && !frameRect().isEmpty() &&
+                          (ownerElement && ownerElement->layoutObject());
   m_subtreeThrottled = subtreeThrottled;
 
   bool isThrottled = canThrottleRendering();

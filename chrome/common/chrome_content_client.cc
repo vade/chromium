@@ -77,13 +77,17 @@
 #if BUILDFLAG(ENABLE_PLUGINS)
 #include "content/public/common/pepper_plugin_info.h"
 #include "flapper_version.h"  // nogncheck  In SHARED_INTERMEDIATE_DIR.
-#include "ppapi/shared_impl/ppapi_permissions.h"
+#include "ppapi/shared_impl/ppapi_permissions.h"  // nogncheck
 #endif
 
 #if defined(WIDEVINE_CDM_AVAILABLE) && BUILDFLAG(ENABLE_PEPPER_CDMS) && \
     !defined(WIDEVINE_CDM_IS_COMPONENT)
 #define WIDEVINE_CDM_AVAILABLE_NOT_COMPONENT
 #include "chrome/common/widevine_cdm_constants.h"
+#endif
+
+#if BUILDFLAG(ENABLE_PEPPER_CDMS)
+#include "chrome/common/media/cdm_host_file_path.h"
 #endif
 
 #if defined(OS_ANDROID)
@@ -540,26 +544,35 @@ void ChromeContentClient::AddPepperPlugins(
 }
 
 void ChromeContentClient::AddContentDecryptionModules(
-    std::vector<content::CdmInfo>* cdms) {
+    std::vector<content::CdmInfo>* cdms,
+    std::vector<content::CdmHostFilePath>* cdm_host_file_paths) {
+  if (cdms) {
 // TODO(jrummell): Need to have a better flag to indicate systems Widevine
 // is available on. For now we continue to use ENABLE_PEPPER_CDMS so that
 // we can experiment between pepper and mojo.
 #if defined(WIDEVINE_CDM_AVAILABLE_NOT_COMPONENT)
-  base::FilePath adapter_path;
-  base::FilePath cdm_path;
-  std::vector<std::string> codecs_supported;
-  if (IsWidevineAvailable(&adapter_path, &cdm_path, &codecs_supported)) {
-    // CdmInfo needs |path| to be the actual Widevine library,
-    // not the adapter, so adjust as necessary. It will be in the
-    // same directory as the installed adapter.
-    const base::Version version(WIDEVINE_CDM_VERSION_STRING);
-    DCHECK(version.IsValid());
-    cdms->push_back(content::CdmInfo(kWidevineCdmType, version, cdm_path,
-                                     codecs_supported));
-  }
+    base::FilePath adapter_path;
+    base::FilePath cdm_path;
+    std::vector<std::string> codecs_supported;
+    if (IsWidevineAvailable(&adapter_path, &cdm_path, &codecs_supported)) {
+      // CdmInfo needs |path| to be the actual Widevine library,
+      // not the adapter, so adjust as necessary. It will be in the
+      // same directory as the installed adapter.
+      const base::Version version(WIDEVINE_CDM_VERSION_STRING);
+      DCHECK(version.IsValid());
+      cdms->push_back(content::CdmInfo(kWidevineCdmType, version, cdm_path,
+                                       codecs_supported));
+    }
 #endif  // defined(WIDEVINE_CDM_AVAILABLE_NOT_COMPONENT)
 
-  // TODO(jrummell): Add External Clear Key CDM for testing, if it's available.
+    // TODO(jrummell): Add External Clear Key CDM for testing, if it's
+    // available.
+  }
+
+#if BUILDFLAG(ENABLE_PEPPER_CDMS)
+  if (cdm_host_file_paths)
+    chrome::AddCdmHostFilePaths(cdm_host_file_paths);
+#endif
 }
 
 static const char* const kChromeStandardURLSchemes[] = {

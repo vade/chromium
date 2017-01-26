@@ -81,6 +81,23 @@ bool needsIncrementalInsertion(const LocalFrame& frame, const String& newText) {
   return true;
 }
 
+DispatchEventResult dispatchBeforeInputFromComposition(
+    EventTarget* target,
+    InputEvent::InputType inputType,
+    const String& data,
+    InputEvent::EventCancelable cancelable) {
+  if (!RuntimeEnabledFeatures::inputEventEnabled())
+    return DispatchEventResult::NotCanceled;
+  if (!target)
+    return DispatchEventResult::NotCanceled;
+  // TODO(chongz): Pass appropriate |ranges| after it's defined on spec.
+  // http://w3c.github.io/editing/input-events.html#dom-inputevent-inputtype
+  InputEvent* beforeInputEvent = InputEvent::createBeforeInput(
+      inputType, data, cancelable, InputEvent::EventIsComposing::IsComposing,
+      nullptr);
+  return target->dispatchEvent(beforeInputEvent);
+}
+
 // Used to insert/replace text during composition update and confirm
 // composition.
 // Procedure:
@@ -666,7 +683,9 @@ Range* InputMethodController::compositionRange() const {
 String InputMethodController::composingText() const {
   DocumentLifecycle::DisallowTransitionScope disallowTransition(
       document().lifecycle());
-  return plainText(compositionEphemeralRange(), TextIteratorEmitsOriginalText);
+  return plainText(
+      compositionEphemeralRange(),
+      TextIteratorBehavior::Builder().setEmitsOriginalText(true).build());
 }
 
 PlainTextRange InputMethodController::getSelectionOffsets() const {
@@ -724,10 +743,12 @@ PlainTextRange InputMethodController::createRangeForSelection(
   if (range.isNull())
     return PlainTextRange();
 
-  const TextIteratorBehaviorFlags behaviorFlags =
-      TextIteratorEmitsObjectReplacementCharacter |
-      TextIteratorEmitsCharactersBetweenAllVisiblePositions;
-  TextIterator it(range.startPosition(), range.endPosition(), behaviorFlags);
+  const TextIteratorBehavior& behavior =
+      TextIteratorBehavior::Builder()
+          .setEmitsObjectReplacementCharacter(true)
+          .setEmitsCharactersBetweenAllVisiblePositions(true)
+          .build();
+  TextIterator it(range.startPosition(), range.endPosition(), behavior);
 
   int rightBoundary = 0;
   for (; !it.atEnd(); it.advance())
@@ -885,8 +906,10 @@ WebTextInputInfo InputMethodController::textInputInfo() const {
   // Emits an object replacement character for each replaced element so that
   // it is exposed to IME and thus could be deleted by IME on android.
   info.value = plainText(EphemeralRange::rangeOfContents(*element),
-                         TextIteratorEmitsObjectReplacementCharacter |
-                             TextIteratorEmitsSpaceForNbsp);
+                         TextIteratorBehavior::Builder()
+                             .setEmitsObjectReplacementCharacter(true)
+                             .setEmitsSpaceForNbsp(true)
+                             .build());
 
   if (info.value.isEmpty())
     return info;

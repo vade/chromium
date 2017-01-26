@@ -1105,7 +1105,7 @@ WebString WebLocalFrameImpl::selectionAsText() const {
   frame()->document()->updateStyleAndLayoutIgnorePendingStylesheets();
 
   String text = frame()->selection().selectedText(
-      TextIteratorEmitsObjectReplacementCharacter);
+      TextIteratorBehavior::emitsObjectReplacementCharacterBehavior());
 #if OS(WIN)
   replaceNewlinesWithWindowsStyleNewlines(text);
 #endif
@@ -1176,8 +1176,9 @@ WebString WebLocalFrameImpl::rangeAsText(const WebRange& webRange) {
   DocumentLifecycle::DisallowTransitionScope disallowTransition(
       frame()->document()->lifecycle());
 
-  return plainText(webRange.createEphemeralRange(frame()),
-                   TextIteratorEmitsObjectReplacementCharacter);
+  return plainText(
+      webRange.createEphemeralRange(frame()),
+      TextIteratorBehavior::emitsObjectReplacementCharacterBehavior());
 }
 
 void WebLocalFrameImpl::moveRangeSelectionExtent(const WebPoint& point) {
@@ -1600,6 +1601,7 @@ LocalFrame* WebLocalFrameImpl::createChildFrame(
                                ? WebTreeScopeType::Document
                                : WebTreeScopeType::Shadow;
   WebFrameOwnerProperties ownerProperties(
+      ownerElement->browsingContextContainerName(),
       ownerElement->scrollingMode(), ownerElement->marginWidth(),
       ownerElement->marginHeight(), ownerElement->allowFullscreen(),
       ownerElement->allowPaymentRequest(), ownerElement->csp(),

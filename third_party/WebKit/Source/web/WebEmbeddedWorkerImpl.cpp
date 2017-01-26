@@ -101,7 +101,7 @@ WebEmbeddedWorkerImpl::WebEmbeddedWorkerImpl(
       m_askedToTerminate(false),
       m_pauseAfterDownloadState(DontPauseAfterDownload),
       m_waitingForDebuggerState(NotWaitingForDebugger) {
-  runningWorkerInstances().add(this);
+  runningWorkerInstances().insert(this);
 }
 
 WebEmbeddedWorkerImpl::~WebEmbeddedWorkerImpl() {
@@ -461,7 +461,7 @@ void WebEmbeddedWorkerImpl::startWorkerThread() {
           m_mainScriptLoader->getReferrerPolicy(), starterOrigin, workerClients,
           m_mainScriptLoader->responseAddressSpace(),
           m_mainScriptLoader->originTrialTokens(), std::move(workerSettings),
-          workerV8Settings, true /* inspectorNetworkCapability */);
+          workerV8Settings);
 
   m_mainScriptLoader.clear();
 

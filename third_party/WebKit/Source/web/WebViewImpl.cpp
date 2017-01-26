@@ -417,7 +417,7 @@ WebViewImpl::WebViewImpl(WebViewClient* client,
 
   m_devToolsEmulator = DevToolsEmulator::create(this);
 
-  allInstances().add(this);
+  allInstances().insert(this);
 
   m_pageImportanceSignals.setObserver(client);
   m_resizeViewportAnchor = new ResizeViewportAnchor(*m_page);
@@ -1798,14 +1798,12 @@ void WebViewImpl::updateBrowserControlsState(WebBrowserControlsState constraint,
 
   browserControls().updateConstraintsAndState(constraint, current, animate);
 
-  // If the controls are going from a locked hidden to unlocked state, or vice
-  // versa, the ICB size needs to change but we can't rely on getting a
-  // WebViewImpl::resize since the top controls shown state may not have
-  // changed.
-  if ((oldPermittedState == WebBrowserControlsHidden &&
-       constraint == WebBrowserControlsBoth) ||
-      (oldPermittedState == WebBrowserControlsBoth &&
-       constraint == WebBrowserControlsHidden)) {
+  // If the controls are going from a locked to an unlocked state, or
+  // vice-versa, then we need to force a recompute of the ICB size since that
+  // depends on the permitted browser controls state.
+  if (oldPermittedState != constraint &&
+      (oldPermittedState == WebBrowserControlsBoth ||
+       constraint == WebBrowserControlsBoth)) {
     performResize();
   }
 

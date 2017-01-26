@@ -200,6 +200,9 @@ PresentationConnection* PresentationConnection::take(
       createSameThreadTask(&PresentationConnection::dispatchEventAsync,
                            wrapPersistent(request), wrapPersistent(event)));
 
+  // Fire onconnect event asynchronously, after onconnectionavailable.
+  connection->didChangeState(WebPresentationConnectionState::Connected);
+
   return connection;
 }
 
@@ -423,8 +426,8 @@ void PresentationConnection::didChangeState(
 
   m_state = state;
   switch (m_state) {
+    // There is no event handler for state changes to Connecting.
     case WebPresentationConnectionState::Connecting:
-      NOTREACHED();
       return;
     case WebPresentationConnectionState::Connected:
       dispatchStateChangeEvent(Event::create(EventTypeNames::connect));

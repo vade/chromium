@@ -6,7 +6,6 @@ package org.chromium.chrome.browser.ntp.cards;
 
 import org.chromium.base.Callback;
 import org.chromium.base.Log;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.ntp.NewTabPage.DestructionObserver;
 import org.chromium.chrome.browser.ntp.NewTabPageUma;
 import org.chromium.chrome.browser.ntp.snippets.CategoryInt;
@@ -15,6 +14,7 @@ import org.chromium.chrome.browser.ntp.snippets.SectionHeader;
 import org.chromium.chrome.browser.ntp.snippets.SnippetArticle;
 import org.chromium.chrome.browser.ntp.snippets.SnippetArticleViewHolder;
 import org.chromium.chrome.browser.ntp.snippets.SnippetsBridge;
+import org.chromium.chrome.browser.ntp.snippets.SnippetsConfig;
 import org.chromium.chrome.browser.ntp.snippets.SuggestionsSource;
 import org.chromium.chrome.browser.offlinepages.ClientId;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
@@ -24,8 +24,11 @@ import org.chromium.chrome.browser.suggestions.SuggestionsRanker;
 import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegate;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 
 /**
  * A group of suggestions, with a header, a status card, and a progress indicator. This is
@@ -33,6 +36,12 @@ import java.util.List;
  */
 public class SuggestionsSection extends InnerNode {
     private static final String TAG = "NtpCards";
+
+    private static final Set<Integer> SECTION_DISMISSAL_GROUP = new HashSet<>(2);
+    {
+        SECTION_DISMISSAL_GROUP.add(1);
+        SECTION_DISMISSAL_GROUP.add(2);
+    }
 
     private final Delegate mDelegate;
     private final SuggestionsCategoryInfo mCategoryInfo;
@@ -127,12 +136,6 @@ public class SuggestionsSection extends InnerNode {
             return mSuggestions.get(position);
         }
 
-        @Override
-        public int getDismissSiblingPosDelta(int position) {
-            checkIndex(position);
-            return 0;
-        }
-
         public void clear() {
             int itemCount = mSuggestions.size();
             if (itemCount == 0) return;
@@ -148,7 +151,7 @@ public class SuggestionsSection extends InnerNode {
             int itemCount = mSuggestions.size();
             if (itemCount > n) {
                 mSuggestions.subList(n, itemCount).clear();
-                notifyItemRangeRemoved(n, itemCount - 1);
+                notifyItemRangeRemoved(n, itemCount - n);
             }
         }
 
@@ -169,6 +172,11 @@ public class SuggestionsSection extends InnerNode {
         @Override
         public Iterator<SnippetArticle> iterator() {
             return mSuggestions.iterator();
+        }
+
+        @Override
+        public Set<Integer> getItemDismissalGroup(int position) {
+            return Collections.singleton(position);
         }
 
         @Override
@@ -248,7 +256,7 @@ public class SuggestionsSection extends InnerNode {
 
     @Override
     public void dismissItem(int position, Callback<String> itemRemovedCallback) {
-        if (!hasSuggestions()) {
+        if (getSectionDismissalRange().contains(position)) {
             mDelegate.dismissSection(this);
             itemRemovedCallback.onResult(getHeaderText());
             return;
@@ -434,23 +442,27 @@ public class SuggestionsSection extends InnerNode {
     }
 
     @Override
-    public int getDismissSiblingPosDelta(int position) {
-        // The only dismiss siblings we have so far are the More button and the status card.
-        // Exit early if there is no More button.
-        if (!mMoreButton.isVisible()) return 0;
+    public Set<Integer> getItemDismissalGroup(int position) {
+        // The section itself can be dismissed via any of the items in the dismissal group,
+        // otherwise we fall back to the default implementation, which dispatches to our children.
+        Set<Integer> sectionDismissalRange = getSectionDismissalRange();
+        if (sectionDismissalRange.contains(position)) return sectionDismissalRange;
 
-        // When there are suggestions we won't have contiguous status and action items.
-        if (hasSuggestions()) return 0;
+        return super.getItemDismissalGroup(position);
+    }
 
-        TreeNode child = getChildForPosition(position);
+    /**
+     * @return The set of indices corresponding to items that can dismiss this entire section
+     * (as opposed to individual items in it).
+     */
+    private Set<Integer> getSectionDismissalRange() {
+        if (hasSuggestions() || !SnippetsConfig.isSectionDismissalEnabled()) {
+            return Collections.emptySet();
+        }
 
-        // The sibling of the more button is the status card, that should be right above.
-        if (child == mMoreButton) return -1;
-
-        // The sibling of the status card is the more button when it exists, should be right below.
-        if (child == mStatus) return 1;
-
-        return 0;
+        assert SECTION_DISMISSAL_GROUP.contains(getStartingOffsetForChild(mStatus));
+        assert SECTION_DISMISSAL_GROUP.contains(getStartingOffsetForChild(mMoreButton));
+        return SECTION_DISMISSAL_GROUP;
     }
 
     public SuggestionsCategoryInfo getCategoryInfo() {
@@ -461,21 +473,11 @@ public class SuggestionsSection extends InnerNode {
         return mHeader.getHeaderText();
     }
 
-    /**
-     * @return The progress indicator.
-     */
-    @VisibleForTesting
     ProgressItem getProgressItemForTesting() {
         return mProgressIndicator;
     }
 
-    @VisibleForTesting
-    ActionItem getActionItem() {
+    ActionItem getActionItemForTesting() {
         return mMoreButton;
-    }
-
-    @VisibleForTesting
-    StatusItem getStatusItem() {
-        return mStatus;
     }
 }

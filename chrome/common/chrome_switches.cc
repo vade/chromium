@@ -28,10 +28,6 @@ namespace switches {
 // auth username/password pair.
 const char kAllowCrossOriginAuthPrompt[]    = "allow-cross-origin-auth-prompt";
 
-// On ChromeOS, file:// access is disabled except for certain whitelisted
-// directories. This switch re-enables file:// for testing.
-const char kAllowFileAccess[]               = "allow-file-access";
-
 // Allow non-secure origins to use the screen capture API and the desktopCapture
 // extension API.
 const char kAllowHttpScreenCapture[] = "allow-http-screen-capture";
@@ -782,24 +778,6 @@ const char kSimulateOutdatedNoAU[]          = "simulate-outdated-no-au";
 
 // Simulates an update being available.
 const char kSimulateUpgrade[]               = "simulate-upgrade";
-
-// Speculative resource prefetching.
-const char kSpeculativeResourcePrefetching[] =
-    "speculative-resource-prefetching";
-
-// Speculative resource prefetching is disabled.
-const char kSpeculativeResourcePrefetchingDisabled[] = "disabled";
-
-// Speculative resource prefetching is enabled.
-const char kSpeculativeResourcePrefetchingEnabled[] = "enabled";
-
-// Speculative resource prefetching is enabled for external requests.
-const char kSpeculativeResourcePrefetchingEnabledExternal[] =
-    "enabled-external-only";
-
-// Speculative resource prefetching will only learn about resources that need to
-// be prefetched but will not prefetch them.
-const char kSpeculativeResourcePrefetchingLearning[] = "learning";
 
 // Causes SSL key material to be logged to the specified file for debugging
 // purposes. See

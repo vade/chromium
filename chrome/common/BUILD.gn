@@ -150,8 +150,6 @@ static_library("common") {
     "url_constants.h",
     "web_application_info.cc",
     "web_application_info.h",
-    "widevine_cdm_constants.cc",
-    "widevine_cdm_constants.h",
   ]
   defines = []
 
@@ -479,6 +477,12 @@ static_library("common") {
       "pepper_permission_util.h",
     ]
   }
+  if (enable_pepper_cdms) {
+    sources += [
+      "widevine_cdm_constants.cc",
+      "widevine_cdm_constants.h",
+    ]
+  }
   if (!enable_webrtc) {
     sources -= [ "media/webrtc_logging_messages.h" ]
   }
@@ -525,6 +529,14 @@ static_library("common") {
     deps = [
       "//sandbox/linux:sandbox_services",
     ]
+  }
+
+  if (enable_pepper_cdms) {
+    sources += [
+      "media/cdm_host_file_path.cc",
+      "media/cdm_host_file_path.h",
+    ]
+    public_deps += [ "//chrome/common:version_header" ]
   }
 }
 

@@ -1544,7 +1544,6 @@ split_static_library("browser") {
     "//mojo/public/cpp/bindings",
     "//mojo/public/js",
     "//net:extras",
-    "//net:net_with_v8",
     "//ppapi/features",
     "//printing/features",
     "//rlz/features",
@@ -1589,8 +1588,18 @@ split_static_library("browser") {
     "//ui/strings",
     "//ui/surface",
     "//ui/web_dialogs",
-    "//v8",
   ]
+
+  # Android does in-process PAC, so must link against V8 directly. Other
+  # platforms use OOP Mojo resolution.
+  if (is_android) {
+    deps += [
+      "//net:net_with_v8",
+      "//v8",
+    ]
+  } else {
+    deps += [ "//net:net" ]
+  }
 
   if (is_chromeos && use_cras) {
     defines += [ "USE_CRAS" ]
@@ -3061,8 +3070,6 @@ split_static_library("browser") {
       "chrome_browser_main_posix.h",
       "chrome_process_singleton.cc",
       "chrome_process_singleton.h",
-      "component_updater/widevine_cdm_component_installer.cc",
-      "component_updater/widevine_cdm_component_installer.h",
       "custom_handlers/register_protocol_handler_permission_request.cc",
       "custom_handlers/register_protocol_handler_permission_request.h",
       "custom_home_pages_table_model.cc",
@@ -3449,6 +3456,13 @@ split_static_library("browser") {
       "//components/web_modal",
       "//device/battery",
       "//net:net_browser_services",
+    ]
+  }
+
+  if (enable_pepper_cdms) {
+    sources += [
+      "component_updater/widevine_cdm_component_installer.cc",
+      "component_updater/widevine_cdm_component_installer.h",
     ]
   }
 

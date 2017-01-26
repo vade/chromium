@@ -1422,6 +1422,12 @@ void WindowTreeClient::WmSetProperty(
     window_manager_internal_client_->WmResponse(change_id, result);
 }
 
+void WindowTreeClient::WmSetCanFocus(Id window_id, bool can_focus) {
+  WindowMus* window = GetWindowByServerId(window_id);
+  if (window)
+    window_manager_delegate_->OnWmSetCanFocus(window->GetWindow(), can_focus);
+}
+
 void WindowTreeClient::WmCreateTopLevelWindow(
     uint32_t change_id,
     ClientSpecificId requesting_client_id,
@@ -1508,6 +1514,43 @@ void WindowTreeClient::WmDeactivateWindow(Id window_id) {
   }
 
   window_manager_delegate_->OnWmDeactivateWindow(window->GetWindow());
+}
+
+void WindowTreeClient::WmStackAbove(uint32_t wm_change_id, Id above_id,
+                                    Id below_id) {
+  if (!window_manager_delegate_)
+    return;
+
+  WindowMus* below_mus = GetWindowByServerId(below_id);
+  if (!below_mus) {
+    DVLOG(1) << "Attempt to stack at top invalid window " << below_id;
+    if (window_manager_internal_client_)
+      window_manager_internal_client_->WmResponse(wm_change_id, false);
+    return;
+  }
+
+  WindowMus* above_mus = GetWindowByServerId(above_id);
+  if (!above_mus) {
+    DVLOG(1) << "Attempt to stack at top invalid window " << above_id;
+    if (window_manager_internal_client_)
+      window_manager_internal_client_->WmResponse(wm_change_id, false);
+    return;
+  }
+
+  Window* above = above_mus->GetWindow();
+  Window* below = below_mus->GetWindow();
+
+  if (above->parent() != below->parent()) {
+    DVLOG(1) << "Windows do not share the same parent";
+    if (window_manager_internal_client_)
+      window_manager_internal_client_->WmResponse(wm_change_id, false);
+    return;
+  }
+
+  above->parent()->StackChildAbove(above, below);
+
+  if (window_manager_internal_client_)
+    window_manager_internal_client_->WmResponse(wm_change_id, true);
 }
 
 void WindowTreeClient::WmStackAtTop(uint32_t wm_change_id, uint32_t window_id) {
@@ -1653,6 +1696,16 @@ void WindowTreeClient::OnWindowTreeHostDeactivateWindow(
     WindowTreeHostMus* window_tree_host) {
   tree_->DeactivateWindow(
       WindowMus::Get(window_tree_host->window())->server_id());
+}
+
+void WindowTreeClient::OnWindowTreeHostStackAbove(
+    WindowTreeHostMus* window_tree_host,
+    Window* window) {
+  WindowMus* above = WindowMus::Get(window_tree_host->window());
+  WindowMus* below = WindowMus::Get(window);
+  const uint32_t change_id = ScheduleInFlightChange(
+      base::MakeUnique<CrashInFlightChange>(above, ChangeType::REORDER));
+  tree_->StackAbove(change_id, above->server_id(), below->server_id());
 }
 
 void WindowTreeClient::OnWindowTreeHostStackAtTop(

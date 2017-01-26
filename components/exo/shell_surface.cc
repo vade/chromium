@@ -1498,6 +1498,7 @@ void ShellSurface::UpdateShadow() {
       shadow_overlay_->Init(ui::LAYER_NOT_DRAWN);
       shadow_overlay_->layer()->Add(shadow->layer());
       window->AddChild(shadow_overlay_);
+      window->StackChildAbove(shadow_overlay_, shadow_underlay_);
       shadow_overlay_->Show();
     }
     shadow_overlay_->SetBounds(shadow_bounds);
@@ -1506,6 +1507,9 @@ void ShellSurface::UpdateShadow() {
     // small style shadow for them.
     if (!activatable_)
       shadow->SetElevation(wm::ShadowElevation::SMALL);
+    // We don't have rounded corners unless frame is enabled.
+    if (!frame_enabled_)
+      shadow->SetRoundedCornerRadius(0);
   }
 }
 

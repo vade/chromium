@@ -45,7 +45,6 @@ const base::Feature* kFeaturesExposedToJava[] = {
     &kCCTPostMessageAPI,
     &kChromeHomeFeature,
     &kContextualSearchSingleActions,
-    &kDownloadsUiFeature,
     &kImportantSitesInCBD,
     &kImprovedA2HS,
     &kNativeAndroidHistoryManager,
@@ -97,9 +96,6 @@ const base::Feature kChromeHomeFeature{"ChromeHome",
 const base::Feature kContextualSearchSingleActions{
     "ContextualSearchSingleActions", base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kDownloadsUiFeature{"DownloadsUi",
-                                         base::FEATURE_DISABLED_BY_DEFAULT};
-
 const base::Feature kImportantSitesInCBD{"ImportantSitesInCBD",
                                          base::FEATURE_DISABLED_BY_DEFAULT};
 
@@ -147,7 +143,7 @@ const base::Feature kWebPaymentsModifiers{"WebPaymentsModifiers",
                                           base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kWebPaymentsSingleAppUiSkip{
-    "WebPaymentsSingleAppUiSkip", base::FEATURE_DISABLED_BY_DEFAULT};
+    "WebPaymentsSingleAppUiSkip", base::FEATURE_ENABLED_BY_DEFAULT};
 
 static jboolean IsEnabled(JNIEnv* env,
                           const JavaParamRef<jclass>& clazz,

@@ -1067,8 +1067,6 @@ void RenderFrameHostImpl::OnOpenURL(const FrameHostMsg_OpenURL_Params& params) {
   GetProcess()->FilterURL(false, &validated_url);
 
   if (params.is_history_navigation_in_new_child) {
-    DCHECK(SiteIsolationPolicy::UseSubframeNavigationEntries());
-
     // Try to find a FrameNavigationEntry that matches this frame instead, based
     // on the frame's unique name.  If this can't be found, fall back to the
     // default params using RequestOpenURL below.
@@ -1421,7 +1419,6 @@ void RenderFrameHostImpl::OnBeforeUnloadACK(
   TRACE_EVENT_ASYNC_END1("navigation", "RenderFrameHostImpl BeforeUnload", this,
                          "FrameTreeNode id",
                          frame_tree_node_->frame_tree_node_id());
-  DCHECK(!GetParent());
   // If this renderer navigated while the beforeunload request was in flight, we
   // may have cleared this state in OnDidCommitProvisionalLoad, in which case we
   // can ignore this message.
@@ -2537,8 +2534,7 @@ void RenderFrameHostImpl::SimulateBeforeUnloadAck() {
 }
 
 bool RenderFrameHostImpl::ShouldDispatchBeforeUnload() {
-  // TODO(creis): Support beforeunload on subframes.
-  return !GetParent() && IsRenderFrameLive();
+  return IsRenderFrameLive();
 }
 
 void RenderFrameHostImpl::UpdateOpener() {

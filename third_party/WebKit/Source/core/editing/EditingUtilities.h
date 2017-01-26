@@ -67,7 +67,6 @@ class Range;
 
 // This file contains a set of helper functions used by the editing commands
 
-CORE_EXPORT bool needsLayoutTreeUpdate(const Node&);
 CORE_EXPORT bool needsLayoutTreeUpdate(const Position&);
 CORE_EXPORT bool needsLayoutTreeUpdate(const PositionInFlatTree&);
 
@@ -416,11 +415,6 @@ const String& nonBreakingSpaceString();
 // Functions dispatch InputEvent
 DispatchEventResult dispatchBeforeInputInsertText(EventTarget*,
                                                   const String& data);
-DispatchEventResult dispatchBeforeInputFromComposition(
-    EventTarget*,
-    InputEvent::InputType,
-    const String& data,
-    InputEvent::EventCancelable);
 DispatchEventResult dispatchBeforeInputEditorCommand(EventTarget*,
                                                      InputEvent::InputType,
                                                      const RangeVector*);

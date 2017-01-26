@@ -11,9 +11,9 @@
 #include "base/mac/bind_objc_block.h"
 #import "base/mac/scoped_nsobject.h"
 #include "base/strings/utf_string_conversions.h"
+#import "ios/web/public/test/crw_mock_web_state_delegate.h"
 #import "ios/web/public/test/fakes/test_web_state.h"
 #import "ios/web/public/web_state/context_menu_params.h"
-#import "ios/web/web_state/web_state_delegate_stub.h"
 #include "testing/platform_test.h"
 #import "third_party/ocmock/gtest_support.h"
 #include "ui/base/page_transition_types.h"
@@ -35,7 +35,7 @@ class WebStateDelegateBridgeTest : public PlatformTest {
 
     id originalMockDelegate =
         [OCMockObject niceMockForProtocol:@protocol(CRWWebStateDelegate)];
-    delegate_.reset([[CRWWebStateDelegateStub alloc]
+    delegate_.reset([[CRWMockWebStateDelegate alloc]
         initWithRepresentedObject:originalMockDelegate]);
     empty_delegate_.reset([[TestEmptyWebStateDelegate alloc] init]);
 
@@ -78,13 +78,6 @@ TEST_F(WebStateDelegateBridgeTest, OpenURLFromWebState) {
   EXPECT_EQ(static_cast<int>(params.transition),
             static_cast<int>(result_params->transition));
   EXPECT_EQ(params.is_renderer_initiated, result_params->is_renderer_initiated);
-}
-
-// Tests |LoadProgressChanged| forwarding.
-TEST_F(WebStateDelegateBridgeTest, LoadProgressChanged) {
-  ASSERT_EQ(0.0, [delegate_ changedProgress]);
-  bridge_->LoadProgressChanged(nullptr, 1.0);
-  EXPECT_EQ(1.0, [delegate_ changedProgress]);
 }
 
 // Tests |HandleContextMenu| forwarding.

@@ -81,7 +81,7 @@ std::ostream& operator<<(std::ostream& os, PositionMoveType type) {
 
 }  // namespace
 
-bool needsLayoutTreeUpdate(const Node& node) {
+static bool needsLayoutTreeUpdate(const Node& node) {
   const Document& document = node.document();
   if (document.needsLayoutTreeUpdate())
     return true;
@@ -2054,23 +2054,6 @@ DispatchEventResult dispatchBeforeInputInsertText(EventTarget* target,
       InputEvent::InputType::InsertText, data,
       InputEvent::EventCancelable::IsCancelable,
       InputEvent::EventIsComposing::NotComposing, nullptr);
-  return target->dispatchEvent(beforeInputEvent);
-}
-
-DispatchEventResult dispatchBeforeInputFromComposition(
-    EventTarget* target,
-    InputEvent::InputType inputType,
-    const String& data,
-    InputEvent::EventCancelable cancelable) {
-  if (!RuntimeEnabledFeatures::inputEventEnabled())
-    return DispatchEventResult::NotCanceled;
-  if (!target)
-    return DispatchEventResult::NotCanceled;
-  // TODO(chongz): Pass appropriate |ranges| after it's defined on spec.
-  // http://w3c.github.io/editing/input-events.html#dom-inputevent-inputtype
-  InputEvent* beforeInputEvent = InputEvent::createBeforeInput(
-      inputType, data, cancelable, InputEvent::EventIsComposing::IsComposing,
-      nullptr);
   return target->dispatchEvent(beforeInputEvent);
 }
 

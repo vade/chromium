@@ -248,24 +248,29 @@ void LocationBarView::Init() {
   }
 
   zoom_view_ = new ZoomView(delegate_);
+  zoom_view_->Init();
   AddChildView(zoom_view_);
 
   open_pdf_in_reader_view_ = new OpenPDFInReaderView();
   AddChildView(open_pdf_in_reader_view_);
 
   manage_passwords_icon_view_ = new ManagePasswordsIconViews(command_updater());
+  manage_passwords_icon_view_->Init();
   AddChildView(manage_passwords_icon_view_);
 
   save_credit_card_icon_view_ =
       new autofill::SaveCardIconView(command_updater(), browser_);
+  save_credit_card_icon_view_->Init();
   save_credit_card_icon_view_->SetVisible(false);
   AddChildView(save_credit_card_icon_view_);
 
   translate_icon_view_ = new TranslateIconView(command_updater());
+  translate_icon_view_->Init();
   translate_icon_view_->SetVisible(false);
   AddChildView(translate_icon_view_);
 
   star_view_ = new StarView(command_updater(), browser_);
+  star_view_->Init();
   star_view_->SetVisible(false);
   AddChildView(star_view_);
 
@@ -462,8 +467,8 @@ gfx::Size LocationBarView::GetPreferredSize() const {
         location_icon_view_->GetMinimumSizeForLabelText(GetLocationIconText())
             .width();
   } else {
-    leading_width +=
-        kHorizontalPadding + location_icon_view_->GetMinimumSize().width();
+    leading_width += GetLayoutConstant(LOCATION_BAR_ELEMENT_PADDING) +
+                     location_icon_view_->GetMinimumSize().width();
   }
 
   // Compute width of omnibox-trailing content.
@@ -482,7 +487,7 @@ gfx::Size LocationBarView::GetPreferredSize() const {
   }
 
   min_size.set_width(leading_width + omnibox_view_->GetMinimumSize().width() +
-                     2 * kHorizontalPadding -
+                     2 * GetLayoutConstant(LOCATION_BAR_ELEMENT_PADDING) -
                      omnibox_view_->GetInsets().width() + trailing_width);
   return min_size;
 }
@@ -495,14 +500,13 @@ void LocationBarView::Layout() {
   location_icon_view_->SetVisible(false);
   keyword_hint_view_->SetVisible(false);
 
-  constexpr int item_padding = kHorizontalPadding;
+  const int item_padding = GetLayoutConstant(LOCATION_BAR_ELEMENT_PADDING);
 
   LocationBarLayout leading_decorations(
       LocationBarLayout::LEFT_EDGE, item_padding,
       item_padding - omnibox_view_->GetInsets().left());
-  LocationBarLayout trailing_decorations(
-      LocationBarLayout::RIGHT_EDGE, item_padding,
-      item_padding - omnibox_view_->GetInsets().right());
+  LocationBarLayout trailing_decorations(LocationBarLayout::RIGHT_EDGE,
+                                         item_padding, item_padding);
 
   const base::string16 keyword(omnibox_view_->model()->keyword());
   // In some cases (e.g. fullscreen mode) we may have 0 height.  We still want
@@ -515,7 +519,7 @@ void LocationBarView::Layout() {
   location_icon_view_->SetLabel(base::string16());
   if (ShouldShowKeywordBubble()) {
     leading_decorations.AddDecoration(vertical_padding, location_height, true,
-                                      0, 0, item_padding,
+                                      0, item_padding, item_padding,
                                       selected_keyword_view_);
     if (selected_keyword_view_->keyword() != keyword) {
       selected_keyword_view_->SetKeyword(keyword);
@@ -536,8 +540,8 @@ void LocationBarView::Layout() {
     // The largest fraction of the omnibox that can be taken by the EV bubble.
     const double kMaxBubbleFraction = 0.5;
     leading_decorations.AddDecoration(vertical_padding, location_height, false,
-                                      kMaxBubbleFraction, 0, item_padding,
-                                      location_icon_view_);
+                                      kMaxBubbleFraction, item_padding,
+                                      item_padding, location_icon_view_);
   } else {
     leading_decorations.AddDecoration(vertical_padding, location_height,
                                       location_icon_view_);
@@ -691,7 +695,8 @@ WebContents* LocationBarView::GetWebContents() {
 // LocationBarView, private:
 
 int LocationBarView::IncrementalMinimumWidth(views::View* view) const {
-  return view->visible() ? (kHorizontalPadding + view->GetMinimumSize().width())
+  return view->visible() ? (GetLayoutConstant(LOCATION_BAR_ELEMENT_PADDING) +
+                            view->GetMinimumSize().width())
                          : 0;
 }
 
@@ -702,9 +707,8 @@ int LocationBarView::GetHorizontalEdgeThickness() const {
 }
 
 int LocationBarView::GetTotalVerticalPadding() const {
-  constexpr int kInteriorPadding = 1;
   return BackgroundWith1PxBorder::kLocationBarBorderThicknessDip +
-         kInteriorPadding;
+         GetLayoutConstant(LOCATION_BAR_ELEMENT_PADDING);
 }
 
 void LocationBarView::RefreshLocationIcon() {

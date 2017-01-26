@@ -69,7 +69,6 @@
 #include "components/sync/js/js_event_details.h"
 #include "components/sync/model/change_processor.h"
 #include "components/sync/model/model_type_change_processor.h"
-#include "components/sync/model/model_type_store.h"
 #include "components/sync/model/sync_error.h"
 #include "components/sync/protocol/sync.pb.h"
 #include "components/sync/syncable/directory.h"
@@ -193,7 +192,7 @@ ProfileSyncService::ProfileSyncService(InitParams init_params)
       network_time_update_callback_(
           std::move(init_params.network_time_update_callback)),
       url_request_context_(init_params.url_request_context),
-      blocking_pool_(init_params.blocking_pool),
+      blocking_task_runner_(std::move(init_params.blocking_task_runner)),
       is_first_time_sync_configure_(false),
       engine_initialized_(false),
       sync_disabled_by_admin_(false),
@@ -213,7 +212,6 @@ ProfileSyncService::ProfileSyncService(InitParams init_params)
       gaia_cookie_manager_service_(init_params.gaia_cookie_manager_service),
       network_resources_(new syncer::HttpBridgeNetworkResources),
       start_behavior_(init_params.start_behavior),
-      catch_up_configure_in_progress_(false),
       passphrase_prompt_triggered_by_version_(false),
       sync_enabled_weak_factory_(this),
       weak_factory_(this) {
@@ -274,19 +272,11 @@ void ProfileSyncService::Initialize() {
                  syncer::ModelTypeSet(syncer::SESSIONS)));
 
   if (base::FeatureList::IsEnabled(switches::kSyncUSSDeviceInfo)) {
-    scoped_refptr<base::SequencedTaskRunner> blocking_task_runner(
-        blocking_pool_->GetSequencedTaskRunnerWithShutdownBehavior(
-            blocking_pool_->GetSequenceToken(),
-            base::SequencedWorkerPool::SKIP_ON_SHUTDOWN));
     // TODO(skym): Stop creating leveldb files when signed out.
     // TODO(skym): Verify using AsUTF8Unsafe is okay here. Should work as long
     // as the Local State file is guaranteed to be UTF-8.
     device_info_sync_bridge_ = base::MakeUnique<DeviceInfoSyncBridge>(
-        local_device_.get(),
-        base::Bind(&ModelTypeStore::CreateStore, syncer::DEVICE_INFO,
-                   sync_data_folder_.Append(base::FilePath(kLevelDBFolderName))
-                       .AsUTF8Unsafe(),
-                   blocking_task_runner),
+        local_device_.get(), GetModelTypeStoreFactory(syncer::DEVICE_INFO),
         base::BindRepeating(
             &ModelTypeChangeProcessor::Create,
             base::BindRepeating(&syncer::ReportUnrecoverableError, channel_)));
@@ -793,7 +783,6 @@ void ProfileSyncService::ShutdownImpl(syncer::ShutdownReason reason) {
   encrypt_everything_ = false;
   encrypted_types_ = syncer::SyncEncryptionHandler::SensitiveTypes();
   passphrase_required_reason_ = syncer::REASON_PASSPHRASE_NOT_REQUIRED;
-  catch_up_configure_in_progress_ = false;
   access_token_.clear();
   request_access_token_retry_timer_.Stop();
   last_snapshot_ = syncer::SyncCycleSnapshot();
@@ -974,7 +963,7 @@ void ProfileSyncService::OnEngineInitialized(
 
   // Initialize local device info.
   local_device_->Initialize(cache_guid, signin_scoped_device_id,
-                            blocking_pool_);
+                            blocking_task_runner_);
 
   if (protocol_event_observers_.might_have_observers()) {
     engine_->RequestBufferedProtocolEventsAndEnableForwarding();
@@ -1320,7 +1309,6 @@ void ProfileSyncService::BeginConfigureCatchUpBeforeClear() {
   sync_prefs_.GetNigoriSpecificsForPassphraseTransition(
       &saved_nigori_state_->nigori_specifics);
   const syncer::ModelTypeSet types = GetActiveDataTypes();
-  catch_up_configure_in_progress_ = true;
   data_type_manager_->Configure(types, syncer::CONFIGURE_REASON_CATCH_UP);
 }
 
@@ -1392,7 +1380,7 @@ void ProfileSyncService::OnConfigureDone(
 
   // Handle unrecoverable error.
   if (configure_status_ != DataTypeManager::OK) {
-    if (catch_up_configure_in_progress_) {
+    if (result.was_catch_up_configure) {
       // Record catchup configuration failure.
       UMA_HISTOGRAM_ENUMERATION(kClearServerDataEventsHistogramName,
                                 CLEAR_SERVER_DATA_CATCHUP_FAILED,
@@ -1436,8 +1424,7 @@ void ProfileSyncService::OnConfigureDone(
     return;
   }
 
-  if (catch_up_configure_in_progress_) {
-    catch_up_configure_in_progress_ = false;
+  if (result.was_catch_up_configure) {
     ClearAndRestartSyncForPassphraseEncryption();
     return;
   }
@@ -1740,12 +1727,9 @@ void ProfileSyncService::ChangePreferredDataTypes(
 
 syncer::ModelTypeSet ProfileSyncService::GetActiveDataTypes() const {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (!IsSyncActive() || !ConfigurationDone())
+  if (!data_type_manager_)
     return syncer::ModelTypeSet();
-  const syncer::ModelTypeSet preferred_types = GetPreferredDataTypes();
-  const syncer::ModelTypeSet failed_types =
-      data_type_status_table_.GetFailedTypes();
-  return Difference(preferred_types, failed_types);
+  return data_type_manager_->GetActiveDataTypes();
 }
 
 syncer::SyncClient* ProfileSyncService::GetSyncClient() const {
@@ -1821,6 +1805,14 @@ void ProfileSyncService::SetPlatformSyncAllowedProvider(
     const PlatformSyncAllowedProvider& platform_sync_allowed_provider) {
   DCHECK(thread_checker_.CalledOnValidThread());
   platform_sync_allowed_provider_ = platform_sync_allowed_provider;
+}
+
+syncer::ModelTypeStoreFactory ProfileSyncService::GetModelTypeStoreFactory(
+    ModelType type) {
+  return base::Bind(&ModelTypeStore::CreateStore, type,
+                    sync_data_folder_.Append(base::FilePath(kLevelDBFolderName))
+                        .AsUTF8Unsafe(),
+                    blocking_task_runner_);
 }
 
 void ProfileSyncService::ConfigureDataTypeManager() {

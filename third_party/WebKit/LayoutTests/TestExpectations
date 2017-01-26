@@ -104,13 +104,11 @@ crbug.com/630615 [ Win ] images/color-profile-background-image-space.html [ Skip
 crbug.com/632000 [ Win ] images/paint-subrect-grid.html [ Pass Failure ]
 
 crbug.com/636271 [ Mac ] paint/invalidation/resize-iframe-text.html [ Pass Failure ]
-crbug.com/636271 [ Mac ] virtual/stable/paint/invalidation/resize-iframe-text.html [ Pass Failure ]
+crbug.com/636271 [ Mac ] virtual/stable/paint/invalidation/resize-iframe-text.html [ Pass Failure Crash ]
 
 crbug.com/639147 svg/wicd/test-rightsizing-b.xhtml [ Failure Pass ]
 
 crbug.com/644433 virtual/gpu/fast/canvas/OffscreenCanvas-2d-pattern-in-worker.html [ Failure ]
-
-crbug.com/683312 virtual/gpu/fast/canvas/canvas-pattern-no-repeat-with-transformations.html [ NeedsRebaseline ]
 
 crbug.com/645389 [ Win ] virtual/gpu/fast/canvas/canvas-hit-regions-fallback-element-test.html [ Timeout ]
 crbug.com/645389 [ Win ] virtual/gpu/fast/canvas/canvas-hit-regions-event-test.html [ Timeout ]
@@ -144,15 +142,14 @@ crbug.com/664852 virtual/gpu/fast/canvas/canvas-lose-restore-googol-size.html [ 
 crbug.com/664852 virtual/gpu/fast/canvas/canvas-lost-gpu-context.html [ Pass Failure ]
 crbug.com/664852 virtual/gpu/fast/canvas/OffscreenCanvas-2d-drawImage.html [ Pass Failure ]
 
+# Added 2017-01-26
+crbug.com/682964 virtual/gpu/fast/canvas/canvas-lose-restore-max-int-size.html [ Pass Failure ]
+
 # Added 2016-12-14
 crbug.com/674396 [ Win ] compositing/reflections/nested-reflection-transition.html [ Pass Failure ]
 
 # Added 2016-12-15
 crbug.com/674468 [ Trusty ] compositing/reflections/nested-reflection-transition.html [ Pass Failure ]
-
-# ====== Paint team owned tests to here ======
-
-crbug.com/681369 editing/selection/select-delete-in-event-handler.html [ NeedsRebaseline ]
 
 
 # ====== LayoutNG-only failures from here ======
@@ -692,8 +689,6 @@ crbug.com/538697 [ Win7 Debug ] printing/webgl-oversized-printing.html [ Failure
 
 crbug.com/617152 external/wpt/mediacapture-streams/GUM-impossible-constraint.https.html [ Skip ]
 
-Bug(none) virtual/stable/paint/invalidation/control-clip.html [ NeedsRebaseline ]
-
 crbug.com/417782 [ Linux Win ] virtual/rootlayerscrolls/fast/scrolling/fractional-scroll-offset-fixed-position-non-composited.html [ Failure ]
 crbug.com/492664 [ Linux ] external/csswg-test/css-writing-modes-3/box-offsets-rel-pos-vlr-005.xht [ Failure ]
 crbug.com/492664 [ Linux ] external/csswg-test/css-writing-modes-3/box-offsets-rel-pos-vrl-004.xht [ Failure ]
@@ -772,53 +767,6 @@ crbug.com/638693 virtual/threaded/animations/display-inline-style-adjust.html [ 
 crbug.com/421283 fast/html/marquee-scrollamount.html [ Pass Failure ]
 
 crbug.com/659123 [ Mac ] fast/css/text-overflow-ellipsis-button.html [ Pass Failure ]
-
-crbug.com/35697 [ Mac Win ] fast/table/backgr_border-table-cell-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_border-table-cell.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_border-table-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_border-table-column-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_border-table-column-group-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_border-table-column-group.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_border-table-column.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_border-table-quirks-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_border-table-quirks.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_border-table-row-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_border-table-row-group-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_border-table-row-group.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_border-table-row.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_border-table.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_layers-hide-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_layers-hide.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_layers-opacity-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_layers-opacity.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_layers-show-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_layers-show.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_position-table-cell-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_position-table-cell.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_position-table-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_position-table-column-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_position-table-column-group-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_position-table-column-group.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_position-table-column.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_position-table-row-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_position-table-row-group-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_position-table-row-group.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_position-table-row.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_position-table.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_simple-table-cell-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_simple-table-cell.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_simple-table-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_simple-table-column-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_simple-table-column-group-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_simple-table-column-group.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_simple-table-column.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_simple-table-row-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_simple-table-row-group-collapsed-border.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_simple-table-row-group.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_simple-table-row.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] fast/table/backgr_simple-table.html [ NeedsRebaseline ]
-crbug.com/35697 fast/table/tbody-background-image.html [ NeedsRebaseline ]
-crbug.com/35697 [ Mac Win ] tables/mozilla_expected_failures/marvin/backgr_fixed-bg.html [ NeedsRebaseline ]
 
 # TODO(oshima): Mac Android are currently not supported.
 crbug.com/567837 [ Mac Android ] virtual/scalefactor200withzoom/fast/hidpi/static [ Skip ]
@@ -948,9 +896,6 @@ crbug.com/605840 [ Android ] fast/text/hyphens/hyphens-orphaned-word.html [ Pass
 crbug.com/605840 [ Android ] fast/text/hyphens/midword-break-priority.html [ Pass ]
 
 crbug.com/655963 inspector/console/console-dir.html [ NeedsManualRebaseline ]
-
-crbug.com/682574 css3/flexbox/button.html [ NeedsRebaseline ]
-crbug.com/682574 fast/forms/select-popup/popup-menu-appearance-transform.html [ NeedsRebaseline ]
 
 crbug.com/405389 external/csswg-test/css-shapes-1/shape-outside/supported-shapes/polygon/shape-outside-polygon-017.html [ Failure ]
 crbug.com/424365 external/csswg-test/css-shapes-1/shape-outside/shape-image/shape-image-010.html [ Failure ]
@@ -1536,8 +1481,8 @@ crbug.com/479533 accessibility/show-context-menu.html [ Skip ]
 crbug.com/479533 accessibility/show-context-menu-shadowdom.html [ Skip ]
 crbug.com/483653 accessibility/scroll-containers.html [ Skip ]
 
-crbug.com/491764 http/tests/inspector/service-workers/user-agent-override.html [ Pass Timeout ]
-crbug.com/491764 virtual/mojo-loading/http/tests/inspector/service-workers/user-agent-override.html [ Pass Timeout ]
+crbug.com/491764 http/tests/inspector/service-workers/user-agent-override.html [ Pass Failure Crash ]
+crbug.com/491764 virtual/mojo-loading/http/tests/inspector/service-workers/user-agent-override.html [ Pass Failure ]
 
 # expected.txt has weird chars that rietveld doesn't handle; will land it manually.
 crbug.com/660581 fast/dom/HTMLTableColElement/span-attribute.html [ Failure ]
@@ -1877,18 +1822,18 @@ crbug.com/626703 external/csswg-test/vendor-imports/mozilla/mozilla-central-reft
 crbug.com/626703 external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/writing-modes-3/logical-physical-mapping-001.html [ Failure ]
 crbug.com/626703 external/wpt/html/semantics/grouping-content/the-li-element/grouping-li-reftest-list-owner-menu.html [ Failure ]
 crbug.com/626703 external/wpt/html/semantics/grouping-content/the-li-element/grouping-li-reftest-list-owner-skip-no-boxes.html [ Failure ]
-crbug.com/626703 external/wpt/streams/count-queuing-strategy.https.html [ Timeout Failure ]
-crbug.com/626703 external/wpt/streams/readable-streams/bad-strategies.https.html [ Timeout Failure ]
-crbug.com/626703 external/wpt/streams/readable-streams/bad-underlying-sources.https.html [ Timeout Failure ]
-crbug.com/626703 external/wpt/streams/readable-streams/brand-checks.https.html [ Timeout Failure ]
-crbug.com/626703 external/wpt/streams/readable-streams/cancel.https.html [ Timeout Failure ]
-crbug.com/626703 external/wpt/streams/readable-streams/count-queuing-strategy-integration.https.html [ Timeout Failure ]
-crbug.com/626703 external/wpt/streams/readable-streams/garbage-collection.https.html [ Timeout Failure ]
+crbug.com/626703 external/wpt/streams/count-queuing-strategy.https.html [ Pass Timeout ]
+crbug.com/626703 external/wpt/streams/readable-streams/bad-strategies.https.html [ Pass Timeout ]
+crbug.com/626703 external/wpt/streams/readable-streams/bad-underlying-sources.https.html [ Pass Timeout ]
+crbug.com/626703 external/wpt/streams/readable-streams/brand-checks.https.html [ Pass Timeout ]
+crbug.com/626703 external/wpt/streams/readable-streams/cancel.https.html [ Pass Timeout ]
+crbug.com/626703 external/wpt/streams/readable-streams/count-queuing-strategy-integration.https.html [ Pass Timeout ]
+crbug.com/626703 external/wpt/streams/readable-streams/garbage-collection.https.html [ Pass Timeout ]
 crbug.com/626703 external/wpt/streams/readable-streams/general.https.html [ Timeout Failure ]
-crbug.com/626703 external/wpt/streams/readable-streams/pipe-through.https.html [ Timeout Failure ]
-crbug.com/626703 external/wpt/streams/readable-streams/readable-stream-reader.https.html [ Timeout Failure ]
-crbug.com/626703 external/wpt/streams/readable-streams/tee.https.html [ Timeout Failure ]
-crbug.com/626703 external/wpt/streams/readable-streams/templated.https.html [ Timeout Failure ]
+crbug.com/626703 external/wpt/streams/readable-streams/pipe-through.https.html [ Pass Timeout ]
+crbug.com/626703 external/wpt/streams/readable-streams/readable-stream-reader.https.html [ Pass Timeout ]
+crbug.com/626703 external/wpt/streams/readable-streams/tee.https.html [ Pass Timeout ]
+crbug.com/626703 external/wpt/streams/readable-streams/templated.https.html [ Pass Timeout ]
 crbug.com/626703 external/wpt/html/webappapis/idle-callbacks/callback-timeout.html [ Timeout ]
 crbug.com/626703 external/wpt/html/webappapis/idle-callbacks/callback-multiple-calls.html [ Timeout ]
 crbug.com/626703 external/wpt/html/webappapis/idle-callbacks/callback-exception.html [ Timeout ]
@@ -1915,7 +1860,6 @@ crbug.com/626703 external/wpt/web-animations/timing-model/animations/set-the-tar
 crbug.com/626703 external/wpt/workers/opaque-origin.html [ Failure Crash ]
 
 # Other untriaged test failures, timeouts and crashes from newly-imported WPT tests.
-crbug.com/626703 external/wpt/dom/events/Event-dispatch-click.html [ Timeout Crash ]
 crbug.com/666703 external/wpt/html/browsers/sandboxing/sandbox-disallow-same-origin.html [ Timeout ]
 crbug.com/626703 external/wpt/fullscreen/api/element-request-fullscreen-two-iframes-manual.html [ Timeout ]
 crbug.com/626703 external/wpt/html/dom/documents/dom-tree-accessors/Document.currentScript.html [ Timeout ]
@@ -2294,8 +2238,6 @@ crbug.com/657748 external/csswg-test/css-display-3/display-contents-text-only-00
 
 # ====== End of display: contents tests ======
 
-crbug.com/682521 inspector/console/console-tests.html [ NeedsManualRebaseline ]
-
 crbug.com/676229 [ Linux ] plugins/mouse-click-plugin-clears-selection.html [ Failure Pass ]
 
 crbug.com/678346 [ Win7 Debug ] fast/dom/shadow/selections-in-shadow.html [ Pass Timeout ]
@@ -2324,6 +2266,8 @@ crbug.com/680050 inspector/sources/debugger-ui/watch-expressions-panel-switch.ht
 
 # When WebAssembly is exposed in V8 (soon), this test has the wrong number of expected Object.getOwnPropertyNames() for global object.
 crbug.com/575167 external/wpt/html/browsers/origin/cross-origin-objects/cross-origin-objects-exceptions.html [ NeedsManualRebaseline ]
+
+crbug.com/685713 virtual/enable_wasm/http/tests/wasm/wasm_serialization_tests.html [ Pass Failure ]
 
 crbug.com/681468 fast/forms/suggestion-picker/date-suggestion-picker-appearance-zoom125.html [ Failure Pass ]
 crbug.com/681468 fast/forms/suggestion-picker/date-suggestion-picker-appearance-zoom200.html [ Failure Pass ]

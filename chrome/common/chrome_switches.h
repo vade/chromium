@@ -32,7 +32,6 @@ namespace switches {
 // All switches in alphabetical order. The switches should be documented
 // alongside the definition of their values in the .cc file.
 extern const char kAllowCrossOriginAuthPrompt[];
-extern const char kAllowFileAccess[];
 extern const char kAllowHttpScreenCapture[];
 extern const char kAllowOutdatedPlugins[];
 extern const char kAllowRunningInsecureContent[];
@@ -222,11 +221,6 @@ extern const char kSimulateElevatedRecovery[];
 extern const char kSimulateOutdated[];
 extern const char kSimulateOutdatedNoAU[];
 extern const char kSimulateUpgrade[];
-extern const char kSpeculativeResourcePrefetching[];
-extern const char kSpeculativeResourcePrefetchingDisabled[];
-extern const char kSpeculativeResourcePrefetchingEnabled[];
-extern const char kSpeculativeResourcePrefetchingEnabledExternal[];
-extern const char kSpeculativeResourcePrefetchingLearning[];
 extern const char kSSLKeyLogFile[];
 extern const char kStartMaximized[];
 extern const char kStartStackProfiler[];

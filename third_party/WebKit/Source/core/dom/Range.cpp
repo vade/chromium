@@ -957,7 +957,9 @@ String Range::toString() const {
 String Range::text() const {
   DCHECK(!m_ownerDocument->needsLayoutTreeUpdate());
   return plainText(EphemeralRange(this),
-                   TextIteratorEmitsObjectReplacementCharacter);
+                   TextIteratorBehavior::Builder()
+                       .setEmitsObjectReplacementCharacter(true)
+                       .build());
 }
 
 DocumentFragment* Range::createContextualFragment(
@@ -1641,7 +1643,7 @@ void Range::getBorderAndTextQuads(Vector<FloatQuad>& quads) const {
   for (Node* node = firstNode(); node != stopNode;
        node = NodeTraversal::next(*node)) {
     if (node->isElementNode())
-      nodeSet.add(node);
+      nodeSet.insert(node);
   }
 
   for (Node* node = firstNode(); node != stopNode;

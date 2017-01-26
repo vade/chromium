@@ -5,10 +5,10 @@
 module ui.mojom;
 
 import "services/ui/public/interfaces/cursor.mojom";
-import "services/ui/public/interfaces/display/display.mojom";
 import "services/ui/public/interfaces/event_matcher.mojom";
 import "services/ui/public/interfaces/window_manager_constants.mojom";
 import "services/ui/public/interfaces/window_tree_constants.mojom";
+import "ui/display/mojo/display.mojom";
 import "ui/events/mojo/event.mojom";
 import "ui/gfx/geometry/mojo/geometry.mojom";
 
@@ -34,6 +34,9 @@ interface WindowManager {
   //   and the window-manager).
 
   // Properties used only during creation time. --------------------------------
+
+  // Whether the window should be initially focusable or not. Type: bool.
+  const string kFocusable_InitProperty = "init:focusable";
 
   // Initial bounds to create the window at. If empty the WindowManager decides
   // the initial bounds. Type: gfx::Rect.
@@ -84,6 +87,11 @@ interface WindowManager {
   // Used to explicitly control whether a window appears in the most recently
   // used list of windows. Maps to aura::client::kExcludeFromMruKey. Type: bool.
   const string kExcludeFromMru_Property = "prop:exclude_from_mru";
+
+  // If true, when a window is in in fullscreen mode, the user cannot reveal
+  // the top portion of the window through a touch / mouse gesture.
+  // Type: bool.
+  const string kImmersiveFullscreen_Property = "prop:immersive-fullscreen";
 
   // Internal window name. Useful for debugging. Maps to aura::client::kNameKey.
   // Type: mojom::String
@@ -164,6 +172,8 @@ interface WindowManager {
                 string name,
                 array<uint8>? value);
 
+  WmSetCanFocus(uint32 window_id, bool can_focus);
+
   // Asks the WindowManager to create a new window.
   // |requesting_client_id| is the id of the client issuing the request. This
   // allows the window manager to track top level windows by client.
@@ -190,6 +200,9 @@ interface WindowManager {
   // Asks the WindowManager to change the activation from the current window
   // to the next. The window manager may completely ignore this message.
   WmDeactivateWindow(uint32 window_id);
+
+  // Asks the WindowMangaer to stack |above_id| in front of |below_id|.
+  WmStackAbove(uint32 change_id, uint32 above_id, uint32 below_id);
 
   // Asks the WindowManager to stack |window_id| as the first child of its
   // window manager owned parent.
