@@ -750,6 +750,8 @@ if (is_win) {
 
     ldflags = []
 
+    ldflags += ["-F"+"../../third_party/Syphon/mac/"]
+
     if (is_component_build) {
       ldflags += [
         # The helper is in Chromium.app/Contents/Versions/X/Chromium Helper.app/Conents/MacOS/
@@ -1194,6 +1196,8 @@ if (is_win) {
       chrome_dylib_version,
       "-Wl,-order_file," + rebase_path("app/framework.order", root_build_dir),
     ]
+
+    ldflags += ["-F"+"../../third_party/Syphon/mac/"]
 
     if (is_component_build) {
       ldflags += [
