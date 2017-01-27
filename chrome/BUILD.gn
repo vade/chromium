@@ -465,7 +465,10 @@ if (is_win) {
   group("chrome") {
     deps = [
       ":chrome_app",
+#      "//third_party/decklink",
+#     "//third_party/Syphon"
     ]
+
 
     data_deps = [
       ":chrome_app",
@@ -481,7 +484,10 @@ if (is_win) {
         ":chrome_dump_syms",
       ]
     }
+
+
   }
+
 
   if (enable_xpc_notifications) {
     bundle_data("chrome_framework_services") {
@@ -701,6 +707,8 @@ if (is_win) {
     ]
 
     ldflags = []
+
+    ldflags += ["-F"+"../../third_party/Syphon/mac/"]
 
     if (is_component_build) {
       ldflags += [
@@ -1064,6 +1072,8 @@ if (is_win) {
       chrome_dylib_version,
       "-Wl,-order_file," + rebase_path("app/framework.order", root_build_dir),
     ]
+
+    ldflags += ["-F"+"../../third_party/Syphon/mac/"]
 
     if (is_component_build) {
       ldflags += [
