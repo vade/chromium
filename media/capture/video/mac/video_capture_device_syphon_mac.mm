@@ -11,6 +11,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/synchronization/lock.h"
+#include "ui/gl/init/gl_initializer.h"
 
 namespace media {
     
@@ -65,9 +66,12 @@ namespace media {
     VideoCaptureDeviceSyphonMac::VideoCaptureDeviceSyphonMac(
                                                                  const VideoCaptureDeviceDescriptor& device_descriptor)
      {
-        NSLog(@"Request to init Syphon Server with device display name:");
+        NSLog(@"Request to init Syphon Server with device descriptor %s %s %s", device_descriptor.display_name.c_str(), device_descriptor.device_id.c_str(),  device_descriptor.model_id.c_str());
          // Because we set up our callback in our initializer,
          run = false;
+         
+//         InitializeStaticCGLInternal
+         gl::init::InitializeStaticGLBindings(gl::kGLImplementationAppleGL);
          
          @autoreleasepool {
              
@@ -78,25 +82,65 @@ namespace media {
                  NSOpenGLPFAColorSize, 32,
                  NSOpenGLPFADepthSize, 24,
                  NSOpenGLPFANoRecovery,
-                 NSOpenGLPFAOpenGLProfile, NSOpenGLProfileVersionLegacy
+//                 NSOpenGLPFAOpenGLProfile, NSOpenGLProfileVersionLegacy
              };
              
              NSOpenGLPixelFormat* format = [[NSOpenGLPixelFormat alloc] initWithAttributes:attributes];
              
              context = [[NSOpenGLContext alloc] initWithFormat:format shareContext:nil];
+             
+             if(context == nil)
+             {
+                 NSLog(@"Unable to create Context - falling back");
+                 NSOpenGLPixelFormatAttribute attributes[] = {
+                     NSOpenGLPFAColorSize, 32,
+                     NSOpenGLPFADepthSize, 24,
+//                     NSOpenGLPFAOpenGLProfile, NSOpenGLProfileVersionLegacy
+                 };
+                 
+                 NSOpenGLPixelFormat* format = [[NSOpenGLPixelFormat alloc] initWithAttributes:attributes];
+                 
+                 context = [[NSOpenGLContext alloc] initWithFormat:format shareContext:nil];
+             
+                 if(context == nil)
+                 {
+                     NSLog(@"Unable to create Context - falling back x2");
+                     NSOpenGLPixelFormatAttribute attributes[] = {
+//                         NSOpenGLPFAOpenGLProfile, NSOpenGLProfileVersionLegacy
+                     };
+                     
+                     NSOpenGLPixelFormat* format = [[NSOpenGLPixelFormat alloc] initWithAttributes:attributes];
+                     
+                     context = [[NSOpenGLContext alloc] initWithFormat:format shareContext:nil];
+                 }
+             }
+             if(context == nil)
+             {
+                 NSLog(@"Unable to create Context Final");
+             }
+             
              [context retain];
 
              // Enumerate Syphon Server Directories to match our Device Descriptors device_id, in which we placed the Syphon Servers UUID
              NSDictionary* selectedServerDictionary = nil;
              NSString* uuidToMatch = [NSString stringWithUTF8String:device_descriptor.device_id.c_str()];
-             for(NSDictionary* serverDescription in [SyphonServerDirectory sharedDirectory].servers) {
-                 NSString* deviceID = [serverDescription objectForKey:SyphonServerDescriptionUUIDKey];
-                 if( [deviceID isEqualToString:uuidToMatch] ) {
-                     selectedServerDictionary = serverDescription;
-                     break;
+             if(uuidToMatch) {
+                 for(NSDictionary* serverDescription in [SyphonServerDirectory sharedDirectory].servers) {
+                     NSString* deviceID = [serverDescription objectForKey:SyphonServerDescriptionUUIDKey];
+                     if( [deviceID isEqualToString:uuidToMatch] ) {
+                         selectedServerDictionary = serverDescription;
+                         break;
+                     }
                  }
              }
+             else {
+                 NSLog(@"Unable to match UUID, finding 1st server");
+                 // grab the first server we find
+                 selectedServerDictionary = [SyphonServerDirectory sharedDirectory].servers[0];
+             }
              if (selectedServerDictionary) {
+                 NSLog(@"Found Server: %@", selectedServerDictionary);
+
                  syphonClient = [[SyphonClient alloc] initWithServerDescription:selectedServerDictionary options:nil newFrameHandler:^(SyphonClient *client) {
                      @autoreleasepool {
                          
@@ -180,21 +224,19 @@ namespace media {
                                  glDisableClientState( GL_TEXTURE_COORD_ARRAY );
                                  glDisableClientState(GL_VERTEX_ARRAY);
                                  
-                                 // GL Syncronize contents of FBO
-                                 //glFlushRenderAPPLE();
-                                 glFinish();
                                  
                                  size_t textureDataLength = 4 * sizeof(int) * image.textureSize.width * image.textureSize.height;
                                  const uint8_t* textureData = (const uint8_t*)malloc(textureDataLength);
                                  
-                                 //                         memset((void*)textureData, 255, textureDataLength);
+                                                          memset((void*)textureData, 128, textureDataLength);
                                  glEnable(GL_TEXTURE_RECTANGLE_EXT);
                                  glBindTexture(GL_TEXTURE_RECTANGLE_EXT, tempTexture);
                                  //glGetTexImage(<#GLenum target#>, <#GLint level#>, <#GLenum format#>, <#GLenum type#>, <#GLvoid *pixels#>)
                                  glGetTexImage(GL_TEXTURE_RECTANGLE_EXT, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, (void*)textureData);
-                                 // flush GL to syncronize
-                                 glFinish();
-                                 
+
+                                 // GL Syncronize contents of FBO
+                                 glFlushRenderAPPLE();
+
                                  const media::VideoCaptureFormat capture_format(
                                                                                 gfx::Size(image.textureSize.width, image.textureSize.height),
                                                                                 0.0f,
@@ -213,10 +255,20 @@ namespace media {
                                  glDeleteTextures(1, &tempTexture);
                              }
                          }
+                         else if(!context) {
+                             NSLog(@"Syphon Client Recieved Frame - No Context");
+                         }
+                         else if(!run) {
+                             NSLog(@"Syphon Client Recieved Frame - Not Running");
+                         }
+                         
                      }
                  }];
               
                  [syphonClient retain];
+             }
+             else {
+                 NSLog(@"Unable to find Syphon Server for device_description");
              }
          }
      }
