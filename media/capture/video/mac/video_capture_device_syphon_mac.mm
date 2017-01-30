@@ -15,12 +15,6 @@
 
 namespace media {
     
-//    static std::string JoinDeviceNameAndFormat(CFStringRef name,
-//                                               CFStringRef format) {
-//        return base::SysCFStringRefToUTF8(name) + " - " +
-//        base::SysCFStringRefToUTF8(format);
-//    }
-    
     // static
     void VideoCaptureDeviceSyphonMac::EnumerateDevices(
                                                          VideoCaptureDeviceDescriptors* device_descriptors) {
@@ -50,9 +44,9 @@ namespace media {
     void VideoCaptureDeviceSyphonMac::EnumerateDeviceCapabilities(
                                                                     const VideoCaptureDeviceDescriptor& device,
                                                                     VideoCaptureFormats* supported_formats) {
-        // Frames vended from Syphon Sources can typically change at runtime
+        // Frames vended from Syphon Sources can typically change sizes at runtime
         // This means we dont have a set format for the life of a server
-        // We are
+        // We are kind of fibbing here. Unsure what the appropriate format info is for dynamic types.
         
         const media::VideoCaptureFormat format(
                                                gfx::Size(640, 480),
@@ -67,10 +61,11 @@ namespace media {
                                                                  const VideoCaptureDeviceDescriptor& device_descriptor)
      {
         NSLog(@"Request to init Syphon Server with device descriptor %s %s %s", device_descriptor.display_name.c_str(), device_descriptor.device_id.c_str(),  device_descriptor.model_id.c_str());
-         // Because we set up our callback in our initializer,
+
          run = false;
          
-//         InitializeStaticCGLInternal
+         // Because we run OpenGL in our frame callback to read Syphon Frames off of the GPU
+         // We need to be sure to initialize a Chrome Mac Desktop Implementation:
          gl::init::InitializeStaticGLBindings(gl::kGLImplementationAppleGL);
          
          @autoreleasepool {
@@ -81,8 +76,8 @@ namespace media {
                  NSOpenGLPFAAccelerated,
                  NSOpenGLPFAColorSize, 32,
                  NSOpenGLPFADepthSize, 24,
-                 NSOpenGLPFANoRecovery,
 //                 NSOpenGLPFAOpenGLProfile, NSOpenGLProfileVersionLegacy
+                 NSOpenGLPFANoRecovery,
              };
              
              NSOpenGLPixelFormat* format = [[NSOpenGLPixelFormat alloc] initWithAttributes:attributes];
@@ -150,6 +145,8 @@ namespace media {
                              SyphonImage* image = [client newFrameImageForContext:context.CGLContextObj];
                              
                              if(image) {
+                                 // Todo: We create and destroy our FBO / Texture every frame
+                                 // Lets cache them at some point.
                                  GLuint tempFBO;
                                  GLuint tempTexture;
                                  
@@ -224,30 +221,29 @@ namespace media {
                                  glDisableClientState( GL_TEXTURE_COORD_ARRAY );
                                  glDisableClientState(GL_VERTEX_ARRAY);
                                  
-                                 
                                  size_t textureDataLength = 4 * sizeof(int) * image.textureSize.width * image.textureSize.height;
                                  const uint8_t* textureData = (const uint8_t*)malloc(textureDataLength);
                                  
-                                                          memset((void*)textureData, 128, textureDataLength);
                                  glEnable(GL_TEXTURE_RECTANGLE_EXT);
                                  glBindTexture(GL_TEXTURE_RECTANGLE_EXT, tempTexture);
-                                 //glGetTexImage(<#GLenum target#>, <#GLint level#>, <#GLenum format#>, <#GLenum type#>, <#GLvoid *pixels#>)
                                  glGetTexImage(GL_TEXTURE_RECTANGLE_EXT, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, (void*)textureData);
 
-                                 // GL Syncronize contents of FBO
+                                 // GL Syncronize contents of FBO / texture
                                  glFlushRenderAPPLE();
 
                                  const media::VideoCaptureFormat capture_format(
                                                                                 gfx::Size(image.textureSize.width, image.textureSize.height),
                                                                                 0.0f,
                                                                                 media::PIXEL_FORMAT_ARGB);
-                                 
+                                 // We are not currently tracking frame deltas
+                                 // We assume 60Hz here.
+                                 // Todo: Track frame delta ms
                                  this->OnIncomingCapturedData(textureData,
                                                               textureDataLength,
                                                               capture_format,
                                                               0,
                                                               base::TimeTicks::Now(),
-                                                              base::TimeDelta::FromMilliseconds(1));
+                                                              base::TimeDelta::FromMilliseconds(16));
                                  
                                  free((void*)textureData);
                                  
@@ -326,16 +322,11 @@ namespace media {
         
         NSLog(@"Request to allocate and start Syphon Server");
         run = true;
-        
-//        if (decklink_capture_delegate_.get())
-//            decklink_capture_delegate_->AllocateAndStart(params);
     }
     
     void VideoCaptureDeviceSyphonMac::StopAndDeAllocate() {
         run = false;
         [syphonClient stop];
-//        if (decklink_capture_delegate_.get())
-//            decklink_capture_delegate_->StopAndDeAllocate();
     }
     
 }  // namespace media
