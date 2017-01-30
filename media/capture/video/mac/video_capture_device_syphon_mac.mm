@@ -66,9 +66,20 @@ namespace media {
          
          // Because we run OpenGL in our frame callback to read Syphon Frames off of the GPU
          // We need to be sure to initialize a Chrome Mac Desktop Implementation:
-         gl::init::InitializeStaticGLBindings(gl::kGLImplementationAppleGL);
+         gl::init::InitializeStaticGLBindings(gl::kGLImplementationDesktopGL);
          
          @autoreleasepool {
+             
+             // Init our last size to zero
+             // We use this to track bounds of incoming images.
+             // Since Syphon frames can change size at any time
+             // We might need to rebuild OpenGL Resources
+             lastSize = NSZeroSize;
+             numPBOs = 2;
+             currentPBO = 0;
+             numTransfers = 0;
+             this->PBOs = nullptr;
+             this->textureData = nullptr;
              
              // Initialize our GL Context
              NSOpenGLPixelFormatAttribute attributes[] = {
@@ -76,7 +87,6 @@ namespace media {
                  NSOpenGLPFAAccelerated,
                  NSOpenGLPFAColorSize, 32,
                  NSOpenGLPFADepthSize, 24,
-//                 NSOpenGLPFAOpenGLProfile, NSOpenGLProfileVersionLegacy
                  NSOpenGLPFANoRecovery,
              };
              
@@ -90,7 +100,6 @@ namespace media {
                  NSOpenGLPixelFormatAttribute attributes[] = {
                      NSOpenGLPFAColorSize, 32,
                      NSOpenGLPFADepthSize, 24,
-//                     NSOpenGLPFAOpenGLProfile, NSOpenGLProfileVersionLegacy
                  };
                  
                  NSOpenGLPixelFormat* format = [[NSOpenGLPixelFormat alloc] initWithAttributes:attributes];
@@ -101,7 +110,6 @@ namespace media {
                  {
                      NSLog(@"Unable to create Context - falling back x2");
                      NSOpenGLPixelFormatAttribute attributes[] = {
-//                         NSOpenGLPFAOpenGLProfile, NSOpenGLProfileVersionLegacy
                      };
                      
                      NSOpenGLPixelFormat* format = [[NSOpenGLPixelFormat alloc] initWithAttributes:attributes];
@@ -133,9 +141,10 @@ namespace media {
                  // grab the first server we find
                  selectedServerDictionary = [SyphonServerDirectory sharedDirectory].servers[0];
              }
+             
              if (selectedServerDictionary) {
                  NSLog(@"Found Server: %@", selectedServerDictionary);
-
+ 
                  syphonClient = [[SyphonClient alloc] initWithServerDescription:selectedServerDictionary options:nil newFrameHandler:^(SyphonClient *client) {
                      @autoreleasepool {
                          
@@ -145,42 +154,79 @@ namespace media {
                              SyphonImage* image = [client newFrameImageForContext:context.CGLContextObj];
                              
                              if(image) {
-                                 // Todo: We create and destroy our FBO / Texture every frame
-                                 // Lets cache them at some point.
-                                 GLuint tempFBO;
-                                 GLuint tempTexture;
                                  
-                                 glGenTextures(1, &tempTexture);
-                                 glBindTexture(GL_TEXTURE_RECTANGLE_EXT, tempTexture);
-                                 glTexImage2D(GL_TEXTURE_RECTANGLE_EXT,
-                                              0,
-                                              GL_RGBA8,
-                                              image.textureSize.width,
-                                              image.textureSize.height,
-                                              0,
-                                              GL_BGRA,
-                                              GL_UNSIGNED_INT_8_8_8_8_REV,
-                                              NULL);
+                                 NSSize currentSize = image.textureSize;
                                  
-                                 glGenFramebuffers(1, &tempFBO);
-                                 glBindFramebuffer(GL_FRAMEBUFFER, tempFBO);
-                                 glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE_EXT, tempTexture, 0);
-                                 
-                                 // things go according to plan?
-                                 GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-                                 if(status != GL_FRAMEBUFFER_COMPLETE)
+                                 // Rebuild GL resources
+                                 if(!NSEqualSizes(this->lastSize, currentSize))
                                  {
-                                     NSLog(@"could not create FBO - bailing");
+                                     if(this->fbo != 0) {
+                                         glDeleteFramebuffers(1, &this->fbo);
+                                     }
+                                     
+                                     if(this->texture != 0) {
+                                         glDeleteTextures(1, &this->texture);
+                                     }
+                                     
+                                     if(this->PBOs != nullptr) {
+                                         glDeleteBuffers(this->numPBOs, this->PBOs);
+                                         delete this->PBOs;
+                                         this->PBOs = nullptr;
+                                     }
+                                     
+                                     if(this->textureData != nullptr)
+                                     {
+                                         free((void*)this->textureData);
+                                     }
+                                     
+                                     this->textureDataLength = 4 * sizeof(int) * currentSize.width * currentSize.height;
+                                     this->textureData = (uint8_t*)malloc(textureDataLength);
+                                     
+                                     glGenTextures(1, &this->texture);
+                                     glBindTexture(GL_TEXTURE_RECTANGLE_EXT, this->texture);
+                                     glTexImage2D(GL_TEXTURE_RECTANGLE_EXT,
+                                                  0,
+                                                  GL_RGBA8,
+                                                  currentSize.width,
+                                                  currentSize.height,
+                                                  0,
+                                                  GL_BGRA,
+                                                  GL_UNSIGNED_INT_8_8_8_8_REV,
+                                                  NULL);
+                                     
+                                     glGenFramebuffers(1, &this->fbo);
+                                     glBindFramebuffer(GL_FRAMEBUFFER, this->fbo);
+                                     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE_EXT, this->texture, 0);
+                                     
+                                     // things go according to plan?
+                                     GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+                                     if(status != GL_FRAMEBUFFER_COMPLETE)
+                                     {
+                                         NSLog(@"could not create FBO - bailing");
+                                     }
+                                     
+                                     // Create our PBO resources
+                                     this->PBOs = new GLuint[this->numPBOs];
+                                     
+                                     glGenBuffers(this->numPBOs, this->PBOs);
+                                     for(GLsizei i = 0; i < this->numPBOs; i++)
+                                     {
+                                         glBindBuffer(GL_PIXEL_PACK_BUFFER, this->PBOs[i]);
+                                         glBufferData(GL_PIXEL_PACK_BUFFER, textureDataLength, NULL, GL_STREAM_READ);
+                                     }
+                                     
+                                     glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+                                     
+                                     // Initialize a sane GL state for our size
+                                     glViewport(0, 0, currentSize.width, currentSize.height);
+                                     glOrtho(0, currentSize.width, 0, currentSize.height, -1, 1);
+                                     
+                                     glMatrixMode(GL_PROJECTION);
+                                     glLoadIdentity();
+                                     
+                                     glMatrixMode(GL_MODELVIEW);
+                                     glLoadIdentity();
                                  }
-                                 
-                                 glViewport(0, 0, image.textureSize.width, image.textureSize.height);
-                                 glOrtho(0, image.textureSize.width, 0, image.textureSize.height, -1, 1);
-                                 
-                                 glMatrixMode(GL_PROJECTION);
-                                 glLoadIdentity();
-                                 
-                                 glMatrixMode(GL_MODELVIEW);
-                                 glLoadIdentity();
                                  
                                  // render into FBO
                                  glColor4f(1.0, 1.0, 1.0, 1.0);
@@ -190,10 +236,10 @@ namespace media {
                                  
                                  GLfloat tex_coords[] =
                                  {
-                                     image.textureSize.width,image.textureSize.height,
-                                     0.0,image.textureSize.height,
+                                     currentSize.width,currentSize.height,
+                                     0.0,currentSize.height,
                                      0.0,0.0,
-                                     image.textureSize.width,0.0
+                                     currentSize.width,0.0
                                  };
                                  
                                  GLfloat vertexCoords[8] =
@@ -221,34 +267,77 @@ namespace media {
                                  glDisableClientState( GL_TEXTURE_COORD_ARRAY );
                                  glDisableClientState(GL_VERTEX_ARRAY);
                                  
-                                 size_t textureDataLength = 4 * sizeof(int) * image.textureSize.width * image.textureSize.height;
-                                 const uint8_t* textureData = (const uint8_t*)malloc(textureDataLength);
+#define USE_ASYNC 1
+#if USE_ASYNC
+                                 // Async GL Readback using PBO
+                                 glReadBuffer(GL_COLOR_ATTACHMENT0);
                                  
+                                 if(this->numTransfers < this->numPBOs) {
+                                     glBindBuffer(GL_PIXEL_PACK_BUFFER, this->PBOs[this->currentPBO]);
+                                     glReadPixels(0, 0, currentSize.width, currentSize.height, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, 0);
+                                 }
+                                 else {
+                                     glBindBuffer(GL_PIXEL_PACK_BUFFER, this->PBOs[this->currentPBO]);
+                                     uint8_t* gpuTexture = (uint8_t*) glMapBuffer(GL_PIXEL_PACK_BUFFER, GL_READ_ONLY);
+                                     
+                                     if(gpuTexture != nullptr) {
+//                                         memcpy(this->textureData, gpuTexture, this->textureDataLength);
+                                         
+                                         const media::VideoCaptureFormat capture_format(
+                                                                                        gfx::Size(currentSize.width, currentSize.height),
+                                                                                        0.0f,
+                                                                                        media::PIXEL_FORMAT_ARGB);
+                                         // We are not currently tracking frame deltas
+                                         // We assume 60Hz here.
+                                         // Todo: Track frame delta ms
+                                         this->OnIncomingCapturedData(gpuTexture,
+                                                                      this->textureDataLength,
+                                                                      capture_format,
+                                                                      0,
+                                                                      base::TimeTicks::Now(),
+                                                                      base::TimeDelta::FromMilliseconds(16));
+
+                                     }
+                                     
+                                     glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+                                     glReadPixels(0, 0, currentSize.width, currentSize.height, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, 0);
+                                 }
+                                 
+                                 // Increment / wrap PBO count
+                                 this->currentPBO += 1;
+                                 this->currentPBO = this->currentPBO % this->numPBOs;
+                                 
+                                 // Increment / wrap num transfers
+                                 this->numTransfers += 1;
+                                 this->numTransfers = this->numTransfers % INT32_MAX;
+#else
+                                 // Synchronous GL Readback using glGetTexImage:
                                  glEnable(GL_TEXTURE_RECTANGLE_EXT);
-                                 glBindTexture(GL_TEXTURE_RECTANGLE_EXT, tempTexture);
-                                 glGetTexImage(GL_TEXTURE_RECTANGLE_EXT, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, (void*)textureData);
-
-                                 // GL Syncronize contents of FBO / texture
-                                 glFlushRenderAPPLE();
-
+                                 glBindTexture(GL_TEXTURE_RECTANGLE_EXT, this->texture);
+                                 glGetTexImage(GL_TEXTURE_RECTANGLE_EXT, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, (void*)this->textureData);
+                                 
                                  const media::VideoCaptureFormat capture_format(
-                                                                                gfx::Size(image.textureSize.width, image.textureSize.height),
+                                                                                gfx::Size(currentSize.width, currentSize.height),
                                                                                 0.0f,
                                                                                 media::PIXEL_FORMAT_ARGB);
                                  // We are not currently tracking frame deltas
                                  // We assume 60Hz here.
                                  // Todo: Track frame delta ms
-                                 this->OnIncomingCapturedData(textureData,
-                                                              textureDataLength,
+                                 this->OnIncomingCapturedData(this->textureData,
+                                                              this->textureDataLength,
                                                               capture_format,
                                                               0,
                                                               base::TimeTicks::Now(),
                                                               base::TimeDelta::FromMilliseconds(16));
+
+#endif
+                                 // GL Syncronize contents of FBO / texture
+                                 glFlushRenderAPPLE();
+
                                  
-                                 free((void*)textureData);
                                  
-                                 glDeleteFramebuffers(1, &tempFBO);
-                                 glDeleteTextures(1, &tempTexture);
+                                 this->lastSize = currentSize;
+                                 
                              }
                          }
                          else if(!context) {
@@ -277,8 +366,30 @@ namespace media {
                 syphonClient = nil;
             }
             if(context != nil) {
+                
+                [context makeCurrentContext];
+
+                if(fbo != 0) {
+                    glDeleteFramebuffers(1, &this->fbo);
+                }
+
+                if(texture != 0) {
+                    glDeleteTextures(1, &this->texture);
+                }
+                
+                if(this->PBOs != nullptr) {
+                    glDeleteBuffers(this->numPBOs, this->PBOs);
+                    delete this->PBOs;
+                    this->PBOs = nullptr;
+                }
+
                 [context release];
                 context = nil;
+                
+                if(this->textureData != nullptr)
+                {
+                    free((void*)this->textureData);
+                }
             }
         }
     }
