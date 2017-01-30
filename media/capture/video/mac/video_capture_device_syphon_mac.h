@@ -85,7 +85,6 @@ namespace media {
         GLsizei currentPBO;
         GLsizei numTransfers;
         GLuint* PBOs;
-        uint8_t* textureData;
         size_t textureDataLength;        
         
         bool run;

@@ -79,7 +79,6 @@ namespace media {
              currentPBO = 0;
              numTransfers = 0;
              this->PBOs = nullptr;
-             this->textureData = nullptr;
              
              // Initialize our GL Context
              NSOpenGLPixelFormatAttribute attributes[] = {
@@ -174,13 +173,7 @@ namespace media {
                                          this->PBOs = nullptr;
                                      }
                                      
-                                     if(this->textureData != nullptr)
-                                     {
-                                         free((void*)this->textureData);
-                                     }
-                                     
                                      this->textureDataLength = 4 * sizeof(int) * currentSize.width * currentSize.height;
-                                     this->textureData = (uint8_t*)malloc(textureDataLength);
                                      
                                      glGenTextures(1, &this->texture);
                                      glBindTexture(GL_TEXTURE_RECTANGLE_EXT, this->texture);
@@ -268,6 +261,7 @@ namespace media {
                                  glDisableClientState(GL_VERTEX_ARRAY);
                                  
 #define USE_ASYNC 1
+                                 // ASYNC 0 Currently broken due to removal of textureData
 #if USE_ASYNC
                                  // Async GL Readback using PBO
                                  glReadBuffer(GL_COLOR_ATTACHMENT0);
@@ -281,7 +275,6 @@ namespace media {
                                      uint8_t* gpuTexture = (uint8_t*) glMapBuffer(GL_PIXEL_PACK_BUFFER, GL_READ_ONLY);
                                      
                                      if(gpuTexture != nullptr) {
-//                                         memcpy(this->textureData, gpuTexture, this->textureDataLength);
                                          
                                          const media::VideoCaptureFormat capture_format(
                                                                                         gfx::Size(currentSize.width, currentSize.height),
@@ -385,11 +378,6 @@ namespace media {
 
                 [context release];
                 context = nil;
-                
-                if(this->textureData != nullptr)
-                {
-                    free((void*)this->textureData);
-                }
             }
         }
     }
