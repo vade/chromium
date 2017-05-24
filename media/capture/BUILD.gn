@@ -153,6 +153,10 @@ component("capture_lib") {
   }
 
   if (is_mac) {
+    sources+= [
+    "//ui/gl/init/gl_initializer.h",
+    "//ui/gl/init/gl_initializer_mac.cc",
+    ]
     deps += [
       "//third_party/decklink",
       "//third_party/Syphon"
