@@ -3,12 +3,18 @@
 // found in the LICENSE file.
 
 /**
- * @fileoverview A helper object used by the "Google Play Store" (Arc++) section
+ * @fileoverview A helper object used by the "Google Play Store" (ARC) section
  * to retrieve information about android apps.
  */
 
 /**
- * @typedef {{appReady: boolean}}
+ * Type definition of AndroidAppsInfo entry. |playStoreEnabled| indicates that
+ * Play Store is enabled. |settingsAppAvailable| indicates that Android settings
+ * app is registered in the system.
+ * @typedef {{
+ *   playStoreEnabled: boolean,
+ *   settingsAppAvailable: boolean,
+ * }}
  * @see chrome/browser/ui/webui/settings/chromeos/android_apps_handler.cc
  */
 var AndroidAppsInfo;

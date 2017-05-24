@@ -37,7 +37,7 @@ class ResourceRequestInfoImpl : public ResourceRequestInfo,
  public:
   using TransferCallback =
       base::Callback<void(mojom::URLLoaderAssociatedRequest,
-                          mojom::URLLoaderClientAssociatedPtr)>;
+                          mojom::URLLoaderClientPtr)>;
 
   // Returns the ResourceRequestInfoImpl associated with the given URLRequest.
   CONTENT_EXPORT static ResourceRequestInfoImpl* ForRequest(
@@ -72,13 +72,13 @@ class ResourceRequestInfoImpl : public ResourceRequestInfo,
       bool report_raw_headers,
       bool is_async,
       PreviewsState previews_state,
-      const std::string& original_headers,
       const scoped_refptr<ResourceRequestBodyImpl> body,
       bool initiated_in_secure_context);
   ~ResourceRequestInfoImpl() override;
 
   // ResourceRequestInfo implementation:
   WebContentsGetter GetWebContentsGetterForRequest() const override;
+  FrameTreeNodeIdGetter GetFrameTreeNodeIdGetterForRequest() const override;
   ResourceContext* GetContext() const override;
   int GetChildID() const override;
   int GetRouteID() const override;
@@ -126,7 +126,7 @@ class ResourceRequestInfoImpl : public ResourceRequestInfo,
                          int request_id,
                          ResourceRequesterInfo* requester_info,
                          mojom::URLLoaderAssociatedRequest url_loader_request,
-                         mojom::URLLoaderClientAssociatedPtr url_loader_client);
+                         mojom::URLLoaderClientPtr url_loader_client);
 
   // Whether this request is part of a navigation that should replace the
   // current session history entry. This state is shuffled up and down the stack
@@ -180,7 +180,6 @@ class ResourceRequestInfoImpl : public ResourceRequestInfo,
   void set_do_not_prompt_for_login(bool do_not_prompt) {
     do_not_prompt_for_login_ = do_not_prompt;
   }
-  const std::string& original_headers() const { return original_headers_; }
 
   const scoped_refptr<ResourceRequestBodyImpl>& body() const { return body_; }
   void ResetBody();
@@ -236,7 +235,6 @@ class ResourceRequestInfoImpl : public ResourceRequestInfo,
   bool report_raw_headers_;
   bool is_async_;
   PreviewsState previews_state_;
-  const std::string original_headers_;
   scoped_refptr<ResourceRequestBodyImpl> body_;
   bool initiated_in_secure_context_;
   std::unique_ptr<NavigationUIData> navigation_ui_data_;

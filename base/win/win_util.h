@@ -137,6 +137,8 @@ BASE_EXPORT bool IsWindows10TabletMode(HWND hwnd);
 // 1. Metrics:- To gain insight into how users use Chrome.
 // 2. Physical keyboard presence :- If a device is in tablet mode, it means
 //    that there is no physical keyboard attached.
+// 3. To set the right interactions media queries,
+//    see https://drafts.csswg.org/mediaqueries-4/#mf-interaction
 // This function optionally sets the |reason| parameter to determine as to why
 // or why not a device was deemed to be a tablet.
 // Returns true if the device is in tablet mode.
@@ -156,6 +158,14 @@ BASE_EXPORT bool IsKeyboardPresentOnSlate(std::string* reason);
 
 // Returns true if the machine is enrolled to a domain.
 BASE_EXPORT bool IsEnrolledToDomain();
+
+// Returns true if the machine is being managed by an MDM system.
+BASE_EXPORT bool IsDeviceRegisteredWithManagement();
+
+// Returns true if the current machine is considered enterprise managed in some
+// fashion.  A machine is considered managed if it is either domain enrolled
+// or registered with an MDM.
+BASE_EXPORT bool IsEnterpriseManaged();
 
 // Used by tests to mock any wanted state. Call with |state| set to true to
 // simulate being in a domain and false otherwise.

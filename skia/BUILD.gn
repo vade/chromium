@@ -32,6 +32,7 @@ config("skia_config") {
     "//third_party/skia/include/config",
     "//third_party/skia/include/core",
     "//third_party/skia/include/effects",
+    "//third_party/skia/include/encode",
     "//third_party/skia/include/images",
     "//third_party/skia/include/lazy",
     "//third_party/skia/include/pathops",
@@ -39,12 +40,22 @@ config("skia_config") {
     "//third_party/skia/include/pipe",
     "//third_party/skia/include/ports",
     "//third_party/skia/include/utils",
+    "//third_party/skia/third_party/vulkan",
   ]
 
-  defines = [ "SK_IGNORE_DW_GRAY_FIX" ]
-  defines += skia_for_chromium_defines
+  defines = skia_for_chromium_defines
+  defines += [
+    "SK_HAS_PNG_LIBRARY",
+    "SK_HAS_WEBP_LIBRARY",
+  ]
 
-  defines += []
+  if (!is_ios) {
+    defines += [ "SK_HAS_JPEG_LIBRARY" ]
+  }
+
+  if (is_win || is_mac) {
+    defines += [ "SK_FREETYPE_MINIMUM_RUNTIME_VERSION=(((FREETYPE_MAJOR) * 0x01000000) | ((FREETYPE_MINOR) * 0x00010000) | ((FREETYPE_PATCH) * 0x00000100))" ]
+  }
 
   if (is_component_build) {
     defines += [
@@ -87,14 +98,15 @@ config("skia_config") {
 # Internal-facing config for Skia library code.
 config("skia_library_config") {
   # These include directories are only included for Skia code and are not
-  # exported to dependents. It's not clear if this is on purpose, but this
-  # matches the GYP build.
+  # exported to dependents.
   include_dirs = [
     "//third_party/skia/include/private",
     "//third_party/skia/include/client/android",
+    "//third_party/skia/src/codec",
     "//third_party/skia/src/core",
     "//third_party/skia/src/effects/gradients",
     "//third_party/skia/src/image",
+    "//third_party/skia/src/images",
     "//third_party/skia/src/opts",
     "//third_party/skia/src/pdf",
     "//third_party/skia/src/ports",
@@ -193,40 +205,64 @@ component("skia") {
     "config/sk_ref_cnt_ext_debug.h",
     "config/sk_ref_cnt_ext_release.h",
     "ext/SkDiscardableMemory_chrome.cc",
+    "ext/SkDiscardableMemory_chrome.h",
     "ext/SkMemory_new_handler.cpp",
     "ext/analysis_canvas.cc",
+    "ext/analysis_canvas.h",
     "ext/benchmarking_canvas.cc",
+    "ext/benchmarking_canvas.h",
     "ext/convolver.cc",
+    "ext/convolver.h",
     "ext/event_tracer_impl.cc",
+    "ext/event_tracer_impl.h",
     "ext/fontmgr_default_android.cc",
+    "ext/fontmgr_default_android.h",
     "ext/fontmgr_default_linux.cc",
+    "ext/fontmgr_default_linux.h",
     "ext/fontmgr_default_win.cc",
+    "ext/fontmgr_default_win.h",
     "ext/google_logging.cc",
     "ext/image_operations.cc",
+    "ext/image_operations.h",
     "ext/opacity_filter_canvas.cc",
+    "ext/opacity_filter_canvas.h",
     "ext/recursive_gaussian_convolution.cc",
-    "ext/skia_encode_image.cc",
-    "ext/skia_encode_image.h",
+    "ext/recursive_gaussian_convolution.h",
     "ext/skia_histogram.cc",
+    "ext/skia_histogram.h",
     "ext/skia_memory_dump_provider.cc",
+    "ext/skia_memory_dump_provider.h",
     "ext/skia_trace_memory_dump_impl.cc",
+    "ext/skia_trace_memory_dump_impl.h",
     "ext/skia_utils_base.cc",
+    "ext/skia_utils_base.h",
     "ext/skia_utils_ios.h",
     "ext/skia_utils_ios.mm",
+    "ext/skia_utils_mac.h",
     "ext/skia_utils_mac.mm",
     "ext/skia_utils_win.cc",
+    "ext/skia_utils_win.h",
   ]
 
   if (!is_ios) {
-    sources += [ "ext/platform_canvas.cc" ]
+    sources += [
+      "ext/platform_canvas.cc",
+      "ext/platform_canvas.h",
+    ]
   }
   if (!is_ios && (current_cpu == "x86" || current_cpu == "x64")) {
-    sources += [ "ext/convolver_SSE2.cc" ]
+    sources += [
+      "ext/convolver_SSE2.cc",
+      "ext/convolver_SSE2.h",
+    ]
   } else if (current_cpu == "mipsel" && mips_dsp_rev >= 2) {
-    sources += [ "ext/convolver_mips_dspr2.cc" ]
+    sources += [
+      "ext/convolver_mips_dspr2.cc",
+      "ext/convolver_mips_dspr2.h",
+    ]
   }
 
-  # The skia gypi values are relative to the skia_dir, so we need to rebase.
+  # The imported Skia gni source paths are made absolute by gn.
   sources += skia_core_sources
   sources += skia_effects_sources
   sources += skia_utils_sources
@@ -234,34 +270,17 @@ component("skia") {
   sources += [
     "//third_party/skia/src/fonts/SkFontMgr_indirect.cpp",
     "//third_party/skia/src/fonts/SkRemotableFontMgr.cpp",
-    "//third_party/skia/src/ports/SkFontConfigInterface.cpp",
-    "//third_party/skia/src/ports/SkFontConfigInterface_direct.cpp",
-    "//third_party/skia/src/ports/SkFontConfigInterface_direct_factory.cpp",
-    "//third_party/skia/src/ports/SkFontHost_FreeType.cpp",
-    "//third_party/skia/src/ports/SkFontHost_FreeType_common.cpp",
-    "//third_party/skia/src/ports/SkFontHost_mac.cpp",
-    "//third_party/skia/src/ports/SkFontHost_win.cpp",
-    "//third_party/skia/src/ports/SkFontMgr_FontConfigInterface.cpp",
-    "//third_party/skia/src/ports/SkFontMgr_android.cpp",
-    "//third_party/skia/src/ports/SkFontMgr_android_parser.cpp",
-    "//third_party/skia/src/ports/SkFontMgr_win_dw.cpp",
+    "//third_party/skia/src/images/SkImageEncoder.cpp",
+    "//third_party/skia/src/images/SkJPEGWriteUtility.cpp",
+    "//third_party/skia/src/images/SkJpegEncoder.cpp",
+    "//third_party/skia/src/images/SkPngEncoder.cpp",
+    "//third_party/skia/src/images/SkWebpEncoder.cpp",
     "//third_party/skia/src/ports/SkGlobalInitialization_default.cpp",
     "//third_party/skia/src/ports/SkImageGenerator_none.cpp",
-    "//third_party/skia/src/ports/SkOSFile_posix.cpp",
     "//third_party/skia/src/ports/SkOSFile_stdio.cpp",
-    "//third_party/skia/src/ports/SkOSFile_win.cpp",
-    "//third_party/skia/src/ports/SkRemotableFontMgr_win_dw.cpp",
-    "//third_party/skia/src/ports/SkScalerContext_win_dw.cpp",
-    "//third_party/skia/src/ports/SkTLS_pthread.cpp",
-    "//third_party/skia/src/ports/SkTLS_win.cpp",
-    "//third_party/skia/src/ports/SkTypeface_win_dw.cpp",
     "//third_party/skia/src/sfnt/SkOTTable_name.cpp",
     "//third_party/skia/src/sfnt/SkOTUtils.cpp",
   ]
-
-  if (is_mac) {
-    sources += [ "//third_party/skia/src/utils/mac/SkStream_mac.cpp" ]
-  }
 
   # This and skia_opts are really the same conceptual target so share headers.
   allow_circular_includes_from = [ ":skia_opts" ]
@@ -277,20 +296,14 @@ component("skia") {
     sources += skia_sksl_sources
   }
 
-  # Remove unused util files include in utils.gypi
+  # Remove unused util sources.
   sources -= [
-    "//third_party/skia/src/utils/SkBoundaryPatch.cpp",
     "//third_party/skia/src/utils/SkCamera.cpp",
     "//third_party/skia/src/utils/SkDumpCanvas.cpp",
     "//third_party/skia/src/utils/SkFrontBufferedStream.cpp",
     "//third_party/skia/src/utils/SkInterpolator.cpp",
-    "//third_party/skia/src/utils/SkLayer.cpp",
-    "//third_party/skia/src/utils/SkMeshUtils.cpp",
     "//third_party/skia/src/utils/SkOSPath.cpp",
     "//third_party/skia/src/utils/SkParsePath.cpp",
-
-    # Testing.
-    "//third_party/skia/src/fonts/SkGScalerContext.cpp",
   ]
 
   if (is_win) {
@@ -316,17 +329,22 @@ component("skia") {
   }
 
   if (is_android && (!enable_basic_printing && !enable_print_preview)) {
-    sources -= [ "ext/skia_utils_base.cc" ]
+    sources -= [
+      "ext/skia_utils_base.cc",
+      "ext/skia_utils_base.h",
+    ]
   }
 
-  # Fixup skia library sources.
+  # Select Skia ports.
+
+  # FreeType is needed everywhere, on Linux and Android as main font backend, on Windows and Mac as fallback backend for Variations.
+  sources += [
+    "//third_party/skia/src/ports/SkFontHost_FreeType.cpp",
+    "//third_party/skia/src/ports/SkFontHost_FreeType_common.cpp",
+  ]
+
   if (is_win) {
-    sources -= [
-      "//third_party/skia/src/ports/SkOSFile_posix.cpp",
-      "//third_party/skia/src/ports/SkTLS_pthread.cpp",
-    ]
-  } else {
-    sources -= [
+    sources += [
       "//third_party/skia/src/ports/SkFontHost_win.cpp",
       "//third_party/skia/src/ports/SkFontMgr_win_dw.cpp",
       "//third_party/skia/src/ports/SkOSFile_win.cpp",
@@ -335,13 +353,24 @@ component("skia") {
       "//third_party/skia/src/ports/SkTLS_win.cpp",
       "//third_party/skia/src/ports/SkTypeface_win_dw.cpp",
     ]
-  }
-  if (!is_mac) {
-    sources -= [ "//third_party/skia/src/ports/SkFontHost_mac.cpp" ]
+  } else {
+    sources += [
+      "//third_party/skia/src/ports/SkOSFile_posix.cpp",
+      "//third_party/skia/src/ports/SkTLS_pthread.cpp",
+    ]
   }
 
-  if (!is_linux) {
-    sources -= [
+  if (is_mac || is_ios) {
+    set_sources_assignment_filter([])
+    sources += [
+      "//third_party/skia/src/ports/SkFontHost_mac.cpp",
+      "//third_party/skia/src/utils/mac/SkStream_mac.cpp",
+    ]
+    set_sources_assignment_filter(sources_assignment_filter)
+  }
+
+  if (is_linux) {
+    sources += [
       "//third_party/skia/src/ports/SkFontConfigInterface.cpp",
       "//third_party/skia/src/ports/SkFontConfigInterface_direct.cpp",
       "//third_party/skia/src/ports/SkFontConfigInterface_direct_factory.cpp",
@@ -349,21 +378,29 @@ component("skia") {
     ]
   }
 
-  if (!is_linux && !is_android) {
-    sources -= [
-      "//third_party/skia/src/ports/SkFontHost_FreeType.cpp",
-      "//third_party/skia/src/ports/SkFontHost_FreeType_common.cpp",
-
+  if (is_linux || is_android) {
+    sources += [
       # Retain the files for the SkFontMgr_Android on linux to emulate android
       # fonts. See content/zygote/zygote_main_linux.cc
+      # Note that this requires expat.
       "//third_party/skia/src/ports/SkFontMgr_android.cpp",
       "//third_party/skia/src/ports/SkFontMgr_android_parser.cpp",
     ]
   }
 
-  # Select the right BitmapPlatformDevice.
+  if (is_win || is_mac) {
+    sources += [
+      # Add the FreeType custom font manager as a fallback backend for variable fonts.
+      "//third_party/skia/src/ports/SkFontMgr_custom.cpp",
+      "//third_party/skia/src/ports/SkFontMgr_custom_empty.cpp",
+    ]
+  }
+
   if (is_win) {
-    sources += [ "ext/raster_handle_allocator_win.cc" ]
+    sources += [
+      # Select the right BitmapPlatformDevice.
+      "ext/raster_handle_allocator_win.cc",
+    ]
   }
 
   if (is_clang && !is_nacl) {
@@ -385,27 +422,41 @@ component("skia") {
     ":skia_opts",
     "//base",
     "//base/third_party/dynamic_annotations",
+    "//build/config/freetype",
+    "//third_party:jpeg",
+    "//third_party/libpng",
+    "//third_party/libwebp",
   ]
+
+  if (is_ios) {
+    sources -= [
+      "//third_party/skia/src/images/SkJPEGWriteUtility.cpp",
+      "//third_party/skia/src/images/SkJpegEncoder.cpp",
+    ]
+    deps -= [ "//third_party:jpeg" ]
+  }
 
   if (is_linux) {
     if (use_pango) {
-      configs += [ "//build/config/linux/pangocairo" ]
+      configs += [
+        # libpng_config will be included automatically from deps.  We do this
+        # to ensure that it is included before the pangocairo path (which also
+        # has a png.h).
+        "//third_party/libpng:libpng_config",
+        "//build/config/linux/pangocairo",
+      ]
     }
     deps += [
       "//build/linux:fontconfig",
-      "//build/linux:freetype2",
       "//third_party/expat",
       "//third_party/icu:icuuc",
     ]
   }
 
   if (is_android) {
-    set_sources_assignment_filter([])
-    set_sources_assignment_filter(sources_assignment_filter)
     deps += [
       "//third_party/android_tools:cpu_features",
       "//third_party/expat",
-      "//third_party/freetype-android:freetype",
     ]
   }
 
@@ -437,15 +488,8 @@ component("skia") {
   if (is_ios) {
     libs = [ "ImageIO.framework" ]
     set_sources_assignment_filter([])
-    sources += [
-      "//third_party/skia/src/ports/SkFontHost_mac.cpp",
-      "//third_party/skia/src/utils/mac/SkCreateCGImageRef.cpp",
-      "//third_party/skia/src/utils/mac/SkStream_mac.cpp",
-    ]
+    sources += [ "//third_party/skia/src/utils/mac/SkCreateCGImageRef.cpp" ]
     set_sources_assignment_filter(sources_assignment_filter)
-
-    # SkFontHost_mac.cpp uses API deprecated in iOS 7, crbug.com/408571
-    cflags = [ "-Wno-deprecated-declarations" ]
   }
 }
 

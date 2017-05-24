@@ -114,7 +114,7 @@
                                                                   self));
   }
 
-  [bubble_ setArrowLocation:info_bubble::kTopRight];
+  [bubble_ setArrowLocation:info_bubble::kTopTrailing];
 }
 
 - (void)dealloc {
@@ -360,8 +360,9 @@
                                            NSRightMouseDownMask
       handler:^NSEvent* (NSEvent* event) {
           NSWindow* eventWindow = [event window];
-          if (eventWindow == window || [eventWindow isSheet])
+          if ([eventWindow isSheet])
             return event;
+
           // Do not close the bubble if the event happened on a window with a
           // higher level.  For example, the content of a browser action bubble
           // opens a calendar picker window with NSPopUpMenuWindowLevel, and a
@@ -369,6 +370,15 @@
           // the bubble.
           if ([eventWindow level] > [window level])
             return event;
+
+          // If the event is in |window|'s hierarchy, do not close the bubble.
+          NSWindow* tempWindow = eventWindow;
+          while (tempWindow) {
+            if (tempWindow == window)
+              return event;
+            tempWindow = [tempWindow parentWindow];
+          }
+
           // Do it right now, because if this event is right mouse event,
           // it may pop up a menu. windowDidResignKey: will not run until
           // the menu is closed.
@@ -411,11 +421,13 @@
                                   info_bubble::kBubbleArrowWidth / 2.0, 0);
       offsets = [[parentWindow_ contentView] convertSize:offsets toView:nil];
       switch ([bubble_ arrowLocation]) {
-        case info_bubble::kTopRight:
-          origin.x -= NSWidth([window frame]) - offsets.width;
+        case info_bubble::kTopTrailing:
+          origin.x -=
+              isRTL ? offsets.width : NSWidth([window frame]) - offsets.width;
           break;
-        case info_bubble::kTopLeft:
-          origin.x -= offsets.width;
+        case info_bubble::kTopLeading:
+          origin.x -=
+              isRTL ? NSWidth([window frame]) - offsets.width : offsets.width;
           break;
         case info_bubble::kNoArrow:
         // FALLTHROUGH.
@@ -431,7 +443,7 @@
       // edge aligns with the anchor. If the arrow is to the left then there's
       // nothing to do because the left edge is already aligned with the left
       // edge of the anchor.
-      if ([bubble_ arrowLocation] == info_bubble::kTopRight) {
+      if ([bubble_ arrowLocation] == info_bubble::kTopTrailing) {
         origin.x -= NSWidth([window frame]);
       }
       break;

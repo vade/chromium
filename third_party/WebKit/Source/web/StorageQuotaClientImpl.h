@@ -32,7 +32,7 @@
 #define StorageQuotaClientImpl_h
 
 #include "modules/quota/StorageQuotaClient.h"
-#include "wtf/Forward.h"
+#include "platform/wtf/Forward.h"
 
 namespace blink {
 
@@ -42,22 +42,19 @@ class StorageQuotaClientImpl
   USING_GARBAGE_COLLECTED_MIXIN(StorageQuotaClientImpl);
 
  public:
-  static StorageQuotaClientImpl* create() {
+  static StorageQuotaClientImpl* Create() {
     return new StorageQuotaClientImpl();
   }
 
   ~StorageQuotaClientImpl() override;
 
-  void requestQuota(ExecutionContext*,
+  void RequestQuota(ScriptState*,
                     WebStorageQuotaType,
-                    unsigned long long newQuotaInBytes,
+                    unsigned long long new_quota_in_bytes,
                     StorageQuotaCallback*,
                     StorageErrorCallback*) override;
-  ScriptPromise requestPersistentQuota(
-      ScriptState*,
-      unsigned long long newQuotaInBytes) override;
 
-  DEFINE_INLINE_VIRTUAL_TRACE() { StorageQuotaClient::trace(visitor); }
+  DEFINE_INLINE_VIRTUAL_TRACE() { StorageQuotaClient::Trace(visitor); }
 
  private:
   StorageQuotaClientImpl();

@@ -5,10 +5,16 @@
 #ifndef DEVICE_GEOLOCATION_GEOLOCATION_SERVICE_CONTEXT_H_
 #define DEVICE_GEOLOCATION_GEOLOCATION_SERVICE_CONTEXT_H_
 
+#include <memory>
+#include <vector>
+
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "device/geolocation/geolocation_export.h"
 #include "device/geolocation/public/interfaces/geolocation.mojom.h"
+
+namespace service_manager {
+struct BindSourceInfo;
+}
 
 namespace device {
 
@@ -24,10 +30,8 @@ class DEVICE_GEOLOCATION_EXPORT GeolocationServiceContext {
   virtual ~GeolocationServiceContext();
 
   // Creates a GeolocationServiceImpl that is weakly bound to |request|.
-  // |update_callback| will be called when services send
-  // location updates to their clients.
-  void CreateService(const base::Closure& update_callback,
-                     mojo::InterfaceRequest<mojom::GeolocationService> request);
+  void CreateService(const service_manager::BindSourceInfo& source_info,
+                     mojom::GeolocationServiceRequest request);
 
   // Called when a service has a connection error. After this call, it is no
   // longer safe to access |service|.
@@ -41,7 +45,7 @@ class DEVICE_GEOLOCATION_EXPORT GeolocationServiceContext {
   void ClearOverride();
 
  private:
-  ScopedVector<GeolocationServiceImpl> services_;
+  std::vector<std::unique_ptr<GeolocationServiceImpl>> services_;
 
   std::unique_ptr<Geoposition> geoposition_override_;
 

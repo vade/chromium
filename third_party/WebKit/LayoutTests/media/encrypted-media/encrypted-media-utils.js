@@ -181,29 +181,19 @@ function dumpKeyStatuses(keyStatuses)
     });
 }
 
-// Verify that |keyStatuses| contains just the keys in |keys.expected|
-// and none of the keys in |keys.unexpected|. All keys should have status
-// 'usable'. Example call: verifyKeyStatuses(mediaKeySession.keyStatuses,
-// { expected: [key1], unexpected: [key2] });
-function verifyKeyStatuses(keyStatuses, keys)
-{
-    var expected = keys.expected || [];
-    var unexpected = keys.unexpected || [];
+// Verify that |keyStatuses| contains just the keys in the array |expected|.
+// Each entry specifies the keyId and status expected.
+// Example call: verifyKeyStatuses(mediaKeySession.keyStatuses,
+//   [{keyId: key1, status: 'usable'}, {keyId: key2, status: 'released'}]);
+function verifyKeyStatuses(keyStatuses, expected) {
+  // |keyStatuses| should have same size as number of |keys.expected|.
+  assert_equals(keyStatuses.size, expected.length);
 
-    // |keyStatuses| should have same size as number of |keys.expected|.
-    assert_equals(keyStatuses.size, expected.length);
-
-    // All |keys.expected| should be found.
-    expected.map(function(key) {
-        assert_true(keyStatuses.has(key));
-        assert_equals(keyStatuses.get(key), 'usable');
-    });
-
-    // All |keys.unexpected| should not be found.
-    unexpected.map(function(key) {
-        assert_false(keyStatuses.has(key));
-        assert_equals(keyStatuses.get(key), undefined);
-    });
+  // All |expected| should be found.
+  expected.map(function(item) {
+    assert_true(keyStatuses.has(item.keyId));
+    assert_equals(keyStatuses.get(item.keyId), item.status);
+  });
 }
 
 // Encodes |data| into base64url string. There is no '=' padding, and the
@@ -313,6 +303,18 @@ function createClearKeyMediaKeysAndInitializeWithOneKey(keyId, key)
         return Promise.resolve(mediaKeys);
     });
 }
+
+// Convert an event into a promise. When |event| is fired on |object|,
+// call |func| to handle the event and either resolve or reject the promise.
+// The event is only fired once.
+function waitForSingleEvent(object, event, func) {
+  return new Promise(function(resolve, reject) {
+    object.addEventListener(event, function listener(e) {
+      object.removeEventListener(event, listener);
+      func(e, resolve, reject);
+    });
+  });
+};
 
 // Play the specified |content| on |video|. Returns a promise that is resolved
 // after the video plays for |duration| seconds.

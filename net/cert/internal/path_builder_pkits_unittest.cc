@@ -12,6 +12,7 @@
 #include "net/cert/internal/trust_store_in_memory.h"
 #include "net/cert/internal/verify_certificate_chain.h"
 #include "net/der/input.h"
+#include "third_party/boringssl/src/include/openssl/pool.h"
 
 // Disable tests that require DSA signatures (DSA signatures are intentionally
 // unsupported). Custom versions of the DSA tests are defined below which expect
@@ -59,7 +60,11 @@ class PathBuilderPkitsTestDelegate {
     ParsedCertificateList certs;
     for (const std::string& der : cert_ders) {
       CertErrors errors;
-      if (!ParsedCertificate::CreateAndAddToVector(der, {}, &certs, &errors)) {
+      if (!ParsedCertificate::CreateAndAddToVector(
+              bssl::UniquePtr<CRYPTO_BUFFER>(CRYPTO_BUFFER_new(
+                  reinterpret_cast<const uint8_t*>(der.data()), der.size(),
+                  nullptr)),
+              {}, &certs, &errors)) {
         ADD_FAILURE() << "ParseCertificate::CreateAndAddToVector() failed:\n"
                       << errors.ToDebugString();
         return false;
@@ -69,9 +74,7 @@ class PathBuilderPkitsTestDelegate {
     // TODO(mattm): test with all possible trust anchors in the trust store?
     TrustStoreInMemory trust_store;
 
-    scoped_refptr<TrustAnchor> trust_anchor =
-        TrustAnchor::CreateFromCertificateNoConstraints(certs[0]);
-    trust_store.AddTrustAnchor(std::move(trust_anchor));
+    trust_store.AddTrustAnchor(certs[0]);
 
     // TODO(mattm): test with other irrelevant certs in cert_issuer_sources?
     CertIssuerSourceStatic cert_issuer_source;
@@ -87,7 +90,8 @@ class PathBuilderPkitsTestDelegate {
 
     CertPathBuilder::Result result;
     CertPathBuilder path_builder(std::move(target_cert), &trust_store,
-                                 &signature_policy, time, &result);
+                                 &signature_policy, time, KeyPurpose::ANY_EKU,
+                                 &result);
     path_builder.AddCertIssuerSource(&cert_issuer_source);
 
     path_builder.Run();

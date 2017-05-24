@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "base/logging.h"
-#include "cc/base/cc_export.h"
+#include "cc/base/base_export.h"
 #include "ui/gfx/geometry/box_f.h"
 #include "ui/gfx/geometry/point3_f.h"
 #include "ui/gfx/geometry/point_f.h"
@@ -79,7 +79,7 @@ struct HomogeneousCoordinate {
   SkMScalar vec[4];
 };
 
-class CC_EXPORT MathUtil {
+class CC_BASE_EXPORT MathUtil {
  public:
   static const double kPiDouble;
   static const float kPiFloat;
@@ -205,19 +205,9 @@ class CC_EXPORT MathUtil {
   static gfx::QuadF MapQuad(const gfx::Transform& transform,
                             const gfx::QuadF& quad,
                             bool* clipped);
-  static gfx::QuadF MapQuad3d(const gfx::Transform& transform,
-                              const gfx::QuadF& q,
-                              gfx::Point3F* p,
-                              bool* clipped);
   static gfx::PointF MapPoint(const gfx::Transform& transform,
                               const gfx::PointF& point,
                               bool* clipped);
-  static gfx::Point3F MapPoint(const gfx::Transform&,
-                               const gfx::Point3F&,
-                               bool* clipped);
-  static gfx::QuadF ProjectQuad(const gfx::Transform& transform,
-                                const gfx::QuadF& quad,
-                                bool* clipped);
   static gfx::PointF ProjectPoint(const gfx::Transform& transform,
                                   const gfx::PointF& point,
                                   bool* clipped);
@@ -229,6 +219,10 @@ class CC_EXPORT MathUtil {
 
   static gfx::Vector2dF ComputeTransform2dScaleComponents(const gfx::Transform&,
                                                           float fallbackValue);
+  // Returns an approximate max scale value of the transform even if it has
+  // perspective. Prefer to use ComputeTransform2dScaleComponents if there is no
+  // perspective, since it can produce more accurate results.
+  static float ComputeApproximateMaxScale(const gfx::Transform& transform);
 
   // Makes a rect that has the same relationship to input_outer_rect as
   // scale_inner_rect has to scale_outer_rect. scale_inner_rect should be
@@ -306,7 +300,7 @@ class CC_EXPORT MathUtil {
   // Returns vector that y axis (0,1,0) transforms to under given transform.
   static gfx::Vector3dF GetYAxis(const gfx::Transform& transform);
 
-  static bool IsNearlyTheSameForTesting(float left, float right);
+  static bool IsFloatNearlyTheSame(float left, float right);
   static bool IsNearlyTheSameForTesting(const gfx::PointF& l,
                                         const gfx::PointF& r);
   static bool IsNearlyTheSameForTesting(const gfx::Point3F& l,
@@ -325,7 +319,7 @@ class CC_EXPORT MathUtil {
   }
 };
 
-class ScopedSubnormalFloatDisabler {
+class CC_BASE_EXPORT ScopedSubnormalFloatDisabler {
  public:
   ScopedSubnormalFloatDisabler();
   ~ScopedSubnormalFloatDisabler();

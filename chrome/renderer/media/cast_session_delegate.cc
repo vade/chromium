@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <utility>
+#include <vector>
 
 #include "base/callback_helpers.h"
 #include "base/lazy_instance.h"
@@ -14,6 +15,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/renderer/media/cast_threads.h"
 #include "chrome/renderer/media/cast_transport_ipc.h"
@@ -33,7 +35,7 @@ using media::cast::CastEnvironment;
 using media::cast::CastSender;
 using media::cast::FrameSenderConfig;
 
-static base::LazyInstance<CastThreads> g_cast_threads =
+static base::LazyInstance<CastThreads>::DestructorAtExit g_cast_threads =
     LAZY_INSTANCE_INITIALIZER;
 
 CastSessionDelegateBase::CastSessionDelegateBase()
@@ -207,14 +209,14 @@ void CastSessionDelegate::GetEventLogsAndReset(
   DCHECK(io_task_runner_->BelongsToCurrentThread());
 
   if (!event_subscribers_.get()) {
-    callback.Run(base::MakeUnique<base::BinaryValue>());
+    callback.Run(base::MakeUnique<base::Value>(base::Value::Type::BINARY));
     return;
   }
 
   media::cast::EncodingEventSubscriber* subscriber =
       event_subscribers_->GetEncodingEventSubscriber(is_audio);
   if (!subscriber) {
-    callback.Run(base::MakeUnique<base::BinaryValue>());
+    callback.Run(base::MakeUnique<base::Value>(base::Value::Type::BINARY));
     return;
   }
 
@@ -245,14 +247,14 @@ void CastSessionDelegate::GetEventLogsAndReset(
 
   if (!success) {
     DVLOG(2) << "Failed to serialize event log.";
-    callback.Run(base::MakeUnique<base::BinaryValue>());
+    callback.Run(base::MakeUnique<base::Value>(base::Value::Type::BINARY));
     return;
   }
 
   DVLOG(2) << "Serialized log length: " << output_bytes;
 
-  std::unique_ptr<base::BinaryValue> blob(
-      new base::BinaryValue(std::move(serialized_log), output_bytes));
+  auto blob = base::MakeUnique<base::Value>(std::vector<char>(
+      serialized_log.get(), serialized_log.get() + output_bytes));
   callback.Run(std::move(blob));
 }
 

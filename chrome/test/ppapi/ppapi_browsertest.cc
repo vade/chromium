@@ -7,6 +7,7 @@
 #include "base/macros.h"
 #include "base/path_service.h"
 #include "base/test/test_timeouts.h"
+#include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -1159,8 +1160,9 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, MAYBE_FlashMessageLoop) {
 TEST_PPAPI_NACL_SUBTESTS(MAYBE_Compositor0, RUN_COMPOSITOR_SUBTESTS_0)
 TEST_PPAPI_NACL_SUBTESTS(MAYBE_Compositor1, RUN_COMPOSITOR_SUBTESTS_1)
 
-#if defined(OS_LINUX) || defined(OS_WIN) || defined(OS_CHROMEOS)
-// Flaky on ChromeOS, Linux and Windows (crbug.com/438729)
+#if defined(OS_LINUX) || defined(OS_WIN) || defined(OS_CHROMEOS) || \
+    defined(OS_MACOSX)
+// Flaky on ChromeOS, Linux, Windows, and Mac (crbug.com/438729)
 #define MAYBE_MediaStreamAudioTrack DISABLED_MediaStreamAudioTrack
 #else
 #define MAYBE_MediaStreamAudioTrack MediaStreamAudioTrack
@@ -1179,7 +1181,13 @@ TEST_PPAPI_NACL(MouseCursor)
 
 TEST_PPAPI_NACL(NetworkProxy)
 
-TEST_PPAPI_NACL(TrueTypeFont)
+// TODO(crbug.com/619765): get working on CrOS ozone build.
+#if defined(OS_CHROMEOS) && defined(USE_OZONE)
+#define MAYBE_TrueTypeFont DISABLED_TrueTypeFont
+#else
+#define MAYBE_TrueTypeFont TrueTypeFont
+#endif
+TEST_PPAPI_NACL(MAYBE_TrueTypeFont)
 
 // TODO(crbug.com/602875), TODO(crbug.com/602876) Flaky on Win and CrOS.
 #if defined(OS_CHROMEOS) || defined(OS_WIN)
@@ -1258,7 +1266,10 @@ class PackagedAppTest : public ExtensionBrowserTest {
 
   void LaunchTestingApp(const std::string& extension_dirname) {
     base::FilePath data_dir;
-    ASSERT_TRUE(PathService::Get(chrome::DIR_GEN_TEST_DATA, &data_dir));
+    {
+      base::ThreadRestrictions::ScopedAllowIO allow_io;
+      ASSERT_TRUE(PathService::Get(chrome::DIR_GEN_TEST_DATA, &data_dir));
+    }
     base::FilePath app_dir = data_dir.AppendASCII("ppapi")
                                      .AppendASCII("tests")
                                      .AppendASCII("extensions")
@@ -1302,8 +1313,14 @@ class NonSfiPackagedAppTest : public PackagedAppTest {
 
 // Load a packaged app, and wait for it to successfully post a "hello" message
 // back.
+#if defined(OS_WIN) || !defined(NDEBUG)
+// flaky: crbug.com/707068
+// flaky on debug builds: crbug.com/709447
+IN_PROC_BROWSER_TEST_F(NewlibPackagedAppTest, DISABLED_SuccessfulLoad) {
+#else
 IN_PROC_BROWSER_TEST_F(NewlibPackagedAppTest,
                        MAYBE_PPAPI_NACL(SuccessfulLoad)) {
+#endif
   RunTests("packaged_app");
 }
 

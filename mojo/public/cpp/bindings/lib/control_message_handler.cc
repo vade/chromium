@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "base/logging.h"
+#include "base/macros.h"
 #include "mojo/public/cpp/bindings/lib/message_builder.h"
 #include "mojo/public/cpp/bindings/lib/serialization.h"
 #include "mojo/public/cpp/bindings/lib/validation_util.h"
@@ -19,9 +20,9 @@ namespace internal {
 namespace {
 
 bool ValidateControlRequestWithResponse(Message* message) {
-  ValidationContext validation_context(
-      message->data(), message->data_num_bytes(), message->handles()->size(),
-      message, "ControlRequestValidator");
+  ValidationContext validation_context(message->payload(),
+                                       message->payload_num_bytes(), 0, 0,
+                                       message, "ControlRequestValidator");
   if (!ValidateMessageIsRequestExpectingResponse(message, &validation_context))
     return false;
 
@@ -35,9 +36,9 @@ bool ValidateControlRequestWithResponse(Message* message) {
 }
 
 bool ValidateControlRequestWithoutResponse(Message* message) {
-  ValidationContext validation_context(
-      message->data(), message->data_num_bytes(), message->handles()->size(),
-      message, "ControlRequestValidator");
+  ValidationContext validation_context(message->payload(),
+                                       message->payload_num_bytes(), 0, 0,
+                                       message, "ControlRequestValidator");
   if (!ValidateMessageIsRequestWithoutResponse(message, &validation_context))
     return false;
 
@@ -80,19 +81,20 @@ bool ControlMessageHandler::Accept(Message* message) {
 
 bool ControlMessageHandler::AcceptWithResponder(
     Message* message,
-    MessageReceiverWithStatus* responder) {
+    std::unique_ptr<MessageReceiverWithStatus> responder) {
   if (!ValidateControlRequestWithResponse(message))
     return false;
 
   if (message->header()->name == interface_control::kRunMessageId)
-    return Run(message, responder);
+    return Run(message, std::move(responder));
 
   NOTREACHED();
   return false;
 }
 
-bool ControlMessageHandler::Run(Message* message,
-                                MessageReceiverWithStatus* responder) {
+bool ControlMessageHandler::Run(
+    Message* message,
+    std::unique_ptr<MessageReceiverWithStatus> responder) {
   interface_control::internal::RunMessageParams_Data* params =
       reinterpret_cast<interface_control::internal::RunMessageParams_Data*>(
           message->mutable_payload());
@@ -116,16 +118,15 @@ bool ControlMessageHandler::Run(Message* message,
   size_t size =
       PrepareToSerialize<interface_control::RunResponseMessageParamsDataView>(
           response_params_ptr, &context_);
-  ResponseMessageBuilder builder(interface_control::kRunMessageId, size,
-                                 message->request_id());
+  MessageBuilder builder(interface_control::kRunMessageId,
+                         Message::kFlagIsResponse, size, 0);
+  builder.message()->set_request_id(message->request_id());
 
   interface_control::internal::RunResponseMessageParams_Data* response_params =
       nullptr;
   Serialize<interface_control::RunResponseMessageParamsDataView>(
       response_params_ptr, builder.buffer(), &response_params, &context_);
-  bool ok = responder->Accept(builder.message());
-  ALLOW_UNUSED_LOCAL(ok);
-  delete responder;
+  ignore_result(responder->Accept(builder.message()));
 
   return true;
 }

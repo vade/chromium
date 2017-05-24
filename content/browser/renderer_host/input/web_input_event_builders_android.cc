@@ -10,6 +10,7 @@
 #include "ui/events/android/key_event_utils.h"
 #include "ui/events/android/motion_event_android.h"
 #include "ui/events/blink/blink_event_util.h"
+#include "ui/events/event_constants.h"
 #include "ui/events/keycodes/dom/dom_code.h"
 #include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/events/keycodes/keyboard_code_conversion.h"
@@ -32,9 +33,9 @@ namespace {
 int WebInputEventToAndroidModifier(int web_modifier) {
   int android_modifier = 0;
   // Currently only Shift, CapsLock are used, add other modifiers if required.
-  if (web_modifier & WebInputEvent::ShiftKey)
+  if (web_modifier & WebInputEvent::kShiftKey)
     android_modifier |= AMETA_SHIFT_ON;
-  if (web_modifier & WebInputEvent::CapsLockOn)
+  if (web_modifier & WebInputEvent::kCapsLockOn)
     android_modifier |= AMETA_CAPS_LOCK_ON;
   return android_modifier;
 }
@@ -56,7 +57,7 @@ ui::DomKey GetDomKeyFromEvent(
     // According to discussion we want to honor CapsLock and possibly NumLock as
     // well. https://github.com/w3c/uievents/issues/70
     const int kAllowedModifiers =
-        WebInputEvent::ShiftKey | WebInputEvent::CapsLockOn;
+        WebInputEvent::kShiftKey | WebInputEvent::kCapsLockOn;
     int fallback_modifiers =
         WebInputEventToAndroidModifier(modifiers & kAllowedModifiers);
 
@@ -82,7 +83,7 @@ WebKeyboardEvent WebKeyboardEventBuilder::Build(
     int scancode,
     int unicode_character,
     bool is_system_key) {
-  DCHECK(WebInputEvent::isKeyboardEventType(type));
+  DCHECK(WebInputEvent::IsKeyboardEventType(type));
 
   ui::DomCode dom_code = ui::DomCode::NONE;
   if (scancode)
@@ -91,57 +92,62 @@ WebKeyboardEvent WebKeyboardEventBuilder::Build(
   WebKeyboardEvent result(
       type, modifiers | ui::DomCodeToWebInputEventModifiers(dom_code),
       time_sec);
-  result.windowsKeyCode = ui::LocatedToNonLocatedKeyboardCode(
+  result.windows_key_code = ui::LocatedToNonLocatedKeyboardCode(
       ui::KeyboardCodeFromAndroidKeyCode(keycode));
-  result.nativeKeyCode = keycode;
-  result.domCode = static_cast<int>(dom_code);
-  result.domKey = GetDomKeyFromEvent(env, android_key_event, keycode, modifiers,
-                                     unicode_character);
-  result.unmodifiedText[0] = unicode_character;
-  if (result.windowsKeyCode == ui::VKEY_RETURN) {
+  result.native_key_code = keycode;
+  result.dom_code = static_cast<int>(dom_code);
+  result.dom_key = GetDomKeyFromEvent(env, android_key_event, keycode,
+                                      modifiers, unicode_character);
+  result.unmodified_text[0] = unicode_character;
+  if (result.windows_key_code == ui::VKEY_RETURN) {
     // This is the same behavior as GTK:
     // We need to treat the enter key as a key press of character \r. This
     // is apparently just how webkit handles it and what it expects.
-    result.unmodifiedText[0] = '\r';
+    result.unmodified_text[0] = '\r';
   }
-  result.text[0] = result.unmodifiedText[0];
-  result.isSystemKey = is_system_key;
+  result.text[0] = result.unmodified_text[0];
+  result.is_system_key = is_system_key;
 
   return result;
 }
 
-WebMouseEvent WebMouseEventBuilder::Build(
-      WebInputEvent::Type type,
-      double time_sec,
-      int window_x,
-      int window_y,
-      int modifiers,
-      int click_count,
-      int pointer_id,
-      float pressure,
-      float orientation_rad,
-      float tilt_rad,
-      int changed_button,
-      int tool_type) {
-
-  DCHECK(WebInputEvent::isMouseEventType(type));
+WebMouseEvent WebMouseEventBuilder::Build(WebInputEvent::Type type,
+                                          double time_sec,
+                                          int window_x,
+                                          int window_y,
+                                          int modifiers,
+                                          int click_count,
+                                          int pointer_id,
+                                          float pressure,
+                                          float orientation_rad,
+                                          float tilt_x,
+                                          float tilt_y,
+                                          int action_button,
+                                          int tool_type) {
+  DCHECK(WebInputEvent::IsMouseEventType(type));
   WebMouseEvent result(type, ui::EventFlagsToWebEventModifiers(modifiers),
                        time_sec);
 
-  result.x = window_x;
-  result.y = window_y;
-  result.windowX = window_x;
-  result.windowY = window_y;
-  result.clickCount = click_count;
+  result.SetPositionInWidget(window_x, window_y);
+  result.click_count = click_count;
 
-  ui::SetWebPointerPropertiesFromMotionEventData(
-      result,
-      pointer_id,
-      pressure,
-      orientation_rad,
-      tilt_rad,
-      changed_button,
-      tool_type);
+  int button = action_button;
+  // For events other than MouseDown/Up, action_button is not defined. So we are
+  // determining |button| value from |modifiers| as is done in other platforms.
+  if (type != WebInputEvent::kMouseDown && type != WebInputEvent::kMouseUp) {
+    if (modifiers & ui::EF_LEFT_MOUSE_BUTTON)
+      button = ui::MotionEvent::BUTTON_PRIMARY;
+    else if (modifiers & ui::EF_MIDDLE_MOUSE_BUTTON)
+      button = ui::MotionEvent::BUTTON_TERTIARY;
+    else if (modifiers & ui::EF_RIGHT_MOUSE_BUTTON)
+      button = ui::MotionEvent::BUTTON_SECONDARY;
+    else
+      button = 0;
+  }
+
+  ui::SetWebPointerPropertiesFromMotionEventData(result, pointer_id, pressure,
+                                                 orientation_rad, tilt_x,
+                                                 tilt_y, button, tool_type);
 
   return result;
 }
@@ -152,18 +158,15 @@ WebMouseWheelEvent WebMouseWheelEventBuilder::Build(float ticks_x,
                                                     double time_sec,
                                                     int window_x,
                                                     int window_y) {
-  WebMouseWheelEvent result(WebInputEvent::MouseWheel,
-                            WebInputEvent::NoModifiers, time_sec);
-  result.x = window_x;
-  result.y = window_y;
-  result.windowX = window_x;
-  result.windowY = window_y;
-  result.button = WebMouseEvent::Button::NoButton;
-  result.hasPreciseScrollingDeltas = true;
-  result.deltaX = ticks_x * tick_multiplier;
-  result.deltaY = ticks_y * tick_multiplier;
-  result.wheelTicksX = ticks_x;
-  result.wheelTicksY = ticks_y;
+  WebMouseWheelEvent result(WebInputEvent::kMouseWheel,
+                            WebInputEvent::kNoModifiers, time_sec);
+  result.SetPositionInWidget(window_x, window_y);
+  result.button = WebMouseEvent::Button::kNoButton;
+  result.has_precise_scrolling_deltas = true;
+  result.delta_x = ticks_x * tick_multiplier;
+  result.delta_y = ticks_y * tick_multiplier;
+  result.wheel_ticks_x = ticks_x;
+  result.wheel_ticks_y = ticks_y;
 
   return result;
 }
@@ -172,12 +175,12 @@ WebGestureEvent WebGestureEventBuilder::Build(WebInputEvent::Type type,
                                               double time_sec,
                                               int x,
                                               int y) {
-  DCHECK(WebInputEvent::isGestureEventType(type));
-  WebGestureEvent result(type, WebInputEvent::NoModifiers, time_sec);
+  DCHECK(WebInputEvent::IsGestureEventType(type));
+  WebGestureEvent result(type, WebInputEvent::kNoModifiers, time_sec);
 
   result.x = x;
   result.y = y;
-  result.sourceDevice = blink::WebGestureDeviceTouchscreen;
+  result.source_device = blink::kWebGestureDeviceTouchscreen;
 
   return result;
 }

@@ -69,6 +69,11 @@ void WebstoreStandaloneInstaller::BeginInstall() {
       profile_->GetRequestContext(),
       GetRequestorURL(),
       id_));
+
+  std::string json_post_data = GetJsonPostData();
+  if (!json_post_data.empty())
+    webstore_data_fetcher_->SetJsonPostData(json_post_data);
+
   webstore_data_fetcher_->Start();
 }
 
@@ -110,7 +115,6 @@ bool WebstoreStandaloneInstaller::EnsureUniqueInstall(
   }
 
   ActiveInstallData install_data(id_);
-  InitInstallData(&install_data);
   scoped_active_install_.reset(new ScopedActiveInstall(tracker, install_data));
   return true;
 }
@@ -154,9 +158,8 @@ WebstoreStandaloneInstaller::GetLocalizedExtensionForDisplay() {
   return localized_extension_for_display_.get();
 }
 
-void WebstoreStandaloneInstaller::InitInstallData(
-    ActiveInstallData* install_data) const {
-  // Default implementation sets no properties.
+std::string WebstoreStandaloneInstaller::GetJsonPostData() {
+  return std::string();
 }
 
 void WebstoreStandaloneInstaller::OnManifestParsed() {
@@ -205,7 +208,6 @@ void WebstoreStandaloneInstaller::OnInstallPromptDone(
   if (installed_extension) {
     std::string install_message;
     webstore_install::Result install_result = webstore_install::SUCCESS;
-    bool done = true;
 
     if (ExtensionPrefs::Get(profile_)->IsExtensionBlacklisted(id_)) {
       // Don't install a blacklisted extension.
@@ -217,10 +219,8 @@ void WebstoreStandaloneInstaller::OnInstallPromptDone(
       extension_service->EnableExtension(id_);
     }  // else extension is installed and enabled; no work to be done.
 
-    if (done) {
-      CompleteInstall(install_result, install_message);
-      return;
-    }
+    CompleteInstall(install_result, install_message);
+    return;
   }
 
   scoped_refptr<WebstoreInstaller> installer =
@@ -315,8 +315,8 @@ void WebstoreStandaloneInstaller::OnWebstoreResponseParseSuccess(
                                 manifest,
                                 icon_url,
                                 profile_->GetRequestContext());
-  // The helper will call us back via OnWebstoreParseSucces or
-  // OnWebstoreParseFailure.
+  // The helper will call us back via OnWebstoreParseSuccess() or
+  // OnWebstoreParseFailure().
   helper->Start();
 }
 

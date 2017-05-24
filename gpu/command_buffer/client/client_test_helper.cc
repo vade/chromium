@@ -42,17 +42,21 @@ CommandBuffer::State MockCommandBufferBase::WaitForTokenInRange(int32_t start,
 }
 
 CommandBuffer::State MockCommandBufferBase::WaitForGetOffsetInRange(
+    uint32_t set_get_buffer_count,
     int32_t start,
     int32_t end) {
-  state_.get_offset = put_offset_;
-  OnFlush();
+  EXPECT_EQ(set_get_buffer_count, state_.set_get_buffer_count);
+  if (state_.get_offset != put_offset_) {
+    state_.get_offset = put_offset_;
+    OnFlush();
+  }
   return state_;
 }
 
 void MockCommandBufferBase::SetGetBuffer(int transfer_buffer_id) {
-  ring_buffer_buffer_ = GetTransferBuffer(transfer_buffer_id);
-  ring_buffer_ =
-      static_cast<CommandBufferEntry*>(ring_buffer_buffer_->memory());
+  ++state_.set_get_buffer_count;
+  state_.get_offset = 0;
+  put_offset_ = 0;
   state_.token = 10000;  // All token checks in the tests should pass.
 }
 
@@ -99,18 +103,15 @@ void MockCommandBufferBase::FlushHelper(int32_t put_offset) {
 }
 
 void MockCommandBufferBase::SetToken(int32_t token) {
-  NOTREACHED();
   state_.token = token;
 }
 
 void MockCommandBufferBase::SetParseError(error::Error error) {
-  NOTREACHED();
   state_.error = error;
 }
 
 void MockCommandBufferBase::SetContextLostReason(
     error::ContextLostReason reason) {
-  NOTREACHED();
   state_.context_lost_reason = reason;
 }
 

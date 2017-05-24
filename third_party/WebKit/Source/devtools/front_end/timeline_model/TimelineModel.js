@@ -32,11 +32,7 @@
  * @unrestricted
  */
 TimelineModel.TimelineModel = class {
-  /**
-   * @param {!TimelineModel.TimelineModel.Filter} eventFilter
-   */
-  constructor(eventFilter) {
-    this._eventFilter = eventFilter;
+  constructor() {
     this.reset();
   }
 
@@ -89,20 +85,7 @@ TimelineModel.TimelineModel = class {
   }
 
   /**
-   * @return {!TimelineModel.TimelineModel.RecordType}
-   */
-  static _eventType(event) {
-    if (event.hasCategory(TimelineModel.TimelineModel.Category.Console))
-      return TimelineModel.TimelineModel.RecordType.ConsoleTime;
-    if (event.hasCategory(TimelineModel.TimelineModel.Category.UserTiming))
-      return TimelineModel.TimelineModel.RecordType.UserTiming;
-    if (event.hasCategory(TimelineModel.TimelineModel.Category.LatencyInfo))
-      return TimelineModel.TimelineModel.RecordType.LatencyInfo;
-    return /** @type !TimelineModel.TimelineModel.RecordType */ (event.name);
-  }
-
-  /**
-   * @param {!Array<!TimelineModel.TimelineModel.Filter>} filters
+   * @param {!Array<!TimelineModel.TimelineModelFilter>} filters
    * @param {!SDK.TracingModel.Event} event
    * @return {boolean}
    */
@@ -123,11 +106,8 @@ TimelineModel.TimelineModel = class {
     switch (event.name) {
       case recordTypes.TimeStamp:
       case recordTypes.MarkFirstPaint:
-      case recordTypes.FirstTextPaint:
-      case recordTypes.FirstImagePaint:
-      case recordTypes.FirstMeaningfulPaint:
-      case recordTypes.FirstPaint:
-      case recordTypes.FirstContentfulPaint:
+      case recordTypes.MarkFMP:
+      case recordTypes.MarkFMPCandidate:
         return true;
       case recordTypes.MarkDOMContent:
       case recordTypes.MarkLoad:
@@ -139,15 +119,23 @@ TimelineModel.TimelineModel = class {
 
   /**
    * @param {!SDK.TracingModel.Event} event
+   * @param {string} field
+   * @return {string}
+   */
+  static globalEventId(event, field) {
+    var data = event.args['data'] || event.args['beginData'];
+    var id = data && data[field];
+    if (!id)
+      return '';
+    return `${event.thread.process().id()}.${id}`;
+  }
+
+  /**
+   * @param {!SDK.TracingModel.Event} event
    * @return {string}
    */
   static eventFrameId(event) {
-    var data = event.args['data'] || event.args['beginData'];
-    var frame = data && data['frame'];
-    if (!frame)
-      return '';
-    var processId = event.thread.process().id();
-    return `${processId}.${frame}`;
+    return TimelineModel.TimelineModel.globalEventId(event, 'frame');
   }
 
   /**
@@ -172,7 +160,7 @@ TimelineModel.TimelineModel = class {
     // FIXME: Consider returning null for loaded traces.
     var workerId = this._workerIdByThread.get(event.thread);
     var mainTarget = SDK.targetManager.mainTarget();
-    return workerId ? mainTarget.subTargetsManager.targetForId(workerId) : mainTarget;
+    return workerId ? SDK.targetManager.targetById(workerId) : mainTarget;
   }
 
   /**
@@ -1025,7 +1013,7 @@ TimelineModel.TimelineModel = class {
       var e = events[i];
       if (!resourceTypes.has(e.name))
         continue;
-      var id = e.args['data']['requestId'];
+      var id = TimelineModel.TimelineModel.globalEventId(e, 'requestId');
       var request = requests.get(id);
       if (request) {
         request.addEvent(e);
@@ -1099,16 +1087,12 @@ TimelineModel.TimelineModel.RecordType = {
   MarkLoad: 'MarkLoad',
   MarkDOMContent: 'MarkDOMContent',
   MarkFirstPaint: 'MarkFirstPaint',
+  MarkFMP: 'firstMeaningfulPaint',
+  MarkFMPCandidate: 'firstMeaningfulPaintCandidate',
 
   TimeStamp: 'TimeStamp',
   ConsoleTime: 'ConsoleTime',
   UserTiming: 'UserTiming',
-
-  FirstTextPaint: 'firstTextPaint',
-  FirstImagePaint: 'firstImagePaint',
-  FirstMeaningfulPaint: 'firstMeaningfulPaint',
-  FirstPaint: 'firstPaint',
-  FirstContentfulPaint: 'firstContentfulPaint',
 
   ResourceSendRequest: 'ResourceSendRequest',
   ResourceReceiveResponse: 'ResourceReceiveResponse',
@@ -1172,7 +1156,9 @@ TimelineModel.TimelineModel.RecordType = {
   // CpuProfile is a virtual event created on frontend to support
   // serialization of CPU Profiles within tracing timeline data.
   CpuProfile: 'CpuProfile',
-  Profile: 'Profile'
+  Profile: 'Profile',
+
+  AsyncTask: 'AsyncTask',
 };
 
 TimelineModel.TimelineModel.Category = {
@@ -1298,6 +1284,7 @@ TimelineModel.TimelineModel.NetworkRequest = class {
     this.startTime = event.name === TimelineModel.TimelineModel.RecordType.ResourceSendRequest ? event.startTime : 0;
     this.endTime = Infinity;
     this.encodedDataLength = 0;
+    this.decodedBodyLength = 0;
     /** @type {!Array<!SDK.TracingModel.Event>} */
     this.children = [];
     /** @type {?Object} */
@@ -1330,7 +1317,7 @@ TimelineModel.TimelineModel.NetworkRequest = class {
     if (!this.responseTime &&
         (event.name === recordType.ResourceReceiveResponse || event.name === recordType.ResourceReceivedData))
       this.responseTime = event.startTime;
-    const encodedDataLength = eventData['encodedDataLength'] || 0;
+    var encodedDataLength = eventData['encodedDataLength'] || 0;
     if (event.name === recordType.ResourceReceiveResponse) {
       if (eventData['fromCache'])
         this.fromCache = true;
@@ -1342,6 +1329,9 @@ TimelineModel.TimelineModel.NetworkRequest = class {
       this.encodedDataLength += encodedDataLength;
     if (event.name === recordType.ResourceFinish && encodedDataLength)
       this.encodedDataLength = encodedDataLength;
+    var decodedBodyLength = eventData['decodedBodyLength'];
+    if (event.name === recordType.ResourceFinish && decodedBodyLength)
+      this.decodedBodyLength = decodedBodyLength;
     if (!this.url)
       this.url = eventData['url'];
     if (!this.requestMethod)
@@ -1353,68 +1343,6 @@ TimelineModel.TimelineModel.NetworkRequest = class {
   }
 };
 
-TimelineModel.TimelineModel.Filter = class {
-  /**
-   * @param {!SDK.TracingModel.Event} event
-   * @return {boolean}
-   */
-  accept(event) {
-    return true;
-  }
-};
-
-TimelineModel.TimelineVisibleEventsFilter = class extends TimelineModel.TimelineModel.Filter {
-  /**
-   * @param {!Array.<string>} visibleTypes
-   */
-  constructor(visibleTypes) {
-    super();
-    this._visibleTypes = new Set(visibleTypes);
-  }
-
-  /**
-   * @override
-   * @param {!SDK.TracingModel.Event} event
-   * @return {boolean}
-   */
-  accept(event) {
-    return this._visibleTypes.has(TimelineModel.TimelineModel._eventType(event));
-  }
-};
-
-TimelineModel.ExclusiveNameFilter = class extends TimelineModel.TimelineModel.Filter {
-  /**
-   * @param {!Array<string>} excludeNames
-   */
-  constructor(excludeNames) {
-    super();
-    this._excludeNames = new Set(excludeNames);
-  }
-
-  /**
-   * @override
-   * @param {!SDK.TracingModel.Event} event
-   * @return {boolean}
-   */
-  accept(event) {
-    return !this._excludeNames.has(event.name);
-  }
-};
-
-TimelineModel.ExcludeTopLevelFilter = class extends TimelineModel.TimelineModel.Filter {
-  constructor() {
-    super();
-  }
-
-  /**
-   * @override
-   * @param {!SDK.TracingModel.Event} event
-   * @return {boolean}
-   */
-  accept(event) {
-    return !SDK.TracingModel.isTopLevelEvent(event);
-  }
-};
 
 /**
  * @unrestricted
@@ -1788,15 +1716,20 @@ TimelineModel.TimelineAsyncEventTracker = class {
     var initiatorInfo = TimelineModel.TimelineAsyncEventTracker._asyncEvents.get(initiatorType);
     if (!initiatorInfo)
       return;
-    var id = event.args['data'][initiatorInfo.joinBy];
+    var id = TimelineModel.TimelineModel.globalEventId(event, initiatorInfo.joinBy);
     if (!id)
       return;
     /** @type {!Map<string, !SDK.TracingModel.Event>|undefined} */
     var initiatorMap = this._initiatorByType.get(initiatorType);
-    if (isInitiator)
+    if (isInitiator) {
       initiatorMap.set(id, event);
-    else
-      TimelineModel.TimelineData.forEvent(event).setInitiator(initiatorMap.get(id) || null);
+      return;
+    }
+    var initiator = initiatorMap.get(id) || null;
+    var timelineData = TimelineModel.TimelineData.forEvent(event);
+    timelineData.setInitiator(initiator);
+    if (!timelineData.frameId && initiator)
+      timelineData.frameId = TimelineModel.TimelineModel.eventFrameId(initiator);
   }
 };
 

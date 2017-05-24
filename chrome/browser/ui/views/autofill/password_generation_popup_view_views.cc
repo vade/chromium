@@ -6,6 +6,7 @@
 
 #include "base/macros.h"
 #include "base/strings/string16.h"
+#include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/ui/autofill/password_generation_popup_controller.h"
 #include "chrome/browser/ui/autofill/popup_constants.h"
 #include "ui/accessibility/ax_node_data.h"
@@ -13,7 +14,6 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/gfx/vector_icons_public.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
@@ -51,14 +51,15 @@ class PasswordTextBox : public views::View {
     SetLayoutManager(box_layout);
 
     views::Label* suggestion_label = new views::Label(
-        suggestion_text, font_list.DeriveWithWeight(gfx::Font::Weight::BOLD));
+        suggestion_text, views::Label::CustomFont{font_list.DeriveWithWeight(
+                             gfx::Font::Weight::BOLD)});
     suggestion_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     suggestion_label->SetEnabledColor(
         PasswordGenerationPopupView::kPasswordTextColor);
     AddChildView(suggestion_label);
 
     views::Label* password_label =
-        new views::Label(generated_password, font_list);
+        new views::Label(generated_password, {font_list});
     password_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     password_label->SetEnabledColor(
         PasswordGenerationPopupView::kPasswordTextColor);
@@ -99,8 +100,8 @@ class PasswordGenerationPopupViewViews::PasswordBox : public views::View {
     SetLayoutManager(box_layout);
 
     views::ImageView* key_image = new views::ImageView();
-    key_image->SetImage(gfx::CreateVectorIcon(gfx::VectorIconId::AUTOLOGIN, 32,
-                                              gfx::kChromeIconGrey));
+    key_image->SetImage(
+        gfx::CreateVectorIcon(kAutologinIcon, 32, gfx::kChromeIconGrey));
     AddChildView(key_image);
 
     PasswordTextBox* password_text_box = new PasswordTextBox();
@@ -154,9 +155,8 @@ PasswordGenerationPopupViewViews::PasswordGenerationPopupViewViews(
       PasswordGenerationPopupController::kHorizontalPadding));
   AddChildView(help_label_);
 
-  set_background(views::Background::CreateSolidBackground(
-      GetNativeTheme()->GetSystemColor(
-          ui::NativeTheme::kColorId_ResultsTableNormalBackground)));
+  set_background(views::Background::CreateThemedSolidBackground(
+      this, ui::NativeTheme::kColorId_ResultsTableNormalBackground));
 }
 
 PasswordGenerationPopupViewViews::~PasswordGenerationPopupViewViews() {}
@@ -176,16 +176,17 @@ void PasswordGenerationPopupViewViews::CreatePasswordView() {
 }
 
 gfx::Size PasswordGenerationPopupViewViews::GetPreferredSizeOfPasswordView() {
-  int height = kPopupBorderThickness;
+  int width = controller_->GetMinimumWidth();
+  if (password_view_)
+    width = std::max(width, password_view_->GetMinimumSize().width());
+  int height = help_label_->GetHeightForWidth(width);
   if (controller_->display_password()) {
     // Add divider height as well.
     height +=
         PasswordGenerationPopupController::kPopupPasswordSectionHeight + 1;
   }
-  int width = controller_->GetMinimumWidth();
-  int popup_width = width - 2 * kPopupBorderThickness;
-  height += help_label_->GetHeightForWidth(popup_width);
-  return gfx::Size(width, height + kPopupBorderThickness);
+  return gfx::Size(width + 2 * kPopupBorderThickness,
+                   height + 2 * kPopupBorderThickness);
 }
 
 void PasswordGenerationPopupViewViews::Show() {
@@ -210,12 +211,11 @@ void PasswordGenerationPopupViewViews::PasswordSelectionUpdated() {
   if (controller_->password_selected())
     NotifyAccessibilityEvent(ui::AX_EVENT_SELECTION, true);
 
-  password_view_->set_background(
-      views::Background::CreateSolidBackground(
-          GetNativeTheme()->GetSystemColor(
-              controller_->password_selected() ?
-                  ui::NativeTheme::kColorId_ResultsTableHoveredBackground :
-                  ui::NativeTheme::kColorId_ResultsTableNormalBackground)));
+  password_view_->set_background(views::Background::CreateThemedSolidBackground(
+      password_view_,
+      controller_->password_selected()
+          ? ui::NativeTheme::kColorId_ResultsTableHoveredBackground
+          : ui::NativeTheme::kColorId_ResultsTableNormalBackground));
 }
 
 void PasswordGenerationPopupViewViews::Layout() {

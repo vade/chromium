@@ -55,6 +55,7 @@ scoped_refptr<gl::GLSurface> ImageTransportSurface::CreateNativeSurface(
       return make_scoped_refptr<gl::GLSurface>(
           new ImageTransportSurfaceOverlayMac(delegate));
     case gl::kGLImplementationMockGL:
+    case gl::kGLImplementationStubGL:
       return make_scoped_refptr<gl::GLSurface>(new gl::GLSurfaceStub);
     default:
       // Content shell in DRT mode spins up a gpu process which needs an
@@ -68,7 +69,8 @@ scoped_refptr<gl::GLSurface> ImageTransportSurface::CreateNativeSurface(
       if (!surface.get() || !surface->Initialize(format))
         return surface;
       return make_scoped_refptr<gl::GLSurface>(
-          new PassThroughImageTransportSurface(delegate, surface.get()));
+          new PassThroughImageTransportSurface(
+              delegate, surface.get(), kMultiWindowSwapIntervalDefault));
   }
 }
 

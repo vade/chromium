@@ -147,7 +147,7 @@ void ViewImpl::AddNewContents(content::WebContents* source,
                               bool* was_blocked) {
   mojom::ViewClientPtr client;
   mojom::ViewPtr view;
-  mojom::ViewRequest view_request(&view);
+  auto view_request = mojo::MakeRequest(&view);
   client_->ViewCreated(std::move(view), MakeRequest(&client),
                        disposition == WindowOpenDisposition::NEW_POPUP,
                        initial_rect, user_gesture);
@@ -240,7 +240,7 @@ void ViewImpl::Observe(int type,
       details_ptr->type = static_cast<mojom::NavigationType>(lcd->type);
       details_ptr->previous_entry_index = lcd->previous_entry_index;
       details_ptr->previous_url = lcd->previous_url;
-      details_ptr->is_in_page = lcd->is_in_page;
+      details_ptr->is_in_page = lcd->is_same_document;
       details_ptr->is_main_frame = lcd->is_main_frame;
       details_ptr->http_status_code = lcd->http_status_code;
       client_->NavigationCommitted(
@@ -299,11 +299,6 @@ void ViewImpl::OnLostConnection(aura::WindowTreeClient* client) {
 
 void ViewImpl::OnPointerEventObserved(const ui::PointerEvent& event,
                                       aura::Window* target) {}
-
-aura::client::CaptureClient* ViewImpl::GetCaptureClient() {
-  // TODO: wire this up. This typically comes from WMState.
-  return nullptr;
-}
 
 aura::PropertyConverter* ViewImpl::GetPropertyConverter() {
   // TODO: wire this up.

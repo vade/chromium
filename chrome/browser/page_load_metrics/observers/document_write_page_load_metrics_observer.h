@@ -24,46 +24,54 @@ class DocumentWritePageLoadMetricsObserver
   DocumentWritePageLoadMetricsObserver() = default;
 
   // page_load_metrics::PageLoadMetricsObserver implementation:
-  void OnFirstContentfulPaint(
-      const page_load_metrics::PageLoadTiming& timing,
+  void OnFirstContentfulPaintInPage(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
 
-  void OnFirstMeaningfulPaint(
-      const page_load_metrics::PageLoadTiming& timing,
+  void OnFirstMeaningfulPaintInMainFrameDocument(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
 
   void OnParseStop(
-      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
 
   void OnLoadingBehaviorObserved(
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
 
+  enum DocumentWriteLoadingBehavior {
+    LOADING_BEHAVIOR_BLOCK,
+    LOADING_BEHAVIOR_RELOAD,
+    LOADING_BEHAVIOR_SAME_SITE_DIFF_SCHEME,
+    LOADING_BEHAVIOR_MAX
+  };
+
  private:
   void LogDocumentWriteEvaluatorFirstContentfulPaint(
-      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& info);
 
   void LogDocumentWriteEvaluatorFirstMeaningfulPaint(
-      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& info);
 
   void LogDocumentWriteEvaluatorParseStop(
-      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& info);
 
   void LogDocumentWriteBlockFirstContentfulPaint(
-      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& info);
 
   void LogDocumentWriteBlockParseStop(
-      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& info);
 
   void LogDocumentWriteBlockFirstMeaningfulPaint(
-      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& info);
 
+  bool doc_write_same_site_diff_scheme_ = false;
   bool doc_write_block_observed_ = false;
   bool doc_write_block_reload_observed_ = false;
 

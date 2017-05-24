@@ -29,18 +29,20 @@
 #include "net/quic/chromium/quic_http_utils.h"
 #include "net/quic/chromium/quic_server_info.h"
 #include "net/quic/chromium/quic_test_packet_maker.h"
+#include "net/quic/chromium/test_task_runner.h"
 #include "net/quic/core/crypto/crypto_protocol.h"
 #include "net/quic/core/crypto/quic_decrypter.h"
 #include "net/quic/core/crypto/quic_encrypter.h"
 #include "net/quic/core/quic_connection.h"
 #include "net/quic/core/spdy_utils.h"
+#include "net/quic/platform/api/quic_string_piece.h"
 #include "net/quic/platform/api/quic_text_utils.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
 #include "net/quic/test_tools/mock_clock.h"
 #include "net/quic/test_tools/mock_random.h"
 #include "net/quic/test_tools/quic_connection_peer.h"
+#include "net/quic/test_tools/quic_spdy_session_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
-#include "net/quic/test_tools/test_task_runner.h"
 #include "net/socket/socket_test_util.h"
 #include "net/test/gtest_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -151,8 +153,8 @@ class TestDelegateBase : public BidirectionalStreamImpl::Delegate {
 
   void Start(const BidirectionalStreamRequestInfo* request_info,
              const NetLogWithSource& net_log,
-             const base::WeakPtr<QuicChromiumClientSession> session) {
-    stream_.reset(new BidirectionalStreamQuicImpl(session));
+             std::unique_ptr<QuicChromiumClientSession::Handle> session) {
+    stream_ = base::MakeUnique<BidirectionalStreamQuicImpl>(std::move(session));
     stream_->Start(request_info, net_log, send_request_headers_automatically_,
                    this, nullptr);
   }
@@ -352,10 +354,10 @@ class BidirectionalStreamQuicImplTest
   };
 
   BidirectionalStreamQuicImplTest()
-      : crypto_config_(CryptoTestUtils::ProofVerifierForTesting()),
+      : crypto_config_(crypto_test_utils::ProofVerifierForTesting()),
         read_buffer_(new IOBufferWithSize(4096)),
         connection_id_(2),
-        stream_id_(kClientDataStreamId1),
+        stream_id_(GetNthClientInitiatedStreamId(0)),
         client_maker_(GetParam(),
                       connection_id_,
                       &clock_,
@@ -435,7 +437,7 @@ class BidirectionalStreamQuicImplTest
         base::WrapUnique(static_cast<QuicServerInfo*>(nullptr)),
         QuicServerId(kDefaultServerHostName, kDefaultServerPort,
                      PRIVACY_MODE_DISABLED),
-        kQuicYieldAfterPacketsRead,
+        /*require_confirmation=*/false, kQuicYieldAfterPacketsRead,
         QuicTime::Delta::FromMilliseconds(kQuicYieldAfterDurationMilliseconds),
         /*cert_verify_flags=*/0, DefaultQuicConfig(), &crypto_config_,
         "CONNECTION_UNKNOWN", dns_start, dns_end, &push_promise_index_, nullptr,
@@ -443,8 +445,7 @@ class BidirectionalStreamQuicImplTest
         /*socket_performance_watcher=*/nullptr, net_log().bound().net_log()));
     session_->Initialize();
     TestCompletionCallback callback;
-    session_->CryptoConnect(/*require_confirmation=*/false,
-                            callback.callback());
+    session_->CryptoConnect(callback.callback());
     EXPECT_TRUE(session_->IsEncryptionEstablished());
   }
 
@@ -468,7 +469,7 @@ class BidirectionalStreamQuicImplTest
       bool should_include_version,
       bool fin,
       QuicStreamOffset offset,
-      base::StringPiece data,
+      QuicStringPiece data,
       QuicTestPacketMaker* maker) {
     std::unique_ptr<QuicReceivedPacket> packet(maker->MakeDataPacket(
         packet_number, stream_id_, should_include_version, fin, offset, data));
@@ -482,7 +483,7 @@ class BidirectionalStreamQuicImplTest
       bool should_include_version,
       bool fin,
       QuicStreamOffset offset,
-      base::StringPiece data) {
+      QuicStringPiece data) {
     return ConstructDataPacket(packet_number, should_include_version, fin,
                                offset, data, &server_maker_);
   }
@@ -610,11 +611,11 @@ class BidirectionalStreamQuicImplTest
   std::unique_ptr<QuicReceivedPacket> ConstructClientAckAndRstStreamPacket(
       QuicPacketNumber packet_number,
       QuicPacketNumber largest_received,
-      QuicPacketNumber ack_least_unacked,
-      QuicPacketNumber stop_least_unacked) {
+      QuicPacketNumber smallest_received,
+      QuicPacketNumber least_unacked) {
     return client_maker_.MakeAckAndRstPacket(
         packet_number, !kIncludeVersion, stream_id_, QUIC_STREAM_CANCELLED,
-        largest_received, ack_least_unacked, stop_least_unacked,
+        largest_received, smallest_received, least_unacked,
         !kIncludeCongestionFeedback);
   }
 
@@ -622,14 +623,15 @@ class BidirectionalStreamQuicImplTest
       QuicPacketNumber packet_number,
       bool should_include_version,
       QuicPacketNumber largest_received,
+      QuicPacketNumber smallest_received,
       QuicPacketNumber least_unacked,
       bool fin,
       QuicStreamOffset offset,
-      base::StringPiece data,
+      QuicStringPiece data,
       QuicTestPacketMaker* maker) {
     std::unique_ptr<QuicReceivedPacket> packet(maker->MakeAckAndDataPacket(
         packet_number, should_include_version, stream_id_, largest_received,
-        least_unacked, fin, offset, data));
+        smallest_received, least_unacked, fin, offset, data));
     DVLOG(2) << "packet(" << packet_number << "): " << std::endl
              << QuicTextUtils::HexDump(packet->AsStringPiece());
     return packet;
@@ -638,28 +640,27 @@ class BidirectionalStreamQuicImplTest
   std::unique_ptr<QuicReceivedPacket> ConstructClientAckPacket(
       QuicPacketNumber packet_number,
       QuicPacketNumber largest_received,
+      QuicPacketNumber smallest_received,
       QuicPacketNumber least_unacked) {
     return client_maker_.MakeAckPacket(packet_number, largest_received,
-                                       least_unacked,
+                                       smallest_received, least_unacked,
                                        !kIncludeCongestionFeedback);
   }
 
   std::unique_ptr<QuicReceivedPacket> ConstructServerAckPacket(
       QuicPacketNumber packet_number,
       QuicPacketNumber largest_received,
+      QuicPacketNumber smallest_received,
       QuicPacketNumber least_unacked) {
     return server_maker_.MakeAckPacket(packet_number, largest_received,
-                                       least_unacked,
+                                       smallest_received, least_unacked,
                                        !kIncludeCongestionFeedback);
   }
 
-  std::unique_ptr<QuicReceivedPacket> ConstructSettingsPacket(
+  std::unique_ptr<QuicReceivedPacket> ConstructInitialSettingsPacket(
       QuicPacketNumber packet_number,
-      SpdySettingsIds id,
-      size_t value,
       QuicStreamOffset* offset) {
-    return client_maker_.MakeSettingsPacket(packet_number, id, value,
-                                            kIncludeVersion, offset);
+    return client_maker_.MakeInitialSettingsPacket(packet_number, offset);
   }
 
   void ExpectLoadTimingValid(const LoadTimingInfo& load_timing_info,
@@ -679,6 +680,10 @@ class BidirectionalStreamQuicImplTest
   const BoundTestNetLog& net_log() const { return net_log_; }
 
   QuicChromiumClientSession* session() const { return session_.get(); }
+
+  QuicStreamId GetNthClientInitiatedStreamId(int n) {
+    return test::GetNthClientInitiatedStreamId(GetParam(), n);
+  }
 
  protected:
   BoundTestNetLog net_log_;
@@ -717,12 +722,10 @@ TEST_P(BidirectionalStreamQuicImplTest, GetRequest) {
   size_t spdy_request_headers_frame_length;
   QuicStreamOffset header_stream_offset = 0;
   AddWrite(ConstructRequestHeadersPacketInner(
-      1, kClientDataStreamId1, kFin, DEFAULT_PRIORITY,
+      1, GetNthClientInitiatedStreamId(0), kFin, DEFAULT_PRIORITY,
       &spdy_request_headers_frame_length, &header_stream_offset));
-  AddWrite(ConstructSettingsPacket(2, SETTINGS_MAX_HEADER_LIST_SIZE,
-                                   kDefaultMaxUncompressedHeaderSize,
-                                   &header_stream_offset));
-  AddWrite(ConstructClientAckPacket(3, 3, 1));
+  AddWrite(ConstructInitialSettingsPacket(2, &header_stream_offset));
+  AddWrite(ConstructClientAckPacket(3, 3, 1, 1));
 
   Initialize();
 
@@ -736,12 +739,12 @@ TEST_P(BidirectionalStreamQuicImplTest, GetRequest) {
   std::unique_ptr<TestDelegateBase> delegate(
       new TestDelegateBase(read_buffer.get(), kReadBufferSize));
   delegate->set_trailers_expected(true);
-  delegate->Start(&request, net_log().bound(), session()->GetWeakPtr());
+  delegate->Start(&request, net_log().bound(), session()->CreateHandle());
   delegate->WaitUntilNextCallback();  // OnStreamReady
   ConfirmHandshake();
 
   // Server acks the request.
-  ProcessPacket(ConstructServerAckPacket(1, 0, 0));
+  ProcessPacket(ConstructServerAckPacket(1, 0, 0, 0));
 
   // Server sends the response headers.
   SpdyHeaderBlock response_headers = ConstructResponseHeaders("200");
@@ -816,14 +819,15 @@ TEST_P(BidirectionalStreamQuicImplTest, LoadTimingTwoRequests) {
   SetRequest("GET", "/", DEFAULT_PRIORITY);
   QuicStreamOffset offset = 0;
   AddWrite(ConstructRequestHeadersPacketInner(
-      1, kClientDataStreamId1, kFin, DEFAULT_PRIORITY, nullptr, &offset));
+      1, GetNthClientInitiatedStreamId(0), kFin, DEFAULT_PRIORITY, nullptr,
+      &offset));
   // SetRequest() again for second request as |request_headers_| was moved.
   SetRequest("GET", "/", DEFAULT_PRIORITY);
   AddWrite(ConstructRequestHeadersPacketInner(
-      2, kClientDataStreamId2, kFin, DEFAULT_PRIORITY, nullptr, &offset));
-  AddWrite(ConstructSettingsPacket(3, SETTINGS_MAX_HEADER_LIST_SIZE,
-                                   kDefaultMaxUncompressedHeaderSize, &offset));
-  AddWrite(ConstructClientAckPacket(4, 3, 1));
+      2, GetNthClientInitiatedStreamId(1), kFin, DEFAULT_PRIORITY, nullptr,
+      &offset));
+  AddWrite(ConstructInitialSettingsPacket(3, &offset));
+  AddWrite(ConstructClientAckPacket(4, 3, 1, 1));
   Initialize();
 
   BidirectionalStreamRequestInfo request;
@@ -836,30 +840,30 @@ TEST_P(BidirectionalStreamQuicImplTest, LoadTimingTwoRequests) {
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
   std::unique_ptr<TestDelegateBase> delegate(
       new TestDelegateBase(read_buffer.get(), kReadBufferSize));
-  delegate->Start(&request, net_log().bound(), session()->GetWeakPtr());
+  delegate->Start(&request, net_log().bound(), session()->CreateHandle());
 
   // Start second request.
   scoped_refptr<IOBuffer> read_buffer2(new IOBuffer(kReadBufferSize));
   std::unique_ptr<TestDelegateBase> delegate2(
       new TestDelegateBase(read_buffer2.get(), kReadBufferSize));
-  delegate2->Start(&request, net_log().bound(), session()->GetWeakPtr());
+  delegate2->Start(&request, net_log().bound(), session()->CreateHandle());
 
   delegate->WaitUntilNextCallback();   // OnStreamReady
   delegate2->WaitUntilNextCallback();  // OnStreamReady
 
   ConfirmHandshake();
   // Server acks the request.
-  ProcessPacket(ConstructServerAckPacket(1, 0, 0));
+  ProcessPacket(ConstructServerAckPacket(1, 0, 0, 0));
 
   // Server sends the response headers.
   offset = 0;
   ProcessPacket(ConstructResponseHeadersPacketInner(
-      2, kClientDataStreamId1, kFin, ConstructResponseHeaders("200"), nullptr,
-      &offset));
+      2, GetNthClientInitiatedStreamId(0), kFin,
+      ConstructResponseHeaders("200"), nullptr, &offset));
 
   ProcessPacket(ConstructResponseHeadersPacketInner(
-      3, kClientDataStreamId2, kFin, ConstructResponseHeaders("200"), nullptr,
-      &offset));
+      3, GetNthClientInitiatedStreamId(1), kFin,
+      ConstructResponseHeaders("200"), nullptr, &offset));
 
   delegate->WaitUntilNextCallback();   // OnHeadersReceived
   delegate2->WaitUntilNextCallback();  // OnHeadersReceived
@@ -884,19 +888,17 @@ TEST_P(BidirectionalStreamQuicImplTest, CoalesceDataBuffersNotHeadersFrame) {
   SetRequest("POST", "/", DEFAULT_PRIORITY);
   size_t spdy_request_headers_frame_length;
   QuicStreamOffset header_stream_offset = 0;
-  AddWrite(ConstructSettingsPacket(1, SETTINGS_MAX_HEADER_LIST_SIZE,
-                                   kDefaultMaxUncompressedHeaderSize,
-                                   &header_stream_offset));
+  AddWrite(ConstructInitialSettingsPacket(1, &header_stream_offset));
   const char kBody1[] = "here are some data";
   const char kBody2[] = "data keep coming";
   std::vector<std::string> two_writes = {kBody1, kBody2};
   AddWrite(ConstructRequestHeadersPacketInner(
-      2, kClientDataStreamId1, !kFin, DEFAULT_PRIORITY,
+      2, GetNthClientInitiatedStreamId(0), !kFin, DEFAULT_PRIORITY,
       &spdy_request_headers_frame_length, &header_stream_offset));
   AddWrite(ConstructClientMultipleDataFramesPacket(3, kIncludeVersion, !kFin, 0,
                                                    {kBody1, kBody2}));
   // Ack server's data packet.
-  AddWrite(ConstructClientAckPacket(4, 3, 1));
+  AddWrite(ConstructClientAckPacket(4, 3, 1, 1));
   const char kBody3[] = "hello there";
   const char kBody4[] = "another piece of small data";
   const char kBody5[] = "really small";
@@ -916,10 +918,11 @@ TEST_P(BidirectionalStreamQuicImplTest, CoalesceDataBuffersNotHeadersFrame) {
   std::unique_ptr<TestDelegateBase> delegate(
       new TestDelegateBase(read_buffer.get(), kReadBufferSize));
   delegate->DoNotSendRequestHeadersAutomatically();
-  delegate->Start(&request, net_log().bound(), session()->GetWeakPtr());
+  delegate->Start(&request, net_log().bound(), session()->CreateHandle());
   EXPECT_FALSE(delegate->is_ready());
   ConfirmHandshake();
   delegate->WaitUntilNextCallback();  // OnStreamReady
+  EXPECT_TRUE(delegate->is_ready());
 
   // Sends request headers separately, which causes them to be sent in a
   // separate packet.
@@ -933,7 +936,7 @@ TEST_P(BidirectionalStreamQuicImplTest, CoalesceDataBuffersNotHeadersFrame) {
   delegate->WaitUntilNextCallback();  // OnDataSent
 
   // Server acks the request.
-  ProcessPacket(ConstructServerAckPacket(1, 0, 0));
+  ProcessPacket(ConstructServerAckPacket(1, 0, 0, 0));
 
   // Server sends the response headers.
   SpdyHeaderBlock response_headers = ConstructResponseHeaders("200");
@@ -998,15 +1001,13 @@ TEST_P(BidirectionalStreamQuicImplTest,
   SetRequest("POST", "/", DEFAULT_PRIORITY);
   size_t spdy_request_headers_frame_length;
   QuicStreamOffset header_stream_offset = 0;
-  AddWrite(ConstructSettingsPacket(1, SETTINGS_MAX_HEADER_LIST_SIZE,
-                                   kDefaultMaxUncompressedHeaderSize,
-                                   &header_stream_offset));
+  AddWrite(ConstructInitialSettingsPacket(1, &header_stream_offset));
   const char kBody1[] = "here are some data";
   AddWrite(ConstructRequestHeadersAndMultipleDataFramesPacket(
       2, !kFin, DEFAULT_PRIORITY, &header_stream_offset,
       &spdy_request_headers_frame_length, {kBody1}));
   // Ack server's data packet.
-  AddWrite(ConstructClientAckPacket(3, 3, 1));
+  AddWrite(ConstructClientAckPacket(3, 3, 1, 1));
   const char kBody2[] = "really small";
   QuicStreamOffset data_offset = strlen(kBody1);
   AddWrite(ConstructClientMultipleDataFramesPacket(4, !kIncludeVersion, kFin,
@@ -1024,7 +1025,7 @@ TEST_P(BidirectionalStreamQuicImplTest,
   std::unique_ptr<TestDelegateBase> delegate(
       new TestDelegateBase(read_buffer.get(), kReadBufferSize));
   delegate->DoNotSendRequestHeadersAutomatically();
-  delegate->Start(&request, net_log().bound(), session()->GetWeakPtr());
+  delegate->Start(&request, net_log().bound(), session()->CreateHandle());
   ConfirmHandshake();
   delegate->WaitUntilNextCallback();  // OnStreamReady
 
@@ -1035,7 +1036,7 @@ TEST_P(BidirectionalStreamQuicImplTest,
   delegate->WaitUntilNextCallback();  // OnDataSent
 
   // Server acks the request.
-  ProcessPacket(ConstructServerAckPacket(1, 0, 0));
+  ProcessPacket(ConstructServerAckPacket(1, 0, 0, 0));
 
   // Server sends the response headers.
   SpdyHeaderBlock response_headers = ConstructResponseHeaders("200");
@@ -1095,9 +1096,7 @@ TEST_P(BidirectionalStreamQuicImplTest,
   SetRequest("POST", "/", DEFAULT_PRIORITY);
   size_t spdy_request_headers_frame_length;
   QuicStreamOffset header_stream_offset = 0;
-  AddWrite(ConstructSettingsPacket(1, SETTINGS_MAX_HEADER_LIST_SIZE,
-                                   kDefaultMaxUncompressedHeaderSize,
-                                   &header_stream_offset));
+  AddWrite(ConstructInitialSettingsPacket(1, &header_stream_offset));
   const char kBody1[] = "here are some data";
   const char kBody2[] = "data keep coming";
   std::vector<std::string> two_writes = {kBody1, kBody2};
@@ -1105,7 +1104,7 @@ TEST_P(BidirectionalStreamQuicImplTest,
       2, !kFin, DEFAULT_PRIORITY, &header_stream_offset,
       &spdy_request_headers_frame_length, two_writes));
   // Ack server's data packet.
-  AddWrite(ConstructClientAckPacket(3, 3, 1));
+  AddWrite(ConstructClientAckPacket(3, 3, 1, 1));
   const char kBody3[] = "hello there";
   const char kBody4[] = "another piece of small data";
   const char kBody5[] = "really small";
@@ -1125,7 +1124,7 @@ TEST_P(BidirectionalStreamQuicImplTest,
   std::unique_ptr<TestDelegateBase> delegate(
       new TestDelegateBase(read_buffer.get(), kReadBufferSize));
   delegate->DoNotSendRequestHeadersAutomatically();
-  delegate->Start(&request, net_log().bound(), session()->GetWeakPtr());
+  delegate->Start(&request, net_log().bound(), session()->CreateHandle());
   ConfirmHandshake();
   delegate->WaitUntilNextCallback();  // OnStreamReady
 
@@ -1138,7 +1137,7 @@ TEST_P(BidirectionalStreamQuicImplTest,
   delegate->WaitUntilNextCallback();  // OnDataSent
 
   // Server acks the request.
-  ProcessPacket(ConstructServerAckPacket(1, 0, 0));
+  ProcessPacket(ConstructServerAckPacket(1, 0, 0, 0));
 
   // Server sends the response headers.
   SpdyHeaderBlock response_headers = ConstructResponseHeaders("200");
@@ -1200,15 +1199,13 @@ TEST_P(BidirectionalStreamQuicImplTest, PostRequest) {
   SetRequest("POST", "/", DEFAULT_PRIORITY);
   size_t spdy_request_headers_frame_length;
   QuicStreamOffset header_stream_offset = 0;
+  AddWrite(ConstructInitialSettingsPacket(1, &header_stream_offset));
   AddWrite(ConstructRequestHeadersPacketInner(
-      1, kClientDataStreamId1, !kFin, DEFAULT_PRIORITY,
+      2, GetNthClientInitiatedStreamId(0), !kFin, DEFAULT_PRIORITY,
       &spdy_request_headers_frame_length, &header_stream_offset));
-  AddWrite(ConstructSettingsPacket(2, SETTINGS_MAX_HEADER_LIST_SIZE,
-                                   kDefaultMaxUncompressedHeaderSize,
-                                   &header_stream_offset));
   AddWrite(ConstructDataPacket(3, kIncludeVersion, kFin, 0, kUploadData,
                                &client_maker_));
-  AddWrite(ConstructClientAckPacket(4, 3, 1));
+  AddWrite(ConstructClientAckPacket(4, 3, 1, 1));
 
   Initialize();
 
@@ -1221,7 +1218,7 @@ TEST_P(BidirectionalStreamQuicImplTest, PostRequest) {
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
   std::unique_ptr<TestDelegateBase> delegate(
       new TestDelegateBase(read_buffer.get(), kReadBufferSize));
-  delegate->Start(&request, net_log().bound(), session()->GetWeakPtr());
+  delegate->Start(&request, net_log().bound(), session()->CreateHandle());
   ConfirmHandshake();
   delegate->WaitUntilNextCallback();  // OnStreamReady
 
@@ -1232,7 +1229,7 @@ TEST_P(BidirectionalStreamQuicImplTest, PostRequest) {
   delegate->WaitUntilNextCallback();  // OnDataSent
 
   // Server acks the request.
-  ProcessPacket(ConstructServerAckPacket(1, 0, 0));
+  ProcessPacket(ConstructServerAckPacket(1, 0, 0, 0));
 
   // Server sends the response headers.
   SpdyHeaderBlock response_headers = ConstructResponseHeaders("200");
@@ -1286,7 +1283,7 @@ TEST_P(BidirectionalStreamQuicImplTest, PutRequest) {
                                          &spdy_request_headers_frame_length));
   AddWrite(ConstructDataPacket(2, kIncludeVersion, kFin, 0, kUploadData,
                                &client_maker_));
-  AddWrite(ConstructClientAckPacket(3, 3, 1));
+  AddWrite(ConstructClientAckPacket(3, 3, 1, 1));
 
   Initialize();
 
@@ -1299,7 +1296,7 @@ TEST_P(BidirectionalStreamQuicImplTest, PutRequest) {
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
   std::unique_ptr<TestDelegateBase> delegate(
       new TestDelegateBase(read_buffer.get(), kReadBufferSize));
-  delegate->Start(&request, net_log().bound(), session()->GetWeakPtr());
+  delegate->Start(&request, net_log().bound(), session()->CreateHandle());
   delegate->WaitUntilNextCallback();  // OnStreamReady
 
   // Send a DATA frame.
@@ -1309,7 +1306,7 @@ TEST_P(BidirectionalStreamQuicImplTest, PutRequest) {
   delegate->WaitUntilNextCallback();  // OnDataSent
 
   // Server acks the request.
-  ProcessPacket(ConstructServerAckPacket(1, 0, 0));
+  ProcessPacket(ConstructServerAckPacket(1, 0, 0, 0));
 
   // Server sends the response headers.
   SpdyHeaderBlock response_headers = ConstructResponseHeaders("200");
@@ -1360,16 +1357,13 @@ TEST_P(BidirectionalStreamQuicImplTest, InterleaveReadDataAndSendData) {
   SetRequest("POST", "/", DEFAULT_PRIORITY);
   size_t spdy_request_headers_frame_length;
   QuicStreamOffset header_stream_offset = 0;
+  AddWrite(ConstructInitialSettingsPacket(1, &header_stream_offset));
   AddWrite(ConstructRequestHeadersPacketInner(
-      1, kClientDataStreamId1, !kFin, DEFAULT_PRIORITY,
+      2, GetNthClientInitiatedStreamId(0), !kFin, DEFAULT_PRIORITY,
       &spdy_request_headers_frame_length, &header_stream_offset));
-
-  AddWrite(ConstructSettingsPacket(2, SETTINGS_MAX_HEADER_LIST_SIZE,
-                                   kDefaultMaxUncompressedHeaderSize,
-                                   &header_stream_offset));
-  AddWrite(ConstructAckAndDataPacket(3, !kIncludeVersion, 2, 1, !kFin, 0,
+  AddWrite(ConstructAckAndDataPacket(3, !kIncludeVersion, 2, 1, 1, !kFin, 0,
                                      kUploadData, &client_maker_));
-  AddWrite(ConstructAckAndDataPacket(4, !kIncludeVersion, 3, 3, kFin,
+  AddWrite(ConstructAckAndDataPacket(4, !kIncludeVersion, 3, 3, 3, kFin,
                                      strlen(kUploadData), kUploadData,
                                      &client_maker_));
   Initialize();
@@ -1383,12 +1377,12 @@ TEST_P(BidirectionalStreamQuicImplTest, InterleaveReadDataAndSendData) {
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
   std::unique_ptr<TestDelegateBase> delegate(
       new TestDelegateBase(read_buffer.get(), kReadBufferSize));
-  delegate->Start(&request, net_log().bound(), session()->GetWeakPtr());
+  delegate->Start(&request, net_log().bound(), session()->CreateHandle());
   ConfirmHandshake();
   delegate->WaitUntilNextCallback();  // OnStreamReady
 
   // Server acks the request.
-  ProcessPacket(ConstructServerAckPacket(1, 0, 0));
+  ProcessPacket(ConstructServerAckPacket(1, 0, 0, 0));
 
   // Server sends the response headers.
   SpdyHeaderBlock response_headers = ConstructResponseHeaders("200");
@@ -1412,8 +1406,8 @@ TEST_P(BidirectionalStreamQuicImplTest, InterleaveReadDataAndSendData) {
   const char kResponseBody[] = "Hello world!";
 
   // Server sends a data packet.
-  ProcessPacket(ConstructAckAndDataPacket(3, !kIncludeVersion, 2, 1, !kFin, 0,
-                                          kResponseBody, &server_maker_));
+  ProcessPacket(ConstructAckAndDataPacket(3, !kIncludeVersion, 2, 1, 1, !kFin,
+                                          0, kResponseBody, &server_maker_));
 
   EXPECT_EQ(static_cast<int64_t>(strlen(kResponseBody)), cb.WaitForResult());
   EXPECT_EQ(std::string(kResponseBody), delegate->data_received());
@@ -1425,7 +1419,7 @@ TEST_P(BidirectionalStreamQuicImplTest, InterleaveReadDataAndSendData) {
   TestCompletionCallback cb2;
   rv = delegate->ReadData(cb2.callback());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
-  ProcessPacket(ConstructAckAndDataPacket(4, !kIncludeVersion, 3, 1, kFin,
+  ProcessPacket(ConstructAckAndDataPacket(4, !kIncludeVersion, 3, 1, 1, kFin,
                                           strlen(kResponseBody), kResponseBody,
                                           &server_maker_));
 
@@ -1452,11 +1446,9 @@ TEST_P(BidirectionalStreamQuicImplTest, ServerSendsRstAfterHeaders) {
   size_t spdy_request_headers_frame_length;
   QuicStreamOffset header_stream_offset = 0;
   AddWrite(ConstructRequestHeadersPacketInner(
-      1, kClientDataStreamId1, kFin, DEFAULT_PRIORITY,
+      1, GetNthClientInitiatedStreamId(0), kFin, DEFAULT_PRIORITY,
       &spdy_request_headers_frame_length, &header_stream_offset));
-  AddWrite(ConstructSettingsPacket(2, SETTINGS_MAX_HEADER_LIST_SIZE,
-                                   kDefaultMaxUncompressedHeaderSize,
-                                   &header_stream_offset));
+  AddWrite(ConstructInitialSettingsPacket(2, &header_stream_offset));
   Initialize();
 
   BidirectionalStreamRequestInfo request;
@@ -1468,7 +1460,7 @@ TEST_P(BidirectionalStreamQuicImplTest, ServerSendsRstAfterHeaders) {
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
   std::unique_ptr<TestDelegateBase> delegate(
       new TestDelegateBase(read_buffer.get(), kReadBufferSize));
-  delegate->Start(&request, net_log().bound(), session()->GetWeakPtr());
+  delegate->Start(&request, net_log().bound(), session()->CreateHandle());
   delegate->WaitUntilNextCallback();  // OnStreamReady
   ConfirmHandshake();
 
@@ -1495,13 +1487,11 @@ TEST_P(BidirectionalStreamQuicImplTest, ServerSendsRstAfterReadData) {
   size_t spdy_request_headers_frame_length;
   QuicStreamOffset header_stream_offset = 0;
   AddWrite(ConstructRequestHeadersPacketInner(
-      1, kClientDataStreamId1, kFin, DEFAULT_PRIORITY,
+      1, GetNthClientInitiatedStreamId(0), kFin, DEFAULT_PRIORITY,
       &spdy_request_headers_frame_length, &header_stream_offset));
-  AddWrite(ConstructSettingsPacket(2, SETTINGS_MAX_HEADER_LIST_SIZE,
-                                   kDefaultMaxUncompressedHeaderSize,
-                                   &header_stream_offset));
+  AddWrite(ConstructInitialSettingsPacket(2, &header_stream_offset));
   // Why does QUIC ack Rst? Is this expected?
-  AddWrite(ConstructClientAckPacket(3, 3, 1));
+  AddWrite(ConstructClientAckPacket(3, 3, 1, 1));
 
   Initialize();
 
@@ -1514,12 +1504,12 @@ TEST_P(BidirectionalStreamQuicImplTest, ServerSendsRstAfterReadData) {
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
   std::unique_ptr<TestDelegateBase> delegate(
       new TestDelegateBase(read_buffer.get(), kReadBufferSize));
-  delegate->Start(&request, net_log().bound(), session()->GetWeakPtr());
+  delegate->Start(&request, net_log().bound(), session()->CreateHandle());
   delegate->WaitUntilNextCallback();  // OnStreamReady
   ConfirmHandshake();
 
   // Server acks the request.
-  ProcessPacket(ConstructServerAckPacket(1, 0, 0));
+  ProcessPacket(ConstructServerAckPacket(1, 0, 0, 0));
 
   // Server sends the response headers.
   SpdyHeaderBlock response_headers = ConstructResponseHeaders("200");
@@ -1557,12 +1547,10 @@ TEST_P(BidirectionalStreamQuicImplTest, SessionClosedBeforeReadData) {
   SetRequest("POST", "/", DEFAULT_PRIORITY);
   size_t spdy_request_headers_frame_length;
   QuicStreamOffset header_stream_offset = 0;
+  AddWrite(ConstructInitialSettingsPacket(1, &header_stream_offset));
   AddWrite(ConstructRequestHeadersPacketInner(
-      1, kClientDataStreamId1, !kFin, DEFAULT_PRIORITY,
+      2, GetNthClientInitiatedStreamId(0), !kFin, DEFAULT_PRIORITY,
       &spdy_request_headers_frame_length, &header_stream_offset));
-  AddWrite(ConstructSettingsPacket(2, SETTINGS_MAX_HEADER_LIST_SIZE,
-                                   kDefaultMaxUncompressedHeaderSize,
-                                   &header_stream_offset));
   Initialize();
 
   BidirectionalStreamRequestInfo request;
@@ -1574,12 +1562,12 @@ TEST_P(BidirectionalStreamQuicImplTest, SessionClosedBeforeReadData) {
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
   std::unique_ptr<TestDelegateBase> delegate(
       new TestDelegateBase(read_buffer.get(), kReadBufferSize));
-  delegate->Start(&request, net_log().bound(), session()->GetWeakPtr());
+  delegate->Start(&request, net_log().bound(), session()->CreateHandle());
   ConfirmHandshake();
   delegate->WaitUntilNextCallback();  // OnStreamReady
 
   // Server acks the request.
-  ProcessPacket(ConstructServerAckPacket(1, 0, 0));
+  ProcessPacket(ConstructServerAckPacket(1, 0, 0, 0));
 
   // Server sends the response headers.
   SpdyHeaderBlock response_headers = ConstructResponseHeaders("200");
@@ -1619,12 +1607,10 @@ TEST_P(BidirectionalStreamQuicImplTest, DeleteStreamAfterReadData) {
   SetRequest("POST", "/", DEFAULT_PRIORITY);
   size_t spdy_request_headers_frame_length;
   QuicStreamOffset header_stream_offset = 0;
+  AddWrite(ConstructInitialSettingsPacket(1, &header_stream_offset));
   AddWrite(ConstructRequestHeadersPacketInner(
-      1, kClientDataStreamId1, !kFin, DEFAULT_PRIORITY,
+      2, GetNthClientInitiatedStreamId(0), !kFin, DEFAULT_PRIORITY,
       &spdy_request_headers_frame_length, &header_stream_offset));
-  AddWrite(ConstructSettingsPacket(2, SETTINGS_MAX_HEADER_LIST_SIZE,
-                                   kDefaultMaxUncompressedHeaderSize,
-                                   &header_stream_offset));
   AddWrite(ConstructClientAckAndRstStreamPacket(3, 2, 1, 1));
 
   Initialize();
@@ -1638,12 +1624,12 @@ TEST_P(BidirectionalStreamQuicImplTest, DeleteStreamAfterReadData) {
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
   std::unique_ptr<TestDelegateBase> delegate(
       new TestDelegateBase(read_buffer.get(), kReadBufferSize));
-  delegate->Start(&request, net_log().bound(), session()->GetWeakPtr());
+  delegate->Start(&request, net_log().bound(), session()->CreateHandle());
   ConfirmHandshake();
   delegate->WaitUntilNextCallback();  // OnStreamReady
 
   // Server acks the request.
-  ProcessPacket(ConstructServerAckPacket(1, 0, 0));
+  ProcessPacket(ConstructServerAckPacket(1, 0, 0, 0));
 
   // Server sends the response headers.
   SpdyHeaderBlock response_headers = ConstructResponseHeaders("200");
@@ -1675,12 +1661,10 @@ TEST_P(BidirectionalStreamQuicImplTest, DeleteStreamDuringOnHeadersReceived) {
   SetRequest("POST", "/", DEFAULT_PRIORITY);
   size_t spdy_request_headers_frame_length;
   QuicStreamOffset header_stream_offset = 0;
+  AddWrite(ConstructInitialSettingsPacket(1, &header_stream_offset));
   AddWrite(ConstructRequestHeadersPacketInner(
-      1, kClientDataStreamId1, !kFin, DEFAULT_PRIORITY,
+      2, GetNthClientInitiatedStreamId(0), !kFin, DEFAULT_PRIORITY,
       &spdy_request_headers_frame_length, &header_stream_offset));
-  AddWrite(ConstructSettingsPacket(2, SETTINGS_MAX_HEADER_LIST_SIZE,
-                                   kDefaultMaxUncompressedHeaderSize,
-                                   &header_stream_offset));
   AddWrite(ConstructClientAckAndRstStreamPacket(3, 2, 1, 1));
 
   Initialize();
@@ -1695,12 +1679,12 @@ TEST_P(BidirectionalStreamQuicImplTest, DeleteStreamDuringOnHeadersReceived) {
   std::unique_ptr<DeleteStreamDelegate> delegate(
       new DeleteStreamDelegate(read_buffer.get(), kReadBufferSize,
                                DeleteStreamDelegate::ON_HEADERS_RECEIVED));
-  delegate->Start(&request, net_log().bound(), session()->GetWeakPtr());
+  delegate->Start(&request, net_log().bound(), session()->CreateHandle());
   ConfirmHandshake();
   delegate->WaitUntilNextCallback();  // OnStreamReady
 
   // Server acks the request.
-  ProcessPacket(ConstructServerAckPacket(1, 0, 0));
+  ProcessPacket(ConstructServerAckPacket(1, 0, 0, 0));
 
   // Server sends the response headers.
   SpdyHeaderBlock response_headers = ConstructResponseHeaders("200");
@@ -1723,13 +1707,11 @@ TEST_P(BidirectionalStreamQuicImplTest, DeleteStreamDuringOnDataRead) {
   SetRequest("POST", "/", DEFAULT_PRIORITY);
   size_t spdy_request_headers_frame_length;
   QuicStreamOffset header_stream_offset = 0;
+  AddWrite(ConstructInitialSettingsPacket(1, &header_stream_offset));
   AddWrite(ConstructRequestHeadersPacketInner(
-      1, kClientDataStreamId1, !kFin, DEFAULT_PRIORITY,
+      2, GetNthClientInitiatedStreamId(0), !kFin, DEFAULT_PRIORITY,
       &spdy_request_headers_frame_length, &header_stream_offset));
-  AddWrite(ConstructSettingsPacket(2, SETTINGS_MAX_HEADER_LIST_SIZE,
-                                   kDefaultMaxUncompressedHeaderSize,
-                                   &header_stream_offset));
-  AddWrite(ConstructClientAckPacket(3, 3, 1));
+  AddWrite(ConstructClientAckPacket(3, 3, 1, 1));
   AddWrite(ConstructClientRstStreamPacket(4));
 
   Initialize();
@@ -1743,12 +1725,12 @@ TEST_P(BidirectionalStreamQuicImplTest, DeleteStreamDuringOnDataRead) {
   scoped_refptr<IOBuffer> read_buffer(new IOBuffer(kReadBufferSize));
   std::unique_ptr<DeleteStreamDelegate> delegate(new DeleteStreamDelegate(
       read_buffer.get(), kReadBufferSize, DeleteStreamDelegate::ON_DATA_READ));
-  delegate->Start(&request, net_log().bound(), session()->GetWeakPtr());
+  delegate->Start(&request, net_log().bound(), session()->CreateHandle());
   ConfirmHandshake();
   delegate->WaitUntilNextCallback();  // OnStreamReady
 
   // Server acks the request.
-  ProcessPacket(ConstructServerAckPacket(1, 0, 0));
+  ProcessPacket(ConstructServerAckPacket(1, 0, 0, 0));
 
   // Server sends the response headers.
   SpdyHeaderBlock response_headers = ConstructResponseHeaders("200");
@@ -1782,7 +1764,7 @@ TEST_P(BidirectionalStreamQuicImplTest, DeleteStreamDuringOnTrailersReceived) {
   size_t spdy_request_headers_frame_length;
   AddWrite(ConstructRequestHeadersPacket(1, kFin, DEFAULT_PRIORITY,
                                          &spdy_request_headers_frame_length));
-  AddWrite(ConstructClientAckPacket(2, 3, 1));  // Ack the data packet
+  AddWrite(ConstructClientAckPacket(2, 3, 1, 1));  // Ack the data packet
   AddWrite(ConstructClientAckAndRstStreamPacket(3, 4, 4, 1));
 
   Initialize();
@@ -1797,11 +1779,11 @@ TEST_P(BidirectionalStreamQuicImplTest, DeleteStreamDuringOnTrailersReceived) {
   std::unique_ptr<DeleteStreamDelegate> delegate(
       new DeleteStreamDelegate(read_buffer.get(), kReadBufferSize,
                                DeleteStreamDelegate::ON_TRAILERS_RECEIVED));
-  delegate->Start(&request, net_log().bound(), session()->GetWeakPtr());
+  delegate->Start(&request, net_log().bound(), session()->CreateHandle());
   delegate->WaitUntilNextCallback();  // OnStreamReady
 
   // Server acks the request.
-  ProcessPacket(ConstructServerAckPacket(1, 0, 0));
+  ProcessPacket(ConstructServerAckPacket(1, 0, 0, 0));
 
   // Server sends the response headers.
   SpdyHeaderBlock response_headers = ConstructResponseHeaders("200");

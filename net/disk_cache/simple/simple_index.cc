@@ -21,8 +21,8 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/task_runner.h"
-#include "base/threading/worker_pool.h"
 #include "base/time/time.h"
+#include "base/trace_event/memory_usage_estimator.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/simple/simple_entry_format.h"
 #include "net/disk_cache/simple/simple_histogram_macros.h"
@@ -48,31 +48,6 @@ const int kWriteToDiskOnBackgroundDelayMSecs = 100;
 const uint32_t kEvictionMarginDivisor = 20;
 
 const uint32_t kBytesInKb = 1024;
-
-// Utility class used for timestamp comparisons in entry metadata while sorting.
-class CompareHashesForTimestamp {
-  typedef disk_cache::SimpleIndex SimpleIndex;
-  typedef disk_cache::SimpleIndex::EntrySet EntrySet;
- public:
-  explicit CompareHashesForTimestamp(const EntrySet& set);
-
-  bool operator()(uint64_t hash1, uint64_t hash2);
-
- private:
-  const EntrySet& entry_set_;
-};
-
-CompareHashesForTimestamp::CompareHashesForTimestamp(const EntrySet& set)
-  : entry_set_(set) {
-}
-
-bool CompareHashesForTimestamp::operator()(uint64_t hash1, uint64_t hash2) {
-  EntrySet::const_iterator it1 = entry_set_.find(hash1);
-  DCHECK(it1 != entry_set_.end());
-  EntrySet::const_iterator it2 = entry_set_.find(hash2);
-  DCHECK(it2 != entry_set_.end());
-  return it1->second.GetLastUsedTime() < it2->second.GetLastUsedTime();
-}
 
 }  // namespace
 
@@ -123,6 +98,8 @@ void EntryMetadata::SetEntrySize(base::StrictNumeric<uint32_t> entry_size) {
 void EntryMetadata::Serialize(base::Pickle* pickle) const {
   DCHECK(pickle);
   int64_t internal_last_used_time = GetLastUsedTime().ToInternalValue();
+  // If you modify the size of the size of the pickle, be sure to update
+  // kOnDiskSizeBytes.
   pickle->WriteInt64(internal_last_used_time);
   pickle->WriteUInt64(entry_size_);
 }
@@ -268,6 +245,11 @@ uint64_t SimpleIndex::GetCacheSizeBetween(base::Time initial_time,
   return size;
 }
 
+size_t SimpleIndex::EstimateMemoryUsage() const {
+  return base::trace_event::EstimateMemoryUsage(entries_set_) +
+         base::trace_event::EstimateMemoryUsage(removed_entries_);
+}
+
 void SimpleIndex::Insert(uint64_t entry_hash) {
   DCHECK(io_thread_checker_.CalledOnValidThread());
   // Upon insert we don't know yet the size of the entry.
@@ -325,28 +307,35 @@ void SimpleIndex::StartEvictionIfNeeded() {
   SIMPLE_CACHE_UMA(
       MEMORY_KB, "Eviction.MaxCacheSizeOnStart2", cache_type_,
       static_cast<base::HistogramBase::Sample>(max_size_ / kBytesInKb));
-  std::vector<uint64_t> entry_hashes;
-  entry_hashes.reserve(entries_set_.size());
-  for (EntrySet::const_iterator it = entries_set_.begin(),
-       end = entries_set_.end(); it != end; ++it) {
-    entry_hashes.push_back(it->first);
-  }
-  std::sort(entry_hashes.begin(), entry_hashes.end(),
-            CompareHashesForTimestamp(entries_set_));
 
-  // Remove as many entries from the index to get below |low_watermark_|.
-  std::vector<uint64_t>::iterator it = entry_hashes.begin();
+  // Flatten for sorting.
+  std::vector<const std::pair<const uint64_t, EntryMetadata>*> entries;
+  entries.reserve(entries_set_.size());
+  for (EntrySet::const_iterator i = entries_set_.begin();
+       i != entries_set_.end(); ++i) {
+    entries.push_back(&*i);
+  }
+
+  std::sort(entries.begin(), entries.end(),
+            [](const std::pair<const uint64_t, EntryMetadata>* a,
+               const std::pair<const uint64_t, EntryMetadata>* b) -> bool {
+              return a->second.RawTimeForSorting() <
+                     b->second.RawTimeForSorting();
+            });
+
+  // Remove as many entries from the index to get below |low_watermark_|,
+  // collecting least recently used hashes into |entry_hashes|.
+  std::vector<uint64_t> entry_hashes;
+  std::vector<const std::pair<const uint64_t, EntryMetadata>*>::iterator it =
+      entries.begin();
   uint64_t evicted_so_far_size = 0;
   while (evicted_so_far_size < cache_size_ - low_watermark_) {
-    DCHECK(it != entry_hashes.end());
-    EntrySet::iterator found_meta = entries_set_.find(*it);
-    DCHECK(found_meta != entries_set_.end());
-    evicted_so_far_size += found_meta->second.GetEntrySize();
+    DCHECK(it != entries.end());
+    entry_hashes.push_back((*it)->first);
+    evicted_so_far_size += (*it)->second.GetEntrySize();
     ++it;
   }
 
-  // Take out the rest of hashes from the eviction list.
-  entry_hashes.erase(it, entry_hashes.end());
   SIMPLE_CACHE_UMA(COUNTS,
                    "Eviction.EntryCount", cache_type_, entry_hashes.size());
   SIMPLE_CACHE_UMA(TIMES,
@@ -395,6 +384,13 @@ void SimpleIndex::InsertInEntrySet(
     EntrySet* entry_set) {
   DCHECK(entry_set);
   entry_set->insert(std::make_pair(entry_hash, entry_metadata));
+}
+
+void SimpleIndex::InsertEntryForTesting(uint64_t entry_hash,
+                                        const EntryMetadata& entry_metadata) {
+  DCHECK(entries_set_.find(entry_hash) == entries_set_.end());
+  InsertInEntrySet(entry_hash, entry_metadata, &entries_set_);
+  cache_size_ += entry_metadata.GetEntrySize();
 }
 
 void SimpleIndex::PostponeWritingToDisk() {

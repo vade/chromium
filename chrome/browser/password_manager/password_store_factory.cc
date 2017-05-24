@@ -9,8 +9,10 @@
 
 #include "base/command_line.h"
 #include "base/environment.h"
+#include "base/memory/ref_counted.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
@@ -22,6 +24,7 @@
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/os_crypt/os_crypt_switches.h"
+#include "components/password_manager/core/browser/http_data_cleaner.h"
 #include "components/password_manager/core/browser/login_database.h"
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/password_manager/core/browser/password_store_default.h"
@@ -260,13 +263,18 @@ PasswordStoreFactory::BuildServiceInstanceFor(
   NOTIMPLEMENTED();
 #endif
   DCHECK(ps);
-  if (!ps->Init(
-          sync_start_util::GetFlareForSyncableService(profile->GetPath()))) {
+  if (!ps->Init(sync_start_util::GetFlareForSyncableService(profile->GetPath()),
+                profile->GetPrefs())) {
     // TODO(crbug.com/479725): Remove the LOG once this error is visible in the
     // UI.
     LOG(WARNING) << "Could not initialize password store.";
     return nullptr;
   }
+
+  password_manager::DelayCleanObsoleteHttpDataForPasswordStoreAndPrefs(
+      ps.get(), profile->GetPrefs(),
+      make_scoped_refptr(profile->GetRequestContext()));
+
   return ps;
 }
 

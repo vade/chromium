@@ -11,6 +11,7 @@
 #include <unordered_map>
 
 #include "base/debug/crash_logging.h"
+#include "base/debug/debugging_flags.h"
 #include "base/debug/stack_trace.h"
 #include "base/logging.h"
 #include "base/macros.h"
@@ -119,9 +120,11 @@ int CloseOverride(int fd) {
 
   // Capture stack for successful close.
   if (ret == 0) {
-#if HAVE_TRACE_STACK_FRAME_POINTERS
+#if BUILDFLAG(CAN_UNWIND_WITH_FRAME_POINTERS) && !defined(MEMORY_SANITIZER)
     // Use TraceStackFramePointers because the backtrack() based default
     // capturing gets only the last stack frame and is not useful.
+    // With the exception of when MSAN is enabled. See comments for why
+    // StackTraceTest.TraceStackFramePointers is disabled in MSAN builds.
     const void* frames[64];
     const size_t frame_count =
         base::debug::TraceStackFramePointers(frames, arraysize(frames), 0);

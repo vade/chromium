@@ -5,8 +5,14 @@
 #ifndef PropertyRegistration_h
 #define PropertyRegistration_h
 
-#include "wtf/Allocator.h"
-#include "wtf/text/WTFString.h"
+#include "core/animation/CSSInterpolationType.h"
+#include "core/animation/InterpolationTypesMap.h"
+#include "core/css/CSSSyntaxDescriptor.h"
+#include "core/css/CSSValue.h"
+#include "core/css/CSSVariableData.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/RefPtr.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -14,13 +20,39 @@ class ExceptionState;
 class ExecutionContext;
 class PropertyDescriptor;
 
-class PropertyRegistration {
-  STATIC_ONLY(PropertyRegistration);
+using CSSInterpolationTypes = Vector<std::unique_ptr<CSSInterpolationType>>;
 
+class CORE_EXPORT PropertyRegistration
+    : public GarbageCollectedFinalized<PropertyRegistration> {
  public:
   static void registerProperty(ExecutionContext*,
                                const PropertyDescriptor&,
                                ExceptionState&);
+
+  PropertyRegistration(const CSSSyntaxDescriptor&,
+                       bool inherits,
+                       const CSSValue* initial,
+                       PassRefPtr<CSSVariableData> initial_variable_data,
+                       CSSInterpolationTypes);
+
+  const CSSSyntaxDescriptor& Syntax() const { return syntax_; }
+  bool Inherits() const { return inherits_; }
+  const CSSValue* Initial() const { return initial_; }
+  CSSVariableData* InitialVariableData() const {
+    return initial_variable_data_.Get();
+  }
+  const InterpolationTypes& GetInterpolationTypes() const {
+    return interpolation_types_;
+  }
+
+  DEFINE_INLINE_TRACE() { visitor->Trace(initial_); }
+
+ private:
+  const CSSSyntaxDescriptor syntax_;
+  const bool inherits_;
+  const Member<const CSSValue> initial_;
+  const RefPtr<CSSVariableData> initial_variable_data_;
+  const InterpolationTypes interpolation_types_;
 };
 
 }  // namespace blink

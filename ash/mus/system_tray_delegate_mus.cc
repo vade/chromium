@@ -4,7 +4,7 @@
 
 #include "ash/mus/system_tray_delegate_mus.h"
 
-#include "ash/common/system/networking_config_delegate.h"
+#include "ash/system/networking_config_delegate.h"
 
 namespace ash {
 namespace {
@@ -19,7 +19,7 @@ class StubNetworkingConfigDelegate : public NetworkingConfigDelegate {
  private:
   // NetworkingConfigDelegate:
   std::unique_ptr<const ExtensionInfo> LookUpExtensionForNetwork(
-      const std::string& service_path) override {
+      const std::string& guid) override {
     return nullptr;
   }
 

@@ -20,7 +20,7 @@ namespace scheduler {
 //
 // |ABCDE                       (Execution with AutoAdvancingVirtualTimeDomain)
 // |-----------------------------> time
-class BLINK_PLATFORM_EXPORT AutoAdvancingVirtualTimeDomain
+class PLATFORM_EXPORT AutoAdvancingVirtualTimeDomain
     : public VirtualTimeDomain {
  public:
   explicit AutoAdvancingVirtualTimeDomain(base::TimeTicks initial_time);
@@ -28,7 +28,8 @@ class BLINK_PLATFORM_EXPORT AutoAdvancingVirtualTimeDomain
 
   // TimeDomain implementation:
   base::Optional<base::TimeDelta> DelayTillNextTask(LazyNow* lazy_now) override;
-  void RequestWakeup(base::TimeTicks now, base::TimeDelta delay) override;
+  void RequestWakeUpAt(base::TimeTicks now, base::TimeTicks run_time) override;
+  void CancelWakeUpAt(base::TimeTicks run_time) override;
   const char* GetName() const override;
 
   // Controls whether or not virtual time is allowed to advance, when the

@@ -60,9 +60,8 @@ class HeadlessBrowserTest : public content::BrowserTestBase {
   ~HeadlessBrowserTest() override;
 
   // BrowserTestBase:
-  void RunTestOnMainThreadLoop() override;
-  void SetUpOnMainThread() override;
-  void TearDownOnMainThread() override;
+  void PreRunTestOnMainThread() override;
+  void PostRunTestOnMainThread() override;
 
   // Run an asynchronous test in a nested run loop. The caller should call
   // FinishAsynchronousTest() to notify that the test should finish.
@@ -116,6 +115,13 @@ class HeadlessAsyncDevTooledBrowserTest : public HeadlessBrowserTest,
   // need to ensure that FinishAsynchronousTest() is called after response(s)
   // are processed (e.g. in a callback).
   virtual void RunDevTooledTest() = 0;
+
+  // Returns the protocol handlers to construct the browser with.  By default
+  // the map returned is empty.
+  virtual ProtocolHandlerMap GetProtocolHandlers();
+
+  // Whether or not we should request a TabSocket when creating |web_contents_|.
+  virtual bool GetCreateTabSocket();
 
  protected:
   void RunTest();

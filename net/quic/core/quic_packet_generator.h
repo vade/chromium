@@ -73,6 +73,7 @@ class QUIC_EXPORT_PRIVATE QuicPacketGenerator {
 
   QuicPacketGenerator(QuicConnectionId connection_id,
                       QuicFramer* framer,
+                      QuicRandom* random_generator,
                       QuicBufferAllocator* buffer_allocator,
                       DelegateInterface* delegate);
 
@@ -92,11 +93,14 @@ class QUIC_EXPORT_PRIVATE QuicPacketGenerator {
   // mode, these packets will also be sent during this call.
   // |delegate| (if not nullptr) will be informed once all packets sent as a
   // result of this call are ACKed by the peer.
+  // When |state| is FIN_AND_PADDING, random padding of size [1, 256] will be
+  // added after stream frames. If current constructed packet cannot
+  // accommodate, the padding will overflow to the next packet(s).
   QuicConsumedData ConsumeData(
       QuicStreamId id,
       QuicIOVector iov,
       QuicStreamOffset offset,
-      bool fin,
+      StreamSendingState state,
       QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener);
 
   // Sends as many data only packets as allowed by the send algorithm and the
@@ -158,6 +162,10 @@ class QUIC_EXPORT_PRIVATE QuicPacketGenerator {
   // Sets the encrypter to use for the encryption level.
   void SetEncrypter(EncryptionLevel level, QuicEncrypter* encrypter);
 
+  // Returns true if there are control frames or current constructed packet has
+  // pending retransmittable frames.
+  bool HasRetransmittableFrames() const;
+
   // Sets the encryption level that will be applied to new packets.
   void set_encryption_level(EncryptionLevel level);
 
@@ -172,13 +180,12 @@ class QUIC_EXPORT_PRIVATE QuicPacketGenerator {
   // when there are frames queued in the creator.
   void SetMaxPacketLength(QuicByteCount length);
 
-  // Sets |path_id| to be the path on which next packet is generated.
-  void SetCurrentPath(QuicPathId path_id,
-                      QuicPacketNumber least_packet_awaited_by_peer,
-                      QuicPacketCount max_packets_in_flight);
-
   void set_debug_delegate(QuicPacketCreator::DebugDelegate* debug_delegate) {
     packet_creator_.set_debug_delegate(debug_delegate);
+  }
+
+  bool latched_flag_no_stop_waiting_frames() const {
+    return packet_creator_.latched_flag_no_stop_waiting_frames();
   }
 
  private:
@@ -197,6 +204,13 @@ class QUIC_EXPORT_PRIVATE QuicPacketGenerator {
   // fit into current open packet.
   bool AddNextPendingFrame();
 
+  // Adds a random amount of padding (between 1 to 256 bytes).
+  void AddRandomPadding();
+
+  // Sends remaining pending padding.
+  // Pending paddings should only be sent when there is nothing else to send.
+  void SendRemainingPendingPadding();
+
   DelegateInterface* delegate_;
 
   QuicPacketCreator packet_creator_;
@@ -213,6 +227,8 @@ class QUIC_EXPORT_PRIVATE QuicPacketGenerator {
   // are referenced elsewhere so that they can later be (optionally)
   // retransmitted.
   QuicStopWaitingFrame pending_stop_waiting_frame_;
+
+  QuicRandom* random_generator_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicPacketGenerator);
 };

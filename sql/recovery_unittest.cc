@@ -805,6 +805,83 @@ TEST_F(SQLRecoveryTest, RecoverDatabase) {
   EXPECT_EQ("trailer", ExecuteWithResults(&db(), kVSql, "|", "\n"));
 }
 
+// When RecoverDatabase() encounters SQLITE_NOTADB, the database is deleted.
+TEST_F(SQLRecoveryTest, RecoverDatabaseDelete) {
+  // Create a valid database, then write junk over the header.  This should lead
+  // to SQLITE_NOTADB, which will cause ATTACH to fail.
+  ASSERT_TRUE(db().Execute("CREATE TABLE x (t TEXT)"));
+  ASSERT_TRUE(db().Execute("INSERT INTO x VALUES ('This is a test')"));
+  db().Close();
+  WriteJunkToDatabase(SQLTestBase::TYPE_OVERWRITE);
+
+  {
+    sql::test::ScopedErrorExpecter expecter;
+    expecter.ExpectError(SQLITE_NOTADB);
+
+    // Reopen() here because it will see SQLITE_NOTADB.
+    ASSERT_TRUE(Reopen());
+
+    // This should "recover" the database by making it valid, but empty.
+    sql::Recovery::RecoverDatabase(&db(), db_path());
+
+    ASSERT_TRUE(expecter.SawExpectedErrors());
+  }
+
+  // Recovery poisoned the handle, must re-open.
+  db().Close();
+  ASSERT_TRUE(Reopen());
+
+  EXPECT_EQ("", GetSchema(&db()));
+}
+
+// Allow callers to validate the database between recovery and commit.
+TEST_F(SQLRecoveryTest, BeginRecoverDatabase) {
+  // Create a table with a broken index.
+  ASSERT_TRUE(db().Execute("CREATE TABLE t (id INTEGER PRIMARY KEY, c TEXT)"));
+  ASSERT_TRUE(db().Execute("CREATE UNIQUE INDEX t_id ON t (id)"));
+  ASSERT_TRUE(db().Execute("INSERT INTO t VALUES (1, 'hello world')"));
+  ASSERT_TRUE(db().Execute("INSERT INTO t VALUES (2, 'testing')"));
+  ASSERT_TRUE(db().Execute("INSERT INTO t VALUES (3, 'nope')"));
+
+  // Inject corruption into the index.
+  db().Close();
+  const char kDeleteSql[] = "DELETE FROM t WHERE id = 3";
+  ASSERT_TRUE(sql::test::CorruptTableOrIndex(db_path(), "t_id", kDeleteSql));
+  ASSERT_TRUE(Reopen());
+
+  // id as read from index.
+  const char kSelectIndexIdSql[] = "SELECT id FROM t INDEXED BY t_id";
+  EXPECT_EQ("1,2,3", ExecuteWithResults(&db(), kSelectIndexIdSql, "|", ","));
+
+  // id as read from table.
+  const char kSelectTableIdSql[] = "SELECT id FROM t NOT INDEXED";
+  EXPECT_EQ("1,2", ExecuteWithResults(&db(), kSelectTableIdSql, "|", ","));
+
+  // Run recovery code, then rollback.  Database remains the same.
+  {
+    std::unique_ptr<sql::Recovery> recovery =
+        sql::Recovery::BeginRecoverDatabase(&db(), db_path());
+    ASSERT_TRUE(recovery);
+    sql::Recovery::Rollback(std::move(recovery));
+  }
+  db().Close();
+  ASSERT_TRUE(Reopen());
+  EXPECT_EQ("1,2,3", ExecuteWithResults(&db(), kSelectIndexIdSql, "|", ","));
+  EXPECT_EQ("1,2", ExecuteWithResults(&db(), kSelectTableIdSql, "|", ","));
+
+  // Run recovery code, then commit.  The failing row is dropped.
+  {
+    std::unique_ptr<sql::Recovery> recovery =
+        sql::Recovery::BeginRecoverDatabase(&db(), db_path());
+    ASSERT_TRUE(recovery);
+    ASSERT_TRUE(sql::Recovery::Recovered(std::move(recovery)));
+  }
+  db().Close();
+  ASSERT_TRUE(Reopen());
+  EXPECT_EQ("1,2", ExecuteWithResults(&db(), kSelectIndexIdSql, "|", ","));
+  EXPECT_EQ("1,2", ExecuteWithResults(&db(), kSelectTableIdSql, "|", ","));
+}
+
 // Test histograms recorded when the invalid database cannot be attached.
 TEST_F(SQLRecoveryTest, AttachFailure) {
   // Create a valid database, then write junk over the header.  This should lead

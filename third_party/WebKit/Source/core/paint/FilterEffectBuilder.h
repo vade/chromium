@@ -28,10 +28,9 @@
 
 #include "core/CoreExport.h"
 #include "platform/geometry/FloatRect.h"
+#include "platform/graphics/paint/PaintFlags.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Allocator.h"
-
-class SkPaint;
+#include "platform/wtf/Allocator.h"
 
 namespace blink {
 
@@ -49,29 +48,33 @@ class CORE_EXPORT FilterEffectBuilder final {
   STACK_ALLOCATED();
 
  public:
-  FilterEffectBuilder(Node*,
-                      const FloatRect& zoomedReferenceBox,
+  FilterEffectBuilder(const FloatRect& zoomed_reference_box,
                       float zoom,
-                      const SkPaint* fillPaint = nullptr,
-                      const SkPaint* strokePaint = nullptr);
+                      const PaintFlags* fill_flags = nullptr,
+                      const PaintFlags* stroke_flags = nullptr);
+  FilterEffectBuilder(Node*,
+                      const FloatRect& zoomed_reference_box,
+                      float zoom,
+                      const PaintFlags* fill_flags = nullptr,
+                      const PaintFlags* stroke_flags = nullptr);
 
-  Filter* buildReferenceFilter(SVGFilterElement&,
-                               FilterEffect* previousEffect,
+  Filter* BuildReferenceFilter(SVGFilterElement&,
+                               FilterEffect* previous_effect,
                                SVGFilterGraphNodeMap* = nullptr) const;
 
-  FilterEffect* buildFilterEffect(const FilterOperations&) const;
-  CompositorFilterOperations buildFilterOperations(
+  FilterEffect* BuildFilterEffect(const FilterOperations&) const;
+  CompositorFilterOperations BuildFilterOperations(
       const FilterOperations&) const;
 
  private:
-  Filter* buildReferenceFilter(const ReferenceFilterOperation&,
-                               FilterEffect* previousEffect) const;
+  Filter* BuildReferenceFilter(const ReferenceFilterOperation&,
+                               FilterEffect* previous_effect) const;
 
-  Member<Node> m_targetContext;
-  FloatRect m_referenceBox;
-  float m_zoom;
-  const SkPaint* m_fillPaint;
-  const SkPaint* m_strokePaint;
+  Member<Node> target_context_;
+  FloatRect reference_box_;
+  float zoom_;
+  const PaintFlags* fill_flags_;
+  const PaintFlags* stroke_flags_;
 };
 
 }  // namespace blink

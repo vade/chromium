@@ -11,6 +11,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/histogram_tester.h"
@@ -23,7 +24,6 @@
 #include "chrome/browser/safe_browsing/local_database_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_blocking_page.h"
 #include "chrome/browser/safe_browsing/test_safe_browsing_service.h"
-#include "chrome/browser/safe_browsing/threat_details.h"
 #include "chrome/browser/safe_browsing/ui_manager.h"
 #include "chrome/browser/ssl/cert_verifier_browser_test.h"
 #include "chrome/browser/ssl/security_state_tab_helper.h"
@@ -36,8 +36,9 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/prefs/pref_service.h"
+#include "components/safe_browsing/browser/threat_details.h"
+#include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "components/safe_browsing_db/database_manager.h"
-#include "components/safe_browsing_db/safe_browsing_prefs.h"
 #include "components/safe_browsing_db/test_database_manager.h"
 #include "components/safe_browsing_db/util.h"
 #include "components/security_interstitials/core/controller_client.h"
@@ -59,6 +60,7 @@
 #include "net/cert/mock_cert_verifier.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/url_request/url_request_mock_http_job.h"
+#include "testing/gmock/include/gmock/gmock-matchers.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using chrome_browser_interstitials::SecurityInterstitialIDNTest;
@@ -67,7 +69,7 @@ using content::InterstitialPage;
 using content::NavigationController;
 using content::RenderFrameHost;
 using content::WebContents;
-using security_interstitials::SafeBrowsingErrorUI;
+using security_interstitials::BaseSafeBrowsingErrorUI;
 
 namespace safe_browsing {
 
@@ -77,6 +79,9 @@ const char kEmptyPage[] = "empty.html";
 const char kHTTPSPage[] = "/ssl/google.html";
 const char kMaliciousPage[] = "safe_browsing/malware.html";
 const char kCrossSiteMaliciousPage[] = "safe_browsing/malware2.html";
+const char kPageWithCrossOriginMaliciousIframe[] =
+    "safe_browsing/malware3.html";
+const char kCrossOriginMaliciousIframeHost[] = "malware.test";
 const char kMaliciousIframe[] = "safe_browsing/malware_iframe.html";
 const char kUnrelatedUrl[] = "https://www.google.com";
 
@@ -98,8 +103,8 @@ class FakeSafeBrowsingDatabaseManager : public TestSafeBrowsingDatabaseManager {
 
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        base::Bind(&FakeSafeBrowsingDatabaseManager::OnCheckBrowseURLDone,
-                   this, gurl, client));
+        base::BindOnce(&FakeSafeBrowsingDatabaseManager::OnCheckBrowseURLDone,
+                       this, gurl, client));
     return false;
   }
 
@@ -164,8 +169,8 @@ class FakeSafeBrowsingUIManager : public TestSafeBrowsingUIManager {
     // Notify the UI thread that we got a report.
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        base::Bind(&FakeSafeBrowsingUIManager::OnThreatDetailsDone, this,
-                   serialized));
+        base::BindOnce(&FakeSafeBrowsingUIManager::OnThreatDetailsDone, this,
+                       serialized));
   }
 
   void OnThreatDetailsDone(const std::string& serialized) {
@@ -215,8 +220,11 @@ class TestThreatDetailsFactory : public ThreatDetailsFactory {
   ThreatDetails* CreateThreatDetails(
       BaseUIManager* delegate,
       WebContents* web_contents,
-      const security_interstitials::UnsafeResource& unsafe_resource) override {
-    details_ = new ThreatDetails(delegate, web_contents, unsafe_resource);
+      const security_interstitials::UnsafeResource& unsafe_resource,
+      net::URLRequestContextGetter* request_context_getter,
+      history::HistoryService* history_service) override {
+    details_ = new ThreatDetails(delegate, web_contents, unsafe_resource,
+                                 request_context_getter, history_service);
     return details_;
   }
 
@@ -234,7 +242,7 @@ class TestSafeBrowsingBlockingPage : public SafeBrowsingBlockingPage {
       WebContents* web_contents,
       const GURL& main_frame_url,
       const UnsafeResourceList& unsafe_resources,
-      const SafeBrowsingErrorUI::SBErrorDisplayOptions& display_options)
+      const BaseSafeBrowsingErrorUI::SBErrorDisplayOptions& display_options)
       : SafeBrowsingBlockingPage(manager,
                                  web_contents,
                                  main_frame_url,
@@ -242,7 +250,7 @@ class TestSafeBrowsingBlockingPage : public SafeBrowsingBlockingPage {
                                  display_options),
         wait_for_delete_(false) {
     // Don't wait the whole 3 seconds for the browser test.
-    threat_details_proceed_delay_ms_ = 100;
+    SetThreatDetailsProceedDelayForTesting(100);
   }
 
   ~TestSafeBrowsingBlockingPage() override {
@@ -289,12 +297,13 @@ class TestSafeBrowsingBlockingPageFactory
         prefs->GetBoolean(prefs::kSafeBrowsingExtendedReportingOptInAllowed);
     bool is_proceed_anyway_disabled =
         prefs->GetBoolean(prefs::kSafeBrowsingProceedAnywayDisabled);
-    SafeBrowsingErrorUI::SBErrorDisplayOptions display_options(
+    BaseSafeBrowsingErrorUI::SBErrorDisplayOptions display_options(
         BaseBlockingPage::IsMainPageLoadBlocked(unsafe_resources),
         is_extended_reporting_opt_in_allowed,
         web_contents->GetBrowserContext()->IsOffTheRecord(),
         IsExtendedReportingEnabled(*prefs), IsScout(*prefs),
-        is_proceed_anyway_disabled);
+        is_proceed_anyway_disabled,
+        BaseBlockingPage::IsMainPageLoadBlocked(unsafe_resources));
     return new TestSafeBrowsingBlockingPage(delegate, web_contents,
                                             main_frame_url, unsafe_resources,
                                             display_options);
@@ -334,6 +343,14 @@ class SafeBrowsingBlockingPageBrowserTest
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
+    command_line->AppendSwitchASCII("enable-features",
+                                    "ThreatDomDetailsTagAttributes<SBDomStudy");
+    command_line->AppendSwitchASCII("force-fieldtrials",
+                                    "SBDomStudy/SBDomGroup");
+    command_line->AppendSwitchASCII(
+        "force-fieldtrial-params",
+        "SBDomStudy.SBDomGroup:tag_attribute_csv/div%2Cfoo%2Cdiv%2Cbaz");
+
     if (testing::get<1>(GetParam()))
       content::IsolateAllSitesForTesting(command_line);
   }
@@ -341,7 +358,7 @@ class SafeBrowsingBlockingPageBrowserTest
   void SetUpOnMainThread() override {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        base::Bind(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
+        base::BindOnce(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
   }
 
   void SetURLThreatType(const GURL& url, SBThreatType threat_type) {
@@ -411,6 +428,27 @@ class SafeBrowsingBlockingPageBrowserTest
     GURL url = net::URLRequestMockHTTPJob::GetMockUrl(kCrossSiteMaliciousPage);
     GURL iframe_url = net::URLRequestMockHTTPJob::GetMockUrl(kMaliciousIframe);
     SetURLThreatType(iframe_url, testing::get<0>(GetParam()));
+
+    ui_test_utils::NavigateToURL(browser(), url);
+    EXPECT_TRUE(WaitForReady());
+    return url;
+  }
+
+  // Adds a safebrowsing threat results to the fake safebrowsing service, and
+  // navigates to a page with a cross-origin iframe containing the threat site.
+  // Returns the url of the parent page and sets |iframe_url| to the malicious
+  // cross-origin iframe.
+  GURL SetupCrossOriginThreatIframeWarningAndNavigate(GURL* iframe_url) {
+    content::SetupCrossSiteRedirector(embedded_test_server());
+    EXPECT_TRUE(embedded_test_server()->Start());
+    GURL url = embedded_test_server()->GetURL(
+        std::string("/") + kPageWithCrossOriginMaliciousIframe);
+    *iframe_url =
+        embedded_test_server()->GetURL(std::string("/") + kMaliciousIframe);
+    GURL::Replacements replace_host;
+    replace_host.SetHostStr(kCrossOriginMaliciousIframeHost);
+    *iframe_url = iframe_url->ReplaceComponents(replace_host);
+    SetURLThreatType(*iframe_url, testing::get<0>(GetParam()));
 
     ui_test_utils::NavigateToURL(browser(), url);
     EXPECT_TRUE(WaitForReady());
@@ -525,13 +563,26 @@ class SafeBrowsingBlockingPageBrowserTest
     if (!rfh)
       return VISIBILITY_ERROR;
 
-    std::unique_ptr<base::Value> value = content::ExecuteScriptAndGetValue(
-        rfh, "var node = document.getElementById('" + node_id +
-                 "');\n"
-                 "if (node)\n"
-                 "   node.offsetWidth > 0 && node.offsetHeight > 0;"
-                 "else\n"
-                 "  'node not found';\n");
+    // clang-format off
+    std::string jsFindVisibility = R"(
+      (function isNodeVisible(node) {
+        if (!node) return 'node not found';
+        if (node.offsetWidth === 0 || node.offsetHeight === 0) return false;
+        // Do not check opacity, since the css transition may actually leave
+        // opacity at 0 after it's been unhidden
+        if (node.classList.contains('hidden')) return false;
+        // Otherwise, we must check all parent nodes
+        var parentVisibility = isNodeVisible(node.parentElement);
+        if (parentVisibility === 'node not found') {
+          return true; // none of the parents are set invisible
+        }
+        return parentVisibility;
+      }(document.getElementById(')" + node_id + R"(')));)";
+    // clang-format on
+
+    std::unique_ptr<base::Value> value =
+        content::ExecuteScriptAndGetValue(rfh, jsFindVisibility);
+
     if (!value.get())
       return VISIBILITY_ERROR;
 
@@ -573,8 +624,8 @@ class SafeBrowsingBlockingPageBrowserTest
     EXPECT_EQ(HIDDEN, GetVisibility("extended-reporting-opt-in"));
     EXPECT_EQ(HIDDEN, GetVisibility("opt-in-checkbox"));
     EXPECT_EQ(HIDDEN, GetVisibility("proceed-link"));
-    EXPECT_TRUE(Click("details-button"));
     EXPECT_EQ(VISIBLE, GetVisibility("learn-more-link"));
+    EXPECT_TRUE(Click("details-button"));
     EXPECT_EQ(VISIBLE, GetVisibility("proceed-link"));
 
     EXPECT_TRUE(ClickAndWaitForDetach("primary-button"));
@@ -600,6 +651,26 @@ class SafeBrowsingBlockingPageBrowserTest
     }
     EXPECT_EQ(expected_child_size, actual_resource.child_ids_size());
     EXPECT_EQ(expected_tag_name, actual_resource.tag_name());
+  }
+
+  void VerifyElement(
+      const ClientSafeBrowsingReportRequest& report,
+      const HTMLElement& actual_element,
+      const std::string& expected_tag_name,
+      const int expected_child_ids_size,
+      const std::vector<AttributeNameValue>& expected_attributes) {
+    EXPECT_EQ(expected_tag_name, actual_element.tag());
+    EXPECT_EQ(expected_child_ids_size, actual_element.child_ids_size());
+    ASSERT_EQ(static_cast<int>(expected_attributes.size()),
+              actual_element.attribute_size());
+    for (size_t i = 0; i < expected_attributes.size(); ++i) {
+      const AttributeNameValue& expected_attribute_pair =
+          expected_attributes[i];
+      const HTMLElement::Attribute& actual_attribute_pb =
+          actual_element.attribute(i);
+      EXPECT_EQ(expected_attribute_pair.first, actual_attribute_pb.name());
+      EXPECT_EQ(expected_attribute_pair.second, actual_attribute_pb.value());
+    }
   }
 
   void ExpectSecurityIndicatorDowngrade(content::WebContents* tab,
@@ -787,6 +858,32 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
         net::URLRequestMockHTTPJob::GetMockUrl(kMaliciousIframe).spec(),
         url.spec(),  // kCrossSiteMaliciousPage
         0, "IFRAME");
+
+    ASSERT_EQ(2, report.dom_size());
+    // Because the order of elements is not deterministic, we basically need to
+    // verify the relationship. Namely that there is an IFRAME element and that
+    // its has a DIV as its parent.
+    int iframe_node_id = -1;
+    for (const HTMLElement& elem : report.dom()) {
+      if (elem.tag() == "IFRAME") {
+        iframe_node_id = elem.id();
+        VerifyElement(report, elem, "IFRAME", /*child_size=*/0,
+                      std::vector<AttributeNameValue>());
+        break;
+      }
+    }
+    EXPECT_GT(iframe_node_id, -1);
+
+    // Find the parent DIV that is the parent of the iframe.
+    for (const HTMLElement& elem : report.dom()) {
+      if (elem.id() != iframe_node_id) {
+        // Not the IIFRAME, so this is the parent DIV
+        VerifyElement(report, elem, "DIV", /*child_size=*/1,
+                      {std::make_pair("foo", "1")});
+        // Make sure this DIV has the IFRAME as a child.
+        EXPECT_EQ(iframe_node_id, elem.child_ids(0));
+      }
+    }
   }
 }
 
@@ -1127,7 +1224,7 @@ class SecurityStyleTestObserver : public content::WebContentsObserver {
  public:
   explicit SecurityStyleTestObserver(content::WebContents* web_contents)
       : content::WebContentsObserver(web_contents),
-        latest_security_style_(blink::WebSecurityStyleUnknown),
+        latest_security_style_(blink::kWebSecurityStyleUnknown),
         latest_security_style_explanations_() {}
 
   blink::WebSecurityStyle latest_security_style() const {
@@ -1164,8 +1261,7 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
   // The security indicator should be downgraded while the interstitial shows.
   SetupThreatIframeWarningAndNavigate();
   ExpectSecurityIndicatorDowngrade(error_tab, 0u);
-  EXPECT_EQ(blink::WebSecurityStyleAuthenticationBroken,
-            observer.latest_security_style());
+  EXPECT_EQ(blink::kWebSecurityStyleInsecure, observer.latest_security_style());
   // Security style summary for Developer Tools should contain a warning.
   EXPECT_EQ(l10n_util::GetStringUTF8(IDS_SAFEBROWSING_WARNING),
             observer.latest_security_style_explanations().summary);
@@ -1237,8 +1333,13 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
       net::URLRequestMockHTTPJob::GetMockUrl("http://example.test");
   ui_test_utils::NavigateToURL(browser(), start_url);
 
-  // The security indicator should be downgraded while the interstitial shows.
-  SetupThreatIframeWarningAndNavigate();
+  // The security indicator should be downgraded while the interstitial
+  // shows. Load a cross-origin iframe to be sure that the main frame origin
+  // (rather than the subresource origin) is being added and removed from the
+  // whitelist; this is a regression test for https://crbug.com/710955.
+  GURL bad_iframe_url;
+  GURL main_url =
+      SetupCrossOriginThreatIframeWarningAndNavigate(&bad_iframe_url);
   WebContents* error_tab = browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(error_tab);
   ExpectSecurityIndicatorDowngrade(error_tab, 0u);
@@ -1262,6 +1363,13 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
   ASSERT_TRUE(entry);
   EXPECT_EQ(start_url, entry->GetURL());
   ExpectNoSecurityIndicatorDowngrade(post_tab);
+
+  // Clear the malicious subresource URL, and check that the hostname of the
+  // interstitial is no longer marked as Dangerous.
+  ClearBadURL(bad_iframe_url);
+  ui_test_utils::NavigateToURL(browser(), main_url);
+  ExpectNoSecurityIndicatorDowngrade(
+      browser()->tab_strip_model()->GetActiveWebContents());
 }
 
 // Test that the security indicator is downgraded after clicking through a

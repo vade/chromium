@@ -49,6 +49,7 @@ import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.HttpAuthDatabase;
 import org.chromium.android_webview.PlatformServiceBridge;
 import org.chromium.android_webview.ResourcesContextWrapperFactory;
+import org.chromium.android_webview.command_line.CommandLineUtil;
 import org.chromium.base.BuildConfig;
 import org.chromium.base.BuildInfo;
 import org.chromium.base.CommandLine;
@@ -59,12 +60,10 @@ import org.chromium.base.PathService;
 import org.chromium.base.PathUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.NativeLibraries;
 import org.chromium.base.library_loader.ProcessInitException;
-import org.chromium.content.browser.ContentViewStatics;
 import org.chromium.content.browser.input.LGEmailActionModeWorkaround;
 import org.chromium.net.NetworkChangeNotifier;
 
@@ -85,7 +84,6 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
 
     private static final String CHROMIUM_PREFS_NAME = "WebViewChromiumPrefs";
     private static final String VERSION_CODE_PREF = "lastVersionCodeUsed";
-    private static final String COMMAND_LINE_FILE = "/data/local/tmp/webview-command-line";
     private static final String HTTP_AUTH_DATABASE_FILE = "http_auth.db";
 
     private class WebViewChromiumRunQueue {
@@ -176,7 +174,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
     private SharedPreferences mWebViewPrefs;
     private WebViewDelegate mWebViewDelegate;
 
-    private boolean mShouldDisableThreadChecking;
+    boolean mShouldDisableThreadChecking;
 
     /**
      * Entry point for newer versions of Android.
@@ -206,7 +204,6 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         initialize(delegate);
     }
 
-    @SuppressFBWarnings("DMI_HARDCODED_ABSOLUTE_FILENAME")
     private void initialize(WebViewDelegate webViewDelegate) {
         mWebViewDelegate = webViewDelegate;
         Context ctx = mWebViewDelegate.getApplication().getApplicationContext();
@@ -224,14 +221,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         // WebView needs to make sure to always use the wrapped application context.
         ContextUtils.initApplicationContext(ResourcesContextWrapperFactory.get(ctx));
 
-        if (isBuildDebuggable()) {
-            // Suppress the StrictMode violation as this codepath is only hit on debuggable builds.
-            StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
-            CommandLine.initFromFile(COMMAND_LINE_FILE);
-            StrictMode.setThreadPolicy(oldPolicy);
-        } else {
-            CommandLine.init(null);
-        }
+        CommandLineUtil.initCommandLine();
 
         boolean multiProcess = false;
         if (BuildInfo.isAtLeastO()) {
@@ -258,8 +248,15 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         System.loadLibrary("webviewchromium_plat_support");
 
         // Use shared preference to check for package downgrade.
-        mWebViewPrefs = ContextUtils.getApplicationContext().getSharedPreferences(
-                CHROMIUM_PREFS_NAME, Context.MODE_PRIVATE);
+        // Since N, getSharedPreferences creates the preference dir if it doesn't exist,
+        // causing a disk write.
+        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskWrites();
+        try {
+            mWebViewPrefs = ContextUtils.getApplicationContext().getSharedPreferences(
+                    CHROMIUM_PREFS_NAME, Context.MODE_PRIVATE);
+        } finally {
+            StrictMode.setThreadPolicy(oldPolicy);
+        }
         int lastVersion = mWebViewPrefs.getInt(VERSION_CODE_PREF, 0);
         int currentVersion = packageInfo.versionCode;
         if (!versionCodeGE(currentVersion, lastVersion)) {
@@ -285,10 +282,6 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
             throw new IllegalArgumentException(
                     "WebView cannot be used with device protected storage");
         }
-    }
-
-    private static boolean isBuildDebuggable() {
-        return !Build.TYPE.equals("user");
     }
 
     /**
@@ -341,13 +334,15 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         AwContents.setAwDrawGLFunctionTable(GraphicsUtils.getDrawGLFunctionTable());
     }
 
-    private void initNetworkChangeNotifier(Context applicationContext) {
+    private void doNetworkInitializations(Context applicationContext) {
         if (applicationContext.checkPermission(Manifest.permission.ACCESS_NETWORK_STATE,
                 Process.myPid(), Process.myUid()) == PackageManager.PERMISSION_GRANTED) {
-            NetworkChangeNotifier.init(applicationContext);
+            NetworkChangeNotifier.init();
             NetworkChangeNotifier.setAutoDetectConnectivityState(
                     new AwNetworkChangeNotifierRegistrationPolicy());
         }
+
+        AwContentsStatics.setCheckClearTextPermitted(BuildInfo.targetsAtLeastO(applicationContext));
     }
 
     private void ensureChromiumStartedLocked(boolean onMainThread) {
@@ -394,7 +389,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
     // lives in the ui/ layer. See ui/base/ui_base_paths.h
     private static final int DIR_RESOURCE_PAKS_ANDROID = 3003;
 
-    private void startChromiumLocked() {
+    protected void startChromiumLocked() {
         assert Thread.holdsLock(mLock) && ThreadUtils.runningOnUiThread();
 
         // The post-condition of this method is everything is ready, so notify now to cover all
@@ -415,25 +410,35 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         PathService.override(DIR_RESOURCE_PAKS_ANDROID, "/system/framework/webview/paks");
 
         // Make sure that ResourceProvider is initialized before starting the browser process.
-        final String webViewPackageName = WebViewFactory.getLoadedPackageInfo().packageName;
+        final PackageInfo webViewPackageInfo = WebViewFactory.getLoadedPackageInfo();
+        final String webViewPackageName = webViewPackageInfo.packageName;
         final Context context = ContextUtils.getApplicationContext();
-        setUpResources(webViewPackageName, context);
+        setUpResources(webViewPackageInfo, context);
         initPlatSupportLibrary();
-        initNetworkChangeNotifier(context);
+        doNetworkInitializations(context);
         final boolean isExternalService = true;
         AwBrowserProcess.configureChildProcessLauncher(webViewPackageName, isExternalService);
         AwBrowserProcess.start();
-        AwBrowserProcess.handleMinidumps(webViewPackageName);
 
-        PlatformServiceBridge.getInstance(context)
-                .queryMetricsSetting(new ValueCallback<Boolean>() {
-                    public void onReceiveValue(Boolean enabled) {
-                        ThreadUtils.assertOnUiThread();
-                        AwMetricsServiceClient.setConsentSetting(context, enabled);
-                    }
-                });
+        final boolean enableMinidumpUploadingForTesting = CommandLine.getInstance().hasSwitch(
+                CommandLineUtil.CRASH_UPLOADS_ENABLED_FOR_TESTING_SWITCH);
+        if (enableMinidumpUploadingForTesting) {
+            AwBrowserProcess.handleMinidumps(webViewPackageName, true /* enabled */);
+        }
 
-        if (isBuildDebuggable()) {
+        PlatformServiceBridge.getInstance().queryMetricsSetting(new ValueCallback<Boolean>() {
+            // Actions conditioned on whether the Android Checkbox is toggled on
+            public void onReceiveValue(Boolean enabled) {
+                ThreadUtils.assertOnUiThread();
+                AwMetricsServiceClient.setConsentSetting(context, enabled);
+
+                if (!enableMinidumpUploadingForTesting) {
+                    AwBrowserProcess.handleMinidumps(webViewPackageName, enabled);
+                }
+            }
+        });
+
+        if (CommandLineUtil.isBuildDebuggable()) {
             setWebContentsDebuggingEnabled(true);
         }
 
@@ -499,9 +504,14 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         mDevToolsServer.setRemoteDebuggingEnabled(enable);
     }
 
-    private void setUpResources(String webViewPackageName, Context context) {
+    private void setUpResources(PackageInfo webViewPackageInfo, Context context) {
+        String packageName = webViewPackageInfo.packageName;
+        if (webViewPackageInfo.applicationInfo.metaData != null) {
+            packageName = webViewPackageInfo.applicationInfo.metaData.getString(
+                    "com.android.webview.WebViewDonorPackage", packageName);
+        }
         ResourceRewriter.rewriteRValues(
-                mWebViewDelegate.getPackageId(context.getResources(), webViewPackageName));
+                mWebViewDelegate.getPackageId(context.getResources(), packageName));
 
         AwResource.setResources(context.getResources());
         AwResource.setConfigKeySystemUuidMapping(android.R.array.config_keySystemUuidMapping);
@@ -518,7 +528,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
                 mStaticMethods = new WebViewFactoryProvider.Statics() {
                     @Override
                     public String findAddress(String addr) {
-                        return ContentViewStatics.findAddress(addr);
+                        return AwContentsStatics.findAddress(addr);
                     }
 
                     @Override
@@ -529,7 +539,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
                     @Override
                     public void setWebContentsDebuggingEnabled(boolean enable) {
                         // Web Contents debugging is always enabled on debug builds.
-                        if (!isBuildDebuggable()) {
+                        if (!CommandLineUtil.isBuildDebuggable()) {
                             WebViewChromiumFactoryProvider.this.setWebContentsDebuggingEnabled(
                                     enable);
                         }
@@ -591,7 +601,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         final String yahooMailPackageId = "com.yahoo.mobile.client.android.mail";
         if (appName.startsWith(yahooMailPackageId)) {
             if (appTargetSdkVersion > Build.VERSION_CODES.M) return false;
-            if (versionCode > 1315849) return false;
+            if (versionCode > 1315850) return false;
             shouldDisable = true;
         }
 
@@ -643,7 +653,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
     }
 
     public TokenBindingService getTokenBindingService() {
-       synchronized (mLock) {
+        synchronized (mLock) {
             if (mTokenBindingManager == null) {
                 mTokenBindingManager = new TokenBindingManagerAdapter(this);
             }

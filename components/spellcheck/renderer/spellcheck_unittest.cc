@@ -12,6 +12,7 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
@@ -74,7 +75,7 @@ class SpellCheckTest : public testing::Test {
 #if defined(OS_MACOSX)
     // TODO(groby): Forcing spellcheck to use hunspell, even on OSX.
     // Instead, tests should exercise individual spelling engines.
-    spell_check_->languages_.push_back(new SpellcheckLanguage());
+    spell_check_->languages_.push_back(base::MakeUnique<SpellcheckLanguage>());
     spell_check_->languages_.front()->platform_spelling_engine_.reset(
         new HunspellEngine);
     spell_check_->languages_.front()->Init(std::move(file), language);
@@ -115,7 +116,7 @@ class SpellCheckTest : public testing::Test {
     EXPECT_EQ(results.size(), expected.size());
     size_t size = std::min(results.size(), expected.size());
     for (size_t j = 0; j < size; ++j) {
-      EXPECT_EQ(results[j].decoration, blink::WebTextDecorationTypeSpelling);
+      EXPECT_EQ(results[j].decoration, blink::kWebTextDecorationTypeSpelling);
       EXPECT_EQ(results[j].location, expected[j].location);
       EXPECT_EQ(results[j].length, expected[j].length);
     }
@@ -134,15 +135,13 @@ class MockTextCheckingCompletion : public blink::WebTextCheckingCompletion {
       : completion_count_(0) {
   }
 
-  void didFinishCheckingText(
+  void DidFinishCheckingText(
       const blink::WebVector<blink::WebTextCheckingResult>& results) override {
     completion_count_++;
     last_results_ = results;
   }
 
-  void didCancelCheckingText() override {
-    completion_count_++;
-  }
+  void DidCancelCheckingText() override { completion_count_++; }
 
   size_t completion_count_;
   blink::WebVector<blink::WebTextCheckingResult> last_results_;
@@ -626,6 +625,7 @@ TEST_F(SpellCheckTest, SpellCheckText) {
       L"\x092E\x0947\x0902 \x0914\x0930 \x0909\x092A\x092F\x094B\x0917\x0940 "
       L"\x092C\x0928\x093E\x0928\x093E \x0939\x0948."
     }, {
+#if !defined(OS_WIN)
       // Hungarian
       "hu-HU",
       L"A Google azt a k\x00FCldet\x00E9st v\x00E1llalta mag\x00E1ra, "
@@ -633,6 +633,7 @@ TEST_F(SpellCheckTest, SpellCheckText) {
       L"rendszerezze \x00E9s \x00E1ltal\x00E1nosan el\x00E9rhet\x0151v\x00E9, "
       L"illetve haszn\x00E1lhat\x00F3v\x00E1 tegye."
     }, {
+#endif  // !defined(OS_WIN)
       // Croatian
       "hr-HR",
       // L"Googleova " - to be added.
@@ -678,6 +679,7 @@ TEST_F(SpellCheckTest, SpellCheckText) {
       L"zasob\x00F3w informacji, aby sta\x0142y si\x0119 one powszechnie "
       L"dost\x0119pne i u\x017Cyteczne."
     }, {
+#if !defined(OS_WIN)
       // Portuguese (Brazil)
       "pt-BR",
       L"A miss\x00E3o do "
@@ -691,6 +693,7 @@ TEST_F(SpellCheckTest, SpellCheckText) {
 #endif
       L"acess\x00EDveis e \x00FAteis em car\x00E1ter universal."
     }, {
+#endif  // !defined(OS_WIN)
       // Portuguese (Portugal)
       "pt-PT",
       L"O "
@@ -760,6 +763,7 @@ TEST_F(SpellCheckTest, SpellCheckText) {
       L"Googles m\x00E5ls\x00E4ttning \x00E4r att ordna v\x00E4rldens "
       L"samlade information och g\x00F6ra den tillg\x00E4nglig f\x00F6r alla."
     }, {
+#if !defined(OS_WIN)
       // Turkish
       "tr-TR",
       // L"Google\x2019\x0131n " - to be added.
@@ -767,6 +771,7 @@ TEST_F(SpellCheckTest, SpellCheckText) {
       L"organize etmek ve evrensel olarak eri\x015Filebilir ve "
       L"kullan\x0131\x015Fl\x0131 k\x0131lmakt\x0131r."
     }, {
+#endif  // !defined(OS_WIN)
       // Ukranian
       "uk-UA",
       L"\x041c\x0456\x0441\x0456\x044f "
@@ -790,6 +795,7 @@ TEST_F(SpellCheckTest, SpellCheckText) {
       L"th\x1EBF gi\x1EDBi va l\x00E0m cho n\x00F3 universal c\x00F3 "
       L"th\x1EC3 truy c\x1EADp va h\x1EEFu d\x1EE5ng h\x01A1n."
     }, {
+#if !defined(OS_WIN)
       // Korean
       "ko",
       L"Google\xC758 \xBAA9\xD45C\xB294 \xC804\xC138\xACC4\xC758 "
@@ -797,6 +803,7 @@ TEST_F(SpellCheckTest, SpellCheckText) {
       L"\xD3B8\xB9AC\xD558\xAC8C \xC774\xC6A9\xD560 \xC218 "
       L"\xC788\xB3C4\xB85D \xD558\xB294 \xAC83\xC785\xB2C8\xB2E4."
     }, {
+#endif  // !defined(OS_WIN)
       // Albanian
       "sq",
       L"Misioni i Google \x00EBsht\x00EB q\x00EB t\x00EB organizoj\x00EB "
@@ -1139,7 +1146,7 @@ TEST_F(SpellCheckTest, CreateTextCheckingResultsKeepsMarkers) {
                                            text, spellcheck_results,
                                            &textcheck_results);
   ASSERT_EQ(spellcheck_results.size(), textcheck_results.size());
-  EXPECT_EQ(blink::WebTextDecorationTypeSpelling,
+  EXPECT_EQ(blink::kWebTextDecorationTypeSpelling,
             textcheck_results[0].decoration);
   EXPECT_EQ(spellcheck_results[0].location, textcheck_results[0].location);
   EXPECT_EQ(spellcheck_results[0].length, textcheck_results[0].length);
@@ -1157,7 +1164,7 @@ TEST_F(SpellCheckTest, CreateTextCheckingResultsAddsGrammarMarkers) {
                                            text, spellcheck_results,
                                            &textcheck_results);
   ASSERT_EQ(spellcheck_results.size(), textcheck_results.size());
-  EXPECT_EQ(blink::WebTextDecorationTypeGrammar,
+  EXPECT_EQ(blink::kWebTextDecorationTypeGrammar,
             textcheck_results[0].decoration);
   EXPECT_EQ(spellcheck_results[0].location, textcheck_results[0].location);
   EXPECT_EQ(spellcheck_results[0].length, textcheck_results[0].length);
@@ -1223,9 +1230,9 @@ TEST_F(SpellCheckTest, CreateTextCheckingResultsKeepsTypographicalApostrophe) {
   ASSERT_EQ(arraysize(kExpectedReplacements), textcheck_results.size());
   for (size_t i = 0; i < arraysize(kExpectedReplacements); ++i) {
     EXPECT_EQ(base::WideToUTF16(kExpectedReplacements[i]),
-              textcheck_results[i].replacement.utf16())
+              textcheck_results[i].replacement.Utf16())
         << "i=" << i << "\nactual: \""
-        << textcheck_results[i].replacement.utf16() << "\"";
+        << textcheck_results[i].replacement.Utf16() << "\"";
   }
 }
 

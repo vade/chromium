@@ -4,6 +4,7 @@
 
 #include "ui/ozone/public/ozone_gpu_test_helper.h"
 
+#include "base/message_loop/message_loop.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ipc/ipc_listener.h"
@@ -84,13 +85,8 @@ class FakeGpuProcessHost {
 
     ui::OzonePlatform::GetInstance()
         ->GetGpuPlatformSupportHost()
-        ->OnGpuProcessLaunched(kGpuProcessHostId, gpu_io_task_runner_, sender);
-  }
-
-  void InitOnUI() {
-    ui::OzonePlatform::GetInstance()
-        ->GetGpuPlatformSupportHost()
-        ->OnChannelEstablished();
+        ->OnGpuProcessLaunched(kGpuProcessHostId, gpu_task_runner_,
+                               gpu_io_task_runner_, sender);
   }
 
  private:
@@ -124,7 +120,6 @@ bool OzoneGpuTestHelper::Initialize(
                             base::Unretained(fake_gpu_process_host_.get())));
   io_helper_thread_->FlushForTesting();
 
-  fake_gpu_process_host_->InitOnUI();
   return true;
 }
 

@@ -5,6 +5,7 @@
     "service_manager:connector": {
       "provides": {
         "browser": [
+          "content::mojom::Child",
           "content::mojom::EmbeddedWorkerInstanceClient",
           "content::mojom::EmbeddedWorkerSetup",
           "content::mojom::FrameFactory",
@@ -18,10 +19,15 @@
         ]
       },
       "requires": {
-        "content_browser": [ "renderer" ],
+        "content_browser": [ "memory_instrumentation", "renderer" ],
         "device": [
+          "device:battery_monitor",
+          "device:generic_sensor",
           "device:power_monitor",
-          "device:time_zone_monitor"
+          "device:screen_orientation",
+          "device:sensors",
+          "device:time_zone_monitor",
+          "device:vibration"
         ],
         "ui": [
           "discardable_memory",
@@ -40,8 +46,32 @@
         ]
       },
       "requires": {
-        "content_browser": [ "renderer" ]
+        "content_browser": [ "memory_instrumentation", "renderer" ]
       }
     }
+  },
+  "required_files" : {
+    "v8_natives_data" : [
+      {
+        "path": "natives_blob.bin",
+        "platform": "linux"
+      },
+      {
+        "path": "assets/natives_blob.bin",
+        "platform": "android"
+      }
+    ],
+    "v8_snapshot_data" : [{
+      "path": "snapshot_blob.bin",
+      "platform": "linux"
+    }],
+    "v8_snapshot_32_data" : [{
+      "path": "assets/snapshot_blob_32.bin",
+      "platform": "android"
+    }],
+    "v8_snapshot_64_data" : [{
+      "path": "assets/snapshot_blob_64.bin",
+      "platform": "android"
+    }]
   }
 }

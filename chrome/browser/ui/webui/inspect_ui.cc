@@ -6,6 +6,7 @@
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/user_metrics.h"
 #include "chrome/browser/devtools/devtools_targets_ui.h"
 #include "chrome/browser/devtools/devtools_ui_bindings.h"
 #include "chrome/browser/devtools/devtools_window.h"
@@ -20,10 +21,10 @@
 #include "components/ui_devtools/devtools_server.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -286,9 +287,8 @@ class DevToolsUIBindingsEnabler
  private:
   // contents::WebContentsObserver overrides.
   void WebContentsDestroyed() override;
-  void DidNavigateMainFrame(
-      const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) override;
+  void DidFinishNavigation(
+      content::NavigationHandle* navigation_handle) override;
 
   DevToolsUIBindings bindings_;
   GURL url_;
@@ -311,10 +311,12 @@ void DevToolsUIBindingsEnabler::WebContentsDestroyed() {
   delete this;
 }
 
-void DevToolsUIBindingsEnabler::DidNavigateMainFrame(
-      const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) {
-  if (url_ != params.url)
+void DevToolsUIBindingsEnabler::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
+  if (!navigation_handle->IsInMainFrame() || !navigation_handle->HasCommitted())
+    return;
+
+  if (url_ != navigation_handle->GetURL())
     delete this;
 }
 
@@ -432,7 +434,7 @@ void InspectUI::InspectBrowserWithCustomFrontend(
 }
 
 void InspectUI::InspectDevices(Browser* browser) {
-  content::RecordAction(base::UserMetricsAction("InspectDevices"));
+  base::RecordAction(base::UserMetricsAction("InspectDevices"));
   chrome::NavigateParams params(chrome::GetSingletonTabNavigateParams(
       browser, GURL(chrome::kChromeUIInspectURL)));
   params.path_behavior = chrome::NavigateParams::IGNORE_AND_NAVIGATE;
@@ -605,8 +607,8 @@ scoped_refptr<content::DevToolsAgentHost> InspectUI::FindTarget(
 
 void InspectUI::PopulateTargets(const std::string& source,
                                 const base::ListValue& targets) {
-  web_ui()->CallJavascriptFunctionUnsafe("populateTargets",
-                                         base::StringValue(source), targets);
+  web_ui()->CallJavascriptFunctionUnsafe("populateTargets", base::Value(source),
+                                         targets);
 }
 
 void InspectUI::PopulateAdditionalTargets(const base::ListValue& targets) {

@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 from page_sets.system_health import platforms
+from page_sets.system_health import story_tags
 from page_sets.system_health import system_health_story
 
 from page_sets.login_helpers import dropbox_login
@@ -30,6 +31,7 @@ class LoadGoogleStory(_LoadingStory):
 class LoadBaiduStory(_LoadingStory):
   NAME = 'load:search:baidu'
   URL = 'https://www.baidu.com/s?word=google'
+  TAGS = [story_tags.INTERNATIONAL]
 
 
 class LoadYahooStory(_LoadingStory):
@@ -37,15 +39,17 @@ class LoadYahooStory(_LoadingStory):
   URL = 'https://search.yahoo.com/search;_ylt=?p=google'
 
 
-class LoadAmazonStory(_LoadingStory):
+class LoadAmazonDesktopStory(_LoadingStory):
   NAME = 'load:search:amazon'
   URL = 'https://www.amazon.com/s/?field-keywords=nexus'
+  SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
 
 
 class LoadTaobaoDesktopStory(_LoadingStory):
   NAME = 'load:search:taobao'
   URL = 'https://world.taobao.com/'
   SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
+  TAGS = [story_tags.INTERNATIONAL]
 
 
 class LoadTaobaoMobileStory(_LoadingStory):
@@ -53,11 +57,13 @@ class LoadTaobaoMobileStory(_LoadingStory):
   # "ali_trackid" in the URL suppresses "Download app" interstitial.
   URL = 'http://m.intl.taobao.com/?ali_trackid'
   SUPPORTED_PLATFORMS = platforms.MOBILE_ONLY
+  TAGS = [story_tags.INTERNATIONAL]
 
 
 class LoadYandexStory(_LoadingStory):
   NAME = 'load:search:yandex'
   URL = 'https://yandex.ru/touchsearch?text=science'
+  TAGS = [story_tags.INTERNATIONAL]
 
 
 class LoadEbayStory(_LoadingStory):
@@ -90,22 +96,26 @@ class LoadVkStory(_LoadingStory):
   # indefinitely on mobile
   # (see https://github.com/chromium/web-page-replay/issues/71).
   SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
+  TAGS = [story_tags.INTERNATIONAL]
 
 
-class LoadInstagramStory(_LoadingStory):
+class LoadInstagramDesktopStory(_LoadingStory):
   NAME = 'load:social:instagram'
   URL = 'https://www.instagram.com/selenagomez/'
+  SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
 
 
 class LoadPinterestStory(_LoadingStory):
   NAME = 'load:social:pinterest'
   URL = 'https://uk.pinterest.com/categories/popular/'
+  TAGS = [story_tags.JAVASCRIPT_HEAVY]
 
 
 class LoadTumblrStory(_LoadingStory):
   NAME = 'load:social:tumblr'
   # Redirects to the "http://" version.
   URL = 'https://50thousand.tumblr.com/'
+  TAGS = [story_tags.JAVASCRIPT_HEAVY]
 
 
 ################################################################################
@@ -113,26 +123,30 @@ class LoadTumblrStory(_LoadingStory):
 ################################################################################
 
 
-class LoadBbcStory(_LoadingStory):
+class LoadBbcDesktopStory(_LoadingStory):
   NAME = 'load:news:bbc'
   # Redirects to the "http://" version.
   URL = 'https://www.bbc.co.uk/news/world-asia-china-36189636'
+  SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
 
 
 class LoadCnnStory(_LoadingStory):
   NAME = 'load:news:cnn'
   # Using "https://" shows "Your connection is not private".
   URL = 'http://edition.cnn.com'
+  TAGS = [story_tags.JAVASCRIPT_HEAVY]
 
 
-class LoadFlipboardStory(_LoadingStory):
+class LoadFlipboardDesktopStory(_LoadingStory):
   NAME = 'load:news:flipboard'
   URL = 'https://flipboard.com/explore'
+  SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
 
 
-class LoadHackerNewsStory(_LoadingStory):
+class LoadHackerNewsDesktopStory(_LoadingStory):
   NAME = 'load:news:hackernews'
   URL = 'https://news.ycombinator.com'
+  SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
 
 
 class LoadNytimesDesktopStory(_LoadingStory):
@@ -151,6 +165,7 @@ class LoadQqMobileStory(_LoadingStory):
   NAME = 'load:news:qq'
   # Using "https://" hangs and shows "This site can't be reached".
   URL = 'http://news.qq.com'
+  TAGS = [story_tags.INTERNATIONAL]
 
 
 class LoadRedditDesktopStory(_LoadingStory):
@@ -162,17 +177,6 @@ class LoadRedditDesktopStory(_LoadingStory):
 class LoadRedditMobileStory(_LoadingStory):
   NAME = 'load:news:reddit'
   URL = 'https://www.reddit.com/r/news/top/?sort=top&t=week'
-  SUPPORTED_PLATFORMS = platforms.MOBILE_ONLY
-
-
-class LoadSohuMobileStory(_LoadingStory):
-  NAME = 'load:news:sohu'
-  # Using "https://" leads to missing images and scripts on mobile (due to
-  # mixed content).
-  URL = 'http://m.sohu.com/n/447433356/'
-  # The desktop page (http://news.sohu.com/20160503/n447433356.shtml) almost
-  # always fails to completely load due to
-  # https://github.com/chromium/web-page-replay/issues/74.
   SUPPORTED_PLATFORMS = platforms.MOBILE_ONLY
 
 
@@ -197,6 +201,14 @@ class LoadWashingtonPostMobileStory(_LoadingStory):
 class LoadWikipediaStory(_LoadingStory):
   NAME = 'load:news:wikipedia'
   URL = 'https://en.wikipedia.org/wiki/Science'
+  TAGS = [story_tags.EMERGING_MARKET]
+
+
+class LoadIrctcStory(_LoadingStory):
+  NAME = 'load:news:irctc'
+  URL = 'https://www.irctc.co.in'
+  SUPPORTED_PLATFORMS = platforms.MOBILE_ONLY
+  TAGS = [story_tags.EMERGING_MARKET]
 
 
 ################################################################################
@@ -208,6 +220,8 @@ class LoadYouTubeStory(_LoadingStory):
   # No way to disable autoplay on desktop.
   NAME = 'load:media:youtube'
   URL = 'https://www.youtube.com/watch?v=QGfhS1hfTWw&autoplay=false'
+  PLATFORM_SPECIFIC = True
+  TAGS = [story_tags.EMERGING_MARKET]
 
 
 class LoadDailymotionStory(_LoadingStory):
@@ -230,14 +244,16 @@ class LoadSoundCloudStory(_LoadingStory):
   URL = 'https://soundcloud.com/lifeofdesiigner/desiigner-panda'
 
 
-class Load9GagStory(_LoadingStory):
+class Load9GagDesktopStory(_LoadingStory):
   NAME = 'load:media:9gag'
   URL = 'https://www.9gag.com/'
+  SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
 
 
-class LoadFlickrStory(_LoadingStory):
+class LoadFlickrDesktopStory(_LoadingStory):
   NAME = 'load:media:flickr'
   URL = 'https://www.flickr.com/photos/tags/farm'
+  SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
 
   def _DidLoadDocument(self, action_runner):
     # Wait until the 'Recently tagged' view loads.
@@ -257,6 +273,7 @@ class LoadFacebookPhotosMobileStory(_LoadingStory):
   URL = (
       'https://m.facebook.com/rihanna/photos/a.207477806675.138795.10092511675/10153911739606676/?type=3&source=54&ref=page_internal')
   SUPPORTED_PLATFORMS = platforms.MOBILE_ONLY
+  TAGS = [story_tags.EMERGING_MARKET]
 
 
 class LoadFacebookPhotosDesktopStory(_LoadingStory):
@@ -319,11 +336,6 @@ class LoadGmailMobileStory(_LoadGmailBaseStory):
     action_runner.WaitForJavaScriptCondition(
         'document.getElementById("apploadingdiv").style.height === "0px"')
 
-class LoadMapsStory(_LoadingStory):
-  NAME = 'load:tools:maps'
-  URL = 'https://www.google.com/maps/place/London,+UK/'
-
-
 class LoadStackOverflowStory(_LoadingStory):
   NAME = 'load:tools:stackoverflow'
   URL = (
@@ -341,11 +353,13 @@ class LoadDropboxStory(_LoadingStory):
 class LoadWeatherStory(_LoadingStory):
   NAME = 'load:tools:weather'
   URL = 'https://weather.com/en-GB/weather/today/l/USCA0286:1:US'
+  TAGS = [story_tags.JAVASCRIPT_HEAVY]
 
 
 class LoadDriveStory(_LoadingStory):
   NAME = 'load:tools:drive'
   URL = 'https://drive.google.com/drive/my-drive'
+  TAGS = [story_tags.JAVASCRIPT_HEAVY]
 
   def _Login(self, action_runner):
     google_login.LoginGoogleAccount(action_runner, 'googletest',

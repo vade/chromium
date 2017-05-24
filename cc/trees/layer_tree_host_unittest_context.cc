@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "base/memory/ptr_util.h"
+#include "cc/base/filter_operations.h"
 #include "cc/layers/heads_up_display_layer.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/layers/painted_scrollbar_layer.h"
@@ -14,7 +15,7 @@
 #include "cc/layers/texture_layer_impl.h"
 #include "cc/layers/video_layer.h"
 #include "cc/layers/video_layer_impl.h"
-#include "cc/output/filter_operations.h"
+#include "cc/paint/paint_flags.h"
 #include "cc/resources/single_release_callback.h"
 #include "cc/resources/ui_resource_manager.h"
 #include "cc/test/fake_content_layer_client.h"
@@ -180,9 +181,10 @@ class LayerTreeHostContextTestLostContextSucceeds
   void RequestNewCompositorFrameSink() override {
     if (async_compositor_frame_sink_creation_) {
       MainThreadTaskRunner()->PostTask(
-          FROM_HERE, base::Bind(&LayerTreeHostContextTestLostContextSucceeds::
-                                    AsyncRequestNewCompositorFrameSink,
-                                base::Unretained(this)));
+          FROM_HERE,
+          base::BindOnce(&LayerTreeHostContextTestLostContextSucceeds::
+                             AsyncRequestNewCompositorFrameSink,
+                         base::Unretained(this)));
     } else {
       AsyncRequestNewCompositorFrameSink();
     }
@@ -222,7 +224,7 @@ class LayerTreeHostContextTestLostContextSucceeds
 
   virtual void InvalidateAndSetNeedsCommit() {
     // Cause damage so we try to draw.
-    layer_tree()->root_layer()->SetNeedsDisplay();
+    layer_tree_host()->root_layer()->SetNeedsDisplay();
     layer_tree_host()->SetNeedsCommit();
   }
 
@@ -407,8 +409,9 @@ class LayerTreeHostClientTakeAwayCompositorFrameSink
     CHECK(surface);
     MainThreadTaskRunner()->PostTask(
         FROM_HERE,
-        base::Bind(&LayerTreeHostClientTakeAwayCompositorFrameSink::MakeVisible,
-                   base::Unretained(this)));
+        base::BindOnce(
+            &LayerTreeHostClientTakeAwayCompositorFrameSink::MakeVisible,
+            base::Unretained(this)));
   }
 
   void DidInitializeCompositorFrameSink() override {
@@ -416,9 +419,9 @@ class LayerTreeHostClientTakeAwayCompositorFrameSink
     if (setos_counter_ == 1) {
       MainThreadTaskRunner()->PostTask(
           FROM_HERE,
-          base::Bind(&LayerTreeHostClientTakeAwayCompositorFrameSink::
-                         HideAndReleaseCompositorFrameSink,
-                     base::Unretained(this)));
+          base::BindOnce(&LayerTreeHostClientTakeAwayCompositorFrameSink::
+                             HideAndReleaseCompositorFrameSink,
+                         base::Unretained(this)));
     } else {
       EndTest();
     }
@@ -538,7 +541,7 @@ class LayerTreeHostContextTestCommitAfterDelayedCompositorFrameSink
   void RequestNewCompositorFrameSink() override {
     MainThreadTaskRunner()->PostTask(
         FROM_HERE,
-        base::Bind(
+        base::BindOnce(
             &LayerTreeHostContextTestCommitAfterDelayedCompositorFrameSink::
                 CreateAndSetCompositorFrameSink,
             base::Unretained(this)));
@@ -609,9 +612,9 @@ class LayerTreeHostContextTestLostContextSucceedsWithContent
     root_->SetIsDrawable(true);
 
     // Paint non-solid color.
-    SkPaint paint;
-    paint.setColor(SkColorSetARGB(100, 80, 200, 200));
-    client_.add_draw_rect(gfx::Rect(5, 5), paint);
+    PaintFlags flags;
+    flags.setColor(SkColorSetARGB(100, 80, 200, 200));
+    client_.add_draw_rect(gfx::Rect(5, 5), flags);
 
     layer_ = FakePictureLayer::Create(&client_);
     layer_->SetBounds(gfx::Size(10, 10));
@@ -619,7 +622,7 @@ class LayerTreeHostContextTestLostContextSucceedsWithContent
 
     root_->AddChild(layer_);
 
-    layer_tree()->SetRootLayer(root_);
+    layer_tree_host()->SetRootLayer(root_);
     LayerTreeHostContextTest::SetupTree();
     client_.set_bounds(root_->bounds());
   }
@@ -688,15 +691,15 @@ class LayerTreeHostContextTestLostContextAndEvictTextures
 
   void SetupTree() override {
     // Paint non-solid color.
-    SkPaint paint;
-    paint.setColor(SkColorSetARGB(100, 80, 200, 200));
-    client_.add_draw_rect(gfx::Rect(5, 5), paint);
+    PaintFlags flags;
+    flags.setColor(SkColorSetARGB(100, 80, 200, 200));
+    client_.add_draw_rect(gfx::Rect(5, 5), flags);
 
     scoped_refptr<FakePictureLayer> picture_layer =
         FakePictureLayer::Create(&client_);
     picture_layer->SetBounds(gfx::Size(10, 20));
     client_.set_bounds(picture_layer->bounds());
-    layer_tree()->SetRootLayer(picture_layer);
+    layer_tree_host()->SetRootLayer(picture_layer);
 
     LayerTreeHostContextTest::SetupTree();
   }
@@ -707,9 +710,9 @@ class LayerTreeHostContextTestLostContextAndEvictTextures
     if (HasImplThread()) {
       ImplThreadTaskRunner()->PostTask(
           FROM_HERE,
-          base::Bind(&LayerTreeHostContextTestLostContextAndEvictTextures::
-                         EvictTexturesOnImplThread,
-                     base::Unretained(this)));
+          base::BindOnce(&LayerTreeHostContextTestLostContextAndEvictTextures::
+                             EvictTexturesOnImplThread,
+                         base::Unretained(this)));
     } else {
       DebugScopedSetImplThread impl(task_runner_provider());
       EvictTexturesOnImplThread();
@@ -804,7 +807,7 @@ class LayerTreeHostContextTestLayersNotified : public LayerTreeHostContextTest {
     root_->AddChild(child_);
     child_->AddChild(grandchild_);
 
-    layer_tree()->SetRootLayer(root_);
+    layer_tree_host()->SetRootLayer(root_);
     LayerTreeHostContextTest::SetupTree();
     client_.set_bounds(root_->bounds());
   }
@@ -970,12 +973,12 @@ class LayerTreeHostContextTestDontUseLostResources
 
     scoped_refptr<PaintedScrollbarLayer> scrollbar =
         PaintedScrollbarLayer::Create(
-            std::unique_ptr<Scrollbar>(new FakeScrollbar), layer->id());
+            std::unique_ptr<Scrollbar>(new FakeScrollbar), layer->element_id());
     scrollbar->SetBounds(gfx::Size(10, 10));
     scrollbar->SetIsDrawable(true);
     root->AddChild(scrollbar);
 
-    layer_tree()->SetRootLayer(root);
+    layer_tree_host()->SetRootLayer(root);
     LayerTreeHostContextTest::SetupTree();
   }
 
@@ -1015,10 +1018,10 @@ class LayerTreeHostContextTestDontUseLostResources
   }
 
   void DidCommitAndDrawFrame() override {
-    ASSERT_TRUE(layer_tree()->hud_layer());
+    ASSERT_TRUE(layer_tree_host()->hud_layer());
     // End the test once we know the 3nd frame drew.
     if (layer_tree_host()->SourceFrameNumber() < 5) {
-      layer_tree()->root_layer()->SetNeedsDisplay();
+      layer_tree_host()->root_layer()->SetNeedsDisplay();
       layer_tree_host()->SetNeedsCommit();
     } else {
       EndTest();
@@ -1060,7 +1063,7 @@ class LayerTreeHostContextTestImplSidePainting
     picture->SetIsDrawable(true);
     root->AddChild(picture);
 
-    layer_tree()->SetRootLayer(root);
+    layer_tree_host()->SetRootLayer(root);
     LayerTreeHostContextTest::SetupTree();
   }
 
@@ -1085,11 +1088,11 @@ class ScrollbarLayerLostContext : public LayerTreeHostContextTest {
 
   void BeginTest() override {
     scoped_refptr<Layer> scroll_layer = Layer::Create();
-    scrollbar_layer_ =
-        FakePaintedScrollbarLayer::Create(false, true, scroll_layer->id());
+    scrollbar_layer_ = FakePaintedScrollbarLayer::Create(
+        false, true, scroll_layer->element_id());
     scrollbar_layer_->SetBounds(gfx::Size(10, 100));
-    layer_tree()->root_layer()->AddChild(scrollbar_layer_);
-    layer_tree()->root_layer()->AddChild(scroll_layer);
+    layer_tree_host()->root_layer()->AddChild(scrollbar_layer_);
+    layer_tree_host()->root_layer()->AddChild(scroll_layer);
     PostSetNeedsCommitToMainThread();
   }
 
@@ -1148,15 +1151,15 @@ class UIResourceLostTest : public LayerTreeHostContextTest {
   void PostStepCompleteToMainThread() {
     task_runner_provider()->MainThreadTaskRunner()->PostTask(
         FROM_HERE,
-        base::Bind(&UIResourceLostTest::StepCompleteOnMainThreadInternal,
-                   base::Unretained(this), time_step_));
+        base::BindOnce(&UIResourceLostTest::StepCompleteOnMainThreadInternal,
+                       base::Unretained(this), time_step_));
   }
 
   void PostLoseContextToImplThread() {
     EXPECT_TRUE(layer_tree_host()->GetTaskRunnerProvider()->IsMainThread());
     ImplThreadTaskRunner()->PostTask(
-        FROM_HERE, base::Bind(&LayerTreeHostContextTest::LoseContext,
-                              base::Unretained(this)));
+        FROM_HERE, base::BindOnce(&LayerTreeHostContextTest::LoseContext,
+                                  base::Unretained(this)));
   }
 
  protected:
@@ -1562,9 +1565,9 @@ class LayerTreeHostContextTestLoseAfterSendingBeginMainFrame
     // Meanwhile, lose the context while we are in defer commits.
     ImplThreadTaskRunner()->PostTask(
         FROM_HERE,
-        base::Bind(&LayerTreeHostContextTestLoseAfterSendingBeginMainFrame::
-                       LoseContextOnImplThread,
-                   base::Unretained(this)));
+        base::BindOnce(&LayerTreeHostContextTestLoseAfterSendingBeginMainFrame::
+                           LoseContextOnImplThread,
+                       base::Unretained(this)));
 
     // After the first frame, we will lose the context and then not start
     // allowing commits until that happens. The 2nd frame should not happen
@@ -1602,15 +1605,15 @@ class LayerTreeHostContextTestLoseWorkerContextDuringPrepareTiles
     : public LayerTreeTest {
  protected:
   void SetupTree() override {
-    SkPaint paint;
+    PaintFlags flags;
     client_.set_fill_with_nonsolid_color(true);
-    client_.add_draw_rect(gfx::Rect(5, 5), paint);
+    client_.add_draw_rect(gfx::Rect(5, 5), flags);
 
     scoped_refptr<FakePictureLayer> picture_layer =
         FakePictureLayer::Create(&client_);
     picture_layer->SetBounds(gfx::Size(10, 20));
     client_.set_bounds(picture_layer->bounds());
-    layer_tree()->SetRootLayer(picture_layer);
+    layer_tree_host()->SetRootLayer(picture_layer);
 
     LayerTreeTest::SetupTree();
   }

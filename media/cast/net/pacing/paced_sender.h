@@ -96,9 +96,7 @@ class PacedPacketSender {
   virtual ~PacedPacketSender() {}
 };
 
-class PacedSender : public PacedPacketSender,
-                    public base::NonThreadSafe,
-                    public base::SupportsWeakPtr<PacedSender> {
+class PacedSender : public PacedPacketSender {
  public:
   // |recent_packet_events| is an externally-owned vector where PacedSender will
   // add PacketEvents related to sending, retransmission, and rejection.  The
@@ -241,8 +239,6 @@ class PacedSender : public PacedPacketSender,
   base::TimeTicks burst_end_;
 
   State state_;
-
-  bool has_reached_upper_bound_once_;
 
   // NOTE: Weak pointers must be invalidated before all other member variables.
   base::WeakPtrFactory<PacedSender> weak_factory_;

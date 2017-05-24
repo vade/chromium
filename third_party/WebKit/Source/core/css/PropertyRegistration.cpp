@@ -4,7 +4,7 @@
 
 #include "core/css/PropertyRegistration.h"
 
-#include "core/animation/CSSValueInterpolationType.h"
+#include "core/animation/CSSInterpolationTypesMap.h"
 #include "core/css/CSSStyleSheet.h"
 #include "core/css/CSSSyntaxDescriptor.h"
 #include "core/css/CSSValueList.h"
@@ -22,34 +22,59 @@
 
 namespace blink {
 
-static bool computationallyIndependent(const CSSValue& value) {
-  DCHECK(!value.isCSSWideKeyword());
+static InterpolationTypes SetRegistrationOnCSSInterpolationTypes(
+    CSSInterpolationTypes css_interpolation_types,
+    const PropertyRegistration& registration) {
+  InterpolationTypes result;
+  for (auto& css_interpolation_type : css_interpolation_types) {
+    css_interpolation_type->SetCustomPropertyRegistration(registration);
+    result.push_back(std::move(css_interpolation_type));
+  }
+  return result;
+}
 
-  if (value.isVariableReferenceValue())
-    return !toCSSVariableReferenceValue(value)
-                .variableDataValue()
-                ->needsVariableResolution();
+PropertyRegistration::PropertyRegistration(
+    const CSSSyntaxDescriptor& syntax,
+    bool inherits,
+    const CSSValue* initial,
+    PassRefPtr<CSSVariableData> initial_variable_data,
+    CSSInterpolationTypes css_interpolation_types)
+    : syntax_(syntax),
+      inherits_(inherits),
+      initial_(initial),
+      initial_variable_data_(std::move(initial_variable_data)),
+      interpolation_types_(SetRegistrationOnCSSInterpolationTypes(
+          std::move(css_interpolation_types),
+          *this)) {}
 
-  if (value.isValueList()) {
-    for (const CSSValue* innerValue : toCSSValueList(value)) {
-      if (!computationallyIndependent(*innerValue))
+static bool ComputationallyIndependent(const CSSValue& value) {
+  DCHECK(!value.IsCSSWideKeyword());
+
+  if (value.IsVariableReferenceValue())
+    return !ToCSSVariableReferenceValue(value)
+                .VariableDataValue()
+                ->NeedsVariableResolution();
+
+  if (value.IsValueList()) {
+    for (const CSSValue* inner_value : ToCSSValueList(value)) {
+      if (!ComputationallyIndependent(*inner_value))
         return false;
     }
     return true;
   }
 
-  if (value.isPrimitiveValue()) {
-    const CSSPrimitiveValue& primitiveValue = toCSSPrimitiveValue(value);
-    if (!primitiveValue.isLength() &&
-        !primitiveValue.isCalculatedPercentageWithLength())
+  if (value.IsPrimitiveValue()) {
+    const CSSPrimitiveValue& primitive_value = ToCSSPrimitiveValue(value);
+    if (!primitive_value.IsLength() &&
+        !primitive_value.IsCalculatedPercentageWithLength())
       return true;
 
-    CSSPrimitiveValue::CSSLengthArray lengthArray;
-    primitiveValue.accumulateLengthArray(lengthArray);
-    for (size_t i = 0; i < lengthArray.values.size(); i++) {
-      if (lengthArray.typeFlags.get(i) &&
-          i != CSSPrimitiveValue::UnitTypePixels &&
-          i != CSSPrimitiveValue::UnitTypePercentage)
+    CSSPrimitiveValue::CSSLengthArray length_array;
+    primitive_value.AccumulateLengthArray(length_array);
+    for (size_t i = 0; i < length_array.values.size(); i++) {
+      if (length_array.type_flags.Get(i) &&
+          i != CSSPrimitiveValue::kUnitTypePixels &&
+          i != CSSPrimitiveValue::kUnitTypePercentage)
         return false;
     }
     return true;
@@ -61,95 +86,85 @@ static bool computationallyIndependent(const CSSValue& value) {
   return true;
 }
 
-InterpolationTypes interpolationTypesForSyntax(const AtomicString& propertyName,
-                                               const CSSSyntaxDescriptor&) {
-  PropertyHandle property(propertyName);
-  InterpolationTypes interpolationTypes;
-  // TODO(alancutter): Read the syntax descriptor and add the appropriate
-  // CSSInterpolationType subclasses.
-  interpolationTypes.push_back(
-      WTF::makeUnique<CSSValueInterpolationType>(property));
-  return interpolationTypes;
-}
-
 void PropertyRegistration::registerProperty(
-    ExecutionContext* executionContext,
+    ExecutionContext* execution_context,
     const PropertyDescriptor& descriptor,
-    ExceptionState& exceptionState) {
+    ExceptionState& exception_state) {
   // Bindings code ensures these are set.
   DCHECK(descriptor.hasName());
   DCHECK(descriptor.hasInherits());
   DCHECK(descriptor.hasSyntax());
 
   String name = descriptor.name();
-  if (!CSSVariableParser::isValidVariableName(name)) {
-    exceptionState.throwDOMException(
-        SyntaxError, "Custom property names must start with '--'.");
+  if (!CSSVariableParser::IsValidVariableName(name)) {
+    exception_state.ThrowDOMException(
+        kSyntaxError, "Custom property names must start with '--'.");
     return;
   }
-  AtomicString atomicName(name);
-  Document* document = toDocument(executionContext);
-  PropertyRegistry& registry = *document->propertyRegistry();
-  if (registry.registration(atomicName)) {
-    exceptionState.throwDOMException(
-        InvalidModificationError,
+  AtomicString atomic_name(name);
+  Document* document = ToDocument(execution_context);
+  PropertyRegistry& registry = *document->GetPropertyRegistry();
+  if (registry.Registration(atomic_name)) {
+    exception_state.ThrowDOMException(
+        kInvalidModificationError,
         "The name provided has already been registered.");
     return;
   }
 
-  CSSSyntaxDescriptor syntaxDescriptor(descriptor.syntax());
-  if (!syntaxDescriptor.isValid()) {
-    exceptionState.throwDOMException(
-        SyntaxError,
+  CSSSyntaxDescriptor syntax_descriptor(descriptor.syntax());
+  if (!syntax_descriptor.IsValid()) {
+    exception_state.ThrowDOMException(
+        kSyntaxError,
         "The syntax provided is not a valid custom property syntax.");
     return;
   }
 
-  InterpolationTypes interpolationTypes =
-      interpolationTypesForSyntax(atomicName, syntaxDescriptor);
+  CSSInterpolationTypes css_interpolation_types =
+      CSSInterpolationTypesMap::CreateCSSInterpolationTypesForSyntax(
+          atomic_name, syntax_descriptor);
 
   if (descriptor.hasInitialValue()) {
     CSSTokenizer tokenizer(descriptor.initialValue());
-    bool isAnimationTainted = false;
-    const CSSValue* initial = syntaxDescriptor.parse(
-        tokenizer.tokenRange(),
-        document->elementSheet().contents()->parserContext(),
-        isAnimationTainted);
+    bool is_animation_tainted = false;
+    const CSSValue* initial = syntax_descriptor.Parse(
+        tokenizer.TokenRange(),
+        document->ElementSheet().Contents()->ParserContext(),
+        is_animation_tainted);
     if (!initial) {
-      exceptionState.throwDOMException(
-          SyntaxError,
+      exception_state.ThrowDOMException(
+          kSyntaxError,
           "The initial value provided does not parse for the given syntax.");
       return;
     }
-    if (!computationallyIndependent(*initial)) {
-      exceptionState.throwDOMException(
-          SyntaxError,
+    if (!ComputationallyIndependent(*initial)) {
+      exception_state.ThrowDOMException(
+          kSyntaxError,
           "The initial value provided is not computationally independent.");
       return;
     }
     initial =
-        &StyleBuilderConverter::convertRegisteredPropertyInitialValue(*initial);
-    RefPtr<CSSVariableData> initialVariableData = CSSVariableData::create(
-        tokenizer.tokenRange(), isAnimationTainted, false);
-    registry.registerProperty(
-        atomicName, syntaxDescriptor, descriptor.inherits(), initial,
-        std::move(initialVariableData), std::move(interpolationTypes));
+        &StyleBuilderConverter::ConvertRegisteredPropertyInitialValue(*initial);
+    RefPtr<CSSVariableData> initial_variable_data = CSSVariableData::Create(
+        tokenizer.TokenRange(), is_animation_tainted, false);
+    registry.RegisterProperty(
+        atomic_name, syntax_descriptor, descriptor.inherits(), initial,
+        std::move(initial_variable_data), std::move(css_interpolation_types));
   } else {
-    if (!syntaxDescriptor.isTokenStream()) {
-      exceptionState.throwDOMException(
-          SyntaxError,
+    if (!syntax_descriptor.IsTokenStream()) {
+      exception_state.ThrowDOMException(
+          kSyntaxError,
           "An initial value must be provided if the syntax is not '*'");
       return;
     }
-    registry.registerProperty(atomicName, syntaxDescriptor,
+    registry.RegisterProperty(atomic_name, syntax_descriptor,
                               descriptor.inherits(), nullptr, nullptr,
-                              std::move(interpolationTypes));
+                              std::move(css_interpolation_types));
   }
 
   // TODO(timloh): Invalidate only elements with this custom property set
-  document->setNeedsStyleRecalc(SubtreeStyleChange,
-                                StyleChangeReasonForTracing::create(
-                                    StyleChangeReason::PropertyRegistration));
+  document->SetNeedsStyleRecalc(kSubtreeStyleChange,
+                                StyleChangeReasonForTracing::Create(
+                                    StyleChangeReason::kPropertyRegistration));
 }
 
 }  // namespace blink

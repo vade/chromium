@@ -24,6 +24,7 @@
 #include "content/browser/service_worker/service_worker_context_observer.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/browser/service_worker/service_worker_database_task_manager.h"
+#include "content/browser/service_worker/service_worker_dispatcher_host.h"
 #include "content/browser/service_worker/service_worker_info.h"
 #include "content/browser/service_worker/service_worker_job_coordinator.h"
 #include "content/browser/service_worker/service_worker_process_manager.h"
@@ -31,6 +32,7 @@
 #include "content/browser/service_worker/service_worker_register_job.h"
 #include "content/browser/service_worker/service_worker_registration.h"
 #include "content/browser/service_worker/service_worker_storage.h"
+#include "content/browser/service_worker/service_worker_version.h"
 #include "content/common/service_worker/service_worker_utils.h"
 #include "content/public/browser/browser_thread.h"
 #include "ipc/ipc_message.h"
@@ -41,6 +43,26 @@
 
 namespace content {
 namespace {
+
+void CheckFetchHandlerOfInstalledServiceWorker(
+    const ServiceWorkerContext::CheckHasServiceWorkerCallback callback,
+    scoped_refptr<ServiceWorkerRegistration> registration) {
+  // Waiting Service Worker is a newer version, prefer that if available.
+  ServiceWorkerVersion* preferred_version =
+      registration->waiting_version() ? registration->waiting_version()
+                                      : registration->active_version();
+
+  DCHECK(preferred_version);
+
+  ServiceWorkerVersion::FetchHandlerExistence existence =
+      preferred_version->fetch_handler_existence();
+
+  DCHECK_NE(existence, ServiceWorkerVersion::FetchHandlerExistence::UNKNOWN);
+
+  callback.Run(existence == ServiceWorkerVersion::FetchHandlerExistence::EXISTS
+                   ? ServiceWorkerCapability::SERVICE_WORKER_WITH_FETCH_HANDLER
+                   : ServiceWorkerCapability::SERVICE_WORKER_NO_FETCH_HANDLER);
+}
 
 void SuccessCollectorCallback(const base::Closure& done_closure,
                               bool* overall_success,
@@ -220,8 +242,8 @@ ServiceWorkerContextCore::ServiceWorkerContextCore(
     base::ObserverListThreadSafe<ServiceWorkerContextObserver>* observer_list,
     ServiceWorkerContextWrapper* wrapper)
     : wrapper_(wrapper),
-      providers_(new ProcessToProviderMap),
-      provider_by_uuid_(new ProviderByClientUUIDMap),
+      providers_(base::MakeUnique<ProcessToProviderMap>()),
+      provider_by_uuid_(base::MakeUnique<ProviderByClientUUIDMap>()),
       force_update_on_page_load_(false),
       next_handle_id_(0),
       next_registration_handle_id_(0),
@@ -241,6 +263,7 @@ ServiceWorkerContextCore::ServiceWorkerContextCore(
     ServiceWorkerContextCore* old_context,
     ServiceWorkerContextWrapper* wrapper)
     : wrapper_(wrapper),
+      dispatcher_hosts_(std::move(old_context->dispatcher_hosts_)),
       providers_(old_context->providers_.release()),
       provider_by_uuid_(old_context->provider_by_uuid_.release()),
       next_handle_id_(old_context->next_handle_id_),
@@ -268,12 +291,26 @@ ServiceWorkerContextCore::~ServiceWorkerContextCore() {
   weak_factory_.InvalidateWeakPtrs();
 }
 
-ServiceWorkerProviderHost* ServiceWorkerContextCore::GetProviderHost(
-    int process_id, int provider_id) {
-  ProviderMap* map = GetProviderMapForProcess(process_id);
-  if (!map)
-    return NULL;
-  return map->Lookup(provider_id);
+void ServiceWorkerContextCore::AddDispatcherHost(
+    int process_id,
+    content::ServiceWorkerDispatcherHost* dispatcher_host) {
+  DCHECK(dispatcher_hosts_.find(process_id) == dispatcher_hosts_.end());
+  dispatcher_hosts_[process_id] = dispatcher_host;
+}
+
+ServiceWorkerDispatcherHost* ServiceWorkerContextCore::GetDispatcherHost(
+    int process_id) {
+  auto it = dispatcher_hosts_.find(process_id);
+  if (it == dispatcher_hosts_.end())
+    return nullptr;
+  return it->second;
+}
+
+void ServiceWorkerContextCore::RemoveDispatcherHost(int process_id) {
+  DCHECK(dispatcher_hosts_.find(process_id) != dispatcher_hosts_.end());
+  RemoveAllProviderHostsForProcess(process_id);
+  embedded_worker_registry_->RemoveProcess(process_id);
+  dispatcher_hosts_.erase(process_id);
 }
 
 void ServiceWorkerContextCore::AddProviderHost(
@@ -286,6 +323,15 @@ void ServiceWorkerContextCore::AddProviderHost(
     map = GetProviderMapForProcess(process_id);
   }
   map->AddWithID(std::move(host), provider_id);
+}
+
+ServiceWorkerProviderHost* ServiceWorkerContextCore::GetProviderHost(
+    int process_id,
+    int provider_id) {
+  ProviderMap* map = GetProviderMapForProcess(process_id);
+  if (!map)
+    return nullptr;
+  return map->Lookup(provider_id);
 }
 
 void ServiceWorkerContextCore::RemoveProviderHost(
@@ -505,7 +551,7 @@ void ServiceWorkerContextCore::UnregistrationComplete(
 ServiceWorkerRegistration* ServiceWorkerContextCore::GetLiveRegistration(
     int64_t id) {
   RegistrationsMap::iterator it = live_registrations_.find(id);
-  return (it != live_registrations_.end()) ? it->second : NULL;
+  return (it != live_registrations_.end()) ? it->second : nullptr;
 }
 
 void ServiceWorkerContextCore::AddLiveRegistration(
@@ -527,7 +573,7 @@ void ServiceWorkerContextCore::RemoveLiveRegistration(int64_t id) {
 
 ServiceWorkerVersion* ServiceWorkerContextCore::GetLiveVersion(int64_t id) {
   VersionMap::iterator it = live_versions_.find(id);
-  return (it != live_versions_.end()) ? it->second : NULL;
+  return (it != live_versions_.end()) ? it->second : nullptr;
 }
 
 // PlzNavigate
@@ -636,14 +682,7 @@ ServiceWorkerContextCore::TransferProviderHostOut(int process_id,
   ProviderMap* map = GetProviderMapForProcess(process_id);
   ServiceWorkerProviderHost* transferee = map->Lookup(provider_id);
   std::unique_ptr<ServiceWorkerProviderHost> replacement =
-      base::MakeUnique<ServiceWorkerProviderHost>(
-          process_id, transferee->frame_id(), provider_id,
-          transferee->provider_type(),
-          transferee->is_parent_frame_secure()
-              ? ServiceWorkerProviderHost::FrameSecurityLevel::SECURE
-              : ServiceWorkerProviderHost::FrameSecurityLevel::INSECURE,
-          AsWeakPtr(), transferee->dispatcher_host());
-  transferee->PrepareForCrossSiteTransfer();
+      transferee->PrepareForCrossSiteTransfer();
   return map->Replace(provider_id, std::move(replacement));
 }
 
@@ -838,17 +877,17 @@ void ServiceWorkerContextCore::DidFindRegistrationForCheckHasServiceWorker(
     ServiceWorkerStatusCode status,
     scoped_refptr<ServiceWorkerRegistration> registration) {
   if (status != SERVICE_WORKER_OK) {
-    callback.Run(false);
+    callback.Run(ServiceWorkerCapability::NO_SERVICE_WORKER);
     return;
   }
 
   if (!ServiceWorkerUtils::ScopeMatches(registration->pattern(), other_url)) {
-    callback.Run(false);
+    callback.Run(ServiceWorkerCapability::NO_SERVICE_WORKER);
     return;
   }
 
   if (registration->is_uninstalling() || registration->is_uninstalled()) {
-    callback.Run(false);
+    callback.Run(ServiceWorkerCapability::NO_SERVICE_WORKER);
     return;
   }
 
@@ -860,14 +899,29 @@ void ServiceWorkerContextCore::DidFindRegistrationForCheckHasServiceWorker(
     return;
   }
 
-  callback.Run(true);
+  CheckFetchHandlerOfInstalledServiceWorker(callback, registration);
 }
 
 void ServiceWorkerContextCore::OnRegistrationFinishedForCheckHasServiceWorker(
     const ServiceWorkerContext::CheckHasServiceWorkerCallback callback,
     scoped_refptr<ServiceWorkerRegistration> registration) {
-  callback.Run(registration->active_version() ||
-               registration->waiting_version());
+  if (!registration->active_version() && !registration->waiting_version()) {
+    callback.Run(ServiceWorkerCapability::NO_SERVICE_WORKER);
+    return;
+  }
+
+  CheckFetchHandlerOfInstalledServiceWorker(callback, registration);
+}
+
+void ServiceWorkerContextCore::BindWorkerFetchContext(
+    int render_process_id,
+    int service_worker_provider_id,
+    mojom::ServiceWorkerWorkerClientAssociatedPtrInfo client_ptr_info) {
+  ServiceWorkerProviderHost* provider_host =
+      GetProviderHost(render_process_id, service_worker_provider_id);
+  if (!provider_host)
+    return;
+  provider_host->BindWorkerFetchContext(std::move(client_ptr_info));
 }
 
 }  // namespace content

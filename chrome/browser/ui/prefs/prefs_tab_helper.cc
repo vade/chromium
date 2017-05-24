@@ -91,6 +91,7 @@ const char* const kPrefsToObserve[] = {
   prefs::kWebKitMinimumFontSize,
   prefs::kWebKitMinimumLogicalFontSize,
   prefs::kWebKitPluginsEnabled,
+  prefs::kWebKitEncryptedMediaEnabled,
   prefs::kWebkitTabsToLinks,
   prefs::kWebKitTextAreasAreResizable,
   prefs::kWebKitWebSecurityEnabled,
@@ -136,7 +137,6 @@ ALL_FONT_SCRIPTS(WEBKIT_WEBPREFS_FONTS_STANDARD)
     }
   }
 }
-#endif  // !defined(OS_ANDROID)
 
 // Registers |obs| to observe per-script font prefs under the path |map_name|.
 // On android, there's no exposed way to change these prefs, so we can save
@@ -154,6 +154,7 @@ void RegisterFontFamilyMapObserver(
     registrar->Add(base::StringPrintf("%s.%s", map_name, script), obs);
   }
 }
+#endif  // !defined(OS_ANDROID)
 
 #if defined(OS_WIN)
 // On Windows with antialising we want to use an alternate fixed font like
@@ -323,6 +324,7 @@ void OverrideFontFamily(WebPreferences* prefs,
   (*map)[script] = base::UTF8ToUTF16(pref_value);
 }
 
+#if !defined(OS_ANDROID)
 void RegisterLocalizedFontPref(user_prefs::PrefRegistrySyncable* registry,
                                const char* path,
                                int default_message_id) {
@@ -332,6 +334,7 @@ void RegisterLocalizedFontPref(user_prefs::PrefRegistrySyncable* registry,
   DCHECK(success);
   registry->RegisterIntegerPref(path, val);
 }
+#endif
 
 }  // namespace
 
@@ -370,6 +373,7 @@ class PrefWatcher : public KeyedService {
       pref_change_registrar_.Add(pref_name, webkit_callback);
     }
 
+#if !defined(OS_ANDROID)
     RegisterFontFamilyMapObserver(&pref_change_registrar_,
                                   prefs::kWebKitStandardFontFamilyMap,
                                   webkit_callback);
@@ -391,6 +395,7 @@ class PrefWatcher : public KeyedService {
     RegisterFontFamilyMapObserver(&pref_change_registrar_,
                                   prefs::kWebKitPictographFontFamilyMap,
                                   webkit_callback);
+#endif  // !defined(OS_ANDROID)
   }
 
   static PrefWatcher* Get(Profile* profile);
@@ -522,6 +527,8 @@ void PrefsTabHelper::RegisterProfilePrefs(
                                 pref_defaults.loads_images_automatically);
   registry->RegisterBooleanPref(prefs::kWebKitPluginsEnabled,
                                 pref_defaults.plugins_enabled);
+  registry->RegisterBooleanPref(prefs::kWebKitEncryptedMediaEnabled,
+                                pref_defaults.encrypted_media_enabled);
   registry->RegisterBooleanPref(prefs::kWebKitDomPasteEnabled,
                                 pref_defaults.dom_paste_enabled);
   registry->RegisterBooleanPref(prefs::kWebKitTextAreasAreResizable,
@@ -582,10 +589,9 @@ void PrefsTabHelper::RegisterProfilePrefs(
     }
   }
 
-  // Register per-script font prefs that don't have defaults.
+// Register font prefs.  This is only configurable on desktop Chrome.
 #if !defined(OS_ANDROID)
   RegisterFontFamilyPrefs(registry, fonts_with_defaults);
-#endif
 
   RegisterLocalizedFontPref(registry, prefs::kWebKitDefaultFontSize,
                             IDS_DEFAULT_FONT_SIZE);
@@ -595,6 +601,7 @@ void PrefsTabHelper::RegisterProfilePrefs(
                             IDS_MINIMUM_FONT_SIZE);
   RegisterLocalizedFontPref(registry, prefs::kWebKitMinimumLogicalFontSize,
                             IDS_MINIMUM_LOGICAL_FONT_SIZE);
+#endif
 }
 
 // static
@@ -669,8 +676,8 @@ void PrefsTabHelper::OnWebPrefChanged(const std::string& pref_name) {
   // give other observers (particularly the FontFamilyCache) a chance to react
   // to the pref change.
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&PrefsTabHelper::NotifyWebkitPreferencesChanged,
-                            weak_ptr_factory_.GetWeakPtr(), pref_name));
+      FROM_HERE, base::BindOnce(&PrefsTabHelper::NotifyWebkitPreferencesChanged,
+                                weak_ptr_factory_.GetWeakPtr(), pref_name));
 }
 
 void PrefsTabHelper::NotifyWebkitPreferencesChanged(

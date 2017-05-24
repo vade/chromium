@@ -38,6 +38,7 @@
 #include "content/public/common/pepper_plugin_info.h"
 #include "content/public/common/sandbox_init.h"
 #include "content/public/common/service_manager_connection.h"
+#include "content/public/common/service_names.mojom.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_platform_file.h"
 #include "ipc/ipc_sync_channel.h"
@@ -51,7 +52,6 @@
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/resource_reply_thread_registrar.h"
 #include "services/service_manager/public/cpp/connector.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
 #include "services/ui/public/interfaces/constants.mojom.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "ui/base/ui_base_switches.h"
@@ -63,6 +63,10 @@
 #include "sandbox/win/src/sandbox.h"
 #elif defined(OS_MACOSX)
 #include "content/common/sandbox_init_mac.h"
+#endif
+
+#if BUILDFLAG(ENABLE_CDM_HOST_VERIFICATION)
+#include "content/common/media/cdm_host_files.h"
 #endif
 
 #if defined(OS_WIN)
@@ -128,7 +132,7 @@ PpapiThread::PpapiThread(const base::CommandLine& command_line, bool is_broker)
       command_line.GetSwitchValueASCII(switches::kPpapiFlashArgs));
 
   blink_platform_impl_.reset(new PpapiBlinkPlatformImpl);
-  blink::Platform::initialize(blink_platform_impl_.get());
+  blink::Platform::Initialize(blink_platform_impl_.get());
 
   if (!is_broker_) {
     scoped_refptr<ppapi::proxy::PluginMessageFilter> plugin_filter(
@@ -150,8 +154,8 @@ PpapiThread::PpapiThread(const base::CommandLine& command_line, bool is_broker)
       NOTREACHED();
 #endif
     } else {
-      ChildThread::Get()->GetRemoteInterfaces()->GetInterface(
-          mojo::MakeRequest(&manager_ptr));
+      ChildThread::Get()->GetConnector()->BindInterface(
+          mojom::kBrowserServiceName, mojo::MakeRequest(&manager_ptr));
     }
     discardable_shared_memory_manager_ = base::MakeUnique<
         discardable_memory::ClientDiscardableSharedMemoryManager>(
@@ -372,6 +376,36 @@ void PpapiThread::OnLoadPlugin(const base::FilePath& path,
     }
   }
 
+#if BUILDFLAG(ENABLE_CDM_HOST_VERIFICATION)
+  // Use a local instance of CdmHostFiles so that if we return early for any
+  // error, all files will closed automatically.
+  std::unique_ptr<CdmHostFiles> cdm_host_files;
+
+#if defined(OS_WIN) || defined(OS_MACOSX)
+  // Open CDM host files before the process is sandboxed.
+  if (!is_broker_ && IsCdm(path))
+    cdm_host_files = CdmHostFiles::Create(path);
+#elif defined(OS_LINUX)
+  cdm_host_files = CdmHostFiles::TakeGlobalInstance();
+  if (is_broker_ || !IsCdm(path))
+    cdm_host_files.reset();  // Close all opened files.
+#endif  // defined(OS_WIN) || defined(OS_MACOSX)
+
+#if defined(OS_WIN)
+  // On Windows, initialize CDM host verification unsandboxed. On other
+  // platforms, this is called sandboxed below.
+  if (cdm_host_files) {
+    DCHECK(IsCdm(path));
+    if (!cdm_host_files->InitVerification(library.get(), path)) {
+      LOG(WARNING) << "CDM host verification failed.";
+      // TODO(xhwang): Add a new load result if needed.
+      ReportLoadResult(path, INIT_FAILED);
+      return;
+    }
+  }
+#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(ENABLE_CDM_HOST_VERIFICATION)
+
 #if defined(OS_WIN)
   // If code subsequently tries to exit using abort(), force a crash (since
   // otherwise these would be silent terminations and fly under the radar).
@@ -450,9 +484,21 @@ void PpapiThread::OnLoadPlugin(const base::FilePath& path,
     CHECK(InitializeSandbox());
 #endif
 
+#if BUILDFLAG(ENABLE_CDM_HOST_VERIFICATION) && !defined(OS_WIN)
+    // Now we are sandboxed, initialize CDM host verification.
+    if (cdm_host_files) {
+      DCHECK(IsCdm(path));
+      if (!cdm_host_files->InitVerification(library.get(), path)) {
+        LOG(WARNING) << "CDM host verification failed.";
+        // TODO(xhwang): Add a new load result if needed.
+        ReportLoadResult(path, INIT_FAILED);
+        return;
+      }
+    }
+#endif  // BUILDFLAG(ENABLE_CDM_HOST_VERIFICATION) && !defined(OS_WIN)
+
     int32_t init_error = plugin_entry_points_.initialize_module(
-        local_pp_module_,
-        &ppapi::proxy::PluginDispatcher::GetBrowserInterface);
+        local_pp_module_, &ppapi::proxy::PluginDispatcher::GetBrowserInterface);
     if (init_error != PP_OK) {
       LOG(WARNING) << "InitModule failed with error " << init_error;
       ReportLoadResult(path, INIT_FAILED);

@@ -22,6 +22,7 @@
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
@@ -39,8 +40,9 @@ IntranetRedirectDetector::IntranetRedirectDetector()
   // no function to do this.
   static const int kStartFetchDelaySeconds = 7;
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::Bind(&IntranetRedirectDetector::FinishSleep,
-                            weak_ptr_factory_.GetWeakPtr()),
+      FROM_HERE,
+      base::BindOnce(&IntranetRedirectDetector::FinishSleep,
+                     weak_ptr_factory_.GetWeakPtr()),
       base::TimeDelta::FromSeconds(kStartFetchDelaySeconds));
 
   net::NetworkChangeNotifier::AddIPAddressObserver(this);
@@ -76,6 +78,29 @@ void IntranetRedirectDetector::FinishSleep() {
 
   DCHECK(fetchers_.empty() && resulting_origins_.empty());
 
+  // Create traffic annotation tag.
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("intranet_redirect_detector", R"(
+        semantics {
+          sender: "Intranet Redirect Detector"
+          description:
+            "This component sends requests to three randomly generated, and "
+            "thus likely nonexistent, hostnames.  If at least two redirect to "
+            "the same hostname, this suggests the ISP is hijacking NXDOMAIN, "
+            "and the omnibox should treat similar redirected navigations as "
+            "'failed' when deciding whether to prompt the user with a 'did you "
+            "mean to navigate' infobar for certain search inputs."
+          trigger: "On startup and when IP address of the computer changes."
+          data: "None, this is just an empty request."
+          destination: OTHER
+        }
+        policy {
+          cookies_allowed: false
+          setting: "This feature cannot be disabled by settings."
+          policy_exception_justification:
+              "Not implemented, considered not useful."
+        })");
+
   // Start three fetchers on random hostnames.
   for (size_t i = 0; i < 3; ++i) {
     std::string url_string("http://");
@@ -84,8 +109,8 @@ void IntranetRedirectDetector::FinishSleep() {
     for (int j = 0; j < num_chars; ++j)
       url_string += ('a' + base::RandInt(0, 'z' - 'a'));
     GURL random_url(url_string + '/');
-    std::unique_ptr<net::URLFetcher> fetcher =
-        net::URLFetcher::Create(random_url, net::URLFetcher::HEAD, this);
+    std::unique_ptr<net::URLFetcher> fetcher = net::URLFetcher::Create(
+        random_url, net::URLFetcher::HEAD, this, traffic_annotation);
     // We don't want these fetches to affect existing state in the profile.
     fetcher->SetLoadFlags(net::LOAD_DISABLE_CACHE |
                           net::LOAD_DO_NOT_SAVE_COOKIES |
@@ -162,7 +187,8 @@ void IntranetRedirectDetector::OnIPAddressChanged() {
   in_sleep_ = true;
   static const int kNetworkSwitchDelayMS = 1000;
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::Bind(&IntranetRedirectDetector::FinishSleep,
-                            weak_ptr_factory_.GetWeakPtr()),
+      FROM_HERE,
+      base::BindOnce(&IntranetRedirectDetector::FinishSleep,
+                     weak_ptr_factory_.GetWeakPtr()),
       base::TimeDelta::FromMilliseconds(kNetworkSwitchDelayMS));
 }

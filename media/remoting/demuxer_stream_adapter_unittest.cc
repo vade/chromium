@@ -8,10 +8,12 @@
 #include <vector>
 
 #include "base/callback_helpers.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/demuxer_stream.h"
-#include "media/remoting/fake_demuxer_stream_provider.h"
+#include "media/remoting/fake_media_resource.h"
 #include "media/remoting/fake_remoter.h"
 #include "media/remoting/proto_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"

@@ -108,11 +108,6 @@
     shouldBeTrue("document.createEvent('PopStateEvent') instanceof window.Event");
     shouldBeTrue("document.createEvent('PopStateEvent').constructor === window.PopStateEvent");
 
-    // ProgressEvent
-    shouldBeTrue("document.createEvent('ProgressEvent') instanceof window.ProgressEvent");
-    shouldBeTrue("document.createEvent('ProgressEvent') instanceof window.Event");
-    shouldBeTrue("document.createEvent('ProgressEvent').constructor === window.ProgressEvent");
-
     // TextEvent
     shouldBeTrue("document.createEvent('TextEvent') instanceof window.TextEvent");
     shouldBeTrue("document.createEvent('TextEvent') instanceof window.UIEvent");
@@ -139,16 +134,6 @@
     shouldBeTrue("document.createEvent('TransitionEvent') instanceof window.TransitionEvent");
     shouldBeTrue("document.createEvent('TransitionEvent') instanceof window.Event");
     shouldBeTrue("document.createEvent('TransitionEvent').constructor === window.TransitionEvent");
-
-    // WebKitAnimationEvent
-    shouldBeTrue("document.createEvent('WebKitAnimationEvent') instanceof window.WebKitAnimationEvent");
-    shouldBeTrue("document.createEvent('WebKitAnimationEvent') instanceof window.Event");
-    shouldBeTrue("document.createEvent('WebKitAnimationEvent').constructor === window.WebKitAnimationEvent");
-
-    // WebKitTransitionEvent
-    shouldBeTrue("document.createEvent('WebKitTransitionEvent') instanceof window.WebKitTransitionEvent");
-    shouldBeTrue("document.createEvent('WebKitTransitionEvent') instanceof window.Event");
-    shouldBeTrue("document.createEvent('WebKitTransitionEvent').constructor === window.WebKitTransitionEvent");
 
     // WheelEvent
     shouldBeTrue("document.createEvent('WheelEvent') instanceof window.WheelEvent");

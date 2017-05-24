@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "content/public/common/console_message_level.h"
@@ -72,6 +73,9 @@ class ExtensionFrameHelper
   // Called after the DOMContentLoaded event has fired.
   void RunScriptsAtDocumentEnd();
 
+  // Called before the window.onload event is fired.
+  void RunScriptsAtDocumentIdle();
+
   // Schedule a callback, to be run at the next RunScriptsAtDocumentStart
   // notification. Only call this when you are certain that there will be such a
   // notification, e.g. from RenderFrameObserver::DidCreateDocumentElement.
@@ -82,6 +86,9 @@ class ExtensionFrameHelper
   // Schedule a callback, to be run at the next RunScriptsAtDocumentEnd call.
   void ScheduleAtDocumentEnd(const base::Closure& callback);
 
+  // Schedule a callback, to be run at the next RunScriptsAtDocumentIdle call.
+  void ScheduleAtDocumentIdle(const base::Closure& callback);
+
  private:
   // RenderFrameObserver implementation.
   void DidCreateDocumentElement() override;
@@ -90,7 +97,7 @@ class ExtensionFrameHelper
       const blink::WebVector<blink::WebString>& newly_matching_selectors,
       const blink::WebVector<blink::WebString>& stopped_matching_selectors)
           override;
-  void DidStartProvisionalLoad() override;
+  void DidStartProvisionalLoad(blink::WebDataSource* data_source) override;
   void DidCreateScriptContext(v8::Local<v8::Context>,
                               int world_id) override;
   void WillReleaseScriptContext(v8::Local<v8::Context>, int world_id) override;
@@ -140,6 +147,9 @@ class ExtensionFrameHelper
 
   // Callbacks to be run at the next RunScriptsAtDocumentEnd notification.
   std::vector<base::Closure> document_load_finished_callbacks_;
+
+  // Callbacks to be run at the next RunScriptsAtDocumentIdle notification.
+  std::vector<base::Closure> document_idle_callbacks_;
 
   bool delayed_main_world_script_initialization_ = false;
 

@@ -9,17 +9,17 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/browsing_data/core/counters/browsing_data_counter.h"
 #include "components/prefs/pref_member.h"
+#include "content/public/browser/browsing_data_remover.h"
 
 namespace options {
 
 // Clear browser data handler page UI handler.
 class ClearBrowserDataHandler : public OptionsPageUIHandler,
-                                public BrowsingDataRemover::Observer,
+                                public content::BrowsingDataRemover::Observer,
                                 public syncer::SyncServiceObserver {
  public:
   ClearBrowserDataHandler();
@@ -57,9 +57,11 @@ class ClearBrowserDataHandler : public OptionsPageUIHandler,
   void UpdateCounterText(
       std::unique_ptr<browsing_data::BrowsingDataCounter::Result> result);
 
-  // Implementation of SyncServiceObserver. Updates the support string at the
-  // bottom of the dialog.
-  void OnStateChanged() override;
+  // Implementation of SyncServiceObserver.
+  void OnStateChanged(syncer::SyncService* sync) override;
+
+  // Updates the support string at the bottom of the dialog.
+  void UpdateSyncState();
 
   // Finds out whether we should show a notice informing the user about other
   // forms of browsing history. Responds with an asynchronous callback to
@@ -74,7 +76,7 @@ class ClearBrowserDataHandler : public OptionsPageUIHandler,
   void UpdateHistoryDeletionDialog(bool show);
 
   // If non-null it means removal is in progress.
-  BrowsingDataRemover* remover_;
+  content::BrowsingDataRemover* remover_;
 
   // Keeps track of whether clearing LSO data is supported.
   BooleanPrefMember clear_plugin_lso_data_enabled_;

@@ -27,14 +27,15 @@ bool WebApkInstallService::IsInstallInProgress(const GURL& web_manifest_url) {
 }
 
 void WebApkInstallService::InstallAsync(const ShortcutInfo& shortcut_info,
-                                        const SkBitmap& shortcut_icon,
+                                        const SkBitmap& primary_icon,
+                                        const SkBitmap& badge_icon,
                                         const FinishCallback& finish_callback) {
   DCHECK(!IsInstallInProgress(shortcut_info.manifest_url));
 
   installs_.insert(shortcut_info.manifest_url);
 
   WebApkInstaller::InstallAsync(
-      browser_context_, shortcut_info, shortcut_icon,
+      browser_context_, shortcut_info, primary_icon, badge_icon,
       base::Bind(&WebApkInstallService::OnFinishedInstall,
                  weak_ptr_factory_.GetWeakPtr(), shortcut_info.manifest_url,
                  finish_callback));
@@ -63,8 +64,9 @@ void WebApkInstallService::UpdateAsync(
 void WebApkInstallService::OnFinishedInstall(
     const GURL& web_manifest_url,
     const FinishCallback& finish_callback,
-    bool success,
+    WebApkInstallResult result,
+    bool relax_updates,
     const std::string& webapk_package_name) {
-  finish_callback.Run(success, webapk_package_name);
+  finish_callback.Run(result, relax_updates, webapk_package_name);
   installs_.erase(web_manifest_url);
 }

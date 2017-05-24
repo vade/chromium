@@ -1,234 +1,252 @@
-# This file controls which subdirectories of the w3c test repos we do (or don't) import.
+# This file controls which subdirectories of the w3c test repos we import.
 #
-# This file acts as a blacklist; directories and files not listed here will automatically
-# be found and imported.
-
+# This file acts as a blacklist; directories and files not listed here will
+# automatically be found and imported.
+#
+# This file is read by webkitpy/w3c/directory_owners_extractor.py to decide who
+# to contact for new failures; it will read entries with the following format:
 # When removing blacklist entries:
-# * Comment out the line rather than deleting it, to show it is intentional
+# * Comment out the line rather than deleting it, to show it is intentional.
 # * Change [ Skip ] to [ Pass ]
 # * Add a leading comment: ## Owners: user@example.com
-
-external/csswg-test/WOFF2-UserAgent [ Skip ]
-external/csswg-test/compositing-1 [ Skip ]
-external/csswg-test/css-align-3 [ Skip ]
-external/csswg-test/css-animations-1 [ Skip ]
-external/csswg-test/css-backgrounds-3 [ Skip ]
-external/csswg-test/css-box-3 [ Skip ]
-external/csswg-test/css-break-3 [ Skip ]
-external/csswg-test/css-cascade-3 [ Skip ]
-external/csswg-test/css-color-3 [ Skip ]
-external/csswg-test/css-color-4 [ Skip ]
-external/csswg-test/css-conditional-3 [ Skip ]
-external/csswg-test/css-counter-styles-3 [ Skip ]
-## Owners: ecobos@igalia.com
-# external/csswg-test/css-dislay-3 [ Pass ]
-external/csswg-test/css-exclusions-1 [ Skip ]
-## Owners: cbiesinger@chromium.org
-# external/csswg-test/css-flexbox-1 [ Pass ]
-external/csswg-test/css-fonts-3 [ Skip ]
-external/csswg-test/css-gcpm-3 [ Skip ]
-external/csswg-test/css-grid-1 [ Skip ]
-external/csswg-test/css-images-3 [ Skip ]
-external/csswg-test/css-lists-3 [ Skip ]
-external/csswg-test/css-masking-1 [ Skip ]
-external/csswg-test/css-multicol-1 [ Skip ]
-external/csswg-test/css-namespaces-3 [ Skip ]
-external/csswg-test/css-page-3 [ Skip ]
-external/csswg-test/css-pseudo-4 [ Skip ]
-external/csswg-test/css-regions-1 [ Skip ]
-external/csswg-test/css-ruby-1 [ Skip ]
-## Owners: kochi@chromium.org
-#external/csswg-test/css-scoping-1 [ Pass ]
-## Owners: bjonesbe@adobe.com
-# external/csswg-test/css-shapes-1 [ Pass ]
-## Owners: kojii@chromium.org
-# external/csswg-test/css-snap-size-1 [ Pass ]
-external/csswg-test/css-speech-1 [ Skip ]
-external/csswg-test/css-style-attr-1 [ Skip ]
-external/csswg-test/css-syntax-3 [ Skip ]
-external/csswg-test/css-tables-3 [ Skip ]
-external/csswg-test/css-text-3/hanging-punctuation [ Skip ]
-external/csswg-test/css-text-3/i18n [ Skip ]
-external/csswg-test/css-text-3/line-break [ Skip ]
-## Owners: kojii@chromium.org
-# external/csswg-test/css-text-3/overflow-wrap [ Pass ]
-external/csswg-test/css-text-3/support [ Skip ]
-external/csswg-test/css-text-3/tab-size [ Skip ]
-external/csswg-test/css-text-3/text-align [ Skip ]
-external/csswg-test/css-text-3/text-indent [ Skip ]
-external/csswg-test/css-text-3/text-justify [ Skip ]
-external/csswg-test/css-text-3/text-transform [ Skip ]
-external/csswg-test/css-text-3/white-space [ Skip ]
-external/csswg-test/css-text-3/word-break [ Skip ]
-## Owners: drott@chromium.org
-# external/csswg-test/css-text-decor-3 [ Pass ]
-external/csswg-test/css-transforms-1 [ Skip ]
-external/csswg-test/css-transitions-1 [ Skip ]
-external/csswg-test/css-transitions-2 [ Skip ]
-## Owners: rego@igalia.com
-# external/csswg-test/css-ui-3 [ Pass ]
-external/csswg-test/css-values-3 [ Skip ]
-external/csswg-test/css-variables-1 [ Skip ]
-## Owners: kojii@chromium.org
-# external/csswg-test/css-writing-modes-3 [ Pass ]
-external/csswg-test/css1 [ Skip ]
-## Owners: kojii@chromium.org
-# external/csswg-test/css21 [ Pass ]
-external/csswg-test/css21/LICENSE-BSD [ Skip ]
-external/csswg-test/css21/LICENSE-W3CD [ Skip ]
-external/csswg-test/css21/LICENSE-W3CTS [ Skip ]
-external/csswg-test/css21/Makefile [ Skip ]
-external/csswg-test/css21/abspos [ Skip ]
-external/csswg-test/css21/archive [ Skip ]
-external/csswg-test/css21/backgrounds [ Skip ]
-external/csswg-test/css21/bidi-005.xht [ Skip ]
-external/csswg-test/css21/bidi-006.xht [ Skip ]
-external/csswg-test/css21/bidi-007.xht [ Skip ]
-external/csswg-test/css21/bidi-008.xht [ Skip ]
-external/csswg-test/css21/bidi-009.xht [ Skip ]
-external/csswg-test/css21/bidi-010.xht [ Skip ]
-external/csswg-test/css21/bidi-overflow-scroll-001.xht [ Skip ]
-external/csswg-test/css21/bidi-text [ Skip ]
-external/csswg-test/css21/border-seams-001.xht [ Skip ]
-external/csswg-test/css21/borders [ Skip ]
-external/csswg-test/css21/box [ Skip ]
-external/csswg-test/css21/box-display [ Skip ]
-external/csswg-test/css21/cascade [ Skip ]
-external/csswg-test/css21/cascade-import [ Skip ]
-external/csswg-test/css21/colors [ Skip ]
-external/csswg-test/css21/css-e-notation-ref-1.html [ Skip ]
-external/csswg-test/css21/css-e-notation-ref-2.html [ Skip ]
-external/csswg-test/css21/css-e-notation-test-1.html [ Skip ]
-external/csswg-test/css21/css-e-notation-test-2.html [ Skip ]
-external/csswg-test/css21/css1 [ Skip ]
-external/csswg-test/css21/css21-errata [ Skip ]
-external/csswg-test/css21/csswg-issues [ Skip ]
-external/csswg-test/css21/floats [ Skip ]
-external/csswg-test/css21/floats-clear [ Skip ]
-external/csswg-test/css21/fonts [ Skip ]
-external/csswg-test/css21/generate [ Skip ]
-external/csswg-test/css21/generated-content [ Skip ]
-external/csswg-test/css21/i18n [ Skip ]
-external/csswg-test/css21/inline-svg-100-percent-in-body.html [ Skip ]
-external/csswg-test/css21/inline-svg-intrinsic-size-100-percent-1.html [ Skip ]
-external/csswg-test/css21/inline-svg-intrinsic-size-100-percent-2.html [ Skip ]
-external/csswg-test/css21/inline-svg-margin-padding-border.html [ Skip ]
-## Owners: kojii@chromium.org
-# external/csswg-test/css21/linebox [ Pass ]
-external/csswg-test/css21/lists [ Skip ]
-external/csswg-test/css21/margin-padding-clear [ Skip ]
-external/csswg-test/css21/media [ Skip ]
-external/csswg-test/css21/normal-flow [ Skip ]
-external/csswg-test/css21/other-formats [ Skip ]
-external/csswg-test/css21/page-box [ Skip ]
-external/csswg-test/css21/pagination [ Skip ]
-external/csswg-test/css21/positioning [ Skip ]
-external/csswg-test/css21/reference [ Skip ]
-external/csswg-test/css21/run-in [ Skip ]
-external/csswg-test/css21/sec5 [ Skip ]
-external/csswg-test/css21/section-index.xht [ Skip ]
-external/csswg-test/css21/selector [ Skip ]
-external/csswg-test/css21/selectors [ Skip ]
-external/csswg-test/css21/src [ Skip ]
-external/csswg-test/css21/syntax [ Skip ]
-external/csswg-test/css21/tables [ Skip ]
-external/csswg-test/css21/text [ Skip ]
-external/csswg-test/css21/ui [ Skip ]
-external/csswg-test/css21/values [ Skip ]
-external/csswg-test/css21/visudet [ Skip ]
-external/csswg-test/css21/visufx [ Skip ]
-external/csswg-test/css21/visuren [ Skip ]
-external/csswg-test/css21/zindex [ Skip ]
-external/csswg-test/css21/zorder [ Skip ]
-external/csswg-test/cssom-1 [ Skip ]
-external/csswg-test/cssom-view-1 [ Skip ]
-external/csswg-test/filters-1 [ Skip ]
-external/csswg-test/fonts [ Skip ]
-external/csswg-test/geometry-1 [ Skip ]
-external/csswg-test/mediaqueries-3 [ Skip ]
-external/csswg-test/reference [ Skip ]
-external/csswg-test/resources [ Skip ]
-external/csswg-test/selectors-3 [ Skip ]
-external/csswg-test/selectors-4 [ Skip ]
-external/csswg-test/support [ Skip ]
-external/csswg-test/tools [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/README [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/align3 [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/check-for-references.sh [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/color4 [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/contain [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/conditional3 [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/css21 [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/filters [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/background [ Skip ]
-## Owners: cbiesinger@chromium.org
-# external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/flexbox [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/flexbox/reftest.list [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/fonts3 [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/images3 [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/lists-3 [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/masking [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/multicol3 [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/reftest.list [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/ruby [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/selectors4 [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/shapes1 [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/sync-tests-filter [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/sync-tests.sh [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/text-decor-3 [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/text3 [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/transforms [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/ui3 [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/values3 [ Skip ]
-## Owners: kojii@chromium.org
-# external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/variables [ Pass ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/variables/reftest.list [ Skip ]
-external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/will-change [ Skip ]
-external/csswg-test/work-in-progress [ Skip ]
-external/csswg-test/wpt_tools [ Skip ]
-external/csswg-test/.gitmodules [ Skip ]
-external/csswg-test/.hgsubstate [ Skip ]
-external/csswg-test/.htaccess [ Skip ]
+#
+# We may want to move towards importing but not running directories without
+# owners, in order to make it easier to enable or run them in the future --
+# directories that are imported but not run are listed in NeverFixTests.
+#
+# Further documentation:
+# https://chromium.googlesource.com/chromium/src/+/master/docs/testing/layout_test_expectations.md
 
 external/wpt/2dcontext [ Skip ]
-external/wpt/DOM-parsing [ Skip ]
 ## Owners: jsbell@chromium.org
 # external/wpt/FileAPI [ Pass ]
 ## Owners: jsbell@chromium.org
 # external/wpt/IndexedDB [ Pass ]
-external/wpt/WebCryptoAPI [ Skip ]
+## Owners: eroman@chromium.org,rsleevi@chromium.org
+# external/wpt/WebCryptoAPI [ Pass ]
 ## Owners: jsbell@chromium.org
 # external/wpt/WebIDL [ Pass ]
 external/wpt/WebIDL/invalid [ Skip ]
 external/wpt/WebIDL/readme.txt [ Skip ]
 external/wpt/WebIDL/testable_assertions.txt [ Skip ]
 external/wpt/WebIDL/valid [ Skip ]
-external/wpt/XMLHttpRequest [ Skip ]
+## Owners: blink-network-dev@chromium.org
+# external/wpt/XMLHttpRequest [ Pass ]
 external/wpt/ambient-light [ Skip ]
-external/wpt/animation-timing [ Skip ]
 external/wpt/annotation-model [ Skip ]
 external/wpt/annotation-protocol [ Skip ]
 external/wpt/annotation-vocab [ Skip ]
 external/wpt/app-uri [ Skip ]
-external/wpt/battery-status [ Skip ]
-external/wpt/bluetooth [ Skip ]
+## Owners: timvolodine@chromium.org
+# external/wpt/battery-status [ Pass ]
+## Owners: ortuno@chromium.org,scheib@chromium.org
+# external/wpt/bluetooth [ Pass ]
 ## Owners: none; No tests in the directory.
 # external/wpt/common [ Pass ]
-external/wpt/compat [ Skip ]
+## Owners: foolip@chromium.org
+# external/wpt/compat [ Pass ]
 external/wpt/config.default.json [ Skip ]
 external/wpt/conformance-checkers [ Skip ]
-external/wpt/console [ Skip ]
-external/wpt/content-security-policy [ Skip ]
-external/wpt/cookies [ Skip ]
-external/wpt/cors [ Skip ]
-external/wpt/csp [ Skip ]
-external/wpt/cssom [ Skip ]
-external/wpt/cssom-view [ Skip ]
-## Owners: TBD
+## Owners: kozyatinskiy@chromium.org
+# external/wpt/console [ Pass ]
+## Owners: mkwst@chromium.org
+# external/wpt/content-security-policy [ Pass ]
+## Owners: mkwst@chromium.org
+# external/wpt/cookies [ Pass ]
+## Owners: blink-network-dev@chromium.org
+# external/wpt/cors [ Pass ]
+## Owners: kojii@chromium.org,ksakamoto@chromium.org
+# external/wpt/css-font-loading [ Pass ]
+external/wpt/css/CSS1 [ Skip ]
+## Owners: kojii@chromium.org
+# external/wpt/css/CSS2 [ Pass ]
+external/wpt/css/CSS2/LICENSE-BSD [ Skip ]
+external/wpt/css/CSS2/LICENSE-W3CD [ Skip ]
+external/wpt/css/CSS2/LICENSE-W3CTS [ Skip ]
+external/wpt/css/CSS2/Makefile [ Skip ]
+## Owners: atotic@chromium.org glebl@chromium.org
+# external/wpt/css/CSS2/abspos [ Pass ]
+external/wpt/css/CSS2/backgrounds [ Skip ]
+external/wpt/css/CSS2/bidi-005.xht [ Skip ]
+external/wpt/css/CSS2/bidi-006.xht [ Skip ]
+external/wpt/css/CSS2/bidi-007.xht [ Skip ]
+external/wpt/css/CSS2/bidi-008.xht [ Skip ]
+external/wpt/css/CSS2/bidi-009.xht [ Skip ]
+external/wpt/css/CSS2/bidi-010.xht [ Skip ]
+external/wpt/css/CSS2/bidi-overflow-scroll-001.xht [ Skip ]
+external/wpt/css/CSS2/bidi-text [ Skip ]
+external/wpt/css/CSS2/border-seams-001.xht [ Skip ]
+external/wpt/css/CSS2/borders [ Skip ]
+external/wpt/css/CSS2/box [ Skip ]
+external/wpt/css/CSS2/box-display [ Skip ]
+external/wpt/css/CSS2/cascade [ Skip ]
+external/wpt/css/CSS2/cascade-import [ Skip ]
+external/wpt/css/CSS2/colors [ Skip ]
+external/wpt/css/CSS2/css-e-notation-ref-1.html [ Skip ]
+external/wpt/css/CSS2/css-e-notation-ref-2.html [ Skip ]
+external/wpt/css/CSS2/css-e-notation-test-1.html [ Skip ]
+external/wpt/css/CSS2/css-e-notation-test-2.html [ Skip ]
+external/wpt/css/CSS2/css1 [ Skip ]
+external/wpt/css/CSS2/css21-errata [ Skip ]
+external/wpt/css/CSS2/csswg-issues [ Skip ]
+## Owners: glebl@chromium.org
+# external/wpt/css/CSS2/floats [ Pass ]
+# external/wpt/css/CSS2/floats-clear [ Pass ]
+external/wpt/css/CSS2/fonts [ Skip ]
+external/wpt/css/CSS2/generate [ Skip ]
+external/wpt/css/CSS2/generated-content [ Skip ]
+external/wpt/css/CSS2/i18n [ Skip ]
+external/wpt/css/CSS2/inline-svg-100-percent-in-body.html [ Skip ]
+external/wpt/css/CSS2/inline-svg-intrinsic-size-100-percent-1.html [ Skip ]
+external/wpt/css/CSS2/inline-svg-intrinsic-size-100-percent-2.html [ Skip ]
+external/wpt/css/CSS2/inline-svg-margin-padding-border.html [ Skip ]
+## Owners: kojii@chromium.org
+# external/wpt/css/CSS2/linebox [ Pass ]
+external/wpt/css/CSS2/lists [ Skip ]
+external/wpt/css/CSS2/margin-padding-clear [ Skip ]
+external/wpt/css/CSS2/media [ Skip ]
+## Owners: glebl@chromium.org
+# external/wpt/css/CSS2/normal-flow [ Pass ]
+external/wpt/css/CSS2/other-formats [ Skip ]
+external/wpt/css/CSS2/page-box [ Skip ]
+external/wpt/css/CSS2/pagination [ Skip ]
+## Owners: glebl@chromium.org
+# external/wpt/css/CSS2/positioning [ Pass ]
+external/wpt/css/CSS2/run-in [ Skip ]
+external/wpt/css/CSS2/sec5 [ Skip ]
+external/wpt/css/CSS2/section-index.xht [ Skip ]
+external/wpt/css/CSS2/selector [ Skip ]
+external/wpt/css/CSS2/selectors [ Skip ]
+external/wpt/css/CSS2/syntax [ Skip ]
+external/wpt/css/CSS2/tables [ Skip ]
+external/wpt/css/CSS2/text [ Skip ]
+external/wpt/css/CSS2/ui [ Skip ]
+external/wpt/css/CSS2/values [ Skip ]
+external/wpt/css/CSS2/visudet [ Skip ]
+external/wpt/css/CSS2/visufx [ Skip ]
+external/wpt/css/CSS2/visuren [ Skip ]
+external/wpt/css/CSS2/zindex [ Skip ]
+external/wpt/css/CSS2/zorder [ Skip ]
+external/wpt/css/WOFF2 [ Skip ]
+external/wpt/css/compositing-1 [ Skip ]
+## Owners: jfernandez@igalia.com
+# external/wpt/css/css-align-3 [ Pass ]
+external/wpt/css/css-animations-1 [ Skip ]
+external/wpt/css/css-backgrounds-3 [ Skip ]
+external/wpt/css/css-block-3 [ Skip ]
+external/wpt/css/css-break-3 [ Skip ]
+external/wpt/css/css-cascade-3 [ Skip ]
+external/wpt/css/css-cascade-4 [ Skip ]
+external/wpt/css/css-color-4 [ Skip ]
+external/wpt/css/css-conditional-3 [ Skip ]
+external/wpt/css/css-counter-styles-3 [ Skip ]
+## Owners: ecobos@igalia.com
+# external/wpt/css/css-display-3 [ Pass ]
+external/wpt/css/css-exclusions-1 [ Skip ]
+## Owners: cbiesinger@chromium.org
+# external/wpt/css/css-flexbox-1 [ Pass ]
+external/wpt/css/css-fonts-3 [ Skip ]
+external/wpt/css/css-gcpm-3 [ Skip ]
+## Owners: rego@igalia.com
+# external/wpt/css/css-grid-1 [ Pass ]
+external/wpt/css/css-images-3 [ Skip ]
+## Owners: kochi@chromium.org
+external/wpt/css/css-lists-3 [ Skip ]
+external/wpt/css/css-logical-properties-1 [ Skip ]
+external/wpt/css/css-logical-props-1 [ Skip ]
+external/wpt/css/css-masking-1 [ Skip ]
+external/wpt/css/css-multicol-1 [ Skip ]
+external/wpt/css/css-namespaces-3 [ Skip ]
+external/wpt/css/css-page-3 [ Skip ]
+external/wpt/css/css-pseudo-4 [ Skip ]
+external/wpt/css/css-regions-1 [ Skip ]
+## Owners: kojii@chromium.org
+# external/wpt/css/css-rhythm-1 [ Pass ]
+external/wpt/css/css-round-display-1 [ Skip ]
+external/wpt/css/css-ruby-1 [ Skip ]
+#external/wpt/css/css-scoping-1 [ Pass ]
+## Owners: bjonesbe@adobe.com
+# external/wpt/css/css-shapes-1 [ Pass ]
+external/wpt/css/css-speech-1 [ Skip ]
+external/wpt/css/css-syntax-3 [ Skip ]
+external/wpt/css/css-style-attr [ Skip ]
+external/wpt/css/css-tables-3 [ Skip ]
+external/wpt/css/css-text-3/hanging-punctuation [ Skip ]
+## Owners: kojii@chromium.org
+# external/wpt/css/css-text-3/i18n [ Pass ]
+# external/wpt/css/css-text-3/line-break [ Pass ]
+external/wpt/css/css-text-3/line-breaking [ Skip ]
+## Owners: kojii@chromium.org
+# external/wpt/css/css-text-3/overflow-wrap [ Pass ]
+external/wpt/css/css-text-3/support [ Skip ]
+external/wpt/css/css-text-3/tab-size [ Skip ]
+external/wpt/css/css-text-3/text-align [ Skip ]
+external/wpt/css/css-text-3/text-indent [ Skip ]
+external/wpt/css/css-text-3/text-justify [ Skip ]
+external/wpt/css/css-text-3/text-transform [ Skip ]
+external/wpt/css/css-text-3/white-space [ Skip ]
+external/wpt/css/css-text-3/word-break [ Skip ]
+## Owners: drott@chromium.org
+# external/wpt/css/css-text-decor-3 [ Pass ]
+external/wpt/css/css-transforms-1 [ Skip ]
+external/wpt/css/css-transitions-1 [ Skip ]
+external/wpt/css/css-transitions-2 [ Skip ]
+## Owners: rego@igalia.com
+# external/wpt/css/css-ui-3 [ Pass ]
+external/wpt/css/css-values-3 [ Skip ]
+external/wpt/css/css-values-4 [ Skip ]
+external/wpt/css/css-variables-1 [ Skip ]
+## Owners: kojii@chromium.org
+# external/wpt/css/css-writing-modes-3 [ Pass ]
+external/wpt/css/css3-color [ Skip ]
+external/wpt/css/css3-selectors [ Skip ]
+external/wpt/css/filter-effects-1 [ Skip ]
+## Owners: xlai@chromium.org,jinho.bang@samsung.com,hs1217.lee@samsung.com
+# external/wpt/css/geometry-1 [ Pass ]
+external/wpt/css/mediaqueries-3 [ Skip ]
+## Owners: rego@igalia.com
+# external/wpt/css/selectors4 [ Pass ]
+external/wpt/css/tools [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/README [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/align3 [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/check-for-references.sh [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/color4 [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/contain [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/conditional3 [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/css21 [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/filters [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/background [ Skip ]
+## Owners: cbiesinger@chromium.org
+# external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/flexbox [ Pass ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/fonts3 [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/images3 [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/lists-3 [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/masking [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/multicol3 [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/ruby [ Skip ]
+## Owners: rego@igalia.com
+# external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/selectors4 [ Pass ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/shapes1 [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/sync-tests-filter [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/sync-tests.sh [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/text-decor-3 [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/text3 [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/transforms [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/ui3 [ Skip ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/values3 [ Skip ]
+## Owners: kojii@chromium.org
+# external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/variables [ Pass ]
+external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/will-change [ Skip ]
+external/wpt/css/work-in-progress [ Skip ]
+external/wpt/css/.htaccess [ Skip ]
+## Owners: style-dev@chromium.org
+# external/wpt/cssom [ Pass ]
+## Owners: style-dev@chromium.org
+# external/wpt/cssom-view [ Pass ]
+## Owners: dom-dev@chromium.org
 # external/wpt/custom-elements [ Pass ]
-external/wpt/custom-elements/v0/registering/unresolved-element-pseudoclass [ Skip ]
 external/wpt/docs [ Skip ]
-## Owners: tkent@chromium.org
+## Owners: dom-dev@chromium.org
 external/wpt/dom [ Pass ]
 ## Owners: dom-dev@chromium.org
 # external/wpt/domparsing [ Pass ]
@@ -236,126 +254,166 @@ external/wpt/dom [ Pass ]
 # external/wpt/domxpath [ Pass ]
 external/wpt/dpub-aam [ Skip ]
 external/wpt/dpub-aria [ Skip ]
-external/wpt/editing [ Skip ]
+## Owners: dom-dev@chromium.org
+# external/wpt/editing [ Pass ]
 ## Owners: jsbell@chromium.org
 # external/wpt/encoding [ Pass ]
 ## Owners: jrummell@chromium.org
 # external/wpt/encrypted-media [ Pass ]
 external/wpt/encrypted-media/Google [ Skip ]
-external/wpt/eventsource [ Skip ]
+## Owners: blink-network-dev@chromium.org
+# external/wpt/eventsource [ Pass ]
 external/wpt/ext-xhtml-pubid [ Skip ]
-external/wpt/fetch [ Skip ]
-external/wpt/fonts [ Skip ]
+## Owners: tyoshino@chromium.org,yhirano@chromium.org,mkwst@chromium.org,japhet@chromium.org
+# external/wpt/fetch [ Pass ]
+## Owners: none; No tests in the directory.
+# external/wpt/fonts [ Pass ]
+external/wpt/fonts/math [ Skip ]
 ## Owners: foolip@chromium.org
 # external/wpt/fullscreen [ Pass ]
 ## Owners: bajones@chromium.org
 # external/wpt/gamepad [ Pass ]
-external/wpt/generic-sensor [ Skip ]
-external/wpt/geolocation-API [ Skip ]
+## Owners: alexander.shalamov@intel.com,mikhail.pozdnyakov@intel.com,rijubrata.bhaumik@intel.com,timvolodine@chromium.org
+# external/wpt/generic-sensor [ Pass ]
+## Owners: mcasas@chromium.org
+# external/wpt/geolocation-API [ Pass ]
 ## Owners: jsbell@chromium.org
 # external/wpt/hr-time [ Pass ]
-## Owners: tkent@chromium.org
+## Owners: dom-dev@chromium.org
 # external/wpt/html [ Pass ]
-## Owners: TBD
+## Owners: dom-dev@chromium.org
 # external/wpt/html-imports [ Pass ]
 external/wpt/html-longdesc [ Skip ]
-external/wpt/html-media-capture [ Skip ]
-external/wpt/http [ Skip ]
+## Owners: rijubrata.bhaumik@intel.com,mcasas@chromium.org
+# external/wpt/html-media-capture [ Pass ]
+## Owners: loading-dev@chromium.org
+# external/wpt/http [ Pass ]
 ## Owners: none; No tests in the directory.
 # external/wpt/images [ Pass ]
 external/wpt/imagebitmap-renderingcontext [ Skip ]
-external/wpt/infrastructure [ Skip ]
+## Owners: smcgruer@chromium.org
+# external/wpt/infrastructure [ Pass ]
+## Owners: none; No tests in the directory.
+# external/wpt/interfaces [ Pass ]
 ## Owners: dom-dev@chromium.org
 # external/wpt/innerText [ Pass ]
 external/wpt/js [ Skip ]
 external/wpt/lint [ Skip ]
-external/wpt/lint.whitelist [ Skip ]
 external/wpt/manifest [ Skip ]
 external/wpt/mathml [ Skip ]
 ## Owners: none; No tests in the directory.
-# external/wpt/media [ Skip ]
-external/wpt/media-source [ Skip ]
-external/wpt/mediacapture-record [ Skip ]
+# external/wpt/media [ Pass ]
+## Owners: mlamouri@chromium.org,zqzhang@chromium.org
+# external/wpt/mediasession [ Pass ]
+## Owners: chcunningham@chromium.org,mlamouri@chromium.org
+# external/wpt/media-capabilities
+## Owners: chcunningham@chromium.org,wolenetz@chromium.org
+# external/wpt/media-source [ Pass ]
+## Owners: mcasas@chromium.org
+# external/wpt/mediacapture-record [ Pass ]
 ## Owners: phoglund@chromium.org
 # external/wpt/mediacapture-streams [ Pass ]
 external/wpt/microdata [ Skip ]
-external/wpt/mixed-content [ Skip ]
-external/wpt/navigation-timing [ Skip ]
-external/wpt/notifications [ Skip ]
+## Owners: mkwst@chromium.org
+# external/wpt/mixed-content [ Pass ]
+## Owners: sunjian@chromium.org,panicker@chromium.org
+external/wpt/navigation-timing [ Pass ]
+## Owners: platform-capabilities@chromium.org
+# external/wpt/notifications [ Pass ]
 external/wpt/offscreen-canvas [ Skip ]
 external/wpt/old-tests [ Skip ]
-external/wpt/orientation-event [ Skip ]
-external/wpt/payment-request [ Skip ]
-external/wpt/page-visibility [ Skip ]
-external/wpt/performance-timeline [ Skip ]
-## Owners: mustaq@chromium.org
+## Owners: timvolodine@chromium.org,reillyg@chromium.org
+# external/wpt/orientation-event [ Pass ]
+## Owners: rouslan@chromium.org,mathp@chromium.org
+# external/wpt/payment-request [ Pass ]
+## Owners: panicker@chromium.org
+# external/wpt/page-visibility [ Pass ]
+## Owners: igrigorik@chromium.org,panicker@chromium.org
+# external/wpt/performance-timeline [ Pass ]
+## Owners: nzolghadr@chromium.org,mustaq@chromium.org
 # external/wpt/pointerevents [ Pass ]
-external/wpt/pointerlock [ Skip ]
-external/wpt/presentation-api [ Skip ]
-external/wpt/progress-events [ Skip ]
+## Owners: chongz@chromium.org
+# external/wpt/pointerlock [ Pass ]
+## Owners: media-dev@chromium.org
+# external/wpt/presentation-api [ Pass ]
+## Owners: blink-network-dev@chromium.org
+# external/wpt/progress-events [ Pass ]
 external/wpt/proximity [ Skip ]
 ## Owners: rob.buis@samsung.com
-# external/wpt/quirks-mode [ Skip ]
-## Owners: mkwst@chromium.org
-# http://crbug.com/360762: Requires HTTPS server with python.
-external/wpt/referrer-policy [ Skip ]
-external/wpt/resource-timing [ Skip ]
+# external/wpt/quirks-mode [ Pass ]
+## Owners: avayvod@chromium.org,mlamouri@chromium.org
+# external/wpt/remote-playback [ Pass ]
+## Owners: jochen@chromium.org,estark@chromium.org
+# external/wpt/referrer-policy [ Pass ]
+## Owners: ksakamoto@chromium.org
+# external/wpt/resource-timing [ Pass ]
 ## Owners: jsbell@chromium.org
 # external/wpt/resources [ Pass ]
 external/wpt/resources/docs [ Skip ]
 external/wpt/resources/examples [ Skip ]
 external/wpt/resources/webidl2/README.md [ Skip ]
 external/wpt/resources/webidl2/test [ Skip ]
-external/wpt/screen-orientation [ Skip ]
-external/wpt/secure-contexts [ Skip ]
+## Owners: mlamouri@chromium.org
+# external/wpt/screen-orientation [ Pass ]
+## Owners: mkwst@chromium.org
+# external/wpt/secure-contexts [ Pass ]
 ## Owners: dom-dev@chromium.org
 # external/wpt/selection [ Pass ]
-external/wpt/selectors [ Skip ]
-external/wpt/selectors-api [ Skip ]
+## Owners: style-dev@chromium.org
+# external/wpt/selectors [ Pass ]
 external/wpt/serve [ Skip ]
 external/wpt/serve.py [ Skip ]
 external/wpt/server-side.md [ Skip ]
-## Owners: shimazu@chromium.org
+## Owners: worker-dev@chromium.org
 # external/wpt/service-workers [ Pass ]
 ## Owners: jsbell@chromium.org
 # external/wpt/service-workers/cache-storage [ Pass ]
-## Owners: kochi@chromium.org crbug.com/505364
+## Owners: dom-dev@chromium.org
 # external/wpt/shadow-dom [ Pass ]
+## Owners: jsbell@chromium.org
+# external/wpt/storage [ Pass ]
 ## Owners: domenic@chromium.org,ricea@chromium.org,tyoshino@chromium.org
 external/wpt/streams [ Pass ]
-## Owners: jww@chromium.org
-external/wpt/subresource-integrity [ Skip ]
+## Owners: mkwst@chromium.org,jochen@chromium.org
+# external/wpt/subresource-integrity [ Pass ]
 ## Owners: foolip@chromium.org
-external/wpt/svg [ Pass ]
+# external/wpt/svg [ Pass ]
 external/wpt/svg/import [ Skip ]
 external/wpt/tools [ Skip ]
 ## Owners: chongz@chromium.org
 # external/wpt/touch-events [ Pass ]
-external/wpt/typedarrays [ Skip ]
 ## Owners: dtapuska@chromium.org
-external/wpt/uievents [ Pass ]
-external/wpt/url [ Skip ]
+# external/wpt/uievents [ Pass ]
+## Owners: blink-network-dev@chromium.org
+# external/wpt/url [ Pass ]
 ## Owners: jsbell@chromium.org
 # external/wpt/user-timing [ Pass ]
-external/wpt/vibration [ Skip ]
+## Owners: platform-capabilities@chromium.org
+# external/wpt/vibration [ Pass ]
 ## Owners: bsheedy@chromium.org
 # external/wpt/webvr [ Pass ]
 external/wpt/wai-aria [ Skip ]
 ## Owners: suzyh@chromium.org
 # external/wpt/web-animations [ Pass ]
-external/wpt/webaudio [ Skip ]
-external/wpt/webauthn [ Skip ]
+## Owners: hongchan@chromium.org, rtoy@chromium.org
+# external/wpt/webaudio [ Pass ]
+## Owners: kpaulhamus@chromium.org
+# external/wpt/webauthn [ Pass ]
 external/wpt/webdriver [ Skip ]
 external/wpt/webgl [ Skip ]
 ## Owners: mek@chromium.org
 # external/wpt/webmessaging [ Pass ]
 ## Owners: hta@chromium.org
 # external/wpt/webrtc [ Pass ]
-external/wpt/websockets [ Skip ]
+## Owners: blink-network-dev@chromium.org
+# external/wpt/websockets [ Pass ]
 ## Owners: michaeln@chromium.org,jsbell@chromium.org
 # external/wpt/webstorage [ Pass ]
-external/wpt/webvtt [ Skip ]
-## Owners: nhiroki@chromium.org
+## Owners: foolip@chromium.org,maksim.sisov@intel.com
+# external/wpt/webvtt [ Pass ]
+## Owners: alexander.shalamov@intel.com,kenneth.r.christiansen@intel.com,rijubrata.bhaumik@intel.com
+# external/wpt/web-nfc [ Pass ]
+## Owners: worker-dev@chromium.org
 # external/wpt/workers [ Pass ]
 
 # Exceptions for individual files that fail due to bugs in the
@@ -446,49 +504,16 @@ external/wpt/html/semantics/embedded-content/the-video-element/video_dynamic_pos
 external/wpt/html/semantics/embedded-content/the-video-element/video_initially_paused.html [ Skip ]
 
 # crbug.com/493537: Need to support SVG reference tests
-external/wpt/dom/nodes/Document-createElement-namespace-tests/bare_mathml.svg [ Skip ]
-external/wpt/dom/nodes/Document-createElement-namespace-tests/bare_svg.svg [ Skip ]
-external/wpt/dom/nodes/Document-createElement-namespace-tests/bare_xhtml.svg [ Skip ]
-external/wpt/dom/nodes/Document-createElement-namespace-tests/empty.svg [ Skip ]
-external/wpt/dom/nodes/Document-createElement-namespace-tests/mathml.svg [ Skip ]
-external/wpt/dom/nodes/Document-createElement-namespace-tests/minimal_html.svg [ Skip ]
-external/wpt/dom/nodes/Document-createElement-namespace-tests/svg.svg [ Skip ]
-external/wpt/dom/nodes/Document-createElement-namespace-tests/xhtml.svg [ Skip ]
-external/wpt/dom/nodes/Document-createElement-namespace-tests/xhtml_ns_changed.svg [ Skip ]
-external/wpt/dom/nodes/Document-createElement-namespace-tests/xhtml_ns_removed.svg [ Skip ]
-external/wpt/dom/nodes/Element-childElement-null-svg.svg [ Skip ]
-external/wpt/dom/nodes/Element-childElementCount-dynamic-add-svg.svg [ Skip ]
-external/wpt/dom/nodes/Element-childElementCount-dynamic-remove-svg.svg [ Skip ]
-external/wpt/dom/nodes/Element-childElementCount-nochild-svg.svg [ Skip ]
-external/wpt/dom/nodes/Element-childElementCount-svg.svg [ Skip ]
-external/wpt/dom/nodes/Element-firstElementChild-entity.svg [ Skip ]
-external/wpt/dom/nodes/Element-firstElementChild-namespace-svg.svg [ Skip ]
-external/wpt/dom/nodes/Element-firstElementChild-svg.svg [ Skip ]
-external/wpt/dom/nodes/Element-lastElementChild-svg.svg [ Skip ]
-external/wpt/dom/nodes/Element-nextElementSibling-svg.svg [ Skip ]
-external/wpt/dom/nodes/Element-previousElementSibling-svg.svg [ Skip ]
-external/wpt/dom/nodes/Element-siblingElement-null-svg.svg [ Skip ]
 external/wpt/html/editing/the-hidden-attribute/hidden-2.svg [ Skip ]
 external/wpt/svg/shapes/rect-01.svg [ Skip ]
 external/wpt/svg/shapes/rect-02.svg [ Skip ]
 external/wpt/svg/shapes/rect-03.svg [ Skip ]
 external/wpt/svg/shapes/rect-04.svg [ Skip ]
 
-# https://github.com/w3c/web-platform-tests/issues/1861: A function can be
-# called before it's defined.
-# crbug.com/493465: Requires the pipe feature of wptserve
-external/wpt/html/browsers/the-window-object/security-window/window-security.sub.html [ Skip ]
-
-# crbug.com/493465: Requires the pipe feature of wptserve
-external/wpt/html/infrastructure/urls/resolving-urls [ Skip ]
-
-# crbug.com/535615: Pathnames are too long for Windows.
-external/wpt/html/semantics/embedded-content/media-elements/loading-the-media-resource/resource-selection-invoke-insert-fragment-into-document.html [ Skip ]
-external/wpt/html/semantics/embedded-content/media-elements/loading-the-media-resource/resource-selection-invoke-insert-parent-into-document.html [ Skip ]
-external/wpt/html/semantics/embedded-content/media-elements/loading-the-media-resource/resource-selection-invoke-insert-source-networkState.html [ Skip ]
-external/wpt/html/semantics/embedded-content/media-elements/loading-the-media-resource/resource-selection-invoke-insert-source-not-in-document.html [ Skip ]
-external/wpt/html/semantics/embedded-content/media-elements/loading-the-media-resource/resource-selection-invoke-remove-from-document-networkState.html [ Skip ]
-external/wpt/html/semantics/embedded-content/media-elements/loading-the-media-resource/resource-selection-pointer-remove-source-after.html [ Skip ]
+# The outputs of these tests contain random values generated by token()
+# in common/utils.js. These could be imported if the results for
+# testharness tests just had pass/fail but no console error messages.
+crbug.com/679742 external/wpt/html/semantics/embedded-content/media-elements/track/track-element/cors [ Skip ]
 
 # It contains only manual SVG tests.
 external/wpt/html/editing/dnd/svg [ Skip ]
@@ -500,24 +525,8 @@ external/wpt/html/editing/dnd/platform/plugin/swfsources [ Skip ]
 external/wpt/html/syntax/parsing-html-fragments/the-input-byte-stream-003.html [ Skip ]
 external/wpt/html/syntax/parsing-html-fragments/the-input-byte-stream-004.html [ Skip ]
 
-# these contain an extraneous debug log div ..
-external/wpt/html-imports/link-import-null.html [ Skip ]
-external/wpt/html-imports/link-import.html [ Skip ]
-external/wpt/html-imports/loading-import.html [ Skip ]
-
-# We'll never be able to test WebRTC deny tests since we always auto-allow
-# user media.
-external/wpt/mediacapture-streams/obtaining-local-multimedia-content/navigatorusermedia/deny.html [ Skip ]
-
 # Requires http server. Needs http: scheme, using XHR, etc.
 external/wpt/FileAPI/url/url_xmlhttprequest_img.html [ Skip ]
-
-# Requires http server. Moved the following test to http/tests/custom-elements/.
-external/wpt/custom-elements/v0/creating-and-passing-registries/no-registry-test.html [ Skip ]
-
-# crbug.com/404303: Was broken as of 2014-07-06.
-external/wpt/mediacapture-streams/obtaining-local-multimedia-content/navigatorusermedia/unknownkey-option-param.html
-external/wpt/mediacapture-streams/obtaining-local-multimedia-content/navigatorusermedia/empty-option-param.html
 
 # Uses custom request handler
 external/wpt/encoding/single-byte-decoder.html [ Skip ]
@@ -528,105 +537,102 @@ external/wpt/html/semantics/embedded-content/media-elements/loading-the-media-re
 external/wpt/html/semantics/embedded-content/media-elements/loading-the-media-resource/resource-selection-candidate-remove-no-listener.html [ Skip ]
 external/wpt/html/semantics/embedded-content/media-elements/loading-the-media-resource/resource-selection-candidate-remove-onerror.html [ Skip ]
 
-# This test requires manual interventions.
-external/wpt/pointerevents/pointerevent_pointermove-on-chorded-mouse-button.html [ Skip ]
-
 # Uses TAB character for indentation
 external/wpt/touch-events/multi-touch-interactions.js [ Skip ]
 
 # CSS Writing Modes Level 3: Following tests require writing-mode: sideways-*, which we do not plan to support today.
-external/csswg-test/css-writing-modes-3/block-flow-direction-slr-043.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-slr-047.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-slr-048.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-slr-050.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-slr-054.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-slr-055.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-slr-056.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-slr-058.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-slr-060.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-slr-062.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-slr-063.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-slr-066.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-srl-042.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-srl-045.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-srl-046.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-srl-049.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-srl-051.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-srl-052.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-srl-053.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-srl-057.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-srl-059.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-srl-061.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-srl-064.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-srl-065.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/inline-block-alignment-slr-009.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/inline-block-alignment-srl-008.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/line-box-direction-slr-043.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/line-box-direction-slr-047.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/line-box-direction-slr-048.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/line-box-direction-slr-050.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/line-box-direction-slr-053.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/line-box-direction-slr-054.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/line-box-direction-slr-056.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/line-box-direction-slr-058.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/line-box-direction-slr-060.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/line-box-direction-srl-042.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/line-box-direction-srl-045.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/line-box-direction-srl-046.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/line-box-direction-srl-049.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/line-box-direction-srl-051.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/line-box-direction-srl-052.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/line-box-direction-srl-055.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/line-box-direction-srl-057.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/line-box-direction-srl-059.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/row-progression-slr-023.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/row-progression-slr-029.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/row-progression-srl-022.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/row-progression-srl-028.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/table-column-order-slr-007.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/table-column-order-srl-006.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/table-progression-slr-001.html [ Skip ]
-external/csswg-test/css-writing-modes-3/table-progression-slr-002.html [ Skip ]
-external/csswg-test/css-writing-modes-3/table-progression-srl-001.html [ Skip ]
-external/csswg-test/css-writing-modes-3/table-progression-srl-002.html [ Skip ]
-external/csswg-test/css-writing-modes-3/text-baseline-slr-009.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/text-baseline-srl-008.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/text-orientation-mixed-srl-016.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/text-orientation-upright-srl-018.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/vertical-alignment-slr-029.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/vertical-alignment-slr-031.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/vertical-alignment-slr-033.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/vertical-alignment-slr-035.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/vertical-alignment-slr-041.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/vertical-alignment-srl-028.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/vertical-alignment-srl-030.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/vertical-alignment-srl-032.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/vertical-alignment-srl-034.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/vertical-alignment-srl-040.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/writing-mode-parsing-sideways-lr-001.html [ Skip ]
-external/csswg-test/css-writing-modes-3/writing-mode-parsing-sideways-rl-001.html [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-slr-043.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-slr-047.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-slr-048.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-slr-050.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-slr-054.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-slr-055.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-slr-056.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-slr-058.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-slr-060.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-slr-062.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-slr-063.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-slr-066.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-srl-042.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-srl-045.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-srl-046.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-srl-049.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-srl-051.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-srl-052.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-srl-053.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-srl-057.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-srl-059.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-srl-061.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-srl-064.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-srl-065.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/inline-block-alignment-slr-009.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/inline-block-alignment-srl-008.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/line-box-direction-slr-043.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/line-box-direction-slr-047.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/line-box-direction-slr-048.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/line-box-direction-slr-050.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/line-box-direction-slr-053.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/line-box-direction-slr-054.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/line-box-direction-slr-056.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/line-box-direction-slr-058.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/line-box-direction-slr-060.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/line-box-direction-srl-042.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/line-box-direction-srl-045.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/line-box-direction-srl-046.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/line-box-direction-srl-049.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/line-box-direction-srl-051.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/line-box-direction-srl-052.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/line-box-direction-srl-055.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/line-box-direction-srl-057.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/line-box-direction-srl-059.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/row-progression-slr-023.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/row-progression-slr-029.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/row-progression-srl-022.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/row-progression-srl-028.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/table-column-order-slr-007.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/table-column-order-srl-006.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/table-progression-slr-001.html [ Skip ]
+external/wpt/css/css-writing-modes-3/table-progression-slr-002.html [ Skip ]
+external/wpt/css/css-writing-modes-3/table-progression-srl-001.html [ Skip ]
+external/wpt/css/css-writing-modes-3/table-progression-srl-002.html [ Skip ]
+external/wpt/css/css-writing-modes-3/text-baseline-slr-009.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/text-baseline-srl-008.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/text-orientation-mixed-srl-016.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/text-orientation-upright-srl-018.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/vertical-alignment-slr-029.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/vertical-alignment-slr-031.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/vertical-alignment-slr-033.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/vertical-alignment-slr-035.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/vertical-alignment-slr-041.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/vertical-alignment-srl-028.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/vertical-alignment-srl-030.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/vertical-alignment-srl-032.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/vertical-alignment-srl-034.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/vertical-alignment-srl-040.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/writing-mode-parsing-sideways-lr-001.html [ Skip ]
+external/wpt/css/css-writing-modes-3/writing-mode-parsing-sideways-rl-001.html [ Skip ]
 
 # CSS Writing Modes Level 3: Following tests require applying writing-mode to table-cell, which we do not support today. crbug.com/409155
-external/csswg-test/css-writing-modes-3/block-flow-direction-vlr-018.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/block-flow-direction-vrl-017.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/line-box-direction-vlr-016.xht [ Skip ]
-external/csswg-test/css-writing-modes-3/line-box-direction-vrl-015.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-vlr-018.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/block-flow-direction-vrl-017.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/line-box-direction-vlr-016.xht [ Skip ]
+external/wpt/css/css-writing-modes-3/line-box-direction-vrl-015.xht [ Skip ]
 
 # CSS Writing Modes Level 3: Following tests require part of text-combine-upright we do not plan to support.
-external/csswg-test/css-writing-modes-3/full-width-001.html [ Skip ]
-external/csswg-test/css-writing-modes-3/full-width-002.html [ Skip ]
-external/csswg-test/css-writing-modes-3/full-width-003.html [ Skip ]
-external/csswg-test/css-writing-modes-3/text-combine-upright-parsing-digits-001.html [ Skip ]
-external/csswg-test/css-writing-modes-3/text-combine-upright-parsing-digits-002.html [ Skip ]
-external/csswg-test/css-writing-modes-3/text-combine-upright-value-digits2-001.html [ Skip ]
-external/csswg-test/css-writing-modes-3/text-combine-upright-value-digits2-002.html [ Skip ]
-external/csswg-test/css-writing-modes-3/text-combine-upright-value-digits2-003.html [ Skip ]
-external/csswg-test/css-writing-modes-3/text-combine-upright-value-digits3-001.html [ Skip ]
-external/csswg-test/css-writing-modes-3/text-combine-upright-value-digits3-002.html [ Skip ]
-external/csswg-test/css-writing-modes-3/text-combine-upright-value-digits3-003.html [ Skip ]
-external/csswg-test/css-writing-modes-3/text-combine-upright-value-digits4-001.html [ Skip ]
-external/csswg-test/css-writing-modes-3/text-combine-upright-value-digits4-002.html [ Skip ]
-external/csswg-test/css-writing-modes-3/text-combine-upright-value-digits4-003.html [ Skip ]
+external/wpt/css/css-writing-modes-3/full-width-001.html [ Skip ]
+external/wpt/css/css-writing-modes-3/full-width-002.html [ Skip ]
+external/wpt/css/css-writing-modes-3/full-width-003.html [ Skip ]
+external/wpt/css/css-writing-modes-3/text-combine-upright-parsing-digits-001.html [ Skip ]
+external/wpt/css/css-writing-modes-3/text-combine-upright-parsing-digits-002.html [ Skip ]
+external/wpt/css/css-writing-modes-3/text-combine-upright-value-digits2-001.html [ Skip ]
+external/wpt/css/css-writing-modes-3/text-combine-upright-value-digits2-002.html [ Skip ]
+external/wpt/css/css-writing-modes-3/text-combine-upright-value-digits2-003.html [ Skip ]
+external/wpt/css/css-writing-modes-3/text-combine-upright-value-digits3-001.html [ Skip ]
+external/wpt/css/css-writing-modes-3/text-combine-upright-value-digits3-002.html [ Skip ]
+external/wpt/css/css-writing-modes-3/text-combine-upright-value-digits3-003.html [ Skip ]
+external/wpt/css/css-writing-modes-3/text-combine-upright-value-digits4-001.html [ Skip ]
+external/wpt/css/css-writing-modes-3/text-combine-upright-value-digits4-002.html [ Skip ]
+external/wpt/css/css-writing-modes-3/text-combine-upright-value-digits4-003.html [ Skip ]
 
 # crbug.com/561421: Update meta refresh parsing to match the new spec
 external/wpt/html/semantics/document-metadata/the-meta-element/pragma-directives/attr-meta-http-equiv-refresh/parsing.html [ Skip ]
@@ -642,7 +648,6 @@ external/wpt/html/browsers/history/the-history-interface/002.html [ Skip ]
 external/wpt/html/browsers/history/the-history-interface/joint_session_history/002.html [ Skip ]
 external/wpt/html/browsers/history/the-history-interface/traverse_the_history_1.html [ Skip ]
 external/wpt/html/browsers/history/the-history-interface/traverse_the_history_write_after_load_1.html [ Skip ]
-external/wpt/html/browsers/windows/browsing-context-names/browsing-context-choose-self-2.html [ Skip ]
 external/wpt/html/semantics/document-metadata/the-style-element/style-error-01.html [ Skip ]
 external/wpt/html/semantics/embedded-content/the-iframe-element/iframe-allowfullscreen.html [ Skip ]
 external/wpt/html/semantics/embedded-content/the-iframe-element/iframe_sandbox_popups_escaping-1.html [ Skip ]
@@ -653,18 +658,6 @@ external/wpt/html/semantics/embedded-content/the-iframe-element/iframe_sandbox_p
 external/wpt/html/semantics/embedded-content/the-iframe-element/iframe_sandbox_popups_nonescaping-3.html [ Skip ]
 external/wpt/html/semantics/forms/form-submission-0/url-encoded.html [ Skip ]
 external/wpt/svg/linking/scripted [ Skip ]
-
-# crbug.com/656171: w3c-test-importer fails to import file with non-valid utf8 (004.worker.js).
-crbug.com/656171 external/wpt/workers/semantics/encodings [ Skip ]
-
-# They have a wrong encoding, and test_parser.py throws UnicodeEncodeError.
-external/wpt/domxpath/001.html [ Skip ]
-external/wpt/domxpath/002.html [ Skip ]
-
-# This test depends on a file xml_xpath_tests.xml, which is too large
-# for Rietveld to handle now, so it's not currently imported.
-crbug.com/676491 external/wpt/domxpath/xml_xpath_runner.html [ Skip ]
-crbug.com/676491 external/wpt/domxpath/xml_xpath_tests.xml [ Skip ]
 
 # Manual tests that fail as TIMEOUT or NOTRUN. Consider adding wpt_automation.
 external/wpt/FileAPI/BlobURL/test1-manual.html [ Skip ]
@@ -765,3 +758,8 @@ external/wpt/uievents/order-of-events/mouse-events/click-order-manual.html [ Ski
 external/wpt/uievents/order-of-events/mouse-events/mouseevents-mousemove-manual.htm [ Skip ]
 external/wpt/uievents/order-of-events/mouse-events/mousemove-across-manual.html [ Skip ]
 external/wpt/uievents/order-of-events/mouse-events/mousemove-between-manual.html [ Skip ]
+external/wpt/keyboard-lock/idlharness.https.html [ Skip ]
+external/wpt/keyboard-lock/navigator-cancelKeyboardLock.https.html [ Skip ]
+external/wpt/keyboard-lock/navigator-requestKeyboardLock.https.html [ Skip ]
+external/wpt/keyboard-lock/navigator-requestKeyboardLock-two-parallel-requests.https.html [ Skip ]
+external/wpt/keyboard-lock/navigator-requestKeyboardLock-two-sequential-requests.https.html [ Skip ]

@@ -24,7 +24,7 @@ class ChromeWebClient : public web::WebClient {
   bool IsAppSpecificURL(const GURL& url) const override;
   base::string16 GetPluginNotSupportedText() const override;
   std::string GetProduct() const override;
-  std::string GetUserAgent(bool desktop_user_agent) const override;
+  std::string GetUserAgent(web::UserAgentType type) const override;
   base::string16 GetLocalizedString(int message_id) const override;
   base::StringPiece GetDataResource(
       int resource_id,
@@ -34,7 +34,7 @@ class ChromeWebClient : public web::WebClient {
       std::vector<std::string>* additional_schemes) override;
   void PostBrowserURLRewriterCreation(
       web::BrowserURLRewriter* rewriter) override;
-  NSString* GetEarlyPageScript() const override;
+  NSString* GetEarlyPageScript(web::BrowserState* browser_state) const override;
   void AllowCertificateError(
       web::WebState* web_state,
       int cert_error,
@@ -42,10 +42,8 @@ class ChromeWebClient : public web::WebClient {
       const GURL& request_url,
       bool overridable,
       const base::Callback<void(bool)>& callback) override;
-  void GetTaskSchedulerInitializationParams(
-      std::vector<base::SchedulerWorkerPoolParams>* params_vector,
-      base::TaskScheduler::WorkerPoolIndexForTraitsCallback*
-          index_to_traits_callback) override;
+  std::unique_ptr<base::TaskScheduler::InitParams> GetTaskSchedulerInitParams()
+      override;
   void PerformExperimentalTaskSchedulerRedirections() override;
 
  private:

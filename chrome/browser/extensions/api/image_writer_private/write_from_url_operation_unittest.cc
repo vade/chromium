@@ -2,9 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/extensions/api/image_writer_private/write_from_url_operation.h"
+
+#include "base/task_scheduler/post_task.h"
 #include "chrome/browser/extensions/api/image_writer_private/error_messages.h"
 #include "chrome/browser/extensions/api/image_writer_private/test_utils.h"
-#include "chrome/browser/extensions/api/image_writer_private/write_from_url_operation.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/url_request/test_url_request_interceptor.h"
@@ -40,7 +42,8 @@ class OperationForTest : public WriteFromUrlOperation {
                               request_context,
                               url,
                               hash,
-                              storage_unit_id) {}
+                              storage_unit_id,
+                              base::FilePath(FILE_PATH_LITERAL("/var/tmp"))) {}
 
   void StartImpl() override {}
 
@@ -78,8 +81,9 @@ class ImageWriterWriteFromUrlOperationTest : public ImageWriterUnitTestBase {
     // Turn on interception and set up our dummy file.
     get_interceptor_.reset(new GetInterceptor(
         BrowserThread::GetTaskRunnerForThread(BrowserThread::IO),
-        BrowserThread::GetBlockingPool()->GetTaskRunnerWithShutdownBehavior(
-            base::SequencedWorkerPool::SKIP_ON_SHUTDOWN)));
+        base::CreateTaskRunnerWithTraits(
+            {base::MayBlock(), base::TaskPriority::BACKGROUND,
+             base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})));
     get_interceptor_->SetResponse(GURL(kTestImageUrl),
                                   test_utils_.GetImagePath());
   }
@@ -159,9 +163,8 @@ TEST_F(ImageWriterWriteFromUrlOperationTest, DownloadFile) {
       .Times(AnyNumber());
 
   content::BrowserThread::PostTask(
-      content::BrowserThread::FILE,
-      FROM_HERE,
-      base::Bind(&OperationForTest::Download, operation, quit_closure));
+      content::BrowserThread::FILE, FROM_HERE,
+      base::BindOnce(&OperationForTest::Download, operation, quit_closure));
 
   runloop.Run();
 
@@ -197,11 +200,10 @@ TEST_F(ImageWriterWriteFromUrlOperationTest, VerifyFile) {
                          100)).Times(AtLeast(1));
 
   operation->SetImagePath(test_utils_.GetImagePath());
-  content::BrowserThread::PostTask(content::BrowserThread::FILE,
-                                   FROM_HERE,
-                                   base::Bind(&OperationForTest::VerifyDownload,
-                                              operation,
-                                              base::Bind(&base::DoNothing)));
+  content::BrowserThread::PostTask(
+      content::BrowserThread::FILE, FROM_HERE,
+      base::BindOnce(&OperationForTest::VerifyDownload, operation,
+                     base::Bind(&base::DoNothing)));
 
   base::RunLoop().RunUntilIdle();
 

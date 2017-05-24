@@ -17,11 +17,15 @@
 #include "ios/chrome/browser/chrome_url_constants.h"
 #include "ios/chrome/browser/search_engines/template_url_service_factory.h"
 #include "ios/chrome/browser/sessions/ios_chrome_session_tab_helper.h"
-#include "ios/chrome/browser/ui/omnibox/web_omnibox_edit_controller.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
+#include "ios/shared/chrome/browser/ui/omnibox/web_omnibox_edit_controller.h"
 #import "ios/web/public/navigation_manager.h"
 #include "ios/web/public/web_state/web_state.h"
 #include "url/gurl.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 ChromeOmniboxClientIOS::ChromeOmniboxClientIOS(
     WebOmniboxEditController* controller,
@@ -119,7 +123,7 @@ gfx::Image ChromeOmniboxClientIOS::GetIconIfExtensionMatch(
 }
 
 bool ChromeOmniboxClientIOS::ProcessExtensionKeyword(
-    TemplateURL* template_url,
+    const TemplateURL* template_url,
     const AutocompleteMatch& match,
     WindowOpenDisposition disposition,
     OmniboxNavigationObserver* observer) {

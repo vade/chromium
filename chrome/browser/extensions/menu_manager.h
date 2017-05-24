@@ -145,7 +145,7 @@ class MenuItem {
 
     std::unique_ptr<base::Value> ToValue() const {
       return std::unique_ptr<base::Value>(
-          new base::FundamentalValue(static_cast<int>(value_)));
+          new base::Value(static_cast<int>(value_)));
     }
 
     bool Populate(const base::Value& value) {
@@ -360,7 +360,7 @@ class MenuManager : public content::NotificationObserver,
                          const Extension* extension) override;
   void OnExtensionUnloaded(content::BrowserContext* browser_context,
                            const Extension* extension,
-                           UnloadedExtensionInfo::Reason reason) override;
+                           UnloadedExtensionReason reason) override;
 
   // Stores the menu items for the extension in the state storage.
   void WriteToStorage(const Extension* extension,

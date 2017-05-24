@@ -49,17 +49,14 @@ std::unique_ptr<TestCompositorFrameSink>
     worker_context_provider =
         new TestInProcessContextProvider(compositor_context_provider.get());
   }
+  constexpr bool disable_display_vsync = false;
   bool synchronous_composite =
       !HasImplThread() &&
       !layer_tree_host()->GetSettings().single_thread_proxy_scheduler;
-  // Allow resource reclaiming for partial raster tests to get back
-  // resources from the Display.
-  bool force_disable_reclaim_resources = false;
   auto delegating_output_surface = base::MakeUnique<TestCompositorFrameSink>(
       compositor_context_provider, std::move(worker_context_provider),
       shared_bitmap_manager(), gpu_memory_buffer_manager(), RendererSettings(),
-      ImplThreadTaskRunner(), synchronous_composite,
-      force_disable_reclaim_resources);
+      ImplThreadTaskRunner(), synchronous_composite, disable_display_vsync);
   delegating_output_surface->SetEnlargePassTextureAmount(
       enlarge_texture_amount_);
   return delegating_output_surface;
@@ -102,7 +99,7 @@ void LayerTreePixelTest::ReadbackResult(
 
 void LayerTreePixelTest::BeginTest() {
   Layer* target =
-      readback_target_ ? readback_target_ : layer_tree()->root_layer();
+      readback_target_ ? readback_target_ : layer_tree_host()->root_layer();
   target->RequestCopyOfOutput(CreateCopyOutputRequest());
   PostSetNeedsCommitToMainThread();
 }
@@ -138,6 +135,10 @@ void LayerTreePixelTest::EndTest() {
   }
 
   TryEndTest();
+}
+
+void LayerTreePixelTest::InitializeSettings(LayerTreeSettings* settings) {
+  settings->layer_transforms_should_scale_layer_contents = true;
 }
 
 void LayerTreePixelTest::TryEndTest() {
@@ -215,7 +216,7 @@ void LayerTreePixelTest::SetupTree() {
   scoped_refptr<Layer> root = Layer::Create();
   root->SetBounds(content_root_->bounds());
   root->AddChild(content_root_);
-  layer_tree()->SetRootLayer(root);
+  layer_tree_host()->SetRootLayer(root);
   LayerTreeTest::SetupTree();
 }
 

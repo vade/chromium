@@ -40,14 +40,19 @@ class MockSessionManagerClient : public SessionManagerClient {
   MOCK_METHOD0(NotifyLockScreenDismissed, void(void));
   MOCK_METHOD1(RetrieveActiveSessions, void(const ActiveSessionsCallback&));
   MOCK_METHOD1(RetrieveDevicePolicy, void(const RetrievePolicyCallback&));
+  MOCK_METHOD1(BlockingRetrieveDevicePolicy,
+               RetrievePolicyResponseType(std::string*));
   MOCK_METHOD2(RetrievePolicyForUser,
                void(const cryptohome::Identification&,
                     const RetrievePolicyCallback&));
-  MOCK_METHOD1(BlockingRetrievePolicyForUser,
-               std::string(const cryptohome::Identification&));
+  MOCK_METHOD2(BlockingRetrievePolicyForUser,
+               RetrievePolicyResponseType(const cryptohome::Identification&,
+                                          std::string*));
   MOCK_METHOD2(RetrieveDeviceLocalAccountPolicy,
                void(const std::string&,
                     const RetrievePolicyCallback&));
+  MOCK_METHOD2(BlockingRetrieveDeviceLocalAccountPolicy,
+               RetrievePolicyResponseType(const std::string&, std::string*));
   MOCK_METHOD2(StoreDevicePolicy,
                void(const std::string&,
                     const StorePolicyCallback&));
@@ -65,15 +70,17 @@ class MockSessionManagerClient : public SessionManagerClient {
                     const std::vector<std::string>&));
   MOCK_METHOD1(GetServerBackedStateKeys, void(const StateKeysCallback&));
   MOCK_METHOD1(CheckArcAvailability, void(const ArcCallback&));
-  MOCK_METHOD3(StartArcInstance,
+  MOCK_METHOD4(StartArcInstance,
                void(const cryptohome::Identification&,
+                    bool,
                     bool,
                     const StartArcInstanceCallback&));
   MOCK_METHOD1(StopArcInstance, void(const ArcCallback&));
   MOCK_METHOD2(SetArcCpuRestriction,
                void(login_manager::ContainerCpuRestrictionState,
                     const ArcCallback&));
-  MOCK_METHOD0(EmitArcBooted, void(void));
+  MOCK_METHOD2(EmitArcBooted,
+               void(const cryptohome::Identification&, const ArcCallback&));
   MOCK_METHOD1(GetArcStartTime, void(const GetArcStartTimeCallback&));
   MOCK_METHOD2(RemoveArcData,
                void(const cryptohome::Identification&, const ArcCallback&));

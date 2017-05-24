@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "content/browser/frame_host/frame_tree_node_blame_context.h"
@@ -114,10 +115,19 @@ class CONTENT_EXPORT FrameTreeNode {
 
   FrameTreeNode* opener() const { return opener_; }
 
+  FrameTreeNode* original_opener() const { return original_opener_; }
+
   // Assigns a new opener for this node and, if |opener| is non-null, registers
   // an observer that will clear this node's opener if |opener| is ever
   // destroyed.
   void SetOpener(FrameTreeNode* opener);
+
+  // Assigns the initial opener for this node, and if |opener| is non-null,
+  // registers an observer that will clear this node's opener if |opener| is
+  // ever destroyed. The value set here is the root of the tree.
+  //
+  // It is not possible to change the opener once it was set.
+  void SetOriginalOpener(FrameTreeNode* opener);
 
   FrameTreeNode* child_at(size_t index) const {
     return children_[index].get();
@@ -153,20 +163,20 @@ class CONTENT_EXPORT FrameTreeNode {
   // Set the current name and notify proxies about the update.
   void SetFrameName(const std::string& name, const std::string& unique_name);
 
-  // Set the frame's feature policy from an HTTP header, clearing any existing
-  // policy.
-  void SetFeaturePolicyHeader(const ParsedFeaturePolicy& parsed_header);
+  // Set the frame's feature policy header, clearing any existing header.
+  void SetFeaturePolicyHeader(const ParsedFeaturePolicyHeader& parsed_header);
 
-  // Clear any feature policy associated with the frame.
-  void ResetFeaturePolicy();
+  // Clear any feature policy header associated with the frame.
+  void ResetFeaturePolicyHeader();
 
-  // Add CSP header to replication state and notify proxies about the update.
-  void AddContentSecurityPolicy(const ContentSecurityPolicyHeader& header);
+  // Add CSP headers to replication state, notify proxies about the update.
+  void AddContentSecurityPolicies(
+      const std::vector<ContentSecurityPolicyHeader>& headers);
 
   // Discards previous CSP headers and notifies proxies about the update.
   // Typically invoked after committing navigation to a new document (since the
   // new document comes with a fresh set of CSP http headers).
-  void ResetContentSecurityPolicy();
+  void ResetCspHeaders();
 
   // Sets the current insecure request policy, and notifies proxies about the
   // update.
@@ -191,15 +201,39 @@ class CONTENT_EXPORT FrameTreeNode {
     return pending_sandbox_flags_;
   }
 
+  const ParsedFeaturePolicyHeader& pending_container_policy() const {
+    return pending_container_policy_;
+  }
+
   // Update this frame's sandbox flags.  This is used when a parent frame
   // updates sandbox flags in the <iframe> element for this frame.  These flags
   // won't take effect until next navigation.  If this frame's parent is itself
   // sandboxed, the parent's sandbox flags are combined with |sandbox_flags|.
   void SetPendingSandboxFlags(blink::WebSandboxFlags sandbox_flags);
 
-  // Set any pending sandbox flags as active, and return true if the sandbox
-  // flags were changed.
-  bool CommitPendingSandboxFlags();
+  // Returns the currently active container policy for this frame, which is set
+  // by the iframe allowfullscreen, allowpaymentrequest, and allow attributes,
+  // along with the origin of the iframe's src attribute (which may be different
+  // from the URL of the document currently loaded into the frame). This does
+  // not include policy changes that have been made by updating the containing
+  // iframe element attributes since the frame was last navigated.
+  const ParsedFeaturePolicyHeader& effective_container_policy() const {
+    return replication_state_.container_policy;
+  }
+
+  // Update this frame's container policy. This is used when a parent frame
+  // updates feature-policy attributes in the <iframe> element for this frame.
+  // These attributes include allow, allowfullscreen, allowpaymentrequest, and
+  // src. Updates to the container policy will not take effect until next
+  // navigation.
+  // This method must only be called on a subframe; changing the container
+  // policy on the main frame is not allowed.
+  void SetPendingContainerPolicy(
+      const ParsedFeaturePolicyHeader& container_policy);
+
+  // Set any pending sandbox flags and container policy as active, and return
+  // true if either was changed.
+  bool CommitPendingFramePolicy();
 
   const FrameOwnerProperties& frame_owner_properties() {
     return frame_owner_properties_;
@@ -253,7 +287,10 @@ class CONTENT_EXPORT FrameTreeNode {
   // Resets the current navigation request. If |keep_state| is true, any state
   // created by the NavigationRequest (e.g. speculative RenderFrameHost,
   // loading state) will not be reset by the function.
-  void ResetNavigationRequest(bool keep_state);
+  // If |keep_state| is false and the request is renderer-initiated and
+  // |inform_renderer| is true, an IPC will be sent to the renderer process to
+  // inform it that the navigation it requested was cancelled.
+  void ResetNavigationRequest(bool keep_state, bool inform_renderer);
 
   // Returns true if this node is in a state where the loading progress is being
   // tracked.
@@ -302,6 +339,11 @@ class CONTENT_EXPORT FrameTreeNode {
   void OnSetHasReceivedUserGesture();
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(SitePerProcessFeaturePolicyBrowserTest,
+                           ContainerPolicyDynamic);
+  FRIEND_TEST_ALL_PREFIXES(SitePerProcessFeaturePolicyBrowserTest,
+                           ContainerPolicySandboxDynamic);
+
   class OpenerDestroyedObserver;
 
   FrameTreeNode* GetSibling(int relative_offset) const;
@@ -341,6 +383,14 @@ class CONTENT_EXPORT FrameTreeNode {
   // is disowned.
   std::unique_ptr<OpenerDestroyedObserver> opener_observer_;
 
+  // The frame that opened this frame, if any. Contrary to opener_, this
+  // cannot be changed unless the original opener is destroyed.
+  FrameTreeNode* original_opener_;
+
+  // An observer that clears this node's |original_opener_| if the opener is
+  // destroyed.
+  std::unique_ptr<OpenerDestroyedObserver> original_opener_observer_;
+
   // The immediate children of this specific frame.
   std::vector<std::unique_ptr<FrameTreeNode>> children_;
 
@@ -358,6 +408,12 @@ class CONTENT_EXPORT FrameTreeNode {
   // replication_state_.sandbox_flags when they take effect on the next frame
   // navigation.
   blink::WebSandboxFlags pending_sandbox_flags_;
+
+  // Tracks the computed container policy for this frame. When the iframe
+  // allowfullscreen, allowpaymentrequest, allow or src attributes are changed,
+  // the updated policy for the frame is stored here, and transferred into
+  // replication_state_.container_policy on the next frame navigation.
+  ParsedFeaturePolicyHeader pending_container_policy_;
 
   // Tracks the scrolling and margin properties for this frame.  These
   // properties affect the child renderer but are stored on its parent's

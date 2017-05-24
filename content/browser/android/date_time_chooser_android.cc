@@ -9,6 +9,7 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/i18n/char_iterator.h"
+#include "base/i18n/unicodestring.h"
 #include "content/common/date_time_suggestion.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/render_view_host.h"
@@ -36,8 +37,7 @@ base::string16 SanitizeSuggestionString(const base::string16& string) {
       sanitized.append(c);
     sanitized_iterator.Advance();
   }
-  return base::string16(sanitized.getBuffer(),
-                        static_cast<size_t>(sanitized.length()));
+  return base::i18n::UnicodeStringToString16(sanitized);
 }
 
 }  // namespace
@@ -92,9 +92,13 @@ void DateTimeChooserAndroid::ShowDialog(
     }
   }
 
-  j_date_time_chooser_.Reset(Java_DateTimeChooserAndroid_createDateTimeChooser(
-      env, native_window->GetJavaObject(), reinterpret_cast<intptr_t>(this),
-      dialog_type, dialog_value, min, max, step, suggestions_array));
+  if (native_window && !(native_window->GetJavaObject()).is_null()) {
+    j_date_time_chooser_.Reset(
+        Java_DateTimeChooserAndroid_createDateTimeChooser(
+            env, native_window->GetJavaObject(),
+            reinterpret_cast<intptr_t>(this), dialog_type, dialog_value, min,
+            max, step, suggestions_array));
+  }
   if (j_date_time_chooser_.is_null())
     ReplaceDateTime(env, j_date_time_chooser_, dialog_value);
 }

@@ -44,7 +44,12 @@ class Manifest(object):
             types = sorted(self._data.keys())
         for item_type in types:
             for path, tests in sorted(iteritems(self._data[item_type])):
-                yield item_type, tests
+                yield item_type, path, tests
+
+    def iterpath(self, path):
+        for type_tests in self._data.values():
+            for test in type_tests.get(path, set()):
+                yield test
 
     @property
     def reftest_nodes_by_url(self):

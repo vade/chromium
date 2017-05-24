@@ -55,6 +55,14 @@ public class AutofillAddress extends PaymentOption {
     /** Multiple fields are invalid or missing. */
     public static final int INVALID_MULTIPLE_FIELDS = 4;
 
+    @IntDef({NORMAL_COMPLETENESS_CHECK, IGNORE_PHONE_COMPLETENESS_CHECK})
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface CompletenessCheckType {}
+    /** A normal completeness check. */
+    public static final int NORMAL_COMPLETENESS_CHECK = 0;
+    /** A completeness check that ignores phone numbers. */
+    public static final int IGNORE_PHONE_COMPLETENESS_CHECK = 1;
+
     @Nullable private static Pattern sRegionCodePattern;
 
     private Context mContext;
@@ -159,8 +167,8 @@ public class AutofillAddress extends PaymentOption {
      * status.
      */
     private void checkAndUpdateAddressCompleteness() {
-        Pair<Integer, Integer> messageResIds =
-                getEditMessageAndTitleResIds(checkAddressCompletionStatus(mProfile));
+        Pair<Integer, Integer> messageResIds = getEditMessageAndTitleResIds(
+                checkAddressCompletionStatus(mProfile, NORMAL_COMPLETENESS_CHECK));
 
         mEditMessage = messageResIds.first.intValue() == 0
                 ? null
@@ -185,7 +193,7 @@ public class AutofillAddress extends PaymentOption {
 
         switch (completionStatus) {
             case COMPLETE:
-                editTitleResId = R.string.autofill_edit_profile;
+                editTitleResId = R.string.payments_edit_address;
                 break;
             case INVALID_ADDRESS:
                 editMessageResId = R.string.payments_invalid_address;
@@ -222,12 +230,14 @@ public class AutofillAddress extends PaymentOption {
      * @return int     The completion status.
      */
     @CompletionStatus
-    public static int checkAddressCompletionStatus(AutofillProfile profile) {
+    public static int checkAddressCompletionStatus(
+            AutofillProfile profile, @CompletenessCheckType int checkType) {
         int invalidFieldsCount = 0;
         int completionStatus = COMPLETE;
 
-        if (!PhoneNumberUtils.isGlobalPhoneNumber(
-                    PhoneNumberUtils.stripSeparators(profile.getPhoneNumber().toString()))) {
+        if (checkType != IGNORE_PHONE_COMPLETENESS_CHECK
+                && !PhoneNumberUtils.isGlobalPhoneNumber(
+                           PhoneNumberUtils.stripSeparators(profile.getPhoneNumber().toString()))) {
             completionStatus = INVALID_PHONE_NUMBER;
             invalidFieldsCount++;
         }

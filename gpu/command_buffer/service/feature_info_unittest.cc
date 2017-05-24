@@ -31,7 +31,7 @@ using ::testing::Not;
 using ::testing::Pointee;
 using ::testing::Return;
 using ::testing::SetArrayArgument;
-using ::testing::SetArgumentPointee;
+using ::testing::SetArgPointee;
 using ::testing::StrEq;
 
 namespace gpu {
@@ -1529,15 +1529,17 @@ TEST_P(FeatureInfoTest, InitializeWithNVFence) {
 
 TEST_P(FeatureInfoTest, InitializeWithNVDrawBuffers) {
   SetupInitExpectationsWithGLVersion("GL_NV_draw_buffers", "", "OpenGL ES 3.0");
-  EXPECT_TRUE(info_->feature_flags().nv_draw_buffers);
-  EXPECT_TRUE(info_->feature_flags().ext_draw_buffers);
+  bool is_es2 = GetContextType() == CONTEXT_TYPE_OPENGLES2;
+  EXPECT_EQ(is_es2, info_->feature_flags().nv_draw_buffers);
+  EXPECT_EQ(is_es2, info_->feature_flags().ext_draw_buffers);
 }
 
 TEST_P(FeatureInfoTest, InitializeWithPreferredEXTDrawBuffers) {
   SetupInitExpectationsWithGLVersion(
       "GL_NV_draw_buffers GL_EXT_draw_buffers", "", "OpenGL ES 3.0");
+  bool is_es2 = GetContextType() == CONTEXT_TYPE_OPENGLES2;
   EXPECT_FALSE(info_->feature_flags().nv_draw_buffers);
-  EXPECT_TRUE(info_->feature_flags().ext_draw_buffers);
+  EXPECT_EQ(is_es2, info_->feature_flags().ext_draw_buffers);
 }
 
 TEST_P(FeatureInfoTest, BlendEquationAdvancedDisabled) {
@@ -1660,6 +1662,15 @@ TEST_P(FeatureInfoTest, InitializeARB_texture_rgNoFloat) {
   EXPECT_TRUE(info_->validators()->read_pixel_format.IsValid(GL_RG_EXT));
   EXPECT_TRUE(info_->validators()->render_buffer_format.IsValid(GL_R8_EXT));
   EXPECT_TRUE(info_->validators()->render_buffer_format.IsValid(GL_RG8_EXT));
+}
+
+TEST_P(FeatureInfoTest, InitializeEXT_texture_norm16) {
+  SetupInitExpectations("GL_EXT_texture_norm16");
+  EXPECT_TRUE(info_->feature_flags().ext_texture_norm16);
+
+  EXPECT_TRUE(info_->validators()->texture_format.IsValid(GL_RED_EXT));
+  EXPECT_TRUE(info_->validators()->texture_internal_format.IsValid(GL_R16_EXT));
+  EXPECT_TRUE(info_->validators()->texture_internal_format.IsValid(GL_RED_EXT));
 }
 
 TEST_P(FeatureInfoTest, InitializeCHROMIUM_ycbcr_422_imageTrue) {

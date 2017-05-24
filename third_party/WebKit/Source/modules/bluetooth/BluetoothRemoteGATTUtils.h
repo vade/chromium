@@ -6,22 +6,13 @@
 #define BluetoothRemoteGATTUtils_h
 
 #include "core/dom/DOMDataView.h"
-#include "core/dom/DOMException.h"
-#include "wtf/Vector.h"
+#include "platform/wtf/Vector.h"
 
 namespace blink {
 
 class BluetoothRemoteGATTUtils final {
  public:
   static DOMDataView* ConvertWTFVectorToDataView(const WTF::Vector<uint8_t>&);
-
-  enum ExceptionType {
-    kGATTServerDisconnected,
-    kGATTServerNotConnected,
-    kInvalidCharacteristic
-  };
-
-  static DOMException* CreateDOMException(ExceptionType);
 };
 
 }  // namespace blink

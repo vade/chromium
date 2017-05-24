@@ -9,6 +9,14 @@ Polymer({
     disabled: {type: Boolean, value: false, reflectToAttribute: true},
 
     inverse: Boolean,
+
+    border: Boolean,
+
+    /* Note that we are not using "aria-label" property here, because
+     * we want to pass the label value but not actually declare it as an
+     * ARIA property anywhere but the actual target element.
+     */
+    labelForAria: String,
   },
 
   focus: function() {
@@ -23,6 +31,29 @@ Polymer({
 
 Polymer({
   is: 'oobe-back-button',
+
+  properties: {
+    disabled: {type: Boolean, value: false, reflectToAttribute: true},
+
+    /* Note that we are not using "aria-label" property here, because
+     * we want to pass the label value but not actually declare it as an
+     * ARIA property anywhere but the actual target element.
+     */
+    labelForAria: String,
+  },
+
+  focus: function() {
+    this.$.button.focus();
+  },
+
+  onClick_: function(e) {
+    if (this.disabled)
+      e.stopPropagation();
+  }
+});
+
+Polymer({
+  is: 'oobe-next-button',
 
   properties: {
     disabled: {type: Boolean, value: false, reflectToAttribute: true},
@@ -42,8 +73,17 @@ Polymer({
   is: 'oobe-welcome-secondary-button',
 
   properties: {
-    icon: String,
+    icon1x: String,
+    icon2x: String,
 
-    ariaLabel: String
+    /* Note that we are not using "aria-label" property here, because
+     * we want to pass the label value but not actually declare it as an
+     * ARIA property anywhere but the actual target element.
+     */
+    labelForAria: String
+  },
+
+  focus: function() {
+    this.$.button.focus();
   },
 });

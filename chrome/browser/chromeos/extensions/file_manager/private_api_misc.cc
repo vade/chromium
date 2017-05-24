@@ -25,7 +25,6 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/devtools/devtools_window.h"
-#include "chrome/browser/extensions/api/file_handlers/mime_util.h"
 #include "chrome/browser/extensions/devtools_util.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
@@ -50,6 +49,7 @@
 #include "components/zoom/page_zoom.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/page_zoom.h"
+#include "extensions/browser/api/file_handlers/mime_util.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "google_apis/drive/auth_service.h"
@@ -284,7 +284,7 @@ bool FileManagerPrivateInternalZipSelectionFunction::RunAsync() {
 }
 
 void FileManagerPrivateInternalZipSelectionFunction::OnZipDone(bool success) {
-  SetResult(base::MakeUnique<base::FundamentalValue>(success));
+  SetResult(base::MakeUnique<base::Value>(success));
   SendResponse(true);
 }
 
@@ -336,7 +336,7 @@ bool FileManagerPrivateRequestWebStoreAccessTokenFunction::RunAsync() {
                   "CWS OAuth token fetch failed. OAuth2TokenService can't "
                   "be retrieved.");
     }
-    SetResult(base::Value::CreateNullValue());
+    SetResult(base::MakeUnique<base::Value>());
     return false;
   }
 
@@ -365,7 +365,7 @@ void FileManagerPrivateRequestWebStoreAccessTokenFunction::OnAccessTokenFetched(
     DCHECK(access_token == auth_service_->access_token());
     if (logger)
       logger->Log(logging::LOG_INFO, "CWS OAuth token fetch succeeded.");
-    SetResult(base::MakeUnique<base::StringValue>(access_token));
+    SetResult(base::MakeUnique<base::Value>(access_token));
     SendResponse(true);
   } else {
     if (logger) {
@@ -373,7 +373,7 @@ void FileManagerPrivateRequestWebStoreAccessTokenFunction::OnAccessTokenFetched(
                   "CWS OAuth token fetch failed. (DriveApiErrorCode: %s)",
                   google_apis::DriveApiErrorCodeToString(code).c_str());
     }
-    SetResult(base::Value::CreateNullValue());
+    SetResult(base::MakeUnique<base::Value>());
     SendResponse(false);
   }
 }
@@ -466,18 +466,16 @@ bool FileManagerPrivateInternalGetMimeTypeFunction::RunAsync() {
 
 void FileManagerPrivateInternalGetMimeTypeFunction::OnGetMimeType(
     const std::string& mimeType) {
-  SetResult(base::MakeUnique<base::StringValue>(mimeType));
+  SetResult(base::MakeUnique<base::Value>(mimeType));
   SendResponse(true);
 }
 
 ExtensionFunction::ResponseAction
 FileManagerPrivateIsPiexLoaderEnabledFunction::Run() {
 #if defined(OFFICIAL_BUILD)
-  return RespondNow(
-      OneArgument(base::MakeUnique<base::FundamentalValue>(true)));
+  return RespondNow(OneArgument(base::MakeUnique<base::Value>(true)));
 #else
-  return RespondNow(
-      OneArgument(base::MakeUnique<base::FundamentalValue>(false)));
+  return RespondNow(OneArgument(base::MakeUnique<base::Value>(false)));
 #endif
 }
 

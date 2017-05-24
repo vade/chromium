@@ -32,14 +32,13 @@ bool IsComponentExtensionWhitelisted(const std::string& extension_id) {
   const char* const kAllowed[] = {
     extension_misc::kHotwordSharedModuleId,
     extension_misc::kInAppPaymentsSupportAppId,
-#if defined(ENABLE_MEDIA_ROUTER)
     extension_misc::kMediaRouterStableExtensionId,
-#endif  // defined(ENABLE_MEDIA_ROUTER)
     extension_misc::kPdfExtensionId,
 #if defined(OS_CHROMEOS)
     extension_misc::kChromeVoxExtensionId,
     extension_misc::kSelectToSpeakExtensionId,
     extension_misc::kSpeechSynthesisExtensionId,
+    extension_misc::kSwitchAccessExtensionId,
     extension_misc::kZIPUnpackerExtensionId,
 #endif
   };
@@ -82,9 +81,6 @@ bool IsComponentExtensionWhitelisted(int manifest_resource_id) {
     case IDR_CRYPTOTOKEN_MANIFEST:
     case IDR_FEEDBACK_MANIFEST:
     case IDR_GAIA_AUTH_MANIFEST:
-#if defined(ENABLE_GOOGLE_NOW)
-    case IDR_GOOGLE_NOW_MANIFEST:
-#endif
 #if BUILDFLAG(ENABLE_HANGOUT_SERVICES_EXTENSION)
     case IDR_HANGOUT_SERVICES_MANIFEST:
 #endif
@@ -114,6 +110,7 @@ bool IsComponentExtensionWhitelisted(int manifest_resource_id) {
     case IDR_FILEMANAGER_MANIFEST:
     case IDR_FIRST_RUN_DIALOG_MANIFEST:
     case IDR_GALLERY_MANIFEST:
+    case IDR_ZIP_ARCHIVER_MANIFEST:
     case IDR_KEYBOARD_MANIFEST:
     case IDR_MOBILE_MANIFEST:
     case IDR_VIDEO_PLAYER_MANIFEST:

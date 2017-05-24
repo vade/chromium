@@ -8,9 +8,9 @@
 
 #include "base/files/file_util.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/pickle.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_task_environment.h"
 #include "build/build_config.h"
 #include "net/base/filename_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -34,16 +34,20 @@ class OSExchangeDataProviderMusTest
     : public PlatformTest,
       public ui::OSExchangeDataProviderFactory::Factory {
  public:
-  OSExchangeDataProviderMusTest() {}
+  OSExchangeDataProviderMusTest()
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
 
   // Overridden from PlatformTest:
   void SetUp() override {
     PlatformTest::SetUp();
+    old_factory_ = ui::OSExchangeDataProviderFactory::TakeFactory();
     ui::OSExchangeDataProviderFactory::SetFactory(this);
   }
 
   void TearDown() override {
-    ui::OSExchangeDataProviderFactory::SetFactory(nullptr);
+    ui::OSExchangeDataProviderFactory::TakeFactory();
+    ui::OSExchangeDataProviderFactory::SetFactory(old_factory_);
     PlatformTest::TearDown();
   }
 
@@ -53,7 +57,8 @@ class OSExchangeDataProviderMusTest
   }
 
  private:
-  base::MessageLoopForUI message_loop_;
+  ui::OSExchangeDataProviderFactory::Factory* old_factory_ = nullptr;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
 };
 
 TEST_F(OSExchangeDataProviderMusTest, StringDataGetAndSet) {
@@ -190,7 +195,6 @@ TEST_F(OSExchangeDataProviderMusTest, TestPickledData) {
   EXPECT_EQ(2, value);
 }
 
-#if defined(USE_AURA)
 TEST_F(OSExchangeDataProviderMusTest, TestHTML) {
   OSExchangeData data;
   GURL url("http://www.google.com/");
@@ -206,6 +210,5 @@ TEST_F(OSExchangeDataProviderMusTest, TestHTML) {
   EXPECT_TRUE(copy.GetHtml(&read_html, &url));
   EXPECT_EQ(html, read_html);
 }
-#endif
 
 }  // namespace aura

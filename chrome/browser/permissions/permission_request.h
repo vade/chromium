@@ -8,11 +8,10 @@
 #include "base/macros.h"
 #include "base/strings/string16.h"
 #include "components/content_settings/core/common/content_settings_types.h"
-#include "content/public/browser/permission_type.h"
 #include "url/gurl.h"
 
 namespace gfx {
-enum class VectorIconId;
+struct VectorIcon;
 }
 
 // Used for UMA to record the types of permission prompts shown.
@@ -36,6 +35,8 @@ enum class PermissionRequestType {
   PERMISSION_PROTECTED_MEDIA_IDENTIFIER,
   PERMISSION_PUSH_MESSAGING,
   PERMISSION_FLASH,
+  PERMISSION_MEDIASTREAM_MIC,
+  PERMISSION_MEDIASTREAM_CAMERA,
   // NUM must be the last value in the enum.
   NUM
 };
@@ -65,8 +66,8 @@ class PermissionRequest {
   // On Android, icons are represented with an IDR_ identifier.
   typedef int IconId;
 #else
-  // On desktop, we use a vector icon id.
-  typedef gfx::VectorIconId IconId;
+  // On desktop, we use a vector icon.
+  typedef const gfx::VectorIcon& IconId;
 #endif
 
   PermissionRequest();

@@ -12,19 +12,9 @@
           "reason": "subtree"
         },
         {
-          "object": "LayoutBlockFlow (positioned) DIV class='absolute green'",
-          "rect": [314, 114, 435, 450],
-          "reason": "subtree"
-        },
-        {
-          "object": "LayoutBlockFlow (relative positioned) DIV class='relative red'",
-          "rect": [314, 114, 435, 450],
-          "reason": "subtree"
-        },
-        {
           "object": "LayoutTableCell (relative positioned) TD id='cellToScroll' class='relative'",
           "rect": [314, 564, 435, 15],
-          "reason": "scroll"
+          "reason": "scroll control"
         }
       ]
     }
@@ -36,7 +26,7 @@
     },
     {
       "object": "HorizontalScrollbar",
-      "reason": "scroll"
+      "reason": "scroll control"
     },
     {
       "object": "LayoutBlockFlow (relative positioned) DIV class='relative red'",

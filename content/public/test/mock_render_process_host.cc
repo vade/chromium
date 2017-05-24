@@ -10,6 +10,7 @@
 
 #include "base/lazy_instance.h"
 #include "base/location.h"
+#include "base/memory/ptr_util.h"
 #include "base/process/process_handle.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -98,7 +99,6 @@ void MockRenderProcessHost::SimulateCrash() {
 
 bool MockRenderProcessHost::Init() {
   has_connection_ = true;
-  remote_interfaces_.reset(new service_manager::InterfaceProvider);
   return true;
 }
 
@@ -143,11 +143,13 @@ int MockRenderProcessHost::VisibleWidgetCount() const {
   return 1;
 }
 
-void MockRenderProcessHost::AudioStateChanged() {}
-
 bool MockRenderProcessHost::IsForGuestsOnly() const {
   return is_for_guests_only_;
 }
+
+void MockRenderProcessHost::OnAudioStreamAdded() {}
+
+void MockRenderProcessHost::OnAudioStreamRemoved() {}
 
 StoragePartition* MockRenderProcessHost::GetStoragePartition() const {
   return BrowserContext::GetDefaultStoragePartition(browser_context_);
@@ -221,6 +223,12 @@ void MockRenderProcessHost::AddPendingView() {
 void MockRenderProcessHost::RemovePendingView() {
 }
 
+void MockRenderProcessHost::AddWidget(RenderWidgetHost* widget) {
+}
+
+void MockRenderProcessHost::RemoveWidget(RenderWidgetHost* widget) {
+}
+
 void MockRenderProcessHost::SetSuddenTerminationAllowed(bool allowed) {
 }
 
@@ -255,9 +263,16 @@ base::TimeDelta MockRenderProcessHost::GetChildProcessIdleTime() const {
   return base::TimeDelta::FromMilliseconds(0);
 }
 
-service_manager::InterfaceProvider*
-MockRenderProcessHost::GetRemoteInterfaces() {
-  return remote_interfaces_.get();
+void MockRenderProcessHost::BindInterface(
+    const std::string& interface_name,
+    mojo::ScopedMessagePipeHandle interface_pipe) {
+  if (binder_overrides_.count(interface_name) > 0)
+    binder_overrides_[interface_name].Run(std::move(interface_pipe));
+}
+
+const service_manager::Identity& MockRenderProcessHost::GetChildIdentity()
+    const {
+  return child_identity_;
 }
 
 std::unique_ptr<base::SharedPersistentMemoryAllocator>
@@ -310,7 +325,7 @@ void MockRenderProcessHost::Resume() {}
 mojom::Renderer* MockRenderProcessHost::GetRendererInterface() {
   if (!renderer_interface_) {
     renderer_interface_.reset(new mojom::RendererAssociatedPtr);
-    mojo::GetIsolatedProxy(renderer_interface_.get());
+    mojo::MakeIsolatedRequest(renderer_interface_.get());
   }
   return renderer_interface_->get();
 }
@@ -343,6 +358,8 @@ bool MockRenderProcessHost::StopWebRTCEventLog() {
   return false;
 }
 
+void MockRenderProcessHost::SetEchoCanceller3(bool enable) {}
+
 void MockRenderProcessHost::SetWebRtcLogMessageCallback(
     base::Callback<void(const std::string&)> callback) {
 }
@@ -370,33 +387,35 @@ bool MockRenderProcessHost::OnMessageReceived(const IPC::Message& msg) {
 
 void MockRenderProcessHost::OnChannelConnected(int32_t peer_pid) {}
 
+void MockRenderProcessHost::OverrideBinderForTesting(
+    const std::string& interface_name,
+    const InterfaceBinder& binder) {
+  binder_overrides_[interface_name] = binder;
+}
+
 MockRenderProcessHostFactory::MockRenderProcessHostFactory() {}
 
 MockRenderProcessHostFactory::~MockRenderProcessHostFactory() {
   // Detach this object from MockRenderProcesses to prevent STLDeleteElements()
   // from calling MockRenderProcessHostFactory::Remove().
-  for (ScopedVector<MockRenderProcessHost>::iterator it = processes_.begin();
-       it != processes_.end(); ++it) {
-    (*it)->SetFactory(NULL);
-  }
+  for (const auto& process : processes_)
+    process->SetFactory(nullptr);
 }
 
 RenderProcessHost* MockRenderProcessHostFactory::CreateRenderProcessHost(
     BrowserContext* browser_context,
     SiteInstance* site_instance) const {
-  MockRenderProcessHost* host = new MockRenderProcessHost(browser_context);
-  if (host) {
-    processes_.push_back(host);
-    host->SetFactory(this);
-  }
-  return host;
+  processes_.push_back(
+      base::MakeUnique<MockRenderProcessHost>(browser_context));
+  processes_.back()->SetFactory(this);
+  return processes_.back().get();
 }
 
 void MockRenderProcessHostFactory::Remove(MockRenderProcessHost* host) const {
-  for (ScopedVector<MockRenderProcessHost>::iterator it = processes_.begin();
-       it != processes_.end(); ++it) {
-    if (*it == host) {
-      processes_.weak_erase(it);
+  for (auto it = processes_.begin(); it != processes_.end(); ++it) {
+    if (it->get() == host) {
+      it->release();
+      processes_.erase(it);
       break;
     }
   }

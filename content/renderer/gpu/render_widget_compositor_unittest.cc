@@ -9,6 +9,7 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -42,11 +43,13 @@ class StubRenderWidgetCompositorDelegate
                            const gfx::Vector2dF& elastic_overscroll_delta,
                            float page_scale,
                            float top_controls_delta) override {}
+  void RecordWheelAndTouchScrollingCount(bool has_scrolled_by_wheel,
+                                         bool has_scrolled_by_touch) override {}
   void BeginMainFrame(double frame_time_sec) override {}
-  std::unique_ptr<cc::CompositorFrameSink> CreateCompositorFrameSink(
-      const cc::FrameSinkId& frame_sink_id,
-      bool fallback) override {
-    return nullptr;
+  void RequestNewCompositorFrameSink(
+      bool fallback,
+      const CompositorFrameSinkCallback& callback) override {
+    callback.Run(nullptr);
   }
   void DidCommitAndDrawCompositorFrame() override {}
   void DidCommitCompositorFrame() override {}
@@ -67,9 +70,9 @@ class FakeRenderWidgetCompositorDelegate
  public:
   FakeRenderWidgetCompositorDelegate() = default;
 
-  std::unique_ptr<cc::CompositorFrameSink> CreateCompositorFrameSink(
-      const cc::FrameSinkId& frame_sink_id,
-      bool fallback) override {
+  void RequestNewCompositorFrameSink(
+      bool fallback,
+      const CompositorFrameSinkCallback& callback) override {
     EXPECT_EQ(num_requests_since_last_success_ >
                   RenderWidgetCompositor::
                       COMPOSITOR_FRAME_SINK_RETRIES_BEFORE_FALLBACK,
@@ -77,15 +80,18 @@ class FakeRenderWidgetCompositorDelegate
     last_create_was_fallback_ = fallback;
 
     bool success = num_failures_ >= num_failures_before_success_;
-    if (!success && use_null_compositor_frame_sink_)
-      return nullptr;
+    if (!success && use_null_compositor_frame_sink_) {
+      callback.Run(std::unique_ptr<cc::CompositorFrameSink>());
+      return;
+    }
 
     auto context_provider = cc::TestContextProvider::Create();
     if (!success) {
       context_provider->UnboundTestContext3d()->loseContextCHROMIUM(
           GL_GUILTY_CONTEXT_RESET_ARB, GL_INNOCENT_CONTEXT_RESET_ARB);
     }
-    return cc::FakeCompositorFrameSink::Create3d(std::move(context_provider));
+    callback.Run(
+        cc::FakeCompositorFrameSink::Create3d(std::move(context_provider)));
   }
 
   void add_success() {
@@ -243,7 +249,7 @@ class RenderWidgetCompositorFrameSinkTest : public testing::Test {
         num_failures_before_success);
     render_widget_compositor_.SetUp(expected_successes,
                                     expected_fallback_succeses);
-    render_widget_compositor_.setVisible(true);
+    render_widget_compositor_.SetVisible(true);
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(&RenderWidgetCompositorFrameSink::SynchronousComposite,
@@ -287,6 +293,8 @@ TEST_F(RenderWidgetCompositorFrameSinkTest, FailOnceBind) {
   RunTest(false, 1, 1, 0);
 }
 
+// Android doesn't support fallback frame sinks. (crbug.com/721102)
+#ifndef OS_ANDROID
 TEST_F(RenderWidgetCompositorFrameSinkTest, FallbackSuccessNull) {
   RunTest(true,
           RenderWidgetCompositor::COMPOSITOR_FRAME_SINK_RETRIES_BEFORE_FALLBACK,
@@ -305,6 +313,7 @@ TEST_F(RenderWidgetCompositorFrameSinkTest, FallbackSuccessNormalSuccess) {
           RenderWidgetCompositor::COMPOSITOR_FRAME_SINK_RETRIES_BEFORE_FALLBACK,
           1, 1);
 }
+#endif
 
 }  // namespace
 }  // namespace content

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "base/message_loop/message_loop.h"
 #include "base/test/test_timeouts.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/common/content_switches.h"
@@ -12,7 +13,6 @@
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "content/test/content_browser_test_utils_internal.h"
-#include "device/wake_lock/wake_lock_service_context.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
@@ -21,6 +21,11 @@ namespace content {
 namespace {
 
 const char kBlinkWakeLockFeature[] = "WakeLock";
+
+void OnHasWakeLock(bool* out, bool has_wakelock) {
+  *out = has_wakelock;
+  base::MessageLoop::current()->QuitNow();
+}
 
 }  // namespace
 
@@ -62,12 +67,18 @@ class WakeLockTest : public ContentBrowserTest {
     return GetNestedFrameNode()->current_frame_host();
   }
 
-  device::WakeLockServiceContext* GetWakeLockServiceContext() {
-    return GetWebContentsImpl()->GetWakeLockServiceContext();
+  device::mojom::WakeLockService* GetRendererWakeLock() {
+    return GetWebContentsImpl()->GetRendererWakeLock();
   }
 
   bool HasWakeLock() {
-    return GetWakeLockServiceContext()->HasWakeLockForTests();
+    bool has_wakelock = false;
+    base::RunLoop run_loop;
+
+    GetRendererWakeLock()->HasWakeLockForTests(
+        base::Bind(&OnHasWakeLock, &has_wakelock));
+    run_loop.Run();
+    return has_wakelock;
   }
 
   void WaitForPossibleUpdate() {

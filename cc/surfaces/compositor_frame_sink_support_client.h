@@ -7,7 +7,13 @@
 
 #include "cc/resources/returned_resource.h"
 
+namespace gfx {
+class Rect;
+}
+
 namespace cc {
+
+class LocalSurfaceId;
 
 struct BeginFrameArgs;
 
@@ -20,7 +26,8 @@ class CompositorFrameSinkSupportClient {
   // TODO(fsamuel): This method ought not be necessary with unified BeginFrame.
   // However, there's a fair amount of cleanup and refactoring necessary to get
   // rid of it.
-  virtual void DidReceiveCompositorFrameAck() = 0;
+  virtual void DidReceiveCompositorFrameAck(
+      const ReturnedResourceArray& resources) = 0;
 
   // Notification for the client to generate a CompositorFrame.
   virtual void OnBeginFrame(const BeginFrameArgs& args) = 0;
@@ -29,7 +36,8 @@ class CompositorFrameSinkSupportClient {
   virtual void ReclaimResources(const ReturnedResourceArray& resources) = 0;
 
   // Called when surface is being scheduled for a draw.
-  virtual void WillDrawSurface() = 0;
+  virtual void WillDrawSurface(const LocalSurfaceId& local_surface_id,
+                               const gfx::Rect& damage_rect) = 0;
 
  protected:
   virtual ~CompositorFrameSinkSupportClient() {}

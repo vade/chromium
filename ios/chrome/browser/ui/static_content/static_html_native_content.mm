@@ -96,6 +96,11 @@
 #pragma mark -
 #pragma mark CRWNativeContent implementation
 
+- (void)willBeDismissed {
+  // Invalidate the _overscrollActionsController but let the animation finish.
+  [_overscrollActionsController scheduleInvalidate];
+}
+
 - (void)close {
   [_overscrollActionsController invalidate];
 }
@@ -112,6 +117,10 @@
   CHECK(_webUsageEnabled) << "Tried to create a web view when web usage was"
                           << " disabled!";
   return [_staticHTMLViewController webView];
+}
+
+- (void)setDelegate:(id<CRWNativeContentDelegate>)delegate {
+  [_staticHTMLViewController setDelegate:delegate];
 }
 
 - (NSString*)title {

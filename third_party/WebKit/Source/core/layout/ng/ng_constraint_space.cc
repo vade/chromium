@@ -16,6 +16,7 @@ NGConstraintSpace::NGConstraintSpace(
     TextDirection direction,
     NGLogicalSize available_size,
     NGLogicalSize percentage_resolution_size,
+    NGPhysicalSize initial_containing_block_size,
     LayoutUnit fragmentainer_space_available,
     bool is_fixed_size_inline,
     bool is_fixed_size_block,
@@ -24,9 +25,15 @@ NGConstraintSpace::NGConstraintSpace(
     bool is_block_direction_triggers_scrollbar,
     NGFragmentationType block_direction_fragmentation_type,
     bool is_new_fc,
-    const std::shared_ptr<NGExclusions>& exclusions)
+    bool is_anonymous,
+    const NGMarginStrut& margin_strut,
+    const NGLogicalOffset& bfc_offset,
+    const std::shared_ptr<NGExclusions>& exclusions,
+    Vector<RefPtr<NGUnpositionedFloat>>& unpositioned_floats,
+    const WTF::Optional<LayoutUnit>& clearance_offset)
     : available_size_(available_size),
       percentage_resolution_size_(percentage_resolution_size),
+      initial_containing_block_size_(initial_containing_block_size),
       fragmentainer_space_available_(fragmentainer_space_available),
       is_fixed_size_inline_(is_fixed_size_inline),
       is_fixed_size_block_(is_fixed_size_block),
@@ -37,22 +44,44 @@ NGConstraintSpace::NGConstraintSpace(
           is_block_direction_triggers_scrollbar),
       block_direction_fragmentation_type_(block_direction_fragmentation_type),
       is_new_fc_(is_new_fc),
+      is_anonymous_(is_anonymous),
       writing_mode_(writing_mode),
       direction_(static_cast<unsigned>(direction)),
-      exclusions_(exclusions) {}
+      margin_strut_(margin_strut),
+      bfc_offset_(bfc_offset),
+      exclusions_(exclusions),
+      clearance_offset_(clearance_offset),
+      layout_opp_iter_(nullptr) {
+  unpositioned_floats_.swap(unpositioned_floats);
+}
 
-NGConstraintSpace* NGConstraintSpace::CreateFromLayoutObject(
+RefPtr<NGConstraintSpace> NGConstraintSpace::CreateFromLayoutObject(
     const LayoutBox& box) {
+  auto writing_mode = FromPlatformWritingMode(box.StyleRef().GetWritingMode());
+  bool parallel_containing_block = IsParallelWritingMode(
+      FromPlatformWritingMode(
+          box.ContainingBlock()->StyleRef().GetWritingMode()),
+      writing_mode);
   bool fixed_inline = false, fixed_block = false;
-  // XXX for orthogonal writing mode this is not right
-  LayoutUnit available_logical_width =
-      std::max(LayoutUnit(), box.containingBlockLogicalWidthForContent());
+
+  LayoutUnit available_logical_width;
+  if (parallel_containing_block)
+    available_logical_width = box.ContainingBlockLogicalWidthForContent();
+  else
+    available_logical_width = box.PerpendicularContainingBlockLogicalHeight();
+  available_logical_width = std::max(LayoutUnit(), available_logical_width);
+
   LayoutUnit available_logical_height;
-  if (!box.parent()) {
-    available_logical_height = box.view()->viewLogicalHeightForPercentages();
-  } else if (box.containingBlock()) {
-    available_logical_height =
-        box.containingBlock()->availableLogicalHeightForPercentageComputation();
+  if (!box.Parent()) {
+    available_logical_height = box.View()->ViewLogicalHeightForPercentages();
+  } else if (box.ContainingBlock()) {
+    if (parallel_containing_block) {
+      available_logical_height =
+          box.ContainingBlock()
+              ->AvailableLogicalHeightForPercentageComputation();
+    } else {
+      available_logical_height = box.ContainingBlockLogicalWidthForContent();
+    }
   }
   NGLogicalSize percentage_size = {available_logical_width,
                                    available_logical_height};
@@ -60,62 +89,79 @@ NGConstraintSpace* NGConstraintSpace::CreateFromLayoutObject(
   // When we have an override size, the available_logical_{width,height} will be
   // used as the final size of the box, so it has to include border and
   // padding.
-  if (box.hasOverrideLogicalContentWidth()) {
+  if (box.HasOverrideLogicalContentWidth()) {
     available_size.inline_size =
-        box.borderAndPaddingLogicalWidth() + box.overrideLogicalContentWidth();
+        box.BorderAndPaddingLogicalWidth() + box.OverrideLogicalContentWidth();
     fixed_inline = true;
   }
-  if (box.hasOverrideLogicalContentHeight()) {
-    available_size.block_size = box.borderAndPaddingLogicalHeight() +
-                                box.overrideLogicalContentHeight();
+  if (box.HasOverrideLogicalContentHeight()) {
+    available_size.block_size = box.BorderAndPaddingLogicalHeight() +
+                                box.OverrideLogicalContentHeight();
     fixed_block = true;
   }
 
   bool is_new_fc =
-      box.isLayoutBlock() && toLayoutBlock(box).createsNewFormattingContext();
+      box.IsLayoutBlock() && ToLayoutBlock(box).CreatesNewFormattingContext();
 
-  auto writing_mode = FromPlatformWritingMode(box.styleRef().getWritingMode());
+  FloatSize icb_float_size = box.View()->ViewportSizeForViewportUnits();
+  NGPhysicalSize initial_containing_block_size{
+      LayoutUnit(icb_float_size.Width()), LayoutUnit(icb_float_size.Height())};
+
+  // ICB cannot be indefinite by the spec.
+  DCHECK_GE(initial_containing_block_size.width, LayoutUnit());
+  DCHECK_GE(initial_containing_block_size.height, LayoutUnit());
+
   return NGConstraintSpaceBuilder(writing_mode)
       .SetAvailableSize(available_size)
       .SetPercentageResolutionSize(percentage_size)
+      .SetInitialContainingBlockSize(initial_containing_block_size)
       .SetIsInlineDirectionTriggersScrollbar(
-          box.styleRef().overflowInlineDirection() == EOverflow::Auto)
+          box.StyleRef().OverflowInlineDirection() == EOverflow::kAuto)
       .SetIsBlockDirectionTriggersScrollbar(
-          box.styleRef().overflowBlockDirection() == EOverflow::Auto)
+          box.StyleRef().OverflowBlockDirection() == EOverflow::kAuto)
       .SetIsFixedSizeInline(fixed_inline)
       .SetIsFixedSizeBlock(fixed_block)
       .SetIsShrinkToFit(
-          box.sizesLogicalWidthToFitContent(box.styleRef().logicalWidth()))
+          box.SizesLogicalWidthToFitContent(box.StyleRef().LogicalWidth()))
       .SetIsNewFormattingContext(is_new_fc)
-      .SetTextDirection(box.styleRef().direction())
-      .ToConstraintSpace();
+      .SetTextDirection(box.StyleRef().Direction())
+      .ToConstraintSpace(writing_mode);
 }
 
 void NGConstraintSpace::AddExclusion(const NGExclusion& exclusion) {
   exclusions_->Add(exclusion);
+  // Invalidate the Layout Opportunity Iterator.
+  layout_opp_iter_.reset();
 }
 
 NGFragmentationType NGConstraintSpace::BlockFragmentationType() const {
   return static_cast<NGFragmentationType>(block_direction_fragmentation_type_);
 }
 
-void NGConstraintSpace::Subtract(const NGBoxFragment*) {
-  // TODO(layout-ng): Implement.
-}
+NGLayoutOpportunityIterator* NGConstraintSpace::LayoutOpportunityIterator(
+    const NGLogicalOffset& iter_offset) {
+  if (layout_opp_iter_ && layout_opp_iter_->Offset() != iter_offset)
+    layout_opp_iter_.reset();
 
-NGLayoutOpportunityIterator* NGConstraintSpace::LayoutOpportunities(
-    unsigned clear,
-    bool for_inline_or_bfc) {
-  NGLayoutOpportunityIterator* iterator = new NGLayoutOpportunityIterator(this);
-  return iterator;
+  if (!layout_opp_iter_) {
+    layout_opp_iter_ = WTF::MakeUnique<NGLayoutOpportunityIterator>(
+        Exclusions().get(), AvailableSize(), iter_offset);
+  }
+  return layout_opp_iter_.get();
 }
 
 String NGConstraintSpace::ToString() const {
-  return String::format("%s,%s %sx%s",
-                        offset_.inline_offset.toString().ascii().data(),
-                        offset_.block_offset.toString().ascii().data(),
-                        AvailableSize().inline_size.toString().ascii().data(),
-                        AvailableSize().block_size.toString().ascii().data());
+  return String::Format(
+      "Offset: %s,%s Size: %sx%s MarginStrut: %s"
+      " Clearance: %s",
+      bfc_offset_.inline_offset.ToString().Ascii().data(),
+      bfc_offset_.block_offset.ToString().Ascii().data(),
+      AvailableSize().inline_size.ToString().Ascii().data(),
+      AvailableSize().block_size.ToString().Ascii().data(),
+      margin_strut_.ToString().Ascii().data(),
+      clearance_offset_.has_value()
+          ? clearance_offset_.value().ToString().Ascii().data()
+          : "none");
 }
 
 }  // namespace blink

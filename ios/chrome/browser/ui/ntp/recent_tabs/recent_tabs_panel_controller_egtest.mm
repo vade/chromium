@@ -9,7 +9,7 @@
 #import <string>
 
 #include "components/strings/grit/components_strings.h"
-#import "ios/chrome/browser/ui/tools_menu/tools_menu_view_controller.h"
+#include "ios/chrome/browser/ui/tools_menu/tools_menu_constants.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/app/tab_test_util.h"
@@ -20,9 +20,13 @@
 #import "ios/web/public/test/http_server.h"
 #include "ios/web/public/test/http_server_util.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace {
 const char kURLOfTestPage[] = "http://testPage";
-std::string const kHTMLOfTestPage =
+const char kHTMLOfTestPage[] =
     "<head><title>TestPageTitle</title></head><body>hello</body>";
 NSString* const kTitleOfTestPage = @"TestPageTitle";
 
@@ -72,10 +76,10 @@ id<GREYMatcher> RecentlyClosedLabelMatcher() {
 - (void)setUp {
   [ChromeEarlGrey clearBrowsingHistory];
   [super setUp];
-  std::map<GURL, std::string> responses;
-  const GURL testPageURL = web::test::HttpServer::MakeUrl(kURLOfTestPage);
-  responses[testPageURL] = kHTMLOfTestPage;
-  web::test::SetUpSimpleHttpServer(responses);
+  web::test::SetUpSimpleHttpServer(std::map<GURL, std::string>{{
+      web::test::HttpServer::MakeUrl(kURLOfTestPage),
+      std::string(kHTMLOfTestPage),
+  }});
 }
 
 - (void)tearDown {

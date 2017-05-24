@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/rand_util.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "content/renderer/media/media_stream.h"
@@ -168,7 +169,6 @@ void PpFrameWriter::PutFrame(PPB_ImageData_Impl* image_data,
     return;
   }
 
-  SkAutoLockPixels src_lock(bitmap);
   const uint8_t* src_data = static_cast<uint8_t*>(bitmap.getPixels());
   const int src_stride = static_cast<int>(bitmap.rowBytes());
   const int width = bitmap.width();
@@ -235,9 +235,9 @@ bool PepperToVideoTrackAdapter::Open(MediaStreamRegistryInterface* registry,
     stream = registry->GetMediaStream(url);
   } else {
     stream =
-        blink::WebMediaStreamRegistry::lookupMediaStreamDescriptor(GURL(url));
+        blink::WebMediaStreamRegistry::LookupMediaStreamDescriptor(GURL(url));
   }
-  if (stream.isNull()) {
+  if (stream.IsNull()) {
     LOG(ERROR) << "PepperToVideoTrackAdapter::Open - invalid url: " << url;
     return false;
   }
@@ -256,19 +256,15 @@ bool PepperToVideoTrackAdapter::Open(MediaStreamRegistryInterface* registry,
   // Create a new webkit video track.
   blink::WebMediaStreamSource webkit_source;
   blink::WebMediaStreamSource::Type type =
-      blink::WebMediaStreamSource::TypeVideo;
-  blink::WebString webkit_track_id = blink::WebString::fromUTF8(track_id);
-  webkit_source.initialize(webkit_track_id, type, webkit_track_id,
+      blink::WebMediaStreamSource::kTypeVideo;
+  blink::WebString webkit_track_id = blink::WebString::FromUTF8(track_id);
+  webkit_source.Initialize(webkit_track_id, type, webkit_track_id,
                            false /* remote */);
-  webkit_source.setExtraData(writer);
+  webkit_source.SetExtraData(writer);
 
-  blink::WebMediaConstraints constraints;
-  constraints.initialize();
   bool track_enabled = true;
-
-  stream.addTrack(MediaStreamVideoTrack::CreateVideoTrack(
-      writer, constraints, MediaStreamVideoSource::ConstraintsCallback(),
-      track_enabled));
+  stream.AddTrack(MediaStreamVideoTrack::CreateVideoTrack(
+      writer, MediaStreamVideoSource::ConstraintsCallback(), track_enabled));
 
   *frame_writer = new PpFrameWriterProxy(writer->AsWeakPtr());
   return true;

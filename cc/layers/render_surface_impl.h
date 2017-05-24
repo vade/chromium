@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/layers/layer_collections.h"
 #include "cc/quads/render_pass.h"
 #include "cc/quads/shared_quad_state.h"
@@ -24,19 +24,16 @@
 
 namespace cc {
 
+class AppendQuadsData;
 class DamageTracker;
 class FilterOperations;
 class Occlusion;
-class RenderPassSink;
 class LayerImpl;
-class LayerIterator;
 class LayerTreeImpl;
-
-struct AppendQuadsData;
 
 class CC_EXPORT RenderSurfaceImpl {
  public:
-  explicit RenderSurfaceImpl(LayerImpl* owning_layer);
+  RenderSurfaceImpl(LayerTreeImpl* layer_tree_impl, int stable_effect_id);
   virtual ~RenderSurfaceImpl();
 
   // Returns the RenderSurfaceImpl that this render surface contributes to. Root
@@ -99,6 +96,21 @@ class CC_EXPORT RenderSurfaceImpl {
     contributes_to_drawn_surface_ = contributes_to_drawn_surface;
   }
 
+  void set_has_contributing_layer_that_escapes_clip(
+      bool contributing_layer_escapes_clip) {
+    has_contributing_layer_that_escapes_clip_ = contributing_layer_escapes_clip;
+  }
+  bool has_contributing_layer_that_escapes_clip() const {
+    return has_contributing_layer_that_escapes_clip_;
+  }
+
+  void set_is_render_surface_list_member(bool is_render_surface_list_member) {
+    is_render_surface_list_member_ = is_render_surface_list_member;
+  }
+  bool is_render_surface_list_member() const {
+    return is_render_surface_list_member_;
+  }
+
   void CalculateContentRectFromAccumulatedContentRect(int max_texture_size);
   void SetContentRectToViewport();
   void SetContentRectForTesting(const gfx::Rect& rect);
@@ -114,15 +126,20 @@ class CC_EXPORT RenderSurfaceImpl {
     return accumulated_content_rect_;
   }
 
+  void increment_num_contributors() { num_contributors_++; }
+  void decrement_num_contributors() {
+    num_contributors_--;
+    DCHECK_GE(num_contributors_, 0);
+  }
+  void reset_num_contributors() { num_contributors_ = 0; }
+  int num_contributors() const { return num_contributors_; }
+
   const Occlusion& occlusion_in_content_space() const {
     return occlusion_in_content_space_;
   }
   void set_occlusion_in_content_space(const Occlusion& occlusion) {
     occlusion_in_content_space_ = occlusion;
   }
-
-  LayerImplList& layer_list() { return layer_list_; }
-  void ClearLayerLists();
 
   int id() const { return stable_effect_id_; }
 
@@ -132,7 +149,7 @@ class CC_EXPORT RenderSurfaceImpl {
   const FilterOperations& Filters() const;
   const FilterOperations& BackgroundFilters() const;
   gfx::PointF FiltersOrigin() const;
-  gfx::Transform FiltersTransform() const;
+  gfx::Transform SurfaceScale() const;
 
   bool HasCopyRequest() const;
 
@@ -143,11 +160,11 @@ class CC_EXPORT RenderSurfaceImpl {
   void NoteAncestorPropertyChanged();
 
   DamageTracker* damage_tracker() const { return damage_tracker_.get(); }
-  gfx::Rect GetDamageRect();
+  gfx::Rect GetDamageRect() const;
 
   int GetRenderPassId();
 
-  void AppendRenderPasses(RenderPassSink* pass_sink);
+  std::unique_ptr<RenderPass> CreateRenderPass();
   void AppendQuads(RenderPass* render_pass, AppendQuadsData* append_quads_data);
 
   int TransformTreeIndex() const;
@@ -156,13 +173,16 @@ class CC_EXPORT RenderSurfaceImpl {
   void set_effect_tree_index(int index) { effect_tree_index_ = index; }
   int EffectTreeIndex() const;
 
+  const EffectNode* OwningEffectNode() const;
+
  private:
   void SetContentRect(const gfx::Rect& content_rect);
   gfx::Rect CalculateClippedAccumulatedContentRect();
   gfx::Rect CalculateExpandedClipForFilters(
       const gfx::Transform& target_to_surface);
-
-  const EffectNode* OwningEffectNode() const;
+  void TileMaskLayer(RenderPass* render_pass,
+                     SharedQuadState* shared_quad_state,
+                     const gfx::Rect& visible_layer_rect);
 
   LayerTreeImpl* layer_tree_impl_;
   int stable_effect_id_;
@@ -196,12 +216,15 @@ class CC_EXPORT RenderSurfaceImpl {
 
   // Is used to calculate the content rect from property trees.
   gfx::Rect accumulated_content_rect_;
+  int num_contributors_;
+  // Is used to decide if the surface is clipped.
+  bool has_contributing_layer_that_escapes_clip_ : 1;
   bool surface_property_changed_ : 1;
   bool ancestor_property_changed_ : 1;
 
   bool contributes_to_drawn_surface_ : 1;
+  bool is_render_surface_list_member_ : 1;
 
-  LayerImplList layer_list_;
   Occlusion occlusion_in_content_space_;
 
   // The nearest ancestor target surface that will contain the contents of this
@@ -209,12 +232,6 @@ class CC_EXPORT RenderSurfaceImpl {
   const RenderSurfaceImpl* nearest_occlusion_immune_ancestor_;
 
   std::unique_ptr<DamageTracker> damage_tracker_;
-
-  // For LayerIteratorActions
-  int target_render_surface_layer_index_history_;
-  size_t current_layer_index_history_;
-
-  friend class LayerIterator;
 
   DISALLOW_COPY_AND_ASSIGN(RenderSurfaceImpl);
 };

@@ -28,6 +28,7 @@
 #include "cc/output/copy_output_result.h"
 #include "cc/surfaces/sequence_surface_reference_factory.h"
 #include "cc/surfaces/surface_id.h"
+#include "cc/surfaces/surface_reference_factory.h"
 #include "cc/surfaces/surface_sequence.h"
 #include "cc/test/pixel_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -92,24 +93,13 @@ class ColoredLayer : public Layer, public LayerDelegate {
   SkColor color_;
 };
 
-// Layer delegate for painting text with effects on canvas.
-class DrawStringLayerDelegate : public LayerDelegate {
+// Layer delegate for painting text with fade effect on canvas.
+class DrawFadedStringLayerDelegate : public LayerDelegate {
  public:
-  enum DrawFunction {
-    STRING_WITH_HALO,
-    STRING_FADED,
-  };
+  DrawFadedStringLayerDelegate(SkColor back_color, const gfx::Size& layer_size)
+      : background_color_(back_color), layer_size_(layer_size) {}
 
-  DrawStringLayerDelegate(
-      SkColor back_color, SkColor halo_color,
-      DrawFunction func, const gfx::Size& layer_size)
-      : background_color_(back_color),
-        halo_color_(halo_color),
-        func_(func),
-        layer_size_(layer_size) {
-  }
-
-  ~DrawStringLayerDelegate() override {}
+  ~DrawFadedStringLayerDelegate() override {}
 
   // Overridden from LayerDelegate:
   void OnPaintLayer(const ui::PaintContext& context) override {
@@ -117,18 +107,8 @@ class DrawStringLayerDelegate : public LayerDelegate {
     gfx::Rect bounds(layer_size_);
     recorder.canvas()->DrawColor(background_color_);
     const base::string16 text = base::ASCIIToUTF16("Tests!");
-    switch (func_) {
-      case STRING_WITH_HALO:
-        recorder.canvas()->DrawStringRectWithHalo(
-            text, font_list_, SK_ColorRED, halo_color_, bounds, 0);
-        break;
-      case STRING_FADED:
-        recorder.canvas()->DrawFadedString(
-            text, font_list_, SK_ColorRED, bounds, 0);
-        break;
-      default:
-        NOTREACHED();
-    }
+    recorder.canvas()->DrawFadedString(text, font_list_, SK_ColorRED, bounds,
+                                       0);
   }
 
   void OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) override {}
@@ -137,12 +117,10 @@ class DrawStringLayerDelegate : public LayerDelegate {
 
  private:
   const SkColor background_color_;
-  const SkColor halo_color_;
-  const DrawFunction func_;
   const gfx::FontList font_list_;
   const gfx::Size layer_size_;
 
-  DISALLOW_COPY_AND_ASSIGN(DrawStringLayerDelegate);
+  DISALLOW_COPY_AND_ASSIGN(DrawFadedStringLayerDelegate);
 };
 
 class LayerWithRealCompositorTest : public testing::Test {
@@ -198,8 +176,9 @@ class LayerWithRealCompositorTest : public testing::Test {
     return layer;
   }
 
-  std::unique_ptr<Layer> CreateDrawStringLayer(
-      const gfx::Rect& bounds, DrawStringLayerDelegate* delegate) {
+  std::unique_ptr<Layer> CreateDrawFadedStringLayerDelegate(
+      const gfx::Rect& bounds,
+      DrawFadedStringLayerDelegate* delegate) {
     std::unique_ptr<Layer> layer(new Layer(LAYER_TEXTURED));
     layer->SetBounds(bounds);
     layer->set_delegate(delegate);
@@ -244,7 +223,7 @@ class LayerWithRealCompositorTest : public testing::Test {
   }
 
   void WaitForSwap() {
-    DrawWaiterForTest::WaitForCompositingEnded(GetCompositor());
+    ui::DrawWaiterForTest::WaitForCompositingEnded(GetCompositor());
   }
 
   void WaitForCommit() {
@@ -789,6 +768,19 @@ TEST_F(LayerWithDelegateTest, Cloning) {
   EXPECT_FALSE(clone->layer_inverted());
   EXPECT_FALSE(clone->fills_bounds_opaquely());
 
+  // A solid color layer with transparent color can be marked as opaque. The
+  // clone should retain this state.
+  layer.reset(CreateLayer(LAYER_SOLID_COLOR));
+  layer->SetColor(kTransparent);
+  layer->SetFillsBoundsOpaquely(true);
+
+  clone = layer->Clone();
+  EXPECT_TRUE(clone->GetTargetTransform().IsIdentity());
+  EXPECT_EQ(kTransparent, clone->background_color());
+  EXPECT_EQ(kTransparent, clone->GetTargetColor());
+  EXPECT_FALSE(clone->layer_inverted());
+  EXPECT_TRUE(clone->fills_bounds_opaquely());
+
   layer.reset(CreateLayer(LAYER_SOLID_COLOR));
   layer->SetVisible(true);
   layer->SetOpacity(1.0f);
@@ -997,7 +989,7 @@ TEST_F(LayerWithNullDelegateTest, SwitchLayerPreservesCCLayerState) {
   l1->SetShowSolidColorContent();
 }
 
-// Various visibile/drawn assertions.
+// Various visible/drawn assertions.
 TEST_F(LayerWithNullDelegateTest, Visibility) {
   std::unique_ptr<Layer> l1(new Layer(LAYER_TEXTURED));
   std::unique_ptr<Layer> l2(new Layer(LAYER_TEXTURED));
@@ -1124,16 +1116,18 @@ TEST_F(LayerWithNullDelegateTest, SetBoundsSchedulesPaint) {
   WaitForDraw();
 }
 
-static void EmptyReleaseCallback(const gpu::SyncToken& sync_token,
-                                 bool is_lost) {}
-
 // Checks that the damage rect for a TextureLayer is empty after a commit.
 TEST_F(LayerWithNullDelegateTest, EmptyDamagedRect) {
+  base::RunLoop run_loop;
+  cc::ReleaseCallback callback =
+      base::Bind([](base::RunLoop* run_loop, const gpu::SyncToken& sync_token,
+                    bool is_lost) { run_loop->Quit(); },
+                 base::Unretained(&run_loop));
+
   std::unique_ptr<Layer> root(CreateLayer(LAYER_SOLID_COLOR));
   cc::TextureMailbox mailbox(gpu::Mailbox::Generate(), gpu::SyncToken(),
                              GL_TEXTURE_2D);
-  root->SetTextureMailbox(mailbox, cc::SingleReleaseCallback::Create(
-                                       base::Bind(EmptyReleaseCallback)),
+  root->SetTextureMailbox(mailbox, cc::SingleReleaseCallback::Create(callback),
                           gfx::Size(10, 10));
   compositor()->SetRootLayer(root.get());
 
@@ -1147,9 +1141,14 @@ TEST_F(LayerWithNullDelegateTest, EmptyDamagedRect) {
   WaitForCommit();
   EXPECT_TRUE(root->damaged_region_for_testing().IsEmpty());
 
-  compositor()->SetRootLayer(nullptr);
-  root.reset();
-  WaitForCommit();
+  // The texture mailbox has a reference from an in-flight texture layer.
+  // We clear the texture mailbox from the root layer and draw a new frame
+  // to ensure that the texture mailbox is released.
+  root->SetShowSolidColorContent();
+  Draw();
+
+  // Wait for texture mailbox release to avoid DCHECKs.
+  run_loop.Run();
 }
 
 void ExpectRgba(int x, int y, SkColor expected_color, SkColor actual_color) {
@@ -1191,7 +1190,6 @@ TEST_F(LayerWithRealCompositorTest, DrawPixels) {
   ReadPixels(&bitmap, gfx::Rect(viewport_size));
   ASSERT_FALSE(bitmap.empty());
 
-  SkAutoLockPixels lock(bitmap);
   for (int x = 0; x < viewport_size.width(); x++) {
     for (int y = 0; y < viewport_size.height(); y++) {
       SkColor actual_color = bitmap.getColor(x, y);
@@ -1229,7 +1227,6 @@ TEST_F(LayerWithRealCompositorTest, DrawAlphaBlendedPixels) {
   ReadPixels(&bitmap, gfx::Rect(viewport_size));
   ASSERT_FALSE(bitmap.empty());
 
-  SkAutoLockPixels lock(bitmap);
   for (int x = 0; x < test_size; x++) {
     for (int y = 0; y < test_size; y++) {
       SkColor actual_color = bitmap.getColor(x, y);
@@ -1270,7 +1267,6 @@ TEST_F(LayerWithRealCompositorTest, DrawAlphaThresholdFilterPixels) {
   ReadPixels(&bitmap, gfx::Rect(viewport_size));
   ASSERT_FALSE(bitmap.empty());
 
-  SkAutoLockPixels lock(bitmap);
   for (int x = 0; x < test_size; x++) {
     for (int y = 0; y < test_size; y++) {
       SkColor actual_color = bitmap.getColor(x, y);
@@ -1450,48 +1446,12 @@ TEST_F(LayerWithRealCompositorTest, ModifyHierarchy) {
 // So we choose to check result only on Windows.
 // See https://codereview.chromium.org/1634103003/#msg41
 #if defined(OS_WIN)
-TEST_F(LayerWithRealCompositorTest, CanvasDrawStringRectWithHalo) {
-  gfx::Size size(50, 50);
-  GetCompositor()->SetScaleAndSize(1.0f, size);
-  DrawStringLayerDelegate delegate(SK_ColorBLUE, SK_ColorWHITE,
-                                   DrawStringLayerDelegate::STRING_WITH_HALO,
-                                   size);
-  std::unique_ptr<Layer> layer(
-      CreateDrawStringLayer(gfx::Rect(size), &delegate));
-  DrawTree(layer.get());
-
-  SkBitmap bitmap;
-  ReadPixels(&bitmap);
-  ASSERT_FALSE(bitmap.empty());
-
-  base::FilePath ref_img =
-      test_data_directory().AppendASCII("string_with_halo.png");
-  // WritePNGFile(bitmap, ref_img, true);
-
-  float percentage_pixels_large_error = 1.0f;
-  float percentage_pixels_small_error = 0.0f;
-  float average_error_allowed_in_bad_pixels = 1.f;
-  int large_error_allowed = 1;
-  int small_error_allowed = 0;
-
-  EXPECT_TRUE(MatchesPNGFile(bitmap, ref_img,
-                             cc::FuzzyPixelComparator(
-                                 true,
-                                 percentage_pixels_large_error,
-                                 percentage_pixels_small_error,
-                                 average_error_allowed_in_bad_pixels,
-                                 large_error_allowed,
-                                 small_error_allowed)));
-}
-
 TEST_F(LayerWithRealCompositorTest, CanvasDrawFadedString) {
   gfx::Size size(50, 50);
   GetCompositor()->SetScaleAndSize(1.0f, size);
-  DrawStringLayerDelegate delegate(SK_ColorBLUE, SK_ColorWHITE,
-                                   DrawStringLayerDelegate::STRING_FADED,
-                                   size);
+  DrawFadedStringLayerDelegate delegate(SK_ColorBLUE, size);
   std::unique_ptr<Layer> layer(
-      CreateDrawStringLayer(gfx::Rect(size), &delegate));
+      CreateDrawFadedStringLayerDelegate(gfx::Rect(size), &delegate));
   DrawTree(layer.get());
 
   SkBitmap bitmap;
@@ -1806,7 +1766,7 @@ TEST_F(LayerWithDelegateTest, ExternalContent) {
 
   // Showing surface content changes the underlying cc layer.
   before = child->cc_layer_for_testing();
-  child->SetShowSurface(
+  child->SetShowPrimarySurface(
       cc::SurfaceInfo(cc::SurfaceId(), 1.0, gfx::Size(10, 10)),
       new TestSurfaceReferenceFactory());
   EXPECT_TRUE(child->cc_layer_for_testing());
@@ -1821,44 +1781,47 @@ TEST_F(LayerWithDelegateTest, ExternalContent) {
 
 TEST_F(LayerWithDelegateTest, ExternalContentMirroring) {
   std::unique_ptr<Layer> layer(CreateLayer(LAYER_SOLID_COLOR));
+  scoped_refptr<cc::SurfaceReferenceFactory> reference_factory(
+      new TestSurfaceReferenceFactory());
 
   cc::SurfaceId surface_id(
       cc::FrameSinkId(0, 1),
-      cc::LocalFrameId(2, base::UnguessableToken::Create()));
+      cc::LocalSurfaceId(2, base::UnguessableToken::Create()));
   cc::SurfaceInfo surface_info(surface_id, 1.0f, gfx::Size(10, 10));
-  layer->SetShowSurface(surface_info, new TestSurfaceReferenceFactory());
+  layer->SetShowPrimarySurface(surface_info, reference_factory);
 
   const auto mirror = layer->Mirror();
   auto* const cc_layer = mirror->cc_layer_for_testing();
   const auto* surface = static_cast<cc::SurfaceLayer*>(cc_layer);
 
   // Mirroring preserves surface state.
-  EXPECT_EQ(surface_info, surface->surface_info());
+  EXPECT_EQ(surface_info, surface->primary_surface_info());
 
   surface_id =
       cc::SurfaceId(cc::FrameSinkId(1, 2),
-                    cc::LocalFrameId(3, base::UnguessableToken::Create()));
+                    cc::LocalSurfaceId(3, base::UnguessableToken::Create()));
   cc::SurfaceInfo surface_info_2(surface_id, 2.0f, gfx::Size(20, 20));
-  layer->SetShowSurface(surface_info_2, new TestSurfaceReferenceFactory());
+  layer->SetShowPrimarySurface(surface_info_2, reference_factory);
 
-  // A new cc::Layer should be created for the mirror.
-  EXPECT_NE(cc_layer, mirror->cc_layer_for_testing());
-  surface = static_cast<cc::SurfaceLayer*>(mirror->cc_layer_for_testing());
+  // The mirror should continue to use the same cc_layer.
+  EXPECT_EQ(cc_layer, mirror->cc_layer_for_testing());
+  layer->SetShowPrimarySurface(surface_info_2, reference_factory);
 
   // Surface updates propagate to the mirror.
-  EXPECT_EQ(surface_info_2, surface->surface_info());
+  EXPECT_EQ(surface_info_2, surface->primary_surface_info());
 }
 
-// Test if frame size in dip is properly calculated in SetShowSurface
+// Test if frame size in dip is properly calculated in SetShowPrimarySurface.
 TEST_F(LayerWithDelegateTest, FrameSizeInDip) {
   std::unique_ptr<Layer> layer(CreateLayer(LAYER_SOLID_COLOR));
 
   cc::SurfaceId surface_id(
       cc::FrameSinkId(0, 1),
-      cc::LocalFrameId(2, base::UnguessableToken::Create()));
+      cc::LocalSurfaceId(2, base::UnguessableToken::Create()));
 
-  layer->SetShowSurface(cc::SurfaceInfo(surface_id, 2.0f, gfx::Size(30, 40)),
-                        new TestSurfaceReferenceFactory());
+  layer->SetShowPrimarySurface(
+      cc::SurfaceInfo(surface_id, 2.0f, gfx::Size(30, 40)),
+      new TestSurfaceReferenceFactory());
 
   EXPECT_EQ(layer->frame_size_in_dip_for_testing(), gfx::Size(15, 20));
 }
@@ -1877,7 +1840,7 @@ TEST_F(LayerWithDelegateTest, LayerFiltersSurvival) {
 
   // Showing surface content changes the underlying cc layer.
   scoped_refptr<cc::Layer> before = layer->cc_layer_for_testing();
-  layer->SetShowSurface(
+  layer->SetShowPrimarySurface(
       cc::SurfaceInfo(cc::SurfaceId(), 1.0, gfx::Size(10, 10)),
       new TestSurfaceReferenceFactory());
   EXPECT_EQ(layer->layer_grayscale(), 0.5f);
@@ -1895,8 +1858,8 @@ TEST_F(LayerWithRealCompositorTest, AddRemoveThreadedAnimations) {
   l1->SetAnimator(LayerAnimator::CreateImplicitAnimator());
   l2->SetAnimator(LayerAnimator::CreateImplicitAnimator());
 
-  auto player1 = l1->GetAnimator()->GetAnimationPlayerForTesting();
-  auto player2 = l2->GetAnimator()->GetAnimationPlayerForTesting();
+  auto* player1 = l1->GetAnimator()->GetAnimationPlayerForTesting();
+  auto* player2 = l2->GetAnimator()->GetAnimationPlayerForTesting();
 
   EXPECT_FALSE(player1->has_any_animation());
 
@@ -2201,7 +2164,7 @@ TEST(LayerDelegateTest, DelegatedFrameDamage) {
 
   FrameDamageCheckingDelegate delegate;
   layer->set_delegate(&delegate);
-  layer->SetShowSurface(
+  layer->SetShowPrimarySurface(
       cc::SurfaceInfo(cc::SurfaceId(), 1.0, gfx::Size(10, 10)),
       new TestSurfaceReferenceFactory());
 
@@ -2220,7 +2183,7 @@ TEST_F(LayerWithRealCompositorTest, CompositorAnimationObserverTest) {
   EXPECT_EQ(0u, animation_observer.animation_step_count());
 
   root->SetOpacity(0.5f);
-  WaitForSwap();
+  WaitForDraw();
   EXPECT_EQ(1u, animation_observer.animation_step_count());
 
   EXPECT_FALSE(animation_observer.shutdown());
@@ -2253,7 +2216,8 @@ class TestMetricsReporter : public ui::AnimationMetricsReporter {
 
 // Starts an animation and tests that incrementing compositor frame count can
 // be used to report animation smoothness metrics.
-TEST_F(LayerWithRealCompositorTest, ReportMetrics) {
+// Flaky test crbug.com/709080
+TEST_F(LayerWithRealCompositorTest, DISABLED_ReportMetrics) {
   std::unique_ptr<Layer> root(CreateLayer(LAYER_SOLID_COLOR));
   GetCompositor()->SetRootLayer(root.get());
   LayerAnimator* animator = root->GetAnimator();

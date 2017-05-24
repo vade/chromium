@@ -66,6 +66,11 @@ void QuicChromiumPacketReader::StartReading() {
   }
 }
 
+size_t QuicChromiumPacketReader::EstimateMemoryUsage() const {
+  // Return the size of |read_buffer_|.
+  return kMaxPacketSize;
+}
+
 void QuicChromiumPacketReader::OnReadComplete(int result) {
   read_pending_ = false;
   if (result == 0)
@@ -81,7 +86,9 @@ void QuicChromiumPacketReader::OnReadComplete(int result) {
   IPEndPoint peer_address;
   socket_->GetLocalAddress(&local_address);
   socket_->GetPeerAddress(&peer_address);
-  if (!visitor_->OnPacket(packet, local_address, peer_address))
+  if (!visitor_->OnPacket(
+          packet, QuicSocketAddress(QuicSocketAddressImpl(local_address)),
+          QuicSocketAddress(QuicSocketAddressImpl(peer_address))))
     return;
 
   StartReading();

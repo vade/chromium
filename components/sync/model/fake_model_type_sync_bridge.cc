@@ -9,7 +9,6 @@
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
 #include "components/sync/base/hash_util.h"
-#include "components/sync/model/model_error.h"
 #include "components/sync/model/mutable_data_batch.h"
 #include "components/sync/model_impl/in_memory_metadata_change_list.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -21,20 +20,6 @@ using sync_pb::ModelTypeState;
 namespace syncer {
 
 namespace {
-
-// It is intentionally very difficult to copy an EntityData, as in normal code
-// we never want to. However, since we store the data as an EntityData for the
-// test code here, this function is needed to manually copy it.
-std::unique_ptr<EntityData> CopyEntityData(const EntityData& old_data) {
-  std::unique_ptr<EntityData> new_data(new EntityData());
-  new_data->id = old_data.id;
-  new_data->client_tag_hash = old_data.client_tag_hash;
-  new_data->non_unique_name = old_data.non_unique_name;
-  new_data->specifics = old_data.specifics;
-  new_data->creation_time = old_data.creation_time;
-  new_data->modification_time = old_data.modification_time;
-  return new_data;
-}
 
 // A simple InMemoryMetadataChangeList that provides accessors for its data.
 class TestMetadataChangeList : public InMemoryMetadataChangeList {
@@ -162,7 +147,7 @@ FakeModelTypeSyncBridge::FakeModelTypeSyncBridge(
       db_(base::MakeUnique<Store>()) {}
 
 FakeModelTypeSyncBridge::~FakeModelTypeSyncBridge() {
-  CheckPostConditions();
+  EXPECT_FALSE(error_next_);
 }
 
 EntitySpecifics FakeModelTypeSyncBridge::WriteItem(const std::string& key,
@@ -263,7 +248,6 @@ void FakeModelTypeSyncBridge::ApplyMetadataChangeList(
         db_->PutMetadata(kv.first, kv.second.metadata);
         break;
       case TestMetadataChangeList::CLEAR:
-        EXPECT_TRUE(db_->HasMetadata(kv.first));
         db_->RemoveMetadata(kv.first);
         break;
     }
@@ -339,8 +323,16 @@ void FakeModelTypeSyncBridge::ErrorOnNextCall() {
   error_next_ = true;
 }
 
-void FakeModelTypeSyncBridge::CheckPostConditions() {
-  EXPECT_FALSE(error_next_);
+std::unique_ptr<EntityData> FakeModelTypeSyncBridge::CopyEntityData(
+    const EntityData& old_data) {
+  std::unique_ptr<EntityData> new_data(new EntityData());
+  new_data->id = old_data.id;
+  new_data->client_tag_hash = old_data.client_tag_hash;
+  new_data->non_unique_name = old_data.non_unique_name;
+  new_data->specifics = old_data.specifics;
+  new_data->creation_time = old_data.creation_time;
+  new_data->modification_time = old_data.modification_time;
+  return new_data;
 }
 
 }  // namespace syncer

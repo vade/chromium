@@ -32,12 +32,21 @@ SettingsPageBrowserTest.prototype = {
   /** @override */
   runAccessibilityChecks: false,
 
+  /** @type {?SettingsBasicPageElement} */
+  basicPage: null,
+
   /** @override */
   setUp: function() {
     PolymerTest.prototype.setUp.call(this);
     suiteSetup(function() {
       return CrSettingsPrefs.initialized;
     });
+
+    suiteSetup(function() {
+      return this.getPage('basic').then(function(basicPage) {
+        this.basicPage = basicPage;
+      }.bind(this));
+    }.bind(this));
   },
 
   /**
@@ -61,8 +70,15 @@ SettingsPageBrowserTest.prototype = {
     assertTrue(!!settingsMain);
     var pageType = 'settings-' + type + '-page';
     var page = settingsMain.$$(pageType);
-    assertTrue(!!page);
-    return page;
+
+    var idleRender = page && page.$$('template[is=settings-idle-load]');
+    if (!idleRender)
+      return Promise.resolve(page);
+
+    return idleRender.get().then(function() {
+      Polymer.dom.flush();
+      return page;
+    });
   },
 
   /**

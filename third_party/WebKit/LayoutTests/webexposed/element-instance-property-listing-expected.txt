@@ -25,6 +25,7 @@ namespace http://www.w3.org/1999/xhtml
     property PROCESSING_INSTRUCTION_NODE
     property TEXT_NODE
     property accessKey
+    property accessibleNode
     property addEventListener
     property after
     property animate
@@ -106,6 +107,7 @@ namespace http://www.w3.org/1999/xhtml
     property nodeName
     property nodeType
     property nodeValue
+    property nonce
     property normalize
     property offsetHeight
     property offsetLeft
@@ -247,7 +249,6 @@ namespace http://www.w3.org/1999/xhtml
     property webkitMatchesSelector
     property webkitRequestFullScreen
     property webkitRequestFullscreen
-    property webkitdropzone
 html element a
     property charset
     property coords
@@ -317,6 +318,7 @@ html element audio
     property canPlayType
     property captureStream
     property controls
+    property controlsList
     property crossOrigin
     property currentSrc
     property currentTime
@@ -373,6 +375,7 @@ html element body
     property onhashchange
     property onlanguagechange
     property onmessage
+    property onmessageerror
     property onoffline
     property ononline
     property onpagehide
@@ -519,6 +522,7 @@ html element frameset
     property onhashchange
     property onlanguagechange
     property onmessage
+    property onmessageerror
     property onoffline
     property ononline
     property onpagehide
@@ -555,6 +559,7 @@ html element html
 html element i
 html element iframe
     property align
+    property allow
     property allowFullscreen
     property allowPaymentRequest
     property contentDocument
@@ -567,7 +572,6 @@ html element iframe
     property marginHeight
     property marginWidth
     property name
-    property permissions
     property referrerPolicy
     property sandbox
     property scrolling
@@ -684,6 +688,7 @@ html element link
     property import
     property integrity
     property media
+    property referrerPolicy
     property rel
     property relList
     property rev
@@ -835,7 +840,7 @@ html element script
     property event
     property htmlFor
     property integrity
-    property nonce
+    property noModule
     property src
     property text
     property type
@@ -1049,6 +1054,7 @@ html element video
     property canPlayType
     property captureStream
     property controls
+    property controlsList
     property crossOrigin
     property currentSrc
     property currentTime
@@ -1124,6 +1130,7 @@ namespace http://www.w3.org/2000/svg
     property PROCESSING_INSTRUCTION_NODE
     property TEXT_NODE
     property accessKey
+    property accessibleNode
     property addEventListener
     property after
     property animate
@@ -1205,6 +1212,7 @@ namespace http://www.w3.org/2000/svg
     property nodeName
     property nodeType
     property nodeValue
+    property nonce
     property normalize
     property offsetHeight
     property offsetLeft
@@ -1346,7 +1354,6 @@ namespace http://www.w3.org/2000/svg
     property webkitMatchesSelector
     property webkitRequestFullScreen
     property webkitRequestFullscreen
-    property webkitdropzone
 svg element a
     property charset
     property coords
@@ -1431,7 +1438,7 @@ svg element script
     property event
     property htmlFor
     property integrity
-    property nonce
+    property noModule
     property src
     property text
     property type

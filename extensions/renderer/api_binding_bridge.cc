@@ -4,6 +4,8 @@
 
 #include "extensions/renderer/api_binding_bridge.h"
 
+#include "base/values.h"
+#include "extensions/renderer/api_binding_hooks.h"
 #include "gin/converter.h"
 #include "gin/object_template_builder.h"
 
@@ -23,9 +25,9 @@ v8::Local<v8::Private> GetPrivatePropertyName(v8::Isolate* isolate,
 
 gin::WrapperInfo APIBindingBridge::kWrapperInfo = {gin::kEmbedderNativeGin};
 
-APIBindingBridge::APIBindingBridge(v8::Local<v8::Context> context,
+APIBindingBridge::APIBindingBridge(APIBindingHooks* hooks,
+                                   v8::Local<v8::Context> context,
                                    v8::Local<v8::Value> api_object,
-                                   v8::Local<v8::Value> js_hook_interface,
                                    const std::string& extension_id,
                                    const std::string& context_type,
                                    const binding::RunJSFunction& run_js)
@@ -33,13 +35,14 @@ APIBindingBridge::APIBindingBridge(v8::Local<v8::Context> context,
       context_type_(context_type),
       run_js_(run_js) {
   v8::Isolate* isolate = context->GetIsolate();
-  v8::Local<v8::Object> wrapper = GetWrapper(isolate);
+  v8::Local<v8::Object> wrapper = GetWrapper(isolate).ToLocalChecked();
   v8::Maybe<bool> result = wrapper->SetPrivate(
       context, GetPrivatePropertyName(isolate, kApiObjectKey), api_object);
   if (!result.IsJust() || !result.FromJust()) {
     NOTREACHED();
     return;
   }
+  v8::Local<v8::Object> js_hook_interface = hooks->GetJSHookInterface(context);
   result = wrapper->SetPrivate(context,
                                GetPrivatePropertyName(isolate,
                                                       kHookInterfaceKey),
@@ -61,7 +64,10 @@ void APIBindingBridge::RegisterCustomHook(v8::Isolate* isolate,
   // functions in binding.js.
   v8::Local<v8::Context> context = isolate->GetCurrentContext();
   v8::Local<v8::Object> hook_object = v8::Object::New(isolate);
-  v8::Local<v8::Object> wrapper = GetWrapper(isolate);
+  v8::Local<v8::Object> wrapper;
+  if (!GetWrapper(isolate).ToLocal(&wrapper))
+    return;
+
   v8::Local<v8::Value> hook_interface =
       wrapper->GetPrivate(
           context, GetPrivatePropertyName(isolate, kHookInterfaceKey))

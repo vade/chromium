@@ -8,28 +8,26 @@
 #include <string>
 
 #include "device/gamepad/gamepad_data_fetcher.h"
-#include "third_party/gvr-android-sdk/src/libraries/headers/vr/gvr/capi/include/gvr_controller.h"
-#include "third_party/gvr-android-sdk/src/libraries/headers/vr/gvr/capi/include/gvr_types.h"
+#include "device/vr/android/gvr/gvr_gamepad_data_provider.h"
+#include "device/vr/vr_export.h"
 
 namespace device {
 
-class GvrDelegate;
-
-class GvrGamepadDataFetcher : public GamepadDataFetcher {
+class DEVICE_VR_EXPORT GvrGamepadDataFetcher : public GamepadDataFetcher {
  public:
   class Factory : public GamepadDataFetcherFactory {
    public:
-    Factory(GvrDelegate* delegate, unsigned int display_id);
+    Factory(GvrGamepadDataProvider*, unsigned int display_id);
     ~Factory() override;
     std::unique_ptr<GamepadDataFetcher> CreateDataFetcher() override;
     GamepadSource source() override;
 
    private:
-    GvrDelegate* delegate_;
+    GvrGamepadDataProvider* data_provider_;
     unsigned int display_id_;
   };
 
-  GvrGamepadDataFetcher(GvrDelegate* delegate, unsigned int display_id);
+  GvrGamepadDataFetcher(GvrGamepadDataProvider*, unsigned int display_id);
   ~GvrGamepadDataFetcher() override;
 
   GamepadSource source() override;
@@ -38,11 +36,12 @@ class GvrGamepadDataFetcher : public GamepadDataFetcher {
   void PauseHint(bool paused) override;
   void OnAddedToProvider() override;
 
+  // Called from GvrGamepadDataProvider
+  void SetGamepadData(GvrGamepadData);
+
  private:
-  std::unique_ptr<gvr::ControllerApi> controller_api_;
-  gvr::ControllerState controller_state_;
-  gvr::ControllerHandedness handedness_;
   unsigned int display_id_;
+  GvrGamepadData gamepad_data_;
 
   DISALLOW_COPY_AND_ASSIGN(GvrGamepadDataFetcher);
 };

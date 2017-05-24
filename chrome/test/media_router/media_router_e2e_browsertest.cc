@@ -5,23 +5,23 @@
 #include "chrome/test/media_router/media_router_e2e_browsertest.h"
 
 #include <vector>
+
 #include "base/command_line.h"
 #include "base/stl_util.h"
 #include "chrome/browser/media/router/media_router.h"
 #include "chrome/browser/media/router/media_router_factory.h"
-#include "chrome/browser/media/router/media_source.h"
-#include "chrome/browser/media/router/media_source_helper.h"
-#include "chrome/browser/media/router/route_request_result.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/media_router/media_source.h"
+#include "chrome/common/media_router/media_source_helper.h"
+#include "chrome/common/media_router/route_request_result.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "media/base/test_data_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "url/gurl.h"
-
+#include "url/origin.h"
 
 // Use the following command to run e2e browser tests:
 // ./out/Debug/browser_tests --user-data-dir=<empty user data dir>
@@ -42,7 +42,7 @@ const char kCastAppPresentationUrl[] =
 const char kVideo[] = "video";
 const char kBearVP9Video[] = "bear-vp9.webm";
 const char kPlayer[] = "player.html";
-const char kOriginUrl[] = "http://origin/";
+const char kOrigin[] = "http://origin/";
 }  // namespace
 
 
@@ -77,7 +77,7 @@ void MediaRouterE2EBrowserTest::OnRouteResponseReceived(
 
 void MediaRouterE2EBrowserTest::CreateMediaRoute(
     const MediaSource& source,
-    const GURL& origin,
+    const url::Origin& origin,
     content::WebContents* web_contents) {
   DCHECK(media_router_);
   observer_.reset(new TestMediaSinksObserver(media_router_, source, origin));
@@ -146,8 +146,8 @@ IN_PROC_BROWSER_TEST_F(MediaRouterE2EBrowserTest, MANUAL_TabMirroring) {
   int tab_id = SessionTabHelper::IdForTab(web_contents);
 
   // Wait for 30 seconds to make sure the route is stable.
-  CreateMediaRoute(
-      MediaSourceForTab(tab_id), GURL(kOriginUrl), web_contents);
+  CreateMediaRoute(MediaSourceForTab(tab_id), url::Origin(GURL(kOrigin)),
+                   web_contents);
   Wait(base::TimeDelta::FromSeconds(30));
 
   // Wait for 10 seconds to make sure route has been stopped.
@@ -158,7 +158,7 @@ IN_PROC_BROWSER_TEST_F(MediaRouterE2EBrowserTest, MANUAL_TabMirroring) {
 IN_PROC_BROWSER_TEST_F(MediaRouterE2EBrowserTest, MANUAL_CastApp) {
   // Wait for 30 seconds to make sure the route is stable.
   CreateMediaRoute(MediaSourceForPresentationUrl(GURL(kCastAppPresentationUrl)),
-                   GURL(kOriginUrl), nullptr);
+                   url::Origin(GURL(kOrigin)), nullptr);
   Wait(base::TimeDelta::FromSeconds(30));
 
   // Wait for 10 seconds to make sure route has been stopped.

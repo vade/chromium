@@ -10,6 +10,10 @@
 #include "base/allocator/features.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#if defined(OS_MACOSX)
+#include "base/allocator/allocator_interception_mac.h"
+#endif
+
 namespace base {
 namespace debug {
 
@@ -68,31 +72,32 @@ class ThreadHeapUsageTrackerTest : public testing::Test {
   }
 
   void* MockMalloc(size_t size) {
-    return dispatch_under_test_->alloc_function(dispatch_under_test_, size);
+    return dispatch_under_test_->alloc_function(dispatch_under_test_, size,
+                                                nullptr);
   }
 
   void* MockCalloc(size_t n, size_t size) {
     return dispatch_under_test_->alloc_zero_initialized_function(
-        dispatch_under_test_, n, size);
+        dispatch_under_test_, n, size, nullptr);
   }
 
   void* MockAllocAligned(size_t alignment, size_t size) {
-    return dispatch_under_test_->alloc_aligned_function(dispatch_under_test_,
-                                                        alignment, size);
+    return dispatch_under_test_->alloc_aligned_function(
+        dispatch_under_test_, alignment, size, nullptr);
   }
 
   void* MockRealloc(void* address, size_t size) {
     return dispatch_under_test_->realloc_function(dispatch_under_test_, address,
-                                                  size);
+                                                  size, nullptr);
   }
 
   void MockFree(void* address) {
-    dispatch_under_test_->free_function(dispatch_under_test_, address);
+    dispatch_under_test_->free_function(dispatch_under_test_, address, nullptr);
   }
 
   size_t MockGetSizeEstimate(void* address) {
     return dispatch_under_test_->get_size_estimate_function(
-        dispatch_under_test_, address);
+        dispatch_under_test_, address, nullptr);
   }
 
  private:
@@ -126,7 +131,9 @@ class ThreadHeapUsageTrackerTest : public testing::Test {
     return ret;
   }
 
-  static void* OnAllocFn(const AllocatorDispatch* self, size_t size) {
+  static void* OnAllocFn(const AllocatorDispatch* self,
+                         size_t size,
+                         void* context) {
     EXPECT_EQ(&g_mock_dispatch, self);
 
     void* ret = malloc(size);
@@ -136,7 +143,8 @@ class ThreadHeapUsageTrackerTest : public testing::Test {
 
   static void* OnAllocZeroInitializedFn(const AllocatorDispatch* self,
                                         size_t n,
-                                        size_t size) {
+                                        size_t size,
+                                        void* context) {
     EXPECT_EQ(&g_mock_dispatch, self);
 
     void* ret = calloc(n, size);
@@ -146,7 +154,8 @@ class ThreadHeapUsageTrackerTest : public testing::Test {
 
   static void* OnAllocAlignedFn(const AllocatorDispatch* self,
                                 size_t alignment,
-                                size_t size) {
+                                size_t size,
+                                void* context) {
     EXPECT_EQ(&g_mock_dispatch, self);
 
     // This is a cheat as it doesn't return aligned allocations. This has the
@@ -158,7 +167,8 @@ class ThreadHeapUsageTrackerTest : public testing::Test {
 
   static void* OnReallocFn(const AllocatorDispatch* self,
                            void* address,
-                           size_t size) {
+                           size_t size,
+                           void* context) {
     EXPECT_EQ(&g_mock_dispatch, self);
 
     g_self->DeleteAlloc(address);
@@ -167,7 +177,9 @@ class ThreadHeapUsageTrackerTest : public testing::Test {
     return ret;
   }
 
-  static void OnFreeFn(const AllocatorDispatch* self, void* address) {
+  static void OnFreeFn(const AllocatorDispatch* self,
+                       void* address,
+                       void* context) {
     EXPECT_EQ(&g_mock_dispatch, self);
 
     g_self->DeleteAlloc(address);
@@ -175,7 +187,8 @@ class ThreadHeapUsageTrackerTest : public testing::Test {
   }
 
   static size_t OnGetSizeEstimateFn(const AllocatorDispatch* self,
-                                    void* address) {
+                                    void* address,
+                                    void* context) {
     EXPECT_EQ(&g_mock_dispatch, self);
 
     return g_self->GetSizeEstimate(address);
@@ -206,6 +219,9 @@ base::allocator::AllocatorDispatch ThreadHeapUsageTrackerTest::g_mock_dispatch =
         &ThreadHeapUsageTrackerTest::OnFreeFn,     // free_function
         &ThreadHeapUsageTrackerTest::
             OnGetSizeEstimateFn,  // get_size_estimate_function
+        nullptr,                  // batch_malloc
+        nullptr,                  // batch_free
+        nullptr,                  // free_definite_size_function
         nullptr,                  // next
 };
 
@@ -538,7 +554,14 @@ TEST_F(ThreadHeapUsageTrackerTest, AllShimFunctionsAreProvided) {
 }
 
 #if BUILDFLAG(USE_EXPERIMENTAL_ALLOCATOR_SHIM)
-TEST(ThreadHeapUsageShimTest, HooksIntoMallocWhenShimAvailable) {
+class ThreadHeapUsageShimTest : public testing::Test {
+#if defined(OS_MACOSX)
+  void SetUp() override { allocator::InitializeAllocatorShim(); }
+  void TearDown() override { allocator::UninterceptMallocZonesForTesting(); }
+#endif
+};
+
+TEST_F(ThreadHeapUsageShimTest, HooksIntoMallocWhenShimAvailable) {
   ASSERT_FALSE(ThreadHeapUsageTracker::IsHeapTrackingEnabled());
 
   ThreadHeapUsageTracker::EnableHeapTracking();

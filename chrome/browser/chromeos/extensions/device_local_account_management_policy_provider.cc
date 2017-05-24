@@ -131,6 +131,11 @@ const char* const kSafeManifestEntries[] = {
     // Special-cased in IsSafeForPublicSession().
     // emk::kApp,
 
+    // Not a real manifest entry (doesn't show up in code search). All legacy
+    // ARC apps have this dictionary (data is stuffed there to be consumed by
+    // the ARC runtime).
+    "arc_metadata",
+
     // Documented in https://developer.chrome.com/extensions/manifest but not
     // implemented anywhere.  Still, a lot of apps use it.
     "author",
@@ -428,10 +433,9 @@ const char* const kSafePermissionStrings[] = {
 
     "certificateProvider",
 
-    // This is risky, but blocking extensions just because they declare
-    // clipboardRead is unfortunate. Options: (1) Make clipboardRead return
-    // empty string (2) confirmation dialog.
-    // "clipboardRead",
+    // clipboardRead is restricted to return an empty string (except for
+    // whitelisted extensions - ie. Chrome RDP client).
+    "clipboardRead",
 
     // Writing to clipboard is safe.
     "clipboardWrite",
@@ -560,9 +564,10 @@ const char* const kSafePermissionStrings[] = {
     // icon and won't extract any data.
     "notifications",
 
-    // Captures page content, so block. Alternatively: Allow, but either (1)
-    // prompt user or (2) return blank content.
-    // "pageCapture",
+    // User is prompted (allow/deny) when an extension requests pageCapture for
+    // the first time in a session. The request is made via
+    // chrome.pageCapture.saveAsMHTML call.
+    "pageCapture",
 
     // Allows to use machine crypto keys - these would be provisioned by the
     // admin anyways.
@@ -631,8 +636,8 @@ const char* const kSafePermissionStrings[] = {
     // request is made via chrome.tabCapture.capture call.
     "tabCapture",
 
-    // Privacy sensitive URL access.
-    // "tabs",
+    // The URL returned by chrome.tabs API is scrubbed down to the origin.
+    "tabs",
 
     // Privacy sensitive URL access.
     // "topSites",
@@ -683,11 +688,11 @@ const char* const kSafePermissionStrings[] = {
 // Some permissions take the form of a dictionary.  See |kSafePermissionStrings|
 // for permission strings (and for more documentation).
 const char* const kSafePermissionDicts[] = {
-    // TBD
-    // "fileSystem",
-
-    // Just another type of connectivity.
+    // Dictionary forms of the above permission strings.
+    "fileSystem",
+    "mediaGalleries",
     "socket",
+    "usbDevices",
 };
 
 // List of safe entries for the "app" dict in manifest.
@@ -757,7 +762,7 @@ bool IsSafeForPublicSession(const extensions::Extension* extension) {
       for (auto it2 = list_value->begin(); it2 != list_value->end(); ++it2) {
         // Try to read as dictionary.
         const base::DictionaryValue *dict_value;
-        if ((*it2)->GetAsDictionary(&dict_value)) {
+        if (it2->GetAsDictionary(&dict_value)) {
           if (dict_value->size() != 1) {
             LOG(ERROR) << extension->id()
                        << " has dict in permission list with size "
@@ -779,7 +784,7 @@ bool IsSafeForPublicSession(const extensions::Extension* extension) {
         }
         // Try to read as string.
         std::string permission_string;
-        if (!(*it2)->GetAsString(&permission_string)) {
+        if (!it2->GetAsString(&permission_string)) {
           LOG(ERROR) << extension->id() << ": " << it.key()
                      << " contains a token that's neither a string nor a dict.";
           safe = false;
@@ -883,6 +888,12 @@ DeviceLocalAccountManagementPolicyProvider::
     ~DeviceLocalAccountManagementPolicyProvider() {
 }
 
+// static
+bool DeviceLocalAccountManagementPolicyProvider::IsWhitelisted(
+    const std::string& extension_id) {
+  return ArrayContains(kPublicSessionWhitelist, extension_id);
+}
+
 std::string DeviceLocalAccountManagementPolicyProvider::
     GetDebugPolicyProviderName() const {
 #if defined(NDEBUG)
@@ -910,7 +921,7 @@ bool DeviceLocalAccountManagementPolicyProvider::UserMayLoad(
 
     // Allow extension if its specific ID is whitelisted for use in public
     // sessions.
-    if (ArrayContains(kPublicSessionWhitelist, extension->id())) {
+    if (IsWhitelisted(extension->id())) {
       return true;
     }
 

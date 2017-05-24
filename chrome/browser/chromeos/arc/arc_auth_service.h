@@ -10,6 +10,7 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/chromeos/arc/auth/arc_active_directory_enrollment_token_fetcher.h"
 #include "components/arc/arc_service.h"
 #include "components/arc/common/auth.mojom.h"
 #include "components/arc/instance_holder.h"
@@ -17,7 +18,7 @@
 
 namespace arc {
 
-class ArcAuthCodeFetcher;
+class ArcFetcherBase;
 
 // Implementation of ARC authorization.
 // TODO(hidehiko): Move to c/b/c/arc/auth with adding tests.
@@ -40,6 +41,8 @@ class ArcAuthService : public ArcService,
   void OnSignInComplete() override;
   void OnSignInFailed(mojom::ArcSignInFailureReason reason) override;
   void RequestAccountInfo() override;
+  void ReportMetrics(mojom::MetricsType metrics_type, int32_t value) override;
+  void ReportAccountCheckStatus(mojom::AccountCheckStatus status) override;
 
   // Deprecated methods:
   // For security reason this code can be used only once and exists for specific
@@ -61,8 +64,12 @@ class ArcAuthService : public ArcService,
   void RequestAccountInfoInternal(
       std::unique_ptr<AccountInfoNotifier> account_info_notifier);
 
-  // Callback on auth_code fetched.
-  void OnAuthCodeFetched(const std::string& auth_code);
+  // Callbacks when auth info is fetched.
+  void OnEnrollmentTokenFetched(
+      ArcActiveDirectoryEnrollmentTokenFetcher::Status status,
+      const std::string& enrollment_token,
+      const std::string& user_id);
+  void OnAuthCodeFetched(bool success, const std::string& auth_code);
 
   // Called to let ARC container know the account info.
   void OnAccountInfoReady(mojom::AccountInfoPtr account_info);
@@ -70,7 +77,7 @@ class ArcAuthService : public ArcService,
   mojo::Binding<mojom::AuthHost> binding_;
 
   std::unique_ptr<AccountInfoNotifier> notifier_;
-  std::unique_ptr<ArcAuthCodeFetcher> fetcher_;
+  std::unique_ptr<ArcFetcherBase> fetcher_;
 
   base::WeakPtrFactory<ArcAuthService> weak_ptr_factory_;
 

@@ -104,7 +104,7 @@ void PushMessagingNotificationManager::EnforceUserVisibleOnlyRequirements(
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(
+      base::BindOnce(
           &PlatformNotificationContext::
               ReadAllNotificationDataForServiceWorkerRegistration,
           notification_context, origin, service_worker_registration_id,
@@ -125,7 +125,7 @@ void PushMessagingNotificationManager::DidGetNotificationsFromDatabaseIOProxy(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(
+      base::BindOnce(
           &PushMessagingNotificationManager::DidGetNotificationsFromDatabase,
           ui_weak_ptr, origin, service_worker_registration_id,
           message_handled_closure, success, data));
@@ -226,10 +226,10 @@ bool PushMessagingNotificationManager::IsTabVisible(
 
   // Ignore minimized windows.
   switch (active_web_contents->GetMainFrame()->GetVisibilityState()) {
-    case blink::WebPageVisibilityStateHidden:
-    case blink::WebPageVisibilityStatePrerender:
+    case blink::kWebPageVisibilityStateHidden:
+    case blink::kWebPageVisibilityStatePrerender:
       return false;
-    case blink::WebPageVisibilityStateVisible:
+    case blink::kWebPageVisibilityStateVisible:
       break;
   }
 
@@ -276,13 +276,13 @@ void PushMessagingNotificationManager::ProcessSilentPush(
       GetStoragePartition(profile_, origin)->GetPlatformNotificationContext();
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&PlatformNotificationContext::WriteNotificationData,
-                 notification_context, origin, database_data,
-                 base::Bind(&PushMessagingNotificationManager::
-                                DidWriteNotificationDataIOProxy,
-                            weak_factory_.GetWeakPtr(), origin,
-                            database_data.notification_data,
-                            message_handled_closure)));
+      base::BindOnce(&PlatformNotificationContext::WriteNotificationData,
+                     notification_context, origin, database_data,
+                     base::Bind(&PushMessagingNotificationManager::
+                                    DidWriteNotificationDataIOProxy,
+                                weak_factory_.GetWeakPtr(), origin,
+                                database_data.notification_data,
+                                message_handled_closure)));
 }
 
 // static
@@ -296,9 +296,10 @@ void PushMessagingNotificationManager::DidWriteNotificationDataIOProxy(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&PushMessagingNotificationManager::DidWriteNotificationData,
-                 ui_weak_ptr, origin, notification_data,
-                 message_handled_closure, success, notification_id));
+      base::BindOnce(
+          &PushMessagingNotificationManager::DidWriteNotificationData,
+          ui_weak_ptr, origin, notification_data, message_handled_closure,
+          success, notification_id));
 }
 
 void PushMessagingNotificationManager::DidWriteNotificationData(

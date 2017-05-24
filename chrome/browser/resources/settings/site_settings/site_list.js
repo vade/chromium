@@ -3,18 +3,6 @@
 // found in the LICENSE file.
 
 /**
- * Enumeration mapping all possible controlled-by values for exceptions to
- * icons.
- * @enum {string}
- */
-var iconControlledBy = {
-  'extension': 'cr:extension',
-  'HostedApp': 'cr:extension',
-  'platform_app': 'cr:extension',
-  'policy' : 'cr:domain',
-};
-
-/**
  * @fileoverview
  * 'site-list' shows a list of Allowed and Blocked sites for a given
  * category.
@@ -35,10 +23,26 @@ Polymer({
     },
 
     /**
+     * Some content types (like Location) do not allow the user to manually
+     * edit the exception list from within Settings.
+     * @private
+     */
+    readOnlyList: {
+      type: Boolean,
+      value: false,
+    },
+
+    /**
      * The site serving as the model for the currently open action menu.
      * @private {?SiteException}
      */
     actionMenuSite_: Object,
+
+    /**
+     * Whether the "edit exception" dialog should be shown.
+     * @private
+     */
+    showEditExceptionDialog_: Boolean,
 
     /**
      * Array of sites to display in the widget.
@@ -46,7 +50,9 @@ Polymer({
      */
     sites: {
       type: Array,
-      value: function() { return []; },
+      value: function() {
+        return [];
+      },
     },
 
     /**
@@ -58,10 +64,10 @@ Polymer({
     },
 
     /**
-      * The type of category this widget is displaying data for. Normally
-      * either 'allow' or 'block', representing which sites are allowed or
-      * blocked respectively.
-      */
+     * The type of category this widget is displaying data for. Normally
+     * either 'allow' or 'block', representing which sites are allowed or
+     * blocked respectively.
+     */
     categorySubtype: {
       type: String,
       value: settings.INVALID_CATEGORY_SUBTYPE,
@@ -69,31 +75,26 @@ Polymer({
 
     /**
      * Whether to show the Allow action in the action menu.
+     * @private
      */
     showAllowAction_: Boolean,
 
     /**
      * Whether to show the Block action in the action menu.
+     * @private
      */
     showBlockAction_: Boolean,
 
     /**
      * Whether to show the 'Clear on exit' action in the action
      * menu.
+     * @private
      */
     showSessionOnlyAction_: Boolean,
 
     /**
-     * Keeps track of the incognito status of the current profile (whether one
-     * exists).
-     */
-    incognitoProfileActive_: {
-      type: Boolean,
-      value: false,
-    },
-
-    /**
      * All possible actions in the action menu.
+     * @private
      */
     actions_: {
       readOnly: true,
@@ -107,10 +108,15 @@ Polymer({
     },
   },
 
-  observers: [
-    'configureWidget_(category, categorySubtype)'
-  ],
+  /**
+   * The element to return focus to, when the currently active dialog is closed.
+   * @private {?HTMLElement}
+   */
+  activeDialogAnchor_: null,
 
+  observers: ['configureWidget_(category, categorySubtype)'],
+
+  /** @override */
   ready: function() {
     this.addWebUIListener('contentSettingSitePermissionChanged',
         this.siteWithinCategoryChanged_.bind(this));
@@ -129,18 +135,21 @@ Polymer({
       this.configureWidget_();
   },
 
-  onIncognitoStatusChanged_: function(incognitoEnabled) {
-    // A change notification is not sent for each site that is deleted during
-    // incognito profile destruction. Therefore, we reconfigure the list when
-    // the incognito profile is destroyed, except for SESSION_ONLY, which won't
-    // have any incognito exceptions.
+  /**
+   * Called for each site list when incognito is enabled or disabled. Only
+   * called on change (opening N incognito windows only fires one message).
+   * Another message is sent when the *last* incognito window closes.
+   * @private
+   */
+  onIncognitoStatusChanged_: function() {
+    // The SESSION_ONLY list won't have any incognito exceptions. (Minor
+    // optimization, not required).
     if (this.categorySubtype == settings.PermissionValues.SESSION_ONLY)
       return;
 
-    if (this.incognitoProfileActive_)
-      this.configureWidget_();  // The incognito profile is being destroyed.
-
-    this.incognitoProfileActive_ = incognitoEnabled;
+    // A change notification is not sent for each site. So we repopulate the
+    // whole list when the incognito profile is created or destroyed.
+    this.populateList_();
   },
 
   /**
@@ -166,19 +175,6 @@ Polymer({
   },
 
   /**
-   * Returns which icon, if any, should represent the fact that this exception
-   * is controlled.
-   * @param {!SiteException} item The item from the list we're computing the
-   *    icon for.
-   * @return {string} The icon to show (or blank, if none).
-   */
-  computeIconControlledBy_: function(item) {
-    if (this.allSites)
-      return '';
-    return iconControlledBy[item.source] || '';
-  },
-
-  /**
    * Whether there are any site exceptions added for this content setting.
    * @return {boolean}
    * @private
@@ -188,12 +184,27 @@ Polymer({
   },
 
   /**
-   * @param {string} source Where the setting came from.
+   * @param {!SiteException} exception The content setting exception.
+   * @param {boolean} readOnlyList Whether the site exception list is read-only.
    * @return {boolean}
    * @private
    */
-  isActionMenuHidden_: function(source) {
-    return this.isExceptionControlled_(source) || this.allSites;
+  shouldHideResetButton_: function(exception, readOnlyList) {
+    return exception.enforcement ==
+        chrome.settingsPrivate.Enforcement.ENFORCED ||
+        this.allSites || !(readOnlyList || !!exception.embeddingOrigin);
+  },
+
+  /**
+   * @param {!SiteException} exception The content setting exception.
+   * @param {boolean} readOnlyList Whether the site exception list is read-only.
+   * @return {boolean}
+   * @private
+   */
+  shouldHideActionMenu_: function(exception, readOnlyList) {
+    return exception.enforcement ==
+        chrome.settingsPrivate.Enforcement.ENFORCED ||
+        this.allSites || readOnlyList || !!exception.embeddingOrigin;
   },
 
   /**
@@ -202,6 +213,7 @@ Polymer({
    * @private
    */
   onAddSiteTap_: function(e) {
+    assert(!this.readOnlyList);
     e.preventDefault();
     var dialog = document.createElement('add-site-dialog');
     dialog.category = this.category;
@@ -211,8 +223,9 @@ Polymer({
     dialog.open(this.categorySubtype);
 
     dialog.addEventListener('close', function() {
+      cr.ui.focusWithoutInk(assert(this.$.addSite));
       dialog.remove();
-    });
+    }.bind(this));
   },
 
   /**
@@ -236,14 +249,24 @@ Polymer({
 
   /**
    * Process the exception list returned from the native layer.
-   * @param {!Array<!Array<SiteException>>} data List of sites (exceptions) to
-   *     process.
+   * @param {!Array<!Array<RawSiteException>>} data List of sites (exceptions)
+   *     to process.
    * @private
    */
   processExceptions_: function(data) {
-    var sites = [];
-    for (var i = 0; i < data.length; ++i)
-      sites = this.appendSiteList_(sites, data[i]);
+    var sites = /** @type {!Array<RawSiteException>} */ ([]);
+    for (var i = 0; i < data.length; ++i) {
+      var exceptionList = data[i];
+      for (var k = 0; k < exceptionList.length; ++k) {
+        if (!this.allSites &&
+            (exceptionList[k].setting == settings.PermissionValues.DEFAULT ||
+             exceptionList[k].setting != this.categorySubtype)) {
+          continue;
+        }
+
+        sites.push(exceptionList[k]);
+      }
+    }
     this.sites = this.toSiteArray_(sites);
   },
 
@@ -274,34 +297,11 @@ Polymer({
   },
 
   /**
-   * Appends to |list| the sites for a given category and subtype.
-   * @param {!Array<SiteException>} sites The site list to add to.
-   * @param {!Array<SiteException>} exceptionList List of sites (exceptions) to
-   *     add.
-   * @return {!Array<SiteException>} The list of sites.
-   * @private
-   */
-  appendSiteList_: function(sites, exceptionList) {
-    for (var i = 0; i < exceptionList.length; ++i) {
-      if (!this.allSites) {
-        if (exceptionList[i].setting == settings.PermissionValues.DEFAULT)
-          continue;
-
-        if (exceptionList[i].setting != this.categorySubtype)
-          continue;
-      }
-
-      sites.push(exceptionList[i]);
-    }
-    return sites;
-  },
-
-  /**
    * Converts a list of exceptions received from the C++ handler to
    * full SiteException objects. If this site-list is used as an all sites
    * view, the list is sorted by site name, then protocol and port and de-duped
    * (by origin).
-   * @param {!Array<SiteException>} sites A list of sites to convert.
+   * @param {!Array<RawSiteException>} sites A list of sites to convert.
    * @return {!Array<SiteException>} A list of full SiteExceptions. Sorted and
    *    deduped if allSites is set.
    * @private
@@ -392,45 +392,65 @@ Polymer({
   },
 
   /**
-   * A handler for activating one of the menu action items.
-   * @param {string} action The permission to set (Allow, Block, SessionOnly,
-   *     etc).
+   * @param {?SiteException} site
    * @private
    */
-  onActionMenuActivate_: function(action) {
-    var origin = this.actionMenuSite_.origin;
-    var incognito = this.actionMenuSite_.incognito;
-    var embeddingOrigin = this.actionMenuSite_.embeddingOrigin;
-    if (action == settings.PermissionValues.DEFAULT) {
-      this.browserProxy.resetCategoryPermissionForOrigin(
-          origin, embeddingOrigin, this.category, incognito);
-    } else {
-      this.browserProxy.setCategoryPermissionForOrigin(
-          origin, embeddingOrigin, this.category, action, incognito);
-    }
+  resetPermissionForOrigin_: function(site) {
+    assert(site);
+    this.browserProxy.resetCategoryPermissionForOrigin(
+        site.origin, site.embeddingOrigin, this.category, site.incognito);
+  },
+
+  /**
+   * @param {string} permissionValue
+   * @private
+   */
+  setPermissionForActionMenuSite_: function(permissionValue) {
+    assert(this.actionMenuSite_);
+    this.browserProxy.setCategoryPermissionForOrigin(
+        this.actionMenuSite_.origin, this.actionMenuSite_.embeddingOrigin,
+        this.category, permissionValue, this.actionMenuSite_.incognito);
   },
 
   /** @private */
   onAllowTap_: function() {
-    this.onActionMenuActivate_(settings.PermissionValues.ALLOW);
+    this.setPermissionForActionMenuSite_(settings.PermissionValues.ALLOW);
     this.closeActionMenu_();
   },
 
   /** @private */
   onBlockTap_: function() {
-    this.onActionMenuActivate_(settings.PermissionValues.BLOCK);
+    this.setPermissionForActionMenuSite_(settings.PermissionValues.BLOCK);
     this.closeActionMenu_();
   },
 
   /** @private */
   onSessionOnlyTap_: function() {
-    this.onActionMenuActivate_(settings.PermissionValues.SESSION_ONLY);
+    this.setPermissionForActionMenuSite_(
+        settings.PermissionValues.SESSION_ONLY);
     this.closeActionMenu_();
   },
 
   /** @private */
+  onEditTap_: function() {
+    // Close action menu without resetting |this.actionMenuSite_| since it is
+    // bound to the dialog.
+    /** @type {!CrActionMenuElement} */ (
+        this.$$('dialog[is=cr-action-menu]')).close();
+    this.showEditExceptionDialog_ = true;
+  },
+
+  /** @private */
+  onEditExceptionDialogClosed_: function() {
+    this.showEditExceptionDialog_ = false;
+    this.actionMenuSite_ = null;
+    this.activeDialogAnchor_.focus();
+    this.activeDialogAnchor_ = null;
+  },
+
+  /** @private */
   onResetTap_: function() {
-    this.onActionMenuActivate_(settings.PermissionValues.DEFAULT);
+    this.resetPermissionForOrigin_(this.actionMenuSite_);
     this.closeActionMenu_();
   },
 
@@ -456,17 +476,27 @@ Polymer({
    * @param {!{model: !{item: !SiteException}}} e
    * @private
    */
+  onResetButtonTap_: function(e) {
+    this.resetPermissionForOrigin_(e.model.item);
+  },
+
+  /**
+   * @param {!{model: !{item: !SiteException}}} e
+   * @private
+   */
   onShowActionMenuTap_: function(e) {
+    this.activeDialogAnchor_ = /** @type {!HTMLElement} */ (
+        Polymer.dom(/** @type {!Event} */ (e)).localTarget);
+
     this.actionMenuSite_ = e.model.item;
     /** @type {!CrActionMenuElement} */ (
-        this.$$('dialog[is=cr-action-menu]')).showAt(
-            /** @type {!Element} */ (
-                Polymer.dom(/** @type {!Event} */ (e)).localTarget));
+        this.$$('dialog[is=cr-action-menu]')).showAt(this.activeDialogAnchor_);
   },
 
   /** @private */
   closeActionMenu_: function() {
     this.actionMenuSite_ = null;
+    this.activeDialogAnchor_ = null;
     var actionMenu = /** @type {!CrActionMenuElement} */ (
         this.$$('dialog[is=cr-action-menu]'));
     if (actionMenu.open)

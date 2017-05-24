@@ -48,12 +48,6 @@ class WebRtcBrowserTest : public WebRtcTestBase {
 
     // Flag used by TestWebAudioMediaStream to force garbage collection.
     command_line->AppendSwitchASCII(switches::kJavaScriptFlags, "--expose-gc");
-
-    // Flag used by |RunsAudioVideoWebRTCCallInTwoTabsGetStatsPromise|.
-    // TODO(hbos): Remove this when bug crbug.com/627816 is resolved (when this
-    // flag is removed).
-    command_line->AppendSwitchASCII(switches::kEnableBlinkFeatures,
-                                    "RTCPeerConnectionNewGetStats");
   }
 
   void RunsAudioVideoWebRTCCallInTwoTabs(
@@ -234,5 +228,20 @@ IN_PROC_BROWSER_TEST_F(WebRtcBrowserTest,
     EXPECT_TRUE(false) << "Expected stats dictionary is missing: " << type;
   }
 
+  DetectVideoAndHangUp();
+}
+
+IN_PROC_BROWSER_TEST_F(
+    WebRtcBrowserTest,
+    RunsAudioVideoWebRTCCallInTwoTabsEmitsGatheringStateChange) {
+  StartServerAndOpenTabs();
+  SetupPeerconnectionWithLocalStream(left_tab_);
+  SetupPeerconnectionWithLocalStream(right_tab_);
+  NegotiateCall(left_tab_, right_tab_);
+
+  std::string ice_gatheringstate =
+      ExecuteJavascript("getLastGatheringState()", left_tab_);
+
+  EXPECT_EQ("complete", ice_gatheringstate);
   DetectVideoAndHangUp();
 }

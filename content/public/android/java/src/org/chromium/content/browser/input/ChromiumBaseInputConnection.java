@@ -65,13 +65,9 @@ public interface ChromiumBaseInputConnection extends InputConnection {
     /**
      * @return The {@link Handler} used for this InputConnection.
      */
+    @Override
     @VisibleForTesting
     Handler getHandler();
-
-    /**
-     * Move cursor to the end of the current selection.
-     */
-    void moveCursorToSelectionEndOnUiThread();
 
     /**
      * Unblock thread function if needed, e.g. we found that we will

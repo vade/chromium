@@ -146,7 +146,7 @@ void ExternalPrefLoader::StartLoading() {
   } else {
     BrowserThread::PostTask(
         BrowserThread::FILE, FROM_HERE,
-        base::Bind(&ExternalPrefLoader::LoadOnFileThread, this));
+        base::BindOnce(&ExternalPrefLoader::LoadOnFileThread, this));
   }
 }
 
@@ -154,13 +154,9 @@ void ExternalPrefLoader::OnIsSyncingChanged() {
   PostLoadIfPrioritySyncReady();
 }
 
-void ExternalPrefLoader::OnStateChanged() {
-  browser_sync::ProfileSyncService* service =
-      ProfileSyncServiceFactory::GetForProfile(profile_);
-  DCHECK(service);
-  if (!service->CanSyncStart()) {
+void ExternalPrefLoader::OnStateChanged(syncer::SyncService* sync) {
+  if (!sync->CanSyncStart())
     PostLoadAndRemoveObservers();
-  }
 }
 
 bool ExternalPrefLoader::PostLoadIfPrioritySyncReady() {
@@ -191,7 +187,7 @@ void ExternalPrefLoader::PostLoadAndRemoveObservers() {
 
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      base::Bind(&ExternalPrefLoader::LoadOnFileThread, this));
+      base::BindOnce(&ExternalPrefLoader::LoadOnFileThread, this));
 }
 
 void ExternalPrefLoader::LoadOnFileThread() {
@@ -232,7 +228,7 @@ void ExternalPrefLoader::LoadOnFileThread() {
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&ExternalPrefLoader::LoadFinished, this));
+      base::BindOnce(&ExternalPrefLoader::LoadFinished, this));
 }
 
 void ExternalPrefLoader::ReadExternalExtensionPrefFile(
@@ -309,7 +305,7 @@ void ExternalPrefLoader::ReadStandaloneExtensionPrefFiles(
         ExtractExtensionPrefs(&deserializer, extension_candidate_path);
     if (ext_prefs) {
       DVLOG(1) << "Adding extension with id: " << id;
-      prefs->Set(id, ext_prefs.release());
+      prefs->Set(id, std::move(ext_prefs));
     }
   }
 }

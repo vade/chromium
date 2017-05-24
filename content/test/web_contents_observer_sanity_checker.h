@@ -30,6 +30,8 @@ namespace content {
 class WebContentsObserverSanityChecker : public WebContentsObserver,
                                          public base::SupportsUserData::Data {
  public:
+  ~WebContentsObserverSanityChecker() override;
+
   // Enables these checks on |web_contents|. Usually ContentBrowserSanityChecker
   // should call this for you.
   static void Enable(WebContents* web_contents);
@@ -46,23 +48,6 @@ class WebContentsObserverSanityChecker : public WebContentsObserver,
   void DidRedirectNavigation(NavigationHandle* navigation_handle) override;
   void ReadyToCommitNavigation(NavigationHandle* navigation_handle) override;
   void DidFinishNavigation(NavigationHandle* navigation_handle) override;
-  void DidStartProvisionalLoadForFrame(RenderFrameHost* render_frame_host,
-                                       const GURL& validated_url,
-                                       bool is_error_page) override;
-  void DidCommitProvisionalLoadForFrame(
-      RenderFrameHost* render_frame_host,
-      const GURL& url,
-      ui::PageTransition transition_type) override;
-  void DidFailProvisionalLoad(RenderFrameHost* render_frame_host,
-                              const GURL& validated_url,
-                              int error_code,
-                              const base::string16& error_description,
-                              bool was_ignored_by_handler) override;
-  void DidNavigateMainFrame(const LoadCommittedDetails& details,
-                            const FrameNavigateParams& params) override;
-  void DidNavigateAnyFrame(RenderFrameHost* render_frame_host,
-                           const LoadCommittedDetails& details,
-                           const FrameNavigateParams& params) override;
   void DocumentAvailableInMainFrame() override;
   void DocumentOnLoadCompletedInMainFrame() override;
   void DocumentLoadedInFrame(RenderFrameHost* render_frame_host) override;
@@ -78,7 +63,9 @@ class WebContentsObserverSanityChecker : public WebContentsObserver,
                            const GURL& url,
                            const Referrer& referrer,
                            WindowOpenDisposition disposition,
-                           ui::PageTransition transition) override;
+                           ui::PageTransition transition,
+                           bool started_from_context_menu,
+                           bool renderer_initiated) override;
   void MediaStartedPlaying(const MediaPlayerInfo& media_info,
                            const MediaPlayerId& id) override;
   void MediaStoppedPlaying(const MediaPlayerInfo& media_info,
@@ -91,7 +78,6 @@ class WebContentsObserverSanityChecker : public WebContentsObserver,
 
  private:
   explicit WebContentsObserverSanityChecker(WebContents* web_contents);
-  ~WebContentsObserverSanityChecker() override;
 
   std::string Format(RenderFrameHost* render_frame_host);
   void AssertRenderFrameExists(RenderFrameHost* render_frame_host);

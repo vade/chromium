@@ -10,9 +10,10 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
 #include "base/time/default_clock.h"
+#include "chrome/browser/permissions/permission_result.h"
+#include "components/content_settings/core/common/content_settings_types.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "content/public/browser/permission_type.h"
 #include "url/gurl.h"
 
 class GURL;
@@ -57,44 +58,52 @@ class PermissionDecisionAutoBlocker : public KeyedService {
 
   static PermissionDecisionAutoBlocker* GetForProfile(Profile* profile);
 
-  // Removes any recorded counts for urls which match |filter|.
-  void RemoveCountsByUrl(base::Callback<bool(const GURL& url)> filter);
-
-  // Returns the current number of dismisses recorded for |permission| type at
-  // |url|.
-  int GetDismissCount(const GURL& url, content::PermissionType permission);
-
-  // Returns the current number of ignores recorded for |permission|
-  // type at |url|.
-  int GetIgnoreCount(const GURL& url, content::PermissionType permission);
-
-  // Records that a dismissal of a prompt for |permission| was made. If the
-  // total number of dismissals exceeds a threshhold and
-  // features::kBlockPromptsIfDismissedOften is enabled it will place |url|
-  // under embargo for |permission|.
-  bool RecordDismissAndEmbargo(const GURL& url,
-                               content::PermissionType permission);
-
-  // Records that an ignore of a prompt for |permission| was made.
-  int RecordIgnore(const GURL& url, content::PermissionType permission);
-
   // Updates the threshold to start blocking prompts from the field trial.
   static void UpdateFromVariations();
 
-  // Checks if |request_origin| is under embargo for |permission|. Internally,
-  // this will make a call to IsUnderEmbargo to check the content setting first,
-  // but may also make a call to Safe Browsing to check the API blacklist, which
-  // is performed asynchronously.
-  void UpdateEmbargoedStatus(content::PermissionType permission,
-                             const GURL& request_origin,
-                             content::WebContents* web_contents,
-                             base::Callback<void(bool)> callback);
+  // Makes an asynchronous call to Safe Browsing to check the API blacklist.
+  // Places the (|request_origin|, |permission|) pair under embargo if they are
+  // on the blacklist.
+  void CheckSafeBrowsingBlacklist(content::WebContents* web_contents,
+                                  const GURL& request_origin,
+                                  ContentSettingsType permission,
+                                  base::Callback<void(bool)> callback);
 
   // Checks the status of the content setting to determine if |request_origin|
   // is under embargo for |permission|. This checks both embargo for Permissions
   // Blacklisting and repeated dismissals.
-  bool IsUnderEmbargo(content::PermissionType permission,
-                      const GURL& request_origin);
+  PermissionResult GetEmbargoResult(const GURL& request_origin,
+                                    ContentSettingsType permission);
+
+  // Returns the current number of dismisses recorded for |permission| type at
+  // |url|.
+  int GetDismissCount(const GURL& url, ContentSettingsType permission);
+
+  // Returns the current number of ignores recorded for |permission|
+  // type at |url|.
+  int GetIgnoreCount(const GURL& url, ContentSettingsType permission);
+
+  // Records that a dismissal of a prompt for |permission| was made. If the
+  // total number of dismissals exceeds a threshhold and
+  // features::kBlockPromptsIfDismissedOften is enabled, it will place |url|
+  // under embargo for |permission|.
+  bool RecordDismissAndEmbargo(const GURL& url, ContentSettingsType permission);
+
+  // Records that an ignore of a prompt for |permission| was made. If the total
+  // number of ignores exceeds a threshold and
+  // features::kBlockPromptsIfIgnoredOften is enabled, it will place |url| under
+  // embargo for |permission|.
+  bool RecordIgnoreAndEmbargo(const GURL& url, ContentSettingsType permission);
+
+  // Clears any existing embargo status for |url|, |permission|. For permissions
+  // embargoed under repeated dismissals, this means a prompt will be shown to
+  // the user on next permission request. On blacklisted permissions, the next
+  // permission request will re-embargo the permission only if it is still
+  // blacklisted. This is a NO-OP for non-embargoed |url|, |permission| pairs.
+  void RemoveEmbargoByUrl(const GURL& url, ContentSettingsType permission);
+
+  // Removes any recorded counts for urls which match |filter|.
+  void RemoveCountsByUrl(base::Callback<bool(const GURL& url)> filter);
 
  private:
   friend class PermissionContextBaseTests;
@@ -105,13 +114,13 @@ class PermissionDecisionAutoBlocker : public KeyedService {
 
   // Get the result of the Safe Browsing check, if |should_be_embargoed| is true
   // then |request_origin| will be placed under embargo for that |permission|.
-  void CheckSafeBrowsingResult(content::PermissionType permission,
-                               const GURL& request_origin,
+  void CheckSafeBrowsingResult(const GURL& request_origin,
+                               ContentSettingsType permission,
                                base::Callback<void(bool)> callback,
                                bool should_be_embargoed);
 
-  void PlaceUnderEmbargo(content::PermissionType permission,
-                         const GURL& request_origin,
+  void PlaceUnderEmbargo(const GURL& request_origin,
+                         ContentSettingsType permission,
                          const char* key);
 
   void SetSafeBrowsingDatabaseManagerAndTimeoutForTesting(
@@ -124,6 +133,7 @@ class PermissionDecisionAutoBlocker : public KeyedService {
   static const char kPromptDismissCountKey[];
   static const char kPromptIgnoreCountKey[];
   static const char kPermissionDismissalEmbargoKey[];
+  static const char kPermissionIgnoreEmbargoKey[];
   static const char kPermissionBlacklistEmbargoKey[];
 
   Profile* profile_;

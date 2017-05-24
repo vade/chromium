@@ -18,6 +18,17 @@ namespace chromecast {
 // should exist per platform root window (e.g., in Ozone, one per Ozone window).
 class CastWindowManager {
  public:
+  // Note: these window IDs are ordered by z-order.
+  enum WindowId {
+    BOTTOM = -1,
+    APP = BOTTOM,
+    DEBUG_OVERLAY,
+    INFO_OVERLAY,
+    SOFT_KEYBOARD,
+    VOLUME,
+    TOP = VOLUME
+  };
+
   // Creates the platform-specific CastWindowManager.
   static std::unique_ptr<CastWindowManager> Create(bool enable_input);
 
@@ -32,6 +43,12 @@ class CastWindowManager {
   // If the window manager hasn't been initialized, this has the side effect of
   // causing it to initialize.
   virtual void AddWindow(gfx::NativeView window) = 0;
+
+  // Sets a window's ID.
+  virtual void SetWindowId(gfx::NativeView window, WindowId window_id) = 0;
+
+  // Return the root window that holds all top-level windows.
+  virtual gfx::NativeView GetRootWindow() = 0;
 };
 
 }  // namespace chromecast

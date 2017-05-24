@@ -45,9 +45,10 @@
 #include "content/common/media/media_devices.h"
 #include "content/common/media/media_stream_options.h"
 #include "content/public/browser/media_request_state.h"
+#include "media/base/video_facing.h"
 
 namespace media {
-class AudioManager;
+class AudioSystem;
 }
 
 namespace url {
@@ -61,6 +62,7 @@ class FakeMediaStreamUIProxy;
 class MediaStreamRequester;
 class MediaStreamUIProxy;
 class VideoCaptureManager;
+class VideoCaptureProvider;
 
 // MediaStreamManager is used to generate and close new media devices, not to
 // start the media flow. The classes requesting new media streams are answered
@@ -84,7 +86,13 @@ class CONTENT_EXPORT MediaStreamManager
   // logging from webrtcLoggingPrivate API. Safe to call from any thread.
   static void SendMessageToNativeLog(const std::string& message);
 
-  explicit MediaStreamManager(media::AudioManager* audio_manager);
+  explicit MediaStreamManager(media::AudioSystem* audio_system);
+
+  // |audio_system| is required but defaults will be used if either
+  // |video_capture_system| or |device_task_runner| are null.
+  explicit MediaStreamManager(
+      media::AudioSystem* audio_system,
+      std::unique_ptr<VideoCaptureProvider> video_capture_provider);
 
   ~MediaStreamManager() override;
 
@@ -96,6 +104,19 @@ class CONTENT_EXPORT MediaStreamManager
 
   // Used to access MediaDevicesManager.
   MediaDevicesManager* media_devices_manager();
+
+  // Used to access AudioSystem.
+  media::AudioSystem* audio_system();
+
+  // AddVideoCaptureObserver() and RemoveAllVideoCaptureObservers() must be
+  // called after InitializeDeviceManagersOnIOThread() and before
+  // WillDestroyCurrentMessageLoop(). They can be called more than once and it's
+  // ok to not call at all if the client is not interested in receiving
+  // media::VideoCaptureObserver callbacks.
+  // The methods must be called on BrowserThread::IO threads. The callbacks of
+  // media::VideoCaptureObserver also arrive on BrowserThread::IO threads.
+  void AddVideoCaptureObserver(media::VideoCaptureObserver* capture_observer);
+  void RemoveAllVideoCaptureObservers();
 
   // Creates a new media access request which is identified by a unique string
   // that's returned to the caller. This will trigger the infobar and ask users
@@ -249,9 +270,8 @@ class CONTENT_EXPORT MediaStreamManager
   void SetGenerateStreamCallbackForTesting(
       GenerateStreamTestCallback test_callback);
 
-#if defined(OS_WIN)
-  void FlushVideoCaptureThreadForTesting();
-#endif
+  // This method is called when all tracks are started.
+  void OnStreamStarted(const std::string& label);
 
  private:
   // Contains all data needed to keep track of requests.
@@ -263,9 +283,8 @@ class CONTENT_EXPORT MediaStreamManager
   using LabeledDeviceRequest = std::pair<std::string, DeviceRequest*>;
   using DeviceRequests = std::list<LabeledDeviceRequest>;
 
-  // Initializes the device managers on IO thread.  Auto-starts the device
-  // thread and registers this as a listener with the device managers.
-  void InitializeDeviceManagersOnIOThread();
+  void InitializeMaybeAsync(
+      std::unique_ptr<VideoCaptureProvider> video_capture_provider);
 
   // |output_parameters| contains real values only if the request requires it.
   void HandleAccessRequestResponse(
@@ -382,13 +401,14 @@ class CONTENT_EXPORT MediaStreamManager
                          const std::string& label,
                          const MediaDeviceEnumeration& enumeration);
 
-  // Task runner shared by VideoCaptureManager and AudioInputDeviceManager and
-  // used for enumerating audio output devices.
-  // Note: Enumeration tasks may take seconds to complete so must never be run
-  // on any of the BrowserThreads (UI, IO, etc).  See http://crbug.com/256945.
-  scoped_refptr<base::SingleThreadTaskRunner> device_task_runner_;
+  // Creates MediaStreamDevices for |devices_infos| of |stream_type|. For video
+  // capture device it also uses cached content from |video_capture_manager_| to
+  // set the MediaStreamDevice fields.
+  MediaStreamDevices ConvertToMediaStreamDevices(
+      MediaStreamType stream_type,
+      const MediaDeviceInfoArray& device_infos);
 
-  media::AudioManager* const audio_manager_;  // not owned
+  media::AudioSystem* const audio_system_;  // not owned
   scoped_refptr<AudioInputDeviceManager> audio_input_device_manager_;
   scoped_refptr<VideoCaptureManager> video_capture_manager_;
 #if defined(OS_WIN)

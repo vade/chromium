@@ -11,6 +11,7 @@
 
 #include "base/strings/string16.h"
 #include "base/time/time.h"
+#include "content/common/message_port.h"
 #include "content/common/service_worker/service_worker_client_info.h"
 #include "content/common/service_worker/service_worker_status_code.h"
 #include "content/common/service_worker/service_worker_types.h"
@@ -29,22 +30,22 @@
 #define IPC_MESSAGE_START ServiceWorkerMsgStart
 
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebServiceWorkerError::ErrorType,
-                          blink::WebServiceWorkerError::ErrorTypeLast)
+                          blink::WebServiceWorkerError::kErrorTypeLast)
 
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebServiceWorkerEventResult,
-                          blink::WebServiceWorkerEventResultLast)
+                          blink::kWebServiceWorkerEventResultLast)
 
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebServiceWorkerState,
-                          blink::WebServiceWorkerStateLast)
+                          blink::kWebServiceWorkerStateLast)
 
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebServiceWorkerResponseType,
-                          blink::WebServiceWorkerResponseTypeLast)
+                          blink::kWebServiceWorkerResponseTypeLast)
 
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebServiceWorkerResponseError,
-                          blink::WebServiceWorkerResponseErrorLast)
+                          blink::kWebServiceWorkerResponseErrorLast)
 
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebServiceWorkerClientType,
-                          blink::WebServiceWorkerClientTypeLast)
+                          blink::kWebServiceWorkerClientTypeLast)
 
 IPC_ENUM_TRAITS_MAX_VALUE(content::ServiceWorkerProviderType,
                           content::SERVICE_WORKER_PROVIDER_TYPE_LAST)
@@ -91,7 +92,6 @@ IPC_STRUCT_TRAITS_BEGIN(content::ServiceWorkerResponse)
   IPC_STRUCT_TRAITS_MEMBER(headers)
   IPC_STRUCT_TRAITS_MEMBER(blob_uuid)
   IPC_STRUCT_TRAITS_MEMBER(blob_size)
-  IPC_STRUCT_TRAITS_MEMBER(stream_url)
   IPC_STRUCT_TRAITS_MEMBER(error)
   IPC_STRUCT_TRAITS_MEMBER(response_time)
   IPC_STRUCT_TRAITS_MEMBER(is_in_cache_storage)
@@ -137,8 +137,7 @@ IPC_STRUCT_BEGIN(ServiceWorkerMsg_MessageToDocument_Params)
   IPC_STRUCT_MEMBER(int, provider_id)
   IPC_STRUCT_MEMBER(content::ServiceWorkerObjectInfo, service_worker_info)
   IPC_STRUCT_MEMBER(base::string16, message)
-  IPC_STRUCT_MEMBER(std::vector<int>, message_ports)
-  IPC_STRUCT_MEMBER(std::vector<int>, new_routing_ids)
+  IPC_STRUCT_MEMBER(std::vector<content::MessagePort>, message_ports)
 IPC_STRUCT_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::PushEventPayload)
@@ -214,35 +213,7 @@ IPC_MESSAGE_CONTROL5(
     int /* provider_id */,
     base::string16 /* message */,
     url::Origin /* source_origin */,
-    std::vector<int> /* sent_message_ports */)
-
-// Informs the browser of a new ServiceWorkerProvider in the child process,
-// |provider_id| is unique within its child process. When this provider is
-// created for a document, |route_id| is the frame ID of it. When this provider
-// is created for a Shared Worker, |route_id| is the Shared Worker route ID.
-// When this provider is created for a Service Worker, |route_id| is
-// MSG_ROUTING_NONE. |provider_type| identifies whether this provider is for
-// Service Worker controllees (documents and Shared Workers) or for controllers
-// (Service Workers).
-//
-// |is_parent_frame_secure| is false if the provider is created for a
-// document whose parent frame is not secure from the point of view of the
-// document; that is, blink::WebFrame::canHaveSecureChild() returns false.
-// This doesn't mean the document is necessarily an insecure context,
-// because the document may have a URL whose scheme is granted an exception
-// that allows bypassing the ancestor secure context check. See the
-// comment in blink::Document::isSecureContextImpl for more details.
-// If the provider is not created for a document, or the document does not have
-// a parent frame, |is_parent_frame_secure| is true.
-IPC_MESSAGE_CONTROL4(ServiceWorkerHostMsg_ProviderCreated,
-                     int /* provider_id */,
-                     int /* route_id */,
-                     content::ServiceWorkerProviderType /* provider_type */,
-                     bool /* is_parent_frame_secure */)
-
-// Informs the browser of a ServiceWorkerProvider being destroyed.
-IPC_MESSAGE_CONTROL1(ServiceWorkerHostMsg_ProviderDestroyed,
-                     int /* provider_id */)
+    std::vector<content::MessagePort> /* sent_message_ports */)
 
 // Increments and decrements the ServiceWorker object's reference
 // counting in the browser side. The ServiceWorker object is created
@@ -265,44 +236,13 @@ IPC_MESSAGE_CONTROL1(ServiceWorkerHostMsg_DecrementRegistrationRefCount,
 IPC_MESSAGE_CONTROL1(ServiceWorkerHostMsg_TerminateWorker,
                      int /* handle_id */)
 
-// Informs the browser that a service worker is starting up in a provider.
-// |provider_id| identifies the ServiceWorkerProviderHost hosting the service
-// worker. |version_id| identifies the ServiceWorkerVersion and
-// |embedded_worker_id| identifies the EmbeddedWorkerInstance.
-IPC_MESSAGE_CONTROL3(ServiceWorkerHostMsg_SetVersionId,
-                     int /* provider_id */,
-                     int64_t /* version_id */,
-                     int /* embedded_worker_id */)
-
-// Informs the browser that event handling has finished.
-// Routed to the target ServiceWorkerVersion.
-IPC_MESSAGE_ROUTED4(ServiceWorkerHostMsg_InstallEventFinished,
-                    int /* request_id */,
-                    blink::WebServiceWorkerEventResult,
-                    bool /* has_fetch_event_handler */,
-                    base::Time /* dispatch_event_time */)
-
-IPC_MESSAGE_ROUTED3(ServiceWorkerHostMsg_ActivateEventFinished,
-                    int /* request_id */,
-                    blink::WebServiceWorkerEventResult,
-                    base::Time /* dispatch_event_time */)
-IPC_MESSAGE_ROUTED4(ServiceWorkerHostMsg_FetchEventResponse,
+// Returns the response as the result of fetch event. This is used only for blob
+// to keep the IPC ordering. Mojo IPC is used when the response body is a stream
+// or is empty, and for the fallback-to-network response.
+IPC_MESSAGE_ROUTED3(ServiceWorkerHostMsg_FetchEventResponse,
                     int /* fetch_event_id */,
-                    content::ServiceWorkerFetchEventResult,
                     content::ServiceWorkerResponse,
                     base::Time /* dispatch_event_time */)
-IPC_MESSAGE_ROUTED3(ServiceWorkerHostMsg_NotificationClickEventFinished,
-                    int /* request_id */,
-                    blink::WebServiceWorkerEventResult,
-                    base::Time /* dispatch_event_time */)
-IPC_MESSAGE_ROUTED3(ServiceWorkerHostMsg_NotificationCloseEventFinished,
-                    int /* request_id */,
-                    blink::WebServiceWorkerEventResult,
-                    base::Time /* dispatch_event_time */)
-
-// Responds to a Ping from the browser.
-// Routed to the target ServiceWorkerVersion.
-IPC_MESSAGE_ROUTED0(ServiceWorkerHostMsg_Pong)
 
 // Asks the browser to retrieve client of the sender ServiceWorker.
 IPC_MESSAGE_ROUTED2(ServiceWorkerHostMsg_GetClient,
@@ -319,7 +259,7 @@ IPC_MESSAGE_ROUTED3(
     ServiceWorkerHostMsg_PostMessageToClient,
     std::string /* uuid */,
     base::string16 /* message */,
-    std::vector<int> /* sent_message_ports */)
+    std::vector<content::MessagePort> /* sent_message_ports */)
 
 // ServiceWorker -> Browser message to request that the ServiceWorkerStorage
 // cache |data| associated with |url|.
@@ -480,12 +420,14 @@ IPC_MESSAGE_CONTROL2(ServiceWorkerMsg_UpdateFound,
                      int /* registration_handle_id */)
 
 // Tells the child process to set the controller ServiceWorker for the given
-// provider.
-IPC_MESSAGE_CONTROL4(ServiceWorkerMsg_SetControllerServiceWorker,
+// provider. |used_features| is the set of features that the worker has used.
+// The values must be from blink::UseCounter::Feature enum.
+IPC_MESSAGE_CONTROL5(ServiceWorkerMsg_SetControllerServiceWorker,
                      int /* thread_id */,
                      int /* provider_id */,
                      content::ServiceWorkerObjectInfo,
-                     bool /* should_notify_controllerchange */)
+                     bool /* should_notify_controllerchange */,
+                     std::set<uint32_t> /* used_features */)
 
 IPC_MESSAGE_CONTROL2(ServiceWorkerMsg_DidEnableNavigationPreload,
                      int /* thread_id */,
@@ -517,22 +459,15 @@ IPC_MESSAGE_CONTROL4(ServiceWorkerMsg_SetNavigationPreloadHeaderError,
 IPC_MESSAGE_CONTROL1(ServiceWorkerMsg_MessageToDocument,
                      ServiceWorkerMsg_MessageToDocument_Params)
 
-// Sent via EmbeddedWorker to dispatch events.
-IPC_MESSAGE_CONTROL1(ServiceWorkerMsg_InstallEvent,
-                     int /* request_id */)
-IPC_MESSAGE_CONTROL1(ServiceWorkerMsg_ActivateEvent,
-                     int /* request_id */)
-IPC_MESSAGE_CONTROL5(ServiceWorkerMsg_NotificationClickEvent,
-                     int /* request_id */,
-                     std::string /* notification_id */,
-                     content::PlatformNotificationData /* notification_data */,
-                     int /* action_index */,
-                     base::NullableString16 /* notification reply */)
-IPC_MESSAGE_CONTROL3(ServiceWorkerMsg_NotificationCloseEvent,
-                     int /* request_id */,
-                     std::string /* notification_id */,
-                     content::PlatformNotificationData /* notification_data */)
+// Notifies a client that its controller used a feature, for UseCounter
+// purposes (browser->renderer). |feature| must be one of the values from
+// blink::UseCounter::Feature enum.
+IPC_MESSAGE_CONTROL3(ServiceWorkerMsg_CountFeature,
+                     int /* thread_id */,
+                     int /* provider_id */,
+                     uint32_t /* feature */)
 
+// Sent via EmbeddedWorker to dispatch events.
 IPC_MESSAGE_CONTROL1(ServiceWorkerMsg_DidSkipWaiting,
                      int /* request_id */)
 IPC_MESSAGE_CONTROL1(ServiceWorkerMsg_DidClaimClients,
@@ -541,9 +476,6 @@ IPC_MESSAGE_CONTROL3(ServiceWorkerMsg_ClaimClientsError,
                      int /* request_id */,
                      blink::WebServiceWorkerError::ErrorType /* code */,
                      base::string16 /* message */)
-
-// Sent via EmbeddedWorker to Ping the worker, expecting a Pong in response.
-IPC_MESSAGE_CONTROL0(ServiceWorkerMsg_Ping)
 
 // Sent via EmbeddedWorker as a response of GetClient.
 IPC_MESSAGE_CONTROL2(ServiceWorkerMsg_DidGetClient,

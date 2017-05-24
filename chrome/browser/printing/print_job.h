@@ -99,6 +99,12 @@ class PrintJob : public PrintJobWorkerOwner,
       const gfx::Size& page_size,
       const gfx::Rect& content_area,
       bool print_text_with_gdi);
+
+  void StartPdfToPostScriptConversion(
+      const scoped_refptr<base::RefCountedMemory>& bytes,
+      const gfx::Rect& content_area,
+      const gfx::Point& physical_offset,
+      bool ps_level2);
 #endif  // defined(OS_WIN)
 
  protected:
@@ -119,7 +125,7 @@ class PrintJob : public PrintJobWorkerOwner,
   // eventual deadlock.
   void ControlledWorkerShutdown();
 
-  // Called at shutdown when running a nested message loop.
+  // Called at shutdown when running a nested run loop.
   void Quit();
 
   void HoldUntilStopIsCalled();
@@ -128,7 +134,7 @@ class PrintJob : public PrintJobWorkerOwner,
   void OnPdfConversionStarted(int page_count);
   void OnPdfPageConverted(int page_number,
                           float scale_factor,
-                          std::unique_ptr<MetafilePlayer> emf);
+                          std::unique_ptr<MetafilePlayer> metafile);
 #endif  // defined(OS_WIN)
 
   content::NotificationRegistrar registrar_;
@@ -161,7 +167,7 @@ class PrintJob : public PrintJobWorkerOwner,
   std::vector<int> pdf_page_mapping_;
 #endif  // defined(OS_WIN)
 
-  // Used at shutdown so that we can quit a nested message loop.
+  // Used at shutdown so that we can quit a nested run loop.
   base::WeakPtrFactory<PrintJob> quit_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintJob);
@@ -205,7 +211,10 @@ class JobEventDetails : public base::RefCountedThreadSafe<JobEventDetails> {
     FAILED,
   };
 
-  JobEventDetails(Type type, PrintedDocument* document, PrintedPage* page);
+  JobEventDetails(Type type,
+                  int job_id,
+                  PrintedDocument* document,
+                  PrintedPage* page);
 
   // Getters.
   PrintedDocument* document() const;
@@ -213,6 +222,7 @@ class JobEventDetails : public base::RefCountedThreadSafe<JobEventDetails> {
   Type type() const {
     return type_;
   }
+  int job_id() const { return job_id_; }
 
  private:
   friend class base::RefCountedThreadSafe<JobEventDetails>;
@@ -222,6 +232,7 @@ class JobEventDetails : public base::RefCountedThreadSafe<JobEventDetails> {
   scoped_refptr<PrintedDocument> document_;
   scoped_refptr<PrintedPage> page_;
   const Type type_;
+  int job_id_;
 
   DISALLOW_COPY_AND_ASSIGN(JobEventDetails);
 };

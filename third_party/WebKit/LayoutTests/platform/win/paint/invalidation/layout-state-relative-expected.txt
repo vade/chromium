@@ -8,13 +8,8 @@
       "paintInvalidations": [
         {
           "object": "LayoutBlockFlow (relative positioned) DIV id='target'",
-          "rect": [8, 150, 784, 18],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [8, 150, 37, 17],
-          "reason": "full"
+          "rect": [8, 152, 784, 20],
+          "reason": "geometry"
         }
       ]
     }
@@ -22,11 +17,11 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutBlockFlow (relative positioned) DIV id='target'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "RootInlineBox",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutText #text",

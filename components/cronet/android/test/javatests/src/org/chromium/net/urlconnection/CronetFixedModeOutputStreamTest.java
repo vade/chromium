@@ -16,7 +16,6 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.HttpRetryException;
 import java.net.HttpURLConnection;
-import java.net.ProtocolException;
 import java.net.URL;
 
 /**
@@ -62,6 +61,23 @@ public class CronetFixedModeOutputStreamTest extends CronetTestBase {
         assertEquals(200, connection.getResponseCode());
         assertEquals("OK", connection.getResponseMessage());
         assertEquals(TestUtil.UPLOAD_DATA_STRING, TestUtil.getResponseAsString(connection));
+        connection.disconnect();
+    }
+
+    @SmallTest
+    @Feature({"Cronet"})
+    @CompareDefaultWithCronet
+    // Regression test for crbug.com/687600.
+    public void testZeroLengthWriteWithNoResponseBody() throws Exception {
+        URL url = new URL(NativeTestServer.getEchoBodyURL());
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setDoOutput(true);
+        connection.setRequestMethod("POST");
+        connection.setFixedLengthStreamingMode(0);
+        OutputStream out = connection.getOutputStream();
+        out.write(new byte[] {});
+        assertEquals(200, connection.getResponseCode());
+        assertEquals("OK", connection.getResponseMessage());
         connection.disconnect();
     }
 
@@ -185,7 +201,7 @@ public class CronetFixedModeOutputStreamTest extends CronetTestBase {
         try {
             connection.getResponseCode();
             fail();
-        } catch (ProtocolException e) {
+        } catch (IOException e) {
             // Expected.
         }
         connection.disconnect();
@@ -209,7 +225,7 @@ public class CronetFixedModeOutputStreamTest extends CronetTestBase {
             // On Lollipop, default implementation only triggers the error when reading response.
             connection.getInputStream();
             fail();
-        } catch (ProtocolException e) {
+        } catch (IOException e) {
             // Expected.
             assertEquals("expected " + (TestUtil.UPLOAD_DATA.length - 1) + " bytes but received "
                             + TestUtil.UPLOAD_DATA.length,
@@ -240,7 +256,7 @@ public class CronetFixedModeOutputStreamTest extends CronetTestBase {
             // On Lollipop, default implementation only triggers the error when reading response.
             connection.getInputStream();
             fail();
-        } catch (ProtocolException e) {
+        } catch (IOException e) {
             // Expected.
             String expectedVariant = "expected 0 bytes but received 1";
             String expectedVariantOnLollipop = "expected " + (TestUtil.UPLOAD_DATA.length - 1)

@@ -17,10 +17,12 @@
 #include "base/environment.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
+#include "base/sequenced_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -36,14 +38,17 @@
 #include "chrome/browser/background_sync/background_sync_controller_impl.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate.h"
+#include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate_factory.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/dom_distiller/profile_utils.h"
 #include "chrome/browser/domain_reliability/service_factory.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
-#include "chrome/browser/download/download_service.h"
-#include "chrome/browser/download/download_service_factory.h"
+#include "chrome/browser/download/download_core_service.h"
+#include "chrome/browser/download/download_core_service_factory.h"
+#include "chrome/browser/media/media_device_id_salt.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/permissions/permission_manager.h"
@@ -75,7 +80,9 @@
 #include "chrome/browser/ssl/chrome_ssl_host_state_delegate.h"
 #include "chrome/browser/ssl/chrome_ssl_host_state_delegate_factory.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
+#include "chrome/browser/ui/webui/prefs_internals_source.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
@@ -102,7 +109,6 @@
 #include "components/ssl_config/ssl_config_service_manager.h"
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "components/url_formatter/url_fixer.h"
-#include "components/user_prefs/tracked/tracked_preference_validation_delegate.h"
 #include "components/user_prefs/user_prefs.h"
 #include "components/zoom/zoom_event_manager.h"
 #include "content/public/browser/browser_thread.h"
@@ -111,18 +117,30 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/url_data_source.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/page_zoom.h"
 #include "extensions/features/features.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "ppapi/features/features.h"
 #include "printing/features/features.h"
+#include "services/identity/identity_service.h"
+#include "services/identity/public/interfaces/constants.mojom.h"
+#include "services/preferences/public/cpp/pref_service_main.h"
+#include "services/preferences/public/interfaces/preferences.mojom.h"
+#include "services/preferences/public/interfaces/tracked_preference_validation_delegate.mojom.h"
+#include "services/service_manager/public/cpp/service.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/locale_change_guard.h"
+#include "chrome/browser/chromeos/login/session/user_session_manager.h"
+#include "chrome/browser/chromeos/policy/user_cloud_policy_manager_chromeos.h"
+#include "chrome/browser/chromeos/policy/user_policy_manager_factory_chromeos.h"
 #include "chrome/browser/chromeos/preferences.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "components/session_manager/core/session_manager.h"
+#include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #endif
 
@@ -130,11 +148,7 @@
 #include "chrome/browser/background/background_mode_manager.h"
 #endif
 
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/login/session/user_session_manager.h"
-#include "chrome/browser/chromeos/policy/user_cloud_policy_manager_chromeos.h"
-#include "chrome/browser/chromeos/policy/user_policy_manager_factory_chromeos.h"
-#else
+#if !defined(OS_CHROMEOS)
 #include "chrome/browser/policy/cloud/user_cloud_policy_manager_factory.h"
 #include "components/policy/core/common/cloud/user_cloud_policy_manager.h"
 #endif
@@ -159,7 +173,6 @@
 
 using base::Time;
 using base::TimeDelta;
-using base::UserMetricsAction;
 using bookmarks::BookmarkModel;
 using content::BrowserThread;
 using content::DownloadManagerDelegate;
@@ -230,14 +243,13 @@ void CreateProfileDirectory(base::SequencedTaskRunner* sequenced_task_runner,
       new base::WaitableEvent(base::WaitableEvent::ResetPolicy::AUTOMATIC,
                               base::WaitableEvent::InitialState::NOT_SIGNALED);
   sequenced_task_runner->PostTask(
-      FROM_HERE, base::Bind(&CreateDirectoryAndSignal, path, done_creating,
-                            create_readme));
+      FROM_HERE, base::BindOnce(&CreateDirectoryAndSignal, path, done_creating,
+                                create_readme));
   // Block the FILE thread until directory is created on I/O pool to make sure
   // that we don't attempt any operation until that part completes.
-  BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE,
-      base::Bind(&BlockFileThreadOnDirectoryCreate,
-                 base::Owned(done_creating)));
+  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+                          base::BindOnce(&BlockFileThreadOnDirectoryCreate,
+                                         base::Owned(done_creating)));
 }
 
 base::FilePath GetCachePath(const base::FilePath& base) {
@@ -389,9 +401,10 @@ void ProfileImpl::RegisterProfilePrefs(
   registry->RegisterStringPref(
       prefs::kPrintPreviewDefaultDestinationSelectionRules, std::string());
   registry->RegisterBooleanPref(prefs::kForceEphemeralProfiles, false);
-#if defined(ENABLE_MEDIA_ROUTER)
   registry->RegisterBooleanPref(prefs::kEnableMediaRouter, true);
-#endif
+#if !defined(OS_ANDROID)
+  registry->RegisterBooleanPref(prefs::kShowCastIconInToolbar, false);
+#endif  // !defined(OS_ANDROID)
   // Initialize the cache prefs.
   registry->RegisterFilePathPref(prefs::kDiskCacheDir, base::FilePath());
   registry->RegisterIntegerPref(prefs::kDiskCacheSize, 0);
@@ -413,6 +426,21 @@ ProfileImpl::ProfileImpl(
   TRACE_EVENT0("browser,startup", "ProfileImpl::ctor")
   DCHECK(!path.empty()) << "Using an empty path will attempt to write " <<
                             "profile files to the root directory!";
+
+#if defined(OS_CHROMEOS)
+  if (!chromeos::ProfileHelper::IsSigninProfile(this)) {
+    const user_manager::User* user =
+        chromeos::ProfileHelper::Get()->GetUserByProfile(this);
+    // A |User| instance should always exist for a profile which is not the
+    // initial or the sign-in profile.
+    CHECK(user);
+    LOG_IF(FATAL,
+           !session_manager::SessionManager::Get()->HasSessionForAccountId(
+               user->GetAccountId()))
+        << "Attempting to construct the profile before starting the user "
+           "session";
+  }
+#endif
 
 #if BUILDFLAG(ENABLE_SESSION_SERVICE)
   create_session_service_timer_.Start(FROM_HERE,
@@ -436,6 +464,8 @@ ProfileImpl::ProfileImpl(
       policy::SchemaRegistryServiceFactory::CreateForContext(
           this, connector->GetChromeSchema(), connector->GetSchemaRegistry());
 #if defined(OS_CHROMEOS)
+  if (force_immediate_policy_load)
+    chromeos::DeviceSettingsService::Get()->LoadImmediately();
   configuration_policy_provider_ =
       policy::UserPolicyManagerFactoryChromeOS::CreateForProfile(
           this, force_immediate_policy_load, sequenced_task_runner);
@@ -474,18 +504,28 @@ ProfileImpl::ProfileImpl(
 
   scoped_refptr<safe_browsing::SafeBrowsingService> safe_browsing_service(
       g_browser_process->safe_browsing_service());
+  prefs::mojom::TrackedPreferenceValidationDelegatePtr pref_validation_delegate;
   if (safe_browsing_service.get()) {
-    pref_validation_delegate_ =
+    auto pref_validation_delegate_impl =
         safe_browsing_service->CreatePreferenceValidationDelegate(this);
+    if (pref_validation_delegate_impl) {
+      mojo::MakeStrongBinding(std::move(pref_validation_delegate_impl),
+                              mojo::MakeRequest(&pref_validation_delegate));
+    }
   }
 
   content::BrowserContext::Initialize(this, path_);
 
   {
+    service_manager::Connector* connector = nullptr;
+    if (features::PrefServiceEnabled()) {
+      connector = content::BrowserContext::GetConnectorFor(this);
+    }
     prefs_ = chrome_prefs::CreateProfilePrefs(
-        path_, sequenced_task_runner, pref_validation_delegate_.get(),
+        path_, std::move(pref_validation_delegate),
         profile_policy_connector_->policy_service(), supervised_user_settings,
-        CreateExtensionPrefStore(this, false), pref_registry_, async_prefs);
+        CreateExtensionPrefStore(this, false), pref_registry_, async_prefs,
+        connector);
     // Register on BrowserContext.
     user_prefs::UserPrefs::Set(this, prefs_.get());
   }
@@ -542,6 +582,8 @@ void ProfileImpl::DoFinalInit() {
       prefs::kForceEphemeralProfiles,
       base::Bind(&ProfileImpl::UpdateIsEphemeralInStorage,
                  base::Unretained(this)));
+
+  media_device_id_salt_ = new MediaDeviceIDSalt(prefs_.get());
 
   // It would be nice to use PathService for fetching this directory, but
   // the cache directory depends on the profile directory, which isn't available
@@ -638,6 +680,16 @@ void ProfileImpl::DoFinalInit() {
   dom_distiller::RegisterViewerSource(this);
 
 #if defined(OS_CHROMEOS)
+  // Finished profile initialization - let the UserManager know so it can
+  // mark the session as initialized. Need to do this before we restart below
+  // so we don't get in a weird state where we restart before the session is
+  // marked as initialized and so try to initialize it again.
+  if (!chromeos::ProfileHelper::IsSigninProfile(this)) {
+    chromeos::ProfileHelper* profile_helper = chromeos::ProfileHelper::Get();
+    user_manager::UserManager::Get()->OnProfileInitialized(
+        profile_helper->GetUserByProfile(this));
+  }
+
   if (chromeos::UserSessionManager::GetInstance()
           ->RestartToApplyPerSessionFlagsIfNeed(this, true)) {
     return;
@@ -668,6 +720,8 @@ void ProfileImpl::DoFinalInit() {
 #if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
   signin_ui_util::InitializePrefsForProfile(this);
 #endif
+
+  content::URLDataSource::Add(this, new PrefsInternalsSource(this));
 }
 
 base::FilePath ProfileImpl::last_selected_directory() {
@@ -974,8 +1028,8 @@ content::BrowserPluginGuestManager* ProfileImpl::GetGuestManager() {
 }
 
 DownloadManagerDelegate* ProfileImpl::GetDownloadManagerDelegate() {
-  return DownloadServiceFactory::GetForBrowserContext(this)->
-      GetDownloadManagerDelegate();
+  return DownloadCoreServiceFactory::GetForBrowserContext(this)
+      ->GetDownloadManagerDelegate();
 }
 
 storage::SpecialStoragePolicy* ProfileImpl::GetSpecialStoragePolicy() {
@@ -992,6 +1046,11 @@ content::PushMessagingService* ProfileImpl::GetPushMessagingService() {
 
 content::SSLHostStateDelegate* ProfileImpl::GetSSLHostStateDelegate() {
   return ChromeSSLHostStateDelegateFactory::GetForProfile(this);
+}
+
+content::BrowsingDataRemoverDelegate*
+ProfileImpl::GetBrowsingDataRemoverDelegate() {
+  return ChromeBrowsingDataRemoverDelegateFactory::GetForProfile(this);
 }
 
 // TODO(mlamouri): we should all these BrowserContext implementation to Profile
@@ -1035,6 +1094,35 @@ ProfileImpl::CreateMediaRequestContextForStoragePartition(
     bool in_memory) {
   return io_data_
       .GetIsolatedMediaRequestContextGetter(partition_path, in_memory).get();
+}
+
+void ProfileImpl::RegisterInProcessServices(StaticServiceMap* services) {
+  if (features::PrefServiceEnabled()) {
+    content::ServiceInfo info;
+    info.factory = base::Bind(
+        &prefs::CreatePrefService, chrome::ExpectedPrefStores(),
+        make_scoped_refptr(content::BrowserThread::GetBlockingPool()));
+    info.task_runner = content::BrowserThread::GetTaskRunnerForThread(
+        content::BrowserThread::IO);
+    services->insert(std::make_pair(prefs::mojom::kServiceName, info));
+  }
+
+  content::ServiceInfo identity_service_info;
+
+  // The Identity Service must run on the UI thread.
+  identity_service_info.task_runner = base::ThreadTaskRunnerHandle::Get();
+
+  // NOTE: The dependencies of the Identity Service have not yet been created,
+  // so it is not possible to bind them here. Instead, bind them at the time
+  // of the actual request to create the Identity Service.
+  identity_service_info.factory =
+      base::Bind(&ProfileImpl::CreateIdentityService, base::Unretained(this));
+  services->insert(
+      std::make_pair(identity::mojom::kServiceName, identity_service_info));
+}
+
+std::string ProfileImpl::GetMediaDeviceIDSalt() {
+  return media_device_id_salt_->GetSalt();
 }
 
 bool ProfileImpl::IsSameProfile(Profile* profile) {
@@ -1292,4 +1380,9 @@ ProfileImpl::CreateDomainReliabilityMonitor(PrefService* local_state) {
 
   return service->CreateMonitor(
       BrowserThread::GetTaskRunnerForThread(BrowserThread::IO));
+}
+
+std::unique_ptr<service_manager::Service> ProfileImpl::CreateIdentityService() {
+  SigninManagerBase* signin_manager = SigninManagerFactory::GetForProfile(this);
+  return base::MakeUnique<identity::IdentityService>(signin_manager);
 }

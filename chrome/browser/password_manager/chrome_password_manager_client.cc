@@ -10,6 +10,8 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/memory/ptr_util.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
@@ -34,6 +36,7 @@
 #include "components/password_manager/content/browser/content_password_manager_driver.h"
 #include "components/password_manager/content/browser/password_manager_internals_service_factory.h"
 #include "components/password_manager/core/browser/browser_save_password_progress_logger.h"
+#include "components/password_manager/core/browser/hsts_query.h"
 #include "components/password_manager/core/browser/log_manager.h"
 #include "components/password_manager/core/browser/log_receiver.h"
 #include "components/password_manager/core/browser/password_bubble_experiment.h"
@@ -50,15 +53,24 @@
 #include "components/sessions/content/content_record_password_state.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/version_info/version_info.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/ssl_status.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/origin_util.h"
 #include "extensions/features/features.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/base/url_util.h"
 #include "third_party/re2/src/re2/re2.h"
+
+#if defined(SAFE_BROWSING_DB_LOCAL)
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/safe_browsing/safe_browsing_service.h"
+#include "components/safe_browsing/password_protection/password_protection_service.h"
+#endif
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/android/tab_android.h"
@@ -138,9 +150,9 @@ void ChromePasswordManagerClient::CreateForWebContentsWithAutofillClient(
   if (FromWebContents(contents))
     return;
 
-  contents->SetUserData(
-      UserDataKey(),
-      new ChromePasswordManagerClient(contents, autofill_client));
+  contents->SetUserData(UserDataKey(),
+                        base::WrapUnique(new ChromePasswordManagerClient(
+                            contents, autofill_client)));
 }
 
 ChromePasswordManagerClient::ChromePasswordManagerClient(
@@ -149,7 +161,10 @@ ChromePasswordManagerClient::ChromePasswordManagerClient(
     : content::WebContentsObserver(web_contents),
       profile_(Profile::FromBrowserContext(web_contents->GetBrowserContext())),
       password_manager_(this),
+// TODO(crbug.com/706392): Fix password reuse detection for Android.
+#if !defined(OS_ANDROID)
       password_reuse_detection_manager_(this),
+#endif
       driver_factory_(nullptr),
       credential_manager_impl_(web_contents, this),
       password_manager_client_bindings_(web_contents, this),
@@ -169,18 +184,12 @@ ChromePasswordManagerClient::ChromePasswordManagerClient(
           base::Unretained(driver_factory_)));
 
   saving_and_filling_passwords_enabled_.Init(
-      password_manager::prefs::kPasswordManagerSavingEnabled, GetPrefs());
+      password_manager::prefs::kCredentialsEnableService, GetPrefs());
   ReportMetrics(*saving_and_filling_passwords_enabled_, this, profile_);
   driver_factory_->RequestSendLoggingAvailability();
 }
 
 ChromePasswordManagerClient::~ChromePasswordManagerClient() {}
-
-bool ChromePasswordManagerClient::IsAutomaticPasswordSavingEnabled() const {
-  return base::FeatureList::IsEnabled(
-             password_manager::features::kEnableAutomaticPasswordSaving) &&
-         chrome::GetChannel() == version_info::Channel::UNKNOWN;
-}
 
 bool ChromePasswordManagerClient::IsPasswordManagementEnabledForCurrentPage()
     const {
@@ -210,15 +219,28 @@ bool ChromePasswordManagerClient::IsPasswordManagementEnabledForCurrentPage()
 
 bool ChromePasswordManagerClient::IsSavingAndFillingEnabledForCurrentPage()
     const {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableAutomation)) {
+    // Disable the password saving UI for automated tests. It obscures the
+    // page, and there is no API to access (or dismiss) UI bubbles/infobars.
+    return false;
+  }
   // TODO(melandory): remove saving_and_filling_passwords_enabled_ check from
   // here once we decide to switch to new settings behavior for everyone.
-  return *saving_and_filling_passwords_enabled_ && !IsOffTheRecord() &&
+  return *saving_and_filling_passwords_enabled_ && !IsIncognito() &&
          IsFillingEnabledForCurrentPage();
 }
 
 bool ChromePasswordManagerClient::IsFillingEnabledForCurrentPage() const {
   return !DidLastPageLoadEncounterSSLErrors() &&
          IsPasswordManagementEnabledForCurrentPage();
+}
+
+void ChromePasswordManagerClient::PostHSTSQueryForHost(
+    const GURL& origin,
+    const HSTSCallback& callback) const {
+  password_manager::PostHSTSQueryForHostAndRequestContext(
+      origin, make_scoped_refptr(profile_->GetRequestContext()), callback);
 }
 
 bool ChromePasswordManagerClient::OnCredentialManagerUsed() {
@@ -233,7 +255,6 @@ bool ChromePasswordManagerClient::OnCredentialManagerUsed() {
 
 bool ChromePasswordManagerClient::PromptUserToSaveOrUpdatePassword(
     std::unique_ptr<password_manager::PasswordFormManager> form_to_save,
-    password_manager::CredentialSourceType type,
     bool update_password) {
   // Save password infobar and the password bubble prompts in case of
   // "webby" URLs and do not prompt in case of "non-webby" URLS (e.g. file://).
@@ -381,9 +402,49 @@ void ChromePasswordManagerClient::HidePasswordGenerationPopup() {
     popup_controller_->HideAndDestroy();
 }
 
-void ChromePasswordManagerClient::DidNavigateMainFrame(
-    const content::LoadCommittedDetails& details,
-    const content::FrameNavigateParams& params) {
+#if defined(SAFE_BROWSING_DB_LOCAL)
+safe_browsing::PasswordProtectionService*
+ChromePasswordManagerClient::GetPasswordProtectionService() const {
+  if (g_browser_process && g_browser_process->safe_browsing_service()) {
+    return g_browser_process->safe_browsing_service()
+        ->GetPasswordProtectionService(profile_);
+  }
+  return nullptr;
+}
+
+void ChromePasswordManagerClient::CheckSafeBrowsingReputation(
+    const GURL& form_action,
+    const GURL& frame_url) {
+  safe_browsing::PasswordProtectionService* pps =
+      GetPasswordProtectionService();
+  if (pps) {
+    // TODO(jialiul): Pass in web_content() instead of GetMainFrameURL(), such
+    // that web_content can be used to display safe browsing interstitial.
+    pps->MaybeStartPasswordFieldOnFocusRequest(GetMainFrameURL(), form_action,
+                                               frame_url);
+  }
+}
+
+void ChromePasswordManagerClient::CheckProtectedPasswordEntry(
+    const std::string& password_saved_domain) {
+  safe_browsing::PasswordProtectionService* pps =
+      GetPasswordProtectionService();
+  if (pps) {
+    // TODO(jialiul): Pass in web_content() instead of GetMainFrameURL(), such
+    // that web_content can be used to display safe browsing interstitial.
+    pps->MaybeStartProtectedPasswordEntryRequest(GetMainFrameURL(),
+                                                 password_saved_domain);
+  }
+}
+#endif
+
+// TODO(crbug.com/706392): Fix password reuse detection for Android.
+#if !defined(OS_ANDROID)
+void ChromePasswordManagerClient::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
+  if (!navigation_handle->IsInMainFrame() || !navigation_handle->HasCommitted())
+    return;
+
   password_reuse_detection_manager_.DidNavigateMainFrame(GetMainFrameURL());
   // After some navigations RenderViewHost persists and just adding the observer
   // will cause multiple call of OnInputEvent. Since Widget API doesn't allow to
@@ -396,12 +457,13 @@ void ChromePasswordManagerClient::DidNavigateMainFrame(
 
 void ChromePasswordManagerClient::OnInputEvent(
     const blink::WebInputEvent& event) {
-  if (event.type() != blink::WebInputEvent::Char)
+  if (event.GetType() != blink::WebInputEvent::kChar)
     return;
   const blink::WebKeyboardEvent& key_event =
       static_cast<const blink::WebKeyboardEvent&>(event);
   password_reuse_detection_manager_.OnKeyPressed(key_event.text);
 }
+#endif
 
 PrefService* ChromePasswordManagerClient::GetPrefs() {
   return profile_->GetPrefs();
@@ -409,7 +471,7 @@ PrefService* ChromePasswordManagerClient::GetPrefs() {
 
 password_manager::PasswordStore*
 ChromePasswordManagerClient::GetPasswordStore() const {
-  // Always use EXPLICIT_ACCESS as the password manager checks IsOffTheRecord
+  // Always use EXPLICIT_ACCESS as the password manager checks IsIncognito
   // itself when it shouldn't access the PasswordStore.
   // TODO(gcasto): Is is safe to change this to
   // ServiceAccessType::IMPLICIT_ACCESS?
@@ -466,7 +528,7 @@ bool ChromePasswordManagerClient::DidLastPageLoadEncounterSSLErrors() const {
   return ssl_errors;
 }
 
-bool ChromePasswordManagerClient::IsOffTheRecord() const {
+bool ChromePasswordManagerClient::IsIncognito() const {
   return web_contents()->GetBrowserContext()->IsOffTheRecord();
 }
 
@@ -544,7 +606,7 @@ void ChromePasswordManagerClient::PromptUserToEnableAutosigninIfNecessary() {
           GetPrefs()) ||
       !GetPrefs()->GetBoolean(
           password_manager::prefs::kCredentialsEnableAutosignin) ||
-      IsOffTheRecord())
+      IsIncognito())
     return;
 
 #if defined(OS_ANDROID)
@@ -565,6 +627,10 @@ void ChromePasswordManagerClient::GenerationAvailableForForm(
 
 const GURL& ChromePasswordManagerClient::GetMainFrameURL() const {
   return web_contents()->GetVisibleURL();
+}
+
+bool ChromePasswordManagerClient::IsMainFrameSecure() const {
+  return content::IsOriginSecure(web_contents()->GetVisibleURL());
 }
 
 const GURL& ChromePasswordManagerClient::GetLastCommittedEntryURL() const {
@@ -630,6 +696,7 @@ const password_manager::LogManager* ChromePasswordManagerClient::GetLogManager()
 // static
 void ChromePasswordManagerClient::BindCredentialManager(
     content::RenderFrameHost* render_frame_host,
+    const service_manager::BindSourceInfo& source_info,
     password_manager::mojom::CredentialManagerRequest request) {
   content::WebContents* web_contents =
       content::WebContents::FromRenderFrameHost(render_frame_host);

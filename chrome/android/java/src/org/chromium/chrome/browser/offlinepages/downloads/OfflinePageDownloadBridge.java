@@ -4,12 +4,15 @@
 
 package org.chromium.chrome.browser.offlinepages.downloads;
 
+import android.app.Activity;
 import android.content.ComponentName;
 import android.support.annotation.Nullable;
 
+import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ObserverList;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.download.DownloadItem;
 import org.chromium.chrome.browser.download.DownloadServiceDelegate;
 import org.chromium.chrome.browser.download.ui.BackendProvider.OfflinePageDelegate;
@@ -19,6 +22,7 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.document.AsyncTabCreationParams;
 import org.chromium.chrome.browser.tabmodel.document.TabDelegate;
+import org.chromium.components.offline_items_collection.ContentId;
 import org.chromium.content_public.browser.LoadUrlParams;
 
 import java.util.ArrayList;
@@ -73,7 +77,10 @@ public class OfflinePageDownloadBridge implements DownloadServiceDelegate, Offli
     }
 
     public OfflinePageDownloadBridge(Profile profile) {
-        mNativeOfflinePageDownloadBridge = sIsTesting ? 0L : nativeInit(profile);
+        // If |profile| is incognito profile, switch to the regular one since
+        // downloads are shared between them.
+        mNativeOfflinePageDownloadBridge =
+                sIsTesting ? 0L : nativeInit(profile.getOriginalProfile());
     }
 
     /** Destroys the native portion of the bridge. */
@@ -126,20 +133,25 @@ public class OfflinePageDownloadBridge implements DownloadServiceDelegate, Offli
     }
 
     @Override
-    public void cancelDownload(String downloadGuid, boolean isOffTheRecord,
-            boolean isNotificationDismissed) {
-        nativeCancelDownload(mNativeOfflinePageDownloadBridge, downloadGuid);
+    public void cancelDownload(ContentId id, boolean isOffTheRecord) {
+        cancelDownload(id.id);
     }
 
     @Override
-    public void pauseDownload(String downloadGuid, boolean isOffTheRecord) {
-        nativePauseDownload(mNativeOfflinePageDownloadBridge, downloadGuid);
+    public void pauseDownload(ContentId id, boolean isOffTheRecord) {
+        pauseDownload(id.id);
     }
 
     @Override
-    public void resumeDownload(DownloadItem item, boolean hasUserGesture) {
+    public void resumeDownload(ContentId id, DownloadItem item, boolean hasUserGesture) {
+        // If the resumption was an user action then we have to resume the specific download item.
+        // Otherwise it can only be called when Chrome starts and we would like to resume all
+        // pending requests.
+        // We assume that |hasUserGesture| == false means resume all pending requests.
         if (hasUserGesture) {
-            nativeResumeDownload(mNativeOfflinePageDownloadBridge, item.getId());
+            resumeDownload(item.getId());
+        } else {
+            nativeResumePendingRequestImmediately(mNativeOfflinePageDownloadBridge);
         }
     }
 
@@ -181,6 +193,21 @@ public class OfflinePageDownloadBridge implements DownloadServiceDelegate, Offli
         tabDelegate.createNewTab(asyncParams, TabLaunchType.FROM_CHROME_UI, Tab.INVALID_TAB_ID);
     }
 
+    @Override
+    public void pauseDownload(String guid) {
+        nativePauseDownload(mNativeOfflinePageDownloadBridge, guid);
+    }
+
+    @Override
+    public void resumeDownload(String guid) {
+        nativeResumeDownload(mNativeOfflinePageDownloadBridge, guid);
+    }
+
+    @Override
+    public void cancelDownload(String guid) {
+        nativeCancelDownload(mNativeOfflinePageDownloadBridge, guid);
+    }
+
     /**
      * Starts download of the page currently open in the specified Tab.
      * If tab's contents are not yet loaded completely, we'll wait for it
@@ -205,19 +232,30 @@ public class OfflinePageDownloadBridge implements DownloadServiceDelegate, Offli
 
     /**
      * Waits for the download items to get loaded and opens the offline page identified by the GUID.
-     * @param GUID of the item to open.
+     * @param id The {@link ContentId} of the page to open.
      */
-    public static void openDownloadedPage(final String guid) {
+    public static void openDownloadedPage(final ContentId id) {
         final OfflinePageDownloadBridge bridge =
                 new OfflinePageDownloadBridge(Profile.getLastUsedProfile());
         bridge.addObserver(
                 new Observer() {
                     @Override
                     public void onItemsLoaded() {
-                        bridge.openItem(guid, null);
+                        bridge.openItem(id.id, getComponentName());
                         bridge.destroyServiceDelegate();
                     }
                 });
+    }
+
+    private static ComponentName getComponentName() {
+        if (!ApplicationStatus.hasVisibleActivities()) return null;
+
+        Activity activity = ApplicationStatus.getLastTrackedFocusedActivity();
+        if (activity instanceof ChromeTabbedActivity) {
+            return activity.getComponentName();
+        }
+
+        return null;
     }
 
     @CalledByNative
@@ -256,15 +294,18 @@ public class OfflinePageDownloadBridge implements DownloadServiceDelegate, Offli
 
     @CalledByNative
     static void createDownloadItemAndAddToList(List<OfflinePageDownloadItem> list, String guid,
-            String url, String title, String targetPath, long startTimeMs, long totalBytes) {
-        list.add(createDownloadItem(guid, url, title, targetPath, startTimeMs, totalBytes));
+            String url, int downloadState, long downloadProgressBytes, String title,
+            String targetPath, long startTimeMs, long totalBytes) {
+        list.add(createDownloadItem(guid, url, downloadState, downloadProgressBytes, title,
+                targetPath, startTimeMs, totalBytes));
     }
 
     @CalledByNative
-    static OfflinePageDownloadItem createDownloadItem(
-            String guid, String url, String title, String targetPath,
-            long startTimeMs, long totalBytes) {
-        return new OfflinePageDownloadItem(guid, url, title, targetPath, startTimeMs, totalBytes);
+    static OfflinePageDownloadItem createDownloadItem(String guid, String url, int downloadState,
+            long downloadProgressBytes, String title, String targetPath, long startTimeMs,
+            long totalBytes) {
+        return new OfflinePageDownloadItem(guid, url, downloadState, downloadProgressBytes, title,
+                targetPath, startTimeMs, totalBytes);
     }
 
     private native long nativeInit(Profile profile);
@@ -279,4 +320,5 @@ public class OfflinePageDownloadBridge implements DownloadServiceDelegate, Offli
     native void nativeDeleteItemByGuid(long nativeOfflinePageDownloadBridge, String guid);
     native long nativeGetOfflineIdByGuid(long nativeOfflinePageDownloadBridge, String guid);
     native void nativeStartDownload(long nativeOfflinePageDownloadBridge, Tab tab);
+    native void nativeResumePendingRequestImmediately(long nativeOfflinePageDownloadBridge);
 }

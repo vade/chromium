@@ -22,10 +22,15 @@
 
 .toolbar-shadow.wrappable {
     flex-wrap: wrap;
+    overflow: visible;
 }
 
 .toolbar-shadow.wrappable-reverse {
     flex-direction: row-reverse;
+}
+
+.toolbar-shadow.toolbar-grow-vertical {
+    height: initial;
 }
 
 .toolbar-shadow.vertical {
@@ -50,7 +55,6 @@
 .toolbar-dropdown-arrow {
     background-color: #6D6D6D;
     pointer-events: none;
-    margin: auto 0;
     flex: none;
 }
 
@@ -69,8 +73,13 @@
     color: #5a5a5a;
 }
 
+.toolbar-text:empty {
+    margin: 0;
+}
+
 .toolbar-has-dropdown {
     justify-content: space-between;
+    padding: 0 3px 0 5px;
 }
 
 .toolbar-has-dropdown .toolbar-text {
@@ -189,29 +198,62 @@
 }
 
 select.toolbar-item {
-    min-width: 48px;
+    min-width: 38px;
     -webkit-appearance: none;
     border: 0;
     border-radius: 0;
-    padding: 0 15px 0 5px;
+    padding: 0 13px 0 5px;
     margin-right: -10px;
     position: relative;
+    height: 22px;
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
+select.toolbar-item[data-keyboard-focus="true"]:focus {
+    background: rgba(0, 0, 0, 0.08);
+    border-radius: 2px;
+}
+
+select.toolbar-item[data-keyboard-focus="true"]:focus > * {
+    background: white;
 }
 
 /* Input */
 
-input.toolbar-item {
-    width: 200px;
+.toolbar-input {
+    width: 120px;
     height: 20px;
     padding: 3px;
     margin: 1px 3px;
     background-color: white;
     border: solid 1px #d8d8d8;
+    min-width: 35px;
 }
 
-input.toolbar-item:focus,
-input.toolbar-item.hover {
+.toolbar-input.focused,
+.toolbar-input.hover {
     border: solid 1px rgb(202, 202, 202);
+}
+
+.toolbar-input > input {
+    border: none;
+    flex-grow: 1;
+}
+
+.toolbar-input-clear-button {
+    opacity: 0.7;
+    flex-basis: 13px;
+    flex-shrink: 0;
+    height: 16px;
+}
+
+.toolbar-input-clear-button:hover {
+    opacity: 1;
+}
+
+.toolbar-input-empty .toolbar-input-clear-button {
+    display: none;
 }
 
 /* Separator */
@@ -240,6 +282,17 @@ input.toolbar-item.hover {
     background-color: rgb(163, 163, 163);
 }
 
+.toolbar-button[data-keyboard-focus="true"]:focus::after {
+    position: absolute;
+    top: 2px;
+    bottom: 2px;
+    left: 2px;
+    right: 2px;
+    background-color: rgba(0, 0, 0, 0.08);
+    border-radius: 2px;
+    content: "";
+}
+
 .toolbar-shadow.floating {
     flex-direction: column;
     height: auto;
@@ -248,10 +301,4 @@ input.toolbar-item.hover {
     margin-top: -1px;
     width: 28px;
     left: -2px;
-}
-
-span.toolbar-select-container.toolbar-item.warning {
-    background: #ffd7d7;
-    padding: 0 5px 0 0;
-    margin-right: 1px;
 }

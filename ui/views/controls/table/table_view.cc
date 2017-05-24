@@ -14,6 +14,7 @@
 #include "base/i18n/rtl.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "cc/paint/paint_flags.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/events/event.h"
 #include "ui/gfx/canvas.h"
@@ -27,7 +28,6 @@
 #include "ui/views/controls/table/table_header.h"
 #include "ui/views/controls/table/table_utils.h"
 #include "ui/views/controls/table/table_view_observer.h"
-#include "ui/views/controls/table/table_view_row_background_painter.h"
 
 // Padding around the text (on each side).
 static const int kTextVerticalPadding = 3;
@@ -73,6 +73,15 @@ ui::NativeTheme::ColorId text_background_color_id(bool has_focus) {
 ui::NativeTheme::ColorId selected_text_color_id(bool has_focus) {
   return has_focus ? ui::NativeTheme::kColorId_TableSelectedText :
       ui::NativeTheme::kColorId_TableSelectedTextUnfocused;
+}
+
+// Whether the platform "command" key is down.
+bool IsCmdOrCtrl(const ui::Event& event) {
+#if defined(OS_MACOSX)
+  return event.IsCommandDown();
+#else
+  return event.IsControlDown();
+#endif
 }
 
 } // namespace
@@ -177,11 +186,6 @@ View* TableView::CreateParentIfNecessary() {
   if (header_)
     scroll_view->SetHeader(header_);
   return scroll_view;
-}
-
-void TableView::SetRowBackgroundPainter(
-    std::unique_ptr<TableViewRowBackgroundPainter> painter) {
-  row_background_painter_ = std::move(painter);
 }
 
 void TableView::SetGrouper(TableGrouper* grouper) {
@@ -304,12 +308,10 @@ int TableView::ModelToView(int model_index) const {
 }
 
 int TableView::ViewToModel(int view_index) const {
-  if (!is_sorted())
-    return view_index;
   DCHECK_GE(view_index, 0) << " negative view_index " << view_index;
   DCHECK_LT(view_index, RowCount()) << " out of bounds view_index " <<
       view_index;
-  return view_to_model_[view_index];
+  return is_sorted() ? view_to_model_[view_index] : view_index;
 }
 
 void TableView::Layout() {
@@ -357,7 +359,7 @@ bool TableView::OnKeyPressed(const ui::KeyEvent& event) {
   switch (event.key_code()) {
     case ui::VKEY_A:
       // control-a selects all.
-      if (event.IsControlDown() && !single_selection_ && RowCount()) {
+      if (IsCmdOrCtrl(event) && !single_selection_ && RowCount()) {
         ui::ListSelectionModel selection_model;
         selection_model.SetSelectedIndex(selection_model_.active());
         for (int i = 0; i < RowCount(); ++i)
@@ -416,8 +418,10 @@ bool TableView::OnMousePressed(const ui::MouseEvent& event) {
 }
 
 void TableView::OnGestureEvent(ui::GestureEvent* event) {
-  if (event->type() != ui::ET_GESTURE_TAP)
+  if (event->type() != ui::ET_GESTURE_TAP_DOWN)
     return;
+
+  RequestFocus();
 
   const int row = event->y() / row_height_;
   if (row < 0 || row >= RowCount())
@@ -441,7 +445,7 @@ bool TableView::GetTooltipTextOrigin(const gfx::Point& p,
 
 void TableView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   node_data->role = ui::AX_ROLE_TABLE;
-  node_data->AddStateFlag(ui::AX_STATE_READ_ONLY);
+  node_data->AddState(ui::AX_STATE_READ_ONLY);
   node_data->AddIntAttribute(ui::AX_ATTR_SET_SIZE, RowCount());
 
   if (selection_model_.active() != ui::ListSelectionModel::kUnselectedIndex) {
@@ -451,7 +455,7 @@ void TableView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
     node_data->AddIntAttribute(ui::AX_ATTR_POS_IN_SET,
                                selection_model_.active());
     if (selection_model_.IsSelected(selection_model_.active())) {
-      node_data->AddStateFlag(ui::AX_STATE_SELECTED);
+      node_data->AddState(ui::AX_STATE_SELECTED);
     }
 
     std::vector<base::string16> name_parts;
@@ -549,15 +553,8 @@ void TableView::OnPaint(gfx::Canvas* canvas) {
   for (int i = region.min_row; i < region.max_row; ++i) {
     const int model_index = ViewToModel(i);
     const bool is_selected = selection_model_.IsSelected(model_index);
-    if (is_selected) {
+    if (is_selected)
       canvas->FillRect(GetRowBounds(i), selected_bg_color);
-    } else if (row_background_painter_) {
-      row_background_painter_->PaintRowBackground(model_index,
-                                                  GetRowBounds(i),
-                                                  canvas);
-    }
-    if (selection_model_.active() == model_index && HasFocus())
-      canvas->DrawFocusRect(GetRowBounds(i));
     for (int j = region.min_column; j < region.max_column; ++j) {
       const gfx::Rect cell_bounds(GetCellBounds(i, j));
       int text_x = kTextHorizontalPadding + cell_bounds.x();
@@ -599,10 +596,10 @@ void TableView::OnPaint(gfx::Canvas* canvas) {
 
   const SkColor grouping_color = GetNativeTheme()->GetSystemColor(
       ui::NativeTheme::kColorId_TableGroupingIndicatorColor);
-  SkPaint grouping_paint;
-  grouping_paint.setColor(grouping_color);
-  grouping_paint.setStyle(SkPaint::kFill_Style);
-  grouping_paint.setAntiAlias(true);
+  cc::PaintFlags grouping_flags;
+  grouping_flags.setColor(grouping_color);
+  grouping_flags.setStyle(cc::PaintFlags::kFill_Style);
+  grouping_flags.setAntiAlias(true);
   const int group_indicator_x = GetMirroredXInView(GetCellBounds(0, 0).x() +
       kTextHorizontalPadding + kGroupingIndicatorSize / 2);
   for (int i = region.min_row; i < region.max_row; ) {
@@ -623,23 +620,30 @@ void TableView::OnPaint(gfx::Canvas* canvas) {
                            kGroupingIndicatorSize,
                            last_cell_bounds.y() - start_cell_bounds.y()),
                        grouping_color);
-      canvas->DrawCircle(gfx::Point(group_indicator_x,
-                                    last_cell_bounds.CenterPoint().y()),
-                         kGroupingIndicatorSize / 2, grouping_paint);
+      canvas->DrawCircle(
+          gfx::Point(group_indicator_x, last_cell_bounds.CenterPoint().y()),
+          kGroupingIndicatorSize / 2, grouping_flags);
     }
-    canvas->DrawCircle(gfx::Point(group_indicator_x,
-                                  start_cell_bounds.CenterPoint().y()),
-                       kGroupingIndicatorSize / 2, grouping_paint);
+    canvas->DrawCircle(
+        gfx::Point(group_indicator_x, start_cell_bounds.CenterPoint().y()),
+        kGroupingIndicatorSize / 2, grouping_flags);
     i = last + 1;
   }
 }
 
 void TableView::OnFocus() {
+  ScrollView* scroll_view = ScrollView::GetScrollViewForContents(this);
+  if (scroll_view)
+    scroll_view->SetHasFocusIndicator(true);
+
   SchedulePaintForSelection();
   NotifyAccessibilityEvent(ui::AX_EVENT_FOCUS, true);
 }
 
 void TableView::OnBlur() {
+  ScrollView* scroll_view = ScrollView::GetScrollViewForContents(this);
+  if (scroll_view)
+    scroll_view->SetHasFocusIndicator(false);
   SchedulePaintForSelection();
 }
 
@@ -786,7 +790,7 @@ TableView::PaintRegion TableView::GetPaintRegion(
 
 gfx::Rect TableView::GetPaintBounds(gfx::Canvas* canvas) const {
   SkRect sk_clip_rect;
-  if (canvas->sk_canvas()->getClipBounds(&sk_clip_rect))
+  if (canvas->sk_canvas()->getLocalClipBounds(&sk_clip_rect))
     return gfx::ToEnclosingRect(gfx::SkRectToRectF(sk_clip_rect));
   return GetVisibleBounds();
 }
@@ -867,20 +871,19 @@ void TableView::ConfigureSelectionModelForEvent(
   const int view_index = event.y() / row_height_;
   DCHECK(view_index >= 0 && view_index < RowCount());
 
-  if (selection_model_.anchor() == -1 ||
-      single_selection_ ||
-      (!event.IsControlDown() && !event.IsShiftDown())) {
+  if (selection_model_.anchor() == -1 || single_selection_ ||
+      (!IsCmdOrCtrl(event) && !event.IsShiftDown())) {
     SelectRowsInRangeFrom(view_index, true, model);
     model->set_anchor(ViewToModel(view_index));
     model->set_active(ViewToModel(view_index));
     return;
   }
-  if ((event.IsControlDown() && event.IsShiftDown()) || event.IsShiftDown()) {
+  if ((IsCmdOrCtrl(event) && event.IsShiftDown()) || event.IsShiftDown()) {
     // control-shift: copy existing model and make sure rows between anchor and
     // |view_index| are selected.
     // shift: reset selection so that only rows between anchor and |view_index|
     // are selected.
-    if (event.IsControlDown() && event.IsShiftDown())
+    if (IsCmdOrCtrl(event) && event.IsShiftDown())
       model->Copy(selection_model_);
     else
       model->set_anchor(selection_model_.anchor());
@@ -891,7 +894,7 @@ void TableView::ConfigureSelectionModelForEvent(
     }
     model->set_active(ViewToModel(view_index));
   } else {
-    DCHECK(event.IsControlDown());
+    DCHECK(IsCmdOrCtrl(event));
     // Toggle the selection state of |view_index| and set the anchor/active to
     // it and don't change the state of any other rows.
     model->Copy(selection_model_);

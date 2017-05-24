@@ -94,10 +94,9 @@ class BookmarkNodeFinder {
   // Maps bookmark node titles to instances, duplicates allowed.
   // Titles are converted to the sync internal format before
   // being used as keys for the map.
-  typedef base::hash_multimap<std::string,
-                              const BookmarkNode*> BookmarkNodeMap;
-  typedef std::pair<BookmarkNodeMap::iterator,
-                    BookmarkNodeMap::iterator> BookmarkNodeRange;
+  using BookmarkNodeMap = std::multimap<std::string, const BookmarkNode*>;
+  using BookmarkNodeRange =
+      std::pair<BookmarkNodeMap::iterator, BookmarkNodeMap::iterator>;
 
   // Converts and truncates bookmark titles in the form sync does internally
   // to avoid mismatches due to sync munging titles.
@@ -778,22 +777,6 @@ const BookmarkNode* BookmarkModelAssociator::CreateBookmarkNode(
   return child_node;
 }
 
-int BookmarkModelAssociator::RemoveSyncNodeHierarchy(
-    syncer::WriteTransaction* trans,
-    int64_t sync_id) {
-  syncer::WriteNode sync_node(trans);
-  if (sync_node.InitByIdLookup(sync_id) != syncer::BaseNode::INIT_OK) {
-    syncer::SyncError error(FROM_HERE, syncer::SyncError::DATATYPE_ERROR,
-                            "Could not lookup bookmark node for ID deletion.",
-                            syncer::BOOKMARKS);
-    unrecoverable_error_handler_->OnUnrecoverableError(error);
-    return 0;
-  }
-
-  return BookmarkChangeProcessor::RemoveSyncNodeHierarchy(trans, &sync_node,
-                                                          this);
-}
-
 struct FolderInfo {
   FolderInfo(const BookmarkNode* f, const BookmarkNode* p, int64_t id)
       : folder(f), parent(p), sync_id(id) {}
@@ -801,7 +784,7 @@ struct FolderInfo {
   const BookmarkNode* parent;
   int64_t sync_id;
 };
-typedef std::vector<FolderInfo> FolderInfoList;
+using FolderInfoList = std::vector<FolderInfo>;
 
 void BookmarkModelAssociator::ApplyDeletesFromSyncJournal(
     syncer::BaseTransaction* trans,

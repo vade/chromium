@@ -14,21 +14,20 @@
 
 #include <stddef.h>
 
-#include <vector>
+#include <algorithm>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/debug/crash_logging.h"
 #include "base/feature_list.h"
+#include "base/memory/ptr_util.h"
 #include "base/sys_info.h"
 #include "base/task_scheduler/initialization_util.h"
-#include "base/task_scheduler/scheduler_worker_pool_params.h"
-#include "base/task_scheduler/task_scheduler.h"
-#include "base/task_scheduler/task_traits.h"
-#include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "content/child/site_isolation_stats_gatherer.h"
+#include "content/public/common/bindings_policy.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
@@ -41,14 +40,6 @@
 #endif
 
 namespace {
-
-enum WorkerPoolType : size_t {
-  BACKGROUND = 0,
-  BACKGROUND_FILE_IO,
-  FOREGROUND,
-  FOREGROUND_FILE_IO,
-  WORKER_POOL_COUNT  // Always last.
-};
 
 const base::Feature kV8_ES2015_TailCalls_Feature {
   "V8_ES2015_TailCalls", base::FEATURE_DISABLED_BY_DEFAULT
@@ -81,71 +72,43 @@ void SetV8FlagIfHasSwitch(const char* switch_name, const char* v8_flag) {
   }
 }
 
-std::vector<base::SchedulerWorkerPoolParams>
-GetDefaultSchedulerWorkerPoolParams() {
+std::unique_ptr<base::TaskScheduler::InitParams>
+GetDefaultTaskSchedulerInitParams() {
   using StandbyThreadPolicy =
       base::SchedulerWorkerPoolParams::StandbyThreadPolicy;
-  using ThreadPriority = base::ThreadPriority;
-  constexpr size_t kMaxNumThreadsInBackgroundPool = 1;
-  constexpr size_t kMaxNumThreadsInBackgroundFileIOPool = 1;
+
+  constexpr int kMaxNumThreadsInBackgroundPool = 1;
+  constexpr int kMaxNumThreadsInBackgroundBlockingPool = 1;
   constexpr int kMaxNumThreadsInForegroundPoolLowerBound = 2;
-  constexpr int kMaxNumThreadsInForegroundPoolUpperBound = 4;
-  constexpr double kMaxNumThreadsInForegroundPoolCoresMultiplier = 1;
-  constexpr int kMaxNumThreadsInForegroundPoolOffset = 0;
-  constexpr size_t kMaxNumThreadsInForegroundFileIOPool = 1;
+  constexpr int kMaxNumThreadsInForegroundBlockingPool = 1;
   constexpr auto kSuggestedReclaimTime = base::TimeDelta::FromSeconds(30);
 
-  std::vector<base::SchedulerWorkerPoolParams> params_vector;
-  params_vector.emplace_back("RendererBackground", ThreadPriority::BACKGROUND,
-                             StandbyThreadPolicy::LAZY,
-                             kMaxNumThreadsInBackgroundPool,
-                             kSuggestedReclaimTime);
-  params_vector.emplace_back(
-      "RendererBackgroundFileIO", ThreadPriority::BACKGROUND,
-      StandbyThreadPolicy::LAZY, kMaxNumThreadsInBackgroundFileIOPool,
-      kSuggestedReclaimTime);
-  params_vector.emplace_back("RendererForeground", ThreadPriority::NORMAL,
-                             StandbyThreadPolicy::LAZY,
-                             base::RecommendedMaxNumberOfThreadsInPool(
-                                 kMaxNumThreadsInForegroundPoolLowerBound,
-                                 kMaxNumThreadsInForegroundPoolUpperBound,
-                                 kMaxNumThreadsInForegroundPoolCoresMultiplier,
-                                 kMaxNumThreadsInForegroundPoolOffset),
-                             kSuggestedReclaimTime);
-  params_vector.emplace_back("RendererForegroundFileIO", ThreadPriority::NORMAL,
-                             StandbyThreadPolicy::LAZY,
-                             kMaxNumThreadsInForegroundFileIOPool,
-                             kSuggestedReclaimTime);
-  DCHECK_EQ(WORKER_POOL_COUNT, params_vector.size());
-  return params_vector;
-}
-
-// Returns the worker pool index for |traits| defaulting to FOREGROUND or
-// FOREGROUND_FILE_IO on any other priorities based off of worker pools defined
-// in GetDefaultSchedulerWorkerPoolParams().
-size_t DefaultRendererWorkerPoolIndexForTraits(const base::TaskTraits& traits) {
-  const bool is_background =
-      traits.priority() == base::TaskPriority::BACKGROUND;
-  if (traits.may_block() || traits.with_base_sync_primitives())
-    return is_background ? BACKGROUND_FILE_IO : FOREGROUND_FILE_IO;
-
-  return is_background ? BACKGROUND : FOREGROUND;
+  return base::MakeUnique<base::TaskScheduler::InitParams>(
+      base::SchedulerWorkerPoolParams(StandbyThreadPolicy::LAZY,
+                                      kMaxNumThreadsInBackgroundPool,
+                                      kSuggestedReclaimTime),
+      base::SchedulerWorkerPoolParams(StandbyThreadPolicy::LAZY,
+                                      kMaxNumThreadsInBackgroundBlockingPool,
+                                      kSuggestedReclaimTime),
+      base::SchedulerWorkerPoolParams(
+          StandbyThreadPolicy::LAZY,
+          std::max(kMaxNumThreadsInForegroundPoolLowerBound,
+                   base::SysInfo::NumberOfProcessors()),
+          kSuggestedReclaimTime),
+      base::SchedulerWorkerPoolParams(StandbyThreadPolicy::LAZY,
+                                      kMaxNumThreadsInForegroundBlockingPool,
+                                      kSuggestedReclaimTime));
 }
 
 }  // namespace
 
 namespace content {
 
-RenderProcessImpl::RenderProcessImpl()
-    : enabled_bindings_(0) {
+RenderProcessImpl::RenderProcessImpl(
+    std::unique_ptr<base::TaskScheduler::InitParams> task_scheduler_init_params)
+    : RenderProcess("Renderer", std::move(task_scheduler_init_params)),
+      enabled_bindings_(0) {
 #if defined(OS_WIN)
-  // Record whether the machine is domain joined in a crash key. This will be
-  // used to better identify whether crashes are from enterprise users.
-  // Note that this is done very early on so that crashes have the highest
-  // chance of getting tagged.
-  base::debug::SetCrashKeyValue("enrolled-to-domain",
-                                base::win::IsEnrolledToDomain() ? "yes" : "no");
-
   // HACK:  See http://b/issue?id=1024307 for rationale.
   if (GetModuleHandle(L"LPK.DLL") == NULL) {
     // Makes sure lpk.dll is loaded by gdi32 to make sure ExtTextOut() works
@@ -179,6 +142,7 @@ RenderProcessImpl::RenderProcessImpl()
   SetV8FlagIfFeature(features::kAsmJsToWebAssembly, "--validate-asm");
   SetV8FlagIfNotFeature(features::kWebAssembly,
                         "--wasm-disable-structured-cloning");
+  SetV8FlagIfFeature(features::kWebAssemblyTrapHandler, "--wasm-trap-handler");
   SetV8FlagIfFeature(features::kSharedArrayBuffer,
                      "--harmony-sharedarraybuffer");
 
@@ -193,16 +157,31 @@ RenderProcessImpl::RenderProcessImpl()
 
   SiteIsolationStatsGatherer::SetEnabled(
       GetContentClient()->renderer()->ShouldGatherSiteIsolationStats());
+
+  if (command_line.HasSwitch(switches::kDomAutomationController))
+    enabled_bindings_ |= BINDINGS_POLICY_DOM_AUTOMATION;
+  if (command_line.HasSwitch(switches::kStatsCollectionController))
+    enabled_bindings_ |= BINDINGS_POLICY_STATS_COLLECTION;
 }
 
 RenderProcessImpl::~RenderProcessImpl() {
 #ifndef NDEBUG
-  int count = blink::WebFrame::instanceCount();
+  int count = blink::WebFrame::InstanceCount();
   if (count)
     DLOG(ERROR) << "WebFrame LEAKED " << count << " TIMES";
 #endif
 
   GetShutDownEvent()->Signal();
+}
+
+std::unique_ptr<RenderProcess> RenderProcessImpl::Create() {
+  auto task_scheduler_init_params =
+      content::GetContentClient()->renderer()->GetTaskSchedulerInitParams();
+  if (!task_scheduler_init_params)
+    task_scheduler_init_params = GetDefaultTaskSchedulerInitParams();
+
+  return base::WrapUnique(
+      new RenderProcessImpl(std::move(task_scheduler_init_params)));
 }
 
 void RenderProcessImpl::AddBindings(int bindings) {
@@ -211,24 +190,6 @@ void RenderProcessImpl::AddBindings(int bindings) {
 
 int RenderProcessImpl::GetEnabledBindings() const {
   return enabled_bindings_;
-}
-
-void RenderProcessImpl::InitializeTaskScheduler() {
-  std::vector<base::SchedulerWorkerPoolParams> params_vector;
-  base::TaskScheduler::WorkerPoolIndexForTraitsCallback
-      index_to_traits_callback;
-  content::GetContentClient()->renderer()->GetTaskSchedulerInitializationParams(
-      &params_vector, &index_to_traits_callback);
-
-  if (params_vector.empty()) {
-    params_vector = GetDefaultSchedulerWorkerPoolParams();
-    index_to_traits_callback =
-        base::Bind(&DefaultRendererWorkerPoolIndexForTraits);
-  }
-  DCHECK(index_to_traits_callback);
-
-  base::TaskScheduler::CreateAndSetDefaultTaskScheduler(
-      params_vector, index_to_traits_callback);
 }
 
 }  // namespace content

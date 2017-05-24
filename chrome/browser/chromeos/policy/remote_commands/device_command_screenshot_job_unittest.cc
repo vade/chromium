@@ -124,7 +124,6 @@ scoped_refptr<base::RefCountedBytes> GenerateTestPNG(const int& width,
     for (int x = 0; x < width; ++x)
       *bmp.getAddr32(x, y) = background_color;
   }
-  SkAutoLockPixels lock(bmp);
   scoped_refptr<base::RefCountedBytes> png_bytes(new base::RefCountedBytes());
   gfx::PNGCodec::ColorFormat color_format = gfx::PNGCodec::FORMAT_RGBA;
   if (!gfx::PNGCodec::Encode(
@@ -247,7 +246,7 @@ std::string DeviceCommandScreenshotTest::CreatePayloadFromResultCode(
   std::string payload;
   base::DictionaryValue root_dict;
   if (result_code != DeviceCommandScreenshotJob::SUCCESS)
-    root_dict.Set(kResultFieldName, new base::FundamentalValue(result_code));
+    root_dict.Set(kResultFieldName, base::MakeUnique<base::Value>(result_code));
   base::JSONWriter::Write(root_dict, &payload);
   return payload;
 }

@@ -10,13 +10,16 @@
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
+#include "base/feature_list.h"
 #include "base/i18n/char_iterator.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "content/app/strings/grit/content_strings.h"
 #include "content/browser/accessibility/browser_accessibility_android.h"
 #include "content/browser/accessibility/one_shot_accessibility_tree_search.h"
 #include "content/common/accessibility_messages.h"
+#include "content/public/common/content_features.h"
 #include "jni/BrowserAccessibilityManager_jni.h"
 #include "ui/accessibility/ax_text_utils.h"
 
@@ -30,9 +33,9 @@ namespace {
 
 using SearchKeyToPredicateMap =
     base::hash_map<base::string16, AccessibilityMatchPredicate>;
-base::LazyInstance<SearchKeyToPredicateMap> g_search_key_to_predicate_map =
-    LAZY_INSTANCE_INITIALIZER;
-base::LazyInstance<base::string16> g_all_search_keys =
+base::LazyInstance<SearchKeyToPredicateMap>::DestructorAtExit
+    g_search_key_to_predicate_map = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<base::string16>::DestructorAtExit g_all_search_keys =
     LAZY_INSTANCE_INITIALIZER;
 
 bool SectionPredicate(
@@ -117,6 +120,26 @@ AccessibilityMatchPredicate PredicateForSearchKey(
   return AllInterestingNodesPredicate;
 }
 
+// The element in the document for which we may be displaying an autofill popup.
+int32_t g_element_hosting_autofill_popup_unique_id = -1;
+
+// The element in the document that is the next element after
+// |g_element_hosting_autofill_popup_unique_id|.
+int32_t g_element_after_element_hosting_autofill_popup_unique_id = -1;
+
+// Autofill popup will not be part of the |AXTree| that is sent by renderer.
+// Hence, we need a proxy |AXNode| to represent the autofill popup.
+BrowserAccessibility* g_autofill_popup_proxy_node = nullptr;
+ui::AXNode* g_autofill_popup_proxy_node_ax_node = nullptr;
+
+void DeleteAutofillPopupProxy() {
+  if (g_autofill_popup_proxy_node) {
+    g_autofill_popup_proxy_node->Destroy();
+    delete g_autofill_popup_proxy_node_ax_node;
+    g_autofill_popup_proxy_node = nullptr;
+  }
+}
+
 }  // anonymous namespace
 
 namespace aria_strings {
@@ -155,6 +178,9 @@ BrowserAccessibilityManagerAndroid::~BrowserAccessibilityManagerAndroid() {
   if (obj.is_null())
     return;
 
+  // Clean up autofill popup proxy node in case the popup was not dismissed.
+  DeleteAutofillPopupProxy();
+
   Java_BrowserAccessibilityManager_onNativeObjectDestroyed(
       env, obj, reinterpret_cast<intptr_t>(this));
 }
@@ -165,7 +191,7 @@ ui::AXTreeUpdate
   ui::AXNodeData empty_document;
   empty_document.id = 0;
   empty_document.role = ui::AX_ROLE_ROOT_WEB_AREA;
-  empty_document.state = 1 << ui::AX_STATE_READ_ONLY;
+  empty_document.AddState(ui::AX_STATE_READ_ONLY);
 
   ui::AXTreeUpdate update;
   update.root_id = empty_document.id;
@@ -183,6 +209,16 @@ void BrowserAccessibilityManagerAndroid::SetContentViewCore(
       env, Java_BrowserAccessibilityManager_create(
                env, reinterpret_cast<intptr_t>(this), content_view_core)
                .obj());
+}
+
+bool BrowserAccessibilityManagerAndroid::ShouldRespectDisplayedPasswordText() {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = GetJavaRefFromRootManager();
+  if (obj.is_null())
+    return false;
+
+  return Java_BrowserAccessibilityManager_shouldRespectDisplayedPasswordText(
+      env, obj);
 }
 
 bool BrowserAccessibilityManagerAndroid::ShouldExposePasswordText() {
@@ -227,7 +263,20 @@ void BrowserAccessibilityManagerAndroid::NotifyAccessibilityEvent(
   // Sometimes we get events on nodes in our internal accessibility tree
   // that aren't exposed on Android. Update |node| to point to the highest
   // ancestor that's a leaf node.
+  BrowserAccessibility* original_node = node;
   node = node->GetClosestPlatformObject();
+  BrowserAccessibilityAndroid* android_node =
+      static_cast<BrowserAccessibilityAndroid*>(node);
+
+  // If the closest platform object is a password field, the event we're
+  // getting is doing something in the shadow dom, for example replacing a
+  // character with a dot after a short pause. On Android we don't want to
+  // fire an event for those changes, but we do want to make sure our internal
+  // state is correct, so we call OnDataChanged() and then return.
+  if (android_node->IsPassword() && original_node != node) {
+    android_node->OnDataChanged();
+    return;
+  }
 
   // Always send AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED to notify
   // the Android system that the accessibility hierarchy rooted at this
@@ -241,8 +290,6 @@ void BrowserAccessibilityManagerAndroid::NotifyAccessibilityEvent(
     return;
   }
 
-  BrowserAccessibilityAndroid* android_node =
-      static_cast<BrowserAccessibilityAndroid*>(node);
   switch (event_type) {
     case ui::AX_EVENT_LOAD_COMPLETE:
       Java_BrowserAccessibilityManager_handlePageLoaded(
@@ -404,9 +451,9 @@ jboolean BrowserAccessibilityManagerAndroid::PopulateAccessibilityNodeInfo(
   if (!node)
     return false;
 
-  if (node->GetParent()) {
+  if (node->PlatformGetParent()) {
     Java_BrowserAccessibilityManager_setAccessibilityNodeInfoParent(
-        env, obj, info, node->GetParent()->unique_id());
+        env, obj, info, node->PlatformGetParent()->unique_id());
   }
   for (unsigned i = 0; i < node->PlatformChildCount(); ++i) {
     Java_BrowserAccessibilityManager_addAccessibilityNodeInfoChild(
@@ -458,11 +505,11 @@ jboolean BrowserAccessibilityManagerAndroid::PopulateAccessibilityNodeInfo(
 
   gfx::Rect absolute_rect = node->GetPageBoundsRect();
   gfx::Rect parent_relative_rect = absolute_rect;
-  if (node->GetParent()) {
-    gfx::Rect parent_rect = node->GetParent()->GetPageBoundsRect();
+  if (node->PlatformGetParent()) {
+    gfx::Rect parent_rect = node->PlatformGetParent()->GetPageBoundsRect();
     parent_relative_rect.Offset(-parent_rect.OffsetFromOrigin());
   }
-  bool is_root = node->GetParent() == NULL;
+  bool is_root = node->PlatformGetParent() == NULL;
   Java_BrowserAccessibilityManager_setAccessibilityNodeInfoLocation(
       env, obj, info,
       id,
@@ -473,7 +520,9 @@ jboolean BrowserAccessibilityManagerAndroid::PopulateAccessibilityNodeInfo(
 
   Java_BrowserAccessibilityManager_setAccessibilityNodeInfoKitKatAttributes(
       env, obj, info, is_root, node->IsEditableText(),
-      base::android::ConvertUTF16ToJavaString(env, node->GetRoleDescription()));
+      base::android::ConvertUTF16ToJavaString(env, node->GetRoleDescription()),
+      node->GetIntAttribute(ui::AX_ATTR_TEXT_SEL_START),
+      node->GetIntAttribute(ui::AX_ATTR_TEXT_SEL_END));
 
   Java_BrowserAccessibilityManager_setAccessibilityNodeInfoLollipopAttributes(
       env, obj, info,
@@ -654,8 +703,10 @@ void BrowserAccessibilityManagerAndroid::SetSelection(
     jint start,
     jint end) {
   BrowserAccessibilityAndroid* node = GetFromUniqueID(id);
-  if (node)
-    node->manager()->SetTextSelection(*node, start, end);
+  if (node) {
+    node->manager()->SetSelection(AXPlatformRange(node->CreatePositionAt(start),
+                                                  node->CreatePositionAt(end)));
+  }
 }
 
 jboolean BrowserAccessibilityManagerAndroid::AdjustSlider(
@@ -726,7 +777,7 @@ void BrowserAccessibilityManagerAndroid::HandleHoverEvent(
   // find an interesting parent.
   while (android_node && !android_node->IsInterestingOnAndroid()) {
     android_node = static_cast<BrowserAccessibilityAndroid*>(
-        android_node->GetParent());
+        android_node->PlatformGetParent());
   }
 
   if (android_node) {
@@ -770,7 +821,21 @@ jint BrowserAccessibilityManagerAndroid::FindElementType(
   if (tree_search.CountMatches() == 0)
     return 0;
 
-  return tree_search.GetMatchAtIndex(0)->unique_id();
+  int32_t element_id = tree_search.GetMatchAtIndex(0)->unique_id();
+
+  // Navigate forwards to the autofill popup's proxy node if focus is currently
+  // on the element hosting the autofill popup. Once within the popup, a back
+  // press will navigate back to the element hosting the popup. If user swipes
+  // past last suggestion in the popup, or swipes left from the first suggestion
+  // in the popup, we will navigate to the element that is the next element in
+  // the document after the element hosting the popup.
+  if (forwards && start_id == g_element_hosting_autofill_popup_unique_id &&
+      g_autofill_popup_proxy_node) {
+    g_element_after_element_hosting_autofill_popup_unique_id = element_id;
+    return g_autofill_popup_proxy_node->unique_id();
+  }
+
+  return element_id;
 }
 
 jboolean BrowserAccessibilityManagerAndroid::NextAtGranularity(
@@ -916,10 +981,8 @@ void BrowserAccessibilityManagerAndroid::SetAccessibilityFocus(
     const JavaParamRef<jobject>& obj,
     jint id) {
   BrowserAccessibilityAndroid* node = GetFromUniqueID(id);
-  if (!node)
-    return;
-
-  node->manager()->SetAccessibilityFocus(*node);
+  if (node)
+    node->manager()->SetAccessibilityFocus(*node);
 }
 
 bool BrowserAccessibilityManagerAndroid::IsSlider(
@@ -931,6 +994,62 @@ bool BrowserAccessibilityManagerAndroid::IsSlider(
     return false;
 
   return node->GetRole() == ui::AX_ROLE_SLIDER;
+}
+
+void BrowserAccessibilityManagerAndroid::OnAutofillPopupDisplayed(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
+  if (!base::FeatureList::IsEnabled(features::kAndroidAutofillAccessibility))
+    return;
+
+  BrowserAccessibility* current_focus = GetFocus();
+  if (current_focus == nullptr) {
+    return;
+  }
+
+  DeleteAutofillPopupProxy();
+
+  g_autofill_popup_proxy_node = BrowserAccessibility::Create();
+  g_autofill_popup_proxy_node_ax_node = new ui::AXNode(nullptr, -1, -1);
+  ui::AXNodeData ax_node_data;
+  ax_node_data.role = ui::AX_ROLE_MENU;
+  ax_node_data.SetName("Autofill");
+  ax_node_data.AddState(ui::AX_STATE_READ_ONLY);
+  ax_node_data.AddState(ui::AX_STATE_FOCUSABLE);
+  ax_node_data.AddState(ui::AX_STATE_SELECTABLE);
+  g_autofill_popup_proxy_node_ax_node->SetData(ax_node_data);
+  g_autofill_popup_proxy_node->Init(this, g_autofill_popup_proxy_node_ax_node);
+
+  g_element_hosting_autofill_popup_unique_id = current_focus->unique_id();
+}
+
+void BrowserAccessibilityManagerAndroid::OnAutofillPopupDismissed(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
+  g_element_hosting_autofill_popup_unique_id = -1;
+  g_element_after_element_hosting_autofill_popup_unique_id = -1;
+  DeleteAutofillPopupProxy();
+}
+
+jint BrowserAccessibilityManagerAndroid::
+    GetIdForElementAfterElementHostingAutofillPopup(
+        JNIEnv* env,
+        const JavaParamRef<jobject>& obj) {
+  if (!base::FeatureList::IsEnabled(features::kAndroidAutofillAccessibility) ||
+      g_element_after_element_hosting_autofill_popup_unique_id == -1 ||
+      GetFromUniqueID(
+          g_element_after_element_hosting_autofill_popup_unique_id) == nullptr)
+    return 0;
+
+  return g_element_after_element_hosting_autofill_popup_unique_id;
+}
+
+jboolean BrowserAccessibilityManagerAndroid::IsAutofillPopupNode(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    jint id) {
+  return g_autofill_popup_proxy_node &&
+         g_autofill_popup_proxy_node->unique_id() == id;
 }
 
 bool BrowserAccessibilityManagerAndroid::Scroll(

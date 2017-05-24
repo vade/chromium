@@ -188,14 +188,18 @@ class _CompilerDispatcher(object):
 
 def main():
   parser = argparse.ArgumentParser()
-  parser.add_argument('tool', help='clang tool to run')
+  parser.add_argument('--tool', required=True, help='clang tool to run')
   parser.add_argument('--all', action='store_true')
   parser.add_argument(
       '--generate-compdb',
       action='store_true',
       help='regenerate the compile database before running the tool')
   parser.add_argument(
-      'compile_database',
+      '--shard',
+      metavar='<n>-of-<count>')
+  parser.add_argument(
+      '-p',
+      required=True,
       help='path to the directory that contains the compile database')
   parser.add_argument(
       'path_filter',
@@ -214,10 +218,11 @@ def main():
       os.environ['PATH'])
 
   if args.generate_compdb:
-    compile_db.GenerateWithNinja(args.compile_database)
+    with open(os.path.join(args.p, 'compile_commands.json'), 'w') as f:
+      f.write(compile_db.GenerateWithNinja(args.p))
 
   if args.all:
-    source_filenames = set(_GetFilesFromCompileDB(args.compile_database))
+    source_filenames = set(_GetFilesFromCompileDB(args.p))
   else:
     git_filenames = set(_GetFilesFromGit(args.path_filter))
     # Filter out files that aren't C/C++/Obj-C/Obj-C++.
@@ -226,8 +231,21 @@ def main():
                         for f in git_filenames
                         if os.path.splitext(f)[1] in extensions]
 
+  if args.shard:
+    total_length = len(source_filenames)
+    match = re.match(r'(\d+)-of-(\d+)$', args.shard)
+    # Input is 1-based, but modular arithmetic is 0-based.
+    shard_number = int(match.group(1)) - 1
+    shard_count = int(match.group(2))
+    source_filenames = [
+        f[1] for f in enumerate(sorted(source_filenames))
+        if f[0] % shard_count == shard_number
+    ]
+    print 'Shard %d-of-%d will process %d entries out of %d' % (
+        shard_number, shard_count, len(source_filenames), total_length)
+
   dispatcher = _CompilerDispatcher(args.tool, args.tool_args,
-                                   args.compile_database,
+                                   args.p,
                                    source_filenames)
   dispatcher.Run()
   return -dispatcher.failed_count

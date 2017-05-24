@@ -7,10 +7,20 @@
  * 'site-data' handles showing the local storage summary list for all sites.
  */
 
+/**
+ * TODO(dbeam): upstream to polymer externs?
+ * @constructor
+ * @extends {Event}
+ */
+function DomRepeatEvent() {}
+
+/** @type {?} */
+DomRepeatEvent.prototype.model;
+
 Polymer({
   is: 'site-data',
 
-  behaviors: [CookieTreeBehavior],
+  behaviors: [CookieTreeBehavior, I18nBehavior],
 
   properties: {
     /**
@@ -25,8 +35,29 @@ Polymer({
     /** @private */
     confirmationDeleteMsg_: String,
 
-    /** @private */
-    idToDelete_: String,
+    /** @type {!Map<string, string>} */
+    focusConfig: {
+      type: Object,
+      observer: 'focusConfigChanged_',
+    },
+  },
+
+  /**
+   * @param {!Map<string, string>} newConfig
+   * @param {?Map<string, string>} oldConfig
+   * @private
+   */
+  focusConfigChanged_: function(newConfig, oldConfig) {
+    // focusConfig is set only once on the parent, so this observer should only
+    // fire once.
+    assert(!oldConfig);
+
+    // Populate the |focusConfig| map of the parent <settings-animated-pages>
+    // element, with additional entries that correspond to subpage trigger
+    // elements residing in this element's Shadow DOM.
+    this.focusConfig.set(
+        settings.Route.SITE_SETTINGS_DATA_DETAILS.path,
+        '* /deep/ #filter /deep/ #searchInput');
   },
 
   /** @override */
@@ -52,7 +83,10 @@ Polymer({
     this.$.list.render();
   },
 
-  /** @private */
+  /**
+   * @return {boolean} Whether to show the multiple site remove button.
+   * @private
+   */
   isRemoveButtonVisible_: function(sites, renderedItemCount) {
     return renderedItemCount != 0;
   },
@@ -73,44 +107,30 @@ Polymer({
     this.$.confirmDeleteDialog.close();
   },
 
+  /** @private */
+  onConfirmDeleteDialogClosed_: function() {
+    cr.ui.focusWithoutInk(assert(this.$.removeShowingSites));
+  },
+
   /**
    * Shows a dialog to confirm the deletion of multiple sites.
    * @param {!Event} e
    * @private
    */
-  onConfirmDeleteMultipleSites_: function(e) {
+  onRemoveShowingSitesTap_: function(e) {
     e.preventDefault();
-    this.idToDelete_ = '';  // Delete all.
     this.confirmationDeleteMsg_ = loadTimeData.getString(
         'siteSettingsCookieRemoveMultipleConfirmation');
     this.$.confirmDeleteDialog.showModal();
   },
 
   /**
-   * Called when deletion for a single/multiple sites has been confirmed.
+   * Called when deletion for all showing sites has been confirmed.
    * @private
    */
   onConfirmDelete_: function() {
-    if (this.idToDelete_ != '')
-      this.onDeleteSite_();
-    else
-      this.onDeleteMultipleSites_();
     this.$.confirmDeleteDialog.close();
-  },
 
-  /**
-   * Deletes all site data for a given site.
-   * @private
-   */
-  onDeleteSite_: function() {
-    this.browserProxy.removeCookie(this.idToDelete_);
-  },
-
-  /**
-   * Deletes site data for multiple sites.
-   * @private
-   */
-  onDeleteMultipleSites_: function() {
     if (this.filterString_.length == 0) {
       this.removeAllCookies();
     } else {
@@ -122,6 +142,16 @@ Polymer({
       // We just deleted all items found by the filter, let's reset the filter.
       /** @type {SettingsSubpageSearchElement} */(this.$.filter).setValue('');
     }
+  },
+
+  /**
+   * Deletes all site data for a given site.
+   * @param {!DomRepeatEvent} e
+   * @private
+   */
+  onRemoveSiteTap_: function(e) {
+    e.stopPropagation();
+    this.browserProxy.removeCookie(e.model.item.id);
   },
 
   /**

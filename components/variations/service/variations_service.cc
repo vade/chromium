@@ -17,6 +17,7 @@
 #include "base/strings/string_util.h"
 #include "base/sys_info.h"
 #include "base/task_runner_util.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/timer/elapsed_timer.h"
 #include "base/values.h"
 #include "base/version.h"
@@ -40,6 +41,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "net/http/http_util.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
 #include "ui/base/device_form_factor.h"
@@ -521,14 +523,41 @@ std::unique_ptr<VariationsService> VariationsService::CreateForTesting(
 
 void VariationsService::DoActualFetch() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!pending_seed_request_);
 
-  pending_seed_request_ = net::URLFetcher::Create(0, variations_server_url_,
-                                                  net::URLFetcher::GET, this);
+  // Normally, there shouldn't be a |pending_request_| when this fires. However
+  // it's not impossible - for example if Chrome was paused (e.g. in a debugger
+  // or if the machine was suspended) and OnURLFetchComplete() hasn't had a
+  // chance to run yet from the previous request. In this case, don't start a
+  // new request and just let the previous one finish.
+  if (pending_seed_request_)
+    return;
+
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("chrome_variations_service", R"(
+        semantics {
+          sender: "Chrome Variations Service"
+          description:
+            "Retrieves the list of Google Chrome's Variations from the server, "
+            "which will apply to the next Chrome session upon a restart."
+          trigger:
+            "Requests are made periodically while Google Chrome is running."
+          data: "The operating system name."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: false
+          setting: "This feature cannot be disabled by settings."
+          policy_exception_justification:
+            "Not implemented, considered not required."
+        })");
+  pending_seed_request_ =
+      net::URLFetcher::Create(0, variations_server_url_, net::URLFetcher::GET,
+                              this, traffic_annotation);
   data_use_measurement::DataUseUserData::AttachToFetcher(
       pending_seed_request_.get(),
       data_use_measurement::DataUseUserData::VARIATIONS);
   pending_seed_request_->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
+                                      net::LOAD_DO_NOT_SEND_AUTH_DATA |
                                       net::LOAD_DO_NOT_SAVE_COOKIES);
   pending_seed_request_->SetRequestContext(client_->GetURLRequestContext());
   bool enable_deltas = false;
@@ -898,6 +927,10 @@ bool VariationsService::OverrideStoredPermanentCountry(
   base::Version version(version_info::GetVersionNumber());
   StorePermanentCountry(version, country_override);
   return true;
+}
+
+std::string VariationsService::GetLatestCountry() const {
+  return local_state_->GetString(prefs::kVariationsCountry);
 }
 
 }  // namespace variations

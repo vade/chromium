@@ -19,6 +19,14 @@ namespace autofill {
 class AutofillManager;
 }
 
+class GURL;
+
+#if defined(SAFE_BROWSING_DB_LOCAL)
+namespace safe_browsing {
+class PasswordProtectionService;
+}
+#endif
+
 namespace password_manager {
 
 class LogManager;
@@ -32,27 +40,16 @@ enum PasswordSyncState {
   SYNCING_WITH_CUSTOM_PASSPHRASE
 };
 
-enum class CredentialSourceType {
-  CREDENTIAL_SOURCE_PASSWORD_MANAGER = 0,
-  CREDENTIAL_SOURCE_API,
-  CREDENTIAL_SOURCE_LAST = CREDENTIAL_SOURCE_API
-};
-
 // An abstraction of operations that depend on the embedders (e.g. Chrome)
 // environment.
 class PasswordManagerClient {
  public:
+  using HSTSCallback = base::Callback<void(bool)>;
   using CredentialsCallback =
       base::Callback<void(const autofill::PasswordForm*)>;
 
   PasswordManagerClient() {}
   virtual ~PasswordManagerClient() {}
-
-  // For automated testing, the save password prompt should sometimes not be
-  // shown, and password immediately saved instead. That can be enforced by
-  // a command-line flag. If auto-saving is enforced, this method returns true.
-  // The default return value is false.
-  virtual bool IsAutomaticPasswordSavingEnabled() const;
 
   // Is saving new data for password autofill and filling of saved data enabled
   // for the current profile and page? For example, saving is disabled in
@@ -62,6 +59,12 @@ class PasswordManagerClient {
   // Checks if filling is enabled for the current page. Filling is disabled when
   // password manager is disabled, or in the presence of SSL errors on a page.
   virtual bool IsFillingEnabledForCurrentPage() const;
+
+  // Checks asynchronously whether HTTP Strict Transport Security (HSTS) is
+  // active for the host of the given origin. Notifies |callback| with the
+  // result on the calling thread.
+  virtual void PostHSTSQueryForHost(const GURL& origin,
+                                    const HSTSCallback& callback) const;
 
   // Checks if the Credential Manager API is allowed to run on the page. It's
   // not allowed while prerendering and the pre-rendered WebContents will be
@@ -87,11 +90,8 @@ class PasswordManagerClient {
   // the stored one. In this case form_to_save.password_overridden() == true
   // and form_to_save.pending_credentials() should correspond to the credential
   // that was overidden.
-  // TODO(crbug.com/576747): Analyze usefulness of the |type| parameter, make a
-  // decision if it should be kept or removed.
   virtual bool PromptUserToSaveOrUpdatePassword(
       std::unique_ptr<PasswordFormManager> form_to_save,
-      CredentialSourceType type,
       bool update_password) = 0;
 
   // Informs the embedder of a password forms that the user should choose from.
@@ -171,7 +171,7 @@ class PasswordManagerClient {
   virtual bool DidLastPageLoadEncounterSSLErrors() const;
 
   // If this browsing session should not be persisted.
-  virtual bool IsOffTheRecord() const;
+  virtual bool IsIncognito() const;
 
   // Returns the PasswordManager associated with this client. The non-const
   // version calls the const one.
@@ -184,6 +184,9 @@ class PasswordManagerClient {
   // Returns the main frame URL.
   virtual const GURL& GetMainFrameURL() const;
 
+  // Returns true if the main frame URL has a secure origin.
+  virtual bool IsMainFrameSecure() const;
+
   virtual const GURL& GetLastCommittedEntryURL() const = 0;
 
   // Use this to filter credentials before handling them in password manager.
@@ -194,6 +197,22 @@ class PasswordManagerClient {
 
   // Record that we saw a password field on this page.
   virtual void AnnotateNavigationEntry(bool has_password_field);
+
+#if defined(SAFE_BROWSING_DB_LOCAL)
+  // Return the PasswordProtectionService associated with this instance.
+  virtual safe_browsing::PasswordProtectionService*
+  GetPasswordProtectionService() const = 0;
+
+  // Checks the safe browsing reputation of the webpage where the focused
+  // username/password field is on.
+  virtual void CheckSafeBrowsingReputation(const GURL& form_action,
+                                           const GURL& frame_url) = 0;
+
+  // Checks the safe browsing reputation of the webpage where password reuse
+  // happens.
+  virtual void CheckProtectedPasswordEntry(
+      const std::string& password_saved_domain) = 0;
+#endif
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PasswordManagerClient);

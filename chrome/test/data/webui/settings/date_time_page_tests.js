@@ -105,7 +105,7 @@
 
     suiteTeardown(function() {
       // TODO(michaelpg): Removes the element before exiting, because the
-      // <paper-tooltip> in <cr-policy-pref-indicator> somehow causes warnings
+      // <paper-tooltip> in <cr-policy-indicator> somehow causes warnings
       // and/or script errors in axs_testing.js.
       PolymerTest.clearBody();
     });
@@ -117,15 +117,14 @@
 
     function verifyPolicy(policy) {
       Polymer.dom.flush();
-      var indicator = dateTime.$$('cr-policy-pref-indicator');
+      var indicator = dateTime.$$('cr-policy-indicator');
 
       if (policy) {
         assertTrue(!!indicator);
-        assertGT(indicator.clientHeight, 0);
+        assertTrue(indicator.indicatorVisible);
       } else {
-        // Indicator should be missing or hidden.
-        if (indicator)
-          assertEquals(0, indicator.clientHeight);
+        // Indicator should be missing dom-ifed out.
+        assertFalse(!!indicator);
       }
 
       assertEquals(policy, dateTime.$.timeZoneAutoDetect.disabled);
@@ -165,6 +164,7 @@
       var prefs = getFakePrefs();
       prefs.settings.resolve_timezone_by_geolocation.value = false;
       dateTime = initializeDateTime(prefs, false);
+      cr.webUIListenerCallback('time-zone-auto-detect-policy', false);
 
       assertTrue(dateTimePageReadyCalled);
       assertTrue(getTimeZonesCalled);
@@ -186,6 +186,7 @@
       var prefs = getFakePrefs();
       prefs.settings.resolve_timezone_by_geolocation.value = false;
       dateTime = initializeDateTime(prefs, true, true);
+      cr.webUIListenerCallback('time-zone-auto-detect-policy', true, true);
 
       assertTrue(dateTimePageReadyCalled);
       assertFalse(getTimeZonesCalled);
@@ -214,6 +215,7 @@
     test('auto-detect forced off', function(done) {
       var prefs = getFakePrefs();
       dateTime = initializeDateTime(prefs, true, false);
+      cr.webUIListenerCallback('time-zone-auto-detect-policy', true, false);
 
       assertTrue(dateTimePageReadyCalled);
       assertTrue(getTimeZonesCalled);
@@ -238,6 +240,7 @@
 
     test('set date and time button', function() {
       dateTime = initializeDateTime(getFakePrefs(), false);
+      cr.webUIListenerCallback('time-zone-auto-detect-policy', false);
 
       var showSetDateTimeUICalled = false;
       registerMessageCallback('showSetDateTimeUI', null, function() {

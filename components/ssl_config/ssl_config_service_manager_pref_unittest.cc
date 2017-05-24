@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "base/feature_list.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
@@ -67,10 +68,11 @@ TEST_F(SSLConfigServiceManagerPrefTest, GoodDisabledCipherSuites) {
   config_service->GetSSLConfig(&old_config);
   EXPECT_TRUE(old_config.disabled_cipher_suites.empty());
 
-  base::ListValue* list_value = new base::ListValue();
+  auto list_value = base::MakeUnique<base::ListValue>();
   list_value->AppendString("0x0004");
   list_value->AppendString("0x0005");
-  local_state.SetUserPref(ssl_config::prefs::kCipherSuiteBlacklist, list_value);
+  local_state.SetUserPref(ssl_config::prefs::kCipherSuiteBlacklist,
+                          std::move(list_value));
 
   // Pump the message loop to notify the SSLConfigServiceManagerPref that the
   // preferences changed.
@@ -103,12 +105,13 @@ TEST_F(SSLConfigServiceManagerPrefTest, BadDisabledCipherSuites) {
   config_service->GetSSLConfig(&old_config);
   EXPECT_TRUE(old_config.disabled_cipher_suites.empty());
 
-  base::ListValue* list_value = new base::ListValue();
+  auto list_value = base::MakeUnique<base::ListValue>();
   list_value->AppendString("0x0004");
   list_value->AppendString("TLS_NOT_WITH_A_CIPHER_SUITE");
   list_value->AppendString("0x0005");
   list_value->AppendString("0xBEEFY");
-  local_state.SetUserPref(ssl_config::prefs::kCipherSuiteBlacklist, list_value);
+  local_state.SetUserPref(ssl_config::prefs::kCipherSuiteBlacklist,
+                          std::move(list_value));
 
   // Pump the message loop to notify the SSLConfigServiceManagerPref that the
   // preferences changed.
@@ -163,7 +166,7 @@ TEST_F(SSLConfigServiceManagerPrefTest, NoSSL3) {
 
   TestingPrefServiceSimple local_state;
   local_state.SetUserPref(ssl_config::prefs::kSSLVersionMin,
-                          new base::StringValue("ssl3"));
+                          base::MakeUnique<base::Value>("ssl3"));
   SSLConfigServiceManager::RegisterPrefs(local_state.registry());
 
   std::unique_ptr<SSLConfigServiceManager> config_manager(
@@ -177,6 +180,49 @@ TEST_F(SSLConfigServiceManagerPrefTest, NoSSL3) {
   config_service->GetSSLConfig(&ssl_config);
   // The command-line option must not have been honored.
   EXPECT_LE(net::SSL_PROTOCOL_VERSION_TLS1, ssl_config.version_min);
+}
+
+// Tests that SSL max version correctly sets the maximum version.
+TEST_F(SSLConfigServiceManagerPrefTest, SSLVersionMax) {
+  scoped_refptr<TestingPrefStore> local_state_store(new TestingPrefStore());
+
+  TestingPrefServiceSimple local_state;
+  local_state.SetUserPref(ssl_config::prefs::kSSLVersionMax,
+                          base::MakeUnique<base::Value>("tls1.3"));
+  SSLConfigServiceManager::RegisterPrefs(local_state.registry());
+
+  std::unique_ptr<SSLConfigServiceManager> config_manager(
+      SSLConfigServiceManager::CreateDefaultManager(
+          &local_state, base::ThreadTaskRunnerHandle::Get()));
+  ASSERT_TRUE(config_manager.get());
+  scoped_refptr<SSLConfigService> config_service(config_manager->Get());
+  ASSERT_TRUE(config_service.get());
+
+  SSLConfig ssl_config;
+  config_service->GetSSLConfig(&ssl_config);
+  EXPECT_EQ(net::SSL_PROTOCOL_VERSION_TLS1_3, ssl_config.version_max);
+}
+
+// Tests that SSL max version can not be set below TLS 1.2.
+TEST_F(SSLConfigServiceManagerPrefTest, NoTLS11Max) {
+  scoped_refptr<TestingPrefStore> local_state_store(new TestingPrefStore());
+
+  TestingPrefServiceSimple local_state;
+  local_state.SetUserPref(ssl_config::prefs::kSSLVersionMax,
+                          base::MakeUnique<base::Value>("tls1.1"));
+  SSLConfigServiceManager::RegisterPrefs(local_state.registry());
+
+  std::unique_ptr<SSLConfigServiceManager> config_manager(
+      SSLConfigServiceManager::CreateDefaultManager(
+          &local_state, base::ThreadTaskRunnerHandle::Get()));
+  ASSERT_TRUE(config_manager.get());
+  scoped_refptr<SSLConfigService> config_service(config_manager->Get());
+  ASSERT_TRUE(config_service.get());
+
+  SSLConfig ssl_config;
+  config_service->GetSSLConfig(&ssl_config);
+  // The command-line option must not have been honored.
+  EXPECT_LE(net::SSL_PROTOCOL_VERSION_TLS1_2, ssl_config.version_max);
 }
 
 // Tests that TLS 1.3 may be enabled via features.
@@ -194,10 +240,34 @@ TEST_F(SSLConfigServiceManagerPrefTest, TLS13Feature) {
   scoped_refptr<SSLConfigService> config_service(config_manager->Get());
   ASSERT_TRUE(config_service.get());
 
-  // The feature should have switched the default version_fallback_min value.
   SSLConfig ssl_config;
   config_service->GetSSLConfig(&ssl_config);
   EXPECT_EQ(net::SSL_PROTOCOL_VERSION_TLS1_3, ssl_config.version_max);
+}
+
+// Tests that the SSLVersionMax preference overwites the TLS 1.3 feature.
+TEST_F(SSLConfigServiceManagerPrefTest, TLS13SSLVersionMax) {
+  scoped_refptr<TestingPrefStore> local_state_store(new TestingPrefStore());
+
+  // Toggle the feature.
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitFromCommandLine("NegotiateTLS13", std::string());
+
+  TestingPrefServiceSimple local_state;
+  local_state.SetUserPref(ssl_config::prefs::kSSLVersionMax,
+                          base::MakeUnique<base::Value>("tls1.2"));
+  SSLConfigServiceManager::RegisterPrefs(local_state.registry());
+
+  std::unique_ptr<SSLConfigServiceManager> config_manager(
+      SSLConfigServiceManager::CreateDefaultManager(
+          &local_state, base::ThreadTaskRunnerHandle::Get()));
+  ASSERT_TRUE(config_manager.get());
+  scoped_refptr<SSLConfigService> config_service(config_manager->Get());
+  ASSERT_TRUE(config_service.get());
+
+  SSLConfig ssl_config;
+  config_service->GetSSLConfig(&ssl_config);
+  EXPECT_EQ(net::SSL_PROTOCOL_VERSION_TLS1_2, ssl_config.version_max);
 }
 
 // Tests that SHA-1 signatures for local trust anchors can be enabled.
@@ -228,7 +298,7 @@ TEST_F(SSLConfigServiceManagerPrefTest, SHA1ForLocalAnchors) {
   // Enabling the local preference should result in SHA-1 local trust anchors
   // being enabled.
   local_state.SetUserPref(ssl_config::prefs::kCertEnableSha1LocalAnchors,
-                          new base::FundamentalValue(true));
+                          base::MakeUnique<base::Value>(true));
   // Pump the message loop to notify the SSLConfigServiceManagerPref that the
   // preferences changed.
   base::RunLoop().RunUntilIdle();
@@ -240,7 +310,7 @@ TEST_F(SSLConfigServiceManagerPrefTest, SHA1ForLocalAnchors) {
   // Disabling the local preference should result in SHA-1 local trust
   // anchors being disabled.
   local_state.SetUserPref(ssl_config::prefs::kCertEnableSha1LocalAnchors,
-                          new base::FundamentalValue(false));
+                          base::MakeUnique<base::Value>(false));
   // Pump the message loop to notify the SSLConfigServiceManagerPref that the
   // preferences changed.
   base::RunLoop().RunUntilIdle();

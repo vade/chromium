@@ -5,7 +5,7 @@
 #include "chrome/browser/ui/webui/settings/chromeos/android_apps_handler.h"
 
 #include "base/values.h"
-#include "chrome/browser/chromeos/arc/arc_session_manager.h"
+#include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"  // kSettingsAppId
 #include "ui/events/event_constants.h"
@@ -14,7 +14,10 @@ namespace chromeos {
 namespace settings {
 
 AndroidAppsHandler::AndroidAppsHandler(Profile* profile)
-    : arc_prefs_observer_(this), profile_(profile), weak_ptr_factory_(this) {}
+    : arc_prefs_observer_(this),
+      arc_session_manager_observer_(this),
+      profile_(profile),
+      weak_ptr_factory_(this) {}
 
 AndroidAppsHandler::~AndroidAppsHandler() {}
 
@@ -31,12 +34,16 @@ void AndroidAppsHandler::RegisterMessages() {
 
 void AndroidAppsHandler::OnJavascriptAllowed() {
   ArcAppListPrefs* arc_prefs = ArcAppListPrefs::Get(profile_);
-  if (arc_prefs)
+  if (arc_prefs) {
     arc_prefs_observer_.Add(arc_prefs);
+    // arc::ArcSessionManager is assosiated with primary profile.
+    arc_session_manager_observer_.Add(arc::ArcSessionManager::Get());
+  }
 }
 
 void AndroidAppsHandler::OnJavascriptDisallowed() {
   arc_prefs_observer_.RemoveAll();
+  arc_session_manager_observer_.RemoveAll();
 }
 
 void AndroidAppsHandler::OnAppRegistered(
@@ -49,27 +56,24 @@ void AndroidAppsHandler::OnAppRemoved(const std::string& app_id) {
   OnAppChanged(app_id);
 }
 
-void AndroidAppsHandler::OnAppReadyChanged(const std::string& app_id,
-                                           bool ready) {
-  OnAppChanged(app_id);
-}
-
 void AndroidAppsHandler::OnAppChanged(const std::string& app_id) {
   if (app_id != arc::kSettingsAppId)
     return;
   SendAndroidAppsInfo();
 }
 
+void AndroidAppsHandler::OnArcPlayStoreEnabledChanged(bool enabled) {
+  SendAndroidAppsInfo();
+}
+
 std::unique_ptr<base::DictionaryValue>
 AndroidAppsHandler::BuildAndroidAppsInfo() {
   std::unique_ptr<base::DictionaryValue> info(new base::DictionaryValue);
-  bool app_ready = false;
-  if (arc::ArcSessionManager::Get()->IsArcEnabled()) {
-    std::unique_ptr<ArcAppListPrefs::AppInfo> app_info =
-        ArcAppListPrefs::Get(profile_)->GetApp(arc::kSettingsAppId);
-    app_ready = app_info && app_info->ready;
-  }
-  info->SetBoolean("appReady", app_ready);
+  info->SetBoolean("playStoreEnabled",
+                   arc::IsArcPlayStoreEnabledForProfile(profile_));
+  info->SetBoolean(
+      "settingsAppAvailable",
+      ArcAppListPrefs::Get(profile_)->IsRegistered(arc::kSettingsAppId));
   return info;
 }
 
@@ -82,7 +86,7 @@ void AndroidAppsHandler::SendAndroidAppsInfo() {
   AllowJavascript();
   std::unique_ptr<base::DictionaryValue> info = BuildAndroidAppsInfo();
   CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("android-apps-info-update"), *info);
+                         base::Value("android-apps-info-update"), *info);
 }
 
 void AndroidAppsHandler::ShowAndroidAppsSettings(const base::ListValue* args) {
@@ -92,7 +96,7 @@ void AndroidAppsHandler::ShowAndroidAppsSettings(const base::ListValue* args) {
   int flags = activated_from_keyboard ? ui::EF_NONE : ui::EF_LEFT_MOUSE_BUTTON;
 
   // Settings in secondary profile cannot access ARC.
-  CHECK(arc::ArcSessionManager::IsAllowedForProfile(profile_));
+  CHECK(arc::IsArcAllowedForProfile(profile_));
   arc::LaunchAndroidSettingsApp(profile_, flags);
 }
 

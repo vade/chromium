@@ -67,8 +67,7 @@ template <typename T, typename... Ts>
 struct ParamTuple<T, Ts...> {
   bool Parse(const base::ListValue& list,
              const base::ListValue::const_iterator& it) {
-    return it != list.end() && GetValue(**it, &head) &&
-           tail.Parse(list, it + 1);
+    return it != list.end() && GetValue(*it, &head) && tail.Parse(list, it + 1);
   }
 
   template <typename H, typename... As>
@@ -184,6 +183,8 @@ DevToolsEmbedderMessageDispatcher::CreateForDevToolsFrontend(
   d->RegisterHandler("searchInPath", &Delegate::SearchInPath, delegate);
   d->RegisterHandler("setWhitelistedShortcuts",
                      &Delegate::SetWhitelistedShortcuts, delegate);
+  d->RegisterHandler("setEyeDropperActive", &Delegate::SetEyeDropperActive,
+                     delegate);
   d->RegisterHandler("showCertificateViewer",
                      &Delegate::ShowCertificateViewer, delegate);
   d->RegisterHandler("zoomIn", &Delegate::ZoomIn, delegate);

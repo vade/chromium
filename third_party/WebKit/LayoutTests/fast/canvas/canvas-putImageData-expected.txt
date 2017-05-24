@@ -1,172 +1,66 @@
-This test ensures that putImageData works correctly, the end result should be a 100x100px green square.
-
-On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
-
-
-PASS getPixel(0,0) is [0,128,0,255]
-PASS getPixel(25,25) is [0,128,0,255]
-PASS getPixel(49,0) is [0,128,0,255]
-PASS getPixel(0,49) is [0,128,0,255]
-PASS getPixel(49,49) is [0,128,0,255]
-PASS getPixel(50,0) is [0,0,0,0]
-PASS getPixel(0,50) is [0,0,0,0]
-PASS getPixel(50,50) is [0,0,0,0]
-PASS getPixel(0,50) is [0,128,0,255]
-PASS getPixel(25,75) is [0,128,0,255]
-PASS getPixel(49,50) is [0,128,0,255]
-PASS getPixel(0,99) is [0,128,0,255]
-PASS getPixel(49,99) is [0,128,0,255]
-PASS getPixel(50,50) is [0,128,0,255]
-PASS getPixel(75,75) is [0,128,0,255]
-PASS getPixel(99,99) is [0,128,0,255]
-PASS getPixel(50,49) is [0,0,0,0]
-PASS getPixel(50,0) is [0,128,0,255]
-PASS getPixel(50,5) is [0,128,0,255]
-PASS getPixel(50,15) is [0,128,0,255]
-PASS getPixel(50,25) is [0,128,0,255]
-PASS getPixel(50,35) is [0,128,0,255]
-PASS getPixel(50,45) is [0,128,0,255]
-PASS getPixel(55,0) is [0,128,0,255]
-PASS getPixel(55,5) is [0,128,0,255]
-PASS getPixel(55,15) is [0,128,0,255]
-PASS getPixel(55,25) is [0,128,0,255]
-PASS getPixel(55,35) is [0,128,0,255]
-PASS getPixel(55,45) is [0,128,0,255]
-PASS getPixel(65,0) is [0,128,0,255]
-PASS getPixel(65,5) is [0,128,0,255]
-PASS getPixel(65,15) is [0,128,0,255]
-PASS getPixel(65,25) is [0,128,0,255]
-PASS getPixel(65,35) is [0,128,0,255]
-PASS getPixel(65,45) is [0,128,0,255]
-PASS getPixel(75,0) is [0,128,0,255]
-PASS getPixel(75,5) is [0,128,0,255]
-PASS getPixel(75,15) is [0,128,0,255]
-PASS getPixel(75,25) is [0,128,0,255]
-PASS getPixel(75,35) is [0,128,0,255]
-PASS getPixel(75,45) is [0,128,0,255]
-PASS getPixel(85,0) is [0,128,0,255]
-PASS getPixel(85,5) is [0,128,0,255]
-PASS getPixel(85,15) is [0,128,0,255]
-PASS getPixel(85,25) is [0,128,0,255]
-PASS getPixel(85,35) is [0,128,0,255]
-PASS getPixel(85,45) is [0,128,0,255]
-PASS getPixel(95,0) is [0,128,0,255]
-PASS getPixel(95,5) is [0,128,0,255]
-PASS getPixel(95,15) is [0,128,0,255]
-PASS getPixel(95,25) is [0,128,0,255]
-PASS getPixel(95,35) is [0,128,0,255]
-PASS getPixel(95,45) is [0,128,0,255]
-PASS getPixel(0,25) is [0,128,0,255]
-PASS getPixel(99,25) is [0,128,0,255]
-PASS getPixel(25,0) is [0,128,0,255]
-PASS getPixel(25,99) is [0,128,0,255]
-PASS getPixel(50,0) is [0,128,0,255]
-PASS getPixel(50,5) is [0,128,0,255]
-PASS getPixel(50,15) is [0,128,0,255]
-PASS getPixel(50,25) is [0,128,0,255]
-PASS getPixel(50,35) is [0,128,0,255]
-PASS getPixel(50,45) is [0,128,0,255]
-PASS getPixel(55,0) is [0,128,0,255]
-PASS getPixel(55,5) is [0,128,0,255]
-PASS getPixel(55,15) is [0,128,0,255]
-PASS getPixel(55,25) is [0,128,0,255]
-PASS getPixel(55,35) is [0,128,0,255]
-PASS getPixel(55,45) is [0,128,0,255]
-PASS getPixel(65,0) is [0,128,0,255]
-PASS getPixel(65,5) is [0,128,0,255]
-PASS getPixel(65,15) is [0,128,0,255]
-PASS getPixel(65,25) is [0,128,0,255]
-PASS getPixel(65,35) is [0,128,0,255]
-PASS getPixel(65,45) is [0,128,0,255]
-PASS getPixel(75,0) is [0,128,0,255]
-PASS getPixel(75,5) is [0,128,0,255]
-PASS getPixel(75,15) is [0,128,0,255]
-PASS getPixel(75,25) is [0,128,0,255]
-PASS getPixel(75,35) is [0,128,0,255]
-PASS getPixel(75,45) is [0,128,0,255]
-PASS getPixel(85,0) is [0,128,0,255]
-PASS getPixel(85,5) is [0,128,0,255]
-PASS getPixel(85,15) is [0,128,0,255]
-PASS getPixel(85,25) is [0,128,0,255]
-PASS getPixel(85,35) is [0,128,0,255]
-PASS getPixel(85,45) is [0,128,0,255]
-PASS getPixel(95,0) is [0,128,0,255]
-PASS getPixel(95,5) is [0,128,0,255]
-PASS getPixel(95,15) is [0,128,0,255]
-PASS getPixel(95,25) is [0,128,0,255]
-PASS getPixel(95,35) is [0,128,0,255]
-PASS getPixel(95,45) is [0,128,0,255]
-PASS getPixel(0,25) is [0,128,0,255]
-PASS getPixel(0,50) is [0,128,0,255]
-PASS getPixel(0,75) is [0,128,0,255]
-PASS getPixel(99,25) is [0,128,0,255]
-PASS getPixel(99,50) is [0,128,0,255]
-PASS getPixel(99,75) is [0,128,0,255]
-PASS getPixel(25,0) is [0,128,0,255]
-PASS getPixel(50,0) is [0,128,0,255]
-PASS getPixel(75,0) is [0,128,0,255]
-PASS getPixel(25,99) is [0,128,0,255]
-PASS getPixel(50,99) is [0,128,0,255]
-PASS getPixel(75,99) is [0,128,0,255]
-PASS getPixel(0,25) is [0,128,0,255]
-PASS getPixel(0,50) is [0,128,0,255]
-PASS getPixel(0,75) is [0,128,0,255]
-PASS getPixel(10,25) is [0,128,0,255]
-PASS getPixel(10,50) is [0,128,0,255]
-PASS getPixel(10,75) is [0,128,0,255]
-PASS getPixel(99,25) is [0,128,0,255]
-PASS getPixel(99,50) is [0,128,0,255]
-PASS getPixel(99,75) is [0,128,0,255]
-PASS getPixel(89,25) is [0,128,0,255]
-PASS getPixel(89,50) is [0,128,0,255]
-PASS getPixel(89,75) is [0,128,0,255]
-PASS getPixel(25,0) is [0,128,0,255]
-PASS getPixel(50,0) is [0,128,0,255]
-PASS getPixel(75,0) is [0,128,0,255]
-PASS getPixel(25,10) is [0,128,0,255]
-PASS getPixel(50,10) is [0,128,0,255]
-PASS getPixel(75,10) is [0,128,0,255]
-PASS getPixel(25,99) is [0,128,0,255]
-PASS getPixel(50,99) is [0,128,0,255]
-PASS getPixel(75,99) is [0,128,0,255]
-PASS getPixel(25,89) is [0,128,0,255]
-PASS getPixel(50,89) is [0,128,0,255]
-PASS getPixel(75,89) is [0,128,0,255]
-PASS getPixel(11,11) is [0,128,0,255]
-PASS getPixel(1,1) is [0,128,0,255]
-PASS getPixel(1,1) is [0,128,0,255]
-PASS getPixel(10,10) is [0,128,0,255]
-PASS getPixel(1,1) is [0,128,0,255]
-PASS getPixel(10,10) is [0,128,0,255]
-PASS getPixel(1,1) is [0,128,0,255]
-PASS getPixel(9,9) is [0,128,0,255]
-PASS getPixel(1,1) is [0,128,0,255]
-PASS getPixel(9,9) is [0,128,0,255]
-PASS getPixel(1,1) is [0,128,0,255]
-PASS getPixel(9,9) is [0,128,0,255]
-PASS context.putImageData({}, 0, 0) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': parameter 1 is not of type 'ImageData'..
-PASS context.putImageData(buffer, NaN, 0, 0, 0, 0, 0) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': The provided double value is non-finite..
-PASS context.putImageData(buffer, 0, NaN, 0, 0, 0, 0) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': The provided double value is non-finite..
-PASS context.putImageData(buffer, 0, 0, NaN, 0, 0, 0) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': The provided double value is non-finite..
-PASS context.putImageData(buffer, 0, 0, 0, NaN, 0, 0) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': The provided double value is non-finite..
-PASS context.putImageData(buffer, 0, 0, 0, 0, NaN, 0) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': The provided double value is non-finite..
-PASS context.putImageData(buffer, 0, 0, 0, 0, 0, NaN) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': The provided double value is non-finite..
-PASS context.putImageData(buffer, Infinity, 0, 0, 0, 0, 0) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': The provided double value is non-finite..
-PASS context.putImageData(buffer, 0, Infinity, 0, 0, 0, 0) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': The provided double value is non-finite..
-PASS context.putImageData(buffer, 0, 0, Infinity, 0, 0, 0) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': The provided double value is non-finite..
-PASS context.putImageData(buffer, 0, 0, 0, Infinity, 0, 0) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': The provided double value is non-finite..
-PASS context.putImageData(buffer, 0, 0, 0, 0, Infinity, 0) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': The provided double value is non-finite..
-PASS context.putImageData(buffer, 0, 0, 0, 0, 0, Infinity) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': The provided double value is non-finite..
-PASS context.putImageData(buffer, undefined, 0, 0, 0, 0, 0) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': The provided double value is non-finite..
-PASS context.putImageData(buffer, 0, undefined, 0, 0, 0, 0) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': The provided double value is non-finite..
-PASS context.putImageData(buffer, 0, 0, undefined, 0, 0, 0) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': The provided double value is non-finite..
-PASS context.putImageData(buffer, 0, 0, 0, undefined, 0, 0) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': The provided double value is non-finite..
-PASS context.putImageData(buffer, 0, 0, 0, 0, undefined, 0) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': The provided double value is non-finite..
-PASS context.putImageData(buffer, 0, 0, 0, 0, 0, undefined) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': The provided double value is non-finite..
-PASS context.putImageData(null, 0, 0, 0, 0, 0, 0) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': parameter 1 is not of type 'ImageData'..
-PASS context.putImageData(undefined, 0, 0, 0, 0, 0, 0) threw exception TypeError: Failed to execute 'putImageData' on 'CanvasRenderingContext2D': parameter 1 is not of type 'ImageData'..
-PASS successfullyParsed is true
-
-TEST COMPLETE
-
+This is a testharness.js-based test.
+PASS PixelTestBasicDrawing 1 
+PASS PixelTestBasicDrawing 2 
+PASS PixelTestBasicDrawing 3 
+PASS PixelTestBasicDrawing 4 
+PASS PixelTestBasicDrawing 5 
+PASS PixelTestBasicDrawing 6 
+PASS PixelTestBasicDrawing 7 
+PASS PixelTestPositionedDrawing 1 
+PASS PixelTestPositionedDrawing 2 
+PASS PixelTestPositionedDrawing 3 
+PASS PixelTestPositionedDrawing 4 
+PASS PixelTestPositionedDrawing 5 
+PASS PixelTestTranslation 1 
+PASS PixelTestTranslation 2 
+PASS PixelTestTranslation 3 
+PASS PixelTestTranslation 4 
+PASS Test dirty rect handling. 
+PASS Test drawing outside the canvas border. 
+PASS test drawing with non-intersecting dirty rect. 
+PASS Test drawing to region intersect edge of canvas. 
+PASS PixelTestRegionIntersectLeftEdge 1 
+PASS PixelTestRegionIntersectLeftEdge 2 
+PASS PixelTestRegionIntersectLeftEdge 3 
+PASS PixelTestRegionIntersectRightEdge 1 
+PASS PixelTestRegionIntersectRightEdge 2 
+PASS PixelTestRegionIntersectRightEdge 3 
+PASS PixelTestRegionIntersectTopEdge 1 
+PASS PixelTestRegionIntersectTopEdge 2 
+PASS PixelTestRegionIntersectTopEdge 3 
+PASS PixelTestRegionIntersectBototmEdge 1 
+PASS PixelTestRegionIntersectBototmEdge 2 
+PASS PixelTestRegionIntersectBototmEdge 3 
+PASS Test drawing with only part of the dirty region intersecting the window. 
+PASS PixelTestDirtyRegionIntersectLeftEdge 1 
+PASS PixelTestDirtyRegionIntersectLeftEdge 2 
+PASS PixelTestDirtyRegionIntersectLeftEdge 3 
+PASS PixelTestDirtyRegionIntersectLeftEdge 4 
+PASS PixelTestDirtyRegionIntersectLeftEdge 5 
+PASS PixelTestDirtyRegionIntersectLeftEdge 6 
+PASS PixelTestDirtyRegionIntersectRightEdge 1 
+PASS PixelTestDirtyRegionIntersectRightEdge 2 
+PASS PixelTestDirtyRegionIntersectRightEdge 3 
+PASS PixelTestDirtyRegionIntersectRightEdge 4 
+PASS PixelTestDirtyRegionIntersectRightEdge 5 
+PASS PixelTestDirtyRegionIntersectRightEdge 6 
+PASS PixelTestDirtyRegionIntersectTopEdge 1 
+PASS PixelTestDirtyRegionIntersectTopEdge 2 
+PASS PixelTestDirtyRegionIntersectTopEdge 3 
+PASS PixelTestDirtyRegionIntersectTopEdge 4 
+PASS PixelTestDirtyRegionIntersectTopEdge 5 
+PASS PixelTestDirtyRegionIntersectTopEdge 6 
+PASS PixelTestDirtyRegionIntersectBottomEdge 1 
+PASS PixelTestDirtyRegionIntersectBottomEdge 2 
+PASS PixelTestDirtyRegionIntersectBottomEdge 3 
+PASS PixelTestDirtyRegionIntersectBottomEdge 4 
+PASS PixelTestDirtyRegionIntersectBottomEdge 5 
+PASS PixelTestDirtyRegionIntersectBottomEdge 6 
+PASS Test clamping of dx/dy. 
+PASS Test clamping of dirtyX/Y/Width/Height. 
+FAIL TestInvalidParam 1 Test bug: need to pass exception to assert_throws()
+FAIL TestInvalidParam 2 Test bug: need to pass exception to assert_throws()
+FAIL TestInvalidParam 3 Test bug: need to pass exception to assert_throws()
+PASS Ensure we don't mess up bounds clipping checks. 
+Harness: the test ran to completion.
 

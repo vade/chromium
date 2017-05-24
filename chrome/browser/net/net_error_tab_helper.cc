@@ -26,9 +26,7 @@
 #include "url/gurl.h"
 
 #if defined(OS_ANDROID)
-#include "base/guid.h"
-#include "chrome/browser/android/offline_pages/request_coordinator_factory.h"
-#include "components/offline_pages/core/background/request_coordinator.h"
+#include "chrome/browser/android/offline_pages/offline_page_utils.h"
 #include "components/offline_pages/core/client_namespace_constants.h"
 #endif  // defined(OS_ANDROID)
 
@@ -54,10 +52,8 @@ void OnDnsProbeFinishedOnIOThread(
     DnsProbeStatus result) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  BrowserThread::PostTask(
-      BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(callback, result));
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                          base::BindOnce(callback, result));
 }
 
 // Can only access g_browser_process->io_thread() from the browser thread,
@@ -195,12 +191,11 @@ void NetErrorTabHelper::StartDnsProbe() {
   DVLOG(1) << "Starting DNS probe.";
 
   BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&StartDnsProbeOnIOThread,
-                 base::Bind(&NetErrorTabHelper::OnDnsProbeFinished,
-                            weak_factory_.GetWeakPtr()),
-                 g_browser_process->io_thread()));
+      BrowserThread::IO, FROM_HERE,
+      base::BindOnce(&StartDnsProbeOnIOThread,
+                     base::Bind(&NetErrorTabHelper::OnDnsProbeFinished,
+                                weak_factory_.GetWeakPtr()),
+                     g_browser_process->io_thread()));
 }
 
 void NetErrorTabHelper::OnDnsProbeFinished(DnsProbeStatus result) {
@@ -292,16 +287,9 @@ void NetErrorTabHelper::RunNetworkDiagnosticsHelper(
 
 #if defined(OS_ANDROID)
 void NetErrorTabHelper::DownloadPageLaterHelper(const GURL& page_url) {
-  offline_pages::RequestCoordinator* request_coordinator =
-      offline_pages::RequestCoordinatorFactory::GetForBrowserContext(
-          web_contents()->GetBrowserContext());
-  DCHECK(request_coordinator) << "No RequestCoordinator for SavePageLater";
-  offline_pages::ClientId client_id(
-      offline_pages::kAsyncNamespace, base::GenerateGUID());
-  request_coordinator->SavePageLater(
-      page_url, client_id, true /*user_requested*/,
-      offline_pages::RequestCoordinator::RequestAvailability::
-          ENABLED_FOR_OFFLINER);
+  offline_pages::OfflinePageUtils::ScheduleDownload(
+      web_contents(), offline_pages::kAsyncNamespace, page_url,
+      offline_pages::OfflinePageUtils::DownloadUIActionFlags::PROMPT_DUPLICATE);
 }
 #endif  // defined(OS_ANDROID)
 

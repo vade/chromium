@@ -16,15 +16,16 @@
 #include "base/feature_list.h"
 #include "base/files/file_util.h"
 #include "base/metrics/field_trial.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
-#include "chrome/browser/features.h"
+#include "base/time/time.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/browser_watcher/features.h"
-#include "components/browser_watcher/stability_debugging.h"
+#include "components/browser_watcher/stability_paths.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/common/content_switches.h"
 #include "media/media_features.h"
@@ -80,11 +81,42 @@ void LogStabilityDebuggingInitStatus(
                             INIT_STATUS_MAX);
 }
 
+// Record information about the chrome module.
+void RecordChromeModuleInfo(
+    base::debug::GlobalActivityTracker* global_tracker) {
+  DCHECK(global_tracker);
+
+  base::debug::GlobalActivityTracker::ModuleInfo module;
+  module.is_loaded = true;
+  module.address = reinterpret_cast<uintptr_t>(&__ImageBase);
+
+  base::win::PEImage pe(&__ImageBase);
+  PIMAGE_NT_HEADERS headers = pe.GetNTHeaders();
+  CHECK(headers);
+  module.size = headers->OptionalHeader.SizeOfImage;
+  module.timestamp = headers->FileHeader.TimeDateStamp;
+
+  GUID guid;
+  DWORD age;
+  pe.GetDebugId(&guid, &age);
+  module.age = age;
+  static_assert(sizeof(module.identifier) >= sizeof(guid),
+                "Identifier field must be able to contain a GUID.");
+  memcpy(module.identifier, &guid, sizeof(guid));
+
+  module.file = "chrome.dll";
+  module.debug_file = "chrome.dll.pdb";
+
+  global_tracker->RecordModuleInfo(module);
+}
+
 void SetupStabilityDebugging() {
   if (!base::FeatureList::IsEnabled(
           browser_watcher::kStabilityDebuggingFeature)) {
     return;
   }
+
+  SCOPED_UMA_HISTOGRAM_TIMER("ActivityTracker.Record.SetupTime");
 
   // TODO(bcwhite): Adjust these numbers once there is real data to show
   // just how much of an arena is necessary.
@@ -132,29 +164,33 @@ void SetupStabilityDebugging() {
                                                 &version_number, &special_build,
                                                 &channel_name);
 
-    base::debug::ActivityUserData& global_data = global_tracker->user_data();
-    global_data.SetString(browser_watcher::kStabilityProduct, product_name);
-    global_data.SetString(browser_watcher::kStabilityVersion, version_number);
-    global_data.SetString(browser_watcher::kStabilityChannel, channel_name);
-    global_data.SetString(browser_watcher::kStabilitySpecialBuild,
-                          special_build);
+    base::debug::ActivityUserData& proc_data = global_tracker->process_data();
+    proc_data.SetString(browser_watcher::kStabilityProduct, product_name);
+    proc_data.SetString(browser_watcher::kStabilityVersion, version_number);
+    proc_data.SetString(browser_watcher::kStabilityChannel, channel_name);
+    proc_data.SetString(browser_watcher::kStabilitySpecialBuild, special_build);
 #if defined(ARCH_CPU_X86)
-    global_data.SetString(browser_watcher::kStabilityPlatform, "Win32");
+    proc_data.SetString(browser_watcher::kStabilityPlatform, "Win32");
 #elif defined(ARCH_CPU_X86_64)
-    global_data.SetString(browser_watcher::kStabilityPlatform, "Win64");
+    proc_data.SetString(browser_watcher::kStabilityPlatform, "Win64");
 #endif
+    proc_data.SetInt(browser_watcher::kStabilityStartTimestamp,
+                     base::Time::Now().ToInternalValue());
 
-    // Record information about chrome's module.
-    global_data.SetUint(browser_watcher::kStabilityModuleAddress,
-                        reinterpret_cast<uint64_t>(&__ImageBase));
+    // Record information about chrome's module. We want this to be done early.
+    RecordChromeModuleInfo(global_tracker);
 
-    base::win::PEImage pe(&__ImageBase);
-    PIMAGE_NT_HEADERS headers = pe.GetNTHeaders();
-    CHECK(headers);
-    global_data.SetUint(browser_watcher::kStabilityModuleTimestamp,
-                        headers->FileHeader.TimeDateStamp);
-    global_data.SetUint(browser_watcher::kStabilityModuleSize,
-                        headers->OptionalHeader.SizeOfImage);
+    // Trigger a flush of the memory mapped file to maximize the chances of
+    // having a minimal amount of content in the stability file, even if
+    // the system crashes or loses power. Note: this does not flush the file
+    // metadata nor does it wait for the changes to be flushed to disk before
+    // returning. This is an expensive operation. Run as an experiment to
+    // measure the effect on performance and collection.
+    const bool should_flush = base::GetFieldTrialParamByFeatureAsBool(
+        browser_watcher::kStabilityDebuggingFeature,
+        browser_watcher::kInitFlushParam, false);
+    if (should_flush)
+      ::FlushViewOfFile(global_tracker->allocator()->data(), 0U);
   }
 }
 #endif  // defined(OS_WIN)
@@ -168,12 +204,6 @@ void SetupDesktopFieldTrials() {
   SetupStabilityDebugging();
   base::FeatureList::IsEnabled(features::kModuleDatabase);
 #endif  // defined(OS_WIN)
-  // Activate the experiment as early as possible to increase its visibility
-  // (e.g. the likelihood of its presence in the serialized system profile).
-  // This also needs to happen before the browser rendez-vous attempt
-  // (NotifyOtherProcessOrCreate) in PreMainMessageLoopRun so the corresponding
-  // metrics are tagged.
-  base::FeatureList::IsEnabled(features::kDesktopFastShutdown);
 }
 
 }  // namespace chrome

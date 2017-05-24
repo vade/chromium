@@ -17,6 +17,7 @@
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/ash/system_tray_client.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/grit/generated_resources.h"
@@ -29,11 +30,12 @@
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/gfx/vector_icons_public.h"
+#include "ui/vector_icons/vector_icons.h"
 #include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/layout/fill_layout.h"
@@ -54,7 +56,7 @@ gfx::NativeWindow GetParentForUnhostedDialog() {
     // TODO(jamescook): LoginDisplayHost has the wrong native window in mash.
     // This will fix itself when mash converts from ui::Window to aura::Window.
     // http://crbug.com/659155
-    if (!chrome::IsRunningInMash())
+    if (!ash_util::IsRunningInMash())
       return LoginDisplayHost::default_host()->GetNativeWindow();
   } else {
     Browser* browser = chrome::FindTabbedBrowser(
@@ -69,6 +71,7 @@ gfx::NativeWindow GetParentForUnhostedDialog() {
 
 // static
 const int ChildNetworkConfigView::kInputFieldMinWidth = 270;
+const int ChildNetworkConfigView::kInputFieldHeight = 28;
 
 NetworkConfigView::NetworkConfigView()
     : child_config_view_(nullptr),
@@ -76,6 +79,7 @@ NetworkConfigView::NetworkConfigView()
       advanced_button_(nullptr) {
   DCHECK(!g_instance);
   g_instance = this;
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::NETWORK_CONFIG);
 }
 
 bool NetworkConfigView::InitWithNetworkState(const NetworkState* network) {
@@ -232,9 +236,14 @@ void NetworkConfigView::ShowAdvancedView() {
                                           true /* show_8021x */);
   AddChildView(child_config_view_);
   // Resize the window to be able to hold the new widgets.
-  gfx::Size size = views::Widget::GetLocalizedContentsSize(
+  gfx::Size size = GetWidget()->non_client_view()->GetPreferredSize();
+  gfx::Size predefined_size = views::Widget::GetLocalizedContentsSize(
       IDS_JOIN_WIFI_NETWORK_DIALOG_ADVANCED_WIDTH_CHARS,
       IDS_JOIN_WIFI_NETWORK_DIALOG_ADVANCED_MINIMUM_HEIGHT_LINES);
+  // Use the pre-determined value to determine its size for non-harmony dialog.
+  if (!ui::MaterialDesignController::IsSecondaryUiMaterial())
+    size.SetToMax(predefined_size);
+
   // Get the new bounds with desired size at the same center point.
   gfx::Rect bounds = GetWidget()->GetWindowBoundsInScreen();
   int horiz_padding = bounds.width() - size.width();
@@ -320,8 +329,8 @@ ControlledSettingIndicatorView::ControlledSettingIndicatorView(
   image_view_ = new views::ImageView();
   // Disable |image_view_| so mouse events propagate to the parent.
   image_view_->SetEnabled(false);
-  image_view_->SetImage(gfx::CreateVectorIcon(gfx::VectorIconId::BUSINESS, 16,
-                                              gfx::kChromeIconGrey));
+  image_view_->SetImage(
+      gfx::CreateVectorIcon(ui::kBusinessIcon, 16, gfx::kChromeIconGrey));
   image_view_->SetTooltipText(
       l10n_util::GetStringUTF16(IDS_OPTIONS_CONTROLLED_SETTING_POLICY));
   AddChildView(image_view_);

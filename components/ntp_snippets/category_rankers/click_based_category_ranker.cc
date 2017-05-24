@@ -10,8 +10,10 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/values.h"
 #include "components/ntp_snippets/category_rankers/constant_category_ranker.h"
+#include "components/ntp_snippets/content_suggestions_metrics.h"
 #include "components/ntp_snippets/features.h"
 #include "components/ntp_snippets/pref_names.h"
 #include "components/prefs/pref_registry_simple.h"
@@ -29,40 +31,54 @@ namespace {
 // a passing margin. Each position has its own passing margin. The category is
 // moved upwards (i.e. passes another category) when it has at least passing
 // margin of the previous category position more clicks.
-const int kPassingMargin = 5;
+const int kDefaultPassingMargin = 5;
+const char kPassingMarginParamName[] =
+    "click_based_category_ranker-passing_margin";
 
 // The first categories get more attention and, therefore, here more stability
 // is needed. The passing margin of such categories is increased and they are
 // referred to as top categories (with extra margin). Only category position
 // defines whether a category is top, but not its content.
-const int kNumTopCategoriesWithExtraMargin = 3;
+const int kDefaultNumTopCategoriesWithExtraMargin = 3;
+const char kNumTopCategoriesWithExtraMarginParamName[] =
+    "click_based_category_ranker-num_top_categories_with_extra_margin";
 
 // The increase of passing margin for each top category compared to the next
 // category (e.g. the first top category has passing margin larger by this value
 // than the second top category, the last top category has it larger by this
 // value than the first non-top category).
-const int kExtraPassingMargin = 2;
+const int kDefaultExtraPassingMargin = 2;
+const char kExtraPassingMarginParamName[] =
+    "click_based_category_ranker-extra_passing_margin";
 
 // The ranker must "forget" history with time, so that changes in the user
 // behavior are reflected by the order in reasonable time. This is done using
 // click count decay with time. However, if there is not enough data, there is
 // no need in "forgetting" it. This value defines how many total clicks (across
 // categories) are considered enough to decay.
-const int kMinNumClicksToDecay = 30;
+const int kDefaultMinNumClicksToDecay = 30;
+const char kMinNumClicksToDecayParamName[] =
+    "click_based_category_ranker-min_num_clicks_to_decay";
 
 // Time between two consecutive decays (assuming enough clicks).
-const base::TimeDelta kTimeBetweenDecays = base::TimeDelta::FromDays(1);
+const int kDefaultTimeBetweenDecaysMinutes = 24 * 60;  // 24 hours = 1 day
+const char kTimeBetweenDecaysParamName[] =
+    "click_based_category_ranker-time_between_decays_minutes";
 
 // Decay factor as a fraction. The current value approximates the seventh root
 // of 0.5. This yields a 50% decay per seven decays. Seven weak decays are used
 // instead of one 50% decay in order to decrease difference of click weight in
 // time.
-const int kDecayFactorNumerator = 91;
-const int kDecayFactorDenominator = 100;  // pow(0.91, 7) = 0.517
+const int kDefaultDecayFactorNumerator = 91;
+const int kDefaultDecayFactorDenominator = 100;  // pow(0.91, 7) = 0.517
+const char kDecayFactorNumeratorParamName[] =
+    "click_based_category_ranker-decay_factor_numerator";
+const char kDecayFactorDenominatorParamName[] =
+    "click_based_category_ranker-decay_factor_denominator";
 
 // Number of positions by which a dismissed category is downgraded.
 const int kDefaultDismissedCategoryPenalty = 1;
-const char* kDismissedCategoryPenaltyParamName =
+const char kDismissedCategoryPenaltyParamName[] =
     "click_based_category_ranker-dismissed_category_penalty";
 
 const char kCategoryIdKey[] = "category";
@@ -71,10 +87,35 @@ const char kLastDismissedKey[] = "last_dismissed";
 const char kContentSuggestionsPromotedCategory[] =
     "click_based_category_ranker-promoted_category";
 
-int GetDismissedCategoryPenaltyVariationValue() {
+int GetExtraPassingMargin() {
   return variations::GetVariationParamByFeatureAsInt(
-      kCategoryRanker, kDismissedCategoryPenaltyParamName,
-      kDefaultDismissedCategoryPenalty);
+      kCategoryRanker, kExtraPassingMarginParamName,
+      kDefaultExtraPassingMargin);
+}
+
+int GetMinNumClicksToDecay() {
+  return variations::GetVariationParamByFeatureAsInt(
+      kCategoryRanker, kMinNumClicksToDecayParamName,
+      kDefaultMinNumClicksToDecay);
+}
+
+base::TimeDelta GetTimeBetweenDecays() {
+  return base::TimeDelta::FromMinutes(
+      variations::GetVariationParamByFeatureAsInt(
+          kCategoryRanker, kTimeBetweenDecaysParamName,
+          kDefaultTimeBetweenDecaysMinutes));
+}
+
+int GetDecayFactorNumerator() {
+  return variations::GetVariationParamByFeatureAsInt(
+      kCategoryRanker, kDecayFactorNumeratorParamName,
+      kDefaultDecayFactorNumerator);
+}
+
+int GetDecayFactorDenominator() {
+  return variations::GetVariationParamByFeatureAsInt(
+      kCategoryRanker, kDecayFactorDenominatorParamName,
+      kDefaultDecayFactorDenominator);
 }
 
 base::Optional<Category> GetPromotedCategoryFromVariations() {
@@ -89,6 +130,14 @@ base::Optional<Category> GetPromotedCategoryFromVariations() {
     return base::nullopt;
   }
   return Category::FromIDValue(category_id);
+}
+
+std::string GetOptionalCategoryAsString(
+    const base::Optional<Category>& optional_category) {
+  if (optional_category.has_value()) {
+    return base::IntToString(optional_category->id());
+  }
+  return "None";
 }
 
 }  // namespace
@@ -206,7 +255,62 @@ void ClickBasedCategoryRanker::AppendCategoryIfNecessary(Category category) {
   if (!ContainsCategory(category)) {
     ordered_categories_.push_back(RankedCategory(
         category, /*clicks=*/0, /*last_dismissed=*/base::Time()));
+    StoreOrderToPrefs(ordered_categories_);
   }
+}
+
+void ClickBasedCategoryRanker::InsertCategoryBeforeIfNecessary(
+    Category category_to_insert,
+    Category anchor) {
+  InsertCategoryRelativeToIfNecessary(category_to_insert, anchor,
+                                      /*after=*/false);
+}
+
+void ClickBasedCategoryRanker::InsertCategoryAfterIfNecessary(
+    Category category_to_insert,
+    Category anchor) {
+  InsertCategoryRelativeToIfNecessary(category_to_insert, anchor,
+                                      /*after=*/true);
+}
+
+std::vector<CategoryRanker::DebugDataItem>
+ClickBasedCategoryRanker::GetDebugData() {
+  std::vector<CategoryRanker::DebugDataItem> result;
+  result.push_back(
+      CategoryRanker::DebugDataItem("Type", "ClickBasedCategoryRanker"));
+
+  std::string initial_order_type;
+  CategoryOrderChoice choice = GetSelectedCategoryOrder();
+  if (choice == CategoryOrderChoice::GENERAL) {
+    initial_order_type = "GENERAL";
+  }
+  if (choice == CategoryOrderChoice::EMERGING_MARKETS_ORIENTED) {
+    initial_order_type = "EMERGING_MARKETS_ORIENTED;";
+  }
+  result.push_back(
+      CategoryRanker::DebugDataItem("Initial order type", initial_order_type));
+
+  std::vector<std::string> category_strings;
+  for (const auto& ranked_category : ordered_categories_) {
+    category_strings.push_back(base::ReplaceStringPlaceholders(
+        "($1; $2)",
+        {base::IntToString(ranked_category.category.id()),
+         base::IntToString(ranked_category.clicks)},
+        /*offsets=*/nullptr));
+  }
+  result.push_back(
+      CategoryRanker::DebugDataItem("Current order (with click counts)",
+                                    base::JoinString(category_strings, ", ")));
+
+  result.push_back(CategoryRanker::DebugDataItem(
+      "Actual promoted category",
+      GetOptionalCategoryAsString(promoted_category_)));
+
+  result.push_back(CategoryRanker::DebugDataItem(
+      "Raw promoted category from variations",
+      GetOptionalCategoryAsString(GetPromotedCategoryFromVariations())));
+
+  return result;
 }
 
 void ClickBasedCategoryRanker::OnSuggestionOpened(Category category) {
@@ -229,6 +333,8 @@ void ClickBasedCategoryRanker::OnSuggestionOpened(Category category) {
     std::vector<RankedCategory>::iterator previous = current - 1;
     const int passing_margin = GetPositionPassingMargin(previous);
     if (current->clicks >= previous->clicks + passing_margin) {
+      const int new_index = previous - ordered_categories_.begin();
+      ntp_snippets::metrics::OnCategoryMovedUp(new_index);
       // It is intended to move only by one position per click in order to avoid
       // dramatic changes, which could confuse the user.
       std::swap(*current, *previous);
@@ -245,7 +351,7 @@ void ClickBasedCategoryRanker::OnCategoryDismissed(Category category) {
     return;
   }
 
-  const int penalty = GetDismissedCategoryPenaltyVariationValue();
+  const int penalty = GetDismissedCategoryPenalty();
   if (penalty != 0) {  // Dismissed category penalty is turned on?
     std::vector<RankedCategory>::iterator current = FindCategory(category);
     for (int downgrade = 0; downgrade < penalty; ++downgrade) {
@@ -259,7 +365,7 @@ void ClickBasedCategoryRanker::OnCategoryDismissed(Category category) {
 
     DCHECK(current != ordered_categories_.begin());
     std::vector<RankedCategory>::iterator previous = current - 1;
-    int new_clicks = std::max(previous->clicks - kPassingMargin, 0);
+    int new_clicks = std::max(previous->clicks - GetPassingMargin(), 0);
     // The previous category may have more clicks (but not enough to pass the
     // margin, this is possible when penalty >= 2), therefore, we ensure that
     // for this category we don't increase clicks.
@@ -286,17 +392,22 @@ void ClickBasedCategoryRanker::RegisterProfilePrefs(
 
 // static
 int ClickBasedCategoryRanker::GetPassingMargin() {
-  return kPassingMargin;
+  return variations::GetVariationParamByFeatureAsInt(
+      kCategoryRanker, kPassingMarginParamName, kDefaultPassingMargin);
 }
 
 // static
 int ClickBasedCategoryRanker::GetNumTopCategoriesWithExtraMargin() {
-  return kNumTopCategoriesWithExtraMargin;
+  return variations::GetVariationParamByFeatureAsInt(
+      kCategoryRanker, kNumTopCategoriesWithExtraMarginParamName,
+      kDefaultNumTopCategoriesWithExtraMargin);
 }
 
 // static
 int ClickBasedCategoryRanker::GetDismissedCategoryPenalty() {
-  return GetDismissedCategoryPenaltyVariationValue();
+  return variations::GetVariationParamByFeatureAsInt(
+      kCategoryRanker, kDismissedCategoryPenaltyParamName,
+      kDefaultDismissedCategoryPenalty);
 }
 
 ClickBasedCategoryRanker::RankedCategory::RankedCategory(
@@ -311,11 +422,13 @@ int ClickBasedCategoryRanker::GetPositionPassingMargin(
     std::vector<RankedCategory>::const_iterator category_position) const {
   int index = category_position - ordered_categories_.cbegin();
   int passing_margin_increase = 0;
-  if (index < kNumTopCategoriesWithExtraMargin) {
-    passing_margin_increase =
-        kExtraPassingMargin * (kNumTopCategoriesWithExtraMargin - index);
+  const int num_top_categories_with_extra_margin =
+      GetNumTopCategoriesWithExtraMargin();
+  if (index < num_top_categories_with_extra_margin) {
+    passing_margin_increase = GetExtraPassingMargin() *
+                              (num_top_categories_with_extra_margin - index);
   }
-  return kPassingMargin + passing_margin_increase;
+  return GetPassingMargin() + passing_margin_increase;
 }
 
 void ClickBasedCategoryRanker::RestoreDefaultOrder() {
@@ -335,8 +448,8 @@ void ClickBasedCategoryRanker::AppendKnownCategory(
     KnownCategories known_category) {
   Category category = Category::FromKnownCategory(known_category);
   DCHECK(!ContainsCategory(category));
-  ordered_categories_.push_back(RankedCategory(
-      category, /*clicks=*/0, /*last_dismissed=*/base::Time()));
+  ordered_categories_.push_back(
+      RankedCategory(category, /*clicks=*/0, /*last_dismissed=*/base::Time()));
 }
 
 namespace {
@@ -364,9 +477,9 @@ bool ClickBasedCategoryRanker::ReadOrderFromPrefs(
     return false;
   }
 
-  for (const std::unique_ptr<base::Value>& value : *list) {
-    base::DictionaryValue* dictionary;
-    if (!value->GetAsDictionary(&dictionary)) {
+  for (const base::Value& value : *list) {
+    const base::DictionaryValue* dictionary;
+    if (!value.GetAsDictionary(&dictionary)) {
       LOG(DFATAL) << "Failed to parse category data from prefs param "
                   << prefs::kClickBasedCategoryRankerOrderWithClicks
                   << " into dictionary.";
@@ -421,6 +534,23 @@ bool ClickBasedCategoryRanker::ContainsCategory(Category category) const {
   return false;
 }
 
+void ClickBasedCategoryRanker::InsertCategoryRelativeToIfNecessary(
+    Category category_to_insert,
+    Category anchor,
+    bool after) {
+  DCHECK(ContainsCategory(anchor));
+  if (ContainsCategory(category_to_insert)) {
+    return;
+  }
+
+  std::vector<RankedCategory>::iterator anchor_it = FindCategory(anchor);
+  ordered_categories_.insert(anchor_it + (after ? 1 : 0),
+                             RankedCategory(category_to_insert,
+                                            /*clicks=*/anchor_it->clicks,
+                                            /*last_dismissed=*/base::Time()));
+  StoreOrderToPrefs(ordered_categories_);
+}
+
 base::Time ClickBasedCategoryRanker::ReadLastDecayTimeFromPrefs() const {
   return base::Time::FromInternalValue(
       pref_service_->GetInt64(prefs::kClickBasedCategoryRankerLastDecayTime));
@@ -437,7 +567,7 @@ bool ClickBasedCategoryRanker::IsEnoughClicksToDecay() const {
   for (const RankedCategory& ranked_category : ordered_categories_) {
     num_clicks += ranked_category.clicks;
   }
-  return num_clicks >= kMinNumClicksToDecay;
+  return num_clicks >= GetMinNumClicksToDecay();
 }
 
 bool ClickBasedCategoryRanker::DecayClicksIfNeeded() {
@@ -450,14 +580,14 @@ bool ClickBasedCategoryRanker::DecayClicksIfNeeded() {
   }
   DCHECK_LE(last_decay, now);
 
-  int num_pending_decays = (now - last_decay) / kTimeBetweenDecays;
+  int num_pending_decays = (now - last_decay) / GetTimeBetweenDecays();
   int executed_decays = 0;
   while (executed_decays < num_pending_decays && IsEnoughClicksToDecay()) {
     for (RankedCategory& ranked_category : ordered_categories_) {
       DCHECK_GE(ranked_category.clicks, 0);
       const int64_t old_clicks = static_cast<int64_t>(ranked_category.clicks);
       ranked_category.clicks =
-          old_clicks * kDecayFactorNumerator / kDecayFactorDenominator;
+          old_clicks * GetDecayFactorNumerator() / GetDecayFactorDenominator();
     }
 
     ++executed_decays;
@@ -467,7 +597,7 @@ bool ClickBasedCategoryRanker::DecayClicksIfNeeded() {
   // done. Even if some were ignored due to absense of clicks, they would have
   // no effect anyway for the same reason.
   StoreLastDecayTimeToPrefs(last_decay +
-                            num_pending_decays * kTimeBetweenDecays);
+                            num_pending_decays * GetTimeBetweenDecays());
 
   if (executed_decays > 0) {
     StoreOrderToPrefs(ordered_categories_);

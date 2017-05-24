@@ -50,25 +50,23 @@ class AndroidManifest(object):
     assert len(manifests) == 1
     self.manifest = manifests[0]
 
-  def GetInstrumentation(self):
+  def GetInstrumentationElements(self):
     instrumentation_els = self.manifest.getElementsByTagName('instrumentation')
     if len(instrumentation_els) == 0:
       return None
-    if len(instrumentation_els) != 1:
-      raise Exception(
-          'More than one <instrumentation> element found in %s' % self.path)
-    return instrumentation_els[0]
+    return instrumentation_els
 
-  def CheckInstrumentation(self, expected_package):
-    instr = self.GetInstrumentation()
-    if not instr:
+  def CheckInstrumentationElements(self, expected_package):
+    instrs = self.GetInstrumentationElements()
+    if not instrs:
       raise Exception('No <instrumentation> elements found in %s' % self.path)
-    instrumented_package = instr.getAttributeNS(
-        'http://schemas.android.com/apk/res/android', 'targetPackage')
-    if instrumented_package != expected_package:
-      raise Exception(
-          'Wrong instrumented package. Expected %s, got %s'
-          % (expected_package, instrumented_package))
+    for instr in instrs:
+      instrumented_package = instr.getAttributeNS(
+          'http://schemas.android.com/apk/res/android', 'targetPackage')
+      if instrumented_package != expected_package:
+        raise Exception(
+            'Wrong instrumented package. Expected %s, got %s'
+            % (expected_package, instrumented_package))
 
   def GetPackageName(self):
     return self.manifest.getAttribute('package')
@@ -295,6 +293,7 @@ def main(argv):
                     help='Path to JAR that contains java resources. Everything '
                     'from this JAR except meta-inf/ content and .class files '
                     'will be added to the final APK.')
+  parser.add_option('--bootclasspath', help='Path to custom android.jar/rt.jar')
 
   # android library options
   parser.add_option('--dex-path', help='Path to target\'s dex output.')
@@ -345,6 +344,7 @@ def main(argv):
       'dist_jar': ['build_config'],
       'resource_rewriter': ['build_config'],
       'group': ['build_config'],
+      'junit_binary': ['build_config'],
   }
   required_options = required_options_map.get(options.type)
   if not required_options:
@@ -375,6 +375,7 @@ def main(argv):
   direct_library_deps = deps.Direct('java_library')
   all_library_deps = deps.All('java_library')
 
+  direct_resources_deps = deps.Direct('android_resources')
   all_resources_deps = deps.All('android_resources')
   # Resources should be ordered with the highest-level dependency first so that
   # overrides are done correctly.
@@ -421,6 +422,8 @@ def main(argv):
     gradle['dependent_java_projects'] = []
     gradle['dependent_prebuilt_jars'] = deps.GradlePrebuiltJarPaths()
 
+    if options.bootclasspath:
+      gradle['bootclasspath'] = options.bootclasspath
     if options.main_class:
       gradle['main_class'] = options.main_class
 
@@ -431,23 +434,23 @@ def main(argv):
         gradle['dependent_java_projects'].append(c['path'])
 
 
-  if (options.type in ('java_binary', 'java_library') and
-      not options.bypass_platform_checks):
+  if (options.type in ('java_binary', 'java_library')):
     deps_info['requires_android'] = options.requires_android
     deps_info['supports_android'] = options.supports_android
 
-    deps_require_android = (all_resources_deps +
-        [d['name'] for d in all_library_deps if d['requires_android']])
-    deps_not_support_android = (
-        [d['name'] for d in all_library_deps if not d['supports_android']])
+    if not options.bypass_platform_checks:
+      deps_require_android = (all_resources_deps +
+          [d['name'] for d in all_library_deps if d['requires_android']])
+      deps_not_support_android = (
+          [d['name'] for d in all_library_deps if not d['supports_android']])
 
-    if deps_require_android and not options.requires_android:
-      raise Exception('Some deps require building for the Android platform: ' +
-          str(deps_require_android))
+      if deps_require_android and not options.requires_android:
+        raise Exception('Some deps require building for the Android platform: '
+            + str(deps_require_android))
 
-    if deps_not_support_android and options.supports_android:
-      raise Exception('Not all deps support the Android platform: ' +
-          str(deps_not_support_android))
+      if deps_not_support_android and options.supports_android:
+        raise Exception('Not all deps support the Android platform: '
+            + str(deps_not_support_android))
 
   if options.type in ('java_binary', 'java_library', 'android_apk'):
     deps_info['jar_path'] = options.jar_path
@@ -477,8 +480,11 @@ def main(argv):
           c['package_name'] for c in all_resources_deps if 'package_name' in c]
 
   if options.type == 'android_apk':
-    # Apks will get their resources srcjar explicitly passed to the java step.
+    # Apks will get their resources srcjar explicitly passed to the java step
     config['javac']['srcjars'] = []
+    # Gradle may need to generate resources for some apks.
+    gradle['srcjars'] = [
+        c['srcjar'] for c in direct_resources_deps if 'srcjar' in c]
 
   if options.type == 'android_assets':
     all_asset_sources = []
@@ -535,7 +541,8 @@ def main(argv):
     deps_info['owned_resources_dirs'] = list(owned_resource_dirs)
     deps_info['owned_resources_zips'] = list(owned_resource_zips)
 
-  if options.type in ('android_resources','android_apk', 'resource_rewriter'):
+  if options.type in (
+      'android_resources', 'android_apk', 'junit_binary', 'resource_rewriter'):
     config['resources'] = {}
     config['resources']['dependency_zips'] = [
         c['resources_zip'] for c in all_resources_deps]
@@ -578,7 +585,7 @@ def main(argv):
     tested_apk_config = GetDepConfig(options.tested_apk_config)
 
     expected_tested_package = tested_apk_config['package_name']
-    AndroidManifest(options.android_manifest).CheckInstrumentation(
+    AndroidManifest(options.android_manifest).CheckInstrumentationElements(
         expected_tested_package)
     if options.proguard_enabled:
       # Add all tested classes to the test's classpath to ensure that the test's
@@ -653,9 +660,9 @@ def main(argv):
     dependency_jars = [c['jar_path'] for c in all_library_deps]
     manifest = AndroidManifest(options.android_manifest)
     deps_info['package_name'] = manifest.GetPackageName()
-    if not options.tested_apk_config and manifest.GetInstrumentation():
+    if not options.tested_apk_config and manifest.GetInstrumentationElements():
       # This must then have instrumentation only for itself.
-      manifest.CheckInstrumentation(manifest.GetPackageName())
+      manifest.CheckInstrumentationElements(manifest.GetPackageName())
 
     library_paths = []
     java_libraries_list = None

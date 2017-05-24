@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
-#include "base/test/simple_test_tick_clock.h"
 #include "base/time/time.h"
 #include "net/base/address_list.h"
 #include "net/base/io_buffer.h"
@@ -116,26 +115,19 @@ class TCPSocketTest : public PlatformTest {
 
 #if defined(TCP_INFO) || defined(OS_LINUX)
   // Tests that notifications to Socket Performance Watcher (SPW) are delivered
-  // correctly. |advance_ticks| is the duration by which the clock is advanced
-  // before a message is read. |should_notify_updated_rtt| is true if the SPW
-  // is interested in receiving RTT notifications. |num_messages| is the number
-  // of messages that are written/read by the sockets.
-  // |expect_connection_changed_count| is the expected number of connection
-  // change notifications received by the SPW. |expect_rtt_notification_count|
-  // is the expected number of RTT notifications received by the SPW.
-  // This test works by writing |num_messages| to the socket. A different
-  // socket (with a SPW attached to it) reads the messages.
-  void TestSPWNotifications(const base::TimeDelta& advance_ticks,
-                            bool should_notify_updated_rtt,
+  // correctly. |should_notify_updated_rtt| is true if the SPW is interested in
+  // receiving RTT notifications. |num_messages| is the number of messages that
+  // are written/read by the sockets. |expect_connection_changed_count| is the
+  // expected number of connection change notifications received by the SPW.
+  // |expect_rtt_notification_count| is the expected number of RTT
+  // notifications received by the SPW. This test works by writing
+  // |num_messages| to the socket. A different socket (with a SPW attached to
+  // it) reads the messages.
+  void TestSPWNotifications(bool should_notify_updated_rtt,
                             size_t num_messages,
                             size_t expect_connection_changed_count,
                             size_t expect_rtt_notification_count) {
     ASSERT_NO_FATAL_FAILURE(SetUpListenIPv4());
-
-    std::unique_ptr<base::SimpleTestTickClock> tick_clock(
-        new base::SimpleTestTickClock());
-    base::SimpleTestTickClock* tick_clock_ptr = tick_clock.get();
-    tick_clock_ptr->SetNowTicks(base::TimeTicks::Now());
 
     TestCompletionCallback connect_callback;
 
@@ -144,7 +136,6 @@ class TCPSocketTest : public PlatformTest {
     TestSocketPerformanceWatcher* watcher_ptr = watcher.get();
 
     TCPSocket connecting_socket(std::move(watcher), NULL, NetLogSource());
-    connecting_socket.SetTickClockForTesting(std::move(tick_clock));
 
     int result = connecting_socket.Open(ADDRESS_FAMILY_IPV4);
     ASSERT_THAT(result, IsOk());
@@ -165,8 +156,6 @@ class TCPSocketTest : public PlatformTest {
     ASSERT_THAT(connect_callback.WaitForResult(), IsOk());
 
     for (size_t i = 0; i < num_messages; ++i) {
-      tick_clock_ptr->Advance(advance_ticks);
-
       // Use a 1 byte message so that the watcher is notified at most once per
       // message.
       const std::string message("t");
@@ -237,12 +226,51 @@ TEST_F(TCPSocketTest, AcceptAsync) {
   TestAcceptAsync();
 }
 
-#if defined(OS_WIN)
-// Test Accept() for AdoptListenSocket.
-TEST_F(TCPSocketTest, AcceptForAdoptedListenSocket) {
-  // Create a socket to be used with AdoptListenSocket.
-  SOCKET existing_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  ASSERT_THAT(socket_.AdoptListenSocket(existing_socket), IsOk());
+// Test AdoptConnectedSocket()
+TEST_F(TCPSocketTest, AdoptConnectedSocket) {
+  TCPSocket accepting_socket(NULL, NULL, NetLogSource());
+  ASSERT_THAT(accepting_socket.Open(ADDRESS_FAMILY_IPV4), IsOk());
+  ASSERT_THAT(accepting_socket.Bind(IPEndPoint(IPAddress::IPv4Localhost(), 0)),
+              IsOk());
+  ASSERT_THAT(accepting_socket.GetLocalAddress(&local_address_), IsOk());
+  ASSERT_THAT(accepting_socket.Listen(kListenBacklog), IsOk());
+
+  TestCompletionCallback connect_callback;
+  // TODO(yzshen): Switch to use TCPSocket when it supports client socket
+  // operations.
+  TCPClientSocket connecting_socket(local_address_list(), NULL, NULL,
+                                    NetLogSource());
+  connecting_socket.Connect(connect_callback.callback());
+
+  TestCompletionCallback accept_callback;
+  std::unique_ptr<TCPSocket> accepted_socket;
+  IPEndPoint accepted_address;
+  int result = accepting_socket.Accept(&accepted_socket, &accepted_address,
+                                       accept_callback.callback());
+  if (result == ERR_IO_PENDING)
+    result = accept_callback.WaitForResult();
+  ASSERT_THAT(result, IsOk());
+
+  SocketDescriptor accepted_descriptor =
+      accepted_socket->ReleaseSocketDescriptorForTesting();
+
+  ASSERT_THAT(
+      socket_.AdoptConnectedSocket(accepted_descriptor, accepted_address),
+      IsOk());
+
+  // socket_ should now have the local address.
+  IPEndPoint adopted_address;
+  ASSERT_THAT(socket_.GetLocalAddress(&adopted_address), IsOk());
+  EXPECT_EQ(local_address_.address(), adopted_address.address());
+
+  EXPECT_THAT(connect_callback.WaitForResult(), IsOk());
+}
+
+// Test Accept() for AdoptUnconnectedSocket.
+TEST_F(TCPSocketTest, AcceptForAdoptedUnconnectedSocket) {
+  SocketDescriptor existing_socket =
+      CreatePlatformSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  ASSERT_THAT(socket_.AdoptUnconnectedSocket(existing_socket), IsOk());
 
   IPEndPoint address(IPAddress::IPv4Localhost(), 0);
   SockaddrStorage storage;
@@ -254,7 +282,6 @@ TEST_F(TCPSocketTest, AcceptForAdoptedListenSocket) {
 
   TestAcceptAsync();
 }
-#endif
 
 // Accept two connections simultaneously.
 TEST_F(TCPSocketTest, Accept2Connections) {
@@ -396,22 +423,13 @@ TEST_F(TCPSocketTest, ReadWrite) {
 // If SocketPerformanceWatcher::ShouldNotifyUpdatedRTT always returns false,
 // then the wtatcher should not receive any notifications.
 TEST_F(TCPSocketTest, SPWNotInterested) {
-  TestSPWNotifications(base::TimeDelta::FromSeconds(0), false, 2u, 0u, 0u);
-}
-
-// One notification should be received when the socket connects. No additional
-// notifications should be received when the message is read because the clock
-// is not advanced.
-TEST_F(TCPSocketTest, SPWNoAdvance) {
-  TestSPWNotifications(base::TimeDelta::FromSeconds(0), true, 2u, 0u, 1u);
+  TestSPWNotifications(false, 2u, 0u, 0u);
 }
 
 // One notification should be received when the socket connects. One
-// additional notification should be received for each message read since this
-// test advances clock by 2 seconds (which is longer than the minimum interval
-// between consecutive notifications) before every read.
-TEST_F(TCPSocketTest, SPWAdvance) {
-  TestSPWNotifications(base::TimeDelta::FromSeconds(2), true, 2u, 0u, 3u);
+// additional notification should be received for each message read.
+TEST_F(TCPSocketTest, SPWNoAdvance) {
+  TestSPWNotifications(true, 2u, 0u, 3u);
 }
 #endif  // defined(TCP_INFO) || defined(OS_LINUX)
 

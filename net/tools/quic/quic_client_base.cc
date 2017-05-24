@@ -7,10 +7,10 @@
 #include "net/quic/core/crypto/quic_random.h"
 #include "net/quic/core/quic_server_id.h"
 #include "net/quic/core/spdy_utils.h"
+#include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_logging.h"
 #include "net/quic/platform/api/quic_text_utils.h"
 
-using base::StringPiece;
 using base::StringToInt;
 using std::string;
 
@@ -23,7 +23,7 @@ void QuicClientBase::ClientQuicDataToResend::Resend() {
 
 QuicClientBase::QuicDataToResend::QuicDataToResend(
     std::unique_ptr<SpdyHeaderBlock> headers,
-    StringPiece body,
+    QuicStringPiece body,
     bool fin)
     : headers_(std::move(headers)), body_(body), fin_(fin) {}
 
@@ -68,10 +68,12 @@ void QuicClientBase::OnClose(QuicSpdyStream* stream) {
   if (store_response_) {
     auto status = response_headers.find(":status");
     if (status == response_headers.end() ||
-        !StringToInt(status->second, &latest_response_code_)) {
+        !QuicTextUtils::StringToInt(status->second, &latest_response_code_)) {
       QUIC_LOG(ERROR) << "Invalid response headers";
     }
     latest_response_headers_ = response_headers.DebugString();
+    preliminary_response_headers_ =
+        client_stream->preliminary_headers().DebugString();
     latest_response_header_block_ = response_headers.Clone();
     latest_response_body_ = client_stream->data();
     latest_response_trailers_ =
@@ -204,7 +206,7 @@ bool QuicClientBase::EncryptionBeingEstablished() {
 }
 
 void QuicClientBase::SendRequest(const SpdyHeaderBlock& headers,
-                                 StringPiece body,
+                                 QuicStringPiece body,
                                  bool fin) {
   QuicClientPushPromiseIndex::TryHandle* handle;
   QuicAsyncStatus rv = push_promise_index()->Try(headers, this, &handle);
@@ -229,7 +231,7 @@ void QuicClientBase::SendRequest(const SpdyHeaderBlock& headers,
 
 void QuicClientBase::SendRequestAndWaitForResponse(
     const SpdyHeaderBlock& headers,
-    StringPiece body,
+    QuicStringPiece body,
     bool fin) {
   SendRequest(headers, body, fin);
   while (WaitForEvents()) {
@@ -255,8 +257,10 @@ QuicSpdyClientStream* QuicClientBase::CreateClientStream() {
     return nullptr;
   }
 
-  QuicSpdyClientStream* stream =
-      session_->CreateOutgoingDynamicStream(kDefaultPriority);
+  auto* stream = static_cast<QuicSpdyClientStream*>(
+      FLAGS_quic_reloadable_flag_quic_refactor_stream_creation
+          ? session_->MaybeCreateOutgoingDynamicStream(kDefaultPriority)
+          : session_->CreateOutgoingDynamicStream(kDefaultPriority));
   if (stream) {
     stream->set_visitor(this);
   }
@@ -392,7 +396,7 @@ QuicConnectionId QuicClientBase::GenerateNewConnectionId() {
 }
 
 void QuicClientBase::MaybeAddDataToResend(const SpdyHeaderBlock& headers,
-                                          StringPiece body,
+                                          QuicStringPiece body,
                                           bool fin) {
   if (!FLAGS_quic_reloadable_flag_enable_quic_stateless_reject_support) {
     return;
@@ -434,7 +438,7 @@ void QuicClientBase::ResendSavedData() {
 }
 
 void QuicClientBase::AddPromiseDataToResend(const SpdyHeaderBlock& headers,
-                                            StringPiece body,
+                                            QuicStringPiece body,
                                             bool fin) {
   std::unique_ptr<SpdyHeaderBlock> new_headers(
       new SpdyHeaderBlock(headers.Clone()));
@@ -467,6 +471,11 @@ size_t QuicClientBase::latest_response_code() const {
 const string& QuicClientBase::latest_response_headers() const {
   QUIC_BUG_IF(!store_response_) << "Response not stored!";
   return latest_response_headers_;
+}
+
+const string& QuicClientBase::preliminary_response_headers() const {
+  QUIC_BUG_IF(!store_response_) << "Response not stored!";
+  return preliminary_response_headers_;
 }
 
 const SpdyHeaderBlock& QuicClientBase::latest_response_header_block() const {

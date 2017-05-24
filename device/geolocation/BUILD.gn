@@ -5,6 +5,7 @@
 import("//build/config/features.gni")
 
 if (is_android) {
+  import("//build/config/android/config.gni")
   import("//build/config/android/rules.gni")  # For generate_jni().
 }
 
@@ -117,20 +118,25 @@ component("geolocation") {
 if (is_android) {
   generate_jni("geolocation_jni_headers") {
     sources = [
-      "android/java/org/chromium/device/geolocation/LocationProviderAdapter.java",
+      "android/java/src/org/chromium/device/geolocation/LocationProviderAdapter.java",
     ]
     jni_package = "device"
   }
 
   android_library("geolocation_java") {
     java_files = [
-      "android/java/org/chromium/device/geolocation/LocationProviderAdapter.java",
-      "android/java/org/chromium/device/geolocation/LocationProviderFactory.java",
+      "android/java/src/org/chromium/device/geolocation/LocationProviderAdapter.java",
+      "android/java/src/org/chromium/device/geolocation/LocationProviderAndroid.java",
+      "android/java/src/org/chromium/device/geolocation/LocationProviderFactory.java",
+      "android/java/src/org/chromium/device/geolocation/LocationProviderGmsCore.java",
     ]
 
     deps = [
       ":geolocation",
       ":geolocation_jni_headers",
+      "$google_play_services_package:google_play_services_base_java",
+      "$google_play_services_package:google_play_services_basement_java",
+      "$google_play_services_package:google_play_services_location_java",
       "//base:base_java",
     ]
   }
@@ -138,7 +144,7 @@ if (is_android) {
   android_library("geolocation_java_test_support") {
     testonly = true
 
-    java_files = [ "android/java/org/chromium/device/geolocation/MockLocationProvider.java" ]
+    java_files = [ "android/javatests/src/org/chromium/device/geolocation/MockLocationProvider.java" ]
     deps = [
       ":geolocation_java",
       "//base:base_java",

@@ -7,37 +7,66 @@
 
 #import <UIKit/UIKit.h>
 
-#import "ios/chrome/browser/ui/collection_view/collection_view_model.h"
-
+@class CollectionViewItem;
+@class ContentSuggestionsSectionInformation;
 @class ContentSuggestionsViewController;
+@protocol ContentSuggestionsDataSource;
+@protocol SuggestedContent;
 
-// Enum defining the ItemType of this ContentSuggestionsCollectionUpdater.
-typedef NS_ENUM(NSInteger, ItemType) {
-  ItemTypeText = kItemTypeEnumZero,
-  ItemTypeArticle,
-  ItemTypeExpand,
-  ItemTypeStack,
-  ItemTypeFavicon,
+// Enum defining the type of a ContentSuggestions.
+typedef NS_ENUM(NSInteger, ContentSuggestionType) {
+  // Use this type to pass information about an empty section. Suggestion of
+  // this type are empty and should not be displayed. The informations to be
+  // displayed are contained in the SectionInfo.
+  ContentSuggestionTypeEmpty,
+  ContentSuggestionTypeArticle,
+  ContentSuggestionTypeReadingList,
+  ContentSuggestionTypeMostVisited,
 };
 
 // Updater for a CollectionViewController populating it with some items and
 // handling the items addition.
 @interface ContentSuggestionsCollectionUpdater : NSObject
 
+// Initialize with the |dataSource| used to get the data.
+- (instancetype)initWithDataSource:(id<ContentSuggestionsDataSource>)dataSource
+    NS_DESIGNATED_INITIALIZER;
+
+- (instancetype)init NS_UNAVAILABLE;
+
 // |collectionViewController| this Updater will update. Needs to be set before
 // adding items.
-@property(nonatomic, assign)
+@property(nonatomic, weak)
     ContentSuggestionsViewController* collectionViewController;
-
-// Adds a text item with a |title| and a |subtitle| in the section numbered
-// |section|. If |section| is greater than the current number of section, it
-// will add a new section at the end.
-- (void)addTextItem:(NSString*)title
-           subtitle:(NSString*)subtitle
-          toSection:(NSInteger)inputSection;
 
 // Returns whether the section should use the default, non-card style.
 - (BOOL)shouldUseCustomStyleForSection:(NSInteger)section;
+
+// Returns the ContentSuggestionType associated with this item.
+- (ContentSuggestionType)contentSuggestionTypeForItem:(CollectionViewItem*)item;
+
+// Adds the sections for the |suggestions| to the model and returns their
+// indices.
+- (NSIndexSet*)addSectionsForSectionInfoToModel:
+    (NSArray<ContentSuggestionsSectionInformation*>*)sectionsInfo;
+
+// Adds the |suggestions| to the model in the section corresponding to
+// |sectionInfo| and returns their index paths. The caller must ensure the
+// corresponding section has been added to the model.
+- (NSArray<NSIndexPath*>*)
+addSuggestionsToModel:
+    (NSArray<CollectionViewItem<SuggestedContent>*>*)suggestions
+      withSectionInfo:(ContentSuggestionsSectionInformation*)sectionInfo;
+
+// Adds an empty item to this |section| and returns its index path. The updater
+// does not do any check about the number of elements in the section.
+- (NSIndexPath*)addEmptyItemForSection:(NSInteger)section;
+
+// Returns whether |section| contains the Most Visited tiles.
+- (BOOL)isMostVisitedSection:(NSInteger)section;
+
+// Updates the number of Most Visited tiles shown for the |size|.
+- (void)updateMostVisitedForSize:(CGSize)size;
 
 @end
 

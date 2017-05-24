@@ -14,6 +14,7 @@ UI.ListWidget = class extends UI.VBox {
     this._delegate = delegate;
 
     this._list = this.contentElement.createChild('div', 'list');
+    this.element.tabIndex = -1;
 
     /** @type {?UI.ListWidget.Editor} */
     this._editor = null;
@@ -115,36 +116,36 @@ UI.ListWidget = class extends UI.VBox {
   _createControls(item, element) {
     var controls = createElementWithClass('div', 'controls-container fill');
     controls.createChild('div', 'controls-gradient');
+
     var buttons = controls.createChild('div', 'controls-buttons');
 
-    var editButton = buttons.createChild('div', 'edit-button');
-    editButton.title = Common.UIString('Edit');
-    editButton.addEventListener('click', onEditClicked.bind(this), false);
+    var toolbar = new UI.Toolbar('', buttons);
 
-    var removeButton = buttons.createChild('div', 'remove-button');
-    removeButton.title = Common.UIString('Remove');
-    removeButton.addEventListener('click', onRemoveClicked.bind(this), false);
+    var editButton = new UI.ToolbarButton(Common.UIString('Edit'), 'largeicon-edit');
+    editButton.addEventListener(UI.ToolbarButton.Events.Click, onEditClicked.bind(this));
+    toolbar.appendToolbarItem(editButton);
+
+    var removeButton = new UI.ToolbarButton(Common.UIString('Remove'), 'largeicon-trash-bin');
+    removeButton.addEventListener(UI.ToolbarButton.Events.Click, onRemoveClicked.bind(this));
+    toolbar.appendToolbarItem(removeButton);
 
     return controls;
 
     /**
-     * @param {!Event} event
      * @this {UI.ListWidget}
      */
-    function onEditClicked(event) {
-      event.consume();
+    function onEditClicked() {
       var index = this._elements.indexOf(element);
       var insertionPoint = this._elements[index + 1] || null;
       this._startEditing(item, element, insertionPoint);
     }
 
     /**
-     * @param {!Event} event
      * @this {UI.ListWidget}
      */
-    function onRemoveClicked(event) {
-      event.consume();
+    function onRemoveClicked() {
       var index = this._elements.indexOf(element);
+      this.element.focus();
       this._delegate.removeItemRequested(this._items[index], index);
     }
   }
@@ -177,6 +178,7 @@ UI.ListWidget = class extends UI.VBox {
       return;
 
     this._stopEditing();
+    this._focusRestorer = new UI.ElementFocusRestorer(this.element);
 
     this._list.classList.add('list-editing');
     this._editItem = item;
@@ -203,6 +205,8 @@ UI.ListWidget = class extends UI.VBox {
 
   _stopEditing() {
     this._list.classList.remove('list-editing');
+    if (this._focusRestorer)
+      this._focusRestorer.restore();
     if (this._editElement)
       this._editElement.classList.remove('hidden');
     if (this._editor && this._editor.element.parentElement)
@@ -301,6 +305,16 @@ UI.ListWidget.Editor = class {
    */
   contentElement() {
     return this._contentElement;
+  }
+
+  /**
+   * @param {boolean} material
+   */
+  setMaterial(material) {
+    this._commitButton.classList.toggle('material-button', material);
+    this._commitButton.classList.toggle('default', material);
+    this._cancelButton.classList.toggle('material-button', material);
+    this.element.classList.toggle('material', material);
   }
 
   /**

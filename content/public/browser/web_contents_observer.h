@@ -35,7 +35,6 @@ class WebContentsImpl;
 struct AXEventNotificationDetails;
 struct AXLocationChangeNotificationDetails;
 struct FaviconURL;
-struct FrameNavigateParams;
 struct LoadCommittedDetails;
 struct Referrer;
 struct ResourceRedirectDetails;
@@ -141,9 +140,9 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
   // Note that this is fired by navigations in any frame of the WebContents,
   // not just the main frame.
   //
-  // Note that this is fired by same-page navigations, such as fragment
+  // Note that this is fired by same-document navigations, such as fragment
   // navigations or pushState/replaceState, which will not result in a document
-  // change. To filter these out, use NavigationHandle::IsSamePage.
+  // change. To filter these out, use NavigationHandle::IsSameDocument.
   //
   // Note that more than one navigation can be ongoing in the same frame at the
   // same time (including the main frame). Each will get its own
@@ -180,9 +179,9 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
   // and related methods to listen for continued events from this
   // RenderFrameHost.
   //
-  // Note that this is fired by same-page navigations, such as fragment
+  // Note that this is fired by same-document navigations, such as fragment
   // navigations or pushState/replaceState, which will not result in a document
-  // change. To filter these out, use NavigationHandle::IsSamePage.
+  // change. To filter these out, use NavigationHandle::IsSameDocument.
   //
   // Note that |navigation_handle| will be destroyed at the end of this call,
   // so do not keep a reference to it afterward.
@@ -202,61 +201,6 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
   // function will be removed when PlzNavigate is enabled.
   virtual void DidStartNavigationToPendingEntry(const GURL& url,
                                                 ReloadType reload_type) {}
-
-  // |render_frame_host| is the RenderFrameHost for which the provisional load
-  // is happening.
-  //
-  // Since the URL validation will strip error URLs, the boolean flag
-  // |is_error_page| will indicate that the not validated URL was an error page.
-  //
-  // Note that during a cross-process navigation, several provisional loads
-  // can be on-going in parallel.
-  //
-  // DEPRECATED. Use DidStartNavigation instead in all cases.
-  virtual void DidStartProvisionalLoadForFrame(
-      RenderFrameHost* render_frame_host,
-      const GURL& validated_url,
-      bool is_error_page) {}
-
-  // This method is invoked when the provisional load was successfully
-  // committed.
-  //
-  // If the navigation only changed the reference fragment, or was triggered
-  // using the history API (e.g. window.history.replaceState), we will receive
-  // this signal without a prior DidStartProvisionalLoadForFrame signal.
-  //
-  // DEPRECATED. Use DidFinishNavigation instead in all cases.
-  virtual void DidCommitProvisionalLoadForFrame(
-      RenderFrameHost* render_frame_host,
-      const GURL& url,
-      ui::PageTransition transition_type) {}
-
-  // This method is invoked when the provisional load failed.
-  //
-  // DEPRECATED. Use DidFinishNavigation instead in all cases.
-  virtual void DidFailProvisionalLoad(
-      RenderFrameHost* render_frame_host,
-      const GURL& validated_url,
-      int error_code,
-      const base::string16& error_description,
-      bool was_ignored_by_handler) {}
-
-  // If the provisional load corresponded to the main frame, this method is
-  // invoked in addition to DidCommitProvisionalLoadForFrame.
-  //
-  // DEPRECATED. Use DidFinishNavigation instead in all cases.
-  virtual void DidNavigateMainFrame(
-      const LoadCommittedDetails& details,
-      const FrameNavigateParams& params) {}
-
-  // And regardless of what frame navigated, this method is invoked after
-  // DidCommitProvisionalLoadForFrame was invoked.
-  //
-  // DEPRECATED. Use DidFinishNavigation instead in all cases.
-  virtual void DidNavigateAnyFrame(
-      RenderFrameHost* render_frame_host,
-      const LoadCommittedDetails& details,
-      const FrameNavigateParams& params) {}
 
   // Document load events ------------------------------------------------------
 
@@ -330,15 +274,13 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
                                    const GURL& url,
                                    const Referrer& referrer,
                                    WindowOpenDisposition disposition,
-                                   ui::PageTransition transition) {}
+                                   ui::PageTransition transition,
+                                   bool started_from_context_menu,
+                                   bool renderer_initiated) {}
 
   // This method is invoked when the renderer process has completed its first
   // paint after a non-empty layout.
   virtual void DidFirstVisuallyNonEmptyPaint() {}
-
-  // This method is invoked when the main frame in the renderer process performs
-  // the first paint after a navigation.
-  virtual void DidFirstPaintAfterLoad(RenderWidgetHost* render_widget_host) {}
 
   // When WebContents::Stop() is called, the WebContents stops loading and then
   // invokes this method. If there are ongoing navigations, their respective
@@ -447,7 +389,7 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
 
   // Called when accessibility events or location changes are received
   // from a render frame, but only when the accessibility mode has the
-  // ACCESSIBILITY_MODE_FLAG_WEB_CONTENTS flag set.
+  // AccessibilityMode::kWebContents flag set.
   virtual void AccessibilityEventReceived(
       const std::vector<AXEventNotificationDetails>& details) {}
   virtual void AccessibilityLocationChangesReceived(
@@ -480,6 +422,21 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
 
   // Notification that |contents| has gained focus.
   virtual void OnWebContentsFocused() {}
+
+  // Notification that |contents| has lost focus.
+  virtual void OnWebContentsLostFocus() {}
+
+  // Notifes that a CompositorFrame was received from the renderer.
+  virtual void DidReceiveCompositorFrame() {}
+
+  // Notifies that the manifest URL for the main frame changed to
+  // |manifest_url|. This will be invoked when a document with a manifest loads
+  // or when the manifest URL changes (possibly to nothing). It is not invoked
+  // when a document with no manifest loads. During document load, if the
+  // document has both a manifest and a favicon, DidUpdateWebManifestURL() will
+  // be invoked before DidUpdateFaviconURL().
+  virtual void DidUpdateWebManifestURL(
+      const base::Optional<GURL>& manifest_url) {}
 
   // IPC::Listener implementation.
   bool OnMessageReceived(const IPC::Message& message) override;

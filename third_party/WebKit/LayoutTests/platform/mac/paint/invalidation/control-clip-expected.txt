@@ -8,22 +8,17 @@
       "paintInvalidations": [
         {
           "object": "LayoutBlockFlow (anonymous)",
-          "rect": [9, 85, 198, 13],
-          "reason": "forced by layout"
+          "rect": [9, 84, 198, 14],
+          "reason": "geometry"
         },
         {
           "object": "LayoutBlockFlow (anonymous)",
           "rect": [16, 114, 184, 13],
-          "reason": "forced by layout"
+          "reason": "geometry"
         },
         {
           "object": "LayoutText #text",
-          "rect": [82, 114, 52, 13],
-          "reason": "full"
-        },
-        {
-          "object": "LayoutText (anonymous)",
-          "rect": [9, 85, 52, 13],
+          "rect": [82, 114, 52, 14],
           "reason": "full"
         }
       ]
@@ -32,11 +27,11 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutBlockFlow (anonymous)",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "RootInlineBox",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutText (anonymous)",
@@ -48,11 +43,11 @@
     },
     {
       "object": "LayoutBlockFlow (anonymous)",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "RootInlineBox",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutText #text",

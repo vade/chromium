@@ -18,32 +18,24 @@ class Clock;
 
 namespace ntp_snippets {
 
+//
+// Null-terminated list of all features related to content suggestions.
+//
+// If you add a base::Feature below, you must add it to this list. It is used in
+// internal pages to list relevant parameters and settings.
+//
+extern const base::Feature*(kAllFeatures[]);
+
 // Features to turn individual providers/categories on/off.
+// TODO(jkrcal): Rename to kRemoteSuggestionsFeature.
 extern const base::Feature kArticleSuggestionsFeature;
 extern const base::Feature kBookmarkSuggestionsFeature;
 extern const base::Feature kRecentOfflineTabSuggestionsFeature;
 extern const base::Feature kPhysicalWebPageSuggestionsFeature;
-extern const base::Feature kForeignSessionsSuggestionsFeature;;
-
-// Feature to allow the 'save to offline' option to appear in the snippets
-// context menu.
-extern const base::Feature kSaveToOfflineFeature;
-
-// Feature to allow offline badges to appear on snippets.
-extern const base::Feature kOfflineBadgeFeature;
-
-// Feature to allow dismissing sections.
-extern const base::Feature kSectionDismissalFeature;
-
-// Global toggle for the whole content suggestions feature. If this is set to
-// false, all the per-provider features are ignored.
-extern const base::Feature kContentSuggestionsFeature;
+extern const base::Feature kForeignSessionsSuggestionsFeature;
 
 // Feature to allow UI as specified here: https://crbug.com/660837.
 extern const base::Feature kIncreasedVisibility;
-
-// Feature to enable the Fetch More action
-extern const base::Feature kFetchMoreFeature;
 
 // Feature to prefer AMP URLs over regular URLs when available.
 extern const base::Feature kPreferAmpUrlsFeature;
@@ -51,9 +43,11 @@ extern const base::Feature kPreferAmpUrlsFeature;
 // Feature to choose a category ranker.
 extern const base::Feature kCategoryRanker;
 
-// Parameter for a kCategoryRanker feature flag.
+// Feature to allow the new Google favicon server for fetching publisher icons.
+extern const base::Feature kPublisherFaviconsFromNewServerFeature;
+
+// Parameter and its values for the kCategoryRanker feature flag.
 extern const char kCategoryRankerParameter[];
-// Possible values of the parameter above.
 extern const char kCategoryRankerConstantRanker[];
 extern const char kCategoryRankerClickBasedRanker[];
 
@@ -69,6 +63,55 @@ CategoryRankerChoice GetSelectedCategoryRanker();
 std::unique_ptr<CategoryRanker> BuildSelectedCategoryRanker(
     PrefService* pref_service,
     std::unique_ptr<base::Clock> clock);
+
+// Feature to choose a default category order.
+extern const base::Feature kCategoryOrder;
+
+// Parameter and its values for the kCategoryOrder feature flag.
+extern const char kCategoryOrderParameter[];
+extern const char kCategoryOrderGeneral[];
+extern const char kCategoryOrderEmergingMarketsOriented[];
+
+enum class CategoryOrderChoice {
+  GENERAL,
+  EMERGING_MARKETS_ORIENTED,
+};
+
+// Returns which category order to use according to kCategoryOrder feature.
+CategoryOrderChoice GetSelectedCategoryOrder();
+
+// Enables and configures notifications for content suggestions on Android.
+extern const base::Feature kNotificationsFeature;
+
+// An integer. The priority of the notification, ranging from -2 (PRIORITY_MIN)
+// to 2 (PRIORITY_MAX). Vibrates and makes sound if >= 0.
+extern const char kNotificationsPriorityParam[];
+constexpr int kNotificationsDefaultPriority = -1;
+
+// "publisher": use article's publisher as notification's text (default).
+// "snippet": use article's snippet as notification's text.
+// "and_more": use "From $1. Read this article and $2 more." as text.
+extern const char kNotificationsTextParam[];
+extern const char kNotificationsTextValuePublisher[];
+extern const char kNotificationsTextValueSnippet[];
+extern const char kNotificationsTextValueAndMore[];
+
+// "true": when Chrome becomes frontmost, leave notifications open.
+// "false": automatically dismiss notification when Chrome becomes frontmost.
+extern const char kNotificationsKeepWhenFrontmostParam[];
+
+// "true": notifications link to chrome://newtab, with appropriate text.
+// "false": notifications link to URL of notifying article.
+extern const char kNotificationsOpenToNTPParam[];
+
+// An integer. The maximum number of notifications that will be shown in 1 day.
+extern const char kNotificationsDailyLimit[];
+constexpr int kNotificationsDefaultDailyLimit = 1;
+
+// An integer. The number of notifications that can be ignored. If the user
+// ignores this many notifications or more, we stop sending them.
+extern const char kNotificationsIgnoredLimitParam[];
+constexpr int kNotificationsIgnoredDefaultLimit = 3;
 
 }  // namespace ntp_snippets
 

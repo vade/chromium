@@ -14,13 +14,13 @@
 #include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
+#include "chrome/browser/gcm/fake_gcm_profile_service.h"
+#include "chrome/browser/gcm/gcm_profile_service_factory.h"
 #include "chrome/browser/permissions/permission_manager.h"
 #include "chrome/browser/permissions/permission_manager_factory.h"
 #include "chrome/browser/push_messaging/push_messaging_app_identifier.h"
 #include "chrome/browser/push_messaging/push_messaging_service_factory.h"
 #include "chrome/browser/push_messaging/push_messaging_service_impl.h"
-#include "chrome/browser/services/gcm/fake_gcm_profile_service.h"
-#include "chrome/browser/services/gcm/gcm_profile_service_factory.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/gcm_driver/crypto/gcm_crypto_test_helpers.h"
@@ -157,7 +157,7 @@ TEST_F(PushMessagingServiceTest, PayloadEncryptionTest) {
   const GURL origin(kTestOrigin);
 
   // (1) Make sure that |kExampleOrigin| has access to use Push Messaging.
-  ASSERT_EQ(blink::WebPushPermissionStatusGranted,
+  ASSERT_EQ(blink::kWebPushPermissionStatusGranted,
             push_service->GetPermissionStatus(origin, true));
 
   std::string subscription_id;

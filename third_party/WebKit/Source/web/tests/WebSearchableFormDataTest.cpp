@@ -31,9 +31,9 @@
 #include "public/web/WebSearchableFormData.h"
 
 #include "platform/testing/URLTestHelpers.h"
+#include "platform/testing/UnitTestHelpers.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebURLLoaderMockFactory.h"
-#include "public/web/WebCache.h"
 #include "public/web/WebDocument.h"
 #include "public/web/WebFrame.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -42,51 +42,60 @@
 
 namespace blink {
 
-class WebSearchableFormDataTest : public testing::Test {
+namespace {
+
+void RegisterMockedURLLoadFromBaseURL(const std::string& base_url,
+                                      const std::string& file_name) {
+  URLTestHelpers::RegisterMockedURLLoadFromBase(WebString::FromUTF8(base_url),
+                                                testing::WebTestDataPath(),
+                                                WebString::FromUTF8(file_name));
+}
+
+class WebSearchableFormDataTest : public ::testing::Test {
  protected:
   WebSearchableFormDataTest() {}
 
   ~WebSearchableFormDataTest() override {
-    Platform::current()->getURLLoaderMockFactory()->unregisterAllURLs();
-    WebCache::clear();
+    Platform::Current()
+        ->GetURLLoaderMockFactory()
+        ->UnregisterAllURLsAndClearMemoryCache();
   }
 
-  FrameTestHelpers::WebViewHelper m_webViewHelper;
+  FrameTestHelpers::WebViewHelper web_view_helper_;
 };
 
+}  // namespace
 TEST_F(WebSearchableFormDataTest, HttpSearchString) {
-  std::string baseURL("http://www.test.com/");
-  URLTestHelpers::registerMockedURLFromBaseURL(
-      WebString::fromUTF8(baseURL.c_str()), "search_form_http.html");
-  WebView* webView =
-      m_webViewHelper.initializeAndLoad(baseURL + "search_form_http.html");
+  std::string base_url("http://www.test.com/");
+  RegisterMockedURLLoadFromBaseURL(base_url, "search_form_http.html");
+  WebView* web_view =
+      web_view_helper_.InitializeAndLoad(base_url + "search_form_http.html");
 
   WebVector<WebFormElement> forms;
-  webView->mainFrame()->document().forms(forms);
+  web_view->MainFrame()->GetDocument().Forms(forms);
 
   EXPECT_EQ(forms.size(), 1U);
 
-  WebSearchableFormData searchableFormData(forms[0]);
+  WebSearchableFormData searchable_form_data(forms[0]);
   EXPECT_EQ("http://www.mock.url/search?hl=en&q={searchTerms}&btnM=Mock+Search",
-            searchableFormData.url().string());
+            searchable_form_data.Url().GetString());
 }
 
 TEST_F(WebSearchableFormDataTest, HttpsSearchString) {
-  std::string baseURL("https://www.test.com/");
-  URLTestHelpers::registerMockedURLFromBaseURL(
-      WebString::fromUTF8(baseURL.c_str()), "search_form_https.html");
-  WebView* webView =
-      m_webViewHelper.initializeAndLoad(baseURL + "search_form_https.html");
+  std::string base_url("https://www.test.com/");
+  RegisterMockedURLLoadFromBaseURL(base_url, "search_form_https.html");
+  WebView* web_view =
+      web_view_helper_.InitializeAndLoad(base_url + "search_form_https.html");
 
   WebVector<WebFormElement> forms;
-  webView->mainFrame()->document().forms(forms);
+  web_view->MainFrame()->GetDocument().Forms(forms);
 
   EXPECT_EQ(forms.size(), 1U);
 
-  WebSearchableFormData searchableFormData(forms[0]);
+  WebSearchableFormData searchable_form_data(forms[0]);
   EXPECT_EQ(
       "https://www.mock.url/search?hl=en&q={searchTerms}&btnM=Mock+Search",
-      searchableFormData.url().string());
+      searchable_form_data.Url().GetString());
 }
 
 }  // namespace blink

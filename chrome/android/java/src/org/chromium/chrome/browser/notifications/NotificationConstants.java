@@ -29,7 +29,7 @@ public class NotificationConstants {
      * When adding a new extra, as well as setting it on the intent in NotificationPlatformBridge,
      * it *must* also be set in {@link NotificationJobService#getJobExtrasFromIntent(Intent)}
      */
-    static final String EXTRA_NOTIFICATION_ID = "notification_id";
+    public static final String EXTRA_NOTIFICATION_ID = "notification_id";
     static final String EXTRA_NOTIFICATION_INFO_ORIGIN = "notification_info_origin";
     static final String EXTRA_NOTIFICATION_INFO_PROFILE_ID = "notification_info_profile_id";
     static final String EXTRA_NOTIFICATION_INFO_PROFILE_INCOGNITO =
@@ -56,6 +56,14 @@ public class NotificationConstants {
     public static final int NOTIFICATION_ID_PHYSICAL_WEB = 3;
 
     /**
+     * Unique identifier for the summary notification for downloads.  Using the ID this summary was
+     * going to have before it was migrated here.
+     * TODO(dtrainor): Clean up this ID and make sure it's in line with existing id counters without
+     * tags.
+     */
+    public static final int NOTIFICATION_ID_DOWNLOAD_SUMMARY = 999999;
+
+    /**
      * Separator used to separate the notification origin from additional data such as the
      * developer specified tag.
      */
@@ -77,4 +85,5 @@ public class NotificationConstants {
     // Web notification group names are set dynamically as this prefix + notification origin.
     // For example, 'Web:chromium.org' for a notification from chromium.org.
     static final String GROUP_WEB_PREFIX = "Web:";
+
 }

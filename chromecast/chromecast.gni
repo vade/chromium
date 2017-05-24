@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/config/chromecast_build.gni")
+import("//build/config/locales.gni")
 
 # This args block should contain arguments used within the //chromecast
 # directory. Arguments which are used in other Chrome components should
@@ -27,6 +28,9 @@ declare_args() {
   # TODO(antz): default to false for audio-only builds, might need further
   # clean up (b/27119303)
   enable_chromecast_webui = !is_cast_audio_only && !is_android
+
+  # Set true to enable assistant features.
+  enable_assistant = false
 }
 
 declare_args() {
@@ -43,3 +47,8 @@ if (chromecast_branding == "public") {
   cast_build_release =
       read_file("//chromecast/internal/build/cast_build_release", "trim string")
 }
+
+# All locales supported by Cast builds. This provides a single point of
+# reference for all GN files referencing a locales list. |locales| is declared
+# in //build/config/locales.gni.
+cast_locales = locales

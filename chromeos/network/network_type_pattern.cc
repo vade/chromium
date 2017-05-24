@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 #include "chromeos/network/network_event_log.h"
+#include "chromeos/network/tether_constants.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace chromeos {
@@ -18,6 +19,7 @@ const char kPatternEthernet[] = "PatternEthernet";
 const char kPatternWireless[] = "PatternWireless";
 const char kPatternMobile[] = "PatternMobile";
 const char kPatternNonVirtual[] = "PatternNonVirtual";
+const char kPatternTether[] = "PatternTether";
 
 enum NetworkTypeBitFlag {
   kNetworkTypeNone = 0,
@@ -27,21 +29,21 @@ enum NetworkTypeBitFlag {
   kNetworkTypeCellular = 1 << 3,
   kNetworkTypeVPN = 1 << 4,
   kNetworkTypeEthernetEap = 1 << 5,
-  kNetworkTypeBluetooth = 1 << 6
+  kNetworkTypeBluetooth = 1 << 6,
+  kNetworkTypeTether = 1 << 7
 };
 
 struct ShillToBitFlagEntry {
   const char* shill_network_type;
   NetworkTypeBitFlag bit_flag;
-} shill_type_to_flag[] = {
-  { shill::kTypeEthernet, kNetworkTypeEthernet },
-  { shill::kTypeEthernetEap, kNetworkTypeEthernetEap },
-  { shill::kTypeWifi, kNetworkTypeWifi },
-  { shill::kTypeWimax, kNetworkTypeWimax },
-  { shill::kTypeCellular, kNetworkTypeCellular },
-  { shill::kTypeVPN, kNetworkTypeVPN },
-  { shill::kTypeBluetooth, kNetworkTypeBluetooth }
-};
+} shill_type_to_flag[] = {{shill::kTypeEthernet, kNetworkTypeEthernet},
+                          {shill::kTypeEthernetEap, kNetworkTypeEthernetEap},
+                          {shill::kTypeWifi, kNetworkTypeWifi},
+                          {shill::kTypeWimax, kNetworkTypeWimax},
+                          {shill::kTypeCellular, kNetworkTypeCellular},
+                          {shill::kTypeVPN, kNetworkTypeVPN},
+                          {shill::kTypeBluetooth, kNetworkTypeBluetooth},
+                          {kTypeTether, kNetworkTypeTether}};
 
 NetworkTypeBitFlag ShillNetworkTypeToFlag(const std::string& shill_type) {
   for (size_t i = 0; i < arraysize(shill_type_to_flag); ++i) {
@@ -72,7 +74,7 @@ NetworkTypePattern NetworkTypePattern::Mobile() {
 
 // static
 NetworkTypePattern NetworkTypePattern::NonVirtual() {
-  return NetworkTypePattern(~kNetworkTypeVPN);
+  return NetworkTypePattern(~(kNetworkTypeVPN | kNetworkTypeTether));
 }
 
 // static
@@ -98,6 +100,11 @@ NetworkTypePattern NetworkTypePattern::VPN() {
 // static
 NetworkTypePattern NetworkTypePattern::Wimax() {
   return NetworkTypePattern(kNetworkTypeWimax);
+}
+
+// static
+NetworkTypePattern NetworkTypePattern::Tether() {
+  return NetworkTypePattern(kNetworkTypeTether);
 }
 
 // static
@@ -134,6 +141,8 @@ std::string NetworkTypePattern::ToDebugString() const {
     return kPatternMobile;
   if (Equals(NonVirtual()))
     return kPatternNonVirtual;
+  if (Equals(Tether()))
+    return kPatternTether;
 
   std::string str;
   for (size_t i = 0; i < arraysize(shill_type_to_flag); ++i) {

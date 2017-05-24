@@ -16,7 +16,6 @@
 #include "base/time/time.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/engine/cycle/sync_cycle_snapshot.h"
-#include "components/sync/engine/model_safe_worker.h"
 #include "components/sync/engine_impl/cycle/status_controller.h"
 #include "components/sync/engine_impl/cycle/sync_cycle_context.h"
 #include "components/sync/engine_impl/sync_cycle_event.h"
@@ -89,9 +88,7 @@ class SyncCycle {
     virtual ~Delegate() {}
   };
 
-  // Build a cycle without a nudge tracker.  Used for poll or configure type
-  // sync cycles.
-  static SyncCycle* Build(SyncCycleContext* context, Delegate* delegate);
+  SyncCycle(SyncCycleContext* context, Delegate* delegate);
   ~SyncCycle();
 
   // Builds a thread-safe and read-only copy of the current cycle state.
@@ -118,8 +115,6 @@ class SyncCycle {
   }
 
  private:
-  SyncCycle(SyncCycleContext* context, Delegate* delegate);
-
   // The context for this cycle, guaranteed to outlive |this|.
   SyncCycleContext* const context_;
 

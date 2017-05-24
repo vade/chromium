@@ -10,6 +10,7 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/message_loop/message_loop.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
@@ -192,7 +193,7 @@ class AutofillTest : public InProcessBrowserTest {
       // triggered by user gestures are ignored.
       content::SimulateMouseClick(
           browser()->tab_strip_model()->GetActiveWebContents(), 0,
-          blink::WebMouseEvent::Button::Left);
+          blink::WebMouseEvent::Button::kLeft);
     }
     // We may not always be expecting changes in Personal data.
     if (observer.get())

@@ -24,6 +24,7 @@
 #include "chromeos/network/network_util.h"
 #include "chromeos/network/onc/onc_utils.h"
 #include "components/arc/arc_bridge_service.h"
+#include "components/user_manager/user_manager.h"
 
 namespace {
 
@@ -43,10 +44,12 @@ chromeos::NetworkConnectionHandler* GetNetworkConnectionHandler() {
 }
 
 bool IsDeviceOwner() {
-  // Check whether the logged-in Chrome OS user is allowed to add or
-  // remove WiFi networks.
-  return chromeos::LoginState::Get()->GetLoggedInUserType() ==
-         chromeos::LoginState::LOGGED_IN_USER_OWNER;
+  // Check whether the logged-in Chrome OS user is allowed to add or remove WiFi
+  // networks. The user account state changes immediately after boot. There is a
+  // small window when this may return an incorrect state. However, after things
+  // settle down this is guranteed to reflect the correct user account state.
+  return user_manager::UserManager::Get()->GetActiveUser()->GetAccountId() ==
+         user_manager::UserManager::Get()->GetOwnerAccountId();
 }
 
 std::string GetStringFromOncDictionary(const base::DictionaryValue* dict,
@@ -55,7 +58,7 @@ std::string GetStringFromOncDictionary(const base::DictionaryValue* dict,
   std::string value;
   dict->GetString(key, &value);
   if (required && value.empty())
-    NOTREACHED();
+    VLOG(1) << "Required parameter " << key << " was not found.";
   return value;
 }
 
@@ -371,8 +374,8 @@ void ArcNetHostImpl::GetNetworks(mojom::GetNetworksRequestType type,
   for (const auto& value : *network_properties_list) {
     mojom::WifiConfigurationPtr wc = mojom::WifiConfiguration::New();
 
-    base::DictionaryValue* network_dict = nullptr;
-    value->GetAsDictionary(&network_dict);
+    const base::DictionaryValue* network_dict = nullptr;
+    value.GetAsDictionary(&network_dict);
     DCHECK(network_dict);
 
     // kName is a post-processed version of kHexSSID.
@@ -386,7 +389,7 @@ void ArcNetHostImpl::GetNetworks(mojom::GetNetworksRequestType type,
     DCHECK(!tmp.empty());
     wc->guid = tmp;
 
-    base::DictionaryValue* wifi_dict = nullptr;
+    const base::DictionaryValue* wifi_dict = nullptr;
     network_dict->GetDictionary(onc::network_config::kWiFi, &wifi_dict);
     DCHECK(wifi_dict);
 

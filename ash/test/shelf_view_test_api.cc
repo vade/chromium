@@ -4,11 +4,11 @@
 
 #include "ash/test/shelf_view_test_api.h"
 
-#include "ash/common/shelf/overflow_button.h"
-#include "ash/common/shelf/shelf_button.h"
-#include "ash/common/shelf/shelf_constants.h"
-#include "ash/common/shelf/shelf_model.h"
-#include "ash/common/shelf/shelf_view.h"
+#include "ash/shelf/overflow_button.h"
+#include "ash/shelf/shelf_button.h"
+#include "ash/shelf/shelf_constants.h"
+#include "ash/shelf/shelf_model.h"
+#include "ash/shelf/shelf_view.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "ui/views/animation/bounds_animator.h"
@@ -135,14 +135,6 @@ gfx::Size ShelfViewTestAPI::GetPreferredSize() {
   return shelf_view_->GetPreferredSize();
 }
 
-int ShelfViewTestAPI::GetButtonSize() {
-  return GetShelfConstant(SHELF_BUTTON_SIZE);
-}
-
-int ShelfViewTestAPI::GetButtonSpacing() {
-  return GetShelfConstant(SHELF_BUTTON_SPACING);
-}
-
 int ShelfViewTestAPI::GetMinimumDragDistance() const {
   return ShelfView::kMinimumDragDistance;
 }
@@ -158,10 +150,6 @@ bool ShelfViewTestAPI::SameDragType(ShelfItemType typea,
   return shelf_view_->SameDragType(typea, typeb);
 }
 
-void ShelfViewTestAPI::SetShelfDelegate(ShelfDelegate* delegate) {
-  shelf_view_->delegate_ = delegate;
-}
-
 gfx::Rect ShelfViewTestAPI::GetBoundsForDragInsertInScreen() {
   return shelf_view_->GetBoundsForDragInsertInScreen();
 }
@@ -170,8 +158,8 @@ bool ShelfViewTestAPI::IsRippedOffFromShelf() {
   return shelf_view_->dragged_off_shelf_;
 }
 
-bool ShelfViewTestAPI::DraggedItemFromOverflowToShelf() {
-  return shelf_view_->dragged_off_from_overflow_to_shelf_;
+bool ShelfViewTestAPI::DraggedItemToAnotherShelf() {
+  return shelf_view_->dragged_to_another_shelf_;
 }
 
 ShelfButtonPressedMetricTracker*

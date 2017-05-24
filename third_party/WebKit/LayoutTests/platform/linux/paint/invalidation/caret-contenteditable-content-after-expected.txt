@@ -14,147 +14,53 @@
         {
           "object": "LayoutBlockFlow DIV id='editor'",
           "rect": [7, 47, 786, 22],
-          "reason": "forced by layout"
+          "reason": "geometry"
         },
         {
           "object": "LayoutBlockFlow DIV id='editor'",
           "rect": [7, 47, 786, 22],
-          "reason": "forced by layout"
+          "reason": "geometry"
         },
         {
           "object": "LayoutBlockFlow DIV id='editor'",
           "rect": [7, 47, 786, 22],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [8, 48, 22, 19],
-          "reason": "full"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [8, 48, 15, 19],
-          "reason": "full"
+          "reason": "geometry"
         },
         {
           "object": "LayoutTextFragment (anonymous)",
-          "rect": [30, 48, 7, 19],
-          "reason": "forced by layout"
+          "rect": [30, 48, 8, 19],
+          "reason": "geometry"
         },
         {
           "object": "LayoutTextFragment (anonymous)",
-          "rect": [23, 48, 7, 19],
-          "reason": "forced by layout"
+          "rect": [23, 48, 8, 19],
+          "reason": "geometry"
         },
         {
           "object": "LayoutTextFragment (anonymous)",
-          "rect": [23, 48, 7, 19],
-          "reason": "forced by layout"
+          "rect": [23, 48, 8, 19],
+          "reason": "geometry"
         },
         {
           "object": "LayoutTextFragment (anonymous)",
-          "rect": [15, 48, 7, 19],
-          "reason": "forced by layout"
+          "rect": [15, 48, 8, 19],
+          "reason": "geometry"
         },
         {
           "object": "LayoutTextFragment (anonymous)",
-          "rect": [15, 48, 7, 19],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [8, 48, 7, 19],
-          "reason": "layoutObject insertion"
+          "rect": [15, 48, 8, 19],
+          "reason": "geometry"
         },
         {
           "object": "LayoutTextFragment (anonymous)",
-          "rect": [8, 48, 7, 19],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutBlockFlow DIV id='editor'",
-          "rect": [7, 47, 3, 22],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutBlockFlow DIV id='editor'",
-          "rect": [7, 47, 3, 22],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutBlockFlow DIV id='editor'",
-          "rect": [7, 47, 3, 22],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutBlockFlow DIV id='editor'",
-          "rect": [7, 47, 3, 22],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [29, 47, 3, 21],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [29, 47, 3, 21],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [29, 47, 3, 21],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [22, 47, 3, 21],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [22, 47, 3, 21],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [22, 47, 3, 21],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [22, 47, 3, 21],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [14, 47, 3, 21],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [14, 47, 3, 21],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [14, 47, 3, 21],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [14, 47, 3, 21],
-          "reason": "invalidate paint rectangle"
+          "rect": [8, 48, 8, 19],
+          "reason": "geometry"
         }
       ]
     }
   ],
   "objectPaintInvalidations": [
     {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
       "object": "LayoutBlockFlow DIV id='editor'",
       "reason": "style change"
     },
@@ -164,75 +70,47 @@
     },
     {
       "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
+      "reason": "caret"
     },
     {
       "object": "LayoutBlockFlow DIV id='editor'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "RootInlineBox",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
+      "reason": "caret"
     },
     {
       "object": "LayoutText #text",
-      "reason": "layoutObject insertion"
+      "reason": "appeared"
     },
     {
       "object": "InlineTextBox 'a'",
-      "reason": "layoutObject insertion"
+      "reason": "appeared"
     },
     {
       "object": "LayoutTextFragment (anonymous)",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'x'",
-      "reason": "forced by layout"
-    },
-    {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
+      "reason": "geometry"
     },
     {
       "object": "LayoutBlockFlow DIV id='editor'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "RootInlineBox",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
+      "reason": "caret"
     },
     {
       "object": "LayoutText #text",
@@ -244,35 +122,23 @@
     },
     {
       "object": "LayoutTextFragment (anonymous)",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'x'",
-      "reason": "forced by layout"
-    },
-    {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
+      "reason": "geometry"
     },
     {
       "object": "LayoutBlockFlow DIV id='editor'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "RootInlineBox",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
+      "reason": "caret"
     },
     {
       "object": "LayoutText #text",
@@ -284,11 +150,11 @@
     },
     {
       "object": "LayoutTextFragment (anonymous)",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'x'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     }
   ]
 }

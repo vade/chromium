@@ -12,10 +12,12 @@ Polymer({
   properties: {
     /** @type {!SearchEngine} */
     engine: Object,
-
-    /** @private {!settings.ExtensionControlBrowserProxy} */
-    browserProxy_: Object,
   },
+
+  behaviors: [FocusRowBehavior],
+
+  /** @private {?settings.ExtensionControlBrowserProxy} */
+  browserProxy_: null,
 
   /** @override */
   created: function() {

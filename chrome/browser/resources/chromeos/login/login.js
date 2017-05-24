@@ -6,6 +6,8 @@
  * @fileoverview Login UI based on a stripped down OOBE controller.
  */
 
+var isMd = false;
+
 // <include src="login_shared.js">
 // <include src="login_non_lock_shared.js">
 // <include src="notification_card.js">
@@ -32,11 +34,13 @@ cr.define('cr.ui.Oobe', function() {
       login.TermsOfServiceScreen.register();
       login.ArcTermsOfServiceScreen.register();
       login.AppLaunchSplashScreen.register();
+      login.ArcKioskSplashScreen.register();
       login.ConfirmPasswordScreen.register();
       login.FatalErrorScreen.register();
       login.DeviceDisabledScreen.register();
       login.UnrecoverableCryptohomeErrorScreen.register();
       login.ActiveDirectoryPasswordChangeScreen.register(/* lazyInit= */ true);
+      login.EncryptionMigrationScreen.register();
 
       cr.ui.Bubble.decorate($('bubble'));
       login.HeaderBar.decorate($('login-header-bar'));
@@ -54,6 +58,7 @@ cr.define('cr.ui.Oobe', function() {
     setOemEulaUrl: function(oemEulaUrl) {},
     setTpmPassword: function(password) {},
     refreshA11yInfo: function(data) {},
+    reloadEulaContent: function(data) {},
 
     /**
      * Reloads content of the page.

@@ -8,7 +8,7 @@
 #include <stddef.h>
 
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
 #include "net/cookies/cookie_constants.h"
@@ -70,7 +70,7 @@ void ReportUMACookieLoss(CookieLossType loss, CookieEvent event) {
 net::CanonicalCookie CanonicalCookieFromSystemCookie(
     NSHTTPCookie* cookie,
     const base::Time& ceation_time) {
-  return *net::CanonicalCookie::Create(
+  return net::CanonicalCookie(
       base::SysNSStringToUTF8([cookie name]),
       base::SysNSStringToUTF8([cookie value]),
       base::SysNSStringToUTF8([cookie domain]),

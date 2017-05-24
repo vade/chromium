@@ -22,6 +22,7 @@
 //  description: A description
 //  dumpAs: 'domtree' or 'flattree'. Default is 'domtree'.
 //  removeSampleIfSucceeded: A boolean. Default is true.
+//  dumpFromRoot: A boolean. Default is false.
 //
 // Example:
 //  test(() => {
@@ -454,7 +455,7 @@ class Parser {
 }
 
 // TODO(yosin): Once we can import JavaScript file from scripts, we should
-// import "imported/wpt/html/resources/common.js", since |HTML5_VOID_ELEMENTS|
+// import "external/wpt/html/resources/common.js", since |HTML5_VOID_ELEMENTS|
 // is defined in there.
 /**
  * @const @type {!Set<string>}
@@ -619,9 +620,10 @@ class Serializer {
   /**
    * @public
    * @param {!HTMLDocument} document
+   * @param {boolean} dumpFromRoot
    */
-  serialize(document) {
-    if (document.body)
+  serialize(document, dumpFromRoot) {
+    if (document.body && !dumpFromRoot)
         this.serializeChildren(document.body);
     else
         this.serializeInternal(document.documentElement);
@@ -700,16 +702,16 @@ class Sample {
     document.body.appendChild(this.iframe_);
     /** @const @type {!HTMLDocument} */
     this.document_ = this.iframe_.contentDocument;
+
+    // Set focus to sample IFRAME to make |eventSender| and
+    // |testRunner.execCommand()| to work on sample rather than main frame.
+    this.iframe_.focus();
     /** @const @type {!Selection} */
     this.selection_ = this.iframe_.contentWindow.getSelection();
     this.selection_.document = this.document_;
     this.selection_.document.offsetLeft = this.iframe_.offsetLeft;
     this.selection_.document.offsetTop = this.iframe_.offsetTop;
     this.selection_.setClipboardData = setClipboardData;
-
-    // Set focus to sample IFRAME to make |eventSender| and
-    // |testRunner.execCommand()| to work on sample rather than main frame.
-    this.iframe_.focus();
     this.load(sampleText);
   }
 
@@ -750,7 +752,8 @@ class Sample {
     if (this.loadSelectionInTextArea(selection))
       return;
     this.selection_.collapse(selection.anchorNode, selection.anchorOffset);
-    this.selection_.extend(selection.focusNode, selection.focusOffset);
+    if (this.selection_.rangeCount > 0)
+      this.selection_.extend(selection.focusNode, selection.focusOffset);
   }
 
   /**
@@ -787,14 +790,15 @@ class Sample {
   /**
    * @public
    * @param {!Traversal} traversal
+   * @param {boolean} dumpFromRoot
    * @return {string}
    */
-  serialize(traversal) {
+  serialize(traversal, dumpFromRoot) {
     /** @type {!SampleSelection} */
     const selection = traversal.fromDOMSelection(this.selection_);
     /** @type {!Serializer} */
     const serializer = new Serializer(selection, traversal);
-    return serializer.serialize(this.document_);
+    return serializer.serialize(this.document_, dumpFromRoot);
   }
 }
 
@@ -872,6 +876,7 @@ function assertSelection(
   const kDescription = 'description';
   const kDumpAs = 'dumpAs';
   const kRemoveSampleIfSucceeded = 'removeSampleIfSucceeded';
+  const kDumpFromRoot = 'dumpFromRoot';
   /** @type {!Object} */
   const options = typeof(opt_options) === 'string'
       ? {description: opt_options} : opt_options;
@@ -883,6 +888,8 @@ function assertSelection(
       ? !!options[kRemoveSampleIfSucceeded] : true;
   /** @type {DumpAs} */
   const dumpAs = options[kDumpAs] || DumpAs.DOM_TREE;
+  /** @type {boolean} */
+  const dumpFromRoot = options[kDumpFromRoot] || false;
 
   checkExpectedText(expectedText);
   const sample = new Sample(inputText);
@@ -912,7 +919,7 @@ function assertSelection(
   })();
 
   /** @type {string} */
-  const actualText = sample.serialize(traversal);
+  const actualText = sample.serialize(traversal, dumpFromRoot);
   // We keep sample HTML when assertion is false for ease of debugging test
   // case.
   if (actualText === expectedText) {

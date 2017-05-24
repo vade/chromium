@@ -14,7 +14,6 @@
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "services/ui/public/cpp/property_type_converters.h"
 #include "services/ui/public/interfaces/window_manager.mojom.h"
-#include "ui/aura/mus/mus_util.h"
 #endif  // defined(USE_ASH)
 
 namespace chrome {
@@ -47,23 +46,19 @@ gfx::NativeWindow ShowWebDialog(gfx::NativeView parent,
   // NOTE: The |parent| may be null, which will result in the default window
   // placement on Aura.
   params.parent = parent;
-#if defined(USE_ASH)
-  if (chrome::IsRunningInMash())
-    params.parent_mus = aura::GetMusWindow(parent);
-#endif  // defined(USE_ASH)
   return ShowWebDialogWidget(params, view);
 }
 
 #if defined(USE_ASH)
-void ShowWebDialogInContainer(int container_id,
-                              content::BrowserContext* context,
-                              ui::WebDialogDelegate* delegate) {
+gfx::NativeWindow ShowWebDialogInContainer(int container_id,
+                                           content::BrowserContext* context,
+                                           ui::WebDialogDelegate* delegate) {
   DCHECK(container_id != ash::kShellWindowId_Invalid);
   views::WebDialogView* view =
       new views::WebDialogView(context, delegate, new ChromeWebContentsHandler);
   views::Widget::InitParams params;
   params.delegate = view;
-  if (chrome::IsRunningInMash()) {
+  if (ash_util::IsRunningInMash()) {
     using ui::mojom::WindowManager;
     params.mus_properties[WindowManager::kContainerId_InitProperty] =
         mojo::ConvertTo<std::vector<uint8_t>>(container_id);
@@ -71,7 +66,7 @@ void ShowWebDialogInContainer(int container_id,
     params.parent = ash::Shell::GetContainer(ash::Shell::GetPrimaryRootWindow(),
                                              container_id);
   }
-  ShowWebDialogWidget(params, view);
+  return ShowWebDialogWidget(params, view);
 }
 #endif  // defined(USE_ASH)
 

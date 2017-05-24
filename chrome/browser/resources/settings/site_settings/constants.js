@@ -16,18 +16,23 @@ settings.ContentSettingsTypes = {
   COOKIES: 'cookies',
   IMAGES: 'images',
   JAVASCRIPT: 'javascript',
-  PLUGINS: 'plugins',
+  PLUGINS: 'plugins',  // AKA Flash.
   POPUPS: 'popups',
   GEOLOCATION: 'location',
   NOTIFICATIONS: 'notifications',
-  MIC: 'media-stream-mic',
+  MIC: 'media-stream-mic',  // AKA Microphone.
   CAMERA: 'media-stream-camera',
   PROTOCOL_HANDLERS: 'register-protocol-handler',
   UNSANDBOXED_PLUGINS: 'ppapi-broker',
   AUTOMATIC_DOWNLOADS: 'multiple-automatic-downloads',
   BACKGROUND_SYNC: 'background-sync',
+  MIDI_DEVICES: 'midi-sysex',
   USB_DEVICES: 'usb-chooser-data',
   ZOOM_LEVELS: 'zoom-levels',
+// <if expr="chromeos">
+  PROTECTED_CONTENT: 'protectedContent',
+// </if>
+  SUBRESOURCE_FILTER: 'subresource-filter',
 };
 
 /**

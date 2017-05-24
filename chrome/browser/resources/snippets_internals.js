@@ -15,7 +15,7 @@ cr.define('chrome.SnippetsInternals', function() {
     });
 
     $('submit-dump').addEventListener('click', function(event) {
-      downloadJson(JSON.stringify(lastSuggestions));
+      downloadJson(JSON.stringify(lastSuggestions, null, 2));
       event.preventDefault();
     });
 
@@ -113,6 +113,10 @@ cr.define('chrome.SnippetsInternals', function() {
     receiveProperty('avg-time-to-use', timeToUse);
   }
 
+  function receiveRankerDebugData(itemsList) {
+    displayList(itemsList, 'ranker', 'no-togler');
+  }
+
   function receiveLastRemoteSuggestionsBackgroundFetchTime(
       lastRemoteSuggestionsBackgroundFetchTime) {
     receiveProperty('last-background-fetch-time-label',
@@ -125,7 +129,7 @@ cr.define('chrome.SnippetsInternals', function() {
     // create a link with download attribute and simulate a click, instead.)
     var link = document.createElement('a');
     link.download = 'snippets.json';
-    link.href = 'data:,' + json;
+    link.href = 'data:application/json,' + encodeURI(json);
     link.click();
   }
 
@@ -168,6 +172,7 @@ cr.define('chrome.SnippetsInternals', function() {
     receiveContentSuggestions: receiveContentSuggestions,
     receiveJson: receiveJson,
     receiveClassification: receiveClassification,
+    receiveRankerDebugData: receiveRankerDebugData,
     receiveLastRemoteSuggestionsBackgroundFetchTime:
         receiveLastRemoteSuggestionsBackgroundFetchTime,
   };

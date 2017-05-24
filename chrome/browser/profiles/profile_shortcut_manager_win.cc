@@ -500,11 +500,6 @@ void CreateOrUpdateDesktopShortcutsAndIconForProfile(
     return;
   }
 
-  BrowserDistribution* distribution = BrowserDistribution::GetDistribution();
-  // Ensure that the distribution supports creating shortcuts. If it doesn't,
-  // the following code may result in NOTREACHED() being hit.
-  DCHECK(distribution->CanCreateDesktopShortcuts());
-
   std::set<base::FilePath> desktop_contents = ListUserDesktopContents(nullptr);
 
   const base::string16 command_line =
@@ -527,6 +522,7 @@ void CreateOrUpdateDesktopShortcutsAndIconForProfile(
   }
 
   ShellUtil::ShortcutProperties properties(ShellUtil::CURRENT_USER);
+  BrowserDistribution* distribution = BrowserDistribution::GetDistribution();
   installer::Product product(distribution);
   product.AddDefaultShortcutProperties(chrome_exe, &properties);
 
@@ -620,9 +616,6 @@ void DeleteDesktopShortcuts(const base::FilePath& profile_path,
   if (ensure_shortcuts_remain && had_shortcuts &&
       !ChromeDesktopShortcutsExist(chrome_exe)) {
     BrowserDistribution* distribution = BrowserDistribution::GetDistribution();
-    // Ensure that the distribution supports creating shortcuts. If it doesn't,
-    // the following code may result in NOTREACHED() being hit.
-    DCHECK(distribution->CanCreateDesktopShortcuts());
     installer::Product product(distribution);
 
     ShellUtil::ShortcutProperties properties(ShellUtil::CURRENT_USER);
@@ -682,7 +675,9 @@ SkBitmap GetSkBitmapCopy(const gfx::Image& image) {
   DCHECK(!image.IsEmpty());
   const SkBitmap* image_bitmap = image.ToSkBitmap();
   SkBitmap bitmap_copy;
-  image_bitmap->deepCopyTo(&bitmap_copy);
+  if (bitmap_copy.tryAllocPixels(image_bitmap->info()))
+    image_bitmap->readPixels(bitmap_copy.info(), bitmap_copy.getPixels(),
+                             bitmap_copy.rowBytes(), 0, 0);
   return bitmap_copy;
 }
 
@@ -785,8 +780,7 @@ base::string16 CreateProfileShortcutFlags(const base::FilePath& profile_path) {
 bool ProfileShortcutManager::IsFeatureEnabled() {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   return command_line->HasSwitch(switches::kEnableProfileShortcutManager) ||
-         (BrowserDistribution::GetDistribution()->CanCreateDesktopShortcuts() &&
-          !command_line->HasSwitch(switches::kUserDataDir));
+         !command_line->HasSwitch(switches::kUserDataDir);
 }
 
 // static

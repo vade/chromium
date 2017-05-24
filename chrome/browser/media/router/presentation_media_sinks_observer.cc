@@ -5,7 +5,7 @@
 #include "chrome/browser/media/router/presentation_media_sinks_observer.h"
 
 #include "chrome/browser/media/router/media_router.h"
-#include "chrome/browser/media/router/media_source.h"
+#include "chrome/common/media_router/media_source.h"
 #include "content/public/browser/presentation_screen_availability_listener.h"
 
 namespace media_router {
@@ -14,7 +14,7 @@ PresentationMediaSinksObserver::PresentationMediaSinksObserver(
     MediaRouter* router,
     content::PresentationScreenAvailabilityListener* listener,
     const MediaSource& source,
-    const GURL& origin)
+    const url::Origin& origin)
     : MediaSinksObserver(router, source, origin),
       listener_(listener),
       previous_availablity_(UNKNOWN) {

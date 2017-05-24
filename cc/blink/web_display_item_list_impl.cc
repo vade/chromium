@@ -9,52 +9,46 @@
 
 #include <vector>
 
-#include "cc/playback/clip_display_item.h"
-#include "cc/playback/clip_path_display_item.h"
-#include "cc/playback/compositing_display_item.h"
-#include "cc/playback/display_item_list_settings.h"
-#include "cc/playback/drawing_display_item.h"
-#include "cc/playback/filter_display_item.h"
-#include "cc/playback/float_clip_display_item.h"
-#include "cc/playback/transform_display_item.h"
+#include "cc/paint/clip_display_item.h"
+#include "cc/paint/clip_path_display_item.h"
+#include "cc/paint/compositing_display_item.h"
+#include "cc/paint/drawing_display_item.h"
+#include "cc/paint/filter_display_item.h"
+#include "cc/paint/float_clip_display_item.h"
+#include "cc/paint/paint_record.h"
+#include "cc/paint/transform_display_item.h"
 #include "third_party/WebKit/public/platform/WebFloatRect.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
 #include "third_party/skia/include/core/SkMatrix44.h"
-#include "third_party/skia/include/core/SkPicture.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/safe_integer_conversions.h"
+#include "ui/gfx/skia_util.h"
 #include "ui/gfx/transform.h"
 
 namespace cc_blink {
 
 namespace {
 
-scoped_refptr<cc::DisplayItemList> CreateUncachedDisplayItemListForBlink() {
-  cc::DisplayItemListSettings settings;
-  settings.use_cached_picture = false;
-  return cc::DisplayItemList::Create(settings);
-}
-
 }  // namespace
 
 WebDisplayItemListImpl::WebDisplayItemListImpl()
-    : display_item_list_(CreateUncachedDisplayItemListForBlink()) {
-}
+    : display_item_list_(new cc::DisplayItemList) {}
 
 WebDisplayItemListImpl::WebDisplayItemListImpl(
     cc::DisplayItemList* display_list)
     : display_item_list_(display_list) {
 }
 
-void WebDisplayItemListImpl::appendDrawingItem(
+void WebDisplayItemListImpl::AppendDrawingItem(
     const blink::WebRect& visual_rect,
-    sk_sp<const SkPicture> picture) {
+    sk_sp<const cc::PaintRecord> record,
+    const blink::WebRect& record_bounds) {
   display_item_list_->CreateAndAppendDrawingItem<cc::DrawingDisplayItem>(
-      visual_rect, std::move(picture));
+      visual_rect, std::move(record), gfx::RectToSkRect(record_bounds));
 }
 
-void WebDisplayItemListImpl::appendClipItem(
+void WebDisplayItemListImpl::AppendClipItem(
     const blink::WebRect& clip_rect,
     const blink::WebVector<SkRRect>& rounded_clip_rects) {
   std::vector<SkRRect> rounded_rects;
@@ -66,34 +60,33 @@ void WebDisplayItemListImpl::appendClipItem(
       clip_rect, rounded_rects, antialias);
 }
 
-void WebDisplayItemListImpl::appendEndClipItem() {
+void WebDisplayItemListImpl::AppendEndClipItem() {
   display_item_list_->CreateAndAppendPairedEndItem<cc::EndClipDisplayItem>();
 }
 
-void WebDisplayItemListImpl::appendClipPathItem(const SkPath& clip_path,
+void WebDisplayItemListImpl::AppendClipPathItem(const SkPath& clip_path,
                                                 bool antialias) {
   display_item_list_->CreateAndAppendPairedBeginItem<cc::ClipPathDisplayItem>(
       clip_path, antialias);
 }
 
-void WebDisplayItemListImpl::appendEndClipPathItem() {
+void WebDisplayItemListImpl::AppendEndClipPathItem() {
   display_item_list_
       ->CreateAndAppendPairedEndItem<cc::EndClipPathDisplayItem>();
 }
 
-void WebDisplayItemListImpl::appendFloatClipItem(
+void WebDisplayItemListImpl::AppendFloatClipItem(
     const blink::WebFloatRect& clip_rect) {
   display_item_list_->CreateAndAppendPairedBeginItem<cc::FloatClipDisplayItem>(
       clip_rect);
 }
 
-void WebDisplayItemListImpl::appendEndFloatClipItem() {
+void WebDisplayItemListImpl::AppendEndFloatClipItem() {
   display_item_list_
       ->CreateAndAppendPairedEndItem<cc::EndFloatClipDisplayItem>();
 }
 
-void WebDisplayItemListImpl::appendTransformItem(
-    const SkMatrix44& matrix) {
+void WebDisplayItemListImpl::AppendTransformItem(const SkMatrix44& matrix) {
   gfx::Transform transform(gfx::Transform::kSkipInitialization);
   transform.matrix() = matrix;
 
@@ -101,12 +94,12 @@ void WebDisplayItemListImpl::appendTransformItem(
       transform);
 }
 
-void WebDisplayItemListImpl::appendEndTransformItem() {
+void WebDisplayItemListImpl::AppendEndTransformItem() {
   display_item_list_
       ->CreateAndAppendPairedEndItem<cc::EndTransformDisplayItem>();
 }
 
-void WebDisplayItemListImpl::appendCompositingItem(
+void WebDisplayItemListImpl::AppendCompositingItem(
     float opacity,
     SkBlendMode xfermode,
     SkRect* bounds,
@@ -123,12 +116,12 @@ void WebDisplayItemListImpl::appendCompositingItem(
           bounds, sk_ref_sp(color_filter), kLcdTextRequiresOpaqueLayer);
 }
 
-void WebDisplayItemListImpl::appendEndCompositingItem() {
+void WebDisplayItemListImpl::AppendEndCompositingItem() {
   display_item_list_
       ->CreateAndAppendPairedEndItem<cc::EndCompositingDisplayItem>();
 }
 
-void WebDisplayItemListImpl::appendFilterItem(
+void WebDisplayItemListImpl::AppendFilterItem(
     const cc::FilterOperations& filters,
     const blink::WebFloatRect& filter_bounds,
     const blink::WebFloatPoint& origin) {
@@ -137,31 +130,26 @@ void WebDisplayItemListImpl::appendFilterItem(
           gfx::ToEnclosingRect(filter_bounds), filters, filter_bounds, origin);
 }
 
-void WebDisplayItemListImpl::appendEndFilterItem() {
+void WebDisplayItemListImpl::AppendEndFilterItem() {
   display_item_list_->CreateAndAppendPairedEndItem<cc::EndFilterDisplayItem>();
 }
 
-void WebDisplayItemListImpl::appendScrollItem(
+void WebDisplayItemListImpl::AppendScrollItem(
     const blink::WebSize& scroll_offset,
     ScrollContainerId) {
   SkMatrix44 matrix(SkMatrix44::kUninitialized_Constructor);
   matrix.setTranslate(-scroll_offset.width, -scroll_offset.height, 0);
   // TODO(wkorman): http://crbug.com/633636 Should we translate the visual rect
   // as well? Create a test case and investigate.
-  appendTransformItem(matrix);
+  AppendTransformItem(matrix);
 }
 
-void WebDisplayItemListImpl::appendEndScrollItem() {
-  appendEndTransformItem();
+void WebDisplayItemListImpl::AppendEndScrollItem() {
+  AppendEndTransformItem();
 }
 
-void WebDisplayItemListImpl::setIsSuitableForGpuRasterization(bool isSuitable) {
+void WebDisplayItemListImpl::SetIsSuitableForGpuRasterization(bool isSuitable) {
   display_item_list_->SetIsSuitableForGpuRasterization(isSuitable);
-}
-
-void WebDisplayItemListImpl::setImpliedColorSpace(
-    const gfx::ColorSpace& implied_color_space) {
-  display_item_list_->SetImpliedColorSpace(implied_color_space);
 }
 
 WebDisplayItemListImpl::~WebDisplayItemListImpl() {

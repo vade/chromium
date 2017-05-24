@@ -13,13 +13,17 @@
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/optional.h"
+#include "cc/surfaces/local_surface_id.h"
 #include "ui/aura/window_observer.h"
+#include "ui/base/cursor/cursor_data.h"
+#include "ui/base/ui_base_types.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace ui {
 
 namespace mojom {
-enum class Cursor : int32_t;
+enum class CursorType : int32_t;
 }
 
 }  // namespace ui
@@ -43,7 +47,7 @@ enum class ChangeType {
   NEW_TOP_LEVEL_WINDOW,
   NEW_WINDOW,
   OPACITY,
-  PREDEFINED_CURSOR,
+  CURSOR,
   PROPERTY,
   REMOVE_CHILD,
   REMOVE_TRANSIENT_WINDOW_FROM_PARENT,
@@ -138,9 +142,12 @@ class InFlightChange {
 
 class InFlightBoundsChange : public InFlightChange {
  public:
-  InFlightBoundsChange(WindowTreeClient* window_tree_client,
-                       WindowMus* window,
-                       const gfx::Rect& revert_bounds);
+  InFlightBoundsChange(
+      WindowTreeClient* window_tree_client,
+      WindowMus* window,
+      const gfx::Rect& revert_bounds,
+      const base::Optional<cc::LocalSurfaceId>& local_surface_id);
+  ~InFlightBoundsChange() override;
 
   // InFlightChange:
   void SetRevertValueFrom(const InFlightChange& change) override;
@@ -149,6 +156,7 @@ class InFlightBoundsChange : public InFlightChange {
  private:
   WindowTreeClient* window_tree_client_;
   gfx::Rect revert_bounds_;
+  base::Optional<cc::LocalSurfaceId> revert_local_surface_id_;
 
   DISALLOW_COPY_AND_ASSIGN(InFlightBoundsChange);
 };
@@ -264,20 +272,19 @@ class InFlightPropertyChange : public InFlightChange {
   DISALLOW_COPY_AND_ASSIGN(InFlightPropertyChange);
 };
 
-class InFlightPredefinedCursorChange : public InFlightChange {
+class InFlightCursorChange : public InFlightChange {
  public:
-  InFlightPredefinedCursorChange(WindowMus* window,
-                                 ui::mojom::Cursor revert_value);
-  ~InFlightPredefinedCursorChange() override;
+  InFlightCursorChange(WindowMus* window, const ui::CursorData& revert_value);
+  ~InFlightCursorChange() override;
 
   // InFlightChange:
   void SetRevertValueFrom(const InFlightChange& change) override;
   void Revert() override;
 
  private:
-  ui::mojom::Cursor revert_cursor_;
+  ui::CursorData revert_cursor_;
 
-  DISALLOW_COPY_AND_ASSIGN(InFlightPredefinedCursorChange);
+  DISALLOW_COPY_AND_ASSIGN(InFlightCursorChange);
 };
 
 class InFlightVisibleChange : public InFlightChange {
@@ -313,17 +320,19 @@ class InFlightOpacityChange : public InFlightChange {
   DISALLOW_COPY_AND_ASSIGN(InFlightOpacityChange);
 };
 
-class InFlightSetModalChange : public InFlightChange {
+class InFlightSetModalTypeChange : public InFlightChange {
  public:
-  explicit InFlightSetModalChange(WindowMus* window);
-  ~InFlightSetModalChange() override;
+  InFlightSetModalTypeChange(WindowMus* window, ui::ModalType revert_value);
+  ~InFlightSetModalTypeChange() override;
 
   // InFlightChange:
   void SetRevertValueFrom(const InFlightChange& change) override;
   void Revert() override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(InFlightSetModalChange);
+  ui::ModalType revert_modal_type_;
+
+  DISALLOW_COPY_AND_ASSIGN(InFlightSetModalTypeChange);
 };
 
 }  // namespace aura

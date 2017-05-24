@@ -23,6 +23,7 @@ bundle_data("assets") {
 }
 
 source_set("first_run") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   sources = [
     "first_run_chrome_signin_view_controller.h",
     "first_run_chrome_signin_view_controller.mm",
@@ -54,6 +55,7 @@ source_set("first_run") {
     "//ios/chrome/browser/ui/authentication",
     "//ios/chrome/browser/ui/commands",
     "//ios/chrome/browser/ui/fancy_ui",
+    "//ios/chrome/browser/ui/icons",
     "//ios/chrome/browser/ui/material_components",
     "//ios/chrome/browser/ui/promos",
     "//ios/chrome/browser/ui/settings",
@@ -96,6 +98,7 @@ source_set("unit_tests") {
 }
 
 source_set("eg_tests") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
     "first_run_egtest.mm",

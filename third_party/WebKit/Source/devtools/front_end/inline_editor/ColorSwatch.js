@@ -133,8 +133,8 @@ InlineEditor.ColorSwatch = class extends HTMLSpanElement {
     this._iconElement = root.createChild('span', 'color-swatch');
     this._iconElement.title = Common.UIString('Shift-click to change color format');
     this._swatchInner = this._iconElement.createChild('span', 'color-swatch-inner');
-    this._swatchInner.addEventListener('dblclick', (e) => e.consume(), false);
-    this._swatchInner.addEventListener('mousedown', (e) => e.consume(), false);
+    this._swatchInner.addEventListener('dblclick', e => e.consume(), false);
+    this._swatchInner.addEventListener('mousedown', e => e.consume(), false);
     this._swatchInner.addEventListener('click', this._handleClick.bind(this), true);
 
     root.createChild('content');
@@ -247,7 +247,7 @@ InlineEditor.CSSShadowSwatch = class extends HTMLSpanElement {
   setCSSShadow(model) {
     this._model = model;
     this._contentElement.removeChildren();
-    var results = Common.TextUtils.splitStringByRegexes(model.asCSSText(), [/inset/g, Common.Color.Regex]);
+    var results = TextUtils.TextUtils.splitStringByRegexes(model.asCSSText(), [/inset/g, Common.Color.Regex]);
     for (var i = 0; i < results.length; i++) {
       var result = results[i];
       if (result.regexIndex === 1) {

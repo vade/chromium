@@ -47,15 +47,19 @@ void MetricsRenderFrameObserver::DidObserveLoadingBehavior(
     page_timing_metrics_sender_->DidObserveLoadingBehavior(behavior);
 }
 
+void MetricsRenderFrameObserver::FrameDetached() {
+  page_timing_metrics_sender_.reset();
+}
+
 void MetricsRenderFrameObserver::DidCommitProvisionalLoad(
     bool is_new_navigation,
-    bool is_same_page_navigation) {
-  // Same-page navigations (e.g. an in-document navigation from a fragment
-  // link) aren't full page loads, since they don't go to network to load the
-  // main HTML resource. DidStartProvisionalLoad doesn't get invoked for same
-  // page navigations, so we may still have an active
-  // page_timing_metrics_sender_ at this point.
-  if (is_same_page_navigation)
+    bool is_same_document_navigation) {
+  // Same-document navigations (e.g. a navigation from a fragment link) aren't
+  // full page loads, since they don't go to network to load the main HTML
+  // resource. DidStartProvisionalLoad doesn't get invoked for same document
+  // navigations, so we may still have an active page_timing_metrics_sender_ at
+  // this point.
+  if (is_same_document_navigation)
     return;
 
   // Make sure to release the sender for a previous navigation, if we have one.
@@ -66,10 +70,8 @@ void MetricsRenderFrameObserver::DidCommitProvisionalLoad(
   // non-null, we will send metrics for the current page at some later time, as
   // those metrics become available.
   if (ShouldSendMetrics()) {
-    PageLoadTiming timing(GetTiming());
-    DCHECK(!timing.navigation_start.is_null());
-    page_timing_metrics_sender_.reset(
-        new PageTimingMetricsSender(this, routing_id(), CreateTimer(), timing));
+    page_timing_metrics_sender_ = base::MakeUnique<PageTimingMetricsSender>(
+        this, routing_id(), CreateTimer(), GetTiming());
   }
 }
 
@@ -78,81 +80,85 @@ void MetricsRenderFrameObserver::SendMetrics() {
     return;
   if (HasNoRenderFrame())
     return;
-  PageLoadTiming timing(GetTiming());
-  page_timing_metrics_sender_->Send(timing);
+  page_timing_metrics_sender_->Send(GetTiming());
 }
 
 bool MetricsRenderFrameObserver::ShouldSendMetrics() const {
   if (HasNoRenderFrame())
     return false;
   const blink::WebLocalFrame* frame = render_frame()->GetWebFrame();
-  // We only track metrics for main frames.
-  if (frame->parent())
-    return false;
-
-  const blink::WebDocument& document = frame->document();
-  return RendererPageTrackDecider(&document, frame->dataSource()).ShouldTrack();
+  const blink::WebDocument& document = frame->GetDocument();
+  return RendererPageTrackDecider(&document, frame->DataSource()).ShouldTrack();
 }
 
-PageLoadTiming MetricsRenderFrameObserver::GetTiming() const {
+mojom::PageLoadTimingPtr MetricsRenderFrameObserver::GetTiming() const {
   const blink::WebPerformance& perf =
-      render_frame()->GetWebFrame()->performance();
+      render_frame()->GetWebFrame()->Performance();
 
-  PageLoadTiming timing;
-  double start = perf.navigationStart();
-  timing.navigation_start = base::Time::FromDoubleT(start);
-  if (perf.responseStart() > 0.0)
-    timing.response_start = ClampDelta(perf.responseStart(), start);
-  if (perf.domContentLoadedEventStart() > 0.0) {
-    timing.dom_content_loaded_event_start =
-        ClampDelta(perf.domContentLoadedEventStart(), start);
+  mojom::PageLoadTimingPtr timing(CreatePageLoadTiming());
+  double start = perf.NavigationStart();
+  timing->navigation_start = base::Time::FromDoubleT(start);
+  if (perf.ResponseStart() > 0.0)
+    timing->response_start = ClampDelta(perf.ResponseStart(), start);
+  if (perf.DomContentLoadedEventStart() > 0.0) {
+    timing->document_timing->dom_content_loaded_event_start =
+        ClampDelta(perf.DomContentLoadedEventStart(), start);
   }
-  if (perf.loadEventStart() > 0.0)
-    timing.load_event_start = ClampDelta(perf.loadEventStart(), start);
-  if (perf.firstLayout() > 0.0)
-    timing.first_layout = ClampDelta(perf.firstLayout(), start);
-  if (perf.firstPaint() > 0.0)
-    timing.first_paint = ClampDelta(perf.firstPaint(), start);
-  if (perf.firstTextPaint() > 0.0)
-    timing.first_text_paint = ClampDelta(perf.firstTextPaint(), start);
-  if (perf.firstImagePaint() > 0.0)
-    timing.first_image_paint = ClampDelta(perf.firstImagePaint(), start);
-  if (perf.firstContentfulPaint() > 0.0) {
-    timing.first_contentful_paint =
-        ClampDelta(perf.firstContentfulPaint(), start);
+  if (perf.LoadEventStart() > 0.0) {
+    timing->document_timing->load_event_start =
+        ClampDelta(perf.LoadEventStart(), start);
   }
-  if (perf.firstMeaningfulPaint() > 0.0) {
-    timing.first_meaningful_paint =
-        ClampDelta(perf.firstMeaningfulPaint(), start);
+  if (perf.FirstLayout() > 0.0)
+    timing->document_timing->first_layout =
+        ClampDelta(perf.FirstLayout(), start);
+  if (perf.FirstPaint() > 0.0)
+    timing->paint_timing->first_paint = ClampDelta(perf.FirstPaint(), start);
+  if (perf.FirstTextPaint() > 0.0) {
+    timing->paint_timing->first_text_paint =
+        ClampDelta(perf.FirstTextPaint(), start);
   }
-  if (perf.parseStart() > 0.0)
-    timing.parse_start = ClampDelta(perf.parseStart(), start);
-  if (perf.parseStop() > 0.0)
-    timing.parse_stop = ClampDelta(perf.parseStop(), start);
-  if (timing.parse_start) {
+  if (perf.FirstImagePaint() > 0.0) {
+    timing->paint_timing->first_image_paint =
+        ClampDelta(perf.FirstImagePaint(), start);
+  }
+  if (perf.FirstContentfulPaint() > 0.0) {
+    timing->paint_timing->first_contentful_paint =
+        ClampDelta(perf.FirstContentfulPaint(), start);
+  }
+  if (perf.FirstMeaningfulPaint() > 0.0) {
+    timing->paint_timing->first_meaningful_paint =
+        ClampDelta(perf.FirstMeaningfulPaint(), start);
+  }
+  if (perf.ParseStart() > 0.0)
+    timing->parse_timing->parse_start = ClampDelta(perf.ParseStart(), start);
+  if (perf.ParseStop() > 0.0)
+    timing->parse_timing->parse_stop = ClampDelta(perf.ParseStop(), start);
+  if (timing->parse_timing->parse_start) {
     // If we started parsing, record all parser durations such as the amount of
     // time blocked on script load, even if those values are zero.
-    timing.parse_blocked_on_script_load_duration =
-        base::TimeDelta::FromSecondsD(perf.parseBlockedOnScriptLoadDuration());
-    timing.parse_blocked_on_script_load_from_document_write_duration =
+    timing->parse_timing->parse_blocked_on_script_load_duration =
+        base::TimeDelta::FromSecondsD(perf.ParseBlockedOnScriptLoadDuration());
+    timing->parse_timing
+        ->parse_blocked_on_script_load_from_document_write_duration =
         base::TimeDelta::FromSecondsD(
-            perf.parseBlockedOnScriptLoadFromDocumentWriteDuration());
-    timing.parse_blocked_on_script_execution_duration =
+            perf.ParseBlockedOnScriptLoadFromDocumentWriteDuration());
+    timing->parse_timing->parse_blocked_on_script_execution_duration =
         base::TimeDelta::FromSecondsD(
-            perf.parseBlockedOnScriptExecutionDuration());
-    timing.parse_blocked_on_script_execution_from_document_write_duration =
+            perf.ParseBlockedOnScriptExecutionDuration());
+    timing->parse_timing
+        ->parse_blocked_on_script_execution_from_document_write_duration =
         base::TimeDelta::FromSecondsD(
-            perf.parseBlockedOnScriptExecutionFromDocumentWriteDuration());
+            perf.ParseBlockedOnScriptExecutionFromDocumentWriteDuration());
   }
 
-  if (perf.authorStyleSheetParseDurationBeforeFCP() > 0.0) {
-    timing.style_sheet_timing.author_style_sheet_parse_duration_before_fcp =
+  if (perf.AuthorStyleSheetParseDurationBeforeFCP() > 0.0) {
+    timing->style_sheet_timing->author_style_sheet_parse_duration_before_fcp =
         base::TimeDelta::FromSecondsD(
-            perf.authorStyleSheetParseDurationBeforeFCP());
+            perf.AuthorStyleSheetParseDurationBeforeFCP());
   }
-  if (perf.updateStyleDurationBeforeFCP() > 0.0) {
-    timing.style_sheet_timing.update_style_duration_before_fcp =
-        base::TimeDelta::FromSecondsD(perf.updateStyleDurationBeforeFCP());
+  if (perf.UpdateStyleDurationBeforeFCP() > 0.0) {
+    timing->style_sheet_timing->update_style_duration_before_fcp =
+        base::TimeDelta::FromSecondsD(perf.UpdateStyleDurationBeforeFCP());
   }
   return timing;
 }

@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/mac/bind_objc_block.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "components/captive_portal/captive_portal_detector.h"
 #include "components/security_interstitials/core/ssl_error_ui.h"
 #include "ios/chrome/browser/ssl/captive_portal_detector_tab_helper.h"
@@ -15,6 +15,7 @@
 #include "ios/web/public/browser_state.h"
 #import "ios/web/public/web_state/web_state.h"
 #include "net/ssl/ssl_info.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -83,7 +84,8 @@ void IOSSSLErrorHandler::RecordCaptivePortalState(web::WebState* web_state) {
         UMA_HISTOGRAM_ENUMERATION(kSessionDetectionResultHistogram,
                                   static_cast<int>(status),
                                   static_cast<int>(CaptivePortalStatus::COUNT));
-      }));
+      }),
+      NO_TRAFFIC_ANNOTATION_YET);
 }
 
 // static

@@ -18,4 +18,5 @@ dictionary SecurityPolicyViolationEventInit : EventInit {
     unsigned short statusCode;
     long      lineNumber;
     long      columnNumber;
+    DOMString sample;
 };

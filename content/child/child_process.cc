@@ -6,6 +6,7 @@
 
 #include <string.h>
 
+#include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/statistics_recorder.h"
@@ -31,14 +32,14 @@ static void SigUSR1Handler(int signal) { }
 namespace content {
 
 namespace {
-
-base::LazyInstance<base::ThreadLocalPointer<ChildProcess> > g_lazy_tls =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<base::ThreadLocalPointer<ChildProcess>>::DestructorAtExit
+    g_lazy_tls = LAZY_INSTANCE_INITIALIZER;
 }
 
-ChildProcess::ChildProcess() : ChildProcess(base::ThreadPriority::NORMAL) {}
-
-ChildProcess::ChildProcess(base::ThreadPriority io_thread_priority)
+ChildProcess::ChildProcess(
+    base::ThreadPriority io_thread_priority,
+    const std::string& task_scheduler_name,
+    std::unique_ptr<base::TaskScheduler::InitParams> task_scheduler_init_params)
     : ref_count_(0),
       shutdown_event_(base::WaitableEvent::ResetPolicy::MANUAL,
                       base::WaitableEvent::InitialState::NOT_SIGNALED),
@@ -52,7 +53,14 @@ ChildProcess::ChildProcess(base::ThreadPriority io_thread_priority)
   // exist when ChildProcess is instantiated in the browser process or in a
   // test process.
   if (!base::TaskScheduler::GetInstance()) {
-    InitializeTaskScheduler();
+    if (task_scheduler_init_params) {
+      base::TaskScheduler::Create(task_scheduler_name);
+      base::TaskScheduler::GetInstance()->Start(
+          *task_scheduler_init_params.get());
+    } else {
+      base::TaskScheduler::CreateAndStartWithDefaultParams(task_scheduler_name);
+    }
+
     DCHECK(base::TaskScheduler::GetInstance());
     initialized_task_scheduler_ = true;
   }
@@ -175,11 +183,6 @@ void ChildProcess::WaitForDebugger(const std::string& label) {
   pause();
 #endif  // defined(OS_ANDROID)
 #endif  // defined(OS_POSIX)
-}
-
-void ChildProcess::InitializeTaskScheduler() {
-  constexpr int kMaxThreads = 2;
-  base::TaskScheduler::CreateAndSetSimpleTaskScheduler(kMaxThreads);
 }
 
 }  // namespace content

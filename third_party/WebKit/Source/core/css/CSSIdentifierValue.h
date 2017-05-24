@@ -7,7 +7,8 @@
 
 #include "core/CSSValueKeywords.h"
 #include "core/css/CSSValue.h"
-#include "wtf/TypeTraits.h"
+#include "core/css/CSSValueIDMappings.h"
+#include "platform/wtf/TypeTraits.h"
 
 namespace blink {
 
@@ -17,31 +18,34 @@ namespace blink {
 // conflicts with CSSOM's CSSKeywordValue class.
 class CORE_EXPORT CSSIdentifierValue : public CSSValue {
  public:
-  static CSSIdentifierValue* create(CSSValueID);
+  static CSSIdentifierValue* Create(CSSValueID);
 
   // TODO(sashab): Rename this to createFromPlatformValue().
   template <typename T>
-  static CSSIdentifierValue* create(T value) {
+  static CSSIdentifierValue* Create(T value) {
     static_assert(!std::is_same<T, CSSValueID>::value,
                   "Do not call create() with a CSSValueID; call "
                   "createIdentifier() instead");
     return new CSSIdentifierValue(value);
   }
 
-  static CSSIdentifierValue* create(const Length& value) {
+  static CSSIdentifierValue* Create(const Length& value) {
     return new CSSIdentifierValue(value);
   }
 
-  CSSValueID getValueID() const { return m_valueID; }
+  CSSValueID GetValueID() const { return value_id_; }
 
-  String customCSSText() const;
+  String CustomCSSText() const;
 
-  bool equals(const CSSIdentifierValue& other) const {
-    return m_valueID == other.m_valueID;
+  bool Equals(const CSSIdentifierValue& other) const {
+    return value_id_ == other.value_id_;
   }
 
   template <typename T>
-  inline T convertTo() const;  // Defined in CSSPrimitiveValueMappings.h
+  inline T ConvertTo()
+      const {  // Overridden for special cases in CSSPrimitiveValueMappings.h
+    return CssValueIDToPlatformEnum<T>(value_id_);
+  }
 
   DECLARE_TRACE_AFTER_DISPATCH();
 
@@ -51,14 +55,16 @@ class CORE_EXPORT CSSIdentifierValue : public CSSValue {
   // TODO(sashab): Remove this function, and update mapping methods to
   // specialize the create() method instead.
   template <typename T>
-  CSSIdentifierValue(T);  // Defined in CSSPrimitiveValueMappings.h
+  CSSIdentifierValue(
+      T t)  // Overriden for special cases in CSSPrimitiveValueMappings.h
+      : CSSValue(kIdentifierClass), value_id_(PlatformEnumToCSSValueID(t)) {}
 
   CSSIdentifierValue(const Length&);
 
-  CSSValueID m_valueID;
+  CSSValueID value_id_;
 };
 
-DEFINE_CSS_VALUE_TYPE_CASTS(CSSIdentifierValue, isIdentifierValue());
+DEFINE_CSS_VALUE_TYPE_CASTS(CSSIdentifierValue, IsIdentifierValue());
 
 }  // namespace blink
 

@@ -9,7 +9,6 @@
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
-#include "base/threading/worker_pool.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/api/image_writer_private/error_messages.h"
 #include "chrome/browser/extensions/api/image_writer_private/operation_manager.h"
@@ -22,21 +21,16 @@ namespace image_writer {
 using content::BrowserThread;
 
 const int kMD5BufferSize = 1024;
-#if defined(OS_CHROMEOS)
-// Chrome OS only has a 1 GB temporary partition.  This is too small to hold our
-// unzipped image. Fortunately we mount part of the temporary partition under
-// /var/tmp.
-const char kChromeOSTempRoot[] = "/var/tmp";
-#endif
 
 #if !defined(OS_CHROMEOS)
-static base::LazyInstance<scoped_refptr<ImageWriterUtilityClient> >
-    g_utility_client = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<scoped_refptr<ImageWriterUtilityClient>>::
+    DestructorAtExit g_utility_client = LAZY_INSTANCE_INITIALIZER;
 #endif
 
 Operation::Operation(base::WeakPtr<OperationManager> manager,
                      const ExtensionId& extension_id,
-                     const std::string& device_path)
+                     const std::string& device_path,
+                     const base::FilePath& download_folder)
     : manager_(manager),
       extension_id_(extension_id),
 #if defined(OS_WIN)
@@ -46,7 +40,8 @@ Operation::Operation(base::WeakPtr<OperationManager> manager,
 #endif
       stage_(image_writer_api::STAGE_UNKNOWN),
       progress_(0),
-      zip_reader_(new zip::ZipReader) {
+      zip_reader_(new zip::ZipReader),
+      download_folder_(download_folder) {
 }
 
 Operation::~Operation() {}
@@ -81,8 +76,8 @@ void Operation::SetUtilityClientForTesting(
 
 void Operation::Start() {
 #if defined(OS_CHROMEOS)
-  if (!temp_dir_.CreateUniqueTempDirUnderPath(
-           base::FilePath(kChromeOSTempRoot))) {
+  if (download_folder_.empty() ||
+      !temp_dir_.CreateUniqueTempDirUnderPath(download_folder_)) {
 #else
   if (!temp_dir_.CreateUniqueTempDir()) {
 #endif
@@ -143,36 +138,30 @@ void Operation::Unzip(const base::Closure& continuation) {
 
 void Operation::Finish() {
   if (!BrowserThread::CurrentlyOn(BrowserThread::FILE)) {
-    BrowserThread::PostTask(
-        BrowserThread::FILE, FROM_HERE, base::Bind(&Operation::Finish, this));
+    BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+                            base::BindOnce(&Operation::Finish, this));
     return;
   }
 
   CleanUp();
 
   BrowserThread::PostTask(
-      BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(&OperationManager::OnComplete, manager_, extension_id_));
+      BrowserThread::UI, FROM_HERE,
+      base::BindOnce(&OperationManager::OnComplete, manager_, extension_id_));
 }
 
 void Operation::Error(const std::string& error_message) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::FILE)) {
-    BrowserThread::PostTask(BrowserThread::FILE,
-                            FROM_HERE,
-                            base::Bind(&Operation::Error, this, error_message));
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
+        base::BindOnce(&Operation::Error, this, error_message));
     return;
   }
 
   BrowserThread::PostTask(
-      BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(&OperationManager::OnError,
-                 manager_,
-                 extension_id_,
-                 stage_,
-                 progress_,
-                 error_message));
+      BrowserThread::UI, FROM_HERE,
+      base::BindOnce(&OperationManager::OnError, manager_, extension_id_,
+                     stage_, progress_, error_message));
 
   CleanUp();
 }
@@ -180,11 +169,8 @@ void Operation::Error(const std::string& error_message) {
 void Operation::SetProgress(int progress) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::FILE)) {
     BrowserThread::PostTask(
-        BrowserThread::FILE,
-        FROM_HERE,
-        base::Bind(&Operation::SetProgress,
-                   this,
-                   progress));
+        BrowserThread::FILE, FROM_HERE,
+        base::BindOnce(&Operation::SetProgress, this, progress));
     return;
   }
 
@@ -198,23 +184,16 @@ void Operation::SetProgress(int progress) {
 
   progress_ = progress;
 
-  BrowserThread::PostTask(BrowserThread::UI,
-                          FROM_HERE,
-                          base::Bind(&OperationManager::OnProgress,
-                                     manager_,
-                                     extension_id_,
-                                     stage_,
-                                     progress_));
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::BindOnce(&OperationManager::OnProgress, manager_, extension_id_,
+                     stage_, progress_));
 }
 
 void Operation::SetStage(image_writer_api::Stage stage) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::FILE)) {
-    BrowserThread::PostTask(
-        BrowserThread::FILE,
-        FROM_HERE,
-        base::Bind(&Operation::SetStage,
-                   this,
-                   stage));
+    BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+                            base::BindOnce(&Operation::SetStage, this, stage));
     return;
   }
 
@@ -226,13 +205,9 @@ void Operation::SetStage(image_writer_api::Stage stage) {
   progress_ = 0;
 
   BrowserThread::PostTask(
-      BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(&OperationManager::OnProgress,
-                 manager_,
-                 extension_id_,
-                 stage_,
-                 progress_));
+      BrowserThread::UI, FROM_HERE,
+      base::BindOnce(&OperationManager::OnProgress, manager_, extension_id_,
+                     stage_, progress_));
 }
 
 bool Operation::IsCancelled() {
@@ -267,10 +242,7 @@ void Operation::StartUtilityClient() {
 
 void Operation::StopUtilityClient() {
   DCHECK_CURRENTLY_ON(BrowserThread::FILE);
-  BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&ImageWriterUtilityClient::Shutdown, image_writer_client_));
+  image_writer_client_->Shutdown();
 }
 
 void Operation::WriteImageProgress(int64_t total_bytes, int64_t curr_bytes) {
@@ -315,8 +287,8 @@ void Operation::GetMD5SumOfFile(
 
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      base::Bind(&Operation::MD5Chunk, this, Passed(std::move(file)), 0,
-                 file_size, progress_offset, progress_scale, callback));
+      base::BindOnce(&Operation::MD5Chunk, this, Passed(std::move(file)), 0,
+                     file_size, progress_offset, progress_scale, callback));
 }
 
 void Operation::MD5Chunk(
@@ -353,9 +325,9 @@ void Operation::MD5Chunk(
 
       BrowserThread::PostTask(
           BrowserThread::FILE, FROM_HERE,
-          base::Bind(&Operation::MD5Chunk, this, Passed(std::move(file)),
-                     bytes_processed + len, bytes_total, progress_offset,
-                     progress_scale, callback));
+          base::BindOnce(&Operation::MD5Chunk, this, Passed(std::move(file)),
+                         bytes_processed + len, bytes_total, progress_offset,
+                         progress_scale, callback));
       // Skip closing the file.
       return;
     } else {

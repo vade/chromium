@@ -18,27 +18,44 @@ namespace device {
 
 class VRServiceImpl;
 
+// Browser process representation of a VRDevice within a WebVR site session
+// (see VRServiceImpl). VRDisplayImpl receives/sends VR device events
+// from/to mojom::VRDisplayClient (the render process representation of a VR
+// device).
+// VRDisplayImpl objects are owned by their respective VRServiceImpl instances.
 class VRDisplayImpl : public mojom::VRDisplay {
  public:
-  VRDisplayImpl(device::VRDevice* device, VRServiceImpl* service);
+  VRDisplayImpl(device::VRDevice* device,
+                VRServiceImpl* service,
+                mojom::VRServiceClient* service_client,
+                mojom::VRDisplayInfoPtr display_info);
   ~VRDisplayImpl() override;
 
-  mojom::VRDisplayClient* client() { return client_.get(); }
+  virtual void OnChanged(mojom::VRDisplayInfoPtr vr_device_info);
+  virtual void OnExitPresent();
+  virtual void OnBlur();
+  virtual void OnFocus();
+  virtual void OnActivate(mojom::VRDisplayEventReason reason,
+                          const base::Callback<void(bool)>& on_handled);
+  virtual void OnDeactivate(mojom::VRDisplayEventReason reason);
 
  private:
   friend class VRDisplayImplTest;
   friend class VRServiceImpl;
 
-  void GetPose(const GetPoseCallback& callback) override;
-  void ResetPose() override;
-
   void RequestPresent(bool secure_origin,
+                      mojom::VRSubmitFrameClientPtr submit_client,
                       const RequestPresentCallback& callback) override;
   void ExitPresent() override;
-  void SubmitFrame(mojom::VRPosePtr pose) override;
+  void SubmitFrame(int16_t frame_index,
+                   const gpu::MailboxHolder& mailbox) override;
 
-  void UpdateLayerBounds(mojom::VRLayerBoundsPtr left_bounds,
-                         mojom::VRLayerBoundsPtr right_bounds) override;
+  void UpdateLayerBounds(int16_t frame_index,
+                         mojom::VRLayerBoundsPtr left_bounds,
+                         mojom::VRLayerBoundsPtr right_bounds,
+                         int16_t source_width,
+                         int16_t source_height) override;
+  void GetVRVSyncProvider(mojom::VRVSyncProviderRequest request) override;
 
   void RequestPresentResult(const RequestPresentCallback& callback,
                             bool secure_origin,

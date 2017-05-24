@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/task_scheduler/post_task.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/metrics/chrome_metrics_service_client.h"
@@ -30,9 +31,12 @@
 #include "base/win/registry.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/install_static/install_util.h"
-#include "chrome/installer/util/browser_distribution.h"
 #include "components/crash/content/app/crashpad.h"
 #endif  // OS_WIN
+
+#if defined(OS_CHROMEOS)
+#include "chromeos/settings/cros_settings_names.h"
+#endif  // defined(OS_CHROMEOS)
 
 namespace {
 
@@ -59,19 +63,10 @@ const base::Feature kMetricsReportingFeature{"MetricsReporting",
 // Posts |GoogleUpdateSettings::StoreMetricsClientInfo| on blocking pool thread
 // because it needs access to IO and cannot work from UI thread.
 void PostStoreMetricsClientInfo(const metrics::ClientInfo& client_info) {
-  // The message loop processes messages after the blocking pool is initialized.
-  // Posting a task to the message loop to post a task to the blocking pool
-  // ensures that the blocking pool is ready to accept tasks at that time.
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE,
-      base::Bind(
-          [](const metrics::ClientInfo& client_info) {
-            content::BrowserThread::PostBlockingPoolTask(
-                FROM_HERE,
-                base::Bind(&GoogleUpdateSettings::StoreMetricsClientInfo,
-                           client_info));
-          },
-          client_info));
+  base::PostTaskWithTraits(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      base::BindOnce(&GoogleUpdateSettings::StoreMetricsClientInfo,
+                     client_info));
 }
 
 // Appends a group to the sampling controlling |trial|. The group will be
@@ -92,6 +87,17 @@ bool IsClientEligibleForSampling() {
              g_browser_process->local_state()) ==
          metrics::EnableMetricsDefault::OPT_OUT;
 }
+
+#if defined(OS_CHROMEOS)
+// Callback to update the metrics reporting state when the Chrome OS metrics
+// reporting setting changes.
+void OnCrosMetricsReportingSettingChange() {
+  bool enable_metrics = false;
+  chromeos::CrosSettings::Get()->GetBoolean(chromeos::kStatsReportingPref,
+                                            &enable_metrics);
+  ChangeMetricsReportingState(enable_metrics);
+}
+#endif
 
 }  // namespace
 
@@ -120,7 +126,13 @@ ChromeMetricsServicesManagerClient::ChromeMetricsServicesManagerClient(
       local_state_(local_state) {
   DCHECK(local_state);
 
-  SetupMetricsStateForChromeOS();
+#if defined(OS_CHROMEOS)
+  cros_settings_observer_ = chromeos::CrosSettings::Get()->AddSettingsObserver(
+      chromeos::kStatsReportingPref,
+      base::Bind(&OnCrosMetricsReportingSettingChange));
+  // Invoke the callback once initially to set the metrics reporting state.
+  OnCrosMetricsReportingSettingChange();
+#endif
 }
 
 ChromeMetricsServicesManagerClient::~ChromeMetricsServicesManagerClient() {}
@@ -230,25 +242,6 @@ ChromeMetricsServicesManagerClient::GetURLRequestContext() {
   return g_browser_process->system_request_context();
 }
 
-bool ChromeMetricsServicesManagerClient::IsSafeBrowsingEnabled(
-    const base::Closure& on_update_callback) {
-  // Start listening for updates to SB service state. This is done here instead
-  // of in the constructor to avoid errors from trying to instantiate SB
-  // service before the IO thread exists.
-  safe_browsing::SafeBrowsingService* sb_service =
-      g_browser_process->safe_browsing_service();
-  if (!sb_state_subscription_ && sb_service) {
-    // It is safe to pass the callback received from the
-    // MetricsServicesManager here since the MetricsServicesManager owns
-    // this object, which owns the sb_state_subscription_, which owns the
-    // pointer to the MetricsServicesManager.
-    sb_state_subscription_ =
-        sb_service->RegisterStateCallback(on_update_callback);
-  }
-
-  return sb_service && sb_service->enabled_by_prefs();
-}
-
 bool ChromeMetricsServicesManagerClient::IsMetricsReportingEnabled() {
   return enabled_state_provider_->IsReportingEnabled();
 }
@@ -294,4 +287,8 @@ ChromeMetricsServicesManagerClient::GetMetricsStateManager() {
         base::Bind(&GoogleUpdateSettings::LoadMetricsClientInfo));
   }
   return metrics_state_manager_.get();
+}
+
+bool ChromeMetricsServicesManagerClient::IsMetricsReportingForceEnabled() {
+  return ChromeMetricsServiceClient::IsMetricsReportingForceEnabled();
 }

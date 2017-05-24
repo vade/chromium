@@ -61,6 +61,7 @@ class Layer;
 class NativeTheme;
 class PaintContext;
 class ThemeProvider;
+class TransformRecorder;
 }
 
 namespace views {
@@ -272,7 +273,16 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   virtual int GetBaseline() const;
 
   // Get the size the View would like to be, if enough space were available.
+  // First checks |preferred_size_|, then |layout_manager_|, then
+  // CalculatePreferredSize().
+  // TODO(estade): migrate existing GetPreferredSize() overrides to
+  // CalculatePreferredSize() and make this function non-virtual.
   virtual gfx::Size GetPreferredSize() const;
+
+  // Sets the size that this View will request during layout. The actual size
+  // may differ. It should rarely be necessary to set this; usually the right
+  // approach is controlling the parent's layout via a LayoutManager.
+  void set_preferred_size(const gfx::Size& size) { preferred_size_ = size; }
 
   // Convenience method that sizes this view to its preferred size.
   void SizeToPreferredSize();
@@ -339,9 +349,8 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Compositor.
   void SetPaintToLayer(ui::LayerType layer_type = ui::LAYER_TEXTURED);
 
-  // Destroys the layer associated with this view, and reparents any descendants
-  // to the destroyed layer's parent. If the view does not currently have a
-  // layer, this has no effect.
+  // Please refer to the comments above the DestroyLayerImpl() function for
+  // details.
   void DestroyLayer();
 
   // Overridden from ui::LayerOwner:
@@ -616,6 +625,12 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Returns true if this view or any of its descendants are permitted to
   // be the target of an event.
   virtual bool CanProcessEventsWithinSubtree() const;
+
+  // Sets whether this view or any of its descendants are permitted to be the
+  // target of an event.
+  void set_can_process_events_within_subtree(bool can_process) {
+    can_process_events_within_subtree_ = can_process;
+  }
 
   // Returns true if the mouse cursor is over |view| and mouse events are
   // enabled.
@@ -1049,6 +1064,10 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Size and disposition ------------------------------------------------------
 
+  // Calculates the natural size for the View, to be taken into consideration
+  // when the parent is performing layout.
+  virtual gfx::Size CalculatePreferredSize() const;
+
   // Override to be notified when the bounds of the view have changed.
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds);
 
@@ -1096,6 +1115,9 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // required when a view is added or removed from a view hierarchy
   //
   // Refer to comments in struct |ViewHierarchyChangedDetails| for |details|.
+  //
+  // See also AddedToWidget() and RemovedFromWidget() for detecting when the
+  // view is added to/removed from a widget.
   virtual void ViewHierarchyChanged(const ViewHierarchyChangedDetails& details);
 
   // When SetVisible() changes the visibility of a view, this method is
@@ -1109,6 +1131,15 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // hierarchy. Overriding this method is useful for tracking which
   // FocusManager manages this view.
   virtual void NativeViewHierarchyChanged();
+
+  // This method is invoked for a view when it is attached to a hierarchy with
+  // a widget, i.e. GetWidget() starts returning a non-null result.
+  // It is also called when the view is moved to a different widget.
+  virtual void AddedToWidget();
+
+  // This method is invoked for a view when it is removed from a hierarchy with
+  // a widget or moved to a different widget.
+  virtual void RemovedFromWidget();
 
   // Painting ------------------------------------------------------------------
 
@@ -1169,6 +1200,11 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // with an associated view. Widget::ReorderNativeViews() may reorder layers
   // below layers owned by a view.
   virtual void ReorderChildLayers(ui::Layer* parent_layer);
+
+  // Notifies parents about a layer being created or destroyed in a child. An
+  // example where a subclass may override this method is when it wants to clip
+  // the child by adding its own layer.
+  virtual void OnChildLayerChanged(View* child);
 
   // Input ---------------------------------------------------------------------
 
@@ -1273,6 +1309,35 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Schedules a paint on the parent View if it exists.
   void SchedulePaintOnParent();
 
+  // Returns whether this view is eligible for painting, i.e. is visible and
+  // nonempty.  Note that this does not behave like IsDrawn(), since it doesn't
+  // check ancestors recursively; rather, it's used to prune subtrees of views
+  // during painting.
+  bool ShouldPaint() const;
+
+  // Returns the offset that should be used when constructing the paint context
+  // for this view.
+  gfx::Vector2d GetPaintContextOffset() const;
+
+  // Adjusts the transform of |recorder| in advance of painting.
+  void SetupTransformRecorderForPainting(ui::TransformRecorder* recorder) const;
+
+  // Recursively calls the painting method |func| on all non-layered children,
+  // in Z order.
+  void RecursivePaintHelper(void (View::*func)(const ui::PaintContext&),
+                            const ui::PaintContext& context);
+
+  // Invokes Paint() and, if necessary, PaintDebugRects().  Should be called
+  // only on the root of a widget/layer.  PaintDebugRects() is invoked as a
+  // separate pass, instead of being rolled into Paint(), so that siblings will
+  // not obscure debug rects.
+  void PaintFromPaintRoot(const ui::PaintContext& parent_context);
+
+  // Draws a semitransparent rect to indicate the bounds of this view.
+  // Recursively does the same for all children.  Invoked only with
+  // --draw-view-bounds-rects.
+  void PaintDebugRects(const ui::PaintContext& parent_context);
+
   // Tree operations -----------------------------------------------------------
 
   // Removes |view| from the hierarchy tree.  If |update_focus_cycle| is true,
@@ -1292,10 +1357,16 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // |old_parent| is the original parent of the View that was removed.
   // If |new_parent| is not NULL, the View that was removed will be reparented
   // to |new_parent| after the remove operation.
-  void PropagateRemoveNotifications(View* old_parent, View* new_parent);
+  // If is_removed_from_widget is true, calls RemovedFromWidget for all
+  // children.
+  void PropagateRemoveNotifications(View* old_parent,
+                                    View* new_parent,
+                                    bool is_removed_from_widget);
 
   // Call ViewHierarchyChanged() for all children.
-  void PropagateAddNotifications(const ViewHierarchyChangedDetails& details);
+  // If is_added_to_widget is true, calls AddedToWidget for all children.
+  void PropagateAddNotifications(const ViewHierarchyChangedDetails& details,
+                                 bool is_added_to_widget);
 
   // Propagates NativeViewHierarchyChanged() notification through all the
   // children.
@@ -1394,6 +1465,25 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   void UpdateLayerVisibility();
   void UpdateChildLayerVisibility(bool visible);
 
+  enum class LayerChangeNotifyBehavior {
+    // Notify the parent chain about the layer change.
+    NOTIFY,
+    // Don't notify the parent chain about the layer change.
+    DONT_NOTIFY
+  };
+
+  // Destroys the layer associated with this view, and reparents any descendants
+  // to the destroyed layer's parent. If the view does not currently have a
+  // layer, this has no effect.
+  // The |notify_parents| enum controls whether a notification about the layer
+  // change is sent to the parents.
+  void DestroyLayerImpl(LayerChangeNotifyBehavior notify_parents);
+
+  // Notifies parents about layering changes in the view. This includes layer
+  // creation and destruction.
+  void NotifyParentsOfLayerChange();
+
+
   // Orphans the layers in this subtree that are parented to layers outside of
   // this subtree.
   void OrphanLayers();
@@ -1491,7 +1581,11 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   mutable bool iterating_;
 #endif
 
+  bool can_process_events_within_subtree_;
+
   // Size and disposition ------------------------------------------------------
+
+  base::Optional<gfx::Size> preferred_size_;
 
   // This View's bounds in the parent coordinate system.
   gfx::Rect bounds_;
@@ -1608,9 +1702,8 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Accessibility -------------------------------------------------------------
 
-  // Belongs to this view, but it's reference-counted on some platforms
-  // so we can't use a scoped_ptr. It's dereferenced in the destructor.
-  NativeViewAccessibility* native_view_accessibility_;
+  // The accessibility element used to represent this View.
+  std::unique_ptr<NativeViewAccessibility> native_view_accessibility_;
 
   // Observers -------------------------------------------------------------
 

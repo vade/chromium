@@ -16,6 +16,7 @@
 #include "ui/aura/window_tree_host_observer.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/base/ime/input_method_factory.h"
+#include "ui/base/layout.h"
 #include "ui/base/view_prop.h"
 #include "ui/compositor/dip_util.h"
 #include "ui/compositor/layer.h"
@@ -35,10 +36,7 @@ const char kWindowTreeHostForAcceleratedWidget[] =
     "__AURA_WINDOW_TREE_HOST_ACCELERATED_WIDGET__";
 
 float GetDeviceScaleFactorFromDisplay(Window* window) {
-  display::Display display =
-      display::Screen::GetScreen()->GetDisplayNearestWindow(window);
-  DCHECK(display.is_valid());
-  return display.device_scale_factor();
+  return ui::GetScaleFactorForNativeView(window);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -73,8 +71,8 @@ void WindowTreeHost::RemoveObserver(WindowTreeHostObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
-ui::EventProcessor* WindowTreeHost::event_processor() {
-  return dispatcher();
+ui::EventSink* WindowTreeHost::event_sink() {
+  return dispatcher_.get();
 }
 
 gfx::Transform WindowTreeHost::GetRootTransform() const {
@@ -196,7 +194,13 @@ void WindowTreeHost::SetSharedInputMethod(ui::InputMethod* input_method) {
 
 ui::EventDispatchDetails WindowTreeHost::DispatchKeyEventPostIME(
     ui::KeyEvent* event) {
-  return SendEventToProcessor(event);
+  // If dispatch to IME is already disabled we shouldn't reach here.
+  DCHECK(!dispatcher_->should_skip_ime());
+  dispatcher_->set_skip_ime(true);
+  ui::EventDispatchDetails dispatch_details = SendEventToSink(event);
+  if (!dispatch_details.dispatcher_destroyed)
+    dispatcher_->set_skip_ime(false);
+  return dispatch_details;
 }
 
 void WindowTreeHost::Show() {
@@ -222,7 +226,7 @@ WindowTreeHost::WindowTreeHost() : WindowTreeHost(nullptr) {}
 
 WindowTreeHost::WindowTreeHost(std::unique_ptr<WindowPort> window_port)
     : window_(new Window(nullptr, std::move(window_port))),
-      last_cursor_(ui::kCursorNull),
+      last_cursor_(ui::CursorType::kNull),
       input_method_(nullptr),
       owned_input_method_(false) {}
 
@@ -251,17 +255,16 @@ void WindowTreeHost::CreateCompositor(const cc::FrameSinkId& frame_sink_id) {
   DCHECK(context_factory);
   ui::ContextFactoryPrivate* context_factory_private =
       Env::GetInstance()->context_factory_private();
-  compositor_.reset(new ui::Compositor(
-      frame_sink_id.is_valid() ? frame_sink_id
-                               : context_factory_private->AllocateFrameSinkId(),
-      context_factory, context_factory_private,
-      base::ThreadTaskRunnerHandle::Get()));
+  compositor_.reset(
+      new ui::Compositor((!context_factory_private || frame_sink_id.is_valid())
+                             ? frame_sink_id
+                             : context_factory_private->AllocateFrameSinkId(),
+                         context_factory, context_factory_private,
+                         base::ThreadTaskRunnerHandle::Get()));
   if (!dispatcher()) {
     window()->Init(ui::LAYER_NOT_DRAWN);
     window()->set_host(this);
     window()->SetName("RootWindow");
-    window()->SetEventTargeter(
-        std::unique_ptr<ui::EventTargeter>(new WindowTargeter()));
     dispatcher_.reset(new WindowEventDispatcher(this));
   }
 }
@@ -270,8 +273,7 @@ void WindowTreeHost::InitCompositor() {
   compositor_->SetScaleAndSize(GetDeviceScaleFactorFromDisplay(window()),
                                GetBoundsInPixels().size());
   compositor_->SetRootLayer(window()->layer());
-  compositor_->SetDisplayColorSpace(
-      GetICCProfileForCurrentDisplay().GetColorSpace());
+  compositor_->SetDisplayColorProfile(GetICCProfileForCurrentDisplay());
 }
 
 void WindowTreeHost::OnAcceleratedWidgetAvailable() {
@@ -333,8 +335,8 @@ gfx::ICCProfile WindowTreeHost::GetICCProfileForCurrentDisplay() {
   return gfx::ICCProfile::FromBestMonitor();
 }
 
-ui::EventProcessor* WindowTreeHost::GetEventProcessor() {
-  return event_processor();
+ui::EventSink* WindowTreeHost::GetEventSink() {
+  return dispatcher_.get();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

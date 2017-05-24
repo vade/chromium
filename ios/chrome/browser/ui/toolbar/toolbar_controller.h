@@ -19,7 +19,7 @@
 #import "ios/chrome/browser/ui/util/relaxed_bounds_constraints_hittest.h"
 
 class ReadingListModel;
-@class ToolsMenuContext;
+@class ToolsMenuConfiguration;
 
 // The time delay before non-initial button images are loaded.
 extern const int64_t kNonInitialImageAdditionDelayNanosec;
@@ -112,20 +112,20 @@ extern const CGRect kToolbarFrame[INTERFACE_IDIOM_COUNT];
 // hold any image for testability: unlike |UIView|, a |UIImageView| that is
 // visible in the UI automation view hierarchy does not prevent its subviews
 // from also being visible.
-// TODO(blundell): Figure out how to fix this and have the top-level view be a
-// UIView. b/6167700
-@property(nonatomic, readonly, retain) ToolbarView* view;
+// TODO(crbug.com/228469): Figure out how to fix this and have the top-level
+// view be a UIView.
+@property(nonatomic, readonly, strong) ToolbarView* view;
 // The view for the toolbar background image. This is a subview of |view| to
 // allow clients to alter the transparency of the background image without
 // affecting the other components of the toolbar.
-@property(nonatomic, readonly, retain) UIImageView* backgroundView;
+@property(nonatomic, readonly, strong) UIImageView* backgroundView;
 // The view for the toolbar shadow image.  This is a subview of |view| to allow
 // clients to alter the visibility of the shadow without affecting other
 // components of the toolbar.
-@property(nonatomic, readonly, retain) UIImageView* shadowView;
+@property(nonatomic, readonly, strong) UIImageView* shadowView;
 
 // The tools popup controller. Nil if the tools popup menu is not visible.
-@property(nonatomic, readonly, retain)
+@property(nonatomic, readonly, strong)
     ToolsPopupController* toolsPopupController;
 
 // Style of this toolbar.
@@ -165,7 +165,8 @@ extern const CGRect kToolbarFrame[INTERFACE_IDIOM_COUNT];
 - (BOOL)imageShouldFlipForRightToLeftLayoutDirection:(int)imageEnum;
 
 // Shows the tools popup menu.
-- (void)showToolsMenuPopupWithContext:(ToolsMenuContext*)context;
+- (void)showToolsMenuPopupWithConfiguration:
+    (ToolsMenuConfiguration*)configuration;
 
 // If |toolsPopupController_| is non-nil, dismisses the tools popup menu with
 // animation.

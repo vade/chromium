@@ -81,7 +81,7 @@ InspectorTest.dumpApplicationCache = function()
 InspectorTest.dumpApplicationCacheTree = function()
 {
     InspectorTest.addResult("Dumping application cache tree:");
-    var applicationCacheTreeElement = UI.panels.resources.applicationCacheListTreeElement;
+    var applicationCacheTreeElement = UI.panels.resources._sidebar.applicationCacheListTreeElement;
     if (!applicationCacheTreeElement.childCount()) {
         InspectorTest.addResult("    (empty)");
         return;
@@ -127,7 +127,7 @@ InspectorTest.applicationCacheStatusToString = function(status)
 InspectorTest.dumpApplicationCacheModel = function()
 {
     InspectorTest.addResult("Dumping application cache model:");
-    var model = UI.panels.resources._applicationCacheModel;
+    var model = UI.panels.resources._sidebar._applicationCacheModel;
 
     var frameIds = [];
     for (var frameId in model._manifestURLsByFrame)
@@ -154,15 +154,15 @@ InspectorTest.dumpApplicationCacheModel = function()
 
 InspectorTest.waitForFrameManifestURLAndStatus = function(frameId, manifestURL, status, callback)
 {
-    var frameManifestStatus = UI.panels.resources._applicationCacheModel.frameManifestStatus(frameId);
-    var frameManifestURL = UI.panels.resources._applicationCacheModel.frameManifestURL(frameId);
+    var frameManifestStatus = UI.panels.resources._sidebar._applicationCacheModel.frameManifestStatus(frameId);
+    var frameManifestURL = UI.panels.resources._sidebar._applicationCacheModel.frameManifestURL(frameId);
     if (frameManifestStatus === status && frameManifestURL.indexOf(manifestURL) !== -1) {
         callback();
         return;
     }
 
     var handler = InspectorTest.waitForFrameManifestURLAndStatus.bind(this, frameId, manifestURL, status, callback);
-    InspectorTest.addSniffer(SDK.ApplicationCacheModel.prototype, "_frameManifestUpdated", handler);
+    InspectorTest.addSniffer(Resources.ApplicationCacheModel.prototype, "_frameManifestUpdated", handler);
 }
 
 InspectorTest.startApplicationCacheStatusesRecording = function()
@@ -188,7 +188,7 @@ InspectorTest.startApplicationCacheStatusesRecording = function()
         }
     }
 
-    InspectorTest.addSniffer(SDK.ApplicationCacheModel.prototype, "_frameManifestUpdated", addRecord, true);
+    InspectorTest.addSniffer(Resources.ApplicationCacheModel.prototype, "_frameManifestUpdated", addRecord, true);
 }
 
 InspectorTest.ensureFrameStatusEventsReceived = function(frameId, count, callback)

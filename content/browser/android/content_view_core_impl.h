@@ -38,6 +38,7 @@ namespace content {
 class GinJavaBridgeDispatcherHost;
 class RenderFrameHost;
 class RenderWidgetHostViewAndroid;
+struct ContextMenuParams;
 struct MenuItem;
 
 class ContentViewCoreImpl : public ContentViewCore,
@@ -55,7 +56,7 @@ class ContentViewCoreImpl : public ContentViewCore,
   base::android::ScopedJavaLocalRef<jobject> GetJavaObject() override;
   WebContents* GetWebContents() const override;
   ui::WindowAndroid* GetWindowAndroid() const override;
-  void ShowPastePopup(int x, int y) override;
+  bool ShowPastePopup(const ContextMenuParams& params) override;
 
   void AddObserver(ContentViewCoreImplObserver* observer);
   void RemoveObserver(ContentViewCoreImplObserver* observer);
@@ -90,50 +91,6 @@ class ContentViewCoreImpl : public ContentViewCore,
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
       jint orientation);
-  jboolean OnTouchEvent(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj,
-      const base::android::JavaParamRef<jobject>& motion_event,
-      jlong time_ms,
-      jint android_action,
-      jint pointer_count,
-      jint history_size,
-      jint action_index,
-      jfloat pos_x_0,
-      jfloat pos_y_0,
-      jfloat pos_x_1,
-      jfloat pos_y_1,
-      jint pointer_id_0,
-      jint pointer_id_1,
-      jfloat touch_major_0,
-      jfloat touch_major_1,
-      jfloat touch_minor_0,
-      jfloat touch_minor_1,
-      jfloat orientation_0,
-      jfloat orientation_1,
-      jfloat tilt_0,
-      jfloat tilt_1,
-      jfloat raw_pos_x,
-      jfloat raw_pos_y,
-      jint android_tool_type_0,
-      jint android_tool_type_1,
-      jint android_button_state,
-      jint android_meta_state,
-      jboolean is_touch_handle_event);
-  jboolean SendMouseEvent(JNIEnv* env,
-                          const base::android::JavaParamRef<jobject>& obj,
-                          jlong time_ms,
-                          jint android_action,
-                          jfloat x,
-                          jfloat y,
-                          jint pointer_id,
-                          jfloat pressure,
-                          jfloat orientation,
-                          jfloat tilt,
-                          jint android_changed_button,
-                          jint android_button_state,
-                          jint android_meta_state,
-                          jint tool_type);
   jboolean SendMouseWheelEvent(JNIEnv* env,
                                const base::android::JavaParamRef<jobject>& obj,
                                jlong time_ms,
@@ -149,7 +106,8 @@ class ContentViewCoreImpl : public ContentViewCore,
                    jfloat y,
                    jfloat hintx,
                    jfloat hinty,
-                   jboolean target_viewport);
+                   jboolean target_viewport,
+                   jboolean from_gamepad);
   void ScrollEnd(JNIEnv* env,
                  const base::android::JavaParamRef<jobject>& obj,
                  jlong time_ms);
@@ -167,25 +125,25 @@ class ContentViewCoreImpl : public ContentViewCore,
                   jfloat y,
                   jfloat vx,
                   jfloat vy,
-                  jboolean target_viewport);
+                  jboolean target_viewport,
+                  jboolean from_gamepad);
   void FlingCancel(JNIEnv* env,
                    const base::android::JavaParamRef<jobject>& obj,
-                   jlong time_ms);
-  void SingleTap(JNIEnv* env,
-                 const base::android::JavaParamRef<jobject>& obj,
-                 jlong time_ms,
-                 jfloat x,
-                 jfloat y);
+                   jlong time_ms,
+                   jboolean from_gamepad);
   void DoubleTap(JNIEnv* env,
                  const base::android::JavaParamRef<jobject>& obj,
                  jlong time_ms,
                  jfloat x,
                  jfloat y);
-  void LongPress(JNIEnv* env,
-                 const base::android::JavaParamRef<jobject>& obj,
-                 jlong time_ms,
-                 jfloat x,
-                 jfloat y);
+
+  void ResolveTapDisambiguation(JNIEnv* env,
+                                const base::android::JavaParamRef<jobject>& obj,
+                                jlong time_ms,
+                                jfloat x,
+                                jfloat y,
+                                jboolean is_long_press);
+
   void PinchBegin(JNIEnv* env,
                   const base::android::JavaParamRef<jobject>& obj,
                   jlong time_ms,
@@ -216,8 +174,6 @@ class ContentViewCoreImpl : public ContentViewCore,
       const base::android::JavaParamRef<jobject>& obj,
       jboolean enabled);
 
-  long GetNativeImeAdapter(JNIEnv* env,
-                           const base::android::JavaParamRef<jobject>& obj);
   void SetFocus(JNIEnv* env,
                 const base::android::JavaParamRef<jobject>& obj,
                 jboolean focused);
@@ -259,13 +215,6 @@ class ContentViewCoreImpl : public ContentViewCore,
       const base::android::JavaParamRef<jstring>& textTrackTextShadow,
       const base::android::JavaParamRef<jstring>& textTrackTextSize);
 
-  void ExtractSmartClipData(JNIEnv* env,
-                            const base::android::JavaParamRef<jobject>& obj,
-                            jint x,
-                            jint y,
-                            jint width,
-                            jint height);
-
   void SetBackgroundOpaque(JNIEnv* env,
                            const base::android::JavaParamRef<jobject>& jobj,
                            jboolean opaque);
@@ -293,10 +242,6 @@ class ContentViewCoreImpl : public ContentViewCore,
 
   void HidePopupsAndPreserveSelection();
 
-  void OnSmartClipDataExtracted(const base::string16& text,
-                                const base::string16& html,
-                                const gfx::Rect& clip_rect);
-
   // Creates a popup menu with |items|.
   // |multiple| defines if it should support multi-select.
   // If not |multiple|, |selected_item| sets the initially selected item.
@@ -310,44 +255,23 @@ class ContentViewCoreImpl : public ContentViewCore,
   // Hides a visible popup menu.
   void HideSelectPopupMenu();
 
-  // All sizes and offsets are in CSS pixels as cached by the renderer.
+  // All sizes and offsets are in CSS pixels (except |top_show_pix|)
+  // as cached by the renderer.
   void UpdateFrameInfo(const gfx::Vector2dF& scroll_offset,
                        float page_scale_factor,
                        const gfx::Vector2dF& page_scale_factor_limits,
                        const gfx::SizeF& content_size,
                        const gfx::SizeF& viewport_size,
-                       const float top_controls_height,
-                       const float top_controls_shown_ratio,
-                       const float bottom_controls_height,
-                       const float bottom_controls_shown_ratio,
-                       bool is_mobile_optimized_hint,
-                       const gfx::SelectionBound& selection_start);
-
-  void ForceUpdateImeAdapter(long native_ime_adapter);
-  void UpdateImeAdapter(long native_ime_adapter,
-                        int text_input_type,
-                        int text_input_flags,
-                        int text_input_mode,
-                        const std::string& text,
-                        int selection_start,
-                        int selection_end,
-                        int composition_start,
-                        int composition_end,
-                        bool show_ime_if_needed,
-                        bool reply_to_request);
-  void OnBackgroundColorChanged(SkColor color);
+                       const float content_offset,
+                       const float top_shown_pix,
+                       bool top_changed,
+                       bool is_mobile_optimized_hint);
 
   bool HasFocus();
   void RequestDisallowInterceptTouchEvent();
   void OnGestureEventAck(const blink::WebGestureEvent& event,
                          InputEventAckState ack_result);
   bool FilterInputEvent(const blink::WebInputEvent& event);
-  void OnSelectionChanged(const std::string& text);
-  void OnSelectionEvent(ui::SelectionEventType event,
-                        const gfx::PointF& selection_anchor,
-                        const gfx::RectF& selection_rect);
-
-  void StartContentIntent(const GURL& content_url, bool is_main_frame);
 
   // Shows the disambiguation popup
   // |rect_pixels|   --> window coordinates which |zoomed_bitmap| represents
@@ -368,8 +292,6 @@ class ContentViewCoreImpl : public ContentViewCore,
   // Returns the viewport size after accounting for the viewport offset.
   gfx::Size GetViewSize() const;
 
-  gfx::Size GetViewSizeWithOSKHidden() const;
-
   void SetAccessibilityEnabledInternal(bool enabled);
 
   bool IsFullscreenRequiredForOrientationLock() const;
@@ -378,7 +300,6 @@ class ContentViewCoreImpl : public ContentViewCore,
   // Methods called from native code
   // --------------------------------------------------------------------------
 
-  gfx::Size GetPhysicalBackingSize() const;
   gfx::Size GetViewportSizeDip() const;
   bool DoBrowserControlsShrinkBlinkSize() const;
   float GetTopControlsHeightDip() const;
@@ -390,6 +311,10 @@ class ContentViewCoreImpl : public ContentViewCore,
                                 const gfx::PointF& extent);
 
   void OnShowUnhandledTapUIIfNeeded(int x_dip, int y_dip);
+  void OnSelectWordAroundCaretAck(bool did_select,
+                                  int start_adjust,
+                                  int end_adjust);
+  void OnTouchDown(const base::android::ScopedJavaLocalRef<jobject>& event);
 
   ui::ViewAndroid* GetViewAndroid() const;
 

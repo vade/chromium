@@ -6,56 +6,42 @@
 #define DEVICE_WAKE_LOCK_WAKE_LOCK_SERVICE_CONTEXT_H_
 
 #include <memory>
-#include <set>
 #include <utility>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/weak_ptr.h"
-#include "base/sequenced_task_runner.h"
-#include "device/wake_lock/wake_lock_service_impl.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
+#include "base/single_thread_task_runner.h"
+#include "device/wake_lock/public/interfaces/wake_lock_context.mojom.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace device {
 
-class PowerSaveBlocker;
+// Callback that maps a context ID to the NativeView associated with
+// that context. This callback is provided to the Device Service by its
+// embedder.
+using WakeLockContextCallback = base::Callback<gfx::NativeView(int)>;
 
-class WakeLockServiceContext {
+// Serves requests for WakeLockService connections within a given context.
+class WakeLockServiceContext : public mojom::WakeLockContext {
  public:
   WakeLockServiceContext(
+      int context_id,
       scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
-      base::Callback<gfx::NativeView()> native_view_getter);
-  ~WakeLockServiceContext();
+      const WakeLockContextCallback& native_view_getter);
+  ~WakeLockServiceContext() override;
 
-  // Creates a WakeLockServiceImpl that is strongly bound to |request|.
-  void CreateService(mojo::InterfaceRequest<mojom::WakeLockService> request);
+  // mojom::WakeLockContext:
+  void GetWakeLock(mojom::WakeLockType type,
+                   mojom::WakeLockReason reason,
+                   const std::string& description,
+                   mojom::WakeLockServiceRequest request) override;
 
-  // Requests wake lock.
-  void RequestWakeLock();
-
-  // Cancels pending wake lock request.
-  void CancelWakeLock();
-
-  // Used by tests.
-  bool HasWakeLockForTests() const;
+  static const int WakeLockInvalidContextId;
 
  private:
-  void CreateWakeLock();
-  void RemoveWakeLock();
-  void UpdateWakeLock();
-
-  scoped_refptr<base::SequencedTaskRunner> main_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> file_task_runner_;
-
-  int num_lock_requests_;
-
-  // The actual power save blocker for screen.
-  std::unique_ptr<PowerSaveBlocker> wake_lock_;
-  base::Callback<gfx::NativeView()> native_view_getter_;
-
-  base::WeakPtrFactory<WakeLockServiceContext> weak_factory_;
+  int context_id_;
+  WakeLockContextCallback native_view_getter_;
 
   DISALLOW_COPY_AND_ASSIGN(WakeLockServiceContext);
 };

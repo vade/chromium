@@ -204,6 +204,12 @@ void InitializeCrashpadWithEmbeddedHandler(bool initial_client,
 }
 #endif  // OS_WIN
 
+crashpad::CrashpadClient& GetCrashpadClient() {
+  static crashpad::CrashpadClient* const client =
+      new crashpad::CrashpadClient();
+  return *client;
+}
+
 void SetUploadConsent(bool consent) {
   if (!g_database)
     return;
@@ -335,13 +341,6 @@ void __declspec(dllexport)
     RequestSingleCrashUploadImpl(const std::string& local_id) {
   crash_reporter::RequestSingleCrashUpload(local_id);
 }
-
-// This helper is invoked by code in chrome.dll to wait for the handler start to
-// complete.
-void __declspec(dllexport) BlockUntilHandlerStartedImpl() {
-  crash_reporter::BlockUntilHandlerStarted();
-}
-
 }  // extern "C"
 
 #endif  // OS_WIN

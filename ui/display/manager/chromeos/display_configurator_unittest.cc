@@ -9,7 +9,6 @@
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/memory/scoped_vector.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -205,8 +204,11 @@ class DisplayConfiguratorTest : public testing::Test {
         observer_(&configurator_),
         test_api_(&configurator_),
         config_waiter_(&test_api_),
-        enable_content_protection_status_(0),
-        enable_content_protection_call_count_(0),
+        set_content_protection_status_(false),
+        set_content_protection_call_count_(0),
+        query_content_protection_response_success_(false),
+        query_content_protection_response_link_mask_(0),
+        query_content_protection_response_protection_mask_(0),
         query_content_protection_call_count_(0),
         display_control_result_(CALLBACK_NOT_CALLED) {}
   ~DisplayConfiguratorTest() override {}
@@ -253,14 +255,17 @@ class DisplayConfiguratorTest : public testing::Test {
     display_control_result_ = (status ? CALLBACK_SUCCESS : CALLBACK_FAILURE);
   }
 
-  void EnableContentProtectionCallback(bool status) {
-    enable_content_protection_status_ = status;
-    enable_content_protection_call_count_++;
+  void SetContentProtectionCallback(bool status) {
+    set_content_protection_status_ = status;
+    set_content_protection_call_count_++;
   }
 
-  void QueryContentProtectionCallback(
-      const DisplayConfigurator::QueryProtectionResponse& response) {
-    query_content_protection_response_ = response;
+  void QueryContentProtectionCallback(bool success,
+                                      uint32_t link_mask,
+                                      uint32_t protection_mask) {
+    query_content_protection_response_success_ = success;
+    query_content_protection_response_link_mask_ = link_mask;
+    query_content_protection_response_protection_mask_ = protection_mask;
     query_content_protection_call_count_++;
   }
 
@@ -324,10 +329,11 @@ class DisplayConfiguratorTest : public testing::Test {
   TestNativeDisplayDelegate* native_display_delegate_;  // not owned
   DisplayConfigurator::TestApi test_api_;
   ConfigurationWaiter config_waiter_;
-  bool enable_content_protection_status_;
-  int enable_content_protection_call_count_;
-  DisplayConfigurator::QueryProtectionResponse
-      query_content_protection_response_;
+  bool set_content_protection_status_;
+  int set_content_protection_call_count_;
+  bool query_content_protection_response_success_;
+  uint32_t query_content_protection_response_link_mask_;
+  uint32_t query_content_protection_response_protection_mask_;
   int query_content_protection_call_count_;
 
   std::unique_ptr<DisplaySnapshot> outputs_[3];
@@ -404,162 +410,6 @@ TEST_F(DisplayConfiguratorTest, FindDisplayModeMatchingSize) {
   // No mode found.
   EXPECT_EQ(nullptr, DisplayConfigurator::FindDisplayModeMatchingSize(
                          *output, gfx::Size(1440, 900)));
-}
-
-TEST_F(DisplayConfiguratorTest, EnableVirtualDisplay) {
-  InitWithSingleOutput();
-
-  observer_.Reset();
-  const DisplayConfigurator::DisplayStateList& cached =
-      configurator_.cached_displays();
-  ASSERT_EQ(static_cast<size_t>(1u), cached.size());
-  EXPECT_EQ(small_mode_.size(), cached[0]->current_mode()->size());
-
-  // Add virtual display.
-  int64_t virtual_display_id =
-      configurator_.AddVirtualDisplay(big_mode_.size());
-  EXPECT_EQ(GenerateDisplayID(0x8000, 0x0, 1), virtual_display_id);
-  EXPECT_FALSE(mirroring_controller_.SoftwareMirroringEnabled());
-  EXPECT_EQ(MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED,
-            configurator_.display_state());
-
-  // Virtual should not trigger addition of added crtc but does change FB
-  // height.
-  const int kVirtualHeight = small_mode_.size().height() +
-                             DisplayConfigurator::kVerticalGap +
-                             big_mode_.size().height();
-  EXPECT_EQ(
-      JoinActions(
-          kGrab, GetFramebufferAction(
-                     gfx::Size(big_mode_.size().width(), kVirtualHeight),
-                     outputs_[0].get(), nullptr)
-                     .c_str(),
-          GetCrtcAction(*outputs_[0], &small_mode_, gfx::Point(0, 0)).c_str(),
-          kUngrab, nullptr),
-      log_->GetActionsAndClear());
-  EXPECT_EQ(1, observer_.num_changes());
-  ASSERT_EQ(static_cast<size_t>(2u), cached.size());
-  EXPECT_EQ(small_mode_.size(), cached[0]->current_mode()->size());
-  EXPECT_EQ(big_mode_.size(), cached[1]->current_mode()->size());
-  EXPECT_EQ(virtual_display_id, cached[1]->display_id());
-
-  // Remove virtual display.
-  observer_.Reset();
-  EXPECT_TRUE(configurator_.RemoveVirtualDisplay(virtual_display_id));
-  EXPECT_EQ(
-      JoinActions(
-          kGrab,
-          GetFramebufferAction(small_mode_.size(), outputs_[0].get(), nullptr)
-              .c_str(),
-          GetCrtcAction(*outputs_[0], &small_mode_, gfx::Point(0, 0)).c_str(),
-          kUngrab, nullptr),
-      log_->GetActionsAndClear());
-  EXPECT_EQ(1, observer_.num_changes());
-  ASSERT_EQ(static_cast<size_t>(1u), cached.size());
-  EXPECT_EQ(small_mode_.size(), cached[0]->current_mode()->size());
-  EXPECT_EQ(MULTIPLE_DISPLAY_STATE_SINGLE, configurator_.display_state());
-}
-
-TEST_F(DisplayConfiguratorTest, EnableTwoVirtualDisplays) {
-  InitWithSingleOutput();
-
-  observer_.Reset();
-  const DisplayConfigurator::DisplayStateList& cached =
-      configurator_.cached_displays();
-  ASSERT_EQ(static_cast<size_t>(1u), cached.size());
-  EXPECT_EQ(small_mode_.size(), cached[0]->current_mode()->size());
-
-  // Add 1st virtual display.
-  int64_t virtual_display_id_1 =
-      configurator_.AddVirtualDisplay(big_mode_.size());
-  EXPECT_EQ(GenerateDisplayID(0x8000, 0x0, 1), virtual_display_id_1);
-  EXPECT_FALSE(mirroring_controller_.SoftwareMirroringEnabled());
-  EXPECT_EQ(MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED,
-            configurator_.display_state());
-
-  // Virtual should not trigger addition of added crtc but does change FB
-  // height.
-  const int kSingleVirtualHeight = small_mode_.size().height() +
-                                   DisplayConfigurator::kVerticalGap +
-                                   big_mode_.size().height();
-  EXPECT_EQ(
-      JoinActions(
-          kGrab, GetFramebufferAction(
-                     gfx::Size(big_mode_.size().width(), kSingleVirtualHeight),
-                     outputs_[0].get(), nullptr)
-                     .c_str(),
-          GetCrtcAction(*outputs_[0], &small_mode_, gfx::Point(0, 0)).c_str(),
-          kUngrab, nullptr),
-      log_->GetActionsAndClear());
-  EXPECT_EQ(1, observer_.num_changes());
-  ASSERT_EQ(static_cast<size_t>(2), cached.size());
-  EXPECT_EQ(small_mode_.size(), cached[0]->current_mode()->size());
-  EXPECT_EQ(big_mode_.size(), cached[1]->current_mode()->size());
-  EXPECT_EQ(virtual_display_id_1, cached[1]->display_id());
-
-  // Add 2nd virtual display
-  int64_t virtual_display_id_2 =
-      configurator_.AddVirtualDisplay(big_mode_.size());
-  EXPECT_EQ(GenerateDisplayID(0x8000, 0x0, 2), virtual_display_id_2);
-  EXPECT_FALSE(mirroring_controller_.SoftwareMirroringEnabled());
-  EXPECT_EQ(MULTIPLE_DISPLAY_STATE_MULTI_EXTENDED,
-            configurator_.display_state());
-
-  const int kDualVirtualHeight =
-      small_mode_.size().height() +
-      (DisplayConfigurator::kVerticalGap + big_mode_.size().height()) * 2;
-  EXPECT_EQ(
-      JoinActions(
-          kGrab, GetFramebufferAction(
-                     gfx::Size(big_mode_.size().width(), kDualVirtualHeight),
-                     outputs_[0].get(), nullptr)
-                     .c_str(),
-          GetCrtcAction(*outputs_[0], &small_mode_, gfx::Point(0, 0)).c_str(),
-          kUngrab, nullptr),
-      log_->GetActionsAndClear());
-  EXPECT_EQ(2, observer_.num_changes());
-  ASSERT_EQ(static_cast<size_t>(3u), cached.size());
-  EXPECT_EQ(small_mode_.size(), cached[0]->current_mode()->size());
-  EXPECT_EQ(big_mode_.size(), cached[1]->current_mode()->size());
-  EXPECT_EQ(big_mode_.size(), cached[2]->current_mode()->size());
-  EXPECT_EQ(virtual_display_id_1, cached[1]->display_id());
-  EXPECT_EQ(virtual_display_id_2, cached[2]->display_id());
-
-  // Remove 1st virtual display.
-  observer_.Reset();
-  EXPECT_TRUE(configurator_.RemoveVirtualDisplay(virtual_display_id_1));
-  EXPECT_EQ(
-      JoinActions(
-          kGrab, GetFramebufferAction(
-                     gfx::Size(big_mode_.size().width(), kSingleVirtualHeight),
-                     outputs_[0].get(), nullptr)
-                     .c_str(),
-          GetCrtcAction(*outputs_[0], &small_mode_, gfx::Point(0, 0)).c_str(),
-          kUngrab, nullptr),
-      log_->GetActionsAndClear());
-  EXPECT_EQ(1, observer_.num_changes());
-  ASSERT_EQ(static_cast<size_t>(2u), cached.size());
-  EXPECT_EQ(small_mode_.size(), cached[0]->current_mode()->size());
-  EXPECT_EQ(big_mode_.size(), cached[1]->current_mode()->size());
-  EXPECT_EQ(virtual_display_id_2, cached[1]->display_id());
-  EXPECT_EQ(MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED,
-            configurator_.display_state());
-
-  // Remove 2nd virtual display.
-  observer_.Reset();
-  EXPECT_TRUE(configurator_.RemoveVirtualDisplay(virtual_display_id_2));
-  EXPECT_EQ(
-      JoinActions(
-          kGrab,
-          GetFramebufferAction(small_mode_.size(), outputs_[0].get(), nullptr)
-              .c_str(),
-          GetCrtcAction(*outputs_[0], &small_mode_, gfx::Point(0, 0)).c_str(),
-          kUngrab, nullptr),
-      log_->GetActionsAndClear());
-  EXPECT_EQ(1, observer_.num_changes());
-  ASSERT_EQ(static_cast<size_t>(1), cached.size());
-  EXPECT_EQ(small_mode_.size(), cached[0]->current_mode()->size());
-  EXPECT_EQ(MULTIPLE_DISPLAY_STATE_SINGLE, configurator_.display_state());
 }
 
 TEST_F(DisplayConfiguratorTest, ConnectSecondOutput) {
@@ -1222,8 +1072,7 @@ TEST_F(DisplayConfiguratorTest, ContentProtection) {
   configurator_.ForceInitialConfigure(0);
   EXPECT_NE(kNoActions, log_->GetActionsAndClear());
 
-  DisplayConfigurator::ContentProtectionClientId id =
-      configurator_.RegisterContentProtectionClient();
+  uint64_t id = configurator_.RegisterContentProtectionClient();
   EXPECT_NE(0u, id);
 
   // One output.
@@ -1234,11 +1083,11 @@ TEST_F(DisplayConfiguratorTest, ContentProtection) {
       base::Bind(&DisplayConfiguratorTest::QueryContentProtectionCallback,
                  base::Unretained(this)));
   EXPECT_EQ(1, query_content_protection_call_count_);
-  EXPECT_TRUE(query_content_protection_response_.success);
+  EXPECT_TRUE(query_content_protection_response_success_);
   EXPECT_EQ(static_cast<uint32_t>(DISPLAY_CONNECTION_TYPE_INTERNAL),
-            query_content_protection_response_.link_mask);
+            query_content_protection_response_link_mask_);
   EXPECT_EQ(static_cast<uint32_t>(CONTENT_PROTECTION_METHOD_NONE),
-            query_content_protection_response_.protection_mask);
+            query_content_protection_response_protection_mask_);
   EXPECT_EQ(kNoActions, log_->GetActionsAndClear());
 
   // Two outputs.
@@ -1249,19 +1098,19 @@ TEST_F(DisplayConfiguratorTest, ContentProtection) {
       base::Bind(&DisplayConfiguratorTest::QueryContentProtectionCallback,
                  base::Unretained(this)));
   EXPECT_EQ(2, query_content_protection_call_count_);
-  EXPECT_TRUE(query_content_protection_response_.success);
+  EXPECT_TRUE(query_content_protection_response_success_);
   EXPECT_EQ(static_cast<uint32_t>(DISPLAY_CONNECTION_TYPE_HDMI),
-            query_content_protection_response_.link_mask);
+            query_content_protection_response_link_mask_);
   EXPECT_EQ(static_cast<uint32_t>(CONTENT_PROTECTION_METHOD_NONE),
-            query_content_protection_response_.protection_mask);
+            query_content_protection_response_protection_mask_);
   EXPECT_EQ(kNoActions, log_->GetActionsAndClear());
 
-  configurator_.EnableContentProtection(
+  configurator_.SetContentProtection(
       id, outputs_[1]->display_id(), CONTENT_PROTECTION_METHOD_HDCP,
-      base::Bind(&DisplayConfiguratorTest::EnableContentProtectionCallback,
+      base::Bind(&DisplayConfiguratorTest::SetContentProtectionCallback,
                  base::Unretained(this)));
-  EXPECT_EQ(1, enable_content_protection_call_count_);
-  EXPECT_TRUE(enable_content_protection_status_);
+  EXPECT_EQ(1, set_content_protection_call_count_);
+  EXPECT_TRUE(set_content_protection_status_);
   EXPECT_EQ(GetSetHDCPStateAction(*outputs_[1], HDCP_STATE_DESIRED),
             log_->GetActionsAndClear());
 
@@ -1272,11 +1121,11 @@ TEST_F(DisplayConfiguratorTest, ContentProtection) {
       base::Bind(&DisplayConfiguratorTest::QueryContentProtectionCallback,
                  base::Unretained(this)));
   EXPECT_EQ(3, query_content_protection_call_count_);
-  EXPECT_TRUE(query_content_protection_response_.success);
+  EXPECT_TRUE(query_content_protection_response_success_);
   EXPECT_EQ(static_cast<uint32_t>(DISPLAY_CONNECTION_TYPE_HDMI),
-            query_content_protection_response_.link_mask);
+            query_content_protection_response_link_mask_);
   EXPECT_EQ(static_cast<uint32_t>(CONTENT_PROTECTION_METHOD_HDCP),
-            query_content_protection_response_.protection_mask);
+            query_content_protection_response_protection_mask_);
   EXPECT_EQ(kNoActions, log_->GetActionsAndClear());
 
   // Protections should be disabled after unregister.
@@ -1386,10 +1235,8 @@ TEST_F(DisplayConfiguratorTest, DoNotConfigureWithSuspendedDisplays) {
 }
 
 TEST_F(DisplayConfiguratorTest, ContentProtectionTwoClients) {
-  DisplayConfigurator::ContentProtectionClientId client1 =
-      configurator_.RegisterContentProtectionClient();
-  DisplayConfigurator::ContentProtectionClientId client2 =
-      configurator_.RegisterContentProtectionClient();
+  uint64_t client1 = configurator_.RegisterContentProtectionClient();
+  uint64_t client2 = configurator_.RegisterContentProtectionClient();
   EXPECT_NE(client1, client2);
 
   Init(false);
@@ -1398,12 +1245,12 @@ TEST_F(DisplayConfiguratorTest, ContentProtectionTwoClients) {
   EXPECT_NE(kNoActions, log_->GetActionsAndClear());
 
   // Clients never know state enableness for methods that they didn't request.
-  configurator_.EnableContentProtection(
+  configurator_.SetContentProtection(
       client1, outputs_[1]->display_id(), CONTENT_PROTECTION_METHOD_HDCP,
-      base::Bind(&DisplayConfiguratorTest::EnableContentProtectionCallback,
+      base::Bind(&DisplayConfiguratorTest::SetContentProtectionCallback,
                  base::Unretained(this)));
-  EXPECT_EQ(1, enable_content_protection_call_count_);
-  EXPECT_TRUE(enable_content_protection_status_);
+  EXPECT_EQ(1, set_content_protection_call_count_);
+  EXPECT_TRUE(set_content_protection_status_);
   EXPECT_EQ(GetSetHDCPStateAction(*outputs_[1], HDCP_STATE_DESIRED).c_str(),
             log_->GetActionsAndClear());
   native_display_delegate_->set_hdcp_state(HDCP_STATE_ENABLED);
@@ -1413,47 +1260,45 @@ TEST_F(DisplayConfiguratorTest, ContentProtectionTwoClients) {
       base::Bind(&DisplayConfiguratorTest::QueryContentProtectionCallback,
                  base::Unretained(this)));
   EXPECT_EQ(1, query_content_protection_call_count_);
-  EXPECT_TRUE(query_content_protection_response_.success);
+  EXPECT_TRUE(query_content_protection_response_success_);
   EXPECT_EQ(static_cast<uint32_t>(DISPLAY_CONNECTION_TYPE_HDMI),
-            query_content_protection_response_.link_mask);
+            query_content_protection_response_link_mask_);
   EXPECT_EQ(CONTENT_PROTECTION_METHOD_HDCP,
-            query_content_protection_response_.protection_mask);
+            query_content_protection_response_protection_mask_);
 
   configurator_.QueryContentProtectionStatus(
       client2, outputs_[1]->display_id(),
       base::Bind(&DisplayConfiguratorTest::QueryContentProtectionCallback,
                  base::Unretained(this)));
   EXPECT_EQ(2, query_content_protection_call_count_);
-  EXPECT_TRUE(query_content_protection_response_.success);
+  EXPECT_TRUE(query_content_protection_response_success_);
   EXPECT_EQ(static_cast<uint32_t>(DISPLAY_CONNECTION_TYPE_HDMI),
-            query_content_protection_response_.link_mask);
+            query_content_protection_response_link_mask_);
   EXPECT_EQ(CONTENT_PROTECTION_METHOD_NONE,
-            query_content_protection_response_.protection_mask);
+            query_content_protection_response_protection_mask_);
 
   // Protections will be disabled only if no more clients request them.
-  configurator_.EnableContentProtection(
+  configurator_.SetContentProtection(
       client2, outputs_[1]->display_id(), CONTENT_PROTECTION_METHOD_NONE,
-      base::Bind(&DisplayConfiguratorTest::EnableContentProtectionCallback,
+      base::Bind(&DisplayConfiguratorTest::SetContentProtectionCallback,
                  base::Unretained(this)));
-  EXPECT_EQ(2, enable_content_protection_call_count_);
-  EXPECT_TRUE(enable_content_protection_status_);
+  EXPECT_EQ(2, set_content_protection_call_count_);
+  EXPECT_TRUE(set_content_protection_status_);
   EXPECT_EQ(kNoActions, log_->GetActionsAndClear());
 
-  configurator_.EnableContentProtection(
+  configurator_.SetContentProtection(
       client1, outputs_[1]->display_id(), CONTENT_PROTECTION_METHOD_NONE,
-      base::Bind(&DisplayConfiguratorTest::EnableContentProtectionCallback,
+      base::Bind(&DisplayConfiguratorTest::SetContentProtectionCallback,
                  base::Unretained(this)));
-  EXPECT_EQ(3, enable_content_protection_call_count_);
-  EXPECT_TRUE(enable_content_protection_status_);
+  EXPECT_EQ(3, set_content_protection_call_count_);
+  EXPECT_TRUE(set_content_protection_status_);
   EXPECT_EQ(GetSetHDCPStateAction(*outputs_[1], HDCP_STATE_UNDESIRED).c_str(),
             log_->GetActionsAndClear());
 }
 
 TEST_F(DisplayConfiguratorTest, ContentProtectionTwoClientsEnable) {
-  DisplayConfigurator::ContentProtectionClientId client1 =
-      configurator_.RegisterContentProtectionClient();
-  DisplayConfigurator::ContentProtectionClientId client2 =
-      configurator_.RegisterContentProtectionClient();
+  uint64_t client1 = configurator_.RegisterContentProtectionClient();
+  uint64_t client2 = configurator_.RegisterContentProtectionClient();
   EXPECT_NE(client1, client2);
 
   Init(false);
@@ -1462,36 +1307,36 @@ TEST_F(DisplayConfiguratorTest, ContentProtectionTwoClientsEnable) {
   log_->GetActionsAndClear();
 
   // Only enable once if HDCP is enabling.
-  configurator_.EnableContentProtection(
+  configurator_.SetContentProtection(
       client1, outputs_[1]->display_id(), CONTENT_PROTECTION_METHOD_HDCP,
-      base::Bind(&DisplayConfiguratorTest::EnableContentProtectionCallback,
+      base::Bind(&DisplayConfiguratorTest::SetContentProtectionCallback,
                  base::Unretained(this)));
-  EXPECT_EQ(1, enable_content_protection_call_count_);
-  EXPECT_TRUE(enable_content_protection_status_);
+  EXPECT_EQ(1, set_content_protection_call_count_);
+  EXPECT_TRUE(set_content_protection_status_);
   native_display_delegate_->set_hdcp_state(HDCP_STATE_DESIRED);
-  configurator_.EnableContentProtection(
+  configurator_.SetContentProtection(
       client2, outputs_[1]->display_id(), CONTENT_PROTECTION_METHOD_HDCP,
-      base::Bind(&DisplayConfiguratorTest::EnableContentProtectionCallback,
+      base::Bind(&DisplayConfiguratorTest::SetContentProtectionCallback,
                  base::Unretained(this)));
-  EXPECT_EQ(2, enable_content_protection_call_count_);
-  EXPECT_TRUE(enable_content_protection_status_);
+  EXPECT_EQ(2, set_content_protection_call_count_);
+  EXPECT_TRUE(set_content_protection_status_);
   EXPECT_EQ(GetSetHDCPStateAction(*outputs_[1], HDCP_STATE_DESIRED).c_str(),
             log_->GetActionsAndClear());
   native_display_delegate_->set_hdcp_state(HDCP_STATE_ENABLED);
 
   // Don't enable again if HDCP is already active.
-  configurator_.EnableContentProtection(
+  configurator_.SetContentProtection(
       client1, outputs_[1]->display_id(), CONTENT_PROTECTION_METHOD_HDCP,
-      base::Bind(&DisplayConfiguratorTest::EnableContentProtectionCallback,
+      base::Bind(&DisplayConfiguratorTest::SetContentProtectionCallback,
                  base::Unretained(this)));
-  EXPECT_EQ(3, enable_content_protection_call_count_);
-  EXPECT_TRUE(enable_content_protection_status_);
-  configurator_.EnableContentProtection(
+  EXPECT_EQ(3, set_content_protection_call_count_);
+  EXPECT_TRUE(set_content_protection_status_);
+  configurator_.SetContentProtection(
       client2, outputs_[1]->display_id(), CONTENT_PROTECTION_METHOD_HDCP,
-      base::Bind(&DisplayConfiguratorTest::EnableContentProtectionCallback,
+      base::Bind(&DisplayConfiguratorTest::SetContentProtectionCallback,
                  base::Unretained(this)));
-  EXPECT_EQ(4, enable_content_protection_call_count_);
-  EXPECT_TRUE(enable_content_protection_status_);
+  EXPECT_EQ(4, set_content_protection_call_count_);
+  EXPECT_TRUE(set_content_protection_status_);
   EXPECT_EQ(kNoActions, log_->GetActionsAndClear());
 }
 

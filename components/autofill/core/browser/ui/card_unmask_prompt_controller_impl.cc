@@ -16,10 +16,11 @@
 #include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/ui/card_unmask_prompt_view.h"
 #include "components/autofill/core/browser/validation.h"
+#include "components/autofill/core/common/autofill_clock.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
+#include "components/grit/components_scaled_resources.h"
 #include "components/prefs/pref_service.h"
-#include "grit/components_scaled_resources.h"
-#include "grit/components_strings.h"
+#include "components/strings/grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace autofill {
@@ -50,7 +51,7 @@ void CardUnmaskPromptControllerImpl::ShowPrompt(
     card_unmask_view_->ControllerGone();
 
   new_card_link_clicked_ = false;
-  shown_timestamp_ = base::Time::Now();
+  shown_timestamp_ = AutofillClock::Now();
   pending_response_ = CardUnmaskDelegate::UnmaskResponse();
   card_unmask_view_ = card_unmask_view;
   card_ = card;
@@ -107,8 +108,8 @@ void CardUnmaskPromptControllerImpl::OnVerificationResult(
 
   unmasking_result_ = result;
   AutofillMetrics::LogRealPanResult(result);
-  AutofillMetrics::LogUnmaskingDuration(base::Time::Now() - verify_timestamp_,
-                                        result);
+  AutofillMetrics::LogUnmaskingDuration(
+      AutofillClock::Now() - verify_timestamp_, result);
   card_unmask_view_->GotVerificationResult(error_message,
                                            AllowsRetry(result));
 }
@@ -124,14 +125,14 @@ void CardUnmaskPromptControllerImpl::LogOnCloseEvents() {
   AutofillMetrics::UnmaskPromptEvent close_reason_event = GetCloseReasonEvent();
   AutofillMetrics::LogUnmaskPromptEvent(close_reason_event);
   AutofillMetrics::LogUnmaskPromptEventDuration(
-      base::Time::Now() - shown_timestamp_, close_reason_event);
+      AutofillClock::Now() - shown_timestamp_, close_reason_event);
 
   if (close_reason_event == AutofillMetrics::UNMASK_PROMPT_CLOSED_NO_ATTEMPTS)
     return;
 
   if (close_reason_event ==
       AutofillMetrics::UNMASK_PROMPT_CLOSED_ABANDON_UNMASKING) {
-    AutofillMetrics::LogTimeBeforeAbandonUnmasking(base::Time::Now() -
+    AutofillMetrics::LogTimeBeforeAbandonUnmasking(AutofillClock::Now() -
                                                    verify_timestamp_);
   }
 
@@ -186,7 +187,7 @@ void CardUnmaskPromptControllerImpl::OnUnmaskResponse(
     const base::string16& exp_month,
     const base::string16& exp_year,
     bool should_store_pan) {
-  verify_timestamp_ = base::Time::Now();
+  verify_timestamp_ = AutofillClock::Now();
   unmasking_number_of_attempts_++;
   unmasking_result_ = AutofillClient::NONE;
   card_unmask_view_->DisableAndWaitForVerification();
@@ -224,7 +225,7 @@ base::string16 CardUnmaskPromptControllerImpl::GetWindowTitle() const {
       ShouldRequestExpirationDate()
           ? IDS_AUTOFILL_CARD_UNMASK_PROMPT_EXPIRED_TITLE
           : IDS_AUTOFILL_CARD_UNMASK_PROMPT_TITLE,
-      card_.TypeAndLastFourDigits());
+      card_.NetworkAndLastFourDigits());
 #endif
 }
 
@@ -239,7 +240,7 @@ base::string16 CardUnmaskPromptControllerImpl::GetInstructionsMessage() const {
   }
   // The iOS UI shows the card details in the instructions text since they
   // don't fit in the title.
-  return l10n_util::GetStringFUTF16(ids, card_.TypeAndLastFourDigits());
+  return l10n_util::GetStringFUTF16(ids, card_.NetworkAndLastFourDigits());
 #else
   return l10n_util::GetStringUTF16(
       IDS_AUTOFILL_CARD_UNMASK_PROMPT_INSTRUCTIONS);
@@ -251,12 +252,12 @@ base::string16 CardUnmaskPromptControllerImpl::GetOkButtonLabel() const {
 }
 
 int CardUnmaskPromptControllerImpl::GetCvcImageRid() const {
-  return card_.type() == kAmericanExpressCard ? IDR_CREDIT_CARD_CVC_HINT_AMEX
-                                              : IDR_CREDIT_CARD_CVC_HINT;
+  return card_.network() == kAmericanExpressCard ? IDR_CREDIT_CARD_CVC_HINT_AMEX
+                                                 : IDR_CREDIT_CARD_CVC_HINT;
 }
 
 bool CardUnmaskPromptControllerImpl::ShouldRequestExpirationDate() const {
-  return card_.ShouldUpdateExpiration(base::Time::Now()) ||
+  return card_.ShouldUpdateExpiration(AutofillClock::Now()) ||
          new_card_link_clicked_;
 }
 
@@ -280,7 +281,7 @@ bool CardUnmaskPromptControllerImpl::InputCvcIsValid(
     const base::string16& input_text) const {
   base::string16 trimmed_text;
   base::TrimWhitespace(input_text, base::TRIM_ALL, &trimmed_text);
-  return IsValidCreditCardSecurityCode(trimmed_text, card_.type());
+  return IsValidCreditCardSecurityCode(trimmed_text, card_.network());
 }
 
 bool CardUnmaskPromptControllerImpl::InputExpirationIsValid(
@@ -300,12 +301,16 @@ bool CardUnmaskPromptControllerImpl::InputExpirationIsValid(
   // Convert 2 digit year to 4 digit year.
   if (year_value < 100) {
     base::Time::Exploded now;
-    base::Time::Now().LocalExplode(&now);
+    AutofillClock::Now().LocalExplode(&now);
     year_value += (now.year / 100) * 100;
   }
 
   return IsValidCreditCardExpirationDate(year_value, month_value,
-                                         base::Time::Now());
+                                         AutofillClock::Now());
+}
+
+int CardUnmaskPromptControllerImpl::GetExpectedCvcLength() const {
+  return GetCvcLengthForCardType(card_.network());
 }
 
 base::TimeDelta CardUnmaskPromptControllerImpl::GetSuccessMessageDuration()

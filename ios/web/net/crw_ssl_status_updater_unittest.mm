@@ -13,6 +13,7 @@
 #include "ios/web/public/ssl_status.h"
 #include "ios/web/public/test/web_test.h"
 #import "ios/web/web_state/wk_web_view_security_util.h"
+#include "net/cert/x509_util_ios_and_mac.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/test_data_directory.h"
 #include "third_party/ocmock/OCMock/OCMock.h"
@@ -80,7 +81,8 @@ class CRWSSLStatusUpdaterTest : public web::WebTest {
     delegate_.reset([[OCMockObject
         mockForProtocol:@protocol(CRWSSLStatusUpdaterDelegate)] retain]);
 
-    nav_manager_.reset(new NavigationManagerImpl(nullptr, GetBrowserState()));
+    nav_manager_.reset(new NavigationManagerImpl());
+    nav_manager_->SetBrowserState(GetBrowserState());
 
     ssl_status_updater_.reset([[CRWSSLStatusUpdater alloc]
         initWithDataSource:data_source_
@@ -91,8 +93,12 @@ class CRWSSLStatusUpdaterTest : public web::WebTest {
     scoped_refptr<net::X509Certificate> cert =
         net::ImportCertFromFile(net::GetTestCertsDirectory(), kCertFileName);
     ASSERT_TRUE(cert);
-    NSArray* chain = @[ static_cast<id>(cert->os_cert_handle()) ];
-    trust_ = CreateServerTrustFromChain(chain, kHostName);
+    base::ScopedCFTypeRef<CFMutableArrayRef> chain(
+        net::x509_util::CreateSecCertificateArrayForX509Certificate(
+            cert.get()));
+    ASSERT_TRUE(chain);
+    trust_ = CreateServerTrustFromChain(static_cast<NSArray*>(chain.get()),
+                                        kHostName);
   }
 
   void TearDown() override {
@@ -104,15 +110,17 @@ class CRWSSLStatusUpdaterTest : public web::WebTest {
   CRWSessionController* SessionControllerWithEntry(std::string item_url_spec) {
     std::vector<std::unique_ptr<web::NavigationItem>> nav_items;
     base::scoped_nsobject<CRWSessionController> session_controller(
-        [[CRWSessionController alloc]
-            initWithNavigationItems:std::move(nav_items)
-                       currentIndex:0
-                       browserState:GetBrowserState()]);
-    [session_controller addPendingEntry:GURL(item_url_spec)
-                               referrer:Referrer()
-                             transition:ui::PAGE_TRANSITION_LINK
-                      rendererInitiated:NO];
-    [session_controller commitPendingEntry];
+        [[CRWSessionController alloc] initWithBrowserState:GetBrowserState()
+                                           navigationItems:std::move(nav_items)
+                                    lastCommittedItemIndex:0]);
+    [session_controller
+                 addPendingItem:GURL(item_url_spec)
+                       referrer:Referrer()
+                     transition:ui::PAGE_TRANSITION_LINK
+                 initiationType:web::NavigationInitiationType::USER_INITIATED
+        userAgentOverrideOption:NavigationManager::UserAgentOverrideOption::
+                                    INHERIT];
+    [session_controller commitPendingItem];
 
     return session_controller.autorelease();
   }

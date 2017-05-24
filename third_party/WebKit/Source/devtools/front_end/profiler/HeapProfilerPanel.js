@@ -29,29 +29,27 @@ Profiler.HeapProfilerPanel = class extends Profiler.ProfilesPanel {
       return;
 
     var object = /** @type {!SDK.RemoteObject} */ (target);
-    var objectId = object.objectId;
-    if (!objectId)
+    if (!object.objectId)
       return;
+    var objectId = /** @type {string} */ (object.objectId);
 
     var heapProfiles = Profiler.ProfileTypeRegistry.instance.heapSnapshotProfileType.getProfiles();
     if (!heapProfiles.length)
       return;
 
+    var heapProfilerModel = object.runtimeModel().heapProfilerModel();
+    if (!heapProfilerModel)
+      return;
+
     /**
+     * @param {string} viewName
      * @this {Profiler.ProfilesPanel}
      */
     function revealInView(viewName) {
-      object.target().heapProfilerAgent().getHeapObjectId(objectId, didReceiveHeapObjectId.bind(this, viewName));
-    }
-
-    /**
-     * @this {Profiler.ProfilesPanel}
-     */
-    function didReceiveHeapObjectId(viewName, error, result) {
-      if (!this.isShowing())
-        return;
-      if (!error)
-        this.showObject(result, viewName);
+      heapProfilerModel.snapshotObjectIdForObjectId(objectId).then(result => {
+        if (this.isShowing() && result)
+          this.showObject(result, viewName);
+      });
     }
 
     contextMenu.appendItem(Common.UIString.capitalize('Reveal in Summary ^view'), revealInView.bind(this, 'Summary'));

@@ -20,7 +20,8 @@ VisitedLinkSlave::~VisitedLinkSlave() {
   FreeTable();
 }
 
-base::Callback<void(mojom::VisitedLinkNotificationSinkRequest)>
+base::Callback<void(const service_manager::BindSourceInfo&,
+                    mojom::VisitedLinkNotificationSinkRequest)>
 VisitedLinkSlave::GetBindCallback() {
   return base::Bind(&VisitedLinkSlave::Bind, weak_factory_.GetWeakPtr());
 }
@@ -63,11 +64,11 @@ void VisitedLinkSlave::UpdateVisitedLinks(
 void VisitedLinkSlave::AddVisitedLinks(
     const std::vector<VisitedLinkSlave::Fingerprint>& fingerprints) {
   for (size_t i = 0; i < fingerprints.size(); ++i)
-    WebView::updateVisitedLinkState(fingerprints[i]);
+    WebView::UpdateVisitedLinkState(fingerprints[i]);
 }
 
 void VisitedLinkSlave::ResetVisitedLinks(bool invalidate_hashes) {
-  WebView::resetVisitedLinkState(invalidate_hashes);
+  WebView::ResetVisitedLinkState(invalidate_hashes);
 }
 
 void VisitedLinkSlave::FreeTable() {
@@ -79,7 +80,8 @@ void VisitedLinkSlave::FreeTable() {
   table_length_ = 0;
 }
 
-void VisitedLinkSlave::Bind(mojom::VisitedLinkNotificationSinkRequest request) {
+void VisitedLinkSlave::Bind(const service_manager::BindSourceInfo& source_info,
+                            mojom::VisitedLinkNotificationSinkRequest request) {
   binding_.Bind(std::move(request));
 }
 

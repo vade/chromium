@@ -23,8 +23,6 @@ ShellDeviceClient::~ShellDeviceClient() {
 void ShellDeviceClient::Shutdown() {
   if (usb_service_)
     usb_service_->Shutdown();
-  if (hid_service_)
-    hid_service_->Shutdown();
 #if DCHECK_IS_ON()
   did_shutdown_ = true;
 #endif
@@ -32,21 +30,16 @@ void ShellDeviceClient::Shutdown() {
 
 device::UsbService* ShellDeviceClient::GetUsbService() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  if (!usb_service_) {
-    usb_service_ = device::UsbService::Create(
-        BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE));
-  }
+  if (!usb_service_)
+    usb_service_ = device::UsbService::Create();
   return usb_service_.get();
 }
 
 device::HidService* ShellDeviceClient::GetHidService() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if (!hid_service_) {
-    hid_service_ = device::HidService::Create(
-        BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE));
-  }
+  if (!hid_service_)
+    hid_service_ = device::HidService::Create();
   return hid_service_.get();
 }
 
-}
+}  // namespace extensions

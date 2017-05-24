@@ -31,8 +31,8 @@ class LessByID {
 // DeleteJournal::TakeSnapshotAndClear needs to remove the unique_ptr from the
 // set, and std::set::extract is only available in C++17. TODO(avi): Switch to
 // using a std::set when Chromium allows C++17 use.
-typedef std::map<const EntryKernel*, std::unique_ptr<EntryKernel>, LessByID>
-    JournalIndex;
+using JournalIndex =
+    std::map<const EntryKernel*, std::unique_ptr<EntryKernel>, LessByID>;
 
 // DeleteJournal manages deleted entries that are not in sync directory until
 // it's safe to drop them after the deletion is confirmed with native models.
@@ -91,6 +91,10 @@ class DeleteJournal {
 
   // Return true if delete journals of |type| are maintained.
   static bool IsDeleteJournalEnabled(ModelType type);
+
+  // Adds entry to JournalIndex if it doesn't already exist.
+  static void AddEntryToJournalIndex(JournalIndex* journal_index,
+                                     std::unique_ptr<EntryKernel> entry);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(SyncableDirectoryTest, ManageDeleteJournals);

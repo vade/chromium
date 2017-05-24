@@ -18,13 +18,14 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/containers/small_map.h"
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "base/trace_event/memory_allocator_dump.h"
 #include "base/trace_event/memory_dump_provider.h"
-#include "cc/base/cc_export.h"
 #include "cc/base/resource_id.h"
+#include "cc/cc_export.h"
 #include "cc/output/context_provider.h"
 #include "cc/output/output_surface.h"
 #include "cc/output/renderer_settings.h"
@@ -38,6 +39,7 @@
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/buffer_types.h"
 #include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/gpu_memory_buffer.h"
@@ -51,9 +53,9 @@ class GLES2Interface;
 
 namespace cc {
 class BlockingTaskRunner;
-class IdAllocator;
 class SharedBitmap;
 class SharedBitmapManager;
+class TextureIdAllocator;
 
 // This class is not thread-safe and can only be called from the thread it was
 // created on (in practice, the impl thread).
@@ -83,11 +85,10 @@ class CC_EXPORT ResourceProvider
       SharedBitmapManager* shared_bitmap_manager,
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       BlockingTaskRunner* blocking_main_thread_task_runner,
-      int highp_threshold_min,
       size_t id_allocation_chunk_size,
       bool delegated_sync_points_required,
       bool use_gpu_memory_buffer_resources,
-      bool enable_color_correct_rendering,
+      bool enable_color_correct_rasterization,
       const BufferToTextureTargetMap& buffer_to_texture_target_map);
   ~ResourceProvider() override;
 
@@ -95,19 +96,25 @@ class CC_EXPORT ResourceProvider
 
   void DidLoseContextProvider() { lost_context_provider_ = true; }
 
-  int max_texture_size() const { return max_texture_size_; }
-  ResourceFormat best_texture_format() const { return best_texture_format_; }
+  int max_texture_size() const { return settings_.max_texture_size; }
+  ResourceFormat best_texture_format() const {
+    return settings_.best_texture_format;
+  }
   ResourceFormat best_render_buffer_format() const {
-    return best_render_buffer_format_;
+    return settings_.best_render_buffer_format;
   }
   ResourceFormat YuvResourceFormat(int bits) const;
-  bool use_sync_query() const { return use_sync_query_; }
+  bool use_sync_query() const { return settings_.use_sync_query; }
   gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager() {
     return gpu_memory_buffer_manager_;
   }
   size_t num_resources() const { return resources_.size(); }
 
-  bool IsResourceFormatSupported(ResourceFormat format) const;
+  bool IsTextureFormatSupported(ResourceFormat format) const;
+
+  // Returns true if the provided |format| can be used as a render buffer.
+  // Note that render buffer support implies texture support.
+  bool IsRenderBufferFormatSupported(ResourceFormat format) const;
 
   // Checks whether a resource is in use by a consumer.
   bool InUseByConsumer(ResourceId id);
@@ -119,7 +126,9 @@ class CC_EXPORT ResourceProvider
 
   // Producer interface.
 
-  ResourceType default_resource_type() const { return default_resource_type_; }
+  ResourceType default_resource_type() const {
+    return settings_.default_resource_type;
+  }
   ResourceType GetResourceType(ResourceId id);
   GLenum GetResourceTextureTarget(ResourceId id);
   bool IsImmutable(ResourceId id);
@@ -164,6 +173,9 @@ class CC_EXPORT ResourceProvider
   // Generates sync tokesn for resources which need a sync token.
   void GenerateSyncTokenForResource(ResourceId resource_id);
   void GenerateSyncTokenForResources(const ResourceIdArray& resource_ids);
+
+  // Gets the most recent sync token from the indicated resources.
+  gpu::SyncToken GetSyncTokenForResources(const ResourceIdArray& resource_ids);
 
   // Creates accounting for a child. Returns a child ID.
   int CreateChild(const ReturnCallback& return_callback);
@@ -281,7 +293,11 @@ class CC_EXPORT ResourceProvider
     GLenum target() const { return target_; }
     ResourceFormat format() const { return format_; }
     const gfx::Size& size() const { return size_; }
-    sk_sp<SkColorSpace> sk_color_space() const { return sk_color_space_; }
+    // Will return the invalid color space unless
+    // |enable_color_correct_rasterization| is true.
+    const gfx::ColorSpace& color_space_for_raster() const {
+      return color_space_;
+    }
 
     const TextureMailbox& mailbox() const { return mailbox_; }
 
@@ -304,7 +320,7 @@ class CC_EXPORT ResourceProvider
     bool has_sync_token_;
     bool synchronized_;
     base::ThreadChecker thread_checker_;
-    sk_sp<SkColorSpace> sk_color_space_;
+    gfx::ColorSpace color_space_;
 
     DISALLOW_COPY_AND_ASSIGN(ScopedWriteLockGL);
   };
@@ -333,7 +349,6 @@ class CC_EXPORT ResourceProvider
                             bool use_mailbox,
                             bool use_distance_field_text,
                             bool can_use_lcd_text,
-                            bool ignore_color_space,
                             int msaa_sample_count);
     ~ScopedSkSurfaceProvider();
 
@@ -393,13 +408,17 @@ class CC_EXPORT ResourceProvider
 
     SkBitmap& sk_bitmap() { return sk_bitmap_; }
     bool valid() const { return !!sk_bitmap_.getPixels(); }
-    sk_sp<SkColorSpace> sk_color_space() const { return sk_color_space_; }
+    // Will return the invalid color space unless
+    // |enable_color_correct_rasterization| is true.
+    const gfx::ColorSpace& color_space_for_raster() const {
+      return color_space_;
+    }
 
    private:
     ResourceProvider* resource_provider_;
     ResourceId resource_id_;
     SkBitmap sk_bitmap_;
-    sk_sp<SkColorSpace> sk_color_space_;
+    gfx::ColorSpace color_space_;
     base::ThreadChecker thread_checker_;
 
     DISALLOW_COPY_AND_ASSIGN(ScopedWriteLockSoftware);
@@ -411,7 +430,11 @@ class CC_EXPORT ResourceProvider
                                    ResourceId resource_id);
     ~ScopedWriteLockGpuMemoryBuffer();
     gfx::GpuMemoryBuffer* GetGpuMemoryBuffer();
-    sk_sp<SkColorSpace> sk_color_space() const { return sk_color_space_; }
+    // Will return the invalid color space unless
+    // |enable_color_correct_rasterization| is true.
+    const gfx::ColorSpace& color_space_for_raster() const {
+      return color_space_;
+    }
 
    private:
     ResourceProvider* resource_provider_;
@@ -420,10 +443,23 @@ class CC_EXPORT ResourceProvider
     gfx::BufferUsage usage_;
     gfx::Size size_;
     std::unique_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer_;
-    sk_sp<SkColorSpace> sk_color_space_;
+    gfx::ColorSpace color_space_;
     base::ThreadChecker thread_checker_;
 
     DISALLOW_COPY_AND_ASSIGN(ScopedWriteLockGpuMemoryBuffer);
+  };
+
+  // All resources that are returned to children while an instance of this
+  // class exists will be stored and returned when the instance is destroyed.
+  class CC_EXPORT ScopedBatchReturnResources {
+   public:
+    explicit ScopedBatchReturnResources(ResourceProvider* resource_provider);
+    ~ScopedBatchReturnResources();
+
+   private:
+    ResourceProvider* resource_provider_;
+
+    DISALLOW_COPY_AND_ASSIGN(ScopedBatchReturnResources);
   };
 
   class Fence : public base::RefCounted<Fence> {
@@ -483,6 +519,9 @@ class CC_EXPORT ResourceProvider
   // Indicates if this resource may be used for a hardware overlay plane.
   bool IsOverlayCandidate(ResourceId id);
 
+  // Return the format of the underlying buffer that can be used for scanout.
+  gfx::BufferFormat GetBufferFormat(ResourceId id);
+
 #if defined(OS_ANDROID)
   // Indicates if this resource is backed by an Android SurfaceTexture, and thus
   // can't really be promoted to an overlay.
@@ -510,6 +549,8 @@ class CC_EXPORT ResourceProvider
   int tracing_id() const { return tracing_id_; }
 
  private:
+  friend class ScopedBatchReturnResources;
+
   struct Resource {
     enum Origin { INTERNAL, EXTERNAL, DELEGATED };
     enum SynchronizationState {
@@ -578,6 +619,7 @@ class CC_EXPORT ResourceProvider
     void WaitSyncToken(gpu::gles2::GLES2Interface* gl);
 
     int child_id;
+    ResourceId id_in_child;
     unsigned gl_id;
     // Pixel buffer used for set pixels without unnecessary copying.
     unsigned gl_pixel_buffer_id;
@@ -627,6 +669,13 @@ class CC_EXPORT ResourceProvider
     // GpuMemoryBuffer resource allocation needs to know how the resource will
     // be used.
     gfx::BufferUsage usage;
+    // This is the the actual format of the underlaying GpuMemoryBuffer, if any,
+    // and might not correspond to ResourceFormat. This format is needed to
+    // scanout the buffer as HW overlay.
+    gfx::BufferFormat buffer_format;
+    // Resource format is the format as seen from the compositor and might not
+    // correspond to buffer_format (e.g: A resouce that was created from a YUV
+    // buffer could be seen as RGB from the compositor/GL.)
     ResourceFormat format;
     SharedBitmapId shared_bitmap_id;
     SharedBitmap* shared_bitmap;
@@ -648,7 +697,6 @@ class CC_EXPORT ResourceProvider
     ~Child();
 
     ResourceIdMap child_to_parent_map;
-    ResourceIdMap parent_to_child_map;
     ReturnCallback return_callback;
     bool marked_for_deletion;
     bool needs_sync_tokens;
@@ -707,48 +755,59 @@ class CC_EXPORT ResourceProvider
   gpu::gles2::GLES2Interface* ContextGL() const;
   bool IsGLContextLost() const;
 
-  // Returns null if |enable_color_correct_rendering_| is false.
-  sk_sp<SkColorSpace> GetResourceSkColorSpace(const Resource* resource) const;
+  // Will return the invalid color space unless
+  // |enable_color_correct_rasterization| is true.
+  gfx::ColorSpace GetResourceColorSpaceForRaster(
+      const Resource* resource) const;
+
+  void SetBatchReturnResources(bool aggregate);
+
+  // Holds const settings for the ResourceProvider. Never changed after init.
+  struct Settings {
+    Settings(ContextProvider* compositor_context_provider,
+             bool delegated_sync_points_required,
+             bool use_gpu_memory_buffer_resources,
+             bool enable_color_correct_rasterization);
+
+    int max_texture_size = 0;
+    bool use_texture_storage_ext = false;
+    bool use_texture_format_bgra = false;
+    bool use_texture_usage_hint = false;
+    bool use_sync_query = false;
+    ResourceType default_resource_type = RESOURCE_TYPE_GL_TEXTURE;
+    ResourceFormat yuv_resource_format = LUMINANCE_8;
+    ResourceFormat yuv_highbit_resource_format = LUMINANCE_8;
+    ResourceFormat best_texture_format = RGBA_8888;
+    ResourceFormat best_render_buffer_format = RGBA_8888;
+    bool enable_color_correct_rasterization = false;
+    bool delegated_sync_points_required = false;
+  } const settings_;
 
   ContextProvider* compositor_context_provider_;
   SharedBitmapManager* shared_bitmap_manager_;
   gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager_;
   BlockingTaskRunner* blocking_main_thread_task_runner_;
   bool lost_context_provider_;
-  int highp_threshold_min_;
   ResourceId next_id_;
   ResourceMap resources_;
   int next_child_;
   ChildMap children_;
+  scoped_refptr<Fence> current_read_lock_fence_;
+  std::unique_ptr<TextureIdAllocator> texture_id_allocator_;
+  BufferToTextureTargetMap buffer_to_texture_target_map_;
 
-  const bool delegated_sync_points_required_;
-
-  ResourceType default_resource_type_;
-  bool use_texture_storage_ext_;
-  bool use_texture_format_bgra_;
-  bool use_texture_usage_hint_;
-  bool use_compressed_texture_etc1_;
-  ResourceFormat yuv_resource_format_;
-  ResourceFormat yuv_highbit_resource_format_;
-  int max_texture_size_;
-  ResourceFormat best_texture_format_;
-  ResourceFormat best_render_buffer_format_;
-  const bool enable_color_correct_rendering_ = false;
+  // Keep track of whether deleted resources should be batched up or returned
+  // immediately.
+  bool batch_return_resources_ = false;
+  // Maps from a child id to the set of resources to be returned to it.
+  base::small_map<std::map<int, ResourceIdArray>> batched_returning_resources_;
 
   base::ThreadChecker thread_checker_;
-
-  scoped_refptr<Fence> current_read_lock_fence_;
-
-  const size_t id_allocation_chunk_size_;
-  std::unique_ptr<IdAllocator> texture_id_allocator_;
-  std::unique_ptr<IdAllocator> buffer_id_allocator_;
-
-  bool use_sync_query_;
-  BufferToTextureTargetMap buffer_to_texture_target_map_;
 
   // A process-unique ID used for disambiguating memory dumps from different
   // resource providers.
   int tracing_id_;
+
 #if defined(OS_ANDROID)
   // Set of resource Ids that would like to be notified about promotion hints.
   ResourceIdSet wants_promotion_hints_set_;

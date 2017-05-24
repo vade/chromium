@@ -7,6 +7,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/memory_coordinator_client.h"
+#include "base/memory/memory_coordinator_proxy.h"
 #include "content/common/child_memory_coordinator.mojom.h"
 #include "content/common/content_export.h"
 #include "content/common/memory_coordinator.mojom.h"
@@ -26,7 +27,8 @@ class CONTENT_EXPORT ChildMemoryCoordinatorDelegate {
 // It lives in child processes and is responsible for dispatching memory events
 // to its clients.
 class CONTENT_EXPORT ChildMemoryCoordinatorImpl
-    : NON_EXPORTED_BASE(public mojom::ChildMemoryCoordinator) {
+    : base::MemoryCoordinator,
+      NON_EXPORTED_BASE(public mojom::ChildMemoryCoordinator) {
  public:
   // Returns the instance of ChildMemoryCoordinatorImpl. Could be nullptr.
   static ChildMemoryCoordinatorImpl* GetInstance();
@@ -35,8 +37,12 @@ class CONTENT_EXPORT ChildMemoryCoordinatorImpl
                              ChildMemoryCoordinatorDelegate* delegate);
   ~ChildMemoryCoordinatorImpl() override;
 
+  // base::MemoryCoordinator implementations:
+  base::MemoryState GetCurrentMemoryState() const override;
+
   // mojom::ChildMemoryCoordinator implementations:
   void OnStateChange(mojom::MemoryState state) override;
+  void PurgeMemory() override;
 
  protected:
   ChildMemoryCoordinatorDelegate* delegate() { return delegate_; }
@@ -45,6 +51,7 @@ class CONTENT_EXPORT ChildMemoryCoordinatorImpl
   friend class ChildMemoryCoordinatorImplTest;
 
   mojo::Binding<mojom::ChildMemoryCoordinator> binding_;
+  base::MemoryState current_state_ = base::MemoryState::NORMAL;
   mojom::MemoryCoordinatorHandlePtr parent_;
   ChildMemoryCoordinatorDelegate* delegate_;
 

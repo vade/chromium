@@ -17,6 +17,7 @@
 #include "net/base/net_errors.h"
 #include "net/http/http_auth_controller.h"
 #include "net/http/http_network_session.h"
+#include "net/http/http_transaction_factory.h"
 #include "net/http/proxy_client_socket.h"
 #include "net/log/net_log_source_type.h"
 #include "net/socket/client_socket_handle.h"
@@ -88,13 +89,18 @@ ProxyResolvingClientSocket::ProxyResolvingClientSocket(
     session_params.testing_fixed_https_port =
         reference_params->testing_fixed_https_port;
     session_params.enable_http2 = reference_params->enable_http2;
-    session_params.enable_http2_alternative_service_with_different_host =
-        reference_params->enable_http2_alternative_service_with_different_host;
-    session_params.enable_quic_alternative_service_with_different_host =
-        reference_params->enable_quic_alternative_service_with_different_host;
+    session_params.enable_http2_alternative_service =
+        reference_params->enable_http2_alternative_service;
   }
 
   network_session_.reset(new net::HttpNetworkSession(session_params));
+
+  net::HttpAuthCache* other_auth_cache =
+      request_context->http_transaction_factory()
+          ->GetSession()
+          ->http_auth_cache();
+  DCHECK(other_auth_cache);
+  network_session_->http_auth_cache()->UpdateAllFrom(*other_auth_cache);
 }
 
 ProxyResolvingClientSocket::~ProxyResolvingClientSocket() {

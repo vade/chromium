@@ -28,27 +28,28 @@ class CORE_EXPORT ElementVisibilityObserver final
   WTF_MAKE_NONCOPYABLE(ElementVisibilityObserver);
 
  public:
-  using VisibilityCallback = Function<void(bool), WTF::SameThreadAffinity>;
+  using VisibilityCallback = Function<void(bool), WTF::kSameThreadAffinity>;
 
   ElementVisibilityObserver(Element*, std::unique_ptr<VisibilityCallback>);
   virtual ~ElementVisibilityObserver();
 
-  void start();
-  void stop();
+  // The |threshold| is the minimum fraction that needs to be visible.
+  void Start(float threshold = 0.0);
+  void Stop();
 
-  void deliverObservationsForTesting();
+  void DeliverObservationsForTesting();
 
   DECLARE_VIRTUAL_TRACE();
 
  private:
   class ElementVisibilityCallback;
 
-  void onVisibilityChanged(
+  void OnVisibilityChanged(
       const HeapVector<Member<IntersectionObserverEntry>>&);
 
-  Member<Element> m_element;
-  Member<IntersectionObserver> m_intersectionObserver;
-  std::unique_ptr<VisibilityCallback> m_callback;
+  Member<Element> element_;
+  Member<IntersectionObserver> intersection_observer_;
+  std::unique_ptr<VisibilityCallback> callback_;
 };
 
 }  // namespace blink

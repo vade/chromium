@@ -7,7 +7,7 @@
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/scoped_nsobject.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/strings/sys_string_conversions.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
@@ -257,6 +257,20 @@ enum MobileSessionStartAction {
             secureSourceApp:secureSourceApp
                 completeURL:url];
   }
+
+  if ([command
+          isEqualToString:base::SysUTF8ToNSString(
+                              app_group::kChromeAppGroupFocusOmniboxCommand)]) {
+    ChromeAppStartupParameters* params = [[ChromeAppStartupParameters alloc]
+        initWithExternalURL:GURL(kChromeUINewTabURL)
+        xCallbackParameters:nil
+          declaredSourceApp:appId
+            secureSourceApp:secureSourceApp
+                completeURL:url];
+    [params setLaunchFocusOmnibox:YES];
+    return params;
+  }
+
   if ([command isEqualToString:base::SysUTF8ToNSString(
                                    app_group::kChromeAppGroupOpenURLCommand)]) {
     if (!parameter || ![parameter isKindOfClass:[NSString class]])
@@ -270,6 +284,33 @@ enum MobileSessionStartAction {
                                               declaredSourceApp:appId
                                                 secureSourceApp:secureSourceApp
                                                     completeURL:url];
+  }
+
+  if ([command
+          isEqualToString:base::SysUTF8ToNSString(
+                              app_group::kChromeAppGroupQRScannerCommand)]) {
+    ChromeAppStartupParameters* params = [[ChromeAppStartupParameters alloc]
+        initWithExternalURL:GURL(kChromeUINewTabURL)
+        xCallbackParameters:nil
+          declaredSourceApp:appId
+            secureSourceApp:secureSourceApp
+                completeURL:url];
+    [params setLaunchQRScanner:YES];
+    return params;
+  }
+
+  if ([command isEqualToString:
+                   base::SysUTF8ToNSString(
+                       app_group::kChromeAppGroupIncognitoSearchCommand)]) {
+    ChromeAppStartupParameters* params = [[ChromeAppStartupParameters alloc]
+        initWithExternalURL:GURL(kChromeUINewTabURL)
+        xCallbackParameters:nil
+          declaredSourceApp:appId
+            secureSourceApp:secureSourceApp
+                completeURL:url];
+    [params setLaunchInIncognito:YES];
+    [params setLaunchFocusOmnibox:YES];
+    return params;
   }
 
   return nil;

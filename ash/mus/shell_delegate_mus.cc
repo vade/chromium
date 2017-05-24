@@ -6,15 +6,13 @@
 
 #include <utility>
 
-#include "ash/common/gpu_support_stub.h"
-#include "ash/common/palette_delegate.h"
-#include "ash/common/session/session_state_delegate.h"
-#include "ash/common/wm_shell.h"
+#include "ash/gpu_support_stub.h"
 #include "ash/mus/accessibility_delegate_mus.h"
 #include "ash/mus/context_menu_mus.h"
-#include "ash/mus/shelf_delegate_mus.h"
 #include "ash/mus/system_tray_delegate_mus.h"
 #include "ash/mus/wallpaper_delegate_mus.h"
+#include "ash/palette_delegate.h"
+#include "ash/session/session_state_delegate.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
@@ -26,36 +24,11 @@ namespace {
 
 class SessionStateDelegateStub : public SessionStateDelegate {
  public:
-  SessionStateDelegateStub()
-      : screen_locked_(false), user_info_(new user_manager::UserInfoImpl()) {}
+  SessionStateDelegateStub() : user_info_(new user_manager::UserInfoImpl()) {}
 
   ~SessionStateDelegateStub() override {}
 
   // SessionStateDelegate:
-  int GetMaximumNumberOfLoggedInUsers() const override { return 3; }
-  int NumberOfLoggedInUsers() const override {
-    // ash_shell has 2 users.
-    return 2;
-  }
-  bool IsActiveUserSessionStarted() const override { return true; }
-  bool CanLockScreen() const override { return true; }
-  bool IsScreenLocked() const override { return screen_locked_; }
-  bool ShouldLockScreenAutomatically() const override { return false; }
-  void LockScreen() override {
-    screen_locked_ = true;
-    NOTIMPLEMENTED();
-  }
-  void UnlockScreen() override {
-    NOTIMPLEMENTED();
-    screen_locked_ = false;
-  }
-  bool IsUserSessionBlocked() const override { return false; }
-  session_manager::SessionState GetSessionState() const override {
-    return session_manager::SessionState::ACTIVE;
-  }
-  const user_manager::UserInfo* GetUserInfo(UserIndex index) const override {
-    return user_info_.get();
-  }
   bool ShouldShowAvatar(WmWindow* window) const override {
     NOTIMPLEMENTED();
     return !user_info_->GetImage().isNull();
@@ -64,18 +37,8 @@ class SessionStateDelegateStub : public SessionStateDelegate {
     NOTIMPLEMENTED();
     return gfx::ImageSkia();
   }
-  void SwitchActiveUser(const AccountId& account_id) override {}
-  void CycleActiveUser(CycleUser cycle_user) override {}
-  bool IsMultiProfileAllowedByPrimaryUserPolicy() const override {
-    return true;
-  }
-  void AddSessionStateObserver(ash::SessionStateObserver* observer) override {}
-  void RemoveSessionStateObserver(
-      ash::SessionStateObserver* observer) override {}
 
  private:
-  bool screen_locked_;
-
   // A pseudo user info.
   std::unique_ptr<user_manager::UserInfo> user_info_;
 
@@ -84,12 +47,8 @@ class SessionStateDelegateStub : public SessionStateDelegate {
 
 }  // namespace
 
-ShellDelegateMus::ShellDelegateMus(
-    service_manager::Connector* connector,
-    std::unique_ptr<SystemTrayDelegate> system_tray_delegate_for_test)
-    : connector_(connector),
-      system_tray_delegate_for_test_(std::move(system_tray_delegate_for_test)) {
-}
+ShellDelegateMus::ShellDelegateMus(service_manager::Connector* connector)
+    : connector_(connector) {}
 
 ShellDelegateMus::~ShellDelegateMus() {}
 
@@ -143,13 +102,15 @@ void ShellDelegateMus::OpenUrlFromArc(const GURL& url) {
   NOTIMPLEMENTED();
 }
 
-ShelfDelegate* ShellDelegateMus::CreateShelfDelegate(ShelfModel* model) {
-  return new ShelfDelegateMus();
+void ShellDelegateMus::ShelfInit() {
+  NOTIMPLEMENTED();
+}
+
+void ShellDelegateMus::ShelfShutdown() {
+  NOTIMPLEMENTED();
 }
 
 SystemTrayDelegate* ShellDelegateMus::CreateSystemTrayDelegate() {
-  if (system_tray_delegate_for_test_)
-    return system_tray_delegate_for_test_.release();
   return new SystemTrayDelegateMus();
 }
 
@@ -192,6 +153,14 @@ base::string16 ShellDelegateMus::GetProductName() const {
 gfx::Image ShellDelegateMus::GetDeprecatedAcceleratorImage() const {
   NOTIMPLEMENTED();
   return gfx::Image();
+}
+
+PrefService* ShellDelegateMus::GetActiveUserPrefService() const {
+  // This code should never be called in the case of Config::MASH. Rather, the
+  // PrefService instance is stored by Shell when it manages to connect to the
+  // pref service in Chrome.
+  NOTREACHED();
+  return nullptr;
 }
 
 bool ShellDelegateMus::IsTouchscreenEnabledInPrefs(bool use_local_state) const {

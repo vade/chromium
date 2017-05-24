@@ -85,8 +85,8 @@ VolumeManagerImpl.prototype.addVolumeMetadata_ = function(volumeMetadata) {
         // error, since users can do nothing in this situation.
         // We show Removable and Provided volumes regardless of mount error so
         // that users can unmount or format the volume.
-        // TODO(fukino): Once Files.app get ready, show erroneous Drive volume
-        // so that users can see auth warning banner on the volume.
+        // TODO(fukino): Once the Files app gets ready, show erroneous Drive
+        // volume so that users can see auth warning banner on the volume.
         // crbug.com/517772.
         var shouldShow = true;
         switch (volumeInfo.volumeType) {
@@ -181,6 +181,14 @@ VolumeManagerImpl.prototype.onMountCompleted_ = function(event) {
                 this.finishRequest_(requestKey, event.status, volumeInfo);
                 callback();
               }.bind(this));
+        } else if (event.status ===
+            VolumeManagerCommon.VolumeError.ALREADY_MOUNTED) {
+          var navigation_event =
+              new Event(VolumeManagerCommon.VOLUME_ALREADY_MOUNTED);
+          navigation_event.volumeId = event.volumeMetadata.volumeId;
+          this.dispatchEvent(navigation_event);
+          this.finishRequest_(requestKey, event.status, volumeInfo);
+          callback();
         } else {
           console.warn('Failed to mount a volume: ' + event.status);
           this.finishRequest_(requestKey, event.status);
@@ -288,8 +296,7 @@ VolumeManagerImpl.prototype.getLocationInfo = function(entry) {
 
   if (util.isFakeEntry(entry)) {
     return new EntryLocationImpl(
-        volumeInfo,
-        entry.rootType,
+        volumeInfo, entry.rootType,
         true /* the entry points a root directory. */,
         true /* fake entries are read only. */);
   }
@@ -298,12 +305,31 @@ VolumeManagerImpl.prototype.getLocationInfo = function(entry) {
   var isReadOnly;
   var isRootEntry;
   if (volumeInfo.volumeType === VolumeManagerCommon.VolumeType.DRIVE) {
-    // For Drive, the roots are /root and /other, instead of /. Root URLs
-    // contain trailing slashes.
+    // For Drive, the roots are /root, /team_drives and /other, instead of /.
+    // Root URLs contain trailing slashes.
     if (entry.fullPath == '/root' || entry.fullPath.indexOf('/root/') === 0) {
       rootType = VolumeManagerCommon.RootType.DRIVE;
       isReadOnly = volumeInfo.isReadOnly;
       isRootEntry = entry.fullPath === '/root';
+    } else if (
+        entry.fullPath == VolumeManagerCommon.TEAM_DRIVES_DIRECTORY_PATH ||
+        entry.fullPath.indexOf(
+            VolumeManagerCommon.TEAM_DRIVES_DIRECTORY_PATH + '/') === 0) {
+      if (entry.fullPath == VolumeManagerCommon.TEAM_DRIVES_DIRECTORY_PATH) {
+        rootType = VolumeManagerCommon.RootType.TEAM_DRIVES_GRAND_ROOT;
+        isReadOnly = true;
+        isRootEntry = true;
+      } else {
+        rootType = VolumeManagerCommon.RootType.TEAM_DRIVE;
+        if (util.isTeamDriveRoot(entry)) {
+          isReadOnly = false;
+          isRootEntry = true;
+        } else {
+          // Regular files/directories under Team Drives.
+          isRootEntry = false;
+          isReadOnly = volumeInfo.isReadOnly;
+        }
+      }
     } else if (entry.fullPath == '/other' ||
                entry.fullPath.indexOf('/other/') === 0) {
       rootType = VolumeManagerCommon.RootType.DRIVE_OTHER;

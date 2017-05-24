@@ -8,6 +8,7 @@
 #include "base/callback_forward.h"
 #include "base/command_line.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/memory_dump_provider.h"
@@ -42,9 +43,10 @@ class MockDumpProvider : public base::trace_event::MemoryDumpProvider {
 
 class MemoryTracingTest : public ContentBrowserTest {
  public:
-  void DoRequestGlobalDump(const MemoryDumpType& dump_type,
-                           const MemoryDumpLevelOfDetail& level_of_detail,
-                           const base::trace_event::MemoryDumpCallback& cb) {
+  void DoRequestGlobalDump(
+      const MemoryDumpType& dump_type,
+      const MemoryDumpLevelOfDetail& level_of_detail,
+      const base::trace_event::GlobalMemoryDumpCallback& cb) {
     MemoryDumpManager::GetInstance()->RequestGlobalDump(dump_type,
                                                         level_of_detail, cb);
   }
@@ -58,7 +60,7 @@ class MemoryTracingTest : public ContentBrowserTest {
       bool success) {
     // Make sure we run the RunLoop closure on the same thread that originated
     // the run loop (which is the IN_PROC_BROWSER_TEST_F main thread).
-    if (!task_runner->RunsTasksOnCurrentThread()) {
+    if (!task_runner->RunsTasksInCurrentSequence()) {
       task_runner->PostTask(
           FROM_HERE, base::Bind(&MemoryTracingTest::OnGlobalMemoryDumpDone,
                                 base::Unretained(this), task_runner, closure,
@@ -78,7 +80,7 @@ class MemoryTracingTest : public ContentBrowserTest {
       const MemoryDumpLevelOfDetail& level_of_detail,
       const base::Closure& closure) {
     uint32_t request_index = next_request_index_++;
-    base::trace_event::MemoryDumpCallback callback = base::Bind(
+    base::trace_event::GlobalMemoryDumpCallback callback = base::Bind(
         &MemoryTracingTest::OnGlobalMemoryDumpDone, base::Unretained(this),
         base::ThreadTaskRunnerHandle::Get(), closure, request_index);
     if (from_renderer_thread) {
@@ -302,7 +304,8 @@ IN_PROC_BROWSER_TEST_F(SingleProcessMemoryTracingTest, QueuedDumps) {
 #endif  // !defined(GOOGLE_CHROME_BUILD)
 
 // Non-deterministic races under TSan. crbug.com/529678
-#if defined(THREAD_SANITIZER)
+// Flaky on Linux. crbug.com/709524
+#if defined(THREAD_SANITIZER) || defined(OS_LINUX)
 #define MAYBE_BrowserInitiatedDump DISABLED_BrowserInitiatedDump
 #else
 #define MAYBE_BrowserInitiatedDump BrowserInitiatedDump

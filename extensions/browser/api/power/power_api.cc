@@ -31,8 +31,8 @@ device::PowerSaveBlocker::PowerSaveBlockerType LevelToPowerSaveBlockerType(
   return device::PowerSaveBlocker::kPowerSaveBlockPreventDisplaySleep;
 }
 
-base::LazyInstance<BrowserContextKeyedAPIFactory<PowerAPI>> g_factory =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<BrowserContextKeyedAPIFactory<PowerAPI>>::DestructorAtExit
+    g_factory = LAZY_INSTANCE_INITIALIZER;
 
 std::unique_ptr<device::PowerSaveBlocker> CreatePowerSaveBlocker(
     device::PowerSaveBlocker::PowerSaveBlockerType type,
@@ -88,7 +88,7 @@ void PowerAPI::SetCreateBlockerFunctionForTesting(
 
 void PowerAPI::OnExtensionUnloaded(content::BrowserContext* browser_context,
                                    const Extension* extension,
-                                   UnloadedExtensionInfo::Reason reason) {
+                                   UnloadedExtensionReason reason) {
   RemoveRequest(extension->id());
   UpdatePowerSaveBlocker();
 }

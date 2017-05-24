@@ -9,7 +9,7 @@ Security.SecurityModel = class extends SDK.SDKModel {
    * @param {!SDK.Target} target
    */
   constructor(target) {
-    super(Security.SecurityModel, target);
+    super(target);
     this._dispatcher = new Security.SecurityDispatcher(this);
     this._securityAgent = target.securityAgent();
     target.registerSecurityDispatcher(this._dispatcher);
@@ -17,14 +17,17 @@ Security.SecurityModel = class extends SDK.SDKModel {
   }
 
   /**
-   * @param {!SDK.Target} target
-   * @return {?Security.SecurityModel}
+   * @return {!SDK.ResourceTreeModel}
    */
-  static fromTarget(target) {
-    var model = target.model(Security.SecurityModel);
-    if (!model)
-      model = new Security.SecurityModel(target);
-    return model;
+  resourceTreeModel() {
+    return /** @type {!SDK.ResourceTreeModel} */ (this.target().model(SDK.ResourceTreeModel));
+  }
+
+  /**
+   * @return {!SDK.NetworkManager}
+   */
+  networkManager() {
+    return /** @type {!SDK.NetworkManager} */ (this.target().model(SDK.NetworkManager));
   }
 
   /**
@@ -60,6 +63,8 @@ Security.SecurityModel = class extends SDK.SDKModel {
     this._securityAgent.showCertificateViewer();
   }
 };
+
+SDK.SDKModel.register(Security.SecurityModel, SDK.Target.Capability.Security, false);
 
 /** @enum {symbol} */
 Security.SecurityModel.Events = {
@@ -108,5 +113,15 @@ Security.SecurityDispatcher = class {
     var pageSecurityState = new Security.PageSecurityState(
         securityState, schemeIsCryptographic, explanations, insecureContentStatus, summary || null);
     this._model.dispatchEventToListeners(Security.SecurityModel.Events.SecurityStateChanged, pageSecurityState);
+  }
+
+
+  /**
+   * @override
+   * @param {number} eventId
+   * @param {string} errorType
+   * @param {string} requestURL
+   */
+  certificateError(eventId, errorType, requestURL) {
   }
 };

@@ -4,7 +4,6 @@
 
 #include "components/policy/core/common/policy_loader_win.h"
 
-#include <windows.h>
 #include <ntdsapi.h>  // For Ds[Un]Bind
 #include <rpc.h>      // For struct GUID
 #include <shlwapi.h>  // For PathIsUNC()
@@ -70,7 +69,7 @@ const char* kInsecurePolicies[] = {
     key::kRestoreOnStartupURLs};
 
 #pragma warning(push)
-#pragma warning(disable: 4068)  // unknown pragmas
+#pragma warning(disable : 4068)  // unknown pragmas
 // TODO(dcheng): Remove pragma once http://llvm.org/PR24007 is fixed.
 #pragma clang diagnostic ignored "-Wmissing-braces"
 // The GUID of the registry settings group policy extension.
@@ -90,10 +89,16 @@ enum DomainCheckErrors {
   DOMAIN_CHECK_ERROR_SIZE,  // Not a DomainCheckError.  Must be last.
 };
 
+// Encapculates logic to determine if enterprise policies should be honored.
+// This is used in various places below.
+bool ShouldHonorPolicies() {
+  return base::win::IsEnterpriseManaged();
+}
+
 // Verifies that untrusted policies contain only safe values. Modifies the
 // |policy| in place.
 void FilterUntrustedPolicy(PolicyMap* policy) {
-  if (base::win::IsEnrolledToDomain())
+  if (ShouldHonorPolicies())
     return;
 
   int invalid_policies = 0;
@@ -107,7 +112,7 @@ void FilterUntrustedPolicy(PolicyMap* policy) {
     std::unique_ptr<base::ListValue> filtered_values(new base::ListValue);
     for (const auto& list_entry : *policy_list_value) {
       std::string entry;
-      if (!list_entry->GetAsString(&entry))
+      if (!list_entry.GetAsString(&entry))
         continue;
       size_t pos = entry.find(';');
       if (pos == std::string::npos)
@@ -126,8 +131,8 @@ void FilterUntrustedPolicy(PolicyMap* policy) {
       filtered_entry.value = std::move(filtered_values);
       policy->Set(key::kExtensionInstallForcelist, std::move(filtered_entry));
 
-      const PolicyDetails* details = GetChromePolicyDetails(
-          key::kExtensionInstallForcelist);
+      const PolicyDetails* details =
+          GetChromePolicyDetails(key::kExtensionInstallForcelist);
       UMA_HISTOGRAM_SPARSE_SLOWLY("EnterpriseCheck.InvalidPolicies",
                                   details->id);
     }
@@ -153,10 +158,10 @@ void FilterUntrustedPolicy(PolicyMap* policy) {
 class Wow64Functions {
  public:
   Wow64Functions()
-    : kernel32_lib_(base::FilePath(L"kernel32")),
-      is_wow_64_process_(NULL),
-      wow_64_disable_wow_64_fs_redirection_(NULL),
-      wow_64_revert_wow_64_fs_redirection_(NULL) {
+      : kernel32_lib_(base::FilePath(L"kernel32")),
+        is_wow_64_process_(NULL),
+        wow_64_disable_wow_64_fs_redirection_(NULL),
+        wow_64_revert_wow_64_fs_redirection_(NULL) {
     if (kernel32_lib_.is_valid()) {
       is_wow_64_process_ = reinterpret_cast<IsWow64Process>(
           kernel32_lib_.GetFunctionPointer("IsWow64Process"));
@@ -172,9 +177,8 @@ class Wow64Functions {
   }
 
   bool is_valid() {
-    return is_wow_64_process_ &&
-        wow_64_disable_wow_64_fs_redirection_ &&
-        wow_64_revert_wow_64_fs_redirection_;
+    return is_wow_64_process_ && wow_64_disable_wow_64_fs_redirection_ &&
+           wow_64_revert_wow_64_fs_redirection_;
   }
 
   bool IsWow64() {
@@ -193,9 +197,9 @@ class Wow64Functions {
   }
 
  private:
-  typedef BOOL (WINAPI* IsWow64Process)(HANDLE, PBOOL);
-  typedef BOOL (WINAPI* Wow64DisableWow64FSRedirection)(PVOID*);
-  typedef BOOL (WINAPI* Wow64RevertWow64FSRedirection)(PVOID);
+  typedef BOOL(WINAPI* IsWow64Process)(HANDLE, PBOOL);
+  typedef BOOL(WINAPI* Wow64DisableWow64FSRedirection)(PVOID*);
+  typedef BOOL(WINAPI* Wow64RevertWow64FSRedirection)(PVOID);
 
   base::ScopedNativeLibrary kernel32_lib_;
 
@@ -207,15 +211,13 @@ class Wow64Functions {
 };
 
 // Global Wow64Function instance used by ScopedDisableWow64Redirection below.
-static base::LazyInstance<Wow64Functions> g_wow_64_functions =
+static base::LazyInstance<Wow64Functions>::DestructorAtExit g_wow_64_functions =
     LAZY_INSTANCE_INITIALIZER;
 
 // Scoper that switches off Wow64 File System Redirection during its lifetime.
 class ScopedDisableWow64Redirection {
  public:
-  ScopedDisableWow64Redirection()
-    : active_(false),
-      previous_state_(NULL) {
+  ScopedDisableWow64Redirection() : active_(false), previous_state_(NULL) {
     Wow64Functions* wow64 = g_wow_64_functions.Pointer();
     if (wow64->is_valid() && wow64->IsWow64()) {
       if (wow64->DisableFsRedirection(&previous_state_))
@@ -260,8 +262,8 @@ class WinGPOListProvider : public AppliedGPOListProvider {
 };
 
 // The default windows GPO list provider used for PolicyLoaderWin.
-static base::LazyInstance<WinGPOListProvider> g_win_gpo_list_provider =
-    LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<WinGPOListProvider>::DestructorAtExit
+    g_win_gpo_list_provider = LAZY_INSTANCE_INITIALIZER;
 
 // Parses |gpo_dict| according to |schema| and writes the resulting policy
 // settings to |policy| for the given |scope| and |level|.
@@ -291,8 +293,12 @@ void CollectEnterpriseUMAs() {
                             base::win::OSInfo::GetInstance()->version_type(),
                             base::win::SUITE_LAST);
 
-  bool in_domain = base::win::IsEnrolledToDomain();
-  UMA_HISTOGRAM_BOOLEAN("EnterpriseCheck.InDomain", in_domain);
+  UMA_HISTOGRAM_BOOLEAN("EnterpriseCheck.InDomain",
+                        base::win::IsEnrolledToDomain());
+  UMA_HISTOGRAM_BOOLEAN("EnterpriseCheck.IsManaged",
+                        base::win::IsDeviceRegisteredWithManagement());
+  UMA_HISTOGRAM_BOOLEAN("EnterpriseCheck.IsEnterpriseUser",
+                        base::win::IsEnterpriseManaged());
 }
 
 }  // namespace
@@ -362,13 +368,13 @@ std::unique_ptr<PolicyBundle> PolicyLoaderWin::Load() {
     PolicyScope scope;
     HKEY hive;
   } kScopes[] = {
-    { POLICY_SCOPE_MACHINE, HKEY_LOCAL_MACHINE },
-    { POLICY_SCOPE_USER,    HKEY_CURRENT_USER  },
+      {POLICY_SCOPE_MACHINE, HKEY_LOCAL_MACHINE},
+      {POLICY_SCOPE_USER, HKEY_CURRENT_USER},
   };
 
-  bool is_enterprise = base::win::IsEnrolledToDomain();
+  bool honor_policies = ShouldHonorPolicies();
   VLOG(1) << "Reading policy from the registry is "
-          << (is_enterprise ? "enabled." : "disabled.");
+          << (honor_policies ? "enabled." : "disabled.");
 
   // Load policy data for the different scopes/levels and merge them.
   std::unique_ptr<PolicyBundle> bundle(new PolicyBundle());
@@ -376,7 +382,7 @@ std::unique_ptr<PolicyBundle> PolicyLoaderWin::Load() {
       &bundle->Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()));
   for (size_t i = 0; i < arraysize(kScopes); ++i) {
     PolicyScope scope = kScopes[i].scope;
-    PolicyLoadStatusSample status;
+    PolicyLoadStatusUmaReporter status;
     RegistryDict gpo_dict;
 
     // Note: GPO rules mandate a call to EnterCriticalPolicySection() here, and
@@ -396,7 +402,7 @@ std::unique_ptr<PolicyBundle> PolicyLoaderWin::Load() {
     // timeout on it more aggressively. For now, there's no justification for
     // the additional effort this would introduce.
 
-    bool is_registry_forced = is_enterprise || gpo_provider_ == nullptr;
+    bool is_registry_forced = honor_policies || gpo_provider_ == nullptr;
     if (is_registry_forced || !ReadPolicyFromGPO(scope, &gpo_dict, &status)) {
       VLOG_IF(1, !is_registry_forced) << "Failed to read GPO files for "
                                       << scope << " falling back to registry.";
@@ -424,7 +430,7 @@ std::unique_ptr<PolicyBundle> PolicyLoaderWin::Load() {
 
 bool PolicyLoaderWin::ReadPRegFile(const base::FilePath& preg_file,
                                    RegistryDict* policy,
-                                   PolicyLoadStatusSample* status) {
+                                   PolicyLoadStatusSampler* status) {
   // The following deals with the minor annoyance that Wow64 FS redirection
   // might need to be turned off: This is the case if running as a 32-bit
   // process on a 64-bit system, in which case Wow64 FS redirection redirects
@@ -452,11 +458,11 @@ bool PolicyLoaderWin::ReadPRegFile(const base::FilePath& preg_file,
 bool PolicyLoaderWin::LoadGPOPolicy(PolicyScope scope,
                                     PGROUP_POLICY_OBJECT policy_object_list,
                                     RegistryDict* policy,
-                                    PolicyLoadStatusSample* status) {
+                                    PolicyLoadStatusSampler* status) {
   RegistryDict parsed_policy;
   RegistryDict forced_policy;
-  for (GROUP_POLICY_OBJECT* policy_object = policy_object_list;
-       policy_object; policy_object = policy_object->pNext) {
+  for (GROUP_POLICY_OBJECT* policy_object = policy_object_list; policy_object;
+       policy_object = policy_object->pNext) {
     if (policy_object->dwOptions & GPO_FLAG_DISABLE)
       continue;
 
@@ -500,12 +506,12 @@ bool PolicyLoaderWin::LoadGPOPolicy(PolicyScope scope,
 
 bool PolicyLoaderWin::ReadPolicyFromGPO(PolicyScope scope,
                                         RegistryDict* policy,
-                                        PolicyLoadStatusSample* status) {
+                                        PolicyLoadStatusSampler* status) {
   PGROUP_POLICY_OBJECT policy_object_list = NULL;
   DWORD flags = scope == POLICY_SCOPE_MACHINE ? GPO_LIST_FLAG_MACHINE : 0;
-  if (gpo_provider_->GetAppliedGPOList(
-          flags, NULL, NULL, &kRegistrySettingsCSEGUID,
-          &policy_object_list) != ERROR_SUCCESS) {
+  if (gpo_provider_->GetAppliedGPOList(flags, NULL, NULL,
+                                       &kRegistrySettingsCSEGUID,
+                                       &policy_object_list) != ERROR_SUCCESS) {
     PLOG(ERROR) << "GetAppliedGPOList scope " << scope;
     status->Add(POLICY_LOAD_STATUS_QUERY_FAILED);
     return false;
@@ -543,7 +549,7 @@ void PolicyLoaderWin::Load3rdPartyPolicy(const RegistryDict* gpo_dict,
     const char* name;
     PolicyDomain domain;
   } k3rdPartyDomains[] = {
-    { "extensions", POLICY_DOMAIN_EXTENSIONS },
+      {"extensions", POLICY_DOMAIN_EXTENSIONS},
   };
 
   // Policy level and corresponding path.
@@ -551,8 +557,8 @@ void PolicyLoaderWin::Load3rdPartyPolicy(const RegistryDict* gpo_dict,
     PolicyLevel level;
     const char* path;
   } kLevels[] = {
-    { POLICY_LEVEL_MANDATORY,   kKeyMandatory   },
-    { POLICY_LEVEL_RECOMMENDED, kKeyRecommended },
+      {POLICY_LEVEL_MANDATORY, kKeyMandatory},
+      {POLICY_LEVEL_RECOMMENDED, kKeyRecommended},
   };
 
   for (size_t i = 0; i < arraysize(k3rdPartyDomains); i++) {
@@ -564,8 +570,7 @@ void PolicyLoaderWin::Load3rdPartyPolicy(const RegistryDict* gpo_dict,
 
     for (RegistryDict::KeyMap::const_iterator component(
              domain_dict->keys().begin());
-         component != domain_dict->keys().end();
-         ++component) {
+         component != domain_dict->keys().end(); ++component) {
       const PolicyNamespace policy_namespace(domain, component->first);
 
       const Schema* schema_from_map = schema_map()->GetSchema(policy_namespace);
@@ -611,8 +616,8 @@ void PolicyLoaderWin::SetupWatches() {
 void PolicyLoaderWin::OnObjectSignaled(HANDLE object) {
   DCHECK(object == user_policy_changed_event_.handle() ||
          object == machine_policy_changed_event_.handle())
-      << "unexpected object signaled policy reload, obj = "
-      << std::showbase << std::hex << object;
+      << "unexpected object signaled policy reload, obj = " << std::showbase
+      << std::hex << object;
   Reload(false);
 }
 

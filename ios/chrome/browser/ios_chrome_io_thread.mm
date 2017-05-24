@@ -19,13 +19,13 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread.h"
-#include "base/threading/worker_pool.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "components/net_log/chrome_net_log.h"
@@ -67,7 +67,7 @@
 #include "net/proxy/proxy_script_fetcher_impl.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/tcp_client_socket.h"
-#include "net/spdy/spdy_session.h"
+#include "net/spdy/chromium/spdy_session.h"
 #include "net/ssl/channel_id_service.h"
 #include "net/ssl/default_channel_id_store.h"
 #include "net/url_request/data_protocol_handler.h"
@@ -127,6 +127,7 @@ std::unique_ptr<net::HostResolver> CreateGlobalHostResolver(
       new net::MappedHostResolver(std::move(global_host_resolver)));
   remapped_resolver->SetRulesFromString(
       command_line.GetSwitchValueASCII(switches::kIOSHostResolverRules));
+  // TODO(crbug.com/703565): remove std::move() once Xcode 9.0+ is required.
   return std::move(remapped_resolver);
 }
 
@@ -385,12 +386,12 @@ void IOSChromeIOThread::Init() {
   globals_->system_cookie_store.reset(new net::CookieMonster(nullptr, nullptr));
   // In-memory channel ID store.
   globals_->system_channel_id_service.reset(
-      new net::ChannelIDService(new net::DefaultChannelIDStore(nullptr),
-                                base::WorkerPool::GetTaskRunner(true)));
+      new net::ChannelIDService(new net::DefaultChannelIDStore(nullptr)));
   globals_->system_cookie_store->SetChannelIDServiceID(
       globals_->system_channel_id_service->GetUniqueID());
   globals_->http_user_agent_settings.reset(new net::StaticHttpUserAgentSettings(
-      std::string(), web::GetWebClient()->GetUserAgent(false)));
+      std::string(),
+      web::GetWebClient()->GetUserAgent(web::UserAgentType::MOBILE)));
   if (command_line.HasSwitch(switches::kIOSTestingFixedHttpPort)) {
     params_.testing_fixed_http_port =
         GetSwitchValueAsInt(command_line, switches::kIOSTestingFixedHttpPort);

@@ -26,9 +26,7 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.ApplicationLifetime;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.download.DownloadUtils;
 import org.chromium.chrome.browser.firstrun.FirstRunGlueImpl;
-import org.chromium.chrome.browser.instantapps.InstantAppsHandler;
 import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
 import org.chromium.chrome.browser.tabmodel.DocumentModeAssassin;
 import org.chromium.chrome.browser.webapps.ChromeWebApkHost;
@@ -91,7 +89,7 @@ public class FeatureUtilities {
     @VisibleForTesting
     static boolean hasGoogleAccountAuthenticator(Context context) {
         if (sHasGoogleAccountAuthenticator == null) {
-            AccountManagerHelper accountHelper = AccountManagerHelper.get(context);
+            AccountManagerHelper accountHelper = AccountManagerHelper.get();
             sHasGoogleAccountAuthenticator = accountHelper.hasGoogleAccountAuthenticator();
         }
         return sHasGoogleAccountAuthenticator;
@@ -99,7 +97,7 @@ public class FeatureUtilities {
 
     @VisibleForTesting
     static boolean hasGoogleAccounts(Context context) {
-        return AccountManagerHelper.get(context).hasGoogleAccounts();
+        return AccountManagerHelper.get().hasGoogleAccounts();
     }
 
     @SuppressLint("InlinedApi")
@@ -133,7 +131,7 @@ public class FeatureUtilities {
      */
     public static boolean isDocumentModeEligible(Context context) {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP
-                && !DeviceFormFactor.isTablet(context);
+                && !DeviceFormFactor.isTablet();
     }
 
     /**
@@ -170,8 +168,7 @@ public class FeatureUtilities {
             // Allowing disk access for preferences while prototyping.
             StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
             try {
-                sCachedHerbFlavor =
-                        ChromePreferenceManager.getInstance(context).getCachedHerbFlavor();
+                sCachedHerbFlavor = ChromePreferenceManager.getInstance().getCachedHerbFlavor();
             } finally {
                 StrictMode.setThreadPolicy(oldPolicy);
             }
@@ -188,8 +185,6 @@ public class FeatureUtilities {
      */
     public static void cacheNativeFlags() {
         cacheHerbFlavor();
-        DownloadUtils.cacheIsDownloadHomeEnabled();
-        InstantAppsHandler.getInstance().cacheInstantAppsEnabled();
         ChromeWebApkHost.cacheEnabledStateForNextLaunch();
         cacheChromeHomeEnabled();
         FirstRunGlueImpl.cacheFirstRunPrefs();
@@ -226,7 +221,7 @@ public class FeatureUtilities {
         sCachedHerbFlavor = newFlavor;
 
         if (!TextUtils.equals(oldFlavor, newFlavor)) {
-            ChromePreferenceManager.getInstance(context).setCachedHerbFlavor(newFlavor);
+            ChromePreferenceManager.getInstance().setCachedHerbFlavor(newFlavor);
         }
     }
 
@@ -244,13 +239,11 @@ public class FeatureUtilities {
      * Cache whether or not Chrome Home is enabled.
      */
     public static void cacheChromeHomeEnabled() {
-        Context context = ContextUtils.getApplicationContext();
-
         // Chrome Home doesn't work with tablets.
-        if (DeviceFormFactor.isTablet(context)) return;
+        if (DeviceFormFactor.isTablet()) return;
 
         boolean isChromeHomeEnabled = ChromeFeatureList.isEnabled(ChromeFeatureList.CHROME_HOME);
-        ChromePreferenceManager manager = ChromePreferenceManager.getInstance(context);
+        ChromePreferenceManager manager = ChromePreferenceManager.getInstance();
         boolean valueChanged = isChromeHomeEnabled != manager.isChromeHomeEnabled();
         manager.setChromeHomeEnabled(isChromeHomeEnabled);
         sChromeHomeEnabled = isChromeHomeEnabled;
@@ -264,12 +257,17 @@ public class FeatureUtilities {
      */
     public static boolean isChromeHomeEnabled() {
         if (sChromeHomeEnabled == null) {
-            ChromePreferenceManager manager =
-                    ChromePreferenceManager.getInstance(ContextUtils.getApplicationContext());
-            sChromeHomeEnabled = manager.isChromeHomeEnabled();
+            sChromeHomeEnabled = ChromePreferenceManager.getInstance().isChromeHomeEnabled();
         }
 
         return sChromeHomeEnabled;
+    }
+
+    /**
+     * @return Whether or not the expand button for Chrome Home is enabled.
+     */
+    public static boolean isChromeHomeExpandButtonEnabled() {
+        return ChromeFeatureList.isEnabled(ChromeFeatureList.CHROME_HOME_EXPAND_BUTTON);
     }
 
     private static native void nativeSetCustomTabVisible(boolean visible);

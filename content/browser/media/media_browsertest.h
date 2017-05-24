@@ -20,6 +20,7 @@ class MediaBrowserTest : public ContentBrowserTest {
   // Common test results.
   static const char kEnded[];
   static const char kError[];
+  static const char kErrorEvent[];
   static const char kFailed[];
 
   // ContentBrowserTest implementation.
@@ -37,6 +38,11 @@ class MediaBrowserTest : public ContentBrowserTest {
   // Opens a URL and waits for the document title to match any of the waited for
   // titles. Returns the matching title.
   std::string RunTest(const GURL& gurl, const std::string& expected_title);
+
+  // Encodes |original_message| to be used in a URI query parameter suitable for
+  // decoding and usage with DecodeURIComponent in test pages that verify error
+  // message contents.
+  std::string EncodeErrorMessage(const std::string& original_message);
 
   // Adds titles that RunTest() should wait for.
   virtual void AddTitlesToAwait(content::TitleWatcher* title_watcher);

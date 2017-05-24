@@ -39,13 +39,13 @@ void DrawTriangle(int x_offset,
                   double rotation_degree,
                   gfx::Canvas* canvas) {
   // Draw triangular arrows.
-  SkPaint content_paint;
-  content_paint.setStyle(SkPaint::kFill_Style);
-  content_paint.setColor(SkColorSetA(
+  cc::PaintFlags content_flags;
+  content_flags.setStyle(cc::PaintFlags::kFill_Style);
+  content_flags.setColor(SkColorSetA(
       SK_ColorBLACK, std::numeric_limits<uint8_t>::max() * kArrowOpacity));
-  SkPaint border_paint;
-  border_paint.setStyle(SkPaint::kStroke_Style);
-  border_paint.setColor(SkColorSetA(
+  cc::PaintFlags border_flags;
+  border_flags.setStyle(cc::PaintFlags::kStroke_Style);
+  border_flags.setColor(SkColorSetA(
       SK_ColorWHITE, std::numeric_limits<uint8_t>::max() * kArrowOpacity));
 
   SkPath base_path;
@@ -64,8 +64,8 @@ void DrawTriangle(int x_offset,
   rotate_transform.ConcatTransform(move_transform);
   base_path.transform(rotate_transform.matrix(), &path);
 
-  canvas->DrawPath(path, content_paint);
-  canvas->DrawPath(path, border_paint);
+  canvas->DrawPath(path, content_flags);
+  canvas->DrawPath(path, border_flags);
 }
 
 }  // namespace
@@ -78,16 +78,15 @@ OverscanCalibrator::OverscanCalibrator(const display::Display& target_display,
       committed_(false) {
   // Undo the overscan calibration temporarily so that the user can see
   // dark boundary and current overscan region.
-  ash::Shell::GetInstance()->window_tree_host_manager()->SetOverscanInsets(
+  ash::Shell::Get()->window_tree_host_manager()->SetOverscanInsets(
       display_.id(), gfx::Insets());
 
   display::ManagedDisplayInfo info =
-      ash::Shell::GetInstance()->display_manager()->GetDisplayInfo(
-          display_.id());
+      ash::Shell::Get()->display_manager()->GetDisplayInfo(display_.id());
 
-  aura::Window* root = ash::Shell::GetInstance()
-                           ->window_tree_host_manager()
-                           ->GetRootWindowForDisplayId(display_.id());
+  aura::Window* root =
+      ash::Shell::Get()->window_tree_host_manager()->GetRootWindowForDisplayId(
+          display_.id());
   ui::Layer* parent_layer =
       ash::Shell::GetContainer(root, ash::kShellWindowId_OverlayContainer)
           ->layer();
@@ -103,13 +102,13 @@ OverscanCalibrator::~OverscanCalibrator() {
   // Overscan calibration has finished without commit, so the display has to
   // be the original offset.
   if (!committed_) {
-    ash::Shell::GetInstance()->window_tree_host_manager()->SetOverscanInsets(
+    ash::Shell::Get()->window_tree_host_manager()->SetOverscanInsets(
         display_.id(), initial_insets_);
   }
 }
 
 void OverscanCalibrator::Commit() {
-  ash::Shell::GetInstance()->window_tree_host_manager()->SetOverscanInsets(
+  ash::Shell::Get()->window_tree_host_manager()->SetOverscanInsets(
       display_.id(), insets_);
   committed_ = true;
 }

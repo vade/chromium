@@ -154,13 +154,13 @@ TEST_F(ImportantSitesUtilTest, SourceOrdering) {
   GURL url6("https://youtube.com/");
   GURL url7("https://foo.bar/");
 
-  service->ResetScoreForURL(url1, 5);
-  service->ResetScoreForURL(url2, 2);  // Below medium engagement (5).
-  service->ResetScoreForURL(url3, 7);
-  service->ResetScoreForURL(url4, 8);
-  service->ResetScoreForURL(url5, 9);
-  service->ResetScoreForURL(url6, 1);  // Below the medium engagement (5).
-  service->ResetScoreForURL(url7, 11);
+  service->ResetBaseScoreForURL(url1, 5);
+  service->ResetBaseScoreForURL(url2, 2);  // Below medium engagement (5).
+  service->ResetBaseScoreForURL(url3, 7);
+  service->ResetBaseScoreForURL(url4, 8);
+  service->ResetBaseScoreForURL(url5, 9);
+  service->ResetBaseScoreForURL(url6, 1);  // Below the medium engagement (5).
+  service->ResetBaseScoreForURL(url7, 11);
 
   // Here we should have:
   // 1: removed domains below minimum engagement,
@@ -239,9 +239,9 @@ TEST_F(ImportantSitesUtilTest, TooManyBookmarks) {
 
   // If we add some site engagement, they should show up (even though the site
   // engagement score is too low for a signal by itself).
-  service->ResetScoreForURL(url1, 2);
-  service->ResetScoreForURL(url4, 3);
-  service->ResetScoreForURL(url7, 0);
+  service->ResetBaseScoreForURL(url1, 2);
+  service->ResetBaseScoreForURL(url4, 3);
+  service->ResetBaseScoreForURL(url7, 0);
 
   important_sites = ImportantSitesUtil::GetImportantRegisterableDomains(
       profile(), kNumImportantSites);
@@ -258,10 +258,11 @@ TEST_F(ImportantSitesUtilTest, Blacklisting) {
   ASSERT_TRUE(service);
 
   GURL url1("http://www.google.com/");
+  GURL url2("http://www.gmail.com/");
 
   // Set a bunch of positive signals.
-  service->ResetScoreForURL(url1, 5);
-  AddBookmark(url1);
+  service->ResetBaseScoreForURL(url1, 5);
+  AddBookmark(url2);
   AddContentSetting(CONTENT_SETTINGS_TYPE_NOTIFICATIONS, CONTENT_SETTING_ALLOW,
                     url1);
 
@@ -269,17 +270,18 @@ TEST_F(ImportantSitesUtilTest, Blacklisting) {
   std::vector<ImportantDomainInfo> important_sites =
       ImportantSitesUtil::GetImportantRegisterableDomains(profile(),
                                                           kNumImportantSites);
-  std::vector<std::string> expected_sorted_domains = {"google.com"};
-  std::vector<GURL> expected_sorted_origins = {url1};
+  std::vector<std::string> expected_sorted_domains = {"google.com",
+                                                      "gmail.com"};
+  std::vector<GURL> expected_sorted_origins = {url1, url2};
   ExpectImportantResultsEq(expected_sorted_domains, expected_sorted_origins,
                            important_sites);
-  ASSERT_EQ(1u, important_sites.size());
+  ASSERT_EQ(2u, important_sites.size());
   // Record ignore twice.
   ImportantSitesUtil::RecordBlacklistedAndIgnoredImportantSites(
-      profile(), std::vector<std::string>(), std::vector<int32_t>(),
+      profile(), {"gmail.com"}, {important_sites[1].reason_bitfield},
       {"google.com"}, {important_sites[0].reason_bitfield});
   ImportantSitesUtil::RecordBlacklistedAndIgnoredImportantSites(
-      profile(), std::vector<std::string>(), std::vector<int32_t>(),
+      profile(), {"gmail.com"}, {important_sites[1].reason_bitfield},
       {"google.com"}, {important_sites[0].reason_bitfield});
 
   // Important fetch 2.
@@ -288,17 +290,22 @@ TEST_F(ImportantSitesUtilTest, Blacklisting) {
   ExpectImportantResultsEq(expected_sorted_domains, expected_sorted_origins,
                            important_sites);
   // We shouldn't blacklist after first two times.
-  ASSERT_EQ(1u, important_sites.size());
+  ASSERT_EQ(2u, important_sites.size());
 
   // Record ignore 3rd time.
   ImportantSitesUtil::RecordBlacklistedAndIgnoredImportantSites(
-      profile(), std::vector<std::string>(), std::vector<int32_t>(),
+      profile(), {"gmail.com"}, {important_sites[1].reason_bitfield},
       {"google.com"}, {important_sites[0].reason_bitfield});
 
-  // Important fetch 3. We should be blacklisted now.
+  // Important fetch 3. Google.com should be blacklisted now.
   important_sites = ImportantSitesUtil::GetImportantRegisterableDomains(
       profile(), kNumImportantSites);
-  ASSERT_EQ(0u, important_sites.size());
+
+  ASSERT_EQ(1u, important_sites.size());
+  expected_sorted_domains = {"gmail.com"};
+  expected_sorted_origins = {url2};
+  ExpectImportantResultsEq(expected_sorted_domains, expected_sorted_origins,
+                           important_sites);
 }
 
 TEST_F(ImportantSitesUtilTest, BlacklistingReset) {
@@ -306,46 +313,49 @@ TEST_F(ImportantSitesUtilTest, BlacklistingReset) {
   ASSERT_TRUE(service);
 
   GURL url1("http://www.google.com/");
+  GURL url2("http://www.gmail.com/");
 
   // Set a bunch of positive signals.
-  service->ResetScoreForURL(url1, 5);
-  AddBookmark(url1);
+  service->ResetBaseScoreForURL(url1, 5);
+  AddBookmark(url2);
   AddContentSetting(CONTENT_SETTINGS_TYPE_NOTIFICATIONS, CONTENT_SETTING_ALLOW,
                     url1);
 
+  // Important fetch 1.
   std::vector<ImportantDomainInfo> important_sites =
       ImportantSitesUtil::GetImportantRegisterableDomains(profile(),
                                                           kNumImportantSites);
-
-  // Record ignored twice.
-  ASSERT_EQ(1u, important_sites.size());
+  ASSERT_EQ(2u, important_sites.size());
+  // Record ignore twice.
   ImportantSitesUtil::RecordBlacklistedAndIgnoredImportantSites(
-      profile(), std::vector<std::string>(), std::vector<int32_t>(),
+      profile(), {"gmail.com"}, {important_sites[1].reason_bitfield},
       {"google.com"}, {important_sites[0].reason_bitfield});
   ImportantSitesUtil::RecordBlacklistedAndIgnoredImportantSites(
-      profile(), std::vector<std::string>(), std::vector<int32_t>(),
+      profile(), {"gmail.com"}, {important_sites[1].reason_bitfield},
       {"google.com"}, {important_sites[0].reason_bitfield});
 
   // Important fetch, we should still be there.
   important_sites = ImportantSitesUtil::GetImportantRegisterableDomains(
       profile(), kNumImportantSites);
-  std::vector<std::string> expected_sorted_domains = {"google.com"};
-  std::vector<GURL> expected_sorted_origins = {url1};
-  ASSERT_EQ(1u, important_sites.size());
+  std::vector<std::string> expected_sorted_domains = {"google.com",
+                                                      "gmail.com"};
+  std::vector<GURL> expected_sorted_origins = {url1, url2};
+  ASSERT_EQ(2u, important_sites.size());
   ExpectImportantResultsEq(expected_sorted_domains, expected_sorted_origins,
                            important_sites);
 
   // Record NOT ignored.
   ImportantSitesUtil::RecordBlacklistedAndIgnoredImportantSites(
-      profile(), {"google.com"}, {important_sites[0].reason_bitfield},
+      profile(), {"google.com", "gmail.com"},
+      {important_sites[0].reason_bitfield, important_sites[1].reason_bitfield},
       std::vector<std::string>(), std::vector<int32_t>());
 
-  // Record ignored twice again.
+  // Record ignored twice again
   ImportantSitesUtil::RecordBlacklistedAndIgnoredImportantSites(
-      profile(), std::vector<std::string>(), std::vector<int32_t>(),
+      profile(), {"gmail.com"}, {important_sites[1].reason_bitfield},
       {"google.com"}, {important_sites[0].reason_bitfield});
   ImportantSitesUtil::RecordBlacklistedAndIgnoredImportantSites(
-      profile(), std::vector<std::string>(), std::vector<int32_t>(),
+      profile(), {"gmail.com"}, {important_sites[1].reason_bitfield},
       {"google.com"}, {important_sites[0].reason_bitfield});
 
   // Important fetch, we should still be there.
@@ -356,13 +366,17 @@ TEST_F(ImportantSitesUtilTest, BlacklistingReset) {
 
   // Record ignored 3rd time in a row.
   ImportantSitesUtil::RecordBlacklistedAndIgnoredImportantSites(
-      profile(), std::vector<std::string>(), std::vector<int32_t>(),
+      profile(), {"gmail.com"}, {important_sites[1].reason_bitfield},
       {"google.com"}, {important_sites[0].reason_bitfield});
 
   // Blacklisted now.
   important_sites = ImportantSitesUtil::GetImportantRegisterableDomains(
       profile(), kNumImportantSites);
-  EXPECT_EQ(0u, important_sites.size());
+  ASSERT_EQ(1u, important_sites.size());
+  expected_sorted_domains = {"gmail.com"};
+  expected_sorted_origins = {url2};
+  ExpectImportantResultsEq(expected_sorted_domains, expected_sorted_origins,
+                           important_sites);
 }
 
 TEST_F(ImportantSitesUtilTest, Metrics) {
@@ -371,7 +385,7 @@ TEST_F(ImportantSitesUtilTest, Metrics) {
   base::HistogramTester histogram_tester;
 
   GURL url1("http://www.google.com/");
-  service->ResetScoreForURL(url1, 5);
+  service->ResetBaseScoreForURL(url1, 5);
   AddContentSetting(CONTENT_SETTINGS_TYPE_NOTIFICATIONS, CONTENT_SETTING_ALLOW,
                     url1);
 
@@ -406,4 +420,59 @@ TEST_F(ImportantSitesUtilTest, Metrics) {
               testing::ElementsAre(
                   base::Bucket(CROSSED_NOTIFICATIONS_AND_ENGAGEMENT, 1),
                   base::Bucket(CROSSED_REASON_UNKNOWN, 1)));
+}
+
+TEST_F(ImportantSitesUtilTest, DialogBlacklisting) {
+  SiteEngagementService* service = SiteEngagementService::Get(profile());
+  ASSERT_TRUE(service);
+
+  GURL url1("http://www.google.com/");
+  GURL url2("http://www.yahoo.com/");
+
+  // Set a bunch of positive signals.
+  service->ResetBaseScoreForURL(url2, 5);
+  AddBookmark(url1);
+  AddContentSetting(CONTENT_SETTINGS_TYPE_NOTIFICATIONS, CONTENT_SETTING_ALLOW,
+                    url1);
+
+  // Start off not disabled.
+  EXPECT_FALSE(ImportantSitesUtil::IsDialogDisabled(profile()));
+
+  // Important fetch 1.
+  std::vector<ImportantDomainInfo> important_sites =
+      ImportantSitesUtil::GetImportantRegisterableDomains(profile(),
+                                                          kNumImportantSites);
+  std::vector<std::string> expected_sorted_domains = {"google.com",
+                                                      "yahoo.com"};
+  std::vector<GURL> expected_sorted_origins = {url1, url2};
+  ExpectImportantResultsEq(expected_sorted_domains, expected_sorted_origins,
+                           important_sites);
+  ASSERT_EQ(2u, important_sites.size());
+  // Ignore all sites 2 times.
+  ImportantSitesUtil::RecordBlacklistedAndIgnoredImportantSites(
+      profile(), std::vector<std::string>(), std::vector<int32_t>(),
+      {"google.com", "yahoo.com"},
+      {important_sites[0].reason_bitfield, important_sites[1].reason_bitfield});
+  ImportantSitesUtil::RecordBlacklistedAndIgnoredImportantSites(
+      profile(), std::vector<std::string>(), std::vector<int32_t>(),
+      {"google.com", "yahoo.com"},
+      {important_sites[0].reason_bitfield, important_sites[1].reason_bitfield});
+
+  // Still not disabled...
+  EXPECT_FALSE(ImportantSitesUtil::IsDialogDisabled(profile()));
+
+  // Ignore 3rd time.
+  ImportantSitesUtil::RecordBlacklistedAndIgnoredImportantSites(
+      profile(), std::vector<std::string>(), std::vector<int32_t>(),
+      {"google.com", "yahoo.com"},
+      {important_sites[0].reason_bitfield, important_sites[1].reason_bitfield});
+
+  // Items should still be present.
+  important_sites = ImportantSitesUtil::GetImportantRegisterableDomains(
+      profile(), kNumImportantSites);
+  ExpectImportantResultsEq(expected_sorted_domains, expected_sorted_origins,
+                           important_sites);
+
+  // Dialog should be blacklisted.
+  EXPECT_TRUE(ImportantSitesUtil::IsDialogDisabled(profile()));
 }

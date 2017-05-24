@@ -231,11 +231,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'UNKNOWN',
     ],
 
-    # https://bugs.chromium.org/p/chromium/issues/detail?id=655755
-    'third_party/dpkg-dev': [
-        'GPL (v2 or later)',
-    ],
-
     'third_party/devscripts': [
         'GPL (v2 or later)',
     ],
@@ -650,15 +645,14 @@ EXCLUDED_PATHS = [
     'out/',
 
     # Don't check downloaded goma client binaries
-    'build/goma/client',
+    'build/goma/client/',
 
     # Don't check sysroot directories
-    'build/linux/debian_jessie_arm64-sysroot',
-    'build/linux/debian_wheezy_amd64-sysroot',
-    'build/linux/debian_wheezy_arm-sysroot',
-    'build/linux/debian_wheezy_i386-sysroot',
-    'build/linux/debian_wheezy_mips-sysroot',
-    'build/linux/ubuntu_precise_amd64-sysroot',
+    'build/linux/debian_jessie_arm64-sysroot/',
+    'build/linux/debian_jessie_amd64-sysroot/',
+    'build/linux/debian_jessie_arm-sysroot/',
+    'build/linux/debian_jessie_i386-sysroot/',
+    'build/linux/debian_jessie_mips-sysroot/',
 ]
 
 

@@ -81,8 +81,8 @@ SearchResultView::SearchResultView(SearchResultListView* list_view)
       badge_icon_(new views::ImageView),
       actions_view_(new SearchResultActionsView(this)),
       progress_bar_(new views::ProgressBar) {
-  icon_->set_interactive(false);
-  badge_icon_->set_interactive(false);
+  icon_->set_can_process_events_within_subtree(false);
+  badge_icon_->set_can_process_events_within_subtree(false);
 
   AddChildView(icon_);
   AddChildView(badge_icon_);
@@ -406,8 +406,8 @@ void SearchResultView::ShowContextMenuForView(views::View* source,
   if (!menu_model)
     return;
 
-  context_menu_runner_.reset(new views::MenuRunner(
-      menu_model, views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::ASYNC));
+  context_menu_runner_.reset(
+      new views::MenuRunner(menu_model, views::MenuRunner::HAS_MNEMONICS));
   context_menu_runner_->RunMenuAt(GetWidget(), NULL,
                                   gfx::Rect(point, gfx::Size()),
                                   views::MENU_ANCHOR_TOPLEFT, source_type);

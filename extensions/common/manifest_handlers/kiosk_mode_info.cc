@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "base/memory/ptr_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -118,7 +119,7 @@ bool KioskModeHandler::Parse(Extension* extension, base::string16* error) {
 
     for (const auto& value : *list) {
       std::unique_ptr<KioskSecondaryAppsType> app =
-          KioskSecondaryAppsType::FromValue(*value, error);
+          KioskSecondaryAppsType::FromValue(value, error);
       if (!app) {
         *error = base::ASCIIToUTF16(
             manifest_errors::kInvalidKioskSecondaryAppsBadAppId);
@@ -149,8 +150,8 @@ bool KioskModeHandler::Parse(Extension* extension, base::string16* error) {
 
   extension->SetManifestData(
       keys::kKioskMode,
-      new KioskModeInfo(kiosk_status, ids, required_platform_version,
-                        always_update));
+      base::MakeUnique<KioskModeInfo>(
+          kiosk_status, ids, required_platform_version, always_update));
 
   return true;
 }

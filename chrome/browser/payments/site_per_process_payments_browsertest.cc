@@ -32,8 +32,7 @@ class SitePerProcessPaymentsBrowserTest : public InProcessBrowserTest {
     // HTTPS server only serves a valid cert for localhost, so this is needed
     // to load pages from other hosts without an error.
     command_line->AppendSwitch(switches::kIgnoreCertificateErrors);
-    command_line->AppendSwitch(
-        switches::kEnableExperimentalWebPlatformFeatures);
+
     // Append --site-per-process flag.
     content::IsolateAllSitesForTesting(command_line);
   }

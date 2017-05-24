@@ -11,6 +11,7 @@
 #include "base/callback.h"
 #include "base/memory/shared_memory.h"
 #include "base/metrics/user_metrics_action.h"
+#include "base/single_thread_task_runner.h"
 #include "content/common/content_export.h"
 #include "content/public/child/child_thread.h"
 #include "ipc/ipc_channel_proxy.h"
@@ -111,6 +112,10 @@ class CONTENT_EXPORT RenderThread : virtual public ChildThread {
   virtual scoped_refptr<base::SingleThreadTaskRunner> GetTimerTaskRunner() = 0;
   virtual scoped_refptr<base::SingleThreadTaskRunner>
   GetLoadingTaskRunner() = 0;
+
+  // Tells the renderer that a field trial was activated.
+  virtual void SetFieldTrialGroup(const std::string& trial_name,
+                                  const std::string& group_name) = 0;
 };
 
 }  // namespace content

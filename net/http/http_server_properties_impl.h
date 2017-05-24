@@ -44,20 +44,19 @@ class NET_EXPORT HttpServerPropertiesImpl
   HttpServerPropertiesImpl();
   ~HttpServerPropertiesImpl() override;
 
-  // Initializes |spdy_servers_map_| with the servers (host/port) from
+  // Sets |spdy_servers_map_| with the servers (host/port) from
   // |spdy_servers| that either support SPDY or not.
-  void InitializeSpdyServers(std::vector<std::string>* spdy_servers,
-                             bool support_spdy);
+  void SetSpdyServers(std::vector<std::string>* spdy_servers,
+                      bool support_spdy);
 
-  void InitializeAlternativeServiceServers(
+  void SetAlternativeServiceServers(
       AlternativeServiceMap* alternate_protocol_servers);
 
-  void InitializeSupportsQuic(IPAddress* last_address);
+  void SetSupportsQuic(IPAddress* last_address);
 
-  void InitializeServerNetworkStats(
-      ServerNetworkStatsMap* server_network_stats_map);
+  void SetServerNetworkStats(ServerNetworkStatsMap* server_network_stats_map);
 
-  void InitializeQuicServerInfoMap(QuicServerInfoMap* quic_server_info_map);
+  void SetQuicServerInfoMap(QuicServerInfoMap* quic_server_info_map);
 
   // Get the list of servers (host/port) that support SPDY. The max_size is the
   // number of MRU servers that support SPDY that are to be returned.
@@ -110,6 +109,7 @@ class NET_EXPORT HttpServerPropertiesImpl
   void SetSupportsQuic(bool used_quic, const IPAddress& address) override;
   void SetServerNetworkStats(const url::SchemeHostPort& server,
                              ServerNetworkStats stats) override;
+  void ClearServerNetworkStats(const url::SchemeHostPort& server) override;
   const ServerNetworkStats* GetServerNetworkStats(
       const url::SchemeHostPort& server) override;
   const ServerNetworkStatsMap& server_network_stats_map() const override;
@@ -120,6 +120,7 @@ class NET_EXPORT HttpServerPropertiesImpl
   size_t max_server_configs_stored_in_properties() const override;
   void SetMaxServerConfigsStoredInProperties(
       size_t max_server_configs_stored_in_properties) override;
+  bool IsInitialized() const override;
 
  private:
   friend class HttpServerPropertiesImplPeer;
@@ -138,8 +139,6 @@ class NET_EXPORT HttpServerPropertiesImpl
                           base::TimeTicks,
                           AlternativeServiceHash>
       BrokenAlternativeServices;
-  // Map to the number of times each alternative service has been marked broken.
-  typedef std::map<AlternativeService, int> RecentlyBrokenAlternativeServices;
 
   // Return the iterator for |server|, or for its canonical host, or end.
   AlternativeServiceMap::const_iterator GetAlternateProtocolIterator(

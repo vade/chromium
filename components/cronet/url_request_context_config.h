@@ -16,6 +16,7 @@
 #include "net/cert/cert_verifier.h"
 
 namespace base {
+class DictionaryValue;
 class SequencedTaskRunner;
 }  // namespace base
 
@@ -86,6 +87,8 @@ struct URLRequestContextConfig {
       bool enable_spdy,
       // Enable SDCH.
       bool enable_sdch,
+      // Enable Brotli.
+      bool enable_brotli,
       // Type of http cache.
       HttpCacheType http_cache,
       // Max size of http cache in bytes.
@@ -99,14 +102,6 @@ struct URLRequestContextConfig {
       const std::string& user_agent,
       // JSON encoded experimental options.
       const std::string& experimental_options,
-      // Data reduction proxy key.
-      const std::string& data_reduction_proxy_key,
-      // Data reduction proxy.
-      const std::string& data_reduction_primary_proxy,
-      // Fallback data reduction proxy.
-      const std::string& data_reduction_fallback_proxy,
-      // Data reduction proxy secure proxy check URL.
-      const std::string& data_reduction_secure_proxy_check_url,
       // MockCertVerifier to use for testing purposes.
       std::unique_ptr<net::CertVerifier> mock_cert_verifier,
       // Enable network quality estimator.
@@ -117,7 +112,7 @@ struct URLRequestContextConfig {
       const std::string& cert_verifier_data);
   ~URLRequestContextConfig();
 
-  // Configure |context_builder| based on |this|.
+  // Configures |context_builder| based on |this|.
   void ConfigureURLRequestContextBuilder(
       net::URLRequestContextBuilder* context_builder,
       net::NetLog* net_log,
@@ -131,6 +126,8 @@ struct URLRequestContextConfig {
   const bool enable_spdy;
   // Enable SDCH.
   const bool enable_sdch;
+  // Enable Brotli.
+  const bool enable_brotli;
   // Type of http cache.
   const HttpCacheType http_cache;
   // Max size of http cache in bytes.
@@ -149,11 +146,6 @@ struct URLRequestContextConfig {
   //   {"experiment1": {"option1": "option_value1", "option2": "option_value2",
   //    ...}, "experiment2: {"option3", "option_value3", ...}, ...}
   const std::string experimental_options;
-  // Enable Data Reduction Proxy with authentication key.
-  const std::string data_reduction_proxy_key;
-  const std::string data_reduction_primary_proxy;
-  const std::string data_reduction_fallback_proxy;
-  const std::string data_reduction_secure_proxy_check_url;
 
   // Certificate verifier for testing.
   std::unique_ptr<net::CertVerifier> mock_cert_verifier;
@@ -172,6 +164,9 @@ struct URLRequestContextConfig {
 
   // The list of public key pins.
   ScopedVector<Pkp> pkp_list;
+
+  // Experimental options that are recognized by the config parser.
+  std::unique_ptr<base::DictionaryValue> effective_experimental_options;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(URLRequestContextConfig);
@@ -197,6 +192,8 @@ struct URLRequestContextConfigBuilder {
   bool enable_spdy = true;
   // Enable SDCH.
   bool enable_sdch = false;
+  // Enable Brotli.
+  bool enable_brotli = false;
   // Type of http cache.
   URLRequestContextConfig::HttpCacheType http_cache =
       URLRequestContextConfig::DISABLED;
@@ -216,11 +213,6 @@ struct URLRequestContextConfigBuilder {
   //   {"experiment1": {"option1": "option_value1", "option2": "option_value2",
   //    ...}, "experiment2: {"option3", "option_value3", ...}, ...}
   std::string experimental_options = "{}";
-  // Enable Data Reduction Proxy with authentication key.
-  std::string data_reduction_proxy_key = "";
-  std::string data_reduction_primary_proxy = "";
-  std::string data_reduction_fallback_proxy = "";
-  std::string data_reduction_secure_proxy_check_url = "";
 
   // Certificate verifier for testing.
   std::unique_ptr<net::CertVerifier> mock_cert_verifier = nullptr;

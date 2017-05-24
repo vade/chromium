@@ -26,20 +26,20 @@
 
 #include "core/xml/XSLTExtensions.h"
 
-#include "platform/RuntimeEnabledFeatures.h"
-#include "wtf/Assertions.h"
 #include <libxml/xpathInternals.h>
 #include <libxslt/extensions.h>
 #include <libxslt/extra.h>
 #include <libxslt/xsltutils.h>
+#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/wtf/Assertions.h"
 
 namespace blink {
 
 // FIXME: This code is taken from libexslt 1.1.11; should sync with newer
 // versions.
-static void exsltNodeSetFunction(xmlXPathParserContextPtr ctxt, int nargs) {
+static void ExsltNodeSetFunction(xmlXPathParserContextPtr ctxt, int nargs) {
   xmlChar* strval;
-  xmlNodePtr retNode;
+  xmlNodePtr ret_node;
   xmlXPathObjectPtr ret;
 
   if (nargs != 1) {
@@ -52,14 +52,21 @@ static void exsltNodeSetFunction(xmlXPathParserContextPtr ctxt, int nargs) {
     return;
   }
 
-  strval = xmlXPathPopString(ctxt);
-  retNode = xmlNewDocText(0, strval);
-  ret = xmlXPathNewValueTree(retNode);
+  // node-set can also take a string and turn it into a singleton node
+  // set with one text node. This may null-deref if allocating the
+  // document, text node, etc. fails; that behavior is expected.
 
-  // FIXME: It might be helpful to push any errors from xmlXPathNewValueTree
-  // up to the Javascript Console.
-  if (ret)
-    ret->type = XPATH_NODESET;
+  // Create a document to hold the text node result.
+  xsltTransformContextPtr tctxt = xsltXPathGetTransformContext(ctxt);
+  xmlDocPtr fragment = xsltCreateRVT(tctxt);
+  xsltRegisterLocalRVT(tctxt, fragment);
+
+  // Create the text node and wrap it in a result set.
+  strval = xmlXPathPopString(ctxt);
+  ret_node = xmlNewDocText(fragment, strval);
+  xmlAddChild(reinterpret_cast<xmlNodePtr>(fragment), ret_node);
+  ret = xmlXPathNewNodeSet(ret_node);
+  CHECK(ret);
 
   if (strval)
     xmlFree(strval);
@@ -67,11 +74,11 @@ static void exsltNodeSetFunction(xmlXPathParserContextPtr ctxt, int nargs) {
   valuePush(ctxt, ret);
 }
 
-void registerXSLTExtensions(xsltTransformContextPtr ctxt) {
+void RegisterXSLTExtensions(xsltTransformContextPtr ctxt) {
   DCHECK(RuntimeEnabledFeatures::xsltEnabled());
   xsltRegisterExtFunction(ctxt, (const xmlChar*)"node-set",
                           (const xmlChar*)"http://exslt.org/common",
-                          exsltNodeSetFunction);
+                          ExsltNodeSetFunction);
 }
 
 }  // namespace blink

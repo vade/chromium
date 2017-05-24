@@ -86,7 +86,7 @@ class ContentTranslateDriver : public TranslateDriver,
                      const std::string& source_lang,
                      const std::string& target_lang) override;
   void RevertTranslation(int page_seq_no) override;
-  bool IsOffTheRecord() override;
+  bool IsIncognito() override;
   const std::string& GetContentsMimeType() override;
   const GURL& GetLastCommittedURL() override;
   const GURL& GetVisibleURL() override;
@@ -96,9 +96,8 @@ class ContentTranslateDriver : public TranslateDriver,
   // content::WebContentsObserver implementation.
   void NavigationEntryCommitted(
       const content::LoadCommittedDetails& load_details) override;
-  void DidNavigateAnyFrame(content::RenderFrameHost* render_frame_host,
-                           const content::LoadCommittedDetails& details,
-                           const content::FrameNavigateParams& params) override;
+  void DidFinishNavigation(
+      content::NavigationHandle* navigation_handle) override;
 
   void OnPageTranslated(bool cancelled,
                         const std::string& original_lang,

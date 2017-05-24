@@ -14,7 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/sequenced_task_runner.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
@@ -185,11 +185,9 @@ UserPolicyManagerFactoryChromeOS::CreateManagerForProfile(
       is_active_directory = false;
       break;
     case AccountType::ACTIVE_DIRECTORY:
-      // Ensure install attributes are locked into Active Directory mode before
-      // allowing Active Directory policy which is not signed.
-      if (!connector->GetInstallAttributes()->IsActiveDirectoryManaged()) {
-        return {};
-      }
+      // Active Directory users only exist on devices whose install attributes
+      // are locked into Active Directory mode.
+      CHECK(connector->GetInstallAttributes()->IsActiveDirectoryManaged());
       is_active_directory = true;
       break;
   }
@@ -199,17 +197,14 @@ UserPolicyManagerFactoryChromeOS::CreateManagerForProfile(
   const user_manager::UserManager* const user_manager =
       user_manager::UserManager::Get();
 
-  // We want to block for policy in a few situations: if the user is new, or if
-  // we are forcing an online signin. An online signin will be forced if there
-  // has been a credential error, or if the initial session creation was not
-  // completed (the oauth_token_status is not set to valid by OAuth2LoginManager
-  // until profile creation/session restore is complete).
+  // We want to block for policy if the session has never been initialized
+  // (generally true if the user is new, or if there was a crash before the
+  // profile finished initializing). There is code in UserSelectionScreen to
+  // force an online signin for uninitialized sessions to help ensure we are
+  // able to load policy.
   const bool block_forever_for_policy =
       !user_manager->IsLoggedInAsStub() &&
-      (user_manager->IsCurrentUserNew() ||
-       user_manager->GetActiveUser()->force_online_signin() ||
-       user_manager->GetActiveUser()->oauth_token_status() !=
-           user_manager::User::OAUTH2_TOKEN_STATUS_VALID);
+      !user_manager->GetActiveUser()->profile_ever_initialized();
 
   const bool wait_for_policy_fetch =
       block_forever_for_policy || !is_browser_restart;
@@ -243,8 +238,9 @@ UserPolicyManagerFactoryChromeOS::CreateManagerForProfile(
           is_active_directory);
 
   scoped_refptr<base::SequencedTaskRunner> backend_task_runner =
-      content::BrowserThread::GetBlockingPool()->GetSequencedTaskRunner(
-          content::BrowserThread::GetBlockingPool()->GetSequenceToken());
+      base::CreateSequencedTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+           base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
   scoped_refptr<base::SequencedTaskRunner> io_task_runner =
       content::BrowserThread::GetTaskRunnerForThread(
           content::BrowserThread::IO);

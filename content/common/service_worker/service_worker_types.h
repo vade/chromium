@@ -98,17 +98,18 @@ enum class FetchRedirectMode {
   LAST = MANUAL_MODE
 };
 
-// Indicates which types of ServiceWorkers should skip handling a request.
-enum class SkipServiceWorker {
-  // Request can be handled both by a controlling same-origin worker and
-  // a cross-origin foreign fetch service worker.
-  NONE,
-  // Request should not be handled by a same-origin controlling worker,
-  // but can be intercepted by a foreign fetch service worker.
-  CONTROLLING,
-  // Request should skip all possible service workers.
+// Indicates which service workers will receive fetch events for this request.
+enum class ServiceWorkerMode {
+  // Relevant local and foreign service workers will get a fetch or
+  // foreignfetch event for this request.
   ALL,
-  LAST = ALL
+  // Only relevant foreign service workers will get a foreignfetch event for
+  // this request.
+  FOREIGN,
+  // Neither local nor foreign service workers will get events for this
+  // request.
+  NONE,
+  LAST = NONE
 };
 
 // Indicates how the service worker handled a fetch event.
@@ -178,7 +179,6 @@ struct CONTENT_EXPORT ServiceWorkerResponse {
       std::unique_ptr<ServiceWorkerHeaderMap> headers,
       const std::string& blob_uuid,
       uint64_t blob_size,
-      const GURL& stream_url,
       blink::WebServiceWorkerResponseError error,
       base::Time response_time,
       bool is_in_cache_storage,
@@ -194,9 +194,11 @@ struct CONTENT_EXPORT ServiceWorkerResponse {
   std::string status_text;
   blink::WebServiceWorkerResponseType response_type;
   ServiceWorkerHeaderMap headers;
+  // |blob_uuid| and |blob_size| are set when the body is a blob. For other
+  // types of responses, the body is provided separately in Mojo IPC via
+  // ServiceWorkerFetchResponseCallback.
   std::string blob_uuid;
   uint64_t blob_size;
-  GURL stream_url;
   blink::WebServiceWorkerResponseError error;
   base::Time response_time;
   bool is_in_cache_storage = false;

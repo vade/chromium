@@ -5,7 +5,6 @@
  */
 
 /* global PaymentRequest:false */
-/* global toDictionary:false */
 
 var request;
 
@@ -38,12 +37,7 @@ function ccBuy() {  // eslint-disable-line no-unused-vars
         .then(function(resp) {
           return resp.complete('success')
         }).then(function() {
-          print(
-              resp.shippingOption + '<br>' +
-              JSON.stringify(
-                  toDictionary(resp.shippingAddress), undefined, 2) +
-                  '<br>' + resp.methodName + '<br>' +
-                  JSON.stringify(resp.details, undefined, 2));
+          print(JSON.stringify(resp, undefined, 2));
         }).catch(function(error) {
           print(error);
         });
@@ -78,12 +72,30 @@ function androidPayBuy() {  // eslint-disable-line no-unused-vars
         .then(function(resp) {
           return resp.complete('success');
         }).then(function() {
-          print(
-              resp.shippingOption + '<br>' +
-              JSON.stringify(
-                  toDictionary(resp.shippingAddress), undefined, 2) +
-              '<br>' + resp.methodName + '<br>' +
-              JSON.stringify(resp.details, undefined, 2));
+          print(JSON.stringify(resp, undefined, 2));
+        }).catch(function(error) {
+          print(error);
+        });
+  } catch (error) {
+    print(error.message);
+  }
+}
+
+/**
+ * Launches the PaymentRequest UI which accepts only Android Pay and does not
+ * require any other information.
+ */
+function androidPaySkipUiBuy() {  // eslint-disable-line no-unused-vars
+  try {
+    request = new PaymentRequest(
+        [{supportedMethods: ['https://android.com/pay']}], {
+          total: {label: 'Total', amount: {currency: 'USD', value: '5.00'}},
+        });
+    request.show()
+        .then(function(resp) {
+          return resp.complete('success');
+        }).then(function() {
+          print(JSON.stringify(resp, undefined, 2));
         }).catch(function(error) {
           print(error);
         });
@@ -113,12 +125,7 @@ function noSupported() {  // eslint-disable-line no-unused-vars
         .then(function(resp) {
           return resp.complete('success');
         }).then(function() {
-          print(
-              resp.shippingOption + '<br>' +
-              JSON.stringify(
-                  toDictionary(resp.shippingAddress), undefined, 2) +
-              '<br>' + resp.methodName + '<br>' +
-              JSON.stringify(resp.details, undefined, 2));
+          print(JSON.stringify(resp, undefined, 2));
         }).catch(function(error) {
           print(error);
         });

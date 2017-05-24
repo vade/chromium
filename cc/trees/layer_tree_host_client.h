@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "base/memory/ref_counted.h"
+#include "base/time/time.h"
 
 namespace gfx {
 class Vector2dF;
@@ -24,6 +25,7 @@ class LayerTreeHostClient {
   // mode, this corresponds to DidCommit().
   virtual void BeginMainFrame(const BeginFrameArgs& args) = 0;
   virtual void BeginMainFrameNotExpectedSoon() = 0;
+  virtual void BeginMainFrameNotExpectedUntil(base::TimeTicks time) = 0;
   virtual void DidBeginMainFrame() = 0;
   // A LayerTreeHost is bound to a LayerTreeHostClient. Visual frame-based
   // updates to the state of the LayerTreeHost are expected to happen only in
@@ -43,6 +45,9 @@ class LayerTreeHostClient {
       const gfx::Vector2dF& elastic_overscroll_delta,
       float page_scale,
       float top_controls_delta) = 0;
+  virtual void RecordWheelAndTouchScrollingCount(
+      bool has_scrolled_by_wheel,
+      bool has_scrolled_by_touch) = 0;
   // Request an CompositorFrameSink from the client. When the client has one it
   // should call LayerTreeHost::SetCompositorFrameSink.  This will result in
   // either DidFailToInitializeCompositorFrameSink or
@@ -55,6 +60,10 @@ class LayerTreeHostClient {
   virtual void DidCommitAndDrawFrame() = 0;
   virtual void DidReceiveCompositorFrameAck() = 0;
   virtual void DidCompletePageScaleAnimation() = 0;
+  // The only time a subframe ever gets its own LayerTree is when the subframe
+  // renders in a different process its ancestors; this returns true in
+  // that case.
+  virtual bool IsForSubframe() = 0;
 
  protected:
   virtual ~LayerTreeHostClient() {}

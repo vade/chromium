@@ -7,29 +7,19 @@
       "drawsContent": true,
       "paintInvalidations": [
         {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [10, 102, 285, 400],
-          "reason": "forced by layout"
-        },
-        {
           "object": "LayoutBlockFlow DIV id='to-be-changed'",
-          "rect": [18, 128, 269, 36],
+          "rect": [18, 130, 269, 40],
           "reason": "full"
         },
         {
           "object": "LayoutText #text",
-          "rect": [18, 128, 257, 35],
-          "reason": "layoutObject removal"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [18, 128, 84, 17],
-          "reason": "layoutObject insertion"
+          "rect": [18, 130, 235, 39],
+          "reason": "disappeared"
         },
         {
           "object": "LayoutView #document",
           "rect": [295, 102, 15, 400],
-          "reason": "scroll"
+          "reason": "scroll control"
         }
       ]
     }
@@ -37,15 +27,11 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutText #text",
-      "reason": "layoutObject removal"
+      "reason": "disappeared"
     },
     {
       "object": "VerticalScrollbar",
-      "reason": "scroll"
-    },
-    {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
+      "reason": "scroll control"
     },
     {
       "object": "LayoutBlockFlow DIV id='to-be-changed'",
@@ -57,11 +43,11 @@
     },
     {
       "object": "LayoutText #text",
-      "reason": "layoutObject insertion"
+      "reason": "appeared"
     },
     {
       "object": "InlineTextBox 'After change'",
-      "reason": "layoutObject insertion"
+      "reason": "appeared"
     }
   ]
 }

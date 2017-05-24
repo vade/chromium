@@ -9,10 +9,10 @@
 #include <string>
 #include <unordered_map>
 
-#include "base/lazy_instance.h"
 #include "base/macros.h"
-#include "base/threading/thread_collision_warner.h"
+#include "base/sequence_checker.h"
 #include "components/sync/model/model_type_store.h"
+#include "third_party/leveldatabase/src/include/leveldb/status.h"
 
 namespace leveldb {
 class DB;
@@ -22,14 +22,38 @@ class WriteBatch;
 
 namespace syncer {
 
+// Different reasons for ModelTypeStoreBackend initialization failure are mapped
+// to these values. The enum is used for recording UMA histogram. Don't reorder,
+// change or delete values.
+enum StoreInitResultForHistogram {
+  STORE_INIT_RESULT_SUCCESS = 0,
+
+  // Following values reflect leveldb initialization errors.
+  STORE_INIT_RESULT_NOT_FOUND,
+  STORE_INIT_RESULT_CORRUPTION,
+  STORE_INIT_RESULT_NOT_SUPPORTED,
+  STORE_INIT_RESULT_INVALID_ARGUMENT,
+  STORE_INIT_RESULT_IO_ERROR,
+
+  // Issues encountered when reading or parsing schema descriptor.
+  STORE_INIT_RESULT_SCHEMA_DESCRIPTOR_ISSUE,
+
+  // Database schema migration failed.
+  STORE_INIT_RESULT_MIGRATION,
+
+  STORE_INIT_RESULT_UNKNOWN,
+
+  // Database was reset after attempt to open failed with corruption.
+  STORE_INIT_RESULT_RECOVERED_AFTER_CORRUPTION,
+  STORE_INIT_RESULT_COUNT
+};
+
 // ModelTypeStoreBackend handles operations with leveldb. It is oblivious of the
 // fact that it is called from separate thread (with the exception of ctor),
 // meaning it shouldn't deal with callbacks and task_runners.
 class ModelTypeStoreBackend
     : public base::RefCountedThreadSafe<ModelTypeStoreBackend> {
  public:
-  typedef std::unordered_map<std::string, ModelTypeStoreBackend*> BackendMap;
-
   // Helper function to create in memory environment for leveldb.
   static std::unique_ptr<leveldb::Env> CreateInMemoryEnv();
 
@@ -69,28 +93,10 @@ class ModelTypeStoreBackend
 
   static const int64_t kLatestSchemaVersion;
   static const char kDBSchemaDescriptorRecordId[];
+  static const char kStoreInitResultHistogramName[];
 
   explicit ModelTypeStoreBackend(const std::string& path);
   ~ModelTypeStoreBackend();
-
-  // In some scenarios ModelTypeStoreBackend holds ownership of env. Typical
-  // example is when test creates in memory environment with CreateInMemoryEnv
-  // and wants it to be destroyed along with backend. This is achieved by
-  // passing ownership of env to TakeEnvOwnership function.
-  //
-  // env_ declaration should appear before declaration of db_ because
-  // environment object should still be valid when db_'s destructor is called.
-  std::unique_ptr<leveldb::Env> env_;
-
-  std::unique_ptr<leveldb::DB> db_;
-
-  std::string path_;
-
-  // backend_map_ holds raw pointer of backend, and when stores ask for backend,
-  // GetOrCreateBackend will return scoped_refptr of backend. backend_map_
-  // doesn't take reference to backend, therefore doesn't block backend
-  // destruction.
-  static base::LazyInstance<BackendMap> backend_map_;
 
   // Init opens database at |path|. If database doesn't exist it creates one.
   // Normally |env| should be nullptr, this causes leveldb to use default disk
@@ -99,6 +105,14 @@ class ModelTypeStoreBackend
   // with in-memory or faulty environment.
   ModelTypeStore::Result Init(const std::string& path,
                               std::unique_ptr<leveldb::Env> env);
+
+  // Opens leveldb database passing correct options. On success sets |db_| and
+  // returns ok status. On failure |db_| is nullptr and returned status reflects
+  // failure type.
+  leveldb::Status OpenDatabase(const std::string& path, leveldb::Env* env);
+
+  // Destroys leveldb database. Used for recovering after database corruption.
+  leveldb::Status DestroyDatabase(const std::string& path, leveldb::Env* env);
 
   // Attempts to read and return the database's version.
   // If there is not a schema descriptor present, the value returned is 0.
@@ -114,8 +128,29 @@ class ModelTypeStoreBackend
   // the schema, returning true on success.
   bool Migrate0To1();
 
-  // Macro wrapped mutex to guard against concurrent calls in debug builds.
-  DFAKE_MUTEX(push_pop_);
+  static void RecordStoreInitResultHistogram(
+      StoreInitResultForHistogram result);
+
+  // Helper function for unittests to check if backend already exists for a
+  // given path.
+  static bool BackendExistsForTest(const std::string& path);
+
+  // In some scenarios ModelTypeStoreBackend holds ownership of env. Typical
+  // example is when test creates in memory environment with CreateInMemoryEnv
+  // and wants it to be destroyed along with backend. This is achieved by
+  // passing ownership of env to TakeEnvOwnership function.
+  //
+  // env_ declaration should appear before declaration of db_ because
+  // environment object should still be valid when db_'s destructor is called.
+  std::unique_ptr<leveldb::Env> env_;
+
+  std::unique_ptr<leveldb::DB> db_;
+
+  std::string path_;
+
+  // Ensures that operations with backend are performed seqentially, not
+  // concurrently.
+  base::SequenceChecker sequence_checker_;
 
   DISALLOW_COPY_AND_ASSIGN(ModelTypeStoreBackend);
 };

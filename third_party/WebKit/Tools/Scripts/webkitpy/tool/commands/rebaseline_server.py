@@ -47,14 +47,14 @@ class TestConfig(object):
         self.platforms = platforms
         self.host = host
         self.filesystem = host.filesystem
-        self.scm = host.scm()
+        self.git = host.git()
 
 
 class RebaselineServer(AbstractLocalServerCommand):
-    name = "rebaseline-server"
+    name = 'rebaseline-server'
     help_text = __doc__
     show_in_main_help = True
-    argument_names = "/path/to/results/directory"
+    argument_names = '/path/to/results/directory'
 
     server = RebaselineHTTPServer
 
@@ -82,7 +82,6 @@ class RebaselineServer(AbstractLocalServerCommand):
     def _prepare_config(self, options, args, tool):
         results_directory = args[0]
         host = Host()
-        host.initialize_scm()
 
         print 'Parsing full_results.json...'
         results_json_path = host.filesystem.join(results_directory, 'full_results.json')
@@ -98,8 +97,8 @@ class RebaselineServer(AbstractLocalServerCommand):
 
         return {
             'test_config': self._test_config,
-            "results_json": results_json,
-            "platforms_json": {
+            'results_json': results_json,
+            'platforms_json': {
                 'platforms': platforms,
                 'defaultPlatform': port.name(),
             },

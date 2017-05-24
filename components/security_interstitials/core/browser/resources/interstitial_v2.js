@@ -102,8 +102,7 @@ function setupEvents() {
   var ssl = interstitialType == 'SSL';
   var captivePortal = interstitialType == 'CAPTIVE_PORTAL';
   var badClock = ssl && loadTimeData.getBoolean('bad_clock');
-  var hidePrimaryButton = badClock && loadTimeData.getBoolean(
-      'hide_primary_button');
+  var hidePrimaryButton = loadTimeData.getBoolean('hide_primary_button');
 
   if (ssl) {
     $('body').classList.add(badClock ? 'bad-clock' : 'ssl');
@@ -115,10 +114,7 @@ function setupEvents() {
     $('body').classList.add('safe-browsing');
   }
 
-  if (loadTimeData.getBoolean('iconUpdate') === true)
-    $('icon').classList.add('new-icons');
-  else
-    $('icon').classList.add('old-icons');
+  $('icon').classList.add('icon');
 
   if (hidePrimaryButton) {
     $('primary-button').classList.add('hidden');

@@ -240,6 +240,7 @@ component("seccomp_bpf") {
 
   public_deps = [
     ":sandbox_services_headers",
+    "//sandbox:sandbox_export",
   ]
   deps = [
     ":sandbox_services",
@@ -339,7 +340,9 @@ component("sandbox_services") {
 
   defines = [ "SANDBOX_IMPLEMENTATION" ]
 
-  public_deps = []
+  public_deps = [
+    "//sandbox:sandbox_export",
+  ]
   deps = [
     "//base",
   ]
@@ -391,14 +394,19 @@ source_set("sandbox_services_headers") {
     "system_headers/arm_linux_syscalls.h",
     "system_headers/arm_linux_ucontext.h",
     "system_headers/i386_linux_ucontext.h",
+    "system_headers/linux_filter.h",
     "system_headers/linux_futex.h",
     "system_headers/linux_seccomp.h",
     "system_headers/linux_signal.h",
     "system_headers/linux_syscalls.h",
     "system_headers/linux_time.h",
     "system_headers/linux_ucontext.h",
+    "system_headers/mips64_linux_syscalls.h",
+    "system_headers/mips_linux_syscalls.h",
+    "system_headers/mips_linux_ucontext.h",
     "system_headers/x86_32_linux_syscalls.h",
     "system_headers/x86_64_linux_syscalls.h",
+    "system_headers/x86_64_linux_ucontext.h",
   ]
 }
 
@@ -413,7 +421,9 @@ if (compile_suid_client || is_nacl_nonsfi) {
       "suid/common/suid_unsafe_environment_variables.h",
     ]
     defines = [ "SANDBOX_IMPLEMENTATION" ]
-
+    public_deps = [
+      "//sandbox:sandbox_export",
+    ]
     deps = [
       ":sandbox_services",
       "//base",
@@ -427,15 +437,5 @@ if (compile_suid_client || is_nacl_nonsfi) {
         "suid/common/suid_unsafe_environment_variables.h",
       ]
     }
-  }
-}
-
-if (is_android) {
-  # TODO(GYP_GONE) Delete this after we've converted everything to GN.
-  group("sandbox_linux_unittests_deps") {
-    testonly = true
-    deps = [
-      ":sandbox_linux_unittests",
-    ]
   }
 }

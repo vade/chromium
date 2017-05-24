@@ -95,7 +95,7 @@ void MP4StreamParser::Init(
     const EncryptedMediaInitDataCB& encrypted_media_init_data_cb,
     const NewMediaSegmentCB& new_segment_cb,
     const EndMediaSegmentCB& end_of_segment_cb,
-    const scoped_refptr<MediaLog>& media_log) {
+    MediaLog* media_log) {
   DCHECK_EQ(state_, kWaitingForInit);
   DCHECK(init_cb_.is_null());
   DCHECK(!init_cb.is_null());
@@ -644,7 +644,8 @@ bool MP4StreamParser::EnqueueSample(BufferQueueMap* buffers, bool* err) {
   std::vector<uint8_t> frame_buf(buf, buf + runs_->sample_size());
   if (video) {
     if (runs_->video_description().video_codec == kCodecH264 ||
-        runs_->video_description().video_codec == kCodecHEVC) {
+        runs_->video_description().video_codec == kCodecHEVC ||
+        runs_->video_description().video_codec == kCodecDolbyVision) {
       DCHECK(runs_->video_description().frame_bitstream_converter);
       if (!runs_->video_description().frame_bitstream_converter->ConvertFrame(
               &frame_buf, runs_->is_keyframe(), &subsamples)) {

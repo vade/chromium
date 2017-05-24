@@ -34,7 +34,8 @@ class CONTENT_EXPORT NavigationThrottle {
     CANCEL_AND_IGNORE,
 
     // Blocks a navigation due to rules asserted before the request is made.
-    // This can only be returned from WillStartRequest. This will result in an
+    // This can only be returned from WillStartRequest and also from
+    // WillRedirectRequest when PlzNavigate is enabled. This will result in an
     // error page for net::ERR_BLOCKED_BY_CLIENT being loaded in the frame that
     // is navigated.
     BLOCK_REQUEST,
@@ -75,6 +76,10 @@ class CONTENT_EXPORT NavigationThrottle {
   // CANCEL_AND_IGNORE, or BLOCK_RESPONSE and perform the destruction
   // asynchronously.
   virtual ThrottleCheckResult WillProcessResponse();
+
+  // Returns the name of the throttle for logging purposes. It must not return
+  // nullptr.
+  virtual const char* GetNameForLogging() = 0;
 
   // The NavigationHandle that is tracking the information related to this
   // navigation.

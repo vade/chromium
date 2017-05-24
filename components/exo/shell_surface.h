@@ -5,11 +5,12 @@
 #ifndef COMPONENTS_EXO_SHELL_SURFACE_H_
 #define COMPONENTS_EXO_SHELL_SURFACE_H_
 
+#include <cstdint>
 #include <deque>
 #include <memory>
 #include <string>
 
-#include "ash/common/wm/window_state_observer.h"
+#include "ash/wm/window_state_observer.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
 #include "components/exo/surface_delegate.h"
@@ -24,6 +25,9 @@
 
 namespace ash {
 class WindowResizer;
+namespace mojom {
+enum class WindowPinType;
+}
 }
 
 namespace base {
@@ -45,11 +49,23 @@ class ShellSurface : public SurfaceDelegate,
                      public ash::wm::WindowStateObserver,
                      public aura::WindowObserver,
                      public WMHelper::ActivationObserver,
-                     public WMHelper::AccessibilityObserver {
+                     public WMHelper::DisplayConfigurationObserver {
  public:
+  enum class BoundsMode { SHELL, CLIENT, FIXED };
+
+  // The |origin| is in screen coordinates. When bounds are controlled by the
+  // shell or fixed, it determines the initial position of the shell surface.
+  // In that case, the position specified as part of the geometry is relative
+  // to the shell surface.
+  //
+  // When bounds are controlled by the client, it represents the origin of a
+  // coordinate system to which the position of the shell surface, specified
+  // as part of the geometry, is relative. The client must acknowledge changes
+  // to the origin, and offset the geometry accordingly.
   ShellSurface(Surface* surface,
                ShellSurface* parent,
-               const gfx::Rect& initial_bounds,
+               BoundsMode bounds_mode,
+               const gfx::Point& origin,
                bool activatable,
                bool can_minimize,
                int container);
@@ -85,7 +101,8 @@ class ShellSurface : public SurfaceDelegate,
       base::Callback<uint32_t(const gfx::Size& size,
                               ash::wm::WindowStateType state_type,
                               bool resizing,
-                              bool activated)>;
+                              bool activated,
+                              const gfx::Vector2d& origin_offset)>;
   void set_configure_callback(const ConfigureCallback& configure_callback) {
     configure_callback_ = configure_callback;
   }
@@ -114,8 +131,14 @@ class ShellSurface : public SurfaceDelegate,
   // Set fullscreen state for shell surface.
   void SetFullscreen(bool fullscreen);
 
-  // Pins the shell surface. |trusted| flag is ignored when |pinned| is false.
-  void SetPinned(bool pinned, bool trusted);
+  // Pins the shell surface.
+  void SetPinned(ash::mojom::WindowPinType type);
+
+  // Sets whether or not the shell surface should autohide the system UI.
+  void SetSystemUiVisibility(bool autohide);
+
+  // Set whether the surface is always on top.
+  void SetAlwaysOnTop(bool always_on_top);
 
   // Set title for surface.
   void SetTitle(const base::string16& title);
@@ -147,12 +170,18 @@ class ShellSurface : public SurfaceDelegate,
   // for the surface from the user's perspective.
   void SetGeometry(const gfx::Rect& geometry);
 
-  // Enable/disable rectangular shadow.
-  void SetRectangularShadow(bool enabled);
+  // Enable/disable rectangular shadow that uses the widget bounds as a content
+  // bounds.
+  void SetRectangularShadowEnabled(bool enabled);
 
-  // Set the content bounds for the shadow. Shell surface geometry will be
+  // [Deprecated] Set the content bounds for the shadow. Shell surface geometry
+  // will be
   // used if bounds are empty.
-  void SetRectangularShadowContentBounds(const gfx::Rect& content_bounds);
+  void SetRectangularShadow_DEPRECATED(const gfx::Rect& content_bounds);
+
+  // Set the content bounds for the shadow in the surface's coordinates.
+  // Setting empty bounds will disable the shadow.
+  void SetRectangularSurfaceShadow(const gfx::Rect& content_bounds);
 
   // Set the pacity of the background for the window that has a shadow.
   void SetRectangularShadowBackgroundOpacity(float opacity);
@@ -198,6 +227,11 @@ class ShellSurface : public SurfaceDelegate,
   bool CanMaximize() const override;
   bool CanMinimize() const override;
   base::string16 GetWindowTitle() const override;
+  void SaveWindowPlacement(const gfx::Rect& bounds,
+                           ui::WindowShowState show_state) override;
+  bool GetSavedWindowPlacement(const views::Widget* widget,
+                               gfx::Rect* bounds,
+                               ui::WindowShowState* show_state) const override;
   void WindowClosing() override;
   views::Widget* GetWidget() override;
   const views::Widget* GetWidget() const override;
@@ -228,8 +262,8 @@ class ShellSurface : public SurfaceDelegate,
       aura::Window* gained_active,
       aura::Window* lost_active) override;
 
-  // Overridden from WMHelper::AccessibilityObserver:
-  void OnAccessibilityModeChanged() override;
+  // Overridden from WMHelper::DisplayConfigurationObserver:
+  void OnDisplayConfigurationChanged() override;
 
   // Overridden from ui::EventHandler:
   void OnKeyEvent(ui::KeyEvent* event) override;
@@ -238,7 +272,10 @@ class ShellSurface : public SurfaceDelegate,
   // Overridden from ui::AcceleratorTarget:
   bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
 
-  aura::Window* shadow_underlay() { return shadow_underlay_; }
+  aura::Window* shadow_overlay() { return shadow_overlay_.get(); }
+  aura::Window* shadow_underlay() { return shadow_underlay_.get(); }
+
+  Surface* surface_for_testing() { return surface_; }
 
  private:
   class ScopedConfigure;
@@ -257,6 +294,9 @@ class ShellSurface : public SurfaceDelegate,
 
   // Asks the client to configure its surface.
   void Configure();
+
+  // Returns the window that has capture during dragging.
+  aura::Window* GetDragWindow() const;
 
   // Attempt to start a drag operation. The type of drag operation to start is
   // determined by |component|.
@@ -278,14 +318,25 @@ class ShellSurface : public SurfaceDelegate,
   // Updates the bounds of widget to match the current surface bounds.
   void UpdateWidgetBounds();
 
+  // Updates the bounds of surface to match the current widget bounds.
+  void UpdateSurfaceBounds();
+
   // Creates, deletes and update the shadow bounds based on
   // |pending_shadow_content_bounds_|.
   void UpdateShadow();
 
+  // Applies |system_modal_| to |widget_|.
+  void UpdateSystemModal();
+
+  // In the coordinate system of the parent root window.
+  gfx::Point GetMouseLocation() const;
+
   views::Widget* widget_ = nullptr;
   Surface* surface_;
   aura::Window* parent_;
-  gfx::Rect initial_bounds_;
+  const BoundsMode bounds_mode_;
+  int64_t primary_display_id_;
+  gfx::Point origin_;
   bool activatable_ = true;
   const bool can_minimize_;
   // Container Window Id (see ash/public/cpp/shell_window_ids.h)
@@ -305,14 +356,13 @@ class ShellSurface : public SurfaceDelegate,
   ConfigureCallback configure_callback_;
   ScopedConfigure* scoped_configure_ = nullptr;
   bool ignore_window_bounds_changes_ = false;
-  gfx::Point origin_;
+  gfx::Vector2d origin_offset_;
   gfx::Vector2d pending_origin_offset_;
-  gfx::Vector2d pending_origin_config_offset_;
+  gfx::Vector2d pending_origin_offset_accumulator_;
   int resize_component_ = HTCAPTION;  // HT constant (see ui/base/hit_test.h)
   int pending_resize_component_ = HTCAPTION;
-  aura::Window* shadow_overlay_ = nullptr;
-  aura::Window* shadow_underlay_ = nullptr;
-  std::unique_ptr<ui::EventHandler> shadow_underlay_event_handler_;
+  std::unique_ptr<aura::Window> shadow_overlay_;
+  std::unique_ptr<aura::Window> shadow_underlay_;
   gfx::Rect shadow_content_bounds_;
   float shadow_background_opacity_ = 1.0;
   std::deque<Config> pending_configs_;
@@ -320,6 +370,9 @@ class ShellSurface : public SurfaceDelegate,
   std::unique_ptr<ScopedAnimationsDisabled> scoped_animations_disabled_;
   int top_inset_height_ = 0;
   int pending_top_inset_height_ = 0;
+  bool shadow_underlay_in_surface_ = true;
+  bool pending_shadow_underlay_in_surface_ = true;
+  bool system_modal_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(ShellSurface);
 };

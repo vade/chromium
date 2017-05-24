@@ -14,7 +14,7 @@
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "content/browser/compositor/browser_compositor_output_surface.h"
-#include "ui/events/latency_info.h"
+#include "ui/latency/latency_info.h"
 
 namespace ui {
 class ContextProviderCommandBuffer;
@@ -29,7 +29,7 @@ class OffscreenBrowserCompositorOutputSurface
   OffscreenBrowserCompositorOutputSurface(
       scoped_refptr<ui::ContextProviderCommandBuffer> context,
       const UpdateVSyncParametersCallback& update_vsync_parameters_callback,
-      std::unique_ptr<display_compositor::CompositorOverlayCandidateValidator>
+      std::unique_ptr<viz::CompositorOverlayCandidateValidator>
           overlay_candidate_validator);
 
   ~OffscreenBrowserCompositorOutputSurface() override;
@@ -39,6 +39,7 @@ class OffscreenBrowserCompositorOutputSurface
   void BindToClient(cc::OutputSurfaceClient* client) override;
   void EnsureBackbuffer() override;
   void DiscardBackbuffer() override;
+  void SetDrawRectangle(const gfx::Rect& draw_rectangle) override;
   void Reshape(const gfx::Size& size,
                float scale_factor,
                const gfx::ColorSpace& color_space,

@@ -6,9 +6,7 @@
 
 #import <MobileCoreServices/MobileCoreServices.h>
 
-#include "base/mac/scoped_nsobject.h"
 #import "base/test/ios/wait_util.h"
-#include "components/reading_list/core/reading_list_switches.h"
 #import "ios/chrome/browser/ui/activity_services/activity_type_util.h"
 #import "ios/chrome/browser/ui/activity_services/appex_constants.h"
 #import "ios/chrome/browser/ui/activity_services/chrome_activity_item_source.h"
@@ -19,6 +17,10 @@
 #include "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
 #import "third_party/ocmock/gtest_support.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 @interface ActivityServiceController (CrVisibleForTesting)
 - (NSArray*)activityItemsForData:(ShareToData*)data;
@@ -37,17 +39,18 @@ class ActivityServiceControllerTest : public PlatformTest {
  protected:
   void SetUp() override {
     PlatformTest::SetUp();
-    parentController_.reset(
-        [[UIViewController alloc] initWithNibName:nil bundle:nil]);
+    parentController_ =
+        [[UIViewController alloc] initWithNibName:nil bundle:nil];
     [[UIApplication sharedApplication] keyWindow].rootViewController =
         parentController_;
-    shareToDelegate_.reset(
-        [[OCMockObject mockForProtocol:@protocol(ShareToDelegate)] retain]);
-    shareData_.reset([[ShareToData alloc]
-            initWithURL:GURL("https://chromium.org")
-                  title:@""
-        isOriginalTitle:YES
-        isPagePrintable:YES]);
+    shareToDelegate_ =
+        [OCMockObject mockForProtocol:@protocol(ShareToDelegate)];
+    shareData_ =
+        [[ShareToData alloc] initWithURL:GURL("https://chromium.org")
+                                   title:@""
+                         isOriginalTitle:YES
+                         isPagePrintable:YES
+                      thumbnailGenerator:DummyThumbnailGeneratorBlock()];
   }
 
   void TearDown() override {
@@ -55,8 +58,12 @@ class ActivityServiceControllerTest : public PlatformTest {
     PlatformTest::TearDown();
   }
 
+  ThumbnailGeneratorBlock DummyThumbnailGeneratorBlock() {
+    return ^UIImage*(CGSize const& size) { return nil; };
+  }
+
   id<ShareToDelegate> GetShareToDelegate() {
-    return static_cast<id<ShareToDelegate>>(shareToDelegate_.get());
+    return static_cast<id<ShareToDelegate>>(shareToDelegate_);
   }
 
   CGRect AnchorRect() {
@@ -67,7 +74,7 @@ class ActivityServiceControllerTest : public PlatformTest {
 
   UIView* AnchorView() {
     // On iPad, UIPopovers must be anchored to non nil views.
-    return [parentController_.get() view];
+    return [parentController_ view];
   }
 
   BOOL ArrayContainsImageSource(NSArray* array) {
@@ -137,8 +144,8 @@ class ActivityServiceControllerTest : public PlatformTest {
   // |extensionItem| and expects failure.
   void ProcessItemsReturnedFromActivityFailure(NSArray* extensionItems,
                                                BOOL expectedResetUI) {
-    base::scoped_nsobject<ActivityServiceController> activityController(
-        [[ActivityServiceController alloc] init]);
+    ActivityServiceController* activityController =
+        [[ActivityServiceController alloc] init];
 
     // Sets up a Mock ShareToDelegate object to check that the ShareToDelegate
     // callback function is not called.
@@ -156,31 +163,31 @@ class ActivityServiceControllerTest : public PlatformTest {
         passwordAppExDidFinish:ShareTo::ShareResult::SHARE_CANCEL
                       username:OCMOCK_ANY
                       password:OCMOCK_ANY
-                successMessage:OCMOCK_ANY];
+             completionMessage:OCMOCK_ANY];
     [[[shareToDelegateMock stub] andDo:validationBlock]
         passwordAppExDidFinish:ShareTo::ShareResult::SHARE_NETWORK_FAILURE
                       username:OCMOCK_ANY
                       password:OCMOCK_ANY
-                successMessage:OCMOCK_ANY];
+             completionMessage:OCMOCK_ANY];
     [[[shareToDelegateMock stub] andDo:validationBlock]
         passwordAppExDidFinish:ShareTo::ShareResult::SHARE_SIGN_IN_FAILURE
                       username:OCMOCK_ANY
                       password:OCMOCK_ANY
-                successMessage:OCMOCK_ANY];
+             completionMessage:OCMOCK_ANY];
     [[[shareToDelegateMock stub] andDo:validationBlock]
         passwordAppExDidFinish:ShareTo::ShareResult::SHARE_ERROR
                       username:OCMOCK_ANY
                       password:OCMOCK_ANY
-                successMessage:OCMOCK_ANY];
+             completionMessage:OCMOCK_ANY];
     [[[shareToDelegateMock stub] andDo:validationBlock]
         passwordAppExDidFinish:ShareTo::ShareResult::SHARE_UNKNOWN_RESULT
                       username:OCMOCK_ANY
                       password:OCMOCK_ANY
-                successMessage:OCMOCK_ANY];
+             completionMessage:OCMOCK_ANY];
     [activityController setShareToDelegateForTesting:(id)shareToDelegateMock];
 
     // Sets up the returned item from a Password Management App Extension.
-    NSString* activityType = activity_services::kAppExtensionLastPass;
+    NSString* activityType = @"com.lastpass.ilastpass.LastPassExt";
     ShareTo::ShareResult result = ShareTo::ShareResult::SHARE_SUCCESS;
     BOOL resetUI =
         [activityController processItemsReturnedFromActivity:activityType
@@ -194,19 +201,19 @@ class ActivityServiceControllerTest : public PlatformTest {
   }
 
   web::TestWebThreadBundle thread_bundle_;
-  base::scoped_nsobject<UIViewController> parentController_;
-  base::scoped_nsobject<OCMockObject> shareToDelegate_;
-  base::scoped_nsobject<ShareToData> shareData_;
+  UIViewController* parentController_;
+  OCMockObject* shareToDelegate_;
+  ShareToData* shareData_;
 };
 
 TEST_F(ActivityServiceControllerTest, PresentAndDismissController) {
   [[shareToDelegate_ expect] shareDidComplete:ShareTo::ShareResult::SHARE_CANCEL
-                               successMessage:[OCMArg isNil]];
+                            completionMessage:[OCMArg isNil]];
 
   UIViewController* parentController =
-      static_cast<UIViewController*>(parentController_.get());
-  base::scoped_nsobject<ActivityServiceController> activityController(
-      [[ActivityServiceController alloc] init]);
+      static_cast<UIViewController*>(parentController_);
+  ActivityServiceController* activityController =
+      [[ActivityServiceController alloc] init];
   EXPECT_FALSE([activityController isActive]);
 
   // Test sharing.
@@ -229,16 +236,17 @@ TEST_F(ActivityServiceControllerTest, PresentAndDismissController) {
 // Verifies that an UIActivityImageSource is sent to the
 // UIActivityViewController if and only if the ShareToData contains an image.
 TEST_F(ActivityServiceControllerTest, ActivityItemsForData) {
-  base::scoped_nsobject<ActivityServiceController> activityController(
-      [[ActivityServiceController alloc] init]);
+  ActivityServiceController* activityController =
+      [[ActivityServiceController alloc] init];
 
   // ShareToData does not contain an image, so the result items array will not
   // contain an image source.
-  base::scoped_nsobject<ShareToData> data([[ShareToData alloc]
-          initWithURL:GURL("https://chromium.org")
-                title:@"foo"
-      isOriginalTitle:YES
-      isPagePrintable:YES]);
+  ShareToData* data =
+      [[ShareToData alloc] initWithURL:GURL("https://chromium.org")
+                                 title:@"foo"
+                       isOriginalTitle:YES
+                       isPagePrintable:YES
+                    thumbnailGenerator:DummyThumbnailGeneratorBlock()];
   NSArray* items = [activityController activityItemsForData:data];
   EXPECT_FALSE(ArrayContainsImageSource(items));
 
@@ -252,39 +260,40 @@ TEST_F(ActivityServiceControllerTest, ActivityItemsForData) {
 // Verifies that when App Extension support is enabled, the URL string is
 // passed in a dictionary as part of the Activity Items to the App Extension.
 TEST_F(ActivityServiceControllerTest, ActivityItemsForDataWithPasswordAppEx) {
-  base::scoped_nsobject<ActivityServiceController> activityController(
-      [[ActivityServiceController alloc] init]);
-  base::scoped_nsobject<ShareToData> data([[ShareToData alloc]
-          initWithURL:GURL("https://chromium.org/login.html")
-                title:@"kung fu fighting"
-      isOriginalTitle:YES
-      isPagePrintable:YES]);
+  ActivityServiceController* activityController =
+      [[ActivityServiceController alloc] init];
+  ShareToData* data =
+      [[ShareToData alloc] initWithURL:GURL("https://chromium.org/login.html")
+                                 title:@"kung fu fighting"
+                       isOriginalTitle:YES
+                       isPagePrintable:YES
+                    thumbnailGenerator:DummyThumbnailGeneratorBlock()];
   NSArray* items = [activityController activityItemsForData:data];
   NSString* findLoginAction =
       (NSString*)activity_services::kUTTypeAppExtensionFindLoginAction;
   // Gets the list of NSExtensionItem objects returned by the array of
   // id<UIActivityItemSource> objects returned by -activityItemsForData:.
   NSArray* extensionItems = FindItemsForActivityType(
-      items, activity_services::kAppExtensionOnePassword);
+      items, @"com.agilebits.onepassword-ios.extension");
   ASSERT_EQ(1U, [extensionItems count]);
   NSExtensionItem* item = extensionItems[0];
   EXPECT_EQ(1U, item.attachments.count);
   NSItemProvider* itemProvider = item.attachments[0];
   // Extracts the dictionary back from the ItemProvider and then check that
   // it has the expected version and the page's URL.
-  __block base::scoped_nsobject<NSDictionary> result;
+  __block NSDictionary* result;
   [itemProvider
       loadItemForTypeIdentifier:findLoginAction
                         options:nil
               completionHandler:^(id item, NSError* error) {
                 if (error || ![item isKindOfClass:[NSDictionary class]]) {
-                  result.reset([[NSDictionary dictionary] retain]);
+                  result = @{};
                 } else {
-                  result.reset([item retain]);
+                  result = item;
                 }
               }];
   base::test::ios::WaitUntilCondition(^{
-    return result.get() != nil;
+    return result != nil;
   });
   EXPECT_EQ(2U, [result count]);
   // Checks version.
@@ -297,15 +306,14 @@ TEST_F(ActivityServiceControllerTest, ActivityItemsForDataWithPasswordAppEx) {
   EXPECT_NSEQ(@"https://chromium.org/login.html", appExUrlString);
 
   // Checks that the list includes the page's title.
-  NSArray* sources =
-      FindItemsOfClass(items, [UIActivityFindLoginActionSource class]);
+  NSArray* sources = FindItemsOfClass(items, [UIActivityURLSource class]);
   EXPECT_EQ(1U, [sources count]);
-  UIActivityFindLoginActionSource* actionSource = sources[0];
+  UIActivityURLSource* actionSource = sources[0];
   id mockActivityViewController =
       [OCMockObject niceMockForClass:[UIActivityViewController class]];
   NSString* title = [actionSource
       activityViewController:mockActivityViewController
-      subjectForActivityType:activity_services::kAppExtensionOnePassword];
+      subjectForActivityType:@"com.agilebits.onepassword-ios.extension"];
   EXPECT_NSEQ(@"kung fu fighting", title);
 }
 
@@ -313,13 +321,14 @@ TEST_F(ActivityServiceControllerTest, ActivityItemsForDataWithPasswordAppEx) {
 // is enabled.
 TEST_F(ActivityServiceControllerTest,
        ActivityItemsForDataWithPasswordAppExReturnsURL) {
-  base::scoped_nsobject<ActivityServiceController> activityController(
-      [[ActivityServiceController alloc] init]);
-  base::scoped_nsobject<ShareToData> data([[ShareToData alloc]
-          initWithURL:GURL("https://chromium.org/login.html")
-                title:@"kung fu fighting"
-      isOriginalTitle:YES
-      isPagePrintable:YES]);
+  ActivityServiceController* activityController =
+      [[ActivityServiceController alloc] init];
+  ShareToData* data =
+      [[ShareToData alloc] initWithURL:GURL("https://chromium.org/login.html")
+                                 title:@"kung fu fighting"
+                       isOriginalTitle:YES
+                       isPagePrintable:YES
+                    thumbnailGenerator:DummyThumbnailGeneratorBlock()];
   NSArray* items = [activityController activityItemsForData:data];
   NSString* shareAction = @"com.apple.UIKit.activity.PostToFacebook";
   NSArray* urlItems =
@@ -337,11 +346,11 @@ TEST_F(ActivityServiceControllerTest,
 // Verifies that -processItemsReturnedFromActivity:status:item: contains
 // the username and password.
 TEST_F(ActivityServiceControllerTest, ProcessItemsReturnedSuccessfully) {
-  base::scoped_nsobject<ActivityServiceController> activityController(
-      [[ActivityServiceController alloc] init]);
+  ActivityServiceController* activityController =
+      [[ActivityServiceController alloc] init];
 
   // Sets up a Mock ShareToDelegate object to check that the callback function
-  // -passwordAppExDidFinish:username:password:successMessage:
+  // -passwordAppExDidFinish:username:password:completionMessage:
   // is correct with the correct username and password.
   OCMockObject* shareToDelegateMock =
       [OCMockObject mockForProtocol:@protocol(ShareToDelegate)];
@@ -349,8 +358,8 @@ TEST_F(ActivityServiceControllerTest, ProcessItemsReturnedSuccessfully) {
   NSString* const kSecretPassword = @"super!secret";
   __block bool blockCalled = false;
   void (^validationBlock)(NSInvocation*) = ^(NSInvocation* invocation) {
-    NSString* username;
-    NSString* password;
+    __unsafe_unretained NSString* username;
+    __unsafe_unretained NSString* password;
     // Skips 0 and 1 index because they are |self| and |cmd|.
     [invocation getArgument:&username atIndex:3];
     [invocation getArgument:&password atIndex:4];
@@ -362,7 +371,7 @@ TEST_F(ActivityServiceControllerTest, ProcessItemsReturnedSuccessfully) {
       passwordAppExDidFinish:ShareTo::ShareResult::SHARE_SUCCESS
                     username:OCMOCK_ANY
                     password:OCMOCK_ANY
-              successMessage:OCMOCK_ANY];
+           completionMessage:OCMOCK_ANY];
   [activityController setShareToDelegateForTesting:(id)shareToDelegateMock];
 
   // Sets up the returned item from a Password Management App Extension.
@@ -371,19 +380,18 @@ TEST_F(ActivityServiceControllerTest, ProcessItemsReturnedSuccessfully) {
   NSDictionary* dictionaryFromAppEx =
       @{ @"username" : kSecretUsername,
          @"password" : kSecretPassword };
-  base::scoped_nsobject<NSItemProvider> itemProvider([[NSItemProvider alloc]
-        initWithItem:dictionaryFromAppEx
-      typeIdentifier:(NSString*)kUTTypePropertyList]);
-  base::scoped_nsobject<NSExtensionItem> extensionItem(
-      [[NSExtensionItem alloc] init]);
-  [extensionItem setAttachments:@[ itemProvider.get() ]];
+  NSItemProvider* itemProvider =
+      [[NSItemProvider alloc] initWithItem:dictionaryFromAppEx
+                            typeIdentifier:(NSString*)kUTTypePropertyList];
+  NSExtensionItem* extensionItem = [[NSExtensionItem alloc] init];
+  [extensionItem setAttachments:@[ itemProvider ]];
 
   BOOL resetUI =
       [activityController processItemsReturnedFromActivity:activityType
                                                     status:result
                                                      items:@[ extensionItem ]];
   ASSERT_FALSE(resetUI);
-  // Wait for -passwordAppExDidFinish:username:password:successMessage:
+  // Wait for -passwordAppExDidFinish:username:password:completionMessage:
   // to be called.
   base::test::ios::WaitUntilCondition(^{
     return blockCalled;
@@ -397,55 +405,54 @@ TEST_F(ActivityServiceControllerTest, ProcessItemsReturnedFailures) {
   ProcessItemsReturnedFromActivityFailure(@[], YES);
 
   // Extension Item is empty.
-  base::scoped_nsobject<NSExtensionItem> extensionItem(
-      [[NSExtensionItem alloc] init]);
+  NSExtensionItem* extensionItem = [[NSExtensionItem alloc] init];
   [extensionItem setAttachments:@[]];
   ProcessItemsReturnedFromActivityFailure(@[ extensionItem ], YES);
 
   // Extension Item does not have a property list provider as the first
   // attachment.
-  base::scoped_nsobject<NSItemProvider> itemProvider([[NSItemProvider alloc]
-        initWithItem:@"some arbitrary garbage"
-      typeIdentifier:(NSString*)kUTTypeText]);
-  [extensionItem setAttachments:@[ itemProvider.get() ]];
+  NSItemProvider* itemProvider =
+      [[NSItemProvider alloc] initWithItem:@"some arbitrary garbage"
+                            typeIdentifier:(NSString*)kUTTypeText];
+  [extensionItem setAttachments:@[ itemProvider ]];
   ProcessItemsReturnedFromActivityFailure(@[ extensionItem ], YES);
 
   // Property list provider did not return a dictionary object.
-  itemProvider.reset([[NSItemProvider alloc]
-        initWithItem:@[ @"foo", @"bar" ]
-      typeIdentifier:(NSString*)kUTTypePropertyList]);
-  [extensionItem setAttachments:@[ itemProvider.get() ]];
+  itemProvider =
+      [[NSItemProvider alloc] initWithItem:@[ @"foo", @"bar" ]
+                            typeIdentifier:(NSString*)kUTTypePropertyList];
+  [extensionItem setAttachments:@[ itemProvider ]];
   ProcessItemsReturnedFromActivityFailure(@[ extensionItem ], NO);
 }
 
 // Verifies that the PrintActivity is sent to the UIActivityViewController if
 // and only if the activity is "printable".
 TEST_F(ActivityServiceControllerTest, ApplicationActivitiesForData) {
-  base::scoped_nsobject<ActivityServiceController> activityController(
-      [[ActivityServiceController alloc] init]);
+  ActivityServiceController* activityController =
+      [[ActivityServiceController alloc] init];
 
   // Verify printable data.
-  base::scoped_nsobject<ShareToData> data([[ShareToData alloc]
-          initWithURL:GURL("https://chromium.org/printable")
-                title:@"bar"
-      isOriginalTitle:YES
-      isPagePrintable:YES]);
+  ShareToData* data =
+      [[ShareToData alloc] initWithURL:GURL("https://chromium.org/printable")
+                                 title:@"bar"
+                       isOriginalTitle:YES
+                       isPagePrintable:YES
+                    thumbnailGenerator:DummyThumbnailGeneratorBlock()];
 
   NSArray* items =
       [activityController applicationActivitiesForData:data controller:nil];
-  NSUInteger expected_items_count =
-      reading_list::switches::IsReadingListEnabled() ? 2U : 1U;
-  ASSERT_EQ(expected_items_count, [items count]);
+  ASSERT_EQ(2U, [items count]);
   EXPECT_EQ([PrintActivity class], [[items objectAtIndex:0] class]);
 
   // Verify non-printable data.
-  data.reset([[ShareToData alloc]
-          initWithURL:GURL("https://chromium.org/unprintable")
-                title:@"baz"
-      isOriginalTitle:YES
-      isPagePrintable:NO]);
+  data =
+      [[ShareToData alloc] initWithURL:GURL("https://chromium.org/unprintable")
+                                 title:@"baz"
+                       isOriginalTitle:YES
+                       isPagePrintable:NO
+                    thumbnailGenerator:DummyThumbnailGeneratorBlock()];
   items = [activityController applicationActivitiesForData:data controller:nil];
-  EXPECT_EQ(expected_items_count - 1, [items count]);
+  EXPECT_EQ(1U, [items count]);
 }
 
 TEST_F(ActivityServiceControllerTest, FindLoginActionTypeConformsToPublicURL) {

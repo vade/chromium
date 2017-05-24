@@ -8,6 +8,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/test/histogram_tester.h"
 #include "base/test/simple_test_clock.h"
 #include "base/time/default_clock.h"
 #include "base/time/time.h"
@@ -20,7 +21,17 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using testing::ElementsAre;
+using testing::IsEmpty;
+
 namespace ntp_snippets {
+
+namespace {
+
+const char kHistogramMovedUpCategoryNewIndex[] =
+    "NewTabPage.ContentSuggestions.MovedUpCategoryNewIndex";
+
+}  // namespace
 
 class ClickBasedCategoryRankerTest : public testing::Test {
  public:
@@ -73,7 +84,7 @@ class ClickBasedCategoryRankerTest : public testing::Test {
 
   void SetDismissedCategoryPenaltyVariationParam(int value) {
     variation_params_manager_.SetVariationParamsWithFeatureAssociations(
-        ntp_snippets::kStudyName,
+        kCategoryRanker.name,
         {{"click_based_category_ranker-dismissed_category_penalty",
           base::IntToString(value)}},
         {kCategoryRanker.name});
@@ -81,10 +92,19 @@ class ClickBasedCategoryRankerTest : public testing::Test {
 
   void SetPromotedCategoryVariationParam(int value) {
     variation_params_manager_.SetVariationParamsWithFeatureAssociations(
-        ntp_snippets::kStudyName,
+        kCategoryRanker.name,
         {{"click_based_category_ranker-promoted_category",
           base::IntToString(value)}},
         {kCategoryRanker.name});
+  }
+
+  std::vector<Category> ConvertKnownCategories(
+      std::vector<KnownCategories> known_categories) {
+    std::vector<Category> converted;
+    for (auto known : known_categories) {
+      converted.push_back(Category::FromKnownCategory(known));
+    }
+    return converted;
   }
 
   ClickBasedCategoryRanker* ranker() { return ranker_.get(); }
@@ -253,8 +273,7 @@ TEST_F(ClickBasedCategoryRankerTest, ShouldPersistOrderAndClicksWhenRestarted) {
   EXPECT_TRUE(CompareCategories(third, second));
 
   // Clicks must be preserved as well.
-  NotifyOnSuggestionOpened(
-      /*times=*/1, third);
+  NotifyOnSuggestionOpened(/*times=*/1, third);
   EXPECT_TRUE(CompareCategories(third, first));
 }
 
@@ -449,8 +468,7 @@ TEST_F(ClickBasedCategoryRankerTest,
 
   ASSERT_TRUE(CompareCategories(first, second));
 
-  NotifyOnSuggestionOpened(
-      /*times=*/1, second);
+  NotifyOnSuggestionOpened(/*times=*/1, second);
 
   // This should reduce the click count back to 0.
   NotifyOnCategoryDismissed(second);
@@ -462,8 +480,7 @@ TEST_F(ClickBasedCategoryRankerTest,
 
   EXPECT_TRUE(CompareCategories(first, second));
 
-  NotifyOnSuggestionOpened(
-      /*times=*/1, second);
+  NotifyOnSuggestionOpened(/*times=*/1, second);
   EXPECT_FALSE(CompareCategories(first, second));
 }
 
@@ -487,8 +504,7 @@ TEST_F(ClickBasedCategoryRankerTest,
   Category second = AddUnusedRemoteCategory();
   Category third = AddUnusedRemoteCategory();
 
-  NotifyOnSuggestionOpened(
-      /*times=*/1, second);
+  NotifyOnSuggestionOpened(/*times=*/1, second);
 
   // This should be ignored, because the penalty is set to 0.
   NotifyOnCategoryDismissed(second);
@@ -647,6 +663,321 @@ TEST_F(ClickBasedCategoryRankerTest,
   test_clock->SetNow(base::Time::Now() + base::TimeDelta::FromDays(15));
   ResetRanker(std::move(test_clock));
   EXPECT_TRUE(CompareCategories(recent_tabs, downloads));
+}
+
+TEST_F(ClickBasedCategoryRankerTest,
+       ShouldEmitNewIndexWhenCategoryMovedUpDueToClick) {
+  base::HistogramTester histogram_tester;
+
+  std::vector<KnownCategories> default_order =
+      ConstantCategoryRanker::GetKnownCategoriesDefaultOrder();
+  Category first = Category::FromKnownCategory(default_order[0]);
+  Category second = Category::FromKnownCategory(default_order[1]);
+
+  ASSERT_TRUE(CompareCategories(first, second));
+
+  // Increase the score of |second| until the order changes.
+  while (CompareCategories(first, second)) {
+    EXPECT_THAT(
+        histogram_tester.GetAllSamples(kHistogramMovedUpCategoryNewIndex),
+        IsEmpty());
+    ranker()->OnSuggestionOpened(second);
+  }
+  ASSERT_FALSE(CompareCategories(first, second));
+  EXPECT_THAT(histogram_tester.GetAllSamples(kHistogramMovedUpCategoryNewIndex),
+              ElementsAre(base::Bucket(/*min=*/0, /*count=*/1)));
+}
+
+TEST_F(ClickBasedCategoryRankerTest,
+       ShouldNotEmitNewIndexWhenCategoryDismissed) {
+  base::HistogramTester histogram_tester;
+
+  std::vector<KnownCategories> default_order =
+      ConstantCategoryRanker::GetKnownCategoriesDefaultOrder();
+  Category category = Category::FromKnownCategory(default_order[0]);
+
+  ASSERT_THAT(histogram_tester.GetAllSamples(kHistogramMovedUpCategoryNewIndex),
+              IsEmpty());
+
+  NotifyOnCategoryDismissed(category);
+
+  EXPECT_THAT(histogram_tester.GetAllSamples(kHistogramMovedUpCategoryNewIndex),
+              IsEmpty());
+}
+
+TEST_F(ClickBasedCategoryRankerTest,
+       ShouldNotEmitNewIndexOfMovedUpCategoryWhenHistoryCleared) {
+  std::vector<KnownCategories> default_order =
+      ConstantCategoryRanker::GetKnownCategoriesDefaultOrder();
+  Category first = Category::FromKnownCategory(default_order[0]);
+  Category second = Category::FromKnownCategory(default_order[1]);
+
+  ASSERT_TRUE(CompareCategories(first, second));
+
+  // Increase the score of |second| until the order changes.
+  while (CompareCategories(first, second)) {
+    ranker()->OnSuggestionOpened(second);
+  }
+  ASSERT_FALSE(CompareCategories(first, second));
+
+  // The histogram tester is created here to ignore previous events.
+  base::HistogramTester histogram_tester;
+  ranker()->ClearHistory(/*begin=*/base::Time(),
+                         /*end=*/base::Time::Max());
+
+  // ClearHistory should restore the default order.
+  ASSERT_TRUE(CompareCategories(first, second));
+
+  EXPECT_THAT(histogram_tester.GetAllSamples(kHistogramMovedUpCategoryNewIndex),
+              IsEmpty());
+}
+
+TEST_F(ClickBasedCategoryRankerTest,
+       ShouldNotEmitNewIndexWhenCategoryPromoted) {
+  base::HistogramTester histogram_tester;
+
+  std::vector<KnownCategories> default_order =
+      ConstantCategoryRanker::GetKnownCategoriesDefaultOrder();
+  Category first = Category::FromKnownCategory(default_order[0]);
+  Category second = Category::FromKnownCategory(default_order[1]);
+
+  ASSERT_TRUE(CompareCategories(first, second));
+
+  ASSERT_THAT(histogram_tester.GetAllSamples(kHistogramMovedUpCategoryNewIndex),
+              IsEmpty());
+
+  SetPromotedCategoryVariationParam(second.id());
+  ResetRanker(base::MakeUnique<base::DefaultClock>());
+
+  ASSERT_FALSE(CompareCategories(first, second));
+
+  EXPECT_THAT(histogram_tester.GetAllSamples(kHistogramMovedUpCategoryNewIndex),
+              IsEmpty());
+}
+
+TEST_F(ClickBasedCategoryRankerTest,
+       ShouldInsertCategoryBeforeSelectedCategory) {
+  std::vector<KnownCategories> default_order =
+      ConstantCategoryRanker::GetKnownCategoriesDefaultOrder();
+  Category first = Category::FromKnownCategory(default_order[0]);
+  Category second = Category::FromKnownCategory(default_order[1]);
+
+  ASSERT_TRUE(CompareCategories(first, second));
+
+  Category inserted = GetUnusedRemoteCategory();
+
+  ranker()->InsertCategoryBeforeIfNecessary(inserted, second);
+  EXPECT_TRUE(CompareCategories(first, inserted));
+  EXPECT_TRUE(CompareCategories(inserted, second));
+}
+
+TEST_F(ClickBasedCategoryRankerTest,
+       ShouldInsertMultipleCategoriesBeforeSelectedCategory) {
+  std::vector<KnownCategories> default_order =
+      ConstantCategoryRanker::GetKnownCategoriesDefaultOrder();
+  Category first = Category::FromKnownCategory(default_order[0]);
+  Category second = Category::FromKnownCategory(default_order[1]);
+
+  ASSERT_TRUE(CompareCategories(first, second));
+
+  Category first_inserted = GetUnusedRemoteCategory();
+  Category second_inserted = GetUnusedRemoteCategory();
+
+  ranker()->InsertCategoryBeforeIfNecessary(first_inserted, second);
+  ranker()->InsertCategoryBeforeIfNecessary(second_inserted, second);
+  EXPECT_TRUE(CompareCategories(first, first_inserted));
+  EXPECT_TRUE(CompareCategories(first_inserted, second_inserted));
+  EXPECT_TRUE(CompareCategories(second_inserted, second));
+}
+
+TEST_F(ClickBasedCategoryRankerTest, ShouldInsertCategoryBeforeFirstCategory) {
+  std::vector<KnownCategories> default_order =
+      ConstantCategoryRanker::GetKnownCategoriesDefaultOrder();
+  Category first = Category::FromKnownCategory(default_order[0]);
+  Category inserted = GetUnusedRemoteCategory();
+
+  ranker()->InsertCategoryBeforeIfNecessary(inserted, first);
+  EXPECT_TRUE(CompareCategories(inserted, first));
+}
+
+TEST_F(ClickBasedCategoryRankerTest, ShouldInsertCategoryBeforeRemoteCategory) {
+  std::vector<KnownCategories> default_order =
+      ConstantCategoryRanker::GetKnownCategoriesDefaultOrder();
+  Category remote = AddUnusedRemoteCategory();
+  Category inserted = GetUnusedRemoteCategory();
+
+  ranker()->InsertCategoryBeforeIfNecessary(inserted, remote);
+  EXPECT_TRUE(CompareCategories(inserted, remote));
+}
+
+TEST_F(ClickBasedCategoryRankerTest,
+       ShouldNotChangeRemainingOrderWhenInsertingBeforeCategory) {
+  std::vector<KnownCategories> default_order =
+      ConstantCategoryRanker::GetKnownCategoriesDefaultOrder();
+  Category anchor = Category::FromKnownCategory(default_order[2]);
+  Category inserted = GetUnusedRemoteCategory();
+
+  ranker()->InsertCategoryBeforeIfNecessary(inserted, anchor);
+  std::vector<Category> converted_categories =
+      ConvertKnownCategories(default_order);
+  for (size_t i = 0; i + 1 < converted_categories.size(); ++i) {
+    EXPECT_TRUE(CompareCategories(converted_categories[i],
+                                  converted_categories[i + 1]));
+  }
+}
+
+TEST_F(ClickBasedCategoryRankerTest,
+       ShouldInsertCategoriesBeforeAndAfterSameCategory) {
+  std::vector<KnownCategories> default_order =
+      ConstantCategoryRanker::GetKnownCategoriesDefaultOrder();
+  Category first = Category::FromKnownCategory(default_order[0]);
+  Category second = Category::FromKnownCategory(default_order[1]);
+  Category third = Category::FromKnownCategory(default_order[2]);
+  ASSERT_TRUE(CompareCategories(first, second));
+  ASSERT_TRUE(CompareCategories(second, third));
+
+  Category first_before = GetUnusedRemoteCategory();
+  ranker()->InsertCategoryBeforeIfNecessary(first_before, second);
+
+  Category first_after = GetUnusedRemoteCategory();
+  ranker()->InsertCategoryAfterIfNecessary(first_after, second);
+
+  Category second_before = GetUnusedRemoteCategory();
+  ranker()->InsertCategoryBeforeIfNecessary(second_before, second);
+
+  Category second_after = GetUnusedRemoteCategory();
+  ranker()->InsertCategoryAfterIfNecessary(second_after, second);
+
+  EXPECT_TRUE(CompareCategories(first_before, second_before));
+  EXPECT_TRUE(CompareCategories(second_before, second));
+  EXPECT_TRUE(CompareCategories(second, second_after));
+  EXPECT_TRUE(CompareCategories(second_after, first_after));
+  EXPECT_TRUE(CompareCategories(first_after, third));
+}
+
+TEST_F(ClickBasedCategoryRankerTest,
+       ShouldInsertCategoriesBeforeAndAfterDifferentCategories) {
+  std::vector<KnownCategories> default_order =
+      ConstantCategoryRanker::GetKnownCategoriesDefaultOrder();
+  Category first = Category::FromKnownCategory(default_order[0]);
+  Category second = Category::FromKnownCategory(default_order[1]);
+  ASSERT_TRUE(CompareCategories(first, second));
+
+  Category first_before = GetUnusedRemoteCategory();
+  ranker()->InsertCategoryBeforeIfNecessary(first_before, second);
+
+  Category first_after = GetUnusedRemoteCategory();
+  ranker()->InsertCategoryAfterIfNecessary(first_after, first);
+
+  Category second_before = GetUnusedRemoteCategory();
+  ranker()->InsertCategoryBeforeIfNecessary(second_before, second);
+
+  Category second_after = GetUnusedRemoteCategory();
+  ranker()->InsertCategoryAfterIfNecessary(second_after, first);
+
+  EXPECT_TRUE(CompareCategories(first, second_after));
+  EXPECT_TRUE(CompareCategories(second_after, first_after));
+  EXPECT_TRUE(CompareCategories(first_after, first_before));
+  EXPECT_TRUE(CompareCategories(first_before, second_before));
+  EXPECT_TRUE(CompareCategories(second_before, second));
+}
+
+TEST_F(ClickBasedCategoryRankerTest,
+       ShouldNotEmitNewIndexWhenCategoryInserted) {
+  base::HistogramTester histogram_tester;
+
+  std::vector<KnownCategories> default_order =
+      ConstantCategoryRanker::GetKnownCategoriesDefaultOrder();
+  Category first = Category::FromKnownCategory(default_order[0]);
+
+  ASSERT_THAT(histogram_tester.GetAllSamples(kHistogramMovedUpCategoryNewIndex),
+              IsEmpty());
+
+  Category before = GetUnusedRemoteCategory();
+  ranker()->InsertCategoryBeforeIfNecessary(before, first);
+
+  Category after = GetUnusedRemoteCategory();
+  ranker()->InsertCategoryAfterIfNecessary(after, first);
+
+  EXPECT_THAT(histogram_tester.GetAllSamples(kHistogramMovedUpCategoryNewIndex),
+              IsEmpty());
+}
+
+// TODO(vitaliii): Reuse these tests for ConstantCategoryRanker.
+TEST_F(ClickBasedCategoryRankerTest,
+       ShouldInsertCategoryAfterSelectedCategory) {
+  std::vector<KnownCategories> default_order =
+      ConstantCategoryRanker::GetKnownCategoriesDefaultOrder();
+  Category first = Category::FromKnownCategory(default_order[0]);
+  Category second = Category::FromKnownCategory(default_order[1]);
+
+  ASSERT_TRUE(CompareCategories(first, second));
+
+  Category inserted = GetUnusedRemoteCategory();
+
+  ranker()->InsertCategoryAfterIfNecessary(inserted, first);
+  EXPECT_TRUE(CompareCategories(first, inserted));
+  EXPECT_TRUE(CompareCategories(inserted, second));
+}
+
+TEST_F(ClickBasedCategoryRankerTest,
+       ShouldInsertMultipleCategoriesAfterSelectedCategory) {
+  std::vector<KnownCategories> default_order =
+      ConstantCategoryRanker::GetKnownCategoriesDefaultOrder();
+  Category first = Category::FromKnownCategory(default_order[0]);
+  Category second = Category::FromKnownCategory(default_order[1]);
+
+  ASSERT_TRUE(CompareCategories(first, second));
+
+  Category first_inserted = GetUnusedRemoteCategory();
+  Category second_inserted = GetUnusedRemoteCategory();
+
+  ranker()->InsertCategoryAfterIfNecessary(first_inserted, first);
+  ranker()->InsertCategoryAfterIfNecessary(second_inserted, first);
+  EXPECT_TRUE(CompareCategories(first, second_inserted));
+  EXPECT_TRUE(CompareCategories(second_inserted, first_inserted));
+  EXPECT_TRUE(CompareCategories(first_inserted, second));
+}
+
+TEST_F(ClickBasedCategoryRankerTest, ShouldInsertCategoryAfterLastCategory) {
+  Category last = AddUnusedRemoteCategory();
+  Category inserted = GetUnusedRemoteCategory();
+
+  ranker()->InsertCategoryAfterIfNecessary(inserted, last);
+  EXPECT_TRUE(CompareCategories(last, inserted));
+}
+
+TEST_F(ClickBasedCategoryRankerTest,
+       ShouldNotChangeRemainingOrderWhenInsertingAfterCategory) {
+  std::vector<KnownCategories> default_order =
+      ConstantCategoryRanker::GetKnownCategoriesDefaultOrder();
+  Category anchor = Category::FromKnownCategory(default_order[2]);
+  Category inserted = GetUnusedRemoteCategory();
+
+  ranker()->InsertCategoryAfterIfNecessary(inserted, anchor);
+  std::vector<Category> converted_categories =
+      ConvertKnownCategories(default_order);
+  for (size_t i = 0; i + 1 < converted_categories.size(); ++i) {
+    EXPECT_TRUE(CompareCategories(converted_categories[i],
+                                  converted_categories[i + 1]));
+  }
+}
+
+TEST_F(ClickBasedCategoryRankerTest,
+       ShouldAssignScoreToInsertedCategoriesBasedOnAnchor) {
+  Category anchor = AddUnusedRemoteCategory();
+  NotifyOnSuggestionOpened(/*times=*/25, anchor);
+
+  Category inserted_before = GetUnusedRemoteCategory();
+  ranker()->InsertCategoryBeforeIfNecessary(inserted_before, anchor);
+
+  Category inserted_after = GetUnusedRemoteCategory();
+  ranker()->InsertCategoryAfterIfNecessary(inserted_after, anchor);
+
+  Category tester = AddUnusedRemoteCategory();
+  NotifyOnSuggestionOpened(/*times=*/20, tester);
+  EXPECT_TRUE(CompareCategories(inserted_before, tester));
+  EXPECT_TRUE(CompareCategories(inserted_after, tester));
 }
 
 }  // namespace ntp_snippets

@@ -18,10 +18,9 @@ namespace media {
 
 class MEDIA_EXPORT AudioManagerCras : public AudioManagerBase {
  public:
-  AudioManagerCras(
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> worker_task_runner,
-      AudioLogFactory* audio_log_factory);
+  AudioManagerCras(std::unique_ptr<AudioThread> audio_thread,
+                   AudioLogFactory* audio_log_factory);
+  ~AudioManagerCras() override;
 
   // AudioManager implementation.
   bool HasAudioOutputDevices() override;
@@ -52,20 +51,26 @@ class MEDIA_EXPORT AudioManagerCras : public AudioManagerBase {
 
   static snd_pcm_format_t BitsToFormat(int bits_per_sample);
 
- protected:
-  ~AudioManagerCras() override;
+  // Checks if |device_id| corresponds to the default device.
+  // Set |is_input| to true for capture devices, false for output.
+  bool IsDefault(const std::string& device_id, bool is_input);
 
+ protected:
   AudioParameters GetPreferredOutputStreamParameters(
       const std::string& output_device_id,
       const AudioParameters& input_params) override;
 
  private:
   // Called by MakeLinearOutputStream and MakeLowLatencyOutputStream.
-  AudioOutputStream* MakeOutputStream(const AudioParameters& params);
+  AudioOutputStream* MakeOutputStream(const AudioParameters& params,
+                                      const std::string& device_id);
 
   // Called by MakeLinearInputStream and MakeLowLatencyInputStream.
   AudioInputStream* MakeInputStream(const AudioParameters& params,
                                     const std::string& device_id);
+
+  // Get minimum output buffer size for this board.
+  int GetMinimumOutputBufferSizePerBoard();
 
   void GetAudioDeviceNamesImpl(bool is_input, AudioDeviceNames* device_names);
 

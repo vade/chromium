@@ -12,6 +12,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/sequenced_task_runner.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/offline_pages/core/background/save_page_request.h"
 #include "sql/connection.h"
@@ -42,26 +43,63 @@ bool CreateRequestQueueTable(sql::Connection* db) {
                       " state INTEGER NOT NULL DEFAULT 0,"
                       " url VARCHAR NOT NULL,"
                       " client_namespace VARCHAR NOT NULL,"
-                      " client_id VARCHAR NOT NULL"
+                      " client_id VARCHAR NOT NULL,"
+                      " original_url VARCHAR NOT NULL DEFAULT ''"
                       ")";
   return db->Execute(kSql);
 }
 
+bool UpgradeWithQuery(sql::Connection* db, const char* upgrade_sql) {
+  if (!db->Execute("ALTER TABLE " REQUEST_QUEUE_TABLE_NAME
+                   " RENAME TO temp_" REQUEST_QUEUE_TABLE_NAME)) {
+    return false;
+  }
+  if (!CreateRequestQueueTable(db))
+    return false;
+  if (!db->Execute(upgrade_sql))
+    return false;
+  return db->Execute("DROP TABLE IF EXISTS temp_" REQUEST_QUEUE_TABLE_NAME);
+}
+
+bool UpgradeFrom57(sql::Connection* db) {
+  const char kSql[] =
+      "INSERT INTO " REQUEST_QUEUE_TABLE_NAME
+      " (request_id, creation_time, activation_time, last_attempt_time, "
+      "started_attempt_count, completed_attempt_count, state, url, "
+      "client_namespace, client_id) "
+      "SELECT "
+      "request_id, creation_time, activation_time, last_attempt_time, "
+      "started_attempt_count, completed_attempt_count, state, url, "
+      "client_namespace, client_id "
+      "FROM temp_" REQUEST_QUEUE_TABLE_NAME;
+  return UpgradeWithQuery(db, kSql);
+}
+
 bool CreateSchema(sql::Connection* db) {
+  sql::Transaction transaction(db);
+  if (!transaction.Begin())
+    return false;
+
+  if (!db->DoesTableExist(REQUEST_QUEUE_TABLE_NAME)) {
+    if (!CreateRequestQueueTable(db))
+      return false;
+  }
+
   // If there is not already a state column, we need to drop the old table.  We
   // are choosing to drop instead of upgrade since the feature is not yet
-  // released, so we don't use a transaction to protect existing data, or try to
-  // migrate it.
+  // released, so we don't try to migrate it.
   if (!db->DoesColumnExist(REQUEST_QUEUE_TABLE_NAME, "state")) {
     if (!db->Execute("DROP TABLE IF EXISTS " REQUEST_QUEUE_TABLE_NAME))
       return false;
   }
 
-  if (!CreateRequestQueueTable(db))
-    return false;
+  if (!db->DoesColumnExist(REQUEST_QUEUE_TABLE_NAME, "original_url")) {
+    if (!UpgradeFrom57(db))
+      return false;
+  }
 
-  // TODO(fgorski): Add indices here.
-  return true;
+  // This would be a great place to add indices when we need them.
+  return transaction.Commit();
 }
 
 // Create a save page request from a SQL result.  Expects complete rows with
@@ -72,8 +110,6 @@ std::unique_ptr<SavePageRequest> MakeSavePageRequest(
   const int64_t id = statement.ColumnInt64(0);
   const base::Time creation_time =
       base::Time::FromInternalValue(statement.ColumnInt64(1));
-  const base::Time activation_time =
-      base::Time::FromInternalValue(statement.ColumnInt64(2));
   const base::Time last_attempt_time =
       base::Time::FromInternalValue(statement.ColumnInt64(3));
   const int64_t started_attempt_count = statement.ColumnInt64(4);
@@ -83,18 +119,20 @@ std::unique_ptr<SavePageRequest> MakeSavePageRequest(
   const GURL url(statement.ColumnString(7));
   const ClientId client_id(statement.ColumnString(8),
                            statement.ColumnString(9));
+  const GURL original_url(statement.ColumnString(10));
 
   DVLOG(2) << "making save page request - id " << id << " url " << url
            << " client_id " << client_id.name_space << "-" << client_id.id
            << " creation time " << creation_time << " user requested "
-           << kUserRequested;
+           << kUserRequested << " original_url " << original_url;
 
-  std::unique_ptr<SavePageRequest> request(new SavePageRequest(
-      id, url, client_id, creation_time, activation_time, kUserRequested));
+  std::unique_ptr<SavePageRequest> request(
+      new SavePageRequest(id, url, client_id, creation_time, kUserRequested));
   request->set_last_attempt_time(last_attempt_time);
   request->set_started_attempt_count(started_attempt_count);
   request->set_completed_attempt_count(completed_attempt_count);
   request->set_request_state(state);
+  request->set_original_url(original_url);
   return request;
 }
 
@@ -104,7 +142,7 @@ std::unique_ptr<SavePageRequest> GetOneRequest(sql::Connection* db,
   const char kSql[] =
       "SELECT request_id, creation_time, activation_time,"
       " last_attempt_time, started_attempt_count, completed_attempt_count,"
-      " state, url, client_namespace, client_id"
+      " state, url, client_namespace, client_id, original_url"
       " FROM " REQUEST_QUEUE_TABLE_NAME " WHERE request_id=?";
 
   sql::Statement statement(db->GetCachedStatement(SQL_FROM_HERE, kSql));
@@ -132,14 +170,14 @@ ItemActionStatus Insert(sql::Connection* db, const SavePageRequest& request) {
       "INSERT OR IGNORE INTO " REQUEST_QUEUE_TABLE_NAME
       " (request_id, creation_time, activation_time,"
       " last_attempt_time, started_attempt_count, completed_attempt_count,"
-      " state, url, client_namespace, client_id)"
+      " state, url, client_namespace, client_id, original_url)"
       " VALUES "
-      " (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+      " (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
   sql::Statement statement(db->GetCachedStatement(SQL_FROM_HERE, kSql));
   statement.BindInt64(0, request.request_id());
   statement.BindInt64(1, request.creation_time().ToInternalValue());
-  statement.BindInt64(2, request.activation_time().ToInternalValue());
+  statement.BindInt64(2, 0);
   statement.BindInt64(3, request.last_attempt_time().ToInternalValue());
   statement.BindInt64(4, request.started_attempt_count());
   statement.BindInt64(5, request.completed_attempt_count());
@@ -147,6 +185,7 @@ ItemActionStatus Insert(sql::Connection* db, const SavePageRequest& request) {
   statement.BindString(7, request.url().spec());
   statement.BindString(8, request.client_id().name_space);
   statement.BindString(9, request.client_id().id);
+  statement.BindString(10, request.original_url().spec());
 
   if (!statement.Run())
     return ItemActionStatus::STORE_ERROR;
@@ -160,12 +199,12 @@ ItemActionStatus Update(sql::Connection* db, const SavePageRequest& request) {
       "UPDATE OR IGNORE " REQUEST_QUEUE_TABLE_NAME
       " SET creation_time = ?, activation_time = ?, last_attempt_time = ?,"
       " started_attempt_count = ?, completed_attempt_count = ?, state = ?,"
-      " url = ?, client_namespace = ?, client_id = ?"
+      " url = ?, client_namespace = ?, client_id = ?, original_url = ?"
       " WHERE request_id = ?";
 
   sql::Statement statement(db->GetCachedStatement(SQL_FROM_HERE, kSql));
   statement.BindInt64(0, request.creation_time().ToInternalValue());
-  statement.BindInt64(1, request.activation_time().ToInternalValue());
+  statement.BindInt64(1, 0);
   statement.BindInt64(2, request.last_attempt_time().ToInternalValue());
   statement.BindInt64(3, request.started_attempt_count());
   statement.BindInt64(4, request.completed_attempt_count());
@@ -173,7 +212,8 @@ ItemActionStatus Update(sql::Connection* db, const SavePageRequest& request) {
   statement.BindString(6, request.url().spec());
   statement.BindString(7, request.client_id().name_space);
   statement.BindString(8, request.client_id().id);
-  statement.BindInt64(9, request.request_id());
+  statement.BindString(9, request.original_url().spec());
+  statement.BindInt64(10, request.request_id());
 
   if (!statement.Run())
     return ItemActionStatus::STORE_ERROR;
@@ -236,7 +276,7 @@ void GetRequestsSync(sql::Connection* db,
   const char kSql[] =
       "SELECT request_id, creation_time, activation_time,"
       " last_attempt_time, started_attempt_count, completed_attempt_count,"
-      " state, url, client_namespace, client_id"
+      " state, url, client_namespace, client_id, original_url"
       " FROM " REQUEST_QUEUE_TABLE_NAME;
 
   sql::Statement statement(db->GetCachedStatement(SQL_FROM_HERE, kSql));
@@ -253,7 +293,6 @@ void GetRequestsByIdsSync(sql::Connection* db,
                           scoped_refptr<base::SingleThreadTaskRunner> runner,
                           const std::vector<int64_t>& request_ids,
                           const RequestQueueStore::UpdateCallback& callback) {
-  // TODO(fgorski): Perhaps add metrics here.
   std::unique_ptr<UpdateRequestsResult> result(
       new UpdateRequestsResult(StoreState::LOADED));
 
@@ -291,7 +330,6 @@ void AddRequestSync(sql::Connection* db,
                     scoped_refptr<base::SingleThreadTaskRunner> runner,
                     const SavePageRequest& request,
                     const RequestQueueStore::AddCallback& callback) {
-  // TODO(fgorski): add UMA metrics here.
   ItemActionStatus status = Insert(db, request);
   runner->PostTask(FROM_HERE, base::Bind(callback, status));
 }
@@ -300,7 +338,6 @@ void UpdateRequestsSync(sql::Connection* db,
                         scoped_refptr<base::SingleThreadTaskRunner> runner,
                         const std::vector<SavePageRequest>& requests,
                         const RequestQueueStore::UpdateCallback& callback) {
-  // TODO(fgorski): add UMA metrics here.
   std::unique_ptr<UpdateRequestsResult> result(
       new UpdateRequestsResult(StoreState::LOADED));
 
@@ -330,7 +367,6 @@ void RemoveRequestsSync(sql::Connection* db,
                         scoped_refptr<base::SingleThreadTaskRunner> runner,
                         const std::vector<int64_t>& request_ids,
                         const RequestQueueStore::UpdateCallback& callback) {
-  // TODO(fgorski): Perhaps add metrics here.
   std::unique_ptr<UpdateRequestsResult> result(
       new UpdateRequestsResult(StoreState::LOADED));
 

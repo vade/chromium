@@ -8,7 +8,7 @@
 #include <string>
 
 #include "android_webview/browser/aw_browser_context.h"
-#include "android_webview/browser/aw_contents_client_bridge_base.h"
+#include "android_webview/browser/aw_contents_client_bridge.h"
 #include "android_webview/browser/aw_contents_io_thread_client.h"
 #include "android_webview/browser/aw_login_delegate.h"
 #include "android_webview/browser/aw_resource_context.h"
@@ -34,7 +34,7 @@
 #include "url/url_constants.h"
 
 using android_webview::AwContentsIoThreadClient;
-using android_webview::AwContentsClientBridgeBase;
+using android_webview::AwContentsClientBridge;
 using android_webview::AwWebResourceRequest;
 using content::BrowserThread;
 using content::ResourceType;
@@ -43,8 +43,9 @@ using navigation_interception::InterceptNavigationDelegate;
 
 namespace {
 
-base::LazyInstance<android_webview::AwResourceDispatcherHostDelegate>
-    g_webview_resource_dispatcher_host_delegate = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<android_webview::AwResourceDispatcherHostDelegate>::
+    DestructorAtExit g_webview_resource_dispatcher_host_delegate =
+        LAZY_INSTANCE_INITIALIZER;
 
 void SetCacheControlFlag(
     net::URLRequest* request, int flag) {
@@ -68,8 +69,8 @@ void DownloadStartingOnUIThread(
     const std::string& content_disposition,
     const std::string& mime_type,
     int64_t content_length) {
-  AwContentsClientBridgeBase* client =
-      AwContentsClientBridgeBase::FromWebContentsGetter(web_contents_getter);
+  AwContentsClientBridge* client =
+      AwContentsClientBridge::FromWebContentsGetter(web_contents_getter);
   if (!client)
     return;
   client->NewDownload(url, user_agent, content_disposition, mime_type,
@@ -81,8 +82,8 @@ void NewLoginRequestOnUIThread(
     const std::string& realm,
     const std::string& account,
     const std::string& args) {
-  AwContentsClientBridgeBase* client =
-      AwContentsClientBridgeBase::FromWebContentsGetter(web_contents_getter);
+  AwContentsClientBridge* client =
+      AwContentsClientBridge::FromWebContentsGetter(web_contents_getter);
   if (!client)
     return;
   client->NewLoginRequest(realm, account, args);
@@ -92,8 +93,8 @@ void OnReceivedErrorOnUiThread(
     const content::ResourceRequestInfo::WebContentsGetter& web_contents_getter,
     const AwWebResourceRequest& request,
     int error_code) {
-  AwContentsClientBridgeBase* client =
-      AwContentsClientBridgeBase::FromWebContentsGetter(web_contents_getter);
+  AwContentsClientBridge* client =
+      AwContentsClientBridge::FromWebContentsGetter(web_contents_getter);
   if (!client) {
     DLOG(WARNING) << "client is null, onReceivedError dropped for "
                   << request.url;
@@ -128,6 +129,7 @@ class IoThreadClientThrottle : public content::ResourceThrottle {
                              int new_render_frame_id);
   bool MaybeBlockRequest();
   bool ShouldBlockRequest();
+  bool GetSafeBrowsingEnabled();
   int render_process_id() const { return render_process_id_; }
   int render_frame_id() const { return render_frame_id_; }
 
@@ -160,6 +162,16 @@ std::unique_ptr<AwContentsIoThreadClient>
 IoThreadClientThrottle::GetIoThreadClient() const {
   if (content::ResourceRequestInfo::OriginatedFromServiceWorker(request_))
     return AwContentsIoThreadClient::GetServiceWorkerIoThreadClient();
+
+  if (render_process_id_ == -1 || render_frame_id_ == -1) {
+    const content::ResourceRequestInfo* resourceRequestInfo =
+        content::ResourceRequestInfo::ForRequest(request_);
+    if (resourceRequestInfo == nullptr) {
+      return nullptr;
+    }
+    return AwContentsIoThreadClient::FromID(
+        resourceRequestInfo->GetFrameTreeNodeId());
+  }
 
   return AwContentsIoThreadClient::FromID(render_process_id_, render_frame_id_);
 }
@@ -203,6 +215,13 @@ bool IoThreadClientThrottle::MaybeBlockRequest() {
     return true;
   }
   return false;
+}
+
+bool IoThreadClientThrottle::GetSafeBrowsingEnabled() {
+  std::unique_ptr<AwContentsIoThreadClient> io_client = GetIoThreadClient();
+  if (!io_client)
+    return false;
+  return io_client->GetSafeBrowsingEnabled();
 }
 
 bool IoThreadClientThrottle::ShouldBlockRequest() {
@@ -272,7 +291,12 @@ void AwResourceDispatcherHostDelegate::RequestBeginning(
   const content::ResourceRequestInfo* request_info =
       content::ResourceRequestInfo::ForRequest(request);
 
-  if (AwSafeBrowsingConfigHelper::GetSafeBrowsingEnabled()) {
+  std::unique_ptr<IoThreadClientThrottle> ioThreadThrottle =
+      base::MakeUnique<IoThreadClientThrottle>(request_info->GetChildID(),
+                                               request_info->GetRenderFrameID(),
+                                               request);
+
+  if (ioThreadThrottle->GetSafeBrowsingEnabled()) {
     content::ResourceThrottle* throttle =
         AwSafeBrowsingResourceThrottle::MaybeCreate(
             request, resource_type,
@@ -291,8 +315,7 @@ void AwResourceDispatcherHostDelegate::RequestBeginning(
   // is called whether or not requests are blocked via BlockRequestForRoute()
   // however io_client may or may not be ready at the time depending on whether
   // webcontents is created.
-  throttles->push_back(base::MakeUnique<IoThreadClientThrottle>(
-      request_info->GetChildID(), request_info->GetRenderFrameID(), request));
+  throttles->push_back(std::move(ioThreadThrottle));
 
   bool is_main_frame = resource_type == content::RESOURCE_TYPE_MAIN_FRAME;
   if (!is_main_frame)

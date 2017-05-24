@@ -14,6 +14,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -179,6 +180,7 @@ class BrowserFocusTest : public InProcessBrowserTest {
 class TestInterstitialPage : public content::InterstitialPageDelegate {
  public:
   explicit TestInterstitialPage(WebContents* tab) {
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
     base::FilePath file_path;
     bool success = PathService::Get(chrome::DIR_TEST_DATA, &file_path);
     EXPECT_TRUE(success);
@@ -372,7 +374,8 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest,
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
 
   // Open a new browser window.
-  Browser* browser2 = new Browser(Browser::CreateParams(browser()->profile()));
+  Browser* browser2 =
+      new Browser(Browser::CreateParams(browser()->profile(), true));
 
   ASSERT_TRUE(browser2);
   chrome::AddTabAt(browser2, GURL(), -1, true);

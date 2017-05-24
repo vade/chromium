@@ -9,7 +9,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/time/time.h"
-#include "cc/debug/lap_timer.h"
+#include "cc/base/lap_timer.h"
 #include "cc/output/context_cache_controller.h"
 #include "cc/output/context_provider.h"
 #include "cc/raster/bitmap_raster_buffer_provider.h"
@@ -242,8 +242,8 @@ class RasterBufferProviderPerfTestBase {
     const gfx::Size size(1, 1);
 
     for (unsigned i = 0; i < num_raster_tasks; ++i) {
-      std::unique_ptr<ScopedResource> resource(
-          ScopedResource::Create(resource_provider_.get()));
+      auto resource =
+          base::MakeUnique<ScopedResource>(resource_provider_.get());
       resource->Allocate(size, ResourceProvider::TEXTURE_HINT_IMMUTABLE,
                          RGBA_8888, gfx::ColorSpace());
 
@@ -341,7 +341,8 @@ class RasterBufferProviderPerfTest
         Create3dResourceProvider();
         raster_buffer_provider_ = base::MakeUnique<GpuRasterBufferProvider>(
             compositor_context_provider_.get(), worker_context_provider_.get(),
-            resource_provider_.get(), false, 0, false);
+            resource_provider_.get(), false, 0,
+            PlatformColor::BestTextureFormat(), false);
         break;
       case RASTER_BUFFER_PROVIDER_TYPE_BITMAP:
         CreateSoftwareResourceProvider();

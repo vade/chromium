@@ -79,7 +79,7 @@ class FileSystem(object):
     def exists(self, path):
         return os.path.exists(path)
 
-    def files_under(self, path, dirs_to_skip=[], file_filter=None):
+    def files_under(self, path, dirs_to_skip=None, file_filter=None):
         """Return the list of all files under the given path in topdown order.
 
         Args:
@@ -90,6 +90,8 @@ class FileSystem(object):
                 each file found. The file is included in the result if the
                 callback returns True.
         """
+        dirs_to_skip = dirs_to_skip or []
+
         def filter_all(fs, dirpath, basename):
             return True
 
@@ -195,6 +197,9 @@ class FileSystem(object):
 
     def open_binary_file_for_reading(self, path):
         return codecs.open(path, 'rb')
+
+    def open_binary_file_for_writing(self, path):
+        return file(path, 'wb')
 
     def read_binary_file(self, path):
         """Return the contents of the file at the given path as a byte string."""

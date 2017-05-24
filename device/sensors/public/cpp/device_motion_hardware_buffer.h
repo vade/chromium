@@ -6,13 +6,12 @@
 #define DEVICE_SENSORS_PUBLIC_CPP_DEVICE_MOTION_HARDWARE_BUFFER_H_
 
 #include "device/base/synchronization/shared_memory_seqlock_buffer.h"
-#include "third_party/WebKit/public/platform/modules/device_orientation/WebDeviceMotionData.h"
+#include "device/sensors/public/cpp/motion_data.h"
 
-namespace content {
+namespace device {
 
-typedef device::SharedMemorySeqLockBuffer<blink::WebDeviceMotionData>
-    DeviceMotionHardwareBuffer;
+typedef SharedMemorySeqLockBuffer<MotionData> DeviceMotionHardwareBuffer;
 
-}  // namespace content
+}  // namespace device
 
 #endif  // DEVICE_SENSORS_PUBLIC_CPP_DEVICE_MOTION_HARDWARE_BUFFER_H_

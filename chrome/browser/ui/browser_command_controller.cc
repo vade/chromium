@@ -13,6 +13,7 @@
 #include "base/debug/profiler.h"
 #include "base/feature_list.h"
 #include "base/macros.h"
+#include "base/metrics/user_metrics.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
@@ -49,7 +50,6 @@
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/service_manager_connection.h"
@@ -87,18 +87,6 @@
 using content::NavigationEntry;
 using content::NavigationController;
 using content::WebContents;
-
-namespace {
-
-enum WindowState {
-  // Not in fullscreen mode.
-  WINDOW_STATE_NOT_FULLSCREEN,
-
-  // Fullscreen mode, occupying the whole screen.
-  WINDOW_STATE_FULLSCREEN,
-};
-
-}  // namespace
 
 namespace chrome {
 
@@ -191,7 +179,7 @@ bool BrowserCommandController::IsReservedCommandOrKey(
   // behavior of these keys.  Ash handles F4 and up; this leaves us needing to
   // reserve browser back/forward and refresh here.
   ui::KeyboardCode key_code =
-    static_cast<ui::KeyboardCode>(event.windowsKeyCode);
+      static_cast<ui::KeyboardCode>(event.windows_key_code);
   if ((key_code == ui::VKEY_BROWSER_BACK && command_id == IDC_BACK) ||
       (key_code == ui::VKEY_BROWSER_FORWARD && command_id == IDC_FORWARD) ||
       (key_code == ui::VKEY_BROWSER_REFRESH && command_id == IDC_RELOAD)) {
@@ -199,8 +187,27 @@ bool BrowserCommandController::IsReservedCommandOrKey(
   }
 #endif
 
-  if (window()->IsFullscreen() && command_id == IDC_FULLSCREEN)
-    return true;
+  if (window()->IsFullscreen()) {
+    // In fullscreen, all commands except for IDC_FULLSCREEN and IDC_EXIT should
+    // be delivered to the web page. The intent to implement and ship can be
+    // found in http://crbug.com/680809.
+    const bool is_exit_fullscreen =
+        (command_id == IDC_EXIT || command_id == IDC_FULLSCREEN);
+#if defined(OS_MACOSX)
+    // This behavior is different on Mac OS, which has a unique user-initiated
+    // full-screen mode. According to the discussion in http://crbug.com/702251,
+    // the commands should be reserved for browser-side handling if the browser
+    // window's toolbar is visible.
+    if (window()->IsToolbarShowing()) {
+      if (command_id == IDC_FULLSCREEN)
+        return true;
+    } else {
+      return is_exit_fullscreen;
+    }
+#else
+    return is_exit_fullscreen;
+#endif
+  }
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
   // If this key was registered by the user as a content editing hotkey, then
@@ -304,20 +311,20 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       if (base::FeatureList::IsEnabled(features::kBackspaceGoesBackFeature))
         GoBack(browser_, disposition);
       else
-        browser_->window()->MaybeShowNewBackShortcutBubble(false);
+        window()->MaybeShowNewBackShortcutBubble(false);
       break;
     case IDC_BACK:
-      browser_->window()->HideNewBackShortcutBubble();
+      window()->HideNewBackShortcutBubble();
       GoBack(browser_, disposition);
       break;
     case IDC_BACKSPACE_FORWARD:
       if (base::FeatureList::IsEnabled(features::kBackspaceGoesBackFeature))
         GoForward(browser_, disposition);
       else
-        browser_->window()->MaybeShowNewBackShortcutBubble(true);
+        window()->MaybeShowNewBackShortcutBubble(true);
       break;
     case IDC_FORWARD:
-      browser_->window()->HideNewBackShortcutBubble();
+      window()->HideNewBackShortcutBubble();
       GoForward(browser_, disposition);
       break;
     case IDC_RELOAD:
@@ -347,23 +354,22 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       NewIncognitoWindow(browser_);
       break;
     case IDC_CLOSE_WINDOW:
-      content::RecordAction(base::UserMetricsAction("CloseWindowByKey"));
+      base::RecordAction(base::UserMetricsAction("CloseWindowByKey"));
       CloseWindow(browser_);
       break;
     case IDC_NEW_TAB:
       NewTab(browser_);
       break;
     case IDC_CLOSE_TAB:
-      content::RecordAction(base::UserMetricsAction("CloseTabByKey"));
+      base::RecordAction(base::UserMetricsAction("CloseTabByKey"));
       CloseTab(browser_);
       break;
     case IDC_SELECT_NEXT_TAB:
-      content::RecordAction(base::UserMetricsAction("Accel_SelectNextTab"));
+      base::RecordAction(base::UserMetricsAction("Accel_SelectNextTab"));
       SelectNextTab(browser_);
       break;
     case IDC_SELECT_PREVIOUS_TAB:
-      content::RecordAction(
-          base::UserMetricsAction("Accel_SelectPreviousTab"));
+      base::RecordAction(base::UserMetricsAction("Accel_SelectPreviousTab"));
       SelectPreviousTab(browser_);
       break;
     case IDC_MOVE_TAB_NEXT:
@@ -380,9 +386,11 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
     case IDC_SELECT_TAB_5:
     case IDC_SELECT_TAB_6:
     case IDC_SELECT_TAB_7:
+      base::RecordAction(base::UserMetricsAction("Accel_SelectNumberedTab"));
       SelectNumberedTab(browser_, id - IDC_SELECT_TAB_0);
       break;
     case IDC_SELECT_LAST_TAB:
+      base::RecordAction(base::UserMetricsAction("Accel_SelectNumberedTab"));
       SelectLastTab(browser_);
       break;
     case IDC_DUPLICATE_TAB:
@@ -401,13 +409,13 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
 #if defined(OS_CHROMEOS)
     case IDC_VISIT_DESKTOP_OF_LRU_USER_2:
     case IDC_VISIT_DESKTOP_OF_LRU_USER_3:
-      ExecuteVisitDesktopCommand(id, browser_->window()->GetNativeWindow());
+      ExecuteVisitDesktopCommand(id, window()->GetNativeWindow());
       break;
 #endif
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
     case IDC_USE_SYSTEM_TITLE_BAR: {
-      PrefService* prefs = browser_->profile()->GetPrefs();
+      PrefService* prefs = profile()->GetPrefs();
       prefs->SetBoolean(prefs::kUseCustomChromeFrame,
                         !prefs->GetBoolean(prefs::kUseCustomChromeFrame));
       break;
@@ -445,7 +453,7 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
 
 #if BUILDFLAG(ENABLE_BASIC_PRINTING)
     case IDC_BASIC_PRINT:
-      content::RecordAction(base::UserMetricsAction("Accel_Advanced_Print"));
+      base::RecordAction(base::UserMetricsAction("Accel_Advanced_Print"));
       BasicPrint(browser_);
       break;
 #endif  // ENABLE_BASIC_PRINTING
@@ -491,23 +499,22 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
 
     // Focus various bits of UI
     case IDC_FOCUS_TOOLBAR:
-      content::RecordAction(base::UserMetricsAction("Accel_Focus_Toolbar"));
+      base::RecordAction(base::UserMetricsAction("Accel_Focus_Toolbar"));
       FocusToolbar(browser_);
       break;
     case IDC_FOCUS_LOCATION:
-      content::RecordAction(base::UserMetricsAction("Accel_Focus_Location"));
+      base::RecordAction(base::UserMetricsAction("Accel_Focus_Location"));
       FocusLocationBar(browser_);
       break;
     case IDC_FOCUS_SEARCH:
-      content::RecordAction(base::UserMetricsAction("Accel_Focus_Search"));
+      base::RecordAction(base::UserMetricsAction("Accel_Focus_Search"));
       FocusSearch(browser_);
       break;
     case IDC_FOCUS_MENU_BAR:
       FocusAppMenu(browser_);
       break;
     case IDC_FOCUS_BOOKMARKS:
-      content::RecordAction(
-          base::UserMetricsAction("Accel_Focus_Bookmarks"));
+      base::RecordAction(base::UserMetricsAction("Accel_Focus_Bookmarks"));
       FocusBookmarksToolbar(browser_);
       break;
     case IDC_FOCUS_INFOBARS:
@@ -523,9 +530,6 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
     // Show various bits of UI
     case IDC_OPEN_FILE:
       browser_->OpenFile();
-      break;
-    case IDC_CREATE_SHORTCUTS:
-      CreateApplicationShortcuts(browser_);
       break;
     case IDC_CREATE_HOSTED_APP:
       CreateBookmarkAppFromCurrentWebContents(browser_);
@@ -555,7 +559,7 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
 #endif
 #if defined(GOOGLE_CHROME_BUILD)
     case IDC_FEEDBACK:
-      OpenFeedbackDialog(browser_);
+      OpenFeedbackDialog(browser_, kFeedbackSourceBrowserCommand);
       break;
 #endif
     case IDC_SHOW_BOOKMARK_BAR:
@@ -569,14 +573,11 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       ShowBookmarkManager(browser_);
       break;
     case IDC_SHOW_APP_MENU:
-      content::RecordAction(base::UserMetricsAction("Accel_Show_App_Menu"));
+      base::RecordAction(base::UserMetricsAction("Accel_Show_App_Menu"));
       ShowAppMenu(browser_);
       break;
     case IDC_SHOW_AVATAR_MENU:
       ShowAvatarMenu(browser_);
-      break;
-    case IDC_SHOW_FAST_USER_SWITCHER:
-      ShowFastUserSwitcher(browser_);
       break;
     case IDC_SHOW_HISTORY:
       ShowHistory(browser_);
@@ -620,6 +621,9 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
     case IDC_HELP_PAGE_VIA_MENU:
       ShowHelp(browser_, HELP_SOURCE_MENU);
       break;
+    case IDC_SHOW_BETA_FORUM:
+      ShowBetaForum(browser_);
+      break;
     case IDC_SHOW_SIGNIN:
       ShowBrowserSigninOrSettings(
           browser_, signin_metrics::AccessPoint::ACCESS_POINT_MENU);
@@ -629,7 +633,7 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       break;
 #if defined(OS_CHROMEOS)
     case IDC_TOUCH_HUD_PROJECTION_TOGGLE:
-      if (chrome::IsRunningInMash()) {
+      if (ash_util::IsRunningInMash()) {
         service_manager::Connector* connector =
             content::ServiceManagerConnection::GetForProcess()->GetConnector();
         mash::mojom::LaunchablePtr launchable;
@@ -786,7 +790,6 @@ void BrowserCommandController::InitCommandState() {
       << "Ought to never have browser for the system profile.";
   const bool normal_window = browser_->is_type_tabbed();
   UpdateOpenFileState(&command_updater_);
-  command_updater_.UpdateCommandEnabled(IDC_CREATE_SHORTCUTS, false);
   UpdateCommandsForDevTools();
   command_updater_.UpdateCommandEnabled(IDC_TASK_MANAGER, CanOpenTaskManager());
   command_updater_.UpdateCommandEnabled(IDC_SHOW_HISTORY, !guest_session);
@@ -794,11 +797,13 @@ void BrowserCommandController::InitCommandState() {
   command_updater_.UpdateCommandEnabled(IDC_HELP_MENU, true);
   command_updater_.UpdateCommandEnabled(IDC_HELP_PAGE_VIA_KEYBOARD, true);
   command_updater_.UpdateCommandEnabled(IDC_HELP_PAGE_VIA_MENU, true);
+  command_updater_.UpdateCommandEnabled(IDC_SHOW_BETA_FORUM, true);
   command_updater_.UpdateCommandEnabled(IDC_BOOKMARKS_MENU, !guest_session);
   command_updater_.UpdateCommandEnabled(IDC_RECENT_TABS_MENU,
                                         !guest_session &&
                                         !profile()->IsOffTheRecord());
-  command_updater_.UpdateCommandEnabled(IDC_CLEAR_BROWSING_DATA, normal_window);
+  command_updater_.UpdateCommandEnabled(IDC_CLEAR_BROWSING_DATA,
+                                        !guest_session);
 #if defined(OS_CHROMEOS)
   command_updater_.UpdateCommandEnabled(IDC_TAKE_SCREENSHOT, true);
   command_updater_.UpdateCommandEnabled(IDC_TOUCH_HUD_PROJECTION_TOGGLE, true);
@@ -806,7 +811,6 @@ void BrowserCommandController::InitCommandState() {
   // Chrome OS uses the system tray menu to handle multi-profiles.
   if (normal_window && (guest_session || !profile()->IsOffTheRecord())) {
     command_updater_.UpdateCommandEnabled(IDC_SHOW_AVATAR_MENU, true);
-    command_updater_.UpdateCommandEnabled(IDC_SHOW_FAST_USER_SWITCHER, true);
   }
 #endif
 
@@ -930,14 +934,6 @@ void BrowserCommandController::UpdateCommandsForTabState() {
   if (browser_->is_devtools())
     command_updater_.UpdateCommandEnabled(IDC_OPEN_FILE, false);
 
-  // Show various bits of UI
-  // TODO(pinkerton): Disable app-mode in the model until we implement it
-  // on the Mac. Be sure to remove both ifdefs. http://crbug.com/13148
-#if !defined(OS_MACOSX)
-  command_updater_.UpdateCommandEnabled(
-      IDC_CREATE_SHORTCUTS,
-      CanCreateApplicationShortcuts(browser_));
-#endif
   command_updater_.UpdateCommandEnabled(IDC_CREATE_HOSTED_APP,
                                         CanCreateBookmarkApp(browser_));
 
@@ -1020,13 +1016,9 @@ void BrowserCommandController::UpdateCommandsForFileSelectionDialogs() {
 }
 
 void BrowserCommandController::UpdateCommandsForFullscreenMode() {
-  WindowState window_state = WINDOW_STATE_NOT_FULLSCREEN;
-  if (window() && window()->IsFullscreen()) {
-    window_state = WINDOW_STATE_FULLSCREEN;
-  }
-  bool show_main_ui = IsShowingMainUI();
-  bool main_not_fullscreen =
-      show_main_ui && window_state == WINDOW_STATE_NOT_FULLSCREEN;
+  const bool is_fullscreen = window() && window()->IsFullscreen();
+  const bool show_main_ui = IsShowingMainUI();
+  const bool main_not_fullscreen = show_main_ui && !is_fullscreen;
 
   // Navigation commands
   command_updater_.UpdateCommandEnabled(IDC_OPEN_CURRENT_URL, show_main_ui);
@@ -1034,8 +1026,7 @@ void BrowserCommandController::UpdateCommandsForFullscreenMode() {
   // Window management commands
   command_updater_.UpdateCommandEnabled(
       IDC_SHOW_AS_TAB,
-      !browser_->is_type_tabbed() &&
-          window_state == WINDOW_STATE_NOT_FULLSCREEN);
+      !browser_->is_type_tabbed() && !is_fullscreen);
 
   // Focus various bits of UI
   command_updater_.UpdateCommandEnabled(IDC_FOCUS_TOOLBAR, show_main_ui);
@@ -1059,16 +1050,6 @@ void BrowserCommandController::UpdateCommandsForFullscreenMode() {
 #endif
   UpdateShowSyncState(show_main_ui);
 
-  // Settings page/subpages are forced to open in normal mode. We disable these
-  // commands for guest sessions and when incognito is forced.
-  const bool options_enabled = show_main_ui &&
-      IncognitoModePrefs::GetAvailability(
-          profile()->GetPrefs()) != IncognitoModePrefs::FORCED;
-  const bool guest_session = profile()->IsGuestSession();
-  command_updater_.UpdateCommandEnabled(IDC_OPTIONS, options_enabled);
-  command_updater_.UpdateCommandEnabled(IDC_IMPORT_SETTINGS,
-                                        options_enabled && !guest_session);
-
   command_updater_.UpdateCommandEnabled(IDC_EDIT_SEARCH_ENGINES, show_main_ui);
   command_updater_.UpdateCommandEnabled(IDC_VIEW_PASSWORDS, show_main_ui);
   command_updater_.UpdateCommandEnabled(IDC_ABOUT, show_main_ui);
@@ -1077,13 +1058,12 @@ void BrowserCommandController::UpdateCommandsForFullscreenMode() {
   if (base::debug::IsProfilingSupported())
     command_updater_.UpdateCommandEnabled(IDC_PROFILING_ENABLED, show_main_ui);
 
-  bool fullscreen_enabled = true;
 #if !defined(OS_MACOSX)
-  if (window_state == WINDOW_STATE_NOT_FULLSCREEN &&
-      !profile()->GetPrefs()->GetBoolean(prefs::kFullscreenAllowed)) {
-    // Disable toggling into fullscreen mode if disallowed by pref.
-    fullscreen_enabled = false;
-  }
+  // Disable toggling into fullscreen mode if disallowed by pref.
+  const bool fullscreen_enabled = is_fullscreen ||
+      profile()->GetPrefs()->GetBoolean(prefs::kFullscreenAllowed);
+#else
+  const bool fullscreen_enabled = true;
 #endif
 
   command_updater_.UpdateCommandEnabled(IDC_FULLSCREEN, fullscreen_enabled);
@@ -1091,6 +1071,7 @@ void BrowserCommandController::UpdateCommandsForFullscreenMode() {
                                         fullscreen_enabled);
 
   UpdateCommandsForBookmarkBar();
+  UpdateCommandsForIncognitoAvailability();
 }
 
 void BrowserCommandController::UpdatePrintingState() {

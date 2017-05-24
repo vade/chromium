@@ -11,6 +11,7 @@
 
 #include "base/macros.h"
 #include "base/observer_list.h"
+#include "chrome/browser/chromeos/app_mode/arc/arc_kiosk_app_data.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "components/signin/core/account_id/account_id.h"
@@ -25,38 +26,17 @@ namespace chromeos {
 // creates a user in whose context the app then runs.
 class ArcKioskAppManager {
  public:
-  // Struct to hold full info about ARC Kiosk app. In future
-  // this structure may contain many extra fields, e.g. icon.
-  class ArcKioskApp {
-   public:
-    ArcKioskApp(const policy::ArcKioskAppBasicInfo& app_info,
-                const AccountId& account_id,
-                const std::string& name);
-    ArcKioskApp(const ArcKioskApp& other);
-    ~ArcKioskApp();
-
-    bool operator==(const std::string& app_id) const;
-    bool operator==(const policy::ArcKioskAppBasicInfo& app_info) const;
-
-    const policy::ArcKioskAppBasicInfo& app_info() const { return app_info_; }
-    const AccountId& account_id() const { return account_id_; }
-    const std::string& name() const { return name_; }
-
-   private:
-    policy::ArcKioskAppBasicInfo app_info_;
-    AccountId account_id_;
-    std::string name_;
-  };
-
-  using ArcKioskApps = std::vector<ArcKioskApp>;
+  using Apps = std::vector<ArcKioskAppData*>;
 
   class ArcKioskAppManagerObserver {
    public:
     virtual void OnArcKioskAppsChanged() {}
 
    protected:
-    virtual ~ArcKioskAppManagerObserver() {}
+    virtual ~ArcKioskAppManagerObserver() = default;
   };
+
+  static const char kArcKioskDictionaryName[];
 
   static ArcKioskAppManager* Get();
 
@@ -74,12 +54,20 @@ class ArcKioskAppManager {
   const AccountId& GetAutoLaunchAccountId() const;
 
   // Returns app that should be started for given account id.
-  const ArcKioskApp* GetAppByAccountId(const AccountId& account_id);
+  const ArcKioskAppData* GetAppByAccountId(const AccountId& account_id);
 
-  const ArcKioskApps& GetAllApps() const { return apps_; }
+  void GetAllApps(Apps* apps) const;
+
+  void UpdateNameAndIcon(const std::string& app_id,
+                         const std::string& name,
+                         const gfx::ImageSkia& icon);
 
   void AddObserver(ArcKioskAppManagerObserver* observer);
   void RemoveObserver(ArcKioskAppManagerObserver* observer);
+
+  bool current_app_was_auto_launched_with_zero_delay() const {
+    return auto_launched_with_zero_delay_;
+  }
 
  private:
   // Updates apps_ based on CrosSettings.
@@ -87,10 +75,12 @@ class ArcKioskAppManager {
 
   // Removes cryptohomes of the removed apps. Terminates the session if
   // a removed app is running.
-  void ClearRemovedApps(const ArcKioskApps& old_apps);
+  void ClearRemovedApps(
+      const std::map<std::string, std::unique_ptr<ArcKioskAppData>>& old_apps);
 
-  ArcKioskApps apps_;
+  std::vector<std::unique_ptr<ArcKioskAppData>> apps_;
   AccountId auto_launch_account_id_;
+  bool auto_launched_with_zero_delay_ = false;
   base::ObserverList<ArcKioskAppManagerObserver, true> observers_;
 
   std::unique_ptr<CrosSettings::ObserverSubscription>

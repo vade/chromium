@@ -1,3 +1,9 @@
+/*
+ * Copyright 2017 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
 .flame-chart-main-pane {
     overflow: hidden;
 }
@@ -13,19 +19,16 @@
 }
 
 .flame-chart-highlight-element {
-    background-color: black;
     position: absolute;
-    opacity: 0.2;
     pointer-events: none;
+    background-color: rgba(56, 121, 217, 0.1);
 }
 
 .flame-chart-selected-element {
     position: absolute;
     pointer-events: none;
-    border-color: rgb(56, 121, 217);
-    border-width: 1px;
-    border-style: solid;
-    background-color: rgba(56, 121, 217, 0.2);
+    outline: 2px solid rgb(56, 121, 217);
+    background-color: rgba(56, 121, 217, 0.1);
 }
 
 .flame-chart-v-scroll {
@@ -81,6 +84,16 @@
     left: 0;
     right: 0;
     bottom: 0;
+}
+
+.chart-cursor-element {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 100;
+    width: 2px;
+    background-color: rgb(56, 121, 217);
+    pointer-events: none;
 }
 
 .flame-chart-entry-info:not(:empty) {

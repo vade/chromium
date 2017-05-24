@@ -11,6 +11,8 @@ static_library("browser") {
     "download_database.h",
     "download_row.cc",
     "download_row.h",
+    "download_slice_info.cc",
+    "download_slice_info.h",
     "download_types.cc",
     "download_types.h",
     "expire_history_backend.cc",
@@ -64,6 +66,10 @@ static_library("browser") {
     "top_sites_observer.h",
     "typed_url_data_type_controller.cc",
     "typed_url_data_type_controller.h",
+    "typed_url_sync_bridge.cc",
+    "typed_url_sync_bridge.h",
+    "typed_url_sync_metadata_database.cc",
+    "typed_url_sync_metadata_database.h",
     "typed_url_syncable_service.cc",
     "typed_url_syncable_service.h",
     "url_database.cc",
@@ -86,6 +92,7 @@ static_library("browser") {
   ]
 
   public_deps = [
+    "//components/sync/protocol",
     "//skia",
   ]
 
@@ -160,6 +167,7 @@ bundle_data("unit_tests_bundle_data") {
     "//components/test/data/history/history.29.sql",
     "//components/test/data/history/history.30.sql",
     "//components/test/data/history/history.31.sql",
+    "//components/test/data/history/history.32.sql",
     "//components/test/data/history/thumbnail_wild/Favicons.corrupt_meta.disable",
     "//components/test/data/history/thumbnail_wild/Favicons.v2.init.sql",
     "//components/test/data/history/thumbnail_wild/Favicons.v3.init.sql",
@@ -179,10 +187,12 @@ bundle_data("unit_tests_bundle_data") {
 source_set("unit_tests") {
   testonly = true
   sources = [
+    "download_slice_info_unittest.cc",
     "expire_history_backend_unittest.cc",
     "history_backend_db_unittest.cc",
     "history_backend_unittest.cc",
     "history_database_unittest.cc",
+    "history_model_worker_unittest.cc",
     "history_querying_unittest.cc",
     "history_service_unittest.cc",
     "history_types_unittest.cc",
@@ -190,6 +200,7 @@ source_set("unit_tests") {
     "top_sites_cache_unittest.cc",
     "top_sites_database_unittest.cc",
     "top_sites_impl_unittest.cc",
+    "typed_url_sync_metadata_database_unittest.cc",
     "typed_url_syncable_service_unittest.cc",
     "url_database_unittest.cc",
     "url_utils_unittest.cc",

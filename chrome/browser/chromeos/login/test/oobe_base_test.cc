@@ -82,7 +82,6 @@ void OobeBaseTest::SetUp() {
 }
 
 void OobeBaseTest::SetUpInProcessBrowserTestFixture() {
-  host_resolver()->AddRule("*", "127.0.0.1");
   network_portal_detector_ = new NetworkPortalDetectorTestImpl();
   network_portal_detector::InitializeForTesting(network_portal_detector_);
   network_portal_detector_->SetDefaultNetworkForTesting(
@@ -99,6 +98,7 @@ void OobeBaseTest::SetUpOnMainThread() {
 
   // Start the accept thread as the sandbox host process has already been
   // spawned.
+  host_resolver()->AddRule("*", "127.0.0.1");
   embedded_test_server()->StartAcceptingConnections();
 
   login_screen_load_observer_.reset(new content::WindowedNotificationObserver(
@@ -228,16 +228,21 @@ void OobeBaseTest::WaitForGaiaPageLoad() {
 }
 
 void OobeBaseTest::WaitForGaiaPageReload() {
-  JS()
-      .Evaluate(
-          "$('gaia-signin').gaiaAuthHost_.addEventListener('ready',"
-          "function f() {"
-          "$(\'gaia-signin\').gaiaAuthHost_.removeEventListener(\'ready\', f);"
-          "window.domAutomationController.setAutomationId(0);"
-          "window.domAutomationController.send('GaiaReady');"
-          "});");
-
+  // Starts listening to message before executing the JS code that generates
+  // the message below.
   content::DOMMessageQueue message_queue;
+
+  JS().Evaluate(
+      "(function() {"
+      "  var authenticator = $('gaia-signin').gaiaAuthHost_;"
+      "  var f = function() {"
+      "    authenticator.removeEventListener('ready', f);"
+      "    window.domAutomationController.setAutomationId(0);"
+      "    window.domAutomationController.send('GaiaReady');"
+      "  };"
+      "  authenticator.addEventListener('ready', f);"
+      "})();");
+
   std::string message;
   do {
     ASSERT_TRUE(message_queue.WaitForMessage(&message));

@@ -14,6 +14,7 @@
 #include "base/callback.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/rand_util.h"
 #include "base/run_loop.h"
 #include "components/sync/base/time.h"
 #include "components/sync/engine/activation_context.h"
@@ -30,7 +31,10 @@ namespace syncer {
 
 namespace {
 
-const char kKey1[] = "key1";
+// TODO(gangwu): crbug.com/719570 should assign kKey1 as "key1" after bug fixed.
+// Assign a prefix 'l' for kKey1 to let TestModelTypeSyncBridge::GetStorageKey
+// generate a random storage key for it.
+const char kKey1[] = "lkey1";
 const char kKey2[] = "key2";
 const char kKey3[] = "key3";
 const char kKey4[] = "key4";
@@ -48,6 +52,10 @@ const std::string kHash5(FakeModelTypeSyncBridge::TagHashFromKey(kKey5));
 // worker/processor will not have been initialized and thus empty.
 const EntitySpecifics kEmptySpecifics;
 
+const int invalidStorageKeySize = 64;
+
+static char InvalidStorageKeyPrefix[] = "InvalidStorageKey";
+
 EntitySpecifics GenerateSpecifics(const std::string& key,
                                   const std::string& value) {
   return FakeModelTypeSyncBridge::GenerateSpecifics(key, value);
@@ -56,6 +64,15 @@ EntitySpecifics GenerateSpecifics(const std::string& key,
 std::unique_ptr<EntityData> GenerateEntityData(const std::string& key,
                                                const std::string& value) {
   return FakeModelTypeSyncBridge::GenerateEntityData(key, value);
+}
+
+std::string GenerateInvalidStorageKey() {
+  return InvalidStorageKeyPrefix +
+         base::RandBytesAsString(invalidStorageKeySize);
+}
+
+bool IsInvalidStorageKey(const std::string& storage_key) {
+  return 0 == storage_key.find(InvalidStorageKeyPrefix);
 }
 
 class TestModelTypeSyncBridge : public FakeModelTypeSyncBridge {
@@ -68,6 +85,11 @@ class TestModelTypeSyncBridge : public FakeModelTypeSyncBridge {
       std::unique_ptr<TestModelTypeSyncBridge> other)
       : TestModelTypeSyncBridge() {
     std::swap(db_, other->db_);
+  }
+
+  ~TestModelTypeSyncBridge() override {
+    EXPECT_FALSE(synchronous_data_callback_);
+    EXPECT_FALSE(data_callback_);
   }
 
   void OnPendingCommitDataLoaded() {
@@ -96,13 +118,62 @@ class TestModelTypeSyncBridge : public FakeModelTypeSyncBridge {
   // FakeModelTypeSyncBridge overrides.
 
   base::Optional<ModelError> MergeSyncData(
-      std::unique_ptr<MetadataChangeList> mcl,
+      std::unique_ptr<MetadataChangeList> metadata_changes,
       EntityDataMap entity_data_map) override {
     merge_call_count_++;
-    return FakeModelTypeSyncBridge::MergeSyncData(std::move(mcl),
+
+    std::map<std::string, std::string> updated_keys;
+
+    // Update storage key for entities with invalid one.
+    for (const auto& kv : entity_data_map) {
+      std::string storage_key = kv.first;
+      if (IsInvalidStorageKey(storage_key)) {
+        change_processor()->UpdateStorageKey(
+            storage_key, kv.second.value().specifics.preference().name(),
+            metadata_changes.get());
+        updated_keys[storage_key] =
+            kv.second.value().specifics.preference().name();
+      }
+    }
+
+    for (const auto& kv : updated_keys) {
+      DCHECK_NE(kv.first, kv.second);
+      entity_data_map[kv.second] = entity_data_map[kv.first];
+      entity_data_map.erase(kv.first);
+    }
+
+    return FakeModelTypeSyncBridge::MergeSyncData(std::move(metadata_changes),
                                                   entity_data_map);
   }
 
+  base::Optional<ModelError> ApplySyncChanges(
+      std::unique_ptr<MetadataChangeList> metadata_changes,
+      EntityChangeList entity_changes) override {
+    EntityChangeList new_changes;
+    for (EntityChangeList::iterator iter = entity_changes.begin();
+         iter != entity_changes.end();) {
+      std::string storage_key = iter->storage_key();
+      if (IsInvalidStorageKey(storage_key)) {
+        EXPECT_TRUE(iter->type() == EntityChange::ACTION_ADD);
+
+        change_processor()->UpdateStorageKey(
+            storage_key, iter->data().specifics.preference().name(),
+            metadata_changes.get());
+        new_changes.push_back(EntityChange::CreateAdd(
+            iter->data().specifics.preference().name(),
+            FakeModelTypeSyncBridge::CopyEntityData(iter->data())
+                ->PassToPtr()));
+        iter = entity_changes.erase(iter);
+      } else {
+        ++iter;
+      }
+    }
+    entity_changes.insert(entity_changes.end(), new_changes.begin(),
+                          new_changes.end());
+
+    return FakeModelTypeSyncBridge::ApplySyncChanges(
+        std::move(metadata_changes), entity_changes);
+  }
   void GetData(StorageKeyList keys, DataCallback callback) override {
     if (synchronous_data_callback_) {
       synchronous_data_callback_ = false;
@@ -114,15 +185,18 @@ class TestModelTypeSyncBridge : public FakeModelTypeSyncBridge {
     }
   }
 
-  void CheckPostConditions() override {
-    FakeModelTypeSyncBridge::CheckPostConditions();
-    EXPECT_FALSE(synchronous_data_callback_);
-    EXPECT_FALSE(data_callback_);
+  std::string GetStorageKey(const EntityData& entity_data) override {
+    std::string name = entity_data.specifics.preference().name();
+    if (name.length() > 0 && name[0] <= 'k') {
+      return entity_data.specifics.preference().name();
+    }
+    return GenerateInvalidStorageKey();
   }
 
  private:
   void CaptureDataCallback(DataCallback callback,
                            std::unique_ptr<DataBatch> data) {
+    EXPECT_FALSE(data_callback_);
     data_callback_ = base::Bind(callback, base::Passed(std::move(data)));
   }
 
@@ -1061,17 +1135,21 @@ TEST_F(SharedModelTypeProcessorTest, ConflictResolutionChangesMatch) {
 
 TEST_F(SharedModelTypeProcessorTest, ConflictResolutionUseLocal) {
   InitializeToReadyState();
-  EntitySpecifics specifics = bridge()->WriteItem(kKey1, kValue1);
+  // WriteAndAck entity to get id from the server.
+  WriteItemAndAck(kKey1, kValue1);
   bridge()->SetConflictResolution(ConflictResolution::UseLocal());
 
-  worker()->UpdateFromServer(kHash1, GenerateSpecifics(kKey1, kValue2));
+  // Change value locally and at the same time simulate conflicting update from
+  // server.
+  EntitySpecifics specifics2 = bridge()->WriteItem(kKey1, kValue2);
+  worker()->UpdateFromServer(kHash1, GenerateSpecifics(kKey1, kValue3));
 
   // Updated metadata but not data; new commit request.
-  EXPECT_EQ(1U, db().data_change_count());
-  EXPECT_EQ(2U, db().metadata_change_count());
-  EXPECT_EQ(1, db().GetMetadata(kKey1).server_version());
+  EXPECT_EQ(2U, db().data_change_count());
+  EXPECT_EQ(4U, db().metadata_change_count());
+  EXPECT_EQ(2, db().GetMetadata(kKey1).server_version());
   worker()->ExpectPendingCommits({kHash1, kHash1});
-  worker()->ExpectNthPendingCommit(1, kHash1, specifics);
+  worker()->ExpectNthPendingCommit(1, kHash1, specifics2);
 }
 
 TEST_F(SharedModelTypeProcessorTest, ConflictResolutionUseRemote) {
@@ -1166,7 +1244,9 @@ TEST_F(SharedModelTypeProcessorTest, Disable) {
 
   // Once we're ready to commit, all three local items should consider
   // themselves uncommitted and pending for commit.
-  worker()->ExpectPendingCommits({kHash1, kHash2, kHash3});
+  // The hashes need to be in alphabet order of their storage keys since
+  // enabling sync trigered merge and it will reorder the commits.
+  worker()->ExpectPendingCommits({kHash2, kHash3, kHash1});
 }
 
 // Test re-encrypt everything when desired encryption key changes.
@@ -1246,18 +1326,26 @@ TEST_F(SharedModelTypeProcessorTest, ReEncryptUpdatesWithNewKey) {
 // Test that re-encrypting enqueues the right data for USE_LOCAL conflicts.
 TEST_F(SharedModelTypeProcessorTest, ReEncryptConflictResolutionUseLocal) {
   InitializeToReadyState();
+  // WriteAndAck entity to get id from the server.
+  WriteItemAndAck(kKey1, kValue1);
   worker()->UpdateWithEncryptionKey("k1");
-  EntitySpecifics specifics = bridge()->WriteItem(kKey1, kValue1);
+  EntitySpecifics specifics = bridge()->WriteItem(kKey1, kValue2);
   worker()->ExpectPendingCommits({kHash1});
 
   bridge()->SetConflictResolution(ConflictResolution::UseLocal());
   // Unencrypted update needs to be re-commited with key k1.
-  worker()->UpdateFromServer(kHash1, GenerateSpecifics(kKey1, kValue2), 1, "");
+  worker()->UpdateFromServer(kHash1, GenerateSpecifics(kKey1, kValue3), 1, "");
 
   // Ensure the re-commit has the correct value.
   EXPECT_EQ(2U, worker()->GetNumPendingCommits());
   worker()->ExpectNthPendingCommit(1, kHash1, specifics);
-  EXPECT_EQ(kValue1, db().GetValue(kKey1));
+  EXPECT_EQ(kValue2, db().GetValue(kKey1));
+
+  // GetData was launched as a result of UpdateWithEncryptionKey(). Since the
+  // conflict resolution encrypted all entities, the GetData result should be
+  // ignored.
+  OnPendingCommitDataLoaded();
+  EXPECT_EQ(2U, worker()->GetNumPendingCommits());
 }
 
 // Test that re-encrypting enqueues the right data for USE_REMOTE conflicts.
@@ -1347,10 +1435,12 @@ TEST_F(SharedModelTypeProcessorTest, IgnoreRemoteEncryption) {
 // Same as above but with two commit requests before one ack.
 TEST_F(SharedModelTypeProcessorTest, IgnoreRemoteEncryptionInterleaved) {
   InitializeToReadyState();
-  EntitySpecifics specifics1 = bridge()->WriteItem(kKey1, kValue1);
-  EntitySpecifics specifics2 = bridge()->WriteItem(kKey1, kValue2);
+  // WriteAndAck entity to get id from the server.
+  WriteItemAndAck(kKey1, kValue1);
+  EntitySpecifics specifics1 = bridge()->WriteItem(kKey1, kValue2);
+  EntitySpecifics specifics2 = bridge()->WriteItem(kKey1, kValue3);
   worker()->AckOnePendingCommit();
-  // kValue1 is now the base value.
+  // kValue2 is now the base value.
   EXPECT_EQ(1U, worker()->GetNumPendingCommits());
   worker()->ExpectNthPendingCommit(0, kHash1, specifics2);
 

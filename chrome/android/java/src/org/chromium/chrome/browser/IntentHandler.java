@@ -35,6 +35,7 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.document.ActivityDelegate;
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.common.ContentUrlConstants;
 import org.chromium.content_public.common.Referrer;
 import org.chromium.ui.base.PageTransition;
 
@@ -588,14 +589,14 @@ public class IntentHandler {
      */
     public static void addTrustedIntentExtras(Intent intent) {
         if (ExternalNavigationDelegateImpl.willChromeHandleIntent(intent, true)) {
-            // The PendingIntent functions as an authentication token --- it could only have come
-            // from us. Stash it in the real Intent as an extra. shouldIgnoreIntent will retrieve it
-            // and check it with isIntentChromeInternal.
-            intent.putExtra(TRUSTED_APPLICATION_CODE_EXTRA, getAuthenticationToken());
             // It is crucial that we never leak the authentication token to other packages, because
             // then the other package could be used to impersonate us/do things as us. Therefore,
             // scope the real Intent to our package.
             intent.setPackage(ContextUtils.getApplicationContext().getPackageName());
+            // The PendingIntent functions as an authentication token --- it could only have come
+            // from us. Stash it in the real Intent as an extra. shouldIgnoreIntent will retrieve it
+            // and check it with isIntentChromeInternal.
+            intent.putExtra(TRUSTED_APPLICATION_CODE_EXTRA, getAuthenticationToken());
         }
     }
 
@@ -693,13 +694,14 @@ public class IntentHandler {
                                || intent.hasCategory(Intent.CATEGORY_DEFAULT)
                                || intent.getCategories() == null)) {
                 String lowerCaseScheme = scheme.toLowerCase(Locale.US);
-                if ("chrome".equals(lowerCaseScheme) || "chrome-native".equals(lowerCaseScheme)
-                        || "about".equals(lowerCaseScheme)) {
+                if (UrlConstants.CHROME_SCHEME.equals(lowerCaseScheme)
+                        || UrlConstants.CHROME_NATIVE_SCHEME.equals(lowerCaseScheme)
+                        || ContentUrlConstants.ABOUT_SCHEME.equals(lowerCaseScheme)) {
                     // Allow certain "safe" internal URLs to be launched by external
                     // applications.
                     String lowerCaseUrl = url.toLowerCase(Locale.US);
-                    if ("about:blank".equals(lowerCaseUrl)
-                            || "about://blank".equals(lowerCaseUrl)) {
+                    if (ContentUrlConstants.ABOUT_BLANK_DISPLAY_URL.equals(lowerCaseUrl)
+                            || ContentUrlConstants.ABOUT_BLANK_URL.equals(lowerCaseUrl)) {
                         return false;
                     }
 
@@ -779,7 +781,6 @@ public class IntentHandler {
             return true;
         }
         if (ExternalAuthUtils.getInstance().isGoogleSigned(
-                    ContextUtils.getApplicationContext(),
                     ApiCompatibilityUtils.getCreatorPackage(token))) {
             return true;
         }
@@ -830,8 +831,9 @@ public class IntentHandler {
     }
 
     private boolean isInvalidScheme(String scheme) {
-        return scheme != null && (scheme.toLowerCase(Locale.US).equals("javascript")
-                                         || scheme.toLowerCase(Locale.US).equals("jar"));
+        return scheme != null
+            && (scheme.toLowerCase(Locale.US).equals(UrlConstants.JAVASCRIPT_SCHEME)
+                || scheme.toLowerCase(Locale.US).equals(UrlConstants.JAR_SCHEME));
     }
 
     /**

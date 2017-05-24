@@ -44,11 +44,23 @@
             ]
         },
         {
-            "type": "@UI.ActionDelegate",
-            "actionId": "network.blocked-urls.show",
-            "className": "Network.BlockedURLsPane.ActionDelegate",
-            "iconClass": "largeicon-block",
-            "title": "Block network requests"
+            "type": "setting",
+            "category": "Network",
+            "title": "Group network log by frame",
+            "settingName": "network.group-by-frame",
+            "settingType": "boolean",
+            "defaultValue": false,
+            "tags": "network, frame, group",
+            "options": [
+                {
+                    "value": true,
+                    "title": "Group network log items by frame"
+                },
+                {
+                    "value": false,
+                    "title": "Don't group network log items by frame"
+                }
+            ]
         },
         {
             "type": "@UI.ActionDelegate",
@@ -88,8 +100,7 @@
             "title": "Request blocking",
             "persistence": "closeable",
             "order": 60,
-            "className": "Network.BlockedURLsPane",
-            "experiment": "requestBlocking"
+            "className": "Network.BlockedURLsPane"
         },
         {
             "type": "view",
@@ -107,7 +118,11 @@
         "components",
         "perf_ui",
         "cookie_table",
-        "data_grid"
+        "data_grid",
+        "network_conditions",
+        "object_ui",
+        "network_log",
+        "product_registry"
     ],
     "scripts": [
         "BlockedURLsPane.js",
@@ -122,6 +137,7 @@
         "NetworkTimeCalculator.js",
         "NetworkLogView.js",
         "NetworkLogViewColumns.js",
+        "NetworkFrameGrouper.js",
         "NetworkManageCustomHeadersView.js",
         "NetworkOverview.js",
         "NetworkWaterfallColumn.js",
@@ -142,6 +158,7 @@
         "networkLogView.css",
         "networkManageCustomHeadersView.css",
         "networkPanel.css",
+        "networkTimingTable.css",
         "networkWaterfallColumn.css",
         "requestCookiesView.css",
         "requestHeadersTree.css",

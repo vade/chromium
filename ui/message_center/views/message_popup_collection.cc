@@ -125,11 +125,36 @@ void MessagePopupCollection::ClickOnSettingsButton(
   message_center_->ClickOnSettingsButton(notification_id);
 }
 
+void MessagePopupCollection::UpdateNotificationSize(
+    const std::string& notification_id) {
+  OnNotificationUpdated(notification_id);
+}
+
 void MessagePopupCollection::MarkAllPopupsShown() {
   std::set<std::string> closed_ids = CloseAllWidgets();
   for (std::set<std::string>::iterator iter = closed_ids.begin();
        iter != closed_ids.end(); iter++) {
     message_center_->MarkSinglePopupAsShown(*iter, false);
+  }
+}
+
+void MessagePopupCollection::PausePopupTimers() {
+  DCHECK(timer_pause_counter_ >= 0);
+  if (timer_pause_counter_ <= 0) {
+    message_center_->PausePopupTimers();
+    timer_pause_counter_ = 1;
+  } else {
+    timer_pause_counter_++;
+  }
+}
+
+void MessagePopupCollection::RestartPopupTimers() {
+  DCHECK(timer_pause_counter_ >= 1);
+  if (timer_pause_counter_ <= 1) {
+    message_center_->RestartPopupTimers();
+    timer_pause_counter_ = 0;
+  } else {
+    timer_pause_counter_--;
   }
 }
 
@@ -148,6 +173,10 @@ void MessagePopupCollection::UpdateWidgets() {
 
   bool top_down = alignment_delegate_->IsTopDown();
   int base = GetBaseLine(toasts_.empty() ? NULL : toasts_.back());
+#if defined(OS_CHROMEOS)
+  bool is_primary_display =
+      alignment_delegate_->IsPrimaryDisplayForNotification();
+#endif
 
   // Iterate in the reverse order to keep the oldest toasts on screen. Newer
   // items may be ignored if there are no room to place them.
@@ -155,6 +184,16 @@ void MessagePopupCollection::UpdateWidgets() {
            popups.rbegin(); iter != popups.rend(); ++iter) {
     if (FindToast((*iter)->id()))
       continue;
+
+#if defined(OS_CHROMEOS)
+    // Disables popup of custom notification on non-primary displays, since
+    // currently custom notification supports only on one display at the same
+    // time.
+    // TODO(yoshiki): Support custom popup notification on multiple display
+    // (crbug.com/715370).
+    if (!is_primary_display && (*iter)->type() == NOTIFICATION_TYPE_CUSTOM)
+      continue;
+#endif
 
     MessageView* view;
     // Create top-level notification.
@@ -224,7 +263,7 @@ void MessagePopupCollection::OnMouseEntered(ToastContentsView* toast_entered) {
   // toasts.  So we need to keep track of which one is the currently active one.
   latest_toast_entered_ = toast_entered;
 
-  message_center_->PausePopupTimers();
+  PausePopupTimers();
 
   if (user_is_closing_toasts_by_clicking_)
     defer_timer_->Stop();
@@ -244,7 +283,7 @@ void MessagePopupCollection::OnMouseExited(ToastContentsView* toast_exited) {
         this,
         &MessagePopupCollection::OnDeferTimerExpired);
   } else {
-    message_center_->RestartPopupTimers();
+    RestartPopupTimers();
   }
 }
 
@@ -407,7 +446,7 @@ void MessagePopupCollection::OnDeferTimerExpired() {
   user_is_closing_toasts_by_clicking_ = false;
   DecrementDeferCounter();
 
-  message_center_->RestartPopupTimers();
+  RestartPopupTimers();
 }
 
 void MessagePopupCollection::OnNotificationUpdated(

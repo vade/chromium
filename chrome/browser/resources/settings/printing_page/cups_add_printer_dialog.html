@@ -4,11 +4,11 @@
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-button/paper-button.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-input/paper-input.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-spinner/paper-spinner.html">
-<link rel="import" href="/i18n_setup.html">
-<link rel="import" href="/printing_page/cups_add_printer_dialog_util.html">
-<link rel="import" href="/printing_page/cups_printers_browser_proxy.html">
-<link rel="import" href="/settings_shared_css.html">
-<link rel="import" href="/settings_vars_css.html">
+<link rel="import" href="../i18n_setup.html">
+<link rel="import" href="cups_add_printer_dialog_util.html">
+<link rel="import" href="cups_printers_browser_proxy.html">
+<link rel="import" href="../settings_shared_css.html">
+<link rel="import" href="../settings_vars_css.html">
 
 <dom-module id="add-printer-discovery-dialog">
   <template>
@@ -41,8 +41,10 @@
         width: 15px;
       }
 
-      #manuallyAddPrinterButton {
-        -webkit-margin-end: 210px;
+      .dialog-buttons {
+        display: flex;
+        justify-content: space-between;
+        width: 100%;
       }
     </style>
     <add-printer-dialog>
@@ -60,17 +62,23 @@
         </div>
       </div>
       <div class="dialog-buttons">
-        <paper-button id="manuallyAddPrinterButton"
-            on-tap="switchToManualAddDialog_">
-          $i18n{manuallyAddPrinterButtonText}
-        </paper-button>
-        <paper-button class="cancel-button" on-tap="onCancelTap_">
-          $i18n{cancelButtonText}
-        </paper-button>
-        <paper-button class="action-button" id="addPrinterButton"
-            disabled="[[!selectedPrinter]]" on-tap="switchToConfiguringDialog_">
-          $i18n{addPrinterButtonText}
-        </paper-button>
+        <div>  <!-- Left group -->
+          <paper-button id="manuallyAddPrinterButton" class="secondary-button"
+              on-tap="switchToManualAddDialog_">
+            $i18n{manuallyAddPrinterButtonText}
+          </paper-button>
+        </div>
+        <div>  <!-- Right group -->
+          <paper-button class="cancel-button secondary-button"
+              on-tap="onCancelTap_">
+            $i18n{cancelButtonText}
+          </paper-button>
+          <paper-button class="action-button" id="addPrinterButton"
+              disabled="[[!selectedPrinter]]"
+              on-tap="switchToManufacturerDialog_">
+            $i18n{addPrinterButtonText}
+          </paper-button>
+        </div>
       </div>
     </add-printer-dialog>
   </template>
@@ -97,7 +105,7 @@
 
       .md-select,
       paper-input {
-        --paper-input-container-color: var(--google-grey-500);
+        --paper-input-container-color: var(--paper-grey-600);
         --paper-input-container-input: {
           font-size: inherit;
         };
@@ -114,9 +122,9 @@
 
       .search-printer-box paper-spinner {
         --paper-spinner-stroke-width: 2px;
+        -webkit-margin-end: 3px;
+        -webkit-margin-start: 20px;
         height: 15px;
-        margin-left: 20px;
-        margin-right: 3px;
         width: 15px;
       }
 
@@ -141,7 +149,7 @@
           <div class="start">
             <div class="label">$i18n{printerName}</div>
             <div class="secondary">
-              <paper-input no-label-float id="printerNameInput"
+              <paper-input no-label-float id="printerNameInput" autofocus
                   value="{{newPrinter.printerName}}">
               </paper-input>
             </div>
@@ -160,10 +168,10 @@
         </div>
         <div class="settings-box two-line">
           <div class="start">
-            <div class="label">$i18n{printerProtocol}</div>
+            <div id="printerProtocol" class="label">$i18n{printerProtocol}</div>
             <div class="secondary">
               <div class="md-select-wrapper">
-                <select class="md-select" 
+                <select class="md-select" aria-labelledby="printerProtocol"
                     value="[[newPrinter.printerProtocol]]"
                     on-change="onProtocolChange_">
                   <option value="ipp">$i18n{printerProtocolIpp}</option>
@@ -173,7 +181,6 @@
                   <option value="socket">$i18n{printerProtocolAppSocket}
                   </option>
                   <option value="lpd">$i18n{printerProtocolLpd}</option>
-                  <option value="usb">$i18n{printerProtocolUsb}</option>
                 </select>
                 <span class="md-select-underline"></span>
               </div>
@@ -184,7 +191,8 @@
           <div class="start">
             <div class="label">$i18n{printerQueue}</div>
             <div class="secondary">
-              <paper-input no-label-float value="{{newPrinter.printerQueue}}">
+              <paper-input no-label-float label="ipp/print" 
+                  value="{{newPrinter.printerQueue}}">
               </paper-input>
             </div>
           </div>
@@ -202,7 +210,8 @@
         </div>
       </div>
       <div class="dialog-buttons">
-        <paper-button class="cancel-button" on-tap="onCancelTap_">
+        <paper-button class="cancel-button secondary-button"
+            on-tap="onCancelTap_">
           $i18n{cancelButtonText}
         </paper-button>
         <paper-button class="action-button" on-tap="switchToManufacturerDialog_"
@@ -231,7 +240,7 @@
       }
 
       paper-input {
-        --paper-input-container-color: var(--google-grey-500);
+        --paper-input-container-color: var(--paper-grey-600);
         --paper-input-container-input: {
           font-size: inherit;
           border: 1px solid lightgray;
@@ -252,8 +261,10 @@
         padding: 10px 20px;
       }
 
-      #manuallyAddPrinterButton {
-        -webkit-margin-end: 210px;
+      .dialog-buttons {
+        display: flex;
+        justify-content: space-between;
+        width: 100%;
       }
 
       #browseButton {
@@ -264,9 +275,6 @@
     <add-printer-dialog>
       <div class="dialog-title">$i18n{addPrintersManuallyTitle}</div>
       <div class="dialog-body">
-        <div class="settings-box first">
-          $i18n{selectManufacturerModelMessage}
-        </div>
         <div class="settings-box two-line">
           <div class="start">
             <div class="label">$i18n{printerManufacturer}</div>
@@ -304,17 +312,25 @@
         </div>
       </div>
       <div class="dialog-buttons">
-        <paper-button id="manuallyAddPrinterButton"
-            on-tap="switchToManualAddDialog_">
-          $i18n{manuallyAddPrinterButtonText}
-        </paper-button>
-        <paper-button class="cancel-button" on-tap="onCancelTap_">
-          $i18n{cancelButtonText}
-        </paper-button>
-        <paper-button class="action-button" id="addPrinterButton"
-            on-tap="switchToConfiguringDialog_">
-          $i18n{addPrinterButtonText}
-        </paper-button>
+        <div>  <!-- Left group -->
+          <paper-button id="manuallyAddPrinterButton" class="secondary-button"
+              on-tap="switchToPreviousDialog_">
+            $i18n{back}
+          </paper-button>
+        </div>
+        <div>  <!-- Right group -->
+          <paper-button class="cancel-button secondary-button"
+              on-tap="onCancelTap_">
+            $i18n{cancelButtonText}
+          </paper-button>
+          <paper-button class="action-button" id="addPrinterButton"
+              disabled="[[!canAddPrinter_(newPrinter.printerManufacturer,
+                                          newPrinter.printerModel,
+                                          newPrinter.printerPPDPath)]]"
+              on-tap="switchToConfiguringDialog_">
+            $i18n{addPrinterButtonText}
+          </paper-button>
+        </div>
       </div>
     </add-printer-dialog>
   </template>
@@ -335,7 +351,8 @@
         <div id="configuringMessage">$i18n{printerConfiguringMessage}</div>
       </div>
       <div class="dialog-buttons">
-        <paper-button class="cancel-button" on-tap="onCancelConfiguringTap_">
+        <paper-button class="cancel-button secondary-button"
+            on-tap="onCancelConfiguringTap_">
           $i18n{cancelButtonText}
         </paper-button>
       </div>
@@ -349,7 +366,7 @@
 
     <!-- Printer Discovery Dialog -->
     <template is="dom-if" if="[[showDiscoveryDialog_]]" restamp>
-      <add-printer-discovery-dialog selected-printer="{{selectedPrinter}}">
+      <add-printer-discovery-dialog selected-printer="{{newPrinter}}">
       </add-printer-discovery-dialog>
     </template>
 
@@ -362,7 +379,7 @@
     <!-- Configuring Printer Dialog -->
     <template is="dom-if" if="[[showConfiguringDialog_]]" restamp>
       <add-printer-configuring-dialog
-          printer-name="[[getConfiguringPrinterName_()]]"
+          printer-name="[[newPrinter.printerName]]"
           dialog-title="[[configuringDialogTitle]]">
       </add-printer-configuring-dialog>
     </template>
@@ -370,7 +387,7 @@
     <!-- Manufacturer and Model Dialog -->
     <template is="dom-if" if="[[showManufacturerDialog_]]" restamp>
       <add-printer-manufacturer-model-dialog new-printer="{{newPrinter}}"
-          setup-failed="[[setupFailed]]">
+          previous-dialog="[[previousDialog]]" setup-failed="[[setupFailed]]">
       </add-printer-manufacturer-model-dialog>
     </template>
 

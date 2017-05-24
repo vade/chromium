@@ -46,16 +46,19 @@ static_library("search_engines") {
   ]
 
   public_deps = [
+    "//base",
+    "//components/google/core/browser",
+    "//components/keyed_service/core",
     "//components/metrics/proto",
+    "//components/prefs",
+    "//components/sync",
+    "//components/webdata/common",
   ]
 
   deps = [
     ":prepopulated_engines",
-    "//base",
     "//base:i18n",
-    "//components/google/core/browser",
     "//components/history/core/browser",
-    "//components/keyed_service/core",
     "//components/metrics/proto",
 
     # The search_engines target is in an include cycle with
@@ -65,12 +68,9 @@ static_library("search_engines") {
     #"//components/omnibox/browser",
     "//components/infobars/core",
     "//components/pref_registry",
-    "//components/prefs",
     "//components/rappor",
     "//components/strings",
-    "//components/sync",
     "//components/url_formatter",
-    "//components/webdata/common",
     "//google_apis",
     "//net",
     "//sql",
@@ -96,6 +96,8 @@ static_library("search_engines") {
 static_library("test_support") {
   testonly = true
   sources = [
+    "search_engines_test_util.cc",
+    "search_engines_test_util.h",
     "testing_search_terms_data.cc",
     "testing_search_terms_data.h",
   ]
@@ -103,6 +105,7 @@ static_library("test_support") {
   public_deps = [
     ":search_engines",
     "//base",
+    "//components/sync_preferences:test_support",
     "//testing/gtest",
   ]
 }
@@ -131,6 +134,7 @@ source_set("unit_tests") {
     "//components/sync:test_support_model",
     "//components/sync_preferences:test_support",
     "//components/webdata/common",
+    "//net:net",
     "//sql",
     "//testing/gmock",
     "//testing/gtest",

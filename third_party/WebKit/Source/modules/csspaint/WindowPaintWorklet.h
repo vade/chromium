@@ -5,14 +5,12 @@
 #ifndef WindowPaintWorklet_h
 #define WindowPaintWorklet_h
 
-#include "core/frame/LocalDOMWindow.h"
 #include "modules/ModulesExport.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
-class DOMWindow;
 class LocalDOMWindow;
 class PaintWorklet;
 class Worklet;
@@ -23,17 +21,17 @@ class MODULES_EXPORT WindowPaintWorklet final
   USING_GARBAGE_COLLECTED_MIXIN(WindowPaintWorklet);
 
  public:
-  static WindowPaintWorklet& from(LocalDOMWindow&);
-  static Worklet* paintWorklet(DOMWindow&);
+  static WindowPaintWorklet& From(LocalDOMWindow&);
+  static Worklet* paintWorklet(LocalDOMWindow&);
   PaintWorklet* paintWorklet();
 
   DECLARE_TRACE();
 
  private:
   explicit WindowPaintWorklet(LocalDOMWindow&);
-  static const char* supplementName();
+  static const char* SupplementName();
 
-  Member<PaintWorklet> m_paintWorklet;
+  Member<PaintWorklet> paint_worklet_;
 };
 
 }  // namespace blink

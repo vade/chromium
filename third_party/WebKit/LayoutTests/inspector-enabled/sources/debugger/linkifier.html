@@ -43,9 +43,7 @@ function test()
 
     function debuggerTest()
     {
-        var scripts = InspectorTest.debuggerModel.scripts;
-        for (var scriptId in scripts) {
-            var scriptCandidate = scripts[scriptId];
+        for (var scriptCandidate of InspectorTest.debuggerModel.scripts()) {
             if (scriptCandidate.sourceURL === InspectorTest.mainTarget.inspectedURL() && scriptCandidate.lineOffset === 4) {
                 script = scriptCandidate;
                 break;
@@ -75,7 +73,7 @@ function test()
     function uiSourceCodeScriptFormatted()
     {
         InspectorTest.addResult("pretty printed location: " + link.textContent);
-        scriptFormatter._discardFormattedUISourceCodeScript(UI.panels.sources.visibleView.uiSourceCode());
+        Sources.sourceFormatter.discardFormattedUISourceCode(UI.panels.sources.visibleView.uiSourceCode());
         InspectorTest.addResult("reverted location: " + link.textContent);
 
         var count1 = liveLocationsCount();

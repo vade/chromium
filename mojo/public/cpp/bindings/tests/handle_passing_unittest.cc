@@ -10,6 +10,7 @@
 #include "base/run_loop.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/system/wait.h"
 #include "mojo/public/cpp/test_support/test_utils.h"
 #include "mojo/public/interfaces/bindings/tests/sample_factory.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -95,9 +96,7 @@ class SampleFactoryImpl : public sample::Factory {
       EXPECT_TRUE(WriteTextMessage(pipe1_.get(), text2));
     }
 
-    sample::ResponsePtr response(sample::Response::New());
-    response->x = 2;
-    response->pipe = std::move(pipe0);
+    sample::ResponsePtr response(sample::Response::New(2, std::move(pipe0)));
     callback.Run(std::move(response), text1);
 
     if (request->obj)
@@ -113,9 +112,8 @@ class SampleFactoryImpl : public sample::Factory {
 
     MojoHandleSignalsState state;
     ASSERT_EQ(MOJO_RESULT_OK,
-              MojoWait(pipe.get().value(), MOJO_HANDLE_SIGNAL_READABLE,
-                       MOJO_DEADLINE_INDEFINITE, &state));
-    ASSERT_EQ(MOJO_HANDLE_SIGNAL_READABLE, state.satisfied_signals);
+              mojo::Wait(pipe.get(), MOJO_HANDLE_SIGNAL_READABLE, &state));
+    ASSERT_TRUE(state.satisfied_signals & MOJO_HANDLE_SIGNAL_READABLE);
     ASSERT_EQ(MOJO_RESULT_OK,
               ReadDataRaw(
                   pipe.get(), nullptr, &data_size, MOJO_READ_DATA_FLAG_QUERY));
@@ -214,10 +212,8 @@ TEST_F(HandlePassingTest, Basic) {
   ImportedInterfaceImpl imported_impl(MakeRequest(&imported),
                                       run_loop.QuitClosure());
 
-  sample::RequestPtr request(sample::Request::New());
-  request->x = 1;
-  request->pipe = std::move(pipe1.handle0);
-  request->obj = std::move(imported);
+  sample::RequestPtr request(sample::Request::New(
+      1, std::move(pipe1.handle0), base::nullopt, std::move(imported)));
   bool got_response = false;
   std::string got_text_reply;
   base::RunLoop run_loop2;
@@ -240,8 +236,9 @@ TEST_F(HandlePassingTest, PassInvalid) {
   sample::FactoryPtr factory;
   SampleFactoryImpl factory_impl(MakeRequest(&factory));
 
-  sample::RequestPtr request(sample::Request::New());
-  request->x = 1;
+  sample::RequestPtr request(
+      sample::Request::New(1, ScopedMessagePipeHandle(), base::nullopt,
+                           imported::ImportedInterfacePtr()));
   bool got_response = false;
   std::string got_text_reply;
   base::RunLoop run_loop;
@@ -328,7 +325,7 @@ TEST_F(HandlePassingTest, CreateNamedObject) {
   sample::NamedObjectPtr object1;
   EXPECT_FALSE(object1);
 
-  InterfaceRequest<sample::NamedObject> object1_request(&object1);
+  auto object1_request = mojo::MakeRequest(&object1);
   EXPECT_TRUE(object1_request.is_pending());
   factory->CreateNamedObject(std::move(object1_request));
   EXPECT_FALSE(object1_request.is_pending());  // We've passed the request.

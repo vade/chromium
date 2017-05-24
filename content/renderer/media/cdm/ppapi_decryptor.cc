@@ -248,6 +248,8 @@ void PpapiDecryptor::Decrypt(
     return;
   }
 
+  // TODO(xhwang): If the buffer is not encrypted, return it directly.
+
   DVLOG(3) << __func__ << " - stream_type: " << stream_type;
   if (!CdmDelegate() ||
       !CdmDelegate()->Decrypt(stream_type, encrypted, decrypt_cb)) {
@@ -279,7 +281,6 @@ void PpapiDecryptor::InitializeAudioDecoder(
   }
 
   DVLOG(2) << __func__;
-  DCHECK(config.is_encrypted());
   DCHECK(config.IsValidConfig());
 
   audio_decoder_init_cb_ = init_cb;
@@ -303,7 +304,6 @@ void PpapiDecryptor::InitializeVideoDecoder(
   }
 
   DVLOG(2) << __func__;
-  DCHECK(config.is_encrypted());
   DCHECK(config.IsValidConfig());
 
   video_decoder_init_cb_ = init_cb;
@@ -396,7 +396,7 @@ void PpapiDecryptor::OnDecoderInitialized(StreamType stream_type,
 }
 
 void PpapiDecryptor::OnSessionMessage(const std::string& session_id,
-                                      MessageType message_type,
+                                      media::CdmMessageType message_type,
                                       const std::vector<uint8_t>& message) {
   DCHECK(render_task_runner_->BelongsToCurrentThread());
   session_message_cb_.Run(session_id, message_type, message);

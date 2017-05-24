@@ -8,9 +8,9 @@ template <typename UnionPtrType>
     case Tag::{{field.name|upper}}:
 {%-   if field.kind|is_object_kind or
          field.kind|is_any_handle_or_interface_kind %}
-      rv->set_{{field.name}}(mojo::internal::Clone(*data_.{{field.name}}));
+      rv->set_{{field.name}}(mojo::Clone(*data_.{{field.name}}));
 {%-   else %}
-      rv->set_{{field.name}}(mojo::internal::Clone(data_.{{field.name}}));
+      rv->set_{{field.name}}(mojo::Clone(data_.{{field.name}}));
 {%-   endif %}
       break;
 {%- endfor %}
@@ -30,9 +30,9 @@ bool {{union.name}}::Equals(const T& other) const {
     case Tag::{{field.name|upper}}:
 {%-   if field.kind|is_object_kind or
          field.kind|is_any_handle_or_interface_kind %}
-      return mojo::internal::Equals(*(data_.{{field.name}}), *(other.data_.{{field.name}}));
+      return mojo::Equals(*(data_.{{field.name}}), *(other.data_.{{field.name}}));
 {%-   else %}
-      return mojo::internal::Equals(data_.{{field.name}}, other.data_.{{field.name}});
+      return mojo::Equals(data_.{{field.name}}, other.data_.{{field.name}});
 {%-   endif %}
 {%- endfor %}
   };

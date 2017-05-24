@@ -8,14 +8,17 @@
 This script checks LayoutTests/external/wpt for changes that can be exported,
 then creates a patch, and creates and lands a pull request for the upstream
 repository.
+
+For this script to be effective it needs to be run on a regular
+interval (e.g. every 10 mins).
 """
 
 import argparse
+import json
 import logging
 
 from webkitpy.common.host import Host
 from webkitpy.w3c.test_exporter import TestExporter
-from webkitpy.w3c.wpt_github import WPTGitHub
 
 
 _log = logging.getLogger(__name__)
@@ -29,13 +32,60 @@ def main():
         '--dry-run', action='store_true',
         help='See what would be done without actually creating or merging '
              'any pull requests.')
+    parser.add_argument(
+        '--gh-user',
+        help='GitHub user name. Can also be provided using the GH_USER '
+             'environment variable.')
+    parser.add_argument(
+        '--gh-token',
+        help='GitHub token or password. Can also be provided using the GH_TOKEN '
+             'environment variable.')
+    parser.add_argument('--gerrit-user', default=None,
+        help='Gerrit username (found on settings page or in .gitcookies).')
+    parser.add_argument('--gerrit-token', default=None,
+        help='Gerrit API key (found on settings page or in .gitcookies).')
+
+    # TODO(jeffcarp): Remove this after SSHing into wpt-exporter and updating file
+    parser.add_argument(
+        '--github-credentials-json',
+        help='Deprecated. Use --credentials-json.')
+
+    parser.add_argument(
+        '--credentials-json',
+        help='A JSON file with an object containing zero or more of the following '
+             'keys that can override command line flags: '
+             'GH_USER, GH_TOKEN, GERRIT_USER, GERRIT_TOKEN')
     args = parser.parse_args()
-
     host = Host()
-    wpt_github = WPTGitHub(host)
-    test_exporter = TestExporter(host, wpt_github, dry_run=args.dry_run)
+    credentials = {
+        'GH_USER': args.gh_user,
+        'GH_TOKEN': args.gh_token,
+    }
+    credentials_json = None
 
-    test_exporter.run()
+    if args.github_credentials_json:
+        credentials_json = args.github_credentials_json
+    if args.credentials_json:
+        credentials_json = args.credentials_json
+
+    if credentials_json:
+        with open(credentials_json, 'r') as f:
+            contents = json.load(f)
+            for key in ('GH_USER', 'GH_TOKEN', 'GERRIT_USER', 'GERRIT_TOKEN'):
+                if key in contents:
+                    credentials[key] = contents[key]
+
+    if not (credentials['GH_USER'] and credentials['GH_TOKEN']):
+        parser.error('Must provide both gh_user and gh_token for GitHub.')
+
+    TestExporter(
+        host=host,
+        gh_user=credentials['GH_USER'],
+        gh_token=credentials['GH_TOKEN'],
+        gerrit_user=credentials['GERRIT_USER'],
+        gerrit_token=credentials['GERRIT_TOKEN'],
+        dry_run=args.dry_run
+    ).run()
 
 
 if __name__ == '__main__':

@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include "base/callback.h"
+#import "ios/web/public/web_state/ui/crw_content_view.h"
 #include "ios/web/public/web_state/web_state_observer.h"
 
 namespace web {
@@ -20,7 +21,8 @@ void TestWebState::RemoveObserver(WebStateObserver* observer) {
 }
 
 TestWebState::TestWebState()
-    : web_usage_enabled_(false),
+    : browser_state_(nullptr),
+      web_usage_enabled_(false),
       is_loading_(false),
       trust_level_(kAbsolute),
       content_is_html_(true) {}
@@ -39,7 +41,7 @@ WebStateDelegate* TestWebState::GetDelegate() {
 void TestWebState::SetDelegate(WebStateDelegate* delegate) {}
 
 BrowserState* TestWebState::GetBrowserState() const {
-  return nullptr;
+  return browser_state_;
 }
 
 bool TestWebState::IsWebUsageEnabled() const {
@@ -66,6 +68,20 @@ const NavigationManager* TestWebState::GetNavigationManager() const {
 
 NavigationManager* TestWebState::GetNavigationManager() {
   return navigation_manager_.get();
+}
+
+const SessionCertificatePolicyCache*
+TestWebState::GetSessionCertificatePolicyCache() const {
+  return nullptr;
+}
+
+SessionCertificatePolicyCache*
+TestWebState::GetSessionCertificatePolicyCache() {
+  return nullptr;
+}
+
+CRWSessionStorage* TestWebState::BuildSessionStorage() {
+  return nil;
 }
 
 void TestWebState::SetNavigationManager(
@@ -121,6 +137,10 @@ WebInterstitial* TestWebState::GetWebInterstitial() const {
   return nullptr;
 }
 
+void TestWebState::SetBrowserState(BrowserState* browser_state) {
+  browser_state_ = browser_state;
+}
+
 void TestWebState::SetContentIsHTML(bool content_is_html) {
   content_is_html_ = content_is_html;
 }
@@ -167,6 +187,25 @@ void TestWebState::OnProvisionalNavigationStarted(const GURL& url) {
     observer.ProvisionalNavigationStarted(url);
 }
 
+void TestWebState::OnRenderProcessGone() {
+  for (auto& observer : observers_)
+    observer.RenderProcessGone();
+}
+
+void TestWebState::ShowTransientContentView(CRWContentView* content_view) {
+  if (content_view) {
+    transient_content_view_.reset([content_view retain]);
+  }
+}
+
+void TestWebState::ClearTransientContentView() {
+  transient_content_view_.reset();
+}
+
+CRWContentView* TestWebState::GetTransientContentView() {
+  return transient_content_view_.get();
+}
+
 void TestWebState::SetCurrentURL(const GURL& url) {
   url_ = url;
 }
@@ -179,16 +218,12 @@ CRWWebViewProxyType TestWebState::GetWebViewProxy() const {
   return nullptr;
 }
 
-int TestWebState::DownloadImage(const GURL& url,
-                                bool is_favicon,
-                                uint32_t max_bitmap_size,
-                                bool bypass_cache,
-                                const ImageDownloadCallback& callback) {
-  return 0;
+WebStateInterfaceProvider* TestWebState::GetWebStateInterfaceProvider() {
+  return nullptr;
 }
 
-service_manager::InterfaceRegistry* TestWebState::GetMojoInterfaceRegistry() {
-  return nullptr;
+bool TestWebState::HasOpener() const {
+  return false;
 }
 
 base::WeakPtr<WebState> TestWebState::AsWeakPtr() {

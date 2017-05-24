@@ -4,41 +4,32 @@
 
 #include "core/workers/WorkerLoaderProxy.h"
 
-#include "core/dom/ExecutionContextTask.h"
+#include "core/loader/ThreadableLoadingContext.h"
 
 namespace blink {
 
 WorkerLoaderProxy::WorkerLoaderProxy(
-    WorkerLoaderProxyProvider* loaderProxyProvider)
-    : m_loaderProxyProvider(loaderProxyProvider) {}
+    WorkerLoaderProxyProvider* loader_proxy_provider)
+    : loader_proxy_provider_(loader_proxy_provider) {}
 
 WorkerLoaderProxy::~WorkerLoaderProxy() {
-  DCHECK(!m_loaderProxyProvider);
+  DCHECK(!loader_proxy_provider_);
 }
 
-void WorkerLoaderProxy::detachProvider(
-    WorkerLoaderProxyProvider* proxyProvider) {
-  MutexLocker locker(m_lock);
-  DCHECK(proxyProvider == m_loaderProxyProvider);
-  m_loaderProxyProvider = nullptr;
+void WorkerLoaderProxy::DetachProvider(
+    WorkerLoaderProxyProvider* proxy_provider) {
+  DCHECK(IsMainThread());
+  DCHECK_EQ(proxy_provider, loader_proxy_provider_);
+  loader_proxy_provider_ = nullptr;
 }
 
-void WorkerLoaderProxy::postTaskToLoader(
-    const WebTraceLocation& location,
-    std::unique_ptr<ExecutionContextTask> task) {
-  MutexLocker locker(m_lock);
-  if (!m_loaderProxyProvider)
-    return;
-  m_loaderProxyProvider->postTaskToLoader(location, std::move(task));
-}
-
-void WorkerLoaderProxy::postTaskToWorkerGlobalScope(
-    const WebTraceLocation& location,
-    std::unique_ptr<WTF::CrossThreadClosure> task) {
-  MutexLocker locker(m_lock);
-  if (!m_loaderProxyProvider)
-    return;
-  m_loaderProxyProvider->postTaskToWorkerGlobalScope(location, std::move(task));
+ThreadableLoadingContext* WorkerLoaderProxy::GetThreadableLoadingContext() {
+  DCHECK(IsMainThread());
+  if (!loader_proxy_provider_)
+    return nullptr;
+  DCHECK(
+      loader_proxy_provider_->GetThreadableLoadingContext()->IsContextThread());
+  return loader_proxy_provider_->GetThreadableLoadingContext();
 }
 
 }  // namespace blink

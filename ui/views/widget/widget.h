@@ -57,7 +57,6 @@ class Layer;
 class NativeTheme;
 class OSExchangeData;
 class ThemeProvider;
-class Window;
 }  // namespace ui
 
 namespace wm {
@@ -214,6 +213,10 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     InitParams(const InitParams& other);
     ~InitParams();
 
+    // Returns the activatablity based on |activatable|, but also handles the
+    // case where |activatable| is |ACTIVATABLE_DEFAULT|.
+    bool CanActivate() const;
+
     Type type;
     // If null, a default implementation will be constructed. The default
     // implementation deletes itself when the Widget closes.
@@ -250,8 +253,6 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     // Whether the widget should be maximized or minimized.
     ui::WindowShowState show_state;
     gfx::NativeView parent;
-    // Used only by mus and is necessitated by mus not being a NativeView.
-    ui::Window* parent_mus = nullptr;
     // Specifies the initial bounds of the Widget. Default is empty, which means
     // the NativeWidget may specify a default size. If the parent is specified,
     // |bounds| is in the parent's coordinate system. If the parent is not
@@ -464,7 +465,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Default behavior is to animate both show and hide.
   void SetVisibilityAnimationTransition(VisibilityTransition transition);
 
-  // Starts a nested message loop that moves the window. This can be used to
+  // Starts a nested run loop that moves the window. This can be used to
   // start a window move operation from a mouse or touch event. This returns
   // when the move completes. |drag_offset| is the offset from the top left
   // corner of the window to the point where the cursor is dragging, and is used
@@ -500,7 +501,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
   // Shows the widget. The widget is activated if during initialization the
   // can_activate flag in the InitParams structure is set to true.
-  virtual void Show();
+  void Show();
+
   // Hides the widget.
   void Hide();
 
@@ -828,7 +830,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
       const gfx::Point& location) override;
 
   // Overridden from ui::EventSource:
-  ui::EventProcessor* GetEventProcessor() override;
+  ui::EventSink* GetEventSink() override;
 
   // Overridden from FocusTraversable:
   FocusSearch* GetFocusSearch() override;

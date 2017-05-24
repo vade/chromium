@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "base/logging.h"
+#include "media/base/media_util.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_types.h"
 
@@ -39,6 +40,11 @@ VideoCodec VideoCodecProfileToVideoCodec(VideoCodecProfile profile) {
     case VP9PROFILE_PROFILE2:
     case VP9PROFILE_PROFILE3:
       return kCodecVP9;
+    case DOLBYVISION_PROFILE0:
+    case DOLBYVISION_PROFILE4:
+    case DOLBYVISION_PROFILE5:
+    case DOLBYVISION_PROFILE7:
+      return kCodecDolbyVision;
   }
   NOTREACHED();
   return kUnknownVideoCodec;
@@ -69,11 +75,11 @@ VideoDecoderConfig::VideoDecoderConfig(const VideoDecoderConfig& other) =
 VideoDecoderConfig::~VideoDecoderConfig() {}
 
 void VideoDecoderConfig::set_color_space_info(
-    const gfx::ColorSpace& color_space_info) {
+    const VideoColorSpace& color_space_info) {
   color_space_info_ = color_space_info;
 }
 
-gfx::ColorSpace VideoDecoderConfig::color_space_info() const {
+VideoColorSpace VideoDecoderConfig::color_space_info() const {
   return color_space_info_;
 }
 
@@ -106,13 +112,13 @@ void VideoDecoderConfig::Initialize(VideoCodec codec,
 
   switch (color_space) {
     case ColorSpace::COLOR_SPACE_JPEG:
-      color_space_info_ = gfx::ColorSpace::CreateJpeg();
+      color_space_info_ = VideoColorSpace::JPEG();
       break;
     case ColorSpace::COLOR_SPACE_HD_REC709:
-      color_space_info_ = gfx::ColorSpace::CreateREC709();
+      color_space_info_ = VideoColorSpace::REC709();
       break;
     case ColorSpace::COLOR_SPACE_SD_REC601:
-      color_space_info_ = gfx::ColorSpace::CreateREC601();
+      color_space_info_ = VideoColorSpace::REC601();
       break;
     case ColorSpace::COLOR_SPACE_UNSPECIFIED:
     default:
@@ -156,6 +162,21 @@ std::string VideoDecoderConfig::AsHumanReadableString() const {
 
 void VideoDecoderConfig::SetExtraData(const std::vector<uint8_t>& extra_data) {
   extra_data_ = extra_data;
+}
+
+void VideoDecoderConfig::SetIsEncrypted(bool is_encrypted) {
+  if (!is_encrypted) {
+    DCHECK(encryption_scheme_.is_encrypted()) << "Config is already clear.";
+    encryption_scheme_ = Unencrypted();
+  } else {
+    DCHECK(!encryption_scheme_.is_encrypted())
+        << "Config is already encrypted.";
+    // TODO(xhwang): This is only used to guide decoder selection, so set
+    // a common encryption scheme that should be supported by all decrypting
+    // decoders. We should be able to remove this when we support switching
+    // decoders at run time. See http://crbug.com/695595
+    encryption_scheme_ = AesCtrEncryptionScheme();
+  }
 }
 
 }  // namespace media

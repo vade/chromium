@@ -12,6 +12,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "content/common/gpu_stream_constants.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/web_preferences.h"
@@ -112,9 +113,11 @@ gpu::CommandBuffer::State PPB_Graphics3D_Impl::WaitForTokenInRange(
 }
 
 gpu::CommandBuffer::State PPB_Graphics3D_Impl::WaitForGetOffsetInRange(
+    uint32_t set_get_buffer_count,
     int32_t start,
     int32_t end) {
-  return GetCommandBuffer()->WaitForGetOffsetInRange(start, end);
+  return GetCommandBuffer()->WaitForGetOffsetInRange(set_get_buffer_count,
+                                                     start, end);
 }
 
 void PPB_Graphics3D_Impl::EnsureWorkVisible() {
@@ -257,7 +260,7 @@ bool PPB_Graphics3D_Impl::InitRaw(
 
   command_buffer_ = gpu::CommandBufferProxyImpl::Create(
       std::move(channel), gpu::kNullSurfaceHandle, share_buffer,
-      gpu::GPU_STREAM_DEFAULT, gpu::GpuStreamPriority::NORMAL, attrib_helper,
+      kGpuStreamIdDefault, kGpuStreamPriorityDefault, attrib_helper,
       GURL::EmptyGURL(), base::ThreadTaskRunnerHandle::Get());
   if (!command_buffer_)
     return false;
@@ -282,12 +285,12 @@ void PPB_Graphics3D_Impl::OnGpuControlErrorMessage(const char* message,
       HostGlobals::Get()->GetInstance(pp_instance())->container();
   if (!container)
     return;
-  WebLocalFrame* frame = container->document().frame();
+  WebLocalFrame* frame = container->GetDocument().GetFrame();
   if (!frame)
     return;
   WebConsoleMessage console_message = WebConsoleMessage(
-      WebConsoleMessage::LevelError, WebString::fromUTF8(message));
-  frame->addMessageToConsole(console_message);
+      WebConsoleMessage::kLevelError, WebString::FromUTF8(message));
+  frame->AddMessageToConsole(console_message);
 }
 
 void PPB_Graphics3D_Impl::OnGpuControlLostContext() {

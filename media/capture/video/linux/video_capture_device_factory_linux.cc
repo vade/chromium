@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// Reduce number of log messages by logging each NOTIMPLEMENTED() only once.
+// // This has to be before any other includes, else default is picked up.
+// // See base/logging.h for details on this.
+// #define NOTIMPLEMENTED_POLICY 5
+
 #include "media/capture/video/linux/video_capture_device_factory_linux.h"
 
 #include <errno.h>
@@ -12,6 +17,7 @@
 #include "base/files/file_enumerator.h"
 #include "base/files/scoped_file.h"
 #include "base/posix/eintr_wrapper.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 
@@ -22,8 +28,7 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "base/lazy_instance.h"
-#include "media/capture/video/linux/camera_facing_chromeos.h"
+#include "media/capture/video/linux/camera_config_chromeos.h"
 #include "media/capture/video/linux/video_capture_device_chromeos.h"
 #endif
 #include "media/capture/video/linux/video_capture_device_linux.h"
@@ -32,23 +37,15 @@ namespace media {
 
 namespace {
 
-#if defined(OS_CHROMEOS)
-base::LazyInstance<media::CameraFacingChromeOS>::Leaky g_camera_facing_helper =
-    LAZY_INSTANCE_INITIALIZER;
-#endif
-}
-
 // USB VID and PID are both 4 bytes long.
-static const size_t kVidPidSize = 4;
+const size_t kVidPidSize = 4;
 
 // /sys/class/video4linux/video{N}/device is a symlink to the corresponding
 // USB device info directory.
-static const char kVidPathTemplate[] =
-    "/sys/class/video4linux/%s/device/../idVendor";
-static const char kPidPathTemplate[] =
-    "/sys/class/video4linux/%s/device/../idProduct";
+const char kVidPathTemplate[] = "/sys/class/video4linux/%s/device/../idVendor";
+const char kPidPathTemplate[] = "/sys/class/video4linux/%s/device/../idProduct";
 
-static bool ReadIdFile(const std::string& path, std::string* id) {
+bool ReadIdFile(const std::string& path, std::string* id) {
   char id_buf[kVidPidSize];
   FILE* file = fopen(path.c_str(), "rb");
   if (!file)
@@ -61,7 +58,7 @@ static bool ReadIdFile(const std::string& path, std::string* id) {
   return true;
 }
 
-static bool HasUsableFormats(int fd, uint32_t capabilities) {
+bool HasUsableFormats(int fd, uint32_t capabilities) {
   if (!(capabilities & V4L2_CAP_VIDEO_CAPTURE))
     return false;
 
@@ -81,10 +78,10 @@ static bool HasUsableFormats(int fd, uint32_t capabilities) {
   return false;
 }
 
-static std::list<float> GetFrameRateList(int fd,
-                                         uint32_t fourcc,
-                                         uint32_t width,
-                                         uint32_t height) {
+std::list<float> GetFrameRateList(int fd,
+                                  uint32_t fourcc,
+                                  uint32_t width,
+                                  uint32_t height) {
   std::list<float> frame_rates;
 
   v4l2_frmivalenum frame_interval = {};
@@ -114,9 +111,9 @@ static std::list<float> GetFrameRateList(int fd,
   return frame_rates;
 }
 
-static void GetSupportedFormatsForV4L2BufferType(
+void GetSupportedFormatsForV4L2BufferType(
     int fd,
-    media::VideoCaptureFormats* supported_formats) {
+    VideoCaptureFormats* supported_formats) {
   v4l2_fmtdesc v4l2_format = {};
   v4l2_format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
   for (; HANDLE_EINTR(ioctl(fd, VIDIOC_ENUM_FMT, &v4l2_format)) == 0;
@@ -153,6 +150,8 @@ static void GetSupportedFormatsForV4L2BufferType(
     }
   }
 }
+
+}  // namespace
 
 VideoCaptureDeviceFactoryLinux::VideoCaptureDeviceFactoryLinux(
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner)
@@ -216,11 +215,12 @@ void VideoCaptureDeviceFactoryLinux::GetDeviceDescriptors(
         HasUsableFormats(fd.get(), cap.capabilities)) {
       const std::string model_id = GetDeviceModelId(unique_id);
 #if defined(OS_CHROMEOS)
+      static CameraConfigChromeOS* config = new CameraConfigChromeOS();
       device_descriptors->emplace_back(
           reinterpret_cast<char*>(cap.card), unique_id, model_id,
           VideoCaptureApi::LINUX_V4L2_SINGLE_PLANE,
           VideoCaptureTransportType::OTHER_TRANSPORT,
-          g_camera_facing_helper.Get().GetCameraFacing(unique_id, model_id));
+          config->GetCameraFacing(unique_id, model_id));
 #else
       device_descriptors->emplace_back(
           reinterpret_cast<char*>(cap.card), unique_id, model_id,
@@ -228,6 +228,10 @@ void VideoCaptureDeviceFactoryLinux::GetDeviceDescriptors(
 #endif
     }
   }
+  // Since JS doesn't have API to get camera facing, we sort the list to make
+  // sure apps use the front camera by default.
+  // TODO(henryhsu): remove this after JS API completed (crbug.com/543997).
+  std::sort(device_descriptors->begin(), device_descriptors->end());
 }
 
 void VideoCaptureDeviceFactoryLinux::GetSupportedFormats(
@@ -248,22 +252,22 @@ void VideoCaptureDeviceFactoryLinux::GetSupportedFormats(
 std::string VideoCaptureDeviceFactoryLinux::GetDeviceModelId(
     const std::string& device_id) {
   // |unique_id| is of the form "/dev/video2".  |file_name| is "video2".
-  const std::string dev_dir = "/dev/";
-  DCHECK_EQ(0, device_id.compare(0, dev_dir.length(), dev_dir));
+  const char kDevDir[] = "/dev/";
+  DCHECK(base::StartsWith(device_id, kDevDir, base::CompareCase::SENSITIVE));
   const std::string file_name =
-      device_id.substr(dev_dir.length(), device_id.length());
-
-  const std::string vidPath =
-      base::StringPrintf(kVidPathTemplate, file_name.c_str());
-  const std::string pidPath =
-      base::StringPrintf(kPidPathTemplate, file_name.c_str());
+      device_id.substr(strlen(kDevDir), device_id.length());
 
   std::string usb_id;
-  if (!ReadIdFile(vidPath, &usb_id))
-    return "";
+  const std::string vid_path =
+      base::StringPrintf(kVidPathTemplate, file_name.c_str());
+  if (!ReadIdFile(vid_path, &usb_id))
+    return usb_id;
+
   usb_id.append(":");
-  if (!ReadIdFile(pidPath, &usb_id))
-    return "";
+  const std::string pid_path =
+      base::StringPrintf(kPidPathTemplate, file_name.c_str());
+  if (!ReadIdFile(pid_path, &usb_id))
+    usb_id.clear();
 
   return usb_id;
 }

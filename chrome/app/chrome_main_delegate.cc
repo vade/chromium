@@ -21,6 +21,7 @@
 #include "base/process/process_handle.h"
 #include "base/process/process_info.h"
 #include "base/strings/string_util.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event_impl.h"
 #include "build/build_config.h"
@@ -51,10 +52,12 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/service_names.mojom.h"
 #include "extensions/common/constants.h"
 #include "pdf/features.h"
 #include "ppapi/features/features.h"
 #include "printing/features/features.h"
+#include "services/service_manager/embedder/switches.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_switches.h"
@@ -62,12 +65,13 @@
 #if defined(OS_WIN)
 #include <atlbase.h>
 #include <malloc.h>
+
 #include <algorithm>
+
 #include "base/debug/close_handle_hook_win.h"
 #include "chrome/browser/downgrade/user_data_downgrade.h"
 #include "chrome/child/v8_breakpad_support_win.h"
 #include "chrome/common/child_process_logging.h"
-#include "components/crash/content/app/crashpad.h"
 #include "sandbox/win/src/sandbox.h"
 #include "ui/base/resource/resource_bundle_win.h"
 #endif
@@ -78,7 +82,6 @@
 #include "chrome/browser/mac/relauncher.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/common/mac/cfbundle_blocker.h"
-#include "components/crash/content/app/crashpad.h"
 #include "components/crash/core/common/objc_zombie.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #endif
@@ -86,7 +89,9 @@
 #if defined(OS_POSIX)
 #include <locale.h>
 #include <signal.h>
+
 #include "chrome/app/chrome_crash_reporter_client.h"
+#include "chrome/app/shutdown_signal_handlers_posix.h"
 #endif
 
 #if !defined(DISABLE_NACL) && defined(OS_LINUX)
@@ -102,8 +107,21 @@
 #include "chromeos/hugepage_text/hugepage_text.h"
 #endif
 
+#if BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
+#include "chrome/app/mash/chrome_mash_catalog.h"
+#include "chrome/app/mash/embedded_services.h"
+#include "mash/common/config.h"                                   // nogncheck
+#include "mash/quick_launch/public/interfaces/constants.mojom.h"  // nogncheck
+#include "services/ui/public/interfaces/constants.mojom.h"        // nogncheck
+
+#if defined(OS_CHROMEOS)
+#include "chrome/app/mash/chrome_mus_catalog.h"
+#endif
+
+#endif  // BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
+
 #if defined(OS_ANDROID)
-#include "chrome/browser/android/java_exception_reporter.h"
+#include "base/android/java_exception_reporter.h"
 #include "chrome/common/descriptors_android.h"
 #else
 // Diagnostics is only available on non-android platforms.
@@ -127,6 +145,7 @@
 
 #if defined(OS_MACOSX) || defined(OS_WIN)
 #include "chrome/browser/policy/policy_path_parser.h"
+#include "components/crash/content/app/crashpad.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -150,17 +169,17 @@
 #if !defined(CHROME_MULTIPLE_DLL_BROWSER)
 #include "chrome/child/pdf_child_init.h"
 
-base::LazyInstance<ChromeContentGpuClient> g_chrome_content_gpu_client =
-    LAZY_INSTANCE_INITIALIZER;
-base::LazyInstance<ChromeContentRendererClient>
+base::LazyInstance<ChromeContentGpuClient>::DestructorAtExit
+    g_chrome_content_gpu_client = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<ChromeContentRendererClient>::DestructorAtExit
     g_chrome_content_renderer_client = LAZY_INSTANCE_INITIALIZER;
-base::LazyInstance<ChromeContentUtilityClient>
+base::LazyInstance<ChromeContentUtilityClient>::DestructorAtExit
     g_chrome_content_utility_client = LAZY_INSTANCE_INITIALIZER;
 #endif
 
 #if !defined(CHROME_MULTIPLE_DLL_CHILD)
-base::LazyInstance<ChromeContentBrowserClient> g_chrome_content_browser_client =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<ChromeContentBrowserClient>::DestructorAtExit
+    g_chrome_content_browser_client = LAZY_INSTANCE_INITIALIZER;
 #endif
 
 #if defined(OS_POSIX)
@@ -169,7 +188,7 @@ base::LazyInstance<ChromeCrashReporterClient>::Leaky g_chrome_crash_client =
 #endif
 
 extern int NaClMain(const content::MainFunctionParams&);
-extern int ServiceProcessMain(const content::MainFunctionParams&);
+extern int CloudPrintServiceProcessMain(const content::MainFunctionParams&);
 
 namespace {
 
@@ -222,7 +241,7 @@ bool UseHooks() {
 #endif  // defined(OS_WIN)
 
 #if defined(OS_LINUX)
-static void AdjustLinuxOOMScore(const std::string& process_type) {
+void AdjustLinuxOOMScore(const std::string& process_type) {
   // Browsers and zygotes should still be killable, but killed last.
   const int kZygoteScore = 0;
   // The minimum amount to bump a score by.  This is large enough that
@@ -249,7 +268,8 @@ static void AdjustLinuxOOMScore(const std::string& process_type) {
     score = kPluginScore + kScoreBump;
   } else if (process_type == switches::kUtilityProcess ||
              process_type == switches::kGpuProcess ||
-             process_type == switches::kServiceProcess) {
+             process_type == switches::kCloudPrintServiceProcess ||
+             process_type == service_manager::switches::kProcessTypeService) {
     score = kMiscScore;
 #ifndef DISABLE_NACL
   } else if (process_type == switches::kNaClLoaderProcess ||
@@ -257,6 +277,8 @@ static void AdjustLinuxOOMScore(const std::string& process_type) {
     score = kPluginScore;
 #endif
   } else if (process_type == switches::kZygoteProcess ||
+             process_type ==
+                 service_manager::switches::kProcessTypeServiceManager ||
              process_type.empty()) {
     // For zygotes and unlabeled process types, we want to still make
     // them killable by the OOM killer.
@@ -271,6 +293,9 @@ static void AdjustLinuxOOMScore(const std::string& process_type) {
   } else {
     NOTREACHED() << "Unknown process type";
   }
+  // In the case of a 0 score, still try to adjust it. Most likely the score is
+  // 0 already, but it may not be if this process inherited a higher score from
+  // its parent process.
   if (score > -1)
     base::AdjustOOMScore(base::GetCurrentProcId(), score);
 }
@@ -890,9 +915,10 @@ void ChromeMainDelegate::PreSandboxStartup() {
 #if defined(OS_ANDROID)
     if (process_type.empty()) {
       breakpad::InitCrashReporter(process_type);
-      chrome::android::InitJavaExceptionReporter();
+      base::android::InitJavaExceptionReporter();
     } else {
       breakpad::InitNonBrowserCrashReporterForAndroid(process_type);
+      base::android::InitJavaExceptionReporterForChildProcess();
     }
 #else  // !defined(OS_ANDROID)
     breakpad::InitCrashReporter(process_type);
@@ -935,24 +961,24 @@ void ChromeMainDelegate::SandboxInitialized(const std::string& process_type) {
 int ChromeMainDelegate::RunProcess(
     const std::string& process_type,
     const content::MainFunctionParams& main_function_params) {
-  // ANDROID doesn't support "service", so no ServiceProcessMain, and arraysize
-  // doesn't support empty array. So we comment out the block for Android.
+// ANDROID doesn't support "cloud-print-service", so no
+// CloudPrintServiceProcessMain, and arraysize doesn't support empty array. So
+// we comment out the block for Android.
 #if !defined(OS_ANDROID)
   static const MainFunction kMainFunctions[] = {
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW) && !defined(CHROME_MULTIPLE_DLL_CHILD)
-    { switches::kServiceProcess,     ServiceProcessMain },
+    {switches::kCloudPrintServiceProcess, CloudPrintServiceProcessMain},
 #endif
 
 #if defined(OS_MACOSX)
-    { switches::kRelauncherProcess,
-      mac_relauncher::internal::RelauncherMain },
+    {switches::kRelauncherProcess, mac_relauncher::internal::RelauncherMain},
 #endif
 
     // This entry is not needed on Linux, where the NaCl loader
     // process is launched via nacl_helper instead.
 #if !defined(DISABLE_NACL) && !defined(CHROME_MULTIPLE_DLL_BROWSER) && \
     !defined(OS_LINUX)
-    { switches::kNaClLoaderProcess,  NaClMain },
+    {switches::kNaClLoaderProcess, NaClMain},
 #else
     { "<invalid>", NULL },  // To avoid constant array of size 0
                             // when DISABLE_NACL and CHROME_MULTIPLE_DLL_CHILD
@@ -977,10 +1003,6 @@ void ChromeMainDelegate::ProcessExiting(const std::string& process_type) {
   // Android doesn't use InitChromeLogging, so we close the log file manually.
   logging::CloseLogFile();
 #endif  // !defined(OS_ANDROID)
-
-#if defined(OS_WIN)
-  base::debug::RemoveHandleHooks();
-#endif
 }
 
 #if defined(OS_MACOSX)
@@ -995,7 +1017,7 @@ bool ChromeMainDelegate::ProcessRegistersWithSystemProcess(
 
 bool ChromeMainDelegate::ShouldSendMachPort(const std::string& process_type) {
   return process_type != switches::kRelauncherProcess &&
-      process_type != switches::kServiceProcess;
+         process_type != switches::kCloudPrintServiceProcess;
 }
 
 bool ChromeMainDelegate::DelaySandboxInitialization(
@@ -1010,7 +1032,7 @@ bool ChromeMainDelegate::DelaySandboxInitialization(
 }
 #elif defined(OS_POSIX) && !defined(OS_ANDROID)
 void ChromeMainDelegate::ZygoteStarting(
-    ScopedVector<content::ZygoteForkDelegate>* delegates) {
+    std::vector<std::unique_ptr<content::ZygoteForkDelegate>>* delegates) {
 #if defined(OS_CHROMEOS)
     chromeos::ReloadElfTextInHugePages();
 #endif
@@ -1089,4 +1111,114 @@ bool ChromeMainDelegate::ShouldEnableProfilerRecording() {
       // Don't enable instrumentation.
       return false;
   }
+}
+
+service_manager::ProcessType ChromeMainDelegate::OverrideProcessType() {
+  const auto& command_line = *base::CommandLine::ForCurrentProcess();
+  if (command_line.GetSwitchValueASCII(switches::kProcessType) ==
+      service_manager::switches::kProcessTypeService) {
+    // Don't mess with embedded service command lines.
+    return service_manager::ProcessType::kDefault;
+  }
+
+#if BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
+  if (command_line.HasSwitch(switches::kMus) ||
+      command_line.HasSwitch(switches::kMash)) {
+    return service_manager::ProcessType::kServiceManager;
+  }
+#endif
+
+  return service_manager::ProcessType::kDefault;
+}
+
+std::unique_ptr<base::Value> ChromeMainDelegate::CreateServiceCatalog() {
+#if BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
+  const auto& command_line = *base::CommandLine::ForCurrentProcess();
+#if defined(OS_CHROMEOS)
+  if (command_line.HasSwitch(switches::kMus))
+    return CreateChromeMusCatalog();
+#endif  // defined(OS_CHROMEOS)
+  if (command_line.HasSwitch(switches::kMash))
+    return CreateChromeMashCatalog();
+#endif  // BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
+  return nullptr;
+}
+
+void ChromeMainDelegate::AdjustServiceProcessCommandLine(
+    const service_manager::Identity& identity,
+    base::CommandLine* command_line) {
+#if BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
+  // Add kMusConfig so that launched processes know what config they are
+  // running in.
+  const bool is_mash = command_line->HasSwitch(switches::kMash);
+  command_line->AppendSwitchASCII(switches::kMusConfig,
+                                  is_mash ? switches::kMash : switches::kMus);
+
+  if (identity.name() == content::mojom::kPackagedServicesServiceName) {
+    // Ensure the browser process doesn't inherit mash or mus flags, since these
+    // flags would cause the process to run as a Service Manager instead.
+    base::CommandLine::SwitchMap switches = command_line->GetSwitches();
+    switches.erase(switches::kMash);
+    switches.erase(switches::kMus);
+    *command_line = base::CommandLine(command_line->GetProgram());
+    for (const auto& sw : switches)
+      command_line->AppendSwitchNative(sw.first, sw.second);
+  }
+#endif
+}
+
+bool ChromeMainDelegate::ShouldTerminateServiceManagerOnInstanceQuit(
+    const service_manager::Identity& identity,
+    int* exit_code) {
+#if BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
+  if (identity.name() == mash::common::GetWindowManagerServiceName() ||
+      identity.name() == ui::mojom::kServiceName ||
+      identity.name() == content::mojom::kPackagedServicesServiceName) {
+    // Quit the main process if an important child (e.g. window manager) dies.
+    // On Chrome OS the OS-level session_manager will restart the main process.
+    *exit_code = 1;
+    LOG(ERROR) << "Main process exiting because service " << identity.name()
+               << " quit unexpectedly.";
+    return true;
+  }
+#endif  // BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
+
+  return false;
+}
+
+void ChromeMainDelegate::OnServiceManagerInitialized(
+    const base::Closure& quit_closure,
+    service_manager::BackgroundServiceManager* service_manager) {
+#if defined(OS_POSIX)
+  // Quit the main process in response to shutdown signals (like SIGTERM).
+  // These signals are used by Linux distributions to request clean shutdown.
+  // On Chrome OS the SIGTERM signal is sent by session_manager.
+  InstallShutdownSignalHandlers(quit_closure,
+                                base::ThreadTaskRunnerHandle::Get());
+#endif
+
+#if BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
+  // Start services that we know we want to launch on startup (UI service,
+  // window manager, quick launch app).
+  service_manager->StartService(
+      service_manager::Identity(ui::mojom::kServiceName));
+  service_manager->StartService(
+      service_manager::Identity(content::mojom::kPackagedServicesServiceName));
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kMash)) {
+    service_manager->StartService(
+        service_manager::Identity(mash::common::GetWindowManagerServiceName()));
+    service_manager->StartService(
+        service_manager::Identity(mash::quick_launch::mojom::kServiceName));
+  }
+#endif  // BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
+}
+
+std::unique_ptr<service_manager::Service>
+ChromeMainDelegate::CreateEmbeddedService(const std::string& service_name) {
+#if BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
+  auto mash_service = CreateEmbeddedMashService(service_name);
+  if (mash_service)
+    return mash_service;
+#endif  // BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
+  return nullptr;
 }

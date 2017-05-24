@@ -13,25 +13,27 @@
 #include <utility>
 #include <vector>
 
-#include "base/callback_forward.h"
+#include "base/callback.h"
 #include "base/task_scheduler/task_scheduler.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "content/public/browser/certificate_request_result_type.h"
 #include "content/public/browser/navigation_throttle.h"
+#include "content/public/common/associated_interface_registry.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/media_stream_request.h"
 #include "content/public/common/resource_type.h"
 #include "content/public/common/service_info.h"
 #include "content/public/common/socket_permission_request.h"
-#include "content/public/common/window_container_type.h"
-#include "media/audio/audio_manager.h"
+#include "content/public/common/window_container_type.mojom.h"
 #include "media/media_features.h"
 #include "media/mojo/interfaces/remoting.mojom.h"
 #include "net/base/mime_util.h"
 #include "net/cookies/canonical_cookie.h"
 #include "storage/browser/fileapi/file_system_context.h"
+#include "storage/browser/quota/quota_manager.h"
 #include "third_party/WebKit/public/platform/WebPageVisibilityState.h"
+#include "third_party/WebKit/public/web/window_features.mojom.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 
@@ -48,11 +50,6 @@ class GURL;
 namespace base {
 class CommandLine;
 class FilePath;
-class SchedulerWorkerPoolParams;
-}
-
-namespace blink {
-struct WebWindowFeatures;
 }
 
 namespace gfx {
@@ -64,12 +61,15 @@ class GpuChannelEstablishFactory;
 }
 
 namespace media {
+class AudioLogFactory;
+class AudioManager;
 class CdmFactory;
 }
 
 namespace service_manager {
-class InterfaceRegistry;
+class BinderRegistry;
 class Service;
+struct BindSourceInfo;
 }
 
 namespace net {
@@ -79,6 +79,8 @@ class SSLCertRequestInfo;
 class SSLInfo;
 class URLRequest;
 class URLRequestContext;
+class X509Certificate;
+typedef std::vector<scoped_refptr<X509Certificate>> CertificateList;
 }
 
 namespace rappor {
@@ -99,7 +101,6 @@ class Origin;
 
 namespace storage {
 class FileSystemBackend;
-class QuotaEvictionPolicy;
 }
 
 namespace content {
@@ -113,7 +114,6 @@ class BrowserURLHandler;
 class ClientCertificateDelegate;
 class ControllerPresentationServiceDelegate;
 class DevToolsManagerDelegate;
-class GpuProcessHost;
 class MediaObserver;
 class MemoryCoordinatorDelegate;
 class NavigationHandle;
@@ -127,6 +127,7 @@ class RenderViewHost;
 class ResourceContext;
 class SiteInstance;
 class SpeechRecognitionManagerDelegate;
+class StoragePartition;
 class TracingDelegate;
 class VpnServiceProxy;
 class WebContents;
@@ -162,7 +163,7 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual void PostAfterStartupTask(
       const tracked_objects::Location& from_here,
       const scoped_refptr<base::TaskRunner>& task_runner,
-      const base::Closure& task);
+      base::OnceClosure task);
 
   // Allows the embedder to indicate whether it considers startup to be
   // complete. May be called on any thread. This should be called on a one-off
@@ -218,10 +219,14 @@ class CONTENT_EXPORT ContentBrowserClient {
   // Returns a list additional WebUI schemes, if any.  These additional schemes
   // act as aliases to the chrome: scheme.  The additional schemes may or may
   // not serve specific WebUI pages depending on the particular URLDataSource
-  // and its override of URLDataSource::ShouldServiceRequest. For all schemes
-  // returned here, view-source is allowed.
+  // and its override of URLDataSource::ShouldServiceRequest.
   virtual void GetAdditionalWebUISchemes(
       std::vector<std::string>* additional_schemes) {}
+
+  // Returns a list of additional schemes allowed for view-source.  Defaults to
+  // the list of WebUI schemes returned by GetAdditionalWebUISchemes.
+  virtual void GetAdditionalViewSourceSchemes(
+      std::vector<std::string>* additional_schemes);
 
   // Called when WebUI objects are created to get aggregate usage data (i.e. is
   // chrome://downloads used more than chrome://bookmarks?). Only internal (e.g.
@@ -455,10 +460,13 @@ class CONTENT_EXPORT ContentBrowserClient {
   // Create and return a new quota permission context.
   virtual QuotaPermissionContext* CreateQuotaPermissionContext();
 
-  // Gives the embedder a chance to register a custom QuotaEvictionPolicy for
-  // temporary storage.
-  virtual std::unique_ptr<storage::QuotaEvictionPolicy>
-  GetTemporaryStorageEvictionPolicy(BrowserContext* context);
+  // Allows the embedder to provide settings that determine the amount
+  // of disk space that may be used by content facing storage apis like
+  // IndexedDatabase and ServiceWorker::CacheStorage and others.
+  virtual void GetQuotaSettings(
+      content::BrowserContext* context,
+      content::StoragePartition* partition,
+      const storage::OptionalQuotaSettingsCallback& callback);
 
   // Informs the embedder that a certificate error has occured.  If
   // |overridable| is true and if |strict_enforcement| is false, the user
@@ -473,7 +481,7 @@ class CONTENT_EXPORT ContentBrowserClient {
       bool overridable,
       bool strict_enforcement,
       bool expired_previous_decision,
-      const base::Callback<void(CertificateRequestResultType)>& callback) {}
+      const base::Callback<void(CertificateRequestResultType)>& callback);
 
   // Selects a SSL client certificate and returns it to the |delegate|. Note:
   // |delegate| may be called synchronously or asynchronously.
@@ -482,6 +490,7 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual void SelectClientCertificate(
       WebContents* web_contents,
       net::SSLCertRequestInfo* cert_request_info,
+      net::CertificateList client_certs,
       std::unique_ptr<ClientCertificateDelegate> delegate);
 
   // Returns a class to get notifications about media event. The embedder can
@@ -496,22 +505,21 @@ class CONTENT_EXPORT ContentBrowserClient {
   // Returns true if the given page is allowed to open a window of the given
   // type. If true is returned, |no_javascript_access| will indicate whether
   // the window that is created should be scriptable/in the same process.
-  // This is called on the IO thread.
-  virtual bool CanCreateWindow(int opener_render_process_id,
-                               int opener_render_frame_id,
-                               const GURL& opener_url,
-                               const GURL& opener_top_level_frame_url,
-                               const GURL& source_origin,
-                               WindowContainerType container_type,
-                               const GURL& target_url,
-                               const Referrer& referrer,
-                               const std::string& frame_name,
-                               WindowOpenDisposition disposition,
-                               const blink::WebWindowFeatures& features,
-                               bool user_gesture,
-                               bool opener_suppressed,
-                               ResourceContext* context,
-                               bool* no_javascript_access);
+  // This is called on the UI thread.
+  virtual bool CanCreateWindow(
+      RenderFrameHost* opener,
+      const GURL& opener_url,
+      const GURL& opener_top_level_frame_url,
+      const GURL& source_origin,
+      content::mojom::WindowContainerType container_type,
+      const GURL& target_url,
+      const Referrer& referrer,
+      const std::string& frame_name,
+      WindowOpenDisposition disposition,
+      const blink::mojom::WindowFeatures& features,
+      bool user_gesture,
+      bool opener_suppressed,
+      bool* no_javascript_access);
 
   // Notifies the embedder that the ResourceDispatcherHost has been created.
   // This is when it can optionally add a delegate.
@@ -536,15 +544,18 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual void BrowserURLHandlerCreated(BrowserURLHandler* handler) {}
 
   // Clears browser cache.
+  // TODO(crbug.com/668114): Deprecated. Use BrowsingDataRemover instead.
   virtual void ClearCache(RenderFrameHost* rfh) {}
 
   // Clears browser cookies.
+  // TODO(crbug.com/668114): Deprecated. Use BrowsingDataRemover instead.
   virtual void ClearCookies(RenderFrameHost* rfh) {}
 
   // Clears |browser_context|'s data stored for the given |origin|.
   // The datatypes to be removed are specified by |remove_cookies|,
   // |remove_storage|, and |remove_cache|. Note that cookies should be removed
   // for the entire eTLD+1 of |origin|. Must call |callback| when finished.
+  // TODO(crbug.com/668114): Depreacated. Use BrowsingDataRemover instead.
   virtual void ClearSiteData(content::BrowserContext* browser_context,
                              const url::Origin& origin,
                              bool remove_cookies,
@@ -654,28 +665,30 @@ class CONTENT_EXPORT ContentBrowserClient {
   // |registry| will by default be run immediately on the IO thread, unless a
   // task runner is provided.
   virtual void ExposeInterfacesToRenderer(
-      service_manager::InterfaceRegistry* registry,
+      service_manager::BinderRegistry* registry,
+      AssociatedInterfaceRegistry* associated_registry,
       RenderProcessHost* render_process_host) {}
 
   // Called when RenderFrameHostImpl connects to the Media service. Expose
   // interfaces to the service using |registry|.
   virtual void ExposeInterfacesToMediaService(
-      service_manager::InterfaceRegistry* registry,
+      service_manager::BinderRegistry* registry,
       RenderFrameHost* render_frame_host) {}
 
   // Allows to register browser Mojo interfaces exposed through the
   // RenderFrameHost.
-  virtual void RegisterRenderFrameMojoInterfaces(
-      service_manager::InterfaceRegistry* registry,
+  virtual void ExposeInterfacesToFrame(
+      service_manager::BinderRegistry* registry,
       RenderFrameHost* render_frame_host) {}
 
-  // Allows to register browser Mojo interfaces exposed through the
-  // GpuProcessHost. Called on the IO thread. Note that interface factory
-  // callbacks added to |registry| will by default be run immediately on the IO
-  // thread, unless a task runner is provided.
-  virtual void ExposeInterfacesToGpuProcess(
-      service_manager::InterfaceRegistry* registry,
-      GpuProcessHost* render_process_host) {}
+  // (Currently called only from GPUProcessHost, move somewhere more central).
+  // Called when a request to bind |interface_name| on |interface_pipe| is
+  // received from |source_info.identity|. If the request is bound,
+  // |interface_pipe| will become invalid (taken by the client).
+  virtual void BindInterfaceRequest(
+      const service_manager::BindSourceInfo& source_info,
+      const std::string& interface_name,
+      mojo::ScopedMessagePipeHandle* interface_pipe) {}
 
   using StaticServiceMap = std::map<std::string, ServiceInfo>;
 
@@ -764,7 +777,7 @@ class CONTENT_EXPORT ContentBrowserClient {
   // Allows the embedder to provide its own AudioManager implementation.
   // If this function returns nullptr, a default platform implementation
   // will be used.
-  virtual media::ScopedAudioManagerPtr CreateAudioManager(
+  virtual std::unique_ptr<media::AudioManager> CreateAudioManager(
       media::AudioLogFactory* audio_log_factory);
   // Creates and returns a factory used for creating CDM instances for playing
   // protected content.
@@ -807,12 +820,10 @@ class CONTENT_EXPORT ContentBrowserClient {
   // Returns the RapporService from the browser process.
   virtual ::rappor::RapporService* GetRapporService();
 
-  // Provides parameters for initializing the global task scheduler. If
-  // |params_vector| is empty, default parameters are used.
-  virtual void GetTaskSchedulerInitializationParams(
-      std::vector<base::SchedulerWorkerPoolParams>* params_vector,
-      base::TaskScheduler::WorkerPoolIndexForTraitsCallback*
-          index_to_traits_callback) {}
+  // Provides parameters for initializing the global task scheduler. Default
+  // params are used if this returns nullptr.
+  virtual std::unique_ptr<base::TaskScheduler::InitParams>
+  GetTaskSchedulerInitParams();
 
   // Performs any necessary PostTask API redirection to the task scheduler.
   virtual void PerformExperimentalTaskSchedulerRedirections() {}

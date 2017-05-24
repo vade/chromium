@@ -10,6 +10,7 @@
 
 function test()
 {
+    var testMapping = InspectorTest.initializeTestMapping();
     var fs = new InspectorTest.TestFileSystem("file:///var/www");
     var fsEntry = InspectorTest.addFooJSFile(fs);
     var scope = new Sources.SourcesSearchScope();
@@ -28,7 +29,7 @@ function test()
 
         function addFileMapping(next)
         {
-            Workspace.fileSystemMapping.addFileMapping(fs.fileSystemPath, "http://127.0.0.1:8000", "/");
+            testMapping.addBinding("foo.js");
             InspectorTest.waitForBinding("foo.js").then(next);
         },
 
@@ -48,7 +49,7 @@ function test()
         function reply()
         {
             var paths = ["/var/www" + fsEntry.fullPath];
-            Workspace.isolatedFileSystemManager._onSearchCompleted({data: {requestId: requestId, fileSystemPath: path, files: paths}});
+            Persistence.isolatedFileSystemManager._onSearchCompleted({data: {requestId: requestId, fileSystemPath: path, files: paths}});
         }
     }
 };

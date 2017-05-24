@@ -87,19 +87,18 @@ CdmPromise::Exception ToMediaExceptionType(cdm::Error error) {
   return CdmPromise::UNKNOWN_ERROR;
 }
 
-ContentDecryptionModule::MessageType ToMediaMessageType(
-    cdm::MessageType message_type) {
+CdmMessageType ToMediaMessageType(cdm::MessageType message_type) {
   switch (message_type) {
     case cdm::kLicenseRequest:
-      return ContentDecryptionModule::LICENSE_REQUEST;
+      return CdmMessageType::LICENSE_REQUEST;
     case cdm::kLicenseRenewal:
-      return ContentDecryptionModule::LICENSE_RENEWAL;
+      return CdmMessageType::LICENSE_RENEWAL;
     case cdm::kLicenseRelease:
-      return ContentDecryptionModule::LICENSE_RELEASE;
+      return CdmMessageType::LICENSE_RELEASE;
   }
 
   NOTREACHED() << "Unexpected cdm::MessageType " << message_type;
-  return ContentDecryptionModule::LICENSE_REQUEST;
+  return CdmMessageType::LICENSE_REQUEST;
 }
 
 CdmKeyInformation::KeyStatus ToCdmKeyInformationKeyStatus(
@@ -376,6 +375,7 @@ CdmAdapter::CdmAdapter(
       allocator_(std::move(allocator)),
       create_cdm_file_io_cb_(create_cdm_file_io_cb),
       task_runner_(base::ThreadTaskRunnerHandle::Get()),
+      pool_(new AudioBufferMemoryPool()),
       weak_factory_(this) {
   DCHECK(!key_system_.empty());
   DCHECK(!session_message_cb_.is_null());
@@ -936,7 +936,7 @@ bool CdmAdapter::AudioFramesDataToAudioFrames(
     scoped_refptr<media::AudioBuffer> frame = media::AudioBuffer::CopyFrom(
         sample_format, audio_channel_layout_, audio_channel_count,
         audio_samples_per_second_, frame_count, &channel_ptrs[0],
-        base::TimeDelta::FromMicroseconds(timestamp));
+        base::TimeDelta::FromMicroseconds(timestamp), pool_);
     result_frames->push_back(frame);
 
     data += frame_size;

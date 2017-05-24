@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_reg_util_win.h"
 #include "base/test/test_simple_task_runner.h"
@@ -42,7 +43,8 @@ class PlatformStateStoreWinTest : public ::testing::Test {
   void SetUp() override {
     ::testing::Test::SetUp();
     base::MessageLoop::current()->SetTaskRunner(task_runner_);
-    registry_override_manager_.OverrideRegistry(HKEY_CURRENT_USER);
+    ASSERT_NO_FATAL_FAILURE(
+        registry_override_manager_.OverrideRegistry(HKEY_CURRENT_USER));
     ASSERT_TRUE(profile_manager_.SetUp());
   }
 

@@ -18,6 +18,7 @@
 #include "base/task_scheduler/task_scheduler.h"
 #include "build/build_config.h"
 #include "content/public/common/content_client.h"
+#include "media/base/decode_capabilities.h"
 #include "third_party/WebKit/public/platform/WebPageVisibilityState.h"
 #include "third_party/WebKit/public/web/WebNavigationPolicy.h"
 #include "third_party/WebKit/public/web/WebNavigationType.h"
@@ -29,11 +30,11 @@ class SkBitmap;
 
 namespace base {
 class FilePath;
-class SchedulerWorkerPoolParams;
 }
 
 namespace blink {
 class WebAudioDevice;
+class WebAudioLatencyHint;
 class WebClipboard;
 class WebFrame;
 class WebLocalFrame;
@@ -54,18 +55,10 @@ class WebURLRequest;
 class WebWorkerContentSettingsClientProxy;
 struct WebPluginParams;
 struct WebURLError;
-}
-
-namespace gfx {
-class ICCProfile;
-}
+}  // namespace blink
 
 namespace media {
 class KeySystemProperties;
-}
-
-namespace service_manager {
-class InterfaceRegistry;
 }
 
 namespace content {
@@ -100,7 +93,6 @@ class CONTENT_EXPORT ContentRendererClient {
   // returns false, the content layer will create the plugin.
   virtual bool OverrideCreatePlugin(
       RenderFrame* render_frame,
-      blink::WebLocalFrame* frame,
       const blink::WebPluginParams& params,
       blink::WebPlugin** plugin);
 
@@ -155,24 +147,24 @@ class CONTENT_EXPORT ContentRendererClient {
 
   // Allows the embedder to override creating a WebMediaStreamCenter. If it
   // returns NULL the content layer will create the stream center.
-  virtual blink::WebMediaStreamCenter* OverrideCreateWebMediaStreamCenter(
-      blink::WebMediaStreamCenterClient* client);
+  virtual std::unique_ptr<blink::WebMediaStreamCenter>
+  OverrideCreateWebMediaStreamCenter(blink::WebMediaStreamCenterClient* client);
 
   // Allows the embedder to override creating a WebRTCPeerConnectionHandler. If
   // it returns NULL the content layer will create the connection handler.
-  virtual blink::WebRTCPeerConnectionHandler*
+  virtual std::unique_ptr<blink::WebRTCPeerConnectionHandler>
   OverrideCreateWebRTCPeerConnectionHandler(
       blink::WebRTCPeerConnectionHandlerClient* client);
 
   // Allows the embedder to override creating a WebMIDIAccessor.  If it
   // returns NULL the content layer will create the MIDI accessor.
-  virtual blink::WebMIDIAccessor* OverrideCreateMIDIAccessor(
+  virtual std::unique_ptr<blink::WebMIDIAccessor> OverrideCreateMIDIAccessor(
       blink::WebMIDIAccessorClient* client);
 
   // Allows the embedder to override creating a WebAudioDevice.  If it
   // returns NULL the content layer will create the audio device.
-  virtual blink::WebAudioDevice* OverrideCreateAudioDevice(
-      double sample_rate);
+  virtual std::unique_ptr<blink::WebAudioDevice> OverrideCreateAudioDevice(
+      const blink::WebAudioLatencyHint& latency_hint);
 
   // Allows the embedder to override the blink::WebClipboard used. If it
   // returns NULL the content layer will handle clipboard interactions.
@@ -184,8 +176,8 @@ class CONTENT_EXPORT ContentRendererClient {
 
   // Allows the embedder to override the WebSpeechSynthesizer used.
   // If it returns NULL the content layer will provide an engine.
-  virtual blink::WebSpeechSynthesizer* OverrideSpeechSynthesizer(
-      blink::WebSpeechSynthesizerClient* client);
+  virtual std::unique_ptr<blink::WebSpeechSynthesizer>
+  OverrideSpeechSynthesizer(blink::WebSpeechSynthesizerClient* client);
 
   // Returns true if the renderer process should schedule the idle handler when
   // all widgets are hidden.
@@ -262,13 +254,21 @@ class CONTENT_EXPORT ContentRendererClient {
   virtual std::unique_ptr<MediaStreamRendererFactory>
   CreateMediaStreamRendererFactory();
 
-  // Allows an embedder to provide a default image decode color space.
-  virtual std::unique_ptr<gfx::ICCProfile> GetImageDecodeColorProfile();
-
-  // Gives the embedder a chance to register the key system(s) it supports by
-  // populating |key_systems|.
+  // Allows embedder to register the key system(s) it supports by populating
+  // |key_systems|.
   virtual void AddSupportedKeySystems(
       std::vector<std::unique_ptr<media::KeySystemProperties>>* key_systems);
+
+  // Signal that embedder has changed key systems.
+  // TODO(chcunningham): Refactor this to a proper change "observer" API that is
+  // less fragile (don't assume AddSupportedKeySystems has just one caller).
+  virtual bool IsKeySystemsUpdateNeeded();
+
+  // Allows embedder to describe customized audio capabilities.
+  virtual bool IsSupportedAudioConfig(const media::AudioConfig& config);
+
+  // Allows embedder to describe customized video capabilities.
+  virtual bool IsSupportedVideoConfig(const media::VideoConfig& config);
 
   // Returns true if we should report a detailed message (including a stack
   // trace) for console [logs|errors|exceptions]. |source| is the WebKit-
@@ -320,6 +320,10 @@ class CONTENT_EXPORT ContentRendererClient {
   // This method may invalidate the frame.
   virtual void RunScriptsAtDocumentEnd(RenderFrame* render_frame) {}
 
+  // Notifies that the window.onload event is about to fire.
+  // This method may invalidate the frame.
+  virtual void RunScriptsAtDocumentIdle(RenderFrame* render_frame) {}
+
   // Allows subclasses to enable some runtime features before Blink has
   // started.
   virtual void SetRuntimeFeaturesDefaultsBeforeBlinkInitialization() {}
@@ -347,21 +351,17 @@ class CONTENT_EXPORT ContentRendererClient {
   virtual void DidInitializeWorkerContextOnWorkerThread(
       v8::Local<v8::Context> context) {}
 
-  // Allows the client to expose interfaces from the renderer process to the
-  // browser process via |registry|.
-  virtual void ExposeInterfacesToBrowser(
-      service_manager::InterfaceRegistry* interface_registry) {}
-
   // Overwrites the given URL to use an HTML5 embed if possible.
   // An empty URL is returned if the URL is not overriden.
   virtual GURL OverrideFlashEmbedWithHTML(const GURL& url);
 
-  // Provides parameters for initializing the global task scheduler. If
-  // |params_vector| is left empty, default parameters are used.
-  virtual void GetTaskSchedulerInitializationParams(
-      std::vector<base::SchedulerWorkerPoolParams>* params_vector,
-      base::TaskScheduler::WorkerPoolIndexForTraitsCallback*
-          index_to_traits_callback) {}
+  // Provides parameters for initializing the global task scheduler. Default
+  // params are used if this returns nullptr.
+  virtual std::unique_ptr<base::TaskScheduler::InitParams>
+  GetTaskSchedulerInitParams();
+
+  // Returns true if the media pipeline can be suspended, or false otherwise.
+  virtual bool AllowMediaSuspend();
 };
 
 }  // namespace content

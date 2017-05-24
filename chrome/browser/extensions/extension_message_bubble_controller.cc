@@ -16,7 +16,6 @@
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
 #include "chrome/common/url_constants.h"
 #include "components/strings/grit/components_strings.h"
-#include "content/public/browser/user_metrics.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -33,7 +32,7 @@ const int kMaxExtensionsToShow = 7;
 bool g_should_ignore_learn_more_for_testing = false;
 
 using ProfileSetMap = std::map<std::string, std::set<Profile*>>;
-base::LazyInstance<ProfileSetMap> g_shown_for_profiles =
+base::LazyInstance<ProfileSetMap>::DestructorAtExit g_shown_for_profiles =
     LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
@@ -77,9 +76,9 @@ void ExtensionMessageBubbleController::Delegate::SetBubbleInfoBeenAcknowledged(
   if (pref_name.empty())
     return;
   extensions::ExtensionPrefs* prefs = extensions::ExtensionPrefs::Get(profile_);
-  prefs->UpdateExtensionPref(extension_id,
-                             pref_name,
-                             value ? new base::FundamentalValue(value) : NULL);
+  prefs->UpdateExtensionPref(
+      extension_id, pref_name,
+      value ? base::MakeUnique<base::Value>(value) : nullptr);
 }
 
 std::string
@@ -316,7 +315,8 @@ void ExtensionMessageBubbleController::OnClose() {
   // If the bubble was closed due to deactivation, don't treat it as
   // acknowledgment so that the user will see the bubble again (until they
   // explicitly take an action).
-  if (user_action_ != ACTION_DISMISS_DEACTIVATION) {
+  if (user_action_ != ACTION_DISMISS_DEACTIVATION ||
+      delegate_->ShouldAcknowledgeOnDeactivate()) {
     AcknowledgeExtensions();
     if (delegate_->ClearProfileSetAfterAction())
       GetProfileSet()->clear();

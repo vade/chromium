@@ -34,6 +34,8 @@ class CHROMEOS_EXPORT NetworkTypePattern {
   static NetworkTypePattern VPN();
   static NetworkTypePattern Wimax();
 
+  static NetworkTypePattern Tether();
+
   // Matches only networks of exactly the type |shill_network_type|, which must
   // be one of the types defined in service_constants.h (e.g.
   // shill::kTypeWifi).

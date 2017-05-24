@@ -13,6 +13,8 @@
 #include "net/cert/cert_status_flags.h"
 #include "net/ssl/ssl_cipher_suite_names.h"
 #include "net/ssl/ssl_connection_status_flags.h"
+#include "net/test/cert_test_util.h"
+#include "net/test/test_data_directory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -125,6 +127,27 @@ TEST(SecurityStateContentUtilsTest,
   EXPECT_FALSE(explanations.displayed_content_with_cert_errors);
 }
 
+// Tests that SecurityInfo flags for mixed content are reflected in the
+// SecurityStyleExplanations produced by GetSecurityStyle.
+TEST(SecurityStateContentUtilsTest, GetSecurityStyleForMixedContent) {
+  content::SecurityStyleExplanations explanations;
+  security_state::SecurityInfo security_info;
+  security_info.cert_status = 0;
+  security_info.scheme_is_cryptographic = true;
+
+  security_info.contained_mixed_form = true;
+  GetSecurityStyle(security_info, &explanations);
+  EXPECT_TRUE(explanations.contained_mixed_form);
+  EXPECT_FALSE(explanations.ran_mixed_content);
+  EXPECT_FALSE(explanations.displayed_mixed_content);
+
+  security_info.contained_mixed_form = false;
+  security_info.mixed_content_status = security_state::CONTENT_STATUS_DISPLAYED;
+  GetSecurityStyle(security_info, &explanations);
+  EXPECT_FALSE(explanations.contained_mixed_form);
+  EXPECT_TRUE(explanations.displayed_mixed_content);
+}
+
 bool FindSecurityStyleExplanation(
     const std::vector<content::SecurityStyleExplanation>& explanations,
     const char* summary,
@@ -202,45 +225,58 @@ TEST(SecurityStateContentUtilsTest, ConnectionExplanation) {
   }
 }
 
-// Tests that a security level of HTTP_SHOW_WARNING produces a
-// content::SecurityStyle of UNAUTHENTICATED, with an explanation.
+// Tests that a security level of HTTP_SHOW_WARNING produces
+// blink::WebSecurityStyleNeutral and an explanation if appropriate.
 TEST(SecurityStateContentUtilsTest, HTTPWarning) {
   security_state::SecurityInfo security_info;
   content::SecurityStyleExplanations explanations;
   security_info.security_level = security_state::HTTP_SHOW_WARNING;
   blink::WebSecurityStyle security_style =
       GetSecurityStyle(security_info, &explanations);
-  EXPECT_EQ(blink::WebSecurityStyleUnauthenticated, security_style);
-  EXPECT_EQ(1u, explanations.unauthenticated_explanations.size());
-}
+  EXPECT_EQ(blink::kWebSecurityStyleNeutral, security_style);
+  // Verify no explanation was shown, because Form Not Secure was not triggered.
+  EXPECT_EQ(0u, explanations.neutral_explanations.size());
 
-// Tests that a security level of NONE when there is a password or
-// credit card field on HTTP produces a content::SecurityStyle of
-// UNAUTHENTICATED, with an info explanation for each.
-TEST(SecurityStateContentUtilsTest, HTTPWarningInFuture) {
-  security_state::SecurityInfo security_info;
-  content::SecurityStyleExplanations explanations;
-  security_info.security_level = security_state::NONE;
-  security_info.displayed_password_field_on_http = true;
-  blink::WebSecurityStyle security_style =
-      GetSecurityStyle(security_info, &explanations);
-  EXPECT_EQ(blink::WebSecurityStyleUnauthenticated, security_style);
-  EXPECT_EQ(1u, explanations.info_explanations.size());
-
-  explanations.info_explanations.clear();
+  explanations.neutral_explanations.clear();
   security_info.displayed_credit_card_field_on_http = true;
   security_style = GetSecurityStyle(security_info, &explanations);
-  EXPECT_EQ(blink::WebSecurityStyleUnauthenticated, security_style);
-  EXPECT_EQ(1u, explanations.info_explanations.size());
+  EXPECT_EQ(blink::kWebSecurityStyleNeutral, security_style);
+  // Verify one explanation was shown, because Form Not Secure was triggered.
+  EXPECT_EQ(1u, explanations.neutral_explanations.size());
 
   // Check that when both password and credit card fields get displayed, only
   // one explanation is added.
-  explanations.info_explanations.clear();
+  explanations.neutral_explanations.clear();
   security_info.displayed_credit_card_field_on_http = true;
   security_info.displayed_password_field_on_http = true;
   security_style = GetSecurityStyle(security_info, &explanations);
-  EXPECT_EQ(blink::WebSecurityStyleUnauthenticated, security_style);
-  EXPECT_EQ(1u, explanations.info_explanations.size());
+  EXPECT_EQ(blink::kWebSecurityStyleNeutral, security_style);
+  // Verify only one explanation was shown when Form Not Secure is triggered.
+  EXPECT_EQ(1u, explanations.neutral_explanations.size());
+}
+
+// Tests that an explanation is provided if a certificate is missing a
+// subjectAltName extension containing a domain name or IP address.
+TEST(SecurityStateContentUtilsTest, SubjectAltNameWarning) {
+  security_state::SecurityInfo security_info;
+  security_info.cert_status = 0;
+  security_info.scheme_is_cryptographic = true;
+
+  security_info.certificate = net::ImportCertFromFile(
+      net::GetTestCertsDirectory(), "salesforce_com_test.pem");
+  ASSERT_TRUE(security_info.certificate);
+
+  content::SecurityStyleExplanations explanations;
+  security_info.cert_missing_subject_alt_name = true;
+  GetSecurityStyle(security_info, &explanations);
+  // Verify that an explanation was shown for a missing subjectAltName.
+  EXPECT_EQ(1u, explanations.insecure_explanations.size());
+
+  explanations.insecure_explanations.clear();
+  security_info.cert_missing_subject_alt_name = false;
+  GetSecurityStyle(security_info, &explanations);
+  // Verify that no explanation is shown if the subjectAltName is present.
+  EXPECT_EQ(0u, explanations.insecure_explanations.size());
 }
 
 }  // namespace

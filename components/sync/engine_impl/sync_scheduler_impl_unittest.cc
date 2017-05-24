@@ -12,6 +12,7 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/test/test_timeouts.h"
@@ -51,7 +52,7 @@ class MockSyncer : public Syncer {
   MockSyncer();
   MOCK_METHOD3(NormalSyncShare, bool(ModelTypeSet, NudgeTracker*, SyncCycle*));
   MOCK_METHOD3(ConfigureSyncShare,
-               bool(ModelTypeSet,
+               bool(const ModelTypeSet&,
                     sync_pb::GetUpdatesCallerInfo::GetUpdatesSource,
                     SyncCycle*));
   MOCK_METHOD2(PollSyncShare, bool(ModelTypeSet, SyncCycle*));
@@ -59,7 +60,7 @@ class MockSyncer : public Syncer {
 
 MockSyncer::MockSyncer() : Syncer(nullptr) {}
 
-typedef std::vector<TimeTicks> SyncShareTimes;
+using SyncShareTimes = std::vector<TimeTicks>;
 
 void QuitLoopNow() {
   // We use QuitNow() instead of Quit() as the latter may get stalled
@@ -87,14 +88,6 @@ void PumpLoopFor(base::TimeDelta time) {
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, base::Bind(&QuitLoopNow), time);
   RunLoop();
-}
-
-ModelSafeRoutingInfo TypesToRoutingInfo(ModelTypeSet types) {
-  ModelSafeRoutingInfo routes;
-  for (ModelTypeSet::Iterator iter = types.First(); iter.Good(); iter.Inc()) {
-    routes[iter.Get()] = GROUP_PASSIVE;
-  }
-  return routes;
 }
 
 static const size_t kMinNumSamples = 5;
@@ -129,11 +122,6 @@ class SyncSchedulerImplTest : public testing::Test {
     delay_ = nullptr;
     extensions_activity_ = new ExtensionsActivity();
 
-    routing_info_[THEMES] = GROUP_UI;
-    routing_info_[TYPED_URLS] = GROUP_DB;
-    routing_info_[THEMES] = GROUP_UI;
-    routing_info_[NIGORI] = GROUP_PASSIVE;
-
     workers_.clear();
     workers_.push_back(make_scoped_refptr(new FakeModelWorker(GROUP_UI)));
     workers_.push_back(make_scoped_refptr(new FakeModelWorker(GROUP_DB)));
@@ -146,6 +134,9 @@ class SyncSchedulerImplTest : public testing::Test {
     model_type_registry_ = base::MakeUnique<ModelTypeRegistry>(
         workers_, test_user_share_.user_share(), &mock_nudge_handler_,
         UssMigrator());
+    model_type_registry_->RegisterDirectoryType(NIGORI, GROUP_PASSIVE);
+    model_type_registry_->RegisterDirectoryType(THEMES, GROUP_UI);
+    model_type_registry_->RegisterDirectoryType(TYPED_URLS, GROUP_DB);
 
     context_ = base::MakeUnique<SyncCycleContext>(
         connection_.get(), directory(), extensions_activity_.get(),
@@ -154,7 +145,6 @@ class SyncSchedulerImplTest : public testing::Test {
         true,   // enable keystore encryption
         false,  // force enable pre-commit GU avoidance
         "fake_invalidator_client_id");
-    context_->SetRoutingInfo(routing_info_);
     context_->set_notifications_enabled(true);
     context_->set_account_name("Test");
     scheduler_ = base::MakeUnique<SyncSchedulerImpl>(
@@ -164,7 +154,6 @@ class SyncSchedulerImplTest : public testing::Test {
   }
 
   SyncSchedulerImpl* scheduler() { return scheduler_.get(); }
-  const ModelSafeRoutingInfo& routing_info() { return routing_info_; }
   MockSyncer* syncer() { return syncer_; }
   MockDelayProvider* delay() { return delay_; }
   MockConnectionManager* connection() { return connection_.get(); }
@@ -292,6 +281,10 @@ class SyncSchedulerImplTest : public testing::Test {
     scheduler_->SetDefaultNudgeDelay(default_delay());
   }
 
+  bool BlockTimerIsRunning() const {
+    return scheduler_->pending_wakeup_timer_.IsRunning();
+  }
+
  private:
   syncable::Directory* directory() {
     return test_user_share_.user_share()->directory.get();
@@ -309,7 +302,6 @@ class SyncSchedulerImplTest : public testing::Test {
   MockDelayProvider* delay_;
   std::vector<scoped_refptr<ModelSafeWorker>> workers_;
   scoped_refptr<ExtensionsActivity> extensions_activity_;
-  ModelSafeRoutingInfo routing_info_;
   base::WeakPtrFactory<SyncSchedulerImplTest> weak_ptr_factory_;
 };
 
@@ -319,7 +311,7 @@ void RecordSyncShareImpl(SyncShareTimes* times) {
 
 ACTION_P2(RecordSyncShare, times, success) {
   RecordSyncShareImpl(times);
-  if (base::MessageLoop::current()->is_running())
+  if (base::RunLoop::IsRunningOnCurrentThread())
     QuitLoopNow();
   return success;
 }
@@ -328,7 +320,7 @@ ACTION_P3(RecordSyncShareMultiple, times, quit_after, success) {
   RecordSyncShareImpl(times);
   EXPECT_LE(times->size(), quit_after);
   if (times->size() >= quit_after &&
-      base::MessageLoop::current()->is_running()) {
+      base::RunLoop::IsRunningOnCurrentThread()) {
     QuitLoopNow();
   }
   return success;
@@ -393,7 +385,6 @@ TEST_F(SyncSchedulerImplTest, Config) {
   CallbackCounter retry_counter;
   ConfigurationParams params(
       GetUpdatesCallerInfo::RECONFIGURATION, model_types,
-      TypesToRoutingInfo(model_types),
       base::Bind(&CallbackCounter::Callback, base::Unretained(&ready_counter)),
       base::Bind(&CallbackCounter::Callback, base::Unretained(&retry_counter)));
   scheduler()->ScheduleConfiguration(params);
@@ -422,7 +413,6 @@ TEST_F(SyncSchedulerImplTest, ConfigWithBackingOff) {
   CallbackCounter retry_counter;
   ConfigurationParams params(
       GetUpdatesCallerInfo::RECONFIGURATION, model_types,
-      TypesToRoutingInfo(model_types),
       base::Bind(&CallbackCounter::Callback, base::Unretained(&ready_counter)),
       base::Bind(&CallbackCounter::Callback, base::Unretained(&retry_counter)));
   scheduler()->ScheduleConfiguration(params);
@@ -468,7 +458,6 @@ TEST_F(SyncSchedulerImplTest, ConfigWithStop) {
   CallbackCounter retry_counter;
   ConfigurationParams params(
       GetUpdatesCallerInfo::RECONFIGURATION, model_types,
-      TypesToRoutingInfo(model_types),
       base::Bind(&CallbackCounter::Callback, base::Unretained(&ready_counter)),
       base::Bind(&CallbackCounter::Callback, base::Unretained(&retry_counter)));
   scheduler()->ScheduleConfiguration(params);
@@ -490,7 +479,6 @@ TEST_F(SyncSchedulerImplTest, ConfigNoAuthToken) {
   CallbackCounter retry_counter;
   ConfigurationParams params(
       GetUpdatesCallerInfo::RECONFIGURATION, model_types,
-      TypesToRoutingInfo(model_types),
       base::Bind(&CallbackCounter::Callback, base::Unretained(&ready_counter)),
       base::Bind(&CallbackCounter::Callback, base::Unretained(&retry_counter)));
   scheduler()->ScheduleConfiguration(params);
@@ -518,7 +506,6 @@ TEST_F(SyncSchedulerImplTest, ConfigNoAuthTokenLocalSync) {
   CallbackCounter retry_counter;
   ConfigurationParams params(
       GetUpdatesCallerInfo::RECONFIGURATION, model_types,
-      TypesToRoutingInfo(model_types),
       base::Bind(&CallbackCounter::Callback, base::Unretained(&ready_counter)),
       base::Bind(&CallbackCounter::Callback, base::Unretained(&retry_counter)));
   scheduler()->ScheduleConfiguration(params);
@@ -546,7 +533,6 @@ TEST_F(SyncSchedulerImplTest, NudgeWithConfigWithBackingOff) {
   CallbackCounter retry_counter;
   ConfigurationParams params(
       GetUpdatesCallerInfo::RECONFIGURATION, model_types,
-      TypesToRoutingInfo(model_types),
       base::Bind(&CallbackCounter::Callback, base::Unretained(&ready_counter)),
       base::Bind(&CallbackCounter::Callback, base::Unretained(&retry_counter)));
   scheduler()->ScheduleConfiguration(params);
@@ -807,7 +793,7 @@ TEST_F(SyncSchedulerImplTest, ThrottlingDoesThrottle) {
   CallbackCounter ready_counter;
   CallbackCounter retry_counter;
   ConfigurationParams params(
-      GetUpdatesCallerInfo::RECONFIGURATION, types, TypesToRoutingInfo(types),
+      GetUpdatesCallerInfo::RECONFIGURATION, types,
       base::Bind(&CallbackCounter::Callback, base::Unretained(&ready_counter)),
       base::Bind(&CallbackCounter::Callback, base::Unretained(&retry_counter)));
   scheduler()->ScheduleConfiguration(params);
@@ -891,7 +877,7 @@ TEST_F(SyncSchedulerImplTest, ThrottlingExpiresFromConfigure) {
   CallbackCounter ready_counter;
   CallbackCounter retry_counter;
   ConfigurationParams params(
-      GetUpdatesCallerInfo::RECONFIGURATION, types, TypesToRoutingInfo(types),
+      GetUpdatesCallerInfo::RECONFIGURATION, types,
       base::Bind(&CallbackCounter::Callback, base::Unretained(&ready_counter)),
       base::Bind(&CallbackCounter::Callback, base::Unretained(&retry_counter)));
   scheduler()->ScheduleConfiguration(params);
@@ -1021,6 +1007,7 @@ TEST_F(SyncSchedulerImplTest, TypeBackingOffAndThrottling) {
   PumpLoop();  // To get PerformDelayedNudge called.
   PumpLoop();  // To get TrySyncCycleJob called
   EXPECT_TRUE(GetBackedOffTypes().HasAll(types));
+  EXPECT_TRUE(BlockTimerIsRunning());
   EXPECT_FALSE(scheduler()->IsBackingOff());
   EXPECT_FALSE(scheduler()->IsCurrentlyThrottled());
 
@@ -1038,8 +1025,19 @@ TEST_F(SyncSchedulerImplTest, TypeBackingOffAndThrottling) {
   PumpLoop();  // To get TrySyncCycleJob called.
 
   EXPECT_TRUE(GetBackedOffTypes().HasAll(types));
+  EXPECT_TRUE(BlockTimerIsRunning());
   EXPECT_FALSE(scheduler()->IsBackingOff());
   EXPECT_TRUE(scheduler()->IsCurrentlyThrottled());
+
+  // Unthrottled client, but the backingoff datatype is still in backoff and
+  // scheduled.
+  EXPECT_CALL(*syncer(), NormalSyncShare(_, _, _))
+      .WillOnce(DoAll(Invoke(test_util::SimulateNormalSuccess),
+                      QuitLoopNowAction(true)));
+  RunLoop();
+  EXPECT_FALSE(scheduler()->IsCurrentlyThrottled());
+  EXPECT_TRUE(GetBackedOffTypes().HasAll(types));
+  EXPECT_TRUE(BlockTimerIsRunning());
 
   StopSyncScheduler();
 }
@@ -1081,6 +1079,7 @@ TEST_F(SyncSchedulerImplTest, TypeThrottlingBackingOffBlocksNudge) {
 
   EXPECT_TRUE(GetThrottledTypes().HasAll(throttled_types));
   EXPECT_TRUE(GetBackedOffTypes().HasAll(backed_off_types));
+  EXPECT_TRUE(BlockTimerIsRunning());
   EXPECT_FALSE(scheduler()->IsBackingOff());
   EXPECT_FALSE(scheduler()->IsCurrentlyThrottled());
 
@@ -1212,7 +1211,6 @@ TEST_F(SyncSchedulerImplTest, ConfigurationMode) {
   CallbackCounter retry_counter;
   ConfigurationParams params(
       GetUpdatesCallerInfo::RECONFIGURATION, config_types,
-      TypesToRoutingInfo(config_types),
       base::Bind(&CallbackCounter::Callback, base::Unretained(&ready_counter)),
       base::Bind(&CallbackCounter::Callback, base::Unretained(&retry_counter)));
   scheduler()->ScheduleConfiguration(params);
@@ -1229,9 +1227,6 @@ TEST_F(SyncSchedulerImplTest, ConfigurationMode) {
       .WillOnce(DoAll(Invoke(test_util::SimulateNormalSuccess),
                       RecordSyncShare(&times2, true)));
 
-  // TODO(tim): Figure out how to remove this dangerous need to reset
-  // routing info between mode switches.
-  context()->SetRoutingInfo(routing_info());
   StartSyncScheduler(base::Time());
 
   RunLoop();
@@ -1307,7 +1302,7 @@ TEST_F(BackoffTriggersSyncSchedulerImplTest, FailGetEncryptionKey) {
   CallbackCounter ready_counter;
   CallbackCounter retry_counter;
   ConfigurationParams params(
-      GetUpdatesCallerInfo::RECONFIGURATION, types, TypesToRoutingInfo(types),
+      GetUpdatesCallerInfo::RECONFIGURATION, types,
       base::Bind(&CallbackCounter::Callback, base::Unretained(&ready_counter)),
       base::Bind(&CallbackCounter::Callback, base::Unretained(&retry_counter)));
   scheduler()->ScheduleConfiguration(params);
@@ -1356,7 +1351,7 @@ TEST_F(SyncSchedulerImplTest, BackoffDropsJobs) {
   CallbackCounter ready_counter;
   CallbackCounter retry_counter;
   ConfigurationParams params(
-      GetUpdatesCallerInfo::RECONFIGURATION, types, TypesToRoutingInfo(types),
+      GetUpdatesCallerInfo::RECONFIGURATION, types,
       base::Bind(&CallbackCounter::Callback, base::Unretained(&ready_counter)),
       base::Bind(&CallbackCounter::Callback, base::Unretained(&retry_counter)));
   scheduler()->ScheduleConfiguration(params);
@@ -1589,7 +1584,6 @@ TEST_F(SyncSchedulerImplTest, DoubleCanaryInConfigure) {
   CallbackCounter retry_counter;
   ConfigurationParams params(
       GetUpdatesCallerInfo::RECONFIGURATION, model_types,
-      TypesToRoutingInfo(model_types),
       base::Bind(&CallbackCounter::Callback, base::Unretained(&ready_counter)),
       base::Bind(&CallbackCounter::Callback, base::Unretained(&retry_counter)));
   scheduler()->ScheduleConfiguration(params);
@@ -1780,6 +1774,128 @@ TEST_F(SyncSchedulerImplTest, PartialFailureWillExponentialBackoff) {
   // times.
   EXPECT_LE(first_blocking_time * 1.5, second_blocking_time);
   EXPECT_GE(first_blocking_time * 2.5, second_blocking_time);
+
+  StopSyncScheduler();
+}
+
+// If a datatype is in backoff or throttling, pending_wakeup_timer_ should
+// schedule a delay job for OnTypesUnblocked. SyncScheduler sometimes use
+// pending_wakeup_timer_ to schdule PerformDelayedNudge job before
+// OnTypesUnblocked got run. This test will verify after ran
+// PerformDelayedNudge, OnTypesUnblocked will be rescheduled if any datatype is
+// in backoff or throttling.
+TEST_F(SyncSchedulerImplTest, TypeBackoffAndSuccessfulSync) {
+  UseMockDelayProvider();
+  EXPECT_CALL(*delay(), GetDelay(_)).WillRepeatedly(Return(long_delay()));
+
+  TimeDelta poll(TimeDelta::FromDays(1));
+  scheduler()->OnReceivedLongPollIntervalUpdate(poll);
+
+  const ModelTypeSet types(THEMES);
+
+  // Set backoff datatype.
+  ::testing::InSequence seq;
+  EXPECT_CALL(*syncer(), NormalSyncShare(_, _, _))
+      .WillOnce(DoAll(WithArg<2>(test_util::SimulatePartialFailure(types)),
+                      Return(true)))
+      .RetiresOnSaturation();
+
+  StartSyncScheduler(base::Time());
+  scheduler()->ScheduleLocalNudge(types, FROM_HERE);
+  PumpLoop();  // To get PerformDelayedNudge called.
+  PumpLoop();  // To get TrySyncCycleJob called
+  EXPECT_TRUE(GetBackedOffTypes().HasAll(types));
+  EXPECT_TRUE(BlockTimerIsRunning());
+  EXPECT_FALSE(scheduler()->IsBackingOff());
+  EXPECT_FALSE(scheduler()->IsCurrentlyThrottled());
+
+  SyncShareTimes times;
+  EXPECT_CALL(*syncer(), NormalSyncShare(_, _, _))
+      .WillOnce(DoAll(Invoke(test_util::SimulateNormalSuccess),
+                      RecordSyncShare(&times, true)))
+      .RetiresOnSaturation();
+
+  // Do a successful Sync.
+  const ModelTypeSet unbacked_off_types(TYPED_URLS);
+  scheduler()->ScheduleLocalNudge(unbacked_off_types, FROM_HERE);
+  PumpLoop();  // TO get PerformDelayedNudge called.
+  PumpLoop();  // To get TrySyncCycleJob called.
+
+  // Timer is still running for backoff datatype after Sync success.
+  EXPECT_TRUE(GetBackedOffTypes().HasAll(types));
+  EXPECT_TRUE(BlockTimerIsRunning());
+  EXPECT_FALSE(scheduler()->IsBackingOff());
+  EXPECT_FALSE(scheduler()->IsCurrentlyThrottled());
+
+  StopSyncScheduler();
+}
+
+// Verify that the timer is scheduled for an unblock job after one datatype is
+// unblocked, and there is another one still blocked.
+TEST_F(SyncSchedulerImplTest, TypeBackingOffAndFailureSync) {
+  UseMockDelayProvider();
+  EXPECT_CALL(*delay(), GetDelay(_))
+      .WillOnce(Return(long_delay()))
+      .RetiresOnSaturation();
+
+  TimeDelta poll(TimeDelta::FromDays(1));
+  scheduler()->OnReceivedLongPollIntervalUpdate(poll);
+
+  // Set a backoff datatype.
+  const ModelTypeSet themes_types(THEMES);
+  ::testing::InSequence seq;
+  EXPECT_CALL(*syncer(), NormalSyncShare(_, _, _))
+      .WillOnce(
+          DoAll(WithArg<2>(test_util::SimulatePartialFailure(themes_types)),
+                Return(true)))
+      .RetiresOnSaturation();
+
+  StartSyncScheduler(base::Time());
+  scheduler()->ScheduleLocalNudge(themes_types, FROM_HERE);
+  PumpLoop();  // To get PerformDelayedNudge called.
+  PumpLoop();  // To get TrySyncCycleJob called
+  EXPECT_TRUE(GetBackedOffTypes().HasAll(themes_types));
+  EXPECT_TRUE(BlockTimerIsRunning());
+  EXPECT_FALSE(scheduler()->IsBackingOff());
+  EXPECT_FALSE(scheduler()->IsCurrentlyThrottled());
+
+  // Set anther backoff datatype.
+  const ModelTypeSet typed_urls_types(TYPED_URLS);
+  EXPECT_CALL(*syncer(), NormalSyncShare(_, _, _))
+      .WillOnce(
+          DoAll(WithArg<2>(test_util::SimulatePartialFailure(typed_urls_types)),
+                Return(true)))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*delay(), GetDelay(_))
+      .WillOnce(Return(default_delay()))
+      .RetiresOnSaturation();
+
+  scheduler()->ScheduleLocalNudge(typed_urls_types, FROM_HERE);
+  PumpLoop();  // TO get PerformDelayedNudge called.
+  PumpLoop();  // To get TrySyncCycleJob called.
+
+  EXPECT_TRUE(GetBackedOffTypes().HasAll(themes_types));
+  EXPECT_TRUE(GetBackedOffTypes().HasAll(typed_urls_types));
+  EXPECT_TRUE(BlockTimerIsRunning());
+  EXPECT_FALSE(scheduler()->IsBackingOff());
+  EXPECT_FALSE(scheduler()->IsCurrentlyThrottled());
+
+  // Unblock one datatype.
+  SyncShareTimes times;
+  EXPECT_CALL(*syncer(), NormalSyncShare(_, _, _))
+      .WillRepeatedly(DoAll(Invoke(test_util::SimulateNormalSuccess),
+                            RecordSyncShare(&times, true)));
+  EXPECT_CALL(*delay(), GetDelay(_)).WillRepeatedly(Return(long_delay()));
+
+  PumpLoop();  // TO get OnTypesUnblocked called.
+  PumpLoop();  // To get TrySyncCycleJob called.
+
+  // Timer is still scheduled for another backoff datatype.
+  EXPECT_TRUE(GetBackedOffTypes().HasAll(themes_types));
+  EXPECT_FALSE(GetBackedOffTypes().HasAll(typed_urls_types));
+  EXPECT_TRUE(BlockTimerIsRunning());
+  EXPECT_FALSE(scheduler()->IsBackingOff());
+  EXPECT_FALSE(scheduler()->IsCurrentlyThrottled());
 
   StopSyncScheduler();
 }

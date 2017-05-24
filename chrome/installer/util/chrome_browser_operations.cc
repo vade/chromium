@@ -5,8 +5,8 @@
 #include "chrome/installer/util/chrome_browser_operations.h"
 
 #include "base/command_line.h"
-#include "base/files/file_path.h"
 #include "base/logging.h"
+#include "chrome/install_static/install_util.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/shell_util.h"
@@ -18,15 +18,7 @@ namespace installer {
 void ChromeBrowserOperations::AddKeyFiles(
     std::vector<base::FilePath>* key_files) const {
   DCHECK(key_files);
-  key_files->push_back(base::FilePath(installer::kChromeDll));
-}
-
-void ChromeBrowserOperations::AppendProductFlags(
-    base::CommandLine* cmd_line) const {
-}
-
-void ChromeBrowserOperations::AppendRenameFlags(
-    base::CommandLine* cmd_line) const {
+  key_files->push_back(base::FilePath(kChromeDll));
 }
 
 // Modifies a ShortcutProperties object by adding default values to
@@ -43,12 +35,15 @@ void ChromeBrowserOperations::AddDefaultShortcutProperties(
   if (!properties->has_target())
     properties->set_target(target_exe);
 
-  if (!properties->has_icon())
-    properties->set_icon(target_exe, dist->GetIconIndex());
+  if (!properties->has_icon()) {
+    DCHECK_EQ(BrowserDistribution::GetDistribution(), dist);
+    properties->set_icon(target_exe, install_static::GetIconResourceIndex());
+  }
 
   if (!properties->has_app_id()) {
-    properties->set_app_id(ShellUtil::GetBrowserModelId(
-        dist, InstallUtil::IsPerUserInstall(target_exe)));
+    DCHECK_EQ(BrowserDistribution::GetDistribution(), dist);
+    properties->set_app_id(
+        ShellUtil::GetBrowserModelId(InstallUtil::IsPerUserInstall()));
   }
 
   if (!properties->has_description())
@@ -60,8 +55,8 @@ void ChromeBrowserOperations::LaunchUserExperiment(
     InstallStatus status,
     bool system_level) const {
   base::CommandLine base_command(setup_path);
-  AppendProductFlags(&base_command);
-  installer::LaunchBrowserUserExperiment(base_command, status, system_level);
+  InstallUtil::AppendModeSwitch(&base_command);
+  LaunchBrowserUserExperiment(base_command, status, system_level);
 }
 
 }  // namespace installer

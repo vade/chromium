@@ -4,9 +4,6 @@
  * found in the LICENSE file.
  */
 
-/**
- * @unrestricted
- */
 SDK.TargetManager = class extends Common.Object {
   constructor() {
     super();
@@ -17,19 +14,38 @@ SDK.TargetManager = class extends Common.Object {
     this._observerCapabiliesMaskSymbol = Symbol('observerCapabilitiesMask');
     /** @type {!Map<symbol, !Array<{modelClass: !Function, thisObject: (!Object|undefined), listener: function(!Common.Event)}>>} */
     this._modelListeners = new Map();
+    /** @type {!Map<function(new:SDK.SDKModel, !SDK.Target), !Array<!SDK.SDKModelObserver>>} */
+    this._modelObservers = new Map();
     this._isSuspended = false;
+    this._lastAnonymousTargetId = 0;
+    /** @type {!Map<!SDK.Target, !SDK.ChildTargetManager>} */
+    this._childTargetManagers = new Map();
+    /** @type {!Set<string>} */
+    this._nodeTargetIds = new Set();
+    /** @type {!Protocol.InspectorBackend.Connection} */
+    this._mainConnection;
+    /** @type {function()} */
+    this._webSocketConnectionLostCallback;
   }
 
+  /**
+   * @return {!Promise}
+   */
   suspendAllTargets() {
     if (this._isSuspended)
-      return;
+      return Promise.resolve();
     this._isSuspended = true;
     this.dispatchEventToListeners(SDK.TargetManager.Events.SuspendStateChanged);
 
-    for (var i = 0; i < this._targets.length; ++i) {
-      for (var model of this._targets[i].models())
-        model.suspendModel();
+    var promises = [];
+    for (var target of this._targets) {
+      var childTargetManager = this._childTargetManagers.get(target);
+      if (childTargetManager)
+        promises.push(childTargetManager.suspend());
+      for (var model of target.models().values())
+        promises.push(model.suspendModel());
     }
+    return Promise.all(promises);
   }
 
   /**
@@ -37,21 +53,19 @@ SDK.TargetManager = class extends Common.Object {
    */
   resumeAllTargets() {
     if (!this._isSuspended)
-      throw new Error('Not suspended');
+      return Promise.resolve();
     this._isSuspended = false;
     this.dispatchEventToListeners(SDK.TargetManager.Events.SuspendStateChanged);
 
     var promises = [];
-    for (var i = 0; i < this._targets.length; ++i) {
-      for (var model of this._targets[i].models())
+    for (var target of this._targets) {
+      var childTargetManager = this._childTargetManagers.get(target);
+      if (childTargetManager)
+        promises.push(childTargetManager.resume());
+      for (var model of target.models().values())
         promises.push(model.resumeModel());
     }
     return Promise.all(promises);
-  }
-
-  suspendAndResumeAllTargets() {
-    this.suspendAllTargets();
-    this.resumeAllTargets();
   }
 
   /**
@@ -62,6 +76,21 @@ SDK.TargetManager = class extends Common.Object {
   }
 
   /**
+   * @param {function(new:T,!SDK.Target)} modelClass
+   * @return {!Array<!T>}
+   * @template T
+   */
+  models(modelClass) {
+    var result = [];
+    for (var i = 0; i < this._targets.length; ++i) {
+      var model = this._targets[i].model(modelClass);
+      if (model)
+        result.push(model);
+    }
+    return result;
+  }
+
+  /**
    * @return {string}
    */
   inspectedURL() {
@@ -69,26 +98,54 @@ SDK.TargetManager = class extends Common.Object {
   }
 
   /**
-   * @param {!SDK.TargetManager.Events} eventName
-   * @param {!Common.Event} event
+   * @param {function(new:T,!SDK.Target)} modelClass
+   * @param {!SDK.SDKModelObserver<T>} observer
+   * @template T
    */
-  _redispatchEvent(eventName, event) {
-    this.dispatchEventToListeners(eventName, event.data);
+  observeModels(modelClass, observer) {
+    if (!this._modelObservers.has(modelClass))
+      this._modelObservers.set(modelClass, []);
+    this._modelObservers.get(modelClass).push(observer);
+    for (var model of this.models(modelClass))
+      observer.modelAdded(model);
   }
 
   /**
-   * @param {boolean=} bypassCache
-   * @param {string=} injectedScript
+   * @param {function(new:T,!SDK.Target)} modelClass
+   * @param {!SDK.SDKModelObserver<T>} observer
+   * @template T
    */
-  reloadPage(bypassCache, injectedScript) {
-    if (!this._targets.length)
+  unobserveModels(modelClass, observer) {
+    if (!this._modelObservers.has(modelClass))
       return;
+    var observers = this._modelObservers.get(modelClass);
+    observers.remove(observer);
+    if (!observers.length)
+      this._modelObservers.delete(modelClass);
+  }
 
-    var resourceTreeModel = SDK.ResourceTreeModel.fromTarget(this._targets[0]);
-    if (!resourceTreeModel)
+  /**
+   * @param {!SDK.Target} target
+   * @param {function(new:SDK.SDKModel,!SDK.Target)} modelClass
+   * @param {!SDK.SDKModel} model
+   */
+  modelAdded(target, modelClass, model) {
+    if (!this._modelObservers.has(modelClass))
       return;
+    for (var observer of this._modelObservers.get(modelClass).slice())
+      observer.modelAdded(model);
+  }
 
-    resourceTreeModel.reloadPage(bypassCache, injectedScript);
+  /**
+   * @param {!SDK.Target} target
+   * @param {function(new:SDK.SDKModel,!SDK.Target)} modelClass
+   * @param {!SDK.SDKModel} model
+   */
+  _modelRemoved(target, modelClass, model) {
+    if (!this._modelObservers.has(modelClass))
+      return;
+    for (var observer of this._modelObservers.get(modelClass).slice())
+      observer.modelRemoved(model);
   }
 
   /**
@@ -155,86 +212,26 @@ SDK.TargetManager = class extends Common.Object {
   }
 
   /**
+   * @param {string} id
    * @param {string} name
    * @param {number} capabilitiesMask
    * @param {!Protocol.InspectorBackend.Connection.Factory} connectionFactory
    * @param {?SDK.Target} parentTarget
    * @return {!SDK.Target}
    */
-  createTarget(name, capabilitiesMask, connectionFactory, parentTarget) {
-    var target = new SDK.Target(this, name, capabilitiesMask, connectionFactory, parentTarget);
-
-    var logAgent = target.hasLogCapability() ? target.logAgent() : null;
-
-    /** @type {!SDK.ConsoleModel} */
-    target.consoleModel = new SDK.ConsoleModel(target, logAgent);
-
-    var networkManager = null;
-    var resourceTreeModel = null;
-    if (target.hasNetworkCapability())
-      networkManager = new SDK.NetworkManager(target);
-    if (networkManager && target.hasDOMCapability()) {
-      resourceTreeModel =
-          new SDK.ResourceTreeModel(target, networkManager, SDK.SecurityOriginManager.fromTarget(target));
-      new SDK.NetworkLog(target, resourceTreeModel, networkManager);
-    }
-
-    /** @type {!SDK.RuntimeModel} */
-    target.runtimeModel = new SDK.RuntimeModel(target);
-
-    if (target.hasJSCapability())
-      new SDK.DebuggerModel(target);
-
-    if (resourceTreeModel) {
-      var domModel = new SDK.DOMModel(target);
-      // TODO(eostroukhov) CSSModel should not depend on RTM
-      new SDK.CSSModel(target, domModel);
-    }
-
-    /** @type {?SDK.SubTargetsManager} */
-    target.subTargetsManager = target.hasTargetCapability() ? new SDK.SubTargetsManager(target) : null;
-    /** @type {!SDK.CPUProfilerModel} */
-    target.cpuProfilerModel = new SDK.CPUProfilerModel(target);
-    /** @type {!SDK.HeapProfilerModel} */
-    target.heapProfilerModel = new SDK.HeapProfilerModel(target);
-
-    target.tracingManager = new SDK.TracingManager(target);
-
-    if (target.subTargetsManager && target.hasBrowserCapability())
-      target.serviceWorkerManager = new SDK.ServiceWorkerManager(target, target.subTargetsManager);
-
-    this.addTarget(target);
-    return target;
-  }
-
-  /**
-   * @param {!SDK.Target} target
-   * @return {!Array<!SDK.TargetManager.Observer>}
-   */
-  _observersForTarget(target) {
-    return this._observers.filter(
-        (observer) => target.hasAllCapabilities(observer[this._observerCapabiliesMaskSymbol] || 0));
-  }
-
-  /**
-   * @param {!SDK.Target} target
-   */
-  addTarget(target) {
+  createTarget(id, name, capabilitiesMask, connectionFactory, parentTarget) {
+    var target = new SDK.Target(this, id, name, capabilitiesMask, connectionFactory, parentTarget);
+    target.createModels(new Set(this._modelObservers.keys()));
+    if (target.hasTargetCapability())
+      this._childTargetManagers.set(target, new SDK.ChildTargetManager(this, target));
     this._targets.push(target);
-    var resourceTreeModel = SDK.ResourceTreeModel.fromTarget(target);
-    if (this._targets.length === 1 && resourceTreeModel) {
-      resourceTreeModel[SDK.TargetManager._listenersSymbol] = [
-        setupRedispatch.call(
-            this, SDK.ResourceTreeModel.Events.MainFrameNavigated, SDK.TargetManager.Events.MainFrameNavigated),
-        setupRedispatch.call(this, SDK.ResourceTreeModel.Events.Load, SDK.TargetManager.Events.Load),
-        setupRedispatch.call(
-            this, SDK.ResourceTreeModel.Events.PageReloadRequested, SDK.TargetManager.Events.PageReloadRequested),
-        setupRedispatch.call(this, SDK.ResourceTreeModel.Events.WillReloadPage, SDK.TargetManager.Events.WillReloadPage)
-      ];
-    }
+
     var copy = this._observersForTarget(target);
     for (var i = 0; i < copy.length; ++i)
       copy[i].targetAdded(target);
+
+    for (var modelClass of target.models().keys())
+      this.modelAdded(target, modelClass, target.models().get(modelClass));
 
     for (var pair of this._modelListeners) {
       var listeners = pair[1];
@@ -245,15 +242,16 @@ SDK.TargetManager = class extends Common.Object {
       }
     }
 
-    /**
-     * @param {!SDK.ResourceTreeModel.Events} sourceEvent
-     * @param {!SDK.TargetManager.Events} targetEvent
-     * @return {!Common.EventTarget.EventDescriptor}
-     * @this {SDK.TargetManager}
-     */
-    function setupRedispatch(sourceEvent, targetEvent) {
-      return resourceTreeModel.addEventListener(sourceEvent, this._redispatchEvent.bind(this, targetEvent));
-    }
+    return target;
+  }
+
+  /**
+   * @param {!SDK.Target} target
+   * @return {!Array<!SDK.TargetManager.Observer>}
+   */
+  _observersForTarget(target) {
+    return this._observers.filter(
+        observer => target.hasAllCapabilities(observer[this._observerCapabiliesMaskSymbol] || 0));
   }
 
   /**
@@ -262,11 +260,16 @@ SDK.TargetManager = class extends Common.Object {
   removeTarget(target) {
     if (!this._targets.includes(target))
       return;
+
+    var childTargetManager = this._childTargetManagers.get(target);
+    this._childTargetManagers.delete(target);
+    if (childTargetManager)
+      childTargetManager.dispose();
+
     this._targets.remove(target);
-    var resourceTreeModel = SDK.ResourceTreeModel.fromTarget(target);
-    var treeModelListeners = resourceTreeModel && resourceTreeModel[SDK.TargetManager._listenersSymbol];
-    if (treeModelListeners)
-      Common.EventTarget.removeEventListeners(treeModelListeners);
+
+    for (var modelClass of target.models().keys())
+      this._modelRemoved(target, modelClass, target.models().get(modelClass));
 
     var copy = this._observersForTarget(target);
     for (var i = 0; i < copy.length; ++i)
@@ -290,15 +293,16 @@ SDK.TargetManager = class extends Common.Object {
     if (!capabilitiesMask)
       return this._targets.slice();
     else
-      return this._targets.filter((target) => target.hasAllCapabilities(capabilitiesMask || 0));
+      return this._targets.filter(target => target.hasAllCapabilities(capabilitiesMask || 0));
   }
 
   /**
    *
-   * @param {number} id
+   * @param {string} id
    * @return {?SDK.Target}
    */
   targetById(id) {
+    // TODO(dgozman): add a map id -> target.
     for (var i = 0; i < this._targets.length; ++i) {
       if (this._targets[i].id() === id)
         return this._targets[i];
@@ -314,24 +318,6 @@ SDK.TargetManager = class extends Common.Object {
   }
 
   /**
-   * @param {!SDK.Target} target
-   */
-  suspendReload(target) {
-    var resourceTreeModel = SDK.ResourceTreeModel.fromTarget(target);
-    if (resourceTreeModel)
-      resourceTreeModel.suspendReload();
-  }
-
-  /**
-   * @param {!SDK.Target} target
-   */
-  resumeReload(target) {
-    var resourceTreeModel = SDK.ResourceTreeModel.fromTarget(target);
-    if (resourceTreeModel)
-      setImmediate(resourceTreeModel.resumeReload.bind(resourceTreeModel));
-  }
-
-  /**
    * @param {function()} webSocketConnectionLostCallback
    */
   connectToMainTarget(webSocketConnectionLostCallback) {
@@ -342,22 +328,29 @@ SDK.TargetManager = class extends Common.Object {
   _connectAndCreateMainTarget() {
     if (Runtime.queryParam('nodeFrontend')) {
       var target = new SDK.Target(
-          this, Common.UIString('Node'), SDK.Target.Capability.Target, this._createMainConnection.bind(this), null);
-      target.subTargetsManager = new SDK.SubTargetsManager(target);
-      target.setInspectedURL('Node');
+          this, 'main', Common.UIString('Node.js'), SDK.Target.Capability.Target, this._createMainConnection.bind(this),
+          null);
+      target.setInspectedURL('Node.js');
+      this._childTargetManagers.set(target, new SDK.ChildTargetManager(this, target));
+      Host.userMetrics.actionTaken(Host.UserMetrics.Action.ConnectToNodeJSFromFrontend);
       return;
     }
 
     var capabilities = SDK.Target.Capability.Browser | SDK.Target.Capability.DOM | SDK.Target.Capability.JS |
-        SDK.Target.Capability.Log | SDK.Target.Capability.Network | SDK.Target.Capability.Target;
+        SDK.Target.Capability.Log | SDK.Target.Capability.Network | SDK.Target.Capability.Target |
+        SDK.Target.Capability.ScreenCapture | SDK.Target.Capability.Tracing | SDK.Target.Capability.Emulation |
+        SDK.Target.Capability.Security | SDK.Target.Capability.Input | SDK.Target.Capability.Inspector |
+        SDK.Target.Capability.DeviceEmulation;
     if (Runtime.queryParam('isSharedWorker')) {
       capabilities = SDK.Target.Capability.Browser | SDK.Target.Capability.Log | SDK.Target.Capability.Network |
-          SDK.Target.Capability.Target;
+          SDK.Target.Capability.Target | SDK.Target.Capability.Inspector;
     } else if (Runtime.queryParam('v8only')) {
       capabilities = SDK.Target.Capability.JS;
+      Host.userMetrics.actionTaken(Host.UserMetrics.Action.ConnectToNodeJSDirectly);
     }
 
-    var target = this.createTarget(Common.UIString('Main'), capabilities, this._createMainConnection.bind(this), null);
+    var target =
+        this.createTarget('main', Common.UIString('Main'), capabilities, this._createMainConnection.bind(this), null);
     target.runtimeAgent().runIfWaitingForDebugger();
   }
 
@@ -366,8 +359,10 @@ SDK.TargetManager = class extends Common.Object {
    * @return {!Protocol.InspectorBackend.Connection}
    */
   _createMainConnection(params) {
-    if (Runtime.queryParam('ws')) {
-      var ws = 'ws://' + Runtime.queryParam('ws');
+    var wsParam = Runtime.queryParam('ws');
+    var wssParam = Runtime.queryParam('wss');
+    if (wsParam || wssParam) {
+      var ws = wsParam ? `ws://${wsParam}` : `wss://${wssParam}`;
       this._mainConnection = new SDK.WebSocketConnection(ws, this._webSocketConnectionLostCallback, params);
     } else if (InspectorFrontendHost.isHostedMode()) {
       this._mainConnection = new SDK.StubConnection(params);
@@ -375,6 +370,13 @@ SDK.TargetManager = class extends Common.Object {
       this._mainConnection = new SDK.MainConnection(params);
     }
     return this._mainConnection;
+  }
+
+  /**
+   * @return {number}
+   */
+  availableNodeTargetsCount() {
+    return this._nodeTargetIds.size;
   }
 
   /**
@@ -387,19 +389,231 @@ SDK.TargetManager = class extends Common.Object {
   }
 };
 
+/**
+ * @implements {Protocol.TargetDispatcher}
+ */
+SDK.ChildTargetManager = class {
+  /**
+   * @param {!SDK.TargetManager} targetManager
+   * @param {!SDK.Target} parentTarget
+   */
+  constructor(targetManager, parentTarget) {
+    this._targetManager = targetManager;
+    this._parentTarget = parentTarget;
+    this._targetAgent = parentTarget.targetAgent();
+
+    /** @type {!Map<string, !SDK.ChildConnection>} */
+    this._childConnections = new Map();
+
+    parentTarget.registerTargetDispatcher(this);
+    this._targetAgent.invoke_setAutoAttach({autoAttach: true, waitForDebuggerOnStart: true});
+    if (Runtime.experiments.isEnabled('autoAttachToCrossProcessSubframes'))
+      this._targetAgent.setAttachToFrames(true);
+
+    if (!parentTarget.parentTarget()) {
+      this._targetAgent.setDiscoverTargets(true);
+      if (Runtime.queryParam('nodeFrontend')) {
+        InspectorFrontendHost.setDevicesUpdatesEnabled(true);
+        InspectorFrontendHost.events.addEventListener(
+            InspectorFrontendHostAPI.Events.DevicesDiscoveryConfigChanged, this._devicesDiscoveryConfigChanged, this);
+      } else {
+        this._targetAgent.setRemoteLocations([{host: 'localhost', port: 9229}]);
+      }
+    }
+  }
+
+  /**
+   * @param {!Common.Event} event
+   */
+  _devicesDiscoveryConfigChanged(event) {
+    var config = /** @type {!Adb.Config} */ (event.data);
+    var locations = [];
+    for (var address of config.networkDiscoveryConfig) {
+      var parts = address.split(':');
+      var port = parseInt(parts[1], 10);
+      if (parts[0] && port)
+        locations.push({host: parts[0], port: port});
+    }
+    this._targetAgent.setRemoteLocations(locations);
+  }
+
+  /**
+   * @return {!Promise}
+   */
+  suspend() {
+    return this._targetAgent.invoke_setAutoAttach({autoAttach: true, waitForDebuggerOnStart: false});
+  }
+
+  /**
+   * @return {!Promise}
+   */
+  resume() {
+    return this._targetAgent.invoke_setAutoAttach({autoAttach: true, waitForDebuggerOnStart: true});
+  }
+
+  dispose() {
+    if (Runtime.queryParam('nodeFrontend') && !this._parentTarget.parentTarget()) {
+      InspectorFrontendHost.events.removeEventListener(
+          InspectorFrontendHostAPI.Events.DevicesDiscoveryConfigChanged, this._devicesDiscoveryConfigChanged, this);
+    }
+
+    // TODO(dgozman): this is O(n^2) when removing main target.
+    var childTargets = this._targetManager._targets.filter(child => child.parentTarget() === this._parentTarget);
+    for (var child of childTargets)
+      this.detachedFromTarget(child.id());
+  }
+
+  /**
+   * @param {string} type
+   * @return {number}
+   */
+  _capabilitiesForType(type) {
+    if (type === 'worker')
+      return SDK.Target.Capability.JS | SDK.Target.Capability.Log;
+    if (type === 'service_worker')
+      return SDK.Target.Capability.Log | SDK.Target.Capability.Network | SDK.Target.Capability.Target;
+    if (type === 'iframe') {
+      return SDK.Target.Capability.Browser | SDK.Target.Capability.DOM | SDK.Target.Capability.JS |
+          SDK.Target.Capability.Log | SDK.Target.Capability.Network | SDK.Target.Capability.Target |
+          SDK.Target.Capability.Tracing | SDK.Target.Capability.Emulation | SDK.Target.Capability.Input;
+    }
+    if (type === 'node')
+      return SDK.Target.Capability.JS;
+    return 0;
+  }
+
+  /**
+   * @override
+   * @param {!Protocol.Target.TargetInfo} targetInfo
+   */
+  targetCreated(targetInfo) {
+    if (targetInfo.type !== 'node')
+      return;
+    if (Runtime.queryParam('nodeFrontend')) {
+      this._targetAgent.attachToTarget(targetInfo.targetId);
+    } else {
+      this._targetManager._nodeTargetIds.add(targetInfo.targetId);
+      this._targetManager.dispatchEventToListeners(SDK.TargetManager.Events.AvailableNodeTargetsChanged);
+    }
+  }
+
+  /**
+   * @override
+   * @param {string} targetId
+   */
+  targetDestroyed(targetId) {
+    if (Runtime.queryParam('nodeFrontend') || !this._targetManager._nodeTargetIds.has(targetId))
+      return;
+    this._targetManager._nodeTargetIds.delete(targetId);
+    this._targetManager.dispatchEventToListeners(SDK.TargetManager.Events.AvailableNodeTargetsChanged);
+  }
+
+  /**
+   * @override
+   * @param {!Protocol.Target.TargetInfo} targetInfo
+   * @param {boolean} waitingForDebugger
+   */
+  attachedToTarget(targetInfo, waitingForDebugger) {
+    var targetName = '';
+    if (targetInfo.type === 'node') {
+      targetName = Common.UIString('Node.js: %s', targetInfo.url);
+    } else if (targetInfo.type !== 'iframe') {
+      var parsedURL = targetInfo.url.asParsedURL();
+      targetName =
+          parsedURL ? parsedURL.lastPathComponentWithFragment() : '#' + (++this._targetManager._lastAnonymousTargetId);
+    }
+    var target = this._targetManager.createTarget(
+        targetInfo.targetId, targetName, this._capabilitiesForType(targetInfo.type),
+        this._createChildConnection.bind(this, this._targetAgent, targetInfo.targetId), this._parentTarget);
+    target[SDK.TargetManager._isWorkerSymbol] = targetInfo.type === 'worker';
+
+    // Only pause the new worker if debugging SW - we are going through the pause on start checkbox.
+    if (!this._parentTarget.parentTarget() && Runtime.queryParam('isSharedWorker') && waitingForDebugger) {
+      var debuggerModel = target.model(SDK.DebuggerModel);
+      if (debuggerModel)
+        debuggerModel.pause();
+    }
+    target.runtimeAgent().runIfWaitingForDebugger();
+
+    if (Runtime.queryParam('nodeFrontend'))
+      InspectorFrontendHost.bringToFront();
+  }
+
+  /**
+   * @override
+   * @param {string} childTargetId
+   */
+  detachedFromTarget(childTargetId) {
+    this._childConnections.get(childTargetId)._onDisconnect.call(null, 'target terminated');
+    this._childConnections.delete(childTargetId);
+  }
+
+  /**
+   * @override
+   * @param {string} childTargetId
+   * @param {string} message
+   */
+  receivedMessageFromTarget(childTargetId, message) {
+    var connection = this._childConnections.get(childTargetId);
+    if (connection)
+      connection._onMessage.call(null, message);
+  }
+
+  /**
+   * @param {!Protocol.TargetAgent} agent
+   * @param {string} childTargetId
+   * @param {!Protocol.InspectorBackend.Connection.Params} params
+   * @return {!Protocol.InspectorBackend.Connection}
+   */
+  _createChildConnection(agent, childTargetId, params) {
+    var connection = new SDK.ChildConnection(agent, childTargetId, params);
+    this._childConnections.set(childTargetId, connection);
+    return connection;
+  }
+};
+
+/**
+ * @implements {Protocol.InspectorBackend.Connection}
+ */
+SDK.ChildConnection = class {
+  /**
+   * @param {!Protocol.TargetAgent} agent
+   * @param {string} targetId
+   * @param {!Protocol.InspectorBackend.Connection.Params} params
+   */
+  constructor(agent, targetId, params) {
+    this._agent = agent;
+    this._targetId = targetId;
+    this._onMessage = params.onMessage;
+    this._onDisconnect = params.onDisconnect;
+  }
+
+  /**
+   * @override
+   * @param {string} message
+   */
+  sendMessage(message) {
+    this._agent.sendMessageToTarget(this._targetId, message);
+  }
+
+  /**
+   * @override
+   * @return {!Promise}
+   */
+  disconnect() {
+    throw 'Not implemented';
+  }
+};
+
 /** @enum {symbol} */
 SDK.TargetManager.Events = {
   InspectedURLChanged: Symbol('InspectedURLChanged'),
-  Load: Symbol('Load'),
-  MainFrameNavigated: Symbol('MainFrameNavigated'),
   NameChanged: Symbol('NameChanged'),
-  PageReloadRequested: Symbol('PageReloadRequested'),
-  WillReloadPage: Symbol('WillReloadPage'),
-  TargetDisposed: Symbol('TargetDisposed'),
-  SuspendStateChanged: Symbol('SuspendStateChanged')
+  SuspendStateChanged: Symbol('SuspendStateChanged'),
+  AvailableNodeTargetsChanged: Symbol('AvailableNodeTargetsChanged')
 };
 
-SDK.TargetManager._listenersSymbol = Symbol('SDK.TargetManager.Listeners');
+SDK.TargetManager._isWorkerSymbol = Symbol('SDK.TargetManager.IsWorker');
 
 /**
  * @interface
@@ -416,6 +630,24 @@ SDK.TargetManager.Observer.prototype = {
    * @param {!SDK.Target} target
    */
   targetRemoved(target) {},
+};
+
+/**
+ * @interface
+ * @template T
+ */
+SDK.SDKModelObserver = function() {};
+
+SDK.SDKModelObserver.prototype = {
+  /**
+   * @param {!T} model
+   */
+  modelAdded(model) {},
+
+  /**
+   * @param {!T} model
+   */
+  modelRemoved(model) {},
 };
 
 /**

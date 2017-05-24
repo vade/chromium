@@ -52,6 +52,9 @@ bool IsIncludedInAndroidOnePromoFieldTrial(base::StringPiece build_fingerprint);
 // Returns the name of the Lo-Fi field trial.
 const char* GetLoFiFieldTrialName();
 
+// Returns the name of the Lite Page fallback to Lo-Fi field trial.
+const char* GetLitePageFallbackFieldTrialName();
+
 // Returns the name of the Lo-Fi field trial that configures LoFi flags when it
 // is force enabled through flags.
 const char* GetLoFiFlagFieldTrialName();
@@ -67,6 +70,11 @@ bool IsIncludedInLoFiControlFieldTrial();
 // Returns true if this client is part of the "Preview" group of the Lo-Fi field
 // trial.
 bool IsIncludedInLitePageFieldTrial();
+
+// Returns true if this client is part of the Lite Page fallback to Lo-Fi field
+// trial or if this client has the command line switch to enable lite pages,
+// which should always fallback.
+bool IsLitePageFallbackEnabled();
 
 // Returns true if this client is part of the field trial that should enable
 // server experiments for the data reduction proxy.
@@ -98,7 +106,8 @@ bool IsLoFiDisabledViaFlags();
 
 // Returns true if this client has the command line switch to enable lite pages.
 // This means a preview should be requested instead of placeholders whenever
-// Lo-Fi mode is on.
+// Lo-Fi mode is on. If Lite Pages are enabled via flags, they will always
+// fallback to Lo-Fi placeholders.
 bool AreLitePagesEnabledViaFlags();
 
 // Returns true if this client has the command line switch to enable forced
@@ -113,10 +122,10 @@ bool WarnIfNoDataReductionProxy();
 // proxy server as quic://proxy.googlezip.net.
 bool IsIncludedInQuicFieldTrial();
 
-const char* GetQuicFieldTrialName();
+// Returns true if QUIC is enabled for non core data reduction proxies.
+bool IsQuicEnabledForNonCoreProxies();
 
-// Returns true if zero RTT for QUIC is enabled.
-bool IsZeroRttQuicEnabled();
+const char* GetQuicFieldTrialName();
 
 // Returns true if Brotli should be added to the accept-encoding header.
 bool IsBrotliAcceptEncodingEnabled();
@@ -135,6 +144,13 @@ GURL GetConfigServiceURL();
 // Returns true if the Data Reduction Proxy is forced to be enabled from the
 // command line.
 bool ShouldForceEnableDataReductionProxy();
+
+// Whether the blacklist should be used for server Lo-Fi and server Lite Page
+// instead of the prefs-based rules.
+bool IsBlackListEnabledForServerPreviews();
+
+// The current LitePage experiment blacklist version.
+int LitePageVersion();
 
 // Retrieves the int stored in |param_name| from the field trial group
 // |group|. If the value is not present, cannot be parsed, or is less than
@@ -197,7 +213,8 @@ class DataReductionProxyParams : public DataReductionProxyConfigValues {
 
   ~DataReductionProxyParams() override;
 
-  const std::vector<DataReductionProxyServer> proxies_for_http() const override;
+  const std::vector<DataReductionProxyServer>& proxies_for_http()
+      const override;
 
   const GURL& secure_proxy_check_url() const override;
 

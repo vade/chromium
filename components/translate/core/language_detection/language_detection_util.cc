@@ -19,6 +19,7 @@
 #include "components/translate/core/common/translate_constants.h"
 #include "components/translate/core/common/translate_metrics.h"
 #include "components/translate/core/common/translate_util.h"
+#include "components/translate/core/language_detection/chinese_script_classifier.h"
 #include "third_party/cld/cld_version.h"
 
 #if BUILDFLAG(CLD_VERSION) == 2
@@ -207,19 +208,30 @@ std::string DetermineTextLanguage(const base::string16& text,
       predicted_language != "zh-Latn" &&
       predicted_language !=
           chrome_lang_id::NNetLanguageIdentifier::kUnknown) {
-    // CLD3 returns 'zh' for Chinese but Translate doesn't accept it. Thus,
-    // analogously to CLD2, 'zh-CN' is returned instead.
-    if (predicted_language == "zh") {
-      language = "zh-CN";
-    } else {
+    if (predicted_language != "zh") {
       language = predicted_language;
+    } else {
+      // If prediction is "zh" (Chinese), then we need to determine whether the
+      // text is zh-Hant (Chinese Traditional) or zh-Hans (Chinese Simplified).
+      translate::ChineseScriptClassifier zh_classifier;
+
+      // The Classify function returns either "zh-Hant" or "zh-Hans".
+      // Convert to the old-style language codes used by the Translate API.
+      const std::string zh_classification = zh_classifier.Classify(utf8_text);
+      if (zh_classification == "zh-Hant") {
+        language = "zh-TW";
+      } else if (zh_classification == "zh-Hans") {
+        language = "zh-CN";
+      } else {
+        language = translate::kUnknownLanguageCode;
+      }
     }
   }
-
 #else
 # error "CLD_VERSION must be 2 or 3"
 #endif
 
+  VLOG(1) << "Detected language: " << language;
   return language;
 }
 
@@ -279,6 +291,13 @@ std::string DeterminePageLanguage(const std::string& code,
   std::string language = modified_html_lang.empty() ? modified_code :
                                                       modified_html_lang;
 
+  // When the page language is English, log conflicting CLD results. We will use
+  // these metrics to decide when to favor CLD.
+  if (language.substr(0, 2) == "en" && cld_language.substr(0, 2) != "en" &&
+      cld_language != kUnknownLanguageCode) {
+    translate::ReportLanguageDetectionConflict(language, cld_language);
+  }
+
   // If |language| is empty, just use CLD result even though it might be
   // translate::kUnknownLanguageCode.
   if (language.empty()) {
@@ -312,7 +331,7 @@ std::string DeterminePageLanguage(const std::string& code,
   }
 
   // Content-Language value might be wrong because CLD says that this page is
-  // written in another language with confidence.  In this case, Chrome doesn't
+  // written in another language with confidence. In this case, Chrome doesn't
   // rely on any of the language codes, and gives up suggesting a translation.
   translate::ReportLanguageVerification(
       translate::LANGUAGE_VERIFICATION_CLD_DISAGREE);

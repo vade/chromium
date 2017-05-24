@@ -22,6 +22,7 @@ import com.google.ipc.invalidation.external.client.types.ObjectId;
 import com.google.protos.ipc.invalidation.Types.ClientType;
 
 import org.chromium.base.ApplicationStatus;
+import org.chromium.base.BuildInfo;
 import org.chromium.base.CollectionUtil;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
@@ -241,7 +242,8 @@ public class InvalidationClientService extends AndroidListener {
     @Override
     public void requestAuthToken(final PendingIntent pendingIntent,
             @Nullable String invalidAuthToken) {
-        @Nullable Account account = ChromeSigninController.get(this).getSignedInUser();
+        @Nullable
+        Account account = ChromeSigninController.get().getSignedInUser();
         if (account == null) {
             // This should never happen, because this code should only be run if a user is
             // signed-in.
@@ -251,7 +253,7 @@ public class InvalidationClientService extends AndroidListener {
 
         // Attempt to retrieve a token for the user. This method will also invalidate
         // invalidAuthToken if it is non-null.
-        AccountManagerHelper.get(this).getNewAuthToken(account, invalidAuthToken,
+        AccountManagerHelper.get().getNewAuthToken(account, invalidAuthToken,
                 getOAuth2ScopeWithType(), new AccountManagerHelper.GetAuthTokenCallback() {
                     @Override
                     public void tokenAvailable(String token) {
@@ -317,13 +319,13 @@ public class InvalidationClientService extends AndroidListener {
     private void startClient() {
         byte[] clientName = InvalidationClientNameProvider.get().getInvalidatorClientName();
         Intent startIntent = AndroidListener.createStartIntent(this, CLIENT_TYPE, clientName);
-        startService(startIntent);
+        startServiceIfPossible(startIntent);
         setIsClientStarted(true);
     }
 
     /** Stops the notification client. */
     private void stopClient() {
-        startService(AndroidListener.createStopIntent(this));
+        startServiceIfPossible(AndroidListener.createStopIntent(this));
         setIsClientStarted(false);
         setClientId(null);
     }
@@ -477,7 +479,7 @@ public class InvalidationClientService extends AndroidListener {
         }
         Bundle bundle =
                 PendingInvalidation.createBundle(objectName, objectSource, version, payload);
-        Account account = ChromeSigninController.get(this).getSignedInUser();
+        Account account = ChromeSigninController.get().getSignedInUser();
         String contractAuthority = AndroidSyncSettings.getContractAuthority(this);
         requestSyncFromContentResolver(bundle, account, contractAuthority);
     }
@@ -539,5 +541,19 @@ public class InvalidationClientService extends AndroidListener {
 
     private static void setIsClientStarted(boolean isStarted) {
         sIsClientStarted = isStarted;
+    }
+
+    private void startServiceIfPossible(Intent intent) {
+        // The use of background services is restricted when the application is not in foreground
+        // for O. See crbug.com/680812.
+        if (BuildInfo.isAtLeastO()) {
+            try {
+                startService(intent);
+            } catch (IllegalStateException exception) {
+                Log.e(TAG, "Failed to start service from exception: ", exception);
+            }
+        } else {
+            startService(intent);
+        }
     }
 }

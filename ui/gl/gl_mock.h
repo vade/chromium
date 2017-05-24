@@ -46,8 +46,26 @@ class MockGLInterface {
     NOTREACHED();
   }
 
+  void CompressedTexSubImage3DRobustANGLE(GLenum /*target*/,
+                                          GLint /*level*/,
+                                          GLint /*xoffset*/,
+                                          GLint /*yoffset*/,
+                                          GLint /*zoffset*/,
+                                          GLsizei /*width*/,
+                                          GLsizei /*height*/,
+                                          GLsizei /*depth*/,
+                                          GLenum /*format*/,
+                                          GLsizei /*imageSize*/,
+                                          GLsizei /*dataSize*/,
+                                          const void* /*data*/) {
+    NOTREACHED();
+  }
+
   void CopySubTextureCHROMIUM(GLuint /*sourceId*/,
+                              GLint /*sourceLevel*/,
+                              GLenum /*destTarget*/,
                               GLuint /*destId*/,
+                              GLint /*destLevel*/,
                               GLint /*xoffset*/,
                               GLint /*yoffset*/,
                               GLint /*x*/,
@@ -112,6 +130,34 @@ class MockGLInterface {
                      GLsizei depth,
                      GLenum format,
                      GLenum type));
+
+  void ReadPixelsRobustANGLE(GLint /*x*/,
+                             GLint /*y*/,
+                             GLsizei /*width*/,
+                             GLsizei /*height*/,
+                             GLenum /*format*/,
+                             GLenum /*type*/,
+                             GLsizei /*bufSize*/,
+                             GLsizei* /*length*/,
+                             GLsizei* /*columns*/,
+                             GLsizei* /*rows*/,
+                             void* /*pixels*/) {
+    NOTREACHED();
+  }
+
+  void ReadnPixelsRobustANGLE(GLint /*x*/,
+                              GLint /*y*/,
+                              GLsizei /*width*/,
+                              GLsizei /*height*/,
+                              GLenum /*format*/,
+                              GLenum /*type*/,
+                              GLsizei /*bufSize*/,
+                              GLsizei* /*length*/,
+                              GLsizei* /*columns*/,
+                              GLsizei* /*rows*/,
+                              void* /*data*/) {
+    NOTREACHED();
+  }
 
  private:
   static MockGLInterface* interface_;

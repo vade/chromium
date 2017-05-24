@@ -20,11 +20,8 @@
 #include "third_party/WebKit/public/platform/WebReferrerPolicy.h"
 #include "third_party/WebKit/public/web/WebContextMenuData.h"
 #include "ui/base/ui_base_types.h"
+#include "ui/gfx/geometry/rect.h"
 #include "url/gurl.h"
-
-#if defined(OS_ANDROID)
-#include "ui/gfx/geometry/point.h"
-#endif
 
 namespace content {
 
@@ -120,9 +117,6 @@ struct CONTENT_EXPORT ContextMenuParams {
   // |dictionary_suggestions| list.
   base::string16 misspelled_word;
 
-  // The identifier of the misspelling under the cursor, if any.
-  uint32_t misspelling_hash;
-
   // Suggested replacements for a misspelled word under the cursor.
   // This vector gets populated in the render process host
   // by intercepting ViewHostMsg_ContextMenu in ResourceMessageFilter
@@ -159,15 +153,11 @@ struct CONTENT_EXPORT ContextMenuParams {
   // Extra properties for the context menu.
   std::map<std::string, std::string> properties;
 
-#if defined(OS_ANDROID)
-  // Points representing the coordinates in the document space of the start and
-  // end of the selection, if there is one.
-  gfx::Point selection_start;
-  gfx::Point selection_end;
-#endif
-
   // If this node is an input field, the type of that field.
   blink::WebContextMenuData::InputFieldType input_field_type;
+
+  // Rect representing the coordinates in the document space of the selection.
+  gfx::Rect selection_rect;
 };
 
 }  // namespace content

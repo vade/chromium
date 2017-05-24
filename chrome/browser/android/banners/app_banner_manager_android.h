@@ -12,6 +12,7 @@
 #include "base/macros.h"
 #include "chrome/browser/banners/app_banner_manager.h"
 #include "content/public/browser/web_contents_user_data.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 namespace banners {
 
@@ -39,9 +40,20 @@ class AppBannerManagerAndroid
   const base::android::ScopedJavaGlobalRef<jobject>& GetJavaBannerManager()
       const;
 
-  // Returns true if this object is currently active.
+  // Returns true if the banner pipeline is currently running.
   bool IsActiveForTesting(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& jobj);
+
+  // Informs the InstallableManager for the WebContents we are attached to that
+  // the add to homescreen menu item has been tapped.
+  void RecordMenuItemAddToHomescreen(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& jobj);
+
+  // Informs the InstallableManager for the WebContents we are attached to that
+  // the menu has been opened.
+  void RecordMenuOpen(JNIEnv* env,
+                      const base::android::JavaParamRef<jobject>& jobj);
 
   // Called when the Java-side has retrieved information for the app.
   // Returns |false| if an icon fetch couldn't be kicked off.
@@ -56,26 +68,26 @@ class AppBannerManagerAndroid
   // AppBannerManager overrides.
   void RequestAppBanner(const GURL& validated_url, bool is_debug_mode) override;
 
-  // Returns a callback which fetches the splash screen image and stores it in
-  // a WebappDataStorage.
-  base::Closure FetchWebappSplashScreenImageCallback(
-      const std::string& webapp_id) override;
-
   // Registers native methods.
   static bool Register(JNIEnv* env);
 
  protected:
+  // Return the ideal badge icon size.
+  int GetIdealBadgeIconSizeInPx();
+
   // AppBannerManager overrides.
   std::string GetAppIdentifier() override;
   std::string GetBannerType() override;
-  int GetIdealIconSizeInPx() override;
-  int GetMinimumIconSizeInPx() override;
+  int GetIdealPrimaryIconSizeInPx() override;
+  int GetMinimumPrimaryIconSizeInPx() override;
   bool IsWebAppInstalled(content::BrowserContext* browser_context,
                          const GURL& start_url,
                          const GURL& manifest_url) override;
-
+  InstallableParams ParamsToPerformInstallableCheck() override;
   void PerformInstallableCheck() override;
+  void OnDidPerformInstallableCheck(const InstallableData& result) override;
   void OnAppIconFetched(const SkBitmap& bitmap) override;
+  void ResetCurrentPageData() override;
   void ShowBanner() override;
 
  private:
@@ -101,6 +113,12 @@ class AppBannerManagerAndroid
                           const GURL& url,
                           const std::string& id);
 
+  // The URL of the badge icon.
+  GURL badge_icon_url_;
+
+  // The badge icon object.
+  SkBitmap badge_icon_;
+
   // The Java-side AppBannerManager.
   base::android::ScopedJavaGlobalRef<jobject> java_banner_manager_;
 
@@ -109,6 +127,9 @@ class AppBannerManagerAndroid
 
   // App package name for a native app banner.
   std::string native_app_package_;
+
+  // Whether WebAPKs can be installed.
+  bool can_install_webapk_;
 
   DISALLOW_COPY_AND_ASSIGN(AppBannerManagerAndroid);
 };

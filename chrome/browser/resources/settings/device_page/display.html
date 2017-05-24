@@ -1,23 +1,26 @@
-<link rel="import" href="chrome://resources/cr_elements/cr_slider/cr_slider.html">
+<link rel="import" href="chrome://resources/html/assert.html">
+<link rel="import" href="chrome://resources/html/cr/ui/focus_without_ink.html">
+<link rel="import" href="chrome://resources/html/polymer.html">
 <link rel="import" href="chrome://resources/html/i18n_behavior.html">
 <link rel="import" href="chrome://resources/html/md_select_css.html">
-<link rel="import" href="chrome://resources/html/polymer.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/iron-flex-layout/classes/iron-flex-layout.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/iron-flex-layout/iron-flex-layout-classes.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-button/paper-button.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-icon-button/paper-icon-button-light.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-tabs/paper-tabs.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-toggle-button/paper-toggle-button.html">
-<link rel="import" href="/device_page/display_layout.html">
-<link rel="import" href="/device_page/display_overscan_dialog.html">
-<link rel="import" href="/settings_shared_css.html">
-<link rel="import" href="/settings_vars_css.html">
+<link rel="import" href="display_layout.html">
+<link rel="import" href="display_overscan_dialog.html">
+<link rel="import" href="../controls/settings_slider.html">
+<link rel="import" href="../prefs/prefs_behavior.html">
+<link rel="import" href="../settings_shared_css.html">
+<link rel="import" href="../settings_vars_css.html">
 
 <dom-module id="settings-display">
   <template>
-    <style include="settings-shared md-select">
+    <style include="settings-shared md-select iron-flex iron-flex-alignment">
      .settings-box.embedded {
+       -webkit-margin-start: 20px;
        align-self: stretch;
-       margin-left: 20px;
        padding: 0;
      }
 
@@ -40,28 +43,22 @@
        margin: 10px 0;
      }
 
-     .title-text {
-       margin-top: 10px;
-     }
-
-     .info-text {
-       color: var(--paper-grey-500);
-       margin-top: 5px;
-     }
-
      .settings-box > paper-button:first-child {
-       padding-left: 0
+       -webkit-padding-start: 0
      }
 
      paper-tab {
        text-transform: uppercase;
      }
 
+     #controlsDiv > .settings-box:first-of-type {
+       border-top: none;
+     }
     </style>
     <div class="settings-box first layout vertical self-stretch">
-      <div class="title-text layout self-start">
+      <h2 class="layout self-start">
         $i18n{displayArrangementTitle}
-      </div>
+      </h2>
       <div class="secondary layout self-start"
           hidden="[[!hasMultipleDisplays_(displays)]]">
         $i18n{displayArrangementText}
@@ -81,67 +78,110 @@
     </div>
     <div hidden="[[hasMultipleDisplays_(displays)]]"
         class="settings-box line-only"></div>
-    <div class="settings-box layout vertical first">
+
+    <div id="controlsDiv" class="settings-box layout vertical first">
       <h2>[[selectedDisplay.name]]</h2>
-      <div class="settings-box embedded first two-line"
-          hidden$="[[!showMirror_(displays)]]">
-        <div class="start">
-          <div>$i18n{displayMirror}</div>
-          <div class="secondary">[[getDisplayMirrorText_(displays)]]</div>
+
+      <template is="dom-if" if="[[showMirror_(unifiedDesktopMode_, displays)]]"
+          restamp>
+        <div class="settings-box embedded two-line">
+          <div class="start">
+            <div id="displayMirrorCheckboxLabel">$i18n{displayMirror}</div>
+            <div class="secondary">[[getDisplayMirrorText_(displays)]]</div>
+          </div>
+          <paper-toggle-button checked="[[isMirrored_(displays)]]"
+              on-tap="onMirroredTap_"
+              aria-labelledby="displayMirrorCheckboxLabel">
+          </paper-toggle-button>
         </div>
-        <paper-toggle-button checked="[[isMirrored_(displays)]]"
-            on-tap="onMirroredTap_">
-      </div>
-      <div class="settings-box embedded"
-          hidden$="[[!showDisplaySelectMenu_(displays, selectedDisplay)]]">
-        <div class="start">$i18n{displayScreenTitle}</div>
-        <div class="md-select-wrapper">
-          <select class="md-select" on-change="updatePrimaryDisplay_"
-              value="[[getDisplaySelectMenuIndex_(
-                  selectedDisplay, primaryDisplayId)]]">
-            <option value="0">$i18n{displayScreenPrimary}</option>
-            <option value="1">$i18n{displayScreenExtended}</option>
-          </select>
-          <span class="md-select-underline"></span>
+      </template>
+
+      <template is="dom-if" if="[[showUnifiedDesktop_(unifiedDesktopAvailable_,
+          unifiedDesktopMode_, displays)]]" restamp>
+        <div class="settings-box embedded two-line">
+          <div class="start">
+            <div id="displayUnifiedDesktopCheckboxLabel">
+              $i18n{displayUnfiedDesktop}
+            </div>
+            <div class="secondary">
+              [[getUnifiedDesktopText_(unifiedDesktopMode_)]]
+            </div>
+          </div>
+          <paper-toggle-button checked="[[unifiedDesktopMode_]]"
+              on-tap="onUnifiedDesktopTap_"
+              aria-labelledby="displayUnifiedDesktopCheckboxLabel">
+          </paper-toggle-button>
         </div>
-      </div>
+      </template>
+
+      <template is="dom-if" restamp
+          if="[[showDisplaySelectMenu_(displays, selectedDisplay)]]">
+        <div class="settings-box embedded">
+          <div id="displayScreenTitle" class="start">
+            $i18n{displayScreenTitle}
+          </div>
+          <div class="md-select-wrapper">
+            <select class="md-select" on-change="updatePrimaryDisplay_"
+                aria-labelledby="displayScreenTitle"
+                value="[[getDisplaySelectMenuIndex_(
+                    selectedDisplay, primaryDisplayId)]]">
+              <option value="0">$i18n{displayScreenPrimary}</option>
+              <option value="1">$i18n{displayScreenExtended}</option>
+            </select>
+            <span class="md-select-underline"></span>
+          </div>
+        </div>
+      </template>
+
       <div class="settings-box embedded two-line">
         <div class="start textarea layout vertical">
           <div>$i18n{displayResolutionTitle}</div>
           <div class="secondary layout self-start">
-            [[getResolutionText_(selectedDisplay, selectedModeIndex_)]]
+            [[getResolutionText_(selectedDisplay, selectedModePref_.value)]]
           </div>
         </div>
-        <cr-slider disabled="[[!enableSetResolution_(selectedDisplay)]]"
-            tick-values="[[modeValues_]]" value="{{selectedModeIndex_}}"
+        <settings-slider disabled="[[!enableSetResolution_(selectedDisplay)]]"
+            tick-values="[[modeValues_]]" pref="{{selectedModePref_}}"
             on-change="onSelectedModeChange_">
-        </cr-slider>
+        </settings-slider>
       </div>
-      <div class="settings-box embedded">
-        <div class="start textarea">$i18n{displayOrientation}</div>
-        <div class="md-select-wrapper">
-          <select class="md-select" value="[[selectedDisplay.rotation]]"
-              on-change="onOrientationChange_">
-            <option value="0">$i18n{displayOrientationStandard}</option>
-            <option value="90">90</option>
-            <option value="180">180</option>
-            <option value="270">270</option>
-          </select>
-          <span class="md-select-underline"></span>
+
+      <template is="dom-if" if="[[!unifiedDesktopMode_]]" restamp>
+        <div class="settings-box embedded">
+          <div id="displayOrientation" class="start textarea">
+            $i18n{displayOrientation}
+          </div>
+          <div class="md-select-wrapper">
+            <select class="md-select" value="[[selectedDisplay.rotation]]"
+                aria-labelledby="displayOrientation"
+                on-change="onOrientationChange_">
+              <option value="0">$i18n{displayOrientationStandard}</option>
+              <option value="90">90</option>
+              <option value="180">180</option>
+              <option value="270">270</option>
+            </select>
+            <span class="md-select-underline"></span>
+          </div>
         </div>
-      </div>
-      <div class="settings-box embedded two-line"
+      </template>
+
+      <div id="overscan" class="settings-box embedded two-line"
           on-tap="onOverscanTap_" hidden$="[[selectedDisplay.isInternal]]"
           actionable>
         <div class="start">
-          <div>$i18n{displayOverscanPageTitle}</div>
-          <div class="secondary">$i18n{displayOverscanPageText}</div>
+          $i18n{displayOverscanPageTitle}
+          <div class="secondary" id="displayOverscanSecondary">
+            $i18n{displayOverscanPageText}
+          </div>
         </div>
-        <button class="subpage-arrow" is="paper-icon-button-light"></button>
+        <button class="subpage-arrow" is="paper-icon-button-light"
+            aria-label="$i18n{displayOverscanPageTitle}"
+            aria-describedby="displayOverscanSecondary"></button>
       </div>
 
       <settings-display-overscan-dialog id="displayOverscan"
-          display-id="{{overscanDisplayId}}">
+          display-id="{{overscanDisplayId}}"
+          on-close="onCloseOverscanDialog_">
       </settings-display-overscan-dialog>
 
       <div class="settings-box embedded two-line"
@@ -149,12 +189,45 @@
           hidden$="[[!showTouchCalibrationSetting_(selectedDisplay)]]"
           actionable>
         <div class="start">
-          <div>$i18n{displayTouchCalibrationTitle}</div>
-          <div class="secondary">$i18n{displayTouchCalibrationText}</div>
+          $i18n{displayTouchCalibrationTitle}
+          <div class="secondary" id="touchCalibrationSecondary">
+            $i18n{displayTouchCalibrationText}
+          </div>
         </div>
-        <button class="subpage-arrow" is="paper-icon-button-light"></button>
+        <button class="subpage-arrow" is="paper-icon-button-light"
+            aria-label="$i18n{displayTouchCalibrationTitle}"
+            aria-describedby="touchCalibrationSecondary"></button>
       </div>
     </div>
+
+    <!-- Night Light Settings -->
+    <div class="settings-box">
+      <div class="start">
+        <h2 id="nightLightLabel">$i18n{displayNightLightLabel}</h2>
+        <div class="secondary">$i18n{displayNightLightText}</div>
+      </div>
+      <settings-toggle-button
+          id="nightLightToggleButton"
+          pref="{{prefs.ash.night_light.enabled}}"
+          aria-labelledby="nightLightLabel">
+      </settings-toggle-button>
+    </div>
+    <div id="nightLightSettingsDiv"
+        class="settings-box continuation start layout vertical">
+      <!-- Color temperature slider -->
+      <div class="settings-box embedded continuation">
+        <div class="start textarea" id="colorTemperatureLabel">
+          $i18n{displayNightLightTemperatureLabel}
+        </div>
+        <settings-slider id="colorTemperatureSlider"
+          aria-labelledby="colorTemperatureLabel" min="0" max="100" scale="100"
+          label-min="$i18n{displayNightLightTempSliderMinLabel}"
+          label-max="$i18n{displayNightLightTempSliderMaxLabel}"
+          pref="{{prefs.ash.night_light.color_temperature}}">
+        </settings-slider>
+      </div>
+    </div>
+
   </template>
   <script src="display.js"></script>
 </dom-module>

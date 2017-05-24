@@ -2121,8 +2121,7 @@ TEST_P(GLES3DecoderTest, ClearBufferivImmediateValidArgs) {
 
   // TODO(zmo): Set up expectations for the path where the attachment isn't
   // marked as cleared.
-  Framebuffer* framebuffer =
-      group().framebuffer_manager()->GetFramebuffer(client_framebuffer_id_);
+  Framebuffer* framebuffer = GetFramebuffer(client_framebuffer_id_);
   framebuffer->MarkAttachmentAsCleared(
       group().renderbuffer_manager(), nullptr, GL_COLOR_ATTACHMENT0, true);
 
@@ -2153,8 +2152,7 @@ TEST_P(GLES3DecoderTest, ClearBufferuivImmediateValidArgs) {
 
   // TODO(zmo): Set up expectations for the path where the attachment isn't
   // marked as cleared.
-  Framebuffer* framebuffer =
-      group().framebuffer_manager()->GetFramebuffer(client_framebuffer_id_);
+  Framebuffer* framebuffer = GetFramebuffer(client_framebuffer_id_);
   framebuffer->MarkAttachmentAsCleared(
       group().renderbuffer_manager(), nullptr, GL_COLOR_ATTACHMENT0, true);
 
@@ -2186,8 +2184,7 @@ TEST_P(GLES3DecoderTest, ClearBufferfvImmediateValidArgs) {
 
   // TODO(zmo): Set up expectations for the path where the attachment isn't
   // marked as cleared.
-  Framebuffer* framebuffer =
-      group().framebuffer_manager()->GetFramebuffer(client_framebuffer_id_);
+  Framebuffer* framebuffer = GetFramebuffer(client_framebuffer_id_);
   framebuffer->MarkAttachmentAsCleared(
       group().renderbuffer_manager(), nullptr, GL_DEPTH_ATTACHMENT, true);
 
@@ -2224,8 +2221,7 @@ TEST_P(GLES3DecoderTest, ClearBufferfiValidArgs) {
 
   // TODO(zmo): Set up expectations for the path where the attachment isn't
   // marked as cleared.
-  Framebuffer* framebuffer =
-      group().framebuffer_manager()->GetFramebuffer(client_framebuffer_id_);
+  Framebuffer* framebuffer = GetFramebuffer(client_framebuffer_id_);
   framebuffer->MarkAttachmentAsCleared(group().renderbuffer_manager(), nullptr,
                                        GL_DEPTH_ATTACHMENT, true);
   framebuffer->MarkAttachmentAsCleared(group().renderbuffer_manager(), nullptr,
@@ -3129,7 +3125,7 @@ TEST_P(GLES2DecoderWithShaderTest, CopyTexImageWithInCompleteFBOFails) {
 
 void GLES2DecoderWithShaderTest::CheckRenderbufferChangesMarkFBOAsNotComplete(
     bool bound_fbo) {
-  FramebufferManager* framebuffer_manager = group().framebuffer_manager();
+  FramebufferManager* framebuffer_manager = GetFramebufferManager();
   SetupTexture();
   DoBindRenderbuffer(
       GL_RENDERBUFFER, client_renderbuffer_id_, kServiceRenderbufferId);
@@ -3189,7 +3185,7 @@ TEST_P(GLES2DecoderWithShaderTest,
 
 void GLES2DecoderWithShaderTest::CheckTextureChangesMarkFBOAsNotComplete(
     bool bound_fbo) {
-  FramebufferManager* framebuffer_manager = group().framebuffer_manager();
+  FramebufferManager* framebuffer_manager = GetFramebufferManager();
   const GLuint kFBOClientTextureId = 4100;
   const GLuint kFBOServiceTextureId = 4101;
 
@@ -3398,7 +3394,7 @@ TEST_P(GLES2DecoderManualInitTest, InvalidateFramebufferBinding) {
   EXPECT_TRUE(
       gl::MockGLInterface::GetGLProcAddress("glInvalidateFramebuffer") !=
       reinterpret_cast<gl::GLFunctionPointerType>(
-          gl::g_driver_gl.fn.glDiscardFramebufferEXTFn));
+          gl::g_current_gl_driver->fn.glDiscardFramebufferEXTFn));
   EXPECT_TRUE(
       gl::MockGLInterface::GetGLProcAddress("glInvalidateFramebuffer") !=
       gl::MockGLInterface::GetGLProcAddress("glDiscardFramebufferEXT"));
@@ -3449,7 +3445,7 @@ TEST_P(GLES2DecoderManualInitTest, DiscardFramebufferEXT) {
   EXPECT_TRUE(
       gl::MockGLInterface::GetGLProcAddress("glDiscardFramebufferEXT") ==
       reinterpret_cast<gl::GLFunctionPointerType>(
-          gl::g_driver_gl.fn.glDiscardFramebufferEXTFn));
+          gl::g_current_gl_driver->fn.glDiscardFramebufferEXTFn));
 
   const GLenum target = GL_FRAMEBUFFER;
   const GLsizei count = 1;
@@ -3465,7 +3461,7 @@ TEST_P(GLES2DecoderManualInitTest, DiscardFramebufferEXT) {
                          kServiceTextureId,
                          0,
                          GL_NO_ERROR);
-  FramebufferManager* framebuffer_manager = group().framebuffer_manager();
+  FramebufferManager* framebuffer_manager = GetFramebufferManager();
   Framebuffer* framebuffer =
       framebuffer_manager->GetFramebuffer(client_framebuffer_id_);
   EXPECT_TRUE(framebuffer->IsCleared());
@@ -3492,7 +3488,7 @@ TEST_P(GLES2DecoderManualInitTest, ClearBackbufferBitsOnDiscardFramebufferEXT) {
   EXPECT_TRUE(
       gl::MockGLInterface::GetGLProcAddress("glDiscardFramebufferEXT") ==
       reinterpret_cast<gl::GLFunctionPointerType>(
-          gl::g_driver_gl.fn.glDiscardFramebufferEXTFn));
+          gl::g_current_gl_driver->fn.glDiscardFramebufferEXTFn));
 
   const GLenum target = GL_FRAMEBUFFER;
   const GLsizei count = 1;
@@ -3571,7 +3567,7 @@ TEST_P(GLES3DecoderTest, DiscardFramebufferEXTInvalidTarget) {
                          kServiceTextureId,
                          0,
                          GL_NO_ERROR);
-  FramebufferManager* framebuffer_manager = group().framebuffer_manager();
+  FramebufferManager* framebuffer_manager = GetFramebufferManager();
   Framebuffer* framebuffer =
       framebuffer_manager->GetFramebuffer(client_framebuffer_id_);
   EXPECT_TRUE(framebuffer->IsCleared());
@@ -3621,7 +3617,7 @@ TEST_P(GLES3DecoderTest, DiscardFramebufferEXTUseCorrectTarget) {
                          0,
                          GL_NO_ERROR);
 
-  FramebufferManager* framebuffer_manager = group().framebuffer_manager();
+  FramebufferManager* framebuffer_manager = GetFramebufferManager();
   Framebuffer* framebuffer =
       framebuffer_manager->GetFramebuffer(client_framebuffer_id_);
   EXPECT_TRUE(framebuffer->IsCleared());
@@ -3705,7 +3701,7 @@ TEST_P(GLES2DecoderManualInitTest,
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 
   // Check that framebuffer is cleared and complete.
-  FramebufferManager* framebuffer_manager = group().framebuffer_manager();
+  FramebufferManager* framebuffer_manager = GetFramebufferManager();
   Framebuffer* framebuffer =
       framebuffer_manager->GetFramebuffer(client_framebuffer_id_);
   EXPECT_TRUE(framebuffer->IsCleared());
@@ -3716,7 +3712,7 @@ TEST_P(GLES2DecoderManualInitTest,
   EXPECT_TRUE(
       gl::MockGLInterface::GetGLProcAddress("glDiscardFramebufferEXT") ==
       reinterpret_cast<gl::GLFunctionPointerType>(
-          gl::g_driver_gl.fn.glDiscardFramebufferEXTFn));
+          gl::g_current_gl_driver->fn.glDiscardFramebufferEXTFn));
 
   const GLenum target = GL_FRAMEBUFFER;
   const GLsizei count = 1;
@@ -3849,8 +3845,7 @@ TEST_P(GLES3DecoderTest, InvalidateFramebufferDepthStencilAttachment) {
       GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER,
       client_renderbuffer_id_, kServiceRenderbufferId, GL_NO_ERROR);
 
-  Framebuffer* framebuffer =
-      group().framebuffer_manager()->GetFramebuffer(client_framebuffer_id_);
+  Framebuffer* framebuffer = GetFramebuffer(client_framebuffer_id_);
   ASSERT_TRUE(framebuffer);
   ASSERT_FALSE(framebuffer->GetAttachment(GL_DEPTH_STENCIL_ATTACHMENT));
   ASSERT_TRUE(framebuffer->GetAttachment(GL_DEPTH_ATTACHMENT));
@@ -4037,6 +4032,106 @@ TEST_P(GLES3DecoderTest, BlitFramebufferMissingDepthOrStencil) {
     EXPECT_EQ(GL_NO_ERROR, GetGLError());
   }
 }
+
+class GLES2DecoderTestWithDrawRectangle : public GLES2DecoderTest {
+  void SetUp() override {
+    surface_supports_draw_rectangle_ = true;
+    GLES2DecoderTest::SetUp();
+  }
+};
+
+// Test that the draw offset is correctly honored when SetDrawRectangle is
+// supported.
+TEST_P(GLES2DecoderTestWithDrawRectangle, FramebufferDrawRectangleClear) {
+  EXPECT_CALL(*gl_, Scissor(101, 202, 3, 4)).Times(1).RetiresOnSaturation();
+  cmds::Scissor scissor_cmd;
+  scissor_cmd.Init(1, 2, 3, 4);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(scissor_cmd));
+
+  // Scissor and Viewport should be restored to (0,0) offset on when clearing
+  // a framebuffer.
+  {
+    const GLuint kFBOClientTextureId = 4100;
+    const GLuint kFBOServiceTextureId = 4101;
+
+    // Register a texture id.
+    EXPECT_CALL(*gl_, GenTextures(_, _))
+        .WillOnce(SetArgPointee<1>(kFBOServiceTextureId))
+        .RetiresOnSaturation();
+    GenHelper<GenTexturesImmediate>(kFBOClientTextureId);
+
+    // Setup "render to" texture.
+    DoBindTexture(GL_TEXTURE_2D, kFBOClientTextureId, kFBOServiceTextureId);
+    DoTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                 0, 0);
+    DoBindFramebuffer(GL_FRAMEBUFFER, client_framebuffer_id_,
+                      kServiceFramebufferId);
+    DoFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           kFBOClientTextureId, kFBOServiceTextureId, 0,
+                           GL_NO_ERROR);
+    // Set scissor rect and enable GL_SCISSOR_TEST to make sure we re-enable it
+    // and restore the rect again after the clear.
+    DoEnableDisable(GL_SCISSOR_TEST, true);
+    EXPECT_CALL(*gl_, Viewport(0, 0, 128, 64)).Times(1).RetiresOnSaturation();
+    EXPECT_CALL(*gl_, Scissor(1, 2, 3, 4)).Times(1).RetiresOnSaturation();
+
+    // Setup "render from" texture.
+    SetupTexture();
+
+    SetupExpectationsForFramebufferClearing(GL_FRAMEBUFFER,       // target
+                                            GL_COLOR_BUFFER_BIT,  // clear bits
+                                            0, 0, 0,
+                                            0,     // color
+                                            0,     // stencil
+                                            1.0f,  // depth
+                                            true,  // scissor test
+                                            1, 2, 3, 4);
+    SetupExpectationsForApplyingDirtyState(false,   // Framebuffer is RGB
+                                           false,   // Framebuffer has depth
+                                           false,   // Framebuffer has stencil
+                                           0x1111,  // color bits
+                                           false,   // depth mask
+                                           false,   // depth enabled
+                                           0,       // front stencil mask
+                                           0,       // back stencil mask
+                                           false);  // stencil enabled
+
+    EXPECT_CALL(*gl_, Clear(GL_COLOR_BUFFER_BIT))
+        .Times(1)
+        .RetiresOnSaturation();
+
+    Clear cmd;
+    cmd.Init(GL_COLOR_BUFFER_BIT);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+    EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  }
+
+  // Check that the draw offset is used when switching to the default
+  // framebuffer and clearing it.
+  {
+    DoBindFramebuffer(GL_FRAMEBUFFER, 0, 0);
+    EXPECT_CALL(*gl_, Clear(GL_COLOR_BUFFER_BIT))
+        .Times(1)
+        .RetiresOnSaturation();
+    SetupExpectationsForColorMask(true, true, true, true);
+    SetupExpectationsForDepthMask(true);
+    SetupExpectationsForStencilMask(0, 0);
+    SetupExpectationsForEnableDisable(GL_DEPTH_TEST, false);
+    SetupExpectationsForEnableDisable(GL_STENCIL_TEST, false);
+    EXPECT_CALL(*gl_, Viewport(100, 200, 128, 64))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, Scissor(101, 202, 3, 4)).Times(1).RetiresOnSaturation();
+    Clear cmd;
+    cmd.Init(GL_COLOR_BUFFER_BIT);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+    EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  }
+}
+
+INSTANTIATE_TEST_CASE_P(Service,
+                        GLES2DecoderTestWithDrawRectangle,
+                        ::testing::Bool());
 
 // TODO(gman): PixelStorei
 

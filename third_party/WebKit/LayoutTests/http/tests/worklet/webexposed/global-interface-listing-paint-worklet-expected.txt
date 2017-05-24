@@ -39,7 +39,7 @@ CONSOLE MESSAGE: line 138:     method constructor
 CONSOLE MESSAGE: line 138:     method divide
 CONSOLE MESSAGE: line 138:     method multiply
 CONSOLE MESSAGE: line 138:     method subtract
-CONSOLE MESSAGE: line 138: interface CSSMatrixTransformComponent : CSSTransformComponent
+CONSOLE MESSAGE: line 138: interface CSSMatrixComponent : CSSTransformComponent
 CONSOLE MESSAGE: line 138:     getter a
 CONSOLE MESSAGE: line 138:     getter b
 CONSOLE MESSAGE: line 138:     getter c
@@ -66,6 +66,13 @@ CONSOLE MESSAGE: line 138:     method constructor
 CONSOLE MESSAGE: line 138: interface CSSNumberValue : CSSStyleValue
 CONSOLE MESSAGE: line 138:     getter value
 CONSOLE MESSAGE: line 138:     method constructor
+CONSOLE MESSAGE: line 138: interface CSSNumericValue : CSSStyleValue
+CONSOLE MESSAGE: line 138:     method add
+CONSOLE MESSAGE: line 138:     method constructor
+CONSOLE MESSAGE: line 138:     method div
+CONSOLE MESSAGE: line 138:     method mul
+CONSOLE MESSAGE: line 138:     method sub
+CONSOLE MESSAGE: line 138:     method to
 CONSOLE MESSAGE: line 138: interface CSSPerspective : CSSTransformComponent
 CONSOLE MESSAGE: line 138:     getter length
 CONSOLE MESSAGE: line 138:     method constructor
@@ -87,6 +94,9 @@ CONSOLE MESSAGE: line 138:     getter x
 CONSOLE MESSAGE: line 138:     getter y
 CONSOLE MESSAGE: line 138:     getter z
 CONSOLE MESSAGE: line 138:     method constructor
+CONSOLE MESSAGE: line 138:     setter x
+CONSOLE MESSAGE: line 138:     setter y
+CONSOLE MESSAGE: line 138:     setter z
 CONSOLE MESSAGE: line 138: interface CSSSimpleLength : CSSLengthValue
 CONSOLE MESSAGE: line 138:     getter type
 CONSOLE MESSAGE: line 138:     getter value
@@ -100,15 +110,16 @@ CONSOLE MESSAGE: line 138:     static method parse
 CONSOLE MESSAGE: line 138:     getter cssText
 CONSOLE MESSAGE: line 138:     method constructor
 CONSOLE MESSAGE: line 138: interface CSSTransformComponent
-CONSOLE MESSAGE: line 138:     getter cssText
 CONSOLE MESSAGE: line 138:     method asMatrix
 CONSOLE MESSAGE: line 138:     method constructor
 CONSOLE MESSAGE: line 138:     method is2D
+CONSOLE MESSAGE: line 138:     method toString
 CONSOLE MESSAGE: line 138: interface CSSTransformValue : CSSStyleValue
+CONSOLE MESSAGE: line 138:     getter is2D
+CONSOLE MESSAGE: line 138:     getter length
 CONSOLE MESSAGE: line 138:     method constructor
 CONSOLE MESSAGE: line 138:     method entries
 CONSOLE MESSAGE: line 138:     method forEach
-CONSOLE MESSAGE: line 138:     method is2D
 CONSOLE MESSAGE: line 138:     method keys
 CONSOLE MESSAGE: line 138:     method values
 CONSOLE MESSAGE: line 138: interface CSSTranslation : CSSTransformComponent
@@ -119,7 +130,15 @@ CONSOLE MESSAGE: line 138:     method constructor
 CONSOLE MESSAGE: line 138: interface CSSURLImageValue : CSSImageValue
 CONSOLE MESSAGE: line 138:     getter url
 CONSOLE MESSAGE: line 138:     method constructor
+CONSOLE MESSAGE: line 138: interface CSSUnitValue : CSSNumericValue
+CONSOLE MESSAGE: line 138:     getter type
+CONSOLE MESSAGE: line 138:     getter unit
+CONSOLE MESSAGE: line 138:     getter value
+CONSOLE MESSAGE: line 138:     method constructor
+CONSOLE MESSAGE: line 138:     setter unit
+CONSOLE MESSAGE: line 138:     setter value
 CONSOLE MESSAGE: line 138: interface CSSUnparsedValue : CSSStyleValue
+CONSOLE MESSAGE: line 138:     getter length
 CONSOLE MESSAGE: line 138:     method constructor
 CONSOLE MESSAGE: line 138:     method entries
 CONSOLE MESSAGE: line 138:     method forEach
@@ -242,11 +261,20 @@ CONSOLE MESSAGE: line 138:     getter locked
 CONSOLE MESSAGE: line 138:     method cancel
 CONSOLE MESSAGE: line 138:     method constructor
 CONSOLE MESSAGE: line 138:     method getReader
+CONSOLE MESSAGE: line 138:     method pipeThrough
+CONSOLE MESSAGE: line 138:     method pipeTo
 CONSOLE MESSAGE: line 138:     method tee
-CONSOLE MESSAGE: line 138: interface StylePropertyMap
+CONSOLE MESSAGE: line 138: interface SharedArrayBuffer
+CONSOLE MESSAGE: line 138:     getter byteLength
+CONSOLE MESSAGE: line 138:     method constructor
+CONSOLE MESSAGE: line 138:     method slice
+CONSOLE MESSAGE: line 138: interface StylePropertyMap : StylePropertyMapReadonly
 CONSOLE MESSAGE: line 138:     method append
 CONSOLE MESSAGE: line 138:     method constructor
 CONSOLE MESSAGE: line 138:     method delete
+CONSOLE MESSAGE: line 138:     method set
+CONSOLE MESSAGE: line 138: interface StylePropertyMapReadonly
+CONSOLE MESSAGE: line 138:     method constructor
 CONSOLE MESSAGE: line 138:     method entries
 CONSOLE MESSAGE: line 138:     method forEach
 CONSOLE MESSAGE: line 138:     method get
@@ -254,7 +282,6 @@ CONSOLE MESSAGE: line 138:     method getAll
 CONSOLE MESSAGE: line 138:     method getProperties
 CONSOLE MESSAGE: line 138:     method has
 CONSOLE MESSAGE: line 138:     method keys
-CONSOLE MESSAGE: line 138:     method set
 CONSOLE MESSAGE: line 138:     method values
 CONSOLE MESSAGE: line 138: interface WorkletGlobalScope
 CONSOLE MESSAGE: line 138:     method constructor
@@ -264,6 +291,7 @@ CONSOLE MESSAGE: line 138:     method abort
 CONSOLE MESSAGE: line 138:     method constructor
 CONSOLE MESSAGE: line 138:     method getWriter
 CONSOLE MESSAGE: line 138: global object
+CONSOLE MESSAGE: line 138:     attribute Atomics
 CONSOLE MESSAGE: line 138:     attribute console
 CONSOLE MESSAGE: line 138:     method gc
 CONSOLE MESSAGE: line 138:     method registerPaint

@@ -30,6 +30,7 @@
 #include "rlz/features/features.h"
 
 #if BUILDFLAG(ENABLE_RLZ)
+#include "base/task_scheduler/post_task.h"
 #include "components/rlz/rlz_tracker.h"
 #endif
 
@@ -108,9 +109,10 @@ IN_PROC_BROWSER_TEST_F(LoginUtilsTest, RlzInitialized) {
   {
     base::RunLoop loop;
     base::string16 rlz_string;
-    content::BrowserThread::PostBlockingPoolTaskAndReply(
-        FROM_HERE, base::Bind(&GetAccessPointRlzInBackgroundThread,
-                              rlz::RLZTracker::ChromeHomePage(), &rlz_string),
+    base::PostTaskWithTraitsAndReply(
+        FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+        base::Bind(&GetAccessPointRlzInBackgroundThread,
+                   rlz::RLZTracker::ChromeHomePage(), &rlz_string),
         loop.QuitClosure());
     loop.Run();
     EXPECT_EQ(base::string16(), rlz_string);

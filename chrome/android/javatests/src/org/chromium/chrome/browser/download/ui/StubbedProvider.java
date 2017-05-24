@@ -20,6 +20,8 @@ import org.chromium.chrome.browser.download.DownloadItem;
 import org.chromium.chrome.browser.offlinepages.downloads.OfflinePageDownloadBridge;
 import org.chromium.chrome.browser.offlinepages.downloads.OfflinePageDownloadItem;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate;
+import org.chromium.components.offline_items_collection.OfflineItem.Progress;
+import org.chromium.components.offline_items_collection.OfflineItemProgressUnit;
 import org.chromium.content_public.browser.DownloadState;
 
 import java.text.SimpleDateFormat;
@@ -88,6 +90,9 @@ public class StubbedProvider implements BackendProvider {
         public boolean isDownloadOpenableInBrowser(boolean isOffTheRecord, String mimeType) {
             return false;
         }
+
+        @Override
+        public void updateLastAccessTime(String downloadGuid, boolean isOffTheRecord) {}
     }
 
     /** Stubs out the OfflinePageDownloadBridge. */
@@ -142,8 +147,16 @@ public class StubbedProvider implements BackendProvider {
             });
         }
 
-        @Override public void openItem(String guid, ComponentName componentName) { }
-        @Override public void destroy() { }
+        @Override
+        public void openItem(String guid, ComponentName componentName) {}
+        @Override
+        public void pauseDownload(String guid) {}
+        @Override
+        public void resumeDownload(String guid) {}
+        @Override
+        public void cancelDownload(String guid) {}
+        @Override
+        public void destroy() {}
     }
 
     /** Stubs out all attempts to get thumbnails for files. */
@@ -172,7 +185,7 @@ public class StubbedProvider implements BackendProvider {
         mHandler = new Handler(Looper.getMainLooper());
         mDownloadDelegate = new StubbedDownloadDelegate();
         mOfflineDelegate = new StubbedOfflinePageDelegate();
-        mSelectionDelegate = new SelectionDelegate<>();
+        mSelectionDelegate = new DownloadItemSelectionDelegate();
         mStubbedThumbnailProvider = new StubbedThumbnailProvider();
     }
 
@@ -303,7 +316,7 @@ public class StubbedProvider implements BackendProvider {
         }
 
         builder.setIsOffTheRecord(isIncognito);
-        builder.setPercentCompleted(percent);
+        builder.setProgress(new Progress(100, 100L, OfflineItemProgressUnit.PERCENTAGE));
         builder.setState(state);
 
         DownloadItem item = new DownloadItem(false, builder.build());
@@ -315,18 +328,23 @@ public class StubbedProvider implements BackendProvider {
     public static OfflinePageDownloadItem createOfflineItem(int which, String date)
             throws Exception {
         long startTime = dateToEpoch(date);
+        int downloadState = org.chromium.components.offlinepages.downloads.DownloadState.COMPLETE;
         if (which == 0) {
             return new OfflinePageDownloadItem("offline_guid_1", "https://url.com",
-                    "page 1", "/data/fake_path/Downloads/first_file", startTime, 1000);
+                    downloadState, 0, "page 1",
+                    "/data/fake_path/Downloads/first_file", startTime, 1000);
         } else if (which == 1) {
             return new OfflinePageDownloadItem("offline_guid_2", "http://stuff_and_things.com",
-                    "page 2", "/data/fake_path/Downloads/file_two", startTime, 10000);
+                    downloadState, 0, "page 2",
+                    "/data/fake_path/Downloads/file_two", startTime, 10000);
         } else if (which == 2) {
             return new OfflinePageDownloadItem("offline_guid_3", "https://url.com",
-                    "page 3", "/data/fake_path/Downloads/3_file", startTime, 100000);
+                    downloadState, 100, "page 3",
+                    "/data/fake_path/Downloads/3_file", startTime, 100000);
         } else if (which == 3) {
             return new OfflinePageDownloadItem("offline_guid_4", "https://thangs.com",
-                    "page 4", "/data/fake_path/Downloads/4", startTime, ONE_GIGABYTE * 5L);
+                    downloadState, 1024, "page 4",
+                    "/data/fake_path/Downloads/4", startTime, ONE_GIGABYTE * 5L);
         } else {
             return null;
         }

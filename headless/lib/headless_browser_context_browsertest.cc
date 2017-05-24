@@ -12,7 +12,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
 #include "headless/lib/browser/headless_web_contents_impl.h"
-#include "headless/public/domains/runtime.h"
+#include "headless/public/devtools/domains/runtime.h"
 #include "headless/public/headless_browser.h"
 #include "headless/public/headless_browser_context.h"
 #include "headless/public/headless_devtools_client.h"
@@ -196,7 +196,7 @@ IN_PROC_BROWSER_TEST_F(HeadlessBrowserTest, ContextProtocolHandler) {
       another_browser_context->CreateWebContentsBuilder()
           .SetInitialURL(GURL("http://not-an-actual-domain.tld/hello.html"))
           .Build();
-  EXPECT_TRUE(WaitForLoad(web_contents));
+  EXPECT_FALSE(WaitForLoad(web_contents));
   EXPECT_TRUE(EvaluateScript(web_contents, "document.body.innerHTML")
                   ->GetResult()
                   ->GetValue()

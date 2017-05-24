@@ -12,6 +12,7 @@
 #include "net/log/test_net_log.h"
 #include "net/log/test_net_log_entry.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_test_util.h"
 
@@ -73,7 +74,8 @@ void TestNetworkQualityEstimator::RunOneRequest() {
   context.set_network_quality_estimator(this);
   context.Init();
   std::unique_ptr<URLRequest> request(
-      context.CreateRequest(GetEchoURL(), DEFAULT_PRIORITY, &test_delegate));
+      context.CreateRequest(GetEchoURL(), DEFAULT_PRIORITY, &test_delegate,
+                            TRAFFIC_ANNOTATION_FOR_TESTS));
   request->SetLoadFlags(request->load_flags() | LOAD_MAIN_FRAME_DEPRECATED);
   request->Start();
   base::RunLoop().Run();
@@ -182,6 +184,19 @@ bool TestNetworkQualityEstimator::GetRecentDownlinkThroughputKbps(
                                                                   kbps);
 }
 
+base::TimeDelta TestNetworkQualityEstimator::GetRTTEstimateInternal(
+    const std::vector<NetworkQualityObservationSource>&
+        disallowed_observation_sources,
+    base::TimeTicks start_time,
+    const base::Optional<NetworkQualityEstimator::Statistic>& statistic,
+    int percentile) const {
+  if (rtt_estimate_internal_)
+    return rtt_estimate_internal_.value();
+
+  return NetworkQualityEstimator::GetRTTEstimateInternal(
+      disallowed_observation_sources, start_time, statistic, percentile);
+}
+
 void TestNetworkQualityEstimator::SetAccuracyRecordingIntervals(
     const std::vector<base::TimeDelta>& accuracy_recording_intervals) {
   accuracy_recording_intervals_set_ = true;
@@ -210,6 +225,48 @@ int TestNetworkQualityEstimator::GetEntriesCount(NetLogEventType type) const {
       ++count;
   }
   return count;
+}
+
+std::string TestNetworkQualityEstimator::GetNetLogLastStringValue(
+    NetLogEventType type,
+    const std::string& key) const {
+  std::string return_value;
+  TestNetLogEntry::List entries;
+  net_log_->GetEntries(&entries);
+
+  for (int i = entries.size() - 1; i >= 0; --i) {
+    if (entries[i].type == type &&
+        entries[i].GetStringValue(key, &return_value)) {
+      return return_value;
+    }
+  }
+  return return_value;
+}
+
+int TestNetworkQualityEstimator::GetNetLogLastIntegerValue(
+    NetLogEventType type,
+    const std::string& key) const {
+  int return_value = 0;
+  TestNetLogEntry::List entries;
+  net_log_->GetEntries(&entries);
+
+  for (int i = entries.size() - 1; i >= 0; --i) {
+    if (entries[i].type == type &&
+        entries[i].GetIntegerValue(key, &return_value)) {
+      return return_value;
+    }
+  }
+  return return_value;
+}
+
+void TestNetworkQualityEstimator::
+    NotifyObserversOfRTTOrThroughputEstimatesComputed(
+        const net::nqe::internal::NetworkQuality& network_quality) {
+  for (auto& observer : rtt_and_throughput_estimates_observer_list_) {
+    observer.OnRTTOrThroughputEstimatesComputed(
+        network_quality.http_rtt(), network_quality.transport_rtt(),
+        network_quality.downstream_throughput_kbps());
+  }
 }
 
 nqe::internal::NetworkID TestNetworkQualityEstimator::GetCurrentNetworkID()

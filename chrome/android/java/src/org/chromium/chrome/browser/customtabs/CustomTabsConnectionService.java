@@ -28,6 +28,8 @@ public class CustomTabsConnectionService extends CustomTabsService {
     @Override
     public void onCreate() {
         ProcessInitializationHandler.getInstance().initializePreNative();
+        // Kick off the first access to avoid random StrictMode violations in clients.
+        RequestThrottler.loadInBackground(getApplication());
         super.onCreate();
     }
 
@@ -76,9 +78,9 @@ public class CustomTabsConnectionService extends CustomTabsService {
     }
 
     @Override
-    protected boolean validatePostMessageOrigin(CustomTabsSessionToken sessionToken) {
-        if (!isFirstRunDone()) return false;
-        return mConnection.validatePostMessageOrigin(sessionToken);
+    protected boolean requestPostMessageChannel(CustomTabsSessionToken sessionToken,
+            Uri postMessageOrigin) {
+        return mConnection.requestPostMessageChannel(sessionToken, postMessageOrigin);
     }
 
     @Override

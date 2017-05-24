@@ -11,6 +11,8 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/sys_info.h"
+#include "base/trace_event/memory_usage_estimator.h"
+#include "base/trace_event/process_memory_dump.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/cache_util.h"
 #include "net/disk_cache/memory/mem_entry_impl.h"
@@ -46,7 +48,7 @@ MemBackendImpl::~MemBackendImpl() {
   DCHECK(CheckLRUListOrder(lru_list_));
   while (!entries_.empty())
     entries_.begin()->second->Doom();
-  DCHECK(!current_size_);
+  DCHECK_EQ(0, current_size_);
 }
 
 // static
@@ -124,6 +126,10 @@ void MemBackendImpl::ModifyStorageSize(int32_t delta) {
   current_size_ += delta;
   if (delta > 0)
     EvictIfNeeded();
+}
+
+bool MemBackendImpl::HasExceededStorageSize() const {
+  return current_size_ > max_size_;
 }
 
 net::CacheType MemBackendImpl::GetCacheType() const {
@@ -281,6 +287,27 @@ void MemBackendImpl::OnExternalCacheHit(const std::string& key) {
   EntryMap::iterator it = entries_.find(key);
   if (it != entries_.end())
     it->second->UpdateStateOnUse(MemEntryImpl::ENTRY_WAS_NOT_MODIFIED);
+}
+
+size_t MemBackendImpl::DumpMemoryStats(
+    base::trace_event::ProcessMemoryDump* pmd,
+    const std::string& parent_absolute_name) const {
+  base::trace_event::MemoryAllocatorDump* dump =
+      pmd->CreateAllocatorDump(parent_absolute_name + "/memory_backend");
+
+  // Entries in lru_list_ will be counted by EMU but not in entries_ since
+  // they're pointers.
+  size_t size = base::trace_event::EstimateMemoryUsage(lru_list_) +
+                base::trace_event::EstimateMemoryUsage(entries_);
+  dump->AddScalar(base::trace_event::MemoryAllocatorDump::kNameSize,
+                  base::trace_event::MemoryAllocatorDump::kUnitsBytes, size);
+  dump->AddScalar("mem_backend_size",
+                  base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+                  current_size_);
+  dump->AddScalar("mem_backend_max_size",
+                  base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+                  max_size_);
+  return size;
 }
 
 void MemBackendImpl::EvictIfNeeded() {

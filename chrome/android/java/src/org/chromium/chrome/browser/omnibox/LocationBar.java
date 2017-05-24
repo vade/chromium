@@ -10,7 +10,6 @@ import android.view.ViewGroup;
 import android.view.Window;
 
 import org.chromium.chrome.browser.WindowDelegate;
-import org.chromium.chrome.browser.appmenu.AppMenuButtonHelper;
 import org.chromium.chrome.browser.ntp.NewTabPage;
 import org.chromium.chrome.browser.omnibox.UrlBar.UrlBarDelegate;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -18,6 +17,7 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.toolbar.Toolbar;
 import org.chromium.chrome.browser.toolbar.ToolbarActionModeCallback;
 import org.chromium.chrome.browser.toolbar.ToolbarDataProvider;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet;
 import org.chromium.ui.base.WindowAndroid;
 
 /**
@@ -78,16 +78,10 @@ public interface LocationBar extends UrlBarDelegate {
     void setToolbarDataProvider(ToolbarDataProvider model);
 
     /**
-     * Sets the menu helper that should be used if there is a menu button in {@link LocationBar}.
-     * @param helper The helper to be used.
+     * Set the bottom sheet for Chrome Home.
+     * @param sheet The bottom sheet for Chrome Home if it exists.
      */
-    void setMenuButtonHelper(AppMenuButtonHelper helper);
-
-    /**
-     * @return The anchor view that should be used for the app menu. Null if there is no menu in
-     *         {@link LocationBar} for the current configuration.
-     */
-    View getMenuAnchor();
+    void setBottomSheet(BottomSheet sheet);
 
     /**
      * Initialize controls that will act as hooks to various functions.
@@ -164,4 +158,12 @@ public interface LocationBar extends UrlBarDelegate {
      */
     void setDefaultTextEditActionModeCallback(ToolbarActionModeCallback callback);
 
+    /**
+     * Returns whether the {@link UrlBar} must be queried for its location on screen when
+     * suggestions are being laid out by {@link SuggestionView}.
+     * TODO(dfalcantara): Revisit this after M58.
+     *
+     * @return Whether or not the {@link UrlBar} has to be explicitly checked for its location.
+     */
+    boolean mustQueryUrlBarLocationForSuggestions();
 }

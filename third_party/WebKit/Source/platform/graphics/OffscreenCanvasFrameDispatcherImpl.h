@@ -5,16 +5,16 @@
 #ifndef OffscreenCanvasFrameDispatcherImpl_h
 #define OffscreenCanvasFrameDispatcherImpl_h
 
+#include <memory>
 #include "cc/ipc/mojo_compositor_frame_sink.mojom-blink.h"
 #include "cc/output/begin_frame_args.h"
 #include "cc/resources/shared_bitmap.h"
+#include "cc/surfaces/local_surface_id_allocator.h"
 #include "cc/surfaces/surface_id.h"
-#include "cc/surfaces/surface_id_allocator.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "platform/graphics/OffscreenCanvasFrameDispatcher.h"
 #include "platform/graphics/StaticBitmapImage.h"
-#include "wtf/Compiler.h"
-#include <memory>
+#include "platform/wtf/Compiler.h"
 
 namespace blink {
 
@@ -24,66 +24,69 @@ class PLATFORM_EXPORT OffscreenCanvasFrameDispatcherImpl final
           public cc::mojom::blink::MojoCompositorFrameSinkClient) {
  public:
   OffscreenCanvasFrameDispatcherImpl(OffscreenCanvasFrameDispatcherClient*,
-                                     uint32_t clientId,
-                                     uint32_t sinkId,
-                                     int canvasId,
+                                     uint32_t client_id,
+                                     uint32_t sink_id,
+                                     int canvas_id,
                                      int width,
                                      int height);
 
   // OffscreenCanvasFrameDispatcher implementation.
   ~OffscreenCanvasFrameDispatcherImpl() final;
-  void dispatchFrame(RefPtr<StaticBitmapImage>,
-                     double commitStartTime,
-                     bool isWebGLSoftwareRendering = false) final;
-  void reclaimResource(unsigned resourceId) final;
-  void reshape(int width, int height) final;
+  void SetNeedsBeginFrame(bool) final;
+  void DispatchFrame(RefPtr<StaticBitmapImage>,
+                     double commit_start_time,
+                     bool is_web_gl_software_rendering = false) final;
+  void ReclaimResource(unsigned resource_id) final;
+  void Reshape(int width, int height) final;
 
   // cc::mojom::blink::MojoCompositorFrameSinkClient implementation.
-  void DidReceiveCompositorFrameAck() final;
+  void DidReceiveCompositorFrameAck(
+      const cc::ReturnedResourceArray& resources) final;
   void OnBeginFrame(const cc::BeginFrameArgs&) final;
   void ReclaimResources(const cc::ReturnedResourceArray& resources) final;
-  void WillDrawSurface() final;
 
   // This enum is used in histogram, so it should be append-only.
   enum OffscreenCanvasCommitType {
-    CommitGPUCanvasGPUCompositing = 0,
-    CommitGPUCanvasSoftwareCompositing = 1,
-    CommitSoftwareCanvasGPUCompositing = 2,
-    CommitSoftwareCanvasSoftwareCompositing = 3,
-    OffscreenCanvasCommitTypeCount,
+    kCommitGPUCanvasGPUCompositing = 0,
+    kCommitGPUCanvasSoftwareCompositing = 1,
+    kCommitSoftwareCanvasGPUCompositing = 2,
+    kCommitSoftwareCanvasSoftwareCompositing = 3,
+    kOffscreenCanvasCommitTypeCount,
   };
 
  private:
   // Surface-related
-  cc::SurfaceIdAllocator m_surfaceIdAllocator;
-  void scheduleSyntheticBeginFrame();  // To be removed (crbug.com/674744)
+  cc::LocalSurfaceIdAllocator local_surface_id_allocator_;
+  const cc::FrameSinkId frame_sink_id_;
+  cc::LocalSurfaceId current_local_surface_id_;
 
-  TaskHandle m_syntheticBeginFrameTask;  // To be removed (crbug.com/674744)
-  const cc::FrameSinkId m_frameSinkId;
-  cc::LocalFrameId m_currentLocalFrameId;
+  int width_;
+  int height_;
+  bool change_size_for_next_commit_;
+  bool needs_begin_frame_;
+  int pending_compositor_frames_ = 0;
 
-  int m_width;
-  int m_height;
-  bool m_changeSizeForNextCommit;
+  unsigned next_resource_id_;
+  HashMap<unsigned, RefPtr<StaticBitmapImage>> cached_images_;
+  HashMap<unsigned, std::unique_ptr<cc::SharedBitmap>> shared_bitmaps_;
+  HashMap<unsigned, GLuint> cached_texture_ids_;
+  HashSet<unsigned> spare_resource_locks_;
 
-  unsigned m_nextResourceId;
-  HashMap<unsigned, RefPtr<StaticBitmapImage>> m_cachedImages;
-  HashMap<unsigned, std::unique_ptr<cc::SharedBitmap>> m_sharedBitmaps;
-  HashMap<unsigned, GLuint> m_cachedTextureIds;
-  HashSet<unsigned> m_spareResourceLocks;
+  bool VerifyImageSize(const IntSize);
+  void PostImageToPlaceholder(RefPtr<StaticBitmapImage>);
 
-  bool verifyImageSize(const IntSize);
+  cc::mojom::blink::MojoCompositorFrameSinkPtr sink_;
+  mojo::Binding<cc::mojom::blink::MojoCompositorFrameSinkClient> binding_;
 
-  cc::mojom::blink::MojoCompositorFrameSinkPtr m_sink;
-  mojo::Binding<cc::mojom::blink::MojoCompositorFrameSinkClient> m_binding;
+  int placeholder_canvas_id_;
 
-  int m_placeholderCanvasId;
+  cc::BeginFrameAck current_begin_frame_ack_;
 
-  void setTransferableResourceToSharedBitmap(cc::TransferableResource&,
+  void SetTransferableResourceToSharedBitmap(cc::TransferableResource&,
                                              RefPtr<StaticBitmapImage>);
-  void setTransferableResourceToSharedGPUContext(cc::TransferableResource&,
+  void SetTransferableResourceToSharedGPUContext(cc::TransferableResource&,
                                                  RefPtr<StaticBitmapImage>);
-  void setTransferableResourceToStaticBitmapImage(cc::TransferableResource&,
+  void SetTransferableResourceToStaticBitmapImage(cc::TransferableResource&,
                                                   RefPtr<StaticBitmapImage>);
 };
 

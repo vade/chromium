@@ -15,7 +15,11 @@
 
 namespace update_client {
 
-const char UpdaterState::kDomainJoined[] = "domainjoined";
+// The value of this constant does not reflect its name (i.e. "domainjoined"
+// vs something like "isenterprisemanaged") because it is used with omaha.
+// After discussion with omaha team it was decided to leave the value as is to
+// keep continuity with previous chrome versions.
+const char UpdaterState::kIsEnterpriseManaged[] = "domainjoined";
 
 UpdaterState::UpdaterState(bool is_machine) : is_machine_(is_machine) {}
 
@@ -23,18 +27,18 @@ UpdaterState::~UpdaterState() {}
 
 std::unique_ptr<UpdaterState::Attributes> UpdaterState::GetState(
     bool is_machine) {
-#if defined(OS_WIN)
+#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
   UpdaterState updater_state(is_machine);
   updater_state.ReadState();
   return base::MakeUnique<Attributes>(updater_state.BuildAttributes());
 #else
   return nullptr;
-#endif  // OS_WIN
+#endif  // OS_WIN or Mac
 }
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
 void UpdaterState::ReadState() {
-  is_joined_to_domain_ = IsJoinedToDomain();
+  is_enterprise_managed_ = IsEnterpriseManaged();
 
 #if defined(GOOGLE_CHROME_BUILD)
   updater_name_ = GetUpdaterName();
@@ -45,12 +49,12 @@ void UpdaterState::ReadState() {
   update_policy_ = GetUpdatePolicy();
 #endif  // GOOGLE_CHROME_BUILD
 }
-#endif  // OS_WIN
+#endif  // OS_WIN or Mac
 
 UpdaterState::Attributes UpdaterState::BuildAttributes() const {
   Attributes attributes;
 
-  attributes[kDomainJoined] = is_joined_to_domain_ ? "1" : "0";
+  attributes[kIsEnterpriseManaged] = is_enterprise_managed_ ? "1" : "0";
 
   attributes["name"] = updater_name_;
 

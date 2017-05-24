@@ -24,12 +24,13 @@ ResourceResponseInfo::ResourceResponseInfo()
       was_fetched_via_foreign_fetch(false),
       was_fallback_required_by_service_worker(false),
       response_type_via_service_worker(
-          blink::WebServiceWorkerResponseTypeDefault),
+          blink::kWebServiceWorkerResponseTypeDefault),
       previews_state(PREVIEWS_OFF),
       effective_connection_type(net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN),
       cert_status(0),
       ssl_connection_status(0),
-      ssl_key_exchange_group(0) {}
+      ssl_key_exchange_group(0),
+      did_service_worker_navigation_preload(false) {}
 
 ResourceResponseInfo::ResourceResponseInfo(const ResourceResponseInfo& other) =
     default;

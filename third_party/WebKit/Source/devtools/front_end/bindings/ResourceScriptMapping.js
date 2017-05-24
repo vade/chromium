@@ -38,7 +38,6 @@ Bindings.ResourceScriptMapping = class {
    * @param {!Bindings.DebuggerWorkspaceBinding} debuggerWorkspaceBinding
    */
   constructor(debuggerModel, workspace, debuggerWorkspaceBinding) {
-    this._target = debuggerModel.target();
     this._debuggerModel = debuggerModel;
     this._workspace = workspace;
     this._debuggerWorkspaceBinding = debuggerWorkspaceBinding;
@@ -222,7 +221,7 @@ Bindings.ResourceScriptMapping = class {
     this._setScriptFile(uiSourceCode, scriptFile);
     for (var i = 0; i < scripts.length; ++i)
       this._debuggerWorkspaceBinding.updateLocations(scripts[i]);
-    this._debuggerWorkspaceBinding.setSourceMapping(this._target, uiSourceCode, this);
+    this._debuggerWorkspaceBinding.setSourceMapping(this._debuggerModel, uiSourceCode, this);
     this._boundUISourceCodes.add(uiSourceCode);
   }
 
@@ -235,7 +234,7 @@ Bindings.ResourceScriptMapping = class {
       scriptFile.dispose();
       this._setScriptFile(uiSourceCode, null);
     }
-    this._debuggerWorkspaceBinding.setSourceMapping(this._target, uiSourceCode, null);
+    this._debuggerWorkspaceBinding.setSourceMapping(this._debuggerModel, uiSourceCode, null);
     this._boundUISourceCodes.delete(uiSourceCode);
   }
 
@@ -413,15 +412,6 @@ Bindings.ResourceScriptFile = class extends Common.Object {
   _mappingCheckedForTest() {
   }
 
-  /**
-   * @return {?SDK.Target}
-   */
-  target() {
-    if (!this._script)
-      return null;
-    return this._script.target();
-  }
-
   dispose() {
     this._uiSourceCode.removeEventListener(
         Workspace.UISourceCode.Events.WorkingCopyChanged, this._workingCopyChanged, this);
@@ -435,7 +425,7 @@ Bindings.ResourceScriptFile = class extends Common.Object {
   addSourceMapURL(sourceMapURL) {
     if (!this._script)
       return;
-    this._script.addSourceMapURL(sourceMapURL);
+    this._script.debuggerModel.setSourceMapURL(this._script, sourceMapURL);
   }
 
   /**

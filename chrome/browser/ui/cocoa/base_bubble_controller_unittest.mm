@@ -165,7 +165,7 @@ class BaseBubbleControllerTest : public CocoaTest {
 // Test that kAlignEdgeToAnchorEdge and a left bubble arrow correctly aligns the
 // left edge of the buble to the anchor point.
 TEST_F(BaseBubbleControllerTest, LeftAlign) {
-  [[controller_ bubble] setArrowLocation:info_bubble::kTopLeft];
+  [[controller_ bubble] setArrowLocation:info_bubble::kTopLeading];
   [[controller_ bubble] setAlignment:info_bubble::kAlignEdgeToAnchorEdge];
   [controller_ showWindow:nil];
 
@@ -181,7 +181,7 @@ TEST_F(BaseBubbleControllerTest, LeftAlign) {
 // Test that kAlignEdgeToAnchorEdge and a right bubble arrow correctly aligns
 // the right edge of the buble to the anchor point.
 TEST_F(BaseBubbleControllerTest, RightAlign) {
-  [[controller_ bubble] setArrowLocation:info_bubble::kTopRight];
+  [[controller_ bubble] setArrowLocation:info_bubble::kTopTrailing];
   [[controller_ bubble] setAlignment:info_bubble::kAlignEdgeToAnchorEdge];
   [controller_ showWindow:nil];
 
@@ -197,7 +197,7 @@ TEST_F(BaseBubbleControllerTest, RightAlign) {
 // Test that kAlignArrowToAnchor and a left bubble arrow correctly aligns
 // the bubble arrow to the anchor point.
 TEST_F(BaseBubbleControllerTest, AnchorAlignLeftArrow) {
-  [[controller_ bubble] setArrowLocation:info_bubble::kTopLeft];
+  [[controller_ bubble] setArrowLocation:info_bubble::kTopLeading];
   [[controller_ bubble] setAlignment:info_bubble::kAlignArrowToAnchor];
   [controller_ showWindow:nil];
 
@@ -214,7 +214,7 @@ TEST_F(BaseBubbleControllerTest, AnchorAlignLeftArrow) {
 // Test that kAlignArrowToAnchor and a right bubble arrow correctly aligns
 // the bubble arrow to the anchor point.
 TEST_F(BaseBubbleControllerTest, AnchorAlignRightArrow) {
-  [[controller_ bubble] setArrowLocation:info_bubble::kTopRight];
+  [[controller_ bubble] setArrowLocation:info_bubble::kTopTrailing];
   [[controller_ bubble] setAlignment:info_bubble::kAlignArrowToAnchor];
   [controller_ showWindow:nil];
 
@@ -248,7 +248,7 @@ TEST_F(BaseBubbleControllerTest, AnchorAlignCenterArrow) {
 // ensures offscreen initialization is done using correct screen metrics.
 TEST_F(BaseBubbleControllerTest, PositionedBeforeShow) {
   // Verify default alignment settings, used when initialized in SetUp().
-  EXPECT_EQ(info_bubble::kTopRight, [[controller_ bubble] arrowLocation]);
+  EXPECT_EQ(info_bubble::kTopTrailing, [[controller_ bubble] arrowLocation]);
   EXPECT_EQ(info_bubble::kAlignArrowToAnchor, [[controller_ bubble] alignment]);
 
   // Verify the default frame (positioned relative to the test_window() origin).
@@ -449,4 +449,61 @@ TEST_F(BaseBubbleControllerTest, StayOnFocus) {
 
   EXPECT_TRUE([bubble_window_ isVisible]);
   g_key_window = nil;
+}
+
+// Test that clicking inside a child window of a bubble, does not dismiss the
+// bubble, even if shouldCloseOnResignKey is YES.
+TEST_F(BaseBubbleControllerTest, MouseDownInChildWindow) {
+  [controller_ setShouldCloseOnResignKey:YES];
+
+  base::scoped_nsobject<NSWindow> child_window([[NSWindow alloc]
+      initWithContentRect:NSMakeRect(500, 500, 500, 500)
+                styleMask:NSBorderlessWindowMask
+                  backing:NSBackingStoreBuffered
+                    defer:NO]);
+  [bubble_window_ addChildWindow:child_window ordered:NSWindowAbove];
+
+  base::scoped_nsobject<BaseBubbleController> keep_alive = ShowBubble();
+  ASSERT_TRUE([bubble_window_ isVisible]);
+
+  NSEvent* event = cocoa_test_event_utils::LeftMouseDownAtPointInWindow(
+      NSMakePoint(10, 10), child_window);
+  [NSApp sendEvent:event];
+  EXPECT_TRUE([bubble_window_ isVisible]);
+
+  // Clicking outside the bubble on another window should dismiss the bubble.
+  event = cocoa_test_event_utils::LeftMouseDownAtPointInWindow(
+      NSMakePoint(10, 10), test_window());
+  [NSApp sendEvent:event];
+  EXPECT_FALSE([bubble_window_ isVisible]);
+}
+
+// Test that clicking outside the bubble window but on a window with a greater
+// level, does not dismiss the bubble, even if shouldCloseOnResignKey is YES.
+TEST_F(BaseBubbleControllerTest, MouseDownInPopup) {
+  [controller_ setShouldCloseOnResignKey:YES];
+
+  base::scoped_nsobject<NSWindow> other_window([[NSWindow alloc]
+      initWithContentRect:NSMakeRect(500, 500, 500, 500)
+                styleMask:NSBorderlessWindowMask
+                  backing:NSBackingStoreBuffered
+                    defer:NO]);
+  [other_window setLevel:NSPopUpMenuWindowLevel];
+
+  base::scoped_nsobject<BaseBubbleController> keep_alive = ShowBubble();
+  ASSERT_TRUE([bubble_window_ isVisible]);
+
+  NSEvent* event = cocoa_test_event_utils::LeftMouseDownAtPointInWindow(
+      NSMakePoint(10, 10), other_window);
+  [NSApp sendEvent:event];
+  EXPECT_TRUE([bubble_window_ isVisible]);
+
+  // Clicking outside the bubble on a normal window should dismiss the bubble.
+  [other_window setLevel:NSNormalWindowLevel];
+  ASSERT_GT(NSPopUpMenuWindowLevel, NSNormalWindowLevel);
+
+  event = cocoa_test_event_utils::LeftMouseDownAtPointInWindow(
+      NSMakePoint(10, 10), other_window);
+  [NSApp sendEvent:event];
+  EXPECT_FALSE([bubble_window_ isVisible]);
 }

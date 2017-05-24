@@ -8,27 +8,26 @@ import android.content.Context;
 
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
-import org.chromium.content.browser.shapedetection.FaceDetectionProviderImpl;
+import org.chromium.content.browser.androidoverlay.AndroidOverlayProviderImpl;
 import org.chromium.content_public.browser.InterfaceRegistrar;
+import org.chromium.content_public.browser.RenderFrameHost;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.device.BatteryMonitor;
-import org.chromium.device.VibrationManager;
-import org.chromium.device.battery.BatteryMonitorFactory;
-import org.chromium.device.nfc.mojom.Nfc;
-import org.chromium.device.vibration.VibrationManagerImpl;
+import org.chromium.media.mojom.AndroidOverlayProvider;
 import org.chromium.mojo.system.impl.CoreImpl;
 import org.chromium.services.service_manager.InterfaceRegistry;
-import org.chromium.shape_detection.mojom.FaceDetectionProvider;
 
 @JNINamespace("content")
 class InterfaceRegistrarImpl {
+
+    private static boolean sHasRegisteredRegistrars;
+
     @CalledByNative
-    static void createInterfaceRegistryForContext(int nativeHandle, Context applicationContext) {
+    static void createInterfaceRegistryForContext(int nativeHandle) {
         ensureContentRegistrarsAreRegistered();
 
         InterfaceRegistry registry = InterfaceRegistry.create(
                 CoreImpl.getInstance().acquireNativeHandle(nativeHandle).toMessagePipeHandle());
-        InterfaceRegistrar.Registry.applyContextRegistrars(registry, applicationContext);
+        InterfaceRegistrar.Registry.applyContextRegistrars(registry);
     }
 
     @CalledByNative
@@ -40,33 +39,29 @@ class InterfaceRegistrarImpl {
         InterfaceRegistrar.Registry.applyWebContentsRegistrars(registry, webContents);
     }
 
+    @CalledByNative
+    static void createInterfaceRegistryForRenderFrameHost(
+            int nativeHandle, RenderFrameHost renderFrameHost) {
+        ensureContentRegistrarsAreRegistered();
+
+        InterfaceRegistry registry = InterfaceRegistry.create(
+                CoreImpl.getInstance().acquireNativeHandle(nativeHandle).toMessagePipeHandle());
+        InterfaceRegistrar.Registry.applyRenderFrameHostRegistrars(registry, renderFrameHost);
+    }
+
     private static void ensureContentRegistrarsAreRegistered() {
         if (sHasRegisteredRegistrars) return;
         sHasRegisteredRegistrars = true;
         InterfaceRegistrar.Registry.addContextRegistrar(new ContentContextInterfaceRegistrar());
-        InterfaceRegistrar.Registry.addWebContentsRegistrar(
-                new ContentWebContentsInterfaceRegistrar());
     }
 
-    private static boolean sHasRegisteredRegistrars;
-}
-
-class ContentContextInterfaceRegistrar implements InterfaceRegistrar<Context> {
-    @Override
-    public void registerInterfaces(InterfaceRegistry registry, final Context applicationContext) {
-        registry.addInterface(
-                VibrationManager.MANAGER, new VibrationManagerImpl.Factory(applicationContext));
-        registry.addInterface(
-                BatteryMonitor.MANAGER, new BatteryMonitorFactory(applicationContext));
-        registry.addInterface(FaceDetectionProvider.MANAGER,
-                new FaceDetectionProviderImpl.Factory(applicationContext));
-        // TODO(avayvod): Register the PresentationService implementation here.
-    }
-}
-
-class ContentWebContentsInterfaceRegistrar implements InterfaceRegistrar<WebContents> {
-    @Override
-    public void registerInterfaces(InterfaceRegistry registry, final WebContents webContents) {
-        registry.addInterface(Nfc.MANAGER, new NfcFactory(webContents));
+    private static class ContentContextInterfaceRegistrar implements InterfaceRegistrar<Context> {
+        @Override
+        public void registerInterfaces(
+                InterfaceRegistry registry, final Context applicationContext) {
+            registry.addInterface(AndroidOverlayProvider.MANAGER,
+                    new AndroidOverlayProviderImpl.Factory(applicationContext));
+            // TODO(avayvod): Register the PresentationService implementation here.
+        }
     }
 }

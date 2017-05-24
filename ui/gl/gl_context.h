@@ -28,15 +28,24 @@ class GLContextVirtual;
 
 namespace gl {
 
+struct CurrentGL;
+class DebugGLApi;
+struct DriverGL;
+class GLApi;
 class GLSurface;
 class GPUTiming;
 class GPUTimingClient;
 struct GLVersionInfo;
+class RealGLApi;
+class TraceGLApi;
 
 struct GLContextAttribs {
   GpuPreference gpu_preference = PreferIntegratedGpu;
   bool bind_generates_resource = true;
   bool webgl_compatibility_context = false;
+  bool global_texture_share_group = false;
+  int client_major_es_version = 3;
+  int client_minor_es_version = 0;
 };
 
 // Encapsulates an OpenGL context, hiding platform specific management.
@@ -137,8 +146,22 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   // Returns a helper structure to convert YUV textures to RGB textures.
   virtual YUVToRGBConverter* GetYUVToRGBConverter();
 
+  // Get the CurrentGL object for this context containing the driver, version
+  // and API.
+  CurrentGL* GetCurrentGL();
+
+  // Reinitialize the dynamic bindings of this context.  Needed when the driver
+  // may be exposing different extensions compared to when it was initialized.
+  // TODO(geofflang): Try to make this call uncessessary by pre-loading all
+  // extension entry points.
+  void ReinitializeDynamicBindings();
+
  protected:
   virtual ~GLContext();
+
+  // Create the GLApi for this context using the provided driver. Creates a
+  // RealGLApi by default.
+  virtual GLApi* CreateGLApi(DriverGL* driver);
 
   // Will release the current context when going out of scope, unless canceled.
   class ScopedReleaseCurrent {
@@ -153,7 +176,7 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   };
 
   // Sets the GL api to the real hardware API (vs the VirtualAPI)
-  static void SetRealGLApi();
+  void BindGLApi();
   virtual void SetCurrent(GLSurface* surface);
 
   // Initialize function pointers to functions where the bound version depends
@@ -172,14 +195,28 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   // For GetRealCurrent.
   friend class gpu::GLContextVirtual;
 
+  std::unique_ptr<GLVersionInfo> GenerateGLVersionInfo();
+
+  bool static_bindings_initialized_ = false;
+  bool dynamic_bindings_initialized_ = false;
+  std::unique_ptr<DriverGL> driver_gl_;
+  std::unique_ptr<GLApi> gl_api_;
+  std::unique_ptr<TraceGLApi> trace_gl_api_;
+  std::unique_ptr<DebugGLApi> debug_gl_api_;
+  std::unique_ptr<CurrentGL> current_gl_;
+
+  // Copy of the real API (if one was created) for dynamic initialization
+  RealGLApi* real_gl_api_ = nullptr;
+
   scoped_refptr<GLShareGroup> share_group_;
-  GLContext* current_virtual_context_;
-  bool state_dirtied_externally_;
+  GLContext* current_virtual_context_ = nullptr;
+  bool state_dirtied_externally_ = false;
   std::unique_ptr<GLStateRestorer> state_restorer_;
   std::unique_ptr<GLVersionInfo> version_info_;
 
-  int swap_interval_;
-  bool force_swap_interval_zero_;
+  // Start with an invalid value so that the first SetSwapInterval isn't a nop.
+  int swap_interval_ = -1;
+  bool force_swap_interval_zero_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(GLContext);
 };

@@ -20,7 +20,7 @@ class JavaScriptDialog {
       content::WebContents* parent_web_contents,
       content::WebContents* alerting_web_contents,
       const base::string16& title,
-      content::JavaScriptMessageType message_type,
+      content::JavaScriptDialogType dialog_type,
       const base::string16& message_text,
       const base::string16& default_prompt_text,
       const content::JavaScriptDialogManager::DialogClosedCallback&
@@ -31,6 +31,9 @@ class JavaScriptDialog {
   // respond to a call that requires it to make no callback or make a customized
   // one.
   virtual void CloseDialogWithoutCallback() = 0;
+
+  // Returns the current value of the user input for a prompt dialog.
+  virtual base::string16 GetUserInput() = 0;
 
  protected:
   explicit JavaScriptDialog(content::WebContents* parent_web_contents);

@@ -10,6 +10,7 @@
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_input_event_router.h"
+#include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_drag_dest_delegate.h"
@@ -35,13 +36,13 @@ int GetModifierFlags() {
   int modifier_state = 0;
   UInt32 currentModifiers = GetCurrentKeyModifiers();
   if (currentModifiers & ::shiftKey)
-    modifier_state |= blink::WebInputEvent::ShiftKey;
+    modifier_state |= blink::WebInputEvent::kShiftKey;
   if (currentModifiers & ::controlKey)
-    modifier_state |= blink::WebInputEvent::ControlKey;
+    modifier_state |= blink::WebInputEvent::kControlKey;
   if (currentModifiers & ::optionKey)
-    modifier_state |= blink::WebInputEvent::AltKey;
+    modifier_state |= blink::WebInputEvent::kAltKey;
   if (currentModifiers & ::cmdKey)
-      modifier_state |= blink::WebInputEvent::MetaKey;
+    modifier_state |= blink::WebInputEvent::kMetaKey;
 
   // The return value of 1 << 0 corresponds to the left mouse button,
   // 1 << 1 corresponds to the right mouse button,
@@ -49,11 +50,11 @@ int GetModifierFlags() {
   NSUInteger pressedButtons = [NSEvent pressedMouseButtons];
 
   if (pressedButtons & (1 << 0))
-      modifier_state |= blink::WebInputEvent::LeftButtonDown;
+    modifier_state |= blink::WebInputEvent::kLeftButtonDown;
   if (pressedButtons & (1 << 1))
-      modifier_state |= blink::WebInputEvent::RightButtonDown;
+    modifier_state |= blink::WebInputEvent::kRightButtonDown;
   if (pressedButtons & (1 << 2))
-      modifier_state |= blink::WebInputEvent::MiddleButtonDown;
+    modifier_state |= blink::WebInputEvent::kMiddleButtonDown;
 
   return modifier_state;
 }
@@ -215,7 +216,7 @@ content::GlobalRoutingID GetRenderViewHostID(content::RenderViewHost* rvh) {
     delegate_->OnDragLeave();
 
   if (currentRWHForDrag_) {
-    currentRWHForDrag_->DragTargetDragLeave();
+    currentRWHForDrag_->DragTargetDragLeave(gfx::Point(), gfx::Point());
     currentRWHForDrag_.reset();
   }
   dropData_.reset();
@@ -243,8 +244,23 @@ content::GlobalRoutingID GetRenderViewHostID(content::RenderViewHost* rvh) {
   // TODO(paulmeyer): The dragging delegates may now by invoked multiple times
   // per drag, even without the drag ever leaving the window.
   if (targetRWH != currentRWHForDrag_.get()) {
-    if (currentRWHForDrag_)
-      currentRWHForDrag_->DragTargetDragLeave();
+    if (currentRWHForDrag_) {
+      gfx::Point transformedLeavePoint = gfx::Point(viewPoint.x, viewPoint.y);
+      gfx::Point transformedScreenPoint =
+          gfx::Point(screenPoint.x, screenPoint.y);
+      content::RenderWidgetHostViewBase* rootView =
+          static_cast<content::RenderWidgetHostViewBase*>(
+              webContents_->GetRenderWidgetHostView());
+      content::RenderWidgetHostViewBase* currentDragView =
+          static_cast<content::RenderWidgetHostViewBase*>(
+              currentRWHForDrag_->GetView());
+      rootView->TransformPointToCoordSpaceForView(
+          transformedLeavePoint, currentDragView, &transformedLeavePoint);
+      rootView->TransformPointToCoordSpaceForView(
+          transformedScreenPoint, currentDragView, &transformedScreenPoint);
+      currentRWHForDrag_->DragTargetDragLeave(transformedLeavePoint,
+                                              transformedScreenPoint);
+    }
     [self draggingEntered:info view:view];
   }
 
@@ -284,7 +300,8 @@ content::GlobalRoutingID GetRenderViewHostID(content::RenderViewHost* rvh) {
 
   if (targetRWH != currentRWHForDrag_.get()) {
     if (currentRWHForDrag_)
-      currentRWHForDrag_->DragTargetDragLeave();
+      currentRWHForDrag_->DragTargetDragLeave(
+          transformedPt, gfx::Point(screenPoint.x, screenPoint.y));
     [self draggingEntered:info view:view];
   }
 

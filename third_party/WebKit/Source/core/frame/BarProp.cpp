@@ -28,35 +28,35 @@
 
 #include "core/frame/BarProp.h"
 
-#include "core/frame/FrameHost.h"
 #include "core/frame/LocalFrame.h"
 #include "core/page/ChromeClient.h"
+#include "core/page/Page.h"
 
 namespace blink {
 
 BarProp::BarProp(LocalFrame* frame, Type type)
-    : DOMWindowClient(frame), m_type(type) {}
+    : DOMWindowClient(frame), type_(type) {}
 
 DEFINE_TRACE(BarProp) {
-  DOMWindowClient::trace(visitor);
+  DOMWindowClient::Trace(visitor);
 }
 
 bool BarProp::visible() const {
-  if (!frame())
+  if (!GetFrame())
     return false;
-  DCHECK(frame()->host());
+  DCHECK(GetFrame()->GetPage());
 
-  switch (m_type) {
-    case Locationbar:
-    case Personalbar:
-    case Toolbar:
-      return frame()->host()->chromeClient().toolbarsVisible();
-    case Menubar:
-      return frame()->host()->chromeClient().menubarVisible();
-    case Scrollbars:
-      return frame()->host()->chromeClient().scrollbarsVisible();
-    case Statusbar:
-      return frame()->host()->chromeClient().statusbarVisible();
+  switch (type_) {
+    case kLocationbar:
+    case kPersonalbar:
+    case kToolbar:
+      return GetFrame()->GetPage()->GetChromeClient().ToolbarsVisible();
+    case kMenubar:
+      return GetFrame()->GetPage()->GetChromeClient().MenubarVisible();
+    case kScrollbars:
+      return GetFrame()->GetPage()->GetChromeClient().ScrollbarsVisible();
+    case kStatusbar:
+      return GetFrame()->GetPage()->GetChromeClient().StatusbarVisible();
   }
 
   NOTREACHED();

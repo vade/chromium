@@ -25,6 +25,17 @@
     flex-wrap: wrap;
 }
 
+.call-frame-chained-arrow {
+    transform: rotate(180deg);
+    margin-right: 3px;
+    flex-shrink: 0;
+}
+
+.call-frame-title-text {
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
 .call-frame-item:not(.async-header) {
     border-top: 1px solid #efefef;
 }
@@ -39,8 +50,7 @@
 
 .call-frame-item-title,
 .call-frame-location {
-    text-overflow: ellipsis;
-    overflow: hidden;
+    display: flex;
     white-space: nowrap;
 }
 

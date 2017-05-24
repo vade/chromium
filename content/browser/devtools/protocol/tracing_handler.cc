@@ -17,7 +17,7 @@
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/trace_event_impl.h"
 #include "base/trace_event/tracing_agent.h"
-#include "components/tracing/browser/trace_config_file.h"
+#include "components/tracing/common/trace_config_file.h"
 #include "content/browser/devtools/devtools_io_context.h"
 #include "content/browser/devtools/devtools_session.h"
 #include "content/browser/tracing/tracing_controller_impl.h"
@@ -63,7 +63,7 @@ std::unique_ptr<base::Value> ConvertDictKeyStyle(const base::Value& value) {
   if (value.GetAsList(&list)) {
     std::unique_ptr<base::ListValue> out_list(new base::ListValue());
     for (const auto& value : *list)
-      out_list->Append(ConvertDictKeyStyle(*value));
+      out_list->Append(ConvertDictKeyStyle(value));
     return std::move(out_list);
   }
 
@@ -131,9 +131,10 @@ TracingHandler::~TracingHandler() {
 }
 
 // static
-TracingHandler* TracingHandler::FromSession(DevToolsSession* session) {
-  return static_cast<TracingHandler*>(
-      session->GetHandlerByName(Tracing::Metainfo::domainName));
+std::vector<TracingHandler*> TracingHandler::ForAgentHost(
+    DevToolsAgentHostImpl* host) {
+  return DevToolsSession::HandlersForAgentHost<TracingHandler>(
+      host, Tracing::Metainfo::domainName);
 }
 
 void TracingHandler::Wire(UberDispatcher* dispatcher) {
@@ -269,7 +270,7 @@ void TracingHandler::OnBufferUsage(float percent_full,
                                    size_t approximate_event_count) {
   // TODO(crbug426117): remove set_value once all clients have switched to
   // the new interface of the event.
-  frontend_->BufferUsage(percent_full, percent_full, approximate_event_count);
+  frontend_->BufferUsage(percent_full, approximate_event_count, percent_full);
 }
 
 void TracingHandler::OnCategoriesReceived(

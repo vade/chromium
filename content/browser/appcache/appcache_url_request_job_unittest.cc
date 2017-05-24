@@ -19,6 +19,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/message_loop/message_loop.h"
 #include "base/pickle.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
@@ -107,10 +108,6 @@ class MockURLRequestJobFactory : public net::URLRequestJobFactory {
   bool IsHandledProtocol(const std::string& scheme) const override {
     return scheme == "http";
   };
-
-  bool IsHandledURL(const GURL& url) const override {
-    return url.SchemeIs("http");
-  }
 
   bool IsSafeRedirectTarget(const GURL& location) const override {
     return false;
@@ -470,11 +467,11 @@ class AppCacheURLRequestJobTest : public testing::Test {
     std::unique_ptr<AppCacheURLRequestJob> job(
         new AppCacheURLRequestJob(request_.get(), nullptr, storage, nullptr,
                                   false, base::Bind(&ExpectNotRestarted)));
-    EXPECT_TRUE(job->is_waiting());
-    EXPECT_FALSE(job->is_delivering_appcache_response());
-    EXPECT_FALSE(job->is_delivering_network_response());
-    EXPECT_FALSE(job->is_delivering_error_response());
-    EXPECT_FALSE(job->has_been_started());
+    EXPECT_TRUE(job->IsWaiting());
+    EXPECT_FALSE(job->IsDeliveringAppCacheResponse());
+    EXPECT_FALSE(job->IsDeliveringNetworkResponse());
+    EXPECT_FALSE(job->IsDeliveringErrorResponse());
+    EXPECT_FALSE(job->IsStarted());
     EXPECT_FALSE(job->has_been_killed());
     EXPECT_EQ(GURL(), job->manifest_url());
     EXPECT_EQ(kAppCacheNoCacheId, job->cache_id());
@@ -496,15 +493,15 @@ class AppCacheURLRequestJobTest : public testing::Test {
         new AppCacheURLRequestJob(request.get(), nullptr, storage, nullptr,
                                   false, base::Bind(&ExpectNotRestarted)));
     job->DeliverErrorResponse();
-    EXPECT_TRUE(job->is_delivering_error_response());
-    EXPECT_FALSE(job->has_been_started());
+    EXPECT_TRUE(job->IsDeliveringErrorResponse());
+    EXPECT_FALSE(job->IsStarted());
 
     job.reset(new AppCacheURLRequestJob(request.get(), nullptr, storage,
                                         nullptr, false,
                                         base::Bind(&ExpectNotRestarted)));
     job->DeliverNetworkResponse();
-    EXPECT_TRUE(job->is_delivering_network_response());
-    EXPECT_FALSE(job->has_been_started());
+    EXPECT_TRUE(job->IsDeliveringNetworkResponse());
+    EXPECT_FALSE(job->IsStarted());
 
     job.reset(new AppCacheURLRequestJob(request.get(), nullptr, storage,
                                         nullptr, false,
@@ -513,9 +510,9 @@ class AppCacheURLRequestJobTest : public testing::Test {
     const int64_t kCacheId(1);
     const AppCacheEntry kEntry(AppCacheEntry::EXPLICIT, 1);
     job->DeliverAppCachedResponse(kManifestUrl, kCacheId, kEntry, false);
-    EXPECT_FALSE(job->is_waiting());
-    EXPECT_TRUE(job->is_delivering_appcache_response());
-    EXPECT_FALSE(job->has_been_started());
+    EXPECT_FALSE(job->IsWaiting());
+    EXPECT_TRUE(job->IsDeliveringAppCacheResponse());
+    EXPECT_FALSE(job->IsStarted());
     EXPECT_EQ(kManifestUrl, job->manifest_url());
     EXPECT_EQ(kCacheId, job->cache_id());
     EXPECT_EQ(kEntry.types(), job->entry().types());
@@ -543,8 +540,8 @@ class AppCacheURLRequestJobTest : public testing::Test {
         request_.get(), nullptr, storage, nullptr, false,
         base::Bind(&SetIfCalled, &restart_callback_invoked_)));
     mock_job->DeliverNetworkResponse();
-    EXPECT_TRUE(mock_job->is_delivering_network_response());
-    EXPECT_FALSE(mock_job->has_been_started());
+    EXPECT_TRUE(mock_job->IsDeliveringNetworkResponse());
+    EXPECT_FALSE(mock_job->IsStarted());
     job_factory_->SetJob(std::move(mock_job));
 
     // Start the request.
@@ -581,8 +578,8 @@ class AppCacheURLRequestJobTest : public testing::Test {
         new AppCacheURLRequestJob(request_.get(), nullptr, storage, nullptr,
                                   false, base::Bind(&ExpectNotRestarted)));
     mock_job->DeliverErrorResponse();
-    EXPECT_TRUE(mock_job->is_delivering_error_response());
-    EXPECT_FALSE(mock_job->has_been_started());
+    EXPECT_TRUE(mock_job->IsDeliveringErrorResponse());
+    EXPECT_FALSE(mock_job->IsStarted());
     job_factory_->SetJob(std::move(mock_job));
 
     // Start the request.
@@ -637,24 +634,24 @@ class AppCacheURLRequestJobTest : public testing::Test {
       job->DeliverAppCachedResponse(
           GURL(), 111,
           AppCacheEntry(AppCacheEntry::EXPLICIT, written_response_id_), false);
-      EXPECT_TRUE(job->is_delivering_appcache_response());
+      EXPECT_TRUE(job->IsDeliveringAppCacheResponse());
     }
 
     // Start the request.
-    EXPECT_FALSE(job->has_been_started());
-    base::WeakPtr<AppCacheURLRequestJob> weak_job = job->GetWeakPtr();
+    EXPECT_FALSE(job->IsStarted());
+    base::WeakPtr<AppCacheJob> weak_job = job->GetWeakPtr();
     job_factory_->SetJob(std::move(job));
     request_->Start();
     EXPECT_FALSE(job_factory_->has_job());
     ASSERT_TRUE(weak_job);
-    EXPECT_TRUE(weak_job->has_been_started());
+    EXPECT_TRUE(weak_job->IsStarted());
 
     if (!start_after_delivery_orders) {
       weak_job->DeliverAppCachedResponse(
           GURL(), 111,
           AppCacheEntry(AppCacheEntry::EXPLICIT, written_response_id_), false);
       ASSERT_TRUE(weak_job);
-      EXPECT_TRUE(weak_job->is_delivering_appcache_response());
+      EXPECT_TRUE(weak_job->IsDeliveringAppCacheResponse());
     }
 
     // Completion is async.
@@ -755,10 +752,10 @@ class AppCacheURLRequestJobTest : public testing::Test {
     job->DeliverAppCachedResponse(
         GURL(), 111,
         AppCacheEntry(AppCacheEntry::EXPLICIT, written_response_id_), false);
-    EXPECT_TRUE(job->is_delivering_appcache_response());
+    EXPECT_TRUE(job->IsDeliveringAppCacheResponse());
 
     // Start the request.
-    EXPECT_FALSE(job->has_been_started());
+    EXPECT_FALSE(job->IsStarted());
     job_factory_->SetJob(std::move(job));
     request_->Start();
     EXPECT_FALSE(job_factory_->has_job());

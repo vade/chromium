@@ -9,11 +9,12 @@
 #include "components/certificate_reporting/error_report.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_utils.h"
-#include "crypto/curve25519.h"
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/base/upload_data_stream.h"
+#include "net/http/http_response_headers.h"
 #include "net/url_request/url_request_filter.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/boringssl/src/include/openssl/curve25519.h"
 
 namespace {
 
@@ -186,14 +187,12 @@ int DelayableCertReportURLRequestJob::ReadRawData(net::IOBuffer* buf,
   return 0;
 }
 
-int DelayableCertReportURLRequestJob::GetResponseCode() const {
-  // Report sender ignores responses. Return empty response.
-  return 200;
-}
-
 void DelayableCertReportURLRequestJob::GetResponseInfo(
     net::HttpResponseInfo* info) {
   // Report sender ignores responses. Return empty response.
+  if (!should_fail_) {
+    info->headers = new net::HttpResponseHeaders("HTTP/1.1 200 OK");
+  }
 }
 
 void DelayableCertReportURLRequestJob::Resume() {
@@ -212,8 +211,8 @@ void DelayableCertReportURLRequestJob::Resume() {
   // Start reading asynchronously as would a normal network request.
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&DelayableCertReportURLRequestJob::NotifyHeadersComplete,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&DelayableCertReportURLRequestJob::NotifyHeadersComplete,
+                     weak_factory_.GetWeakPtr()));
 }
 
 CertReportJobInterceptor::CertReportJobInterceptor(
@@ -234,9 +233,9 @@ net::URLRequestJob* CertReportJobInterceptor::MaybeInterceptRequest(
       GetReportContents(request, server_private_key_);
   content::BrowserThread::PostTask(
       content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&CertReportJobInterceptor::RequestCreated,
-                 weak_factory_.GetWeakPtr(), serialized_report,
-                 expected_report_result_));
+      base::BindOnce(&CertReportJobInterceptor::RequestCreated,
+                     weak_factory_.GetWeakPtr(), serialized_report,
+                     expected_report_result_));
 
   if (expected_report_result_ == REPORTS_FAIL) {
     return new DelayableCertReportURLRequestJob(
@@ -269,16 +268,16 @@ void CertReportJobInterceptor::SetFailureMode(
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&CertReportJobInterceptor::SetFailureModeOnIOThread,
-                 weak_factory_.GetWeakPtr(), expected_report_result));
+      base::BindOnce(&CertReportJobInterceptor::SetFailureModeOnIOThread,
+                     weak_factory_.GetWeakPtr(), expected_report_result));
 }
 
 void CertReportJobInterceptor::Resume() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&CertReportJobInterceptor::ResumeOnIOThread,
-                 base::Unretained(this)));
+      base::BindOnce(&CertReportJobInterceptor::ResumeOnIOThread,
+                     base::Unretained(this)));
 }
 
 RequestObserver* CertReportJobInterceptor::request_created_observer() const {
@@ -376,7 +375,7 @@ void CertificateReportingServiceObserver::OnServiceReset() {
 
 CertificateReportingServiceTestHelper::CertificateReportingServiceTestHelper() {
   memset(server_private_key_, 1, sizeof(server_private_key_));
-  crypto::curve25519::ScalarBaseMult(server_private_key_, server_public_key_);
+  X25519_public_from_private(server_public_key_, server_private_key_);
 }
 
 CertificateReportingServiceTestHelper::
@@ -388,9 +387,9 @@ void CertificateReportingServiceTestHelper::SetUpInterceptor() {
       new CertReportJobInterceptor(REPORTS_FAIL, server_private_key_);
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&SetUpURLHandlersOnIOThread,
-                 base::Passed(std::unique_ptr<net::URLRequestInterceptor>(
-                     url_request_interceptor_))));
+      base::BindOnce(&SetUpURLHandlersOnIOThread,
+                     base::Passed(std::unique_ptr<net::URLRequestInterceptor>(
+                         url_request_interceptor_))));
 }
 
 void CertificateReportingServiceTestHelper::SetFailureMode(

@@ -15,12 +15,12 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/size.h"
+#include "ui/gfx/native_pixmap.h"
 #include "ui/gfx/swap_result.h"
 #include "ui/ozone/platform/drm/gpu/crtc_controller.h"
 #include "ui/ozone/platform/drm/gpu/drm_buffer.h"
 #include "ui/ozone/platform/drm/gpu/drm_device.h"
 #include "ui/ozone/platform/drm/gpu/page_flip_request.h"
-#include "ui/ozone/public/native_pixmap.h"
 
 namespace ui {
 
@@ -202,14 +202,16 @@ bool HardwareDisplayController::MoveCursor(const gfx::Point& location) {
 void HardwareDisplayController::AddCrtc(
     std::unique_ptr<CrtcController> controller) {
   scoped_refptr<DrmDevice> drm = controller->drm();
-  owned_hardware_planes_[drm.get()] =
-      base::MakeUnique<HardwareDisplayPlaneList>();
+
+  std::unique_ptr<HardwareDisplayPlaneList>& owned_planes =
+      owned_hardware_planes_[drm.get()];
+  if (!owned_planes)
+    owned_planes.reset(new HardwareDisplayPlaneList());
 
   // Check if this controller owns any planes and ensure we keep track of them.
   const std::vector<std::unique_ptr<HardwareDisplayPlane>>& all_planes =
       drm->plane_manager()->planes();
-  HardwareDisplayPlaneList* crtc_plane_list =
-      owned_hardware_planes_[drm.get()].get();
+  HardwareDisplayPlaneList* crtc_plane_list = owned_planes.get();
   uint32_t crtc = controller->crtc();
   for (const auto& plane : all_planes) {
     if (plane->in_use() && (plane->owning_crtc() == crtc))

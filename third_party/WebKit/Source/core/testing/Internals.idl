@@ -27,8 +27,6 @@
 [
     DoNotCheckConstants,
 ] interface Internals {
-    DOMString address(Node node);
-
     GCObservation observeGC(any observed);
 
     [RaisesException] DOMString elementLayoutTreeAsText(Element element);
@@ -58,9 +56,6 @@
     [RaisesException] boolean isValidContentSelect(Element contentElement);
     Node treeScopeRootNode(Node node);
     Node parentTreeScope(Node node);
-    [RaisesException] boolean hasSelectorForIdInShadow(Element host, DOMString id);
-    [RaisesException] boolean hasSelectorForClassInShadow(Element host, DOMString className);
-    [RaisesException] boolean hasSelectorForAttributeInShadow(Element host, DOMString attributeName);
     [RaisesException] unsigned short compareTreeScopePosition(Node treeScope1, Node treeScope2);
     [RaisesException] unsigned long updateStyleAndReturnAffectedElementCount();
     [RaisesException] unsigned long needsLayoutCount();
@@ -110,7 +105,7 @@
     unsigned long activeMarkerCountForNode(Node node);
     [RaisesException] Range markerRangeForNode(Node node, DOMString markerType, unsigned long index);
     [RaisesException] DOMString markerDescriptionForNode(Node node, DOMString markerType, unsigned long index);
-    void addTextMatchMarker(Range range, boolean isActive);
+    [RaisesException] void addTextMatchMarker(Range range, DOMString matchStatus);
     [RaisesException] void addCompositionMarker(Range range, DOMString underlineColorValue, boolean thick, DOMString backgroundColorValue);
     void setMarkersActive(Node node, unsigned long startOffset, unsigned long endOffset, boolean active);
     void setMarkedTextMatchesAreHighlighted(Document document, boolean highlight);
@@ -141,6 +136,8 @@
 
     [RaisesException] long lastSpellCheckRequestSequence(Document document);
     [RaisesException] long lastSpellCheckProcessedSequence(Document document);
+    [RuntimeEnabled=IdleTimeSpellChecking, RaisesException] DOMString idleTimeSpellCheckerState(Document document);
+    [RuntimeEnabled=IdleTimeSpellChecking, RaisesException] void runIdleTimeSpellChecker(Document document);
 
     sequence<DOMString> userPreferredLanguages();
     void setUserPreferredLanguages(sequence<DOMString> languages);
@@ -207,7 +204,6 @@
 
     unsigned long numberOfLiveNodes();
     unsigned long numberOfLiveDocuments();
-    DOMString dumpRefCountedInstanceCounts();
 
     DOMString counterValue(Element element);
     [RaisesException] long pageNumber(Element element, optional float pageWidth = 800, optional float pageHeight = 600);
@@ -223,9 +219,12 @@
 
     [RaisesException] void setIsCursorVisible(Document document, boolean isVisible);
 
+    // HTMLMediaElement, HTMLAudioElement and HTMLVideoElement.
     DOMString effectivePreload(HTMLMediaElement mediaElement);
     void mediaPlayerRemoteRouteAvailabilityChanged(HTMLMediaElement mediaElement, boolean available);
     void mediaPlayerPlayingRemotelyChanged(HTMLMediaElement mediaElement, boolean remote);
+    void setMediaElementNetworkState(HTMLMediaElement element, long state);
+    void setPersistent(HTMLVideoElement video, boolean persistent);
 
     void registerURLSchemeAsBypassingContentSecurityPolicy(DOMString scheme);
     void registerURLSchemeAsBypassingContentSecurityPolicy(DOMString scheme, sequence<DOMString> policyAreas);
@@ -264,9 +263,14 @@
     SerializedScriptValue deserializeBuffer(ArrayBuffer buffer);
     ArrayBuffer serializeObject(SerializedScriptValue obj);
 
+    [CallWith=ScriptState] any deserializeBufferContainingWasm(ArrayBuffer buffer);
+    ArrayBuffer serializeWithInlineWasm(any obj);
+
+
     void forceReload(boolean endToEnd);
 
     DOMString getImageSourceURL(Element element);
+    [RaisesException] void forceImageReload(Element element);
 
     DOMString selectMenuListText(HTMLSelectElement select);
     boolean isSelectPopupVisible(Node node);
@@ -274,7 +278,12 @@
     long selectPopupItemStyleFontHeight(Node select, long itemIndex);
     void resetTypeAheadSession(HTMLSelectElement select);
 
+    readonly attribute Node? visibleSelectionAnchorNode;
+    readonly attribute unsigned long visibleSelectionAnchorOffset;
+    readonly attribute Node? visibleSelectionFocusNode;
+    readonly attribute unsigned long visibleSelectionFocusOffset;
     [RaisesException] ClientRect selectionBounds();
+    readonly attribute DOMString textAffinity;
 
     boolean loseSharedGraphicsContext3D();
 
@@ -314,6 +323,8 @@
     unsigned long canvasFontCacheMaxFonts();
 
     DictionaryTest dictionaryTest();
+    RecordTest recordTest();
+    SequenceTest sequenceTest();
     UnionTypesTest unionTypesTest();
     CallbackFunctionTest callbackFunctionTest();
     [RaisesException] void setScrollChain(ScrollState scrollState, sequence<Element> elements);
@@ -330,9 +341,17 @@
 
     bool magnifyScaleAroundAnchor(float offset, float x, float y);
 
-    boolean isUseCounted(Document document, long useCounterId);
+    boolean isUseCounted(Document document, unsigned long feature);
     boolean isCSSPropertyUseCounted(Document document, DOMString propertyName);
+    boolean isAnimatedCSSPropertyUseCounted(Document document, DOMString propertyName);
 
+    // Returns a promise that is resolved when |feature| is counted on
+    // |document|'s UseCounter. When |feature| was already counted, it's
+    // immediately resolved.
+    [CallWith=ScriptState] Promise<bool> observeUseCounter(Document document, unsigned long feature);
+
+    readonly attribute unsigned long length;
+    getter long (unsigned long index);
     iterable<long>;
 
     [Unscopable] readonly attribute DOMString unscopableAttribute;
@@ -347,8 +366,6 @@
     bool setScrollbarVisibilityInScrollableArea(Node node, boolean visible);
 
     [RaisesException] double monotonicTimeToZeroBasedDocumentTime(double platformTime);
-
-    void setMediaElementNetworkState(HTMLMediaElement element, long state);
 
     DOMString getScrollAnimationState(Node node);
 

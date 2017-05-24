@@ -13,13 +13,17 @@
 #include "base/memory/ref_counted.h"
 #include "base/scoped_observer.h"
 #include "base/sequence_checker.h"
+#include "base/sequenced_task_runner.h"
 #include "base/threading/non_thread_safe.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extension_registry_factory.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/browser/process_manager.h"
+#include "extensions/browser/process_manager_factory.h"
 #include "extensions/browser/process_manager_observer.h"
 #include "extensions/common/extension.h"
 
@@ -154,7 +158,7 @@ class ApiResourceManager : public BrowserContextKeyedAPI,
   // ExtensionRegistryObserver:
   void OnExtensionUnloaded(content::BrowserContext* browser_context,
                            const Extension* extension,
-                           UnloadedExtensionInfo::Reason reason) override {
+                           UnloadedExtensionReason reason) override {
     data_->InitiateExtensionUnloadedCleanup(extension->id());
   }
 
@@ -361,6 +365,17 @@ class ApiResourceManager : public BrowserContextKeyedAPI,
       extension_registry_observer_;
   ScopedObserver<ProcessManager, ProcessManagerObserver>
       process_manager_observer_;
+};
+
+template <class T>
+struct BrowserContextFactoryDependencies<ApiResourceManager<T>> {
+  static void DeclareFactoryDependencies(
+      BrowserContextKeyedAPIFactory<ApiResourceManager<T>>* factory) {
+    factory->DependsOn(
+        ExtensionsBrowserClient::Get()->GetExtensionSystemFactory());
+    factory->DependsOn(ExtensionRegistryFactory::GetInstance());
+    factory->DependsOn(ProcessManagerFactory::GetInstance());
+  }
 };
 
 // With WorkerPoolThreadTraits, ApiResourceManager can be used to manage the

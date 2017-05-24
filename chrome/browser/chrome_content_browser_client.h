@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
@@ -20,11 +21,18 @@
 #include "extensions/features/features.h"
 #include "media/media_features.h"
 #include "ppapi/features/features.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 
 class ChromeContentBrowserClientParts;
 
 namespace base {
 class CommandLine;
+}
+
+namespace blink {
+namespace mojom {
+class WindowFeatures;
+}
 }
 
 namespace content {
@@ -59,7 +67,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const content::MainFunctionParams& parameters) override;
   void PostAfterStartupTask(const tracked_objects::Location& from_here,
                             const scoped_refptr<base::TaskRunner>& task_runner,
-                            const base::Closure& task) override;
+                            base::OnceClosure task) override;
   bool IsBrowserStartupComplete() override;
   std::string GetStoragePartitionIdForSite(
       content::BrowserContext* browser_context,
@@ -85,6 +93,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   bool ShouldLockToOrigin(content::BrowserContext* browser_context,
                           const GURL& effective_site_url) override;
   void GetAdditionalWebUISchemes(
+      std::vector<std::string>* additional_schemes) override;
+  void GetAdditionalViewSourceSchemes(
       std::vector<std::string>* additional_schemes) override;
   bool LogWebUIUrl(const GURL& web_ui_url) const override;
   bool IsHandledURL(const GURL& url) override;
@@ -168,8 +178,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const GURL& url,
       content::ResourceContext* context) override;
   content::QuotaPermissionContext* CreateQuotaPermissionContext() override;
-  std::unique_ptr<storage::QuotaEvictionPolicy>
-  GetTemporaryStorageEvictionPolicy(content::BrowserContext* context) override;
+  void GetQuotaSettings(
+      content::BrowserContext* context,
+      content::StoragePartition* partition,
+      const storage::OptionalQuotaSettingsCallback& callback) override;
+
   void AllowCertificateError(
       content::WebContents* web_contents,
       int cert_error,
@@ -184,24 +197,23 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   void SelectClientCertificate(
       content::WebContents* web_contents,
       net::SSLCertRequestInfo* cert_request_info,
+      net::CertificateList client_certs,
       std::unique_ptr<content::ClientCertificateDelegate> delegate) override;
   content::MediaObserver* GetMediaObserver() override;
   content::PlatformNotificationService* GetPlatformNotificationService()
       override;
-  bool CanCreateWindow(int opener_render_process_id,
-                       int opener_render_frame_id,
+  bool CanCreateWindow(content::RenderFrameHost* opener,
                        const GURL& opener_url,
                        const GURL& opener_top_level_frame_url,
                        const GURL& source_origin,
-                       WindowContainerType container_type,
+                       content::mojom::WindowContainerType container_type,
                        const GURL& target_url,
                        const content::Referrer& referrer,
                        const std::string& frame_name,
                        WindowOpenDisposition disposition,
-                       const blink::WebWindowFeatures& features,
+                       const blink::mojom::WindowFeatures& features,
                        bool user_gesture,
                        bool opener_suppressed,
-                       content::ResourceContext* context,
                        bool* no_javascript_access) override;
   void ResourceDispatcherHostCreated() override;
   content::SpeechRecognitionManagerDelegate*
@@ -211,7 +223,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
                            content::WebPreferences* prefs) override;
   void BrowserURLHandlerCreated(content::BrowserURLHandler* handler) override;
   void ClearCache(content::RenderFrameHost* rfh) override;
-  void ClearCookies(content::RenderFrameHost* rfh) override;
   void ClearSiteData(content::BrowserContext* browser_context,
                      const url::Origin& origin,
                      bool remove_cookies,
@@ -271,17 +282,19 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       int sandbox_type) const override;
 #endif
   void ExposeInterfacesToRenderer(
-      service_manager::InterfaceRegistry* registry,
+      service_manager::BinderRegistry* registry,
+      content::AssociatedInterfaceRegistry* associated_registry,
       content::RenderProcessHost* render_process_host) override;
   void ExposeInterfacesToMediaService(
-      service_manager::InterfaceRegistry* registry,
+      service_manager::BinderRegistry* registry,
       content::RenderFrameHost* render_frame_host) override;
-  void RegisterRenderFrameMojoInterfaces(
-      service_manager::InterfaceRegistry* registry,
+  void ExposeInterfacesToFrame(
+      service_manager::BinderRegistry* registry,
       content::RenderFrameHost* render_frame_host) override;
-  void ExposeInterfacesToGpuProcess(
-      service_manager::InterfaceRegistry* registry,
-      content::GpuProcessHost* render_process_host) override;
+  void BindInterfaceRequest(
+      const service_manager::BindSourceInfo& source_info,
+      const std::string& interface_name,
+      mojo::ScopedMessagePipeHandle* interface_pipe) override;
   void RegisterInProcessServices(StaticServiceMap* services) override;
   void RegisterOutOfProcessServices(
       OutOfProcessServiceMap* services) override;
@@ -314,16 +327,15 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
                           media::mojom::RemoterRequest request) final;
 #endif  // BUILDFLAG(ENABLE_MEDIA_REMOTING)
 
-  void GetTaskSchedulerInitializationParams(
-      std::vector<base::SchedulerWorkerPoolParams>* params_vector,
-      base::TaskScheduler::WorkerPoolIndexForTraitsCallback*
-          index_to_traits_callback) override;
+  std::unique_ptr<base::TaskScheduler::InitParams> GetTaskSchedulerInitParams()
+      override;
   void PerformExperimentalTaskSchedulerRedirections() override;
   bool ShouldRedirectDOMStorageTaskRunner() override;
   bool RedirectNonUINonIOBrowserThreadsToTaskScheduler() override;
 
  private:
   friend class DisableWebRtcEncryptionFlagTest;
+  friend class InProcessBrowserTest;
 
 #if BUILDFLAG(ENABLE_WEBRTC)
   // Copies disable WebRTC encryption switch depending on the channel.
@@ -354,6 +366,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const base::Callback<void(bool)>& callback);
 #endif
 
+  // The value pointed to by |settings| should remain valid until the
+  // the function is called again with a new value or a nullptr.
+  static void SetDefaultQuotaSettingsForTesting(
+      const storage::QuotaSettings *settings);
+
 #if BUILDFLAG(ENABLE_PLUGINS)
   // Set of origins that can use TCP/UDP private APIs from NaCl.
   std::set<std::string> allowed_socket_origins_;
@@ -367,6 +384,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   // Vector of additional ChromeContentBrowserClientParts.
   // Parts are deleted in the reverse order they are added.
   std::vector<ChromeContentBrowserClientParts*> extra_parts_;
+
+  service_manager::BinderRegistry gpu_binder_registry_;
 
   base::WeakPtrFactory<ChromeContentBrowserClient> weak_factory_;
 

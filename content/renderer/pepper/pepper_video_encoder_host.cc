@@ -7,10 +7,12 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/shared_memory.h"
 #include "base/numerics/safe_math.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "content/common/gpu_stream_constants.h"
 #include "content/common/pepper_file_util.h"
 #include "content/public/renderer/renderer_ppapi_host.h"
 #include "content/renderer/pepper/gfx_conversion.h"
@@ -402,16 +404,16 @@ void PepperVideoEncoderHost::RequireBitstreamBuffers(
       break;
     }
 
-    shm_buffers_.push_back(new ShmBuffer(i, std::move(shm)));
+    shm_buffers_.push_back(base::MakeUnique<ShmBuffer>(i, std::move(shm)));
   }
 
   // Feed buffers to the encoder.
   std::vector<SerializedHandle> handles;
-  for (size_t i = 0; i < shm_buffers_.size(); ++i) {
-    encoder_->UseOutputBitstreamBuffer(shm_buffers_[i]->ToBitstreamBuffer());
+  for (const auto& buffer : shm_buffers_) {
+    encoder_->UseOutputBitstreamBuffer(buffer->ToBitstreamBuffer());
     handles.push_back(SerializedHandle(
         renderer_ppapi_host_->ShareSharedMemoryHandleWithRemote(
-            shm_buffers_[i]->shm->handle()),
+            buffer->shm->handle()),
         output_buffer_size));
   }
 
@@ -529,10 +531,9 @@ bool PepperVideoEncoderHost::EnsureGpuChannel() {
     return false;
 
   command_buffer_ = gpu::CommandBufferProxyImpl::Create(
-      std::move(channel), gpu::kNullSurfaceHandle, nullptr,
-      gpu::GPU_STREAM_DEFAULT, gpu::GpuStreamPriority::NORMAL,
-      gpu::gles2::ContextCreationAttribHelper(), GURL::EmptyGURL(),
-      base::ThreadTaskRunnerHandle::Get());
+      std::move(channel), gpu::kNullSurfaceHandle, nullptr, kGpuStreamIdDefault,
+      kGpuStreamPriorityDefault, gpu::gles2::ContextCreationAttribHelper(),
+      GURL::EmptyGURL(), base::ThreadTaskRunnerHandle::Get());
   if (!command_buffer_) {
     Close();
     return false;

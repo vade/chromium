@@ -2,15 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// ======                        New Architecture                         =====
-// =         This code is only used in the new iOS Chrome architecture.       =
-// ============================================================================
-
 #import "ios/clean/chrome/browser/ui/presenters/menu_presentation_controller.h"
 
 #import <QuartzCore/QuartzCore.h>
 
-#include "ios/clean/chrome/browser/ui/commands/toolbar_commands.h"
+#include "ios/clean/chrome/browser/ui/commands/tools_menu_commands.h"
 #include "ios/clean/chrome/browser/ui/presenters/menu_presentation_delegate.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -26,7 +22,7 @@
 @implementation MenuPresentationController
 @synthesize presentationDelegate = _presentationDelegate;
 @synthesize presentationFrame = _presentationFrame;
-@synthesize toolbarCommandHandler = _toolbarCommandHandler;
+@synthesize dispatcher = _dispatcher;
 @synthesize dismissRecognizer = _dismissRecognizer;
 
 #pragma mark - UIPresentationDelegate
@@ -50,9 +46,10 @@
 }
 
 - (void)presentationTransitionWillBegin {
-  self.presentedView.layer.borderWidth = 1.0;
-  self.presentedView.layer.shadowRadius = 1.0;
-  self.presentedView.layer.borderColor = [UIColor blackColor].CGColor;
+  self.presentedView.layer.shadowRadius = 5.0f;
+  self.presentedView.layer.shadowOpacity = 0.4f;
+  self.presentedView.layer.shadowOffset = CGSizeMake(0.0f, 0.0f);
+  self.presentedView.layer.cornerRadius = 2.0f;
 
   self.dismissRecognizer =
       [[UITapGestureRecognizer alloc] initWithTarget:self
@@ -63,7 +60,7 @@
 #pragma mark - Private methods.
 
 - (void)tapToDismiss:(UIGestureRecognizer*)recognizer {
-  [self.toolbarCommandHandler closeToolsMenu];
+  [self.dispatcher closeToolsMenu];
 }
 
 // Checks if the presenting view controller conforms to

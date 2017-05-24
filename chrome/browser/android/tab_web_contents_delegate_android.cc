@@ -13,7 +13,12 @@
 #include "chrome/browser/android/banners/app_banner_manager_android.h"
 #include "chrome/browser/android/feature_utilities.h"
 #include "chrome/browser/android/hung_renderer_infobar_delegate.h"
-#include "chrome/browser/android/media/media_throttle_infobar_delegate.h"
+
+#include "device/vr/features/features.h"
+#if BUILDFLAG(ENABLE_VR)
+#include "chrome/browser/android/vr_shell/vr_tab_helper.h"
+#endif  // BUILDFLAG(ENABLE_VR)
+
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/infobars/infobar_service.h"
@@ -42,7 +47,6 @@
 #include "content/public/common/file_chooser_params.h"
 #include "jni/TabWebContentsDelegateAndroid_jni.h"
 #include "ppapi/features/features.h"
-#include "third_party/WebKit/public/web/WebWindowFeatures.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
 
@@ -121,6 +125,11 @@ void TabWebContentsDelegateAndroid::LoadingStateChanged(
 void TabWebContentsDelegateAndroid::RunFileChooser(
     content::RenderFrameHost* render_frame_host,
     const FileChooserParams& params) {
+#if BUILDFLAG(ENABLE_VR)
+  if (vr_shell::VrTabHelper::IsInVr(
+          WebContents::FromRenderFrameHost(render_frame_host)))
+    return;
+#endif
   FileSelectHelper::RunFileChooser(render_frame_host, params);
 }
 
@@ -128,6 +137,10 @@ std::unique_ptr<BluetoothChooser>
 TabWebContentsDelegateAndroid::RunBluetoothChooser(
     content::RenderFrameHost* frame,
     const BluetoothChooser::EventHandler& event_handler) {
+#if BUILDFLAG(ENABLE_VR)
+  if (vr_shell::VrTabHelper::IsInVr(WebContents::FromRenderFrameHost(frame)))
+    return nullptr;
+#endif
   return base::MakeUnique<BluetoothChooserAndroid>(frame, event_handler);
 }
 
@@ -179,7 +192,7 @@ blink::WebDisplayMode TabWebContentsDelegateAndroid::GetDisplayMode(
 
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
   if (obj.is_null())
-    return blink::WebDisplayModeUndefined;
+    return blink::kWebDisplayModeUndefined;
 
   return static_cast<blink::WebDisplayMode>(
       Java_TabWebContentsDelegateAndroid_getDisplayMode(env, obj));
@@ -257,6 +270,11 @@ void TabWebContentsDelegateAndroid::FindMatchRectsReply(
 content::JavaScriptDialogManager*
 TabWebContentsDelegateAndroid::GetJavaScriptDialogManager(
     WebContents* source) {
+#if BUILDFLAG(ENABLE_VR)
+  if (vr_shell::VrTabHelper::IsInVr(source)) {
+    return nullptr;
+  }
+#endif
   return app_modal::JavaScriptDialogManager::GetInstance();
 }
 
@@ -264,6 +282,10 @@ void TabWebContentsDelegateAndroid::RequestMediaAccessPermission(
     content::WebContents* web_contents,
     const content::MediaStreamRequest& request,
     const content::MediaResponseCallback& callback) {
+#if BUILDFLAG(ENABLE_VR)
+  if (vr_shell::VrTabHelper::IsInVr(web_contents))
+    return;
+#endif
   MediaCaptureDevicesDispatcher::GetInstance()->ProcessMediaAccessRequest(
       web_contents, request, callback, nullptr);
 }
@@ -274,12 +296,6 @@ bool TabWebContentsDelegateAndroid::CheckMediaAccessPermission(
     content::MediaStreamType type) {
   return MediaCaptureDevicesDispatcher::GetInstance()
       ->CheckMediaAccessPermission(web_contents, security_origin, type);
-}
-
-void TabWebContentsDelegateAndroid::RequestMediaDecodePermission(
-    content::WebContents* web_contents,
-    const base::Callback<void(bool)>& callback) {
-  MediaThrottleInfoBarDelegate::Create(web_contents, callback);
 }
 
 bool TabWebContentsDelegateAndroid::RequestPpapiBrokerPermission(
@@ -331,7 +347,7 @@ WebContents* TabWebContentsDelegateAndroid::OpenURLFromTab(
       !base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisablePopupBlocking)) {
     if (popup_blocker_helper->MaybeBlockPopup(nav_params,
-                                              blink::WebWindowFeatures())) {
+                                              blink::mojom::WindowFeatures())) {
       return nullptr;
     }
   }

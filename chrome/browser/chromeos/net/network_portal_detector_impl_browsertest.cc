@@ -126,10 +126,8 @@ class NetworkPortalDetectorImplBrowserTest
                              shill::kStateIdle,
                              true /* add_to_visible */);
     DBusThreadManager::Get()->GetShillServiceClient()->SetProperty(
-        dbus::ObjectPath(kWifiServicePath),
-        shill::kStateProperty,
-        base::StringValue(shill::kStatePortal),
-        base::Bind(&base::DoNothing),
+        dbus::ObjectPath(kWifiServicePath), shill::kStateProperty,
+        base::Value(shill::kStatePortal), base::Bind(&base::DoNothing),
         base::Bind(&ErrorCallbackFunction));
 
     network_portal_detector_ = new NetworkPortalDetectorImpl(
@@ -154,11 +152,6 @@ class NetworkPortalDetectorImplBrowserTest
   }
 
   MessageCenter* message_center() { return MessageCenter::Get(); }
-
-  void SetIgnoreNoNetworkForTesting() {
-    network_portal_detector_->notification_controller_
-        ->SetIgnoreNoNetworkForTesting();
-  }
 
   const NetworkPortalWebDialog* GetDialog() const {
     return network_portal_detector_->notification_controller_
@@ -254,8 +247,6 @@ void NetworkPortalDetectorImplBrowserTestIgnoreProxy::TestImpl(
 
   LoginUser(kTestUser);
   content::RunAllPendingInMessageLoop();
-
-  SetIgnoreNoNetworkForTesting();
 
   ProfileManager::GetActiveUserProfile()->GetPrefs()->SetBoolean(
       prefs::kCaptivePortalAuthenticationIgnoresProxy, preference_value);

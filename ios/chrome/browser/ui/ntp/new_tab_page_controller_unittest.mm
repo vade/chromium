@@ -6,8 +6,6 @@
 
 #include <memory>
 
-#include "base/mac/scoped_nsautorelease_pool.h"
-#include "base/mac/scoped_nsobject.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
@@ -19,6 +17,8 @@
 #include "ios/chrome/browser/chrome_url_constants.h"
 #include "ios/chrome/browser/search_engines/template_url_service_factory.h"
 #include "ios/chrome/browser/sessions/ios_chrome_tab_restore_service_factory.h"
+#import "ios/chrome/browser/sessions/test_session_service.h"
+#import "ios/chrome/browser/tabs/tab_model.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_view.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #include "ios/chrome/test/block_cleanup_test.h"
@@ -30,9 +30,13 @@
 #import "third_party/ocmock/OCMock/OCMock.h"
 #import "third_party/ocmock/gtest_support.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 @interface NewTabPageController (TestSupport)
 - (id<NewTabPagePanelProtocol>)currentController;
-- (id<NewTabPagePanelProtocol>)bookmarkController;
+- (BookmarkHomeTabletNTPController*)bookmarkController;
 - (id<NewTabPagePanelProtocol>)incognitoController;
 @end
 
@@ -46,12 +50,12 @@
   return currentController_;
 }
 
-- (id<NewTabPagePanelProtocol>)bookmarkController {
+- (BookmarkHomeTabletNTPController*)bookmarkController {
   return bookmarkController_.get();
 }
 
 - (id<NewTabPagePanelProtocol>)incognitoController {
-  return incognitoController_.get();
+  return incognitoController_;
 }
 
 @end
@@ -84,31 +88,43 @@ class NewTabPageControllerTest : public BlockCleanupTest {
         ios::BookmarkModelFactory::GetForBrowserState(
             chrome_browser_state_.get()));
     GURL url(kChromeUINewTabURL);
-    controller_.reset([[NewTabPageController alloc]
-               initWithUrl:url
-                    loader:nil
-                   focuser:nil
-               ntpObserver:nil
-              browserState:chrome_browser_state_.get()
-                colorCache:nil
-        webToolbarDelegate:nil
-                  tabModel:nil]);
+    parentViewController_ = [[UIViewController alloc] init];
+    tabModel_ = [[TabModel alloc]
+        initWithSessionWindow:nil
+               sessionService:[[TestSessionService alloc] init]
+                 browserState:chrome_browser_state_.get()];
+    controller_ =
+        [[NewTabPageController alloc] initWithUrl:url
+                                           loader:nil
+                                          focuser:nil
+                                      ntpObserver:nil
+                                     browserState:chrome_browser_state_.get()
+                                       colorCache:nil
+                               webToolbarDelegate:nil
+                                         tabModel:tabModel_
+                             parentViewController:parentViewController_
+                                       dispatcher:nil];
 
-    incognitoController_.reset([[NewTabPageController alloc]
-               initWithUrl:url
-                    loader:nil
-                   focuser:nil
-               ntpObserver:nil
-              browserState:chrome_browser_state_
-                               ->GetOffTheRecordChromeBrowserState()
-                colorCache:nil
-        webToolbarDelegate:nil
-                  tabModel:nil]);
+    incognitoController_ = [[NewTabPageController alloc]
+                 initWithUrl:url
+                      loader:nil
+                     focuser:nil
+                 ntpObserver:nil
+                browserState:chrome_browser_state_
+                                 ->GetOffTheRecordChromeBrowserState()
+                  colorCache:nil
+          webToolbarDelegate:nil
+                    tabModel:nil
+        parentViewController:parentViewController_
+                  dispatcher:nil];
   };
 
   void TearDown() override {
-    incognitoController_.reset();
-    controller_.reset();
+    incognitoController_ = nil;
+    controller_ = nil;
+    parentViewController_ = nil;
+    [tabModel_ browserStateDestroyed];
+    tabModel_ = nil;
 
     // There may be blocks released below that have weak references to |profile|
     // owned by chrome_browser_state_.  Ensure BlockCleanupTest::TearDown() is
@@ -120,11 +136,10 @@ class NewTabPageControllerTest : public BlockCleanupTest {
   web::TestWebThreadBundle thread_bundle_;
   IOSChromeScopedTestingLocalState local_state_;
   std::unique_ptr<TestChromeBrowserState> chrome_browser_state_;
-  base::scoped_nsobject<NewTabPageController> controller_;
-  base::scoped_nsobject<NewTabPageController> incognitoController_;
-  // The pool has to be the last declared field because it must be destroyed
-  // first.
-  base::mac::ScopedNSAutoreleasePool pool_;
+  TabModel* tabModel_;
+  UIViewController* parentViewController_;
+  NewTabPageController* controller_;
+  NewTabPageController* incognitoController_;
 };
 
 TEST_F(NewTabPageControllerTest, NewTabBarItemDidChange) {

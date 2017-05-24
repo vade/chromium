@@ -24,19 +24,15 @@ bool PrintWebViewHelper::PrintPagesNative(blink::WebLocalFrame* frame,
 
   std::vector<gfx::Size> page_size_in_dpi(printed_pages.size());
   std::vector<gfx::Rect> content_area_in_dpi(printed_pages.size());
+  std::vector<gfx::Rect> printable_area_in_dpi(printed_pages.size());
 
   PdfMetafileSkia metafile(PDF_SKIA_DOCUMENT_TYPE);
   CHECK(metafile.Init());
 
-  PrintMsg_PrintPage_Params page_params;
-  page_params.params = params.params;
   for (size_t i = 0; i < printed_pages.size(); ++i) {
-    page_params.page_number = printed_pages[i];
-    PrintPageInternal(page_params,
-                      frame,
-                      &metafile,
-                      &page_size_in_dpi[i],
-                      &content_area_in_dpi[i]);
+    PrintPageInternal(params.params, printed_pages[i], page_count, frame,
+                      &metafile, &page_size_in_dpi[i], &content_area_in_dpi[i],
+                      &printable_area_in_dpi[i]);
   }
 
   // blink::printEnd() for PDF should be called before metafile is closed.
@@ -59,6 +55,8 @@ bool PrintWebViewHelper::PrintPagesNative(blink::WebLocalFrame* frame,
     printed_page_params.page_number = printed_pages[i];
     printed_page_params.page_size = page_size_in_dpi[i];
     printed_page_params.content_area = content_area_in_dpi[i];
+    printed_page_params.physical_offsets =
+        gfx::Point(printable_area_in_dpi[i].x(), printable_area_in_dpi[i].y());
     Send(new PrintHostMsg_DidPrintPage(routing_id(), printed_page_params));
     // Send the rest of the pages with an invalid metafile handle.
     // TODO(erikchen): Fix semantics. See https://crbug.com/640840

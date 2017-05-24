@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include <memory>
+#include <utility>
 
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -49,11 +50,11 @@ class SettingsOverridePermissionTest : public ChromeManifestTest {
     std::unique_ptr<base::DictionaryValue> settings_override(
         new base::DictionaryValue);
     if (flags & kHomepage)
-      settings_override->SetString("homepage", "http://www.google.com");
+      settings_override->SetString("homepage", "http://www.google.com/home");
     if (flags & kStartupPages) {
       std::unique_ptr<base::ListValue> startup_pages(new base::ListValue);
       startup_pages->AppendString("http://startup.com/startup.html");
-      settings_override->Set("startup_pages", startup_pages.release());
+      settings_override->Set("startup_pages", std::move(startup_pages));
     }
     if (flags & kSearchProvider) {
       std::unique_ptr<base::DictionaryValue> search_provider(
@@ -65,10 +66,10 @@ class SettingsOverridePermissionTest : public ChromeManifestTest {
       search_provider->SetBoolean("is_default", true);
       search_provider->SetString("favicon_url",
                                  "http://wikipedia.org/wiki/Favicon");
-      settings_override->Set("search_provider", search_provider.release());
+      settings_override->Set("search_provider", std::move(search_provider));
     }
-    ext_manifest.Set(
-        manifest_keys::kSettingsOverride, settings_override.release());
+    ext_manifest.Set(manifest_keys::kSettingsOverride,
+                     std::move(settings_override));
 
     ManifestData manifest(&ext_manifest, "test");
     return LoadAndExpectSuccess(manifest);
@@ -88,7 +89,7 @@ TEST_F(SettingsOverridePermissionTest, HomePage) {
 #if defined(OS_WIN) || defined(OS_MACOSX)
   EXPECT_TRUE(permission_set.HasAPIPermission(APIPermission::kHomepage));
   VerifyOnePermissionMessage(extension->permissions_data(),
-                             "Change your home page to: google.com/");
+                             "Change your home page to: google.com");
 #else
   EXPECT_FALSE(permission_set.HasAPIPermission(APIPermission::kHomepage));
 #endif
@@ -104,9 +105,8 @@ TEST_F(SettingsOverridePermissionTest, StartupPages) {
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
   EXPECT_TRUE(permission_set.HasAPIPermission(APIPermission::kStartupPages));
-  VerifyOnePermissionMessage(
-      extension->permissions_data(),
-      "Change your start page to: startup.com/startup.html");
+  VerifyOnePermissionMessage(extension->permissions_data(),
+                             "Change your start page to: startup.com");
 #else
   EXPECT_FALSE(permission_set.HasAPIPermission(APIPermission::kStartupPages));
 #endif

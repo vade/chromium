@@ -72,15 +72,10 @@ extern NSString* const kLocationBarResignsFirstResponderNotification;
 - (instancetype)initWithCoder:(NSCoder*)aDecoder NS_UNAVAILABLE;
 
 // The top-level browser container view.
-@property(nonatomic, retain) BrowserContainerView* contentArea;
+@property(nonatomic, strong) BrowserContainerView* contentArea;
 
 // Invisible button used to dismiss the keyboard.
-@property(nonatomic, retain) UIButton* typingShield;
-
-// Valid only for tablet. YES if the tab strip will display the mode toggle
-// switch. May be set to the same value repeatedly with no layout penalty
-// (guaranteed by the tab strip).
-@property(nonatomic, assign) BOOL hasModeToggleSwitch;
+@property(nonatomic, strong) UIButton* typingShield;
 
 // Activates/deactivates the object. This will enable/disable the ability for
 // this object to browse, and to have live UIWebViews associated with it. While
@@ -92,7 +87,7 @@ extern NSString* const kLocationBarResignsFirstResponderNotification;
 @property(nonatomic, assign, readonly, getter=isPlayingTTS) BOOL playingTTS;
 
 // Returns the TabModel passed to the initializer.
-@property(nonatomic, assign, readonly) TabModel* tabModel;
+@property(nonatomic, weak, readonly) TabModel* tabModel;
 
 // Returns the ios::ChromeBrowserState passed to the initializer.
 @property(nonatomic, assign, readonly) ios::ChromeBrowserState* browserState;
@@ -143,6 +138,9 @@ extern NSString* const kLocationBarResignsFirstResponderNotification;
 
 // Shows the QR scanner UI.
 - (void)showQRScanner;
+
+// Focuses the omnibox.
+- (void)focusOmnibox;
 
 // Dismisses all presented views then calls |completion|.
 - (void)clearPresentedStateWithCompletion:(ProceduralBlock)completion;

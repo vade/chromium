@@ -90,7 +90,7 @@ ExtensionNavigationThrottle::WillStartRequest() {
             is_guest, extension, owner_extension, partition_id, resource_path,
             navigation_handle()->GetPageTransition(), &allowed);
         if (!allowed)
-          return content::NavigationThrottle::CANCEL;
+          return content::NavigationThrottle::BLOCK_REQUEST;
       }
     }
 
@@ -108,23 +108,7 @@ ExtensionNavigationThrottle::WillStartRequest() {
   // The subframe which is navigated needs to have all of its ancestors be
   // at the same origin, otherwise the resource needs to be explicitly listed
   // in web_accessible_resources.
-  // Since the RenderFrameHost is not known until navigation has committed,
-  // we can't get it from NavigationHandle. However, this code only cares about
-  // the ancestor chain, so find the current RenderFrameHost and use it to
-  // traverse up to the main frame.
-  content::RenderFrameHost* navigating_frame = nullptr;
-  for (auto* frame : web_contents->GetAllFrames()) {
-    if (frame->GetFrameTreeNodeId() ==
-        navigation_handle()->GetFrameTreeNodeId()) {
-      navigating_frame = frame;
-      break;
-    }
-  }
-  DCHECK(navigating_frame);
-
-  // Traverse the chain of parent frames, checking if they are the same origin
-  // as the URL of this navigation.
-  content::RenderFrameHost* ancestor = navigating_frame->GetParent();
+  content::RenderFrameHost* ancestor = navigation_handle()->GetParentFrame();
   bool external_ancestor = false;
   while (ancestor) {
     if (ancestor->GetLastCommittedURL().GetOrigin() != url.GetOrigin()) {
@@ -158,6 +142,10 @@ ExtensionNavigationThrottle::WillStartRequest() {
   }
 
   return content::NavigationThrottle::BLOCK_REQUEST;
+}
+
+const char* ExtensionNavigationThrottle::GetNameForLogging() {
+  return "ExtensionNavigationThrottle";
 }
 
 }  // namespace extensions

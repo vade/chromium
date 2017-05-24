@@ -10,13 +10,17 @@ and Buildbucket to manage changelists and try jobs associated with them.
 
 import json
 import logging
+import re
+
+from webkitpy.common.net.buildbot import Build, filter_latest_builds
+from webkitpy.common.checkout.git import Git
 
 _log = logging.getLogger(__name__)
 
-_COMMANDS_THAT_REQUIRE_AUTH = (
-    'archive', 'comments', 'commit', 'description', 'diff', 'land', 'lint', 'owners', 'patch',
-    'presubmit', 'set-close', 'set-commit', 'status', 'try-results', 'try', 'upload',
-)
+# A refresh token may be needed for some commands, such as git cl try,
+# in order to authenticate with buildbucket.
+_COMMANDS_THAT_TAKE_REFRESH_TOKEN = ('try',)
+
 
 class GitCL(object):
 
@@ -24,13 +28,26 @@ class GitCL(object):
         self._host = host
         self._auth_refresh_token_json = auth_refresh_token_json
         self._cwd = cwd
+        self._git_executable_name = Git.find_executable_name(host.executive, host.platform)
 
     def run(self, args):
         """Runs git-cl with the given arguments and returns the output."""
-        command = ['git', 'cl'] + args
-        if self._auth_refresh_token_json and args[0] in _COMMANDS_THAT_REQUIRE_AUTH:
+        command = [self._git_executable_name, 'cl'] + args
+        if self._auth_refresh_token_json and args[0] in _COMMANDS_THAT_TAKE_REFRESH_TOKEN:
             command += ['--auth-refresh-token-json', self._auth_refresh_token_json]
         return self._host.executive.run_command(command, cwd=self._cwd)
+
+    def trigger_try_jobs(self, builders=None):
+        builders = builders or self._host.builders.all_try_builder_names()
+        if 'android_blink_rel' in builders:
+            self.run(['try', '-b', 'android_blink_rel'])
+            builders.remove('android_blink_rel')
+        # TODO(qyearsley): Stop explicitly adding the master name when
+        # git cl try can get the master name; see http://crbug.com/700523.
+        command = ['try', '-m', 'tryserver.blink']
+        for builder in sorted(builders):
+            command.extend(['-b', builder])
+        self.run(command)
 
     def get_issue_number(self):
         return self.run(['issue']).split()[2]
@@ -59,6 +76,25 @@ class GitCL(object):
         self._host.print_('Timed out waiting for try results.')
         return None
 
+    def latest_try_jobs(self, builder_names=None):
+        """Returns a list of Builds for the latest jobs for the given builders.
+
+        This includes builds that are not yet finished and builds with infra
+        failures, so if a build is in this list, that doesn't guarantee that
+        there are results.
+
+        Args:
+            builder_names: Optional list of builders used to filter results.
+
+        Returns:
+            A list of Build objects for try jobs, with one Build listed
+            per builder. For scheduled builds, there is no build number.
+        """
+        try_results = self.fetch_try_results()
+        if builder_names:
+            try_results = [r for r in try_results if r['builder_name'] in builder_names]
+        return filter_latest_builds(self._try_result_to_build(r) for r in try_results)
+
     def fetch_try_results(self):
         """Requests results of try jobs for the current CL."""
         with self._host.filesystem.mkdtemp() as temp_directory:
@@ -68,6 +104,18 @@ class GitCL(object):
             _log.debug('Fetched try results to file "%s".', results_path)
             self._host.filesystem.remove(results_path)
         return json.loads(contents)
+
+    @staticmethod
+    def _try_result_to_build(try_result):
+        """Converts a parsed try result dict to a Build object."""
+        builder_name = try_result['builder_name']
+        url = try_result['url']
+        if url is None:
+            return Build(builder_name, None)
+        match = re.match(r'.*/builds/(\d+)?$', url)
+        build_number = match.group(1)
+        assert build_number and build_number.isdigit()
+        return Build(builder_name, int(build_number))
 
     @staticmethod
     def all_jobs_finished(try_results):

@@ -29,85 +29,80 @@
 #include "core/style/ComputedStyleConstants.h"
 #include "platform/heap/Handle.h"
 #include "platform/scroll/Scrollbar.h"
-#include "wtf/HashMap.h"
+#include "platform/wtf/HashMap.h"
 
 namespace blink {
 
 class ComputedStyle;
+class Element;
 class LayoutBox;
 class LayoutScrollbarPart;
-class LocalFrame;
-class Node;
 
 class LayoutScrollbar final : public Scrollbar {
  public:
-  static Scrollbar* createCustomScrollbar(ScrollableArea*,
+  static Scrollbar* CreateCustomScrollbar(ScrollableArea*,
                                           ScrollbarOrientation,
-                                          Node*,
-                                          LocalFrame* owningFrame = nullptr);
+                                          Element*);
   ~LayoutScrollbar() override;
 
-  LayoutBox* owningLayoutObject() const;
-  LayoutBox* owningLayoutObjectWithinFrame() const;
+  // The LayoutBox that supplies our style information. If the scrollbar is for
+  // a document, this is either the <body> or <html> element. Otherwise, it is
+  // the element that owns our PaintLayerScrollableArea.
+  LayoutBox* StyleSource() const;
 
-  IntRect buttonRect(ScrollbarPart) const;
-  IntRect trackRect(int startLength, int endLength) const;
-  IntRect trackPieceRectWithMargins(ScrollbarPart, const IntRect&) const;
+  IntRect ButtonRect(ScrollbarPart) const;
+  IntRect TrackRect(int start_length, int end_length) const;
+  IntRect TrackPieceRectWithMargins(ScrollbarPart, const IntRect&) const;
 
-  int minimumThumbLength() const;
+  int MinimumThumbLength() const;
 
-  bool isOverlayScrollbar() const override { return false; }
+  bool IsOverlayScrollbar() const override { return false; }
 
-  LayoutScrollbarPart* getPart(ScrollbarPart partType) {
-    return m_parts.get(partType);
+  LayoutScrollbarPart* GetPart(ScrollbarPart part_type) {
+    return parts_.at(part_type);
   }
-  const LayoutScrollbarPart* getPart(ScrollbarPart partType) const {
-    return m_parts.get(partType);
+  const LayoutScrollbarPart* GetPart(ScrollbarPart part_type) const {
+    return parts_.at(part_type);
   }
 
-  void invalidateDisplayItemClientsOfScrollbarParts();
+  void InvalidateDisplayItemClientsOfScrollbarParts();
+
+  void SetVisualRect(const LayoutRect&) final;
 
   DECLARE_VIRTUAL_TRACE();
 
  protected:
-  LayoutScrollbar(ScrollableArea*, ScrollbarOrientation, Node*, LocalFrame*);
+  LayoutScrollbar(ScrollableArea*, ScrollbarOrientation, Element*);
 
  private:
   friend class Scrollbar;
 
-  void setParent(Widget*) override;
-  void setEnabled(bool) override;
+  void SetEnabled(bool) override;
+  void DisconnectFromScrollableArea() override;
 
-  void setHoveredPart(ScrollbarPart) override;
-  void setPressedPart(ScrollbarPart) override;
+  void SetHoveredPart(ScrollbarPart) override;
+  void SetPressedPart(ScrollbarPart) override;
 
-  void styleChanged() override;
+  void StyleChanged() override;
 
-  bool isCustomScrollbar() const override { return true; }
+  bool IsCustomScrollbar() const override { return true; }
 
-  void updateScrollbarParts(bool destroy = false);
+  void UpdateScrollbarParts(bool destroy = false);
 
-  PassRefPtr<ComputedStyle> getScrollbarPseudoStyle(ScrollbarPart, PseudoId);
-  void updateScrollbarPart(ScrollbarPart, bool destroy = false);
+  PassRefPtr<ComputedStyle> GetScrollbarPseudoStyle(ScrollbarPart, PseudoId);
+  void UpdateScrollbarPart(ScrollbarPart, bool destroy = false);
 
-  // This Scrollbar(Widget) may outlive the DOM which created it (during tear
-  // down), so we keep a reference to the Node which caused this custom
-  // scrollbar creation.
-  // This will not create a reference cycle as the Widget tree is owned by our
-  // containing FrameView which this Node pointer can in no way keep alive.
-  // See webkit bug 80610.
-  Member<Node> m_owner;
+  // The element that supplies our style information.
+  Member<Element> style_source_;
 
-  Member<LocalFrame> m_owningFrame;
-
-  HashMap<unsigned, LayoutScrollbarPart*> m_parts;
+  HashMap<unsigned, LayoutScrollbarPart*> parts_;
 };
 
 DEFINE_TYPE_CASTS(LayoutScrollbar,
                   ScrollbarThemeClient,
                   scrollbar,
-                  scrollbar->isCustomScrollbar(),
-                  scrollbar.isCustomScrollbar());
+                  scrollbar->IsCustomScrollbar(),
+                  scrollbar.IsCustomScrollbar());
 
 }  // namespace blink
 

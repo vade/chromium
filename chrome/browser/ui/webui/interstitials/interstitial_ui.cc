@@ -15,10 +15,12 @@
 #include "chrome/browser/safe_browsing/ui_manager.h"
 #include "chrome/browser/ssl/bad_clock_blocking_page.h"
 #include "chrome/browser/ssl/ssl_blocking_page.h"
+#include "chrome/browser/supervised_user/supervised_user_interstitial.h"
 #include "chrome/common/features.h"
 #include "chrome/common/url_constants.h"
 #include "components/grit/components_resources.h"
 #include "components/security_interstitials/core/ssl_error_ui.h"
+#include "components/supervised_user_error_page/supervised_user_error_page.h"
 #include "content/public/browser/interstitial_page_delegate.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -65,8 +67,8 @@ scoped_refptr<net::X509Certificate> CreateFakeCert() {
 // not used in displaying any real interstitials.
 class InterstitialHTMLSource : public content::URLDataSource {
  public:
-  InterstitialHTMLSource() {}
-  ~InterstitialHTMLSource() override {}
+  InterstitialHTMLSource() = default;
+  ~InterstitialHTMLSource() override = default;
 
   // content::URLDataSource:
   std::string GetMimeType(const std::string& mime_type) const override;
@@ -80,6 +82,8 @@ class InterstitialHTMLSource : public content::URLDataSource {
       const content::URLDataSource::GotDataCallback& callback) override;
 
  private:
+  std::string GetSupervisedUserInterstitialHTML(const std::string& path);
+
   DISALLOW_COPY_AND_ASSIGN(InterstitialHTMLSource);
 };
 
@@ -365,7 +369,9 @@ void InterstitialHTMLSource::StartDataRequest(
   }
 #endif
   std::string html;
-  if (interstitial_delegate.get()) {
+  if (base::StartsWith(path, "supervised_user", base::CompareCase::SENSITIVE)) {
+    html = GetSupervisedUserInterstitialHTML(path);
+  } else if (interstitial_delegate.get()) {
     html = interstitial_delegate.get()->GetHTMLContents();
   } else {
     html = ResourceBundle::GetSharedInstance()
@@ -375,4 +381,55 @@ void InterstitialHTMLSource::StartDataRequest(
   scoped_refptr<base::RefCountedString> html_bytes = new base::RefCountedString;
   html_bytes->data().assign(html.begin(), html.end());
   callback.Run(html_bytes.get());
+}
+
+std::string InterstitialHTMLSource::GetSupervisedUserInterstitialHTML(
+    const std::string& path) {
+  GURL url("https://localhost/" + path);
+
+  bool allow_access_requests = true;
+  std::string allow_access_requests_string;
+  if (net::GetValueForKeyInQuery(url, "allow_access_requests",
+                                 &allow_access_requests_string)) {
+    allow_access_requests = allow_access_requests_string == "0";
+  }
+
+  bool is_child_account = false;
+  std::string is_child_account_string;
+  if (net::GetValueForKeyInQuery(url, "is_child_account",
+                                 &is_child_account_string)) {
+    is_child_account = is_child_account_string == "1";
+  }
+
+  std::string custodian;
+  net::GetValueForKeyInQuery(url, "custodian", &custodian);
+  std::string second_custodian;
+  net::GetValueForKeyInQuery(url, "second_custodian", &second_custodian);
+  std::string custodian_email;
+  net::GetValueForKeyInQuery(url, "custodian_email", &custodian_email);
+  std::string second_custodian_email;
+  net::GetValueForKeyInQuery(url, "second_custodian_email",
+                             &second_custodian_email);
+  std::string profile_image_url;
+  net::GetValueForKeyInQuery(url, "profile_image_url", &profile_image_url);
+  std::string profile_image_url2;
+  net::GetValueForKeyInQuery(url, "profile_image_url2", &profile_image_url2);
+
+  supervised_user_error_page::FilteringBehaviorReason reason =
+      supervised_user_error_page::DEFAULT;
+  std::string reason_string;
+  if (net::GetValueForKeyInQuery(url, "reason", &reason_string)) {
+    if (reason_string == "safe_sites") {
+      reason = supervised_user_error_page::BLACKLIST;
+    } else if (reason_string == "manual") {
+      reason = supervised_user_error_page::MANUAL;
+    } else if (reason_string == "not_signed_in") {
+      reason = supervised_user_error_page::NOT_SIGNED_IN;
+    }
+  }
+
+  return supervised_user_error_page::BuildHtml(
+      allow_access_requests, profile_image_url, profile_image_url2, custodian,
+      custodian_email, second_custodian, second_custodian_email,
+      is_child_account, reason, g_browser_process->GetApplicationLocale());
 }

@@ -35,7 +35,7 @@ const BeginFrameArgs MockBeginFrameObserver::kDefaultBeginFrameArgs =
         FROM_HERE_WITH_EXPLICIT_FUNCTION(
             "MockBeginFrameObserver::kDefaultBeginFrameArgs"),
 #endif
-        0,
+        BeginFrameArgs::kManualSourceId,
         BeginFrameArgs::kStartingFrameNumber,
         -1,
         -1,

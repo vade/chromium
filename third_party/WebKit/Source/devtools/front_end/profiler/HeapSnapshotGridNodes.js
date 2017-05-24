@@ -132,18 +132,11 @@ Profiler.HeapSnapshotGridNode = class extends DataGrid.DataGridNode {
   }
 
   /**
-   * @param {!SDK.Target} target
-   * @param {function(!SDK.RemoteObject)} callback
+   * @param {!SDK.HeapProfilerModel} heapProfilerModel
    * @param {string} objectGroupName
+   * @return {!Promise<!SDK.RemoteObject>}
    */
-  queryObjectContent(target, callback, objectGroupName) {
-  }
-
-  /**
-   * @override
-   */
-  wasDetached() {
-    this._dataGrid.nodeWasDetached(this);
+  queryObjectContent(heapProfilerModel, objectGroupName) {
   }
 
   /**
@@ -151,7 +144,7 @@ Profiler.HeapSnapshotGridNode = class extends DataGrid.DataGridNode {
    * @return {string}
    */
   _toPercentString(num) {
-    return num.toFixed(0) + '\u2009%';  // \u2009 is a thin space.
+    return num.toFixed(0) + '\xa0%';  // \xa0 is a non-breaking space.
   }
 
   /**
@@ -604,26 +597,29 @@ Profiler.HeapSnapshotGenericObjectNode = class extends Profiler.HeapSnapshotGrid
 
   /**
    * @override
-   * @param {!SDK.Target} target
-   * @param {function(!SDK.RemoteObject)} callback
+   * @param {!SDK.HeapProfilerModel} heapProfilerModel
    * @param {string} objectGroupName
+   * @return {!Promise<!SDK.RemoteObject>}
    */
-  queryObjectContent(target, callback, objectGroupName) {
+  queryObjectContent(heapProfilerModel, objectGroupName) {
+    var fulfill;
+    var promise = new Promise(x => fulfill = x);
+
     /**
-     * @param {?Protocol.Error} error
-     * @param {!Protocol.Runtime.RemoteObject} object
+     * @param {?SDK.RemoteObject} object
      */
-    function formatResult(error, object) {
-      if (!error && object.type)
-        callback(target.runtimeModel.createRemoteObject(object));
-      else
-        callback(target.runtimeModel.createRemoteObjectFromPrimitiveValue(Common.UIString('Preview is not available')));
+    function onResult(object) {
+      fulfill(object || runtimeModel.createRemoteObjectFromPrimitiveValue(Common.UIString('Preview is not available')));
     }
 
+    var runtimeModel = heapProfilerModel.runtimeModel();
     if (this._type === 'string')
-      callback(target.runtimeModel.createRemoteObjectFromPrimitiveValue(this._name));
+      onResult(runtimeModel.createRemoteObjectFromPrimitiveValue(this._name));
+    else if (!heapProfilerModel || !runtimeModel)
+      onResult(null);
     else
-      target.heapProfilerAgent().getObjectByHeapObjectId(String(this.snapshotNodeId), objectGroupName, formatResult);
+      heapProfilerModel.objectForSnapshotObjectId(String(this.snapshotNodeId), objectGroupName).then(onResult);
+    return promise;
   }
 
   updateHasChildren() {
@@ -1428,12 +1424,12 @@ Profiler.AllocationGridNode = class extends Profiler.HeapSnapshotGridNode {
 
     var cell = super.createCell(columnId);
     var allocationNode = this._allocationNode;
-    var target = this._dataGrid.target();
+    var heapProfilerModel = this._dataGrid.heapProfilerModel();
     if (allocationNode.scriptId) {
       var linkifier = this._dataGrid._linkifier;
       var urlElement = linkifier.linkifyScriptLocation(
-          target, String(allocationNode.scriptId), allocationNode.scriptName, allocationNode.line - 1,
-          allocationNode.column - 1, 'profile-node-file');
+          heapProfilerModel ? heapProfilerModel.target() : null, String(allocationNode.scriptId),
+          allocationNode.scriptName, allocationNode.line - 1, allocationNode.column - 1, 'profile-node-file');
       urlElement.style.maxWidth = '75%';
       cell.insertBefore(urlElement, cell.firstChild);
     }

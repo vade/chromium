@@ -9,6 +9,8 @@
 Polymer({
   is: 'settings-search-engine-entry',
 
+  behaviors: [FocusRowBehavior],
+
   properties: {
     /** @type {!SearchEngine} */
     engine: Object,
@@ -25,8 +27,8 @@ Polymer({
       reflectToAttribute: true,
       type: Boolean,
       computed: 'computeShowDots_(engine.canBeDefault,' +
-                                 'engine.canBeEdited,' +
-                                 'engine.canBeRemoved)',
+          'engine.canBeEdited,' +
+          'engine.canBeRemoved)',
     },
 
     /** @private {boolean} */
@@ -104,6 +106,7 @@ Polymer({
       // previous dialog's contents are cleared.
       dialog.addEventListener('close', function() {
         this.showEditSearchEngineDialog_ = false;
+        cr.ui.focusWithoutInk(assert(this.$$('paper-icon-button')));
       }.bind(this));
     }.bind(this));
   },

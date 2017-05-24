@@ -6,11 +6,13 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
+#include "base/test/scoped_task_environment.h"
+#include "base/test/simple_test_tick_clock.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "media/base/pipeline_status.h"
 #include "media/base/renderer_client.h"
 #include "media/base/test_helpers.h"
-#include "media/remoting/fake_demuxer_stream_provider.h"
+#include "media/remoting/fake_media_resource.h"
 #include "media/remoting/fake_remoter.h"
 #include "media/remoting/renderer_controller.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -31,6 +33,23 @@ PipelineMetadata DefaultMetadata() {
   data.has_video = true;
   data.video_decoder_config = TestVideoConfig::Normal();
   return data;
+}
+
+PipelineStatistics DefaultStats() {
+  PipelineStatistics stats;
+  stats.audio_bytes_decoded = 1234U;
+  stats.video_bytes_decoded = 2345U;
+  stats.video_frames_decoded = 3000U;
+  stats.video_frames_dropped = 91U;
+  stats.audio_memory_usage = 5678;
+  stats.video_memory_usage = 6789;
+  stats.video_keyframe_distance_average = base::TimeDelta::Max();
+  return stats;
+}
+
+bool IsDefaultStats(const PipelineStatistics& stats) {
+  const PipelineStatistics default_stats = DefaultStats();
+  return memcmp(&stats, &default_stats, sizeof(PipelineStatistics)) == 0;
 }
 
 class RendererClientImpl : public RendererClient {
@@ -115,8 +134,7 @@ class CourierRendererTest : public testing::Test {
         sender_audio_demuxer_handle_(RpcBroker::kInvalidHandle),
         sender_video_demuxer_handle_(RpcBroker::kInvalidHandle),
         received_audio_ds_init_cb_(false),
-        received_video_ds_init_cb_(false),
-        renderer_initialized_(false) {}
+        received_video_ds_init_cb_(false) {}
   ~CourierRendererTest() override = default;
 
   // Use this function to mimic receiver to handle RPC message for renderer
@@ -177,10 +195,9 @@ class CourierRendererTest : public testing::Test {
           std::unique_ptr<pb::RpcMessage> init_cb(new pb::RpcMessage());
           init_cb->set_handle(sender_renderer_callback_handle_);
           init_cb->set_proc(pb::RpcMessage::RPC_R_INITIALIZE_CALLBACK);
-          init_cb->set_boolean_value(true);
+          init_cb->set_boolean_value(is_successfully_initialized_);
           controller_->GetRpcBroker()->ProcessMessageFromRemote(
               std::move(init_cb));
-          renderer_initialized_ = true;
         }
 
       } break;
@@ -211,14 +228,14 @@ class CourierRendererTest : public testing::Test {
   void InitializeRenderer() {
     // Register media::RendererClient implementation.
     render_client_.reset(new RendererClientImpl());
-    demuxer_stream_provider_.reset(new FakeDemuxerStreamProvider());
+    media_resource_.reset(new FakeMediaResource());
     EXPECT_CALL(*render_client_, OnPipelineStatus(_)).Times(1);
     DCHECK(renderer_);
     // Redirect RPC message for simulate receiver scenario
     controller_->GetRpcBroker()->SetMessageCallbackForTesting(base::Bind(
         &CourierRendererTest::RpcMessageResponseBot, base::Unretained(this)));
     RunPendingTasks();
-    renderer_->Initialize(demuxer_stream_provider_.get(), render_client_.get(),
+    renderer_->Initialize(media_resource_.get(), render_client_.get(),
                           base::Bind(&RendererClientImpl::OnPipelineStatus,
                                      base::Unretained(render_client_.get())));
     RunPendingTasks();
@@ -230,6 +247,10 @@ class CourierRendererTest : public testing::Test {
 
   bool IsRendererInitialized() const {
     return renderer_->state_ == CourierRenderer::STATE_PLAYING;
+  }
+
+  bool DidEncounterFatalError() const {
+    return renderer_->state_ == CourierRenderer::STATE_ERROR;
   }
 
   void OnReceivedRpc(std::unique_ptr<pb::RpcMessage> message) {
@@ -247,6 +268,10 @@ class CourierRendererTest : public testing::Test {
 
     renderer_.reset(new CourierRenderer(base::ThreadTaskRunnerHandle::Get(),
                                         controller_->GetWeakPtr(), nullptr));
+    clock_ = new base::SimpleTestTickClock();
+    renderer_->clock_.reset(clock_);
+    clock_->Advance(base::TimeDelta::FromSeconds(1));
+
     RunPendingTasks();
   }
 
@@ -271,11 +296,45 @@ class CourierRendererTest : public testing::Test {
     ASSERT_EQ(renderer_->current_max_time_, current_max);
   }
 
-  base::MessageLoop message_loop_;
+  // Issues RPC_RC_ONTIMEUPDATE RPC message.
+  void IssueTimeUpdateRpc(base::TimeDelta media_time,
+                          base::TimeDelta max_media_time) {
+    std::unique_ptr<remoting::pb::RpcMessage> rpc(
+        new remoting::pb::RpcMessage());
+    rpc->set_handle(5);
+    rpc->set_proc(remoting::pb::RpcMessage::RPC_RC_ONTIMEUPDATE);
+    auto* time_message = rpc->mutable_rendererclient_ontimeupdate_rpc();
+    time_message->set_time_usec(media_time.InMicroseconds());
+    time_message->set_max_time_usec(max_media_time.InMicroseconds());
+    OnReceivedRpc(std::move(rpc));
+    RunPendingTasks();
+  }
+
+  // Issues RPC_RC_ONSTATISTICSUPDATE RPC message with DefaultStats().
+  void IssueStatisticsUpdateRpc() {
+    EXPECT_CALL(*render_client_, OnStatisticsUpdate(_)).Times(1);
+    const PipelineStatistics stats = DefaultStats();
+    std::unique_ptr<remoting::pb::RpcMessage> rpc(
+        new remoting::pb::RpcMessage());
+    rpc->set_handle(5);
+    rpc->set_proc(remoting::pb::RpcMessage::RPC_RC_ONSTATISTICSUPDATE);
+    auto* message = rpc->mutable_rendererclient_onstatisticsupdate_rpc();
+    message->set_audio_bytes_decoded(stats.audio_bytes_decoded);
+    message->set_video_bytes_decoded(stats.video_bytes_decoded);
+    message->set_video_frames_decoded(stats.video_frames_decoded);
+    message->set_video_frames_dropped(stats.video_frames_dropped);
+    message->set_audio_memory_usage(stats.audio_memory_usage);
+    message->set_video_memory_usage(stats.video_memory_usage);
+    OnReceivedRpc(std::move(rpc));
+    RunPendingTasks();
+  }
+
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   std::unique_ptr<RendererController> controller_;
   std::unique_ptr<RendererClientImpl> render_client_;
-  std::unique_ptr<FakeDemuxerStreamProvider> demuxer_stream_provider_;
+  std::unique_ptr<FakeMediaResource> media_resource_;
   std::unique_ptr<CourierRenderer> renderer_;
+  base::SimpleTestTickClock* clock_;  // Owned by |renderer_|;
 
   // RPC handles.
   const int receiver_renderer_handle_;
@@ -286,14 +345,15 @@ class CourierRendererTest : public testing::Test {
   int sender_audio_demuxer_handle_;
   int sender_video_demuxer_handle_;
 
-  // flag to indicate if RPC_DS_INITIALIZE_CALLBACK RPC messages are received.
+  // Indicate whether RPC_DS_INITIALIZE_CALLBACK RPC messages are received.
   bool received_audio_ds_init_cb_;
   bool received_video_ds_init_cb_;
 
-  // Check if |renderer_| is initialized successfully or not.
-  bool renderer_initialized_;
+  // Indicates whether the test wants to simulate successful initialization in
+  // the renderer on the receiver side.
+  bool is_successfully_initialized_ = true;
 
-  // vector to store received RPC message with proc value
+  // Stores RPC messages that are sending to remote sink.
   std::vector<std::unique_ptr<pb::RpcMessage>> received_rpc_;
 
  private:
@@ -306,6 +366,38 @@ TEST_F(CourierRendererTest, Initialize) {
 
   ASSERT_TRUE(IsRendererInitialized());
   ASSERT_EQ(render_client_->status(), PIPELINE_OK);
+}
+
+TEST_F(CourierRendererTest, InitializeFailed) {
+  is_successfully_initialized_ = false;
+  InitializeRenderer();
+  RunPendingTasks();
+  ASSERT_FALSE(IsRendererInitialized());
+  ASSERT_TRUE(DidEncounterFatalError());
+  // Don't report error to prevent breaking the pipeline.
+  ASSERT_EQ(render_client_->status(), PIPELINE_OK);
+
+  // The CourierRenderer should act as a no-op renderer from this point.
+
+  ResetReceivedRpcMessage();
+  EXPECT_CALL(*render_client_, OnFlushCallback()).Times(1);
+  renderer_->Flush(base::Bind(&RendererClientImpl::OnFlushCallback,
+                              base::Unretained(render_client_.get())));
+  RunPendingTasks();
+  ASSERT_EQ(0, ReceivedRpcMessageCount());
+
+  base::TimeDelta seek = base::TimeDelta::FromMicroseconds(100);
+  renderer_->StartPlayingFrom(seek);
+  RunPendingTasks();
+  ASSERT_EQ(0, ReceivedRpcMessageCount());
+
+  renderer_->SetVolume(3.0);
+  RunPendingTasks();
+  ASSERT_EQ(0, ReceivedRpcMessageCount());
+
+  renderer_->SetPlaybackRate(2.5);
+  RunPendingTasks();
+  ASSERT_EQ(0, ReceivedRpcMessageCount());
 }
 
 TEST_F(CourierRendererTest, Flush) {
@@ -372,8 +464,6 @@ TEST_F(CourierRendererTest, SetPlaybackRate) {
   RunPendingTasks();
   ASSERT_EQ(0, ReceivedRpcMessageCount());
 
-  controller_->GetRpcBroker()->SetMessageCallbackForTesting(base::Bind(
-      &CourierRendererTest::OnSendMessageToSink, base::Unretained(this)));
   renderer_->SetPlaybackRate(2.5);
   RunPendingTasks();
   ASSERT_EQ(1, ReceivedRpcMessageCount());
@@ -385,28 +475,15 @@ TEST_F(CourierRendererTest, SetPlaybackRate) {
 }
 
 TEST_F(CourierRendererTest, OnTimeUpdate) {
-  // Issues RPC_RC_ONTIMEUPDATE RPC message.
   base::TimeDelta media_time = base::TimeDelta::FromMicroseconds(100);
   base::TimeDelta max_media_time = base::TimeDelta::FromMicroseconds(500);
-  std::unique_ptr<pb::RpcMessage> rpc(new pb::RpcMessage());
-  rpc->set_handle(5);
-  rpc->set_proc(pb::RpcMessage::RPC_RC_ONTIMEUPDATE);
-  auto* time_message = rpc->mutable_rendererclient_ontimeupdate_rpc();
-  time_message->set_time_usec(media_time.InMicroseconds());
-  time_message->set_max_time_usec(max_media_time.InMicroseconds());
-  OnReceivedRpc(std::move(rpc));
+  IssueTimeUpdateRpc(media_time, max_media_time);
   ValidateCurrentTime(media_time, max_media_time);
 
   // Issues RPC_RC_ONTIMEUPDATE RPC message with invalid time
   base::TimeDelta media_time2 = base::TimeDelta::FromMicroseconds(-100);
   base::TimeDelta max_media_time2 = base::TimeDelta::FromMicroseconds(500);
-  std::unique_ptr<pb::RpcMessage> rpc2(new pb::RpcMessage());
-  rpc2->set_handle(5);
-  rpc2->set_proc(pb::RpcMessage::RPC_RC_ONTIMEUPDATE);
-  auto* time_message2 = rpc2->mutable_rendererclient_ontimeupdate_rpc();
-  time_message2->set_time_usec(media_time2.InMicroseconds());
-  time_message2->set_max_time_usec(max_media_time2.InMicroseconds());
-  OnReceivedRpc(std::move(rpc2));
+  IssueTimeUpdateRpc(media_time2, max_media_time2);
   // Because of invalid value, the time will not be updated and remain the same.
   ValidateCurrentTime(media_time, max_media_time);
 }
@@ -480,32 +557,9 @@ TEST_F(CourierRendererTest, OnVideoOpacityChange) {
 
 TEST_F(CourierRendererTest, OnStatisticsUpdate) {
   InitializeRenderer();
-  ASSERT_NE(render_client_->stats().audio_bytes_decoded, 1234U);
-  ASSERT_NE(render_client_->stats().video_bytes_decoded, 2345U);
-  ASSERT_NE(render_client_->stats().video_frames_decoded, 3456U);
-  ASSERT_NE(render_client_->stats().video_frames_dropped, 4567U);
-  ASSERT_NE(render_client_->stats().audio_memory_usage, 5678);
-  ASSERT_NE(render_client_->stats().video_memory_usage, 6789);
-  // Issues RPC_RC_ONSTATISTICSUPDATE RPC message.
-  EXPECT_CALL(*render_client_, OnStatisticsUpdate(_)).Times(1);
-  std::unique_ptr<pb::RpcMessage> rpc(new pb::RpcMessage());
-  rpc->set_handle(5);
-  rpc->set_proc(pb::RpcMessage::RPC_RC_ONSTATISTICSUPDATE);
-  auto* message = rpc->mutable_rendererclient_onstatisticsupdate_rpc();
-  message->set_audio_bytes_decoded(1234U);
-  message->set_video_bytes_decoded(2345U);
-  message->set_video_frames_decoded(3456U);
-  message->set_video_frames_dropped(4567U);
-  message->set_audio_memory_usage(5678);
-  message->set_video_memory_usage(6789);
-  OnReceivedRpc(std::move(rpc));
-  RunPendingTasks();
-  ASSERT_EQ(render_client_->stats().audio_bytes_decoded, 1234U);
-  ASSERT_EQ(render_client_->stats().video_bytes_decoded, 2345U);
-  ASSERT_EQ(render_client_->stats().video_frames_decoded, 3456U);
-  ASSERT_EQ(render_client_->stats().video_frames_dropped, 4567U);
-  ASSERT_EQ(render_client_->stats().audio_memory_usage, 5678);
-  ASSERT_EQ(render_client_->stats().video_memory_usage, 6789);
+  ASSERT_FALSE(IsDefaultStats(render_client_->stats()));
+  IssueStatisticsUpdateRpc();
+  ASSERT_TRUE(IsDefaultStats(render_client_->stats()));
 }
 
 TEST_F(CourierRendererTest, OnDurationChange) {
@@ -538,7 +592,60 @@ TEST_F(CourierRendererTest, OnDurationChangeWithInvalidValue) {
   RunPendingTasks();
 }
 
-// TODO(xjz): Tests for detecting PACING_TOO_SLOWLY and FRAME_DROP_RATE_HIGH.
+TEST_F(CourierRendererTest, OnPacingTooSlowly) {
+  InitializeRenderer();
+
+  controller_->GetRpcBroker()->SetMessageCallbackForTesting(base::Bind(
+      &CourierRendererTest::OnSendMessageToSink, base::Unretained(this)));
+  // There should be no error reported with this playback rate.
+  renderer_->SetPlaybackRate(0.8);
+  RunPendingTasks();
+  clock_->Advance(base::TimeDelta::FromSeconds(3));
+  for (int i = 0; i < 8; ++i) {
+    ASSERT_FALSE(DidEncounterFatalError());
+    IssueTimeUpdateRpc(base::TimeDelta::FromMilliseconds(100 + i * 800),
+                       base::TimeDelta::FromSeconds(16));
+    clock_->Advance(base::TimeDelta::FromSeconds(1));
+    RunPendingTasks();
+  }
+  ASSERT_FALSE(DidEncounterFatalError());  // No delay at this playback rate.
+
+  // Change playback rate. Pacing keeps same as above. Should report error.
+  renderer_->SetPlaybackRate(1);
+  RunPendingTasks();
+  clock_->Advance(base::TimeDelta::FromSeconds(3));
+
+  for (int i = 8; i < 13; ++i) {
+    ASSERT_FALSE(DidEncounterFatalError());  // Not enough measurements.
+    IssueTimeUpdateRpc(base::TimeDelta::FromMilliseconds(100 + i * 800),
+                       base::TimeDelta::FromSeconds(16));
+    clock_->Advance(base::TimeDelta::FromSeconds(1));
+    RunPendingTasks();
+  }
+
+  for (int i = 13; i < 16; ++i) {
+    // Don't report error at the first and second time that encounters delay.
+    ASSERT_FALSE(DidEncounterFatalError());
+    IssueTimeUpdateRpc(base::TimeDelta::FromMilliseconds(100 + i * 800),
+                       base::TimeDelta::FromSeconds(16));
+    clock_->Advance(base::TimeDelta::FromSeconds(1));
+    RunPendingTasks();
+  }
+  // Reports error when encounters delay continuously for 3 times.
+  ASSERT_TRUE(DidEncounterFatalError());
+}
+
+TEST_F(CourierRendererTest, OnFrameDropRateHigh) {
+  InitializeRenderer();
+
+  for (int i = 0; i < 7; ++i) {
+    ASSERT_FALSE(DidEncounterFatalError());  // Not enough measurements.
+    IssueStatisticsUpdateRpc();
+    clock_->Advance(base::TimeDelta::FromSeconds(1));
+    RunPendingTasks();
+  }
+  ASSERT_TRUE(DidEncounterFatalError());
+}
 
 }  // namespace remoting
 }  // namespace media

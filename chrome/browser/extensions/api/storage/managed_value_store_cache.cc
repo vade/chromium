@@ -14,6 +14,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/extensions/api/storage/policy_value_store.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
@@ -176,9 +177,8 @@ void ManagedValueStoreCache::ExtensionTracker::LoadSchemas(
   // Load the schema files in a background thread.
   BrowserThread::PostBlockingPoolSequencedTask(
       kLoadSchemasBackgroundTaskTokenName, FROM_HERE,
-      base::Bind(&ExtensionTracker::LoadSchemasOnBlockingPool,
-                 base::Passed(&added),
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&ExtensionTracker::LoadSchemasOnBlockingPool,
+                     base::Passed(&added), weak_factory_.GetWeakPtr()));
 }
 
 bool ManagedValueStoreCache::ExtensionTracker::UsesManagedStorage(
@@ -190,7 +190,7 @@ bool ManagedValueStoreCache::ExtensionTracker::UsesManagedStorage(
 void ManagedValueStoreCache::ExtensionTracker::LoadSchemasOnBlockingPool(
     std::unique_ptr<ExtensionSet> extensions,
     base::WeakPtr<ExtensionTracker> self) {
-  DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
+  base::ThreadRestrictions::AssertIOAllowed();
   std::unique_ptr<policy::ComponentMap> components(new policy::ComponentMap);
 
   for (ExtensionSet::const_iterator it = extensions->begin();
@@ -215,8 +215,8 @@ void ManagedValueStoreCache::ExtensionTracker::LoadSchemasOnBlockingPool(
   }
 
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::Bind(&ExtensionTracker::Register, self,
-                                     base::Owned(components.release())));
+                          base::BindOnce(&ExtensionTracker::Register, self,
+                                         base::Owned(components.release())));
 }
 
 void ManagedValueStoreCache::ExtensionTracker::Register(
@@ -329,10 +329,9 @@ void ManagedValueStoreCache::OnPolicyUpdated(const policy::PolicyNamespace& ns,
 
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      base::Bind(&ManagedValueStoreCache::UpdatePolicyOnFILE,
-                 base::Unretained(this),
-                 ns.component_id,
-                 base::Passed(current.DeepCopy())));
+      base::BindOnce(&ManagedValueStoreCache::UpdatePolicyOnFILE,
+                     base::Unretained(this), ns.component_id,
+                     base::Passed(current.DeepCopy())));
 }
 
 // static

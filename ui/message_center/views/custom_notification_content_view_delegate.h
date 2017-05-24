@@ -21,7 +21,7 @@ class MESSAGE_CENTER_EXPORT CustomNotificationContentViewDelegate {
  public:
   virtual bool IsCloseButtonFocused() const = 0;
   virtual void RequestFocusOnCloseButton() = 0;
-  virtual bool IsPinned() const = 0;
+  virtual void UpdateControlButtonsVisibility() = 0;
 };
 
 // The struct to hold a view and CustomNotificationContentViewDelegate

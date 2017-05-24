@@ -92,7 +92,7 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
                         const gfx::Range& range) override;
   void SelectionBoundsChanged(
       const ViewHostMsg_SelectionBounds_Params& params) override;
-  void OnSwapCompositorFrame(uint32_t compositor_frame_sink_id,
+  void SubmitCompositorFrame(const cc::LocalSurfaceId& local_surface_id,
                              cc::CompositorFrame frame) override;
 #if defined(USE_AURA)
   void ProcessAckedTouchEvent(const TouchEventWithLatencyInfo& touch,
@@ -105,6 +105,9 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
 
   bool LockMouse() override;
   void UnlockMouse() override;
+  void DidCreateNewRendererCompositorFrameSink(
+      cc::mojom::MojoCompositorFrameSinkClient* renderer_compositor_frame_sink)
+      override;
 
 #if defined(OS_MACOSX)
   // RenderWidgetHostView implementation.
@@ -116,9 +119,7 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   void StopSpeaking() override;
 #endif  // defined(OS_MACOSX)
 
-  void LockCompositingSurface() override;
-  void UnlockCompositingSurface() override;
-
+  void OnSetNeedsFlushInput() override;
   void WheelEventAck(const blink::WebMouseWheelEvent& event,
                      InputEventAckState ack_result) override;
 
@@ -128,12 +129,9 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   bool IsRenderWidgetHostViewGuest() override;
   RenderWidgetHostViewBase* GetOwnerRenderWidgetHostView() const;
 
- protected:
-  friend class RenderWidgetHostView;
-  bool ShouldCreateNewSurfaceId(uint32_t compositor_frame_sink_id,
-                                const cc::CompositorFrame& frame) override;
-
  private:
+  friend class RenderWidgetHostView;
+
   void SendSurfaceInfoToEmbedderImpl(
       const cc::SurfaceInfo& surface_info,
       const cc::SurfaceSequence& sequence) override;
@@ -157,6 +155,8 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
                           int browser_plugin_instance_id,
                           const blink::WebInputEvent* event);
 
+  bool HasEmbedderChanged() override;
+
   // BrowserPluginGuest and RenderWidgetHostViewGuest's lifetimes are not tied
   // to one another, therefore we access |guest_| through WeakPtr.
   base::WeakPtr<BrowserPluginGuest> guest_;
@@ -165,6 +165,12 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   // RenderWidgetHostViewGuest mostly only cares about stuff related to
   // compositing, the rest are directly forwarded to this |platform_view_|.
   base::WeakPtr<RenderWidgetHostViewBase> platform_view_;
+
+  // When true the guest will forward its selection updates to the owner RWHV.
+  // The guest may forward its updates only when there is an ongoing IME
+  // session.
+  bool should_forward_text_selection_;
+
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewGuest);
 };
 

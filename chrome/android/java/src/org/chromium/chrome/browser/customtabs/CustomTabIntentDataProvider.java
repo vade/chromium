@@ -26,6 +26,7 @@ import android.widget.RemoteViews;
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.IntentHandler;
@@ -57,6 +58,14 @@ public class CustomTabIntentDataProvider {
     /** Indicates that the Custom Tab should style itself as a media viewer. */
     public static final String EXTRA_IS_MEDIA_VIEWER =
             "org.chromium.chrome.browser.customtabs.IS_MEDIA_VIEWER";
+
+    /** URL that should be loaded in place of the URL passed along in the data. */
+    public static final String EXTRA_MEDIA_VIEWER_URL =
+            "org.chromium.chrome.browser.customtabs.MEDIA_VIEWER_URL";
+
+    /** Extra that enables embedded media experience. */
+    public static final String EXTRA_ENABLE_EMBEDDED_MEDIA_EXPERIENCE =
+            "org.chromium.chrome.browser.customtabs.EXTRA_ENABLE_EMBEDDED_MEDIA_EXPERIENCE";
 
     /** Indicates that the Custom Tab should style itself as an info page. */
     public static final String EXTRA_IS_INFO_PAGE =
@@ -93,6 +102,8 @@ public class CustomTabIntentDataProvider {
     private final Intent mKeepAliveServiceIntent;
     private final int mTitleVisibilityState;
     private final boolean mIsMediaViewer;
+    private final String mMediaViewerUrl;
+    private final boolean mEnableEmbeddedMediaExperience;
     private final boolean mIsInfoPage;
     private final int mInitialBackgroundColor;
     private final boolean mDisableStar;
@@ -178,6 +189,11 @@ public class CustomTabIntentDataProvider {
                 CustomTabsIntent.EXTRA_REMOTEVIEWS_PENDINGINTENT);
         mIsMediaViewer = mIsTrustedIntent
                 && IntentUtils.safeGetBooleanExtra(intent, EXTRA_IS_MEDIA_VIEWER, false);
+        mMediaViewerUrl = mIsMediaViewer
+                ? IntentUtils.safeGetStringExtra(intent, EXTRA_MEDIA_VIEWER_URL) : null;
+        mEnableEmbeddedMediaExperience = mIsTrustedIntent
+                && IntentUtils.safeGetBooleanExtra(
+                           intent, EXTRA_ENABLE_EMBEDDED_MEDIA_EXPERIENCE, false);
         mIsInfoPage = mIsTrustedIntent
                 && IntentUtils.safeGetBooleanExtra(intent, EXTRA_IS_INFO_PAGE, false);
         mDisableStar = IntentUtils.safeGetBooleanExtra(intent, EXTRA_DISABLE_STAR_BUTTON, false);
@@ -335,6 +351,7 @@ public class CustomTabIntentDataProvider {
      * @return A array of {@link View} ids, of which the onClick event is handled by the custom tab.
      */
     public int[] getClickableViewIDs() {
+        if (mClickableViewIds == null) return null;
         return mClickableViewIds.clone();
     }
 
@@ -388,9 +405,15 @@ public class CustomTabIntentDataProvider {
         try {
             // Media viewers pass in PendingIntents that contain CHOOSER Intents.  Setting the data
             // in these cases prevents the Intent from firing correctly.
+            String title = mMenuEntries.get(menuIndex).first;
             PendingIntent pendingIntent = mMenuEntries.get(menuIndex).second;
             pendingIntent.send(
                     activity, 0, isMediaViewer() ? null : addedIntent, mOnFinished, null);
+            if (shouldEnableEmbeddedMediaExperience()
+                    && TextUtils.equals(
+                               title, activity.getString(R.string.download_manager_open_with))) {
+                RecordUserAction.record("CustomTabsMenuCustomMenuItem.DownloadsUI.OpenWith");
+            }
         } catch (CanceledException e) {
             Log.e(TAG, "Custom tab in Chrome failed to send pending intent.");
         }
@@ -481,6 +504,20 @@ public class CustomTabIntentDataProvider {
      */
     boolean isMediaViewer() {
         return mIsMediaViewer;
+    }
+
+    /**
+     * @return See {@link #EXTRA_MEDIA_VIEWER_URL}.
+     */
+    String getMediaViewerUrl() {
+        return mMediaViewerUrl;
+    }
+
+    /**
+     * @return See {@link #EXTRA_ENABLE_EMBEDDED_MEDIA_EXPERIENCE}
+     */
+    boolean shouldEnableEmbeddedMediaExperience() {
+        return mEnableEmbeddedMediaExperience;
     }
 
     /**

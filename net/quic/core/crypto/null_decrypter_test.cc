@@ -3,14 +3,13 @@
 // found in the LICENSE file.
 
 #include "net/quic/core/crypto/null_decrypter.h"
+#include "net/quic/platform/api/quic_test.h"
 #include "net/quic/test_tools/quic_test_utils.h"
-
-using base::StringPiece;
 
 namespace net {
 namespace test {
 
-class NullDecrypterTest : public ::testing::TestWithParam<bool> {};
+class NullDecrypterTest : public QuicTestWithParam<bool> {};
 
 TEST_F(NullDecrypterTest, DecryptClient) {
   unsigned char expected[] = {
@@ -24,11 +23,11 @@ TEST_F(NullDecrypterTest, DecryptClient) {
   NullDecrypter decrypter(Perspective::IS_SERVER);
   char buffer[256];
   size_t length = 0;
-  ASSERT_TRUE(decrypter.DecryptPacket(QUIC_VERSION_37, kDefaultPathId, 0,
-                                      "hello world!", StringPiece(data, len),
-                                      buffer, &length, 256));
+  ASSERT_TRUE(decrypter.DecryptPacket(QUIC_VERSION_37, 0, "hello world!",
+                                      QuicStringPiece(data, len), buffer,
+                                      &length, 256));
   EXPECT_LT(0u, length);
-  EXPECT_EQ("goodbye!", StringPiece(buffer, length));
+  EXPECT_EQ("goodbye!", QuicStringPiece(buffer, length));
 }
 
 TEST_F(NullDecrypterTest, DecryptServer) {
@@ -43,11 +42,11 @@ TEST_F(NullDecrypterTest, DecryptServer) {
   NullDecrypter decrypter(Perspective::IS_CLIENT);
   char buffer[256];
   size_t length = 0;
-  ASSERT_TRUE(decrypter.DecryptPacket(QUIC_VERSION_37, kDefaultPathId, 0,
-                                      "hello world!", StringPiece(data, len),
-                                      buffer, &length, 256));
+  ASSERT_TRUE(decrypter.DecryptPacket(QUIC_VERSION_37, 0, "hello world!",
+                                      QuicStringPiece(data, len), buffer,
+                                      &length, 256));
   EXPECT_LT(0u, length);
-  EXPECT_EQ("goodbye!", StringPiece(buffer, length));
+  EXPECT_EQ("goodbye!", QuicStringPiece(buffer, length));
 }
 
 TEST_F(NullDecrypterTest, DecryptClientPre37) {
@@ -62,11 +61,11 @@ TEST_F(NullDecrypterTest, DecryptClientPre37) {
   NullDecrypter decrypter(Perspective::IS_CLIENT);
   char buffer[256];
   size_t length = 0;
-  ASSERT_TRUE(decrypter.DecryptPacket(QUIC_VERSION_36, kDefaultPathId, 0,
-                                      "hello world!", StringPiece(data, len),
-                                      buffer, &length, 256));
+  ASSERT_TRUE(decrypter.DecryptPacket(QUIC_VERSION_36, 0, "hello world!",
+                                      QuicStringPiece(data, len), buffer,
+                                      &length, 256));
   EXPECT_LT(0u, length);
-  EXPECT_EQ("goodbye!", StringPiece(buffer, length));
+  EXPECT_EQ("goodbye!", QuicStringPiece(buffer, length));
 }
 
 TEST_F(NullDecrypterTest, DecryptServerPre37) {
@@ -81,11 +80,11 @@ TEST_F(NullDecrypterTest, DecryptServerPre37) {
   NullDecrypter decrypter(Perspective::IS_SERVER);
   char buffer[256];
   size_t length = 0;
-  ASSERT_TRUE(decrypter.DecryptPacket(QUIC_VERSION_36, kDefaultPathId, 0,
-                                      "hello world!", StringPiece(data, len),
-                                      buffer, &length, 256));
+  ASSERT_TRUE(decrypter.DecryptPacket(QUIC_VERSION_36, 0, "hello world!",
+                                      QuicStringPiece(data, len), buffer,
+                                      &length, 256));
   EXPECT_LT(0u, length);
-  EXPECT_EQ("goodbye!", StringPiece(buffer, length));
+  EXPECT_EQ("goodbye!", QuicStringPiece(buffer, length));
 }
 
 TEST_F(NullDecrypterTest, BadHash) {
@@ -100,9 +99,9 @@ TEST_F(NullDecrypterTest, BadHash) {
   NullDecrypter decrypter(Perspective::IS_CLIENT);
   char buffer[256];
   size_t length = 0;
-  ASSERT_FALSE(decrypter.DecryptPacket(QUIC_VERSION_35, kDefaultPathId, 0,
-                                       "hello world!", StringPiece(data, len),
-                                       buffer, &length, 256));
+  ASSERT_FALSE(decrypter.DecryptPacket(QUIC_VERSION_35, 0, "hello world!",
+                                       QuicStringPiece(data, len), buffer,
+                                       &length, 256));
 }
 
 TEST_F(NullDecrypterTest, ShortInput) {
@@ -115,9 +114,9 @@ TEST_F(NullDecrypterTest, ShortInput) {
   NullDecrypter decrypter(Perspective::IS_CLIENT);
   char buffer[256];
   size_t length = 0;
-  ASSERT_FALSE(decrypter.DecryptPacket(QUIC_VERSION_35, kDefaultPathId, 0,
-                                       "hello world!", StringPiece(data, len),
-                                       buffer, &length, 256));
+  ASSERT_FALSE(decrypter.DecryptPacket(QUIC_VERSION_35, 0, "hello world!",
+                                       QuicStringPiece(data, len), buffer,
+                                       &length, 256));
 }
 
 }  // namespace test

@@ -748,16 +748,21 @@ DriveVolumeItem.prototype.updateSubDirectories = function(recursive) {
   // Drive volume has children including fake entries (offline, recent, etc...).
   if (this.entry && !this.hasChildren) {
     var entries = [this.entry];
+    var teamDriveEntry = this.volumeInfo_.teamDriveDisplayRoot;
+    if (teamDriveEntry)
+      entries.push(teamDriveEntry);
+    var fakeEntries = [];
     if (this.parentTree_.fakeEntriesVisible_) {
       for (var key in this.volumeInfo_.fakeEntries)
-        entries.push(this.volumeInfo_.fakeEntries[key]);
+        fakeEntries.push(this.volumeInfo_.fakeEntries[key]);
+      // This list is sorted by URL on purpose.
+      fakeEntries.sort(function(a, b) {
+        if (a.toURL() === b.toURL())
+          return 0;
+        return b.toURL() > a.toURL() ? 1 : -1;
+      });
+      entries = entries.concat(fakeEntries);
     }
-    // This list is sorted by URL on purpose.
-    entries.sort(function(a, b) {
-      if (a.toURL() === b.toURL())
-        return 0;
-      return b.toURL() > a.toURL() ? 1 : -1;
-    });
 
     for (var i = 0; i < entries.length; i++) {
       var item = new SubDirectoryItem(
@@ -781,7 +786,10 @@ DriveVolumeItem.prototype.updateSubDirectories = function(recursive) {
  * @override
  */
 DriveVolumeItem.prototype.updateItemByEntry = function(changedDirectoryEntry) {
-  this.items[0].updateItemByEntry(changedDirectoryEntry);
+  // The first item is My Drive, and the second item is Team Drives.
+  // Keep in sync with |fixedEntries| in |updateSubDirectories|.
+  var index = util.isTeamDriveEntry(changedDirectoryEntry) ? 1 : 0;
+  this.items[index].updateItemByEntry(changedDirectoryEntry);
 };
 
 /**
@@ -988,7 +996,7 @@ MenuItem.prototype.selectByEntry = function(entry) {
  */
 MenuItem.prototype.activate = function() {
   // Dispatch an event to update the menu (if updatable).
-  var updateEvent = new Event('update');
+  var updateEvent = /** @type {MenuItemUpdateEvent} */ (new Event('update'));
   updateEvent.menuButton = this.menuButton_;
   this.menuButton_.menu.dispatchEvent(updateEvent);
 
@@ -1368,14 +1376,14 @@ DirectoryTree.prototype.onFilterChanged_ = function() {
 
 /**
  * Invoked when a directory is changed.
- * @param {!Event} event Event.
+ * @param {!FileWatchEvent} event Event.
  * @private
  */
 DirectoryTree.prototype.onDirectoryContentChanged_ = function(event) {
   if (event.eventType !== 'changed' || !event.entry)
     return;
 
-  this.updateTreeByEntry_(event.entry);
+  this.updateTreeByEntry_(/** @type{!Entry} */ (event.entry));
 };
 
 /**

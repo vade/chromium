@@ -41,7 +41,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/prefs/pref_service.h"
-#include "components/safe_browsing_db/safe_browsing_prefs.h"
+#include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "content/public/browser/download_danger_type.h"
 #include "third_party/icu/source/common/unicode/uchar.h"
 #include "ui/accessibility/ax_node_data.h"
@@ -57,13 +57,14 @@
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/text_elider.h"
 #include "ui/gfx/text_utils.h"
-#include "ui/gfx/vector_icons_public.h"
+#include "ui/vector_icons/vector_icons.h"
 #include "ui/views/animation/flood_fill_ink_drop_ripple.h"
 #include "ui/views/animation/ink_drop_highlight.h"
 #include "ui/views/animation/ink_drop_impl.h"
 #include "ui/views/border.h"
+#include "ui/views/controls/button/image_button.h"
+#include "ui/views/controls/button/image_button_factory.h"
 #include "ui/views/controls/button/md_text_button.h"
-#include "ui/views/controls/button/vector_icon_button.h"
 #include "ui/views/controls/focusable_border.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/mouse_constants.h"
@@ -154,23 +155,6 @@ class SeparatorBorder : public views::FocusableBorder {
 
 }  // namespace
 
-// Allows the DownloadItemView to control the InkDrop on the drop down button.
-class DownloadItemView::DropDownButton : public views::VectorIconButton {
- public:
-  explicit DropDownButton(views::VectorIconButtonDelegate* delegate)
-      : views::VectorIconButton(delegate) {}
-  ~DropDownButton() override {}
-
-  // Promoted visibility to public.
-  void AnimateInkDrop(views::InkDropState state) {
-    // TODO(bruthig): Plumb in the proper Event.
-    views::VectorIconButton::AnimateInkDrop(state, nullptr /* event */);
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DropDownButton);
-};
-
 DownloadItemView::DownloadItemView(DownloadItem* download_item,
                                    DownloadShelfView* parent)
     : shelf_(parent),
@@ -182,7 +166,7 @@ DownloadItemView::DownloadItemView(DownloadItem* download_item,
       model_(download_item),
       save_button_(nullptr),
       discard_button_(nullptr),
-      dropdown_button_(new DropDownButton(this)),
+      dropdown_button_(views::CreateVectorImageButton(this)),
       dangerous_download_label_(nullptr),
       dangerous_download_label_sized_(false),
       disabled_while_opening_(false),
@@ -351,7 +335,8 @@ void DownloadItemView::OnDownloadOpened(DownloadItem* download) {
   SetEnabled(false);
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
-      base::Bind(&DownloadItemView::Reenable, weak_ptr_factory_.GetWeakPtr()),
+      base::BindOnce(&DownloadItemView::Reenable,
+                     weak_ptr_factory_.GetWeakPtr()),
       base::TimeDelta::FromMilliseconds(kDisabledOnOpenDuration));
 
   // Notify our parent.
@@ -386,6 +371,13 @@ void DownloadItemView::Layout() {
         gfx::Point(width() - dropdown_button_->width() - kEndPadding,
                    (height() - dropdown_button_->height()) / 2));
   }
+}
+
+void DownloadItemView::UpdateDropdownButton() {
+  views::SetImageFromVectorIcon(
+      dropdown_button_,
+      dropdown_state_ == PUSHED ? kCaretDownIcon : kCaretUpIcon,
+      GetTextColor());
 }
 
 gfx::Size DownloadItemView::GetPreferredSize() const {
@@ -496,14 +488,24 @@ void DownloadItemView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   node_data->SetName(accessible_name_);
   node_data->role = ui::AX_ROLE_BUTTON;
   if (model_.IsDangerous())
-    node_data->AddStateFlag(ui::AX_STATE_DISABLED);
+    node_data->AddState(ui::AX_STATE_DISABLED);
   else
-    node_data->AddStateFlag(ui::AX_STATE_HASPOPUP);
+    node_data->AddState(ui::AX_STATE_HASPOPUP);
 }
 
 void DownloadItemView::OnThemeChanged() {
   UpdateColorsFromTheme();
   SchedulePaint();
+  UpdateDropdownButton();
+}
+
+void DownloadItemView::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  if (details.is_add && details.child == this) {
+    // This is only required because OnThemeChanged is not called when a view is
+    // added as a child.
+    UpdateDropdownButton();
+  }
 }
 
 void DownloadItemView::AddInkDropLayer(ui::Layer* ink_drop_layer) {
@@ -599,10 +601,6 @@ void DownloadItemView::ButtonPressed(views::Button* sender,
   UMA_HISTOGRAM_LONG_TIMES("clickjacking.discard_download", warning_duration);
   MaybeSubmitDownloadToFeedbackService(DownloadCommands::DISCARD);
   // WARNING: 'this' maybe deleted at this point. Don't access 'this'.
-}
-
-SkColor DownloadItemView::GetVectorIconBaseColor() const {
-  return GetTextColor();
 }
 
 void DownloadItemView::AnimationProgressed(const gfx::Animation* animation) {
@@ -730,11 +728,11 @@ void DownloadItemView::DrawIcon(gfx::Canvas* canvas) {
   // Draw the icon image.
   int icon_x = progress_x + DownloadShelf::kFiletypeIconOffset;
   int icon_y = progress_y + DownloadShelf::kFiletypeIconOffset;
-  SkPaint paint;
+  cc::PaintFlags flags;
   // Use an alpha to make the image look disabled.
   if (!enabled())
-    paint.setAlpha(120);
-  canvas->DrawImageInt(*icon->ToImageSkia(), icon_x, icon_y, paint);
+    flags.setAlpha(120);
+  canvas->DrawImageInt(*icon->ToImageSkia(), icon_x, icon_y, flags);
 }
 
 void DownloadItemView::OnFocus() {
@@ -882,15 +880,14 @@ void DownloadItemView::SetDropdownState(State new_state) {
       !dropdown_button_->GetImage(views::CustomButton::STATE_NORMAL).isNull())
     return;
 
-  dropdown_button_->SetIcon(new_state == PUSHED ? kCaretDownIcon
-                                                : kCaretUpIcon);
   if (new_state != dropdown_state_) {
     dropdown_button_->AnimateInkDrop(new_state == PUSHED
                                          ? views::InkDropState::ACTIVATED
-                                         : views::InkDropState::DEACTIVATED);
+                                         : views::InkDropState::DEACTIVATED,
+                                     nullptr);
   }
-  dropdown_button_->OnThemeChanged();
   dropdown_state_ = new_state;
+  UpdateDropdownButton();
   SchedulePaint();
 }
 
@@ -988,8 +985,8 @@ gfx::ImageSkia DownloadItemView::GetWarningIcon() {
     case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST:
     case content::DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED:
     case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE:
-      return gfx::CreateVectorIcon(gfx::VectorIconId::WARNING,
-                                   kWarningIconSize, gfx::kGoogleRed700);
+      return gfx::CreateVectorIcon(ui::kWarningIcon, kWarningIconSize,
+                                   gfx::kGoogleRed700);
 
     case content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS:
     case content::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT:

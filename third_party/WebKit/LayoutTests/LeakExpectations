@@ -1,5 +1,7 @@
 # This file is used for tests that only need to be suppressed on the Chromium
 # WebKit Leak bots.
+# Further documentation:
+# https://chromium.googlesource.com/chromium/src/+/master/docs/testing/layout_test_expectations.md
 
 ###########################################################################
 # WARNING: Memory leaks must be fixed asap. Sheriff is expected to revert #
@@ -25,6 +27,7 @@ crbug.com/364398 virtual/mojo-loading/http/tests/security/xssAuditor/viewsource-
 
 # FIXME: The below tests fails when the leak detector is disabled.
 crbug.com/366029 compositing/fixed-body-background-positioned.html [ Failure Pass ]
+crbug.com/366029 virtual/disable-spinvalidation/compositing/fixed-body-background-positioned.html [ Failure Pass ]
 
 # FIXME: The below tests crashes when the leak detector is run on debug builds
 crbug.com/366043 [ Debug ] fast/history/history-traversal-is-asynchronous.html [ Crash ]
@@ -52,9 +55,9 @@ crbug.com/629058 plugins/fullscreen-plugins-dont-reload.html [ Leak ]
 # -----------------------------------------------------------------
 
 crbug.com/364417 paint/invalidation/japanese-rl-selection-clear.html [ Leak ]
-crbug.com/364417 virtual/stable/paint/invalidation/japanese-rl-selection-clear.html [ Leak ]
+crbug.com/364417 virtual/disable-spinvalidation/paint/invalidation/japanese-rl-selection-clear.html [ Leak ]
 
-crbug.com/455369 fast/html/marquee-destroyed-without-removed-from-crash.html [ Leak Pass ]
+crbug.com/455369 html/marquee/marquee-destroyed-without-removed-from-crash.html [ Leak Pass ]
 
 crbug.com/414163 [ Debug ] inspector/sources/debugger/promise-tracker.html [ Crash ]
 
@@ -63,6 +66,9 @@ crbug.com/480769 virtual/mojo-loading/http/tests/inspector/service-workers/user-
 
 crbug.com/662477 external/wpt/html/webappapis/idle-callbacks/cancel-invoked.html [ Leak ]
 crbug.com/662477 external/wpt/html/webappapis/scripting/events/onerroreventhandler.html [ Leak ]
+
+# Likely caused by http://crbug.com/501866.
+crbug.com/701695 external/wpt/html/webappapis/scripting/events/event-handler-processing-algorithm-error/window-synthetic-errorevent.html [ Leak ]
 
 # -----------------------------------------------------------------
 # Untriaged but known leaks of ActiveDOMObject (fast).
@@ -94,8 +100,10 @@ crbug.com/506754 http/tests/security/cross-origin-indexeddb-allowed.html [ Leak 
 crbug.com/506754 virtual/mojo-loading/http/tests/security/cross-origin-indexeddb-allowed.html [ Leak ]
 crbug.com/506754 http/tests/serviceworker/chromium/resolve-after-window-close.html [ Leak ]
 crbug.com/506754 virtual/mojo-loading/http/tests/serviceworker/chromium/resolve-after-window-close.html [ Leak ]
+crbug.com/506754 virtual/off-main-thread-fetch/http/tests/serviceworker/chromium/resolve-after-window-close.html [ Leak ]
 crbug.com/506754 http/tests/serviceworker/chromium/window-close-during-registration.html [ Leak ]
 crbug.com/506754 virtual/mojo-loading/http/tests/serviceworker/chromium/window-close-during-registration.html [ Leak ]
+crbug.com/506754 virtual/off-main-thread-fetch/http/tests/serviceworker/chromium/window-close-during-registration.html [ Leak ]
 crbug.com/506754 virtual/service-worker-navigation-preload/http/tests/serviceworker/chromium/resolve-after-window-close.html [ Leak ]
 crbug.com/506754 virtual/service-worker-navigation-preload/http/tests/serviceworker/chromium/window-close-during-registration.html [ Leak ]
 crbug.com/506754 virtual/service-worker-navigation-preload-disabled/http/tests/serviceworker/chromium/resolve-after-window-close.html [ Leak ]
@@ -113,20 +121,14 @@ crbug.com/578297 [ Linux ] http/tests/media/media-source/mediasource-appendstrea
 crbug.com/578297 [ Linux ] virtual/mojo-loading/http/tests/media/media-source/mediasource-appendstream-quota-exceeded.html [ Slow ]
 
 # -----------------------------------------------------------------
-# Leaks in external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/*
+# Leaks in external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/*
 # -----------------------------------------------------------------
-crbug.com/594309 [ Linux ] external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-baseline-align-self-baseline-vert-001.html [ Failure Pass Leak ]
-crbug.com/594309 [ Linux ] external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-baseline-empty-001a.html [ Leak ]
-crbug.com/594309 [ Linux ] external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-baseline-empty-001b.html [ Leak ]
-crbug.com/594309 [ Linux ] external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-baseline-multi-item-vert-001.html [ Leak ]
-crbug.com/594309 [ Linux ] external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-whitespace-handling-002.xhtml [ Leak ]
-crbug.com/594309 [ Linux ] external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/variables/variable-declaration-15.html [ Leak ]
-crbug.com/594309 [ Linux ] external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/variables/variable-declaration-16.html [ Leak ]
-crbug.com/594309 [ Linux ] external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/variables/variable-declaration-17.html [ Leak ]
-crbug.com/594309 [ Linux ] external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/variables/variable-declaration-18.html [ Leak ]
-crbug.com/594309 [ Linux ] external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/variables/variable-external-font-face-01.html [ Pass Leak ]
-crbug.com/594309 [ Linux ] external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/variables/variable-font-face-02.html [ Pass Leak ]
-crbug.com/594309 [ Linux ] external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/writing-modes-3/text-combine-upright-compression-007.html [ Leak ]
+crbug.com/594309 [ Linux ] external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-baseline-align-self-baseline-vert-001.html [ Failure Pass Leak ]
+crbug.com/594309 [ Linux ] external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-baseline-empty-001a.html [ Leak ]
+crbug.com/594309 [ Linux ] external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-baseline-empty-001b.html [ Leak ]
+crbug.com/594309 [ Linux ] external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-baseline-multi-item-vert-001.html [ Leak ]
+crbug.com/594309 [ Linux ] external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-whitespace-handling-002.xhtml [ Leak ]
+crbug.com/594309 [ Linux ] external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/writing-modes-3/text-combine-upright-compression-007.html [ Leak ]
 
 crbug.com/664874 http/tests/xmlhttprequest/workers/xmlhttprequest-allowed-with-disabled-web-security.html [ Leak ]
 crbug.com/664874 virtual/mojo-loading/http/tests/xmlhttprequest/workers/xmlhttprequest-allowed-with-disabled-web-security.html [ Leak ]
@@ -135,6 +137,14 @@ crbug.com/672740 http/tests/security/mixedContent/websocket/insecure-websocket-i
 crbug.com/672740 virtual/mojo-loading/http/tests/security/mixedContent/websocket/insecure-websocket-in-secure-page-worker-allowed.html [ Leak Pass ]
 crbug.com/672740 http/tests/security/mixedContent/websocket/insecure-websocket-in-secure-page-worker.html [ Leak Pass ]
 crbug.com/672740 virtual/mojo-loading/http/tests/security/mixedContent/websocket/insecure-websocket-in-secure-page-worker.html [ Leak Pass ]
+
+# Flaky crashes, but bot build logs do not show the failure, at least as linked by the flakiness
+# board.
+crbug.com/674858 [ Linux ] virtual/threaded/printing/offscreencanvas-2d-printing.html [ Pass Crash ]
+crbug.com/674858 [ Linux ] virtual/threaded/printing/offscreencanvas-webgl-printing.html [ Pass Crash ]
+
+# Sheriff: Commit causing leak found but non-trivial to revert
+crbug.com/718114 [ Linux ] external/wpt/html/semantics/scripting-1/the-script-element/module/crossorigin.html [ Leak Failure ]
 
 ###########################################################################
 # WARNING: Memory leaks must be fixed asap. Sheriff is expected to revert #

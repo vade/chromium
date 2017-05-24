@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Common utilities for Quic tests
-
 #ifndef NET_TOOLS_QUIC_TEST_TOOLS_MOCK_QUIC_TIME_WAIT_LIST_MANAGER_H_
 #define NET_TOOLS_QUIC_TEST_TOOLS_MOCK_QUIC_TIME_WAIT_LIST_MANAGER_H_
 
@@ -38,12 +36,10 @@ class MockTimeWaitListManager : public QuicTimeWaitListManager {
         termination_packets);
   }
 
-  MOCK_METHOD5(ProcessPacket,
+  MOCK_METHOD3(ProcessPacket,
                void(const QuicSocketAddress& server_address,
                     const QuicSocketAddress& client_address,
-                    QuicConnectionId connection_id,
-                    QuicPacketNumber packet_number,
-                    const QuicEncryptedPacket& packet));
+                    QuicConnectionId connection_id));
 
   MOCK_METHOD4(SendVersionNegotiationPacket,
                void(QuicConnectionId connection_id,

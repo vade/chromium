@@ -9,15 +9,14 @@
 #include "base/i18n/rtl.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/values.h"
+#include "components/grit/components_resources.h"
 #include "components/prefs/pref_service.h"
-#include "components/safe_browsing_db/safe_browsing_prefs.h"
+#include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "components/security_interstitials/content/security_interstitial_controller_client.h"
 #include "components/security_interstitials/core/common_string_util.h"
-#include "components/security_interstitials/core/metrics_helper.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/components_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/webui/jstemplate_builder.h"
 #include "ui/base/webui/web_ui_util.h"
@@ -91,11 +90,6 @@ void SecurityInterstitialPage::Show() {
 
 SecurityInterstitialControllerClient* SecurityInterstitialPage::controller() {
   return controller_.get();
-}
-
-security_interstitials::MetricsHelper*
-SecurityInterstitialPage::metrics_helper() {
-  return controller_->metrics_helper();
 }
 
 void SecurityInterstitialPage::UpdateMetricsAfterSecurityInterstitial() {

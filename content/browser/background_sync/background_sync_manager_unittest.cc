@@ -8,6 +8,7 @@
 
 #include <memory>
 #include <utility>
+#include <vector>
 
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
@@ -136,9 +137,7 @@ class BackgroundSyncManagerTest : public testing::Test {
     // Create a StoragePartition with the correct BrowserContext so that the
     // BackgroundSyncManager can find the BrowserContext through it.
     storage_partition_impl_.reset(new StoragePartitionImpl(
-        helper_->browser_context(), base::FilePath(), nullptr, nullptr, nullptr,
-        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-        nullptr, nullptr, nullptr, nullptr));
+        helper_->browser_context(), base::FilePath(), nullptr));
     helper_->context_wrapper()->set_storage_partition(
         storage_partition_impl_.get());
 
@@ -209,7 +208,7 @@ class BackgroundSyncManagerTest : public testing::Test {
   void StatusAndRegistrationsCallback(
       bool* was_called,
       BackgroundSyncStatus status,
-      std::unique_ptr<ScopedVector<BackgroundSyncRegistration>> registrations) {
+      std::vector<std::unique_ptr<BackgroundSyncRegistration>> registrations) {
     *was_called = true;
     callback_status_ = status;
     callback_registrations_ = std::move(registrations);
@@ -305,13 +304,13 @@ class BackgroundSyncManagerTest : public testing::Test {
     EXPECT_TRUE(was_called);
 
     if (callback_status_ == BACKGROUND_SYNC_STATUS_OK) {
-      for (auto iter = callback_registrations_->begin();
-           iter < callback_registrations_->end(); ++iter) {
+      for (auto iter = callback_registrations_.begin();
+           iter < callback_registrations_.end(); ++iter) {
         if ((*iter)->options()->tag == registration_options.tag) {
           // Transfer the matching registration out of the vector into
           // callback_registration_ for testing.
-          callback_registration_.reset(*iter);
-          callback_registrations_->weak_erase(iter);
+          callback_registration_ = std::move(*iter);
+          callback_registrations_.erase(iter);
           return true;
         }
       }
@@ -427,7 +426,7 @@ class BackgroundSyncManagerTest : public testing::Test {
   // Callback values.
   BackgroundSyncStatus callback_status_ = BACKGROUND_SYNC_STATUS_OK;
   std::unique_ptr<BackgroundSyncRegistration> callback_registration_;
-  std::unique_ptr<ScopedVector<BackgroundSyncRegistration>>
+  std::vector<std::unique_ptr<BackgroundSyncRegistration>>
       callback_registrations_;
   ServiceWorkerStatusCode callback_sw_status_code_ = SERVICE_WORKER_OK;
   int sync_events_called_ = 0;
@@ -516,15 +515,15 @@ TEST_F(BackgroundSyncManagerTest, GetRegistrationBadBackend) {
 
 TEST_F(BackgroundSyncManagerTest, GetRegistrationsZero) {
   EXPECT_TRUE(GetRegistrations());
-  EXPECT_EQ(0u, callback_registrations_->size());
+  EXPECT_EQ(0u, callback_registrations_.size());
 }
 
 TEST_F(BackgroundSyncManagerTest, GetRegistrationsOne) {
   EXPECT_TRUE(Register(sync_options_1_));
   EXPECT_TRUE(GetRegistrations());
 
-  EXPECT_EQ(1u, callback_registrations_->size());
-  sync_options_1_.Equals(*(*callback_registrations_)[0]->options());
+  EXPECT_EQ(1u, callback_registrations_.size());
+  sync_options_1_.Equals(*callback_registrations_[0]->options());
 }
 
 TEST_F(BackgroundSyncManagerTest, GetRegistrationsTwo) {
@@ -532,9 +531,9 @@ TEST_F(BackgroundSyncManagerTest, GetRegistrationsTwo) {
   EXPECT_TRUE(Register(sync_options_2_));
   EXPECT_TRUE(GetRegistrations());
 
-  EXPECT_EQ(2u, callback_registrations_->size());
-  sync_options_1_.Equals(*(*callback_registrations_)[0]->options());
-  sync_options_2_.Equals(*(*callback_registrations_)[1]->options());
+  EXPECT_EQ(2u, callback_registrations_.size());
+  sync_options_1_.Equals(*callback_registrations_[0]->options());
+  sync_options_2_.Equals(*callback_registrations_[1]->options());
 }
 
 TEST_F(BackgroundSyncManagerTest, GetRegistrationsBadBackend) {

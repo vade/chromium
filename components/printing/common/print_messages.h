@@ -20,6 +20,7 @@
 #include "printing/page_size_margins.h"
 #include "printing/print_job_constants.h"
 #include "third_party/WebKit/public/web/WebPrintScalingOption.h"
+#include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/ipc/geometry/gfx_param_traits.h"
 #include "ui/gfx/ipc/skia/gfx_skia_param_traits.h"
@@ -46,7 +47,6 @@ struct PrintMsg_Print_Params {
   int margin_left;
   double dpi;
   double scale_factor;
-  int desired_dpi;
   bool rasterize_pdf;
   int document_cookie;
   bool selection_only;
@@ -100,7 +100,7 @@ struct PrintHostMsg_SetOptionsFromDocument_Params {
 #define IPC_MESSAGE_START PrintMsgStart
 
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebPrintScalingOption,
-                          blink::WebPrintScalingOptionLast)
+                          blink::kWebPrintScalingOptionLast)
 
 // Parameters for a render request.
 IPC_STRUCT_TRAITS_BEGIN(PrintMsg_Print_Params)
@@ -125,12 +125,6 @@ IPC_STRUCT_TRAITS_BEGIN(PrintMsg_Print_Params)
 
   // Specifies the scale factor in percent
   IPC_STRUCT_TRAITS_MEMBER(scale_factor)
-
-  // Desired apparent dpi on paper.
-  IPC_STRUCT_TRAITS_MEMBER(desired_dpi)
-
-  // Whether to rasterize a PDF for printing
-  IPC_STRUCT_TRAITS_MEMBER(rasterize_pdf)
 
   // Cookie for the document to ensure correctness.
   IPC_STRUCT_TRAITS_MEMBER(document_cookie)
@@ -167,19 +161,12 @@ IPC_STRUCT_TRAITS_BEGIN(PrintMsg_Print_Params)
   // URL string to be printed as footer if requested by the user.
   IPC_STRUCT_TRAITS_MEMBER(url)
 
+  // Whether to rasterize a PDF for printing
+  IPC_STRUCT_TRAITS_MEMBER(rasterize_pdf)
+
   // True if print backgrounds is requested by the user.
   IPC_STRUCT_TRAITS_MEMBER(should_print_backgrounds)
 IPC_STRUCT_TRAITS_END()
-
-IPC_STRUCT_BEGIN(PrintMsg_PrintPage_Params)
-  // Parameters to render the page as a printed page. It must always be the same
-  // value for all the document.
-  IPC_STRUCT_MEMBER(PrintMsg_Print_Params, params)
-
-  // The page number is the indicator of the square that should be rendered
-  // according to the layout specified in PrintMsg_Print_Params.
-  IPC_STRUCT_MEMBER(int, page_number)
-IPC_STRUCT_END()
 
 IPC_STRUCT_TRAITS_BEGIN(printing::PageRange)
   IPC_STRUCT_TRAITS_MEMBER(from)
@@ -266,14 +253,8 @@ IPC_STRUCT_END()
 
 // Parameters sent along with the page count.
 IPC_STRUCT_BEGIN(PrintHostMsg_DidGetPreviewPageCount_Params)
-  // Cookie for the document to ensure correctness.
-  IPC_STRUCT_MEMBER(int, document_cookie)
-
   // Total page count.
   IPC_STRUCT_MEMBER(int, page_count)
-
-  // Indicates whether the previewed document is modifiable.
-  IPC_STRUCT_MEMBER(bool, is_modifiable)
 
   // Scaling % to fit to page
   IPC_STRUCT_MEMBER(int, fit_to_page_scaling)
@@ -306,6 +287,10 @@ IPC_STRUCT_BEGIN(PrintHostMsg_DidPrintPage_Params)
 
   // The printable area the page author specified.
   IPC_STRUCT_MEMBER(gfx::Rect, content_area)
+
+  // The physical offsets of the printer in DPI. Used for PS printing.
+  IPC_STRUCT_MEMBER(gfx::Point, physical_offsets)
+
 IPC_STRUCT_END()
 
 // TODO(dgn) Rename *ScriptedPrint messages because they are not called only
@@ -476,7 +461,7 @@ IPC_MESSAGE_ROUTED1(PrintHostMsg_PrintPreviewCancelled,
 IPC_MESSAGE_ROUTED1(PrintHostMsg_PrintPreviewInvalidPrinterSettings,
                     int /* document cookie */)
 
-// Run a nested message loop in the renderer until print preview for
+// Run a nested run loop in the renderer until print preview for
 // window.print() finishes.
 IPC_SYNC_MESSAGE_ROUTED0_0(PrintHostMsg_SetupScriptedPrintPreview)
 

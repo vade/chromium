@@ -4,6 +4,9 @@
   <message name="IDS_PRIVATE_USER_DATA_INPUT" desc="Summary phrase for a security problem where the site collects private user data on an insecure page." translateable="false">
     Private User Data Input
   </message>
+  <message name="IDS_PRIVATE_USER_DATA_INPUT_DESCRIPTION" desc="Description of a security problem where the site collects private user data on an insecure page, which results in an omnibox warning." translateable="false">
+    This page includes a password or credit card input over HTTP. A warning has been added to the URL bar.
+  </message>
   <message name="IDS_SAFEBROWSING_WARNING" desc="Summary phrase for a security problem where the site is deemed unsafe by the SafeBrowsing service." translateable="false">
     This page is dangerous (flagged by Google Safe Browsing).
   </message>
@@ -12,6 +15,12 @@
   </message>
   <message name="IDS_SHA1_DESCRIPTION" desc="Description of a security problem where the site's certificate chain contains a SHA1 signature." translateable="false">
     The certificate chain for this site contains a certificate signed using SHA-1.
+  </message>
+  <message name="IDS_SUBJECT_ALT_NAME_MISSING" desc="Summary phrase for a security problem where the site's certificate is missing a subjectAltName extension." translateable="false">
+    Subject Alternative Name Missing
+  </message>
+  <message name="IDS_SUBJECT_ALT_NAME_MISSING_DESCRIPTION" desc="Description of a security problem where the site's certificate is missing a subjectAltName extension." translateable="false">
+    The certificate for this site does not contain a Subject Alternative Name extension containing a domain name or IP address.
   </message>
   <message name="IDS_CERTIFICATE_CHAIN_ERROR" desc="Summary phrase for a security problem with the site's certificate." translateable="false">
     Certificate Error

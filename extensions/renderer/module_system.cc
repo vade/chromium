@@ -23,6 +23,7 @@
 #include "extensions/renderer/script_context_set.h"
 #include "extensions/renderer/source_map.h"
 #include "extensions/renderer/v8_helpers.h"
+#include "gin/converter.h"
 #include "gin/modules/module_registry.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
 
@@ -60,18 +61,19 @@ void Fatal(ScriptContext* context, const std::string& message) {
 
   ExtensionsClient* client = ExtensionsClient::Get();
   if (client->ShouldSuppressFatalErrors()) {
-    console::Error(context->GetRenderFrame(), full_message);
+    console::AddMessage(context, content::CONSOLE_MESSAGE_LEVEL_ERROR,
+                        full_message);
     client->RecordDidSuppressFatalError();
   } else {
-    console::Fatal(context->GetRenderFrame(), full_message);
+    console::Fatal(context, full_message);
   }
 }
 
 void Warn(v8::Isolate* isolate, const std::string& message) {
   ScriptContext* script_context =
       ScriptContextSet::GetContextByV8Context(isolate->GetCurrentContext());
-  console::Warn(script_context ? script_context->GetRenderFrame() : nullptr,
-                message);
+  console::AddMessage(script_context, content::CONSOLE_MESSAGE_LEVEL_WARNING,
+                      message);
 }
 
 // Default exception handler which logs the exception.
@@ -445,6 +447,16 @@ void ModuleSystem::LazyFieldGetterInner(
   }
   std::string name = *v8::String::Utf8Value(v8_module_name);
 
+  // As part of instantiating a module, we delete the getter and replace it with
+  // the property directly. If we're trying to load the same module a second
+  // time, it means something went wrong. Bail out early rather than going
+  // through the initialization process again (since bindings may not expect to
+  // run multiple times).
+  if (!module_system->loaded_modules_.insert(name).second) {
+    Warn(isolate, "Previous API instantiation failed.");
+    return;
+  }
+
   // Switch to our v8 context because we need functions created while running
   // the require()d module to belong to our context, not the current one.
   v8::Context::Scope context_scope(context);
@@ -492,7 +504,18 @@ void ModuleSystem::LazyFieldGetterInner(
   v8::Local<v8::Value> val = info.This();
   if (val->IsObject()) {
     v8::Local<v8::Object> object = v8::Local<v8::Object>::Cast(val);
-    object->Delete(context, property);
+    auto maybe = object->Delete(context, property);
+    if (!maybe.IsJust()) {
+      // In theory, deletion should never result in throwing an error. But
+      // crazier things have happened.
+      NOTREACHED();
+      return;
+    }
+    if (!maybe.FromJust()) {
+      // Deletion can *fail* in certain cases, such as when the script does
+      // Object.freeze(chrome).
+      return;
+    }
     SetProperty(context, object, property, new_field);
   } else {
     NOTREACHED();
@@ -521,6 +544,9 @@ void ModuleSystem::SetLazyField(v8::Local<v8::Object> object,
   v8::HandleScope handle_scope(GetIsolate());
   v8::Local<v8::Object> parameters = v8::Object::New(GetIsolate());
   v8::Local<v8::Context> context = context_->v8_context();
+  // Since we reset the accessor here, we remove the record of having loaded the
+  // module.
+  loaded_modules_.erase(module_name);
   SetPrivateProperty(context, parameters, kModuleName,
               ToV8StringUnsafe(GetIsolate(), module_name.c_str()));
   SetPrivateProperty(context, parameters, kModuleField,
@@ -545,11 +571,37 @@ void ModuleSystem::SetNativeLazyField(v8::Local<v8::Object> object,
 void ModuleSystem::OnNativeBindingCreated(
     const std::string& api_name,
     v8::Local<v8::Value> api_bridge_value) {
+  DCHECK(!get_internal_api_.IsEmpty());
   v8::HandleScope scope(GetIsolate());
   if (source_map_->Contains(api_name)) {
+    // We need to load the custom bindings and store them in our modules.
+    // Storing them is important so that calls through CallModuleMethod() route
+    // to the proper objects, if they share the same name as an API.
+    v8::Local<v8::Value> modules;
+    if (!GetPrivate(context()->v8_context()->Global(), kModulesField,
+                    &modules) ||
+        !modules->IsObject()) {
+      NOTREACHED();
+      return;
+    }
+
     NativesEnabledScope enabled(this);
-    LoadModuleWithNativeAPIBridge(api_name, api_bridge_value);
+    v8::Local<v8::Value> exports =
+        LoadModuleWithNativeAPIBridge(api_name, api_bridge_value);
+    SetPrivateProperty(context()->v8_context(), modules.As<v8::Object>(),
+                       gin::StringToSymbol(GetIsolate(), api_name), exports);
   }
+}
+
+void ModuleSystem::SetGetInternalAPIHook(
+    v8::Local<v8::FunctionTemplate> get_internal_api) {
+  DCHECK(get_internal_api_.IsEmpty());
+  get_internal_api_.Set(GetIsolate(), get_internal_api);
+}
+
+void ModuleSystem::SetJSBindingUtilGetter(const JSBindingUtilGetter& getter) {
+  DCHECK(js_binding_util_getter_.is_null());
+  js_binding_util_getter_ = getter;
 }
 
 v8::Local<v8::Value> ModuleSystem::RunString(v8::Local<v8::String> code,
@@ -614,8 +666,12 @@ void ModuleSystem::RequireAsync(
       gin::ModuleRegistry::From(v8_context);
   if (!module_registry) {
     Warn(GetIsolate(), "Extension view no longer exists");
-    resolver->Reject(v8_context, v8::Exception::Error(ToV8StringUnsafe(
-        GetIsolate(), "Extension view no longer exists")));
+    auto maybe = resolver->Reject(
+        v8_context,
+        v8::Exception::Error(ToV8StringUnsafe(
+            GetIsolate(),
+            "Extension view no longer exists")));
+    CHECK(IsTrue(maybe));
     return;
   }
   module_registry->LoadModule(
@@ -632,7 +688,7 @@ v8::Local<v8::String> ModuleSystem::WrapSource(v8::Local<v8::String> source) {
   v8::Local<v8::String> left = ToV8StringUnsafe(
       GetIsolate(),
       "(function(define, require, requireNative, requireAsync, exports, "
-      "console, privates, apiBridge,"
+      "console, privates, apiBridge, bindingUtil, getInternalApi,"
       "$Array, $Function, $JSON, $Object, $RegExp, $String, $Error) {"
       "'use strict';");
   v8::Local<v8::String> right = ToV8StringUnsafe(GetIsolate(), "\n})");
@@ -730,6 +786,28 @@ v8::Local<v8::Value> ModuleSystem::LoadModuleWithNativeAPIBridge(
   v8::Local<v8::Object> natives(NewInstance());
   CHECK(!natives.IsEmpty());  // this can fail if v8 has issues
 
+  v8::Local<v8::Value> get_internal_api;
+  if (get_internal_api_.IsEmpty()) {
+    get_internal_api = v8::Undefined(GetIsolate());
+  } else {
+    get_internal_api = get_internal_api_.Get(GetIsolate())
+                           ->GetFunction(v8_context)
+                           .ToLocalChecked();
+  }
+
+  v8::Local<v8::Value> binding_util;
+  if (!js_binding_util_getter_.is_null()) {
+    js_binding_util_getter_.Run(v8_context, &binding_util);
+    if (binding_util.IsEmpty()) {
+      // The NativeExtensionBindingsSystem was destroyed. This shouldn't happen,
+      // but JS makes the impossible possible!
+      NOTREACHED();
+      return v8::Undefined(GetIsolate());
+    }
+  } else {
+    binding_util = v8::Undefined(GetIsolate());
+  }
+
   // These must match the argument order in WrapSource.
   v8::Local<v8::Value> args[] = {
       // AMD.
@@ -746,7 +824,9 @@ v8::Local<v8::Value> ModuleSystem::LoadModuleWithNativeAPIBridge(
       console::AsV8Object(GetIsolate()),
       GetPropertyUnsafe(v8_context, natives, "privates",
                         v8::NewStringType::kInternalized),
-      api_bridge,  // exposed as apiBridge.
+      api_bridge,        // exposed as apiBridge.
+      binding_util,      // exposed as bindingUtil.
+      get_internal_api,  // exposed as getInternalApi.
       // Each safe builtin. Keep in order with the arguments in WrapSource.
       context_->safe_builtins()->GetArray(),
       context_->safe_builtins()->GetFunction(),
@@ -797,7 +877,8 @@ void ModuleSystem::OnModuleLoaded(
   v8::HandleScope handle_scope(GetIsolate());
   v8::Local<v8::Promise::Resolver> resolver_local(
       v8::Local<v8::Promise::Resolver>::New(GetIsolate(), *resolver));
-  resolver_local->Resolve(context()->v8_context(), value);
+  auto maybe = resolver_local->Resolve(context()->v8_context(), value);
+  CHECK(IsTrue(maybe));
 }
 
 void ModuleSystem::ClobberExistingNativeHandler(const std::string& name) {

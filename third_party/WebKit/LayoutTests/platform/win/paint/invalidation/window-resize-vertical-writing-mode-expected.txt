@@ -2,34 +2,29 @@
   "layers": [
     {
       "name": "LayoutView #document",
-      "bounds": [913, 235],
+      "bounds": [939, 235],
       "contentsOpaque": true,
       "drawsContent": true,
       "paintInvalidations": [
         {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [0, 0, 913, 235],
-          "reason": "forced by layout"
-        },
-        {
           "object": "LayoutView #document",
-          "rect": [0, 0, 913, 235],
-          "reason": "bounds change"
+          "rect": [0, 0, 939, 235],
+          "reason": "geometry"
         },
         {
           "object": "LayoutBlockFlow BODY",
-          "rect": [8, 8, 897, 219],
-          "reason": "forced by layout"
+          "rect": [8, 8, 923, 219],
+          "reason": "geometry"
         },
         {
           "object": "LayoutText #text",
-          "rect": [10, 7, 894, 215],
-          "reason": "forced by layout"
+          "rect": [9, 7, 921, 213],
+          "reason": "geometry"
         },
         {
           "object": "LayoutView #document",
-          "rect": [313, 0, 600, 500],
-          "reason": "bounds change"
+          "rect": [339, 0, 600, 500],
+          "reason": "geometry"
         },
         {
           "object": "LayoutView #document",
@@ -38,23 +33,13 @@
         },
         {
           "object": "LayoutView #document",
-          "rect": [313, 235, 600, 15],
-          "reason": "scroll"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [483, 0, 430, 500],
-          "reason": "forced by layout"
+          "rect": [339, 235, 600, 15],
+          "reason": "scroll control"
         },
         {
           "object": "LayoutBlockFlow BODY",
-          "rect": [491, 8, 414, 484],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [493, 8, 411, 484],
-          "reason": "forced by layout"
+          "rect": [505, 8, 426, 484],
+          "reason": "geometry"
         }
       ]
     }
@@ -62,79 +47,75 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutView #document",
-      "reason": "scroll"
+      "reason": "geometry"
     },
     {
       "object": "LayoutView #document",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutBlockFlow BODY",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "RootInlineBox",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutText #text",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'AAAA'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'BBBB'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'CCCC'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'DDDD'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'EEEE'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'FFFF'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'GGGG'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'HHHH'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'IIII JJJJ'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'KKKK'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'LLLL'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'MMMM'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'NNNN'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     }
   ]
 }
@@ -142,54 +123,54 @@
   "layers": [
     {
       "name": "LayoutView #document",
-      "bounds": [913, 235],
+      "bounds": [939, 235],
       "contentsOpaque": true,
       "drawsContent": true,
       "paintInvalidations": [
         {
           "object": "LayoutView #document",
-          "rect": [200, 0, 913, 235],
-          "reason": "bounds change"
+          "rect": [200, 0, 939, 235],
+          "reason": "geometry"
         },
         {
           "object": "LayoutView #document",
-          "rect": [0, 0, 913, 235],
+          "rect": [0, 0, 939, 235],
           "reason": "full"
         },
         {
           "object": "LayoutView #document",
-          "rect": [0, 0, 913, 235],
-          "reason": "bounds change"
+          "rect": [0, 0, 939, 235],
+          "reason": "geometry"
         },
         {
           "object": "LayoutBlockFlow BODY",
-          "rect": [208, 8, 897, 219],
-          "reason": "bounds change"
+          "rect": [208, 8, 923, 219],
+          "reason": "geometry"
         },
         {
           "object": "LayoutBlockFlow BODY",
-          "rect": [8, 8, 897, 219],
-          "reason": "bounds change"
+          "rect": [8, 8, 923, 219],
+          "reason": "geometry"
         },
         {
           "object": "LayoutText #text",
-          "rect": [210, 7, 894, 215],
-          "reason": "bounds change"
+          "rect": [209, 7, 921, 213],
+          "reason": "geometry"
         },
         {
           "object": "LayoutText #text",
-          "rect": [10, 7, 894, 215],
-          "reason": "bounds change"
+          "rect": [9, 7, 921, 213],
+          "reason": "geometry"
         },
         {
           "object": "LayoutView #document",
-          "rect": [513, 235, 600, 15],
-          "reason": "scroll"
+          "rect": [539, 235, 600, 15],
+          "reason": "scroll control"
         },
         {
           "object": "LayoutView #document",
-          "rect": [513, 235, 400, 15],
-          "reason": "scroll"
+          "rect": [539, 235, 400, 15],
+          "reason": "scroll control"
         }
       ]
     }
@@ -197,75 +178,75 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutView #document",
-      "reason": "scroll"
+      "reason": "geometry"
     },
     {
       "object": "LayoutView #document",
-      "reason": "bounds change"
+      "reason": "geometry"
     },
     {
       "object": "LayoutBlockFlow BODY",
-      "reason": "bounds change"
+      "reason": "geometry"
     },
     {
       "object": "RootInlineBox",
-      "reason": "bounds change"
+      "reason": "geometry"
     },
     {
       "object": "LayoutText #text",
-      "reason": "bounds change"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'AAAA'",
-      "reason": "bounds change"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'BBBB'",
-      "reason": "bounds change"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'CCCC'",
-      "reason": "bounds change"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'DDDD'",
-      "reason": "bounds change"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'EEEE'",
-      "reason": "bounds change"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'FFFF'",
-      "reason": "bounds change"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'GGGG'",
-      "reason": "bounds change"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'HHHH'",
-      "reason": "bounds change"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'IIII JJJJ'",
-      "reason": "bounds change"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'KKKK'",
-      "reason": "bounds change"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'LLLL'",
-      "reason": "bounds change"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'MMMM'",
-      "reason": "bounds change"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'NNNN'",
-      "reason": "bounds change"
+      "reason": "geometry"
     }
   ]
 }
@@ -279,53 +260,43 @@
       "paintInvalidations": [
         {
           "object": "LayoutView #document",
-          "rect": [0, 0, 913, 235],
+          "rect": [0, 0, 939, 235],
           "reason": "full"
         },
         {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [-513, 0, 913, 235],
-          "reason": "forced by layout"
-        },
-        {
           "object": "LayoutView #document",
-          "rect": [-513, 0, 913, 235],
-          "reason": "bounds change"
+          "rect": [-539, 0, 939, 235],
+          "reason": "geometry"
         },
         {
           "object": "LayoutBlockFlow BODY",
-          "rect": [-505, 8, 897, 219],
-          "reason": "forced by layout"
+          "rect": [-531, 8, 923, 219],
+          "reason": "geometry"
         },
         {
           "object": "LayoutText #text",
-          "rect": [-503, 7, 894, 215],
-          "reason": "forced by layout"
+          "rect": [-530, 7, 921, 213],
+          "reason": "geometry"
         },
         {
           "object": "LayoutView #document",
           "rect": [0, 0, 400, 600],
-          "reason": "bounds change"
+          "reason": "geometry"
         },
         {
           "object": "LayoutView #document",
           "rect": [0, 235, 400, 15],
-          "reason": "scroll"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [39, 0, 361, 600],
-          "reason": "forced by layout"
+          "reason": "scroll control"
         },
         {
           "object": "LayoutBlockFlow BODY",
-          "rect": [47, 8, 345, 584],
-          "reason": "forced by layout"
+          "rect": [37, 8, 355, 584],
+          "reason": "geometry"
         },
         {
           "object": "LayoutText #text",
-          "rect": [49, 7, 342, 566],
-          "reason": "forced by layout"
+          "rect": [38, 7, 353, 554],
+          "reason": "geometry"
         }
       ]
     }
@@ -333,47 +304,43 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutView #document",
-      "reason": "scroll"
+      "reason": "geometry"
     },
     {
       "object": "LayoutView #document",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutBlockFlow BODY",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "RootInlineBox",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutText #text",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'AAAA BBBB CCCC'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'DDDD EEEE FFFF'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'GGGG HHHH IIII JJJJ'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'KKKK LLLL MMMM'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'NNNN'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     }
   ]
 }
@@ -391,34 +358,24 @@
           "reason": "incremental"
         },
         {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [439, 0, 361, 600],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [39, 0, 361, 600],
-          "reason": "forced by layout"
+          "object": "LayoutBlockFlow BODY",
+          "rect": [437, 8, 355, 584],
+          "reason": "geometry"
         },
         {
           "object": "LayoutBlockFlow BODY",
-          "rect": [447, 8, 345, 584],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutBlockFlow BODY",
-          "rect": [47, 8, 345, 584],
-          "reason": "forced by layout"
+          "rect": [37, 8, 355, 584],
+          "reason": "geometry"
         },
         {
           "object": "LayoutText #text",
-          "rect": [449, 7, 342, 566],
-          "reason": "forced by layout"
+          "rect": [438, 7, 353, 554],
+          "reason": "geometry"
         },
         {
           "object": "LayoutText #text",
-          "rect": [49, 7, 342, 566],
-          "reason": "forced by layout"
+          "rect": [38, 7, 353, 554],
+          "reason": "geometry"
         }
       ]
     }
@@ -429,40 +386,36 @@
       "reason": "incremental"
     },
     {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
-    },
-    {
       "object": "LayoutBlockFlow BODY",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "RootInlineBox",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutText #text",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'AAAA BBBB CCCC'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'DDDD EEEE FFFF'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'GGGG HHHH IIII JJJJ'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'KKKK LLLL MMMM'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'NNNN'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     }
   ]
 }

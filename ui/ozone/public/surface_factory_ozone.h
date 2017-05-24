@@ -16,17 +16,19 @@
 #include "base/native_library.h"
 #include "ui/gfx/buffer_types.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/native_pixmap.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/overlay_transform.h"
 #include "ui/gl/gl_implementation.h"
-#include "ui/gl/gl_surface.h"
 #include "ui/ozone/ozone_base_export.h"
 #include "ui/ozone/public/gl_ozone.h"
-#include "ui/ozone/public/native_pixmap.h"
+
+namespace gfx {
+class NativePixmap;
+}
 
 namespace ui {
 
-class NativePixmap;
 class SurfaceOzoneCanvas;
 
 // The Ozone interface allows external implementations to hook into Chromium to
@@ -67,33 +69,12 @@ class OZONE_BASE_EXPORT SurfaceFactoryOzone {
   // GL implementation doesn't exist.
   virtual GLOzone* GetGLOzone(gl::GLImplementation implementation);
 
-  // DEPRECATED(kylechar): Implement GLOzoneEGL instead.
-  virtual intptr_t GetNativeDisplay();
-
-  // DEPRECATED(kylechar): Implement GLOzone instead.
-  virtual scoped_refptr<gl::GLSurface> CreateViewGLSurface(
-      gl::GLImplementation implementation,
-      gfx::AcceleratedWidget widget);
-
-  // DEPRECATED(kylechar): Implement GLOzone instead.
-  virtual scoped_refptr<gl::GLSurface> CreateSurfacelessViewGLSurface(
-      gl::GLImplementation implementation,
-      gfx::AcceleratedWidget widget);
-
-  // DEPRECATED(kylechar): Implement GLOzone instead.
-  virtual scoped_refptr<gl::GLSurface> CreateOffscreenGLSurface(
-      gl::GLImplementation implementation,
-      const gfx::Size& size);
-
   // Create SurfaceOzoneCanvas for the specified gfx::AcceleratedWidget.
   //
   // Note: The platform must support creation of SurfaceOzoneCanvas from the
   // Browser Process using only the handle contained in gfx::AcceleratedWidget.
   virtual std::unique_ptr<SurfaceOzoneCanvas> CreateCanvasForWidget(
       gfx::AcceleratedWidget widget);
-
-  // DEPRECATED(kylechar): Implement GLOzoneEGL instead.
-  virtual bool LoadEGLGLES2Bindings();
 
   // Returns all scanout formats for |widget| representing a particular display
   // controller or default display controller for kNullAcceleratedWidget.
@@ -104,7 +85,7 @@ class OZONE_BASE_EXPORT SurfaceFactoryOzone {
   // for |widget| representing a particular display controller or default
   // display controller for kNullAcceleratedWidget.
   // It can be called on any thread.
-  virtual scoped_refptr<NativePixmap> CreateNativePixmap(
+  virtual scoped_refptr<gfx::NativePixmap> CreateNativePixmap(
       gfx::AcceleratedWidget widget,
       gfx::Size size,
       gfx::BufferFormat format,
@@ -112,7 +93,7 @@ class OZONE_BASE_EXPORT SurfaceFactoryOzone {
 
   // Create a single native buffer from an existing handle. Takes ownership of
   // |handle| and can be called on any thread.
-  virtual scoped_refptr<NativePixmap> CreateNativePixmapFromHandle(
+  virtual scoped_refptr<gfx::NativePixmap> CreateNativePixmapFromHandle(
       gfx::AcceleratedWidget widget,
       gfx::Size size,
       gfx::BufferFormat format,

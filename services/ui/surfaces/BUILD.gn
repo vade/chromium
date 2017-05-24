@@ -6,30 +6,30 @@ import("//build/config/ui.gni")
 
 source_set("surfaces") {
   sources = [
-    "display_compositor.cc",
-    "display_compositor.h",
     "display_output_surface.cc",
     "display_output_surface.h",
-    "gpu_compositor_frame_sink.cc",
-    "gpu_compositor_frame_sink.h",
-    "gpu_display_compositor_frame_sink.cc",
-    "gpu_display_compositor_frame_sink.h",
-    "gpu_offscreen_compositor_frame_sink.cc",
-    "gpu_offscreen_compositor_frame_sink.h",
+    "mus_display_provider.cc",
+    "mus_display_provider.h",
   ]
 
   deps = [
     "//base",
     "//cc",
-    "//cc/ipc:internal_interfaces",
+    "//cc/ipc:interfaces",
     "//cc/surfaces",
-    "//components/display_compositor",
+    "//components/viz/display_compositor",
+    "//components/viz/frame_sinks",
     "//gpu/command_buffer/client",
     "//gpu/command_buffer/client:gles2_interface",
     "//gpu/ipc:command_buffer",
     "//ui/display/types",
     "//ui/gfx",
     "//ui/gfx/geometry/mojo",
+    "//ui/latency",
+  ]
+
+  public_deps = [
+    "//ipc",
   ]
 
   if (use_ozone) {

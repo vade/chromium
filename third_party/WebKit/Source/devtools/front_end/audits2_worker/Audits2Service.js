@@ -37,50 +37,37 @@ var Audits2Service = class {
   }
 
   /**
-   * @return {!Promise}
+   * @return {!Promise<!ReportRenderer.ReportJSON>}
    */
-  start() {
-    return window.runLighthouseInWorker(this, 'https://www.webkit.org', {flags: {mobile: true}}, [
-      'is-on-https',
-      'redirects-http',
-      'service-worker',
-      'works-offline',
-      'viewport',
-      'manifest-display',
-      'without-javascript',
-      'first-meaningful-paint',
-      'speed-index-metric',
-      'estimated-input-latency',
-      'time-to-interactive',
-      'user-timings',
-      'screenshots',
-      'critical-request-chains',
-      'manifest-exists',
-      'manifest-background-color',
-      'manifest-theme-color',
-      'manifest-icons-min-192',
-      'manifest-icons-min-144',
-      'manifest-name',
-      'manifest-short-name',
-      'manifest-short-name-length',
-      'manifest-start-url',
-      'meta-theme-color',
-      'aria-valid-attr',
-      'aria-allowed-attr',
-      'color-contrast',
-      'image-alt',
-      'label',
-      'tabindex',
-      'content-width',
-      'geolocation-on-start'
-    ]);
+  start(params) {
+    self.listenForStatus(message => {
+      this.statusUpdate(message[1]);
+    });
+
+    return Promise.resolve()
+        .then(_ => self.runLighthouseInWorker(this, params.url, {}, params.categoryIDs))
+        .then(/** @type {!ReportRenderer.ReportJSON} */ result => {
+          // Filter out artifacts except for screenshots in traces to minimize report size.
+          var traces = result.artifacts.traces;
+          for (var pass in traces) {
+            traces[pass]['traceEvents'] =
+                traces[pass]['traceEvents'].filter(e => e['cat'] === 'disabled-by-default-devtools.screenshot');
+          }
+          result.artifacts = {traces: traces};
+          return result;
+        })
+        .catch(err => ({
+                 fatal: true,
+                 message: err.message,
+                 stack: err.stack,
+               }));
   }
 
   /**
    * @return {!Promise}
    */
   stop() {
-    this._onClose();
+    this.close();
     return Promise.resolve();
   }
 
@@ -99,6 +86,13 @@ var Audits2Service = class {
    */
   dispose() {
     return Promise.resolve();
+  }
+
+  /**
+   * @param {string} message
+   */
+  statusUpdate(message) {
+    this._notify('statusUpdate', {message: message});
   }
 
   /**
@@ -123,7 +117,7 @@ var Audits2Service = class {
   }
 };
 
-// Make lighthouse happy.
+// Make lighthouse and traceviewer happy.
 global = self;
 global.isVinn = true;
 global.document = {};

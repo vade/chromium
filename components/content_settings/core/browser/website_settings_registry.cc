@@ -12,8 +12,8 @@
 
 namespace {
 
-base::LazyInstance<content_settings::WebsiteSettingsRegistry> g_instance =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<content_settings::WebsiteSettingsRegistry>::DestructorAtExit
+    g_instance = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
@@ -142,6 +142,7 @@ void WebsiteSettingsRegistry::Init() {
            WebsiteSettingsInfo::REQUESTING_ORIGIN_AND_TOP_LEVEL_ORIGIN_SCOPE,
            DESKTOP | PLATFORM_ANDROID,
            WebsiteSettingsInfo::DONT_INHERIT_IN_INCOGNITO);
+  // TODO(raymes): Deprecated. See crbug.com/681709. Remove after M60.
   Register(CONTENT_SETTINGS_TYPE_PROMPT_NO_DECISION_COUNT,
            "prompt-no-decision-count", nullptr, WebsiteSettingsInfo::UNSYNCABLE,
            WebsiteSettingsInfo::NOT_LOSSY,
@@ -153,6 +154,25 @@ void WebsiteSettingsRegistry::Init() {
            WebsiteSettingsInfo::REQUESTING_ORIGIN_ONLY_SCOPE,
            DESKTOP | PLATFORM_ANDROID,
            WebsiteSettingsInfo::INHERIT_IN_INCOGNITO);
+  Register(CONTENT_SETTINGS_TYPE_PERMISSION_AUTOBLOCKER_DATA,
+           "permission-autoblocking-data", nullptr,
+           WebsiteSettingsInfo::UNSYNCABLE, WebsiteSettingsInfo::NOT_LOSSY,
+           WebsiteSettingsInfo::REQUESTING_ORIGIN_ONLY_SCOPE,
+           DESKTOP | PLATFORM_ANDROID,
+           WebsiteSettingsInfo::INHERIT_IN_INCOGNITO);
+  Register(
+      CONTENT_SETTINGS_TYPE_PASSWORD_PROTECTION, "password-protection", nullptr,
+      WebsiteSettingsInfo::UNSYNCABLE, WebsiteSettingsInfo::NOT_LOSSY,
+      WebsiteSettingsInfo::REQUESTING_ORIGIN_ONLY_SCOPE,
+      DESKTOP | PLATFORM_ANDROID, WebsiteSettingsInfo::INHERIT_IN_INCOGNITO);
+  // Set when an origin is activated for subresource filtering and the
+  // associated UI is shown to the user. Cleared when a site is de-activated or
+  // the first URL matching the origin is removed from history.
+  Register(
+      CONTENT_SETTINGS_TYPE_SUBRESOURCE_FILTER_DATA, "subresource-filter-data",
+      nullptr, WebsiteSettingsInfo::UNSYNCABLE, WebsiteSettingsInfo::NOT_LOSSY,
+      WebsiteSettingsInfo::REQUESTING_ORIGIN_ONLY_SCOPE,
+      DESKTOP | PLATFORM_ANDROID, WebsiteSettingsInfo::INHERIT_IN_INCOGNITO);
 }
 
 }  // namespace content_settings

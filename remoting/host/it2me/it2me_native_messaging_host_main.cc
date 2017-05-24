@@ -11,6 +11,7 @@
 #include "base/i18n/icu_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/task_scheduler/task_scheduler.h"
 #include "build/build_config.h"
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/base/breakpad.h"
@@ -20,6 +21,7 @@
 #include "remoting/host/logging.h"
 #include "remoting/host/native_messaging/native_messaging_pipe.h"
 #include "remoting/host/native_messaging/pipe_messaging_channel.h"
+#include "remoting/host/policy_watcher.h"
 #include "remoting/host/resources.h"
 #include "remoting/host/usage_stats_consent.h"
 
@@ -45,7 +47,13 @@ namespace remoting {
 
 // Creates a It2MeNativeMessagingHost instance, attaches it to stdin/stdout and
 // runs the message loop until It2MeNativeMessagingHost signals shutdown.
-int StartIt2MeNativeMessagingHost() {
+int It2MeNativeMessagingHostMain(int argc, char** argv) {
+  // This object instance is required by Chrome code (such as MessageLoop).
+  base::AtExitManager exit_manager;
+
+  base::CommandLine::Init(argc, argv);
+  remoting::InitHostLogging();
+
 #if defined(OS_MACOSX)
   // Needed so we don't leak objects when threads are created.
   base::mac::ScopedNSAutoreleasePool pool;
@@ -55,10 +63,9 @@ int StartIt2MeNativeMessagingHost() {
   // Initialize Breakpad as early as possible. On Mac the command-line needs to
   // be initialized first, so that the preference for crash-reporting can be
   // looked up in the config file.
-  // TODO(nicholss): Commenting out Breakpad. See crbug.com/637884
-  // if (IsUsageStatsAllowed()) {
-  //   InitializeCrashReporting();
-  // }
+  if (IsUsageStatsAllowed()) {
+    InitializeCrashReporting();
+  }
 #endif  // defined(REMOTING_ENABLE_BREAKPAD)
 
 #if defined(OS_WIN)
@@ -71,6 +78,8 @@ int StartIt2MeNativeMessagingHost() {
 
   // Required to find the ICU data file, used by some file_util routines.
   base::i18n::InitializeICU();
+
+  base::TaskScheduler::CreateAndStartWithDefaultParams("It2Me");
 
   remoting::LoadResources("");
 
@@ -178,8 +187,10 @@ int StartIt2MeNativeMessagingHost() {
   std::unique_ptr<ChromotingHostContext> context =
       ChromotingHostContext::Create(new remoting::AutoThreadTaskRunner(
           message_loop.task_runner(), run_loop.QuitClosure()));
+  std::unique_ptr<PolicyWatcher> policy_watcher =
+      PolicyWatcher::Create(nullptr, context->file_task_runner());
   std::unique_ptr<extensions::NativeMessageHost> host(
-      new It2MeNativeMessagingHost(needs_elevation, /*policy_service=*/nullptr,
+      new It2MeNativeMessagingHost(needs_elevation, std::move(policy_watcher),
                                    std::move(context), std::move(factory)));
 
   host->Start(native_messaging_pipe.get());
@@ -189,17 +200,10 @@ int StartIt2MeNativeMessagingHost() {
   // Run the loop until channel is alive.
   run_loop.Run();
 
+  // Block until tasks blocking shutdown have completed their execution.
+  base::TaskScheduler::GetInstance()->Shutdown();
+
   return kSuccessExitCode;
-}
-
-int It2MeNativeMessagingHostMain(int argc, char** argv) {
-  // This object instance is required by Chrome code (such as MessageLoop).
-  base::AtExitManager exit_manager;
-
-  base::CommandLine::Init(argc, argv);
-  remoting::InitHostLogging();
-
-  return StartIt2MeNativeMessagingHost();
 }
 
 }  // namespace remoting

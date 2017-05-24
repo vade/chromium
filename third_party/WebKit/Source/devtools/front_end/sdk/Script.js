@@ -40,23 +40,13 @@ SDK.Script = class {
    * @param {string} hash
    * @param {boolean} isContentScript
    * @param {boolean} isLiveEdit
-   * @param {string=} sourceMapURL
-   * @param {boolean=} hasSourceURL
+   * @param {string|undefined} sourceMapURL
+   * @param {boolean} hasSourceURL
+   * @param {number} length
    */
   constructor(
-      debuggerModel,
-      scriptId,
-      sourceURL,
-      startLine,
-      startColumn,
-      endLine,
-      endColumn,
-      executionContextId,
-      hash,
-      isContentScript,
-      isLiveEdit,
-      sourceMapURL,
-      hasSourceURL) {
+      debuggerModel, scriptId, sourceURL, startLine, startColumn, endLine, endColumn, executionContextId, hash,
+      isContentScript, isLiveEdit, sourceMapURL, hasSourceURL, length) {
     this.debuggerModel = debuggerModel;
     this.scriptId = scriptId;
     this.sourceURL = sourceURL;
@@ -65,12 +55,15 @@ SDK.Script = class {
     this.endLine = endLine;
     this.endColumn = endColumn;
 
-    this._executionContextId = executionContextId;
+    this.executionContextId = executionContextId;
     this.hash = hash;
     this._isContentScript = isContentScript;
     this._isLiveEdit = isLiveEdit;
     this.sourceMapURL = sourceMapURL;
     this.hasSourceURL = hasSourceURL;
+    this.contentLength = length;
+    this._originalContentProvider = null;
+    this._originalSource = null;
   }
 
   /**
@@ -94,41 +87,6 @@ SDK.Script = class {
   }
 
   /**
-   * @param {!SDK.Script} script
-   * @param {string} source
-   */
-  static _reportDeprecatedCommentIfNeeded(script, source) {
-    var consoleModel = script.target().consoleModel;
-    if (!consoleModel)
-      return;
-    var linesToCheck = 5;
-    var offset = source.lastIndexOf('\n');
-    while (linesToCheck && offset !== -1) {
-      offset = source.lastIndexOf('\n', offset - 1);
-      --linesToCheck;
-    }
-    offset = offset !== -1 ? offset : 0;
-    var sourceTail = source.substr(offset);
-    if (sourceTail.length > 5000)
-      return;
-    if (sourceTail.search(/^[\040\t]*\/\/@ source(mapping)?url=/mi) === -1)
-      return;
-    var text = Common.UIString(
-        '\'//@ sourceURL\' and \'//@ sourceMappingURL\' are deprecated, please use \'//# sourceURL=\' and \'//# sourceMappingURL=\' instead.');
-    var msg = new SDK.ConsoleMessage(
-        script.target(), SDK.ConsoleMessage.MessageSource.JS, SDK.ConsoleMessage.MessageLevel.Warning, text, undefined,
-        undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, script.scriptId);
-    consoleModel.addMessage(msg);
-  }
-
-  /**
-   * @return {!SDK.Target}
-   */
-  target() {
-    return this.debuggerModel.target();
-  }
-
-  /**
    * @return {boolean}
    */
   isContentScript() {
@@ -139,7 +97,7 @@ SDK.Script = class {
    * @return {?SDK.ExecutionContext}
    */
   executionContext() {
-    return this.target().runtimeModel.executionContext(this._executionContextId);
+    return this.debuggerModel.runtimeModel().executionContext(this.executionContextId);
   }
 
   /**
@@ -177,7 +135,7 @@ SDK.Script = class {
 
     var callback;
     var promise = new Promise(fulfill => callback = fulfill);
-    this.target().debuggerAgent().getScriptSource(this.scriptId, didGetScriptSource.bind(this));
+    this.debuggerModel.target().debuggerAgent().getScriptSource(this.scriptId, didGetScriptSource.bind(this));
     return promise;
 
     /**
@@ -186,14 +144,23 @@ SDK.Script = class {
      * @param {string} source
      */
     function didGetScriptSource(error, source) {
-      if (!error) {
-        SDK.Script._reportDeprecatedCommentIfNeeded(this, source);
-        this._source = SDK.Script._trimSourceURLComment(source);
-      } else {
-        this._source = '';
-      }
+      this._source = error ? '' : SDK.Script._trimSourceURLComment(source);
+      if (this._originalSource === null)
+        this._originalSource = this._source;
       callback(this._source);
     }
+  }
+
+  /**
+   * @return {!Common.ContentProvider}
+   */
+  originalContentProvider() {
+    if (!this._originalContentProvider) {
+      var lazyContent = () => this.requestContent().then(() => this._originalSource);
+      this._originalContentProvider =
+          new Common.StaticContentProvider(this.contentURL(), this.contentType(), lazyContent);
+    }
+    return this._originalContentProvider;
   }
 
   /**
@@ -225,7 +192,8 @@ SDK.Script = class {
 
     if (this.scriptId) {
       // Script failed to parse.
-      this.target().debuggerAgent().searchInContent(this.scriptId, query, caseSensitive, isRegex, innerCallback);
+      this.debuggerModel.target().debuggerAgent().searchInContent(
+          this.scriptId, query, caseSensitive, isRegex, innerCallback);
     } else {
       callback([]);
     }
@@ -266,8 +234,9 @@ SDK.Script = class {
     newSource = this._appendSourceURLCommentIfNeeded(newSource);
 
     if (this.scriptId) {
-      this.target().debuggerAgent().setScriptSource(
-          this.scriptId, newSource, undefined, didEditScriptSource.bind(this));
+      this.requestContent().then(
+          () => this.debuggerModel.target().debuggerAgent().setScriptSource(
+              this.scriptId, newSource, undefined, didEditScriptSource.bind(this)));
     } else {
       callback('Script failed to parse');
     }
@@ -288,16 +257,6 @@ SDK.Script = class {
   isInlineScript() {
     var startsAtZero = !this.lineOffset && !this.columnOffset;
     return !!this.sourceURL && !startsAtZero;
-  }
-
-  /**
-   * @param {string} sourceMapURL
-   */
-  addSourceMapURL(sourceMapURL) {
-    if (this.sourceMapURL)
-      return;
-    this.sourceMapURL = sourceMapURL;
-    this.debuggerModel.dispatchEventToListeners(SDK.DebuggerModel.Events.SourceMapURLAdded, this);
   }
 
   /**
@@ -327,7 +286,7 @@ SDK.Script = class {
      * @this {SDK.Script}
      */
     function setBlackboxedRanges(fulfill, reject) {
-      this.target().debuggerAgent().setBlackboxedRanges(this.scriptId, positions, callback);
+      this.debuggerModel.target().debuggerAgent().setBlackboxedRanges(this.scriptId, positions, callback);
       /**
        * @param {?Protocol.Error} error
        */

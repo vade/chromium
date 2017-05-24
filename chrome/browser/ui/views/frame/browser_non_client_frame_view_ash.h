@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "ash/common/shell_observer.h"
+#include "ash/shell_observer.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
@@ -86,11 +86,6 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
   // Distance between the right edge of the NonClientFrameView and the tab
   // strip.
   int GetTabStripRightInset() const;
-
-  // Returns true if we should use a super short header with light bars instead
-  // of regular tabs. This header is used in immersive fullscreen when the
-  // top-of-window views are not revealed.
-  bool UseImmersiveLightbarHeaderStyle() const;
 
   // Returns true if the header should be painted so that it looks the same as
   // the header used for packaged apps. Packaged apps use a different color

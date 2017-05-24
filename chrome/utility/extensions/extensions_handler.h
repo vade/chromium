@@ -8,7 +8,6 @@
 #include <stdint.h>
 
 #include "base/base64.h"
-#include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "chrome/common/media_galleries/picasa_types.h"
@@ -20,15 +19,15 @@
 #error "Extensions must be enabled"
 #endif
 
-class ChromeContentUtilityClient;
-
 namespace service_manager {
-class InterfaceRegistry;
+class BinderRegistry;
 }
 
 namespace extensions {
 
 // Dispatches IPCs for Chrome extensions utility messages.
+// Note: these IPC are deprecated so there is no need to convert
+// them to mojo. https://crbug.com/680928
 class ExtensionsHandler : public UtilityMessageHandler {
  public:
   ExtensionsHandler();
@@ -36,11 +35,8 @@ class ExtensionsHandler : public UtilityMessageHandler {
 
   static void PreSandboxStartup();
 
-  // TODO(noel): consider moving this API to the UtilityMessageHandler
-  // interface.
   static void ExposeInterfacesToBrowser(
-      service_manager::InterfaceRegistry* registry,
-      ChromeContentUtilityClient* utility_client,
+      service_manager::BinderRegistry* registry,
       bool running_elevated);
 
   // UtilityMessageHandler:
@@ -63,8 +59,6 @@ class ExtensionsHandler : public UtilityMessageHandler {
       const picasa::AlbumUIDSet& album_uids,
       const std::vector<picasa::FolderINIContents>& folders_inis);
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
-
-  UtilityHandler utility_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionsHandler);
 };

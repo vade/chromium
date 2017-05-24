@@ -6,58 +6,43 @@
 
 #include "base/memory/ptr_util.h"
 #include "chrome/browser/infobars/infobar_service.h"
-#include "chrome/browser/media/webrtc/media_stream_devices_controller.h"
 #include "chrome/browser/permissions/grouped_permission_infobar_delegate_android.h"
 #include "chrome/browser/permissions/permission_request.h"
-#include "chrome/browser/permissions/permission_request_id.h"
-#include "components/infobars/core/infobar.h"
-#include "content/public/browser/web_contents.h"
 
 PermissionPromptAndroid::PermissionPromptAndroid(
     content::WebContents* web_contents)
-    : web_contents_(web_contents), delegate_(nullptr), infobar_(nullptr) {
+    : web_contents_(web_contents), delegate_(nullptr) {
   DCHECK(web_contents);
 }
 
-PermissionPromptAndroid::~PermissionPromptAndroid() {
-  if (infobar_) {
-    GroupedPermissionInfoBarDelegate* infobar_delegate =
-        static_cast<GroupedPermissionInfoBarDelegate*>(infobar_->delegate());
-    infobar_delegate->PermissionPromptDestroyed();
-  }
-}
+PermissionPromptAndroid::~PermissionPromptAndroid() {}
 
 void PermissionPromptAndroid::SetDelegate(Delegate* delegate) {
   delegate_ = delegate;
 }
 
-void PermissionPromptAndroid::Show(
-    const std::vector<PermissionRequest*>& requests,
-    const std::vector<bool>& values) {
+void PermissionPromptAndroid::Show() {
   InfoBarService* infobar_service =
       InfoBarService::FromWebContents(web_contents_);
   if (!infobar_service)
     return;
 
-  infobar_ = GroupedPermissionInfoBarDelegate::Create(
-      this, infobar_service, requests[0]->GetOrigin(), requests);
+  GroupedPermissionInfoBarDelegate::Create(
+      this, infobar_service, delegate_->Requests()[0]->GetOrigin());
 }
 
 bool PermissionPromptAndroid::CanAcceptRequestUpdate() {
   return false;
 }
 
-void PermissionPromptAndroid::Hide() {
-  InfoBarService* infobar_service =
-      InfoBarService::FromWebContents(web_contents_);
-  if (infobar_ && infobar_service) {
-    infobar_service->RemoveInfoBar(infobar_);
-  }
-  infobar_ = nullptr;
+bool PermissionPromptAndroid::HidesAutomatically() {
+  return true;
 }
 
-bool PermissionPromptAndroid::IsVisible() {
-  return infobar_ != nullptr;
+void PermissionPromptAndroid::Hide() {
+  // Hide() is only called if HidesAutomatically() returns false or
+  // CanAcceptRequestUpdate() return true.
+  NOTREACHED();
 }
 
 void PermissionPromptAndroid::UpdateAnchorPosition() {
@@ -87,6 +72,30 @@ void PermissionPromptAndroid::Accept() {
 void PermissionPromptAndroid::Deny() {
   if (delegate_)
     delegate_->Deny();
+}
+
+size_t PermissionPromptAndroid::PermissionCount() const {
+  return delegate_->Requests().size();
+}
+
+ContentSettingsType PermissionPromptAndroid::GetContentSettingType(
+    size_t position) const {
+  const std::vector<PermissionRequest*>& requests = delegate_->Requests();
+  DCHECK_LT(position, requests.size());
+  return requests[position]->GetContentSettingsType();
+}
+
+int PermissionPromptAndroid::GetIconIdForPermission(size_t position) const {
+  const std::vector<PermissionRequest*>& requests = delegate_->Requests();
+  DCHECK_LT(position, requests.size());
+  return requests[position]->GetIconId();
+}
+
+base::string16 PermissionPromptAndroid::GetMessageTextFragment(
+    size_t position) const {
+  const std::vector<PermissionRequest*>& requests = delegate_->Requests();
+  DCHECK_LT(position, requests.size());
+  return requests[position]->GetMessageTextFragment();
 }
 
 // static

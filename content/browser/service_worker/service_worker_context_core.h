@@ -24,6 +24,7 @@
 #include "content/browser/service_worker/service_worker_registration_status.h"
 #include "content/browser/service_worker/service_worker_storage.h"
 #include "content/common/content_export.h"
+#include "content/common/worker_url_loader_factory_provider.mojom.h"
 #include "content/public/browser/service_worker_context.h"
 
 class GURL;
@@ -44,6 +45,7 @@ class EmbeddedWorkerRegistry;
 class ServiceWorkerContextObserver;
 class ServiceWorkerContextWrapper;
 class ServiceWorkerDatabaseTaskManager;
+class ServiceWorkerDispatcherHost;
 class ServiceWorkerJobCoordinator;
 class ServiceWorkerNavigationHandleCore;
 class ServiceWorkerProviderHost;
@@ -154,10 +156,17 @@ class CONTENT_EXPORT ServiceWorkerContextCore
     return job_coordinator_.get();
   }
 
+  // Maintains DispatcherHosts to exchange service worker related messages
+  // through them. The DispatcherHosts are not owned by this class.
+  void AddDispatcherHost(int process_id,
+                         ServiceWorkerDispatcherHost* dispatcher_host);
+  ServiceWorkerDispatcherHost* GetDispatcherHost(int process_id);
+  void RemoveDispatcherHost(int process_id);
+
   // The context class owns the set of ProviderHosts.
-  ServiceWorkerProviderHost* GetProviderHost(int process_id, int provider_id);
   void AddProviderHost(
       std::unique_ptr<ServiceWorkerProviderHost> provider_host);
+  ServiceWorkerProviderHost* GetProviderHost(int process_id, int provider_id);
   void RemoveProviderHost(int process_id, int provider_id);
   void RemoveAllProviderHostsForProcess(int process_id);
   std::unique_ptr<ProviderHostIterator> GetProviderHostIterator();
@@ -287,6 +296,14 @@ class CONTENT_EXPORT ServiceWorkerContextCore
   // version. The count resets to zero when the worker successfully starts.
   int GetVersionFailureCount(int64_t version_id);
 
+  // Binds the ServiceWorkerWorkerClient of a dedicated (or shared) worker to
+  // the parent frame's ServiceWorkerProviderHost. (This is used only when
+  // off-main-thread-fetch is enabled.)
+  void BindWorkerFetchContext(
+      int render_process_id,
+      int service_worker_provider_id,
+      mojom::ServiceWorkerWorkerClientAssociatedPtrInfo client_ptr_info);
+
   base::WeakPtr<ServiceWorkerContextCore> AsWeakPtr() {
     return weak_factory_.GetWeakPtr();
   }
@@ -342,6 +359,8 @@ class CONTENT_EXPORT ServiceWorkerContextCore
   // because the Wrapper::Shutdown call that hops threads to destroy |this| uses
   // Bind() to hold a reference to |wrapper_| until |this| is fully destroyed.
   ServiceWorkerContextWrapper* wrapper_;
+  std::map<int /* process_id */, ServiceWorkerDispatcherHost*>
+      dispatcher_hosts_;
   std::unique_ptr<ProcessToProviderMap> providers_;
   std::unique_ptr<ProviderByClientUUIDMap> provider_by_uuid_;
   std::unique_ptr<ServiceWorkerStorage> storage_;

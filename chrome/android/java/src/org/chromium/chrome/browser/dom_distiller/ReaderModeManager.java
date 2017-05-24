@@ -17,7 +17,6 @@ import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.PanelState;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.StateChangeReason;
 import org.chromium.chrome.browser.compositor.bottombar.readermode.ReaderModePanel;
-import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.infobar.InfoBar;
 import org.chromium.chrome.browser.infobar.InfoBarContainer;
 import org.chromium.chrome.browser.infobar.InfoBarContainer.InfoBarContainerObserver;
@@ -27,6 +26,7 @@ import org.chromium.chrome.browser.tabmodel.TabCreatorManager;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabObserver;
+import org.chromium.chrome.browser.util.AccessibilityUtil;
 import org.chromium.chrome.browser.widget.findinpage.FindToolbarObserver;
 import org.chromium.components.dom_distiller.content.DistillablePageUtils;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
@@ -156,6 +156,8 @@ public class ReaderModeManager extends TabModelSelectorTabObserver
 
     @Override
     public void onShown(Tab shownTab) {
+        if (mTabModelSelector == null) return;
+
         int shownTabId = shownTab.getId();
         Tab previousTab = mTabModelSelector.getTabById(mTabId);
         mTabId = shownTabId;
@@ -440,9 +442,9 @@ public class ReaderModeManager extends TabModelSelectorTabObserver
 
         return new WebContentsObserver(webContents) {
             @Override
-            public void didStartProvisionalLoadForFrame(long frameId, long parentFrameId,
-                    boolean isMainFrame, String validatedUrl, boolean isErrorPage) {
-                if (!isMainFrame) return;
+            public void didStartNavigation(String url, boolean isInMainFrame,
+                    boolean isSameDocument, boolean isErrorPage) {
+                if (!isInMainFrame || isSameDocument) return;
                 // If there is a navigation in the current tab, hide the bar. It will show again
                 // once the distillability test is successful.
                 if (readerTabId == mTabModelSelector.getCurrentTabId()) {
@@ -453,20 +455,21 @@ public class ReaderModeManager extends TabModelSelectorTabObserver
                 ReaderModeTabInfo tabInfo = mTabStatusMap.get(readerTabId);
                 if (tabInfo == null) return;
 
-                tabInfo.setUrl(validatedUrl);
-                if (DomDistillerUrlUtils.isDistilledPage(validatedUrl)) {
+                tabInfo.setUrl(url);
+                if (DomDistillerUrlUtils.isDistilledPage(url)) {
                     tabInfo.setStatus(STARTED);
-                    mReaderModePageUrl = validatedUrl;
+                    mReaderModePageUrl = url;
                 }
             }
 
             @Override
-            public void didNavigateMainFrame(String url, String baseUrl,
-                    boolean isNavigationToDifferentPage, boolean isNavigationInPage,
-                    int statusCode) {
+            public void didFinishNavigation(String url, boolean isInMainFrame, boolean isErrorPage,
+                    boolean hasCommitted, boolean isSameDocument, boolean isFragmentNavigation,
+                    Integer pageTransition, int errorCode, String errorDescription,
+                    int httpStatusCode) {
                 // TODO(cjhopman): This should possibly ignore navigations that replace the entry
                 // (like those from history.replaceState()).
-                if (isNavigationInPage) return;
+                if (!hasCommitted || !isInMainFrame || isSameDocument) return;
                 if (DomDistillerUrlUtils.isDistilledPage(url)) return;
 
                 // Make sure the tab was not destroyed.
@@ -533,7 +536,7 @@ public class ReaderModeManager extends TabModelSelectorTabObserver
                 || mIsFindToolbarShowing
                 || mIsFullscreenModeEntered
                 || mIsKeyboardShowing
-                || DeviceClassManager.isAccessibilityModeEnabled(mChromeActivity)) {
+                || AccessibilityUtil.isAccessibilityEnabled()) {
             return;
         }
 
@@ -544,6 +547,7 @@ public class ReaderModeManager extends TabModelSelectorTabObserver
      * Open a link from the panel in a new tab.
      * @param url The URL to load.
      */
+    @Override
     public void createNewTab(String url) {
         if (mChromeActivity == null) return;
 
@@ -639,8 +643,8 @@ public class ReaderModeManager extends TabModelSelectorTabObserver
 
         boolean enabled = CommandLine.getInstance().hasSwitch(ChromeSwitches.ENABLE_DOM_DISTILLER)
                 && !CommandLine.getInstance().hasSwitch(
-                        ChromeSwitches.DISABLE_READER_MODE_BOTTOM_BAR)
-                && !DeviceFormFactor.isTablet(context)
+                           ChromeSwitches.DISABLE_READER_MODE_BOTTOM_BAR)
+                && !DeviceFormFactor.isTablet()
                 && DomDistillerTabUtils.isDistillerHeuristicsEnabled()
                 && !SysUtils.isLowEndDevice();
         return enabled;

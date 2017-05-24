@@ -8,8 +8,7 @@
 #include "base/memory/ptr_util.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "services/service_manager/public/c/main.h"
-#include "services/service_manager/public/cpp/interface_factory.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/cpp/service_context.h"
 #include "services/service_manager/public/cpp/service_runner.h"
@@ -21,23 +20,25 @@ using service_manager::test::mojom::ConnectTestServiceRequest;
 namespace {
 
 class Target : public service_manager::Service,
-               public service_manager::InterfaceFactory<ConnectTestService>,
                public ConnectTestService {
  public:
-  Target() {}
+  Target() {
+    registry_.AddInterface<ConnectTestService>(
+        base::Bind(&Target::Create, base::Unretained(this)));
+  }
   ~Target() override {}
 
  private:
   // service_manager::Service:
-  bool OnConnect(const service_manager::ServiceInfo& remote_info,
-                 service_manager::InterfaceRegistry* registry) override {
-    registry->AddInterface<ConnectTestService>(this);
-    return true;
+  void OnBindInterface(const service_manager::BindSourceInfo& source_info,
+                       const std::string& interface_name,
+                       mojo::ScopedMessagePipeHandle interface_pipe) override {
+    registry_.BindInterface(source_info, interface_name,
+                            std::move(interface_pipe));
   }
 
-  // service_manager::InterfaceFactory<ConnectTestService>:
-  void Create(const service_manager::Identity& remote_identity,
-              ConnectTestServiceRequest request) override {
+  void Create(const service_manager::BindSourceInfo& source_info,
+              ConnectTestServiceRequest request) {
     bindings_.AddBinding(this, std::move(request));
   }
 
@@ -50,6 +51,7 @@ class Target : public service_manager::Service,
     callback.Run(context()->identity().instance());
   }
 
+  service_manager::BinderRegistry registry_;
   mojo::BindingSet<ConnectTestService> bindings_;
 
   DISALLOW_COPY_AND_ASSIGN(Target);

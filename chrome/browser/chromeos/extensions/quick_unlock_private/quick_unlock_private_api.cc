@@ -5,8 +5,8 @@
 #include "chrome/browser/chromeos/extensions/quick_unlock_private/quick_unlock_private_api.h"
 
 #include "base/memory/ptr_util.h"
-#include "chrome/browser/chromeos/login/quick_unlock/pin_storage.h"
-#include "chrome/browser/chromeos/login/quick_unlock/pin_storage_factory.h"
+#include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_factory.h"
+#include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_storage.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/login/auth/extended_authenticator.h"
@@ -49,9 +49,9 @@ const char* kMostCommonPins[] = {"1212", "1004", "2000", "6969",
 QuickUnlockModeList ComputeActiveModes(Profile* profile) {
   QuickUnlockModeList modes;
 
-  chromeos::PinStorage* pin_storage =
-      chromeos::PinStorageFactory::GetForProfile(profile);
-  if (pin_storage && pin_storage->IsPinSet())
+  chromeos::quick_unlock::QuickUnlockStorage* quick_unlock_storage =
+      chromeos::quick_unlock::QuickUnlockFactory::GetForProfile(profile);
+  if (quick_unlock_storage && quick_unlock_storage->pin_storage()->IsPinSet())
     modes.push_back(quick_unlock_private::QUICK_UNLOCK_MODE_PIN);
 
   return modes;
@@ -108,7 +108,7 @@ bool IsPinLengthValid(const std::string& pin,
   GetSanitizedPolicyPinMinMaxLength(pref_service, &min_length, &max_length);
 
   // Check if the PIN is shorter than the minimum specified length.
-  if (int{pin.size()} < min_length) {
+  if (static_cast<int>(pin.size()) < min_length) {
     if (length_problem)
       *length_problem = CredentialProblem::CREDENTIAL_PROBLEM_TOO_SHORT;
     return false;
@@ -116,7 +116,7 @@ bool IsPinLengthValid(const std::string& pin,
 
   // If the maximum specified length is zero, there is no maximum length.
   // Otherwise check if the PIN is longer than the maximum specified length.
-  if (max_length != 0 && int{pin.size()} > max_length) {
+  if (max_length != 0 && static_cast<int>(pin.size()) > max_length) {
     if (length_problem)
       *length_problem = CredentialProblem::CREDENTIAL_PROBLEM_TOO_LONG;
     return false;
@@ -135,7 +135,7 @@ bool IsPinLengthValid(const std::string& pin,
 bool IsPinDifficultEnough(const std::string& pin) {
   // If the pin length is |kMinLengthForNonWeakPin| or less, there is no need to
   // check for same character and increasing pin.
-  if (int{pin.size()} <= kMinLengthForNonWeakPin)
+  if (static_cast<int>(pin.size()) <= kMinLengthForNonWeakPin)
     return true;
 
   // Check if it is on the list of most common PINs.
@@ -149,7 +149,7 @@ bool IsPinDifficultEnough(const std::string& pin) {
   // TODO(sammiequon): Should longer PINs (5+) be still subjected to this?
   bool is_increasing = true;
   bool is_decreasing = true;
-  for (int i = 1; i < int{pin.length()}; ++i) {
+  for (int i = 1; i < static_cast<int>(pin.length()); ++i) {
     const char previous = pin[i - 1];
     const char current = pin[i];
 
@@ -400,14 +400,14 @@ void QuickUnlockPrivateSetModesFunction::ApplyModeChange() {
   // Apply changes.
   if (update_pin) {
     Profile* profile = chrome_details_.GetProfile();
-    chromeos::PinStorage* pin_storage =
-        chromeos::PinStorageFactory::GetForProfile(profile);
+    chromeos::quick_unlock::QuickUnlockStorage* quick_unlock_storage =
+        chromeos::quick_unlock::QuickUnlockFactory::GetForProfile(profile);
 
     if (pin_credential.empty()) {
-      pin_storage->RemovePin();
+      quick_unlock_storage->pin_storage()->RemovePin();
     } else {
-      pin_storage->SetPin(pin_credential);
-      pin_storage->MarkStrongAuth();
+      quick_unlock_storage->pin_storage()->SetPin(pin_credential);
+      quick_unlock_storage->MarkStrongAuth();
     }
   }
 }

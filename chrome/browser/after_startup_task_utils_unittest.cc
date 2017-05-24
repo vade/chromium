@@ -5,6 +5,7 @@
 #include "chrome/browser/after_startup_task_utils.h"
 
 #include <memory>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -30,16 +31,18 @@ class WrappedTaskRunner : public base::TaskRunner {
       : real_task_runner_(real_runner) {}
 
   bool PostDelayedTask(const tracked_objects::Location& from_here,
-                       const base::Closure& task,
+                       base::OnceClosure task,
                        base::TimeDelta delay) override {
     ++posted_task_count_;
     return real_task_runner_->PostDelayedTask(
-        from_here, base::Bind(&WrappedTaskRunner::RunWrappedTask, this, task),
+        from_here,
+        base::BindOnce(&WrappedTaskRunner::RunWrappedTask, this,
+                       std::move(task)),
         base::TimeDelta());  // Squash all delays so our tests complete asap.
   }
 
-  bool RunsTasksOnCurrentThread() const override {
-    return real_task_runner_->RunsTasksOnCurrentThread();
+  bool RunsTasksInCurrentSequence() const override {
+    return real_task_runner_->RunsTasksInCurrentSequence();
   }
 
   base::TaskRunner* real_runner() const { return real_task_runner_.get(); }
@@ -56,9 +59,9 @@ class WrappedTaskRunner : public base::TaskRunner {
  private:
   ~WrappedTaskRunner() override {}
 
-  void RunWrappedTask(const base::Closure& task) {
+  void RunWrappedTask(base::OnceClosure task) {
     ++ran_task_count_;
-    task.Run();
+    std::move(task).Run();
   }
 
   scoped_refptr<TaskRunner> real_task_runner_;
@@ -96,12 +99,13 @@ class AfterStartupTaskTest : public testing::Test {
   void PostAfterStartupTaskFromDBThread(
       const tracked_objects::Location& from_here,
       const scoped_refptr<base::TaskRunner>& task_runner,
-      const base::Closure& task) {
+      base::OnceClosure task) {
     RunLoop run_loop;
     db_thread_->real_runner()->PostTaskAndReply(
-        FROM_HERE, base::Bind(&AfterStartupTaskUtils::PostTask, from_here,
-                              task_runner, task),
-        base::Bind(&RunLoop::Quit, base::Unretained(&run_loop)));
+        FROM_HERE,
+        base::BindOnce(&AfterStartupTaskUtils::PostTask, from_here, task_runner,
+                       std::move(task)),
+        base::BindOnce(&RunLoop::Quit, base::Unretained(&run_loop)));
     run_loop.Run();
   }
 
@@ -109,8 +113,8 @@ class AfterStartupTaskTest : public testing::Test {
   void FlushDBThread() {
     RunLoop run_loop;
     db_thread_->real_runner()->PostTaskAndReply(
-        FROM_HERE, base::Bind(&base::DoNothing),
-        base::Bind(&RunLoop::Quit, base::Unretained(&run_loop)));
+        FROM_HERE, base::BindOnce(&base::DoNothing),
+        base::BindOnce(&RunLoop::Quit, base::Unretained(&run_loop)));
     run_loop.Run();
   }
 
@@ -150,20 +154,20 @@ TEST_F(AfterStartupTaskTest, PostTask) {
   EXPECT_FALSE(AfterStartupTaskUtils::IsBrowserStartupComplete());
   AfterStartupTaskUtils::PostTask(
       FROM_HERE, ui_thread_,
-      base::Bind(&AfterStartupTaskTest::VerifyExpectedThread,
-                 BrowserThread::UI));
+      base::BindOnce(&AfterStartupTaskTest::VerifyExpectedThread,
+                     BrowserThread::UI));
   AfterStartupTaskUtils::PostTask(
       FROM_HERE, db_thread_,
-      base::Bind(&AfterStartupTaskTest::VerifyExpectedThread,
-                 BrowserThread::DB));
+      base::BindOnce(&AfterStartupTaskTest::VerifyExpectedThread,
+                     BrowserThread::DB));
   PostAfterStartupTaskFromDBThread(
       FROM_HERE, ui_thread_,
-      base::Bind(&AfterStartupTaskTest::VerifyExpectedThread,
-                 BrowserThread::UI));
+      base::BindOnce(&AfterStartupTaskTest::VerifyExpectedThread,
+                     BrowserThread::UI));
   PostAfterStartupTaskFromDBThread(
       FROM_HERE, db_thread_,
-      base::Bind(&AfterStartupTaskTest::VerifyExpectedThread,
-                 BrowserThread::DB));
+      base::BindOnce(&AfterStartupTaskTest::VerifyExpectedThread,
+                     BrowserThread::DB));
   RunLoop().RunUntilIdle();
   EXPECT_EQ(0, db_thread_->total_task_count() + ui_thread_->total_task_count());
 
@@ -182,15 +186,15 @@ TEST_F(AfterStartupTaskTest, PostTask) {
 
   // Tasks posted after startup should get posted immediately.
   AfterStartupTaskUtils::PostTask(FROM_HERE, ui_thread_,
-                                  base::Bind(&base::DoNothing));
+                                  base::BindOnce(&base::DoNothing));
   AfterStartupTaskUtils::PostTask(FROM_HERE, db_thread_,
-                                  base::Bind(&base::DoNothing));
+                                  base::BindOnce(&base::DoNothing));
   EXPECT_EQ(1, db_thread_->posted_task_count());
   EXPECT_EQ(1, ui_thread_->posted_task_count());
   PostAfterStartupTaskFromDBThread(FROM_HERE, ui_thread_,
-                                   base::Bind(&base::DoNothing));
+                                   base::BindOnce(&base::DoNothing));
   PostAfterStartupTaskFromDBThread(FROM_HERE, db_thread_,
-                                   base::Bind(&base::DoNothing));
+                                   base::BindOnce(&base::DoNothing));
   EXPECT_EQ(2, db_thread_->posted_task_count());
   EXPECT_EQ(2, ui_thread_->posted_task_count());
   FlushDBThread();
@@ -208,8 +212,8 @@ TEST_F(AfterStartupTaskTest, AfterStartupTaskUtilsRunner) {
 
   EXPECT_FALSE(AfterStartupTaskUtils::IsBrowserStartupComplete());
   after_startup_runner->PostTask(
-      FROM_HERE, base::Bind(&AfterStartupTaskTest::VerifyExpectedThread,
-                            BrowserThread::DB));
+      FROM_HERE, base::BindOnce(&AfterStartupTaskTest::VerifyExpectedThread,
+                                BrowserThread::DB));
 
   RunLoop().RunUntilIdle();
   EXPECT_FALSE(AfterStartupTaskUtils::IsBrowserStartupComplete());

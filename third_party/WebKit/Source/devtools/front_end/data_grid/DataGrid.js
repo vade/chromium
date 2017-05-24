@@ -246,11 +246,12 @@ DataGrid.DataGrid = class extends Common.Object {
    * @protected
    */
   setVerticalPadding(top, bottom) {
-    this._topFillerRow.style.height = top + 'px';
-    if (top || bottom)
-      this._bottomFillerRow.style.height = bottom + 'px';
-    else
-      this._bottomFillerRow.style.height = 'auto';
+    var topPx = top + 'px';
+    var bottomPx = (top || bottom) ? bottom + 'px' : 'auto';
+    if (this._topFillerRow.style.height === topPx && this._bottomFillerRow.style.height === bottomPx)
+      return;
+    this._topFillerRow.style.height = topPx;
+    this._bottomFillerRow.style.height = bottomPx;
     this.dispatchEventToListeners(DataGrid.DataGrid.Events.PaddingChanged);
   }
 
@@ -306,7 +307,19 @@ DataGrid.DataGrid = class extends Common.Object {
 
     var element = this._editingNode._element.children[cellIndex];
     UI.InplaceEditor.startEditing(element, this._startEditingConfig(element));
-    element.getComponentSelection().setBaseAndExtent(element, 0, element, 1);
+    element.getComponentSelection().selectAllChildren(element);
+  }
+
+  /**
+   * @param {!DataGrid.DataGridNode} node
+   * @param {string} columnIdentifier
+   */
+  startEditingNextEditableColumnOfDataGridNode(node, columnIdentifier) {
+    const column = this._columns[columnIdentifier];
+    const cellIndex = this._visibleColumnsArray.indexOf(column);
+    const nextEditableColumn = this._nextEditableColumn(cellIndex);
+    if (nextEditableColumn !== -1)
+      this._startEditingColumnOfDataGridNode(node, nextEditableColumn);
   }
 
   /**
@@ -333,7 +346,7 @@ DataGrid.DataGrid = class extends Common.Object {
     this._editing = true;
     UI.InplaceEditor.startEditing(element, this._startEditingConfig(element));
 
-    element.getComponentSelection().setBaseAndExtent(element, 0, element, 1);
+    element.getComponentSelection().selectAllChildren(element);
   }
 
   renderInline() {
@@ -367,7 +380,7 @@ DataGrid.DataGrid = class extends Common.Object {
     }
     var column = this._columns[columnId];
     var cellIndex = this._visibleColumnsArray.indexOf(column);
-    var textBeforeEditing = /** @type {string} */ (this._editingNode.data[columnId]);
+    var textBeforeEditing = /** @type {string} */ (this._editingNode.data[columnId] || '');
     var currentEditingNode = this._editingNode;
 
     /**
@@ -825,6 +838,8 @@ DataGrid.DataGrid = class extends Common.Object {
       if (this._editCallback) {
         handled = true;
         this._startEditing(this.selectedNode._element.children[this._nextEditableColumn(-1)]);
+      } else {
+        this.dispatchEventToListeners(DataGrid.DataGrid.Events.OpenedNode, this.selectedNode);
       }
     }
 
@@ -951,6 +966,7 @@ DataGrid.DataGrid = class extends Common.Object {
         gridNode.select();
     } else {
       gridNode.select();
+      this.dispatchEventToListeners(DataGrid.DataGrid.Events.OpenedNode, gridNode);
     }
   }
 
@@ -1173,8 +1189,9 @@ DataGrid.DataGrid.ColumnDescriptor;
 DataGrid.DataGrid.Events = {
   SelectedNode: Symbol('SelectedNode'),
   DeselectedNode: Symbol('DeselectedNode'),
+  OpenedNode: Symbol('OpenedNode'),
   SortingChanged: Symbol('SortingChanged'),
-  PaddingChanged: Symbol('PaddingChanged')
+  PaddingChanged: Symbol('PaddingChanged'),
 };
 
 /** @enum {string} */
@@ -1205,7 +1222,6 @@ DataGrid.DataGrid.ResizeMethod = {
 
 /**
  * @unrestricted
- * @this {NODE_TYPE}
  * @template NODE_TYPE
  */
 DataGrid.DataGridNode = class extends Common.Object {
@@ -1221,6 +1237,10 @@ DataGrid.DataGridNode = class extends Common.Object {
     this._expanded = false;
     /** @type {boolean} */
     this._selected = false;
+    /** @type {boolean} */
+    this._dirty = false;
+    /** @type {boolean} */
+    this._inactive = false;
     /** @type {number|undefined} */
     this._depth;
     /** @type {boolean|undefined} */
@@ -1282,6 +1302,10 @@ DataGrid.DataGridNode = class extends Common.Object {
       this._element.classList.add('selected');
     if (this.revealed)
       this._element.classList.add('revealed');
+    if (this.dirty)
+      this._element.classList.add('dirty');
+    if (this.inactive)
+      this._element.classList.add('inactive');
     return this._element;
   }
 
@@ -1361,6 +1385,51 @@ DataGrid.DataGridNode = class extends Common.Object {
 
     for (var i = 0; i < this.children.length; ++i)
       this.children[i].revealed = x && this.expanded;
+  }
+
+  /**
+   * @return {boolean}
+   */
+  isDirty() {
+    return this._dirty;
+  }
+
+  /**
+   * @param {boolean} dirty
+   */
+  setDirty(dirty) {
+    if (this._dirty === dirty)
+      return;
+    this._dirty = dirty;
+    if (!this._element)
+      return;
+    if (dirty)
+      this._element.classList.add('dirty');
+    else
+      this._element.classList.remove('dirty');
+  }
+
+
+  /**
+   * @return {boolean}
+   */
+  isInactive() {
+    return this._inactive;
+  }
+
+  /**
+   * @param {boolean} inactive
+   */
+  setInactive(inactive) {
+    if (this._inactive === inactive)
+      return;
+    this._inactive = inactive;
+    if (!this._element)
+      return;
+    if (inactive)
+      this._element.classList.add('inactive');
+    else
+      this._element.classList.remove('inactive');
   }
 
   /**
@@ -1520,7 +1589,7 @@ DataGrid.DataGridNode = class extends Common.Object {
    * @return {number}
    */
   nodeSelfHeight() {
-    return 16;
+    return 20;
   }
 
   /**
@@ -1528,6 +1597,26 @@ DataGrid.DataGridNode = class extends Common.Object {
    */
   appendChild(child) {
     this.insertChild(child, this.children.length);
+  }
+
+  /**
+   * @param {boolean=} onlyCaches
+   */
+  resetNode(onlyCaches) {
+    // @TODO(allada) This is a hack to make sure ViewportDataGrid can clean up these caches. Try Not To Use.
+    delete this._depth;
+    delete this._revealed;
+    if (onlyCaches)
+      return;
+    if (this.previousSibling)
+      this.previousSibling.nextSibling = this.nextSibling;
+    if (this.nextSibling)
+      this.nextSibling.previousSibling = this.previousSibling;
+    this.dataGrid = null;
+    this.parent = null;
+    this.nextSibling = null;
+    this.previousSibling = null;
+    this._attached = false;
   }
 
   /**
@@ -1556,16 +1645,12 @@ DataGrid.DataGridNode = class extends Common.Object {
     child.dataGrid = this.dataGrid;
     child.recalculateSiblings(index);
 
-    child._depth = undefined;
-    child._revealed = undefined;
-    child._attached = false;
     child._shouldRefreshChildren = true;
 
     var current = child.children[0];
     while (current) {
+      current.resetNode(true);
       current.dataGrid = this.dataGrid;
-      current._depth = undefined;
-      current._revealed = undefined;
       current._attached = false;
       current._shouldRefreshChildren = true;
       current = current.traverseNextNode(false, child, true);
@@ -1593,19 +1678,10 @@ DataGrid.DataGridNode = class extends Common.Object {
 
     if (this.dataGrid)
       this.dataGrid.updateSelectionBeforeRemoval(child, false);
+
     child._detach();
-
+    child.resetNode();
     this.children.remove(child, true);
-
-    if (child.previousSibling)
-      child.previousSibling.nextSibling = child.nextSibling;
-    if (child.nextSibling)
-      child.nextSibling.previousSibling = child.previousSibling;
-
-    child.dataGrid = null;
-    child.parent = null;
-    child.nextSibling = null;
-    child.previousSibling = null;
 
     if (this.children.length <= 0)
       this.setHasChildren(false);
@@ -1617,10 +1693,7 @@ DataGrid.DataGridNode = class extends Common.Object {
     for (var i = 0; i < this.children.length; ++i) {
       var child = this.children[i];
       child._detach();
-      child.dataGrid = null;
-      child.parent = null;
-      child.nextSibling = null;
-      child.previousSibling = null;
+      child.resetNode();
     }
 
     this.children = [];
@@ -1879,11 +1952,6 @@ DataGrid.DataGridNode = class extends Common.Object {
 
     for (var i = 0; i < this.children.length; ++i)
       this.children[i]._detach();
-
-    this.wasDetached();
-  }
-
-  wasDetached() {
   }
 
   savePosition() {

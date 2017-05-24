@@ -7,7 +7,7 @@ Checking 'win'
 Found: window
 
 Checking 'window["doc'
-Found: "document"]
+Found: "document"], displayed as "document"
 
 Checking 'window["document"].bo'
 Found: body
@@ -72,17 +72,17 @@ Checking 'shou'
 Not Found: should not find this
 
 Checking 'myMap.get('
-Found: "first")
-Found: "second")
-Found: "third")
+Found: "first"), displayed as "first"
+Found: "second"), displayed as "second"
+Found: "third"), displayed as "third"
 
 Checking 'myMap.get(''
-Found: 'first')
-Found: 'second')
-Found: 'third')
+Found: 'first'), displayed as 'first'
+Found: 'second'), displayed as 'second'
+Found: 'third'), displayed as 'third'
 
 Checking 'myMap.set('firs'
-Found: 'first', 
+Found: 'first', , displayed as 'first'
 
 Checking 'myMap.set(should'
 Found: shouldFindThisFunction
@@ -90,9 +90,9 @@ Not Found: shouldNotFindThis
 Not Found: "shouldNotFindThis")
 
 Checking 'myMap.delete(''
-Found: 'first')
-Found: 'second')
-Found: 'third')
+Found: 'first'), displayed as 'first'
+Found: 'second'), displayed as 'second'
+Found: 'third'), displayed as 'third'
 
 Checking 'document.   bo'
 Found: body
@@ -130,5 +130,29 @@ Found: Infinity
 
 Checking 'var x = (do|);'
 Found: document
+
+Checking 'complicatedObject["foo'
+Found: "foo-bar"], displayed as "foo-bar"
+
+Checking 'complicatedObject["foo-'
+Found: "foo-bar"], displayed as "foo-bar"
+
+Checking 'complicatedObject["foo-bar'
+Found: "foo-bar"], displayed as "foo-bar"
+
+Checking 'complicatedObject["'sing'
+Found: "'single-qouted'"], displayed as "'single-qouted'"
+
+Checking 'complicatedObject['\'sing'
+Found: '\'single-qouted\''], displayed as '\'single-qouted\''
+
+Checking 'complicatedObject["'single-qou'
+Found: "'single-qouted'"], displayed as "'single-qouted'"
+
+Checking 'complicatedObject["\"double-qouted\"'
+Found: "\"double-qouted\""], displayed as "\"double-qouted\""
+
+Checking 'complicatedObject["notDangerous();'
+Found: "notDangerous();"], displayed as "notDangerous();"
 
 

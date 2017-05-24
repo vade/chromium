@@ -5,6 +5,7 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_cocoa_controller.h"
 
 #import "base/mac/foundation_util.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"  // IDC_BOOKMARK_MENU
 #import "chrome/browser/app_controller_mac.h"
@@ -16,7 +17,6 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_bridge.h"
 #import "chrome/browser/ui/cocoa/l10n_util.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
-#include "content/public/browser/user_metrics.h"
 #import "ui/base/cocoa/cocoa_base_utils.h"
 #import "ui/base/cocoa/menu_controller.h"
 
@@ -93,7 +93,7 @@ const NSUInteger kMaximumMenuPixelsWide = 300;
 - (void)openURLForNode:(const BookmarkNode*)node {
   Browser* browser = chrome::FindTabbedBrowser(bridge_->GetProfile(), true);
   if (!browser) {
-    browser = new Browser(Browser::CreateParams(bridge_->GetProfile()));
+    browser = new Browser(Browser::CreateParams(bridge_->GetProfile(), true));
   }
   WindowOpenDisposition disposition =
       ui::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
@@ -101,35 +101,6 @@ const NSUInteger kMaximumMenuPixelsWide = 300;
       node->url(), Referrer(), disposition,
       ui::PAGE_TRANSITION_AUTO_BOOKMARK, false);
   browser->OpenURL(params);
-}
-
-// Open sites under BookmarkNode with the specified disposition.
-- (void)openAll:(NSInteger)tag
-    withDisposition:(WindowOpenDisposition)disposition {
-  int identifier = tag;
-
-  const BookmarkNode* node = [self nodeForIdentifier:identifier];
-  DCHECK(node);
-
-  Browser* browser = chrome::FindTabbedBrowser(bridge_->GetProfile(), true);
-  if (!browser) {
-    browser = new Browser(Browser::CreateParams(bridge_->GetProfile()));
-  }
-  DCHECK(browser);
-
-  if (!node || !browser)
-    return; // shouldn't be reached
-
-  chrome::OpenAll(NULL, browser, node, disposition, browser->profile());
-
-  if (disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB) {
-    content::RecordAction(UserMetricsAction("OpenAllBookmarks"));
-  } else if (disposition == WindowOpenDisposition::NEW_WINDOW) {
-    content::RecordAction(UserMetricsAction("OpenAllBookmarksNewWindow"));
-  } else {
-    content::RecordAction(
-        UserMetricsAction("OpenAllBookmarksIncognitoWindow"));
-  }
 }
 
 - (IBAction)openBookmarkMenuItem:(id)sender {
@@ -141,21 +112,6 @@ const NSUInteger kMaximumMenuPixelsWide = 300;
     return;  // shouldn't be reached
 
   [self openURLForNode:node];
-}
-
-- (IBAction)openAllBookmarks:(id)sender {
-  WindowOpenDisposition disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
-  [self openAll:[sender tag] withDisposition:disposition];
-}
-
-- (IBAction)openAllBookmarksNewWindow:(id)sender {
-  WindowOpenDisposition disposition = WindowOpenDisposition::NEW_WINDOW;
-  [self openAll:[sender tag] withDisposition:disposition];
-}
-
-- (IBAction)openAllBookmarksIncognitoWindow:(id)sender {
-  WindowOpenDisposition disposition = WindowOpenDisposition::OFF_THE_RECORD;
-  [self openAll:[sender tag] withDisposition:disposition];
 }
 
 @end  // BookmarkMenuCocoaController

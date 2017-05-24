@@ -64,10 +64,14 @@
      */
     addExtensions(extensions) {
       // Support for legacy front-ends (<M41).
-      if (window['WebInspector'] && window['WebInspector']['addExtensions'])
+      if (window['WebInspector'] && window['WebInspector']['addExtensions']) {
         window['WebInspector']['addExtensions'](extensions);
-      else
+      } else if (window['InspectorFrontendAPI']) {
+        // The addExtensions command is sent as the onload event happens for
+        // DevTools front-end. In case of hosted mode, this
+        // happens before the InspectorFrontendAPI is initialized.
         this._dispatchOnInspectorFrontendAPI('addExtensions', [extensions]);
+      }
     }
 
     /**
@@ -103,13 +107,10 @@
     }
 
     /**
-     * @param {boolean} discoverUsbDevices
-     * @param {boolean} portForwardingEnabled
-     * @param {!Adb.PortForwardingConfig} portForwardingConfig
+     * @param {!Adb.Config} config
      */
-    devicesDiscoveryConfigChanged(discoverUsbDevices, portForwardingEnabled, portForwardingConfig) {
-      this._dispatchOnInspectorFrontendAPI(
-          'devicesDiscoveryConfigChanged', [discoverUsbDevices, portForwardingEnabled, portForwardingConfig]);
+    devicesDiscoveryConfigChanged(config) {
+      this._dispatchOnInspectorFrontendAPI('devicesDiscoveryConfigChanged', [config]);
     }
 
     /**
@@ -154,6 +155,13 @@
     }
 
     /**
+     * @param {!{r: number, g: number, b: number, a: number}} color
+     */
+    eyeDropperPickedColor(color) {
+      this._dispatchOnInspectorFrontendAPI('eyeDropperPickedColor', [color]);
+    }
+
+    /**
      * @param {!Array.<!{fileSystemName: string, rootURL: string, fileSystemPath: string}>} fileSystems
      */
     fileSystemsLoaded(fileSystems) {
@@ -176,9 +184,18 @@
 
     /**
      * @param {!Array<string>} changedPaths
+     * @param {!Array<string>} addedPaths
+     * @param {!Array<string>} removedPaths
      */
-    fileSystemFilesChanged(changedPaths) {
-      this._dispatchOnInspectorFrontendAPI('fileSystemFilesChanged', [changedPaths]);
+    fileSystemFilesChangedAddedRemoved(changedPaths, addedPaths, removedPaths) {
+      // Support for legacy front-ends (<M58)
+      if (window['InspectorFrontendAPI'] && window['InspectorFrontendAPI']['fileSystemFilesChanged']) {
+        this._dispatchOnInspectorFrontendAPI(
+            'fileSystemFilesChanged', [changedPaths.concat(addedPaths).concat(removedPaths)]);
+      } else {
+        this._dispatchOnInspectorFrontendAPI(
+            'fileSystemFilesChangedAddedRemoved', [changedPaths, addedPaths, removedPaths]);
+      }
     }
 
     /**
@@ -608,6 +625,14 @@
 
     /**
      * @override
+     * @param {boolean} active
+     */
+    setEyeDropperActive(active) {
+      DevToolsAPI.sendMessageToEmbedder('setEyeDropperActive', [active], null);
+    }
+
+    /**
+     * @override
      * @param {!Array<string>} certChain
      */
     showCertificateViewer(certChain) {
@@ -639,14 +664,16 @@
 
     /**
      * @override
-     * @param {boolean} discoverUsbDevices
-     * @param {boolean} portForwardingEnabled
-     * @param {!Adb.PortForwardingConfig} portForwardingConfig
+     * @param {!Adb.Config} config
      */
-    setDevicesDiscoveryConfig(discoverUsbDevices, portForwardingEnabled, portForwardingConfig) {
+    setDevicesDiscoveryConfig(config) {
       DevToolsAPI.sendMessageToEmbedder(
           'setDevicesDiscoveryConfig',
-          [discoverUsbDevices, portForwardingEnabled, JSON.stringify(portForwardingConfig)], null);
+          [
+            config.discoverUsbDevices, config.portForwardingEnabled, JSON.stringify(config.portForwardingConfig),
+            config.networkDiscoveryEnabled, JSON.stringify(config.networkDiscoveryConfig)
+          ],
+          null);
     }
 
     /**

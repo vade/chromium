@@ -30,8 +30,8 @@
 #include "chrome/common/extensions/api/extension_action/action_info.h"
 #include "components/crx_file/id_util.h"
 #include "content/public/browser/navigation_controller.h"
-#include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_registry.h"
@@ -120,7 +120,8 @@ ExtensionAction::ShowAction ExtensionActionRunner::RunAction(
     return ExtensionAction::ACTION_SHOW_POPUP;
 
   ExtensionActionAPI::Get(browser_context_)
-      ->DispatchExtensionActionClicked(*extension_action, web_contents());
+      ->DispatchExtensionActionClicked(*extension_action, web_contents(),
+                                       extension);
   return ExtensionAction::ACTION_NONE;
 }
 
@@ -355,7 +356,7 @@ void ExtensionActionRunner::ShowBlockedActionBubble(
     if (default_bubble_close_action_for_testing_) {
       base::ThreadTaskRunnerHandle::Get()->PostTask(
           FROM_HERE,
-          base::Bind(callback, *default_bubble_close_action_for_testing_));
+          base::BindOnce(callback, *default_bubble_close_action_for_testing_));
     } else {
       toolbar_actions_bar->ShowToolbarActionBubble(
           base::MakeUnique<BlockedActionBubbleDelegate>(callback,
@@ -399,11 +400,13 @@ bool ExtensionActionRunner::OnMessageReceived(
   return handled;
 }
 
-void ExtensionActionRunner::DidNavigateMainFrame(
-    const content::LoadCommittedDetails& details,
-    const content::FrameNavigateParams& params) {
-  if (details.is_in_page)
+void ExtensionActionRunner::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
+  if (!navigation_handle->IsInMainFrame() ||
+      !navigation_handle->HasCommitted() ||
+      navigation_handle->IsSameDocument()) {
     return;
+  }
 
   LogUMA();
   num_page_requests_ = 0;
@@ -417,7 +420,7 @@ void ExtensionActionRunner::DidNavigateMainFrame(
 void ExtensionActionRunner::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const Extension* extension,
-    UnloadedExtensionInfo::Reason reason) {
+    UnloadedExtensionReason reason) {
   PendingScriptMap::iterator iter = pending_scripts_.find(extension->id());
   if (iter != pending_scripts_.end()) {
     pending_scripts_.erase(iter);

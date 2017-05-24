@@ -100,9 +100,16 @@ class ProcessorEntityTracker {
   // Clears any in-memory sync state associated with outstanding commits.
   void ClearTransientSyncState();
 
-  // Takes the passed commit data and caches it in the instance.
-  // The data is swapped from the input struct without copying.
-  void CacheCommitData(EntityData* data);
+  // Update storage_key_.
+  // This function should only be called by
+  // ModelTypeChangeProcessor::UpdateStorageKey for the data type which does not
+  // create storage key based on syncer::EntityData.
+  void SetStorageKey(const std::string& new_key);
+
+  // Takes the passed commit data updates its fields with values from metadata
+  // and caches it in the instance. The data is swapped from the input struct
+  // without copying.
+  void SetCommitData(EntityData* data);
 
   // Caches the a copy of |data_ptr|, which doesn't copy the data itself.
   void CacheCommitData(const EntityDataPtr& data_ptr);
@@ -121,6 +128,9 @@ class ProcessorEntityTracker {
   // base_specifics_hash if the entity was not already unsynced.
   void IncrementSequenceNumber();
 
+  // Returns the estimate of dynamically allocated memory in bytes.
+  size_t EstimateMemoryUsage() const;
+
  private:
   friend class ProcessorEntityTrackerTest;
 
@@ -135,7 +145,7 @@ class ProcessorEntityTracker {
   void UpdateSpecificsHash(const sync_pb::EntitySpecifics& specifics);
 
   // Storage key. Should always be available.
-  const std::string storage_key_;
+  std::string storage_key_;
 
   // Serializable Sync metadata.
   sync_pb::EntityMetadata metadata_;

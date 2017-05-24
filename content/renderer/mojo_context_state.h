@@ -8,14 +8,14 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "gin/modules/module_registry_observer.h"
 #include "v8/include/v8.h"
 
 namespace blink {
-class WebFrame;
+class WebLocalFrame;
 class WebURLResponse;
 }
 
@@ -29,7 +29,7 @@ enum class MojoBindingsType;
 // by way of gin. Non-builtin modules are downloaded by way of ResourceFetchers.
 class MojoContextState : public gin::ModuleRegistryObserver {
  public:
-  MojoContextState(blink::WebFrame* frame,
+  MojoContextState(blink::WebLocalFrame* frame,
                    v8::Local<v8::Context> context,
                    MojoBindingsType bindings_type);
   ~MojoContextState() override;
@@ -61,7 +61,7 @@ class MojoContextState : public gin::ModuleRegistryObserver {
       const std::vector<std::string>& dependencies) override;
 
   // Frame script is executed in. Also used to download resources.
-  blink::WebFrame* frame_;
+  blink::WebLocalFrame* frame_;
 
   // See description above getter.
   bool module_added_;
@@ -70,7 +70,7 @@ class MojoContextState : public gin::ModuleRegistryObserver {
   std::unique_ptr<MojoMainRunner> runner_;
 
   // Set of fetchers we're waiting on to download script.
-  ScopedVector<ResourceFetcher> module_fetchers_;
+  std::vector<std::unique_ptr<ResourceFetcher>> module_fetchers_;
 
   // Set of modules we've fetched script from.
   std::set<std::string> fetched_modules_;

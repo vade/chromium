@@ -16,6 +16,8 @@ class VRDisplayImpl;
 
 const unsigned int VR_DEVICE_LAST_ID = 0xFFFFFFFF;
 
+// Represents one of the platform's VR devices. Owned by the respective
+// VRDeviceProvider.
 class DEVICE_VR_EXPORT VRDevice {
  public:
   VRDevice();
@@ -23,16 +25,24 @@ class DEVICE_VR_EXPORT VRDevice {
 
   unsigned int id() const { return id_; }
 
-  virtual mojom::VRDisplayInfoPtr GetVRDevice() = 0;
-  virtual mojom::VRPosePtr GetPose() = 0;
-  virtual void ResetPose() = 0;
+  // Queries VR device for display info and calls onCreated once the display
+  // info object is created. If the query fails onCreated will be called with a
+  // nullptr as argument. onCreated can be called before this function returns.
+  virtual void CreateVRDisplayInfo(
+      const base::Callback<void(mojom::VRDisplayInfoPtr)>& on_created) = 0;
 
-  virtual void RequestPresent(const base::Callback<void(bool)>& callback) = 0;
+  virtual void RequestPresent(mojom::VRSubmitFrameClientPtr submit_client,
+                              const base::Callback<void(bool)>& callback) = 0;
   virtual void SetSecureOrigin(bool secure_origin) = 0;
   virtual void ExitPresent() = 0;
-  virtual void SubmitFrame(mojom::VRPosePtr pose) = 0;
-  virtual void UpdateLayerBounds(mojom::VRLayerBoundsPtr left_bounds,
-                                 mojom::VRLayerBoundsPtr right_bounds) = 0;
+  virtual void SubmitFrame(int16_t frame_index,
+                           const gpu::MailboxHolder& mailbox) = 0;
+  virtual void UpdateLayerBounds(int16_t frame_index,
+                                 mojom::VRLayerBoundsPtr left_bounds,
+                                 mojom::VRLayerBoundsPtr right_bounds,
+                                 int16_t source_width,
+                                 int16_t source_height) = 0;
+  virtual void GetVRVSyncProvider(mojom::VRVSyncProviderRequest request) = 0;
 
   virtual void AddDisplay(VRDisplayImpl* display);
   virtual void RemoveDisplay(VRDisplayImpl* display);
@@ -44,7 +54,8 @@ class DEVICE_VR_EXPORT VRDevice {
   virtual void OnExitPresent();
   virtual void OnBlur();
   virtual void OnFocus();
-  virtual void OnActivate(mojom::VRDisplayEventReason reason);
+  virtual void OnActivate(mojom::VRDisplayEventReason reason,
+                          const base::Callback<void(bool)>& on_handled);
   virtual void OnDeactivate(mojom::VRDisplayEventReason reason);
 
  protected:
@@ -54,6 +65,8 @@ class DEVICE_VR_EXPORT VRDevice {
   void SetPresentingDisplay(VRDisplayImpl* display);
 
  private:
+  void OnVRDisplayInfoCreated(mojom::VRDisplayInfoPtr vr_device_info);
+
   std::set<VRDisplayImpl*> displays_;
 
   VRDisplayImpl* presenting_display_;
@@ -61,6 +74,8 @@ class DEVICE_VR_EXPORT VRDevice {
   unsigned int id_;
 
   static unsigned int next_id_;
+
+  base::WeakPtrFactory<VRDevice> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(VRDevice);
 };

@@ -4,11 +4,11 @@
 
 #include "core/input/TouchEventManager.h"
 
+#include <memory>
 #include "core/dom/Document.h"
 #include "core/events/TouchEvent.h"
 #include "core/frame/Deprecation.h"
 #include "core/frame/EventHandlerRegistry.h"
-#include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
 #include "core/html/HTMLCanvasElement.h"
 #include "core/input/EventHandlingUtil.h"
@@ -17,50 +17,62 @@
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "platform/Histogram.h"
-#include "platform/PlatformTouchEvent.h"
-#include "wtf/CurrentTime.h"
-#include "wtf/PtrUtil.h"
-#include <memory>
+#include "platform/wtf/CurrentTime.h"
+#include "platform/wtf/PtrUtil.h"
+#include "public/platform/WebCoalescedInputEvent.h"
+#include "public/platform/WebTouchEvent.h"
 
 namespace blink {
 
 namespace {
 
-bool hasTouchHandlers(const EventHandlerRegistry& registry) {
-  return registry.hasEventHandlers(
-             EventHandlerRegistry::TouchStartOrMoveEventBlocking) ||
-         registry.hasEventHandlers(
-             EventHandlerRegistry::TouchStartOrMoveEventPassive) ||
-         registry.hasEventHandlers(
-             EventHandlerRegistry::TouchEndOrCancelEventBlocking) ||
-         registry.hasEventHandlers(
-             EventHandlerRegistry::TouchEndOrCancelEventPassive);
+bool HasTouchHandlers(const EventHandlerRegistry& registry) {
+  return registry.HasEventHandlers(
+             EventHandlerRegistry::kTouchStartOrMoveEventBlocking) ||
+         registry.HasEventHandlers(
+             EventHandlerRegistry::kTouchStartOrMoveEventPassive) ||
+         registry.HasEventHandlers(
+             EventHandlerRegistry::kTouchEndOrCancelEventBlocking) ||
+         registry.HasEventHandlers(
+             EventHandlerRegistry::kTouchEndOrCancelEventPassive);
 }
 
-const AtomicString& touchEventNameForTouchPointState(
-    PlatformTouchPoint::TouchState state) {
+const AtomicString& TouchEventNameForTouchPointState(
+    WebTouchPoint::State state) {
   switch (state) {
-    case PlatformTouchPoint::TouchReleased:
+    case WebTouchPoint::kStateReleased:
       return EventTypeNames::touchend;
-    case PlatformTouchPoint::TouchCancelled:
+    case WebTouchPoint::kStateCancelled:
       return EventTypeNames::touchcancel;
-    case PlatformTouchPoint::TouchPressed:
+    case WebTouchPoint::kStatePressed:
       return EventTypeNames::touchstart;
-    case PlatformTouchPoint::TouchMoved:
+    case WebTouchPoint::kStateMoved:
       return EventTypeNames::touchmove;
-    case PlatformTouchPoint::TouchStationary:
+    case WebTouchPoint::kStateStationary:
     // Fall through to default
     default:
-      ASSERT_NOT_REACHED();
-      return emptyAtom;
+      NOTREACHED();
+      return g_empty_atom;
   }
 }
 
 enum TouchEventDispatchResultType {
-  UnhandledTouches,  // Unhandled touch events.
-  HandledTouches,    // Handled touch events.
-  TouchEventDispatchResultTypeMax,
+  kUnhandledTouches,  // Unhandled touch events.
+  kHandledTouches,    // Handled touch events.
+  kTouchEventDispatchResultTypeMax,
 };
+
+bool IsTouchSequenceStart(const WebTouchEvent& event) {
+  if (!event.touches_length)
+    return false;
+  if (event.GetType() != WebInputEvent::kTouchStart)
+    return false;
+  for (size_t i = 0; i < event.touches_length; ++i) {
+    if (event.touches[i].state != blink::WebTouchPoint::kStatePressed)
+      return false;
+  }
+  return true;
+}
 
 // Defining this class type local to dispatchTouchEvents() and annotating
 // it with STACK_ALLOCATED(), runs into MSVC(VS 2013)'s C4822 warning
@@ -75,81 +87,97 @@ class ChangedTouches final {
  public:
   // The touches corresponding to the particular change state this struct
   // instance represents.
-  Member<TouchList> m_touches;
+  Member<TouchList> touches_;
 
   using EventTargetSet = HeapHashSet<Member<EventTarget>>;
   // Set of targets involved in m_touches.
-  EventTargetSet m_targets;
+  EventTargetSet targets_;
 
-  WebPointerProperties::PointerType m_pointerType;
+  WebPointerProperties::PointerType pointer_type_;
 };
 
 }  // namespace
 
-TouchEventManager::TouchEventManager(LocalFrame& frame) : m_frame(frame) {
-  clear();
+TouchEventManager::TouchEventManager(LocalFrame& frame) : frame_(frame) {
+  Clear();
 }
 
-void TouchEventManager::clear() {
-  m_touchSequenceDocument.clear();
-  m_targetForTouchID.clear();
-  m_regionForTouchID.clear();
-  m_touchPressed = false;
-  m_currentEvent = PlatformEvent::NoType;
-  m_currentTouchAction = TouchActionAuto;
+void TouchEventManager::Clear() {
+  touch_sequence_document_.Clear();
+  target_for_touch_id_.clear();
+  region_for_touch_id_.clear();
+  touch_pressed_ = false;
+  suppressing_touchmoves_within_slop_ = false;
+  current_touch_action_ = TouchAction::kTouchActionAuto;
 }
 
 DEFINE_TRACE(TouchEventManager) {
-  visitor->trace(m_frame);
-  visitor->trace(m_touchSequenceDocument);
-  visitor->trace(m_targetForTouchID);
+  visitor->Trace(frame_);
+  visitor->Trace(touch_sequence_document_);
+  visitor->Trace(target_for_touch_id_);
 }
 
-WebInputEventResult TouchEventManager::dispatchTouchEvents(
-    const PlatformTouchEvent& event,
-    const HeapVector<TouchInfo>& touchInfos,
-    bool allTouchesReleased) {
+WebInputEventResult TouchEventManager::DispatchTouchEvents(
+    const WebTouchEvent& event,
+    const Vector<WebTouchEvent>& coalesced_events,
+    const HeapVector<TouchInfo>& touch_infos,
+    bool all_touches_released) {
   // Build up the lists to use for the |touches|, |targetTouches| and
   // |changedTouches| attributes in the JS event. See
   // http://www.w3.org/TR/touch-events/#touchevent-interface for how these
   // lists fit together.
 
+  if (event.GetType() == WebInputEvent::kTouchEnd ||
+      event.GetType() == WebInputEvent::kTouchCancel ||
+      event.touches_length > 1) {
+    suppressing_touchmoves_within_slop_ = false;
+  }
+
+  if (suppressing_touchmoves_within_slop_ &&
+      event.GetType() == WebInputEvent::kTouchMove) {
+    if (!event.moved_beyond_slop_region)
+      return WebInputEventResult::kHandledSuppressed;
+    suppressing_touchmoves_within_slop_ = false;
+  }
+
   // Holds the complete set of touches on the screen.
-  TouchList* touches = TouchList::create();
+  TouchList* touches = TouchList::Create();
 
   // A different view on the 'touches' list above, filtered and grouped by
   // event target. Used for the |targetTouches| list in the JS event.
   using TargetTouchesHeapMap = HeapHashMap<EventTarget*, Member<TouchList>>;
-  TargetTouchesHeapMap touchesByTarget;
+  TargetTouchesHeapMap touches_by_target;
 
   // Array of touches per state, used to assemble the |changedTouches| list.
-  ChangedTouches changedTouches[PlatformTouchPoint::TouchStateEnd];
+  ChangedTouches changed_touches[WebTouchPoint::kStateMax + 1];
 
-  for (auto touchInfo : touchInfos) {
-    const PlatformTouchPoint& point = touchInfo.point;
-    PlatformTouchPoint::TouchState pointState = point.state();
+  for (auto touch_info : touch_infos) {
+    const WebTouchPoint& point = touch_info.point;
+    WebTouchPoint::State point_state = point.state;
 
-    Touch* touch = Touch::create(
-        touchInfo.targetFrame.get(), touchInfo.touchNode.get(), point.id(),
-        point.screenPos(), touchInfo.contentPoint, touchInfo.adjustedRadius,
-        point.rotationAngle(), point.force(), touchInfo.region);
+    Touch* touch = Touch::Create(
+        touch_info.target_frame.Get(), touch_info.touch_node.Get(), point.id,
+        point.screen_position, touch_info.content_point,
+        touch_info.adjusted_radius, point.rotation_angle, point.force,
+        touch_info.region);
 
     // Ensure this target's touch list exists, even if it ends up empty, so
     // it can always be passed to TouchEvent::Create below.
-    TargetTouchesHeapMap::iterator targetTouchesIterator =
-        touchesByTarget.find(touchInfo.touchNode.get());
-    if (targetTouchesIterator == touchesByTarget.end()) {
-      touchesByTarget.set(touchInfo.touchNode.get(), TouchList::create());
-      targetTouchesIterator = touchesByTarget.find(touchInfo.touchNode.get());
+    TargetTouchesHeapMap::iterator target_touches_iterator =
+        touches_by_target.find(touch_info.touch_node.Get());
+    if (target_touches_iterator == touches_by_target.end()) {
+      touches_by_target.Set(touch_info.touch_node.Get(), TouchList::Create());
+      target_touches_iterator =
+          touches_by_target.find(touch_info.touch_node.Get());
     }
 
     // |touches| and |targetTouches| should only contain information about
     // touches still on the screen, so if this point is released or
     // cancelled it will only appear in the |changedTouches| list.
-    if (pointState != PlatformTouchPoint::TouchReleased &&
-        pointState != PlatformTouchPoint::TouchCancelled) {
-      touches->append(touch);
-      targetTouchesIterator->value->append(touch);
+    if (point_state != WebTouchPoint::kStateReleased &&
+        point_state != WebTouchPoint::kStateCancelled) {
+      touches->Append(touch);
+      target_touches_iterator->value->Append(touch);
     }
 
     // Now build up the correct list for |changedTouches|.
@@ -158,130 +186,140 @@ WebInputEventResult TouchEventManager::dispatchTouchEvents(
     // never be in the |changedTouches| list so we do not handle them
     // explicitly here. See https://bugs.webkit.org/show_bug.cgi?id=37609
     // for further discussion about the TouchStationary state.
-    if (pointState != PlatformTouchPoint::TouchStationary &&
-        touchInfo.knownTarget) {
-      ASSERT(pointState < PlatformTouchPoint::TouchStateEnd);
-      if (!changedTouches[pointState].m_touches)
-        changedTouches[pointState].m_touches = TouchList::create();
-      changedTouches[pointState].m_touches->append(touch);
-      changedTouches[pointState].m_targets.add(touchInfo.touchNode);
-      changedTouches[pointState].m_pointerType =
-          point.pointerProperties().pointerType;
+    if (point_state != WebTouchPoint::kStateStationary &&
+        touch_info.known_target) {
+      DCHECK_LE(point_state, WebTouchPoint::kStateMax);
+      if (!changed_touches[point_state].touches_)
+        changed_touches[point_state].touches_ = TouchList::Create();
+      changed_touches[point_state].touches_->Append(touch);
+      changed_touches[point_state].targets_.insert(touch_info.touch_node);
+      changed_touches[point_state].pointer_type_ = point.pointer_type;
     }
   }
 
-  if (allTouchesReleased) {
-    m_touchSequenceDocument.clear();
-    m_currentTouchAction = TouchActionAuto;
+  if (all_touches_released) {
+    touch_sequence_document_.Clear();
+    current_touch_action_ = TouchAction::kTouchActionAuto;
   }
 
-  WebInputEventResult eventResult = WebInputEventResult::NotHandled;
+  WebInputEventResult event_result = WebInputEventResult::kNotHandled;
+  // First we construct the webcoalescedinputevent contains all the coalesced
+  // touch event.
+  std::vector<const WebInputEvent*> coalesced_touches;
+  for (size_t i = 0; i < coalesced_events.size(); ++i) {
+    coalesced_touches.push_back(&coalesced_events[i]);
+  }
+  WebCoalescedInputEvent coalesced_event(event, coalesced_touches);
 
   // Now iterate through the |changedTouches| list and |m_targets| within it,
   // sending TouchEvents to the targets as required.
-  for (unsigned state = 0; state != PlatformTouchPoint::TouchStateEnd;
-       ++state) {
-    if (!changedTouches[state].m_touches)
+  for (unsigned state = 0; state <= WebTouchPoint::kStateMax; ++state) {
+    if (!changed_touches[state].touches_)
       continue;
 
-    const AtomicString& eventName(touchEventNameForTouchPointState(
-        static_cast<PlatformTouchPoint::TouchState>(state)));
-    for (const auto& eventTarget : changedTouches[state].m_targets) {
-      EventTarget* touchEventTarget = eventTarget;
-      TouchEvent* touchEvent = TouchEvent::create(
-          touches, touchesByTarget.get(touchEventTarget),
-          changedTouches[state].m_touches.get(), eventName,
-          touchEventTarget->toNode()->document().domWindow(),
-          event.getModifiers(), event.cancelable(),
-          event.causesScrollingIfUncanceled(),
-          event.touchStartOrFirstTouchMove(), event.timestamp(),
-          m_currentTouchAction, changedTouches[state].m_pointerType);
+    const AtomicString& event_name(TouchEventNameForTouchPointState(
+        static_cast<WebTouchPoint::State>(state)));
+    for (const auto& event_target : changed_touches[state].targets_) {
+      EventTarget* touch_event_target = event_target;
+      TouchEvent* touch_event = TouchEvent::Create(
+          coalesced_event, touches, touches_by_target.at(touch_event_target),
+          changed_touches[state].touches_.Get(), event_name,
+          touch_event_target->ToNode()->GetDocument().domWindow(),
+          current_touch_action_);
 
-      DispatchEventResult domDispatchResult =
-          touchEventTarget->dispatchEvent(touchEvent);
+      DispatchEventResult dom_dispatch_result =
+          touch_event_target->DispatchEvent(touch_event);
 
       // Only report for top level documents with a single touch on
       // touch-start or the first touch-move.
-      if (event.touchStartOrFirstTouchMove() && touchInfos.size() == 1 &&
-          m_frame->isMainFrame()) {
+      if (event.touch_start_or_first_touch_move && touch_infos.size() == 1 &&
+          frame_->IsMainFrame()) {
         // Record the disposition and latency of touch starts and first touch
         // moves before and after the page is fully loaded respectively.
-        int64_t latencyInMicros =
-            (TimeTicks::Now() - event.timestamp()).InMicroseconds();
-        if (event.cancelable()) {
-          if (m_frame->document()->isLoadCompleted()) {
+        int64_t latency_in_micros =
+            (TimeTicks::Now() -
+             TimeTicks::FromSeconds(event.TimeStampSeconds()))
+                .InMicroseconds();
+        if (event.IsCancelable()) {
+          if (frame_->GetDocument()->IsLoadCompleted()) {
             DEFINE_STATIC_LOCAL(EnumerationHistogram,
-                                touchDispositionsAfterPageLoadHistogram,
+                                touch_dispositions_after_page_load_histogram,
                                 ("Event.Touch.TouchDispositionsAfterPageLoad",
-                                 TouchEventDispatchResultTypeMax));
-            touchDispositionsAfterPageLoadHistogram.count(
-                (domDispatchResult != DispatchEventResult::NotCanceled)
-                    ? HandledTouches
-                    : UnhandledTouches);
+                                 kTouchEventDispatchResultTypeMax));
+            touch_dispositions_after_page_load_histogram.Count(
+                (dom_dispatch_result != DispatchEventResult::kNotCanceled)
+                    ? kHandledTouches
+                    : kUnhandledTouches);
 
             DEFINE_STATIC_LOCAL(
-                CustomCountHistogram, eventLatencyAfterPageLoadHistogram,
+                CustomCountHistogram, event_latency_after_page_load_histogram,
                 ("Event.Touch.TouchLatencyAfterPageLoad", 1, 100000000, 50));
-            eventLatencyAfterPageLoadHistogram.count(latencyInMicros);
+            event_latency_after_page_load_histogram.Count(latency_in_micros);
           } else {
             DEFINE_STATIC_LOCAL(EnumerationHistogram,
-                                touchDispositionsBeforePageLoadHistogram,
+                                touch_dispositions_before_page_load_histogram,
                                 ("Event.Touch.TouchDispositionsBeforePageLoad",
-                                 TouchEventDispatchResultTypeMax));
-            touchDispositionsBeforePageLoadHistogram.count(
-                (domDispatchResult != DispatchEventResult::NotCanceled)
-                    ? HandledTouches
-                    : UnhandledTouches);
+                                 kTouchEventDispatchResultTypeMax));
+            touch_dispositions_before_page_load_histogram.Count(
+                (dom_dispatch_result != DispatchEventResult::kNotCanceled)
+                    ? kHandledTouches
+                    : kUnhandledTouches);
 
             DEFINE_STATIC_LOCAL(
-                CustomCountHistogram, eventLatencyBeforePageLoadHistogram,
+                CustomCountHistogram, event_latency_before_page_load_histogram,
                 ("Event.Touch.TouchLatencyBeforePageLoad", 1, 100000000, 50));
-            eventLatencyBeforePageLoadHistogram.count(latencyInMicros);
+            event_latency_before_page_load_histogram.Count(latency_in_micros);
           }
           // Report the touch disposition there is no active fling animation.
           DEFINE_STATIC_LOCAL(EnumerationHistogram,
-                              touchDispositionsOutsideFlingHistogram,
+                              touch_dispositions_outside_fling_histogram,
                               ("Event.Touch.TouchDispositionsOutsideFling2",
-                               TouchEventDispatchResultTypeMax));
-          touchDispositionsOutsideFlingHistogram.count(
-              (domDispatchResult != DispatchEventResult::NotCanceled)
-                  ? HandledTouches
-                  : UnhandledTouches);
+                               kTouchEventDispatchResultTypeMax));
+          touch_dispositions_outside_fling_histogram.Count(
+              (dom_dispatch_result != DispatchEventResult::kNotCanceled)
+                  ? kHandledTouches
+                  : kUnhandledTouches);
         }
 
         // Report the touch disposition when there is an active fling animation.
-        if (event.dispatchType() ==
-            PlatformEvent::ListenersForcedNonBlockingDueToFling) {
+        if (event.dispatch_type ==
+            WebInputEvent::kListenersForcedNonBlockingDueToFling) {
           DEFINE_STATIC_LOCAL(EnumerationHistogram,
-                              touchDispositionsDuringFlingHistogram,
+                              touch_dispositions_during_fling_histogram,
                               ("Event.Touch.TouchDispositionsDuringFling2",
-                               TouchEventDispatchResultTypeMax));
-          touchDispositionsDuringFlingHistogram.count(
-              touchEvent->preventDefaultCalledOnUncancelableEvent()
-                  ? HandledTouches
-                  : UnhandledTouches);
+                               kTouchEventDispatchResultTypeMax));
+          touch_dispositions_during_fling_histogram.Count(
+              touch_event->PreventDefaultCalledOnUncancelableEvent()
+                  ? kHandledTouches
+                  : kUnhandledTouches);
         }
       }
-      eventResult = EventHandlingUtil::mergeEventResult(
-          eventResult,
-          EventHandlingUtil::toWebInputEventResult(domDispatchResult));
+      event_result = EventHandlingUtil::MergeEventResult(
+          event_result,
+          EventHandlingUtil::ToWebInputEventResult(dom_dispatch_result));
     }
   }
 
-  return eventResult;
+  // Do not suppress any touchmoves if the touchstart is consumed.
+  if (IsTouchSequenceStart(event) &&
+      event_result == WebInputEventResult::kNotHandled) {
+    suppressing_touchmoves_within_slop_ = true;
+  }
+
+  return event_result;
 }
 
-void TouchEventManager::updateTargetAndRegionMapsForTouchStarts(
-    HeapVector<TouchInfo>& touchInfos) {
-  for (auto& touchInfo : touchInfos) {
+void TouchEventManager::UpdateTargetAndRegionMapsForTouchStarts(
+    HeapVector<TouchInfo>& touch_infos) {
+  for (auto& touch_info : touch_infos) {
     // Touch events implicitly capture to the touched node, and don't change
     // active/hover states themselves (Gesture events do). So we only need
     // to hit-test on touchstart and when the target could be different than
     // the corresponding pointer event target.
-    if (touchInfo.point.state() == PlatformTouchPoint::TouchPressed) {
-      HitTestRequest::HitTestRequestType hitType = HitTestRequest::TouchEvent |
-                                                   HitTestRequest::ReadOnly |
-                                                   HitTestRequest::Active;
+    if (touch_info.point.state == WebTouchPoint::kStatePressed) {
+      HitTestRequest::HitTestRequestType hit_type =
+          HitTestRequest::kTouchEvent | HitTestRequest::kReadOnly |
+          HitTestRequest::kActive;
       HitTestResult result;
       // For the touchPressed points hit-testing is done in
       // PointerEventManager. If it was the second touch there is a
@@ -290,42 +328,42 @@ void TouchEventManager::updateTargetAndRegionMapsForTouchStarts(
       // against |m_touchSequenceDocument| if the target set by
       // PointerEventManager was either null or not in
       // |m_touchSequenceDocument|.
-      if (m_touchSequenceDocument &&
-          (!touchInfo.touchNode ||
-           &touchInfo.touchNode->document() != m_touchSequenceDocument)) {
-        if (m_touchSequenceDocument->frame()) {
-          LayoutPoint framePoint = LayoutPoint(
-              m_touchSequenceDocument->frame()->view()->rootFrameToContents(
-                  touchInfo.point.pos()));
-          result = EventHandlingUtil::hitTestResultInFrame(
-              m_touchSequenceDocument->frame(), framePoint, hitType);
-          Node* node = result.innerNode();
+      if (touch_sequence_document_ &&
+          (!touch_info.touch_node ||
+           &touch_info.touch_node->GetDocument() != touch_sequence_document_)) {
+        if (touch_sequence_document_->GetFrame()) {
+          LayoutPoint frame_point = LayoutPoint(
+              touch_sequence_document_->GetFrame()->View()->RootFrameToContents(
+                  touch_info.point.position));
+          result = EventHandlingUtil::HitTestResultInFrame(
+              touch_sequence_document_->GetFrame(), frame_point, hit_type);
+          Node* node = result.InnerNode();
           if (!node)
             continue;
           if (isHTMLCanvasElement(node)) {
-            HitTestCanvasResult* hitTestCanvasResult =
-                toHTMLCanvasElement(node)->getControlAndIdIfHitRegionExists(
-                    result.pointInInnerNodeFrame());
-            if (hitTestCanvasResult->getControl())
-              node = hitTestCanvasResult->getControl();
-            touchInfo.region = hitTestCanvasResult->getId();
+            HitTestCanvasResult* hit_test_canvas_result =
+                toHTMLCanvasElement(node)->GetControlAndIdIfHitRegionExists(
+                    result.PointInInnerNodeFrame());
+            if (hit_test_canvas_result->GetControl())
+              node = hit_test_canvas_result->GetControl();
+            touch_info.region = hit_test_canvas_result->GetId();
           }
           // Touch events should not go to text nodes.
-          if (node->isTextNode())
-            node = FlatTreeTraversal::parent(*node);
-          touchInfo.touchNode = node;
+          if (node->IsTextNode())
+            node = FlatTreeTraversal::Parent(*node);
+          touch_info.touch_node = node;
         } else {
           continue;
         }
       }
-      if (!touchInfo.touchNode)
+      if (!touch_info.touch_node)
         continue;
-      if (!m_touchSequenceDocument) {
+      if (!touch_sequence_document_) {
         // Keep track of which document should receive all touch events
         // in the active sequence. This must be a single document to
         // ensure we don't leak Nodes between documents.
-        m_touchSequenceDocument = &(touchInfo.touchNode->document());
-        ASSERT(m_touchSequenceDocument->frame()->view());
+        touch_sequence_document_ = &(touch_info.touch_node->GetDocument());
+        DCHECK(touch_sequence_document_->GetFrame()->View());
       }
 
       // Ideally we'd ASSERT(!m_targetForTouchID.contains(point.id())
@@ -334,58 +372,58 @@ void TouchEventManager::updateTargetAndRegionMapsForTouchStarts(
       // some tests that take advantage of it. There may also be edge
       // cases in the browser where this happens.
       // See http://crbug.com/345372.
-      m_targetForTouchID.set(touchInfo.point.id(), touchInfo.touchNode);
+      target_for_touch_id_.Set(touch_info.point.id, touch_info.touch_node);
 
-      m_regionForTouchID.set(touchInfo.point.id(), touchInfo.region);
+      region_for_touch_id_.Set(touch_info.point.id, touch_info.region);
 
-      TouchAction effectiveTouchAction =
-          TouchActionUtil::computeEffectiveTouchAction(*touchInfo.touchNode);
-      if (effectiveTouchAction != TouchActionAuto) {
-        m_frame->page()->chromeClient().setTouchAction(m_frame,
-                                                       effectiveTouchAction);
+      TouchAction effective_touch_action =
+          TouchActionUtil::ComputeEffectiveTouchAction(*touch_info.touch_node);
+      if (effective_touch_action != TouchAction::kTouchActionAuto) {
+        frame_->GetPage()->GetChromeClient().SetTouchAction(
+            frame_, effective_touch_action);
 
         // Combine the current touch action sequence with the touch action
         // for the current finger press.
-        m_currentTouchAction &= effectiveTouchAction;
+        current_touch_action_ &= effective_touch_action;
       }
     }
   }
 }
 
-void TouchEventManager::setAllPropertiesOfTouchInfos(
-    HeapVector<TouchInfo>& touchInfos) {
-  for (auto& touchInfo : touchInfos) {
-    PlatformTouchPoint::TouchState pointState = touchInfo.point.state();
-    Node* touchNode = nullptr;
-    String regionID;
+void TouchEventManager::SetAllPropertiesOfTouchInfos(
+    HeapVector<TouchInfo>& touch_infos) {
+  for (auto& touch_info : touch_infos) {
+    WebTouchPoint::State point_state = touch_info.point.state;
+    Node* touch_node = nullptr;
+    String region_id;
 
-    if (pointState == PlatformTouchPoint::TouchReleased ||
-        pointState == PlatformTouchPoint::TouchCancelled) {
+    if (point_state == WebTouchPoint::kStateReleased ||
+        point_state == WebTouchPoint::kStateCancelled) {
       // The target should be the original target for this touch, so get
       // it from the hashmap. As it's a release or cancel we also remove
       // it from the map.
-      touchNode = m_targetForTouchID.take(touchInfo.point.id());
-      regionID = m_regionForTouchID.take(touchInfo.point.id());
+      touch_node = target_for_touch_id_.Take(touch_info.point.id);
+      region_id = region_for_touch_id_.Take(touch_info.point.id);
     } else {
       // No hittest is performed on move or stationary, since the target
       // is not allowed to change anyway.
-      touchNode = m_targetForTouchID.get(touchInfo.point.id());
-      regionID = m_regionForTouchID.get(touchInfo.point.id());
+      touch_node = target_for_touch_id_.at(touch_info.point.id);
+      region_id = region_for_touch_id_.at(touch_info.point.id);
     }
 
-    LocalFrame* targetFrame = nullptr;
-    bool knownTarget = false;
-    if (touchNode) {
-      Document& doc = touchNode->document();
+    LocalFrame* target_frame = nullptr;
+    bool known_target = false;
+    if (touch_node) {
+      Document& doc = touch_node->GetDocument();
       // If the target node has moved to a new document while it was being
       // touched, we can't send events to the new document because that could
       // leak nodes from one document to another. See http://crbug.com/394339.
-      if (&doc == m_touchSequenceDocument.get()) {
-        targetFrame = doc.frame();
-        knownTarget = true;
+      if (&doc == touch_sequence_document_.Get()) {
+        target_frame = doc.GetFrame();
+        known_target = true;
       }
     }
-    if (!knownTarget) {
+    if (!known_target) {
       // If we don't have a target registered for the point it means we've
       // missed our opportunity to do a hit test for it (due to some
       // optimization that prevented blink from ever seeing the
@@ -399,116 +437,102 @@ void TouchEventManager::setAllPropertiesOfTouchInfos(
       // a Touch is a Node so using the window could be a breaking change.
       // Since we know there was no handler invoked, the specific target
       // should be completely irrelevant to the application.
-      touchNode = m_touchSequenceDocument;
-      targetFrame = m_touchSequenceDocument->frame();
+      touch_node = touch_sequence_document_;
+      target_frame = touch_sequence_document_->GetFrame();
     }
-    ASSERT(targetFrame);
+    DCHECK(target_frame);
 
     // pagePoint should always be in the target element's document coordinates.
-    FloatPoint pagePoint =
-        targetFrame->view()->rootFrameToContents(touchInfo.point.pos());
-    float scaleFactor = 1.0f / targetFrame->pageZoomFactor();
+    FloatPoint page_point =
+        target_frame->View()->RootFrameToContents(touch_info.point.position);
+    float scale_factor = 1.0f / target_frame->PageZoomFactor();
 
-    touchInfo.touchNode = touchNode;
-    touchInfo.targetFrame = targetFrame;
-    touchInfo.contentPoint = pagePoint.scaledBy(scaleFactor);
-    touchInfo.adjustedRadius = touchInfo.point.radius().scaledBy(scaleFactor);
-    touchInfo.knownTarget = knownTarget;
-    touchInfo.region = regionID;
+    touch_info.touch_node = touch_node;
+    touch_info.target_frame = target_frame;
+    touch_info.content_point = page_point.ScaledBy(scale_factor);
+    touch_info.adjusted_radius =
+        FloatSize(touch_info.point.radius_x, touch_info.point.radius_y)
+            .ScaledBy(scale_factor);
+    touch_info.known_target = known_target;
+    touch_info.region = region_id;
   }
 }
 
-bool TouchEventManager::reHitTestTouchPointsIfNeeded(
-    const PlatformTouchEvent& event,
-    HeapVector<TouchInfo>& touchInfos) {
-  bool newTouchSequence = true;
-  bool allTouchesReleased = true;
+bool TouchEventManager::ReHitTestTouchPointsIfNeeded(
+    const WebTouchEvent& event,
+    HeapVector<TouchInfo>& touch_infos) {
+  bool new_touch_sequence = true;
+  bool all_touches_released = true;
 
-  for (const auto& point : event.touchPoints()) {
-    if (point.state() != PlatformTouchPoint::TouchPressed)
-      newTouchSequence = false;
-    if (point.state() != PlatformTouchPoint::TouchReleased &&
-        point.state() != PlatformTouchPoint::TouchCancelled)
-      allTouchesReleased = false;
+  for (unsigned i = 0; i < event.touches_length; ++i) {
+    WebTouchPoint::State state = event.touches[i].state;
+    if (state != WebTouchPoint::kStatePressed)
+      new_touch_sequence = false;
+    if (state != WebTouchPoint::kStateReleased &&
+        state != WebTouchPoint::kStateCancelled)
+      all_touches_released = false;
   }
-  if (newTouchSequence) {
+  if (new_touch_sequence) {
     // Ideally we'd ASSERT(!m_touchSequenceDocument) here since we should
     // have cleared the active document when we saw the last release. But we
     // have some tests that violate this, ClusterFuzz could trigger it, and
     // there may be cases where the browser doesn't reliably release all
     // touches. http://crbug.com/345372 tracks this.
-    m_touchSequenceDocument.clear();
+    touch_sequence_document_.Clear();
   }
 
-  ASSERT(m_frame->view());
-  if (m_touchSequenceDocument && (!m_touchSequenceDocument->frame() ||
-                                  !m_touchSequenceDocument->frame()->view())) {
+  DCHECK(frame_->View());
+  if (touch_sequence_document_ &&
+      (!touch_sequence_document_->GetFrame() ||
+       !touch_sequence_document_->GetFrame()->View())) {
     // If the active touch document has no frame or view, it's probably being
     // destroyed so we can't dispatch events.
     return false;
   }
 
-  updateTargetAndRegionMapsForTouchStarts(touchInfos);
+  UpdateTargetAndRegionMapsForTouchStarts(touch_infos);
 
-  m_touchPressed = !allTouchesReleased;
+  touch_pressed_ = !all_touches_released;
 
   // If there's no document receiving touch events, or no handlers on the
   // document set to receive the events, then we can skip all the rest of
   // this work.
-  if (!m_touchSequenceDocument || !m_touchSequenceDocument->frameHost() ||
-      !hasTouchHandlers(
-          m_touchSequenceDocument->frameHost()->eventHandlerRegistry()) ||
-      !m_touchSequenceDocument->frame()) {
-    if (allTouchesReleased) {
-      m_touchSequenceDocument.clear();
+  if (!touch_sequence_document_ || !touch_sequence_document_->GetPage() ||
+      !HasTouchHandlers(
+          touch_sequence_document_->GetPage()->GetEventHandlerRegistry()) ||
+      !touch_sequence_document_->GetFrame()) {
+    if (all_touches_released) {
+      touch_sequence_document_.Clear();
     }
     return false;
   }
 
-  setAllPropertiesOfTouchInfos(touchInfos);
+  SetAllPropertiesOfTouchInfos(touch_infos);
 
   return true;
 }
 
-// TODO(rbyers): Replace with AutoReset as base/WTF unification permits.
-class CurrentEventHolder {
-  // Always stack allocated to ensure lifetime doesn't exceed that of target
-  DISALLOW_NEW();
+WebInputEventResult TouchEventManager::HandleTouchEvent(
+    const WebTouchEvent& event,
+    const Vector<WebTouchEvent>& coalesced_events,
+    HeapVector<TouchInfo>& touch_infos) {
+  if (!ReHitTestTouchPointsIfNeeded(event, touch_infos))
+    return WebInputEventResult::kNotHandled;
 
- public:
-  CurrentEventHolder(PlatformEvent::EventType& target,
-                     PlatformEvent::EventType value)
-      : m_target(target) {
-    m_target = value;
-  }
-  ~CurrentEventHolder() { m_target = PlatformEvent::NoType; }
-
- private:
-  PlatformEvent::EventType& m_target;
-};
-
-WebInputEventResult TouchEventManager::handleTouchEvent(
-    const PlatformTouchEvent& event,
-    HeapVector<TouchInfo>& touchInfos) {
-
-  // Track the current event for the scope of this function.
-  CurrentEventHolder holder(m_currentEvent, event.type());
-
-  if (!reHitTestTouchPointsIfNeeded(event, touchInfos))
-    return WebInputEventResult::NotHandled;
-
-  bool allTouchesReleased = true;
-  for (const auto& point : event.touchPoints()) {
-    if (point.state() != PlatformTouchPoint::TouchReleased &&
-        point.state() != PlatformTouchPoint::TouchCancelled)
-      allTouchesReleased = false;
+  bool all_touches_released = true;
+  for (unsigned i = 0; i < event.touches_length; ++i) {
+    WebTouchPoint::State state = event.touches[i].state;
+    if (state != WebTouchPoint::kStateReleased &&
+        state != WebTouchPoint::kStateCancelled)
+      all_touches_released = false;
   }
 
-  return dispatchTouchEvents(event, touchInfos, allTouchesReleased);
+  return DispatchTouchEvents(event, coalesced_events, touch_infos,
+                             all_touches_released);
 }
 
-bool TouchEventManager::isAnyTouchActive() const {
-  return m_touchPressed;
+bool TouchEventManager::IsAnyTouchActive() const {
+  return touch_pressed_;
 }
 
 }  // namespace blink

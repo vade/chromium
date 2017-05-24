@@ -2781,6 +2781,17 @@ TEST_F(GLES2ImplementationTest, BindTexImage2DCHROMIUM) {
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
 
+TEST_F(GLES2ImplementationTest, BindTexImage2DWithInternalformatCHROMIUM) {
+  struct Cmds {
+    cmds::BindTexImage2DWithInternalformatCHROMIUM cmd;
+  };
+  Cmds expected;
+  expected.cmd.Init(GL_TEXTURE_2D, 2, 3);
+
+  gl_->BindTexImage2DWithInternalformatCHROMIUM(GL_TEXTURE_2D, 2, 3);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
 TEST_F(GLES2ImplementationTest, ReleaseTexImage2DCHROMIUM) {
   struct Cmds {
     cmds::ReleaseTexImage2DCHROMIUM cmd;
@@ -3045,6 +3056,28 @@ TEST_F(GLES2ImplementationTest, CoverageModulationCHROMIUM) {
   expected.cmd.Init(GL_RGB);
 
   gl_->CoverageModulationCHROMIUM(GL_RGB);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
+TEST_F(GLES2ImplementationTest, SetDrawRectangleCHROMIUM) {
+  struct Cmds {
+    cmds::SetDrawRectangleCHROMIUM cmd;
+  };
+  Cmds expected;
+  expected.cmd.Init(1, 2, 3, 4);
+
+  gl_->SetDrawRectangleCHROMIUM(1, 2, 3, 4);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+
+TEST_F(GLES2ImplementationTest, SetEnableDCLayersCHROMIUM) {
+  struct Cmds {
+    cmds::SetEnableDCLayersCHROMIUM cmd;
+  };
+  Cmds expected;
+  expected.cmd.Init(true);
+
+  gl_->SetEnableDCLayersCHROMIUM(true);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_IMPLEMENTATION_UNITTEST_AUTOGEN_H_

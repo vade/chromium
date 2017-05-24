@@ -18,6 +18,7 @@
 #include "content/browser/gpu/browser_gpu_channel_host_factory.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
+#include "media/base/media_switches.h"
 #include "media/base/video_frame.h"
 #include "media/gpu/ipc/client/gpu_jpeg_decode_accelerator_host.h"
 #include "mojo/public/cpp/system/platform_handle.h"
@@ -25,8 +26,11 @@
 namespace content {
 
 VideoCaptureGpuJpegDecoder::VideoCaptureGpuJpegDecoder(
-    const DecodeDoneCB& decode_done_cb)
-    : decode_done_cb_(decode_done_cb),
+    DecodeDoneCB decode_done_cb,
+    base::Callback<void(const std::string&)> send_log_message_cb)
+    : decode_done_cb_(std::move(decode_done_cb)),
+      send_log_message_cb_(std::move(send_log_message_cb)),
+      has_received_decoded_frame_(false),
       next_bitstream_buffer_id_(0),
       in_buffer_id_(media::JpegDecodeAccelerator::kInvalidBitstreamBufferId),
       decoder_status_(INIT_PENDING) {}
@@ -47,7 +51,9 @@ void VideoCaptureGpuJpegDecoder::Initialize() {
   DCHECK(CalledOnValidThread());
 
   base::AutoLock lock(lock_);
-  bool is_platform_supported = false;
+  bool is_platform_supported =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kUseFakeJpegDecodeAccelerator);
 #if defined(OS_CHROMEOS)
   // Non-ChromeOS platforms do not support HW JPEG decode now. Do not establish
   // gpu channel to avoid introducing overhead.
@@ -122,13 +128,12 @@ void VideoCaptureGpuJpegDecoder::DecodeCapturedData(
   // Mask against 30 bits, to avoid (undefined) wraparound on signed integer.
   next_bitstream_buffer_id_ = (next_bitstream_buffer_id_ + 1) & 0x3FFFFFFF;
 
-  // The APIs of |decoder_| and |decode_done_cb_| require us to wrap the
-  // |out_buffer| in a VideoFrame.
+  // The API of |decoder_| requires us to wrap the |out_buffer| in a VideoFrame.
   const gfx::Size dimensions = frame_format.frame_size;
   std::unique_ptr<media::VideoCaptureBufferHandle> out_buffer_access =
-      out_buffer.handle_provider()->GetHandleForInProcessAccess();
+      out_buffer.handle_provider->GetHandleForInProcessAccess();
   base::SharedMemoryHandle out_handle =
-      out_buffer.handle_provider()->GetNonOwnedSharedMemoryHandleForLegacyIPC();
+      out_buffer.handle_provider->GetNonOwnedSharedMemoryHandleForLegacyIPC();
   scoped_refptr<media::VideoFrame> out_frame =
       media::VideoFrame::WrapExternalSharedMemory(
           media::PIXEL_FORMAT_I420,          // format
@@ -152,10 +157,21 @@ void VideoCaptureGpuJpegDecoder::DecodeCapturedData(
   out_frame->metadata()->SetTimeTicks(media::VideoFrameMetadata::REFERENCE_TIME,
                                       reference_time);
 
+  media::mojom::VideoFrameInfoPtr out_frame_info =
+      media::mojom::VideoFrameInfo::New();
+  out_frame_info->timestamp = timestamp;
+  out_frame_info->pixel_format = media::PIXEL_FORMAT_I420;
+  out_frame_info->storage_type = media::PIXEL_STORAGE_CPU;
+  out_frame_info->coded_size = dimensions;
+  out_frame_info->visible_rect = gfx::Rect(dimensions);
+  out_frame_info->metadata = out_frame->metadata()->CopyInternalValues();
+
   {
     base::AutoLock lock(lock_);
     decode_done_closure_ =
-        base::Bind(decode_done_cb_, base::Passed(&out_buffer), out_frame);
+        base::Bind(decode_done_cb_, out_buffer.id, out_buffer.frame_feedback_id,
+                   base::Passed(&out_buffer.access_permission),
+                   base::Passed(&out_frame_info));
   }
   decoder_->Decode(in_buffer, std::move(out_frame));
 }
@@ -163,6 +179,10 @@ void VideoCaptureGpuJpegDecoder::DecodeCapturedData(
 void VideoCaptureGpuJpegDecoder::VideoFrameReady(int32_t bitstream_buffer_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   TRACE_EVENT0("jpeg", "VideoCaptureGpuJpegDecoder::VideoFrameReady");
+  if (!has_received_decoded_frame_) {
+    send_log_message_cb_.Run("Received decoded frame from Gpu Jpeg decoder");
+    has_received_decoded_frame_ = true;
+  }
   base::AutoLock lock(lock_);
 
   if (!IsDecoding_Locked()) {
@@ -190,7 +210,7 @@ void VideoCaptureGpuJpegDecoder::NotifyError(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   LOG(ERROR) << "Decode error, bitstream_buffer_id=" << bitstream_buffer_id
              << ", error=" << error;
-
+  send_log_message_cb_.Run("Gpu Jpeg decoder failed");
   base::AutoLock lock(lock_);
   decode_done_closure_.Reset();
   decoder_status_ = FAILED;

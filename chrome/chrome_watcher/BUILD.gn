@@ -22,7 +22,6 @@ source_set("hang_util") {
   ]
   deps = [
     "//base",
-    "//components/memory_pressure",
   ]
   libs = [ "pdh.lib" ]  # Used by system_load_estimator.h.
   ldflags = [ "/DELAYLOAD:pdh.dll" ]  # Only used on report capture.
@@ -38,12 +37,6 @@ test("system_load_estimator_unittests") {
     "//base/test:run_all_unittests",
     "//base/test:test_support",
     "//testing/gtest",
-  ]
-}
-
-group("kasko_util") {
-  public_deps = [
-    "//third_party/kasko:kasko_features",
   ]
 }
 
@@ -64,11 +57,10 @@ shared_library("chrome_watcher") {
   deps = [
     ":chrome_watcher_resources",
     ":client",
-    ":kasko_util",
     "//base",
     "//base:base_static",
     "//build/config/sanitizers:deps",
-    "//chrome/common:metrics_constants_util_win",
+    "//chrome/common",
     "//chrome/install_static:secondary_module",
     "//chrome_elf",
     "//components/browser_watcher",

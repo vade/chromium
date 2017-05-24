@@ -6,16 +6,6 @@
 	<array>
 		<dict>
 			<key>Type</key>
-			<string>PSToggleSwitchSpecifier</string>
-			<key>Title</key>
-			<string>Disable pending index navigation</string>
-			<key>Key</key>
-			<string>PendingIndexNavigationDisabled</string>
-			<key>DefaultValue</key>
-			<false/>
-		</dict>
-		<dict>
-			<key>Type</key>
 			<string>PSMultiValueSpecifier</string>
 			<key>Title</key>
 			<string>Enable SnapshotLRUCache</string>
@@ -51,34 +41,6 @@
 			<string>TabStripAutoScrollNewTabsDisabled</string>
 			<key>DefaultValue</key>
 			<false/>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSGroupSpecifier</string>
-			<key>Title</key>
-			<string>iPad Tab Switcher</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSMultiValueSpecifier</string>
-			<key>Title</key>
-			<string>Enable Tab Switcher</string>
-			<key>Key</key>
-			<string>EnableTabSwitcher</string>
-			<key>DefaultValue</key>
-			<string></string>
-			<key>Values</key>
-			<array>
-				<string></string>
-				<string>Enabled</string>
-				<string>Disabled</string>
-			</array>
-			<key>Titles</key>
-			<array>
-				<string>Default</string>
-				<string>Enabled</string>
-				<string>Disabled</string>
-			</array>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -123,28 +85,6 @@
 			<string>PSGroupSpecifier</string>
 			<key>Title</key>
 			<string>UI Settings</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSMultiValueSpecifier</string>
-			<key>Title</key>
-			<string>Enable All Bookmarks</string>
-			<key>Key</key>
-			<string>AllBookmarks</string>
-			<key>DefaultValue</key>
-			<string></string>
-			<key>Titles</key>
-			<array>
-				<string>Default</string>
-				<string>Enabled</string>
-				<string>Disabled</string>
-			</array>
-			<key>Values</key>
-			<array>
-				<string></string>
-				<string>Enabled</string>
-				<string>Disabled</string>
-			</array>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -204,16 +144,6 @@
 			<key>Type</key>
 			<string>PSToggleSwitchSpecifier</string>
 			<key>Title</key>
-			<string>Enable Credential Management API</string>
-			<key>Key</key>
-			<string>EnableCredentialManagement</string>
-			<key>DefaultValue</key>
-			<false/>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSToggleSwitchSpecifier</string>
-			<key>Title</key>
 			<string>Fake Cloud Policy Type</string>
 			<key>Key</key>
 			<string>FakeCloudPolicyType</string>
@@ -249,28 +179,6 @@
 			<string>SafariVCSignInDisabled</string>
 			<key>DefaultValue</key>
 			<false/>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSMultiValueSpecifier</string>
-			<key>Title</key>
-			<string>Enable Download Image Renaming</string>
-			<key>Key</key>
-			<string>EnableDownloadRenaming</string>
-			<key>DefaultValue</key>
-			<string></string>
-			<key>Values</key>
-			<array>
-				<string></string>
-				<string>Enabled</string>
-				<string>Disabled</string>
-			</array>
-			<key>Titles</key>
-			<array>
-				<string>Default</string>
-				<string>Enabled</string>
-				<string>Disabled</string>
-			</array>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -336,35 +244,35 @@
 			<key>DefaultValue</key>
 			<false/>
 		</dict>
-                <dict>
-                        <key>Type</key>
-                        <string>PSMultiValueSpecifier</string>
-                        <key>Title</key>
-                        <string>Enable Suggestions UI</string>
-                        <key>Key</key>
-                        <string>EnableSuggestions</string>
-                        <key>DefaultValue</key>
-                        <string></string>
-                        <key>Values</key>
-                        <array>
-                                <string></string>
-                                <string>Enabled</string>
-                                <string>Disabled</string>
-                        </array>
-                        <key>Titles</key>
-                        <array>
-                                <string>Default</string>
-                                <string>Enabled</string>
-                                <string>Disabled</string>
-                        </array>
-                </dict>
 		<dict>
 			<key>Type</key>
 			<string>PSMultiValueSpecifier</string>
 			<key>Title</key>
-			<string>Enable Passwords Link</string>
+			<string>Enable Suggestions UI</string>
 			<key>Key</key>
-			<string>EnablePasswordsLink</string>
+			<string>EnableSuggestions</string>
+			<key>DefaultValue</key>
+			<string></string>
+			<key>Values</key>
+			<array>
+				<string></string>
+				<string>Enabled</string>
+				<string>Disabled</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>Default</string>
+				<string>Enabled</string>
+				<string>Disabled</string>
+			</array>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Title</key>
+			<string>Enable Signin Promo</string>
+			<key>Key</key>
+			<string>EnableSigninPromo</string>
 			<key>DefaultValue</key>
 			<string></string>
 			<key>Values</key>
@@ -436,15 +344,11 @@
 				<integer>0</integer>
 				<integer>1</integer>
 				<integer>2</integer>
-				<integer>3</integer>
-				<integer>4</integer>
 			</array>
 			<key>Titles</key>
 			<array>
 				<string>Default</string>
 				<string>App Rating Promo</string>
-				<string>Faster Access Move to Dock Promo</string>
-				<string>Love Chrome Move to Dock Promo</string>
 				<string>Tip Move to Dock Promo</string>
 			</array>
 		</dict>
@@ -469,16 +373,6 @@
 				<string>Disabled</string>
 				<string>Enabled</string>
 			</array>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSToggleSwitchSpecifier</string>
-			<key>Title</key>
-			<string>Disable External Application Prompt</string>
-			<key>Key</key>
-			<string>ExternalAppPromptDisabled</string>
-			<key>DefaultValue</key>
-			<false/>
 		</dict>
 		<dict>
 			<key>Type</key>
@@ -552,6 +446,16 @@
 		</dict>
 		<dict>
 			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Title</key>
+			<string>Enable Native App Launcher</string>
+			<key>Key</key>
+			<string>NativeAppLauncherEnabled</string>
+			<key>DefaultValue</key>
+			<false/>
+		</dict>
+		<dict>
+			<key>Type</key>
 			<string>PSTextFieldSpecifier</string>
 			<key>Title</key>
 			<string>Origin Server Host</string>
@@ -592,6 +496,12 @@
 		</dict>
 		<dict>
 			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>Physical Web Settings</string>
+		</dict>
+		<dict>
+			<key>Type</key>
 			<string>PSMultiValueSpecifier</string>
 			<key>Title</key>
 			<string>Physical Web</string>
@@ -625,6 +535,34 @@
 			<string>Enable Payment Request</string>
 			<key>Key</key>
 			<string>EnablePaymentRequest</string>
+			<key>DefaultValue</key>
+			<string></string>
+			<key>Values</key>
+			<array>
+				<string></string>
+				<string>Enabled</string>
+				<string>Disabled</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>Default</string>
+				<string>Enabled</string>
+				<string>Disabled</string>
+			</array>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>CSChromium</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Title</key>
+			<string>Enable Bottom Toolbar</string>
+			<key>Key</key>
+			<string>EnableBottomToolbar</string>
 			<key>DefaultValue</key>
 			<string></string>
 			<key>Values</key>
@@ -718,35 +656,25 @@
 		</dict>
 		<dict>
 			<key>Type</key>
-			<string>PSGroupSpecifier</string>
+			<string>PSMultiValueSpecifier</string>
 			<key>Title</key>
-			<string>QR Code Reader</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSToggleSwitchSpecifier</string>
-			<key>Title</key>
-			<string>Disable QR Code Reader</string>
+			<string>Download missing favicons for NTP Most Likely Tiles from Google</string>
 			<key>Key</key>
-			<string>DisableQRCodeReader</string>
+			<string>EnableNtpMostLikelyFaviconsFromServer</string>
 			<key>DefaultValue</key>
-			<false/>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSGroupSpecifier</string>
-			<key>Title</key>
-			<string>Spotlight</string>
-		</dict>
-		<dict>
-			<key>Type</key>
-			<string>PSToggleSwitchSpecifier</string>
-			<key>Title</key>
-			<string>Disable Spotlight Actions</string>
-			<key>Key</key>
-			<string>DisableSpotlightActions</string>
-			<key>DefaultValue</key>
-			<false/>
+			<string></string>
+			<key>Values</key>
+			<array>
+				<string></string>
+				<string>Enabled</string>
+				<string>Disabled</string>
+			</array>
+			<key>Titles</key>
+			<array>
+				<string>Default</string>
+				<string>Enabled</string>
+				<string>Disabled</string>
+			</array>
 		</dict>
 	</array>
 </dict>

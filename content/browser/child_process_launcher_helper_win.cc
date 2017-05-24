@@ -4,6 +4,7 @@
 
 #include "base/files/file_path.h"
 #include "base/metrics/field_trial.h"
+#include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/win_util.h"
@@ -85,7 +86,6 @@ void ChildProcessLauncherHelper::AfterLaunchOnLauncherThread(
   DCHECK_CURRENTLY_ON(BrowserThread::PROCESS_LAUNCHER);
 }
 
-// static
 base::TerminationStatus ChildProcessLauncherHelper::GetTerminationStatus(
     const ChildProcessLauncherHelper::Process& process,
     bool known_dead,
@@ -107,13 +107,25 @@ void ChildProcessLauncherHelper::ForceNormalProcessTerminationSync(
   process.process.Terminate(RESULT_CODE_NORMAL_EXIT, false);
 }
 
-// static
-void ChildProcessLauncherHelper::SetProcessBackgroundedOnLauncherThread(
-      base::Process process, bool background) {
+void ChildProcessLauncherHelper::SetProcessPriorityOnLauncherThread(
+    base::Process process,
+    bool background,
+    bool boost_for_pending_views) {
   DCHECK_CURRENTLY_ON(BrowserThread::PROCESS_LAUNCHER);
   if (process.CanBackgroundProcesses())
     process.SetProcessBackgrounded(background);
 }
+
+// static
+void ChildProcessLauncherHelper::SetRegisteredFilesForService(
+    const std::string& service_name,
+    catalog::RequiredFileMap required_files) {
+  // No file passing from the manifest on Windows yet.
+  DCHECK(required_files.empty());
+}
+
+// static
+void ChildProcessLauncherHelper::ResetRegisteredFilesForTesting() {}
 
 }  // namespace internal
 }  // namespace content

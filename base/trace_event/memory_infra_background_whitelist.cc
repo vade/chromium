@@ -19,9 +19,9 @@ namespace {
 const char* const kDumpProviderWhitelist[] = {
     "android::ResourceManagerImpl",
     "BlinkGC",
-    "ChildDiscardableSharedMemoryManager",
+    "ClientDiscardableSharedMemoryManager",
     "DOMStorage",
-    "HostDiscardableSharedMemoryManager",
+    "DiscardableSharedMemoryManager",
     "IndexedDBBackingStore",
     "JavaHeap",
     "LevelDB",
@@ -32,9 +32,17 @@ const char* const kDumpProviderWhitelist[] = {
     "ProcessMemoryMetrics",
     "Skia",
     "Sql",
+    "URLRequestContext",
     "V8Isolate",
     "WinHeap",
     "SyncDirectory",
+    "TabRestoreServiceHelper",
+    nullptr  // End of list marker.
+};
+
+// The names of dump providers whitelisted for summary tracing.
+const char* const kDumpProviderSummaryWhitelist[] = {
+    "Malloc", "PartitionAlloc", "ProcessMemoryMetrics", "V8Isolate",
     nullptr  // End of list marker.
 };
 
@@ -60,6 +68,77 @@ const char* const kAllocatorDumpNameWhitelist[] = {
     "malloc",
     "malloc/allocated_objects",
     "malloc/metadata_fragmentation_caches",
+    "net/http_network_session_0x?",
+    "net/http_network_session_0x?/quic_stream_factory",
+    "net/http_network_session_0x?/socket_pool",
+    "net/http_network_session_0x?/spdy_session_pool",
+    "net/http_network_session_0x?/stream_factory",
+    "net/sdch_manager_0x?",
+    "net/ssl_session_cache",
+    "net/url_request_context",
+    "net/url_request_context/app_request",
+    "net/url_request_context/app_request/0x?",
+    "net/url_request_context/app_request/0x?/http_cache",
+    "net/url_request_context/app_request/0x?/http_cache/memory_backend",
+    "net/url_request_context/app_request/0x?/http_cache/simple_backend",
+    "net/url_request_context/app_request/0x?/http_network_session",
+    "net/url_request_context/app_request/0x?/sdch_manager",
+    "net/url_request_context/extensions",
+    "net/url_request_context/extensions/0x?",
+    "net/url_request_context/extensions/0x?/http_cache",
+    "net/url_request_context/extensions/0x?/http_cache/memory_backend",
+    "net/url_request_context/extensions/0x?/http_cache/simple_backend",
+    "net/url_request_context/extensions/0x?/http_network_session",
+    "net/url_request_context/extensions/0x?/sdch_manager",
+    "net/url_request_context/isolated_media",
+    "net/url_request_context/isolated_media/0x?",
+    "net/url_request_context/isolated_media/0x?/http_cache",
+    "net/url_request_context/isolated_media/0x?/http_cache/memory_backend",
+    "net/url_request_context/isolated_media/0x?/http_cache/simple_backend",
+    "net/url_request_context/isolated_media/0x?/http_network_session",
+    "net/url_request_context/isolated_media/0x?/sdch_manager",
+    "net/url_request_context/main",
+    "net/url_request_context/main/0x?",
+    "net/url_request_context/main/0x?/http_cache",
+    "net/url_request_context/main/0x?/http_cache/memory_backend",
+    "net/url_request_context/main/0x?/http_cache/simple_backend",
+    "net/url_request_context/main/0x?/http_network_session",
+    "net/url_request_context/main/0x?/sdch_manager",
+    "net/url_request_context/main_media",
+    "net/url_request_context/main_media/0x?",
+    "net/url_request_context/main_media/0x?/http_cache",
+    "net/url_request_context/main_media/0x?/http_cache/memory_backend",
+    "net/url_request_context/main_media/0x?/http_cache/simple_backend",
+    "net/url_request_context/main_media/0x?/http_network_session",
+    "net/url_request_context/main_media/0x?/sdch_manager",
+    "net/url_request_context/proxy",
+    "net/url_request_context/proxy/0x?",
+    "net/url_request_context/proxy/0x?/http_cache",
+    "net/url_request_context/proxy/0x?/http_cache/memory_backend",
+    "net/url_request_context/proxy/0x?/http_cache/simple_backend",
+    "net/url_request_context/proxy/0x?/http_network_session",
+    "net/url_request_context/proxy/0x?/sdch_manager",
+    "net/url_request_context/safe_browsing",
+    "net/url_request_context/safe_browsing/0x?",
+    "net/url_request_context/safe_browsing/0x?/http_cache",
+    "net/url_request_context/safe_browsing/0x?/http_cache/memory_backend",
+    "net/url_request_context/safe_browsing/0x?/http_cache/simple_backend",
+    "net/url_request_context/safe_browsing/0x?/http_network_session",
+    "net/url_request_context/safe_browsing/0x?/sdch_manager",
+    "net/url_request_context/system",
+    "net/url_request_context/system/0x?",
+    "net/url_request_context/system/0x?/http_cache",
+    "net/url_request_context/system/0x?/http_cache/memory_backend",
+    "net/url_request_context/system/0x?/http_cache/simple_backend",
+    "net/url_request_context/system/0x?/http_network_session",
+    "net/url_request_context/system/0x?/sdch_manager",
+    "net/url_request_context/unknown",
+    "net/url_request_context/unknown/0x?",
+    "net/url_request_context/unknown/0x?/http_cache",
+    "net/url_request_context/unknown/0x?/http_cache/memory_backend",
+    "net/url_request_context/unknown/0x?/http_cache/simple_backend",
+    "net/url_request_context/unknown/0x?/http_network_session",
+    "net/url_request_context/unknown/0x?/sdch_manager",
     "web_cache/Image_resources",
     "web_cache/CSS stylesheet_resources",
     "web_cache/Script_resources",
@@ -68,6 +147,7 @@ const char* const kAllocatorDumpNameWhitelist[] = {
     "web_cache/Other_resources",
     "partition_alloc/allocated_objects",
     "partition_alloc/partitions",
+    "partition_alloc/partitions/array_buffer",
     "partition_alloc/partitions/buffer",
     "partition_alloc/partitions/fast_malloc",
     "partition_alloc/partitions/layout",
@@ -88,21 +168,71 @@ const char* const kAllocatorDumpNameWhitelist[] = {
     "winheap/allocated_objects",
     "sync/0x?/kernel",
     "sync/0x?/store",
+    "sync/0x?/model_type/APP",
+    "sync/0x?/model_type/APP_LIST",
+    "sync/0x?/model_type/APP_NOTIFICATION",
+    "sync/0x?/model_type/APP_SETTING",
+    "sync/0x?/model_type/ARC_PACKAGE",
+    "sync/0x?/model_type/ARTICLE",
+    "sync/0x?/model_type/AUTOFILL",
+    "sync/0x?/model_type/AUTOFILL_PROFILE",
+    "sync/0x?/model_type/AUTOFILL_WALLET",
+    "sync/0x?/model_type/BOOKMARK",
+    "sync/0x?/model_type/DEVICE_INFO",
+    "sync/0x?/model_type/DICTIONARY",
+    "sync/0x?/model_type/EXPERIMENTS",
+    "sync/0x?/model_type/EXTENSION",
+    "sync/0x?/model_type/EXTENSION_SETTING",
+    "sync/0x?/model_type/FAVICON_IMAGE",
+    "sync/0x?/model_type/FAVICON_TRACKING",
+    "sync/0x?/model_type/HISTORY_DELETE_DIRECTIVE",
+    "sync/0x?/model_type/MANAGED_USER",
+    "sync/0x?/model_type/MANAGED_USER_SETTING",
+    "sync/0x?/model_type/MANAGED_USER_SHARED_SETTING",
+    "sync/0x?/model_type/MANAGED_USER_WHITELIST",
+    "sync/0x?/model_type/NIGORI",
+    "sync/0x?/model_type/PASSWORD",
+    "sync/0x?/model_type/PREFERENCE",
+    "sync/0x?/model_type/PRINTER",
+    "sync/0x?/model_type/PRIORITY_PREFERENCE",
+    "sync/0x?/model_type/READING_LIST",
+    "sync/0x?/model_type/SEARCH_ENGINE",
+    "sync/0x?/model_type/SESSION",
+    "sync/0x?/model_type/SYNCED_NOTIFICATION",
+    "sync/0x?/model_type/SYNCED_NOTIFICATION_APP_INFO",
+    "sync/0x?/model_type/THEME",
+    "sync/0x?/model_type/TYPED_URL",
+    "sync/0x?/model_type/WALLET_METADATA",
+    "sync/0x?/model_type/WIFI_CREDENTIAL",
+    "tab_restore/service_helper_0x?/entries",
+    "tab_restore/service_helper_0x?/entries/tab_0x?",
+    "tab_restore/service_helper_0x?/entries/window_0x?",
     nullptr  // End of list marker.
 };
 
 const char* const* g_dump_provider_whitelist = kDumpProviderWhitelist;
+const char* const* g_dump_provider_whitelist_for_summary =
+    kDumpProviderSummaryWhitelist;
 const char* const* g_allocator_dump_name_whitelist =
     kAllocatorDumpNameWhitelist;
+
+bool IsMemoryDumpProviderInList(const char* mdp_name, const char* const* list) {
+  for (size_t i = 0; list[i] != nullptr; ++i) {
+    if (strcmp(mdp_name, list[i]) == 0)
+      return true;
+  }
+  return false;
+}
 
 }  // namespace
 
 bool IsMemoryDumpProviderWhitelisted(const char* mdp_name) {
-  for (size_t i = 0; g_dump_provider_whitelist[i] != nullptr; ++i) {
-    if (strcmp(mdp_name, g_dump_provider_whitelist[i]) == 0)
-      return true;
-  }
-  return false;
+  return IsMemoryDumpProviderInList(mdp_name, g_dump_provider_whitelist);
+}
+
+bool IsMemoryDumpProviderWhitelistedForSummary(const char* mdp_name) {
+  return IsMemoryDumpProviderInList(mdp_name,
+                                    g_dump_provider_whitelist_for_summary);
 }
 
 bool IsMemoryAllocatorDumpNameWhitelisted(const std::string& name) {
@@ -135,6 +265,10 @@ bool IsMemoryAllocatorDumpNameWhitelisted(const std::string& name) {
 
 void SetDumpProviderWhitelistForTesting(const char* const* list) {
   g_dump_provider_whitelist = list;
+}
+
+void SetDumpProviderSummaryWhitelistForTesting(const char* const* list) {
+  g_dump_provider_whitelist_for_summary = list;
 }
 
 void SetAllocatorDumpNameWhitelistForTesting(const char* const* list) {

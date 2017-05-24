@@ -9,7 +9,7 @@
 Polymer({
   is: 'settings-search-engines-page',
 
-  behaviors: [WebUIListenerBehavior],
+  behaviors: [settings.GlobalScrollTargetBehavior, WebUIListenerBehavior],
 
   properties: {
     /** @type {!Array<!SearchEngine>} */
@@ -30,6 +30,15 @@ Polymer({
       value: function() { return []; }
     },
 
+    /**
+     * Needed by GlobalScrollTargetBehavior.
+     * @override
+     */
+    subpageRoute: {
+      type: Object,
+      value: settings.Route.SEARCH_ENGINES,
+    },
+
     /** @private {boolean} */
     showAddSearchEngineDialog_: Boolean,
 
@@ -37,7 +46,10 @@ Polymer({
     showExtensionsList_: {
       type: Boolean,
       computed: 'computeShowExtensionsList_(extensions)',
-    }
+    },
+
+    /** @private {HTMLElement} */
+    omniboxExtensionlastFocused_: Object,
   },
 
   // Since the iron-list for extensions is enclosed in a dom-if, observe both
@@ -50,6 +62,11 @@ Polymer({
         getSearchEnginesList().then(this.enginesChanged_.bind(this));
     this.addWebUIListener(
         'search-engines-changed', this.enginesChanged_.bind(this));
+
+    // Sets offset in iron-list that uses the page as a scrollTarget.
+    Polymer.RenderStatus.afterNextRender(this, function() {
+      this.$.otherEngines.scrollOffset = this.$.otherEngines.offsetTop;
+    });
   },
 
   /** @private */
@@ -82,6 +99,7 @@ Polymer({
       // previous dialog's contents are cleared.
       dialog.addEventListener('close', function() {
         this.showAddSearchEngineDialog_ = false;
+        cr.ui.focusWithoutInk(assert(this.$.addSearchEngine));
       }.bind(this));
     }.bind(this));
   },

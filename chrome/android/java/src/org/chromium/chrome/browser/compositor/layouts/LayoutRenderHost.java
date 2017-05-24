@@ -26,7 +26,7 @@ public interface LayoutRenderHost {
     /**
      * Indicates that a previously rendered frame has been swapped to the OS.
      */
-    void onSwapBuffersCompleted(int pendingSwapBuffersCount);
+    void didSwapFrame(int pendingFrameCount);
 
     /**
      * Indicates that the rendering surface has just been created.
@@ -36,7 +36,7 @@ public interface LayoutRenderHost {
     /**
      * Indicates that the rendering surface has been resized.
      */
-    void onPhysicalBackingSizeChanged(int width, int height);
+    void onSurfaceResized(int width, int height);
 
     /**
      * Pushes a debug rectangle that will be drawn.

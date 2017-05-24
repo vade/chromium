@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/i18n/rtl.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/supports_user_data.h"
 #include "components/safe_browsing/base_blocking_page.h"
@@ -86,7 +87,7 @@ WhitelistUrlSet* GetOrCreateWhitelist(WebContents* web_contents) {
       static_cast<WhitelistUrlSet*>(web_contents->GetUserData(kWhitelistKey));
   if (!site_list) {
     site_list = new WhitelistUrlSet;
-    web_contents->SetUserData(kWhitelistKey, site_list);
+    web_contents->SetUserData(kWhitelistKey, base::WrapUnique(site_list));
   }
   return site_list;
 }
@@ -215,13 +216,15 @@ void BaseUIManager::DisplayBlockingPage(
     return;
   }
 
-  // BaseUIManager does not send SafeBrowsingHitReport. Subclasses should
-  // implement the reporting logic themselves if needed.
+  if (resource.threat_type != SB_THREAT_TYPE_SAFE) {
+    CreateAndSendHitReport(resource);
+  }
+
   AddToWhitelistUrlSet(GetMainFrameWhitelistUrlForResource(resource),
                        resource.web_contents_getter.Run(),
                        true /* A decision is now pending */,
                        resource.threat_type);
-  BaseBlockingPage::ShowBlockingPage(this, resource);
+  ShowBlockingPageForResource(resource);
 }
 
 void BaseUIManager::EnsureWhitelistCreated(
@@ -232,6 +235,13 @@ void BaseUIManager::EnsureWhitelistCreated(
 void BaseUIManager::LogPauseDelay(base::TimeDelta time) {
   UMA_HISTOGRAM_LONG_TIMES("SB2.Delay", time);
   return;
+}
+
+void BaseUIManager::CreateAndSendHitReport(const UnsafeResource& resource) {}
+
+void BaseUIManager::ShowBlockingPageForResource(
+    const UnsafeResource& resource) {
+  BaseBlockingPage::ShowBlockingPage(this, resource);
 }
 
 // A safebrowsing hit is sent after a blocking page for malware/phishing
@@ -329,7 +339,7 @@ void BaseUIManager::RemoveFromPendingWhitelistUrlSet(
   // remove the main-frame URL from the pending whitelist, so the
   // main-frame URL will have already been removed when the subsequent
   // blocking pages are dismissed.
-  if (site_list->ContainsPending(whitelist_url, nullptr))
+  if (site_list && site_list->ContainsPending(whitelist_url, nullptr))
     site_list->RemovePending(whitelist_url);
 
   // Notify security UI that security state has changed.

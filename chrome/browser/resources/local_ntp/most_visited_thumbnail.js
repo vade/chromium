@@ -56,13 +56,10 @@ window.addEventListener('DOMContentLoaded', function() {
       image.src = src;
     }
 
-    var useIcons = params['icons'] == '1';
     if (data.dummy) {
       showEmptyTile();
-    } else if (useIcons && data.largeIconUrl) {
-      createThumbnail(data.largeIconUrl, 'large-icon');
-    } else if (!useIcons && data.thumbnailUrls && data.thumbnailUrls.length) {
-      createThumbnail(data.thumbnailUrls[0], 'thumbnail');
+    } else if (data.thumbnailUrl) {
+      createThumbnail(data.thumbnailUrl, 'thumbnail');
     } else if (data.domain) {
       showDomainElement();
     } else {

@@ -25,7 +25,7 @@ class WebContentsImpl;
 // Base class for something which owns a mojo::AssociatedBindingSet on behalf
 // of a WebContents. See WebContentsFrameBindingSet<T> below.
 class CONTENT_EXPORT WebContentsBindingSet {
- protected:
+ public:
   class CONTENT_EXPORT Binder {
    public:
     virtual ~Binder() {}
@@ -35,6 +35,16 @@ class CONTENT_EXPORT WebContentsBindingSet {
         mojo::ScopedInterfaceEndpointHandle handle);
   };
 
+  void SetBinderForTesting(std::unique_ptr<Binder> binder) {
+    binder_for_testing_ = std::move(binder);
+  }
+
+  template <typename Interface>
+  static WebContentsBindingSet* GetForWebContents(WebContents* web_contents) {
+    return GetForWebContents(web_contents, Interface::Name_);
+  }
+
+ protected:
   WebContentsBindingSet(WebContents* web_contents,
                         const std::string& interface_name,
                         std::unique_ptr<Binder> binder);
@@ -43,12 +53,16 @@ class CONTENT_EXPORT WebContentsBindingSet {
  private:
   friend class WebContentsImpl;
 
+  static WebContentsBindingSet* GetForWebContents(WebContents* web_contents,
+                                                  const char* interface_name);
+
   void CloseAllBindings();
   void OnRequestForFrame(RenderFrameHost* render_frame_host,
                          mojo::ScopedInterfaceEndpointHandle handle);
 
   const base::Closure remove_callback_;
   std::unique_ptr<Binder> binder_;
+  std::unique_ptr<Binder> binder_for_testing_;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsBindingSet);
 };
@@ -119,8 +133,7 @@ class WebContentsFrameBindingSet : public WebContentsBindingSet {
   class FrameInterfaceBinder : public Binder {
    public:
     FrameInterfaceBinder(WebContentsFrameBindingSet* binding_set,
-                         Interface* impl)
-        : impl_(impl), bindings_(mojo::BindingSetDispatchMode::WITH_CONTEXT) {
+                         Interface* impl) : impl_(impl) {
       bindings_.set_pre_dispatch_handler(
           base::Bind(&WebContentsFrameBindingSet::WillDispatchForContext,
                      base::Unretained(binding_set)));
@@ -132,19 +145,19 @@ class WebContentsFrameBindingSet : public WebContentsBindingSet {
     void OnRequestForFrame(
         RenderFrameHost* render_frame_host,
         mojo::ScopedInterfaceEndpointHandle handle) override {
-      mojo::AssociatedInterfaceRequest<Interface> request;
-      request.Bind(std::move(handle));
-      bindings_.AddBinding(impl_, std::move(request), render_frame_host);
+      bindings_.AddBinding(
+          impl_, mojo::AssociatedInterfaceRequest<Interface>(std::move(handle)),
+          render_frame_host);
     }
 
     Interface* const impl_;
-    mojo::AssociatedBindingSet<Interface> bindings_;
+    mojo::AssociatedBindingSet<Interface, RenderFrameHost*> bindings_;
 
     DISALLOW_COPY_AND_ASSIGN(FrameInterfaceBinder);
   };
 
-  void WillDispatchForContext(void* context) {
-    current_target_frame_ = static_cast<RenderFrameHost*>(context);
+  void WillDispatchForContext(RenderFrameHost* const& frame_host) {
+    current_target_frame_ = frame_host;
   }
 
   RenderFrameHost* current_target_frame_ = nullptr;

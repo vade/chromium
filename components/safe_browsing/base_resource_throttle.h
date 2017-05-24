@@ -5,8 +5,6 @@
 #ifndef COMPONENTS_SAFE_BROWSING_BASE_RESOURCE_THROTTLE_H_
 #define COMPONENTS_SAFE_BROWSING_BASE_RESOURCE_THROTTLE_H_
 
-#include <set>
-#include <string>
 #include <vector>
 
 #include "base/macros.h"
@@ -85,6 +83,12 @@ class BaseResourceThrottle
       scoped_refptr<BaseUIManager> ui_manager);
 
   ~BaseResourceThrottle() override;
+
+  // If our blocked resource is the main frame, this calls
+  // ContentSubresourceFilterDriverFactory's
+  // OnMainResourceMatchedSafeBrowsingBlacklist method.
+  static void NotifySubresourceFilterOfBlockedResource(
+      const security_interstitials::UnsafeResource& resource);
 
   // Does nothing in the base class. Override this to destroy prerender contents
   // in chrome.
@@ -181,11 +185,6 @@ class BaseResourceThrottle
 
   const content::ResourceType resource_type_;
   net::NetLogWithSource net_log_with_source_;
-
-  // TODO(vakh): The following set should be removed after fixing
-  // http://crbug.com/660293
-  // URLs that timed out waiting for a SafeBrowsing reputation check.
-  std::set<GURL> timed_out_urls_;
 
   DISALLOW_COPY_AND_ASSIGN(BaseResourceThrottle);
 };

@@ -42,16 +42,10 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
-#include "content/public/common/content_features.h"
 #include "content/public/common/origin_util.h"
 #include "ui/base/l10n/l10n_util.h"
-
-#if defined(OS_WIN) && defined(USE_ASH)
-#include "chrome/browser/ui/ash/ash_util.h"
-#endif
 
 namespace options {
 
@@ -170,9 +164,6 @@ void PasswordManagerHandler::GetLocalizedValues(
 #endif
 
   localized_strings->SetBoolean("disableShowPasswords", disable_show_passwords);
-  localized_strings->SetBoolean(
-      "enableCredentialManagerAPI",
-      base::FeatureList::IsEnabled(features::kCredentialManagementAPI));
 }
 
 void PasswordManagerHandler::RegisterMessages() {
@@ -249,10 +240,9 @@ void PasswordManagerHandler::ShowPassword(
     const std::string& username,
     const base::string16& password_value) {
   // Call back the front end to reveal the password.
-  web_ui()->CallJavascriptFunctionUnsafe(
-      "PasswordManager.showPassword",
-      base::FundamentalValue(static_cast<int>(index)),
-      base::StringValue(password_value));
+  web_ui()->CallJavascriptFunctionUnsafe("PasswordManager.showPassword",
+                                         base::Value(static_cast<int>(index)),
+                                         base::Value(password_value));
 }
 
 void PasswordManagerHandler::HandleUpdatePasswordLists(

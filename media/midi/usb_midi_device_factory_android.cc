@@ -6,10 +6,8 @@
 
 #include <stddef.h>
 
-#include "base/android/context_utils.h"
 #include "base/bind.h"
 #include "base/containers/hash_tables.h"
-#include "base/lazy_instance.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/synchronization/lock.h"
@@ -31,8 +29,7 @@ UsbMidiDeviceFactoryAndroid::UsbMidiDeviceFactoryAndroid() : delegate_(NULL) {}
 UsbMidiDeviceFactoryAndroid::~UsbMidiDeviceFactoryAndroid() {
   JNIEnv* env = base::android::AttachCurrentThread();
   if (!raw_factory_.is_null())
-    Java_UsbMidiDeviceFactoryAndroid_close(
-        env, raw_factory_, base::android::GetApplicationContext());
+    Java_UsbMidiDeviceFactoryAndroid_close(env, raw_factory_);
 }
 
 void UsbMidiDeviceFactoryAndroid::EnumerateDevices(
@@ -41,14 +38,12 @@ void UsbMidiDeviceFactoryAndroid::EnumerateDevices(
   DCHECK(!delegate_);
   JNIEnv* env = base::android::AttachCurrentThread();
   uintptr_t pointer = reinterpret_cast<uintptr_t>(this);
-  raw_factory_.Reset(Java_UsbMidiDeviceFactoryAndroid_create(
-      env, base::android::GetApplicationContext(), pointer));
+  raw_factory_.Reset(Java_UsbMidiDeviceFactoryAndroid_create(env, pointer));
 
   delegate_ = delegate;
   callback_ = callback;
 
-  if (Java_UsbMidiDeviceFactoryAndroid_enumerateDevices(
-          env, raw_factory_, base::android::GetApplicationContext())) {
+  if (Java_UsbMidiDeviceFactoryAndroid_enumerateDevices(env, raw_factory_)) {
     // Asynchronous operation.
     return;
   }

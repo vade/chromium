@@ -29,6 +29,7 @@
  */
 
 /**
+ * @implements {Bindings.CSSWorkspaceBinding.SourceMapping}
  * @unrestricted
  */
 Bindings.StylesSourceMapping = class {
@@ -53,28 +54,50 @@ Bindings.StylesSourceMapping = class {
       this._cssModel.addEventListener(SDK.CSSModel.Events.StyleSheetAdded, this._styleSheetAdded, this),
       this._cssModel.addEventListener(SDK.CSSModel.Events.StyleSheetRemoved, this._styleSheetRemoved, this),
       this._cssModel.addEventListener(SDK.CSSModel.Events.StyleSheetChanged, this._styleSheetChanged, this),
-      SDK.ResourceTreeModel.fromTarget(cssModel.target())
+      cssModel.target()
+          .model(SDK.ResourceTreeModel)
           .addEventListener(SDK.ResourceTreeModel.Events.MainFrameNavigated, this._unbindAllUISourceCodes, this)
     ];
   }
 
   /**
+   * @override
    * @param {!SDK.CSSLocation} rawLocation
    * @return {?Workspace.UILocation}
    */
   rawLocationToUILocation(rawLocation) {
-    var uiSourceCode =
-        Bindings.NetworkProject.uiSourceCodeForStyleURL(this._workspace, rawLocation.url, rawLocation.header());
+    var header = rawLocation.header();
+    if (!header)
+      return null;
+    var uiSourceCode = Bindings.NetworkProject.uiSourceCodeForStyleURL(this._workspace, rawLocation.url, header);
     if (!uiSourceCode)
       return null;
     var lineNumber = rawLocation.lineNumber;
     var columnNumber = rawLocation.columnNumber;
-    var header = this._cssModel.styleSheetHeaderForId(rawLocation.styleSheetId);
-    if (header && header.isInline && header.hasSourceURL) {
+    if (header.isInline && header.hasSourceURL) {
       lineNumber -= header.lineNumberInSource(0);
       columnNumber -= header.columnNumberInSource(lineNumber, 0);
     }
     return uiSourceCode.uiLocation(lineNumber, columnNumber);
+  }
+
+  /**
+   * @override
+   * @param {!Workspace.UILocation} uiLocation
+   * @return {!Array<!SDK.CSSLocation>}
+   */
+  uiLocationToRawLocations(uiLocation) {
+    // TODO(caseq,lushnikov): return multiple raw locations.
+    var header = Bindings.NetworkProject.styleHeaderForUISourceCode(uiLocation.uiSourceCode);
+    if (!header)
+      return [];
+    var lineNumber = uiLocation.lineNumber;
+    var columnNumber = uiLocation.columnNumber;
+    if (header.isInline && header.hasSourceURL) {
+      columnNumber = header.columnNumberInSource(lineNumber, columnNumber);
+      lineNumber = header.lineNumberInSource(lineNumber);
+    }
+    return [new SDK.CSSLocation(header, lineNumber, columnNumber)];
   }
 
   /**
@@ -143,8 +166,6 @@ Bindings.StylesSourceMapping = class {
    * @param {!Common.Event} event
    */
   _unbindAllUISourceCodes(event) {
-    if (event.data.target() !== this._cssModel.target())
-      return;
     for (var styleFile of this._styleFiles.values())
       styleFile.dispose();
     this._styleFiles.clear();
@@ -269,9 +290,13 @@ Bindings.StylesSourceMapping = class {
      */
     function callback(uiSourceCode, content) {
       var styleFile = this._styleFiles.get(uiSourceCode);
-      if (styleFile)
-        styleFile.addRevision(content || '');
+      if (typeof content === 'string' && styleFile)
+        styleFile.addRevision(content);
+      this._styleFileSyncedForTest();
     }
+  }
+
+  _styleFileSyncedForTest() {
   }
 
   dispose() {

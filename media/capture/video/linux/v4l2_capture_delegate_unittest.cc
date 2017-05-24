@@ -7,6 +7,7 @@
 
 #include "base/files/file_enumerator.h"
 #include "base/run_loop.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "media/capture/video/linux/v4l2_capture_delegate.h"
 #include "media/capture/video/video_capture_device.h"
@@ -33,13 +34,32 @@ static struct {
 } const kControls[] = {{V4L2_CID_USER_BASE, V4L2_CID_USER_CLASS},
                        {V4L2_CID_CAMERA_CLASS_BASE, V4L2_CID_CAMERA_CLASS}};
 
-// Determines if |control_id| is special, i.e. controls another one's state.
-static bool IsSpecialControl(int control_id) {
+// Determines if |control_id| is special, i.e. controls another one's state, or
+// if it should be skipped (blacklisted, https://crbug.com/697885).
+#if !defined(V4L2_CID_PAN_SPEED)
+#define V4L2_CID_PAN_SPEED (V4L2_CID_CAMERA_CLASS_BASE + 32)
+#endif
+#if !defined(V4L2_CID_TILT_SPEED)
+#define V4L2_CID_TILT_SPEED (V4L2_CID_CAMERA_CLASS_BASE + 33)
+#endif
+#if !defined(V4L2_CID_PANTILT_CMD)
+#define V4L2_CID_PANTILT_CMD (V4L2_CID_CAMERA_CLASS_BASE + 34)
+#endif
+static bool IsSpecialOrBlacklistedControl(int control_id) {
   switch (control_id) {
     case V4L2_CID_AUTO_WHITE_BALANCE:
     case V4L2_CID_EXPOSURE_AUTO:
     case V4L2_CID_EXPOSURE_AUTO_PRIORITY:
     case V4L2_CID_FOCUS_AUTO:
+    case V4L2_CID_PAN_RELATIVE:
+    case V4L2_CID_TILT_RELATIVE:
+    case V4L2_CID_PAN_RESET:
+    case V4L2_CID_TILT_RESET:
+    case V4L2_CID_PAN_ABSOLUTE:
+    case V4L2_CID_TILT_ABSOLUTE:
+    case V4L2_CID_PAN_SPEED:
+    case V4L2_CID_TILT_SPEED:
+    case V4L2_CID_PANTILT_CMD:
       return true;
   }
   return false;
@@ -87,7 +107,7 @@ static void SetControlsToMaxValues(int device_fd) {
         break;
       range.id |= V4L2_CTRL_FLAG_NEXT_CTRL;
 
-      if (IsSpecialControl(range.id & ~V4L2_CTRL_FLAG_NEXT_CTRL))
+      if (IsSpecialOrBlacklistedControl(range.id & ~V4L2_CTRL_FLAG_NEXT_CTRL))
         continue;
       DVLOG(1) << __func__ << " " << range.name << " set to " << range.maximum;
 
@@ -112,7 +132,7 @@ static void SetControlsToMaxValues(int device_fd) {
         break;
       range.id |= V4L2_CTRL_FLAG_NEXT_CTRL;
 
-      if (IsSpecialControl(range.id & ~V4L2_CTRL_FLAG_NEXT_CTRL))
+      if (IsSpecialOrBlacklistedControl(range.id & ~V4L2_CTRL_FLAG_NEXT_CTRL))
         continue;
       DVLOG(1) << __func__ << " " << range.name << " set to " << range.maximum;
 
@@ -187,20 +207,22 @@ class MockVideoCaptureDeviceClient : public VideoCaptureDevice::Client {
                void(const tracked_objects::Location& from_here,
                     const std::string& reason));
   MOCK_CONST_METHOD0(GetBufferPoolUtilization, double(void));
+  MOCK_METHOD0(OnStarted, void(void));
 };
 
 class V4L2CaptureDelegateTest : public ::testing::Test {
  public:
   V4L2CaptureDelegateTest()
       : device_descriptor_("Device 0", "/dev/video0"),
-        delegate_(new V4L2CaptureDelegate(device_descriptor_,
-                                          base::ThreadTaskRunnerHandle::Get(),
-                                          50)) {}
+        delegate_(base::MakeUnique<V4L2CaptureDelegate>(
+            device_descriptor_,
+            base::ThreadTaskRunnerHandle::Get(),
+            50)) {}
   ~V4L2CaptureDelegateTest() override = default;
 
-  base::MessageLoop loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   VideoCaptureDeviceDescriptor device_descriptor_;
-  scoped_refptr<V4L2CaptureDelegate> delegate_;
+  std::unique_ptr<V4L2CaptureDelegate> delegate_;
 };
 
 }  // anonymous namespace
@@ -232,6 +254,7 @@ TEST_F(V4L2CaptureDelegateTest, CreateAndDestroyAndVerifyControls) {
     std::unique_ptr<MockVideoCaptureDeviceClient> client(
         new MockVideoCaptureDeviceClient());
     MockVideoCaptureDeviceClient* client_ptr = client.get();
+    EXPECT_CALL(*client_ptr, OnStarted());
     delegate_->AllocateAndStart(320 /* width */, 240 /* height */,
                                 10.0 /* frame_rate */, std::move(client));
 

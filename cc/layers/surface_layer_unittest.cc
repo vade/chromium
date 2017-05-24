@@ -14,6 +14,7 @@
 #include "cc/animation/animation_host.h"
 #include "cc/layers/solid_color_layer.h"
 #include "cc/layers/surface_layer.h"
+#include "cc/layers/surface_layer_impl.h"
 #include "cc/output/compositor_frame.h"
 #include "cc/surfaces/sequence_surface_reference_factory.h"
 #include "cc/surfaces/surface_info.h"
@@ -31,59 +32,54 @@
 namespace cc {
 namespace {
 
+using testing::_;
+using testing::Eq;
+
 static constexpr FrameSinkId kArbitraryFrameSinkId(1, 1);
 
 class SurfaceLayerTest : public testing::Test {
+ public:
+  SurfaceLayerTest()
+      : host_impl_(&task_runner_provider_, &task_graph_runner_) {}
+
  protected:
   void SetUp() override {
     animation_host_ = AnimationHost::CreateForTesting(ThreadInstance::MAIN);
     layer_tree_host_ = FakeLayerTreeHost::Create(
         &fake_client_, &task_graph_runner_, animation_host_.get());
-    layer_tree_ = layer_tree_host_->GetLayerTree();
-    layer_tree_->SetViewportSize(gfx::Size(10, 10));
+    layer_tree_host_->SetViewportSize(gfx::Size(10, 10));
+    host_impl_.CreatePendingTree();
   }
 
   void TearDown() override {
     if (layer_tree_host_) {
-      layer_tree_->SetRootLayer(nullptr);
+      layer_tree_host_->SetRootLayer(nullptr);
       layer_tree_host_ = nullptr;
     }
   }
 
   FakeLayerTreeHostClient fake_client_;
+  FakeImplTaskRunnerProvider task_runner_provider_;
   TestTaskGraphRunner task_graph_runner_;
   std::unique_ptr<AnimationHost> animation_host_;
   std::unique_ptr<FakeLayerTreeHost> layer_tree_host_;
-  LayerTree* layer_tree_;
+  FakeLayerTreeHostImpl host_impl_;
 };
 
-class TestSurfaceReferenceFactory : public SequenceSurfaceReferenceFactory {
- protected:
-  void SatisfySequence(const SurfaceSequence& seq) const override {
-    *out_seq_ = seq;
-  }
-
-  void RequireSequence(const SurfaceId& id,
-                       const SurfaceSequence& seq) const override {
-    *out_id_ = id;
-    out_set_->insert(seq);
-  }
-
+class MockSurfaceReferenceFactory : public SequenceSurfaceReferenceFactory {
  public:
-  TestSurfaceReferenceFactory(SurfaceSequence* out_seq,
-                              SurfaceId* out_id,
-                              std::set<SurfaceSequence>* out_set)
-      : out_seq_(out_seq), out_id_(out_id), out_set_(out_set) {}
+  MockSurfaceReferenceFactory() {}
+
+  // SequenceSurfaceReferenceFactory implementation.
+  MOCK_CONST_METHOD1(SatisfySequence, void(const SurfaceSequence&));
+  MOCK_CONST_METHOD2(RequireSequence,
+                     void(const SurfaceId&, const SurfaceSequence&));
 
  protected:
-  ~TestSurfaceReferenceFactory() override = default;
+  ~MockSurfaceReferenceFactory() override = default;
 
  private:
-  SurfaceSequence* out_seq_;
-  SurfaceId* out_id_;
-  std::set<SurfaceSequence>* out_set_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestSurfaceReferenceFactory);
+  DISALLOW_COPY_AND_ASSIGN(MockSurfaceReferenceFactory);
 };
 
 // Check that one surface can be referenced by multiple LayerTreeHosts, and
@@ -91,66 +87,98 @@ class TestSurfaceReferenceFactory : public SequenceSurfaceReferenceFactory {
 TEST_F(SurfaceLayerTest, MultipleFramesOneSurface) {
   const base::UnguessableToken kArbitraryToken =
       base::UnguessableToken::Create();
-  SurfaceSequence blank_change;  // Receives sequence if commit doesn't happen.
-
-  SurfaceId required_id;
-  std::set<SurfaceSequence> required_seq;
-  scoped_refptr<SurfaceReferenceFactory> ref_factory =
-      new TestSurfaceReferenceFactory(&blank_change, &required_id,
-                                      &required_seq);
-  auto layer = SurfaceLayer::Create(ref_factory);
-  SurfaceInfo info(
-      SurfaceId(kArbitraryFrameSinkId, LocalFrameId(1, kArbitraryToken)), 1.f,
+  const SurfaceInfo info(
+      SurfaceId(kArbitraryFrameSinkId, LocalSurfaceId(1, kArbitraryToken)), 1.f,
       gfx::Size(1, 1));
-  layer->SetSurfaceInfo(info);
+  const SurfaceSequence expected_seq1(FrameSinkId(1, 1), 1u);
+  const SurfaceSequence expected_seq2(FrameSinkId(2, 2), 1u);
+  const SurfaceId expected_id(kArbitraryFrameSinkId,
+                              LocalSurfaceId(1, kArbitraryToken));
+
+  scoped_refptr<MockSurfaceReferenceFactory> ref_factory =
+      new testing::StrictMock<MockSurfaceReferenceFactory>();
+
+  // We are going to set up the SurfaceLayers and LayerTreeHosts. Each layer
+  // will require a sequence and no sequence should be satisfied for now.
+  EXPECT_CALL(*ref_factory, RequireSequence(Eq(expected_id), Eq(expected_seq1)))
+      .Times(1);
+  EXPECT_CALL(*ref_factory, RequireSequence(Eq(expected_id), Eq(expected_seq2)))
+      .Times(1);
+  EXPECT_CALL(*ref_factory, SatisfySequence(_)).Times(0);
+
+  auto layer = SurfaceLayer::Create(ref_factory);
+  layer->SetPrimarySurfaceInfo(info);
   layer_tree_host_->GetSurfaceSequenceGenerator()->set_frame_sink_id(
       FrameSinkId(1, 1));
-  layer_tree_->SetRootLayer(layer);
+  layer_tree_host_->SetRootLayer(layer);
 
   auto animation_host2 = AnimationHost::CreateForTesting(ThreadInstance::MAIN);
   std::unique_ptr<FakeLayerTreeHost> layer_tree_host2 =
       FakeLayerTreeHost::Create(&fake_client_, &task_graph_runner_,
                                 animation_host2.get());
-  auto layer2 = SurfaceLayer::Create(std::move(ref_factory));
-  layer2->SetSurfaceInfo(info);
+  auto layer2 = SurfaceLayer::Create(ref_factory);
+  layer2->SetPrimarySurfaceInfo(info);
   layer_tree_host2->GetSurfaceSequenceGenerator()->set_frame_sink_id(
       FrameSinkId(2, 2));
   layer_tree_host2->SetRootLayer(layer2);
 
-  // Layers haven't been removed, so no sequence should be satisfied.
-  EXPECT_FALSE(blank_change.is_valid());
+  testing::Mock::VerifyAndClearExpectations(ref_factory.get());
 
-  SurfaceSequence expected1(FrameSinkId(1, 1), 1u);
-  SurfaceSequence expected2(FrameSinkId(2, 2), 1u);
-
+  // Destroy the second LayerTreeHost. The sequence generated by its
+  // SurfaceLayer must be satisfied and no new sequences must be required.
+  EXPECT_CALL(*ref_factory, SatisfySequence(Eq(expected_seq2))).Times(1);
   layer_tree_host2->SetRootLayer(nullptr);
   layer_tree_host2.reset();
   animation_host2 = nullptr;
-
-  // Layer was removed so sequence from second LayerTreeHost should be
-  // satisfied.
   base::RunLoop().RunUntilIdle();
-  EXPECT_TRUE(blank_change == expected2);
+  testing::Mock::VerifyAndClearExpectations(ref_factory.get());
 
-  // Set of sequences that need to be satisfied should include sequences from
-  // both trees.
-  EXPECT_TRUE(required_id == SurfaceId(kArbitraryFrameSinkId,
-                                       LocalFrameId(1, kArbitraryToken)));
-  EXPECT_EQ(2u, required_seq.size());
-  EXPECT_TRUE(required_seq.count(expected1));
-  EXPECT_TRUE(required_seq.count(expected2));
-
-  layer_tree_->SetRootLayer(nullptr);
+  // Destroy the first LayerTreeHost. The sequence generated by its
+  // SurfaceLayer must be satisfied and no new sequences must be required.
+  EXPECT_CALL(*ref_factory, SatisfySequence(expected_seq1)).Times(1);
+  EXPECT_CALL(*ref_factory, RequireSequence(_, _)).Times(0);
+  layer_tree_host_->SetRootLayer(nullptr);
   layer_tree_host_.reset();
-
-  // Layer was removed so sequence from first LayerTreeHost should be
-  // satisfied.
   base::RunLoop().RunUntilIdle();
-  EXPECT_TRUE(blank_change == expected1);
+  testing::Mock::VerifyAndClearExpectations(ref_factory.get());
+}
 
-  // No more SurfaceSequences should have been generated that need to have be
-  // satisfied.
-  EXPECT_EQ(2u, required_seq.size());
+// This test verifies that the primary and fallback SurfaceInfo are pushed
+// across from SurfaceLayer to SurfaceLayerImpl.
+TEST_F(SurfaceLayerTest, SurfaceInfoPushProperties) {
+  // We use a nice mock here because we are not really interested in calls to
+  // MockSurfaceReferenceFactory and we don't want warnings printed.
+  scoped_refptr<SurfaceReferenceFactory> ref_factory =
+      new testing::NiceMock<MockSurfaceReferenceFactory>();
+
+  scoped_refptr<SurfaceLayer> layer = SurfaceLayer::Create(ref_factory);
+  layer_tree_host_->SetRootLayer(layer);
+  SurfaceInfo primary_info(
+      SurfaceId(kArbitraryFrameSinkId,
+                LocalSurfaceId(1, base::UnguessableToken::Create())),
+      1.f, gfx::Size(1, 1));
+  layer->SetPrimarySurfaceInfo(primary_info);
+
+  std::unique_ptr<SurfaceLayerImpl> layer_impl =
+      SurfaceLayerImpl::Create(host_impl_.pending_tree(), layer->id());
+  layer->PushPropertiesTo(layer_impl.get());
+
+  // Verify tha the primary SurfaceInfo is pushed through and that there is
+  // no valid fallback SurfaceInfo.
+  EXPECT_EQ(primary_info, layer_impl->primary_surface_info());
+  EXPECT_EQ(SurfaceInfo(), layer_impl->fallback_surface_info());
+
+  SurfaceInfo fallback_info(
+      SurfaceId(kArbitraryFrameSinkId,
+                LocalSurfaceId(2, base::UnguessableToken::Create())),
+      2.f, gfx::Size(10, 10));
+  layer->SetFallbackSurfaceInfo(fallback_info);
+  layer->PushPropertiesTo(layer_impl.get());
+
+  // Verify that the primary SurfaceInfo stays the same and the new fallback
+  // SurfaceInfo is pushed through.
+  EXPECT_EQ(primary_info, layer_impl->primary_surface_info());
+  EXPECT_EQ(fallback_info, layer_impl->fallback_surface_info());
 }
 
 // Check that SurfaceSequence is sent through swap promise.
@@ -162,27 +190,37 @@ class SurfaceLayerSwapPromise : public LayerTreeTest {
   void BeginTest() override {
     layer_tree_host()->GetSurfaceSequenceGenerator()->set_frame_sink_id(
         FrameSinkId(1, 1));
-    layer_ = SurfaceLayer::Create(new TestSurfaceReferenceFactory(
-        &satisfied_sequence_, &required_id_, &required_set_));
+    ref_factory_ = new testing::StrictMock<MockSurfaceReferenceFactory>();
+
+    // Create a SurfaceLayer but don't add it to the tree yet. No sequence
+    // should be required / satisfied.
+    EXPECT_CALL(*ref_factory_, SatisfySequence(_)).Times(0);
+    EXPECT_CALL(*ref_factory_, RequireSequence(_, _)).Times(0);
+    layer_ = SurfaceLayer::Create(ref_factory_);
     SurfaceInfo info(
-        SurfaceId(kArbitraryFrameSinkId, LocalFrameId(1, kArbitraryToken)), 1.f,
-        gfx::Size(1, 1));
-    layer_->SetSurfaceInfo(info);
+        SurfaceId(kArbitraryFrameSinkId, LocalSurfaceId(1, kArbitraryToken)),
+        1.f, gfx::Size(1, 1));
+    layer_->SetPrimarySurfaceInfo(info);
+    testing::Mock::VerifyAndClearExpectations(ref_factory_.get());
 
-    // Layer hasn't been added to tree so no SurfaceSequence generated yet.
-    EXPECT_EQ(0u, required_set_.size());
+    // Add the layer to the tree. A sequence must be required.
+    SurfaceSequence expected_seq(kArbitraryFrameSinkId, 1u);
+    SurfaceId expected_id(kArbitraryFrameSinkId,
+                          LocalSurfaceId(1, kArbitraryToken));
+    EXPECT_CALL(*ref_factory_, SatisfySequence(_)).Times(0);
+    EXPECT_CALL(*ref_factory_,
+                RequireSequence(Eq(expected_id), Eq(expected_seq)))
+        .Times(1);
+    layer_tree_host()->SetRootLayer(layer_);
+    testing::Mock::VerifyAndClearExpectations(ref_factory_.get());
 
-    layer_tree()->SetRootLayer(layer_);
-
-    // Should have SurfaceSequence from first tree.
-    SurfaceSequence expected(kArbitraryFrameSinkId, 1u);
-    EXPECT_TRUE(required_id_ == SurfaceId(kArbitraryFrameSinkId,
-                                          LocalFrameId(1, kArbitraryToken)));
-    EXPECT_EQ(1u, required_set_.size());
-    EXPECT_TRUE(required_set_.count(expected));
+    // By the end of the test, the required sequence must be satisfied and no
+    // more sequence must be required.
+    EXPECT_CALL(*ref_factory_, SatisfySequence(Eq(expected_seq))).Times(1);
+    EXPECT_CALL(*ref_factory_, RequireSequence(_, _)).Times(0);
 
     gfx::Size bounds(100, 100);
-    layer_tree()->SetViewportSize(bounds);
+    layer_tree_host()->SetViewportSize(bounds);
 
     blank_layer_ = SolidColorLayer::Create();
     blank_layer_->SetIsDrawable(true);
@@ -195,19 +233,19 @@ class SurfaceLayerSwapPromise : public LayerTreeTest {
 
   void DidCommitAndDrawFrame() override {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(&SurfaceLayerSwapPromise::ChangeTree,
-                              base::Unretained(this)));
+        FROM_HERE, base::BindOnce(&SurfaceLayerSwapPromise::ChangeTree,
+                                  base::Unretained(this)));
   }
+
+  void AfterTest() override {}
 
  protected:
   int commit_count_;
   bool sequence_was_satisfied_;
   scoped_refptr<SurfaceLayer> layer_;
   scoped_refptr<Layer> blank_layer_;
-  SurfaceSequence satisfied_sequence_;
+  scoped_refptr<MockSurfaceReferenceFactory> ref_factory_;
 
-  SurfaceId required_id_;
-  std::set<SurfaceSequence> required_set_;
   const base::UnguessableToken kArbitraryToken =
       base::UnguessableToken::Create();
 };
@@ -220,7 +258,7 @@ class SurfaceLayerSwapPromiseWithDraw : public SurfaceLayerSwapPromise {
     switch (commit_count_) {
       case 1:
         // Remove SurfaceLayer from tree to cause SwapPromise to be created.
-        layer_tree()->SetRootLayer(blank_layer_);
+        layer_tree_host()->SetRootLayer(blank_layer_);
         break;
       case 2:
         EndTest();
@@ -229,14 +267,6 @@ class SurfaceLayerSwapPromiseWithDraw : public SurfaceLayerSwapPromise {
         NOTREACHED();
         break;
     }
-  }
-
-  void AfterTest() override {
-    EXPECT_TRUE(required_id_ == SurfaceId(kArbitraryFrameSinkId,
-                                          LocalFrameId(1, kArbitraryToken)));
-    EXPECT_EQ(1u, required_set_.size());
-    EXPECT_TRUE(satisfied_sequence_ ==
-                SurfaceSequence(kArbitraryFrameSinkId, 1u));
   }
 };
 
@@ -259,7 +289,7 @@ class SurfaceLayerSwapPromiseWithoutDraw : public SurfaceLayerSwapPromise {
     switch (commit_count_) {
       case 1:
         // Remove SurfaceLayer from tree to cause SwapPromise to be created.
-        layer_tree()->SetRootLayer(blank_layer_);
+        layer_tree_host()->SetRootLayer(blank_layer_);
         break;
       case 2:
         layer_tree_host()->SetNeedsCommit();
@@ -268,14 +298,6 @@ class SurfaceLayerSwapPromiseWithoutDraw : public SurfaceLayerSwapPromise {
         EndTest();
         break;
     }
-  }
-
-  void AfterTest() override {
-    EXPECT_TRUE(required_id_ == SurfaceId(kArbitraryFrameSinkId,
-                                          LocalFrameId(1, kArbitraryToken)));
-    EXPECT_EQ(1u, required_set_.size());
-    EXPECT_TRUE(satisfied_sequence_ ==
-                SurfaceSequence(kArbitraryFrameSinkId, 1u));
   }
 };
 

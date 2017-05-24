@@ -346,6 +346,24 @@ UI.Size = class {
     this.width = width;
     this.height = height;
   }
+
+  /**
+   * @param {?UI.Size} size
+   * @return {!UI.Size}
+   */
+  clipTo(size) {
+    if (!size)
+      return this;
+    return new UI.Size(Math.min(this.width, size.width), Math.min(this.height, size.height));
+  }
+
+  /**
+   * @param {number} scale
+   * @return {!UI.Size}
+   */
+  scale(scale) {
+    return new UI.Size(this.width * scale, this.height * scale);
+  }
 };
 
 /**
@@ -454,6 +472,22 @@ UI.Rect = class {
    */
   size() {
     return new UI.Size(this.width, this.height);
+  }
+
+  /**
+   * @param {!UI.Rect} origin
+   * @return {!UI.Rect}
+   */
+  relativeTo(origin) {
+    return new UI.Rect(this.left - origin.left, this.top - origin.top, this.width, this.height);
+  }
+
+  /**
+   * @param {!UI.Rect} origin
+   * @return {!UI.Rect}
+   */
+  rebaseTo(origin) {
+    return new UI.Rect(this.left + origin.left, this.top + origin.top, this.width, this.height);
   }
 };
 

@@ -698,20 +698,7 @@ class GPU_EXPORT TextureRef : public base::RefCounted<TextureRef> {
 struct DecoderTextureState {
   // total_texture_upload_time automatically initialized to 0 in default
   // constructor.
-  explicit DecoderTextureState(const GpuDriverBugWorkarounds& workarounds)
-      : tex_image_failed(false),
-        texture_upload_count(0),
-        texsubimage_faster_than_teximage(
-            workarounds.texsubimage_faster_than_teximage),
-        force_cube_map_positive_x_allocation(
-            workarounds.force_cube_map_positive_x_allocation),
-        force_cube_complete(workarounds.force_cube_complete),
-        unpack_alignment_workaround_with_unpack_buffer(
-            workarounds.unpack_alignment_workaround_with_unpack_buffer),
-        unpack_overlapping_rows_separately_unpack_buffer(
-            workarounds.unpack_overlapping_rows_separately_unpack_buffer),
-        unpack_image_height_workaround_with_unpack_buffer(
-            workarounds.unpack_image_height_workaround_with_unpack_buffer) {}
+  explicit DecoderTextureState(const GpuDriverBugWorkarounds& workarounds);
 
   // This indicates all the following texSubImage*D calls that are part of the
   // failed texImage*D call should be ignored. The client calls have a lock
@@ -719,13 +706,10 @@ struct DecoderTextureState {
   // group.
   bool tex_image_failed;
 
-  // Command buffer stats.
-  int texture_upload_count;
-  base::TimeDelta total_texture_upload_time;
-
   bool texsubimage_faster_than_teximage;
   bool force_cube_map_positive_x_allocation;
   bool force_cube_complete;
+  bool force_int_or_srgb_cube_texture_complete;
   bool unpack_alignment_workaround_with_unpack_buffer;
   bool unpack_overlapping_rows_separately_unpack_buffer;
   bool unpack_image_height_workaround_with_unpack_buffer;
@@ -774,9 +758,8 @@ class GPU_EXPORT TextureManager : public base::trace_event::MemoryDumpProvider {
                  ProgressReporter* progress_reporter);
   ~TextureManager() override;
 
-  void set_framebuffer_manager(FramebufferManager* manager) {
-    framebuffer_manager_ = manager;
-  }
+  void AddFramebufferManager(FramebufferManager* framebuffer_manager);
+  void RemoveFramebufferManager(FramebufferManager* framebuffer_manager);
 
   // Init the texture manager.
   bool Initialize();
@@ -1208,7 +1191,7 @@ class GPU_EXPORT TextureManager : public base::trace_event::MemoryDumpProvider {
 
   scoped_refptr<FeatureInfo> feature_info_;
 
-  FramebufferManager* framebuffer_manager_;
+  std::vector<FramebufferManager*> framebuffer_managers_;
 
   // Info for each texture in the system.
   typedef base::hash_map<GLuint, scoped_refptr<TextureRef> > TextureMap;
@@ -1253,18 +1236,6 @@ class GPU_EXPORT TextureManager : public base::trace_event::MemoryDumpProvider {
   ProgressReporter* progress_reporter_;
 
   DISALLOW_COPY_AND_ASSIGN(TextureManager);
-};
-
-// This class records texture upload time when in scope.
-class ScopedTextureUploadTimer {
- public:
-  explicit ScopedTextureUploadTimer(DecoderTextureState* texture_state);
-  ~ScopedTextureUploadTimer();
-
- private:
-  DecoderTextureState* texture_state_;
-  base::TimeTicks begin_time_;
-  DISALLOW_COPY_AND_ASSIGN(ScopedTextureUploadTimer);
 };
 
 }  // namespace gles2

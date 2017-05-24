@@ -29,9 +29,11 @@ class WindowServerServiceTestClient
 
  private:
   // service_manager::test::ServiceTestClient:
-  bool OnConnect(const service_manager::ServiceInfo& remote_info,
-                 service_manager::InterfaceRegistry* registry) override {
-    return test_->OnConnect(remote_info.identity, registry);
+  void OnBindInterface(const service_manager::BindSourceInfo& source_info,
+                       const std::string& interface_name,
+                       mojo::ScopedMessagePipeHandle interface_pipe) override {
+    test_->OnBindInterface(source_info, interface_name,
+                           std::move(interface_pipe));
   }
 
   WindowServerServiceTestBase* test_;
@@ -50,7 +52,7 @@ void EnsureCommandLineSwitch(const std::string& name) {
 WindowServerServiceTestBase::WindowServerServiceTestBase()
     : ServiceTest(kTestAppName) {
   EnsureCommandLineSwitch(switches::kUseTestConfig);
-  EnsureCommandLineSwitch(::switches::kOverrideUseGLWithOSMesaForTests);
+  EnsureCommandLineSwitch(::switches::kOverrideUseSoftwareGLForTests);
 }
 
 WindowServerServiceTestBase::~WindowServerServiceTestBase() {}

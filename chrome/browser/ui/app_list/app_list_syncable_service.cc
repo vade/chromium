@@ -11,11 +11,19 @@
 #include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/apps/drive/drive_app_provider.h"
+#include "chrome/browser/chromeos/arc/arc_util.h"
+#include "chrome/browser/chromeos/file_manager/app_id.h"
+#include "chrome/browser/chromeos/genius_app/app_id.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
+#include "chrome/browser/ui/app_list/arc/arc_app_item.h"
+#include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
+#include "chrome/browser/ui/app_list/arc/arc_app_model_builder.h"
+#include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/browser/ui/app_list/extension_app_item.h"
 #include "chrome/browser/ui/app_list/extension_app_model_builder.h"
 #include "chrome/common/chrome_switches.h"
@@ -39,22 +47,11 @@
 #include "ui/app_list/app_list_switches.h"
 #include "ui/base/l10n/l10n_util.h"
 
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/arc/arc_session_manager.h"
-#include "chrome/browser/chromeos/file_manager/app_id.h"
-#include "chrome/browser/chromeos/genius_app/app_id.h"
-#include "chrome/browser/ui/app_list/arc/arc_app_item.h"
-#include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
-#include "chrome/browser/ui/app_list/arc/arc_app_model_builder.h"
-#endif
-
 using syncer::SyncChange;
 
 namespace app_list {
 
 namespace {
-
-const char kOemFolderId[] = "ddb1da55-d478-4243-8642-56d3041f0263";
 
 const char kNameKey[] = "name";
 const char kParentIdKey[] = "parent_id";
@@ -132,14 +129,10 @@ bool AppIsDefault(ExtensionService* service, const std::string& id) {
 }
 
 bool IsUnRemovableDefaultApp(const std::string& id) {
-  if (id == extension_misc::kChromeAppId ||
-      id == extensions::kWebStoreAppId)
-    return true;
-#if defined(OS_CHROMEOS)
-  if (id == file_manager::kFileManagerAppId || id == genius_app::kGeniusAppId)
-    return true;
-#endif
-  return false;
+  return id == extension_misc::kChromeAppId ||
+         id == extensions::kWebStoreAppId ||
+         id == file_manager::kFileManagerAppId ||
+         id == genius_app::kGeniusAppId;
 }
 
 void UninstallExtension(ExtensionService* service, const std::string& id) {
@@ -154,10 +147,8 @@ bool GetAppListItemType(AppListItem* item,
   const char* item_type = item->GetItemType();
   if (item_type == ExtensionAppItem::kItemType) {
     *type = sync_pb::AppListSpecifics::TYPE_APP;
-#if defined(OS_CHROMEOS)
   } else if (item_type == ArcAppItem::kItemType) {
     *type = sync_pb::AppListSpecifics::TYPE_APP;
-#endif
   } else if (item_type == AppListFolderItem::kItemType) {
     *type = sync_pb::AppListSpecifics::TYPE_FOLDER;
   } else {
@@ -196,8 +187,8 @@ void UpdateSyncItemInLocalStorage(
   base::DictionaryValue* dict_item = nullptr;
   if (!pref_update->GetDictionaryWithoutPathExpansion(sync_item->item_id,
       &dict_item)) {
-    dict_item = new base::DictionaryValue();
-    pref_update->SetWithoutPathExpansion(sync_item->item_id, dict_item);
+    dict_item = pref_update->SetDictionaryWithoutPathExpansion(
+        sync_item->item_id, base::MakeUnique<base::DictionaryValue>());
   }
 
   dict_item->SetString(kNameKey, sync_item->item_name);
@@ -207,6 +198,13 @@ void UpdateSyncItemInLocalStorage(
   dict_item->SetString(kPinPositionKey, sync_item->item_pin_ordinal.IsValid() ?
       sync_item->item_pin_ordinal.ToInternalValue() : std::string());
   dict_item->SetInteger(kTypeKey, static_cast<int>(sync_item->item_type));
+}
+
+bool IsDefaultSyncItem(const AppListSyncableService::SyncItem* sync_item) {
+  DCHECK(sync_item->item_ordinal.IsValid());
+  return sync_item->parent_id.empty() &&
+         sync_item->item_ordinal.Equals(
+             syncer::StringOrdinal::CreateInitialOrdinal());
 }
 
 }  // namespace
@@ -258,16 +256,11 @@ class AppListSyncableService::ModelObserver : public AppListModelObserver {
     if (item->GetItemType() == AppListFolderItem::kItemType)
       return;
 
-#if defined(OS_CHROMEOS)
     if (item->GetItemType() == ArcAppItem::kItemType) {
-      // Don't sync remove changes coming as result of disabling Arc.
-      const arc::ArcSessionManager* arc_session_manager =
-          arc::ArcSessionManager::Get();
-      DCHECK(arc_session_manager);
-      if (!arc_session_manager->IsArcEnabled())
+      // Don't sync remove changes coming as result of disabling ARC.
+      if (!arc::IsArcPlayStoreEnabledForProfile(owner_->profile()))
         return;
     }
-#endif
 
     owner_->RemoveSyncItem(item->id());
   }
@@ -290,6 +283,10 @@ class AppListSyncableService::ModelObserver : public AppListModelObserver {
 };
 
 // AppListSyncableService
+
+// static
+const char AppListSyncableService::kOemFolderId[] =
+    "ddb1da55-d478-4243-8642-56d3041f0263";
 
 // static
 void AppListSyncableService::RegisterProfilePrefs(
@@ -394,26 +391,20 @@ void AppListSyncableService::BuildModel() {
   if (service)
     controller = service->GetControllerDelegate();
   apps_builder_.reset(new ExtensionAppModelBuilder(controller));
-#if defined(OS_CHROMEOS)
-  if (arc::ArcSessionManager::IsAllowedForProfile(profile_))
+  if (arc::IsArcAllowedForProfile(profile_))
     arc_apps_builder_.reset(new ArcAppModelBuilder(controller));
-#endif
   DCHECK(profile_);
   if (app_list::switches::IsAppListSyncEnabled()) {
     VLOG(1) << this << ": AppListSyncableService: InitializeWithService.";
     SyncStarted();
     apps_builder_->InitializeWithService(this, model_.get());
-#if defined(OS_CHROMEOS)
     if (arc_apps_builder_.get())
       arc_apps_builder_->InitializeWithService(this, model_.get());
-#endif
   } else {
     VLOG(1) << this << ": AppListSyncableService: InitializeWithProfile.";
     apps_builder_->InitializeWithProfile(profile_, model_.get());
-#if defined(OS_CHROMEOS)
     if (arc_apps_builder_.get())
       arc_apps_builder_->InitializeWithProfile(profile_, model_.get());
-#endif
   }
 
   if (app_list::switches::IsDriveAppsInAppListEnabled())
@@ -876,6 +867,8 @@ syncer::SyncMergeResult AppListSyncableService::MergeDataAndStartSyncing(
                                      GetSyncDataFromSyncItem(sync_item)));
   }
 
+  MaybeImportLegacyPlayStorePosition(&change_list);
+
   sync_processor_->ProcessSyncChanges(FROM_HERE, change_list);
 
   HandleUpdateFinished();
@@ -1024,11 +1017,15 @@ void AppListSyncableService::ProcessExistingSyncItem(SyncItem* sync_item) {
   }
   VLOG(2) << "ProcessExistingSyncItem: " << sync_item->ToString();
   AppListItem* app_item = model_->FindItem(sync_item->item_id);
-  DVLOG(2) << " AppItem: " << app_item->ToDebugString();
   if (!app_item) {
-    LOG(ERROR) << "Item not found in model: " << sync_item->ToString();
+    // This is expected in case the user uses devices with different app set,
+    // for example, ARC enabled and ARC disabled devices. Another scenario is
+    // app pinned by default (YouTube, for instance) but which has not been yet
+    // installed on this device.
+    DVLOG(2) << "Skip updating missing item : " << sync_item->ToString();
     return;
   }
+  DVLOG(2) << " AppItem: " << app_item->ToDebugString();
   // This is the only place where sync can cause an item to change folders.
   if (app_list::switches::IsFolderUIEnabled() &&
       app_item->folder_id() != sync_item->parent_id &&
@@ -1146,18 +1143,21 @@ std::string AppListSyncableService::FindOrCreateOemFolder() {
   if (!oem_folder) {
     std::unique_ptr<AppListFolderItem> new_folder(new AppListFolderItem(
         kOemFolderId, AppListFolderItem::FOLDER_TYPE_OEM));
-    oem_folder =
-        static_cast<AppListFolderItem*>(model_->AddItem(std::move(new_folder)));
     SyncItem* oem_sync_item = FindSyncItem(kOemFolderId);
+    syncer::StringOrdinal oem_position;
     if (oem_sync_item) {
+      DCHECK(oem_sync_item->item_ordinal.IsValid());
       VLOG(1) << "Creating OEM folder from existing sync item: "
                << oem_sync_item->item_ordinal.ToDebugString();
-      model_->SetItemPosition(oem_folder, oem_sync_item->item_ordinal);
+      oem_position = oem_sync_item->item_ordinal;
     } else {
-      model_->SetItemPosition(oem_folder, GetOemFolderPos());
+      oem_position = GetOemFolderPos();
       // Do not create a sync item for the OEM folder here, do it in
       // ResolveFolderPositions() when the item position is finalized.
     }
+    oem_folder =
+        static_cast<AppListFolderItem*>(model_->AddItem(std::move(new_folder)));
+    model_->SetItemPosition(oem_folder, oem_position);
   }
   model_->SetItemName(oem_folder, oem_folder_name_);
   return oem_folder->id();
@@ -1184,34 +1184,48 @@ syncer::StringOrdinal AppListSyncableService::GetOemFolderPos() {
   // stable. TODO(stevenjb): consider explicitly setting the OEM folder location
   // along with the name in ServicesCustomizationDocument::SetOemFolderName().
   AppListItemList* item_list = model_->top_level_item_list();
-  if (item_list->item_count() == 0)
-    return syncer::StringOrdinal();
+  if (!item_list->item_count()) {
+    LOG(ERROR) << "No top level item was found. "
+               << "Placing OEM folder at the beginning.";
+    return syncer::StringOrdinal::CreateInitialOrdinal();
+  }
 
-  size_t oem_index = 0;
-  for (; oem_index < item_list->item_count() - 1; ++oem_index) {
-    AppListItem* cur_item = item_list->item_at(oem_index);
-    if (cur_item->id() == extensions::kWebStoreAppId)
-      break;
+  size_t web_store_app_index;
+  if (!item_list->FindItemIndex(extensions::kWebStoreAppId,
+                                &web_store_app_index)) {
+    LOG(ERROR) << "Web store position is not found it top items. "
+               << "Placing OEM folder at the end.";
+    return item_list->item_at(item_list->item_count() - 1)
+        ->position()
+        .CreateAfter();
   }
-  syncer::StringOrdinal oem_ordinal;
-  AppListItem* prev = item_list->item_at(oem_index);
-  if (oem_index + 1 < item_list->item_count()) {
-    AppListItem* next = item_list->item_at(oem_index + 1);
-    oem_ordinal = prev->position().CreateBetween(next->position());
-  } else {
-    oem_ordinal = prev->position().CreateAfter();
+
+  // Skip items with the same position.
+  const AppListItem* web_store_app_item =
+      item_list->item_at(web_store_app_index);
+  for (size_t j = web_store_app_index + 1; j < item_list->item_count(); ++j) {
+    const AppListItem* next_item = item_list->item_at(j);
+    DCHECK(next_item->position().IsValid());
+    if (!next_item->position().Equals(web_store_app_item->position())) {
+      const syncer::StringOrdinal oem_ordinal =
+          web_store_app_item->position().CreateBetween(next_item->position());
+      VLOG(1) << "Placing OEM Folder at: " << j
+              << " position: " << oem_ordinal.ToDebugString();
+      return oem_ordinal;
+    }
   }
-  VLOG(1) << "Placing OEM Folder at: " << oem_index
+
+  const syncer::StringOrdinal oem_ordinal =
+      web_store_app_item->position().CreateAfter();
+  VLOG(1) << "Placing OEM Folder at: " << item_list->item_count()
           << " position: " << oem_ordinal.ToDebugString();
   return oem_ordinal;
 }
 
 bool AppListSyncableService::AppIsOem(const std::string& id) {
-#if defined(OS_CHROMEOS)
   const ArcAppListPrefs* arc_prefs = ArcAppListPrefs::Get(profile_);
   if (arc_prefs && arc_prefs->IsOem(id))
     return true;
-#endif
 
   if (!extension_system_->extension_service())
     return false;
@@ -1232,6 +1246,31 @@ std::string AppListSyncableService::SyncItem::ToString() const {
     res += " [" + item_pin_ordinal.ToDebugString() + "]";
   }
   return res;
+}
+
+void AppListSyncableService::MaybeImportLegacyPlayStorePosition(
+    syncer::SyncChangeList* change_list) {
+  SyncItem* play_store_sync_item = FindSyncItem(arc::kPlayStoreAppId);
+  if (!play_store_sync_item || !IsDefaultSyncItem(play_store_sync_item))
+    return;
+
+  const SyncItem* legacy_play_store_sync_item =
+      FindSyncItem(arc::kLegacyPlayStoreAppId);
+  if (!legacy_play_store_sync_item ||
+      IsDefaultSyncItem(legacy_play_store_sync_item)) {
+    return;
+  }
+
+  play_store_sync_item->parent_id = legacy_play_store_sync_item->parent_id;
+  play_store_sync_item->item_ordinal =
+      legacy_play_store_sync_item->item_ordinal;
+  DCHECK(!IsDefaultSyncItem(play_store_sync_item));
+  ProcessExistingSyncItem(play_store_sync_item);
+  UpdateSyncItemInLocalStorage(profile_, play_store_sync_item);
+  change_list->push_back(
+      SyncChange(FROM_HERE, SyncChange::ACTION_UPDATE,
+                 GetSyncDataFromSyncItem(play_store_sync_item)));
+  DVLOG(2) << "Play Store app list item was updated from the legacy entry";
 }
 
 }  // namespace app_list

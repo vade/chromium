@@ -9,6 +9,8 @@
 
 #include <string>
 
+#include "components/autofill/core/common/password_form.h"
+
 namespace password_manager {
 
 namespace metrics_util {
@@ -52,6 +54,7 @@ enum UIDismissalReason {
   AUTO_SIGNIN_TOAST_TIMEOUT,
   AUTO_SIGNIN_TOAST_CLICKED_OBSOLETE,  // obsolete.
   CLICKED_BRAND_NAME,
+  CLICKED_PASSWORDS_DASHBOARD,
   NUM_UI_RESPONSES,
 };
 
@@ -172,6 +175,13 @@ enum CredentialManagerGetMediation {
   CREDENTIAL_MANAGER_GET_UNMEDIATED
 };
 
+// Metrics: "PasswordManager.HttpPasswordMigrationMode"
+enum HttpPasswordMigrationMode {
+  HTTP_PASSWORD_MIGRATION_MODE_MOVE,
+  HTTP_PASSWORD_MIGRATION_MODE_COPY,
+  HTTP_PASSWORD_MIGRATION_MODE_COUNT
+};
+
 enum PasswordReusePasswordFieldDetected {
   NO_PASSWORD_FIELD,
   HAS_PASSWORD_FIELD,
@@ -228,8 +238,14 @@ void LogShouldBlockPasswordForSameOriginButDifferentScheme(bool should_block);
 // Logs number of passwords migrated from HTTP to HTTPS.
 void LogCountHttpMigratedPasswords(int count);
 
-// Log if the account chooser has empty username or duplicate usernames.
-void LogAccountChooserUsability(AccountChooserUsabilityMetric usability);
+// Logs mode of HTTP password migration.
+void LogHttpPasswordMigrationMode(HttpPasswordMigrationMode mode);
+
+// Log if the account chooser has empty username or duplicate usernames. In
+// addition record number of the placeholder avatars and total number of rows.
+void LogAccountChooserUsability(AccountChooserUsabilityMetric usability,
+                                int count_empty_icons,
+                                int count_accounts);
 
 // Log the result of navigator.credentials.get. |status| specifies the
 // "unmediated" parameter of the API method.
@@ -241,6 +257,18 @@ void LogPasswordReuse(int password_length,
                       int saved_passwords,
                       int number_matches,
                       bool password_field_detected);
+
+// Log when the user selects the "Login not secure" warning in the password
+// autofill dropdown to show more information about the warning.
+void LogShowedHttpNotSecureExplanation();
+
+// Log that the Form-Not-Secure warning was shown. Should be called at most once
+// per main-frame navigation.
+void LogShowedFormNotSecureWarningOnCurrentNavigation();
+
+// Log a password successful submission event.
+void LogPasswordSuccessfulSubmissionIndicatorEvent(
+    autofill::PasswordForm::SubmissionIndicatorEvent event);
 
 }  // namespace metrics_util
 

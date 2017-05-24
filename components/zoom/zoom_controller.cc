@@ -9,6 +9,7 @@
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
@@ -284,14 +285,16 @@ void ZoomController::ResetZoomModeOnNavigationIfNeeded(const GURL& url) {
   zoom_mode_ = ZOOM_MODE_DEFAULT;
 }
 
-void ZoomController::DidNavigateMainFrame(
-    const content::LoadCommittedDetails& details,
-    const content::FrameNavigateParams& params) {
-  if (details.entry && details.entry->GetPageType() == content::PAGE_TYPE_ERROR)
+void ZoomController::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
+  if (!navigation_handle->IsInMainFrame() || !navigation_handle->HasCommitted())
+    return;
+
+  if (navigation_handle->IsErrorPage())
     content::HostZoomMap::SendErrorPageZoomLevelRefresh(web_contents());
 
-  if (!details.is_in_page)
-    ResetZoomModeOnNavigationIfNeeded(params.url);
+  if (!navigation_handle->IsSameDocument())
+    ResetZoomModeOnNavigationIfNeeded(navigation_handle->GetURL());
 
   // If the main frame's content has changed, the new page may have a different
   // zoom level from the old one.
@@ -344,8 +347,12 @@ void ZoomController::UpdateState(const std::string& host) {
     ZoomChangedEventData zoom_change_data = *event_data_;
     event_data_.reset();
     // The zoom bubble should not be shown for zoom changes where the host
-    // is empty.
-    zoom_change_data.can_show_bubble = can_show_bubble_ && !host.empty();
+    // is empty or when zoom level is not changed from default.
+    const bool changed_from_default =
+        zoom_change_data.new_zoom_level != zoom_change_data.old_zoom_level ||
+        zoom_change_data.new_zoom_level != GetDefaultZoomLevel();
+    zoom_change_data.can_show_bubble =
+        can_show_bubble_ && !host.empty() && changed_from_default;
     for (auto& observer : observers_)
       observer.OnZoomChanged(zoom_change_data);
   } else {

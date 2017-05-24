@@ -14,22 +14,14 @@
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string16.h"
+#include "device/usb/public/interfaces/device.mojom.h"
 
 namespace device {
 
 class UsbDeviceHandle;
 
-enum UsbTransferType {
-  USB_TRANSFER_CONTROL = 0,
-  USB_TRANSFER_ISOCHRONOUS,
-  USB_TRANSFER_BULK,
-  USB_TRANSFER_INTERRUPT,
-};
-
-enum UsbEndpointDirection {
-  USB_DIRECTION_INBOUND = 0,
-  USB_DIRECTION_OUTBOUND,
-};
+using UsbTransferType = mojom::UsbTransferType;
+using UsbTransferDirection = mojom::UsbTransferDirection;
 
 enum UsbSynchronizationType {
   USB_SYNCHRONIZATION_NONE = 0,
@@ -61,7 +53,7 @@ struct UsbEndpointDescriptor {
   ~UsbEndpointDescriptor();
 
   uint8_t address;
-  UsbEndpointDirection direction;
+  UsbTransferDirection direction;
   uint16_t maximum_packet_size;
   UsbSynchronizationType synchronization_type;
   UsbTransferType transfer_type;
@@ -133,6 +125,9 @@ struct UsbDeviceDescriptor {
   uint16_t vendor_id = 0;
   uint16_t product_id = 0;
   uint16_t device_version = 0;
+  uint8_t i_manufacturer = 0;
+  uint8_t i_product = 0;
+  uint8_t i_serial_number = 0;
   uint8_t num_configurations = 0;
   std::vector<UsbConfigDescriptor> configurations;
 };

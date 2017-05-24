@@ -11,17 +11,30 @@ function test()
 {
     UI.viewManager.showView("sources.search");
     var scope = new Sources.SourcesSearchScope();
-    InspectorTest.runAfterResourcesAreFinished(["search.html", "search.js", "search.css"], step2)
+    Promise.all([
+        InspectorTest.waitForUISourceCode("search.html"),
+        InspectorTest.waitForUISourceCode("search.js"),
+        InspectorTest.waitForUISourceCode("search.css"),
+    ]).then(step2);
 
     function step2()
     {
         InspectorTest.runTestSuite([
-            function testIgnoreCase(next)
+            function testIgnoreCaseAndIgnoreDynamicScript(next)
             {
                 var query = "searchTest" + "UniqueString";
                 var searchConfig = new Workspace.SearchConfig(query, true, false);
                 InspectorTest.runSearchAndDumpResults(scope, searchConfig, next);
             },
+
+            function testIgnoreCase(next)
+            {
+                Common.settingForTest('searchInAnonymousAndContentScripts').set(true);
+                var query = "searchTest" + "UniqueString";
+                var searchConfig = new Workspace.SearchConfig(query, true, false);
+                InspectorTest.runSearchAndDumpResults(scope, searchConfig, next);
+            },
+
 
             function testCaseSensitive(next)
             {

@@ -21,13 +21,12 @@ class PasswordReuseDetectionManager : public PasswordReuseDetectorConsumer {
  public:
   explicit PasswordReuseDetectionManager(PasswordManagerClient* client);
   ~PasswordReuseDetectionManager() override;
-
   void DidNavigateMainFrame(const GURL& main_frame_url);
   void OnKeyPressed(const base::string16& text);
 
   // PasswordReuseDetectorConsumer
   void OnReuseFound(const base::string16& password,
-                    const std::string& saved_domain,
+                    const std::string& legitimate_domain,
                     int saved_passwords,
                     int number_matches) override;
 

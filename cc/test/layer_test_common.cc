@@ -18,7 +18,6 @@
 #include "cc/quads/render_pass.h"
 #include "cc/test/animation_test_common.h"
 #include "cc/test/fake_compositor_frame_sink.h"
-#include "cc/test/layer_tree_settings_for_testing.h"
 #include "cc/test/mock_occlusion_tracker.h"
 #include "cc/trees/layer_tree_host_common.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -31,6 +30,18 @@ namespace cc {
 
 // Align with expected and actual output.
 const char* LayerTestCommon::quad_string = "    Quad: ";
+
+RenderSurfaceImpl* GetRenderSurface(LayerImpl* layer_impl) {
+  EffectTree& effect_tree =
+      layer_impl->layer_tree_impl()->property_trees()->effect_tree;
+
+  if (RenderSurfaceImpl* surface =
+          effect_tree.GetRenderSurface(layer_impl->effect_tree_index()))
+    return surface;
+
+  return effect_tree.GetRenderSurface(
+      effect_tree.Node(layer_impl->effect_tree_index())->target_id);
+}
 
 static bool CanRectFBeSafelyRoundedToRect(const gfx::RectF& r) {
   // Ensure that range of float values is not beyond integer range.
@@ -48,9 +59,11 @@ void LayerTestCommon::VerifyQuadsExactlyCoverRect(const QuadList& quads,
   Region remaining = rect;
 
   for (auto iter = quads.cbegin(); iter != quads.cend(); ++iter) {
+    EXPECT_TRUE(iter->rect.Contains(iter->visible_rect));
+
     gfx::RectF quad_rectf = MathUtil::MapClippedRect(
         iter->shared_quad_state->quad_to_target_transform,
-        gfx::RectF(iter->rect));
+        gfx::RectF(iter->visible_rect));
 
     // Before testing for exact coverage in the integer world, assert that
     // rounding will not round the rect incorrectly.
@@ -116,10 +129,19 @@ void LayerTestCommon::VerifyQuadsAreOccluded(const QuadList& quads,
 }
 
 LayerTestCommon::LayerImplTest::LayerImplTest()
-    : LayerImplTest(LayerTreeSettingsForTesting()) {}
+    : LayerImplTest(LayerTreeSettings()) {}
+
+LayerTestCommon::LayerImplTest::LayerImplTest(
+    std::unique_ptr<CompositorFrameSink> compositor_frame_sink)
+    : LayerImplTest(LayerTreeSettings(), std::move(compositor_frame_sink)) {}
 
 LayerTestCommon::LayerImplTest::LayerImplTest(const LayerTreeSettings& settings)
-    : compositor_frame_sink_(FakeCompositorFrameSink::Create3d()),
+    : LayerImplTest(settings, FakeCompositorFrameSink::Create3d()) {}
+
+LayerTestCommon::LayerImplTest::LayerImplTest(
+    const LayerTreeSettings& settings,
+    std::unique_ptr<CompositorFrameSink> compositor_frame_sink)
+    : compositor_frame_sink_(std::move(compositor_frame_sink)),
       animation_host_(AnimationHost::CreateForTesting(ThreadInstance::MAIN)),
       host_(FakeLayerTreeHost::Create(&client_,
                                       &task_graph_runner_,
@@ -130,7 +152,6 @@ LayerTestCommon::LayerImplTest::LayerImplTest(const LayerTreeSettings& settings)
   std::unique_ptr<LayerImpl> root =
       LayerImpl::Create(host_->host_impl()->active_tree(), 1);
   host_->host_impl()->active_tree()->SetRootLayerForTesting(std::move(root));
-  root_layer_for_testing()->SetHasRenderSurface(true);
   host_->host_impl()->SetVisible(true);
   EXPECT_TRUE(
       host_->host_impl()->InitializeRenderer(compositor_frame_sink_.get()));
@@ -152,9 +173,9 @@ LayerTestCommon::LayerImplTest::~LayerImplTest() {
 
 void LayerTestCommon::LayerImplTest::CalcDrawProps(
     const gfx::Size& viewport_size) {
-  LayerImplList layer_list;
+  RenderSurfaceList render_surface_list;
   LayerTreeHostCommon::CalcDrawPropsImplInputsForTesting inputs(
-      root_layer_for_testing(), viewport_size, &layer_list);
+      root_layer_for_testing(), viewport_size, &render_surface_list);
   LayerTreeHostCommon::CalculateDrawPropertiesForTesting(&inputs);
 }
 

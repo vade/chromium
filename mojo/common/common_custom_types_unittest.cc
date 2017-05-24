@@ -7,9 +7,12 @@
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/numerics/safe_math.h"
+#include "base/process/process_handle.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "mojo/common/common_custom_types_struct_traits.h"
+#include "mojo/common/process_id.mojom.h"
 #include "mojo/common/test_common_custom_types.mojom.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -226,6 +229,15 @@ TEST_F(CommonCustomTypesTest, UnguessableToken) {
   run_loop.Run();
 }
 
+TEST_F(CommonCustomTypesTest, ProcessId) {
+  base::ProcessId pid = base::GetCurrentProcId();
+  base::ProcessId out_pid = base::kNullProcessId;
+  ASSERT_NE(pid, out_pid);
+  EXPECT_TRUE(mojom::ProcessId::Deserialize(mojom::ProcessId::Serialize(&pid),
+                                            &out_pid));
+  EXPECT_EQ(pid, out_pid);
+}
+
 TEST_F(CommonCustomTypesTest, Time) {
   base::RunLoop run_loop;
 
@@ -274,27 +286,27 @@ TEST_F(CommonCustomTypesTest, Value) {
   ASSERT_TRUE(ptr->BounceValue(nullptr, &output));
   EXPECT_FALSE(output);
 
-  std::unique_ptr<base::Value> input = base::Value::CreateNullValue();
+  auto input = base::MakeUnique<base::Value>();
   ASSERT_TRUE(ptr->BounceValue(input->CreateDeepCopy(), &output));
   EXPECT_TRUE(base::Value::Equals(input.get(), output.get()));
 
-  input = base::MakeUnique<base::FundamentalValue>(123);
+  input = base::MakeUnique<base::Value>(123);
   ASSERT_TRUE(ptr->BounceValue(input->CreateDeepCopy(), &output));
   EXPECT_TRUE(base::Value::Equals(input.get(), output.get()));
 
-  input = base::MakeUnique<base::FundamentalValue>(1.23);
+  input = base::MakeUnique<base::Value>(1.23);
   ASSERT_TRUE(ptr->BounceValue(input->CreateDeepCopy(), &output));
   EXPECT_TRUE(base::Value::Equals(input.get(), output.get()));
 
-  input = base::MakeUnique<base::FundamentalValue>(false);
+  input = base::MakeUnique<base::Value>(false);
   ASSERT_TRUE(ptr->BounceValue(input->CreateDeepCopy(), &output));
   EXPECT_TRUE(base::Value::Equals(input.get(), output.get()));
 
-  input = base::MakeUnique<base::StringValue>("test string");
+  input = base::MakeUnique<base::Value>("test string");
   ASSERT_TRUE(ptr->BounceValue(input->CreateDeepCopy(), &output));
   EXPECT_TRUE(base::Value::Equals(input.get(), output.get()));
 
-  input = base::BinaryValue::CreateWithCopiedBuffer("mojo", 4);
+  input = base::Value::CreateWithCopiedBuffer("mojo", 4);
   ASSERT_TRUE(ptr->BounceValue(input->CreateDeepCopy(), &output));
   EXPECT_TRUE(base::Value::Equals(input.get(), output.get()));
 
@@ -304,9 +316,8 @@ TEST_F(CommonCustomTypesTest, Value) {
   dict->SetString("string", "some string");
   dict->SetBoolean("nested.bool", true);
   dict->SetInteger("nested.int", 9);
-  dict->Set("some_binary",
-            base::BinaryValue::CreateWithCopiedBuffer("mojo", 4));
-  dict->Set("null_value", base::Value::CreateNullValue());
+  dict->Set("some_binary", base::Value::CreateWithCopiedBuffer("mojo", 4));
+  dict->Set("null_value", base::MakeUnique<base::Value>());
   dict->SetIntegerWithoutPathExpansion("non_nested.int", 10);
   {
     std::unique_ptr<base::ListValue> dict_list(new base::ListValue());
@@ -327,8 +338,8 @@ TEST_F(CommonCustomTypesTest, Value) {
   list->AppendString("string");
   list->AppendDouble(42.1);
   list->AppendBoolean(true);
-  list->Append(base::BinaryValue::CreateWithCopiedBuffer("mojo", 4));
-  list->Append(base::Value::CreateNullValue());
+  list->Append(base::Value::CreateWithCopiedBuffer("mojo", 4));
+  list->Append(base::MakeUnique<base::Value>());
   {
     std::unique_ptr<base::DictionaryValue> list_dict(
         new base::DictionaryValue());

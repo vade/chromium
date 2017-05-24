@@ -28,12 +28,15 @@ EventConverterEvdev::EventConverterEvdev(int fd,
                                          uint16_t product_id)
     : fd_(fd),
       path_(path),
-      input_device_(id, type, name, GetInputPathInSys(path), vendor_id,
-                    product_id) {}
+      input_device_(id,
+                    type,
+                    name,
+                    GetInputPathInSys(path),
+                    vendor_id,
+                    product_id),
+      controller_(FROM_HERE) {}
 
 EventConverterEvdev::~EventConverterEvdev() {
-  DCHECK(!enabled_);
-  DCHECK(!watching_);
 }
 
 void EventConverterEvdev::Start() {
@@ -48,7 +51,7 @@ void EventConverterEvdev::Stop() {
 }
 
 void EventConverterEvdev::SetEnabled(bool enabled) {
-  if (enabled == enabled_)
+  if (enabled == input_device_.enabled)
     return;
   if (enabled) {
     TRACE_EVENT1("evdev", "EventConverterEvdev::OnEnabled", "path",
@@ -59,7 +62,11 @@ void EventConverterEvdev::SetEnabled(bool enabled) {
                  path_.value());
     OnDisabled();
   }
-  enabled_ = enabled;
+  input_device_.enabled = enabled;
+}
+
+bool EventConverterEvdev::IsEnabled() const {
+  return input_device_.enabled;
 }
 
 void EventConverterEvdev::OnStopped() {
@@ -95,6 +102,10 @@ bool EventConverterEvdev::HasTouchscreen() const {
 }
 
 bool EventConverterEvdev::HasPen() const {
+  return false;
+}
+
+bool EventConverterEvdev::HasGamepad() const {
   return false;
 }
 

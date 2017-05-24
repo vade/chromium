@@ -17,11 +17,6 @@ class BrowserContext;
 class NavigationHandle;
 }
 
-namespace page_load_metrics {
-struct PageLoadExtraInfo;
-struct PageLoadTiming;
-}
-
 namespace data_reduction_proxy {
 class DataReductionProxyData;
 class DataReductionProxyPingbackClient;
@@ -44,13 +39,13 @@ extern const char kHistogramParseBlockedOnScriptLoadSuffix[];
 extern const char kHistogramParseDurationSuffix[];
 
 // Byte and request specific histogram suffixes.
-extern const char kRequestsPercentProxied[];
+extern const char kResourcesPercentProxied[];
 extern const char kBytesPercentProxied[];
 extern const char kBytesCompressionRatio[];
 extern const char kBytesInflationPercent[];
-extern const char kNetworkRequests[];
-extern const char kRequestsProxied[];
-extern const char kRequestsNotProxied[];
+extern const char kNetworkResources[];
+extern const char kResourcesProxied[];
+extern const char kResourcesNotProxied[];
 extern const char kNetworkBytes[];
 extern const char kBytesProxied[];
 extern const char kBytesNotProxied[];
@@ -73,47 +68,46 @@ class DataReductionProxyMetricsObserver
                         const GURL& currently_committed_url,
                         bool started_in_foreground) override;
   ObservePolicy OnCommit(content::NavigationHandle* navigation_handle) override;
-  ObservePolicy OnHidden(
-      const page_load_metrics::PageLoadTiming& timing,
-      const page_load_metrics::PageLoadExtraInfo& info) override;
   ObservePolicy FlushMetricsOnAppEnterBackground(
-      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& info) override;
-  void OnComplete(const page_load_metrics::PageLoadTiming& timing,
+  void OnComplete(const page_load_metrics::mojom::PageLoadTiming& timing,
                   const page_load_metrics::PageLoadExtraInfo& info) override;
   void OnDomContentLoadedEventStart(
-      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& info) override;
   void OnLoadEventStart(
-      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& info) override;
-  void OnFirstLayout(const page_load_metrics::PageLoadTiming& timing,
+  void OnFirstLayout(const page_load_metrics::mojom::PageLoadTiming& timing,
                      const page_load_metrics::PageLoadExtraInfo& info) override;
-  void OnFirstPaint(const page_load_metrics::PageLoadTiming& timing,
+  void OnFirstPaintInPage(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& info) override;
+  void OnFirstTextPaintInPage(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& info) override;
+  void OnFirstImagePaintInPage(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& info) override;
+  void OnFirstContentfulPaintInPage(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& info) override;
+  void OnFirstMeaningfulPaintInMainFrameDocument(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& info) override;
+  void OnParseStart(const page_load_metrics::mojom::PageLoadTiming& timing,
                     const page_load_metrics::PageLoadExtraInfo& info) override;
-  void OnFirstTextPaint(
-      const page_load_metrics::PageLoadTiming& timing,
-      const page_load_metrics::PageLoadExtraInfo& info) override;
-  void OnFirstImagePaint(
-      const page_load_metrics::PageLoadTiming& timing,
-      const page_load_metrics::PageLoadExtraInfo& info) override;
-  void OnFirstContentfulPaint(
-      const page_load_metrics::PageLoadTiming& timing,
-      const page_load_metrics::PageLoadExtraInfo& info) override;
-  void OnFirstMeaningfulPaint(
-      const page_load_metrics::PageLoadTiming& timing,
-      const page_load_metrics::PageLoadExtraInfo& info) override;
-  void OnParseStart(const page_load_metrics::PageLoadTiming& timing,
-                    const page_load_metrics::PageLoadExtraInfo& info) override;
-  void OnParseStop(const page_load_metrics::PageLoadTiming& timing,
+  void OnParseStop(const page_load_metrics::mojom::PageLoadTiming& timing,
                    const page_load_metrics::PageLoadExtraInfo& info) override;
-  void OnLoadedResource(
-      const page_load_metrics::ExtraRequestInfo& extra_request_info) override;
+  void OnLoadedResource(const page_load_metrics::ExtraRequestCompleteInfo&
+                            extra_request_compelte_info) override;
 
  private:
   // Sends the page load information to the pingback client.
-  void SendPingback(const page_load_metrics::PageLoadTiming& timing,
-                    const page_load_metrics::PageLoadExtraInfo& info);
+  void SendPingback(const page_load_metrics::mojom::PageLoadTiming& timing,
+                    const page_load_metrics::PageLoadExtraInfo& info,
+                    bool app_background_occurred);
 
   // Records UMA of page size when the observer is about to be deleted.
   void RecordPageSizeUMA() const;
@@ -127,11 +121,11 @@ class DataReductionProxyMetricsObserver
   // The browser context this navigation is operating in.
   content::BrowserContext* browser_context_;
 
-  // The number of requests that used data reduction proxy.
-  int num_data_reduction_proxy_requests_;
+  // The number of resources that used data reduction proxy.
+  int num_data_reduction_proxy_resources_;
 
-  // The number of request that did not come from cache.
-  int num_network_requests_;
+  // The number of resources that did not come from cache.
+  int num_network_resources_;
 
   // The total content network bytes that the user would have downloaded if they
   // were not using data reduction proxy.

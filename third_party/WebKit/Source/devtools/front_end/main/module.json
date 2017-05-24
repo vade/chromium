@@ -204,6 +204,13 @@
         },
         {
             "type": "@UI.ToolbarItem.Provider",
+            "className": "Main.Main.NodeIndicator",
+            "order": 2,
+            "location": "main-toolbar-left",
+            "condition": "!nodeFrontend"
+        },
+        {
+            "type": "@UI.ToolbarItem.Provider",
             "className": "Main.Main.WarningErrorCounter",
             "order": 1,
             "location": "main-toolbar-right"
@@ -242,25 +249,6 @@
                 {
                     "value": false,
                     "title": "Enable cache"
-                }
-            ]
-        },
-        {
-            "type": "setting",
-            "category": "Debugger",
-            "title": "Disable JavaScript",
-            "settingName": "javaScriptDisabled",
-            "settingType": "boolean",
-            "order": 1,
-            "defaultValue": false,
-            "options": [
-                {
-                    "value": true,
-                    "title": "Disable JavaScript"
-                },
-                {
-                    "value": false,
-                    "title": "Enable JavaScript"
                 }
             ]
         },
@@ -373,12 +361,20 @@
             "order": 80
         },
         {
+            "type": "context-menu-item",
+            "location": "mainMenu/footer",
+            "title": "Help",
+            "subMenuId": "mainMenuHelp",
+            "order": 30
+        },
+        {
             "type": "view",
             "location": "drawer-view",
             "id": "rendering",
             "title": "Rendering",
             "persistence": "closeable",
             "order": 50,
+            "condition": "!v8only",
             "className": "Main.RenderingOptionsView"
         },
         {
@@ -405,6 +401,13 @@
         {
             "type": "@UI.ViewLocationResolver",
             "name": "drawer-view",
+            "category": "Drawer",
+            "className": "UI.InspectorView"
+        },
+        {
+            "type": "@UI.ViewLocationResolver",
+            "name": "panel",
+            "category": "Panel",
             "className": "UI.InspectorView"
         },
         {
@@ -427,12 +430,14 @@
         "host",
         "platform",
         "sdk",
-        "persistence"
+        "persistence",
+        "help",
+        "console_model",
+        "network_log"
     ],
     "scripts": [
         "RenderingOptions.js",
         "SimpleApp.js",
-        "OverlayController.js",
         "GCActionDelegate.js",
         "RequestAppBannerActionDelegate.js",
         "ExecutionContextSelector.js",
@@ -440,6 +445,7 @@
     ],
     "resources": [
         "errorWarningCounter.css",
+        "nodeIcon.css",
         "remoteDebuggingTerminatedScreen.css",
         "renderingOptions.css",
         "targetCrashedScreen.css"

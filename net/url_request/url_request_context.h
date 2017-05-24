@@ -8,6 +8,7 @@
 #ifndef NET_URL_REQUEST_URL_REQUEST_CONTEXT_H_
 #define NET_URL_REQUEST_URL_REQUEST_CONTEXT_H_
 
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -23,6 +24,7 @@
 #include "net/http/http_server_properties.h"
 #include "net/http/transport_security_state.h"
 #include "net/ssl/ssl_config_service.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_request.h"
 
 namespace base {
@@ -44,6 +46,7 @@ class HttpUserAgentSettings;
 class NetLog;
 class NetworkDelegate;
 class NetworkQualityEstimator;
+class ReportingService;
 class SdchManager;
 class ProxyService;
 class URLRequest;
@@ -71,14 +74,28 @@ class NET_EXPORT URLRequestContext
   // session.
   const HttpNetworkSession::Params* GetNetworkSessionParams() const;
 
+  // This function should not be used in Chromium, please use the version with
+  // NetworkTrafficAnnotationTag in the future.
   std::unique_ptr<URLRequest> CreateRequest(
       const GURL& url,
       RequestPriority priority,
       URLRequest::Delegate* delegate) const;
 
-  NetLog* net_log() const {
-    return net_log_;
-  }
+  // |traffic_annotation| is metadata about the network traffic send via this
+  // URLRequest, see net::DefineNetworkTrafficAnnotation. Note that:
+  // - net provides the API for tagging requests with an opaque identifier.
+  // - tools/traffic_annotation/traffic_annotation.proto contains the Chrome
+  // specific .proto describing the verbose annotation format that Chrome's
+  // callsites are expected to follow.
+  // - tools/traffic_annotation/ contains sample and template for annotation and
+  // tools will be added for verification following crbug.com/690323.
+  std::unique_ptr<URLRequest> CreateRequest(
+      const GURL& url,
+      RequestPriority priority,
+      URLRequest::Delegate* delegate,
+      NetworkTrafficAnnotationTag traffic_annotation) const;
+
+  NetLog* net_log() const { return net_log_; }
 
   void set_net_log(NetLog* net_log) {
     net_log_ = net_log;
@@ -205,9 +222,22 @@ class NET_EXPORT URLRequestContext
 
   // Gets the URLRequest objects that hold a reference to this
   // URLRequestContext.
-  std::set<const URLRequest*>* url_requests() const {
-    return url_requests_.get();
+  const std::set<const URLRequest*>& url_requests() const {
+    return url_requests_;
   }
+
+  // TODO(xunjieli): Temporary to investigate crbug.com/711721.
+
+  // Adds |address| to |address_map_|. Return false if the same address has been
+  // added for more than 1000 times but is not yet removed from the map.
+  bool AddToAddressMap(const void* const address);
+
+  // Removes |address| from |address_map_|.
+  void RemoveFromAddressMap(const void* const address) const;
+
+  void InsertURLRequest(const URLRequest* request) const;
+
+  void RemoveURLRequest(const URLRequest* request) const;
 
   // CHECKs that no URLRequests using this context remain. Subclasses should
   // additionally call AssertNoURLRequests() within their own destructor,
@@ -234,6 +264,11 @@ class NET_EXPORT URLRequestContext
     network_quality_estimator_ = network_quality_estimator;
   }
 
+  ReportingService* reporting_service() const { return reporting_service_; }
+  void set_reporting_service(ReportingService* reporting_service) {
+    reporting_service_ = reporting_service;
+  }
+
   void set_enable_brotli(bool enable_brotli) { enable_brotli_ = enable_brotli; }
 
   bool enable_brotli() const { return enable_brotli_; }
@@ -250,7 +285,7 @@ class NET_EXPORT URLRequestContext
   // Sets a name for this URLRequestContext. Currently the name is used in
   // MemoryDumpProvier to annotate memory usage. The name does not need to be
   // unique.
-  void set_name(const std::string& name) { name_ = name; }
+  void set_name(const char* name) { name_ = name; }
 
   // MemoryDumpProvider implementation:
   bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
@@ -284,13 +319,14 @@ class NET_EXPORT URLRequestContext
   URLRequestBackoffManager* backoff_manager_;
   SdchManager* sdch_manager_;
   NetworkQualityEstimator* network_quality_estimator_;
+  ReportingService* reporting_service_;
 
   // ---------------------------------------------------------------------------
   // Important: When adding any new members below, consider whether they need to
   // be added to CopyFrom.
   // ---------------------------------------------------------------------------
 
-  std::unique_ptr<std::set<const URLRequest*>> url_requests_;
+  mutable std::set<const URLRequest*> url_requests_;
 
   // Enables Brotli Content-Encoding support.
   bool enable_brotli_;
@@ -301,7 +337,21 @@ class NET_EXPORT URLRequestContext
   // An optional name which can be set to describe this URLRequestContext.
   // Used in MemoryDumpProvier to annotate memory usage. The name does not need
   // to be unique.
-  std::string name_;
+  const char* name_;
+
+  // The largest number of outstanding URLRequests that have been created by
+  // |this| and are not yet destroyed. This doesn't need to be in CopyFrom.
+  mutable size_t largest_outstanding_requests_count_seen_;
+
+  // TODO(xunjieli): Remove after crbug.com/711721 is fixed.
+
+  // A map of frame address to the number of outstanding requests that are
+  // associated with that address.
+  mutable std::map<const void* const, int> address_map_;
+
+  // Whether AddToAddressMap() has reported false. This is to avoid gathering
+  // too many crash dumps when users run into this scenario.
+  bool has_reported_too_many_outstanding_requests_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestContext);
 };

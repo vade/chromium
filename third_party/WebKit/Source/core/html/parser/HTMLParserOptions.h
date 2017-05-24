@@ -27,7 +27,7 @@
 #define HTMLParserOptions_h
 
 #include "core/CoreExport.h"
-#include "wtf/Allocator.h"
+#include "platform/wtf/Allocator.h"
 
 namespace blink {
 
@@ -37,10 +37,10 @@ class CORE_EXPORT HTMLParserOptions {
   DISALLOW_NEW();
 
  public:
-  bool scriptEnabled;
-  bool pluginsEnabled;
+  bool script_enabled = false;
+  bool plugins_enabled = false;
 
-  explicit HTMLParserOptions(Document* = 0);
+  explicit HTMLParserOptions(Document* = nullptr);
 };
 
 }  // namespace blink

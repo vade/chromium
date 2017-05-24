@@ -39,16 +39,17 @@ DrawPolygon::DrawPolygon(const DrawQuad* original,
                          const std::vector<gfx::Point3F>& in_points,
                          const gfx::Vector3dF& normal,
                          int draw_order_index)
-    : order_index_(draw_order_index), original_ref_(original), is_split_(true) {
+    : normal_(normal),
+      order_index_(draw_order_index),
+      original_ref_(original),
+      is_split_(true) {
   for (size_t i = 0; i < in_points.size(); i++) {
     points_.push_back(in_points[i]);
   }
-#if DCHECK_IS_ON()
-  normal_ = normal;
-  ConstructNormal();
-  DCHECK_LE((normal_ - normal).Length(), normalized_threshold);
-#endif
-  normal_ = normal;
+  // If life was fair, we could recalculate the normal from the given points
+  // and assert it was roughly the same.  This causes unhelpful breaks on
+  // trivial slices of split polygons.  Similarly, when splitting, it is
+  // better to keep the normal that was constructed from the original.
 }
 
 // This takes the original DrawQuad that this polygon should be based on,
@@ -288,11 +289,12 @@ void DrawPolygon::SplitPolygon(std::unique_ptr<DrawPolygon> polygon,
   std::vector<gfx::Point3F> out_points;
 
   out_points.push_back(pre_pos_intersection);
-  do {
-    out_points.push_back(polygon->points_[front_begin]);
-    front_begin = next(front_begin);
-  } while (vertex_distance[front_begin] > 0.0);
-  out_points.push_back(pre_neg_intersection);
+  for (size_t index = front_begin; index != back_begin; index = next(index)) {
+    out_points.push_back(polygon->points_[index]);
+  }
+  if (out_points.back() != pre_neg_intersection) {
+    out_points.push_back(pre_neg_intersection);
+  }
   *front =
       base::MakeUnique<DrawPolygon>(polygon->original_ref_, out_points,
                                     polygon->normal_, polygon->order_index_);
@@ -300,11 +302,12 @@ void DrawPolygon::SplitPolygon(std::unique_ptr<DrawPolygon> polygon,
   out_points.clear();
 
   out_points.push_back(pre_neg_intersection);
-  do {
-    out_points.push_back(polygon->points_[back_begin]);
-    back_begin = next(back_begin);
-  } while (vertex_distance[back_begin] < 0.0);
-  out_points.push_back(pre_pos_intersection);
+  for (size_t index = back_begin; index != front_begin; index = next(index)) {
+    out_points.push_back(polygon->points_[index]);
+  }
+  if (out_points.back() != pre_pos_intersection) {
+    out_points.push_back(pre_pos_intersection);
+  }
   *back =
       base::MakeUnique<DrawPolygon>(polygon->original_ref_, out_points,
                                     polygon->normal_, polygon->order_index_);

@@ -8,6 +8,7 @@
  * FileManager objects encapsulate the functionality of the file selector
  * dialogs, as well as the full screen file manager application.
  *
+ * @implements {CommandHandlerDeps}
  * @constructor
  * @struct
  */
@@ -49,7 +50,7 @@ function FileManager() {
   /** @private {importer.ImportController} */
   this.importController_ = null;
 
-  /** @private {importer.MediaImportHandler} */
+  /** @private {importer.ImportRunner} */
   this.mediaImportHandler_ = null;
 
   /**
@@ -277,6 +278,13 @@ function FileManager() {
    */
   this.quickViewController_ = null;
 
+  /**
+   * Records histograms of directory-changed event.
+   * @type {NavigationUma}
+   * @private
+   */
+  this.navigationUma_ = null;
+
   // --------------------------------------------------------------------------
   // DOM elements.
 
@@ -286,6 +294,12 @@ function FileManager() {
    * @private
    */
   this.backgroundPage_ = null;
+
+  /**
+   * @type {FileBrowserBackgroundImpl}
+   * @private
+   */
+  this.fileBrowserBackground_ = null;
 
   /**
    * The root DOM element of this app.
@@ -330,6 +344,12 @@ FileManager.prototype = /** @struct */ {
     return this.directoryModel_;
   },
   /**
+   * @return {DirectoryTreeNamingController}
+   */
+  get directoryTreeNamingController() {
+    return this.directoryTreeNamingController_;
+  },
+  /**
    * @return {!FileFilter}
    */
   get fileFilter() {
@@ -364,6 +384,12 @@ FileManager.prototype = /** @struct */ {
    */
   get metadataModel() {
     return this.metadataModel_;
+  },
+  /**
+   * @return {FileSelectionHandler}
+   */
+  get selectionHandler() {
+    return this.selectionHandler_;
   },
   /**
    * @return {DirectoryTree}
@@ -432,7 +458,7 @@ FileManager.prototype = /** @struct */ {
     return this.historyLoader_;
   },
   /**
-   * @return {importer.MediaImportHandler}
+   * @return {importer.ImportRunner}
    */
   get mediaImportHandler() {
     return this.mediaImportHandler_;
@@ -495,6 +521,13 @@ FileManager.prototype = /** @struct */ {
       listBeingUpdated = null;
     });
 
+    this.directoryModel_.addEventListener(
+        'directory-changed',
+        /** @param {!Event} event */
+        function(event) {
+          this.navigationUma_.onDirectoryChanged(event.newDirEntry);
+        }.bind(this));
+
     this.initCommands_();
 
     assert(this.directoryModel_);
@@ -534,7 +567,7 @@ FileManager.prototype = /** @struct */ {
     this.actionsController_ = new ActionsController(
         this.volumeManager_, assert(this.metadataModel_), this.directoryModel_,
         assert(this.folderShortcutsModel_),
-        this.backgroundPage_.background.driveSyncHandler,
+        this.fileBrowserBackground_.driveSyncHandler,
         this.selectionHandler_, assert(this.ui_));
 
     this.quickViewModel_ = new QuickViewModel();
@@ -610,17 +643,14 @@ FileManager.prototype = /** @struct */ {
       return;
 
     this.fileTransferController_ = new FileTransferController(
-        assert(this.document_),
-        assert(this.ui_.listContainer),
-        assert(this.ui_.directoryTree),
-        this.ui_.multiProfileShareDialog,
-        assert(this.backgroundPage_.background.progressCenter),
-        assert(this.fileOperationManager_),
-        assert(this.metadataModel_),
-        assert(this.thumbnailModel_),
-        assert(this.directoryModel_),
-        assert(this.volumeManager_),
-        assert(this.selectionHandler_));
+        assert(this.document_), assert(this.ui_.listContainer),
+        assert(this.ui_.directoryTree), this.ui_.multiProfileShareDialog,
+        assert(this.fileBrowserBackground_.progressCenter),
+        assert(this.fileOperationManager_), assert(this.metadataModel_),
+        assert(this.thumbnailModel_), assert(this.directoryModel_),
+        assert(this.volumeManager_), assert(this.selectionHandler_),
+        CommandUtil.shouldShowMenuItemsForEntry.bind(
+            null, assert(this.volumeManager_)));
   };
 
   /**
@@ -630,7 +660,8 @@ FileManager.prototype = /** @struct */ {
   FileManager.prototype.initCommands_ = function() {
     assert(this.ui_.textContextMenu);
 
-    this.commandHandler_ = new CommandHandler(this);
+    this.commandHandler_ =
+        new CommandHandler(this, assert(this.selectionHandler_));
 
     // TODO(hirono): Move the following block to the UI part.
     var commandButtons = this.dialogDom_.querySelectorAll('button[command]');
@@ -768,18 +799,21 @@ FileManager.prototype = /** @struct */ {
             assert(opt_backgroundPage);
             this.backgroundPage_ =
                 /** @type {!BackgroundWindow} */ (opt_backgroundPage);
-            this.backgroundPage_.background.ready(function() {
-              loadTimeData.data = this.backgroundPage_.background.stringData;
+            this.fileBrowserBackground_ =
+                /** @type {!FileBrowserBackgroundImpl} */ (
+                    this.backgroundPage_.background);
+            this.fileBrowserBackground_.ready(function() {
+              loadTimeData.data = this.fileBrowserBackground_.stringData;
               if (util.runningInBrowser())
                 this.backgroundPage_.registerDialog(window);
               this.fileOperationManager_ =
-                  this.backgroundPage_.background.fileOperationManager;
+                  this.fileBrowserBackground_.fileOperationManager;
               this.mediaImportHandler_ =
-                  this.backgroundPage_.background.mediaImportHandler;
+                  this.fileBrowserBackground_.mediaImportHandler;
               this.mediaScanner_ =
-                  this.backgroundPage_.background.mediaScanner;
+                  this.fileBrowserBackground_.mediaScanner;
               this.historyLoader_ =
-                  this.backgroundPage_.background.historyLoader;
+                  this.fileBrowserBackground_.historyLoader;
               metrics.recordInterval('Load.InitBackgroundPage');
               resolve();
             }.bind(this));
@@ -793,9 +827,9 @@ FileManager.prototype = /** @struct */ {
    */
   FileManager.prototype.initVolumeManager_ = function() {
     var allowedPaths = this.launchParams_.allowedPaths;
-    // Files.app native implementation create snapshot files for non-native
-    // files. But it does not work for folders (e.g., dialog for loading
-    // unpacked extensions).
+    // The native implementation of the Files app creates snapshot files for
+    // non-native files. But it does not work for folders (e.g., dialog for
+    // loading unpacked extensions).
     if (allowedPaths === AllowedPaths.NATIVE_PATH &&
         !DialogType.isFolderDialog(this.launchParams_.type)) {
       if (this.launchParams_.type == DialogType.SELECT_SAVEAS_FILE) {
@@ -806,23 +840,26 @@ FileManager.prototype = /** @struct */ {
       }
     }
 
+    var writableOnly =
+        this.launchParams_.type === DialogType.SELECT_SAVEAS_FILE;
+
     // VolumeManagerWrapper hides virtual file system related event and data
     // even depends on the value of |supportVirtualPath|. If it is
     // VirtualPathSupport.NO_VIRTUAL_PATH, it hides Drive even if Drive is
     // enabled on preference.
-    // In other words, even if Drive is disabled on preference but Files.app
+    // In other words, even if Drive is disabled on preference but the Files app
     // should show Drive when it is re-enabled, then the value should be set to
     // true.
     // Note that the Drive enabling preference change is listened by
     // DriveIntegrationService, so here we don't need to take care about it.
     this.volumeManager_ = new VolumeManagerWrapper(
-        allowedPaths, this.backgroundPage_);
+        allowedPaths, writableOnly, this.backgroundPage_);
   };
 
   /**
-   * One time initialization of the Files.app's essential UI elements. These
-   * elements will be shown to the user. Only visible elements should be
-   * initialized here. Any heavy operation should be avoided. Files.app's
+   * One time initialization of the essential UI elements in the Files app.
+   * These elements will be shown to the user. Only visible elements should be
+   * initialized here. Any heavy operation should be avoided. The Files app's
    * window is shown at the end of this routine.
    * @private
    */
@@ -867,9 +904,6 @@ FileManager.prototype = /** @struct */ {
     var dom = this.dialogDom_;
     assert(dom);
 
-    // Initialize the dialog.
-    FileManagerDialogBase.setFileManager(this);
-
     var table = queryRequiredElement('.detail-table', dom);
     FileTable.decorate(
         table,
@@ -894,7 +928,7 @@ FileManager.prototype = /** @struct */ {
             this.volumeManager_));
 
     // Handle UI events.
-    this.backgroundPage_.background.progressCenter.addPanel(
+    this.fileBrowserBackground_.progressCenter.addPanel(
         this.ui_.progressCenterPanel);
 
     util.addIsFocusedMethod();
@@ -995,7 +1029,10 @@ FileManager.prototype = /** @struct */ {
     this.folderShortcutsModel_ = new FolderShortcutsDataModel(
         this.volumeManager_);
 
-    this.selectionHandler_ = new FileSelectionHandler(this);
+    this.selectionHandler_ = new FileSelectionHandler(
+        assert(this.directoryModel_), assert(this.fileOperationManager_),
+        assert(this.ui_.listContainer), assert(this.metadataModel_),
+        assert(this.volumeManager_));
 
     this.directoryModel_.getFileListSelection().addEventListener('change',
         this.selectionHandler_.onFileSelectionChanged.bind(
@@ -1084,13 +1121,6 @@ FileManager.prototype = /** @struct */ {
   };
 
   /**
-   * @return {DirectoryTreeNamingController}
-   */
-  FileManager.prototype.getDirectoryTreeNamingController = function() {
-    return this.directoryTreeNamingController_;
-  };
-
-  /**
    * @private
    */
   FileManager.prototype.initDirectoryTree_ = function() {
@@ -1101,6 +1131,7 @@ FileManager.prototype = /** @struct */ {
     var addNewServicesVisible =
         this.dialogType === DialogType.FULL_PAGE &&
         !chrome.extension.inIncognitoContext;
+    this.navigationUma_ = new NavigationUma(assert(this.volumeManager_));
     DirectoryTree.decorate(directoryTree,
                            assert(this.directoryModel_),
                            assert(this.volumeManager_),
@@ -1360,40 +1391,6 @@ FileManager.prototype = /** @struct */ {
   };
 
   /**
-   * TODO(mtomasz): Move this to a utility function working on the root type.
-   * @return {boolean} True if the current directory content is from Google
-   *     Drive.
-   */
-  FileManager.prototype.isOnDrive = function() {
-    return this.directoryModel_.isOnDrive();
-  };
-
-  /**
-   * @return {boolean} True if the current directory content is from MTP volume.
-   */
-  FileManager.prototype.isOnMTP = function() {
-    return this.directoryModel_.isOnMTP();
-  };
-
-  /**
-   * Check if the drive-related setting items should be shown on currently
-   * displayed gear menu.
-   * @return {boolean} True if those setting items should be shown.
-   */
-  FileManager.prototype.shouldShowDriveSettings = function() {
-    return this.isOnDrive();
-  };
-
-  /**
-   * Tells whether the current directory is read only.
-   * TODO(mtomasz): Remove and use EntryLocation directly.
-   * @return {boolean} True if read only, false otherwise.
-   */
-  FileManager.prototype.isOnReadonlyDirectory = function() {
-    return this.directoryModel_.isReadOnly();
-  };
-
-  /**
    * Return DirectoryEntry of the current directory or null.
    * @return {DirectoryEntry|FakeEntry} DirectoryEntry of the current directory.
    *     Returns null if the directory model is not ready or the current
@@ -1420,14 +1417,14 @@ FileManager.prototype = /** @struct */ {
            i++) {
         var taskId = this.fileTransferController_.pendingTaskIds[i];
         var item =
-            this.backgroundPage_.background.progressCenter.getItemById(taskId);
+            this.fileBrowserBackground_.progressCenter.getItemById(taskId);
         item.message = '';
         item.state = ProgressItemState.CANCELED;
-        this.backgroundPage_.background.progressCenter.updateItem(item);
+        this.fileBrowserBackground_.progressCenter.updateItem(item);
       }
     }
     if (this.ui_ && this.ui_.progressCenterPanel) {
-      this.backgroundPage_.background.progressCenter.removePanel(
+      this.fileBrowserBackground_.progressCenter.removePanel(
           this.ui_.progressCenterPanel);
     }
   };

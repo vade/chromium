@@ -234,6 +234,10 @@ URLDatabase* HistoryService::InMemoryDatabase() {
   return in_memory_backend_ ? in_memory_backend_->db() : nullptr;
 }
 
+TypedURLSyncBridge* HistoryService::GetTypedURLSyncBridge() const {
+  return history_backend_->GetTypedURLSyncBridge();
+}
+
 TypedUrlSyncableService* HistoryService::GetTypedUrlSyncableService() const {
   return history_backend_->GetTypedUrlSyncableService();
 }
@@ -393,10 +397,6 @@ void HistoryService::AddPage(const HistoryAddPageArgs& add_page_args) {
   DCHECK(backend_task_runner_) << "History service being called after cleanup";
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  // Filter out unwanted URLs. We don't add auto-subframe URLs. They are a
-  // large part of history (think iframes for ads) and we never display them in
-  // history UI. We will still add manual subframes, which are ones the user
-  // has clicked on to get.
   if (history_client_ && !history_client_->CanAddURL(add_page_args.url))
     return;
 
@@ -502,9 +502,9 @@ void HistoryService::AddPagesWithDetails(const URLRows& info,
                           history_backend_, info, visit_source));
 }
 
-base::CancelableTaskTracker::TaskId HistoryService::GetFavicons(
-    const std::vector<GURL>& icon_urls,
-    int icon_types,
+base::CancelableTaskTracker::TaskId HistoryService::GetFavicon(
+    const GURL& icon_url,
+    favicon_base::IconType icon_type,
     const std::vector<int>& desired_sizes,
     const favicon_base::FaviconResultsCallback& callback,
     base::CancelableTaskTracker* tracker) {
@@ -515,8 +515,8 @@ base::CancelableTaskTracker::TaskId HistoryService::GetFavicons(
       new std::vector<favicon_base::FaviconRawBitmapResult>();
   return tracker->PostTaskAndReply(
       backend_task_runner_.get(), FROM_HERE,
-      base::Bind(&HistoryBackend::GetFavicons, history_backend_, icon_urls,
-                 icon_types, desired_sizes, results),
+      base::Bind(&HistoryBackend::GetFavicon, history_backend_, icon_url,
+                 icon_type, desired_sizes, results),
       base::Bind(&RunWithFaviconResults, callback, base::Owned(results)));
 }
 
@@ -575,8 +575,8 @@ base::CancelableTaskTracker::TaskId HistoryService::GetFaviconForID(
 base::CancelableTaskTracker::TaskId
 HistoryService::UpdateFaviconMappingsAndFetch(
     const GURL& page_url,
-    const std::vector<GURL>& icon_urls,
-    int icon_types,
+    const GURL& icon_url,
+    favicon_base::IconType icon_type,
     const std::vector<int>& desired_sizes,
     const favicon_base::FaviconResultsCallback& callback,
     base::CancelableTaskTracker* tracker) {
@@ -588,8 +588,8 @@ HistoryService::UpdateFaviconMappingsAndFetch(
   return tracker->PostTaskAndReply(
       backend_task_runner_.get(), FROM_HERE,
       base::Bind(&HistoryBackend::UpdateFaviconMappingsAndFetch,
-                 history_backend_, page_url, icon_urls, icon_types,
-                 desired_sizes, results),
+                 history_backend_, page_url, icon_url, icon_type, desired_sizes,
+                 results),
       base::Bind(&RunWithFaviconResults, callback, base::Owned(results)));
 }
 
@@ -623,6 +623,24 @@ void HistoryService::SetFavicons(const GURL& page_url,
   ScheduleTask(PRIORITY_NORMAL,
                base::Bind(&HistoryBackend::SetFavicons, history_backend_,
                           page_url, icon_type, icon_url, bitmaps));
+}
+
+void HistoryService::SetLastResortFavicons(
+    const GURL& page_url,
+    favicon_base::IconType icon_type,
+    const GURL& icon_url,
+    const std::vector<SkBitmap>& bitmaps,
+    base::Callback<void(bool)> callback) {
+  DCHECK(backend_task_runner_) << "History service being called after cleanup";
+  DCHECK(thread_checker_.CalledOnValidThread());
+  if (history_client_ && !history_client_->CanAddURL(page_url))
+    return;
+
+  PostTaskAndReplyWithResult(
+      backend_task_runner_.get(), FROM_HERE,
+      base::Bind(&HistoryBackend::SetLastResortFavicons, history_backend_,
+                 page_url, icon_type, icon_url, bitmaps),
+      callback);
 }
 
 void HistoryService::SetFaviconsOutOfDateForPage(const GURL& page_url) {
@@ -883,11 +901,9 @@ bool HistoryService::Init(
     backend_task_runner_ = thread_->task_runner();
   } else {
     backend_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
-        base::TaskTraits()
-            .WithPriority(base::TaskPriority::USER_BLOCKING)
-            .WithShutdownBehavior(base::TaskShutdownBehavior::BLOCK_SHUTDOWN)
-            .MayBlock()
-            .WithBaseSyncPrimitives());
+        {base::MayBlock(), base::WithBaseSyncPrimitives(),
+         base::TaskPriority::USER_BLOCKING,
+         base::TaskShutdownBehavior::BLOCK_SHUTDOWN});
   }
 
   // Create the history backend.
@@ -919,11 +935,11 @@ void HistoryService::ScheduleAutocomplete(
 }
 
 void HistoryService::ScheduleTask(SchedulePriority priority,
-                                  const base::Closure& task) {
+                                  base::OnceClosure task) {
   DCHECK(thread_checker_.CalledOnValidThread());
   CHECK(backend_task_runner_);
   // TODO(brettw): Do prioritization.
-  backend_task_runner_->PostTask(FROM_HERE, task);
+  backend_task_runner_->PostTask(FROM_HERE, std::move(task));
 }
 
 base::WeakPtr<HistoryService> HistoryService::AsWeakPtr() {

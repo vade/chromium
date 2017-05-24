@@ -29,13 +29,13 @@ public class SigninPromoUtil {
         // The promo is displayed if Chrome is launched directly (i.e., not with the intent to
         // navigate to and view a URL on startup), the instance is part of the field trial,
         // and the promo has been marked to display.
-        ChromePreferenceManager preferenceManager = ChromePreferenceManager.getInstance(activity);
+        ChromePreferenceManager preferenceManager = ChromePreferenceManager.getInstance();
         if (MultiWindowUtils.getInstance().isLegacyMultiWindow(activity)) return false;
         if (!preferenceManager.getShowSigninPromo()) return false;
         preferenceManager.setShowSigninPromo(false);
 
         String lastSyncName = PrefServiceBridge.getInstance().getSyncLastAccountName();
-        if (ChromeSigninController.get(activity).isSignedIn() || !TextUtils.isEmpty(lastSyncName)) {
+        if (ChromeSigninController.get().isSignedIn() || !TextUtils.isEmpty(lastSyncName)) {
             return false;
         }
 

@@ -66,7 +66,7 @@ Sources.JavaScriptBreakpointsSidebarPane = class extends UI.ThrottledWidget {
         entry = this._listElement.createChild('div', 'breakpoint-entry');
         entry.addEventListener('contextmenu', this._breakpointContextMenu.bind(this), true);
         entry.addEventListener('click', this._revealLocation.bind(this), false);
-        var checkboxLabel = UI.createCheckboxLabel('');
+        var checkboxLabel = UI.CheckboxLabel.create('');
         checkboxLabel.addEventListener('click', this._breakpointCheckboxClicked.bind(this), false);
         entry.appendChild(checkboxLabel);
         entry[Sources.JavaScriptBreakpointsSidebarPane._checkboxLabelSymbol] = checkboxLabel;
@@ -124,7 +124,7 @@ Sources.JavaScriptBreakpointsSidebarPane = class extends UI.ThrottledWidget {
      */
     function fillSnippetElement(snippetElement, content) {
       var lineNumber = uiLocation.lineNumber;
-      var text = new Common.Text(content || '');
+      var text = new TextUtils.Text(content || '');
       if (lineNumber < text.lineCount()) {
         var lineText = text.lineAt(lineNumber);
         var maxSnippetLength = 200;
@@ -204,6 +204,10 @@ Sources.JavaScriptBreakpointsSidebarPane = class extends UI.ThrottledWidget {
     }
     var removeAllTitle = Common.UIString('Remove all breakpoints');
     contextMenu.appendItem(removeAllTitle, this._breakpointManager.removeAllBreakpoints.bind(this._breakpointManager));
+    var removeOtherTitle = Common.UIString('Remove other breakpoints');
+    contextMenu.appendItem(
+        removeOtherTitle,
+        this._breakpointManager.removeOtherBreakpoints.bind(this._breakpointManager, new Set(breakpoints)));
     contextMenu.show();
   }
 

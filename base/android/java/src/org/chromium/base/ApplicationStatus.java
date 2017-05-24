@@ -4,13 +4,12 @@
 
 package org.chromium.base;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.Application;
 import android.app.Application.ActivityLifecycleCallbacks;
 import android.os.Bundle;
 
-import org.chromium.base.ActivityState.ActivityStateEnum;
-import org.chromium.base.ApplicationState.ApplicationStateEnum;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.MainDex;
@@ -30,13 +29,12 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ApplicationStatus {
     private static class ActivityInfo {
         private int mStatus = ActivityState.DESTROYED;
-        private ObserverList<ActivityStateListener> mListeners =
-                new ObserverList<ActivityStateListener>();
+        private ObserverList<ActivityStateListener> mListeners = new ObserverList<>();
 
         /**
          * @return The current {@link ActivityState} of the activity.
          */
-        @ActivityStateEnum
+        @ActivityState
         public int getStatus() {
             return mStatus;
         }
@@ -44,7 +42,7 @@ public class ApplicationStatus {
         /**
          * @param status The new {@link ActivityState} of the activity.
          */
-        public void setStatus(@ActivityStateEnum int status) {
+        public void setStatus(@ActivityState int status) {
             mStatus = status;
         }
 
@@ -56,11 +54,12 @@ public class ApplicationStatus {
         }
     }
 
-    private static Object sCachedApplicationStateLock = new Object();
-    @ApplicationStateEnum
+    private static final Object sCachedApplicationStateLock = new Object();
+    @ApplicationState
     private static Integer sCachedApplicationState;
 
     /** Last activity that was shown (or null if none or it was destroyed). */
+    @SuppressLint("StaticFieldLeak")
     private static Activity sActivity;
 
     /** A lazily initialized listener that forwards application state changes to native. */
@@ -69,21 +68,20 @@ public class ApplicationStatus {
     /**
      * A map of which observers listen to state changes from which {@link Activity}.
      */
-    private static final Map<Activity, ActivityInfo> sActivityInfo =
-            new ConcurrentHashMap<Activity, ActivityInfo>();
+    private static final Map<Activity, ActivityInfo> sActivityInfo = new ConcurrentHashMap<>();
 
     /**
      * A list of observers to be notified when any {@link Activity} has a state change.
      */
     private static final ObserverList<ActivityStateListener> sGeneralActivityStateListeners =
-            new ObserverList<ActivityStateListener>();
+            new ObserverList<>();
 
     /**
      * A list of observers to be notified when the visibility state of this {@link Application}
      * changes.  See {@link #getStateForApplication()}.
      */
     private static final ObserverList<ApplicationStateListener> sApplicationStateListeners =
-            new ObserverList<ApplicationStateListener>();
+            new ObserverList<>();
 
     /**
      * Interface to be implemented by listeners.
@@ -93,7 +91,7 @@ public class ApplicationStatus {
          * Called when the application's state changes.
          * @param newState The application state.
          */
-        public void onApplicationStateChange(@ApplicationStateEnum int newState);
+        void onApplicationStateChange(@ApplicationState int newState);
     }
 
     /**
@@ -105,7 +103,7 @@ public class ApplicationStatus {
          * @param activity The activity that had a state change.
          * @param newState New activity state.
          */
-        public void onActivityStateChange(Activity activity, @ActivityStateEnum int newState);
+        void onActivityStateChange(Activity activity, @ActivityState int newState);
     }
 
     private ApplicationStatus() {}
@@ -174,7 +172,7 @@ public class ApplicationStatus {
      * @param activity Current activity.
      * @param newState New state value.
      */
-    private static void onStateChange(Activity activity, @ActivityStateEnum int newState) {
+    private static void onStateChange(Activity activity, @ActivityState int newState) {
         if (activity == null) throw new IllegalArgumentException("null activity is not supported");
 
         if (sActivity == null
@@ -187,7 +185,13 @@ public class ApplicationStatus {
         int oldApplicationState = getStateForApplication();
 
         if (newState == ActivityState.CREATED) {
-            assert !sActivityInfo.containsKey(activity);
+            // TODO(tedchoc): crbug/691100.  The timing of application callback lifecycles were
+            //                changed in O and the activity info may have been lazily created
+            //                on first access to avoid a crash on startup.  This should be removed
+            //                once the new lifecycle APIs are available.
+            if (!BuildInfo.isAtLeastO()) {
+                assert !sActivityInfo.containsKey(activity);
+            }
             sActivityInfo.put(activity, new ActivityInfo());
         }
 
@@ -245,9 +249,9 @@ public class ApplicationStatus {
      * @return A {@link List} of all non-destroyed {@link Activity}s.
      */
     public static List<WeakReference<Activity>> getRunningActivities() {
-        List<WeakReference<Activity>> activities = new ArrayList<WeakReference<Activity>>();
+        List<WeakReference<Activity>> activities = new ArrayList<>();
         for (Activity activity : sActivityInfo.keySet()) {
-            activities.add(new WeakReference<Activity>(activity));
+            activities.add(new WeakReference<>(activity));
         }
         return activities;
     }
@@ -295,7 +299,7 @@ public class ApplicationStatus {
      * @param activity The activity whose state is to be returned.
      * @return The state of the specified activity (see {@link ActivityState}).
      */
-    @ActivityStateEnum
+    @ActivityState
     public static int getStateForActivity(Activity activity) {
         ActivityInfo info = sActivityInfo.get(activity);
         return info != null ? info.getStatus() : ActivityState.DESTROYED;
@@ -304,14 +308,14 @@ public class ApplicationStatus {
     /**
      * @return The state of the application (see {@link ApplicationState}).
      */
-    @ApplicationStateEnum
+    @ApplicationState
     @CalledByNative
     public static int getStateForApplication() {
         synchronized (sCachedApplicationStateLock) {
             if (sCachedApplicationState == null) {
                 sCachedApplicationState = determineApplicationState();
             }
-            return sCachedApplicationState.intValue();
+            return sCachedApplicationState;
         }
     }
 
@@ -351,11 +355,19 @@ public class ApplicationStatus {
      * @param listener Listener to receive state changes.
      * @param activity Activity to track or {@code null} to track all activities.
      */
+    @SuppressLint("NewApi")
     public static void registerStateListenerForActivity(ActivityStateListener listener,
             Activity activity) {
         assert activity != null;
 
         ActivityInfo info = sActivityInfo.get(activity);
+        // TODO(tedchoc): crbug/691100.  The timing of application callback lifecycles were changed
+        //                in O and the activity info may need to be lazily created if the onCreate
+        //                event has not yet been received.
+        if (BuildInfo.isAtLeastO() && info == null && !activity.isDestroyed()) {
+            info = new ActivityInfo();
+            sActivityInfo.put(activity, info);
+        }
         assert info != null && info.getStatus() != ActivityState.DESTROYED;
         info.getListeners().addObserver(listener);
     }
@@ -438,7 +450,7 @@ public class ApplicationStatus {
      *         HAS_STOPPED_ACTIVITIES if none are running/paused and one is stopped.
      *         HAS_DESTROYED_ACTIVITIES if none are running/paused/stopped.
      */
-    @ApplicationStateEnum
+    @ApplicationState
     private static int determineApplicationState() {
         boolean hasPausedActivity = false;
         boolean hasStoppedActivity = false;
@@ -463,5 +475,5 @@ public class ApplicationStatus {
 
     // Called to notify the native side of state changes.
     // IMPORTANT: This is always called on the main thread!
-    private static native void nativeOnApplicationStateChange(@ApplicationStateEnum int newState);
+    private static native void nativeOnApplicationStateChange(@ApplicationState int newState);
 }

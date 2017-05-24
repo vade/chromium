@@ -4,10 +4,41 @@
 
 #include "chrome/browser/android/webapk/chrome_webapk_host.h"
 
+#include "chrome/browser/android/chrome_feature_list.h"
+#include "components/variations/variations_associated_data.h"
 #include "jni/ChromeWebApkHost_jni.h"
 
+namespace {
+
+// Variations flag to enable launching Chrome renderer in WebAPK process.
+const char* kLaunchRendererInWebApkProcess =
+    "launch_renderer_in_webapk_process";
+
+}  // anonymous namespace
+
 // static
-bool ChromeWebApkHost::AreWebApkEnabled() {
+bool ChromeWebApkHost::Register(JNIEnv* env) {
+  return RegisterNativesImpl(env);
+}
+
+// static
+bool ChromeWebApkHost::CanInstallWebApk() {
   JNIEnv* env = base::android::AttachCurrentThread();
-  return Java_ChromeWebApkHost_areWebApkEnabled(env);
+  return Java_ChromeWebApkHost_canInstallWebApk(env);
+}
+
+// static
+GooglePlayInstallState ChromeWebApkHost::GetGooglePlayInstallState() {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  return static_cast<GooglePlayInstallState>(
+      Java_ChromeWebApkHost_getGooglePlayInstallState(env));
+}
+
+// static
+jboolean CanLaunchRendererInWebApkProcess(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jclass>& clazz) {
+  return variations::GetVariationParamValueByFeature(
+             chrome::android::kImprovedA2HS, kLaunchRendererInWebApkProcess) ==
+         "true";
 }

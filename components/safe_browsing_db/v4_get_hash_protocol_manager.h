@@ -14,6 +14,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -39,7 +40,7 @@ namespace safe_browsing {
 
 // The matching hash prefixes and corresponding stores, for each full hash
 // generated for a given URL.
-typedef base::hash_map<FullHash, StoreAndHashPrefixes>
+typedef std::unordered_map<FullHash, StoreAndHashPrefixes>
     FullHashToStoreAndHashPrefixesMap;
 
 // ----------------------------------------------------------------
@@ -90,7 +91,7 @@ struct CachedHashPrefixInfo {
 
 // Cached full hashes received from the server for the corresponding hash
 // prefixes.
-typedef base::hash_map<HashPrefix, CachedHashPrefixInfo> FullHashCache;
+typedef std::unordered_map<HashPrefix, CachedHashPrefixInfo> FullHashCache;
 
 // FullHashCallback is invoked when GetFullHashes completes. The parameter is
 // the vector of full hash results. If empty, indicates that there were no
@@ -288,11 +289,15 @@ class V4GetHashProtocolManager : public net::URLFetcherDelegate,
                    const std::vector<FullHashInfo>& full_hash_infos,
                    const base::Time& negative_cache_expire);
 
+ protected:
+  // A cache of full hash results.
+  FullHashCache full_hash_cache_;
+
  private:
   // Map of GetHash requests to parameters which created it.
   using PendingHashRequests =
-      base::hash_map<const net::URLFetcher*,
-                     std::unique_ptr<FullHashCallbackInfo>>;
+      std::unordered_map<const net::URLFetcher*,
+                         std::unique_ptr<FullHashCallbackInfo>>;
 
   // The factory that controls the creation of V4GetHashProtocolManager.
   // This is used by tests.
@@ -328,9 +333,6 @@ class V4GetHashProtocolManager : public net::URLFetcherDelegate,
 
   // The clock used to vend times.
   std::unique_ptr<base::Clock> clock_;
-
-  // A cache of full hash results.
-  FullHashCache full_hash_cache_;
 
   // The following sets represent the combination of lists that we would always
   // request from the server, irrespective of which list we found the hash

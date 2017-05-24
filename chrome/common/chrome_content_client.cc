@@ -43,6 +43,7 @@
 #include "extensions/common/constants.h"
 #include "extensions/features/features.h"
 #include "gpu/config/gpu_info.h"
+#include "gpu/config/gpu_util.h"
 #include "media/media_features.h"
 #include "net/http/http_util.h"
 #include "pdf/features.h"
@@ -70,14 +71,13 @@
 #endif
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-#include "chrome/common/extensions/extension_process_policy.h"
 #include "extensions/common/features/feature_util.h"
 #endif
 
 #if BUILDFLAG(ENABLE_PLUGINS)
 #include "content/public/common/pepper_plugin_info.h"
 #include "flapper_version.h"  // nogncheck  In SHARED_INTERMEDIATE_DIR.
-#include "ppapi/shared_impl/ppapi_permissions.h"
+#include "ppapi/shared_impl/ppapi_permissions.h"  // nogncheck
 #endif
 
 #if defined(WIDEVINE_CDM_AVAILABLE) && BUILDFLAG(ENABLE_PEPPER_CDMS) && \
@@ -86,8 +86,12 @@
 #include "chrome/common/widevine_cdm_constants.h"
 #endif
 
+#if BUILDFLAG(ENABLE_CDM_HOST_VERIFICATION)
+#include "chrome/common/media/cdm_host_file_path.h"
+#endif
+
 #if defined(OS_ANDROID)
-#include "chrome/common/chrome_media_client_android.h"
+#include "chrome/common/media/chrome_media_drm_bridge_client.h"
 #endif
 
 namespace {
@@ -445,24 +449,7 @@ void ChromeContentClient::SetActiveURL(const GURL& url) {
 }
 
 void ChromeContentClient::SetGpuInfo(const gpu::GPUInfo& gpu_info) {
-#if !defined(OS_ANDROID)
-  base::debug::SetCrashKeyValue(crash_keys::kGPUVendorID,
-      base::StringPrintf("0x%04x", gpu_info.gpu.vendor_id));
-  base::debug::SetCrashKeyValue(crash_keys::kGPUDeviceID,
-      base::StringPrintf("0x%04x", gpu_info.gpu.device_id));
-#endif
-  base::debug::SetCrashKeyValue(crash_keys::kGPUDriverVersion,
-      gpu_info.driver_version);
-  base::debug::SetCrashKeyValue(crash_keys::kGPUPixelShaderVersion,
-      gpu_info.pixel_shader_version);
-  base::debug::SetCrashKeyValue(crash_keys::kGPUVertexShaderVersion,
-      gpu_info.vertex_shader_version);
-#if defined(OS_MACOSX)
-  base::debug::SetCrashKeyValue(crash_keys::kGPUGLVersion, gpu_info.gl_version);
-#elif defined(OS_POSIX)
-  base::debug::SetCrashKeyValue(crash_keys::kGPUVendor, gpu_info.gl_vendor);
-  base::debug::SetCrashKeyValue(crash_keys::kGPURenderer, gpu_info.gl_renderer);
-#endif
+  gpu::SetKeysForCrashLogging(gpu_info);
 }
 
 #if BUILDFLAG(ENABLE_PLUGINS)
@@ -493,8 +480,8 @@ void ChromeContentClient::AddPepperPlugins(
 
   // If flash is disabled, do not try to add any flash plugin.
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kDisableBundledPpapiFlash))
-    return;
+  bool disable_bundled_flash =
+      command_line->HasSwitch(switches::kDisableBundledPpapiFlash);
 
   std::vector<std::unique_ptr<content::PepperPluginInfo>> flash_versions;
 
@@ -508,7 +495,8 @@ void ChromeContentClient::AddPepperPlugins(
     return;
 
   auto component_flash = base::MakeUnique<content::PepperPluginInfo>();
-  if (GetComponentUpdatedPepperFlash(component_flash.get()))
+  if (!disable_bundled_flash &&
+      GetComponentUpdatedPepperFlash(component_flash.get()))
     flash_versions.push_back(std::move(component_flash));
 #endif  // defined(OS_LINUX)
 
@@ -524,7 +512,7 @@ void ChromeContentClient::AddPepperPlugins(
   content::PepperPluginInfo* max_flash = FindMostRecentPlugin(flash_versions);
   if (max_flash) {
     plugins->push_back(*max_flash);
-  } else {
+  } else if (!disable_bundled_flash) {
 #if defined(GOOGLE_CHROME_BUILD) && defined(FLAPPER_AVAILABLE)
     // Add a fake Flash plugin even though it doesn't actually exist - if a
     // web page requests it, it will be component-updated on-demand. There is
@@ -540,26 +528,35 @@ void ChromeContentClient::AddPepperPlugins(
 }
 
 void ChromeContentClient::AddContentDecryptionModules(
-    std::vector<content::CdmInfo>* cdms) {
+    std::vector<content::CdmInfo>* cdms,
+    std::vector<content::CdmHostFilePath>* cdm_host_file_paths) {
+  if (cdms) {
 // TODO(jrummell): Need to have a better flag to indicate systems Widevine
 // is available on. For now we continue to use ENABLE_PEPPER_CDMS so that
 // we can experiment between pepper and mojo.
 #if defined(WIDEVINE_CDM_AVAILABLE_NOT_COMPONENT)
-  base::FilePath adapter_path;
-  base::FilePath cdm_path;
-  std::vector<std::string> codecs_supported;
-  if (IsWidevineAvailable(&adapter_path, &cdm_path, &codecs_supported)) {
-    // CdmInfo needs |path| to be the actual Widevine library,
-    // not the adapter, so adjust as necessary. It will be in the
-    // same directory as the installed adapter.
-    const base::Version version(WIDEVINE_CDM_VERSION_STRING);
-    DCHECK(version.IsValid());
-    cdms->push_back(content::CdmInfo(kWidevineCdmType, version, cdm_path,
-                                     codecs_supported));
-  }
+    base::FilePath adapter_path;
+    base::FilePath cdm_path;
+    std::vector<std::string> codecs_supported;
+    if (IsWidevineAvailable(&adapter_path, &cdm_path, &codecs_supported)) {
+      // CdmInfo needs |path| to be the actual Widevine library,
+      // not the adapter, so adjust as necessary. It will be in the
+      // same directory as the installed adapter.
+      const base::Version version(WIDEVINE_CDM_VERSION_STRING);
+      DCHECK(version.IsValid());
+      cdms->push_back(content::CdmInfo(kWidevineCdmType, version, cdm_path,
+                                       codecs_supported));
+    }
 #endif  // defined(WIDEVINE_CDM_AVAILABLE_NOT_COMPONENT)
 
-  // TODO(jrummell): Add External Clear Key CDM for testing, if it's available.
+    // TODO(jrummell): Add External Clear Key CDM for testing, if it's
+    // available.
+  }
+
+#if BUILDFLAG(ENABLE_CDM_HOST_VERIFICATION)
+  if (cdm_host_file_paths)
+    chrome::AddCdmHostFilePaths(cdm_host_file_paths);
+#endif
 }
 
 static const char* const kChromeStandardURLSchemes[] = {
@@ -573,7 +570,7 @@ static const char* const kChromeStandardURLSchemes[] = {
 };
 
 void ChromeContentClient::AddAdditionalSchemes(Schemes* schemes) {
-  for (auto& standard_scheme : kChromeStandardURLSchemes)
+  for (auto* standard_scheme : kChromeStandardURLSchemes)
     schemes->standard_schemes.push_back(standard_scheme);
 
 #if defined(OS_ANDROID)
@@ -596,6 +593,11 @@ void ChromeContentClient::AddAdditionalSchemes(Schemes* schemes) {
 
   schemes->no_access_schemes.push_back(chrome::kChromeNativeScheme);
 
+  // chrome-native: is a scheme used for placeholder navigations that allow
+  // UIs to be drawn with platform native widgets instead of HTML.  These pages
+  // should be treated as empty documents that can commit synchronously.
+  schemes->empty_document_schemes.push_back(chrome::kChromeNativeScheme);
+
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   if (extensions::feature_util::ExtensionServiceWorkersEnabled())
     schemes->service_worker_schemes.push_back(extensions::kExtensionScheme);
@@ -605,6 +607,8 @@ void ChromeContentClient::AddAdditionalSchemes(Schemes* schemes) {
   // overridden by the web_accessible_resources manifest key.
   // TODO(kalman): See what happens with a service worker.
   schemes->cors_enabled_schemes.push_back(extensions::kExtensionScheme);
+
+  schemes->csp_bypassing_schemes.push_back(extensions::kExtensionScheme);
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -684,7 +688,7 @@ bool ChromeContentClient::AllowScriptExtensionForServiceWorker(
 
 bool ChromeContentClient::IsSupplementarySiteIsolationModeEnabled() {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-  return extensions::IsIsolateExtensionsEnabled();
+  return true;
 #else
   return false;
 #endif
@@ -697,7 +701,7 @@ content::OriginTrialPolicy* ChromeContentClient::GetOriginTrialPolicy() {
 }
 
 #if defined(OS_ANDROID)
-media::MediaClientAndroid* ChromeContentClient::GetMediaClientAndroid() {
-  return new ChromeMediaClientAndroid();
+media::MediaDrmBridgeClient* ChromeContentClient::GetMediaDrmBridgeClient() {
+  return new ChromeMediaDrmBridgeClient();
 }
 #endif  // OS_ANDROID

@@ -29,14 +29,12 @@ import org.chromium.base.annotations.JNINamespace;
 import org.chromium.content.browser.ActivityContentVideoViewEmbedder;
 import org.chromium.content.browser.ContentVideoViewEmbedder;
 import org.chromium.content.browser.ContentView;
-import org.chromium.content.browser.ContentViewClient;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.ContentViewRenderView;
 import org.chromium.content_public.browser.ActionModeCallbackHelper;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.ui.base.ViewAndroidDelegate;
 import org.chromium.ui.base.WindowAndroid;
 
 /**
@@ -57,7 +55,6 @@ public class Shell extends LinearLayout {
     private ContentViewCore mContentViewCore;
     private WebContents mWebContents;
     private NavigationController mNavigationController;
-    private ContentViewClient mContentViewClient;
     private EditText mUrlTextView;
     private ImageButton mPrevButton;
     private ImageButton mNextButton;
@@ -68,6 +65,7 @@ public class Shell extends LinearLayout {
     private long mNativeShell;
     private ContentViewRenderView mContentViewRenderView;
     private WindowAndroid mWindow;
+    private ShellViewAndroidDelegate mViewAndroidDelegate;
 
     private boolean mLoading;
     private boolean mIsFullscreen;
@@ -102,13 +100,10 @@ public class Shell extends LinearLayout {
      *
      * @param nativeShell The pointer to the native Shell object.
      * @param window The owning window for this shell.
-     * @param client The {@link ContentViewClient} to be bound to any current or new
-     *               {@link ContentViewCore}s associated with this shell.
      */
-    public void initialize(long nativeShell, WindowAndroid window, ContentViewClient client) {
+    public void initialize(long nativeShell, WindowAndroid window) {
         mNativeShell = nativeShell;
         mWindow = window;
-        mContentViewClient = client;
     }
 
     /**
@@ -286,6 +281,10 @@ public class Shell extends LinearLayout {
         }
     }
 
+    public ShellViewAndroidDelegate getViewAndroidDelegate() {
+        return mViewAndroidDelegate;
+    }
+
     /**
      * Initializes the ContentView based on the native tab contents pointer passed in.
      * @param webContents A {@link WebContents} object.
@@ -296,10 +295,9 @@ public class Shell extends LinearLayout {
         Context context = getContext();
         mContentViewCore = new ContentViewCore(context, "");
         ContentView cv = ContentView.createContentView(context, mContentViewCore);
-        mContentViewCore.initialize(ViewAndroidDelegate.createBasicDelegate(cv), cv,
-                webContents, mWindow);
+        mViewAndroidDelegate = new ShellViewAndroidDelegate(cv);
+        mContentViewCore.initialize(mViewAndroidDelegate, cv, webContents, mWindow);
         mContentViewCore.setActionModeCallback(defaultActionCallback());
-        mContentViewCore.setContentViewClient(mContentViewClient);
         mWebContents = mContentViewCore.getWebContents();
         mNavigationController = mWebContents.getNavigationController();
         if (getParent() != null) mContentViewCore.onShow();
@@ -352,13 +350,17 @@ public class Shell extends LinearLayout {
             @Override
             public void enterFullscreenVideo(View view, boolean isVideoLoaded) {
                 super.enterFullscreenVideo(view, isVideoLoaded);
-                mContentViewRenderView.setOverlayVideoMode(true);
+                if (mContentViewRenderView != null) {
+                    mContentViewRenderView.setOverlayVideoMode(true);
+                }
             }
 
             @Override
             public void exitFullscreenVideo() {
                 super.exitFullscreenVideo();
-                mContentViewRenderView.setOverlayVideoMode(false);
+                if (mContentViewRenderView != null) {
+                    mContentViewRenderView.setOverlayVideoMode(false);
+                }
             }
         };
     }

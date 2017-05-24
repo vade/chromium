@@ -13,6 +13,7 @@
 #include "base/debug/dump_without_crashing.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
@@ -28,6 +29,7 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_process_policy.h"
 #include "chrome/common/url_constants.h"
+#include "components/dom_distiller/core/url_constants.h"
 #include "components/guest_view/browser/guest_view_message_filter.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/browser_url_handler.h"
@@ -91,18 +93,38 @@ enum RenderProcessHostPrivilege {
   PRIV_EXTENSION,
 };
 
-// Specifies reasons why web-accessible resource checks in ShouldAllowOpenURL
-// might fail.
+// Specifies the scheme of the SiteInstance responsible for a failed
+// web-accessible resource check in ShouldAllowOpenURL.
 //
 // This enum backs an UMA histogram.  The order of existing values
-// should not be changed, and new values should only be added before
-// FAILURE_LAST.
-enum ShouldAllowOpenURLFailureReason {
-  FAILURE_FILE_SYSTEM_URL = 0,
-  FAILURE_BLOB_URL,
-  FAILURE_SCHEME_NOT_HTTP_OR_HTTPS_OR_EXTENSION,
-  FAILURE_RESOURCE_NOT_WEB_ACCESSIBLE,
-  FAILURE_LAST,
+// should not be changed.  Add any new values before SCHEME_LAST, and also run
+// update_should_allow_open_url_histograms.py to update the corresponding enum
+// in histograms.xml.  This enum must also be synchronized to kSchemeNames in
+// RecordShouldAllowOpenURLFailure.
+enum ShouldAllowOpenURLFailureScheme {
+  SCHEME_UNKNOWN,
+  SCHEME_EMPTY,
+  SCHEME_HTTP,
+  SCHEME_HTTPS,
+  SCHEME_FILE,
+  SCHEME_FTP,
+  SCHEME_DATA,
+  SCHEME_JAVASCRIPT,
+  SCHEME_ABOUT,
+  SCHEME_CHROME,
+  SCHEME_DEVTOOLS,
+  SCHEME_GUEST,
+  SCHEME_VIEWSOURCE,
+  SCHEME_CHROME_SEARCH,
+  SCHEME_CHROME_NATIVE,
+  SCHEME_DOM_DISTILLER,
+  SCHEME_CHROME_EXTENSION,
+  SCHEME_CONTENT,
+  SCHEME_BLOB,
+  SCHEME_FILESYSTEM,
+  // Add new entries above and make sure to update histograms.xml by running
+  // update_should_allow_open_url_histograms.py.
+  SCHEME_LAST,
 };
 
 RenderProcessHostPrivilege GetPrivilegeRequiredByUrl(
@@ -150,36 +172,47 @@ RenderProcessHostPrivilege GetProcessPrivilege(
   return PRIV_EXTENSION;
 }
 
-// Determines whether the extension |origin| passed in can be committed by
-// the process identified by |child_id| and returns true or false
-// accordingly. Please refer to the implementation for more information.
-bool IsIllegalOrigin(content::ResourceContext* resource_context,
-                     int child_id,
-                     const GURL& origin) {
+// Determines whether the extension |origin| is legal to use in an Origin header
+// from the process identified by |child_id|.  Returns CONTINUE if so, FAIL if
+// the extension is not recognized (and may recently have been uninstalled), and
+// KILL if the origin is from a platform app but the request does not come from
+// that app.
+content::HeaderInterceptorResult CheckOriginHeader(
+    content::ResourceContext* resource_context,
+    int child_id,
+    const GURL& origin) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   // Consider non-extension URLs safe; they will be checked elsewhere.
   if (!origin.SchemeIs(kExtensionScheme))
-    return false;
+    return content::HeaderInterceptorResult::CONTINUE;
 
-  // If there is no extension installed for the URL, it couldn't have committed.
-  // (If the extension was recently uninstalled, the tab would have closed.)
+  // If there is no extension installed for the origin, it may be from a
+  // recently uninstalled extension.  The tabs of such extensions are
+  // automatically closed, but subframes and content scripts may stick around.
+  // Fail such requests without killing the process.
+  // TODO(rdevlin.cronin, creis): Track which extensions have been uninstalled
+  // and use HeaderInterceptorResult::KILL for anything not on the list.
+  // See https://crbug.com/705128.
   ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
   InfoMap* extension_info_map = io_data->GetExtensionInfoMap();
   const Extension* extension =
       extension_info_map->extensions().GetExtensionOrAppByURL(origin);
   if (!extension)
-    return true;
+    return content::HeaderInterceptorResult::FAIL;
 
   // Check for platform app origins.  These can only be committed by the app
-  // itself, or by one if its guests if there are accessible_resources.
+  // itself, or by one if its guests if it has the webview permission.
+  // Processes that incorrectly claim to be an app should be killed.
   const ProcessMap& process_map = extension_info_map->process_map();
   if (extension->is_platform_app() &&
       !process_map.Contains(extension->id(), child_id)) {
-    // This is a platform app origin not in the app's own process.  If there
-    // are no accessible resources, this is illegal.
-    if (!extension->GetManifestData(manifest_keys::kWebviewAccessibleResources))
-      return true;
+    // This is a platform app origin not in the app's own process.  If it cannot
+    // create webviews, this is illegal.
+    if (!extension->permissions_data()->HasAPIPermission(
+            extensions::APIPermission::kWebView)) {
+      return content::HeaderInterceptorResult::KILL;
+    }
 
     // If there are accessible resources, the origin is only legal if the
     // given process is a guest of the app.
@@ -189,18 +222,22 @@ bool IsIllegalOrigin(content::ResourceContext* resource_context,
         child_id, &owner_process_id, &owner_extension_id);
     const Extension* owner_extension =
         extension_info_map->extensions().GetByID(owner_extension_id);
-    return !owner_extension || owner_extension != extension;
+    if (!owner_extension || owner_extension != extension)
+      return content::HeaderInterceptorResult::KILL;
+
+    // It's a valid guest of the app, so allow it to proceed.
+    return content::HeaderInterceptorResult::CONTINUE;
   }
 
   // With only the origin and not the full URL, we don't have enough
   // information to validate hosted apps or web_accessible_resources in normal
   // extensions. Assume they're legal.
-  return false;
+  return content::HeaderInterceptorResult::CONTINUE;
 }
 
 // This callback is registered on the ResourceDispatcherHost for the chrome
 // extension Origin scheme. We determine whether the extension origin is
-// valid. Please see the IsIllegalOrigin() function.
+// valid. Please see the CheckOriginHeader() function.
 void OnHttpHeaderReceived(const std::string& header,
                           const std::string& value,
                           int child_id,
@@ -211,17 +248,7 @@ void OnHttpHeaderReceived(const std::string& header,
   GURL origin(value);
   DCHECK(origin.SchemeIs(extensions::kExtensionScheme));
 
-  if (IsIllegalOrigin(resource_context, child_id, origin)) {
-    // TODO(ananta): Find a way to specify the right error code here.
-    callback.Run(false, 0);
-  } else {
-    callback.Run(true, 0);
-  }
-}
-
-void RecordShowAllowOpenURLFailure(ShouldAllowOpenURLFailureReason reason) {
-  UMA_HISTOGRAM_ENUMERATION("Extensions.ShouldAllowOpenURL.Failure", reason,
-                            FAILURE_LAST);
+  callback.Run(CheckOriginHeader(resource_context, child_id, origin));
 }
 
 }  // namespace
@@ -296,27 +323,23 @@ bool ChromeContentBrowserClientExtensionsPart::ShouldUseProcessPerSite(
 bool ChromeContentBrowserClientExtensionsPart::DoesSiteRequireDedicatedProcess(
     content::BrowserContext* browser_context,
     const GURL& effective_site_url) {
-  if (IsIsolateExtensionsEnabled()) {
-    const Extension* extension =
-        ExtensionRegistry::Get(browser_context)
-            ->enabled_extensions()
-            .GetExtensionOrAppByURL(effective_site_url);
-    if (extension) {
-      // Always isolate Chrome Web Store.
-      if (extension->id() == kWebStoreAppId)
-        return true;
+  const Extension* extension = ExtensionRegistry::Get(browser_context)
+                                   ->enabled_extensions()
+                                   .GetExtensionOrAppByURL(effective_site_url);
+  if (!extension)
+    return false;
 
-      // --isolate-extensions should isolate extensions, except for hosted
-      // apps. Isolating hosted apps is a good idea, but ought to be a separate
-      // knob.
-      if (extension->is_hosted_app())
-        return false;
+  // Always isolate Chrome Web Store.
+  if (extension->id() == kWebStoreAppId)
+    return true;
 
-      // Isolate all extensions.
-      return true;
-    }
-  }
-  return false;
+  // Extensions should be isolated, except for hosted apps. Isolating hosted
+  // apps is a good idea, but ought to be a separate knob.
+  if (extension->is_hosted_app())
+    return false;
+
+  // Isolate all extensions.
+  return true;
 }
 
 // static
@@ -336,8 +359,8 @@ bool ChromeContentBrowserClientExtensionsPart::ShouldLockToOrigin(
 
     // http://crbug.com/600441 workaround: Extension process reuse, implemented
     // in ShouldTryToUseExistingProcessHost(), means that extension processes
-    // aren't always actually dedicated to a single origin, even in
-    // --isolate-extensions. TODO(nick): Fix this.
+    // aren't always actually dedicated to a single origin.
+    // TODO(nick): Fix this.
     if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
             ::switches::kSitePerProcess))
       return false;
@@ -578,9 +601,9 @@ bool ChromeContentBrowserClientExtensionsPart::ShouldAllowOpenURL(
   // https://crbug.com/656752.
   if (to_url.SchemeIsFileSystem() || to_url.SchemeIsBlob()) {
     if (to_url.SchemeIsFileSystem())
-      RecordShowAllowOpenURLFailure(FAILURE_FILE_SYSTEM_URL);
+      RecordShouldAllowOpenURLFailure(FAILURE_FILE_SYSTEM_URL, site_url);
     else
-      RecordShowAllowOpenURLFailure(FAILURE_BLOB_URL);
+      RecordShouldAllowOpenURLFailure(FAILURE_BLOB_URL, site_url);
 
     // TODO(alexmos): Temporary instrumentation to find any regressions for
     // this blocking.  Remove after verifying that this is not breaking any
@@ -612,6 +635,15 @@ bool ChromeContentBrowserClientExtensionsPart::ShouldAllowOpenURL(
     return true;
   }
 
+  // <webview> guests should be allowed to load only webview-accessible
+  // resources, but that check is done later in
+  // AllowCrossRendererResourceLoadHelper, so allow <webview> guests to proceed
+  // here and rely on that check instead.  See https://crbug.com/691941.
+  if (site_url.SchemeIs(content::kGuestScheme)) {
+    *result = true;
+    return true;
+  }
+
   if (WebAccessibleResourcesInfo::IsResourceWebAccessible(to_extension,
                                                           to_url.path())) {
     *result = true;
@@ -619,23 +651,14 @@ bool ChromeContentBrowserClientExtensionsPart::ShouldAllowOpenURL(
   }
 
   if (!site_url.SchemeIsHTTPOrHTTPS() && !site_url.SchemeIs(kExtensionScheme)) {
-    RecordShowAllowOpenURLFailure(
-        FAILURE_SCHEME_NOT_HTTP_OR_HTTPS_OR_EXTENSION);
-
-    // TODO(alexmos): Previous version of this function skipped the
-    // web-accessible resource checks in this case.  Collect data to catch
-    // any regressions, and then remove this.
-    char site_url_copy[256];
-    base::strlcpy(site_url_copy, site_url.spec().c_str(),
-                  arraysize(site_url_copy));
-    base::debug::Alias(&site_url_copy);
-    char to_origin_copy[256];
-    base::strlcpy(to_origin_copy, to_origin.Serialize().c_str(),
-                  arraysize(to_origin_copy));
-    base::debug::Alias(&to_origin_copy);
-    base::debug::DumpWithoutCrashing();
+    // This function used to incorrectly skip the web-accessible resource
+    // checks in this case. Measure how often this happens.  See also
+    // https://crbug.com/696034.
+    RecordShouldAllowOpenURLFailure(
+        FAILURE_SCHEME_NOT_HTTP_OR_HTTPS_OR_EXTENSION, site_url);
   } else {
-    RecordShowAllowOpenURLFailure(FAILURE_RESOURCE_NOT_WEB_ACCESSIBLE);
+    RecordShouldAllowOpenURLFailure(FAILURE_RESOURCE_NOT_WEB_ACCESSIBLE,
+                                    site_url);
   }
 
   *result = false;
@@ -655,6 +678,66 @@ ChromeContentBrowserClientExtensionsPart::GetVpnServiceProxy(
 #else
   return nullptr;
 #endif
+}
+
+// static
+bool ChromeContentBrowserClientExtensionsPart::
+    ShouldFrameShareParentSiteInstanceDespiteTopDocumentIsolation(
+        const GURL& subframe_url,
+        content::SiteInstance* parent_site_instance) {
+  const Extension* extension =
+      ExtensionRegistry::Get(parent_site_instance->GetBrowserContext())
+          ->enabled_extensions()
+          .GetExtensionOrAppByURL(parent_site_instance->GetSiteURL());
+
+  return extension && extension->is_hosted_app();
+}
+
+// static
+void ChromeContentBrowserClientExtensionsPart::RecordShouldAllowOpenURLFailure(
+    ShouldAllowOpenURLFailureReason reason,
+    const GURL& site_url) {
+  UMA_HISTOGRAM_ENUMERATION("Extensions.ShouldAllowOpenURL.Failure", reason,
+                            FAILURE_LAST);
+
+  // Must be kept in sync with the ShouldAllowOpenURLFailureScheme enum.
+  static const char* const kSchemeNames[] = {
+      "unknown",
+      "",
+      url::kHttpScheme,
+      url::kHttpsScheme,
+      url::kFileScheme,
+      url::kFtpScheme,
+      url::kDataScheme,
+      url::kJavaScriptScheme,
+      url::kAboutScheme,
+      content::kChromeUIScheme,
+      content::kChromeDevToolsScheme,
+      content::kGuestScheme,
+      content::kViewSourceScheme,
+      chrome::kChromeSearchScheme,
+      chrome::kChromeNativeScheme,
+      dom_distiller::kDomDistillerScheme,
+      extensions::kExtensionScheme,
+      url::kContentScheme,
+      url::kBlobScheme,
+      url::kFileSystemScheme,
+      "last",
+  };
+
+  static_assert(arraysize(kSchemeNames) == SCHEME_LAST + 1,
+                "kSchemeNames should have SCHEME_LAST + 1 elements");
+
+  ShouldAllowOpenURLFailureScheme scheme = SCHEME_UNKNOWN;
+  for (int i = 1; i < SCHEME_LAST; i++) {
+    if (site_url.SchemeIs(kSchemeNames[i])) {
+      scheme = static_cast<ShouldAllowOpenURLFailureScheme>(i);
+      break;
+    }
+  }
+
+  UMA_HISTOGRAM_ENUMERATION("Extensions.ShouldAllowOpenURL.Failure.Scheme",
+                            scheme, SCHEME_LAST);
 }
 
 void ChromeContentBrowserClientExtensionsPart::RenderProcessWillLaunch(
@@ -692,9 +775,10 @@ void ChromeContentBrowserClientExtensionsPart::SiteInstanceGotProcess(
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&InfoMap::RegisterExtensionProcess,
-                 ExtensionSystem::Get(context)->info_map(), extension->id(),
-                 site_instance->GetProcess()->GetID(), site_instance->GetId()));
+      base::BindOnce(&InfoMap::RegisterExtensionProcess,
+                     ExtensionSystem::Get(context)->info_map(), extension->id(),
+                     site_instance->GetProcess()->GetID(),
+                     site_instance->GetId()));
 }
 
 void ChromeContentBrowserClientExtensionsPart::SiteInstanceDeleting(
@@ -716,9 +800,10 @@ void ChromeContentBrowserClientExtensionsPart::SiteInstanceDeleting(
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&InfoMap::UnregisterExtensionProcess,
-                 ExtensionSystem::Get(context)->info_map(), extension->id(),
-                 site_instance->GetProcess()->GetID(), site_instance->GetId()));
+      base::BindOnce(&InfoMap::UnregisterExtensionProcess,
+                     ExtensionSystem::Get(context)->info_map(), extension->id(),
+                     site_instance->GetProcess()->GetID(),
+                     site_instance->GetId()));
 }
 
 void ChromeContentBrowserClientExtensionsPart::OverrideWebkitPrefs(

@@ -5,13 +5,10 @@
 #ifndef NET_QUIC_TEST_TOOLS_SIMPLE_QUIC_FRAMER_H_
 #define NET_QUIC_TEST_TOOLS_SIMPLE_QUIC_FRAMER_H_
 
-#include <stddef.h>
-
 #include <memory>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/strings/string_piece.h"
 #include "net/quic/core/quic_framer.h"
 #include "net/quic/core/quic_packets.h"
 
@@ -41,9 +38,11 @@ class SimpleQuicFramer {
   const std::vector<QuicConnectionCloseFrame>& connection_close_frames() const;
   const std::vector<QuicStopWaitingFrame>& stop_waiting_frames() const;
   const std::vector<QuicPingFrame>& ping_frames() const;
+  const std::vector<QuicWindowUpdateFrame>& window_update_frames() const;
   const std::vector<QuicGoAwayFrame>& goaway_frames() const;
   const std::vector<QuicRstStreamFrame>& rst_stream_frames() const;
   const std::vector<std::unique_ptr<QuicStreamFrame>>& stream_frames() const;
+  const std::vector<QuicPaddingFrame>& padding_frames() const;
   const QuicVersionNegotiationPacket* version_negotiation_packet() const;
 
   QuicFramer* framer();

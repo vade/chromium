@@ -11,6 +11,7 @@
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/web_contents.h"
@@ -37,80 +38,37 @@ void PrerenderTabHelper::DidGetRedirectForResourceRequest(
   MainFrameUrlDidChange(details.new_url);
 }
 
-void PrerenderTabHelper::DidCommitProvisionalLoadForFrame(
-    content::RenderFrameHost* render_frame_host,
-    const GURL& validated_url,
-    ui::PageTransition transition_type) {
-  if (render_frame_host->GetParent())
+void PrerenderTabHelper::DidFinishNavigation(
+      content::NavigationHandle* navigation_handle) {
+  if (!navigation_handle->IsInMainFrame() ||
+      !navigation_handle->HasCommitted() ||
+      navigation_handle->IsErrorPage()) {
     return;
-  url_ = validated_url;
+  }
+
+  url_ = navigation_handle->GetURL();
   PrerenderManager* prerender_manager = MaybeGetPrerenderManager();
   if (!prerender_manager)
     return;
   if (prerender_manager->IsWebContentsPrerendering(web_contents(), NULL))
     return;
-  prerender_manager->RecordNavigation(validated_url);
+  prerender_manager->RecordNavigation(url_);
 }
 
-void PrerenderTabHelper::DidStopLoading() {
-  // Compute the PPLT metric and report it in a histogram, if needed. If the
-  // page is still prerendering, record the not swapped in page load time
-  // instead.
-  if (!pplt_load_start_.is_null()) {
-    base::TimeTicks now = GetTimeTicksFromPrerenderManager();
-    if (IsPrerendering()) {
-      PrerenderManager* prerender_manager = MaybeGetPrerenderManager();
-      if (prerender_manager) {
-        prerender_manager->RecordPageLoadTimeNotSwappedIn(
-            origin_, now - pplt_load_start_, url_);
-      } else {
-        NOTREACHED();
-      }
-    } else {
-      double fraction_elapsed_at_swapin = -1.0;
-      if (!actual_load_start_.is_null()) {
-        double plt = (now - actual_load_start_).InMillisecondsF();
-        if (plt > 0.0) {
-          fraction_elapsed_at_swapin = 1.0 -
-              (now - pplt_load_start_).InMillisecondsF() / plt;
-        } else {
-          fraction_elapsed_at_swapin = 1.0;
-        }
-        DCHECK_GE(fraction_elapsed_at_swapin, 0.0);
-        DCHECK_LE(fraction_elapsed_at_swapin, 1.0);
-      }
-
-      RecordPerceivedPageLoadTime(
-          now - pplt_load_start_, fraction_elapsed_at_swapin);
-    }
-  }
-
-  // Reset the PPLT metric.
-  pplt_load_start_ = base::TimeTicks();
-  actual_load_start_ = base::TimeTicks();
-}
-
-void PrerenderTabHelper::DidStartProvisionalLoadForFrame(
-    content::RenderFrameHost* render_frame_host,
-    const GURL& validated_url,
-    bool is_error_page) {
-  // Determine the navigation type.
+void PrerenderTabHelper::DidStartNavigation(
+    content::NavigationHandle* navigation_handle) {
+  // Determine the origin.
   PrerenderManager* prerender_manager = MaybeGetPrerenderManager();
-  if (prerender_manager &&
-      prerender_manager->IsWebContentsPrerendering(web_contents(), &origin_)) {
-    navigation_type_ = NAVIGATION_TYPE_PRERENDERED;
-  } else {
-    navigation_type_ = NAVIGATION_TYPE_NORMAL;
-  }
+  if (prerender_manager)
+    prerender_manager->IsWebContentsPrerendering(web_contents(), &origin_);
 
-  if (render_frame_host->GetParent())
+  if (navigation_handle->IsSameDocument())
     return;
 
-  // Record PPLT state for the beginning of a new navigation.
-  pplt_load_start_ = GetTimeTicksFromPrerenderManager();
-  actual_load_start_ = base::TimeTicks();
+  if (!navigation_handle->IsInMainFrame())
+    return;
 
-  MainFrameUrlDidChange(validated_url);
+  MainFrameUrlDidChange(navigation_handle->GetURL());
 }
 
 void PrerenderTabHelper::MainFrameUrlDidChange(const GURL& url) {
@@ -142,32 +100,8 @@ bool PrerenderTabHelper::IsPrerendering() {
 }
 
 void PrerenderTabHelper::PrerenderSwappedIn() {
-  // Ensure we are not prerendering any more.
-  DCHECK_EQ(NAVIGATION_TYPE_PRERENDERED, navigation_type_);
   DCHECK(!IsPrerendering());
   swap_ticks_ = GetTimeTicksFromPrerenderManager();
-  if (pplt_load_start_.is_null()) {
-    // If we have already finished loading, report a 0 PPLT.
-    RecordPerceivedPageLoadTime(base::TimeDelta(), 1.0);
-  } else {
-    // If we have not finished loading yet, record the actual load start, and
-    // rebase the start time to now.
-    actual_load_start_ = pplt_load_start_;
-    pplt_load_start_ = GetTimeTicksFromPrerenderManager();
-  }
-}
-
-void PrerenderTabHelper::RecordPerceivedPageLoadTime(
-    base::TimeDelta perceived_page_load_time,
-    double fraction_plt_elapsed_at_swap_in) {
-  DCHECK(!IsPrerendering());
-  PrerenderManager* prerender_manager = MaybeGetPrerenderManager();
-  if (!prerender_manager)
-    return;
-
-  prerender_manager->RecordPerceivedPageLoadTime(
-      origin_, navigation_type_, perceived_page_load_time,
-      fraction_plt_elapsed_at_swap_in, url_);
 }
 
 }  // namespace prerender

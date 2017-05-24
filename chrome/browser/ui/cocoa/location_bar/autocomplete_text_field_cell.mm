@@ -159,9 +159,10 @@ size_t CalculatePositionsInFrame(
   // Flip all frames in RTL.
   if (cocoa_l10n_util::ShouldDoExperimentalRTLLayout()) {
     for (NSRect& rect : *decoration_frames)
-      rect.origin.x = NSWidth(frame) - NSWidth(rect) - NSMinX(rect);
-    text_frame->origin.x =
-        NSWidth(frame) - NSWidth(*text_frame) - NSMinX(*text_frame);
+      rect.origin.x =
+          NSMinX(frame) + NSMaxX(frame) - NSWidth(rect) - NSMinX(rect);
+    text_frame->origin.x = NSMinX(frame) + NSMaxX(frame) -
+                           NSWidth(*text_frame) - NSMinX(*text_frame);
     leading_count = decorations->size() - leading_count;
   }
 
@@ -196,7 +197,7 @@ size_t CalculatePositionsInFrame(
 }
 
 - (void)clearTrackingArea {
-  for (auto& decoration : mouseTrackingDecorations_)
+  for (auto* decoration : mouseTrackingDecorations_)
     decoration->RemoveTrackingArea();
 
   mouseTrackingDecorations_.clear();
@@ -361,12 +362,22 @@ size_t CalculatePositionsInFrame(
   }
 
   // Draw the border.
+  const ui::ThemeProvider* provider = [[controlView window] themeProvider];
+  bool increaseContrast = provider && provider->ShouldIncreaseContrast();
   if (!inDarkMode) {
-    const CGFloat kNormalStrokeGray = 168 / 255.;
-    [[NSColor colorWithCalibratedWhite:kNormalStrokeGray alpha:1] set];
+    if (increaseContrast) {
+      [[NSColor blackColor] set];
+    } else {
+      const CGFloat kNormalStrokeGray = 168 / 255.;
+      [[NSColor colorWithCalibratedWhite:kNormalStrokeGray alpha:1] set];
+    }
   } else {
-    const CGFloat k30PercentAlpha = 0.3;
-    [[NSColor colorWithCalibratedWhite:0 alpha:k30PercentAlpha] set];
+    if (increaseContrast) {
+      [[NSColor whiteColor] set];
+    } else {
+      const CGFloat k30PercentAlpha = 0.3;
+      [[NSColor colorWithCalibratedWhite:0 alpha:k30PercentAlpha] set];
+    }
   }
   [path stroke];
 
@@ -724,6 +735,13 @@ static NSString* UnusedLegalNameForNewDropFile(NSURL* saveLocation,
     const bool controlDown = ([event modifierFlags] & NSControlKeyMask) != 0;
     [controlView observer]->OnSetFocus(controlDown);
   }
+}
+
+- (int)leadingDecorationIndex:(LocationBarDecoration*)decoration {
+  for (size_t i = 0; i < leadingDecorations_.size(); ++i)
+    if (leadingDecorations_[i] == decoration)
+      return leadingDecorations_.size() - (i + 1);
+  return -1;
 }
 
 @end

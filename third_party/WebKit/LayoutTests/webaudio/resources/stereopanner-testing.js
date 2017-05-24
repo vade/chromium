@@ -48,12 +48,14 @@ var StereoPannerTest = (function () {
    * @param {Object} options.description Test description
    * @param {Object} options.numberOfInputChannels Number of input channels
    */
-  function Test(options) {
+  function Test(should, options) {
 
     // Primary test flag.
     this.success = true;
 
+    this.should = should;
     this.context = null;
+    this.prefix = options.prefix;
     this.numberOfInputChannels = (options.numberOfInputChannels || 1);
     switch (this.numberOfInputChannels) {
       case 1:
@@ -176,82 +178,36 @@ var StereoPannerTest = (function () {
 
 
   Test.prototype.showResult = function () {
-    if (this.impulseIndex === gNodesToCreate) {
-      testPassed('Number of impulses matches the number of panner nodes.');
-    } else {
-      testFailed('Number of impulses is incorrect. (Found '
-        + this.impulseIndex
-        + ' but expected '
-        + gNodesToCreate
-        + ')'
-      );
-      this.success = false;
-    }
+    this.should(this.impulseIndex, this.prefix + "Number of impulses found")
+      .beEqualTo(gNodesToCreate);
 
-    if (this.errors.length === 0) {
-      testPassed('All impulses at expected offsets.');
-    } else {
-      testFailed(this.errors.length + ' timing errors found in '
-        + this.nodesToCreate + ' panner nodes.'
-      );
-      for (var i = 0; i < this.errors.length; i++) {
-        testFailed('Impulse at sample ' + this.errors[i].actual
-          + ' but expected ' + this.errors[i].expected
-        );
-      }
-      this.success = false;
-    }
+    this.should(this.errors.length, this.prefix + "Number of impulse at the wrong offset")
+      .beEqualTo(0);
 
-    if (this.maxErrorL <= this.maxAllowedError) {
-      testPassed('Left channel gain values are correct.');
-    } else {
-      testFailed('Left channel gain values are incorrect.  Max error = '
-        + this.maxErrorL + ' at time ' + this.onsets[this.maxErrorIndexL]
-        + ' (threshold = ' + this.maxAllowedError + ')'
-      );
-      this.success = false;
-    }
+    this.should(this.maxErrorL, this.prefix + "Left channel error magnitude")
+      .beLessThanOrEqualTo(this.maxAllowedError);
 
-    if (this.maxErrorR <= this.maxAllowedError) {
-      testPassed('Right channel gain values are correct.');
-    } else {
-      testFailed('Right channel gain values are incorrect.  Max error = '
-        + this.maxErrorR + ' at time ' + this.onsets[this.maxErrorIndexR]
-        + ' (threshold = ' + this.maxAllowedError + ')'
-      );
-      this.success = false;
-    }
+    this.should(this.maxErrorR, this.prefix + "Right channel error magnitude")
+      .beLessThanOrEqualTo(this.maxAllowedError);
   };
 
-
-  Test.prototype.finish = function () {
-    if (this.success)
-      testPassed(this.description + ': passed.');
-    else
-      testFailed(this.description + ': failed.');
-  };
-
-
-  Test.prototype.run = function (done) {
+  Test.prototype.run = function () {
 
     this.init();
     this.prepare();
-    this.context.oncomplete = function (event) {
-      this.renderedBufferL = event.renderedBuffer.getChannelData(0);
-      this.renderedBufferR = event.renderedBuffer.getChannelData(1);
-      this.verify();
-      this.showResult();
-      this.finish();
-      done();
-    }.bind(this);
-    this.context.startRendering();
 
+    return this.context.startRendering()
+      .then(renderedBuffer => {
+        this.renderedBufferL = renderedBuffer.getChannelData(0);
+        this.renderedBufferR = renderedBuffer.getChannelData(1);
+        this.verify();
+        this.showResult();
+      });
   };
 
-
   return {
-    create: function (options) {
-      return new Test(options);
+    create: function (should, options) {
+      return new Test(should, options);
     }
   };
 

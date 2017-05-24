@@ -25,7 +25,6 @@
 #include "base/metrics/statistics_recorder.h"
 #include "base/path_service.h"
 #include "base/single_thread_task_runner.h"
-#include "base/threading/worker_pool.h"
 #include "components/prefs/json_pref_store.h"
 #include "components/prefs/pref_filter.h"
 #include "ios/crnet/sdch_owner_pref_storage.h"
@@ -312,7 +311,7 @@ void CrNetEnvironment::Install() {
 
 void CrNetEnvironment::InstallIntoSessionConfiguration(
     NSURLSessionConfiguration* config) {
-  config.protocolClasses = @[ [CRNPauseableHTTPProtocolHandler class] ];
+  config.protocolClasses = @[ [CRNHTTPProtocolHandler class] ];
 }
 
 CrNetEnvironment::~CrNetEnvironment() {
@@ -329,14 +328,14 @@ void CrNetEnvironment::SetHTTPProtocolHandlerRegistered(bool registered) {
     [NSURLCache setSharedURLCache:[EmptyNSURLCache emptyNSURLCache]];
     // Register the chrome http protocol handler to replace the default one.
     BOOL success =
-        [NSURLProtocol registerClass:[CRNPauseableHTTPProtocolHandler class]];
+        [NSURLProtocol registerClass:[CRNHTTPProtocolHandler class]];
     DCHECK(success);
   } else {
     // Set up an empty default cache, with default size.
     // TODO(droger): If the NSURLCache is to be used, its size should most
     // likely be changed. On an iPod2 with iOS4, the default size is 512k.
     [NSURLCache setSharedURLCache:[[[NSURLCache alloc] init] autorelease]];
-    [NSURLProtocol unregisterClass:[CRNPauseableHTTPProtocolHandler class]];
+    [NSURLProtocol unregisterClass:[CRNHTTPProtocolHandler class]];
   }
 }
 
@@ -425,7 +424,7 @@ void CrNetEnvironment::InitializeOnNetworkThread() {
           .release());
   main_context_->set_proxy_service(
       net::ProxyService::CreateUsingSystemProxyResolver(
-          std::move(proxy_config_service_), 0, nullptr)
+          std::move(proxy_config_service_), nullptr)
           .release());
 
   // Cache
@@ -462,9 +461,8 @@ void CrNetEnvironment::InitializeOnNetworkThread() {
     // constructed. If not, build an ephemeral ChannelIDService with no backing
     // disk store.
     // TODO(ellyjones): support persisting ChannelID.
-    params.channel_id_service = new net::ChannelIDService(
-        new net::DefaultChannelIDStore(NULL),
-        base::WorkerPool::GetTaskRunner(true));
+    params.channel_id_service =
+        new net::ChannelIDService(new net::DefaultChannelIDStore(NULL));
   }
 
   // TODO(mmenke):  These really shouldn't be leaked.
@@ -477,7 +475,9 @@ void CrNetEnvironment::InitializeOnNetworkThread() {
   main_context_->set_http_transaction_factory(main_cache);
 
   // Cookies
-  cookie_store_ = net::CookieStoreIOS::CreateCookieStore(
+  [[NSHTTPCookieStorage sharedHTTPCookieStorage]
+      setCookieAcceptPolicy:NSHTTPCookieAcceptPolicyAlways];
+  cookie_store_ = base::MakeUnique<net::CookieStoreIOS>(
       [NSHTTPCookieStorage sharedHTTPCookieStorage]);
   main_context_->set_cookie_store(cookie_store_.get());
 

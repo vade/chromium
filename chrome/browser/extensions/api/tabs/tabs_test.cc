@@ -11,6 +11,7 @@
 
 #include "apps/test/app_window_waiter.h"
 #include "base/memory/ref_counted.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/pattern.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -39,6 +40,7 @@
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/page_zoom.h"
 #include "content/public/common/url_constants.h"
@@ -173,7 +175,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, MAYBE_GetWindow) {
 
   // Popup.
   Browser* popup_browser = new Browser(
-      Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile()));
+      Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile(), true));
   function = new WindowsGetFunction();
   function->set_extension(extension.get());
   result.reset(utils::ToDictionary(
@@ -644,7 +646,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, DontCreateTabInClosingPopupWindow) {
   // a new tab in it. Tab should not be opened in the popup window, but in a
   // tabbed browser window.
   Browser* popup_browser = new Browser(
-      Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile()));
+      Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile(), true));
   int window_id = ExtensionTabUtil::GetWindowId(popup_browser);
   chrome::CloseWindow(popup_browser);
 
@@ -868,9 +870,10 @@ Browser* ExtensionWindowLastFocusedTest::CreateBrowserWithEmptyTab(
   Browser* new_browser;
   if (as_popup)
     new_browser = new Browser(
-        Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile()));
+        Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile(), true));
   else
-    new_browser = new Browser(Browser::CreateParams(browser()->profile()));
+    new_browser =
+        new Browser(Browser::CreateParams(browser()->profile(), true));
   AddBlankTabAndShow(new_browser);
   return new_browser;
 }
@@ -1241,7 +1244,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, NoTabsAppWindow) {
   CloseAppWindow(app_window);
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, FilteredEvents) {
+// Crashes on Mac/Win only.  http://crbug.com/708996
+#if defined(OS_MACOSX)
+#define MAYBE_FilteredEvents DISABLED_FilteredEvents
+#else
+#define MAYBE_FilteredEvents FilteredEvents
+#endif
+
+IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, MAYBE_FilteredEvents) {
   extensions::ResultCatcher catcher;
   ExtensionTestMessageListener listener("ready", true);
   ASSERT_TRUE(
@@ -1255,7 +1265,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsTest, FilteredEvents) {
       " \"maxWidth\": 400, \"maxHeight\": 400}}");
 
   Browser* browser_window =
-      new Browser(Browser::CreateParams(browser()->profile()));
+      new Browser(Browser::CreateParams(browser()->profile(), true));
   AddBlankTabAndShow(browser_window);
 
   DevToolsWindow* devtools_window =
@@ -2108,7 +2118,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsZoomTest, CannotZoomInvalidTab) {
 }
 
 // Regression test for crbug.com/660498.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Foo) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TemporaryAddressSpoof) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   content::WebContents* first_web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
@@ -2134,6 +2144,58 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Foo) {
             browser()->tab_strip_model()->GetActiveWebContents());
 
   EXPECT_EQ(url, second_web_contents->GetVisibleURL());
+}
+
+// Window created by chrome.windows.create should be in the same SiteInstance
+// and BrowsingInstance as the opener - this is a regression test for
+// https://crbug.com/597750.
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WindowsCreateVsSiteInstance) {
+  const extensions::Extension* extension =
+      LoadExtension(test_data_dir_.AppendASCII("../simple_with_file"));
+  ASSERT_TRUE(extension);
+
+  // Navigate a tab to an extension page.
+  GURL extension_url = extension->GetResourceURL("file.html");
+  ui_test_utils::NavigateToURL(browser(), extension_url);
+  content::WebContents* old_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  // Execute chrome.windows.create and store the new tab in |new_contents|.
+  content::WebContents* new_contents = nullptr;
+  {
+    content::WebContentsAddedObserver observer;
+    ASSERT_TRUE(content::ExecuteScript(old_contents,
+                                       "window.name = 'old-contents';\n"
+                                       "chrome.windows.create({url: '" +
+                                           extension_url.spec() + "'})"));
+    new_contents = observer.GetWebContents();
+    ASSERT_TRUE(content::WaitForLoadStop(new_contents));
+  }
+
+  // Verify that the old and new tab are in the same process and SiteInstance.
+  // Note: both test assertions are important - one observed failure mode was
+  // having the same process, but different SiteInstance.
+  EXPECT_EQ(old_contents->GetMainFrame()->GetProcess(),
+            new_contents->GetMainFrame()->GetProcess());
+  EXPECT_EQ(old_contents->GetMainFrame()->GetSiteInstance(),
+            new_contents->GetMainFrame()->GetSiteInstance());
+
+  // Verify that the |new_contents| doesn't have a |window.opener| set.
+  bool window_opener_cast_to_bool = true;
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      new_contents, "window.domAutomationController.send(!!window.opener)",
+      &window_opener_cast_to_bool));
+  EXPECT_FALSE(window_opener_cast_to_bool);
+
+  // Verify that |new_contents| can find |old_contents| using window.open/name.
+  std::string location_of_other_window;
+  EXPECT_TRUE(ExecuteScriptAndExtractString(
+      new_contents,
+      "var w = window.open('', 'old-contents');\n"
+      "window.domAutomationController.send(w.location.href);",
+      &location_of_other_window));
+  EXPECT_EQ(old_contents->GetMainFrame()->GetLastCommittedURL().spec(),
+            location_of_other_window);
 }
 
 }  // namespace extensions

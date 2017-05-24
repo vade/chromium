@@ -34,17 +34,11 @@ const char kEnableMergeKeyCharEvents[]     = "enable-merge-key-char-events";
 // Disables use of DWM composition for top level windows.
 const char kDisableDwmComposition[] = "disable-dwm-composition";
 
-// Disables large icons on the New Tab page.
-const char kDisableIconNtp[] = "disable-icon-ntp";
-
 // Disables touch adjustment.
 const char kDisableTouchAdjustment[] = "disable-touch-adjustment";
 
 // Disables touch event based drag and drop.
 const char kDisableTouchDragDrop[] = "disable-touch-drag-drop";
-
-// Enables large icons on the New Tab page.
-const char kEnableIconNtp[] = "enable-icon-ntp";
 
 // Enables touch event based drag and drop.
 const char kEnableTouchDragDrop[] = "enable-touch-drag-drop";
@@ -76,10 +70,10 @@ const char kTopChromeMDMaterialHybrid[] = "material-hybrid";
 // Classic, non-material, mode for the |kTopChromeMD| switch.
 const char kTopChromeMDNonMaterial[] = "non-material";
 
-// Use new window behavior for virtual keyboard (do not change work area in
+// Disable new window behavior for virtual keyboard (do not change work area in
 // non-sticky mode).
-const char kUseNewVirtualKeyboardBehavior[] =
-    "use-new-virtual-keyboard-behavior";
+const char kDisableNewVirtualKeyboardBehavior[] =
+    "disable-new-virtual-keyboard-behavior";
 
 // Applies the material design mode passed via --top-chrome-md to elements
 // throughout Chrome (not just top Chrome).

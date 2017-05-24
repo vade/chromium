@@ -34,14 +34,17 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/mojo/app_window.mojom.h"
 #include "printing/features/features.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 
 #if defined(USE_ASH)
-#include "ash/common/shelf/shelf_constants.h"  // nogncheck
+#include "ash/shelf/shelf_constants.h"  // nogncheck
 #endif
 
 #if BUILDFLAG(ENABLE_PRINTING)
@@ -293,7 +296,7 @@ bool ChromeAppDelegate::CheckMediaAccessPermission(
 
 int ChromeAppDelegate::PreferredIconSize() {
 #if defined(USE_ASH)
-  return ash::GetShelfConstant(ash::SHELF_SIZE);
+  return ash::kShelfSize;
 #else
   return extension_misc::EXTENSION_ICON_SMALL;
 #endif
@@ -305,10 +308,11 @@ void ChromeAppDelegate::SetWebContentsBlocked(
   if (!blocked)
     web_contents->Focus();
   // RenderViewHost may be NULL during shutdown.
-  content::RenderViewHost* host = web_contents->GetRenderViewHost();
+  content::RenderFrameHost* host = web_contents->GetMainFrame();
   if (host) {
-    host->Send(new ChromeViewMsg_SetVisuallyDeemphasized(host->GetRoutingID(),
-                                                         blocked));
+    extensions::mojom::AppWindowPtr app_window;
+    BindInterface(host->GetProcess(), &app_window);
+    app_window->SetVisuallyDeemphasized(blocked);
   }
 }
 
@@ -332,8 +336,8 @@ void ChromeAppDelegate::OnHide() {
   // the window.
   content::BrowserThread::PostDelayedTask(
       content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&ChromeAppDelegate::RelinquishKeepAliveAfterTimeout,
-                 weak_factory_.GetWeakPtr()),
+      base::BindOnce(&ChromeAppDelegate::RelinquishKeepAliveAfterTimeout,
+                     weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromSeconds(kAppWindowFirstShowTimeoutSeconds));
 }
 

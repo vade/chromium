@@ -290,7 +290,7 @@ class ExtensionDevToolsClientHost : public content::DevToolsAgentHostClient,
   // ExtensionRegistryObserver implementation.
   void OnExtensionUnloaded(content::BrowserContext* browser_context,
                            const Extension* extension,
-                           UnloadedExtensionInfo::Reason reason) override;
+                           UnloadedExtensionReason reason) override;
 
   Profile* profile_;
   scoped_refptr<DevToolsAgentHost> agent_host_;
@@ -341,13 +341,23 @@ ExtensionDevToolsClientHost::ExtensionDevToolsClientHost(
   // Attach to debugger and tell it we are ready.
   agent_host_->AttachClient(this);
 
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           ::switches::kSilentDebuggerExtensionAPI)) {
-    infobar_ = ExtensionDevToolsInfoBar::Create(
-        extension_id, extension_name, this,
-        base::Bind(&ExtensionDevToolsClientHost::InfoBarDismissed,
-                   base::Unretained(this)));
+    return;
   }
+
+  // We allow policy-installed extensions to circumvent the normal
+  // infobar warning. See crbug.com/693621.
+  const Extension* extension =
+      ExtensionRegistry::Get(profile)->enabled_extensions().GetByID(
+          extension_id);
+  if (extension && Manifest::IsPolicyLocation(extension->location()))
+    return;
+
+  infobar_ = ExtensionDevToolsInfoBar::Create(
+      extension_id, extension_name, this,
+      base::Bind(&ExtensionDevToolsClientHost::InfoBarDismissed,
+                 base::Unretained(this)));
 }
 
 ExtensionDevToolsClientHost::~ExtensionDevToolsClientHost() {
@@ -381,8 +391,8 @@ void ExtensionDevToolsClientHost::SendMessageToBackend(
   protocol_request.SetInteger("id", request_id);
   protocol_request.SetString("method", method);
   if (command_params) {
-    protocol_request.Set("params",
-                         command_params->additional_properties.DeepCopy());
+    protocol_request.Set(
+        "params", command_params->additional_properties.CreateDeepCopy());
   }
 
   std::string json_args;
@@ -412,7 +422,7 @@ void ExtensionDevToolsClientHost::SendDetachedEvent() {
 void ExtensionDevToolsClientHost::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const Extension* extension,
-    UnloadedExtensionInfo::Reason reason) {
+    UnloadedExtensionReason reason) {
   if (extension->id() == extension_id_)
     Close();
 }
@@ -720,9 +730,8 @@ DebuggerGetTargetsFunction::~DebuggerGetTargetsFunction() {
 bool DebuggerGetTargetsFunction::RunAsync() {
   content::DevToolsAgentHost::List list = DevToolsAgentHost::GetOrCreateAll();
   content::BrowserThread::PostTask(
-      content::BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(&DebuggerGetTargetsFunction::SendTargetList, this, list));
+      content::BrowserThread::UI, FROM_HERE,
+      base::BindOnce(&DebuggerGetTargetsFunction::SendTargetList, this, list));
   return true;
 }
 

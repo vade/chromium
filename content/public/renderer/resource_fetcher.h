@@ -18,7 +18,7 @@ class TimeDelta;
 }
 
 namespace blink {
-class WebFrame;
+class WebLocalFrame;
 class WebURLResponse;
 }
 
@@ -51,9 +51,8 @@ class CONTENT_EXPORT ResourceFetcher {
 
   // Starts the request using the specified frame.  Calls |callback| when
   // done.
-  virtual void Start(blink::WebFrame* frame,
+  virtual void Start(blink::WebLocalFrame* frame,
                      blink::WebURLRequest::RequestContext request_context,
-                     blink::WebURLRequest::FrameType frame_type,
                      const Callback& callback) = 0;
 
   // Sets how long to wait for the server to reply.  By default, there is no

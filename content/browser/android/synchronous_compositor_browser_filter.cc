@@ -185,21 +185,26 @@ void SynchronousCompositorBrowserFilter::VSyncComplete() {
 
   std::vector<int> routing_ids;
   routing_ids.reserve(compositor_host_pending_renderer_state_.size());
-  for (const auto host : compositor_host_pending_renderer_state_)
+  for (const auto* host : compositor_host_pending_renderer_state_)
     routing_ids.push_back(host->routing_id());
 
   std::vector<SyncCompositorCommonRendererParams> params;
   params.reserve(compositor_host_pending_renderer_state_.size());
 
-  if (!render_process_host_->Send(
-          new SyncCompositorMsg_SynchronizeRendererState(routing_ids,
-                                                         &params))) {
-    return;
+  {
+    base::ThreadRestrictions::ScopedAllowWait wait;
+    if (!render_process_host_->Send(
+            new SyncCompositorMsg_SynchronizeRendererState(routing_ids,
+                                                           &params))) {
+      compositor_host_pending_renderer_state_.clear();
+      return;
+    }
   }
 
   if (compositor_host_pending_renderer_state_.size() != params.size()) {
     bad_message::ReceivedBadMessage(render_process_host_,
                                     bad_message::SCO_INVALID_ARGUMENT);
+    compositor_host_pending_renderer_state_.clear();
     return;
   }
 

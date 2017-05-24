@@ -70,7 +70,7 @@ class CrashDumpObserver : public content::BrowserChildProcessObserver,
                                   content::FileDescriptorInfo* mappings);
 
  private:
-  friend struct base::DefaultLazyInstanceTraits<CrashDumpObserver>;
+  friend struct base::LazyInstanceTraitsBase<CrashDumpObserver>;
 
   CrashDumpObserver();
   ~CrashDumpObserver() override;
@@ -100,6 +100,9 @@ class CrashDumpObserver : public content::BrowserChildProcessObserver,
 
   base::Lock registered_clients_lock_;
   std::vector<std::unique_ptr<Client>> registered_clients_;
+
+  // child_process_id to process id.
+  std::map<int, base::ProcessHandle> child_process_id_to_pid_;
 
   DISALLOW_COPY_AND_ASSIGN(CrashDumpObserver);
 };

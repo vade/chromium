@@ -17,10 +17,6 @@
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
-#include "chrome/browser/extensions/api/tabs/tabs_api.h"
-#include "chrome/browser/extensions/extension_action.h"
-#include "chrome/browser/extensions/location_bar_controller.h"
-#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
@@ -29,15 +25,15 @@
 #include "chrome/browser/ui/browser_list.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/content_settings/content_setting_bubble_cocoa.h"
-#import "chrome/browser/ui/cocoa/extensions/extension_popup_controller.h"
 #import "chrome/browser/ui/cocoa/first_run_bubble_controller.h"
+#import "chrome/browser/ui/cocoa/info_bubble_view.h"
+#import "chrome/browser/ui/cocoa/l10n_util.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_cell.h"
 #import "chrome/browser/ui/cocoa/location_bar/content_setting_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/keyword_hint_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_icon_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/manage_passwords_decoration.h"
-#import "chrome/browser/ui/cocoa/location_bar/page_action_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/save_credit_card_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/security_state_bubble_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/selected_keyword_decoration.h"
@@ -59,14 +55,13 @@
 #include "components/prefs/pref_service.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
+#include "components/toolbar/vector_icons.h"
 #include "components/translate/core/browser/language_state.h"
 #include "components/variations/variations_associated_data.h"
 #include "components/zoom/zoom_controller.h"
 #include "components/zoom/zoom_event_manager.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
-#include "extensions/browser/extension_system.h"
-#include "extensions/common/extension.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "ui/base/cocoa/cocoa_base_utils.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -76,7 +71,7 @@
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia_util_mac.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/gfx/vector_icons_public.h"
+#include "ui/vector_icons/vector_icons.h"
 
 using content::WebContents;
 
@@ -222,16 +217,13 @@ void LocationBarViewMac::UpdateSaveCreditCardIcon() {
   OnDecorationsChanged();
 }
 
-void LocationBarViewMac::UpdatePageActions() {
-  RefreshPageActionDecorations();
-  Layout();
-
-  [field_ updateMouseTracking];
-  [field_ setNeedsDisplay:YES];
-}
-
 void LocationBarViewMac::UpdateBookmarkStarVisibility() {
   star_decoration_->SetVisible(IsStarEnabled());
+}
+
+void LocationBarViewMac::UpdateZoomViewVisibility() {
+  UpdateZoomDecoration(/*default_zoom_changed=*/false);
+  OnChanged();
 }
 
 void LocationBarViewMac::UpdateLocationBarVisibility(bool visible,
@@ -244,19 +236,6 @@ void LocationBarViewMac::UpdateLocationBarVisibility(bool visible,
                               withAnimation:animate];
     location_bar_visible_ = visible;
   }
-}
-
-bool LocationBarViewMac::ShowPageActionPopup(
-    const extensions::Extension* extension, bool grant_active_tab) {
-  for (const auto& decoration : page_action_decorations_) {
-    if (decoration->GetExtension() == extension)
-      return decoration->ActivatePageAction(grant_active_tab);
-  }
-  return false;
-}
-
-void LocationBarViewMac::UpdateOpenPDFInReaderPrompt() {
-  // Not implemented on Mac.
 }
 
 void LocationBarViewMac::SaveStateToContents(WebContents* contents) {
@@ -280,66 +259,28 @@ LocationBarTesting* LocationBarViewMac::GetLocationBarForTesting() {
   return this;
 }
 
-// TODO(pamg): Change all these, here and for other platforms, to size_t.
-int LocationBarViewMac::PageActionCount() {
-  return static_cast<int>(page_action_decorations_.size());
-}
-
-int LocationBarViewMac::PageActionVisibleCount() {
-  int result = 0;
-  for (const auto& decoration : page_action_decorations_) {
-    if (decoration->IsVisible())
-      ++result;
-  }
-  return result;
-}
-
-ExtensionAction* LocationBarViewMac::GetPageAction(size_t index) {
-  if (index < page_action_decorations_.size())
-    return page_action_decorations_[index]->GetPageAction();
-  NOTREACHED();
-  return NULL;
-}
-
-ExtensionAction* LocationBarViewMac::GetVisiblePageAction(size_t index) {
-  size_t current = 0;
-  for (const auto& decoration : page_action_decorations_) {
-    if (decoration->IsVisible()) {
-      if (current == index)
-        return decoration->GetPageAction();
-
-      ++current;
-    }
-  }
-
-  NOTREACHED();
-  return NULL;
-}
-
-void LocationBarViewMac::TestPageActionPressed(size_t index) {
-  DCHECK_LT(index, static_cast<size_t>(PageActionVisibleCount()));
-  size_t current = 0;
-  for (const auto& decoration : page_action_decorations_) {
-    if (decoration->IsVisible()) {
-      if (current == index) {
-        decoration->OnMousePressed(NSZeroRect, NSZeroPoint);
-        return;
-      }
-      ++current;
-    }
-  }
-}
-
 bool LocationBarViewMac::GetBookmarkStarVisibility() {
   DCHECK(star_decoration_.get());
   return star_decoration_->IsVisible();
+}
+
+bool LocationBarViewMac::TestContentSettingImagePressed(size_t index) {
+  if (index >= content_setting_decorations_.size())
+    return false;
+
+  // TODO(tapted): Use OnAccessibilityViewAction() here. Currently it's broken.
+  ContentSettingDecoration* decoration =
+      content_setting_decorations_[index].get();
+  AutocompleteTextFieldCell* cell = [field_ cell];
+  NSRect frame = [cell frameForDecoration:decoration inFrame:[field_ bounds]];
+  decoration->OnMousePressed(frame, NSZeroPoint);
+  return true;
 }
 
 void LocationBarViewMac::SetEditable(bool editable) {
   [field_ setEditable:editable ? YES : NO];
   UpdateBookmarkStarVisibility();
   UpdateZoomDecoration(/*default_zoom_changed=*/false);
-  UpdatePageActions();
   Layout();
 }
 
@@ -394,12 +335,16 @@ NSPoint LocationBarViewMac::GetPageInfoBubblePoint() const {
   return [field_ bubblePointForDecoration:GetPageInfoDecoration()];
 }
 
+NSPoint LocationBarViewMac::GetInfoBarAnchorPoint() const {
+  return [field_ arrowAnchorPointForDecoration:GetPageInfoDecoration()];
+}
+
 void LocationBarViewMac::OnDecorationsChanged() {
   // TODO(shess): The field-editor frame and cursor rects should not
   // change, here.
   std::vector<LocationBarDecoration*> decorations = GetDecorations();
   for (auto* decoration : decorations)
-    UpdateAccessibilityViewPosition(decoration);
+    UpdateAccessibilityView(decoration);
   [field_ updateMouseTracking];
   [field_ resetFieldEditorFrameIfNeeded];
   [field_ setNeedsDisplay:YES];
@@ -423,11 +368,6 @@ void LocationBarViewMac::Layout() {
   [cell addTrailingDecoration:zoom_decoration_.get()];
   [cell addTrailingDecoration:save_credit_card_decoration_.get()];
   [cell addTrailingDecoration:manage_passwords_decoration_.get()];
-
-  // Note that display order is front to back.
-  for (const auto& decoration : page_action_decorations_) {
-    [cell addTrailingDecoration:decoration.get()];
-  }
 
   for (const auto& decoration : content_setting_decorations_) {
     [cell addTrailingDecoration:decoration.get()];
@@ -531,53 +471,6 @@ void LocationBarViewMac::RedrawDecoration(LocationBarDecoration* decoration) {
     [field_ setNeedsDisplayInRect:frame];
 }
 
-void LocationBarViewMac::SetPreviewEnabledPageAction(
-    ExtensionAction* page_action, bool preview_enabled) {
-  DCHECK(page_action);
-  WebContents* contents = GetWebContents();
-  if (!contents)
-    return;
-  RefreshPageActionDecorations();
-  Layout();
-
-  PageActionDecoration* decoration = GetPageActionDecoration(page_action);
-  DCHECK(decoration);
-  if (!decoration)
-    return;
-
-  decoration->set_preview_enabled(preview_enabled);
-  decoration->UpdateVisibility(contents);
-}
-
-NSRect LocationBarViewMac::GetPageActionFrame(ExtensionAction* page_action) {
-  PageActionDecoration* decoration = GetPageActionDecoration(page_action);
-  if (!decoration)
-    return NSZeroRect;
-
-  AutocompleteTextFieldCell* cell = [field_ cell];
-  NSRect frame = [cell frameForDecoration:decoration inFrame:[field_ bounds]];
-  return frame;
-}
-
-NSPoint LocationBarViewMac::GetPageActionBubblePoint(
-    ExtensionAction* page_action) {
-  PageActionDecoration* decoration = GetPageActionDecoration(page_action);
-  if (!decoration)
-    return NSZeroPoint;
-
-  NSRect frame = GetPageActionFrame(page_action);
-  if (NSIsEmptyRect(frame)) {
-    // The bubble point positioning assumes that the page action is visible. If
-    // not, something else needs to be done otherwise the bubble will appear
-    // near the top left corner (unanchored).
-    NOTREACHED();
-    return NSZeroPoint;
-  }
-
-  NSPoint bubble_point = decoration->GetBubblePointInFrame(frame);
-  return [field_ convertPoint:bubble_point toView:nil];
-}
-
 void LocationBarViewMac::ResetTabState(WebContents* contents) {
   omnibox_view_->ResetTabState(contents);
 }
@@ -588,7 +481,6 @@ void LocationBarViewMac::Update(const WebContents* contents) {
   UpdateSaveCreditCardIcon();
   UpdateTranslateDecoration();
   UpdateZoomDecoration(/*default_zoom_changed=*/false);
-  RefreshPageActionDecorations();
   RefreshContentSettingsDecorations();
   if (contents) {
     omnibox_view_->OnTabChanged(contents);
@@ -606,11 +498,10 @@ void LocationBarViewMac::UpdateWithoutTabRestore() {
 
 void LocationBarViewMac::UpdateLocationIcon() {
   SkColor vector_icon_color = GetLocationBarIconColor();
-  gfx::VectorIconId vector_icon_id =
-      ShouldShowEVBubble() ? gfx::VectorIconId::LOCATION_BAR_HTTPS_VALID
-                           : omnibox_view_->GetVectorIcon();
+  const gfx::VectorIcon& vector_icon_id = ShouldShowEVBubble()
+                                              ? toolbar::kHttpsValidIcon
+                                              : omnibox_view_->GetVectorIcon();
 
-  DCHECK(vector_icon_id != gfx::VectorIconId::VECTOR_ICON_NONE);
   NSImage* image = NSImageFromImageSkiaWithColorSpace(
       gfx::CreateVectorIcon(vector_icon_id, kDefaultIconSize,
                             vector_icon_color),
@@ -714,8 +605,7 @@ NSImage* LocationBarViewMac::GetKeywordImage(const base::string16& keyword) {
   SkColor icon_color =
       IsLocationBarDark() ? kMaterialDarkVectorIconColor : gfx::kGoogleBlue700;
   return NSImageFromImageSkiaWithColorSpace(
-      gfx::CreateVectorIcon(gfx::VectorIconId::OMNIBOX_SEARCH, kDefaultIconSize,
-                            icon_color),
+      gfx::CreateVectorIcon(ui::kSearchIcon, kDefaultIconSize, icon_color),
       base::mac::GetSRGBColorSpace());
 }
 
@@ -747,76 +637,9 @@ void LocationBarViewMac::PostNotification(NSString* notification) {
                                         object:[NSValue valueWithPointer:this]];
 }
 
-PageActionDecoration* LocationBarViewMac::GetPageActionDecoration(
-    ExtensionAction* page_action) {
-  DCHECK(page_action);
-  for (const auto& decoration : page_action_decorations_) {
-    if (decoration->GetPageAction() == page_action)
-      return decoration.get();
-  }
-  // If |page_action| is the browser action of an extension, no element in
-  // |page_action_decorations_| will match.
-  NOTREACHED();
-  return NULL;
-}
-
-void LocationBarViewMac::DeletePageActionDecorations() {
-  // TODO(shess): Deleting these decorations could result in the cell
-  // refering to them before things are laid out again.  Meanwhile, at
-  // least fail safe.
-  [[field_ cell] clearDecorations];
-
-  page_action_decorations_.clear();
-}
-
 void LocationBarViewMac::OnEditBookmarksEnabledChanged() {
   UpdateBookmarkStarVisibility();
   OnChanged();
-}
-
-void LocationBarViewMac::RefreshPageActionDecorations() {
-  if (!IsEditable()) {
-    DeletePageActionDecorations();
-    return;
-  }
-
-  WebContents* web_contents = GetWebContents();
-  if (!web_contents) {
-    DeletePageActionDecorations();
-    return;
-  }
-
-  std::vector<ExtensionAction*> new_page_actions =
-      extensions::TabHelper::FromWebContents(web_contents)->
-          location_bar_controller()->GetCurrentActions();
-
-  if (PageActionsDiffer(new_page_actions)) {
-    DeletePageActionDecorations();
-    for (const auto new_page_action : new_page_actions) {
-      page_action_decorations_.push_back(base::MakeUnique<PageActionDecoration>(
-          this, browser_, new_page_action));
-    }
-  }
-
-  GURL url = GetToolbarModel()->GetURL();
-  for (const auto& decoration : page_action_decorations_) {
-    decoration->UpdateVisibility(
-        GetToolbarModel()->input_in_progress() ? NULL : web_contents);
-  }
-}
-
-bool LocationBarViewMac::PageActionsDiffer(
-    const std::vector<ExtensionAction*>& page_actions) const {
-  if (page_action_decorations_.size() != page_actions.size())
-    return true;
-
-  for (size_t index = 0; index < page_actions.size(); ++index) {
-    PageActionDecoration* decoration = page_action_decorations_[index].get();
-    if (decoration->GetPageAction() != page_actions[index])
-      return true;
-  }
-
-  return false;
 }
 
 bool LocationBarViewMac::RefreshContentSettingsDecorations() {
@@ -833,15 +656,9 @@ void LocationBarViewMac::ShowFirstRunBubbleInternal() {
   if (!field_ || ![field_ window])
     return;
 
-  // The first run bubble's left edge should line up with the left edge of the
-  // omnibox. This is different from other bubbles, which line up at a point
-  // set by their top arrow. Because the BaseBubbleController adjusts the
-  // window origin left to account for the arrow spacing, the first run bubble
-  // moves the window origin right by this spacing, so that the
-  // BaseBubbleController will move it back to the correct position.
-  const NSPoint kOffset = NSMakePoint(
-      info_bubble::kBubbleArrowXOffset + info_bubble::kBubbleArrowWidth/2.0,
-      kFirstRunBubbleYOffset);
+  // Point the bubble's arrow at the middle of the bottom of the page info icon.
+  const NSPoint kOffset =
+      NSMakePoint(info_bubble::kBubbleArrowXOffset, kFirstRunBubbleYOffset);
   [FirstRunBubbleController showForView:field_
                                  offset:kOffset
                                 browser:browser_
@@ -874,7 +691,6 @@ bool LocationBarViewMac::UpdateZoomDecoration(bool default_zoom_changed) {
       IsLocationBarDark());
 }
 
-// TODO(spqchan): Add tests for the security state decoration.
 void LocationBarViewMac::UpdateSecurityState(bool tab_changed) {
   using SecurityLevel = security_state::SecurityLevel;
   SecurityLevel new_security_level = GetToolbarModel()->GetSecurityLevel(false);
@@ -889,18 +705,24 @@ void LocationBarViewMac::UpdateSecurityState(bool tab_changed) {
   if ((ShouldShowSecurityState() || ShouldShowExtensionBubble() ||
        ShouldShowChromeBubble()) &&
       is_width_available_for_security_verbose_) {
-    bool is_secure_to_secure = IsSecureConnection(new_security_level) &&
-                               IsSecureConnection(security_level_);
-    bool is_new_security_level =
-        security_level_ != new_security_level && !is_secure_to_secure;
-    if (!tab_changed && security_state_bubble_decoration_->HasAnimatedOut())
-      security_state_bubble_decoration_->AnimateIn(false);
-    else if (tab_changed || !CanAnimateSecurityLevel(new_security_level))
+    if (tab_changed) {
       security_state_bubble_decoration_->ShowWithoutAnimation();
-    else if (is_new_security_level)
-      security_state_bubble_decoration_->AnimateIn();
+    } else {
+      bool is_secure_to_secure = IsSecureConnection(new_security_level) &&
+                                 IsSecureConnection(security_level_);
+      bool is_new_security_level =
+          security_level_ != new_security_level && !is_secure_to_secure;
+      if (!is_new_security_level &&
+          security_state_bubble_decoration_->HasAnimatedOut()) {
+        security_state_bubble_decoration_->AnimateIn(false);
+      } else if (!CanAnimateSecurityLevel(new_security_level)) {
+        security_state_bubble_decoration_->ShowWithoutAnimation();
+      } else if (is_new_security_level) {
+        security_state_bubble_decoration_->AnimateIn();
+      }
+    }
   } else if (!is_width_available_for_security_verbose_ ||
-             CanAnimateSecurityLevel(security_level_)) {
+             (!tab_changed && CanAnimateSecurityLevel(security_level_))) {
     security_state_bubble_decoration_->AnimateOut();
   }
 
@@ -910,8 +732,8 @@ void LocationBarViewMac::UpdateSecurityState(bool tab_changed) {
 bool LocationBarViewMac::CanAnimateSecurityLevel(
     security_state::SecurityLevel level) const {
   return !GetOmniboxView()->IsEditingOrEmpty() &&
-         (security_level_ == security_state::SecurityLevel::DANGEROUS ||
-          security_level_ == security_state::SecurityLevel::HTTP_SHOW_WARNING);
+         (level == security_state::DANGEROUS ||
+          level == security_state::HTTP_SHOW_WARNING);
 }
 
 bool LocationBarViewMac::IsSecureConnection(
@@ -920,14 +742,46 @@ bool LocationBarViewMac::IsSecureConnection(
          level == security_state::EV_SECURE;
 }
 
-void LocationBarViewMac::UpdateAccessibilityViewPosition(
+void LocationBarViewMac::UpdateAccessibilityView(
     LocationBarDecoration* decoration) {
   if (!decoration->IsVisible())
     return;
-  NSRect r =
+  // This uses |frame| instead of |bounds| because the accessibility views are
+  // parented to the toolbar.
+  NSRect apparent_frame =
       [[field_ cell] frameForDecoration:decoration inFrame:[field_ frame]];
-  [decoration->GetAccessibilityView() setFrame:r];
-  [decoration->GetAccessibilityView() setNeedsDisplayInRect:r];
+
+  // This is a bit subtle:
+  // The decorations' accessibility views can become key to allow keyboard
+  // access to the location bar decorations, but Cocoa's automatic key view loop
+  // sorts by top-left coordinate. Since the omnibox's top-left coordinate is
+  // before its leading decorations, the omnibox would sort before its own
+  // leading decorations, which was logical but visually unintuitive. Therefore,
+  // for leading decorations, this method moves their frame to be "just before"
+  // the omnibox in automatic key view loop order, and gives them an apparent
+  // frame (see DecorationAccessibilityView) so that they still paint their
+  // focus rings at the right place.
+  //
+  // TODO(lgrey): This hack doesn't work in RTL layouts, but the layout of the
+  // omnibox is currently screwed up in RTL layouts anyway. See
+  // https://crbug.com/715627.
+  NSRect real_frame = apparent_frame;
+  int left_index = [[field_ cell] leadingDecorationIndex:decoration];
+
+  // If there are ever too many leading views, the fake x-coords might land
+  // before the button preceding the omnibox in the key view order. This
+  // threshold is just a guess.
+  DCHECK_LT(left_index, 10);
+  if (left_index != -1) {
+    CGFloat delta = left_index + 1;
+    real_frame.origin.x =
+        cocoa_l10n_util::ShouldDoExperimentalRTLLayout()
+            ? NSMaxX([field_ frame]) + delta - NSWidth(real_frame)
+            : NSMinX([field_ frame]) - delta;
+  }
+  decoration->UpdateAccessibilityView(apparent_frame);
+  [decoration->GetAccessibilityView() setFrame:real_frame];
+  [decoration->GetAccessibilityView() setNeedsDisplayInRect:apparent_frame];
 }
 
 std::vector<LocationBarDecoration*> LocationBarViewMac::GetDecorations() {

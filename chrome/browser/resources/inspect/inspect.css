@@ -6,15 +6,20 @@
   box-sizing: border-box;
 }
 
+html {
+  height: 100%;
+}
+
 body {
   color: rgb(48, 57, 66);
   font-size: 13px;
+  height: 100%;
   margin: 0;
-  min-width: 47em;
+  overflow: auto;
 }
 
 .hidden {
-    display: none !important;
+  display: none !important;
 }
 
 img {
@@ -27,8 +32,8 @@ img {
 }
 
 #container {
-  -webkit-flex-direction: row;
-  display: -webkit-flex;
+  display: flex;
+  height: 100%
 }
 
 #infobar {
@@ -48,12 +53,13 @@ img {
 }
 
 #navigation {
+  flex-shrink: 0;
   padding-top: 20px;
   width: 150px;
 }
 
 #content {
-  -webkit-flex: 1;
+  flex-grow: 1;
 }
 
 #caption {
@@ -91,6 +97,7 @@ img {
 }
 
 #content > div {
+  min-width: 32em;
   padding: 0 20px 65px 0;
 }
 #content > div:not(.selected) {
@@ -147,8 +154,8 @@ img {
 }
 
 .port-icon.transient {
-  -webkit-transform: scale(1.2);
   background-color: orange;
+  transform: scale(1.2);
 }
 
 .port-number {
@@ -278,9 +285,9 @@ img {
 }
 
 .open > input:focus {
-  -webkit-transition: border-color 200ms;
   border-color: rgb(77, 144, 254);
   outline: none;
+  transition: border-color 200ms;
 }
 
 .open > button {
@@ -428,21 +435,4 @@ dialog.target-discovery .port-forwarding {
 
 .config-buttons > label {
   flex-grow: 1
-}
-
-@media (max-width: 47em) {
-  #navigation,
-  #content {
-    overflow: visible;
-  }
-}
-@media (min-width: 47em) {
-  #container {
-    max-height: 100vh;
-  }
-  #navigation,
-  #content {
-    max-height: 100vh;
-    overflow: auto;
-  }
 }

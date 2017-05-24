@@ -8,42 +8,40 @@
 #include "base/macros.h"
 #include "device/vr/vr_device.h"
 
-namespace gvr {
-class GvrApi;
-}  // namespace gvr
-
 namespace device {
 
 class GvrDeviceProvider;
 class GvrDelegate;
 
-class GvrDevice : public VRDevice {
+class DEVICE_VR_EXPORT GvrDevice : public VRDevice {
  public:
-  GvrDevice(GvrDeviceProvider* provider, GvrDelegate* delegate);
+  GvrDevice(GvrDeviceProvider* provider);
   ~GvrDevice() override;
 
   // VRDevice
-  mojom::VRDisplayInfoPtr GetVRDevice() override;
-  mojom::VRPosePtr GetPose() override;
-  void ResetPose() override;
+  void CreateVRDisplayInfo(
+      const base::Callback<void(mojom::VRDisplayInfoPtr)>& on_created) override;
 
-  void RequestPresent(const base::Callback<void(bool)>& callback) override;
+  void RequestPresent(mojom::VRSubmitFrameClientPtr submit_client,
+                      const base::Callback<void(bool)>& callback) override;
   void SetSecureOrigin(bool secure_origin) override;
   void ExitPresent() override;
 
-  void SubmitFrame(mojom::VRPosePtr pose) override;
-  void UpdateLayerBounds(mojom::VRLayerBoundsPtr left_bounds,
-                         mojom::VRLayerBoundsPtr right_bounds) override;
-
-  void SetDelegate(GvrDelegate* delegate);
+  void SubmitFrame(int16_t frame_index,
+                   const gpu::MailboxHolder& mailbox) override;
+  void UpdateLayerBounds(int16_t frame_index,
+                         mojom::VRLayerBoundsPtr left_bounds_ptr,
+                         mojom::VRLayerBoundsPtr right_bounds_ptr,
+                         int16_t source_width,
+                         int16_t source_height) override;
+  void GetVRVSyncProvider(mojom::VRVSyncProviderRequest request) override;
+  void OnDelegateChanged();
 
  private:
-  gvr::GvrApi* GetGvrApi();
+  GvrDelegate* GetGvrDelegate();
 
-  GvrDelegate* delegate_;
   GvrDeviceProvider* gvr_provider_;
   bool secure_origin_ = false;
-  uint32_t pose_index_ = 1;
 
   DISALLOW_COPY_AND_ASSIGN(GvrDevice);
 };

@@ -37,10 +37,6 @@
 #include "media/formats/mp4/box_definitions.h"
 #endif
 
-#if defined(OS_ANDROID)
-#include "base/android/build_info.h"
-#endif
-
 namespace media {
 namespace {
 
@@ -115,12 +111,13 @@ GpuVideoDecoder::BufferData::BufferData(int32_t bbid,
 
 GpuVideoDecoder::BufferData::~BufferData() {}
 
-GpuVideoDecoder::GpuVideoDecoder(GpuVideoAcceleratorFactories* factories,
-                                 const RequestSurfaceCB& request_surface_cb,
-                                 scoped_refptr<MediaLog> media_log)
+GpuVideoDecoder::GpuVideoDecoder(
+    GpuVideoAcceleratorFactories* factories,
+    const RequestOverlayInfoCB& request_overlay_info_cb,
+    MediaLog* media_log)
     : needs_bitstream_conversion_(false),
       factories_(factories),
-      request_surface_cb_(request_surface_cb),
+      request_overlay_info_cb_(request_overlay_info_cb),
       media_log_(media_log),
       vda_initialized_(false),
       state_(kNormal),
@@ -173,7 +170,7 @@ static bool IsCodedSizeSupported(const gfx::Size& coded_size,
 // callsite to always be called with the same stat name (can't parameterize it).
 static void ReportGpuVideoDecoderInitializeStatusToUMAAndRunCB(
     const VideoDecoder::InitCB& cb,
-    scoped_refptr<MediaLog> media_log,
+    MediaLog* media_log,
     bool success) {
   // TODO(xhwang): Report |success| directly.
   PipelineStatus status = success ? PIPELINE_OK : DECODER_ERROR_NOT_SUPPORTED;
@@ -186,20 +183,6 @@ static void ReportGpuVideoDecoderInitializeStatusToUMAAndRunCB(
   }
 
   cb.Run(success);
-}
-
-// static
-void ReleaseMailboxTrampoline(
-    const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
-    const VideoFrame::ReleaseMailboxCB& release_mailbox_cb,
-    const gpu::SyncToken& release_sync_token) {
-  if (task_runner->BelongsToCurrentThread()) {
-    release_mailbox_cb.Run(release_sync_token);
-    return;
-  }
-
-  task_runner->PostTask(FROM_HERE,
-                        base::Bind(release_mailbox_cb, release_sync_token));
 }
 
 std::string GpuVideoDecoder::GetDisplayName() const {
@@ -218,18 +201,6 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
   InitCB bound_init_cb =
       base::Bind(&ReportGpuVideoDecoderInitializeStatusToUMAAndRunCB,
                  BindToCurrentLoop(init_cb), media_log_);
-
-  bool requires_restart_for_external_output_surface = false;
-#if !defined(OS_ANDROID)
-  if (config.is_encrypted()) {
-    DVLOG(1) << "Encrypted stream not supported.";
-    bound_init_cb.Run(false);
-    return;
-  }
-#else
-  requires_restart_for_external_output_surface =
-      base::android::BuildInfo::GetInstance()->sdk_int() < 23;
-#endif
 
   bool previously_initialized = config_.IsValidConfig();
   DVLOG(1) << (previously_initialized ? "Reinitializing" : "Initializing")
@@ -252,6 +223,14 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
 
   VideoDecodeAccelerator::Capabilities capabilities =
       factories_->GetVideoDecodeAcceleratorCapabilities();
+  if (config.is_encrypted() &&
+      !(capabilities.flags &
+        VideoDecodeAccelerator::Capabilities::SUPPORTS_ENCRYPTED_STREAMS)) {
+    DVLOG(1) << "Encrypted stream not supported.";
+    bound_init_cb.Run(false);
+    return;
+  }
+
   if (!IsProfileSupported(capabilities, config.profile(), config.coded_size(),
                           config.is_encrypted())) {
     DVLOG(1) << "Unsupported profile " << GetProfileName(config.profile())
@@ -312,27 +291,36 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
 
   init_cb_ = bound_init_cb;
 
-  const bool supports_external_output_surface =
-      (capabilities.flags & VideoDecodeAccelerator::Capabilities::
-                                SUPPORTS_EXTERNAL_OUTPUT_SURFACE) != 0;
-  if (supports_external_output_surface && !request_surface_cb_.is_null()) {
+  const bool supports_external_output_surface = !!(
+      capabilities.flags &
+      VideoDecodeAccelerator::Capabilities::SUPPORTS_EXTERNAL_OUTPUT_SURFACE);
+  if (supports_external_output_surface && !request_overlay_info_cb_.is_null()) {
+    const bool requires_restart_for_external_output_surface =
+        !(capabilities.flags & VideoDecodeAccelerator::Capabilities::
+                                   SUPPORTS_SET_EXTERNAL_OUTPUT_SURFACE);
+
     // If we have a surface request callback we should call it and complete
     // initialization with the returned surface.
-    request_surface_cb_.Run(
+    request_overlay_info_cb_.Run(
         requires_restart_for_external_output_surface,
-        BindToCurrentLoop(base::Bind(&GpuVideoDecoder::OnSurfaceAvailable,
+        BindToCurrentLoop(base::Bind(&GpuVideoDecoder::OnOverlayInfoAvailable,
                                      weak_factory_.GetWeakPtr())));
     return;
   }
 
   // If external surfaces are not supported we can complete initialization now.
-  CompleteInitialization(SurfaceManager::kNoSurfaceID);
+  CompleteInitialization(SurfaceManager::kNoSurfaceID,
+                         base::UnguessableToken());
 }
 
-// OnSurfaceAvailable() might be called at any time between Initialize() and
+// OnOverlayInfoAvailable() might be called at any time between Initialize() and
 // ~GpuVideoDecoder() so we have to be careful to not make assumptions about
 // the current state.
-void GpuVideoDecoder::OnSurfaceAvailable(int surface_id) {
+// At most one of |surface_id| and |token| should be provided.  The other will
+// be kNoSurfaceID or an empty token, respectively.
+void GpuVideoDecoder::OnOverlayInfoAvailable(
+    int surface_id,
+    const base::Optional<base::UnguessableToken>& token) {
   DCheckGpuVideoAcceleratorFactoriesTaskRunnerIsCurrent();
 
   if (!vda_)
@@ -343,16 +331,18 @@ void GpuVideoDecoder::OnSurfaceAvailable(int surface_id) {
   // SetSurface() before initializing because there is no remote VDA to handle
   // the call yet.
   if (!vda_initialized_) {
-    CompleteInitialization(surface_id);
+    CompleteInitialization(surface_id, token);
     return;
   }
 
   // The VDA must be already initialized (or async initialization is in
   // progress) so we can call SetSurface().
-  vda_->SetSurface(surface_id);
+  vda_->SetSurface(surface_id, token);
 }
 
-void GpuVideoDecoder::CompleteInitialization(int surface_id) {
+void GpuVideoDecoder::CompleteInitialization(
+    int surface_id,
+    const base::Optional<base::UnguessableToken>& token) {
   DCheckGpuVideoAcceleratorFactoriesTaskRunnerIsCurrent();
   DCHECK(vda_);
   DCHECK(!init_cb_.is_null());
@@ -362,9 +352,11 @@ void GpuVideoDecoder::CompleteInitialization(int surface_id) {
   vda_config.profile = config_.profile();
   vda_config.cdm_id = cdm_id_;
   vda_config.surface_id = surface_id;
+  vda_config.overlay_routing_token = token;
   vda_config.encryption_scheme = config_.encryption_scheme();
   vda_config.is_deferred_initialization_allowed = true;
   vda_config.initial_expected_coded_size = config_.coded_size();
+  vda_config.color_space = config_.color_space_info();
 
 #if defined(OS_ANDROID) && BUILDFLAG(USE_PROPRIETARY_CODECS)
   // We pass the SPS and PPS on Android because it lets us initialize
@@ -676,11 +668,11 @@ void GpuVideoDecoder::PictureReady(const media::Picture& picture) {
 
   scoped_refptr<VideoFrame> frame(VideoFrame::WrapNativeTextures(
       pixel_format_, mailbox_holders,
-      base::Bind(
-          &ReleaseMailboxTrampoline, factories_->GetTaskRunner(),
-          base::Bind(&GpuVideoDecoder::ReleaseMailbox,
-                     weak_factory_.GetWeakPtr(), factories_,
-                     picture.picture_buffer_id(), pb.client_texture_ids())),
+      // Always post ReleaseMailbox to avoid deadlock with the compositor when
+      // releasing video frames on the media thread; http://crbug.com/710209.
+      BindToCurrentLoop(base::Bind(
+          &GpuVideoDecoder::ReleaseMailbox, weak_factory_.GetWeakPtr(),
+          factories_, picture.picture_buffer_id(), pb.client_texture_ids())),
       pb.size(), visible_rect, natural_size, timestamp));
   if (!frame) {
     DLOG(ERROR) << "Create frame failed for: " << picture.picture_buffer_id();
@@ -696,9 +688,6 @@ void GpuVideoDecoder::PictureReady(const media::Picture& picture) {
     frame->metadata()->SetBoolean(VideoFrameMetadata::WANTS_PROMOTION_HINT,
                                   true);
   }
-#if defined(OS_WIN)
-  frame->metadata()->SetBoolean(VideoFrameMetadata::DECODER_OWNS_FRAME, true);
-#endif
 
   if (requires_texture_copy_)
     frame->metadata()->SetBoolean(VideoFrameMetadata::COPY_REQUIRED, true);
@@ -823,8 +812,9 @@ GpuVideoDecoder::~GpuVideoDecoder() {
 
   if (!init_cb_.is_null())
     base::ResetAndReturn(&init_cb_).Run(false);
-  if (!request_surface_cb_.is_null())
-    base::ResetAndReturn(&request_surface_cb_).Run(false, SurfaceCreatedCB());
+  if (!request_overlay_info_cb_.is_null())
+    base::ResetAndReturn(&request_overlay_info_cb_)
+        .Run(false, ProvideOverlayInfoCB());
 
   for (size_t i = 0; i < available_shm_segments_.size(); ++i) {
     delete available_shm_segments_[i];
@@ -901,13 +891,11 @@ bool GpuVideoDecoder::IsProfileSupported(
     bool is_encrypted) {
   DCheckGpuVideoAcceleratorFactoriesTaskRunnerIsCurrent();
   for (const auto& supported_profile : capabilities.supported_profiles) {
-    if (profile == supported_profile.profile) {
-      if (supported_profile.encrypted_only && !is_encrypted)
-        continue;
-
-      return IsCodedSizeSupported(coded_size,
-                                  supported_profile.min_resolution,
-                                  supported_profile.max_resolution);
+    if (profile == supported_profile.profile &&
+        !(supported_profile.encrypted_only && !is_encrypted) &&
+        IsCodedSizeSupported(coded_size, supported_profile.min_resolution,
+                             supported_profile.max_resolution)) {
+      return true;
     }
   }
   return false;

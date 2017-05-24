@@ -10,6 +10,7 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/optional.h"
 #include "chrome/browser/media/webrtc/test_stats_dictionary.h"
 #include "chrome/test/base/in_process_browser_test.h"
 
@@ -168,10 +169,12 @@ class WebRtcTestBase : public InProcessBrowserTest {
                                    const std::string& keygen_algorithm) const;
 
   void VerifyStatsGeneratedCallback(content::WebContents* tab) const;
+  double MeasureGetStatsCallbackPerformance(content::WebContents* tab) const;
   std::vector<std::string> VerifyStatsGeneratedPromise(
       content::WebContents* tab) const;
   scoped_refptr<content::TestStatsReportDictionary> GetStatsReportDictionary(
       content::WebContents* tab) const;
+  double MeasureGetStatsPerformance(content::WebContents* tab) const;
   std::vector<std::string> GetWhitelistedStatsTypes(
       content::WebContents* tab) const;
 
@@ -183,6 +186,14 @@ class WebRtcTestBase : public InProcessBrowserTest {
 
   // Add 'usedtx=1' to the offer SDP.
   void EnableOpusDtx(content::WebContents* tab) const;
+
+  void CreateAndAddStreams(content::WebContents* tab, size_t count) const;
+  void VerifyRtpSenders(content::WebContents* tab,
+                        base::Optional<size_t> expected_num_tracks =
+                            base::Optional<size_t>()) const;
+  void VerifyRtpReceivers(content::WebContents* tab,
+                          base::Optional<size_t> expected_num_tracks =
+                              base::Optional<size_t>()) const;
 
  private:
   void CloseInfoBarInTab(content::WebContents* tab_contents,

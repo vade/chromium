@@ -8,10 +8,11 @@
 self.testRunner;
 
 TestRunner.executeTestScript = function() {
-  fetch(`${Runtime.queryParam('test')}`)
-      .then((data) => data.text())
-      .then((testScript) => eval(`(function(){${testScript}})()`))
-      .catch((error) => {
+  const testScriptURL = /** @type {string} */ (Runtime.queryParam('test'));
+  fetch(testScriptURL)
+      .then(data => data.text())
+      .then(testScript => eval(`(function test(){${testScript}})()\n//# sourceURL=${testScriptURL}`))
+      .catch(error => {
         TestRunner.addResult(`Unable to execute test script because of error: ${error}`);
         TestRunner.completeTest();
       });

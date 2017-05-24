@@ -19,6 +19,8 @@
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
 #include "content/common/content_export.h"
 
+class GURL;
+
 namespace content {
 
 class WebContentsImpl;
@@ -39,6 +41,12 @@ class CONTENT_EXPORT WebContentsAndroid
   base::android::ScopedJavaLocalRef<jobject> GetJavaObject();
 
   // Methods called from Java
+  base::android::ScopedJavaLocalRef<jobject> GetTopLevelNativeWindow(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
+  base::android::ScopedJavaLocalRef<jobject> GetMainFrame(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj) const;
   base::android::ScopedJavaLocalRef<jstring> GetTitle(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj) const;
@@ -56,11 +64,14 @@ class CONTENT_EXPORT WebContentsAndroid
   void Cut(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
   void Copy(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
   void Paste(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
+  void PasteAsPlainText(JNIEnv* env,
+                        const base::android::JavaParamRef<jobject>& obj);
   void Replace(JNIEnv* env,
                const base::android::JavaParamRef<jobject>& obj,
                const base::android::JavaParamRef<jstring>& jstr);
   void SelectAll(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
-  void Unselect(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
+  void CollapseSelection(JNIEnv* env,
+                         const base::android::JavaParamRef<jobject>& obj);
   jint GetBackgroundColor(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& obj);
   base::android::ScopedJavaLocalRef<jstring> GetURL(
@@ -136,13 +147,9 @@ class CONTENT_EXPORT WebContentsAndroid
       const base::android::JavaParamRef<jobject>& obj,
       const base::android::JavaParamRef<jstring>& jframe_name,
       const base::android::JavaParamRef<jstring>& jmessage,
+      const base::android::JavaParamRef<jstring>& jsource_origin,
       const base::android::JavaParamRef<jstring>& jtarget_origin,
-      const base::android::JavaParamRef<jintArray>& jsent_ports);
-
-  void CreateMessageChannel(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj,
-      const base::android::JavaParamRef<jobjectArray>& ports);
+      const base::android::JavaParamRef<jobjectArray>& jports);
 
   jboolean HasAccessedInitialDocument(
       JNIEnv* env,
@@ -150,6 +157,15 @@ class CONTENT_EXPORT WebContentsAndroid
 
   jint GetThemeColor(JNIEnv* env,
                      const base::android::JavaParamRef<jobject>& obj);
+
+  void RequestSmartClipExtract(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jobject>& callback,
+      jint x,
+      jint y,
+      jint width,
+      jint height);
 
   void RequestAccessibilitySnapshot(
       JNIEnv* env,
@@ -165,16 +181,12 @@ class CONTENT_EXPORT WebContentsAndroid
       const base::android::JavaParamRef<jobject>& obj,
       const base::android::JavaParamRef<jobject>& overscroll_refresh_handler);
 
-  // Relay the access from Java layer to GetScaledContentBitmap through JNI.
+  // Relay the access from Java layer to RWHV::CopyFromSurface() through JNI.
   void GetContentBitmap(JNIEnv* env,
                         const base::android::JavaParamRef<jobject>& obj,
-                        const base::android::JavaParamRef<jobject>& jcallback,
-                        const base::android::JavaParamRef<jobject>& color_type,
-                        jfloat scale,
-                        jfloat x,
-                        jfloat y,
-                        jfloat width,
-                        jfloat height);
+                        jint width,
+                        jint height,
+                        const base::android::JavaParamRef<jobject>& jcallback);
 
   void ReloadLoFiImages(JNIEnv* env,
                         const base::android::JavaParamRef<jobject>& obj);
@@ -188,6 +200,20 @@ class CONTENT_EXPORT WebContentsAndroid
                     const base::android::JavaParamRef<jobject>& jcallback);
   void DismissTextHandles(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& obj);
+  void ShowContextMenuAtPoint(JNIEnv* env,
+                              const base::android::JavaParamRef<jobject>& obj,
+                              int x,
+                              int y);
+  void SetHasPersistentVideo(JNIEnv* env,
+                             const base::android::JavaParamRef<jobject>& obj,
+                             jboolean value);
+  bool HasActiveEffectivelyFullscreenVideo(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
+
+  base::android::ScopedJavaLocalRef<jobject> GetOrCreateEventForwarder(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
 
   void SetMediaSession(
       const base::android::ScopedJavaLocalRef<jobject>& j_media_session);

@@ -4,8 +4,8 @@
 
 #include "components/spellcheck/renderer/spellcheck_provider_test.h"
 
+#include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
-#include "components/spellcheck/common/spellcheck_marker.h"
 #include "components/spellcheck/common/spellcheck_messages.h"
 #include "components/spellcheck/renderer/spellcheck.h"
 #include "components/spellcheck/spellcheck_build_features.h"
@@ -21,12 +21,12 @@ FakeTextCheckingCompletion::FakeTextCheckingCompletion()
 
 FakeTextCheckingCompletion::~FakeTextCheckingCompletion() {}
 
-void FakeTextCheckingCompletion::didFinishCheckingText(
+void FakeTextCheckingCompletion::DidFinishCheckingText(
     const blink::WebVector<blink::WebTextCheckingResult>& results) {
   ++completion_count_;
 }
 
-void FakeTextCheckingCompletion::didCancelCheckingText() {
+void FakeTextCheckingCompletion::DidCancelCheckingText() {
   ++completion_count_;
   ++cancellation_count_;
 }
@@ -62,14 +62,14 @@ bool TestingSpellCheckProvider::Send(IPC::Message* message)  {
   }
 #endif
 
-  messages_.push_back(message);
+  messages_.push_back(base::WrapUnique<IPC::Message>(message));
   return true;
 }
 
-void TestingSpellCheckProvider::OnCallSpellingService(int route_id,
-                           int identifier,
-                           const base::string16& text,
-                           const std::vector<SpellCheckMarker>& markers) {
+void TestingSpellCheckProvider::OnCallSpellingService(
+    int route_id,
+    int identifier,
+    const base::string16& text) {
 #if BUILDFLAG(USE_BROWSER_SPELLCHECKER)
   NOTREACHED();
 #else
@@ -84,9 +84,8 @@ void TestingSpellCheckProvider::OnCallSpellingService(int route_id,
   text_check_completions_.Remove(identifier);
   std::vector<blink::WebTextCheckingResult> results;
   results.push_back(blink::WebTextCheckingResult(
-      blink::WebTextDecorationTypeSpelling,
-      0, 5, blink::WebString("hello")));
-  completion->didFinishCheckingText(results);
+      blink::kWebTextDecorationTypeSpelling, 0, 5, blink::WebString("hello")));
+  completion->DidFinishCheckingText(results);
   last_request_ = text;
   last_results_ = results;
 #endif
@@ -111,4 +110,3 @@ bool TestingSpellCheckProvider::SatisfyRequestFromCache(
 
 SpellCheckProviderTest::SpellCheckProviderTest() {}
 SpellCheckProviderTest::~SpellCheckProviderTest() {}
-

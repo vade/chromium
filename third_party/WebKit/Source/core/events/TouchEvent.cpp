@@ -26,15 +26,17 @@
 
 #include "core/events/TouchEvent.h"
 
-#include "bindings/core/v8/DOMWrapperWorld.h"
-#include "bindings/core/v8/ScriptState.h"
 #include "core/events/EventDispatcher.h"
 #include "core/frame/FrameConsole.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/html/HTMLElement.h"
+#include "core/input/InputDeviceCapabilities.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "platform/Histogram.h"
+#include "platform/bindings/DOMWrapperWorld.h"
+#include "platform/bindings/ScriptState.h"
+#include "public/platform/WebCoalescedInputEvent.h"
 
 namespace blink {
 
@@ -58,91 +60,91 @@ enum TouchTargetAndDispatchResultType {
   // The following enums represent state captured during the CAPTURING_PHASE.
 
   // Non-root-scroller, non-scrollable document, already handled.
-  CapturingNonRootScrollerNonScrollableAlreadyHandled,
+  kCapturingNonRootScrollerNonScrollableAlreadyHandled,
   // Non-root-scroller, non-scrollable document, not handled.
-  CapturingNonRootScrollerNonScrollableNotHandled,
+  kCapturingNonRootScrollerNonScrollableNotHandled,
   // Non-root-scroller, non-scrollable document, handled application.
-  CapturingNonRootScrollerNonScrollableHandled,
+  kCapturingNonRootScrollerNonScrollableHandled,
   // Non-root-scroller, scrollable document, already handled.
-  CapturingNonRootScrollerScrollableDocumentAlreadyHandled,
+  kCapturingNonRootScrollerScrollableDocumentAlreadyHandled,
   // Non-root-scroller, scrollable document, not handled.
-  CapturingNonRootScrollerScrollableDocumentNotHandled,
+  kCapturingNonRootScrollerScrollableDocumentNotHandled,
   // Non-root-scroller, scrollable document, handled application.
-  CapturingNonRootScrollerScrollableDocumentHandled,
+  kCapturingNonRootScrollerScrollableDocumentHandled,
   // Root-scroller, non-scrollable document, already handled.
-  CapturingRootScrollerNonScrollableAlreadyHandled,
+  kCapturingRootScrollerNonScrollableAlreadyHandled,
   // Root-scroller, non-scrollable document, not handled.
-  CapturingRootScrollerNonScrollableNotHandled,
+  kCapturingRootScrollerNonScrollableNotHandled,
   // Root-scroller, non-scrollable document, handled.
-  CapturingRootScrollerNonScrollableHandled,
+  kCapturingRootScrollerNonScrollableHandled,
   // Root-scroller, scrollable document, already handled.
-  CapturingRootScrollerScrollableDocumentAlreadyHandled,
+  kCapturingRootScrollerScrollableDocumentAlreadyHandled,
   // Root-scroller, scrollable document, not handled.
-  CapturingRootScrollerScrollableDocumentNotHandled,
+  kCapturingRootScrollerScrollableDocumentNotHandled,
   // Root-scroller, scrollable document, handled.
-  CapturingRootScrollerScrollableDocumentHandled,
+  kCapturingRootScrollerScrollableDocumentHandled,
 
   // The following enums represent state captured during the AT_TARGET phase.
 
   // Non-root-scroller, non-scrollable document, already handled.
-  NonRootScrollerNonScrollableAlreadyHandled,
+  kNonRootScrollerNonScrollableAlreadyHandled,
   // Non-root-scroller, non-scrollable document, not handled.
-  NonRootScrollerNonScrollableNotHandled,
+  kNonRootScrollerNonScrollableNotHandled,
   // Non-root-scroller, non-scrollable document, handled application.
-  NonRootScrollerNonScrollableHandled,
+  kNonRootScrollerNonScrollableHandled,
   // Non-root-scroller, scrollable document, already handled.
-  NonRootScrollerScrollableDocumentAlreadyHandled,
+  kNonRootScrollerScrollableDocumentAlreadyHandled,
   // Non-root-scroller, scrollable document, not handled.
-  NonRootScrollerScrollableDocumentNotHandled,
+  kNonRootScrollerScrollableDocumentNotHandled,
   // Non-root-scroller, scrollable document, handled application.
-  NonRootScrollerScrollableDocumentHandled,
+  kNonRootScrollerScrollableDocumentHandled,
   // Root-scroller, non-scrollable document, already handled.
-  RootScrollerNonScrollableAlreadyHandled,
+  kRootScrollerNonScrollableAlreadyHandled,
   // Root-scroller, non-scrollable document, not handled.
-  RootScrollerNonScrollableNotHandled,
+  kRootScrollerNonScrollableNotHandled,
   // Root-scroller, non-scrollable document, handled.
-  RootScrollerNonScrollableHandled,
+  kRootScrollerNonScrollableHandled,
   // Root-scroller, scrollable document, already handled.
-  RootScrollerScrollableDocumentAlreadyHandled,
+  kRootScrollerScrollableDocumentAlreadyHandled,
   // Root-scroller, scrollable document, not handled.
-  RootScrollerScrollableDocumentNotHandled,
+  kRootScrollerScrollableDocumentNotHandled,
   // Root-scroller, scrollable document, handled.
-  RootScrollerScrollableDocumentHandled,
+  kRootScrollerScrollableDocumentHandled,
 
   // The following enums represent state captured during the BUBBLING_PHASE.
 
   // Non-root-scroller, non-scrollable document, already handled.
-  BubblingNonRootScrollerNonScrollableAlreadyHandled,
+  kBubblingNonRootScrollerNonScrollableAlreadyHandled,
   // Non-root-scroller, non-scrollable document, not handled.
-  BubblingNonRootScrollerNonScrollableNotHandled,
+  kBubblingNonRootScrollerNonScrollableNotHandled,
   // Non-root-scroller, non-scrollable document, handled application.
-  BubblingNonRootScrollerNonScrollableHandled,
+  kBubblingNonRootScrollerNonScrollableHandled,
   // Non-root-scroller, scrollable document, already handled.
-  BubblingNonRootScrollerScrollableDocumentAlreadyHandled,
+  kBubblingNonRootScrollerScrollableDocumentAlreadyHandled,
   // Non-root-scroller, scrollable document, not handled.
-  BubblingNonRootScrollerScrollableDocumentNotHandled,
+  kBubblingNonRootScrollerScrollableDocumentNotHandled,
   // Non-root-scroller, scrollable document, handled application.
-  BubblingNonRootScrollerScrollableDocumentHandled,
+  kBubblingNonRootScrollerScrollableDocumentHandled,
   // Root-scroller, non-scrollable document, already handled.
-  BubblingRootScrollerNonScrollableAlreadyHandled,
+  kBubblingRootScrollerNonScrollableAlreadyHandled,
   // Root-scroller, non-scrollable document, not handled.
-  BubblingRootScrollerNonScrollableNotHandled,
+  kBubblingRootScrollerNonScrollableNotHandled,
   // Root-scroller, non-scrollable document, handled.
-  BubblingRootScrollerNonScrollableHandled,
+  kBubblingRootScrollerNonScrollableHandled,
   // Root-scroller, scrollable document, already handled.
-  BubblingRootScrollerScrollableDocumentAlreadyHandled,
+  kBubblingRootScrollerScrollableDocumentAlreadyHandled,
   // Root-scroller, scrollable document, not handled.
-  BubblingRootScrollerScrollableDocumentNotHandled,
+  kBubblingRootScrollerScrollableDocumentNotHandled,
   // Root-scroller, scrollable document, handled.
-  BubblingRootScrollerScrollableDocumentHandled,
+  kBubblingRootScrollerScrollableDocumentHandled,
 
-  TouchTargetAndDispatchResultTypeMax,
+  kTouchTargetAndDispatchResultTypeMax,
 };
 
-void logTouchTargetHistogram(EventTarget* eventTarget,
+void LogTouchTargetHistogram(EventTarget* event_target,
                              unsigned short phase,
-                             bool defaultPreventedBeforeCurrentTarget,
-                             bool defaultPrevented) {
+                             bool default_prevented_before_current_target,
+                             bool default_prevented) {
   int result = 0;
   Document* document = nullptr;
 
@@ -161,99 +163,94 @@ void logTouchTargetHistogram(EventTarget* eventTarget,
       break;
   }
 
-  if (const LocalDOMWindow* domWindow = eventTarget->toLocalDOMWindow()) {
+  if (const LocalDOMWindow* dom_window = event_target->ToLocalDOMWindow()) {
     // Treat the window as a root scroller as well.
-    document = domWindow->document();
+    document = dom_window->document();
     result += kTouchTargetHistogramRootScrollerOffset;
-  } else if (Node* node = eventTarget->toNode()) {
+  } else if (Node* node = event_target->ToNode()) {
     // Report if the target node is the document or body.
-    if (node->isDocumentNode() || node->document().documentElement() == node ||
-        node->document().body() == node) {
+    if (node->IsDocumentNode() ||
+        node->GetDocument().documentElement() == node ||
+        node->GetDocument().body() == node) {
       result += kTouchTargetHistogramRootScrollerOffset;
     }
-    document = &node->document();
+    document = &node->GetDocument();
   }
 
   if (document) {
-    FrameView* view = document->view();
-    if (view && view->isScrollable())
+    FrameView* view = document->View();
+    if (view && view->IsScrollable())
       result += kTouchTargetHistogramScrollableDocumentOffset;
   }
 
-  if (defaultPreventedBeforeCurrentTarget)
+  if (default_prevented_before_current_target)
     result += kTouchTargetHistogramAlreadyHandledOffset;
-  else if (defaultPrevented)
+  else if (default_prevented)
     result += kTouchTargetHistogramHandledOffset;
   else
     result += kTouchTargetHistogramNotHandledOffset;
 
-  DEFINE_STATIC_LOCAL(EnumerationHistogram, rootDocumentListenerHistogram,
+  DEFINE_STATIC_LOCAL(EnumerationHistogram, root_document_listener_histogram,
                       ("Event.Touch.TargetAndDispatchResult2",
-                       TouchTargetAndDispatchResultTypeMax));
-  rootDocumentListenerHistogram.count(
+                       kTouchTargetAndDispatchResultTypeMax));
+  root_document_listener_histogram.Count(
       static_cast<TouchTargetAndDispatchResultType>(result));
 }
 
+// Helper function to get WebTouchEvent from WebCoalescedInputEvent.
+const WebTouchEvent* GetWebTouchEvent(const WebCoalescedInputEvent& event) {
+  return static_cast<const WebTouchEvent*>(&event.Event());
+}
 }  // namespace
 
 TouchEvent::TouchEvent()
-    : m_causesScrollingIfUncanceled(false),
-      m_firstTouchMoveOrStart(false),
-      m_defaultPreventedBeforeCurrentTarget(false),
-      m_currentTouchAction(TouchActionAuto) {}
+    : default_prevented_before_current_target_(false),
+      current_touch_action_(TouchAction::kTouchActionAuto) {}
 
-TouchEvent::TouchEvent(TouchList* touches,
-                       TouchList* targetTouches,
-                       TouchList* changedTouches,
+TouchEvent::TouchEvent(const WebCoalescedInputEvent& event,
+                       TouchList* touches,
+                       TouchList* target_touches,
+                       TouchList* changed_touches,
                        const AtomicString& type,
                        AbstractView* view,
-                       PlatformEvent::Modifiers modifiers,
-                       bool cancelable,
-                       bool causesScrollingIfUncanceled,
-                       bool firstTouchMoveOrStart,
-                       TimeTicks platformTimeStamp,
-                       TouchAction currentTouchAction,
-                       WebPointerProperties::PointerType pointerType)
+                       TouchAction current_touch_action)
     // Pass a sourceCapabilities including the ability to fire touchevents when
     // creating this touchevent, which is always created from input device
     // capabilities from EventHandler.
     : UIEventWithKeyState(
           type,
           true,
-          cancelable,
+          GetWebTouchEvent(event)->IsCancelable(),
           view,
           0,
-          modifiers,
-          platformTimeStamp,
-          InputDeviceCapabilities::firesTouchEventsSourceCapabilities()),
-      m_touches(touches),
-      m_targetTouches(targetTouches),
-      m_changedTouches(changedTouches),
-      m_causesScrollingIfUncanceled(causesScrollingIfUncanceled),
-      m_firstTouchMoveOrStart(firstTouchMoveOrStart),
-      m_defaultPreventedBeforeCurrentTarget(false),
-      m_currentTouchAction(currentTouchAction),
-      m_pointerType(pointerType) {}
+          static_cast<WebInputEvent::Modifiers>(event.Event().GetModifiers()),
+          TimeTicks::FromSeconds(event.Event().TimeStampSeconds()),
+          view ? view->GetInputDeviceCapabilities()->FiresTouchEvents(true)
+               : nullptr),
+      touches_(touches),
+      target_touches_(target_touches),
+      changed_touches_(changed_touches),
+      default_prevented_before_current_target_(false),
+      current_touch_action_(current_touch_action) {
+  DCHECK(WebInputEvent::IsTouchEventType(event.Event().GetType()));
+  native_event_.reset(new WebCoalescedInputEvent(event));
+}
 
 TouchEvent::TouchEvent(const AtomicString& type,
                        const TouchEventInit& initializer)
     : UIEventWithKeyState(type, initializer),
-      m_touches(TouchList::create(initializer.touches())),
-      m_targetTouches(TouchList::create(initializer.targetTouches())),
-      m_changedTouches(TouchList::create(initializer.changedTouches())),
-      m_causesScrollingIfUncanceled(false),
-      m_firstTouchMoveOrStart(false),
-      m_defaultPreventedBeforeCurrentTarget(false),
-      m_currentTouchAction(TouchActionAuto),
-      m_pointerType(WebPointerProperties::PointerType::Unknown) {}
+      touches_(TouchList::Create(initializer.touches())),
+      target_touches_(TouchList::Create(initializer.targetTouches())),
+      changed_touches_(TouchList::Create(initializer.changedTouches())),
+      current_touch_action_(TouchAction::kTouchActionAuto) {}
 
 TouchEvent::~TouchEvent() {}
 
-const AtomicString& TouchEvent::interfaceName() const {
+const AtomicString& TouchEvent::InterfaceName() const {
   return EventNames::TouchEvent;
 }
 
-bool TouchEvent::isTouchEvent() const {
+bool TouchEvent::IsTouchEvent() const {
   return true;
 }
 
@@ -263,23 +260,51 @@ void TouchEvent::preventDefault() {
   // A common developer error is to wait too long before attempting to stop
   // scrolling by consuming a touchmove event. Generate a warning if this
   // event is uncancelable.
-  String warningMessage;
-  switch (handlingPassive()) {
-    case PassiveMode::NotPassive:
-    case PassiveMode::NotPassiveDefault:
+  MessageSource message_source = kJSMessageSource;
+  String warning_message;
+  switch (HandlingPassive()) {
+    case PassiveMode::kNotPassive:
+    case PassiveMode::kNotPassiveDefault:
       if (!cancelable()) {
-        warningMessage = "Ignored attempt to cancel a " + type() +
-                         " event with cancelable=false, for example "
-                         "because scrolling is in progress and "
-                         "cannot be interrupted.";
+        if (view() && view()->GetFrame()) {
+          UseCounter::Count(
+              view()->GetFrame(),
+              UseCounter::kUncancelableTouchEventPreventDefaulted);
+        }
+
+        if (native_event_ &&
+            GetWebTouchEvent(*native_event_)->dispatch_type ==
+                WebInputEvent::
+                    kListenersForcedNonBlockingDueToMainThreadResponsiveness) {
+          // Non blocking due to main thread responsiveness.
+          if (view() && view()->GetFrame()) {
+            UseCounter::Count(
+                view()->GetFrame(),
+                UseCounter::
+                    kUncancelableTouchEventDueToMainThreadResponsivenessPreventDefaulted);
+          }
+          message_source = kInterventionMessageSource;
+          warning_message =
+              "Ignored attempt to cancel a " + type() +
+              " event with cancelable=false. This event was forced to be "
+              "non-cancellable because the page was too busy to handle the "
+              "event promptly.";
+        } else {
+          // Non blocking for any other reason.
+          warning_message = "Ignored attempt to cancel a " + type() +
+                            " event with cancelable=false, for example "
+                            "because scrolling is in progress and "
+                            "cannot be interrupted.";
+        }
       }
       break;
-    case PassiveMode::PassiveForcedDocumentLevel:
+    case PassiveMode::kPassiveForcedDocumentLevel:
       // Only enable the warning when the current touch action is auto because
       // an author may use touch action but call preventDefault for interop with
       // browsers that don't support touch-action.
-      if (m_currentTouchAction == TouchActionAuto) {
-        warningMessage =
+      if (current_touch_action_ == TouchAction::kTouchActionAuto) {
+        message_source = kInterventionMessageSource;
+        warning_message =
             "Unable to preventDefault inside passive event listener due to "
             "target being treated as passive. See "
             "https://www.chromestatus.com/features/5093566007214080";
@@ -289,25 +314,26 @@ void TouchEvent::preventDefault() {
       break;
   }
 
-  if (!warningMessage.isEmpty() && view() && view()->isLocalDOMWindow() &&
-      view()->frame()) {
-    toLocalDOMWindow(view())->frame()->console().addMessage(
-        ConsoleMessage::create(JSMessageSource, WarningMessageLevel,
-                               warningMessage));
+  if (!warning_message.IsEmpty() && view() && view()->IsLocalDOMWindow() &&
+      view()->GetFrame()) {
+    ToLocalDOMWindow(view())->GetFrame()->Console().AddMessage(
+        ConsoleMessage::Create(message_source, kWarningMessageLevel,
+                               warning_message));
   }
 
   if ((type() == EventTypeNames::touchstart ||
        type() == EventTypeNames::touchmove) &&
-      view() && view()->frame() && m_currentTouchAction == TouchActionAuto) {
-    switch (handlingPassive()) {
-      case PassiveMode::NotPassiveDefault:
-        UseCounter::count(view()->frame(),
-                          UseCounter::TouchEventPreventedNoTouchAction);
+      view() && view()->GetFrame() &&
+      current_touch_action_ == TouchAction::kTouchActionAuto) {
+    switch (HandlingPassive()) {
+      case PassiveMode::kNotPassiveDefault:
+        UseCounter::Count(view()->GetFrame(),
+                          UseCounter::kTouchEventPreventedNoTouchAction);
         break;
-      case PassiveMode::PassiveForcedDocumentLevel:
-        UseCounter::count(
-            view()->frame(),
-            UseCounter::TouchEventPreventedForcedDocumentPassiveNoTouchAction);
+      case PassiveMode::kPassiveForcedDocumentLevel:
+        UseCounter::Count(
+            view()->GetFrame(),
+            UseCounter::kTouchEventPreventedForcedDocumentPassiveNoTouchAction);
         break;
       default:
         break;
@@ -315,47 +341,53 @@ void TouchEvent::preventDefault() {
   }
 }
 
-void TouchEvent::doneDispatchingEventAtCurrentTarget() {
+bool TouchEvent::IsTouchStartOrFirstTouchMove() const {
+  if (!native_event_)
+    return false;
+  return GetWebTouchEvent(*native_event_)->touch_start_or_first_touch_move;
+}
+
+void TouchEvent::DoneDispatchingEventAtCurrentTarget() {
   // Do not log for non-cancelable events, events that don't block
   // scrolling, have more than one touch point or aren't on the main frame.
-  if (!cancelable() || !m_firstTouchMoveOrStart ||
-      !(m_touches && m_touches->length() == 1) ||
-      !(view() && view()->frame() && view()->frame()->isMainFrame()))
+  if (!cancelable() || !IsTouchStartOrFirstTouchMove() ||
+      !(touches_ && touches_->length() == 1) ||
+      !(view() && view()->GetFrame() && view()->GetFrame()->IsMainFrame()))
     return;
 
   bool canceled = defaultPrevented();
-  logTouchTargetHistogram(currentTarget(), eventPhase(),
-                          m_defaultPreventedBeforeCurrentTarget, canceled);
-  m_defaultPreventedBeforeCurrentTarget = canceled;
+  LogTouchTargetHistogram(currentTarget(), eventPhase(),
+                          default_prevented_before_current_target_, canceled);
+  default_prevented_before_current_target_ = canceled;
 }
 
-EventDispatchMediator* TouchEvent::createMediator() {
-  return TouchEventDispatchMediator::create(this);
+EventDispatchMediator* TouchEvent::CreateMediator() {
+  return TouchEventDispatchMediator::Create(this);
 }
 
 DEFINE_TRACE(TouchEvent) {
-  visitor->trace(m_touches);
-  visitor->trace(m_targetTouches);
-  visitor->trace(m_changedTouches);
-  UIEventWithKeyState::trace(visitor);
+  visitor->Trace(touches_);
+  visitor->Trace(target_touches_);
+  visitor->Trace(changed_touches_);
+  UIEventWithKeyState::Trace(visitor);
 }
 
-TouchEventDispatchMediator* TouchEventDispatchMediator::create(
-    TouchEvent* touchEvent) {
-  return new TouchEventDispatchMediator(touchEvent);
+TouchEventDispatchMediator* TouchEventDispatchMediator::Create(
+    TouchEvent* touch_event) {
+  return new TouchEventDispatchMediator(touch_event);
 }
 
-TouchEventDispatchMediator::TouchEventDispatchMediator(TouchEvent* touchEvent)
-    : EventDispatchMediator(touchEvent) {}
+TouchEventDispatchMediator::TouchEventDispatchMediator(TouchEvent* touch_event)
+    : EventDispatchMediator(touch_event) {}
 
-TouchEvent& TouchEventDispatchMediator::event() const {
-  return toTouchEvent(EventDispatchMediator::event());
+TouchEvent& TouchEventDispatchMediator::Event() const {
+  return ToTouchEvent(EventDispatchMediator::GetEvent());
 }
 
-DispatchEventResult TouchEventDispatchMediator::dispatchEvent(
+DispatchEventResult TouchEventDispatchMediator::DispatchEvent(
     EventDispatcher& dispatcher) const {
-  event().eventPath().adjustForTouchEvent(event());
-  return dispatcher.dispatch();
+  Event().GetEventPath().AdjustForTouchEvent(Event());
+  return dispatcher.Dispatch();
 }
 
 }  // namespace blink

@@ -4,6 +4,7 @@
 
 #import <EarlGrey/EarlGrey.h>
 
+#import "ios/showcase/test/showcase_eg_utils.h"
 #import "ios/showcase/test/showcase_test_case.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -17,15 +18,17 @@
 @implementation SCTabGridTestCase
 
 // Tests launching TabGridViewController and tapping a cell.
-- (void)testLaunchAndTappingCell {
-  [[EarlGrey selectElementWithMatcher:grey_text(@"TabGridViewController")]
+// TODO(crbug.com/710662): re-enable this test.
+- (void)FLAKY_testLaunchAndTappingCell {
+  showcase_utils::Open(@"TabGridViewController");
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(@"Tab 0_button")]
       performAction:grey_tap()];
-  [[EarlGrey selectElementWithMatcher:grey_text(@"Tab 0")]
-      performAction:grey_tap()];
-  [[EarlGrey selectElementWithMatcher:grey_text(@"TabCommands")]
+  [[EarlGrey selectElementWithMatcher:grey_text(@"TabGridCommands")]
       assertWithMatcher:grey_notNil()];
-  [[EarlGrey selectElementWithMatcher:grey_text(@"Done")]
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityLabel(
+                                          @"protocol_alerter_done")]
       performAction:grey_tap()];
+  showcase_utils::Close();
 }
 
 @end

@@ -37,7 +37,6 @@
 namespace blink {
 
 class DeprecatedStorageInfo;
-class DOMWindow;
 class LocalDOMWindow;
 
 class DOMWindowQuota final : public GarbageCollected<DOMWindowQuota>,
@@ -45,17 +44,17 @@ class DOMWindowQuota final : public GarbageCollected<DOMWindowQuota>,
   USING_GARBAGE_COLLECTED_MIXIN(DOMWindowQuota);
 
  public:
-  static DOMWindowQuota& from(LocalDOMWindow&);
-  static DeprecatedStorageInfo* webkitStorageInfo(DOMWindow&);
+  static DOMWindowQuota& From(LocalDOMWindow&);
+  static DeprecatedStorageInfo* webkitStorageInfo(LocalDOMWindow&);
   DeprecatedStorageInfo* webkitStorageInfo() const;
 
   DECLARE_TRACE();
 
  private:
   explicit DOMWindowQuota(LocalDOMWindow&);
-  static const char* supplementName();
+  static const char* SupplementName();
 
-  mutable Member<DeprecatedStorageInfo> m_storageInfo;
+  mutable Member<DeprecatedStorageInfo> storage_info_;
 };
 
 }  // namespace blink

@@ -12,7 +12,6 @@ goog.provide('Output.EventType');
 goog.require('AutomationTreeWalker');
 goog.require('EarconEngine');
 goog.require('Spannable');
-goog.require('Stubs');
 goog.require('constants');
 goog.require('cursors.Cursor');
 goog.require('cursors.Range');
@@ -30,6 +29,7 @@ var AutomationNode = chrome.automation.AutomationNode;
 var Dir = constants.Dir;
 var EventType = chrome.automation.EventType;
 var RoleType = chrome.automation.RoleType;
+var StateType = chrome.automation.StateType;
 
 /**
  * An Output object formats a cursors.Range into speech, braille, or both
@@ -427,10 +427,14 @@ Output.RULES = {
       speak: '$earcon(ALERT_MODAL) $name $nameOrTextContent $state $role'
     },
     cell: {
-      enter: '@cell_summary($tableCellRowIndex, $tableCellColumnIndex) ' +
-          '$node(tableColumnHeader)',
-      speak: '@cell_summary($tableCellRowIndex, $tableCellColumnIndex) ' +
-          '$node(tableColumnHeader) $state'
+      enter: '@cell_summary($if($ariaCellRowIndex, $ariaCellRowIndex, ' +
+      '$tableCellRowIndex), ' +
+      '$if($ariaCellColumnIndex, $ariaCellColumnIndex, ' +
+      '$tableCellColumnIndex)) $node(tableColumnHeader)',
+      speak: '$name @cell_summary($if($ariaCellRowIndex, $ariaCellRowIndex, ' +
+      '$tableCellRowIndex), ' +
+      '$if($ariaCellColumnIndex, $ariaCellColumnIndex, ' +
+      '$tableCellColumnIndex)) $node(tableColumnHeader) $state'
     },
     checkBox: {
       speak: '$if($checked, $earcon(CHECK_ON), $earcon(CHECK_OFF)) ' +
@@ -479,7 +483,9 @@ Output.RULES = {
       enter: '$nameFromNode $role $description'
     },
     link: {
-      enter: '$nameFromNode= $role $state'
+      enter: '$nameFromNode= $role $state',
+      speak: '$name $value $state ' +
+          '$if($inPageLinkTarget, @internal_link, $role) $description',
     },
     list: {
       enter: '$role @@list_with_items($countChildren(listItem))',
@@ -562,7 +568,9 @@ Output.RULES = {
           '$if($setSize, @describe_index($posInSet, $setSize))',
     },
     table: {
-      enter: '@table_summary($name, $tableRowCount, $tableColumnCount) ' +
+      enter: '@table_summary($name, ' +
+          '$if($ariaRowCount, $ariaRowCount, $tableRowCount), ' +
+          '$if($ariaColumnCount, $ariaColumnCount, $tableColumnCount)) ' +
           '$node(tableHeader)'
     },
     tableHeaderContainer: {
@@ -720,6 +728,21 @@ Output.forceModeForNextSpeechUtterance_;
  */
 Output.forceModeForNextSpeechUtterance = function(mode) {
   Output.forceModeForNextSpeechUtterance_ = mode;
+};
+
+/**
+ * For a given automation property, return true if the value
+ * represents something 'truthy', e.g.: for checked:
+ * 'true'|'mixed' -> true
+ * 'false'|undefined -> false
+ */
+Output.isTruthy = function(node, attrib) {
+  switch(attrib) {
+    case 'checked':
+      return node.checked && node.checked !== 'false';
+    default:
+      return node[attrib] !== undefined || node.state[attrib];
+  }
 };
 
 Output.prototype = {
@@ -1003,7 +1026,7 @@ Output.prototype = {
       return;
     var uniqueAncestors = AutomationUtil.getUniqueAncestors(prevParent, parent);
     for (var i = 0; parent = uniqueAncestors[i]; i++) {
-      if (parent.role == RoleType.window)
+      if (parent.role == RoleType.WINDOW)
         break;
       if (Output.ROLE_INFO_[parent.role] &&
           Output.ROLE_INFO_[parent.role].outputContextFirst) {
@@ -1069,20 +1092,19 @@ Output.prototype = {
       // All possible tokens based on prefix.
       if (prefix == '$') {
         if (token == 'value') {
-          var text = node.value;
-          if (!node.state.editable && node.name == text)
+          var text = node.value || '';
+          if (!node.state[StateType.EDITABLE] && node.name == text)
             return;
 
           var selectedText = '';
-          if (text !== undefined) {
-            if (node.textSelStart !== undefined) {
-              options.annotation.push(new Output.SelectionSpan(
-                  node.textSelStart,
-                  node.textSelEnd));
+          if (node.textSelStart !== undefined) {
+            options.annotation.push(new Output.SelectionSpan(
+                node.textSelStart || 0,
+                node.textSelEnd || 0));
 
-              selectedText =
-                  node.value.substring(node.textSelStart, node.textSelEnd);
-            }
+            selectedText =
+                node.value.substring(node.textSelStart || 0,
+                                     node.textSelEnd || 0);
           }
           options.annotation.push(token);
           if (selectedText && !this.formatOptions_.braille) {
@@ -1105,7 +1127,7 @@ Output.prototype = {
           this.append_(buff, node.description || '', options);
         } else if (token == 'urlFilename') {
           options.annotation.push('name');
-          var url = node.url;
+          var url = node.url || '';
           var filename = '';
           if (url.substring(0, 4) != 'data') {
             filename =
@@ -1117,23 +1139,22 @@ Output.prototype = {
           }
           this.append_(buff, filename, options);
         } else if (token == 'nameFromNode') {
-          if (chrome.automation.NameFromType[node.nameFrom] ==
-              'contents')
+          if (node.nameFrom == chrome.automation.NameFromType.CONTENTS)
             return;
 
           options.annotation.push('name');
-          this.append_(buff, node.name, options);
+          this.append_(buff, node.name || '', options);
         } else if (token == 'nameOrDescendants') {
           options.annotation.push(token);
           if (node.name)
-            this.append_(buff, node.name, options);
+            this.append_(buff, node.name || '', options);
           else
             this.format_(node, '$descendants', buff);
         } else if (token == 'description') {
           if (node.name == node.description || node.value == node.description)
             return;
           options.annotation.push(token);
-          this.append_(buff, node.description, options);
+          this.append_(buff, node.description || '', options);
         } else if (token == 'indexInParent') {
           if (node.parent) {
             options.annotation.push(token);
@@ -1156,34 +1177,33 @@ Output.prototype = {
           }
         } else if (token == 'checked') {
           var msg;
-          var ariaChecked = node.htmlAttributes['aria-checked'];
-          switch (ariaChecked) {
+          switch (node.checked) {
             case 'mixed':
-              msg = 'aria_checked_mixed';
+              msg = 'checked_mixed';
               break;
             case 'true':
-              msg = 'aria_checked_true';
-              break;
-            case 'false':
-              msg = 'aria_checked_false';
+              msg = 'checked_true';
               break;
             default:
-            msg =
-                node.state.checked ? 'aria_checked_true' : 'aria_checked_false';
+              msg = 'checked_false';
+              break;
           }
           this.format_(node, '@' + msg, buff);
         } else if (token == 'state') {
-          Object.getOwnPropertyNames(node.state).forEach(function(s) {
-            var stateInfo = Output.STATE_INFO_[s];
-            if (stateInfo && !stateInfo.isRoleSpecific && stateInfo.on)
+          if (node.state) {
+            Object.getOwnPropertyNames(node.state).forEach(function(s) {
+              var stateInfo = Output.STATE_INFO_[s];
+              if (stateInfo && !stateInfo.isRoleSpecific && stateInfo.on)
               this.format_(node, '@' + stateInfo.on.msgId, buff);
-          }.bind(this));
+            }.bind(this));
+          }
         } else if (token == 'find') {
           // Find takes two arguments: JSON query string and format string.
           if (tree.firstChild) {
             var jsonQuery = tree.firstChild.value;
             node = node.find(
-                /** @type {Object}*/(JSON.parse(jsonQuery)));
+                /** @type {chrome.automation.FindParams}*/(
+                    JSON.parse(jsonQuery)));
             var formatString = tree.firstChild.nextSibling;
             if (node)
               this.format_(node, formatString, buff);
@@ -1230,7 +1250,7 @@ Output.prototype = {
           } else {
             console.error('Missing role info for ' + node.role);
           }
-          this.append_(buff, msg, options);
+          this.append_(buff, msg || '', options);
         } else if (token == 'inputType') {
           if (!node.inputType)
             return;
@@ -1285,7 +1305,8 @@ Output.prototype = {
             return;
           if (this.formatOptions_.speech && resolvedInfo.earconId) {
             options.annotation.push(
-                new Output.EarconAction(resolvedInfo.earconId), node.location);
+                new Output.EarconAction(resolvedInfo.earconId),
+                                        node.location || undefined);
           }
           var msgId =
               this.formatOptions_.braille ? resolvedInfo.msgId + '_brl' :
@@ -1297,7 +1318,7 @@ Output.prototype = {
           if (token == 'if') {
             var cond = tree.firstChild;
             var attrib = cond.value.slice(1);
-            if (node[attrib] !== undefined || node.state[attrib])
+            if (Output.isTruthy(node, attrib))
               this.format_(node, cond.nextSibling, buff);
             else
               this.format_(node, cond.nextSibling.nextSibling, buff);
@@ -1307,7 +1328,8 @@ Output.prototype = {
               return;
 
             options.annotation.push(
-                new Output.EarconAction(tree.firstChild.value, node.location));
+                new Output.EarconAction(tree.firstChild.value,
+                                        node.location || undefined));
             this.append_(buff, '', options);
           } else if (token == 'countChildren') {
             var role = tree.firstChild.value;
@@ -1474,7 +1496,7 @@ Output.prototype = {
       for (i = 0; i < ancestors.length - 1; i++) {
         var node = ancestors[i];
         // Discard ancestors of deepest window.
-        if (node.role == RoleType.window) {
+        if (node.role == RoleType.WINDOW) {
           contextFirst = [];
           rest = [];
         }
@@ -1638,7 +1660,7 @@ Output.prototype = {
       options.annotation.push(earcon);
     var text = '';
 
-    if (this.formatOptions_.braille && !node.state.editable) {
+    if (this.formatOptions_.braille && !node.state[StateType.EDITABLE]) {
       // In braille, we almost always want to show the entire contents and
       // simply place the cursor under the SelectionSpan we set above.
       text = range.start.getText();
@@ -1781,7 +1803,7 @@ Output.prototype = {
             if (!s.node)
               return false;
             return s.node.display == 'inline' ||
-                s.node.role == RoleType.inlineTextBox;
+                s.node.role == RoleType.INLINE_TEXT_BOX;
           });
 
       var isName = cur.hasSpan('name');
@@ -1832,7 +1854,8 @@ Output.prototype = {
       while (earconFinder = ancestors.pop()) {
         var info = Output.ROLE_INFO_[earconFinder.role];
         if (info && info.earconId) {
-          return new Output.EarconAction(info.earconId, node.location);
+          return new Output.EarconAction(info.earconId,
+                                         node.location || undefined);
           break;
         }
         earconFinder = earconFinder.parent;

@@ -14,7 +14,7 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
 #include "chrome/browser/ui/libgtkui/app_indicator_icon_menu.h"
 #include "content/public/browser/browser_thread.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -72,14 +72,15 @@ bool g_attempted_load = false;
 bool g_opened = false;
 
 // Retrieved functions from libappindicator.
-app_indicator_new_func app_indicator_new = NULL;
-app_indicator_new_with_path_func app_indicator_new_with_path = NULL;
-app_indicator_set_status_func app_indicator_set_status = NULL;
+app_indicator_new_func app_indicator_new = nullptr;
+app_indicator_new_with_path_func app_indicator_new_with_path = nullptr;
+app_indicator_set_status_func app_indicator_set_status = nullptr;
 app_indicator_set_attention_icon_full_func
-    app_indicator_set_attention_icon_full = NULL;
-app_indicator_set_menu_func app_indicator_set_menu = NULL;
-app_indicator_set_icon_full_func app_indicator_set_icon_full = NULL;
-app_indicator_set_icon_theme_path_func app_indicator_set_icon_theme_path = NULL;
+    app_indicator_set_attention_icon_full = nullptr;
+app_indicator_set_menu_func app_indicator_set_menu = nullptr;
+app_indicator_set_icon_full_func app_indicator_set_icon_full = nullptr;
+app_indicator_set_icon_theme_path_func app_indicator_set_icon_theme_path =
+    nullptr;
 
 void EnsureMethodsLoaded() {
   if (g_attempted_load)
@@ -177,8 +178,8 @@ AppIndicatorIcon::AppIndicatorIcon(std::string id,
                                    const gfx::ImageSkia& image,
                                    const base::string16& tool_tip)
     : id_(id),
-      icon_(NULL),
-      menu_model_(NULL),
+      icon_(nullptr),
+      menu_model_(nullptr),
       icon_change_count_(0),
       weak_factory_(this) {
   std::unique_ptr<base::Environment> env(base::Environment::Create());
@@ -192,9 +193,9 @@ AppIndicatorIcon::~AppIndicatorIcon() {
   if (icon_) {
     app_indicator_set_status(icon_, APP_INDICATOR_STATUS_PASSIVE);
     g_object_unref(icon_);
-    content::BrowserThread::GetBlockingPool()->PostTask(
-        FROM_HERE,
-        base::Bind(&DeleteTempDirectory, temp_dir_));
+    base::PostTaskWithTraits(FROM_HERE,
+                             {base::MayBlock(), base::TaskPriority::BACKGROUND},
+                             base::BindOnce(&DeleteTempDirectory, temp_dir_));
   }
 }
 
@@ -214,21 +215,21 @@ void AppIndicatorIcon::SetImage(const gfx::ImageSkia& image) {
   // another thread.
   SkBitmap safe_bitmap = *image.bitmap();
 
-  scoped_refptr<base::TaskRunner> task_runner =
-      content::BrowserThread::GetBlockingPool()
-          ->GetTaskRunnerWithShutdownBehavior(
-                base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
+  const base::TaskTraits kTraits = {
+      base::MayBlock(), base::TaskPriority::USER_VISIBLE,
+      base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN};
+
   if (desktop_env_ == base::nix::DESKTOP_ENVIRONMENT_KDE4 ||
       desktop_env_ == base::nix::DESKTOP_ENVIRONMENT_KDE5) {
-    base::PostTaskAndReplyWithResult(
-        task_runner.get(), FROM_HERE,
+    base::PostTaskWithTraitsAndReplyWithResult(
+        FROM_HERE, kTraits,
         base::Bind(AppIndicatorIcon::WriteKDE4TempImageOnWorkerThread,
                    safe_bitmap, temp_dir_),
         base::Bind(&AppIndicatorIcon::SetImageFromFile,
                    weak_factory_.GetWeakPtr()));
   } else {
-    base::PostTaskAndReplyWithResult(
-        task_runner.get(), FROM_HERE,
+    base::PostTaskWithTraitsAndReplyWithResult(
+        FROM_HERE, kTraits,
         base::Bind(AppIndicatorIcon::WriteUnityTempImageOnWorkerThread,
                    safe_bitmap, icon_change_count_, id_),
         base::Bind(&AppIndicatorIcon::SetImageFromFile,
@@ -361,9 +362,9 @@ void AppIndicatorIcon::SetImageFromFile(const SetImageFromFileParams& params) {
   }
 
   if (temp_dir_ != params.parent_temp_dir) {
-    content::BrowserThread::GetBlockingPool()->PostTask(
-        FROM_HERE,
-        base::Bind(&DeleteTempDirectory, temp_dir_));
+    base::PostTaskWithTraits(FROM_HERE,
+                             {base::MayBlock(), base::TaskPriority::BACKGROUND},
+                             base::BindOnce(&DeleteTempDirectory, temp_dir_));
     temp_dir_ = params.parent_temp_dir;
   }
 }

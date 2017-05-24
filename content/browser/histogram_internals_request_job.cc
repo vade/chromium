@@ -7,6 +7,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/statistics_recorder.h"
 #include "content/browser/histogram_synchronizer.h"
+#include "content/public/browser/browser_thread.h"
 #include "net/base/escape.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request.h"
@@ -15,18 +16,24 @@
 namespace content {
 
 HistogramInternalsRequestJob::HistogramInternalsRequestJob(
-    net::URLRequest* request, net::NetworkDelegate* network_delegate)
-    : net::URLRequestSimpleJob(request, network_delegate) {
-  const std::string& spec = request->url().possibly_invalid_spec();
-  const url::Parsed& parsed = request->url().parsed_for_possibly_invalid_spec();
+    net::URLRequest* request,
+    net::NetworkDelegate* network_delegate)
+    : net::URLRequestSimpleJob(request, network_delegate),
+      url_(request->url()),
+      weak_factory_(this) {}
+
+HistogramInternalsRequestJob::~HistogramInternalsRequestJob() {}
+
+std::string HistogramInternalsRequestJob::GenerateHTML(const GURL& url) {
+  const std::string& spec = url.possibly_invalid_spec();
+  const url::Parsed& parsed = url.parsed_for_possibly_invalid_spec();
   // + 1 to skip the slash at the beginning of the path.
   int offset = parsed.CountCharactersBefore(url::Parsed::PATH, false) + 1;
 
+  std::string path;
   if (offset < static_cast<int>(spec.size()))
-    path_.assign(spec.substr(offset));
-}
+    path = spec.substr(offset);
 
-void AboutHistogram(std::string* data, const std::string& path) {
   HistogramSynchronizer::FetchHistograms();
 
   std::string unescaped_query;
@@ -37,21 +44,34 @@ void AboutHistogram(std::string* data, const std::string& path) {
     unescaped_title += " - " + unescaped_query;
   }
 
-  data->append("<!DOCTYPE html>\n<html>\n<head>\n");
-  data->append(
+  std::string data;
+  data.append("<!DOCTYPE html>\n<html>\n<head>\n");
+  data.append(
       "<meta http-equiv=\"Content-Security-Policy\" "
       "content=\"object-src 'none'; script-src 'none'\">");
-  data->append("<title>");
-  data->append(net::EscapeForHTML(unescaped_title));
-  data->append("</title>\n");
-  data->append("</head><body>");
+  data.append("<title>");
+  data.append(net::EscapeForHTML(unescaped_title));
+  data.append("</title>\n");
+  data.append("</head><body>");
 
   // Display any stats for which we sent off requests the last time.
-  data->append("<p>Stats accumulated from browser startup to previous ");
-  data->append("page load; reload to get stats as of this page load.</p>\n");
-  data->append("<table width=\"100%\">\n");
+  data.append("<p>Stats accumulated from browser startup to previous ");
+  data.append("page load; reload to get stats as of this page load.</p>\n");
+  data.append("<table width=\"100%\">\n");
 
-  base::StatisticsRecorder::WriteHTMLGraph(unescaped_query, data);
+  base::StatisticsRecorder::WriteHTMLGraph(unescaped_query, &data);
+  return data;
+}
+
+void HistogramInternalsRequestJob::Start() {
+  // First import histograms from all providers and then start the URL fetch
+  // job. It's not possible to call URLRequestSimpleJob::Start through Bind,
+  // it ends up re-calling this method, so a small helper method is used.
+  content::BrowserThread::PostTaskAndReply(
+      content::BrowserThread::UI, FROM_HERE,
+      base::Bind(&base::StatisticsRecorder::ImportProvidedHistograms),
+      base::Bind(&HistogramInternalsRequestJob::StartUrlRequest,
+                 weak_factory_.GetWeakPtr()));
 }
 
 int HistogramInternalsRequestJob::GetData(
@@ -62,9 +82,12 @@ int HistogramInternalsRequestJob::GetData(
   mime_type->assign("text/html");
   charset->assign("UTF8");
 
-  data->clear();
-  AboutHistogram(data, path_);
+  *data = GenerateHTML(url_);
   return net::OK;
+}
+
+void HistogramInternalsRequestJob::StartUrlRequest() {
+  URLRequestSimpleJob::Start();
 }
 
 }  // namespace content

@@ -20,12 +20,16 @@
 #include "url/gurl.h"
 #include "url/origin.h"
 
+namespace blink {
+enum class WebFeaturePolicyFeature;
+}
+
 namespace base {
 class Value;
 }
 
 namespace service_manager {
-class InterfaceRegistry;
+class BinderRegistry;
 class InterfaceProvider;
 }
 
@@ -40,9 +44,6 @@ class RenderViewHost;
 class RenderWidgetHostView;
 class SiteInstance;
 struct FileChooserFileInfo;
-struct FormFieldData;
-
-using FormFieldDataCallback = base::Callback<void(const FormFieldData&)>;
 
 // The interface provides a communication conduit with a frame in the renderer.
 class CONTENT_EXPORT RenderFrameHost : public IPC::Listener,
@@ -177,9 +178,9 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener,
   // RenderViewHost for this frame.
   virtual RenderViewHost* GetRenderViewHost() = 0;
 
-  // Returns the InterfaceRegistry that this process uses to expose interfaces
+  // Returns the BinderRegistry that this process uses to expose interfaces
   // to the application running in this frame.
-  virtual service_manager::InterfaceRegistry* GetInterfaceRegistry() = 0;
+  virtual service_manager::BinderRegistry* GetInterfaceRegistry() = 0;
 
   // Returns the InterfaceProvider that this process can use to bind
   // interfaces exposed to it by the application running in this frame.
@@ -196,6 +197,16 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener,
   // Returns whether the RenderFrame in the renderer process has been created
   // and still has a connection.  This is valid for all frames.
   virtual bool IsRenderFrameLive() = 0;
+
+  // Returns true if this is the currently-visible RenderFrameHost for our frame
+  // tree node. During process transfer, a RenderFrameHost may be created that
+  // is not current. After process transfer, the old RenderFrameHost becomes
+  // non-current until it is deleted (which may not happen until its unload
+  // handler runs).
+  //
+  // Changes to the IsCurrent() state of a RenderFrameHost may be observed via
+  // WebContentsObserver::RenderFrameHostChanged().
+  virtual bool IsCurrent() = 0;
 
   // Get the number of proxies to this frame, in all processes. Exposed for
   // use by resource metrics.
@@ -219,8 +230,38 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener,
       const TextSurroundingSelectionCallback& callback,
       int max_length) = 0;
 
-  // Retrieves the text input info associated with the current form field.
-  virtual void RequestFocusedFormFieldData(FormFieldDataCallback& callback) = 0;
+  // Tell the render frame to enable a set of javascript bindings. The argument
+  // should be a combination of values from BindingsPolicy.
+  virtual void AllowBindings(int binding_flags) = 0;
+
+  // Returns a bitwise OR of bindings types that have been enabled for this
+  // RenderFrame. See BindingsPolicy for details.
+  virtual int GetEnabledBindings() const = 0;
+
+  // Causes all new requests for the root RenderFrameHost and its children to
+  // be blocked (not being started) until ResumeBlockedRequestsForFrame is
+  // called.
+  virtual void BlockRequestsForFrame() = 0;
+
+  // Resumes any blocked request for the specified root RenderFrameHost and
+  // child frame hosts.
+  virtual void ResumeBlockedRequestsForFrame() = 0;
+
+#if defined(OS_ANDROID)
+  // Returns an InterfaceProvider for Java-implemented interfaces that are
+  // scoped to this RenderFrameHost. This provides access to interfaces
+  // implemented in Java in the browser process to C++ code in the browser
+  // process.
+  virtual service_manager::InterfaceProvider* GetJavaInterfaces() = 0;
+#endif  // OS_ANDROID
+
+  // Stops and disables the hang monitor for beforeunload. This avoids flakiness
+  // in tests that need to observe beforeunload dialogs, which could fail if the
+  // timeout skips the dialog.
+  virtual void DisableBeforeUnloadHangMonitorForTesting() = 0;
+  virtual bool IsBeforeUnloadHangMonitorDisabledForTesting() = 0;
+
+  virtual bool IsFeatureEnabled(blink::WebFeaturePolicyFeature feature) = 0;
 
  private:
   // This interface should only be implemented inside content.

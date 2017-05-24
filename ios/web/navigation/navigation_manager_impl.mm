@@ -11,12 +11,13 @@
 #include "base/logging.h"
 #import "ios/web/navigation/crw_session_controller+private_constructors.h"
 #import "ios/web/navigation/crw_session_controller.h"
-#import "ios/web/navigation/crw_session_entry.h"
 #import "ios/web/navigation/navigation_item_impl.h"
+#import "ios/web/navigation/navigation_item_impl_list.h"
 #import "ios/web/navigation/navigation_manager_delegate.h"
-#include "ios/web/navigation/navigation_manager_facade_delegate.h"
 #include "ios/web/public/load_committed_details.h"
 #import "ios/web/public/navigation_item.h"
+#include "ios/web/public/reload_type.h"
+#import "ios/web/public/web_client.h"
 #import "ios/web/public/web_state/web_state.h"
 #include "ui/base/page_transition_types.h"
 
@@ -32,10 +33,7 @@ bool AreURLsInPageNavigation(const GURL& existing_url, const GURL& new_url) {
   if (existing_url == new_url || !new_url.has_ref())
     return false;
 
-  url::Replacements<char> replacements;
-  replacements.ClearRef();
-  return existing_url.ReplaceComponents(replacements) ==
-         new_url.ReplaceComponents(replacements);
+  return existing_url.EqualsIgnoringRef(new_url);
 }
 
 }  // anonymous namespace
@@ -45,6 +43,7 @@ namespace web {
 NavigationManager::WebLoadParams::WebLoadParams(const GURL& url)
     : url(url),
       transition_type(ui::PAGE_TRANSITION_LINK),
+      user_agent_override_option(UserAgentOverrideOption::INHERIT),
       is_renderer_initiated(false),
       post_data(nil) {}
 
@@ -54,6 +53,7 @@ NavigationManager::WebLoadParams::WebLoadParams(const WebLoadParams& other)
     : url(other.url),
       referrer(other.referrer),
       transition_type(other.transition_type),
+      user_agent_override_option(other.user_agent_override_option),
       is_renderer_initiated(other.is_renderer_initiated),
       extra_headers([other.extra_headers copy]),
       post_data([other.post_data copy]) {}
@@ -64,26 +64,27 @@ NavigationManager::WebLoadParams& NavigationManager::WebLoadParams::operator=(
   referrer = other.referrer;
   is_renderer_initiated = other.is_renderer_initiated;
   transition_type = other.transition_type;
+  user_agent_override_option = other.user_agent_override_option;
   extra_headers.reset([other.extra_headers copy]);
   post_data.reset([other.post_data copy]);
 
   return *this;
 }
 
-NavigationManagerImpl::NavigationManagerImpl(
-    NavigationManagerDelegate* delegate,
-    BrowserState* browser_state)
-    : delegate_(delegate),
-      browser_state_(browser_state),
-      facade_delegate_(nullptr) {
-  DCHECK(browser_state_);
-}
+NavigationManagerImpl::NavigationManagerImpl()
+    : delegate_(nullptr), browser_state_(nullptr) {}
 
 NavigationManagerImpl::~NavigationManagerImpl() {
-  // The facade layer should be deleted before this object.
-  DCHECK(!facade_delegate_);
-
   [session_controller_ setNavigationManager:nullptr];
+}
+
+void NavigationManagerImpl::SetDelegate(NavigationManagerDelegate* delegate) {
+  delegate_ = delegate;
+}
+
+void NavigationManagerImpl::SetBrowserState(BrowserState* browser_state) {
+  browser_state_ = browser_state;
+  [session_controller_ setBrowserState:browser_state];
 }
 
 void NavigationManagerImpl::SetSessionController(
@@ -92,60 +93,36 @@ void NavigationManagerImpl::SetSessionController(
   [session_controller_ setNavigationManager:this];
 }
 
-void NavigationManagerImpl::InitializeSession(NSString* window_name,
-                                              NSString* opener_id,
-                                              BOOL opened_by_dom,
-                                              int opener_navigation_index) {
-  SetSessionController([[CRWSessionController alloc]
-         initWithWindowName:window_name
-                   openerId:opener_id
-                openedByDOM:opened_by_dom
-      openerNavigationIndex:opener_navigation_index
-               browserState:browser_state_]);
+void NavigationManagerImpl::InitializeSession() {
+  SetSessionController(
+      [[CRWSessionController alloc] initWithBrowserState:browser_state_]);
 }
 
 void NavigationManagerImpl::ReplaceSessionHistory(
     std::vector<std::unique_ptr<web::NavigationItem>> items,
-    int current_index) {
+    int lastCommittedItemIndex) {
   SetSessionController([[CRWSessionController alloc]
-      initWithNavigationItems:std::move(items)
-                 currentIndex:current_index
-                 browserState:browser_state_]);
-}
-
-void NavigationManagerImpl::SetFacadeDelegate(
-    NavigationManagerFacadeDelegate* facade_delegate) {
-  facade_delegate_ = facade_delegate;
-}
-
-NavigationManagerFacadeDelegate* NavigationManagerImpl::GetFacadeDelegate()
-    const {
-  return facade_delegate_;
+        initWithBrowserState:browser_state_
+             navigationItems:std::move(items)
+      lastCommittedItemIndex:lastCommittedItemIndex]);
 }
 
 void NavigationManagerImpl::OnNavigationItemsPruned(size_t pruned_item_count) {
   delegate_->OnNavigationItemsPruned(pruned_item_count);
-
-  if (facade_delegate_)
-    facade_delegate_->OnNavigationItemsPruned(pruned_item_count);
 }
 
 void NavigationManagerImpl::OnNavigationItemChanged() {
   delegate_->OnNavigationItemChanged();
-
-  if (facade_delegate_)
-    facade_delegate_->OnNavigationItemChanged();
 }
 
 void NavigationManagerImpl::OnNavigationItemCommitted() {
   LoadCommittedDetails details;
   details.item = GetLastCommittedItem();
   DCHECK(details.item);
-  details.previous_item_index = [session_controller_ previousNavigationIndex];
+  details.previous_item_index = [session_controller_ previousItemIndex];
   if (details.previous_item_index >= 0) {
-    DCHECK([session_controller_ previousEntry]);
-    details.previous_url =
-        [session_controller_ previousEntry].navigationItem->GetURL();
+    DCHECK([session_controller_ previousItem]);
+    details.previous_url = [session_controller_ previousItem]->GetURL();
     details.is_in_page =
         AreURLsInPageNavigation(details.previous_url, details.item->GetURL());
   } else {
@@ -154,11 +131,6 @@ void NavigationManagerImpl::OnNavigationItemCommitted() {
   }
 
   delegate_->OnNavigationItemCommitted(details);
-
-  if (facade_delegate_) {
-    facade_delegate_->OnNavigationItemCommitted(details.previous_item_index,
-                                                details.is_in_page);
-  }
 }
 
 CRWSessionController* NavigationManagerImpl::GetSessionController() {
@@ -173,24 +145,71 @@ void NavigationManagerImpl::LoadURL(const GURL& url,
   delegate_->GetWebState()->OpenURL(params);
 }
 
-NavigationItem* NavigationManagerImpl::GetLastUserItem() const {
-  CRWSessionEntry* entry = [session_controller_ lastUserEntry];
-  return [entry navigationItem];
+void NavigationManagerImpl::AddTransientItem(const GURL& url) {
+  [session_controller_ addTransientItemWithURL:url];
+
+  // TODO(crbug.com/676129): Transient item is only supposed to be added for
+  // pending non-app-specific loads, but pending item can be null because of the
+  // bug. The workaround should be removed once the bug is fixed.
+  NavigationItem* item = GetPendingItem();
+  if (!item)
+    item = GetLastCommittedNonAppSpecificItem();
+  DCHECK(item->GetUserAgentType() != UserAgentType::NONE);
+  GetTransientItem()->SetUserAgentType(item->GetUserAgentType());
 }
 
-NavigationItem* NavigationManagerImpl::GetPreviousItem() const {
-  CRWSessionEntry* entry = [session_controller_ previousEntry];
-  return [entry navigationItem];
-}
+void NavigationManagerImpl::AddPendingItem(
+    const GURL& url,
+    const web::Referrer& referrer,
+    ui::PageTransition navigation_type,
+    NavigationInitiationType initiation_type,
+    UserAgentOverrideOption user_agent_override_option) {
+  [session_controller_ addPendingItem:url
+                             referrer:referrer
+                           transition:navigation_type
+                       initiationType:initiation_type
+              userAgentOverrideOption:user_agent_override_option];
 
-std::vector<NavigationItem*> NavigationManagerImpl::GetItems() {
-  std::vector<NavigationItem*> items;
-  size_t i = 0;
-  items.resize([session_controller_ entries].count);
-  for (CRWSessionEntry* entry in [session_controller_ entries]) {
-    items[i++] = entry.navigationItem;
+  // Set the user agent type for web URLs.
+  NavigationItem* pending_item = GetPendingItem();
+  if (!pending_item)
+    return;
+
+  // |user_agent_override_option| must be INHERIT if |pending_item|'s
+  // UserAgentType is NONE, as requesting a desktop or mobile user agent should
+  // be disabled for app-specific URLs.
+  DCHECK(pending_item->GetUserAgentType() != UserAgentType::NONE ||
+         user_agent_override_option == UserAgentOverrideOption::INHERIT);
+
+  // Newly created pending items are created with UserAgentType::NONE for native
+  // pages or UserAgentType::MOBILE for non-native pages.  If the pending item's
+  // URL is non-native, check which user agent type it should be created with
+  // based on |user_agent_override_option|.
+  DCHECK_NE(UserAgentType::DESKTOP, pending_item->GetUserAgentType());
+  if (pending_item->GetUserAgentType() == UserAgentType::NONE)
+    return;
+
+  switch (user_agent_override_option) {
+    case UserAgentOverrideOption::DESKTOP:
+      pending_item->SetUserAgentType(UserAgentType::DESKTOP);
+      break;
+    case UserAgentOverrideOption::MOBILE:
+      pending_item->SetUserAgentType(UserAgentType::MOBILE);
+      break;
+    case UserAgentOverrideOption::INHERIT: {
+      // Propagate the last committed non-native item's UserAgentType if there
+      // is one, otherwise keep the default value, which is mobile.
+      NavigationItem* last_non_native_item =
+          GetLastCommittedNonAppSpecificItem();
+      DCHECK(!last_non_native_item ||
+             last_non_native_item->GetUserAgentType() != UserAgentType::NONE);
+      if (last_non_native_item) {
+        pending_item->SetUserAgentType(
+            last_non_native_item->GetUserAgentType());
+      }
+      break;
+    }
   }
-  return items;
 }
 
 BrowserState* NavigationManagerImpl::GetBrowserState() const {
@@ -202,29 +221,23 @@ WebState* NavigationManagerImpl::GetWebState() const {
 }
 
 NavigationItem* NavigationManagerImpl::GetVisibleItem() const {
-  CRWSessionEntry* entry = [session_controller_ visibleEntry];
-  return [entry navigationItem];
+  return [session_controller_ visibleItem];
 }
 
 NavigationItem* NavigationManagerImpl::GetLastCommittedItem() const {
-  CRWSessionEntry* entry = [session_controller_ lastCommittedEntry];
-  return [entry navigationItem];
+  return [session_controller_ lastCommittedItem];
 }
 
 NavigationItem* NavigationManagerImpl::GetPendingItem() const {
-  return [[session_controller_ pendingEntry] navigationItem];
+  return [session_controller_ pendingItem];
 }
 
 NavigationItem* NavigationManagerImpl::GetTransientItem() const {
-  return [[session_controller_ transientEntry] navigationItem];
+  return [session_controller_ transientItem];
 }
 
 void NavigationManagerImpl::DiscardNonCommittedItems() {
-  [session_controller_ discardNonCommittedEntries];
-}
-
-void NavigationManagerImpl::LoadIfNecessary() {
-  // Nothing to do; iOS loads lazily.
+  [session_controller_ discardNonCommittedItems];
 }
 
 void NavigationManagerImpl::LoadURLWithParams(
@@ -243,46 +256,39 @@ void NavigationManagerImpl::AddTransientURLRewriter(
 }
 
 int NavigationManagerImpl::GetItemCount() const {
-  return [[session_controller_ entries] count];
+  return [session_controller_ items].size();
 }
 
 NavigationItem* NavigationManagerImpl::GetItemAtIndex(size_t index) const {
-  NSArray* entries = [session_controller_ entries];
-  return index < entries.count ? [entries[index] navigationItem] : nullptr;
-}
-
-int NavigationManagerImpl::GetCurrentItemIndex() const {
-  return [session_controller_ currentNavigationIndex];
+  return [session_controller_ itemAtIndex:index];
 }
 
 int NavigationManagerImpl::GetPendingItemIndex() const {
-  if ([session_controller_ hasPendingEntry]) {
-    if ([session_controller_ pendingEntryIndex] != -1) {
-      return [session_controller_ pendingEntryIndex];
+  if (GetPendingItem()) {
+    if ([session_controller_ pendingItemIndex] != -1) {
+      return [session_controller_ pendingItemIndex];
     }
-    // TODO(crbug.com/665189): understand why current item index is
+    // TODO(crbug.com/665189): understand why last committed item index is
     // returned here.
-    return GetCurrentItemIndex();
+    return GetLastCommittedItemIndex();
   }
   return -1;
 }
 
 int NavigationManagerImpl::GetLastCommittedItemIndex() const {
-  if (![[session_controller_ entries] count])
+  if (GetItemCount() == 0)
     return -1;
-  return [session_controller_ currentNavigationIndex];
+  return [session_controller_ lastCommittedItemIndex];
 }
 
 bool NavigationManagerImpl::RemoveItemAtIndex(int index) {
   if (index == GetLastCommittedItemIndex() || index == GetPendingItemIndex())
     return false;
 
-  NSUInteger idx = static_cast<NSUInteger>(index);
-  NSArray* entries = [session_controller_ entries];
-  if (idx >= entries.count)
+  if (index < 0 || index >= GetItemCount())
     return false;
 
-  [session_controller_ removeEntryAtIndex:index];
+  [session_controller_ removeItemAtIndex:index];
   return true;
 }
 
@@ -311,17 +317,53 @@ void NavigationManagerImpl::GoToIndex(int index) {
   delegate_->GoToIndex(index);
 }
 
-void NavigationManagerImpl::Reload(bool check_for_reposts) {
-  // Navigation manager may be empty if the only pending item failed to load
-  // with SSL error and the user has decided not to proceed.
-  NavigationItem* item = GetVisibleItem();
-  GURL url = item ? item->GetURL() : GURL(url::kAboutBlankURL);
-  web::Referrer referrer = item ? item->GetReferrer() : web::Referrer();
+NavigationItemList NavigationManagerImpl::GetBackwardItems() const {
+  return [session_controller_ backwardItems];
+}
 
-  WebState::OpenURLParams params(url, referrer,
-                                 WindowOpenDisposition::CURRENT_TAB,
-                                 ui::PAGE_TRANSITION_RELOAD, NO);
-  delegate_->GetWebState()->OpenURL(params);
+NavigationItemList NavigationManagerImpl::GetForwardItems() const {
+  return [session_controller_ forwardItems];
+}
+
+void NavigationManagerImpl::Reload(ReloadType reload_type,
+                                   bool check_for_reposts) {
+  if (!GetTransientItem() && !GetPendingItem() && !GetLastCommittedItem())
+    return;
+
+  // Reload with ORIGINAL_REQUEST_URL type should reload with the original
+  // request url of the transient item, or pending item if transient doesn't
+  // exist, or last committed item if both of them don't exist. The reason is
+  // that a server side redirect may change the item's url.
+  // For example, the user visits www.chromium.org and is then redirected
+  // to m.chromium.org, when the user wants to refresh the page with a different
+  // configuration (e.g. user agent), the user would be expecting to visit
+  // www.chromium.org instead of m.chromium.org.
+  if (reload_type == web::ReloadType::ORIGINAL_REQUEST_URL) {
+    NavigationItem* reload_item = nullptr;
+    if (GetTransientItem())
+      reload_item = GetTransientItem();
+    else if (GetPendingItem())
+      reload_item = GetPendingItem();
+    else
+      reload_item = GetLastCommittedItem();
+    DCHECK(reload_item);
+
+    reload_item->SetURL(reload_item->GetOriginalRequestURL());
+  }
+
+  delegate_->Reload();
+}
+
+void NavigationManagerImpl::CopyStateFromAndPrune(
+    const NavigationManager* manager) {
+  DCHECK(manager);
+  CRWSessionController* other_session =
+      static_cast<const NavigationManagerImpl*>(manager)->session_controller_;
+  [session_controller_ copyStateFromSessionControllerAndPrune:other_session];
+}
+
+bool NavigationManagerImpl::CanPruneAllButLastCommittedItem() const {
+  return [session_controller_ canPruneAllButLastCommittedItem];
 }
 
 std::unique_ptr<std::vector<BrowserURLRewriter::URLRewriter>>
@@ -333,18 +375,13 @@ void NavigationManagerImpl::RemoveTransientURLRewriters() {
   transient_url_rewriters_.reset();
 }
 
-void NavigationManagerImpl::CopyState(
-    NavigationManagerImpl* navigation_manager) {
-  SetSessionController([navigation_manager->GetSessionController() copy]);
-}
-
 int NavigationManagerImpl::GetIndexForOffset(int offset) const {
-  int result = [session_controller_ pendingEntryIndex] == -1
-                   ? GetCurrentItemIndex()
-                   : static_cast<int>([session_controller_ pendingEntryIndex]);
+  int result = [session_controller_ pendingItemIndex] == -1
+                   ? GetLastCommittedItemIndex()
+                   : static_cast<int>([session_controller_ pendingItemIndex]);
 
   if (offset < 0) {
-    if (GetTransientItem() && [session_controller_ pendingEntryIndex] == -1) {
+    if (GetTransientItem() && [session_controller_ pendingItemIndex] == -1) {
       // Going back from transient item that added to the end navigation stack
       // is a matter of discarding it as there is no need to move navigation
       // index back.
@@ -368,16 +405,6 @@ int NavigationManagerImpl::GetIndexForOffset(int offset) const {
     if (result > GetItemCount() /* overflow */)
       result = INT_MIN;
   } else if (offset > 0) {
-    if (GetPendingItem() && [session_controller_ pendingEntryIndex] == -1) {
-      // Chrome for iOS does not allow forward navigation if there is another
-      // pending navigation in progress. Returning invalid index indicates that
-      // forward navigation will not be allowed (and |INT_MAX| works for that).
-      // This is different from other platforms which allow forward navigation
-      // if pending item exist.
-      // TODO(crbug.com/661858): Remove this once back-forward navigation uses
-      // pending index.
-      return INT_MAX;
-    }
     while (offset > 0 && result < GetItemCount()) {
       ++result;
       --offset;
@@ -397,10 +424,25 @@ int NavigationManagerImpl::GetIndexForOffset(int offset) const {
 }
 
 bool NavigationManagerImpl::IsRedirectItemAtIndex(int index) const {
-  DCHECK_GT(index, 0);
+  DCHECK_GE(index, 0);
   DCHECK_LT(index, GetItemCount());
   ui::PageTransition transition = GetItemAtIndex(index)->GetTransitionType();
   return transition & ui::PAGE_TRANSITION_IS_REDIRECT_MASK;
+}
+
+NavigationItem* NavigationManagerImpl::GetLastCommittedNonAppSpecificItem()
+    const {
+  int index = GetLastCommittedItemIndex();
+  if (index == -1)
+    return nullptr;
+  WebClient* client = GetWebClient();
+  const ScopedNavigationItemImplList& items = [session_controller_ items];
+  while (index >= 0) {
+    NavigationItem* item = items[index--].get();
+    if (!client->IsAppSpecificURL(item->GetVirtualURL()))
+      return item;
+  }
+  return nullptr;
 }
 
 }  // namespace web

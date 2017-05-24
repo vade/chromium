@@ -29,7 +29,8 @@ class NET_EXPORT HttpResponseInfo {
   // Describes the kind of connection used to fetch this response.
   //
   // NOTE: Please keep in sync with Net.HttpResponseInfo.ConnectionInfo
-  // histogram.  Because of that, and also because these values are persisted to
+  // histogram in tools/metrics/histograms/histograms.xml.
+  // Because of that, and also because these values are persisted to
   // the cache, please make sure not to delete or reorder values.
   enum ConnectionInfo {
     CONNECTION_INFO_UNKNOWN = 0,
@@ -49,6 +50,8 @@ class NET_EXPORT HttpResponseInfo {
     CONNECTION_INFO_QUIC_36 = 14,
     CONNECTION_INFO_QUIC_37 = 15,
     CONNECTION_INFO_QUIC_38 = 16,
+    CONNECTION_INFO_QUIC_39 = 17,
+    CONNECTION_INFO_QUIC_40 = 18,
     NUM_OF_CONNECTION_INFOS,
   };
 
@@ -141,11 +144,6 @@ class NET_EXPORT HttpResponseInfo {
   // True if the resource was originally fetched for a prefetch and has not been
   // used since.
   bool unused_since_prefetch;
-
-  // True if this resource is stale and requires async revalidation.
-  // This value is not persisted by Persist(); it is only ever set when the
-  // response is retrieved from the cache.
-  bool async_revalidation_required;
 
   // Remote address of the socket which fetched this resource.
   //

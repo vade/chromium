@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/strings/nullable_string16.h"
 #include "content/common/manifest_manager_messages.h"
+#include "content/public/common/associated_interface_provider.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/renderer/fetchers/manifest_fetcher.h"
 #include "content/renderer/manifest/manifest_parser.h"
@@ -21,8 +22,8 @@ namespace content {
 ManifestManager::ManifestManager(RenderFrame* render_frame)
     : RenderFrameObserver(render_frame),
       may_have_manifest_(false),
-      manifest_dirty_(true) {
-}
+      manifest_dirty_(true),
+      weak_factory_(this) {}
 
 ManifestManager::~ManifestManager() {
   if (fetcher_)
@@ -103,12 +104,34 @@ void ManifestManager::DidChangeManifest() {
   may_have_manifest_ = true;
   manifest_dirty_ = true;
   manifest_url_ = GURL();
+
+  if (!render_frame()->IsMainFrame())
+    return;
+
+  if (weak_factory_.HasWeakPtrs())
+    return;
+
+  // Changing the manifest URL can trigger multiple notifications; the manifest
+  // URL update may involve removing the old manifest link before adding the new
+  // one, triggering multiple calls to DidChangeManifest(). Coalesce changes
+  // during a single event loop task to avoid sending spurious notifications to
+  // the browser.
+  //
+  // During document load, coalescing is disabled to maintain relative ordering
+  // of this notification and the favicon URL reporting.
+  if (!render_frame()->GetWebFrame()->IsLoading()) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&ManifestManager::ReportManifestChange,
+                              weak_factory_.GetWeakPtr()));
+    return;
+  }
+  ReportManifestChange();
 }
 
 void ManifestManager::DidCommitProvisionalLoad(
     bool is_new_navigation,
-    bool is_same_page_navigation) {
-  if (is_same_page_navigation)
+    bool is_same_document_navigation) {
+  if (is_same_document_navigation)
     return;
 
   may_have_manifest_ = false;
@@ -117,7 +140,7 @@ void ManifestManager::DidCommitProvisionalLoad(
 }
 
 void ManifestManager::FetchManifest() {
-  manifest_url_ = render_frame()->GetWebFrame()->document().manifestURL();
+  manifest_url_ = render_frame()->GetWebFrame()->GetDocument().ManifestURL();
 
   if (manifest_url_.is_empty()) {
     ManifestUmaUtil::FetchFailed(ManifestUmaUtil::FETCH_EMPTY_URL);
@@ -128,10 +151,10 @@ void ManifestManager::FetchManifest() {
   fetcher_.reset(new ManifestFetcher(manifest_url_));
   fetcher_->Start(
       render_frame()->GetWebFrame(),
-      render_frame()->GetWebFrame()->document().manifestUseCredentials(),
+      render_frame()->GetWebFrame()->GetDocument().ManifestUseCredentials(),
       base::Bind(&ManifestManager::OnManifestFetchComplete,
                  base::Unretained(this),
-                 render_frame()->GetWebFrame()->document().url()));
+                 render_frame()->GetWebFrame()->GetDocument().Url()));
 }
 
 static const std::string& GetMessagePrefix() {
@@ -143,14 +166,14 @@ void ManifestManager::OnManifestFetchComplete(
     const GURL& document_url,
     const blink::WebURLResponse& response,
     const std::string& data) {
-  if (response.isNull() && data.empty()) {
+  if (response.IsNull() && data.empty()) {
     ManifestUmaUtil::FetchFailed(ManifestUmaUtil::FETCH_UNSPECIFIED_REASON);
     ResolveCallbacks(ResolveStateFailure);
     return;
   }
 
   ManifestUmaUtil::FetchSucceeded();
-  GURL response_url = response.url();
+  GURL response_url = response.Url();
   base::StringPiece data_piece(data);
   ManifestParser parser(data_piece, response_url, document_url);
   parser.Parse();
@@ -161,15 +184,15 @@ void ManifestManager::OnManifestFetchComplete(
 
   for (const auto& error : manifest_debug_info_.errors) {
     blink::WebConsoleMessage message;
-    message.level = error.critical ? blink::WebConsoleMessage::LevelError :
-        blink::WebConsoleMessage::LevelWarning;
+    message.level = error.critical ? blink::WebConsoleMessage::kLevelError
+                                   : blink::WebConsoleMessage::kLevelWarning;
     message.text =
-        blink::WebString::fromUTF8(GetMessagePrefix() + error.message);
+        blink::WebString::FromUTF8(GetMessagePrefix() + error.message);
     message.url =
-        render_frame()->GetWebFrame()->document().manifestURL().string();
-    message.lineNumber = error.line;
-    message.columnNumber = error.column;
-    render_frame()->GetWebFrame()->addMessageToConsole(message);
+        render_frame()->GetWebFrame()->GetDocument().ManifestURL().GetString();
+    message.line_number = error.line;
+    message.column_number = error.column;
+    render_frame()->GetWebFrame()->AddMessageToConsole(message);
   }
 
   // Having errors while parsing the manifest doesn't mean the manifest parsing
@@ -179,7 +202,7 @@ void ManifestManager::OnManifestFetchComplete(
     return;
   }
 
-  manifest_url_ = response.url();
+  manifest_url_ = response.Url();
   manifest_ = parser.manifest();
   ResolveCallbacks(ResolveStateSuccess);
 }
@@ -207,6 +230,24 @@ void ManifestManager::ResolveCallbacks(ResolveState state) {
 
 void ManifestManager::OnDestruct() {
   delete this;
+}
+
+void ManifestManager::ReportManifestChange() {
+  auto manifest_url =
+      render_frame()->GetWebFrame()->GetDocument().ManifestURL();
+  if (manifest_url.IsNull()) {
+    GetManifestChangeObserver().ManifestUrlChanged(base::nullopt);
+  } else {
+    GetManifestChangeObserver().ManifestUrlChanged(GURL(manifest_url));
+  }
+}
+
+mojom::ManifestUrlChangeObserver& ManifestManager::GetManifestChangeObserver() {
+  if (!manifest_change_observer_) {
+    render_frame()->GetRemoteAssociatedInterfaces()->GetInterface(
+        &manifest_change_observer_);
+  }
+  return *manifest_change_observer_;
 }
 
 } // namespace content

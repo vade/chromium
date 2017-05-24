@@ -35,6 +35,7 @@
 #include "ui/shell_dialogs/select_file_dialog.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/system/pointer_device_observer.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "components/user_manager/user_manager.h"
@@ -83,7 +84,7 @@ class BrowserOptionsHandler
   void Uninitialize() override;
 
   // syncer::SyncServiceObserver implementation.
-  void OnStateChanged() override;
+  void OnStateChanged(syncer::SyncService* sync) override;
 
   // SigninManagerBase::Observer implementation.
   void GoogleSigninSucceeded(const std::string& account_id,
@@ -98,15 +99,18 @@ class BrowserOptionsHandler
   // extensions::ExtensionRegistryObserver:
   void OnExtensionLoaded(content::BrowserContext* browser_context,
                          const extensions::Extension* extension) override;
-  void OnExtensionUnloaded(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension,
-      extensions::UnloadedExtensionInfo::Reason reason) override;
+  void OnExtensionUnloaded(content::BrowserContext* browser_context,
+                           const extensions::Extension* extension,
+                           extensions::UnloadedExtensionReason reason) override;
 
   // policy::PolicyService::Observer:
   void OnPolicyUpdated(const policy::PolicyNamespace& ns,
                        const policy::PolicyMap& previous,
                        const policy::PolicyMap& current) override;
+#if defined(OS_CHROMEOS)
+  static void DisablePolymerPreloadForTesting();
+#endif  // defined(OS_CHROMEOS)
+
  private:
   // content::NotificationObserver implementation.
   void Observe(int type,
@@ -341,6 +345,9 @@ class BrowserOptionsHandler
   // Called to show Android apps settings.
   void ShowAndroidAppsSettings(const base::ListValue* args);
 
+  // Called to show apps based on a url for the Play Store.
+  void ShowPlayStoreApps(const base::ListValue* args);
+
   // Called to show TalkBack settings.
   void ShowAccessibilityTalkBackSettings(const base::ListValue *args);
 #endif
@@ -439,6 +446,9 @@ class BrowserOptionsHandler
   bool enable_factory_reset_;
 
   PrefChangeRegistrar local_state_pref_change_registrar_;
+
+  std::unique_ptr<chromeos::CrosSettings::ObserverSubscription>
+      system_timezone_policy_observer_;
 #endif
 
   ScopedObserver<SigninManagerBase, SigninManagerBase::Observer>

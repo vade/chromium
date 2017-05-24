@@ -7,47 +7,53 @@
 
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
+#include "modules/webaudio/AudioContextOptions.h"
 #include "modules/webaudio/BaseAudioContext.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
+class AudioContextOptions;
 class AudioTimestamp;
 class Document;
 class ExceptionState;
 class ScriptState;
+class WebAudioLatencyHint;
 
 // This is an BaseAudioContext which actually plays sound, unlike an
 // OfflineAudioContext which renders sound into a buffer.
-class AudioContext : public BaseAudioContext {
+class MODULES_EXPORT AudioContext : public BaseAudioContext {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static AudioContext* create(Document&, ExceptionState&);
+  static AudioContext* Create(Document&,
+                              const AudioContextOptions&,
+                              ExceptionState&);
 
   ~AudioContext() override;
   DECLARE_VIRTUAL_TRACE();
 
   ScriptPromise closeContext(ScriptState*);
-  bool isContextClosed() const final;
+  bool IsContextClosed() const final;
 
   ScriptPromise suspendContext(ScriptState*) final;
   ScriptPromise resumeContext(ScriptState*) final;
 
-  bool hasRealtimeConstraint() final { return true; }
+  bool HasRealtimeConstraint() final { return true; }
 
   void getOutputTimestamp(ScriptState*, AudioTimestamp&);
+  double baseLatency() const;
 
  protected:
-  AudioContext(Document&);
+  AudioContext(Document&, const WebAudioLatencyHint&);
 
-  void didClose() final;
+  void DidClose() final;
 
  private:
-  void stopRendering();
+  void StopRendering();
 
-  unsigned m_contextId;
-  Member<ScriptPromiseResolver> m_closeResolver;
+  unsigned context_id_;
+  Member<ScriptPromiseResolver> close_resolver_;
 };
 
 }  // namespace blink

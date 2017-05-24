@@ -23,7 +23,7 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.CachedMetrics.SparseHistogramSample;
 import org.chromium.base.metrics.CachedMetrics.TimesHistogramSample;
-import org.chromium.chrome.browser.ChromeApplication;
+import org.chromium.chrome.browser.AppHooks;
 
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -51,9 +51,7 @@ public class ExternalAuthUtils {
      */
     public static ExternalAuthUtils getInstance() {
         if (sInstance.get() == null) {
-            ChromeApplication application =
-                    (ChromeApplication) ContextUtils.getApplicationContext();
-            sInstance.compareAndSet(null, application.createExternalAuthUtils());
+            sInstance.compareAndSet(null, AppHooks.get().createExternalAuthUtils());
         }
         return sInstance.get();
     }
@@ -94,20 +92,18 @@ public class ExternalAuthUtils {
 
     /**
      * Returns whether the current build of Chrome is a Google-signed package.
-     *
-     * @param context the current context.
      * @return whether the currently running application is signed with Google keys.
      */
-    public boolean isChromeGoogleSigned(Context context) {
-        return isGoogleSigned(context, context.getPackageName());
+    public boolean isChromeGoogleSigned() {
+        String packageName = ContextUtils.getApplicationContext().getPackageName();
+        return isGoogleSigned(packageName);
     }
 
     /**
      * Returns whether the call is originating from a Google-signed package.
-     * @param appContext the current context.
      * @param packageName The package name to inquire about.
      */
-    public boolean isGoogleSigned(Context context, String packageName) {
+    public boolean isGoogleSigned(String packageName) {
         // This is overridden in a subclass.
         return false;
     }
@@ -131,7 +127,7 @@ public class ExternalAuthUtils {
         for (String packageName : callingPackages) {
             if (!TextUtils.isEmpty(packageToMatch) && !packageName.equals(packageToMatch)) continue;
             matchFound = true;
-            if ((shouldBeGoogleSigned && !isGoogleSigned(context, packageName))
+            if ((shouldBeGoogleSigned && !isGoogleSigned(packageName))
                     || (shouldBeSystem && !isSystemBuild(pm, packageName))) {
                 return false;
             }
@@ -245,7 +241,7 @@ public class ExternalAuthUtils {
     public boolean canUseFirstPartyGooglePlayServices(
             Context context, UserRecoverableErrorHandler userRecoverableErrorHandler) {
         return canUseGooglePlayServices(context, userRecoverableErrorHandler)
-                && isChromeGoogleSigned(context);
+                && isChromeGoogleSigned();
     }
 
     /**
@@ -266,8 +262,7 @@ public class ExternalAuthUtils {
      */
     protected int checkGooglePlayServicesAvailable(final Context context) {
         // Temporarily allowing disk access. TODO: Fix. See http://crbug.com/577190
-        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
-        StrictMode.allowThreadDiskWrites();
+        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskWrites();
         try {
             long time = SystemClock.elapsedRealtime();
             int isAvailable =

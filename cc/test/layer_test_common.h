@@ -15,6 +15,7 @@
 #include "cc/test/fake_layer_tree_host.h"
 #include "cc/test/fake_layer_tree_host_client.h"
 #include "cc/test/test_task_graph_runner.h"
+#include "cc/trees/effect_node.h"
 #include "cc/trees/layer_tree_host_impl.h"
 
 #define EXPECT_SET_NEEDS_COMMIT(expect, code_to_test)                 \
@@ -40,6 +41,9 @@ class QuadList;
 class RenderSurfaceImpl;
 class ResourceProvider;
 
+// Returns the RenderSurfaceImpl into which the given layer draws.
+RenderSurfaceImpl* GetRenderSurface(LayerImpl* layer_impl);
+
 class LayerTestCommon {
  public:
   static const char* quad_string;
@@ -54,7 +58,11 @@ class LayerTestCommon {
   class LayerImplTest {
    public:
     LayerImplTest();
+    explicit LayerImplTest(
+        std::unique_ptr<CompositorFrameSink> compositor_frame_sink);
     explicit LayerImplTest(const LayerTreeSettings& settings);
+    LayerImplTest(const LayerTreeSettings& settings,
+                  std::unique_ptr<CompositorFrameSink> compositor_frame_sink);
     ~LayerImplTest();
 
     template <typename T>
@@ -135,6 +143,25 @@ class LayerTestCommon {
                                            layer_impl_id_++, a, b, c, d, e);
       T* ptr = layer.get();
       root_layer_for_testing()->test_properties()->AddChild(std::move(layer));
+      return ptr;
+    }
+
+    template <typename T,
+              typename A,
+              typename B,
+              typename C,
+              typename D,
+              typename E>
+    T* AddChild(LayerImpl* parent,
+                const A& a,
+                const B& b,
+                const C& c,
+                const D& d,
+                const E& e) {
+      std::unique_ptr<T> layer = T::Create(host_->host_impl()->active_tree(),
+                                           layer_impl_id_++, a, b, c, d, e);
+      T* ptr = layer.get();
+      parent->test_properties()->AddChild(std::move(layer));
       return ptr;
     }
 

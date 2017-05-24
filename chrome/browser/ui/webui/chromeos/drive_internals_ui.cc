@@ -20,6 +20,7 @@
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
+#include "base/task_scheduler/post_task.h"
 #include "chrome/browser/chromeos/drive/debug_info_collector.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
@@ -351,7 +352,7 @@ void DriveInternalsWebUIHandler::OnGetAppList(
   base::DictionaryValue app_list;
   app_list.SetString("etag", parsed_app_list->etag());
 
-  base::ListValue* items = new base::ListValue();
+  auto items = base::MakeUnique<base::ListValue>();
   for (size_t i = 0; i < parsed_app_list->items().size(); ++i) {
     const google_apis::AppResource* app = parsed_app_list->items()[i].get();
     auto app_data = base::MakeUnique<base::DictionaryValue>();
@@ -362,7 +363,7 @@ void DriveInternalsWebUIHandler::OnGetAppList(
 
     items->Append(std::move(app_data));
   }
-  app_list.Set("items", items);
+  app_list.Set("items", std::move(items));
 
   web_ui()->CallJavascriptFunctionUnsafe("updateAppList", app_list);
 }
@@ -591,7 +592,7 @@ void DriveInternalsWebUIHandler::ResetFinished(bool success) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   web_ui()->CallJavascriptFunctionUnsafe("updateResetStatus",
-                                         base::FundamentalValue(success));
+                                         base::Value(success));
 }
 
 void DriveInternalsWebUIHandler::ListFileEntries(const base::ListValue* args) {
@@ -669,15 +670,12 @@ void DriveInternalsWebUIHandler::UpdateGCacheContentsSection() {
   const base::FilePath root_path = drive::util::GetCacheRootPath(profile);
   base::ListValue* gcache_contents = new base::ListValue;
   base::DictionaryValue* gcache_summary = new base::DictionaryValue;
-  BrowserThread::PostBlockingPoolTaskAndReply(
-      FROM_HERE,
-      base::Bind(&GetGCacheContents,
-                 root_path,
-                 gcache_contents,
+  base::PostTaskWithTraitsAndReply(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+      base::Bind(&GetGCacheContents, root_path, gcache_contents,
                  gcache_summary),
       base::Bind(&DriveInternalsWebUIHandler::OnGetGCacheContents,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 base::Owned(gcache_contents),
+                 weak_ptr_factory_.GetWeakPtr(), base::Owned(gcache_contents),
                  base::Owned(gcache_summary)));
 }
 
@@ -711,8 +709,8 @@ void DriveInternalsWebUIHandler::UpdateLocalStorageUsageSection() {
   base::FilePath home_path;
   if (PathService::Get(base::DIR_HOME, &home_path)) {
     base::DictionaryValue* local_storage_summary = new base::DictionaryValue;
-    BrowserThread::PostBlockingPoolTaskAndReply(
-        FROM_HERE,
+    base::PostTaskWithTraitsAndReply(
+        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
         base::Bind(&GetFreeDiskSpace, home_path, local_storage_summary),
         base::Bind(&DriveInternalsWebUIHandler::OnGetFreeDiskSpace,
                    weak_ptr_factory_.GetWeakPtr(),
@@ -811,7 +809,7 @@ void DriveInternalsWebUIHandler::OnGetResourceEntryByPath(
 
   if (error == drive::FILE_ERROR_OK) {
     DCHECK(entry.get());
-    const base::StringValue value(FormatEntry(path, *entry) + "\n");
+    const base::Value value(FormatEntry(path, *entry) + "\n");
     web_ui()->CallJavascriptFunctionUnsafe("updateFileSystemContents", value);
   }
 }
@@ -846,7 +844,7 @@ void DriveInternalsWebUIHandler::OnReadDirectoryByPath(
     // There may be pending ReadDirectoryByPath() calls, but we can update
     // the page with what we have now. This results in progressive
     // updates, which is good for a large file system.
-    const base::StringValue value(file_system_as_text);
+    const base::Value value(file_system_as_text);
     web_ui()->CallJavascriptFunctionUnsafe("updateFileSystemContents", value);
   }
 }

@@ -186,6 +186,11 @@ class COMPOSITOR_EXPORT Layer
   // the combined opacity of the parent.
   float GetCombinedOpacity() const;
 
+  // The layer temperature value between 0.0f and 1.0f, where a value of 0.0f
+  // is least warm (which is the default), and a value of 1.0f is most warm.
+  float layer_temperature() const { return layer_temperature_; }
+  void SetLayerTemperature(float value);
+
   // Blur pixels by this amount in anything below the layer and visible through
   // the layer.
   int background_blur() const { return background_blur_radius_; }
@@ -271,7 +276,9 @@ class COMPOSITOR_EXPORT Layer
   bool GetTargetTransformRelativeTo(const Layer* ancestor,
                                     gfx::Transform* transform) const;
 
-  // See description in View for details
+  // Note: Setting a layer non-opaque has significant performance impact,
+  // especially on low-end Chrome OS devices. Please ensure you are not
+  // adding unnecessary overdraw. When in doubt, talk to the graphics team.
   void SetFillsBoundsOpaquely(bool fills_bounds_opaquely);
   bool fills_bounds_opaquely() const { return fills_bounds_opaquely_; }
 
@@ -292,9 +299,17 @@ class COMPOSITOR_EXPORT Layer
   void SetTextureFlipped(bool flipped);
   bool TextureFlipped() const;
 
-  // Begins showing content from a surface with a particular id.
-  void SetShowSurface(const cc::SurfaceInfo& surface_info,
-                      scoped_refptr<cc::SurfaceReferenceFactory> surface_ref);
+  // Begins showing content from a surface with a particular ID.
+  void SetShowPrimarySurface(
+      const cc::SurfaceInfo& surface_info,
+      scoped_refptr<cc::SurfaceReferenceFactory> surface_ref);
+
+  // In the event that the primary surface is not yet available in the
+  // display compositor, the fallback surface will be used.
+  void SetFallbackSurface(const cc::SurfaceInfo& surface_info);
+
+  // Returns the fallback SurfaceInfo set by SetFallbackSurface.
+  const cc::SurfaceInfo* GetFallbackSurfaceInfo() const;
 
   bool has_external_content() {
     return texture_layer_.get() || surface_layer_.get();
@@ -349,7 +364,9 @@ class COMPOSITOR_EXPORT Layer
 
   // Makes this Layer scrollable, clipping to |parent_clip_layer|. |on_scroll|
   // is invoked when scrolling performed by the cc::InputHandler is committed.
-  void SetScrollable(Layer* parent_clip_layer, const base::Closure& on_scroll);
+  void SetScrollable(
+      Layer* parent_clip_layer,
+      const base::Callback<void(const gfx::ScrollOffset&)>& on_scroll);
 
   // Gets and sets the current scroll offset of the layer.
   gfx::ScrollOffset CurrentScrollOffset() const;
@@ -409,6 +426,7 @@ class COMPOSITOR_EXPORT Layer
   void SetBrightnessFromAnimation(float brightness) override;
   void SetGrayscaleFromAnimation(float grayscale) override;
   void SetColorFromAnimation(SkColor color) override;
+  void SetTemperatureFromAnimation(float temperature) override;
   void ScheduleDrawForAnimation() override;
   const gfx::Rect& GetBoundsForAnimation() const override;
   gfx::Transform GetTransformForAnimation() const override;
@@ -417,6 +435,7 @@ class COMPOSITOR_EXPORT Layer
   float GetBrightnessForAnimation() const override;
   float GetGrayscaleForAnimation() const override;
   SkColor GetColorForAnimation() const override;
+  float GetTemperatureFromAnimation() const override;
   float GetDeviceScaleFactor() const override;
   cc::Layer* GetCcLayer() const override;
   LayerThreadedAnimationDelegate* GetThreadedAnimationDelegate() override;
@@ -465,7 +484,9 @@ class COMPOSITOR_EXPORT Layer
   // Visibility of this layer. See SetVisible/IsDrawn for more details.
   bool visible_;
 
+  // See SetFillsBoundsOpaquely(). Defaults to true.
   bool fills_bounds_opaquely_;
+
   bool fills_bounds_completely_;
 
   // Union of damaged rects, in layer space, that SetNeedsDisplayRect should
@@ -484,6 +505,14 @@ class COMPOSITOR_EXPORT Layer
   float layer_brightness_;
   float layer_grayscale_;
   bool layer_inverted_;
+
+  // The global color temperature value (0.0f ~ 1.0f). Used to calculate the
+  // layer blue and green colors scales. 0.0f is least warm (default), and 1.0f
+  // is most warm.
+  float layer_temperature_;
+  // The calculated layer blue and green color scales (0.0f ~ 1.0f).
+  float layer_blue_scale_;
+  float layer_green_scale_;
 
   // The associated mask layer with this layer.
   Layer* layer_mask_;

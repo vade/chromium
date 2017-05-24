@@ -44,17 +44,17 @@ class TestSkTypeface : public SkTypeface {
     return nullptr;
   }
   void onFilterRec(SkScalerContextRec*) const override { ADD_FAILURE(); }
-  SkAdvancedTypefaceMetrics* onGetAdvancedTypefaceMetrics(
-      PerGlyphInfo,
-      const uint32_t* glyphIDs,
-      uint32_t glyphIDsCount) const override {
-    ADD_FAILURE();
-    return nullptr;
-  }
 
   SkStreamAsset* onOpenStream(int* ttcIndex) const override {
     ADD_FAILURE();
     return nullptr;
+  }
+
+  int onGetVariationDesignPosition(
+      SkFontArguments::VariationPosition::Coordinate coordinates[],
+      int coordinateCount) const override {
+    ADD_FAILURE();
+    return -1;
   }
 
   void onGetFontDescriptor(SkFontDescriptor*, bool* isLocal) const override {

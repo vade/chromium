@@ -12,7 +12,7 @@
 #include "base/files/scoped_file.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/synchronization/waitable_event.h"
@@ -951,8 +951,8 @@ void VaapiVideoDecodeAccelerator::FinishFlush() {
 
   base::AutoLock auto_lock(lock_);
   if (state_ != kDecoding) {
-    DCHECK_EQ(state_, kDestroying);
-    return;  // We could've gotten destroyed already.
+    DCHECK(state_ == kDestroying || state_ == kResetting) << state_;
+    return;
   }
 
   // Still waiting for textures from client to finish outputting all pending
@@ -1010,12 +1010,16 @@ void VaapiVideoDecodeAccelerator::Reset() {
   // Drop all remaining input buffers, if present.
   while (!input_buffers_.empty()) {
     const auto& input_buffer = input_buffers_.front();
-    if (!input_buffer->is_flush())
+    if (!input_buffer->is_flush()) {
       task_runner_->PostTask(
           FROM_HERE, base::Bind(&Client::NotifyEndOfBitstreamBuffer, client_,
                                 input_buffer->id));
+      --num_stream_bufs_at_decoder_;
+    }
     input_buffers_.pop();
   }
+  TRACE_COUNTER1("Video Decoder", "Stream buffers at decoder",
+                 num_stream_bufs_at_decoder_);
 
   decoder_thread_task_runner_->PostTask(
       FROM_HERE, base::Bind(&VaapiVideoDecodeAccelerator::ResetTask,
@@ -1049,7 +1053,6 @@ void VaapiVideoDecodeAccelerator::FinishReset() {
     return;
   }
 
-  num_stream_bufs_at_decoder_ = 0;
   state_ = kIdle;
 
   task_runner_->PostTask(FROM_HERE,

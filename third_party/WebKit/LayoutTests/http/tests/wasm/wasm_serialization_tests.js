@@ -33,7 +33,7 @@ function findStartOfWasmHeader(byteView) {
 function TestIncompatibleDowngrade() {
   return createWasmModule()
     .then((mod) => {
-      var buffer = window.internals.serializeObject(mod);
+      var buffer = window.internals.serializeWithInlineWasm(mod);
       var byteView = new Uint8Array(buffer);
       // The serialized payload starts with some serialization header, followed
       // by the wasm wire bytes. Those should start with the characters
@@ -57,12 +57,7 @@ function TestIncompatibleDowngrade() {
       assert_true(invalidated,
                   "the serialized blob should contain some non-null bytes.");
 
-      var deserialized = undefined;
-      try {
-        deserialized = window.internals.deserializeBuffer(byteView.buffer);
-        assert_unreached();
-      } catch (e) {
-        assert_equals(deserialized, undefined);
-      }
+      var deserialized = window.internals.deserializeBufferContainingWasm(byteView.buffer);
+      assert_equals(deserialized, null);
     });
 }

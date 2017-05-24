@@ -6,11 +6,11 @@
 
 #include <algorithm>
 
-#include "ash/display/window_tree_host_manager.h"
 #include "ash/public/cpp/shell_window_ids.h"
-#include "ash/screen_util.h"
 #include "ash/shell.h"
+#include "ash/shell_port.h"
 #include "ash/wm/window_util.h"
+#include "ash/wm_window.h"
 #include "base/memory/ptr_util.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/screen_position_client.h"
@@ -22,8 +22,10 @@
 #include "ui/compositor/layer_tree_owner.h"
 #include "ui/compositor/paint_context.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
+#include "ui/display/display.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
+#include "ui/wm/core/coordinate_conversion.h"
 #include "ui/wm/core/shadow_types.h"
 #include "ui/wm/core/window_util.h"
 
@@ -35,9 +37,8 @@ class DragWindowController::DragWindowDetails : public aura::WindowDelegate {
  public:
   DragWindowDetails(const display::Display& display,
                     aura::Window* original_window)
-      : root_window_(Shell::GetInstance()
-                         ->window_tree_host_manager()
-                         ->GetRootWindowForDisplayId(display.id())) {}
+      : root_window_(
+            ShellPort::Get()->GetRootWindowForDisplayId(display.id())) {}
 
   ~DragWindowDetails() override {
     delete drag_window_;
@@ -59,8 +60,8 @@ class DragWindowController::DragWindowDetails : public aura::WindowDelegate {
     if (!drag_window_)
       CreateDragWindow(original_window, bounds_in_screen);
 
-    gfx::Rect bounds_in_root = ScreenUtil::ConvertRectFromScreen(
-        drag_window_->parent(), bounds_in_screen);
+    gfx::Rect bounds_in_root = bounds_in_screen;
+    ::wm::ConvertRectFromScreen(drag_window_->parent(), &bounds_in_root);
     drag_window_->SetBounds(bounds_in_root);
     if (root_bounds_in_screen.Contains(drag_location_in_screen)) {
       SetOpacity(original_window, 1.f);

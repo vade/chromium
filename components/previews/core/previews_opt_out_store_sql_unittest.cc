@@ -15,6 +15,9 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/field_trial.h"
+#include "base/metrics/field_trial_param_associator.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/histogram_tester.h"
@@ -36,7 +39,8 @@ const base::FilePath::CharType kOptOutFilename[] = FILE_PATH_LITERAL("OptOut");
 
 class PreviewsOptOutStoreSQLTest : public testing::Test {
  public:
-  PreviewsOptOutStoreSQLTest() {}
+  PreviewsOptOutStoreSQLTest()
+      : field_trials_(new base::FieldTrialList(nullptr)) {}
   ~PreviewsOptOutStoreSQLTest() override {}
 
   // Called when |store_| is done loading.
@@ -60,16 +64,17 @@ class PreviewsOptOutStoreSQLTest : public testing::Test {
   }
 
   // Creates a store that operates on one thread.
-  void Create() {
+  void Create(std::unique_ptr<PreviewsTypeList> enabled_previews) {
     store_ = base::MakeUnique<PreviewsOptOutStoreSQL>(
         base::ThreadTaskRunnerHandle::Get(),
         base::ThreadTaskRunnerHandle::Get(),
-        temp_dir_.GetPath().Append(kOptOutFilename));
+        temp_dir_.GetPath().Append(kOptOutFilename),
+        std::move(enabled_previews));
   }
 
   // Sets up initialization of |store_|.
-  void CreateAndLoad() {
-    Create();
+  void CreateAndLoad(std::unique_ptr<PreviewsTypeList> enabled_previews) {
+    Create(std::move(enabled_previews));
     Load();
   }
 
@@ -80,6 +85,13 @@ class PreviewsOptOutStoreSQLTest : public testing::Test {
   void TearDown() override { DestroyStore(); }
 
  protected:
+  void ResetFieldTrials() {
+    // Destroy existing FieldTrialList before creating new one to avoid DCHECK.
+    field_trials_.reset();
+    field_trials_.reset(new base::FieldTrialList(nullptr));
+    base::FieldTrialParamAssociator::GetInstance()->ClearAllParamsForTesting();
+  }
+
   base::HistogramTester histogram_tester_;
 
   base::MessageLoop message_loop_;
@@ -95,12 +107,17 @@ class PreviewsOptOutStoreSQLTest : public testing::Test {
 
   // The directory for the database.
   base::ScopedTempDir temp_dir_;
+
+ private:
+  std::unique_ptr<base::FieldTrialList> field_trials_;
 };
 
 TEST_F(PreviewsOptOutStoreSQLTest, TestErrorRecovery) {
   // Creates the database and corrupt to test the recovery method.
   std::string test_host = "host.com";
-  CreateAndLoad();
+  std::unique_ptr<PreviewsTypeList> enabled_previews(new PreviewsTypeList);
+  enabled_previews->push_back({PreviewsType::OFFLINE, 0});
+  CreateAndLoad(std::move(enabled_previews));
   store_->AddPreviewNavigation(true, test_host, PreviewsType::OFFLINE,
                                base::Time::Now());
   base::RunLoop().RunUntilIdle();
@@ -111,7 +128,9 @@ TEST_F(PreviewsOptOutStoreSQLTest, TestErrorRecovery) {
       temp_dir_.GetPath().Append(kOptOutFilename)));
   base::RunLoop().RunUntilIdle();
 
-  CreateAndLoad();
+  enabled_previews.reset(new PreviewsTypeList);
+  enabled_previews->push_back({PreviewsType::OFFLINE, 0});
+  CreateAndLoad(std::move(enabled_previews));
   // The data should be recovered.
   EXPECT_EQ(1U, black_list_map_->size());
   auto iter = black_list_map_->find(test_host);
@@ -123,7 +142,9 @@ TEST_F(PreviewsOptOutStoreSQLTest, TestErrorRecovery) {
 TEST_F(PreviewsOptOutStoreSQLTest, TestPersistance) {
   // Tests if data is stored as expected in the SQLite database.
   std::string test_host = "host.com";
-  CreateAndLoad();
+  std::unique_ptr<PreviewsTypeList> enabled_previews(new PreviewsTypeList);
+  enabled_previews->push_back({PreviewsType::OFFLINE, 0});
+  CreateAndLoad(std::move(enabled_previews));
   histogram_tester_.ExpectUniqueSample("Previews.OptOut.DBRowCount", 0, 1);
   base::Time now = base::Time::Now();
   store_->AddPreviewNavigation(true, test_host, PreviewsType::OFFLINE, now);
@@ -134,7 +155,9 @@ TEST_F(PreviewsOptOutStoreSQLTest, TestPersistance) {
   DestroyStore();
 
   // Reload and test for persistence
-  CreateAndLoad();
+  enabled_previews.reset(new PreviewsTypeList);
+  enabled_previews->push_back({PreviewsType::OFFLINE, 0});
+  CreateAndLoad(std::move(enabled_previews));
   EXPECT_EQ(1U, black_list_map_->size());
   auto iter = black_list_map_->find(test_host);
 
@@ -158,7 +181,9 @@ TEST_F(PreviewsOptOutStoreSQLTest, TestMaxRows) {
   std::string row_limit_string = base::SizeTToString(row_limit);
   command_line->AppendSwitchASCII("previews-max-opt-out-rows",
                                   row_limit_string);
-  CreateAndLoad();
+  std::unique_ptr<PreviewsTypeList> enabled_previews(new PreviewsTypeList);
+  enabled_previews->push_back({PreviewsType::OFFLINE, 0});
+  CreateAndLoad(std::move(enabled_previews));
   histogram_tester_.ExpectUniqueSample("Previews.OptOut.DBRowCount", 0, 1);
   base::SimpleTestClock clock;
 
@@ -180,7 +205,9 @@ TEST_F(PreviewsOptOutStoreSQLTest, TestMaxRows) {
   DestroyStore();
 
   // Reload and test for persistence
-  CreateAndLoad();
+  enabled_previews.reset(new PreviewsTypeList);
+  enabled_previews->push_back({PreviewsType::OFFLINE, 0});
+  CreateAndLoad(std::move(enabled_previews));
   histogram_tester_.ExpectBucketCount("Previews.OptOut.DBRowCount",
                                       static_cast<int>(row_limit) + 1, 1);
   // The delete happens after the load, so it is possible to load more than
@@ -190,7 +217,9 @@ TEST_F(PreviewsOptOutStoreSQLTest, TestMaxRows) {
             host_indifferent_item_->OptOutRecordsSizeForTesting());
 
   DestroyStore();
-  CreateAndLoad();
+  enabled_previews.reset(new PreviewsTypeList);
+  enabled_previews->push_back({PreviewsType::OFFLINE, 0});
+  CreateAndLoad(std::move(enabled_previews));
   histogram_tester_.ExpectBucketCount("Previews.OptOut.DBRowCount",
                                       static_cast<int>(row_limit), 1);
 
@@ -218,7 +247,9 @@ TEST_F(PreviewsOptOutStoreSQLTest, TestMaxRowsPerHost) {
   std::string row_limit_string = base::SizeTToString(row_limit);
   command_line->AppendSwitchASCII("previews-max-opt-out-rows-per-host",
                                   row_limit_string);
-  CreateAndLoad();
+  std::unique_ptr<PreviewsTypeList> enabled_previews(new PreviewsTypeList);
+  enabled_previews->push_back({PreviewsType::OFFLINE, 0});
+  CreateAndLoad(std::move(enabled_previews));
   histogram_tester_.ExpectUniqueSample("Previews.OptOut.DBRowCount", 0, 1);
   base::SimpleTestClock clock;
 
@@ -240,7 +271,9 @@ TEST_F(PreviewsOptOutStoreSQLTest, TestMaxRowsPerHost) {
   DestroyStore();
 
   // Reload and test for persistence.
-  CreateAndLoad();
+  enabled_previews.reset(new PreviewsTypeList);
+  enabled_previews->push_back({PreviewsType::OFFLINE, 0});
+  CreateAndLoad(std::move(enabled_previews));
   histogram_tester_.ExpectBucketCount("Previews.OptOut.DBRowCount",
                                       static_cast<int>(row_limit), 1);
 
@@ -257,6 +290,68 @@ TEST_F(PreviewsOptOutStoreSQLTest, TestMaxRowsPerHost) {
   // be black listed.
   EXPECT_FALSE(iter->second->IsBlackListed(clock.Now()));
   histogram_tester_.ExpectTotalCount("Previews.OptOut.DBRowCount", 2);
+}
+
+TEST_F(PreviewsOptOutStoreSQLTest, TestPreviewsDisabledClearsBlacklistEntry) {
+  // Tests if data is cleared for previews type when it is disabled.
+  // Enable offline previews and add black list entry for it.
+  std::map<std::string, std::string> params;
+  std::string test_host = "host.com";
+  std::unique_ptr<PreviewsTypeList> enabled_previews(new PreviewsTypeList);
+  enabled_previews->push_back({PreviewsType::OFFLINE, 0});
+  CreateAndLoad(std::move(enabled_previews));
+  histogram_tester_.ExpectUniqueSample("Previews.OptOut.DBRowCount", 0, 1);
+  base::Time now = base::Time::Now();
+  store_->AddPreviewNavigation(true, test_host, PreviewsType::OFFLINE, now);
+  base::RunLoop().RunUntilIdle();
+
+  // Force data write to database then reload it and verify black list entry
+  // is present.
+  DestroyStore();
+  enabled_previews.reset(new PreviewsTypeList);
+  enabled_previews->push_back({PreviewsType::OFFLINE, 0});
+  CreateAndLoad(std::move(enabled_previews));
+  auto iter = black_list_map_->find(test_host);
+  EXPECT_NE(black_list_map_->end(), iter);
+  EXPECT_EQ(1U, iter->second->OptOutRecordsSizeForTesting());
+
+  DestroyStore();
+  enabled_previews.reset(new PreviewsTypeList);
+  CreateAndLoad(std::move(enabled_previews));
+  iter = black_list_map_->find(test_host);
+  EXPECT_EQ(black_list_map_->end(), iter);
+
+}
+
+TEST_F(PreviewsOptOutStoreSQLTest,
+       TestPreviewsVersionUpdateClearsBlacklistEntry) {
+  // Tests if data is cleared for new version of previews type.
+  // Enable offline previews and add black list entry for it.
+  std::string test_host = "host.com";
+  std::unique_ptr<PreviewsTypeList> enabled_previews(new PreviewsTypeList);
+  enabled_previews->push_back({PreviewsType::OFFLINE, 1});
+  CreateAndLoad(std::move(enabled_previews));
+  histogram_tester_.ExpectUniqueSample("Previews.OptOut.DBRowCount", 0, 1);
+  base::Time now = base::Time::Now();
+  store_->AddPreviewNavigation(true, test_host, PreviewsType::OFFLINE, now);
+  base::RunLoop().RunUntilIdle();
+
+  // Force data write to database then reload it and verify black list entry
+  // is present.
+  DestroyStore();
+  enabled_previews.reset(new PreviewsTypeList);
+  enabled_previews->push_back({PreviewsType::OFFLINE, 1});
+  CreateAndLoad(std::move(enabled_previews));
+  auto iter = black_list_map_->find(test_host);
+  EXPECT_NE(black_list_map_->end(), iter);
+  EXPECT_EQ(1U, iter->second->OptOutRecordsSizeForTesting());
+
+  DestroyStore();
+  enabled_previews.reset(new PreviewsTypeList);
+  enabled_previews->push_back({PreviewsType::OFFLINE, 2});
+  CreateAndLoad(std::move(enabled_previews));
+  iter = black_list_map_->find(test_host);
+  EXPECT_EQ(black_list_map_->end(), iter);
 }
 
 }  // namespace net

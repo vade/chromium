@@ -9,7 +9,7 @@
 #define BASE_THREADING_POST_TASK_AND_REPLY_IMPL_H_
 
 #include "base/base_export.h"
-#include "base/callback_forward.h"
+#include "base/callback.h"
 #include "base/location.h"
 
 namespace base {
@@ -29,12 +29,12 @@ class BASE_EXPORT PostTaskAndReplyImpl {
   // SequencedTaskRunnerHandle::IsSet(). Both |task| and |reply| are guaranteed
   // to be deleted on the sequence or thread that called this.
   bool PostTaskAndReply(const tracked_objects::Location& from_here,
-                        const Closure& task,
-                        const Closure& reply);
+                        OnceClosure task,
+                        OnceClosure reply);
 
  private:
   virtual bool PostTask(const tracked_objects::Location& from_here,
-                        const Closure& task) = 0;
+                        OnceClosure task) = 0;
 };
 
 }  // namespace internal

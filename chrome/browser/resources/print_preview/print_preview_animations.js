@@ -2,16 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Counter used to give webkit animations unique names.
+// Counter used to give animations unique names.
 var animationCounter = 0;
 
-var animationEventTracker_ = new EventTracker();
+var animationEventTracker = new EventTracker();
 
 function addAnimation(code) {
   var name = 'anim' + animationCounter;
   animationCounter++;
   var rules = document.createTextNode(
-      '@-webkit-keyframes ' + name + ' {' + code + '}');
+      '@keyframes ' + name + ' {' + code + '}');
   var el = document.createElement('style');
   el.type = 'text/css';
   el.appendChild(rules);
@@ -54,9 +54,9 @@ function fadeInElement(el, opt_justShow) {
   } else {
     el.style.height = height + 'px';
     var animName = addAnimation(getFadeInAnimationCode(height));
-    animationEventTracker_.add(
-        el, 'webkitAnimationEnd', onFadeInAnimationEnd.bind(el), false);
-    el.style.webkitAnimationName = animName;
+    animationEventTracker.add(
+        el, 'animationend', onFadeInAnimationEnd.bind(el), false);
+    el.style.animationName = animName;
   }
   el.classList.add('visible');
 }
@@ -73,9 +73,10 @@ function fadeOutElement(el) {
   el.style.height = 'auto';
   var height = el.offsetHeight;
   el.style.height = height + 'px';
+  /** @suppress {suspiciousCode} */
   el.offsetHeight;  // Should force an update of the computed style.
-  animationEventTracker_.add(
-      el, 'webkitTransitionEnd', onFadeOutTransitionEnd.bind(el), false);
+  animationEventTracker.add(
+      el, 'transitionend', onFadeOutTransitionEnd.bind(el), false);
   el.classList.add('closing');
   el.classList.remove('visible');
   el.setAttribute('aria-hidden', 'true');
@@ -83,19 +84,19 @@ function fadeOutElement(el) {
 
 /**
  * Executes when a fade out animation ends.
- * @param {WebkitTransitionEvent} event The event that triggered this listener.
+ * @param {Event} event The event that triggered this listener.
  * @this {HTMLElement} The element where the transition occurred.
  */
 function onFadeOutTransitionEnd(event) {
   if (event.propertyName != 'height')
     return;
-  animationEventTracker_.remove(this, 'webkitTransitionEnd');
+  animationEventTracker.remove(this, 'transitionend');
   this.hidden = true;
 }
 
 /**
  * Executes when a fade in animation ends.
- * @param {WebkitAnimationEvent} event The event that triggered this listener.
+ * @param {Event} event The event that triggered this listener.
  * @this {HTMLElement} The element where the transition occurred.
  */
 function onFadeInAnimationEnd(event) {
@@ -108,12 +109,12 @@ function onFadeInAnimationEnd(event) {
  * @param {HTMLElement} element The animated element.
  */
 function fadeInAnimationCleanup(element) {
-  if (element.style.webkitAnimationName) {
-    var animEl = document.getElementById(element.style.webkitAnimationName);
+  if (element.style.animationName) {
+    var animEl = document.getElementById(element.style.animationName);
     if (animEl)
       animEl.parentNode.removeChild(animEl);
-    element.style.webkitAnimationName = '';
-    animationEventTracker_.remove(element, 'webkitAnimationEnd');
+    element.style.animationName = '';
+    animationEventTracker.remove(element, 'animationend');
   }
 }
 
@@ -129,14 +130,16 @@ function fadeInOption(el, opt_justShow) {
   // To make the option visible during the first fade in.
   el.hidden = false;
 
-  var leftColumn = el.querySelector('.left-column');
+  var leftColumn = assertInstanceof(el.querySelector('.left-column'),
+                                    HTMLElement);
   wrapContentsInDiv(leftColumn, ['invisible']);
-  var rightColumn = el.querySelector('.right-column');
+  var rightColumn = assertInstanceof(el.querySelector('.right-column'),
+                                     HTMLElement);
   wrapContentsInDiv(rightColumn, ['invisible']);
 
   var toAnimate = el.querySelectorAll('.collapsible');
   for (var i = 0; i < toAnimate.length; i++)
-    fadeInElement(toAnimate[i], opt_justShow);
+    fadeInElement(assertInstanceof(toAnimate[i], HTMLElement), opt_justShow);
   el.classList.add('visible');
 }
 
@@ -150,10 +153,13 @@ function fadeOutOption(el, opt_justHide) {
   if (!el.classList.contains('visible'))
     return;
 
-  var leftColumn = el.querySelector('.left-column');
+  var leftColumn = assertInstanceof(el.querySelector('.left-column'),
+                                    HTMLElement);
   wrapContentsInDiv(leftColumn, ['visible']);
-  var rightColumn = el.querySelector('.right-column');
-  wrapContentsInDiv(rightColumn, ['visible']);
+  var rightColumn = assertInstanceof(el.querySelector('.right-column'),
+                                     HTMLElement);
+  if (rightColumn)
+    wrapContentsInDiv(rightColumn, ['visible']);
 
   var toAnimate = el.querySelectorAll('.collapsible');
   for (var i = 0; i < toAnimate.length; i++) {
@@ -162,7 +168,7 @@ function fadeOutOption(el, opt_justHide) {
       toAnimate[i].classList.add('closing');
       toAnimate[i].classList.remove('visible');
     } else {
-      fadeOutElement(toAnimate[i]);
+      fadeOutElement(assertInstanceof(toAnimate[i], HTMLElement));
     }
   }
   el.classList.remove('visible');
@@ -172,8 +178,8 @@ function fadeOutOption(el, opt_justHide) {
  * Wraps the contents of |el| in a div element and attaches css classes
  * |classes| in the new div, only if has not been already done. It is necessary
  * for animating the height of table cells.
- * @param {HTMLElement} el The element to be processed.
- * @param {array} classes The css classes to add.
+ * @param {!HTMLElement} el The element to be processed.
+ * @param {!Array} classes The css classes to add.
  */
 function wrapContentsInDiv(el, classes) {
   var div = el.querySelector('div');

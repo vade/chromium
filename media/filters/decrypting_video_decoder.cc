@@ -23,7 +23,7 @@ const char DecryptingVideoDecoder::kDecoderName[] = "DecryptingVideoDecoder";
 
 DecryptingVideoDecoder::DecryptingVideoDecoder(
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
-    const scoped_refptr<MediaLog>& media_log,
+    MediaLog* media_log,
     const base::Closure& waiting_for_decryption_key_cb)
     : task_runner_(task_runner),
       media_log_(media_log),
@@ -52,7 +52,7 @@ void DecryptingVideoDecoder::Initialize(const VideoDecoderConfig& config,
   DCHECK(decode_cb_.is_null());
   DCHECK(reset_cb_.is_null());
   DCHECK(config.IsValidConfig());
-  DCHECK(config.is_encrypted());
+  DCHECK(cdm_context);
 
   init_cb_ = BindToCurrentLoop(init_cb);
   output_cb_ = BindToCurrentLoop(output_cb);
@@ -60,7 +60,6 @@ void DecryptingVideoDecoder::Initialize(const VideoDecoderConfig& config,
   config_ = config;
 
   if (state_ == kUninitialized) {
-    DCHECK(cdm_context);
     if (!cdm_context->GetDecryptor()) {
       MEDIA_LOG(DEBUG, media_log_) << GetDisplayName() << ": no decryptor";
       base::ResetAndReturn(&init_cb_).Run(false);
@@ -69,7 +68,8 @@ void DecryptingVideoDecoder::Initialize(const VideoDecoderConfig& config,
 
     decryptor_ = cdm_context->GetDecryptor();
   } else {
-    // Reinitialization.
+    // Reinitialization (i.e. upon a config change). The new config can be
+    // encrypted or clear.
     decryptor_->DeinitializeDecoder(Decryptor::kVideo);
   }
 
@@ -275,8 +275,18 @@ void DecryptingVideoDecoder::DeliverFrame(
   }
 
   DCHECK_EQ(status, Decryptor::kSuccess);
-  // No frame returned with kSuccess should be end-of-stream frame.
+  // Frame returned with kSuccess should not be an end-of-stream frame.
   DCHECK(!frame->metadata()->IsTrue(VideoFrameMetadata::END_OF_STREAM));
+
+  // If color space is not set, use the color space in the |config_|.
+  if (!frame->ColorSpace().IsValid()) {
+    DVLOG(3) << "Setting color space using information in the config.";
+    frame->metadata()->SetInteger(VideoFrameMetadata::COLOR_SPACE,
+                                  config_.color_space());
+    if (config_.color_space_info() != VideoColorSpace())
+      frame->set_color_space(config_.color_space_info().ToGfxColorSpace());
+  }
+
   output_cb_.Run(frame);
 
   if (scoped_pending_buffer_to_decode->end_of_stream()) {

@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/metrics/field_trial.h"
 
 namespace chromeos {
@@ -26,6 +27,10 @@ const char kTestCrosGaiaIdMigration[] = "test-cros-gaia-id-migration";
 // all stored user keys will be converted to GaiaId)
 const char kTestCrosGaiaIdMigrationStarted[] = "started";
 
+// Controls whether enable voice interaction feature.
+const base::Feature kVoiceInteractionFeature{"ChromeOSVoiceInteraction",
+                                             base::FEATURE_DISABLED_BY_DEFAULT};
+
 }  // namespace
 
 // Please keep the order of these switches synchronized with the header file
@@ -36,12 +41,6 @@ const char kAggressiveCacheDiscardThreshold[] = "aggressive-cache-discard";
 const char kAggressiveTabDiscardThreshold[] = "aggressive-tab-discard";
 
 const char kAggressiveThreshold[] = "aggressive";
-
-// If this flag is set, enable data roaming in the cellular network by default
-// upon system start if it's an unmanaged device. This flag is used by Rialto
-// device to obtain device policy during OOBE since the Rialto device has no
-// display and and only connects over cell.
-const char kAllowDataRoamingByDefault[] = "allow-data-roaming-by-default";
 
 // If this flag is passed, failed policy fetches will not cause profile
 // initialization to fail. This is useful for tests because it means that
@@ -55,9 +54,30 @@ const char kAllowFailedPolicyFetchForTest[] =
 // mode. This can be enabled by this flag.
 const char kAllowRAInDevMode[] = "allow-ra-in-dev-mode";
 
+// Specifies whether an app launched in kiosk mode was auto launched with zero
+// delay. Used in order to properly restore auto-launched state during session
+// restore flow.
+const char kAppAutoLaunched[] = "app-auto-launched";
+
 // Path for app's OEM manifest file.
 const char kAppOemManifestFile[] = "app-mode-oem-manifest";
 
+// Always starts ARC after login screen without Play Store in almost all cases.
+// Secondary profile is an exception where ARC will not start.
+const char kArcAlwaysStart[] = "arc-always-start";
+
+// Signals ARC support status on this device. This can take one of the
+// following three values.
+// - none: ARC is not installed on this device. (default)
+// - installed: ARC is installed on this device, but not officially supported.
+//   Users can enable ARC only when Finch experiment is turned on.
+// - officially-supported: ARC is installed and supported on this device. So
+//   users can enable ARC via settings etc.
+// - officially-supported-with-active-directory: ARC is supported and also
+//   allowed to use with Active Directory management.
+const char kArcAvailability[] = "arc-availability";
+
+// DEPRECATED: Please use --arc-availability=installed.
 // Signals the availability of the ARC instance on this device.
 const char kArcAvailable[] = "arc-available";
 
@@ -68,6 +88,15 @@ const char kArtifactsDir[] = "artifacts-dir";
 // is used to override OOBE/sign in WebUI init type.
 // Possible values: parallel|postpone. Default: parallel.
 const char kAshWebUIInit[] = "ash-webui-init";
+
+// If this flag is set, it indicates that this device is a "Cellular First"
+// device. Cellular First devices use cellular telephone data networks as
+// their primary means of connecting to the internet.
+// Setting this flag has two consequences:
+// 1. Cellular data roaming will be enabled by default.
+// 2. UpdateEngine will be instructed to allow auto-updating over cellular
+//    data connections.
+const char kCellularFirst[] = "cellular-first";
 
 // Default large wallpaper to use for kids accounts (as path to trusted,
 // non-user-writable JPEG file).
@@ -141,6 +170,9 @@ const char kDisableDemoMode[] = "disable-demo-mode";
 // If this switch is set, the device cannot be remotely disabled by its owner.
 const char kDisableDeviceDisabling[] = "disable-device-disabling";
 
+// Disable encryption migration for user's cryptohome to run latest Arc.
+const char kDisableEncryptionMigration[] = "disable-encryption-migration";
+
 // Disables notification when device is in end of life status.
 const char kDisableEolNotification[] = "disable-eol-notification";
 
@@ -205,23 +237,27 @@ const char kEafePath[] = "eafe-path";
 // EAFE URL to use for Easy bootstrapping.
 const char kEafeUrl[] = "eafe-url";
 
-// Enables AD functionality.
-const char kEnableAd[] = "enable-ad";
-
 // Enables the Android Wallpapers App as the default app on Chrome OS.
 const char kEnableAndroidWallpapersApp[] = "enable-android-wallpapers-app";
 
+// DEPRECATED. Please use --arc-availability=officially-supported.
 // Enables starting the ARC instance upon session start.
 const char kEnableArc[] = "enable-arc";
 
 // Enables ARC OptIn flow in OOBE.
 const char kEnableArcOOBEOptIn[] = "enable-arc-oobe-optin";
 
-// Enables consume kiosk mode.
+// Enables native ChromeVox support for Arc.
+const char kEnableChromeVoxArcSupport[] = "enable-chromevox-arc-support";
+
+// Enables consumer kiosk mode for Chrome OS.
 const char kEnableConsumerKiosk[] = "enable-consumer-kiosk";
 
 // Enables Data Saver prompt on cellular networks.
 const char kEnableDataSaverPrompt[] = "enable-datasaver-prompt";
+
+// Enables encryption migration for user's cryptohome to run latest Arc.
+const char kEnableEncryptionMigration[] = "enable-encryption-migration";
 
 // Shows additional checkboxes in Settings to enable Chrome OS accessibility
 // features that haven't launched yet.
@@ -233,6 +269,9 @@ const char kEnableExtensionAssetsSharing[] = "enable-extension-assets-sharing";
 
 // Enables animated transitions during first-run tutorial.
 const char kEnableFirstRunUITransitions[] = "enable-first-run-ui-transitions";
+
+// Enables action handler apps (e.g. creating new notes) on lock screen.
+const char kEnableLockScreenApps[] = "enable-lock-screen-apps";
 
 // Enables Kiosk mode for Chrome OS. Note this switch refers to retail mode
 // rather than the kiosk app mode.
@@ -268,9 +307,20 @@ const char kEnableTouchCalibrationSetting[] =
 const char kEnableTouchpadThreeFingerClick[] =
     "enable-touchpad-three-finger-click";
 
+// Enables touch support for screen magnifier.
+const char kEnableTouchSupportForScreenMagnifier[] =
+    "enable-touch-support-for-screen-magnifier";
+
 // Enables the chromecast support for video player app.
 const char kEnableVideoPlayerChromecastSupport[] =
     "enable-video-player-chromecast-support";
+
+// Enables the VoiceInteraction support.
+const char kEnableVoiceInteraction[] = "enable-voice-interaction";
+
+// Enables zip archiver.
+const char kEnableZipArchiverOnFileManager[] =
+    "enable-zip-archiver-on-file-manager";
 
 // Disables ARC for managed accounts.
 const char kEnterpriseDisableArc[] = "enterprise-disable-arc";
@@ -377,6 +427,12 @@ const char kOobeSkipPostLogin[] = "oobe-skip-postlogin";
 // Interval at which we check for total time on OOBE.
 const char kOobeTimerInterval[] = "oobe-timer-interval";
 
+// If true, the views-based md login and lock screens will be shown.
+const char kShowMdLogin[] = "show-md-login";
+
+// If true, the non-views-based md login and lock screens will be shown.
+const char kShowNonViewMdLogin[] = "show-non-view-md-login";
+
 // Specifies power stub behavior:
 //  'cycle=2' - Cycles power states every 2 seconds.
 // See FakeDBusThreadManager::ParsePowerCommandLineSwitch for full details.
@@ -425,6 +481,9 @@ const char kWakeOnWifiPacket[] = "wake-on-wifi-packet";
 
 // Force system compositor mode when set.
 const char kForceSystemCompositorMode[] = "force-system-compositor-mode";
+
+// Enables testing for encryption migration UI.
+const char kTestEncryptionMigrationUI[] = "test-encryption-migration-ui";
 
 bool WakeOnWifiEnabled() {
   return !base::CommandLine::ForCurrentProcess()->HasSwitch(kDisableWakeOnWifi);
@@ -479,6 +538,16 @@ bool IsGaiaIdMigrationStarted() {
 
   return command_line->GetSwitchValueASCII(kTestCrosGaiaIdMigration) ==
          kTestCrosGaiaIdMigrationStarted;
+}
+
+bool IsCellularFirstDevice() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(kCellularFirst);
+}
+
+bool IsVoiceInteractionEnabled() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+             kEnableVoiceInteraction) ||
+         base::FeatureList::IsEnabled(kVoiceInteractionFeature);
 }
 
 }  // namespace switches

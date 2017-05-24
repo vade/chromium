@@ -13,6 +13,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "ui/aura/env.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_observer.h"
@@ -45,8 +46,7 @@ namespace {
 const int kHideKeyboardDelayMs = 100;
 
 // The virtual keyboard show/hide animation duration.
-const int kShowAnimationDurationMs = 350;
-const int kHideAnimationDurationMs = 100;
+const int kAnimationDurationMs = 100;
 
 // The opacity of virtual keyboard container when show animation starts or
 // hide animation finishes. This cannot be zero because we call Show() on the
@@ -96,9 +96,14 @@ class KeyboardWindowDelegate : public aura::WindowDelegate {
 void ToggleTouchEventLogging(bool enable) {
 #if defined(OS_CHROMEOS)
 #if defined(USE_OZONE)
-  ui::OzonePlatform::GetInstance()
-      ->GetInputController()
-      ->SetTouchEventLoggingEnabled(enable);
+  // TODO(moshayedi): crbug.com/642863. Revisit when we have mojo interface for
+  // InputController for processes that aren't mus-ws.
+  if (aura::Env::GetInstance()->mode() == aura::Env::Mode::MUS)
+    return;
+  ui::InputController* controller =
+      ui::OzonePlatform::GetInstance()->GetInputController();
+  if (controller)
+    controller->SetTouchEventLoggingEnabled(enable);
 #elif defined(USE_X11)
   if (!base::SysInfo::IsRunningOnChromeOS())
     return;
@@ -175,7 +180,6 @@ KeyboardController::KeyboardController(KeyboardUI* ui,
       show_on_resize_(false),
       keyboard_locked_(false),
       keyboard_mode_(FULL_WIDTH),
-      type_(ui::TEXT_INPUT_TYPE_NONE),
       weak_factory_(this) {
   CHECK(ui);
   input_method_ = ui_->GetInputMethod();
@@ -188,6 +192,7 @@ KeyboardController::~KeyboardController() {
     if (container_->GetRootWindow())
       container_->GetRootWindow()->RemoveObserver(this);
     container_->RemoveObserver(this);
+    container_->RemovePreTargetHandler(&event_filter_);
   }
   if (input_method_)
     input_method_->RemoveObserver(this);
@@ -216,7 +221,12 @@ aura::Window* KeyboardController::GetContainerWindow() {
     container_->Init(ui::LAYER_NOT_DRAWN);
     container_->AddObserver(this);
     container_->SetLayoutManager(new KeyboardLayoutManager(this));
+    container_->AddPreTargetHandler(&event_filter_);
   }
+  return container_.get();
+}
+
+aura::Window* KeyboardController::GetContainerWindowWithoutCreationForTest() {
   return container_.get();
 }
 
@@ -258,7 +268,7 @@ void KeyboardController::HideKeyboard(HideReason reason) {
   ui::ScopedLayerAnimationSettings settings(container_animator);
   settings.SetTweenType(gfx::Tween::FAST_OUT_LINEAR_IN);
   settings.SetTransitionDuration(
-      base::TimeDelta::FromMilliseconds(kHideAnimationDurationMs));
+      base::TimeDelta::FromMilliseconds(kAnimationDurationMs));
   gfx::Transform transform;
   transform.Translate(0, kAnimationDistance);
   container_->SetTransform(transform);
@@ -267,6 +277,10 @@ void KeyboardController::HideKeyboard(HideReason reason) {
 
 void KeyboardController::AddObserver(KeyboardControllerObserver* observer) {
   observer_list_.AddObserver(observer);
+}
+
+bool KeyboardController::HasObserver(KeyboardControllerObserver* observer) {
+  return observer_list_.HasObserver(observer);
 }
 
 void KeyboardController::RemoveObserver(KeyboardControllerObserver* observer) {
@@ -363,9 +377,10 @@ void KeyboardController::OnTextInputStateChanged(
   if (!container_.get())
     return;
 
-  type_ = client ? client->GetTextInputType() : ui::TEXT_INPUT_TYPE_NONE;
+  ui::TextInputType type =
+      client ? client->GetTextInputType() : ui::TEXT_INPUT_TYPE_NONE;
 
-  if (type_ == ui::TEXT_INPUT_TYPE_NONE && !keyboard_locked_) {
+  if (type == ui::TEXT_INPUT_TYPE_NONE && !keyboard_locked_) {
     if (keyboard_visible_) {
       // Set the visibility state here so that any queries for visibility
       // before the timer fires returns the correct future value.
@@ -382,7 +397,7 @@ void KeyboardController::OnTextInputStateChanged(
       weak_factory_.InvalidateWeakPtrs();
       keyboard_visible_ = true;
     }
-    ui_->SetUpdateInputType(type_);
+    ui_->SetUpdateInputType(type);
     // Do not explicitly show the Virtual keyboard unless it is in the process
     // of hiding. Instead, the virtual keyboard is shown in response to a user
     // gesture (mouse or touch) that is received while an element has input
@@ -404,8 +419,9 @@ void KeyboardController::OnShowImeIfNeeded() {
 }
 
 void KeyboardController::ShowKeyboardInternal(int64_t display_id) {
-  if (!container_.get())
-    return;
+  // The container window should have been created already when
+  // |Shell::CreateKeyboard| is called.
+  DCHECK(container_.get());
 
   if (container_->children().empty()) {
     keyboard::MarkKeyboardLoadStarted();
@@ -482,7 +498,7 @@ void KeyboardController::ShowKeyboardInternal(int64_t display_id) {
     ui::ScopedLayerAnimationSettings settings(container_animator);
     settings.SetTweenType(gfx::Tween::LINEAR_OUT_SLOW_IN);
     settings.SetTransitionDuration(
-        base::TimeDelta::FromMilliseconds(kShowAnimationDurationMs));
+        base::TimeDelta::FromMilliseconds(kAnimationDurationMs));
     container_->SetTransform(gfx::Transform());
     container_->layer()->SetOpacity(1.0);
   }
@@ -493,6 +509,8 @@ bool KeyboardController::WillHideKeyboard() const {
 }
 
 void KeyboardController::ShowAnimationFinished() {
+  MarkKeyboardLoadFinished();
+
   // Notify observers after animation finished to prevent reveal desktop
   // background during animation.
   NotifyKeyboardBoundsChanging(container_->bounds());
@@ -503,6 +521,7 @@ void KeyboardController::HideAnimationFinished() {
   ui_->HideKeyboardContainer(container_.get());
   for (KeyboardControllerObserver& observer : observer_list_)
     observer.OnKeyboardHidden();
+  ui_->EnsureCaretInWorkArea();
 }
 
 void KeyboardController::AdjustKeyboardBounds() {

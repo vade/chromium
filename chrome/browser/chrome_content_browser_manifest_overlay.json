@@ -7,8 +7,8 @@
         "renderer": [
           "autofill::mojom::AutofillDriver",
           "autofill::mojom::PasswordManagerDriver",
+          "chrome::mojom::CacheStatsRecorder",
           "chrome::mojom::NetBenchmarking",
-          "chrome::mojom::FieldTrialRecorder",
           "extensions::StashService",
           "metrics::mojom::LeakDetector",
           "mojom::ModuleEventSink",
@@ -19,38 +19,18 @@
         "gpu": [
           "metrics::mojom::CallStackProfileCollector"
         ],
-        "ash": [
-          // Under classic ash the browser provides some of the ash interfaces
-          // to itself.
-          "app_list::mojom::AppList",
-          "app_list::mojom::AppListPresenter",
-          "ash::mojom::AcceleratorController",
-          "ash::mojom::CastConfig",
-          "ash::mojom::LocaleNotificationController",
-          "ash::mojom::MediaController",
-          "ash::mojom::NewWindowController",
-          "ash::mojom::SessionController",
-          "ash::mojom::ShelfController",
-          "ash::mojom::ShutdownController",
-          "ash::mojom::SystemTray",
-          "ash::mojom::TouchViewManager",
-          "ash::mojom::WallpaperController",
-          "ash::mojom::VpnList",
-          "keyboard::mojom::Keyboard"
-        ],
-        "ime:ime_driver": [],
-        "mash:launchable": [
-          "mash::mojom::Launchable"
-        ]
+        "ime:ime_driver": []
       },
       "requires": {
         "accessibility_autoclick": [ "ash:autoclick" ],
         "ash": [ "ash" ],
-        "image_decoder": [ "decode" ],
+        "device": [ "device:fingerprint" ],
+        "identity": [ "identity_manager" ],
         "nacl_broker": [ "browser" ],
         "nacl_loader": [ "browser" ],
-        "preferences": [ "preferences_manager" ],
-        "ui": [ "display_controller", "ime_registrar" ]
+        "preferences_forwarder": [ "pref_client" ],
+        "preferences": [ "pref_client", "pref_control" ],
+        "ui": [ "display_controller", "ime_registrar", "window_manager" ]
       }
     },
     "navigation:frame": {
@@ -58,25 +38,26 @@
         "renderer": [
           "autofill::mojom::AutofillDriver",
           "autofill::mojom::PasswordManagerDriver",
+          "blink::mojom::InstalledAppProvider",
           "blink::mojom::ShareService",
           "bluetooth::mojom::AdapterFactory",
+          "chrome::mojom::OpenSearchDocumentDescriptionHandler",
           "chrome::mojom::PrerenderCanceler",
-          "device::usb::ChooserService",
-          "device::usb::DeviceManager",
           "contextual_search::mojom::ContextualSearchJsApiService",
+          "device::mojom::UsbChooserService",
+          "device::mojom::UsbDeviceManager",
           "dom_distiller::mojom::DistillabilityService",
           "dom_distiller::mojom::DistillerJavaScriptService",
           "extensions::KeepAlive",
           "extensions::mime_handler::MimeHandlerService",
           "media_router::mojom::MediaRouter",
-          "mojom::OmniboxPageHandler",
           "password_manager::mojom::CredentialManager",
           "translate::mojom::ContentTranslateDriver",
 
           // TODO(beng): These should be moved to a separate capability.
           "mojom::OmniboxPageHandler",
           "mojom::PluginsPageHandler",
-          "mojom::SiteEngagementUIHandler",
+          "mojom::SiteEngagementDetailsProvider",
           "mojom::UsbInternalsPageHandler"
         ]
       }

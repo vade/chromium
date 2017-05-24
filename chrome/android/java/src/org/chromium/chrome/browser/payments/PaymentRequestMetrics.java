@@ -40,13 +40,25 @@ public final class PaymentRequestMetrics {
     @VisibleForTesting
     public static final int ABORT_REASON_INSTRUMENT_DETAILS_ERROR = 5;
     @VisibleForTesting
-    public static final int ABORT_REASON_NO_MATCHING_PAYMENT_METHOD = 6;
+    public static final int ABORT_REASON_NO_MATCHING_PAYMENT_METHOD = 6; // Deprecated.
     @VisibleForTesting
-    public static final int ABORT_REASON_NO_SUPPORTED_PAYMENT_METHOD = 7;
+    public static final int ABORT_REASON_NO_SUPPORTED_PAYMENT_METHOD = 7; // Deprecated.
     @VisibleForTesting
     public static final int ABORT_REASON_OTHER = 8;
     @VisibleForTesting
     public static final int ABORT_REASON_MAX = 9;
+
+    // PaymentRequestNoShowReason defined in tools/metrics/histograms/histograms.xml
+    @VisibleForTesting
+    public static final int NO_SHOW_NO_MATCHING_PAYMENT_METHOD = 0;
+    @VisibleForTesting
+    public static final int NO_SHOW_NO_SUPPORTED_PAYMENT_METHOD = 1;
+    @VisibleForTesting
+    public static final int NO_SHOW_CONCURRENT_REQUESTS = 2;
+    @VisibleForTesting
+    public static final int NO_SHOW_REASON_OTHER = 3;
+    @VisibleForTesting
+    public static final int NO_SHOW_REASON_MAX = 4;
 
     // PaymentRequestPaymentMethods defined in tools/metrics/histograms/histograms.xml.
     @VisibleForTesting

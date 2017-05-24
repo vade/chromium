@@ -22,9 +22,7 @@ bool UsernamesCollectionKey::operator<(
 }
 
 PasswordFormFillData::PasswordFormFillData()
-    : wait_for_username(false),
-      is_possible_change_password_form(false),
-      show_form_not_secure_warning_on_autofill(false) {}
+    : wait_for_username(false), is_possible_change_password_form(false) {}
 
 PasswordFormFillData::PasswordFormFillData(const PasswordFormFillData& other) =
     default;
@@ -86,10 +84,17 @@ void InitPasswordFormFillData(
       if (it.second->is_public_suffix_match ||
           it.second->is_affiliation_based_match)
         key.realm = it.second->signon_realm;
-      result->other_possible_usernames[key] =
-          it.second->other_possible_usernames;
     }
   }
+}
+
+PasswordFormFillData ClearPasswordValues(const PasswordFormFillData& data) {
+  PasswordFormFillData result(data);
+  if (result.wait_for_username)
+    result.password_field.value.clear();
+  for (auto& credentials : result.additional_logins)
+    credentials.second.password.clear();
+  return result;
 }
 
 }  // namespace autofill

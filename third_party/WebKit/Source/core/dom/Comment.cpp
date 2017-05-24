@@ -26,9 +26,9 @@
 namespace blink {
 
 inline Comment::Comment(Document& document, const String& text)
-    : CharacterData(document, text, CreateOther) {}
+    : CharacterData(document, text, kCreateOther) {}
 
-Comment* Comment::create(Document& document, const String& text) {
+Comment* Comment::Create(Document& document, const String& text) {
   return new Comment(document, text);
 }
 
@@ -40,8 +40,8 @@ Node::NodeType Comment::getNodeType() const {
   return kCommentNode;
 }
 
-Node* Comment::cloneNode(bool /*deep*/) {
-  return create(document(), data());
+Node* Comment::cloneNode(bool /*deep*/, ExceptionState&) {
+  return Create(GetDocument(), data());
 }
 
 }  // namespace blink

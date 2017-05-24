@@ -143,27 +143,10 @@ class MEDIA_EXPORT AudioOutputController
   //
   // It is safe to call this method more than once. Calls after the first one
   // will have no effect.
-  void Close(const base::Closure& closed_task);
+  void Close(base::OnceClosure closed_task);
 
   // Sets the volume of the audio output stream.
   void SetVolume(double volume);
-
-  // Calls |callback| (on the caller's thread) with the current output
-  // device ID.
-  void GetOutputDeviceId(
-      base::Callback<void(const std::string&)> callback) const;
-
-  // Changes which output device to use. If desired, you can provide a
-  // callback that will be notified (on the thread you called from)
-  // when the function has completed execution.
-  //
-  // Changing the output device causes the controller to go through
-  // the same state transition back to the current state as a call to
-  // OnDeviceChange (unless it is currently diverting, see
-  // Start/StopDiverting below, in which case the state transition
-  // will happen when StopDiverting is called).
-  void SwitchOutputDevice(const std::string& output_device_id,
-                          const base::Closure& callback);
 
   // AudioSourceCallback implementation.
   int OnMoreData(base::TimeDelta delay,
@@ -219,8 +202,6 @@ class MEDIA_EXPORT AudioOutputController
   void DoPause();
   void DoClose();
   void DoSetVolume(double volume);
-  std::string DoGetOutputDeviceId() const;
-  void DoSwitchOutputDevice(const std::string& output_device_id);
   void DoReportError();
   void DoStartDiverting(AudioOutputStream* to_stream);
   void DoStopDiverting();
@@ -253,9 +234,11 @@ class MEDIA_EXPORT AudioOutputController
   // When non-NULL, audio is being diverted to this stream.
   AudioOutputStream* diverting_to_stream_;
 
-  // The targets for audio stream to be copied to.
+  // The targets for audio stream to be copied to. |should_duplicate_| is set to
+  // 1 when the OnMoreData() call should proxy the data to
+  // BroadcastDataToDuplicationTargets().
   std::set<AudioPushSink*> duplication_targets_;
-  base::Lock duplication_targets_lock_;
+  base::AtomicRefCount should_duplicate_;
 
   // The current volume of the audio stream.
   double volume_;

@@ -15,15 +15,20 @@
 #include "base/message_loop/message_loop.h"
 #include "base/numerics/safe_math.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/default_tick_clock.h"
 #include "base/time/time.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/buffering_state.h"
-#include "media/base/demuxer_stream_provider.h"
+#include "media/base/media_resource.h"
 #include "media/base/renderer_client.h"
+#include "media/base/video_renderer_sink.h"
 #include "media/remoting/demuxer_stream_adapter.h"
 #include "media/remoting/proto_enum_utils.h"
 #include "media/remoting/proto_utils.h"
 #include "media/remoting/renderer_controller.h"
+
+namespace media {
+namespace remoting {
 
 namespace {
 
@@ -54,9 +59,6 @@ constexpr base::TimeDelta kDataFlowPollPeriod =
 
 }  // namespace
 
-namespace media {
-namespace remoting {
-
 CourierRenderer::CourierRenderer(
     scoped_refptr<base::SingleThreadTaskRunner> media_task_runner,
     const base::WeakPtr<RendererController>& controller,
@@ -64,21 +66,19 @@ CourierRenderer::CourierRenderer(
     : state_(STATE_UNINITIALIZED),
       main_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       media_task_runner_(std::move(media_task_runner)),
-      demuxer_stream_provider_(nullptr),
+      media_resource_(nullptr),
       client_(nullptr),
       controller_(controller),
       rpc_broker_(controller_->GetRpcBroker()),
       rpc_handle_(rpc_broker_->GetUniqueHandle()),
       remote_renderer_handle_(RpcBroker::kInvalidHandle),
       video_renderer_sink_(video_renderer_sink),
+      clock_(new base::DefaultTickClock()),
       weak_factory_(this) {
   VLOG(2) << __func__;
   // Note: The constructor is running on the main thread, but will be destroyed
   // on the media thread. Therefore, all weak pointers must be dereferenced on
   // the media thread.
-  controller_->SetShowInterstitialCallback(
-      base::Bind(&CourierRenderer::RequestUpdateInterstitialOnMainThread,
-                 media_task_runner_, weak_factory_.GetWeakPtr()));
   const RpcBroker::ReceiveMessageCallback receive_callback =
       base::Bind(&CourierRenderer::OnMessageReceivedOnMainThread,
                  media_task_runner_, weak_factory_.GetWeakPtr());
@@ -89,27 +89,23 @@ CourierRenderer::~CourierRenderer() {
   VLOG(2) << __func__;
   DCHECK(media_task_runner_->BelongsToCurrentThread());
 
-  UpdateInterstitial(interstitial_background_, canvas_size_,
-                     InterstitialType::BETWEEN_SESSIONS);
-
-  // Post task on main thread to unset the interstial callback.
-  main_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&RendererController::SetShowInterstitialCallback, controller_,
-                 RendererController::ShowInterstitialCallback()));
-
   // Post task on main thread to unregister message receiver.
   main_task_runner_->PostTask(
       FROM_HERE, base::Bind(&RpcBroker::UnregisterMessageReceiverCallback,
                             rpc_broker_, rpc_handle_));
+
+  if (video_renderer_sink_) {
+    video_renderer_sink_->PaintSingleFrame(
+        VideoFrame::CreateBlackFrame(gfx::Size(1280, 720)));
+  }
 }
 
-void CourierRenderer::Initialize(DemuxerStreamProvider* demuxer_stream_provider,
+void CourierRenderer::Initialize(MediaResource* media_resource,
                                  RendererClient* client,
                                  const PipelineStatusCB& init_cb) {
   VLOG(2) << __func__;
   DCHECK(media_task_runner_->BelongsToCurrentThread());
-  DCHECK(demuxer_stream_provider);
+  DCHECK(media_resource);
   DCHECK(client);
 
   if (state_ != STATE_UNINITIALIZED) {
@@ -118,22 +114,26 @@ void CourierRenderer::Initialize(DemuxerStreamProvider* demuxer_stream_provider,
     return;
   }
 
-  demuxer_stream_provider_ = demuxer_stream_provider;
+  media_resource_ = media_resource;
   client_ = client;
   init_workflow_done_callback_ = init_cb;
 
   state_ = STATE_CREATE_PIPE;
+
+  // TODO(servolk): Add support for multiple streams. For now use the first
+  // enabled audio and video streams to preserve the existing behavior.
+  ::media::DemuxerStream* audio_demuxer_stream =
+      media_resource_->GetFirstStream(DemuxerStream::AUDIO);
+  ::media::DemuxerStream* video_demuxer_stream =
+      media_resource_->GetFirstStream(DemuxerStream::VIDEO);
+
   // Create audio mojo data pipe handles if audio is available.
-  DemuxerStream* audio_demuxer_stream =
-      demuxer_stream_provider_->GetStream(DemuxerStream::AUDIO);
   std::unique_ptr<mojo::DataPipe> audio_data_pipe;
   if (audio_demuxer_stream) {
     audio_data_pipe = base::WrapUnique(DemuxerStreamAdapter::CreateDataPipe());
   }
 
   // Create video mojo data pipe handles if video is available.
-  DemuxerStream* video_demuxer_stream =
-      demuxer_stream_provider_->GetStream(DemuxerStream::VIDEO);
   std::unique_ptr<mojo::DataPipe> video_data_pipe;
   if (video_demuxer_stream) {
     video_data_pipe = base::WrapUnique(DemuxerStreamAdapter::CreateDataPipe());
@@ -317,15 +317,20 @@ void CourierRenderer::OnDataPipeCreated(
     int video_rpc_handle) {
   VLOG(2) << __func__;
   DCHECK(media_task_runner_->BelongsToCurrentThread());
-  DCHECK(!init_workflow_done_callback_.is_null());
 
   if (state_ == STATE_ERROR)
     return;  // Abort because something went wrong in the meantime.
   DCHECK_EQ(state_, STATE_CREATE_PIPE);
+  DCHECK(!init_workflow_done_callback_.is_null());
+
+  // TODO(servolk): Add support for multiple streams. For now use the first
+  // enabled audio and video streams to preserve the existing behavior.
+  ::media::DemuxerStream* audio_demuxer_stream =
+      media_resource_->GetFirstStream(DemuxerStream::AUDIO);
+  ::media::DemuxerStream* video_demuxer_stream =
+      media_resource_->GetFirstStream(DemuxerStream::VIDEO);
 
   // Create audio demuxer stream adapter if audio is available.
-  DemuxerStream* audio_demuxer_stream =
-      demuxer_stream_provider_->GetStream(DemuxerStream::AUDIO);
   if (audio_demuxer_stream && audio.is_valid() && audio_handle.is_valid() &&
       audio_rpc_handle != RpcBroker::kInvalidHandle) {
     VLOG(2) << "Initialize audio";
@@ -337,8 +342,6 @@ void CourierRenderer::OnDataPipeCreated(
   }
 
   // Create video demuxer stream adapter if video is available.
-  DemuxerStream* video_demuxer_stream =
-      demuxer_stream_provider_->GetStream(DemuxerStream::VIDEO);
   if (video_demuxer_stream && video.is_valid() && video_handle.is_valid() &&
       video_rpc_handle != RpcBroker::kInvalidHandle) {
     VLOG(2) << "Initialize video";
@@ -671,9 +674,10 @@ void CourierRenderer::OnFatalError(StopTrigger stop_trigger) {
 
   data_flow_poll_timer_.Stop();
 
+  // This renderer will be shut down shortly. To prevent breaking the pipeline,
+  // just run the callback without reporting error.
   if (!init_workflow_done_callback_.is_null()) {
-    base::ResetAndReturn(&init_workflow_done_callback_)
-        .Run(PIPELINE_ERROR_INITIALIZATION_FAILED);
+    base::ResetAndReturn(&init_workflow_done_callback_).Run(PIPELINE_OK);
     return;
   }
 
@@ -681,36 +685,12 @@ void CourierRenderer::OnFatalError(StopTrigger stop_trigger) {
     base::ResetAndReturn(&flush_cb_).Run();
 }
 
-// static
-void CourierRenderer::RequestUpdateInterstitialOnMainThread(
-    scoped_refptr<base::SingleThreadTaskRunner> media_task_runner,
-    base::WeakPtr<CourierRenderer> self,
-    const base::Optional<SkBitmap>& background_image,
-    const gfx::Size& canvas_size,
-    InterstitialType interstitial_type) {
-  media_task_runner->PostTask(
-      FROM_HERE, base::Bind(&CourierRenderer::UpdateInterstitial, self,
-                            background_image, canvas_size, interstitial_type));
-}
-
-void CourierRenderer::UpdateInterstitial(
-    const base::Optional<SkBitmap>& background_image,
-    const gfx::Size& canvas_size,
-    InterstitialType interstitial_type) {
-  DCHECK(media_task_runner_->BelongsToCurrentThread());
-  if (background_image.has_value())
-    interstitial_background_ = background_image.value();
-  canvas_size_ = canvas_size;
-  PaintInterstitial(interstitial_background_, canvas_size_, interstitial_type,
-                    video_renderer_sink_);
-}
-
 void CourierRenderer::OnMediaTimeUpdated() {
   DCHECK(media_task_runner_->BelongsToCurrentThread());
   if (!flush_cb_.is_null())
     return;  // Don't manage and check the queue when Flush() is on-going.
 
-  base::TimeTicks current_time = base::TimeTicks::Now();
+  base::TimeTicks current_time = clock_->NowTicks();
   if (current_time < ignore_updates_until_time_)
     return;  // Not stable yet.
 
@@ -758,7 +738,7 @@ void CourierRenderer::UpdateVideoStatsQueue(int video_frames_decoded,
     return;
   }
 
-  base::TimeTicks current_time = base::TimeTicks::Now();
+  base::TimeTicks current_time = clock_->NowTicks();
   if (current_time < ignore_updates_until_time_)
     return;  // Not stable yet.
 
@@ -796,7 +776,7 @@ void CourierRenderer::ResetMeasurements() {
   sum_video_frames_dropped_ = 0;
   sum_video_frames_decoded_ = 0;
   stats_updated_ = false;
-  ignore_updates_until_time_ = base::TimeTicks::Now() + kStabilizationPeriod;
+  ignore_updates_until_time_ = clock_->NowTicks() + kStabilizationPeriod;
 
   if (state_ != STATE_ERROR &&
       (audio_demuxer_stream_adapter_ || video_demuxer_stream_adapter_)) {
@@ -813,7 +793,7 @@ void CourierRenderer::MeasureAndRecordDataRates() {
   // resuming playback. Since the goal here is to measure the sustained content
   // bitrates, ignore the byte counts the first time since the last
   // ResetMeasurements() call.
-  const base::TimeTicks current_time = base::TimeTicks::Now();
+  const base::TimeTicks current_time = clock_->NowTicks();
   if (current_time < ignore_updates_until_time_ + kDataFlowPollPeriod) {
     if (audio_demuxer_stream_adapter_)
       audio_demuxer_stream_adapter_->GetBytesWrittenAndReset();

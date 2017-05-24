@@ -4,6 +4,8 @@
 
 #include "public/platform/scheduler/test/fake_renderer_scheduler.h"
 
+#include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "public/platform/WebThread.h"
 
 namespace blink {
@@ -17,15 +19,18 @@ std::unique_ptr<blink::WebThread> FakeRendererScheduler::CreateMainThread() {
   return nullptr;
 }
 
-scoped_refptr<TaskQueue> FakeRendererScheduler::DefaultTaskRunner() {
+scoped_refptr<base::SingleThreadTaskRunner>
+FakeRendererScheduler::DefaultTaskRunner() {
   return nullptr;
 }
 
-scoped_refptr<TaskQueue> FakeRendererScheduler::CompositorTaskRunner() {
+scoped_refptr<base::SingleThreadTaskRunner>
+FakeRendererScheduler::CompositorTaskRunner() {
   return nullptr;
 }
 
-scoped_refptr<TaskQueue> FakeRendererScheduler::LoadingTaskRunner() {
+scoped_refptr<base::SingleThreadTaskRunner>
+FakeRendererScheduler::LoadingTaskRunner() {
   return nullptr;
 }
 
@@ -34,22 +39,8 @@ FakeRendererScheduler::IdleTaskRunner() {
   return nullptr;
 }
 
-scoped_refptr<TaskQueue> FakeRendererScheduler::TimerTaskRunner() {
-  return nullptr;
-}
-
-scoped_refptr<TaskQueue> FakeRendererScheduler::NewLoadingTaskRunner(
-    TaskQueue::QueueType queue_type) {
-  return nullptr;
-}
-
-scoped_refptr<TaskQueue> FakeRendererScheduler::NewTimerTaskRunner(
-    TaskQueue::QueueType queue_type) {
-  return nullptr;
-}
-
-scoped_refptr<TaskQueue> FakeRendererScheduler::NewUnthrottledTaskRunner(
-    TaskQueue::QueueType queue_type) {
+scoped_refptr<base::SingleThreadTaskRunner>
+FakeRendererScheduler::TimerTaskRunner() {
   return nullptr;
 }
 
@@ -62,6 +53,9 @@ void FakeRendererScheduler::WillBeginFrame(const cc::BeginFrameArgs& args) {}
 
 void FakeRendererScheduler::BeginFrameNotExpectedSoon() {}
 
+void FakeRendererScheduler::BeginMainFrameNotExpectedUntil(
+    base::TimeTicks time) {}
+
 void FakeRendererScheduler::DidCommitFrameToCompositor() {}
 
 void FakeRendererScheduler::DidHandleInputEventOnCompositorThread(
@@ -69,7 +63,8 @@ void FakeRendererScheduler::DidHandleInputEventOnCompositorThread(
     InputEventState event_state) {}
 
 void FakeRendererScheduler::DidHandleInputEventOnMainThread(
-    const blink::WebInputEvent& web_input_event) {}
+    const blink::WebInputEvent& web_input_event,
+    WebInputEventResult result) {}
 
 void FakeRendererScheduler::DidAnimateForInputOnCompositorThread() {}
 
@@ -85,11 +80,9 @@ void FakeRendererScheduler::SuspendRenderer() {}
 
 void FakeRendererScheduler::ResumeRenderer() {}
 
-void FakeRendererScheduler::AddPendingNavigation(
-    blink::WebScheduler::NavigatingFrameType type) {}
+void FakeRendererScheduler::AddPendingNavigation(NavigatingFrameType type) {}
 
-void FakeRendererScheduler::RemovePendingNavigation(
-    blink::WebScheduler::NavigatingFrameType type) {}
+void FakeRendererScheduler::RemovePendingNavigation(NavigatingFrameType type) {}
 
 void FakeRendererScheduler::OnNavigationStarted() {}
 
@@ -121,7 +114,8 @@ void FakeRendererScheduler::SetTopLevelBlameContext(
 
 void FakeRendererScheduler::SetRAILModeObserver(RAILModeObserver* observer) {}
 
-bool FakeRendererScheduler::MainThreadSeemsUnresponsive() {
+bool FakeRendererScheduler::MainThreadSeemsUnresponsive(
+    base::TimeDelta main_thread_responsiveness_threshold) {
   return false;
 }
 

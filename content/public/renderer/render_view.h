@@ -71,7 +71,7 @@ class CONTENT_EXPORT RenderView : public IPC::Sender {
   virtual float GetDeviceScaleFactor() const = 0;
 
   // Gets WebKit related preferences associated with this view.
-  virtual WebPreferences& GetWebkitPreferences() = 0;
+  virtual const WebPreferences& GetWebkitPreferences() = 0;
 
   // Overrides the WebKit related preferences associated with this view. Note
   // that the browser process may update the preferences at any time.
@@ -86,10 +86,6 @@ class CONTENT_EXPORT RenderView : public IPC::Sender {
   // Returns true if we should display scrollbars for the given view size and
   // false if the scrollbars should be hidden.
   virtual bool ShouldDisplayScrollbars(int width, int height) const = 0;
-
-  // Bitwise-ORed set of extra bindings that have been enabled.  See
-  // BindingsPolicy for details.
-  virtual int GetEnabledBindings() const = 0;
 
   // Whether content state (such as form state, scroll position and page
   // contents) should be sent to the browser immediately. This is normally

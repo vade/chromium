@@ -3,17 +3,22 @@
 # found in the LICENSE file.
 
 source_set("util") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   sources = [
     "CRUILabel+AttributeUtils.h",
     "CRUILabel+AttributeUtils.mm",
     "core_text_util.h",
     "core_text_util.mm",
+    "i18n_string.h",
+    "i18n_string.mm",
     "label_link_controller.h",
     "label_link_controller.mm",
     "label_observer.h",
     "label_observer.mm",
     "manual_text_framer.h",
     "manual_text_framer.mm",
+    "pasteboard_util.h",
+    "pasteboard_util.mm",
     "relaxed_bounds_constraints_hittest.h",
     "snapshot_util.h",
     "snapshot_util.mm",
@@ -39,6 +44,7 @@ source_set("util") {
 }
 
 source_set("unit_tests") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
     "CRUILabel+AttributeUtils_unittest.mm",

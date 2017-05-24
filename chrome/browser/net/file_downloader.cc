@@ -8,6 +8,7 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
+#include "base/task_scheduler/post_task.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_status_code.h"
@@ -19,13 +20,16 @@ using net::URLFetcher;
 
 const int kNumRetries = 1;
 
-FileDownloader::FileDownloader(const GURL& url,
-                               const base::FilePath& path,
-                               bool overwrite,
-                               net::URLRequestContextGetter* request_context,
-                               const DownloadFinishedCallback& callback)
+FileDownloader::FileDownloader(
+    const GURL& url,
+    const base::FilePath& path,
+    bool overwrite,
+    net::URLRequestContextGetter* request_context,
+    const DownloadFinishedCallback& callback,
+    const net::NetworkTrafficAnnotationTag& traffic_annotation)
     : callback_(callback),
-      fetcher_(URLFetcher::Create(url, URLFetcher::GET, this)),
+      fetcher_(
+          URLFetcher::Create(url, URLFetcher::GET, this, traffic_annotation)),
       local_path_(path),
       weak_ptr_factory_(this) {
   fetcher_->SetRequestContext(request_context);
@@ -39,9 +43,9 @@ FileDownloader::FileDownloader(const GURL& url,
     fetcher_->Start();
   } else {
     base::PostTaskAndReplyWithResult(
-        BrowserThread::GetBlockingPool()
-            ->GetTaskRunnerWithShutdownBehavior(
-                base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN)
+        base::CreateTaskRunnerWithTraits(
+            {base::MayBlock(), base::TaskPriority::BACKGROUND,
+             base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN})
             .get(),
         FROM_HERE, base::Bind(&base::PathExists, local_path_),
         base::Bind(&FileDownloader::OnFileExistsCheckDone,
@@ -78,9 +82,9 @@ void FileDownloader::OnURLFetchComplete(const net::URLFetcher* source) {
   }
 
   base::PostTaskAndReplyWithResult(
-      BrowserThread::GetBlockingPool()
-          ->GetTaskRunnerWithShutdownBehavior(
-              base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN)
+      base::CreateTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+           base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN})
           .get(),
       FROM_HERE, base::Bind(&base::Move, response_path, local_path_),
       base::Bind(&FileDownloader::OnFileMoveDone,

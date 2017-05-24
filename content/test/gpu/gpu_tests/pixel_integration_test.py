@@ -7,18 +7,23 @@ import os
 import re
 import sys
 
+from gpu_tests import gpu_integration_test
 from gpu_tests import cloud_storage_integration_test_base
+from gpu_tests import path_util
 from gpu_tests import pixel_expectations
 from gpu_tests import pixel_test_pages
 
 from py_utils import cloud_storage
 from telemetry.util import image_util
 
+gpu_relative_path = "content/test/data/gpu/"
+gpu_data_dir = os.path.join(path_util.GetChromiumSrcDir(), gpu_relative_path)
 
-test_data_dir = os.path.abspath(os.path.join(
-    os.path.dirname(__file__), '..', '..', 'data', 'gpu'))
+default_reference_image_dir = os.path.join(gpu_data_dir, 'gpu_reference')
 
-default_reference_image_dir = os.path.join(test_data_dir, 'gpu_reference')
+test_data_dirs = [gpu_data_dir,
+                  os.path.join(
+                      path_util.GetChromiumSrcDir(), 'media/test/data')]
 
 test_harness_script = r"""
   var domAutomationController = {};
@@ -62,12 +67,12 @@ class PixelIntegrationTest(
     return 'pixel'
 
   @classmethod
-  def setUpClass(cls):
-    super(cls, PixelIntegrationTest).setUpClass()
+  def SetUpProcess(cls):
+    super(cls, PixelIntegrationTest).SetUpProcess()
     cls._original_finder_options = cls._finder_options.Copy()
     cls.CustomizeBrowserArgs([])
     cls.StartBrowser()
-    cls.SetStaticServerDirs([test_data_dir])
+    cls.SetStaticServerDirs(test_data_dirs)
 
   @classmethod
   def CustomizeBrowserArgs(cls, browser_args):
@@ -117,8 +122,10 @@ class PixelIntegrationTest(
     pages += pixel_test_pages.ExperimentalCanvasFeaturesPages(name)
     if sys.platform.startswith('darwin'):
       pages += pixel_test_pages.MacSpecificPages(name)
+    if sys.platform.startswith('win'):
+      pages += pixel_test_pages.DirectCompositionPages(name)
     for p in pages:
-      yield(p.name, p.url, (p))
+      yield(p.name, gpu_relative_path + p.url, (p))
 
   def RunActualGpuTest(self, test_path, *args):
     page = args[0]
@@ -131,7 +138,7 @@ class PixelIntegrationTest(
     tab = self.tab
     tab.Navigate(url, script_to_evaluate_on_commit=test_harness_script)
     tab.action_runner.WaitForJavaScriptCondition(
-      'domAutomationController._finished', timeout_in_seconds=300)
+      'domAutomationController._finished', timeout=300)
     if not tab.EvaluateJavaScript('domAutomationController._succeeded'):
       self.fail('page indicated test failure')
     if not tab.screenshot_supported:
@@ -142,8 +149,9 @@ class PixelIntegrationTest(
     dpr = tab.EvaluateJavaScript('window.devicePixelRatio')
     if page.test_rect:
       screenshot = image_util.Crop(
-          screenshot, page.test_rect[0] * dpr, page.test_rect[1] * dpr,
-          page.test_rect[2] * dpr, page.test_rect[3] * dpr)
+          screenshot, int(page.test_rect[0] * dpr),
+          int(page.test_rect[1] * dpr), int(page.test_rect[2] * dpr),
+          int(page.test_rect[3] * dpr))
     if page.expected_colors:
       # Use expected colors instead of ref images for validation.
       self._ValidateScreenshotSamples(
@@ -226,3 +234,7 @@ class PixelIntegrationTest(
 
     self._WriteImage(image_path, screenshot)
     return screenshot
+
+def load_tests(loader, tests, pattern):
+  del loader, tests, pattern  # Unused.
+  return gpu_integration_test.LoadAllTestsInModule(sys.modules[__name__])

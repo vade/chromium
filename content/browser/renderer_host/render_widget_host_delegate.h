@@ -12,7 +12,6 @@
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "content/common/drag_event_source_info.h"
-#include "content/public/browser/renderer_unresponsive_type.h"
 #include "content/public/common/drop_data.h"
 #include "third_party/WebKit/public/platform/WebDisplayMode.h"
 #include "third_party/WebKit/public/platform/WebDragOperation.h"
@@ -41,6 +40,7 @@ class RenderWidgetHostInputEventRouter;
 class RenderViewHostDelegateView;
 class TextInputManager;
 class WebContents;
+enum class KeyboardEventProcessingResult;
 struct ScreenInfo;
 struct NativeWebKeyboardEvent;
 
@@ -60,6 +60,10 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
   // The RenderWidgetHost got the focus.
   virtual void RenderWidgetGotFocus(RenderWidgetHostImpl* render_widget_host) {}
 
+  // The RenderWidgetHost lost the focus.
+  virtual void RenderWidgetLostFocus(
+      RenderWidgetHostImpl* render_widget_host) {}
+
   // The RenderWidget was resized.
   virtual void RenderWidgetWasResized(RenderWidgetHostImpl* render_widget_host,
                                       bool width_changed) {}
@@ -78,12 +82,10 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
   virtual void GetScreenInfo(ScreenInfo* web_screen_info);
 
   // Callback to give the browser a chance to handle the specified keyboard
-  // event before sending it to the renderer.
-  // Returns true if the |event| was handled. Otherwise, if the |event| would
-  // be handled in HandleKeyboardEvent() method as a normal keyboard shortcut,
-  // |*is_keyboard_shortcut| should be set to true.
-  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                      bool* is_keyboard_shortcut);
+  // event before sending it to the renderer. See enum for details on return
+  // value.
+  virtual KeyboardEventProcessingResult PreHandleKeyboardEvent(
+      const NativeWebKeyboardEvent& event);
 
   // Callback to inform the browser that the renderer did not process the
   // specified events. This gives an opportunity to the browser to process the
@@ -151,8 +153,7 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
 
   // Notification that the renderer has become unresponsive. The
   // delegate can use this notification to show a warning to the user.
-  virtual void RendererUnresponsive(RenderWidgetHostImpl* render_widget_host,
-                                    RendererUnresponsiveType type) {}
+  virtual void RendererUnresponsive(RenderWidgetHostImpl* render_widget_host) {}
 
   // Notification that a previously unresponsive renderer has become
   // responsive again. The delegate can use this notification to end the
@@ -184,6 +185,10 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
   // Returns true if |render_widget_host| holds the mouse lock.
   virtual bool HasMouseLock(RenderWidgetHostImpl* render_widget_host);
 
+  // Returns the widget that holds the mouse lock or nullptr if the mouse isn't
+  // locked.
+  virtual RenderWidgetHostImpl* GetMouseLockWidget();
+
   // Called when the visibility of the RenderFrameProxyHost in outer
   // WebContents changes. This method is only called on an inner WebContents and
   // will eventually notify all the RenderWidgetHostViews belonging to that
@@ -192,11 +197,6 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
 
   // Update the renderer's cache of the screen rect of the view and window.
   virtual void SendScreenRects() {}
-
-  // Notifies that the main frame in the renderer has performed the first paint
-  // after a navigation.
-  virtual void OnFirstPaintAfterLoad(RenderWidgetHostImpl* render_widget_host) {
-  }
 
   // Returns the TextInputManager tracking text input state.
   virtual TextInputManager* GetTextInputManager();
@@ -217,6 +217,10 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
 
   // Allow the delegate to handle the cursor update. Returns true if handled.
   virtual bool OnUpdateDragCursor();
+
+  // Returns true if the provided RenderWidgetHostImpl matches the current
+  // RenderWidgetHost on the main frame, and false otherwise.
+  virtual bool IsWidgetForMainFrame(RenderWidgetHostImpl*);
 
   // Inner WebContents Helpers -------------------------------------------------
   //
@@ -248,6 +252,9 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
   // Return this object cast to a WebContents, if it is one. If the object is
   // not a WebContents, returns nullptr.
   virtual WebContents* GetAsWebContents();
+
+  // Notifies that a CompositorFrame was received from the renderer.
+  virtual void DidReceiveCompositorFrame() {}
 
  protected:
   virtual ~RenderWidgetHostDelegate() {}

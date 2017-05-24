@@ -38,21 +38,15 @@ cr.define('print_preview', function() {
      * @private
      */
     this.query_ = query;
-
-    /**
-     * FedEx terms-of-service widget or {@code null} if this list item does not
-     * render the FedEx Office print destination.
-     * @type {print_preview.FedexTos}
-     * @private
-     */
-    this.fedexTos_ = null;
-  };
+  }
 
   /**
    * Event types dispatched by the destination list item.
    * @enum {string}
    */
   DestinationListItem.EventType = {
+    // Dispatched to check the printer needs to be configured before activation.
+    CONFIGURE_REQUEST: 'print_preview.DestinationListItem.CONFIGURE_REQUEST',
     // Dispatched when the list item is activated.
     SELECT: 'print_preview.DestinationListItem.SELECT',
     REGISTER_PROMO_CLICKED:
@@ -81,7 +75,7 @@ cr.define('print_preview', function() {
           this.onRegisterPromoClicked_.bind(this));
     },
 
-    /** @return {!print_preiew.Destination} */
+    /** @return {!print_preview.Destination} */
     get destination() {
       return this.destination_;
     },
@@ -96,6 +90,49 @@ cr.define('print_preview', function() {
       this.destination_ = destination;
       this.query_ = query;
       this.updateUi_();
+    },
+
+    /**
+     * Called if the printer configuration request is accepted. Show the waiting
+     * message to the user as the configuration might take longer than expected.
+     */
+    onConfigureRequestAccepted: function() {
+      // It must be a Chrome OS CUPS printer which hasn't been set up before.
+      assert(
+          this.destination_.origin == print_preview.DestinationOrigin.CROS &&
+          !this.destination_.capabilities);
+      this.updateConfiguringMessage_(true);
+    },
+
+    /**
+     * Called if the printer configuration request is rejected. The request is
+     * rejected if another printer is setting up in process or the current
+     * printer doesn't need to be setup.
+     * @param {boolean} otherPrinterSetupInProgress
+     */
+    onConfigureRequestRejected: function(otherPrinterSetupInProgress) {
+      // If another printer setup is in progress, the printer should not be
+      // activated.
+      if (!otherPrinterSetupInProgress)
+        this.onDestinationActivated_();
+    },
+
+    /**
+     * Called when the printer configuration request is resolved successful or
+     * failed.
+     * @param response {!print_preview.PrinterSetupResponse}
+     */
+    onConfigureResolved: function(response) {
+      assert(response.printerId == this.destination_.id);
+      if (response.success) {
+        this.updateConfiguringMessage_(false);
+        this.destination_.capabilities = response.capabilities;
+        this.onDestinationActivated_();
+      } else {
+        this.updateConfiguringMessage_(false);
+        setIsVisible(
+            this.getChildElement('.configuring-failed-text'), true);
+      }
     },
 
     /**
@@ -153,7 +190,8 @@ cr.define('print_preview', function() {
             'extensionDestinationIconTooltip',
             this.destination_.extensionName);
         extensionIconEl.onclick = this.onExtensionIconClicked_.bind(this);
-        extensionIconEl.onkeydown = this.onExtensionIconKeyDown_.bind(this);
+        extensionIconEl.onkeydown = /** @type {function(Event)} */(
+            this.onExtensionIconKeyDown_.bind(this));
       }
 
       var extensionIndicatorEl =
@@ -170,7 +208,14 @@ cr.define('print_preview', function() {
       setIsVisible(
           this.getChildElement('.register-promo'),
           this.destination_.connectionStatus ==
-              print_preview.Destination.ConnectionStatus.UNREGISTERED);
+              print_preview.DestinationConnectionStatus.UNREGISTERED);
+
+      if (cr.isChromeOS) {
+        // Reset the configuring messages for CUPS printers.
+        this.updateConfiguringMessage_(false);
+        setIsVisible(
+            this.getChildElement('.configuring-failed-text'), false);
+      }
     },
 
     /**
@@ -195,25 +240,45 @@ cr.define('print_preview', function() {
     },
 
     /**
-     * Called when the destination item is activated. Dispatches a SELECT event
-     * on the given event target.
+     * Shows/Hides the configuring in progress message and starts/stops its
+     * animation accordingly.
+     * @param {boolean} show If the message and animation should be shown.
+     * @private
+     */
+    updateConfiguringMessage_: function(show) {
+      setIsVisible(
+          this.getChildElement('.configuring-in-progress-text'), show);
+      this.getChildElement('.configuring-text-jumping-dots')
+          .classList.toggle('jumping-dots', show);
+    },
+
+    /**
+     * Called when the destination item is activated. Check if the printer needs
+     * to be set up first before activation.
      * @private
      */
     onActivate_: function() {
-      if (this.destination_.id ==
-              print_preview.Destination.GooglePromotedId.FEDEX &&
-          !this.destination_.isTosAccepted) {
-        if (!this.fedexTos_) {
-          this.fedexTos_ = new print_preview.FedexTos();
-          this.fedexTos_.render(this.getElement());
-          this.tracker.add(
-              this.fedexTos_,
-              print_preview.FedexTos.EventType.AGREE,
-              this.onTosAgree_.bind(this));
-        }
-        this.fedexTos_.setIsVisible(true);
-      } else if (this.destination_.connectionStatus !=
-                     print_preview.Destination.ConnectionStatus.UNREGISTERED) {
+      if (!cr.isChromeOS) {
+        this.onDestinationActivated_();
+        return;
+      }
+
+      // Check if the printer needs configuration before using. The user is only
+      // allowed to set up one printer at one time.
+      var configureEvent = new CustomEvent(
+          DestinationListItem.EventType.CONFIGURE_REQUEST,
+          {detail: {destination: this.destination_}});
+      this.eventTarget_.dispatchEvent(configureEvent);
+    },
+
+    /**
+     * Called when the destination has been resolved successfully and needs to
+     * be activated. Dispatches a SELECT event on the given event target.
+     * @private
+     */
+    onDestinationActivated_: function() {
+      if (this.destination_.connectionStatus !=
+              print_preview.DestinationConnectionStatus.UNREGISTERED) {
         var selectEvt = new Event(DestinationListItem.EventType.SELECT);
         selectEvt.destination = this.destination_;
         this.eventTarget_.dispatchEvent(selectEvt);
@@ -223,7 +288,7 @@ cr.define('print_preview', function() {
     /**
      * Called when the key is pressed on the destination item. Dispatches a
      * SELECT event when Enter is pressed.
-     * @param {KeyboardEvent} e Keyboard event to process.
+     * @param {!KeyboardEvent} e Keyboard event to process.
      * @private
      */
     onKeyDown_: function(e) {
@@ -241,17 +306,6 @@ cr.define('print_preview', function() {
     },
 
     /**
-     * Called when the user agrees to the print destination's terms-of-service.
-     * Selects the print destination that was agreed to.
-     * @private
-     */
-    onTosAgree_: function() {
-      var selectEvt = new Event(DestinationListItem.EventType.SELECT);
-      selectEvt.destination = this.destination_;
-      this.eventTarget_.dispatchEvent(selectEvt);
-    },
-
-    /**
      * Called when the registration promo is clicked.
      * @private
      */
@@ -266,7 +320,7 @@ cr.define('print_preview', function() {
      * Handles click and 'Enter' key down events for the extension icon element.
      * It opens extensions page with the extension associated with the
      * destination highlighted.
-     * @param {MouseEvent|KeyboardEvent} e The event to handle.
+     * @param {Event} e The event to handle.
      * @private
      */
     onExtensionIconClicked_: function(e) {
@@ -277,7 +331,7 @@ cr.define('print_preview', function() {
     /**
      * Handles key down event for the extensin icon element. Keys different than
      * 'Enter' are ignored.
-     * @param {KeyboardEvent} e The event to handle.
+     * @param {!Event} e The event to handle.
      * @private
      */
     onExtensionIconKeyDown_: function(e) {
@@ -285,7 +339,7 @@ cr.define('print_preview', function() {
         return;
       if (e.keyCode != 13 /* Enter */)
         return;
-      this.onExtensionIconClicked_(event);
+      this.onExtensionIconClicked_(e);
     }
   };
 

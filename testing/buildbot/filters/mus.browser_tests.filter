@@ -1,0 +1,16 @@
+# Failing test
+-BrowserTest.FullscreenBookmarkBar
+-BrowserTest.DisableOptionsAndImportMenuItemsConsistently
+-BrowserTest.ReattachDevToolsWindow
+
+# Flaky tests -crbug.com/707195
+-BrowserTest.AboutVersion
+-BrowserTest.CanDuplicateTab
+-BrowserTest.ClearPendingOnFailUnlessNT
+-BrowserTest.DefaultMediaDevices
+-BrowserTest.GetSizeForNewRenderView
+-BrowserTest.JavascriptAlertActivatesTab
+-BrowserTest.Title
+
+# Trying to whitelist
+ChromeContentRendererClientSearchBoxTest.RewriteThumbnailURL

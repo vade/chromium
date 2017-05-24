@@ -13,7 +13,7 @@
 #include "components/policy/core/common/policy_pref_names.h"
 #include "components/policy/policy_constants.h"
 #include "components/prefs/pref_value_map.h"
-#include "grit/components_strings.h"
+#include "components/strings/grit/components_strings.h"
 
 namespace policy {
 
@@ -60,7 +60,7 @@ void URLBlacklistPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
   if (disabled_schemes) {
     for (const auto& entry : *disabled_schemes) {
       std::string entry_value;
-      if (entry->GetAsString(&entry_value)) {
+      if (entry.GetAsString(&entry_value)) {
         entry_value.append("://*");
         merged_url_blacklist->AppendString(entry_value);
       }
@@ -69,8 +69,8 @@ void URLBlacklistPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
 
   if (url_blacklist) {
     for (const auto& entry : *url_blacklist) {
-      if (entry->IsType(base::Value::Type::STRING))
-        merged_url_blacklist->Append(entry->CreateDeepCopy());
+      if (entry.IsType(base::Value::Type::STRING))
+        merged_url_blacklist->Append(entry.CreateDeepCopy());
     }
   }
 

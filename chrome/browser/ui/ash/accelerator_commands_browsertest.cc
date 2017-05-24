@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/common/accelerators/accelerator_commands.h"
+#include "ash/accelerators/accelerator_commands.h"
 
 #include "ash/accelerators/accelerator_commands_aura.h"
-#include "ash/common/wm/window_state.h"
-#include "ash/common/wm_window.h"
 #include "ash/shell.h"
+#include "ash/wm/window_state.h"
 #include "ash/wm/window_state_aura.h"
+#include "ash/wm_window.h"
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "build/build_config.h"
@@ -149,7 +149,8 @@ IN_PROC_BROWSER_TEST_P(AcceleratorCommandsFullscreenBrowserTest,
   // 3) Hosted apps.
   Browser::CreateParams browser_create_params(
       Browser::CreateParams::CreateForApp("Test", true /* trusted_source */,
-                                          gfx::Rect(), browser()->profile()));
+                                          gfx::Rect(), browser()->profile(),
+                                          true));
 
   Browser* app_host_browser = new Browser(browser_create_params);
   ASSERT_TRUE(app_host_browser->is_app());
@@ -169,7 +170,7 @@ IN_PROC_BROWSER_TEST_P(AcceleratorCommandsFullscreenBrowserTest,
 
   // 4) Popup browser windows.
   browser_create_params =
-      Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile());
+      Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile(), true);
   Browser* popup_browser = new Browser(browser_create_params);
   ASSERT_TRUE(popup_browser->is_type_popup());
   ASSERT_FALSE(popup_browser->is_app());

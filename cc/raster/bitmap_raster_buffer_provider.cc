@@ -15,7 +15,7 @@
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
 #include "cc/debug/traced_value.h"
-#include "cc/playback/raster_source.h"
+#include "cc/raster/raster_source.h"
 #include "cc/resources/platform_color.h"
 #include "cc/resources/resource.h"
 
@@ -40,7 +40,7 @@ class RasterBufferImpl : public RasterBuffer {
       const gfx::Rect& raster_full_rect,
       const gfx::Rect& raster_dirty_rect,
       uint64_t new_content_id,
-      float scale,
+      const gfx::AxisTransform2d& transform,
       const RasterSource::PlaybackSettings& playback_settings) override {
     TRACE_EVENT0("cc", "BitmapRasterBuffer::Playback");
     gfx::Rect playback_rect = raster_full_rect;
@@ -50,15 +50,11 @@ class RasterBufferImpl : public RasterBuffer {
     DCHECK(!playback_rect.IsEmpty())
         << "Why are we rastering a tile that's not dirty?";
 
-    sk_sp<SkColorSpace> raster_color_space =
-        raster_source->HasImpliedColorSpace() ? nullptr
-                                              : lock_.sk_color_space();
-
     size_t stride = 0u;
     RasterBufferProvider::PlaybackToMemory(
         lock_.sk_bitmap().getPixels(), resource_->format(), resource_->size(),
-        stride, raster_source, raster_full_rect, playback_rect, scale,
-        raster_color_space, playback_settings);
+        stride, raster_source, raster_full_rect, playback_rect, transform,
+        lock_.color_space_for_raster(), playback_settings);
   }
 
  private:
@@ -102,6 +98,8 @@ void BitmapRasterBufferProvider::OrderingBarrier() {
   // No need to sync resources as this provider does not use GL context.
 }
 
+void BitmapRasterBufferProvider::Flush() {}
+
 ResourceFormat BitmapRasterBufferProvider::GetResourceFormat(
     bool must_support_alpha) const {
   return resource_provider_->best_texture_format();
@@ -114,6 +112,20 @@ bool BitmapRasterBufferProvider::IsResourceSwizzleRequired(
 
 bool BitmapRasterBufferProvider::CanPartialRasterIntoProvidedResource() const {
   return true;
+}
+
+bool BitmapRasterBufferProvider::IsResourceReadyToDraw(
+    ResourceId resource_id) const {
+  // Bitmap resources are immediately ready to draw.
+  return true;
+}
+
+uint64_t BitmapRasterBufferProvider::SetReadyToDrawCallback(
+    const ResourceProvider::ResourceIdArray& resource_ids,
+    const base::Closure& callback,
+    uint64_t pending_callback_id) const {
+  // Bitmap resources are immediately ready to draw.
+  return 0;
 }
 
 void BitmapRasterBufferProvider::Shutdown() {}

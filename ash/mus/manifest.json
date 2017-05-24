@@ -18,6 +18,7 @@
           "ash::mojom::ShutdownController",
           "ash::mojom::SystemTray",
           "ash::mojom::TouchViewManager",
+          "ash::mojom::TrayAction",
           "ash::mojom::VpnList",
           "ash::mojom::WallpaperController"
         ],
@@ -25,8 +26,7 @@
       },
       "requires": {
         "*": [ "accessibility", "app" ],
-        "content_browser": [ "ash" ],
-        "preferences": [ "preferences_manager" ],
+        "preferences_forwarder": [ "pref_client" ],
         "ui": [ "display_test", "window_manager" ],
         "touch_hud": [ "mash:launchable" ]
       }

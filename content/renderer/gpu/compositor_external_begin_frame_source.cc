@@ -55,6 +55,12 @@ void CompositorExternalBeginFrameSource::RemoveObserver(
   external_begin_frame_source_.RemoveObserver(obs);
 }
 
+void CompositorExternalBeginFrameSource::DidFinishFrame(
+    cc::BeginFrameObserver* obs,
+    const cc::BeginFrameAck& ack) {
+  external_begin_frame_source_.DidFinishFrame(obs, ack);
+}
+
 bool CompositorExternalBeginFrameSource::IsThrottled() const {
   return true;
 }
@@ -62,6 +68,14 @@ bool CompositorExternalBeginFrameSource::IsThrottled() const {
 void CompositorExternalBeginFrameSource::OnNeedsBeginFrames(
     bool needs_begin_frames) {
   Send(new ViewHostMsg_SetNeedsBeginFrames(routing_id_, needs_begin_frames));
+}
+
+void CompositorExternalBeginFrameSource::OnDidFinishFrame(
+    const cc::BeginFrameAck& ack) {
+  DCHECK_LE(cc::BeginFrameArgs::kStartingFrameNumber, ack.sequence_number);
+  // If there was damage, ViewHostMsg_SwapCompositorFrame includes the ack.
+  if (!ack.has_damage)
+    Send(new ViewHostMsg_BeginFrameDidNotSwap(routing_id_, ack));
 }
 
 void CompositorExternalBeginFrameSource::OnMessageReceived(

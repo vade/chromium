@@ -19,34 +19,31 @@ namespace ash {
 namespace {
 
 void SetCursorOnAllRootWindows(gfx::NativeCursor cursor) {
-  aura::Window::Windows root_windows =
-      Shell::GetInstance()->GetAllRootWindows();
+  aura::Window::Windows root_windows = Shell::Get()->GetAllRootWindows();
   for (aura::Window::Windows::iterator iter = root_windows.begin();
        iter != root_windows.end(); ++iter)
     (*iter)->GetHost()->SetCursor(cursor);
 
-  Shell::GetInstance()
+  Shell::Get()
       ->window_tree_host_manager()
       ->cursor_window_controller()
       ->SetCursor(cursor);
 }
 
 void NotifyCursorVisibilityChange(bool visible) {
-  aura::Window::Windows root_windows =
-      Shell::GetInstance()->GetAllRootWindows();
+  aura::Window::Windows root_windows = Shell::Get()->GetAllRootWindows();
   for (aura::Window::Windows::iterator iter = root_windows.begin();
        iter != root_windows.end(); ++iter)
     (*iter)->GetHost()->OnCursorVisibilityChanged(visible);
 
-  Shell::GetInstance()
+  Shell::Get()
       ->window_tree_host_manager()
       ->cursor_window_controller()
       ->SetVisibility(visible);
 }
 
 void NotifyMouseEventsEnableStateChange(bool enabled) {
-  aura::Window::Windows root_windows =
-      Shell::GetInstance()->GetAllRootWindows();
+  aura::Window::Windows root_windows = Shell::Get()->GetAllRootWindows();
   for (aura::Window::Windows::iterator iter = root_windows.begin();
        iter != root_windows.end(); ++iter)
     (*iter)->GetHost()->dispatcher()->OnMouseEventsEnableStateChanged(enabled);
@@ -63,7 +60,7 @@ AshNativeCursorManager::~AshNativeCursorManager() {}
 void AshNativeCursorManager::SetNativeCursorEnabled(bool enabled) {
   native_cursor_enabled_ = enabled;
 
-  ::wm::CursorManager* cursor_manager = Shell::GetInstance()->cursor_manager();
+  ::wm::CursorManager* cursor_manager = Shell::Get()->cursor_manager();
   SetCursor(cursor_manager->GetCursor(), cursor_manager);
 }
 
@@ -73,7 +70,7 @@ void AshNativeCursorManager::SetDisplay(
   DCHECK(display.is_valid());
   // Use the platform's device scale factor instead of the display's, which
   // might have been adjusted for the UI scale.
-  const float original_scale = Shell::GetInstance()
+  const float original_scale = Shell::Get()
                                    ->display_manager()
                                    ->GetDisplayInfo(display.id())
                                    .device_scale_factor();
@@ -84,7 +81,7 @@ void AshNativeCursorManager::SetDisplay(
   if (image_cursors_->SetDisplay(display, cursor_scale))
     SetCursor(delegate->GetCursor(), delegate);
 
-  Shell::GetInstance()
+  Shell::Get()
       ->window_tree_host_manager()
       ->cursor_window_controller()
       ->SetDisplay(display);
@@ -96,12 +93,12 @@ void AshNativeCursorManager::SetCursor(
   if (native_cursor_enabled_) {
     image_cursors_->SetPlatformCursor(&cursor);
   } else {
-    gfx::NativeCursor invisible_cursor(ui::kCursorNone);
+    gfx::NativeCursor invisible_cursor(ui::CursorType::kNone);
     image_cursors_->SetPlatformCursor(&invisible_cursor);
-    if (cursor == ui::kCursorCustom) {
+    if (cursor == ui::CursorType::kCustom) {
       // Fall back to the default pointer cursor for now. (crbug.com/476078)
       // TODO(oshima): support custom cursor.
-      cursor = ui::kCursorPointer;
+      cursor = ui::CursorType::kPointer;
     } else {
       cursor.SetPlatformCursor(invisible_cursor.platform());
     }
@@ -124,7 +121,7 @@ void AshNativeCursorManager::SetCursorSet(
   if (delegate->IsCursorVisible())
     SetCursor(delegate->GetCursor(), delegate);
 
-  Shell::GetInstance()
+  Shell::Get()
       ->window_tree_host_manager()
       ->cursor_window_controller()
       ->SetCursorSet(cursor_set);
@@ -138,7 +135,7 @@ void AshNativeCursorManager::SetVisibility(
   if (visible) {
     SetCursor(delegate->GetCursor(), delegate);
   } else {
-    gfx::NativeCursor invisible_cursor(ui::kCursorNone);
+    gfx::NativeCursor invisible_cursor(ui::CursorType::kNone);
     image_cursors_->SetPlatformCursor(&invisible_cursor);
     SetCursorOnAllRootWindows(invisible_cursor);
   }

@@ -235,13 +235,8 @@ void CloudPolicyClient::FetchPolicy() {
 
     // These fields are included only in requests for chrome policy.
     if (IsChromePolicy(type_to_fetch.first)) {
-      if (submit_machine_id_ && !machine_id_.empty())
-        fetch_request->set_machine_id(machine_id_);
-      if (!last_policy_timestamp_.is_null()) {
-        base::TimeDelta timestamp(
-            last_policy_timestamp_ - base::Time::UnixEpoch());
-        fetch_request->set_timestamp(timestamp.InMilliseconds());
-      }
+      if (!last_policy_timestamp_.is_null())
+        fetch_request->set_timestamp(last_policy_timestamp_.ToJavaTime());
       if (!invalidation_payload_.empty()) {
         fetch_request->set_invalidation_version(invalidation_version_);
         fetch_request->set_invalidation_payload(invalidation_payload_);
@@ -287,6 +282,7 @@ void CloudPolicyClient::FetchRobotAuthCodes(const std::string& auth_token) {
   request->set_oauth2_client_id(
       GaiaUrls::GetInstance()->oauth2_chrome_client_id());
   request->add_auth_scope(GaiaConstants::kAnyApiOAuth2Scope);
+  request->set_device_type(em::DeviceServiceApiAccessRequest::CHROME_OS);
 
   policy_fetch_request_job_->Start(
       base::Bind(&CloudPolicyClient::OnFetchRobotAuthCodesCompleted,

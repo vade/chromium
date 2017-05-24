@@ -6,8 +6,10 @@
 
 #include "base/command_line.h"
 #include "chrome/browser/ui/startup/startup_tab_provider.h"
-#include "chrome/common/url_constants.cc"
+#include "chrome/common/url_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using Creator = StartupBrowserCreatorImpl;
 
 namespace {
 
@@ -84,9 +86,9 @@ TEST(StartupBrowserCreatorImplTest, DetermineStartupTabs) {
   FakeStartupTabProvider provider(kOnboardingTabs | kResetTriggerTabs |
                                   kPinnedTabs | kPreferencesTabs |
                                   kNewTabPageTabs);
-  StartupBrowserCreatorImpl impl(
-      base::FilePath(), base::CommandLine(base::CommandLine::NO_PROGRAM),
-      chrome::startup::IS_FIRST_RUN);
+  Creator impl(base::FilePath(),
+               base::CommandLine(base::CommandLine::NO_PROGRAM),
+               chrome::startup::IS_FIRST_RUN);
 
   StartupTabs output =
       impl.DetermineStartupTabs(provider, StartupTabs(), false, false);
@@ -103,9 +105,9 @@ TEST(StartupBrowserCreatorImplTest, DetermineStartupTabs_IncognitoOrCrash) {
   FakeStartupTabProvider provider(kOnboardingTabs | kDistributionFirstRunTabs |
                                   kResetTriggerTabs | kPinnedTabs |
                                   kPreferencesTabs | kNewTabPageTabs);
-  StartupBrowserCreatorImpl impl(
-      base::FilePath(), base::CommandLine(base::CommandLine::NO_PROGRAM),
-      chrome::startup::IS_FIRST_RUN);
+  Creator impl(base::FilePath(),
+               base::CommandLine(base::CommandLine::NO_PROGRAM),
+               chrome::startup::IS_FIRST_RUN);
 
   // Incognito case:
   StartupTabs output =
@@ -128,9 +130,9 @@ TEST(StartupBrowserCreatorImplTest, DetermineStartupTabs_MasterPrefs) {
   FakeStartupTabProvider provider(kOnboardingTabs | kDistributionFirstRunTabs |
                                   kResetTriggerTabs | kPinnedTabs |
                                   kPreferencesTabs | kNewTabPageTabs);
-  StartupBrowserCreatorImpl impl(
-      base::FilePath(), base::CommandLine(base::CommandLine::NO_PROGRAM),
-      chrome::startup::IS_FIRST_RUN);
+  Creator impl(base::FilePath(),
+               base::CommandLine(base::CommandLine::NO_PROGRAM),
+               chrome::startup::IS_FIRST_RUN);
 
   StartupTabs output =
       impl.DetermineStartupTabs(provider, StartupTabs(), false, false);
@@ -144,9 +146,9 @@ TEST(StartupBrowserCreatorImplTest, DetermineStartupTabs_CommandLine) {
   FakeStartupTabProvider provider(kOnboardingTabs | kDistributionFirstRunTabs |
                                   kResetTriggerTabs | kPinnedTabs |
                                   kPreferencesTabs | kNewTabPageTabs);
-  StartupBrowserCreatorImpl impl(
-      base::FilePath(), base::CommandLine(base::CommandLine::NO_PROGRAM),
-      chrome::startup::IS_FIRST_RUN);
+  Creator impl(base::FilePath(),
+               base::CommandLine(base::CommandLine::NO_PROGRAM),
+               chrome::startup::IS_FIRST_RUN);
 
   StartupTabs cmd_line_tabs = {StartupTab(GURL("https://cmd-line"), false)};
 
@@ -175,9 +177,9 @@ TEST(StartupBrowserCreatorImplTest, DetermineStartupTabs_CommandLine) {
 TEST(StartupBrowserCreatorImplTest, DetermineStartupTabs_NewTabPage) {
   FakeStartupTabProvider provider_allows_ntp(kPinnedTabs | kResetTriggerTabs |
                                              kNewTabPageTabs);
-  StartupBrowserCreatorImpl impl(
-      base::FilePath(), base::CommandLine(base::CommandLine::NO_PROGRAM),
-      chrome::startup::IS_FIRST_RUN);
+  Creator impl(base::FilePath(),
+               base::CommandLine(base::CommandLine::NO_PROGRAM),
+               chrome::startup::IS_FIRST_RUN);
 
   StartupTabs output = impl.DetermineStartupTabs(provider_allows_ntp,
                                                  StartupTabs(), false, false);
@@ -185,4 +187,88 @@ TEST(StartupBrowserCreatorImplTest, DetermineStartupTabs_NewTabPage) {
   EXPECT_EQ("reset-trigger", output[0].url.host());
   EXPECT_EQ("new-tab", output[1].url.host());
   EXPECT_EQ("pinned", output[2].url.host());
+}
+
+TEST(StartupBrowserCreatorImplTest, DetermineBrowserOpenBehavior_Startup) {
+  SessionStartupPref pref_default(SessionStartupPref::Type::DEFAULT);
+  SessionStartupPref pref_last(SessionStartupPref::Type::LAST);
+  SessionStartupPref pref_urls(SessionStartupPref::Type::URLS);
+
+  // The most typical case: startup, not recovering from a crash, no switches.
+  // Test each pref with and without command-line tabs.
+  Creator::BrowserOpenBehavior output = Creator::DetermineBrowserOpenBehavior(
+      pref_default, Creator::PROCESS_STARTUP);
+  EXPECT_EQ(Creator::BrowserOpenBehavior::NEW, output);
+
+  output = Creator::DetermineBrowserOpenBehavior(
+      pref_default, Creator::PROCESS_STARTUP | Creator::HAS_CMD_LINE_TABS);
+  EXPECT_EQ(Creator::BrowserOpenBehavior::NEW, output);
+
+  output = Creator::DetermineBrowserOpenBehavior(pref_urls,
+                                                 Creator::PROCESS_STARTUP);
+  EXPECT_EQ(Creator::BrowserOpenBehavior::NEW, output);
+
+  output = Creator::DetermineBrowserOpenBehavior(
+      pref_urls, Creator::PROCESS_STARTUP | Creator::HAS_CMD_LINE_TABS);
+  EXPECT_EQ(Creator::BrowserOpenBehavior::NEW, output);
+
+  output = Creator::DetermineBrowserOpenBehavior(pref_last,
+                                                 Creator::PROCESS_STARTUP);
+  EXPECT_EQ(Creator::BrowserOpenBehavior::SYNCHRONOUS_RESTORE, output);
+
+  output = Creator::DetermineBrowserOpenBehavior(
+      pref_last, Creator::PROCESS_STARTUP | Creator::HAS_CMD_LINE_TABS);
+  EXPECT_EQ(Creator::BrowserOpenBehavior::SYNCHRONOUS_RESTORE, output);
+}
+
+TEST(StartupBrowserCreatorImplTest, DetermineBrowserOpenBehavior_CmdLineTabs) {
+  SessionStartupPref pref_default(SessionStartupPref::Type::DEFAULT);
+  SessionStartupPref pref_last(SessionStartupPref::Type::LAST);
+  SessionStartupPref pref_urls(SessionStartupPref::Type::URLS);
+
+  // Command line tabs after startup should prompt use of existing window,
+  // regardless of pref.
+  Creator::BrowserOpenBehavior output = Creator::DetermineBrowserOpenBehavior(
+      pref_default, Creator::HAS_CMD_LINE_TABS);
+  EXPECT_EQ(Creator::BrowserOpenBehavior::USE_EXISTING, output);
+
+  output = Creator::DetermineBrowserOpenBehavior(pref_urls,
+                                                 Creator::HAS_CMD_LINE_TABS);
+  EXPECT_EQ(Creator::BrowserOpenBehavior::USE_EXISTING, output);
+
+  output = Creator::DetermineBrowserOpenBehavior(pref_last,
+                                                 Creator::HAS_CMD_LINE_TABS);
+  EXPECT_EQ(Creator::BrowserOpenBehavior::USE_EXISTING, output);
+
+  // Exception: this can be overridden by passing a switch.
+  output = Creator::DetermineBrowserOpenBehavior(
+      pref_urls, Creator::HAS_NEW_WINDOW_SWITCH | Creator::HAS_CMD_LINE_TABS);
+  EXPECT_EQ(Creator::BrowserOpenBehavior::NEW, output);
+}
+
+TEST(StartupBrowserCreatorImplTest, DetermineBrowserOpenBehavior_PostCrash) {
+  SessionStartupPref pref_last(SessionStartupPref::Type::LAST);
+
+  // Launching after crash should block session restore.
+  Creator::BrowserOpenBehavior output = Creator::DetermineBrowserOpenBehavior(
+      pref_last, Creator::PROCESS_STARTUP | Creator::IS_POST_CRASH_LAUNCH);
+  EXPECT_EQ(Creator::BrowserOpenBehavior::NEW, output);
+}
+
+TEST(StartupBrowserCreatorImplTest, DetermineBrowserOpenBehavior_NotStartup) {
+  SessionStartupPref pref_default(SessionStartupPref::Type::DEFAULT);
+  SessionStartupPref pref_last(SessionStartupPref::Type::LAST);
+  SessionStartupPref pref_urls(SessionStartupPref::Type::URLS);
+
+  // Launch after startup without command-line tabs should always create a new
+  // window.
+  Creator::BrowserOpenBehavior output =
+      Creator::DetermineBrowserOpenBehavior(pref_default, 0);
+  EXPECT_EQ(Creator::BrowserOpenBehavior::NEW, output);
+
+  output = Creator::DetermineBrowserOpenBehavior(pref_last, 0);
+  EXPECT_EQ(Creator::BrowserOpenBehavior::NEW, output);
+
+  output = Creator::DetermineBrowserOpenBehavior(pref_urls, 0);
+  EXPECT_EQ(Creator::BrowserOpenBehavior::NEW, output);
 }

@@ -9,6 +9,9 @@
 #include "components/password_manager/core/browser/password_manager_client.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
+#if defined(SAFE_BROWSING_DB_LOCAL) || defined(SAFE_BROWSING_DB_REMOTE)
+#include "components/safe_browsing/password_protection/password_protection_service.h"
+#endif
 
 namespace password_manager {
 
@@ -46,7 +49,7 @@ void PasswordReuseDetectionManager::OnKeyPressed(const base::string16& text) {
 
 void PasswordReuseDetectionManager::OnReuseFound(
     const base::string16& password,
-    const std::string& saved_domain,
+    const std::string& legitimate_domain,
     int saved_passwords,
     int number_matches) {
   std::unique_ptr<BrowserSavePasswordProgressLogger> logger;
@@ -54,12 +57,17 @@ void PasswordReuseDetectionManager::OnReuseFound(
     logger.reset(
         new BrowserSavePasswordProgressLogger(client_->GetLogManager()));
     logger->LogString(BrowserSavePasswordProgressLogger::STRING_REUSE_FOUND,
-                      saved_domain);
+                      legitimate_domain);
   }
 
   metrics_util::LogPasswordReuse(
       password.size(), saved_passwords, number_matches,
       client_->GetPasswordManager()->IsPasswordFieldDetectedOnPage());
+#if defined(SAFE_BROWSING_DB_LOCAL)
+  // TODO(jialiul): After CSD whitelist being added to Android, we should gate
+  // this by either SAFE_BROWSING_DB_LOCAL or SAFE_BROWSING_DB_REMOTE.
+  client_->CheckProtectedPasswordEntry(legitimate_domain);
+#endif
 }
 
 }  // namespace password_manager

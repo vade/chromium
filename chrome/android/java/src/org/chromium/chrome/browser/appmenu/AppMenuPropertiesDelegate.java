@@ -4,16 +4,22 @@
 
 package org.chromium.chrome.browser.appmenu;
 
+import android.content.Context;
+import android.content.pm.ResolveInfo;
 import android.graphics.PorterDuff;
 import android.graphics.drawable.Drawable;
+import android.os.SystemClock;
+import android.support.annotation.Nullable;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.CommandLine;
+import org.chromium.base.ContextUtils;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.UrlConstants;
@@ -26,8 +32,12 @@ import org.chromium.chrome.browser.preferences.ManagedPreferencesUtils;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.share.ShareHelper;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
 import org.chromium.ui.base.DeviceFormFactor;
+import org.chromium.webapk.lib.client.WebApkValidator;
+
+import java.util.concurrent.TimeUnit;
 
 /**
  * App Menu helper that handles hiding and showing menu items based on activity state.
@@ -36,14 +46,17 @@ public class AppMenuPropertiesDelegate {
     // Indices for different levels in drawable.btn_reload_stop.
     // Used only when preparing menu and refresh reload button in menu when tab
     // page load status changes.
-    private static final int RELOAD_BUTTON_LEVEL_RELOAD = 0;
-    private static final int RELOAD_BUTTON_LEVEL_STOP_LOADING = 1;
+    static final int RELOAD_BUTTON_LEVEL_RELOAD = 0;
+    static final int RELOAD_BUTTON_LEVEL_STOP_LOADING = 1;
 
     protected MenuItem mReloadMenuItem;
 
     protected final ChromeActivity mActivity;
 
     protected BookmarkBridge mBookmarkBridge;
+
+    @Nullable
+    private AppMenuIconRowFooter mAppMenuIconRowFooter;
 
     public AppMenuPropertiesDelegate(ChromeActivity activity) {
         mActivity = activity;
@@ -90,13 +103,17 @@ public class AppMenuPropertiesDelegate {
 
         if (isPageMenu && currentTab != null) {
             String url = currentTab.getUrl();
-            boolean isChromeScheme = url.startsWith(UrlConstants.CHROME_SCHEME)
-                    || url.startsWith(UrlConstants.CHROME_NATIVE_SCHEME);
-            boolean isFileScheme = url.startsWith(UrlConstants.FILE_SCHEME);
-            boolean isContentScheme = url.startsWith(UrlConstants.CONTENT_SCHEME);
-            boolean shouldShowIconRow = !mActivity.isTablet()
-                    || mActivity.getWindow().getDecorView().getWidth()
-                            < DeviceFormFactor.getMinimumTabletWidthPx(mActivity);
+            boolean isChromeScheme = url.startsWith(UrlConstants.CHROME_URL_PREFIX)
+                    || url.startsWith(UrlConstants.CHROME_NATIVE_URL_PREFIX);
+            boolean isFileScheme = url.startsWith(UrlConstants.FILE_URL_PREFIX);
+            boolean isContentScheme = url.startsWith(UrlConstants.CONTENT_URL_PREFIX);
+
+            // If the BottomSheet is not null, the icon row will be displayed using
+            // AppMenuIconRowFooter as a prompt view.
+            boolean shouldShowIconRow = mActivity.getBottomSheet() == null
+                    && (!mActivity.isTablet()
+                               || mActivity.getWindow().getDecorView().getWidth()
+                                       < DeviceFormFactor.getMinimumTabletWidthPx(mActivity));
 
             // Update the icon row items (shown in narrow form factors).
             menu.findItem(R.id.icon_row_menu_id).setVisible(shouldShowIconRow);
@@ -114,25 +131,18 @@ public class AppMenuPropertiesDelegate {
 
                 MenuItem offlineMenuItem = menu.findItem(R.id.offline_page_id);
                 if (offlineMenuItem != null) {
-                    if (DownloadUtils.isDownloadHomeEnabled()) {
-                        offlineMenuItem.setEnabled(
-                                DownloadUtils.isAllowedToDownloadPage(currentTab));
+                    offlineMenuItem.setEnabled(
+                            DownloadUtils.isAllowedToDownloadPage(currentTab));
 
-                        Drawable drawable = offlineMenuItem.getIcon();
-                        if (drawable != null) {
-                            int iconTint = ApiCompatibilityUtils.getColor(
-                                    mActivity.getResources(), R.color.light_normal_color);
-                            drawable.mutate();
-                            drawable.setColorFilter(iconTint, PorterDuff.Mode.SRC_ATOP);
-                        }
-                    } else {
-                        offlineMenuItem.setVisible(false);
+                    Drawable drawable = offlineMenuItem.getIcon();
+                    if (drawable != null) {
+                        int iconTint = ApiCompatibilityUtils.getColor(
+                                mActivity.getResources(), R.color.light_normal_color);
+                        drawable.mutate();
+                        drawable.setColorFilter(iconTint, PorterDuff.Mode.SRC_ATOP);
                     }
                 }
             }
-
-            menu.findItem(R.id.downloads_menu_id)
-                    .setVisible(DownloadUtils.isDownloadHomeEnabled());
 
             menu.findItem(R.id.update_menu_id).setVisible(
                     UpdateMenuItemHelper.getInstance().shouldShowMenuItem(mActivity));
@@ -169,13 +179,9 @@ public class AppMenuPropertiesDelegate {
             //                access to the resource via FLAG_GRANT_READ_URI_PERMISSION, and that
             //                is not persisted when adding to the homescreen.
             // * If creating shortcuts it not supported by the current home screen.
-            MenuItem homescreenItem = menu.findItem(R.id.add_to_homescreen_id);
-            boolean homescreenItemVisible = ShortcutHelper.isAddToHomeIntentSupported(mActivity)
+            boolean canShowHomeScreenMenuItem = ShortcutHelper.isAddToHomeIntentSupported()
                     && !isChromeScheme && !isFileScheme && !isContentScheme && !isIncognito;
-            if (homescreenItemVisible) {
-                homescreenItem.setTitle(AppBannerManager.getHomescreenLanguageOption());
-            }
-            homescreenItem.setVisible(homescreenItemVisible);
+            prepareAddToHomescreenMenuItem(menu, currentTab, canShowHomeScreenMenuItem);
 
             // Hide request desktop site on all chrome:// pages except for the NTP. Check request
             // desktop site if it's activated on this page.
@@ -190,12 +196,12 @@ public class AppMenuPropertiesDelegate {
             menu.findItem(R.id.enter_vr_id).setVisible(
                     CommandLine.getInstance().hasSwitch(ChromeSwitches.ENABLE_VR_SHELL_DEV));
 
-            // Only display the standalone content suggestions UI if the corresponding feature
-            // is enabled.
-            MenuItem item = menu.findItem(R.id.content_suggestions_standalone_ui);
-            item.setTitle("🔰🆕👌");
-            item.setVisible(
-                    ChromeFeatureList.isEnabled(ChromeFeatureList.NTP_SUGGESTIONS_STANDALONE_UI));
+            if (FeatureUtilities.isChromeHomeEnabled()) {
+                // History, downloads, and bookmarks are shown in the Chrome Home bottom sheet.
+                menu.findItem(R.id.open_history_menu_id).setVisible(false);
+                menu.findItem(R.id.downloads_menu_id).setVisible(false);
+                menu.findItem(R.id.all_bookmarks_menu_id).setVisible(false);
+            }
         }
 
         if (isOverviewMenu) {
@@ -225,6 +231,61 @@ public class AppMenuPropertiesDelegate {
     }
 
     /**
+     * Called after the menu has been shown to finish initializing views.
+     * @param menu The {@link AppMenu} that was shown.
+     */
+    public void onShow(final AppMenu menu) {
+        View promptView = menu.getPromptView();
+        if (!(promptView instanceof AppMenuIconRowFooter)) {
+            mAppMenuIconRowFooter = null;
+            return;
+        }
+
+        mAppMenuIconRowFooter = (AppMenuIconRowFooter) promptView;
+        mAppMenuIconRowFooter.initialize(mActivity, menu, mBookmarkBridge);
+    }
+
+    /**
+     * Sets the visibility and labels of the "Add to Home screen" and "Open WebAPK" menu items.
+     */
+    protected void prepareAddToHomescreenMenuItem(
+            Menu menu, Tab currentTab, boolean canShowHomeScreenMenuItem) {
+        // Record whether or not we have finished installability checks for this page when we're
+        // preparing the menu to be displayed. This will let us determine if it is feasible to
+        // change the add to homescreen menu item based on whether a site is a PWA.
+        currentTab.getAppBannerManager().recordMenuOpen();
+
+        MenuItem homescreenItem = menu.findItem(R.id.add_to_homescreen_id);
+        MenuItem openWebApkItem = menu.findItem(R.id.open_webapk_id);
+        if (canShowHomeScreenMenuItem) {
+            Context context = ContextUtils.getApplicationContext();
+            long addToHomeScreenStart = SystemClock.elapsedRealtime();
+            ResolveInfo resolveInfo =
+                    WebApkValidator.queryResolveInfo(context, currentTab.getUrl());
+            RecordHistogram.recordTimesHistogram("Android.PrepareMenu.OpenWebApkVisibilityCheck",
+                    SystemClock.elapsedRealtime() - addToHomeScreenStart, TimeUnit.MILLISECONDS);
+
+            boolean openWebApkItemVisible =
+                    resolveInfo != null && resolveInfo.activityInfo.packageName != null;
+
+            if (openWebApkItemVisible) {
+                String appName = resolveInfo.loadLabel(context.getPackageManager()).toString();
+                openWebApkItem.setTitle(context.getString(R.string.menu_open_webapk, appName));
+
+                homescreenItem.setVisible(false);
+                openWebApkItem.setVisible(true);
+            } else {
+                homescreenItem.setTitle(AppBannerManager.getHomescreenLanguageOption());
+                homescreenItem.setVisible(true);
+                openWebApkItem.setVisible(false);
+            }
+        } else {
+            homescreenItem.setVisible(false);
+            openWebApkItem.setVisible(false);
+        }
+    }
+
+    /**
      * Notify the delegate that the load state changed.
      * @param isLoading Whether the page is currently loading.
      */
@@ -234,6 +295,8 @@ public class AppMenuPropertiesDelegate {
                     ? RELOAD_BUTTON_LEVEL_STOP_LOADING : RELOAD_BUTTON_LEVEL_RELOAD);
             mReloadMenuItem.setTitle(isLoading
                     ? R.string.accessibility_btn_stop_loading : R.string.accessibility_btn_refresh);
+        } else if (mAppMenuIconRowFooter != null) {
+            mAppMenuIconRowFooter.loadingStateChanged(isLoading);
         }
     }
 
@@ -267,6 +330,15 @@ public class AppMenuPropertiesDelegate {
      */
     public int getFooterResourceId() {
         return 0;
+    }
+
+    /**
+     * Determines whether the header should be shown based on the maximum available menu height.
+     * @param maxMenuHeight The maximum available height for the menu to draw.
+     * @return Whether the footer, as specified in {@link #getFooterResourceId()}, should be shown.
+     */
+    public boolean shouldShowFooter(int maxMenuHeight) {
+        return true;
     }
 
     /**
@@ -306,8 +378,8 @@ public class AppMenuPropertiesDelegate {
     protected void updateRequestDesktopSiteMenuItem(
             MenuItem requstMenuItem, Tab currentTab) {
         String url = currentTab.getUrl();
-        boolean isChromeScheme = url.startsWith(UrlConstants.CHROME_SCHEME)
-                || url.startsWith(UrlConstants.CHROME_NATIVE_SCHEME);
+        boolean isChromeScheme = url.startsWith(UrlConstants.CHROME_URL_PREFIX)
+                || url.startsWith(UrlConstants.CHROME_NATIVE_URL_PREFIX);
         requstMenuItem.setVisible(!isChromeScheme || currentTab.isNativePage());
         requstMenuItem.setChecked(currentTab.getUseDesktopUserAgent());
         requstMenuItem.setTitleCondensed(requstMenuItem.isChecked()

@@ -23,11 +23,9 @@
 #include "third_party/skia/include/core/SkImageInfo.h"
 #include "ui/display/types/gamma_ramp_rgb_entry.h"
 #include "ui/ozone/platform/drm/common/drm_util.h"
+#include "ui/ozone/platform/drm/gpu/hardware_display_plane_manager_atomic.h"
 #include "ui/ozone/platform/drm/gpu/hardware_display_plane_manager_legacy.h"
 
-#if defined(USE_DRM_ATOMIC)
-#include "ui/ozone/platform/drm/gpu/hardware_display_plane_manager_atomic.h"
-#endif
 
 namespace ui {
 
@@ -354,7 +352,7 @@ class DrmDevice::PageFlipManager {
 class DrmDevice::IOWatcher : public base::MessagePumpLibevent::Watcher {
  public:
   IOWatcher(int fd, DrmDevice::PageFlipManager* page_flip_manager)
-      : page_flip_manager_(page_flip_manager), fd_(fd) {
+      : page_flip_manager_(page_flip_manager), controller_(FROM_HERE), fd_(fd) {
     Register();
   }
 
@@ -411,12 +409,13 @@ bool DrmDevice::Initialize(bool use_atomic) {
     return false;
   }
 
-#if defined(USE_DRM_ATOMIC)
   // Use atomic only if the build, kernel & flags all allow it.
   if (use_atomic && SetCapability(DRM_CLIENT_CAP_ATOMIC, 1))
     plane_manager_.reset(new HardwareDisplayPlaneManagerAtomic());
-#endif  // defined(USE_DRM_ATOMIC)
 
+  LOG_IF(WARNING, use_atomic && !plane_manager_)
+      << "Drm atomic requested but capabilities don't allow it. Falling back "
+         "to legacy page flip.";
   if (!plane_manager_)
     plane_manager_.reset(new HardwareDisplayPlaneManagerLegacy());
   if (!plane_manager_->Initialize(this)) {
@@ -661,7 +660,6 @@ bool DrmDevice::CommitProperties(drmModeAtomicReq* properties,
                                  uint32_t flags,
                                  uint32_t crtc_count,
                                  const PageFlipCallback& callback) {
-#if defined(USE_DRM_ATOMIC)
   uint64_t id = 0;
   bool page_flip_event_requested = flags & DRM_MODE_PAGE_FLIP_EVENT;
 
@@ -675,24 +673,11 @@ bool DrmDevice::CommitProperties(drmModeAtomicReq* properties,
 
     return true;
   }
-#endif  // defined(USE_DRM_ATOMIC)
   return false;
 }
 
 bool DrmDevice::SetCapability(uint64_t capability, uint64_t value) {
   DCHECK(file_.IsValid());
-
-#ifndef DRM_IOCTL_SET_CLIENT_CAP
-// drmSetClientCap was introduced in a later version of libdrm than the wheezy
-// sysroot supplies.
-// TODO(thomasanderson): Remove this when support for the wheezy sysroot is
-// dropped in favor of jessie.
-#define DRM_IOCTL_SET_CLIENT_CAP DRM_IOW(0x0d, struct drm_set_client_cap)
-  struct drm_set_client_cap {
-    __u64 capability;
-    __u64 value;
-  };
-#endif
 
   struct drm_set_client_cap cap = {capability, value};
   return !drmIoctl(file_.GetPlatformFile(), DRM_IOCTL_SET_CLIENT_CAP, &cap);

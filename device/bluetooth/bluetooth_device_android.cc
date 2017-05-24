@@ -4,7 +4,6 @@
 
 #include "device/bluetooth/bluetooth_device_android.h"
 
-#include "base/android/context_utils.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/metrics/histogram_macros.h"
@@ -34,14 +33,15 @@ void RecordConnectionTerminatedResult(int32_t status) {
 }
 }  // namespace
 
-BluetoothDeviceAndroid* BluetoothDeviceAndroid::Create(
+std::unique_ptr<BluetoothDeviceAndroid> BluetoothDeviceAndroid::Create(
     BluetoothAdapterAndroid* adapter,
     const JavaRef<jobject>&
         bluetooth_device_wrapper) {  // Java Type: bluetoothDeviceWrapper
-  BluetoothDeviceAndroid* device = new BluetoothDeviceAndroid(adapter);
+  std::unique_ptr<BluetoothDeviceAndroid> device(
+      new BluetoothDeviceAndroid(adapter));
 
   device->j_device_.Reset(Java_ChromeBluetoothDevice_create(
-      AttachCurrentThread(), reinterpret_cast<intptr_t>(device),
+      AttachCurrentThread(), reinterpret_cast<intptr_t>(device.get()),
       bluetooth_device_wrapper));
 
   return device;
@@ -222,7 +222,10 @@ void BluetoothDeviceAndroid::OnConnectionStateChange(
   } else {
     // Otherwise an existing connection was terminated.
     RecordConnectionTerminatedResult(status);
-    DidDisconnectGatt(true /* notifyDeviceChanged */);
+    gatt_services_.clear();
+    device_uuids_.ClearServiceUUIDs();
+    SetGattServicesDiscoveryComplete(false);
+    DidDisconnectGatt();
   }
 }
 
@@ -261,8 +264,8 @@ BluetoothDeviceAndroid::BluetoothDeviceAndroid(BluetoothAdapterAndroid* adapter)
     : BluetoothDevice(adapter) {}
 
 void BluetoothDeviceAndroid::CreateGattConnectionImpl() {
-  Java_ChromeBluetoothDevice_createGattConnectionImpl(
-      AttachCurrentThread(), j_device_, base::android::GetApplicationContext());
+  Java_ChromeBluetoothDevice_createGattConnectionImpl(AttachCurrentThread(),
+                                                      j_device_);
 }
 
 void BluetoothDeviceAndroid::DisconnectGatt() {

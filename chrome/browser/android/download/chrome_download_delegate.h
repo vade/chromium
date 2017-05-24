@@ -11,6 +11,8 @@
 class ChromeDownloadDelegate
     : public content::WebContentsUserData<ChromeDownloadDelegate> {
  public:
+  ~ChromeDownloadDelegate() override;
+
   // Returns true iff this request resulted in the tab creating the download
   // to close.
   static bool EnqueueDownloadManagerRequest(jobject chrome_download_delegate,
@@ -19,13 +21,11 @@ class ChromeDownloadDelegate
 
   void SetJavaRef(JNIEnv*, jobject obj);
 
-  void OnDownloadStarted(const std::string& filename);
   void RequestFileAccess(intptr_t callback_id);
 
  private:
   explicit ChromeDownloadDelegate(content::WebContents* contents);
   friend class content::WebContentsUserData<ChromeDownloadDelegate>;
-  ~ChromeDownloadDelegate() override;
 
   // A reference to the Java ChromeDownloadDelegate object.
   jobject java_ref_;

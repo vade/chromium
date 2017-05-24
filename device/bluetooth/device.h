@@ -11,6 +11,7 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/bluetooth_gatt_connection.h"
@@ -50,22 +51,68 @@ class Device : public mojom::Device, public device::BluetoothAdapter::Observer {
 
   // mojom::Device overrides:
   void Disconnect() override;
-  void GetInfo(const GetInfoCallback& callback) override;
-  void GetServices(const GetServicesCallback& callback) override;
+  void GetInfo(GetInfoCallback callback) override;
+  void GetServices(GetServicesCallback callback) override;
   void GetCharacteristics(const std::string& service_id,
-                          const GetCharacteristicsCallback& callback) override;
+                          GetCharacteristicsCallback callback) override;
+  void ReadValueForCharacteristic(
+      const std::string& service_id,
+      const std::string& characteristic_id,
+      ReadValueForCharacteristicCallback callback) override;
+  void WriteValueForCharacteristic(
+      const std::string& service_id,
+      const std::string& characteristic_id,
+      const std::vector<uint8_t>& value,
+      WriteValueForCharacteristicCallback callback) override;
   void GetDescriptors(const std::string& service_id,
                       const std::string& characteristic_id,
-                      const GetDescriptorsCallback& callback) override;
+                      GetDescriptorsCallback callback) override;
+  void ReadValueForDescriptor(const std::string& service_id,
+                              const std::string& characteristic_id,
+                              const std::string& descriptor_id,
+                              ReadValueForDescriptorCallback callback) override;
+  void WriteValueForDescriptor(
+      const std::string& service_id,
+      const std::string& characteristic_id,
+      const std::string& descriptor_id,
+      const std::vector<uint8_t>& value,
+      WriteValueForDescriptorCallback callback) override;
 
  private:
   Device(scoped_refptr<device::BluetoothAdapter> adapter,
          std::unique_ptr<device::BluetoothGattConnection> connection);
 
-  void GetServicesImpl(const GetServicesCallback& callback);
+  void GetServicesImpl(GetServicesCallback callback);
 
   mojom::ServiceInfoPtr ConstructServiceInfoStruct(
       const device::BluetoothRemoteGattService& service);
+
+  void OnReadRemoteCharacteristic(ReadValueForCharacteristicCallback callback,
+                                  const std::vector<uint8_t>& value);
+
+  void OnReadRemoteCharacteristicError(
+      ReadValueForCharacteristicCallback callback,
+      device::BluetoothGattService::GattErrorCode error_code);
+
+  void OnWriteRemoteCharacteristic(
+      WriteValueForCharacteristicCallback callback);
+
+  void OnWriteRemoteCharacteristicError(
+      WriteValueForCharacteristicCallback callback,
+      device::BluetoothGattService::GattErrorCode error_code);
+
+  void OnReadRemoteDescriptor(ReadValueForDescriptorCallback callback,
+                              const std::vector<uint8_t>& value);
+
+  void OnReadRemoteDescriptorError(
+      ReadValueForDescriptorCallback callback,
+      device::BluetoothGattService::GattErrorCode error_code);
+
+  void OnWriteRemoteDescriptor(WriteValueForDescriptorCallback callback);
+
+  void OnWriteRemoteDescriptorError(
+      WriteValueForDescriptorCallback callback,
+      device::BluetoothGattService::GattErrorCode error_code);
 
   const std::string& GetAddress();
 
@@ -80,6 +127,8 @@ class Device : public mojom::Device, public device::BluetoothAdapter::Observer {
   // The services request queue which holds callbacks that are waiting for
   // services to be discovered for this device.
   std::vector<base::Closure> pending_services_requests_;
+
+  base::WeakPtrFactory<Device> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(Device);
 };

@@ -73,11 +73,7 @@ std::unique_ptr<TestingProfile> BuildTestingProfile(
 }  // namespace
 
 ExtensionServiceTestBase::ExtensionServiceInitParams::
-    ExtensionServiceInitParams()
-    : autoupdate_enabled(false),
-      is_first_run(true),
-      profile_is_supervised(false) {
-}
+    ExtensionServiceInitParams() {}
 
 ExtensionServiceTestBase::ExtensionServiceInitParams::
     ExtensionServiceInitParams(const ExtensionServiceInitParams& other) =
@@ -87,7 +83,6 @@ ExtensionServiceTestBase::ExtensionServiceTestBase()
     : thread_bundle_(new content::TestBrowserThreadBundle(kThreadOptions)),
       service_(NULL),
       testing_local_state_(TestingBrowserProcess::GetGlobal()),
-      did_reset_thread_bundle_(false),
       registry_(NULL) {
   base::FilePath test_data_dir;
   if (!PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir)) {
@@ -98,11 +93,6 @@ ExtensionServiceTestBase::ExtensionServiceTestBase()
 }
 
 ExtensionServiceTestBase::~ExtensionServiceTestBase() {
-  // Parts of destruction have to happen on an IO thread, so if the thread
-  // bundle is reset, we need to change it back.
-  if (did_reset_thread_bundle_)
-    ResetThreadBundle(kThreadOptions);
-
   // Why? Because |profile_| has to be destroyed before |at_exit_manager_|, but
   // is declared above it in the class definition since it's protected.
   profile_.reset();
@@ -191,10 +181,11 @@ void ExtensionServiceTestBase::InitializeExtensionServiceWithUpdater() {
   service_->updater()->Start();
 }
 
-void ExtensionServiceTestBase::ResetThreadBundle(int options) {
-  did_reset_thread_bundle_ = true;
-  thread_bundle_.reset();
-  thread_bundle_.reset(new content::TestBrowserThreadBundle(options));
+void ExtensionServiceTestBase::
+    InitializeExtensionServiceWithExtensionsDisabled() {
+  ExtensionServiceInitParams params = CreateDefaultInitParams();
+  params.extensions_enabled = false;
+  InitializeExtensionService(params);
 }
 
 size_t ExtensionServiceTestBase::GetPrefKeyCount() {
@@ -315,15 +306,10 @@ void ExtensionServiceTestBase::CreateExtensionService(
   if (!params.is_first_run)
     ExtensionPrefs::Get(profile_.get())->SetAlertSystemFirstRun();
 
-  service_ =
-      system->CreateExtensionService(base::CommandLine::ForCurrentProcess(),
-                                     params.extensions_install_dir,
-                                     params.autoupdate_enabled);
+  service_ = system->CreateExtensionService(
+      base::CommandLine::ForCurrentProcess(), params.extensions_install_dir,
+      params.autoupdate_enabled, params.extensions_enabled);
 
-  service_->SetFileTaskRunnerForTesting(
-      base::ThreadTaskRunnerHandle::Get().get());
-  service_->set_extensions_enabled(true);
-  service_->set_show_extensions_prompts(false);
   service_->component_loader()->set_ignore_whitelist_for_testing(true);
 
   // When we start up, we want to make sure there is no external provider,

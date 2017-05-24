@@ -36,7 +36,7 @@ class OffscreenTab;  // Forward declaration.  See below.
 //
 // This class operates exclusively on the UI thread and so is not thread-safe.
 class OffscreenTabsOwner
-    : protected content::WebContentsUserData<OffscreenTabsOwner> {
+    : public content::WebContentsUserData<OffscreenTabsOwner> {
  public:
   ~OffscreenTabsOwner() final;
 
@@ -131,9 +131,9 @@ class OffscreenTab : protected content::WebContentsDelegate,
                    const std::string& request_method,
                    const base::Callback<void(bool)>& callback) final;
   bool HandleContextMenu(const content::ContextMenuParams& params) final;
-  bool PreHandleKeyboardEvent(content::WebContents* source,
-                              const content::NativeWebKeyboardEvent& event,
-                              bool* is_keyboard_shortcut) final;
+  content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
+      content::WebContents* source,
+      const content::NativeWebKeyboardEvent& event) final;
   bool PreHandleGestureEvent(content::WebContents* source,
                              const blink::WebGestureEvent& event) final;
   bool CanDragEnter(content::WebContents* source,
@@ -145,7 +145,7 @@ class OffscreenTab : protected content::WebContentsDelegate,
       int32_t route_id,
       int32_t main_frame_route_id,
       int32_t main_frame_widget_route_id,
-      WindowContainerType window_container_type,
+      content::mojom::WindowContainerType window_container_type,
       const GURL& opener_url,
       const std::string& frame_name,
       const GURL& target_url,

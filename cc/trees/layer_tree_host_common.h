@@ -13,7 +13,7 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_collections.h"
 #include "cc/layers/layer_impl.h"
@@ -72,11 +72,8 @@ class CC_EXPORT LayerTreeHostCommon {
         const gfx::Vector2dF& elastic_overscroll,
         const LayerImpl* elastic_overscroll_application_layer,
         int max_texture_size,
-        bool can_render_to_separate_surface,
         bool can_adjust_raster_scales,
-        bool verify_clip_tree_calculations,
-        bool verify_visible_rect_calculations,
-        LayerImplList* render_surface_layer_list,
+        RenderSurfaceList* render_surface_list,
         PropertyTrees* property_trees);
 
     LayerImpl* root_layer;
@@ -90,11 +87,8 @@ class CC_EXPORT LayerTreeHostCommon {
     gfx::Vector2dF elastic_overscroll;
     const LayerImpl* elastic_overscroll_application_layer;
     int max_texture_size;
-    bool can_render_to_separate_surface;
     bool can_adjust_raster_scales;
-    bool verify_clip_tree_calculations;
-    bool verify_visible_rect_calculations;
-    LayerImplList* render_surface_layer_list;
+    RenderSurfaceList* render_surface_list;
     PropertyTrees* property_trees;
   };
 
@@ -104,18 +98,18 @@ class CC_EXPORT LayerTreeHostCommon {
                                       const gfx::Size& device_viewport_size,
                                       const gfx::Transform& device_transform,
                                       float device_scale_factor,
-                                      LayerImplList* render_surface_layer_list);
+                                      RenderSurfaceList* render_surface_list);
     CalcDrawPropsImplInputsForTesting(LayerImpl* root_layer,
                                       const gfx::Size& device_viewport_size,
                                       const gfx::Transform& device_transform,
-                                      LayerImplList* render_surface_layer_list);
+                                      RenderSurfaceList* render_surface_list);
     CalcDrawPropsImplInputsForTesting(LayerImpl* root_layer,
                                       const gfx::Size& device_viewport_size,
-                                      LayerImplList* render_surface_layer_list);
+                                      RenderSurfaceList* render_surface_list);
     CalcDrawPropsImplInputsForTesting(LayerImpl* root_layer,
                                       const gfx::Size& device_viewport_size,
                                       float device_scale_factor,
-                                      LayerImplList* render_surface_layer_list);
+                                      RenderSurfaceList* render_surface_list);
   };
 
   static int CalculateLayerJitter(LayerImpl* scrolling_layer);
@@ -127,7 +121,7 @@ class CC_EXPORT LayerTreeHostCommon {
       CalcDrawPropsImplInputsForTesting* inputs);
 
   template <typename Function>
-  static void CallFunctionForEveryLayer(LayerTree* layer,
+  static void CallFunctionForEveryLayer(LayerTreeHost* host,
                                         const Function& function);
 
   template <typename Function>
@@ -151,11 +145,11 @@ class CC_EXPORT LayerTreeHostCommon {
   // to be told when they're faded out so it can stop handling input for
   // invisible scrollbars.
   struct CC_EXPORT ScrollbarsUpdateInfo {
-    int layer_id;
+    ElementId element_id;
     bool hidden;
 
     ScrollbarsUpdateInfo();
-    ScrollbarsUpdateInfo(int layer_id, bool hidden);
+    ScrollbarsUpdateInfo(ElementId element_id, bool hidden);
 
     bool operator==(const ScrollbarsUpdateInfo& other) const;
   };
@@ -177,13 +171,15 @@ struct CC_EXPORT ScrollAndScaleSet {
   float top_controls_delta;
   std::vector<LayerTreeHostCommon::ScrollbarsUpdateInfo> scrollbars;
   std::vector<std::unique_ptr<SwapPromise>> swap_promises;
+  bool has_scrolled_by_wheel;
+  bool has_scrolled_by_touch;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ScrollAndScaleSet);
 };
 
 template <typename Function>
-void LayerTreeHostCommon::CallFunctionForEveryLayer(LayerTree* host,
+void LayerTreeHostCommon::CallFunctionForEveryLayer(LayerTreeHost* host,
                                                     const Function& function) {
   for (auto* layer : *host) {
     function(layer);

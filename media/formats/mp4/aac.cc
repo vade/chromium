@@ -27,8 +27,7 @@ AAC::AAC(const AAC& other) = default;
 AAC::~AAC() {
 }
 
-bool AAC::Parse(const std::vector<uint8_t>& data,
-                const scoped_refptr<MediaLog>& media_log) {
+bool AAC::Parse(const std::vector<uint8_t>& data, MediaLog* media_log) {
 #if defined(OS_ANDROID)
   codec_specific_data_ = data;
 #endif
@@ -148,12 +147,6 @@ bool AAC::Parse(const std::vector<uint8_t>& data,
     channel_layout_ = kADTSChannelLayoutTable[channel_config_];
   }
   DCHECK(channel_layout_ != CHANNEL_LAYOUT_NONE);
-
-  MEDIA_LOG(INFO, media_log)
-      << "Audio codec: mp4a.40." << static_cast<int>(profile_)
-      << ". Sampling frequency: " << frequency_ << "Hz"
-      << ". Sampling frequency(Extension): " << extension_frequency_ << "Hz"
-      << ". Channel layout: " << channel_layout_ << ".";
 
   return true;
 }

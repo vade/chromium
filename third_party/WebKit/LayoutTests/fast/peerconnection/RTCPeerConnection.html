@@ -31,9 +31,15 @@ shouldThrow("new RTCPeerConnection({iceServers:[{url:'foo'}]});");
 shouldThrow("new RTCPeerConnection({iceServers:[{urls:'unsupported:scheme'}]});");
 shouldThrow("new RTCPeerConnection({iceServers:[{urls:[1, 'turn:foo.com']}]});");
 
-shouldNotThrow("new RTCPeerConnection({iceServers:[], iceTransports:'none'});");
+shouldNotThrow("new RTCPeerConnection({iceServers:[], iceTransportPolicy:'relay'});");
+shouldNotThrow("new RTCPeerConnection({iceServers:[], iceTransportPolicy:'all'});");
+shouldThrow("new RTCPeerConnection({iceServers:[], iceTransportPolicy:'none'});");
+shouldThrow("new RTCPeerConnection({iceServers:[], iceTransportPolicy:'foo'});");
+
+// TODO(foolip): |iceTransports| is not in the spec.
 shouldNotThrow("new RTCPeerConnection({iceServers:[], iceTransports:'relay'});");
 shouldNotThrow("new RTCPeerConnection({iceServers:[], iceTransports:'all'});");
+shouldThrow("new RTCPeerConnection({iceServers:[], iceTransports:'none'});");
 shouldThrow("new RTCPeerConnection({iceServers:[], iceTransports:'foo'});");
 
 shouldNotThrow("new RTCPeerConnection({iceServers:[], bundlePolicy:'balanced'});");
@@ -44,6 +50,14 @@ shouldThrow("new RTCPeerConnection({iceServers:[], bundlePolicy:'foo'});");
 shouldNotThrow("new RTCPeerConnection({iceServers:[], rtcpMuxPolicy:'negotiate'});");
 shouldNotThrow("new RTCPeerConnection({iceServers:[], rtcpMuxPolicy:'require'});");
 shouldThrow("new RTCPeerConnection({iceServers:[], rtcpMuxPolicy:'foo'});");
+
+shouldNotThrow("new RTCPeerConnection({iceCandidatePoolSize:0});");
+shouldNotThrow("new RTCPeerConnection({iceCandidatePoolSize:1});");
+shouldNotThrow("new RTCPeerConnection({iceCandidatePoolSize:255});");
+shouldThrow("new RTCPeerConnection({iceCandidatePoolSize:-1});");
+shouldThrow("new RTCPeerConnection({iceCandidatePoolSize:99999999});");
+shouldThrow("new RTCPeerConnection({iceCandidatePoolSize:256});");
+shouldThrow("new RTCPeerConnection({iceCandidatePoolSize:'foo'});");
 
 // Deprecated.
 shouldNotThrow("new RTCPeerConnection(null, {mandatory:{valid_and_supported_1:1}});");

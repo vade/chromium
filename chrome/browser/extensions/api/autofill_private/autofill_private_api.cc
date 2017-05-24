@@ -31,6 +31,9 @@ namespace {
 static const char kSettingsOrigin[] = "Chrome settings";
 static const char kErrorDataUnavailable[] = "Autofill data unavailable.";
 
+// TODO(mad): This does basically the same thing as
+//            components/autofill/core/browser/autofill_address_util.cc, we
+//            should refactor to use a single code path for this.
 // Fills |components| with the address UI components that should be used to
 // input an address for |country_code| when UI BCP 47 language code is
 // |ui_language_code|.
@@ -213,13 +216,13 @@ ExtensionFunction::ResponseAction AutofillPrivateSaveAddressFunction::Run() {
 
   if (address->address_level1) {
     profile.SetRawInfo(
-        autofill::ADDRESS_HOME_CITY,
+        autofill::ADDRESS_HOME_STATE,
         base::UTF8ToUTF16(*address->address_level1));
   }
 
   if (address->address_level2) {
     profile.SetRawInfo(
-        autofill::ADDRESS_HOME_STATE,
+        autofill::ADDRESS_HOME_CITY,
         base::UTF8ToUTF16(*address->address_level2));
   }
 

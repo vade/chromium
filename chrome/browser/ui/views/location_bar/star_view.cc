@@ -13,8 +13,8 @@
 #include "chrome/browser/ui/views/bookmarks/bookmark_bubble_view.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/strings/grit/components_strings.h"
+#include "components/toolbar/vector_icons.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/vector_icons_public.h"
 
 StarView::StarView(CommandUpdater* command_updater, Browser* browser)
     : BubbleIconView(command_updater, IDC_BOOKMARK_PAGE), browser_(browser) {
@@ -62,7 +62,6 @@ views::BubbleDialogDelegateView* StarView::GetBubble() const {
   return BookmarkBubbleView::bookmark_bubble();
 }
 
-gfx::VectorIconId StarView::GetVectorIcon() const {
-  return active() ? gfx::VectorIconId::LOCATION_BAR_STAR_ACTIVE
-                  : gfx::VectorIconId::LOCATION_BAR_STAR;
+const gfx::VectorIcon& StarView::GetVectorIcon() const {
+  return active() ? toolbar::kStarActiveIcon : toolbar::kStarIcon;
 }

@@ -147,7 +147,7 @@ class BrowserEncodingTest
 
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        base::Bind(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
+        base::BindOnce(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
   }
 
   base::ScopedTempDir temp_dir_;
@@ -227,9 +227,6 @@ IN_PROC_BROWSER_TEST_F(BrowserEncodingTest, TestEncodingAutoDetect) {
       { "Shift-JIS_with_no_encoding_specified.html",
         "expected_Shift-JIS_saved_from_no_encoding_specified.html",
         "Shift_JIS" },
-      { "UTF-8_with_no_encoding_specified.html",
-        "expected_UTF-8_saved_from_no_encoding_specified.html",
-        "UTF-8" },
       { "EUC-KR_with_no_encoding_specified.html",
         "expected_EUC-KR_saved_from_no_encoding_specified.html",
         "EUC-KR" },

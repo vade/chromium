@@ -36,7 +36,12 @@ class FakeUpdateEngineClient : public UpdateEngineClient {
   void GetChannel(bool get_current_channel,
                   const GetChannelCallback& callback) override;
   void GetEolStatus(const GetEolStatusCallback& callback) override;
-
+  void SetUpdateOverCellularPermission(bool allowed,
+                                       const base::Closure& callback) override;
+  void SetUpdateOverCellularTarget(
+      const std::string& target_version,
+      int64_t target_size,
+      const SetUpdateOverCellularTargetCallback& callback) override;
   // Pushes UpdateEngineClient::Status in the queue to test changing status.
   // GetLastStatus() returns the status set by this method in FIFO order.
   // See set_default_status().

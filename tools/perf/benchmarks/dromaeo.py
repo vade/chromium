@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import json
 import math
 import os
 
@@ -32,36 +33,36 @@ class _DromaeoMeasurement(legacy_page_test.LegacyPageTest):
     self._power_metric.Start(page, tab)
 
   def ValidateAndMeasurePage(self, page, tab, results):
-    tab.WaitForJavaScriptExpression(
+    tab.WaitForJavaScriptCondition(
         'window.document.getElementById("pause") &&' +
         'window.document.getElementById("pause").value == "Run"',
-        120)
+        timeout=120)
 
     # Start spying on POST request that will report benchmark results, and
     # intercept result data.
-    tab.ExecuteJavaScript('(function() {' +
-                          '  var real_jquery_ajax_ = window.jQuery;' +
-                          '  window.results_ = "";' +
-                          '  window.jQuery.ajax = function(request) {' +
-                          '    if (request.url == "store.php") {' +
-                          '      window.results_ =' +
-                          '          decodeURIComponent(request.data);' +
-                          '      window.results_ = window.results_.substring(' +
-                          '          window.results_.indexOf("=") + 1, ' +
-                          '          window.results_.lastIndexOf("&"));' +
-                          '      real_jquery_ajax_(request);' +
-                          '    }' +
-                          '  };' +
-                          '})();')
+    tab.ExecuteJavaScript("""
+        (function() {
+          var real_jquery_ajax_ = window.jQuery;
+          window.results_ = "";
+          window.jQuery.ajax = function(request) {
+            if (request.url == "store.php") {
+              window.results_ = decodeURIComponent(request.data);
+              window.results_ = window.results_.substring(
+                window.results_.indexOf("=") + 1,
+                window.results_.lastIndexOf("&"));
+              real_jquery_ajax_(request);
+            }
+          };
+        })();""")
     # Starts benchmark.
     tab.ExecuteJavaScript('window.document.getElementById("pause").click();')
 
-    tab.WaitForJavaScriptExpression('!!window.results_', 600)
+    tab.WaitForJavaScriptCondition('!!window.results_', timeout=600)
 
     self._power_metric.Stop(page, tab)
     self._power_metric.AddResults(tab, results)
 
-    score = eval(tab.EvaluateJavaScript('window.results_ || "[]"'))
+    score = json.loads(tab.EvaluateJavaScript('window.results_ || "[]"'))
 
     def Escape(k):
       chars = [' ', '.', '-', '/', '(', ')', '*']
@@ -124,6 +125,9 @@ class _DromaeoBenchmark(perf_benchmark.PerfBenchmark):
     return ps
 
 
+@benchmark.Owner(emails=['yukishiino@chromium.org',
+                         'bashi@chromium.org',
+                         'haraken@chromium.org'])
 class DromaeoDomCoreAttr(_DromaeoBenchmark):
   """Dromaeo DOMCore attr JavaScript benchmark.
 
@@ -137,6 +141,9 @@ class DromaeoDomCoreAttr(_DromaeoBenchmark):
     return 'dromaeo.domcoreattr'
 
 
+@benchmark.Owner(emails=['yukishiino@chromium.org',
+                         'bashi@chromium.org',
+                         'haraken@chromium.org'])
 class DromaeoDomCoreModify(_DromaeoBenchmark):
   """Dromaeo DOMCore modify JavaScript benchmark.
 
@@ -150,6 +157,9 @@ class DromaeoDomCoreModify(_DromaeoBenchmark):
     return 'dromaeo.domcoremodify'
 
 
+@benchmark.Owner(emails=['yukishiino@chromium.org',
+                         'bashi@chromium.org',
+                         'haraken@chromium.org'])
 class DromaeoDomCoreQuery(_DromaeoBenchmark):
   """Dromaeo DOMCore query JavaScript benchmark.
 
@@ -163,6 +173,9 @@ class DromaeoDomCoreQuery(_DromaeoBenchmark):
     return 'dromaeo.domcorequery'
 
 
+@benchmark.Owner(emails=['yukishiino@chromium.org',
+                         'bashi@chromium.org',
+                         'haraken@chromium.org'])
 class DromaeoDomCoreTraverse(_DromaeoBenchmark):
   """Dromaeo DOMCore traverse JavaScript benchmark.
 
@@ -174,164 +187,3 @@ class DromaeoDomCoreTraverse(_DromaeoBenchmark):
   @classmethod
   def Name(cls):
     return 'dromaeo.domcoretraverse'
-
-
-class DromaeoJslibAttrJquery(_DromaeoBenchmark):
-  """Dromaeo JSLib attr jquery JavaScript benchmark.
-
-  Tests setting and getting DOM node attributes using the jQuery JavaScript
-  Library.
-  """
-  tag = 'jslibattrjquery'
-  query_param = 'jslib-attr-jquery'
-
-  @classmethod
-  def Name(cls):
-    return 'dromaeo.jslibattrjquery'
-
-  @classmethod
-  def ShouldDisable(cls, possible_browser):
-    # http://crbug.com/634055 (Android One).
-    return cls.IsSvelte(possible_browser)
-
-class DromaeoJslibAttrPrototype(_DromaeoBenchmark):
-  """Dromaeo JSLib attr prototype JavaScript benchmark.
-
-  Tests setting and getting DOM node attributes using the jQuery JavaScript
-  Library.
-  """
-  tag = 'jslibattrprototype'
-  query_param = 'jslib-attr-prototype'
-
-  @classmethod
-  def Name(cls):
-    return 'dromaeo.jslibattrprototype'
-
-
-class DromaeoJslibEventJquery(_DromaeoBenchmark):
-  """Dromaeo JSLib event jquery JavaScript benchmark.
-
-  Tests binding, removing, and triggering DOM events using the jQuery JavaScript
-  Library.
-  """
-  tag = 'jslibeventjquery'
-  query_param = 'jslib-event-jquery'
-
-  @classmethod
-  def Name(cls):
-    return 'dromaeo.jslibeventjquery'
-
-
-class DromaeoJslibEventPrototype(_DromaeoBenchmark):
-  """Dromaeo JSLib event prototype JavaScript benchmark.
-
-  Tests binding, removing, and triggering DOM events using the Prototype
-  JavaScript Library.
-  """
-  tag = 'jslibeventprototype'
-  query_param = 'jslib-event-prototype'
-
-  @classmethod
-  def Name(cls):
-    return 'dromaeo.jslibeventprototype'
-
-
-# win-ref: http://crbug.com/598705
-# android: http://crbug.com/503138
-# linux: http://crbug.com/583075
-@benchmark.Disabled('win-reference', 'android', 'linux')
-class DromaeoJslibModifyJquery(_DromaeoBenchmark):
-  """Dromaeo JSLib modify jquery JavaScript benchmark.
-
-  Tests creating and injecting DOM nodes into a document using the jQuery
-  JavaScript Library.
-  """
-  tag = 'jslibmodifyjquery'
-  query_param = 'jslib-modify-jquery'
-
-  @classmethod
-  def Name(cls):
-    return 'dromaeo.jslibmodifyjquery'
-
-
-class DromaeoJslibModifyPrototype(_DromaeoBenchmark):
-  """Dromaeo JSLib modify prototype JavaScript benchmark.
-
-  Tests creating and injecting DOM nodes into a document using the Prototype
-  JavaScript Library.
-  """
-  tag = 'jslibmodifyprototype'
-  query_param = 'jslib-modify-prototype'
-
-  @classmethod
-  def Name(cls):
-    return 'dromaeo.jslibmodifyprototype'
-
-
-class DromaeoJslibStyleJquery(_DromaeoBenchmark):
-  """Dromaeo JSLib style jquery JavaScript benchmark.
-
-  Tests getting and setting CSS information on DOM elements using the jQuery
-  JavaScript Library.
-  """
-  tag = 'jslibstylejquery'
-  query_param = 'jslib-style-jquery'
-
-  @classmethod
-  def Name(cls):
-    return 'dromaeo.jslibstylejquery'
-
-
-class DromaeoJslibStylePrototype(_DromaeoBenchmark):
-  """Dromaeo JSLib style prototype JavaScript benchmark.
-
-  Tests getting and setting CSS information on DOM elements using the jQuery
-  JavaScript Library.
-  """
-  tag = 'jslibstyleprototype'
-  query_param = 'jslib-style-prototype'
-
-  @classmethod
-  def Name(cls):
-    return 'dromaeo.jslibstyleprototype'
-
-
-class DromaeoJslibTraverseJquery(_DromaeoBenchmark):
-  """Dromaeo JSLib traverse jquery JavaScript benchmark.
-
-
-  Tests getting and setting CSS information on DOM elements using the Prototype
-  JavaScript Library.
-  """
-  tag = 'jslibtraversejquery'
-  query_param = 'jslib-traverse-jquery'
-
-  @classmethod
-  def Name(cls):
-    return 'dromaeo.jslibtraversejquery'
-
-
-class DromaeoJslibTraversePrototype(_DromaeoBenchmark):
-  """Dromaeo JSLib traverse prototype JavaScript benchmark.
-
-  Tests traversing a DOM structure using the jQuery JavaScript Library.
-  """
-  tag = 'jslibtraverseprototype'
-  query_param = 'jslib-traverse-prototype'
-
-  @classmethod
-  def Name(cls):
-    return 'dromaeo.jslibtraverseprototype'
-
-
-class DromaeoCSSQueryJquery(_DromaeoBenchmark):
-  """Dromaeo CSS Query jquery JavaScript benchmark.
-
-  Tests traversing a DOM structure using the Prototype JavaScript Library.
-  """
-  tag = 'cssqueryjquery'
-  query_param = 'cssquery-jquery'
-
-  @classmethod
-  def Name(cls):
-    return 'dromaeo.cssqueryjquery'

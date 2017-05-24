@@ -8,36 +8,35 @@
 #include "core/inspector/InspectorBaseAgent.h"
 #include "core/inspector/protocol/DeviceOrientation.h"
 #include "modules/ModulesExport.h"
-#include "wtf/text/WTFString.h"
 
 namespace blink {
 
 class DeviceOrientationController;
-class Page;
+class InspectedFrames;
 
 class MODULES_EXPORT DeviceOrientationInspectorAgent final
     : public InspectorBaseAgent<protocol::DeviceOrientation::Metainfo> {
   WTF_MAKE_NONCOPYABLE(DeviceOrientationInspectorAgent);
 
  public:
-  static DeviceOrientationInspectorAgent* create(Page*);
-
+  explicit DeviceOrientationInspectorAgent(InspectedFrames*);
   ~DeviceOrientationInspectorAgent() override;
   DECLARE_VIRTUAL_TRACE();
 
   // Protocol methods.
-  Response setDeviceOrientationOverride(double, double, double) override;
-  Response clearDeviceOrientationOverride() override;
+  protocol::Response setDeviceOrientationOverride(double,
+                                                  double,
+                                                  double) override;
+  protocol::Response clearDeviceOrientationOverride() override;
 
-  // Inspector Controller API.
-  Response disable() override;
-  void restore() override;
-  void didCommitLoadForLocalFrame(LocalFrame*) override;
+  protocol::Response disable() override;
+  void Restore() override;
+  void DidCommitLoadForLocalFrame(LocalFrame*) override;
 
  private:
-  explicit DeviceOrientationInspectorAgent(Page&);
-  DeviceOrientationController& controller();
-  Member<Page> m_page;
+  DeviceOrientationController* Controller();
+
+  Member<InspectedFrames> inspected_frames_;
 };
 
 }  // namespace blink

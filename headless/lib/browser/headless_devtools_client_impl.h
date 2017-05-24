@@ -34,7 +34,6 @@
 #include "headless/public/devtools/domains/network.h"
 #include "headless/public/devtools/domains/page.h"
 #include "headless/public/devtools/domains/profiler.h"
-#include "headless/public/devtools/domains/rendering.h"
 #include "headless/public/devtools/domains/runtime.h"
 #include "headless/public/devtools/domains/security.h"
 #include "headless/public/devtools/domains/service_worker.h"
@@ -87,12 +86,16 @@ class HeadlessDevToolsClientImpl : public HeadlessDevToolsClient,
   network::Domain* GetNetwork() override;
   page::Domain* GetPage() override;
   profiler::Domain* GetProfiler() override;
-  rendering::Domain* GetRendering() override;
   runtime::Domain* GetRuntime() override;
   security::Domain* GetSecurity() override;
   service_worker::Domain* GetServiceWorker() override;
   target::Domain* GetTarget() override;
   tracing::Domain* GetTracing() override;
+  void SetRawProtocolListener(
+      RawProtocolListener* raw_protocol_listener) override;
+  int GetNextRawDevToolsMessageId() override;
+  void SendRawDevToolsMessage(const std::string& json_message) override;
+  void SendRawDevToolsMessage(const base::DictionaryValue& message) override;
 
   // content::DevToolstAgentHostClient implementation:
   void DispatchProtocolMessage(content::DevToolsAgentHost* agent_host,
@@ -106,11 +109,7 @@ class HeadlessDevToolsClientImpl : public HeadlessDevToolsClient,
                    base::Callback<void(const base::Value&)> callback) override;
   void SendMessage(const char* method,
                    std::unique_ptr<base::Value> params,
-                   base::Callback<void()> callback) override;
-  void SendMessage(const char* method,
-                   base::Callback<void(const base::Value&)> callback) override;
-  void SendMessage(const char* method,
-                   base::Callback<void()> callback) override;
+                   base::Closure callback) override;
   void RegisterEventHandler(
       const char* method,
       base::Callback<void(const base::Value&)> callback) override;
@@ -125,13 +124,13 @@ class HeadlessDevToolsClientImpl : public HeadlessDevToolsClient,
   struct Callback {
     Callback();
     Callback(Callback&& other);
-    explicit Callback(base::Callback<void()> callback);
+    explicit Callback(base::Closure callback);
     explicit Callback(base::Callback<void(const base::Value&)> callback);
     ~Callback();
 
     Callback& operator=(Callback&& other);
 
-    base::Callback<void()> callback;
+    base::Closure callback;
     base::Callback<void(const base::Value&)> callback_with_result;
   };
 
@@ -144,9 +143,6 @@ class HeadlessDevToolsClientImpl : public HeadlessDevToolsClient,
                              std::unique_ptr<base::Value> params,
                              CallbackType callback);
 
-  template <typename CallbackType>
-  void SendMessageWithoutParams(const char* method, CallbackType callback);
-
   bool DispatchMessageReply(const base::DictionaryValue& message_dict);
 
   using EventHandler = base::Callback<void(const base::Value&)>;
@@ -158,8 +154,10 @@ class HeadlessDevToolsClientImpl : public HeadlessDevToolsClient,
                          const EventHandler* event_handler,
                          const base::DictionaryValue* result_dict);
 
-  content::DevToolsAgentHost* agent_host_;  // Not owned.
+  content::DevToolsAgentHost* agent_host_;      // Not owned.
+  RawProtocolListener* raw_protocol_listener_;  // Not owned.
   int next_message_id_;
+  int next_raw_message_id_;
   std::unordered_map<int, Callback> pending_messages_;
 
   EventHandlerMap event_handlers_;
@@ -190,7 +188,6 @@ class HeadlessDevToolsClientImpl : public HeadlessDevToolsClient,
   network::ExperimentalDomain network_domain_;
   page::ExperimentalDomain page_domain_;
   profiler::ExperimentalDomain profiler_domain_;
-  rendering::ExperimentalDomain rendering_domain_;
   runtime::ExperimentalDomain runtime_domain_;
   security::ExperimentalDomain security_domain_;
   service_worker::ExperimentalDomain service_worker_domain_;

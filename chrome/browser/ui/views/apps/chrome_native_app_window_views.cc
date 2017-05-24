@@ -111,7 +111,6 @@ void ChromeNativeAppWindowViews::OnBeforeWidgetInit(
 }
 
 void ChromeNativeAppWindowViews::OnBeforePanelWidgetInit(
-    bool use_default_bounds,
     views::Widget::InitParams* init_params,
     views::Widget* widget) {
 }
@@ -214,18 +213,10 @@ void ChromeNativeAppWindowViews::InitializePanelWindow(
   else if (preferred_size_.height() < kMinPanelHeight)
     preferred_size_.set_height(kMinPanelHeight);
 
-  // When a panel is not docked it will be placed at a default origin in the
-  // currently active target root window.
-  bool use_default_bounds = create_params.state != ui::SHOW_STATE_DOCKED;
-  // Sanitize initial origin reseting it in case it was not specified.
-  using BoundsSpecification = AppWindow::BoundsSpecification;
-  bool position_specified =
-      initial_window_bounds.x() != BoundsSpecification::kUnspecifiedPosition &&
-      initial_window_bounds.y() != BoundsSpecification::kUnspecifiedPosition;
-  params.bounds = (use_default_bounds || !position_specified) ?
-      gfx::Rect(preferred_size_) :
-      gfx::Rect(initial_window_bounds.origin(), preferred_size_);
-  OnBeforePanelWidgetInit(use_default_bounds, &params, widget());
+  // A panel will be placed at a default origin in the currently active target
+  // root window.
+  params.bounds = gfx::Rect(preferred_size_);
+  OnBeforePanelWidgetInit(&params, widget());
   widget()->Init(params);
   widget()->set_focus_on_creation(create_params.focused);
 }
@@ -369,8 +360,7 @@ void ChromeNativeAppWindowViews::InitializeWindow(
   has_frame_color_ = create_params.has_frame_color;
   active_frame_color_ = create_params.active_frame_color;
   inactive_frame_color_ = create_params.inactive_frame_color;
-  if (create_params.window_type == AppWindow::WINDOW_TYPE_PANEL ||
-      create_params.window_type == AppWindow::WINDOW_TYPE_V1_PANEL) {
+  if (create_params.window_type == AppWindow::WINDOW_TYPE_PANEL) {
     InitializePanelWindow(create_params);
   } else {
     InitializeDefaultWindow(create_params);

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef REMOTING_PROTOCOL_HOST_SESSION_OPTIONS_H_
-#define REMOTING_PROTOCOL_HOST_SESSION_OPTIONS_H_
+#ifndef REMOTING_HOST_HOST_SESSION_OPTIONS_H_
+#define REMOTING_HOST_HOST_SESSION_OPTIONS_H_
 
 #include <map>
 #include <string>
@@ -12,7 +12,6 @@
 #include "base/optional.h"
 
 namespace remoting {
-namespace protocol {
 
 // Session based host options sending from client. This class parses and stores
 // session configuration from client side to control the behavior of other host
@@ -22,12 +21,24 @@ class HostSessionOptions final {
   HostSessionOptions();
   ~HostSessionOptions();
 
+  HostSessionOptions(const std::string& parameter);
+
   // Appends one key-value pair into current instance.
   void Append(const std::string& key, const std::string& value);
 
   // Retrieves the value of |key|. Returns a true Optional if |key| has been
-  // found, value of the Optional wil be set to corresponding value.
+  // found, value of the Optional will be set to corresponding value.
   base::Optional<std::string> Get(const std::string& key) const;
+
+  // Retrieves the value of |key|. Returns a true Optional if |key| has been
+  // found and the corresponding value can be converted to a boolean value.
+  // "true", "1" or empty will be converted to true, "false" or "0" will be
+  // converted to false.
+  base::Optional<bool> GetBool(const std::string& key) const;
+
+  // Retrieves the value of |key|. Returns a true Optional if |key| has been
+  // found and the corresponding value can be converted to an integer.
+  base::Optional<int> GetInt(const std::string& key) const;
 
   // Returns a string to represent current instance. Consumers can rebuild an
   // exactly same instance with Import() function.
@@ -46,7 +57,6 @@ class HostSessionOptions final {
   DISALLOW_COPY_AND_ASSIGN(HostSessionOptions);
 };
 
-}  // namespace protocol
 }  // namespace remoting
 
-#endif  // REMOTING_PROTOCOL_HOST_SESSION_OPTIONS_H_
+#endif  // REMOTING_HOST_HOST_SESSION_OPTIONS_H_

@@ -5,6 +5,7 @@
 #include "content/browser/renderer_host/media/audio_input_sync_writer.h"
 
 #include <algorithm>
+#include <utility>
 
 #include "base/format_macros.h"
 #include "base/metrics/histogram_macros.h"
@@ -47,6 +48,7 @@ AudioInputSyncWriter::AudioInputSyncWriter(void* shared_memory,
       write_count_(0),
       write_to_fifo_count_(0),
       write_error_count_(0),
+      had_socket_error_(false),
       trailing_write_to_fifo_count_(0),
       trailing_write_error_count_(0) {
   DCHECK_GT(shared_memory_segment_count, 0);
@@ -63,9 +65,7 @@ AudioInputSyncWriter::AudioInputSyncWriter(void* shared_memory,
     CHECK_EQ(0U, reinterpret_cast<uintptr_t>(ptr) &
         (AudioBus::kChannelAlignment - 1));
     AudioInputBuffer* buffer = reinterpret_cast<AudioInputBuffer*>(ptr);
-    std::unique_ptr<AudioBus> audio_bus =
-        AudioBus::WrapMemory(params, buffer->audio);
-    audio_buses_.push_back(std::move(audio_bus));
+    audio_buses_.push_back(AudioBus::WrapMemory(params, buffer->audio));
     ptr += shared_memory_segment_size_;
   }
 }
@@ -153,8 +153,7 @@ void AudioInputSyncWriter::Write(const AudioBus* data,
     WriteParametersToCurrentSegment(volume, key_pressed, hardware_delay_bytes);
 
     // Copy data into shared memory using pre-allocated audio buses.
-    AudioBus* audio_bus = audio_buses_[current_segment_id_];
-    data->CopyTo(audio_bus);
+    data->CopyTo(audio_buses_[current_segment_id_].get());
 
     if (!SignalDataWrittenAndUpdateCounters())
       write_error = true;
@@ -291,7 +290,7 @@ bool AudioInputSyncWriter::WriteDataFromFifoToSharedMemory() {
 
     // Copy data from the fifo into shared memory using pre-allocated audio
     // buses.
-    (*audio_bus_it)->CopyTo(audio_buses_[current_segment_id_]);
+    (*audio_bus_it)->CopyTo(audio_buses_[current_segment_id_].get());
 
     if (!SignalDataWrittenAndUpdateCounters())
       write_error = true;
@@ -331,13 +330,20 @@ void AudioInputSyncWriter::WriteParametersToCurrentSegment(
 bool AudioInputSyncWriter::SignalDataWrittenAndUpdateCounters() {
   if (socket_->Send(&current_segment_id_, sizeof(current_segment_id_)) !=
       sizeof(current_segment_id_)) {
-    const std::string error_message = "AISW: No room in socket buffer.";
-    LOG(WARNING) << error_message;
-    AddToNativeLog(error_message);
-    TRACE_EVENT_INSTANT0("audio",
-                         "AudioInputSyncWriter: No room in socket buffer",
-                         TRACE_EVENT_SCOPE_THREAD);
+    // Ensure we don't log consecutive errors as this can lead to a large
+    // amount of logs.
+    if (!had_socket_error_) {
+      had_socket_error_ = true;
+      const std::string error_message = "AISW: No room in socket buffer.";
+      PLOG(WARNING) << error_message;
+      AddToNativeLog(error_message);
+      TRACE_EVENT_INSTANT0("audio",
+                           "AudioInputSyncWriter: No room in socket buffer",
+                           TRACE_EVENT_SCOPE_THREAD);
+    }
     return false;
+  } else {
+    had_socket_error_ = false;
   }
 
   if (++current_segment_id_ >= shared_memory_segment_count_)

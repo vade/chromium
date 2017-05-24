@@ -9,17 +9,9 @@
 
 namespace content {
 
-FeaturePolicyParsedWhitelist::FeaturePolicyParsedWhitelist()
-    : matches_all_origins(false) {}
-
-FeaturePolicyParsedWhitelist::FeaturePolicyParsedWhitelist(
-    const FeaturePolicyParsedWhitelist& fppw) = default;
-
-FeaturePolicyParsedWhitelist::~FeaturePolicyParsedWhitelist() {}
-
 FrameReplicationState::FrameReplicationState()
-    : sandbox_flags(blink::WebSandboxFlags::None),
-      scope(blink::WebTreeScopeType::Document),
+    : sandbox_flags(blink::WebSandboxFlags::kNone),
+      scope(blink::WebTreeScopeType::kDocument),
       insecure_request_policy(blink::kLeaveInsecureRequestsAlone),
       has_potentially_trustworthy_unique_origin(false),
       has_received_user_gesture(false) {}

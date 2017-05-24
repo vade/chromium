@@ -74,9 +74,9 @@ class VIEWS_EXPORT ImageButton : public CustomButton {
   }
 
   // Overridden from View:
-  gfx::Size GetPreferredSize() const override;
   const char* GetClassName() const override;
   void OnPaint(gfx::Canvas* canvas) override;
+  gfx::Size CalculatePreferredSize() const override;
 
  protected:
   // Overridden from View:
@@ -102,6 +102,8 @@ class VIEWS_EXPORT ImageButton : public CustomButton {
   FRIEND_TEST_ALL_PREFIXES(ImageButtonTest, ImagePositionWithBorder);
   FRIEND_TEST_ALL_PREFIXES(ImageButtonTest, LeftAlignedMirrored);
   FRIEND_TEST_ALL_PREFIXES(ImageButtonTest, RightAlignedMirrored);
+
+  FRIEND_TEST_ALL_PREFIXES(ImageButtonFactoryTest, CreateVectorImageButton);
 
   // Returns the correct position of the image for painting.
   gfx::Point ComputeImagePaintPosition(const gfx::ImageSkia& image);

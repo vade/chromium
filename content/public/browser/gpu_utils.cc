@@ -5,7 +5,9 @@
 #include "content/public/browser/gpu_utils.h"
 
 #include "base/command_line.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "content/browser/gpu/gpu_process_host.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
@@ -24,6 +26,20 @@ bool GetUintFromSwitch(const base::CommandLine* command_line,
   return base::StringToUint(switch_value, value);
 }
 
+void RunTaskOnTaskRunner(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    const base::Closure& callback) {
+  task_runner->PostTask(FROM_HERE, callback);
+}
+
+void StopGpuProcessImpl(const base::Closure& callback,
+                        content::GpuProcessHost* host) {
+  if (host)
+    host->gpu_service()->Stop(callback);
+  else
+    callback.Run();
+}
+
 }  // namespace
 
 namespace content {
@@ -39,6 +55,9 @@ const gpu::GpuPreferences GetGpuPreferencesFromCommandLine() {
       command_line->HasSwitch(switches::kInProcessGPU);
   gpu_preferences.ui_prioritize_in_gpu_process =
       command_line->HasSwitch(switches::kUIPrioritizeInGpuProcess);
+  gpu_preferences.enable_gpu_scheduler =
+      command_line->HasSwitch(switches::kEnableGpuScheduler) &&
+      !command_line->HasSwitch(switches::kDisableGpuScheduler);
   gpu_preferences.disable_accelerated_video_decode =
       command_line->HasSwitch(switches::kDisableAcceleratedVideoDecode);
 #if defined(OS_CHROMEOS)
@@ -47,9 +66,7 @@ const gpu::GpuPreferences GetGpuPreferencesFromCommandLine() {
 #endif
 #if BUILDFLAG(ENABLE_WEBRTC)
   gpu_preferences.disable_web_rtc_hw_encoding =
-      command_line->HasSwitch(switches::kDisableWebRtcHWEncoding) ||
-      (command_line->HasSwitch(switches::kDisableWebRtcHWVP8Encoding) &&
-       !base::FeatureList::IsEnabled(features::kWebRtcHWH264Encoding));
+      command_line->HasSwitch(switches::kDisableWebRtcHWEncoding);
 #endif
 #if defined(OS_WIN)
   uint32_t enable_accelerated_vpx_decode_val =
@@ -114,6 +131,15 @@ const gpu::GpuPreferences GetGpuPreferencesFromCommandLine() {
   // Some of these preferences are set or adjusted in
   // GpuDataManagerImplPrivate::AppendGpuCommandLine.
   return gpu_preferences;
+}
+
+void StopGpuProcess(const base::Closure& callback) {
+  content::GpuProcessHost::CallOnIO(
+      content::GpuProcessHost::GPU_PROCESS_KIND_SANDBOXED,
+      false /* force_create */,
+      base::Bind(&StopGpuProcessImpl,
+                 base::Bind(RunTaskOnTaskRunner,
+                            base::ThreadTaskRunnerHandle::Get(), callback)));
 }
 
 }  // namespace content

@@ -4,14 +4,11 @@
 
 #include "net/quic/core/quic_stream.h"
 
-#include "net/quic/core/quic_flags.h"
 #include "net/quic/core/quic_flow_controller.h"
 #include "net/quic/core/quic_session.h"
-#include "net/quic/core/quic_write_blocked_list.h"
 #include "net/quic/platform/api/quic_bug_tracker.h"
 #include "net/quic/platform/api/quic_logging.h"
 
-using base::StringPiece;
 using std::string;
 
 namespace net {
@@ -21,7 +18,7 @@ namespace net {
 
 namespace {
 
-struct iovec MakeIovec(StringPiece data) {
+struct iovec MakeIovec(QuicStringPiece data) {
   struct iovec iov = {const_cast<char*>(data.data()),
                       static_cast<size_t>(data.size())};
   return iov;
@@ -72,10 +69,12 @@ QuicStream::QuicStream(QuicStreamId id, QuicSession* session)
                        perspective_,
                        GetReceivedFlowControlWindow(session),
                        GetInitialStreamFlowControlWindowToSend(session),
-                       session_->flow_controller()->auto_tune_receive_window()),
+                       session_->flow_controller()->auto_tune_receive_window(),
+                       session_->flow_controller()),
       connection_flow_controller_(session_->flow_controller()),
       stream_contributes_to_connection_flow_control_(true),
-      busy_counter_(0) {
+      busy_counter_(0),
+      add_random_padding_after_fin_(false) {
   SetFromConfig();
 }
 
@@ -181,7 +180,7 @@ void QuicStream::CloseConnectionWithDetails(QuicErrorCode error,
 }
 
 void QuicStream::WriteOrBufferData(
-    StringPiece data,
+    QuicStringPiece data,
     bool fin,
     QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
   if (data.empty() && !fin) {
@@ -211,7 +210,7 @@ void QuicStream::WriteOrBufferData(
   // If there's unconsumed data or an unconsumed fin, queue it.
   if (consumed_data.bytes_consumed < data.length() ||
       (fin && !consumed_data.fin_consumed)) {
-    StringPiece remainder(data.substr(consumed_data.bytes_consumed));
+    QuicStringPiece remainder(data.substr(consumed_data.bytes_consumed));
     queued_data_bytes_ += remainder.size();
     queued_data_.emplace_back(remainder.as_string(), ack_listener);
   }
@@ -274,8 +273,8 @@ QuicConsumedData QuicStream::WritevData(
     bool fin,
     QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
   if (write_side_closed_) {
-    QUIC_DLOG(ERROR) << ENDPOINT
-                     << "Attempt to write when the write side is closed";
+    QUIC_DLOG(ERROR) << ENDPOINT << "Stream " << id()
+                     << "attempting to write when the write side is closed";
     return QuicConsumedData(0, false);
   }
 
@@ -347,6 +346,9 @@ QuicConsumedData QuicStream::WritevData(
   } else {
     session_->MarkConnectionLevelWriteBlocked(id());
   }
+  if (consumed_data.bytes_consumed > 0 || consumed_data.fin_consumed) {
+    busy_counter_ = 0;
+  }
   return consumed_data;
 }
 
@@ -355,7 +357,11 @@ QuicConsumedData QuicStream::WritevDataInner(
     QuicStreamOffset offset,
     bool fin,
     QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
-  return session()->WritevData(this, id(), iov, offset, fin,
+  StreamSendingState state = fin ? FIN : NO_FIN;
+  if (fin && add_random_padding_after_fin_) {
+    state = FIN_AND_PADDING;
+  }
+  return session()->WritevData(this, id(), iov, offset, state,
                                std::move(ack_listener));
 }
 
@@ -369,7 +375,7 @@ void QuicStream::CloseReadSide() {
   sequencer_.ReleaseBuffer();
 
   if (write_side_closed_) {
-    QUIC_DLOG(INFO) << ENDPOINT << "Closing stream: " << id();
+    QUIC_DLOG(INFO) << ENDPOINT << "Closing stream " << id();
     session_->CloseStream(id());
   }
 }
@@ -382,7 +388,7 @@ void QuicStream::CloseWriteSide() {
 
   write_side_closed_ = true;
   if (read_side_closed_) {
-    QUIC_DLOG(INFO) << ENDPOINT << "Closing stream: " << id();
+    QUIC_DLOG(INFO) << ENDPOINT << "Closing stream " << id();
     session_->CloseStream(id());
   }
 }
@@ -480,6 +486,10 @@ void QuicStream::UpdateSendWindowOffset(QuicStreamOffset new_window) {
   if (flow_controller_.UpdateSendWindowOffset(new_window)) {
     OnCanWrite();
   }
+}
+
+void QuicStream::AddRandomPaddingAfterFin() {
+  add_random_padding_after_fin_ = true;
 }
 
 }  // namespace net

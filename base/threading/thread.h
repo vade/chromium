@@ -28,6 +28,9 @@ namespace base {
 class MessagePump;
 class RunLoop;
 
+// IMPORTANT: Instead of creating a base::Thread, consider using
+// base::Create(Sequenced|SingleTreaded)TaskRunnerWithTraits().
+//
 // A simple thread abstraction that establishes a MessageLoop on a new thread.
 // The consumer uses the MessageLoop of the thread to cause code to execute on
 // the thread.  When this object is destroyed the thread is terminated.  All
@@ -175,9 +178,8 @@ class BASE_EXPORT Thread : PlatformThread::Delegate {
   // deadlock on Windows with printer worker thread. In any other case, Stop()
   // should be used.
   //
-  // StopSoon should not be called multiple times as it is risky to do so. It
-  // could cause a timing issue in message_loop() access. Call Stop() to reset
-  // the thread object once it is known that the thread has quit.
+  // Call Stop() to reset the thread object once it is known that the thread has
+  // quit.
   void StopSoon();
 
   // Detaches the owning sequence, indicating that the next call to this API
@@ -242,6 +244,15 @@ class BASE_EXPORT Thread : PlatformThread::Delegate {
   //
   // This method is thread-safe.
   PlatformThreadId GetThreadId() const;
+
+  // Returns the current thread handle. If called before Start*() returns or
+  // after Stop() returns, an empty thread handle will be returned.
+  //
+  // This method is thread-safe.
+  //
+  // TODO(robliao): Remove this when it no longer needs to be temporarily
+  // exposed for http://crbug.com/717380.
+  PlatformThreadHandle GetThreadHandle() const;
 
   // Returns true if the thread has been started, and not yet stopped.
   bool IsRunning() const;

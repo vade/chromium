@@ -7,14 +7,15 @@
 #include <memory>
 
 #include "base/memory/ptr_util.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
+#include "chrome/browser/chromeos/policy/remote_commands/device_command_fetch_status_job.h"
 #include "chrome/browser/chromeos/policy/remote_commands/device_command_reboot_job.h"
 #include "chrome/browser/chromeos/policy/remote_commands/device_command_screenshot_job.h"
+#include "chrome/browser/chromeos/policy/remote_commands/device_command_set_volume_job.h"
 #include "chrome/browser/chromeos/policy/remote_commands/screenshot_delegate.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/policy/core/common/remote_commands/remote_command_job.h"
 #include "components/policy/proto/device_management_backend.pb.h"
-#include "content/public/browser/browser_thread.h"
 
 namespace em = enterprise_management;
 
@@ -35,9 +36,15 @@ DeviceCommandsFactoryChromeOS::BuildJobForType(em::RemoteCommand_Type type) {
     case em::RemoteCommand_Type_DEVICE_SCREENSHOT:
       return base::WrapUnique<RemoteCommandJob>(
           new DeviceCommandScreenshotJob(base::MakeUnique<ScreenshotDelegate>(
-              content::BrowserThread::GetBlockingPool()->GetSequencedTaskRunner(
-                  content::BrowserThread::GetBlockingPool()
-                      ->GetSequenceToken()))));
+              base::CreateSequencedTaskRunnerWithTraits(
+                  {base::MayBlock(), base::TaskPriority::BACKGROUND,
+                   base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN}))));
+    case em::RemoteCommand_Type_DEVICE_SET_VOLUME:
+      return base::WrapUnique<RemoteCommandJob>(
+          new DeviceCommandSetVolumeJob());
+    case em::RemoteCommand_Type_DEVICE_FETCH_STATUS:
+      return base::WrapUnique<RemoteCommandJob>(
+          new DeviceCommandFetchStatusJob());
     default:
       return nullptr;
   }

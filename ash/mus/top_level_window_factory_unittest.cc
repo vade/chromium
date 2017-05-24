@@ -2,12 +2,27 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/common/test/ash_test.h"
-#include "ash/common/wm_shell.h"
-#include "ash/common/wm_window.h"
-#include "ash/mus/test/wm_test_base.h"
+#include "ash/mus/top_level_window_factory.h"
+
+#include <stdint.h>
+
+#include <map>
+#include <string>
+#include <vector>
+
+#include "ash/mus/window_manager.h"
+#include "ash/mus/window_manager_application.h"
+#include "ash/shell.h"
+#include "ash/test/ash_test_base.h"
+#include "ash/test/ash_test_helper.h"
+#include "ash/wm/window_properties.h"
+#include "services/ui/public/cpp/property_type_converters.h"
+#include "ui/aura/mus/property_converter.h"
 #include "ui/aura/window.h"
 #include "ui/display/screen.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/test/gfx_util.h"
+#include "ui/wm/core/window_util.h"
 
 namespace ash {
 
@@ -17,33 +32,86 @@ int64_t GetDisplayId(aura::Window* window) {
   return display::Screen::GetScreen()->GetDisplayNearestWindow(window).id();
 }
 
-}  // namespace
-
-using TopLevelWindowFactoryTest = AshTest;
-
-TEST_F(TopLevelWindowFactoryTest, CreateFullscreenWindow) {
-  std::unique_ptr<WindowOwner> window_owner = CreateToplevelTestWindow();
-  WmWindow* window = window_owner->window();
-  window->SetFullscreen(true);
-  WmWindow* root_window = WmShell::Get()->GetPrimaryRootWindow();
-  EXPECT_EQ(root_window->GetBounds(), window->GetBounds());
+aura::Window* CreateFullscreenTestWindow(mus::WindowManager* window_manager,
+                                         int64_t display_id) {
+  std::map<std::string, std::vector<uint8_t>> properties;
+  properties[ui::mojom::WindowManager::kShowState_Property] =
+      mojo::ConvertTo<std::vector<uint8_t>>(
+          static_cast<aura::PropertyConverter::PrimitiveType>(
+              ui::mojom::ShowState::FULLSCREEN));
+  if (display_id != display::kInvalidDisplayId) {
+    properties[ui::mojom::WindowManager::kDisplayId_InitProperty] =
+        mojo::ConvertTo<std::vector<uint8_t>>(display_id);
+  }
+  aura::Window* window = mus::CreateAndParentTopLevelWindow(
+      window_manager, ui::mojom::WindowType::WINDOW, &properties);
+  window->Show();
+  return window;
 }
 
-using TopLevelWindowFactoryWmTest = mus::WmTestBase;
+}  // namespace
+
+using TopLevelWindowFactoryTest = test::AshTestBase;
+
+TEST_F(TopLevelWindowFactoryTest, CreateFullscreenWindow) {
+  std::unique_ptr<aura::Window> window = CreateTestWindow();
+  ::wm::SetWindowFullscreen(window.get(), true);
+  aura::Window* root_window = Shell::GetPrimaryRootWindow();
+  EXPECT_EQ(root_window->bounds(), window->bounds());
+}
+
+using TopLevelWindowFactoryWmTest = test::AshTestBase;
 
 TEST_F(TopLevelWindowFactoryWmTest, IsWindowShownInCorrectDisplay) {
   UpdateDisplay("400x400,400x400");
   EXPECT_NE(GetPrimaryDisplay().id(), GetSecondaryDisplay().id());
 
+  mus::WindowManager* window_manager =
+      ash_test_helper()->window_manager_app()->window_manager();
+
   std::unique_ptr<aura::Window> window_primary_display(
-      CreateFullscreenTestWindow(GetPrimaryDisplay().id()));
+      CreateFullscreenTestWindow(window_manager, GetPrimaryDisplay().id()));
   std::unique_ptr<aura::Window> window_secondary_display(
-      CreateFullscreenTestWindow(GetSecondaryDisplay().id()));
+      CreateFullscreenTestWindow(window_manager, GetSecondaryDisplay().id()));
 
   EXPECT_EQ(GetPrimaryDisplay().id(),
             GetDisplayId(window_primary_display.get()));
   EXPECT_EQ(GetSecondaryDisplay().id(),
             GetDisplayId(window_secondary_display.get()));
+}
+
+using TopLevelWindowFactoryAshTest = test::AshTestBase;
+
+TEST_F(TopLevelWindowFactoryAshTest, TopLevelNotShownOnCreate) {
+  std::map<std::string, std::vector<uint8_t>> properties;
+  std::unique_ptr<aura::Window> window(mus::CreateAndParentTopLevelWindow(
+      ash_test_helper()->window_manager_app()->window_manager(),
+      ui::mojom::WindowType::WINDOW, &properties));
+  ASSERT_TRUE(window);
+  EXPECT_FALSE(window->IsVisible());
+}
+
+TEST_F(TopLevelWindowFactoryAshTest, CreateTopLevelWindow) {
+  const gfx::Rect bounds(1, 2, 124, 345);
+  std::map<std::string, std::vector<uint8_t>> properties;
+  properties[ui::mojom::WindowManager::kBounds_InitProperty] =
+      mojo::ConvertTo<std::vector<uint8_t>>(bounds);
+  properties[ui::mojom::WindowManager::kResizeBehavior_Property] =
+      mojo::ConvertTo<std::vector<uint8_t>>(
+          static_cast<aura::PropertyConverter::PrimitiveType>(
+              ui::mojom::kResizeBehaviorCanResize |
+              ui::mojom::kResizeBehaviorCanMaximize |
+              ui::mojom::kResizeBehaviorCanMinimize));
+  mus::WindowManager* window_manager =
+      ash_test_helper()->window_manager_app()->window_manager();
+  // |window| is owned by its parent.
+  aura::Window* window = CreateAndParentTopLevelWindow(
+      window_manager, ui::mojom::WindowType::WINDOW, &properties);
+  ASSERT_TRUE(window->parent());
+  EXPECT_EQ(kShellWindowId_DefaultContainer, window->parent()->id());
+  EXPECT_EQ(bounds, window->bounds());
+  EXPECT_EQ(WidgetCreationType::FOR_CLIENT,
+            window->GetProperty(kWidgetCreationTypeKey));
 }
 
 }  // namespace ash

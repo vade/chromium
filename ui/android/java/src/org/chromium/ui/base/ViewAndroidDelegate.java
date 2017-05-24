@@ -4,6 +4,7 @@
 
 package org.chromium.ui.base;
 
+import android.annotation.TargetApi;
 import android.content.ClipData;
 import android.graphics.Bitmap;
 import android.os.Build;
@@ -21,10 +22,6 @@ import org.chromium.base.annotations.JNINamespace;
  */
 @JNINamespace("ui")
 public abstract class ViewAndroidDelegate {
-
-    // TODO(hush): use View#DRAG_FLAG_GLOBAL when Chromium starts to build with API 24.
-    private static final int DRAG_FLAG_GLOBAL = 1 << 8;
-
     /**
      * @return An anchor view that can be used to anchor decoration views like Autofill popup.
      */
@@ -86,8 +83,7 @@ public abstract class ViewAndroidDelegate {
      * @param shadowImage The shadow image for the dragged text.
      */
     @SuppressWarnings("deprecation")
-    // TODO(hush): uncomment below when we build with API 24.
-    // @TargetApi(Build.VERSION_CODES.N)
+    @TargetApi(Build.VERSION_CODES.N)
     @CalledByNative
     private boolean startDragAndDrop(String text, Bitmap shadowImage) {
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.M) return false;
@@ -99,9 +95,42 @@ public abstract class ViewAndroidDelegate {
         imageView.setImageBitmap(shadowImage);
         imageView.layout(0, 0, shadowImage.getWidth(), shadowImage.getHeight());
 
-        // TODO(hush): use View#startDragAndDrop when Chromium starts to build with API 24.
-        return containerView.startDrag(ClipData.newPlainText(null, text),
-                new View.DragShadowBuilder(imageView), null, DRAG_FLAG_GLOBAL);
+        return containerView.startDragAndDrop(ClipData.newPlainText(null, text),
+                new View.DragShadowBuilder(imageView), null, View.DRAG_FLAG_GLOBAL);
+    }
+
+    /**
+     * Called whenever the background color of the page changes as notified by Blink.
+     * @param color The new ARGB color of the page background.
+     */
+    @CalledByNative
+    public void onBackgroundColorChanged(int color) {}
+
+    /**
+     * Notify the client of the position of the top controls.
+     * @param topControlsOffsetY The Y offset of the top controls in physical pixels.
+     * @param topContentOffsetY The Y offset of the content in physical pixels.
+     */
+    @CalledByNative
+    public void onTopControlsChanged(float topControlsOffsetY, float topContentOffsetY) {}
+
+    /**
+     * Notify the client of the position of the bottom controls.
+     * @param bottomControlsOffsetY The Y offset of the bottom controls in physical pixels.
+     * @param bottomContentOffsetY The Y offset of the content in physical pixels.
+     */
+    @CalledByNative
+    public void onBottomControlsChanged(float bottomControlsOffsetY, float bottomContentOffsetY) {}
+
+    /**
+     * Returns the bottom system window inset in pixels. The system window inset represents the area
+     * of a full-screen window that is partially or fully obscured by the status bar, navigation
+     * bar, IME or other system windows.
+     * @return The bottom system window inset.
+     */
+    @CalledByNative
+    public int getSystemWindowInsetBottom() {
+        return 0;
     }
 
     /**

@@ -11,7 +11,7 @@
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #import "base/test/ios/wait_util.h"
-#include "components/reading_list/ios/offline_url_utils.h"
+#include "components/reading_list/core/offline_url_utils.h"
 #include "ios/chrome/browser/chrome_paths.h"
 #include "ios/chrome/browser/dom_distiller/distiller_viewer.h"
 #include "ios/chrome/browser/reading_list/offline_url_utils.h"
@@ -29,8 +29,13 @@ class DistillerViewerTest : public dom_distiller::DistillerViewerInterface {
                       const std::string& html,
                       const GURL& redirect_url,
                       const std::string& mime_type)
-      : dom_distiller::DistillerViewerInterface(nil, nil) {
+      : dom_distiller::DistillerViewerInterface(nil) {
     std::vector<ImageInfo> images;
+    ImageInfo image;
+    image.url = GURL("http://image");
+    image.data = "image";
+    images.push_back(image);
+
     if (redirect_url.is_valid()) {
       delegate->DistilledPageRedirectedToURL(url, redirect_url);
     }
@@ -101,6 +106,7 @@ class MockURLDownloader : public URLDownloader {
       return;
     }
     original_url_ = url;
+    saved_size_ = 0;
     distiller_.reset(new DistillerViewerTest(
         url,
         base::Bind(&URLDownloader::DistillerCallback, base::Unretained(this)),
@@ -113,9 +119,12 @@ class MockURLDownloader : public URLDownloader {
                      const GURL& distilled_url,
                      SuccessState success,
                      const base::FilePath& distilled_path,
+                     int64_t size,
                      const std::string& title) {
     downloaded_files_.push_back(url);
-    DCHECK_EQ(distilled_url, redirect_url_);
+    // Saved data is the string "html" and an image with data "image".
+    EXPECT_EQ(size, 9);
+    EXPECT_EQ(distilled_url, redirect_url_);
   }
 
   void OnEndRemove(const GURL& url, bool success) {

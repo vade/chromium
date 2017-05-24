@@ -24,9 +24,9 @@ namespace internal {
 namespace {
 
 bool ValidateControlResponse(Message* message) {
-  ValidationContext validation_context(
-      message->data(), message->data_num_bytes(), message->handles()->size(),
-      message, "ControlResponseValidator");
+  ValidationContext validation_context(message->payload(),
+                                       message->payload_num_bytes(), 0, 0,
+                                       message, "ControlResponseValidator");
   if (!ValidateMessageIsResponse(message, &validation_context))
     return false;
 
@@ -79,14 +79,16 @@ void SendRunMessage(MessageReceiverWithResponder* receiver,
   params_ptr->input = std::move(input_ptr);
   size_t size = PrepareToSerialize<interface_control::RunMessageParamsDataView>(
       params_ptr, &context);
-  RequestMessageBuilder builder(interface_control::kRunMessageId, size);
+  MessageBuilder builder(interface_control::kRunMessageId,
+                         Message::kFlagExpectsResponse, size, 0);
 
   interface_control::internal::RunMessageParams_Data* params = nullptr;
   Serialize<interface_control::RunMessageParamsDataView>(
       params_ptr, builder.buffer(), &params, &context);
-  MessageReceiver* responder = new RunResponseForwardToCallback(callback);
-  if (!receiver->AcceptWithResponder(builder.message(), responder))
-    delete responder;
+  std::unique_ptr<MessageReceiver> responder =
+      base::MakeUnique<RunResponseForwardToCallback>(callback);
+  ignore_result(
+      receiver->AcceptWithResponder(builder.message(), std::move(responder)));
 }
 
 Message ConstructRunOrClosePipeMessage(
@@ -99,7 +101,8 @@ Message ConstructRunOrClosePipeMessage(
   size_t size = PrepareToSerialize<
       interface_control::RunOrClosePipeMessageParamsDataView>(params_ptr,
                                                               &context);
-  MessageBuilder builder(interface_control::kRunOrClosePipeMessageId, size);
+  MessageBuilder builder(interface_control::kRunOrClosePipeMessageId, 0, size,
+                         0);
 
   interface_control::internal::RunOrClosePipeMessageParams_Data* params =
       nullptr;
@@ -113,8 +116,7 @@ void SendRunOrClosePipeMessage(
     interface_control::RunOrClosePipeInputPtr input_ptr) {
   Message message(ConstructRunOrClosePipeMessage(std::move(input_ptr)));
 
-  bool ok = receiver->Accept(&message);
-  ALLOW_UNUSED_LOCAL(ok);
+  ignore_result(receiver->Accept(&message));
 }
 
 void RunVersionCallback(

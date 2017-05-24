@@ -39,7 +39,10 @@
 
 namespace blink {
 
-FilterOperation::OperationType FilterOperationResolver::filterOperationForType(
+static const float kOffScreenCanvasEmFontSize = 16.0;
+static const float kOffScreenCanvasRemFontSize = 16.0;
+
+FilterOperation::OperationType FilterOperationResolver::FilterOperationForType(
     CSSValueID type) {
   switch (type) {
     case CSSValueGrayscale:
@@ -63,158 +66,225 @@ FilterOperation::OperationType FilterOperationResolver::filterOperationForType(
     case CSSValueDropShadow:
       return FilterOperation::DROP_SHADOW;
     default:
-      ASSERT_NOT_REACHED();
+      NOTREACHED();
       // FIXME: We shouldn't have a type None since we never create them
       return FilterOperation::NONE;
   }
 }
 
-static void countFilterUse(FilterOperation::OperationType operationType,
+static void CountFilterUse(FilterOperation::OperationType operation_type,
                            const Document& document) {
   // This variable is always reassigned, but MSVC thinks it might be left
   // uninitialized.
-  UseCounter::Feature feature = UseCounter::NumberOfFeatures;
-  switch (operationType) {
+  UseCounter::Feature feature = UseCounter::kNumberOfFeatures;
+  switch (operation_type) {
     case FilterOperation::NONE:
     case FilterOperation::BOX_REFLECT:
-      ASSERT_NOT_REACHED();
+      NOTREACHED();
       return;
     case FilterOperation::REFERENCE:
-      feature = UseCounter::CSSFilterReference;
+      feature = UseCounter::kCSSFilterReference;
       break;
     case FilterOperation::GRAYSCALE:
-      feature = UseCounter::CSSFilterGrayscale;
+      feature = UseCounter::kCSSFilterGrayscale;
       break;
     case FilterOperation::SEPIA:
-      feature = UseCounter::CSSFilterSepia;
+      feature = UseCounter::kCSSFilterSepia;
       break;
     case FilterOperation::SATURATE:
-      feature = UseCounter::CSSFilterSaturate;
+      feature = UseCounter::kCSSFilterSaturate;
       break;
     case FilterOperation::HUE_ROTATE:
-      feature = UseCounter::CSSFilterHueRotate;
+      feature = UseCounter::kCSSFilterHueRotate;
       break;
     case FilterOperation::INVERT:
-      feature = UseCounter::CSSFilterInvert;
+      feature = UseCounter::kCSSFilterInvert;
       break;
     case FilterOperation::OPACITY:
-      feature = UseCounter::CSSFilterOpacity;
+      feature = UseCounter::kCSSFilterOpacity;
       break;
     case FilterOperation::BRIGHTNESS:
-      feature = UseCounter::CSSFilterBrightness;
+      feature = UseCounter::kCSSFilterBrightness;
       break;
     case FilterOperation::CONTRAST:
-      feature = UseCounter::CSSFilterContrast;
+      feature = UseCounter::kCSSFilterContrast;
       break;
     case FilterOperation::BLUR:
-      feature = UseCounter::CSSFilterBlur;
+      feature = UseCounter::kCSSFilterBlur;
       break;
     case FilterOperation::DROP_SHADOW:
-      feature = UseCounter::CSSFilterDropShadow;
+      feature = UseCounter::kCSSFilterDropShadow;
       break;
   };
-  UseCounter::count(document, feature);
+  UseCounter::Count(document, feature);
 }
 
-FilterOperations FilterOperationResolver::createFilterOperations(
+FilterOperations FilterOperationResolver::CreateFilterOperations(
     StyleResolverState& state,
-    const CSSValue& inValue) {
+    const CSSValue& in_value) {
   FilterOperations operations;
 
-  if (inValue.isIdentifierValue()) {
-    DCHECK_EQ(toCSSIdentifierValue(inValue).getValueID(), CSSValueNone);
+  if (in_value.IsIdentifierValue()) {
+    DCHECK_EQ(ToCSSIdentifierValue(in_value).GetValueID(), CSSValueNone);
     return operations;
   }
 
-  const CSSToLengthConversionData& conversionData =
-      state.cssToLengthConversionData();
-  for (auto& currValue : toCSSValueList(inValue)) {
-    if (currValue->isURIValue()) {
-      countFilterUse(FilterOperation::REFERENCE, state.document());
+  const CSSToLengthConversionData& conversion_data =
+      state.CssToLengthConversionData();
 
-      const CSSURIValue& urlValue = toCSSURIValue(*currValue);
-      SVGElementProxy& elementProxy =
-          state.elementStyleResources().cachedOrPendingFromValue(urlValue);
-      operations.operations().push_back(
-          ReferenceFilterOperation::create(urlValue.value(), elementProxy));
+  for (auto& curr_value : ToCSSValueList(in_value)) {
+    if (curr_value->IsURIValue()) {
+      CountFilterUse(FilterOperation::REFERENCE, state.GetDocument());
+
+      const CSSURIValue& url_value = ToCSSURIValue(*curr_value);
+      SVGElementProxy& element_proxy =
+          state.GetElementStyleResources().CachedOrPendingFromValue(url_value);
+      operations.Operations().push_back(
+          ReferenceFilterOperation::Create(url_value.Value(), element_proxy));
       continue;
     }
 
-    const CSSFunctionValue* filterValue = toCSSFunctionValue(currValue.get());
-    FilterOperation::OperationType operationType =
-        filterOperationForType(filterValue->functionType());
-    countFilterUse(operationType, state.document());
-    DCHECK_LE(filterValue->length(), 1u);
+    const CSSFunctionValue* filter_value = ToCSSFunctionValue(curr_value.Get());
+    FilterOperation::OperationType operation_type =
+        FilterOperationForType(filter_value->FunctionType());
+    CountFilterUse(operation_type, state.GetDocument());
+    DCHECK_LE(filter_value->length(), 1u);
 
-    const CSSPrimitiveValue* firstValue =
-        filterValue->length() && filterValue->item(0).isPrimitiveValue()
-            ? &toCSSPrimitiveValue(filterValue->item(0))
+    const CSSPrimitiveValue* first_value =
+        filter_value->length() && filter_value->Item(0).IsPrimitiveValue()
+            ? &ToCSSPrimitiveValue(filter_value->Item(0))
             : nullptr;
-    switch (filterValue->functionType()) {
+    double first_number =
+        StyleBuilderConverter::ConvertValueToNumber(filter_value, first_value);
+
+    switch (filter_value->FunctionType()) {
       case CSSValueGrayscale:
       case CSSValueSepia:
-      case CSSValueSaturate: {
-        double amount = 1;
-        if (filterValue->length() == 1) {
-          amount = firstValue->getDoubleValue();
-          if (firstValue->isPercentage())
-            amount /= 100;
-        }
-
-        operations.operations().push_back(
-            BasicColorMatrixFilterOperation::create(amount, operationType));
-        break;
-      }
+      case CSSValueSaturate:
       case CSSValueHueRotate: {
-        double angle = 0;
-        if (filterValue->length() == 1)
-          angle = firstValue->computeDegrees();
-
-        operations.operations().push_back(
-            BasicColorMatrixFilterOperation::create(angle, operationType));
+        operations.Operations().push_back(
+            BasicColorMatrixFilterOperation::Create(first_number,
+                                                    operation_type));
         break;
       }
       case CSSValueInvert:
       case CSSValueBrightness:
       case CSSValueContrast:
       case CSSValueOpacity: {
-        double amount =
-            (filterValue->functionType() == CSSValueBrightness) ? 0 : 1;
-        if (filterValue->length() == 1) {
-          amount = firstValue->getDoubleValue();
-          if (firstValue->isPercentage())
-            amount /= 100;
-        }
-
-        operations.operations().push_back(
-            BasicComponentTransferFilterOperation::create(amount,
-                                                          operationType));
+        operations.Operations().push_back(
+            BasicComponentTransferFilterOperation::Create(first_number,
+                                                          operation_type));
         break;
       }
       case CSSValueBlur: {
-        Length stdDeviation = Length(0, Fixed);
-        if (filterValue->length() >= 1)
-          stdDeviation = firstValue->convertToLength(conversionData);
-        operations.operations().push_back(
-            BlurFilterOperation::create(stdDeviation));
+        Length std_deviation = Length(0, kFixed);
+        if (filter_value->length() >= 1) {
+          std_deviation = first_value->ConvertToLength(conversion_data);
+        }
+        operations.Operations().push_back(
+            BlurFilterOperation::Create(std_deviation));
         break;
       }
       case CSSValueDropShadow: {
-        ShadowData shadow =
-            StyleBuilderConverter::convertShadow(state, filterValue->item(0));
+        ShadowData shadow = StyleBuilderConverter::ConvertShadow(
+            conversion_data, &state, filter_value->Item(0));
         // TODO(fs): Resolve 'currentcolor' when constructing the filter chain.
-        if (shadow.color().isCurrentColor())
-          shadow.overrideColor(state.style()->color());
-        operations.operations().push_back(
-            DropShadowFilterOperation::create(shadow));
+        if (shadow.GetColor().IsCurrentColor()) {
+          shadow.OverrideColor(state.Style()->GetColor());
+        }
+        operations.Operations().push_back(
+            DropShadowFilterOperation::Create(shadow));
         break;
       }
       default:
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
         break;
     }
   }
 
+  return operations;
+}
+
+FilterOperations FilterOperationResolver::CreateOffscreenFilterOperations(
+    const CSSValue& in_value) {
+  FilterOperations operations;
+
+  if (in_value.IsIdentifierValue()) {
+    DCHECK_EQ(ToCSSIdentifierValue(in_value).GetValueID(), CSSValueNone);
+    return operations;
+  }
+
+  FontDescription font_description;
+  Font font(font_description);
+  CSSToLengthConversionData::FontSizes font_sizes(
+      kOffScreenCanvasEmFontSize, kOffScreenCanvasRemFontSize, &font);
+  CSSToLengthConversionData::ViewportSize viewport_size(0, 0);
+  CSSToLengthConversionData conversion_data(&ComputedStyle::InitialStyle(),
+                                            font_sizes, viewport_size, 1);
+
+  for (auto& curr_value : ToCSSValueList(in_value)) {
+    if (curr_value->IsURIValue())
+      continue;
+
+    const CSSFunctionValue* filter_value = ToCSSFunctionValue(curr_value.Get());
+    FilterOperation::OperationType operation_type =
+        FilterOperationForType(filter_value->FunctionType());
+    // TODO(fserb): Take an ExecutionContext argument to this function,
+    // so we can have workers using UseCounter as well.
+    // countFilterUse(operationType, state.document());
+    DCHECK_LE(filter_value->length(), 1u);
+
+    const CSSPrimitiveValue* first_value =
+        filter_value->length() && filter_value->Item(0).IsPrimitiveValue()
+            ? &ToCSSPrimitiveValue(filter_value->Item(0))
+            : nullptr;
+    double first_number =
+        StyleBuilderConverter::ConvertValueToNumber(filter_value, first_value);
+
+    switch (filter_value->FunctionType()) {
+      case CSSValueGrayscale:
+      case CSSValueSepia:
+      case CSSValueSaturate:
+      case CSSValueHueRotate: {
+        operations.Operations().push_back(
+            BasicColorMatrixFilterOperation::Create(first_number,
+                                                    operation_type));
+        break;
+      }
+      case CSSValueInvert:
+      case CSSValueBrightness:
+      case CSSValueContrast:
+      case CSSValueOpacity: {
+        operations.Operations().push_back(
+            BasicComponentTransferFilterOperation::Create(first_number,
+                                                          operation_type));
+        break;
+      }
+      case CSSValueBlur: {
+        Length std_deviation = Length(0, kFixed);
+        if (filter_value->length() >= 1) {
+          std_deviation = first_value->ConvertToLength(conversion_data);
+        }
+        operations.Operations().push_back(
+            BlurFilterOperation::Create(std_deviation));
+        break;
+      }
+      case CSSValueDropShadow: {
+        ShadowData shadow = StyleBuilderConverter::ConvertShadow(
+            conversion_data, nullptr, filter_value->Item(0));
+        // For offscreen canvas, the default color is always black.
+        if (shadow.GetColor().IsCurrentColor()) {
+          shadow.OverrideColor(Color::kBlack);
+        }
+        operations.Operations().push_back(
+            DropShadowFilterOperation::Create(shadow));
+        break;
+      }
+      default:
+        NOTREACHED();
+        break;
+    }
+  }
   return operations;
 }
 

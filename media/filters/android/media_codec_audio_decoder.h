@@ -14,9 +14,9 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "media/base/android/media_codec_bridge.h"
 #include "media/base/android/media_codec_loop.h"
 #include "media/base/android/media_drm_bridge_cdm_context.h"
+#include "media/base/audio_buffer.h"
 #include "media/base/audio_decoder.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/media_export.h"
@@ -168,6 +168,12 @@ class MEDIA_EXPORT MediaCodecAudioDecoder : public AudioDecoder,
   // Cached decoder config.
   AudioDecoderConfig config_;
 
+  // Indication to use passthrough decoder or not.
+  bool is_passthrough_;
+
+  // The audio sample format of the audio decoder output.
+  SampleFormat sample_format_;
+
   // Actual channel count that comes from decoder may be different than config.
   int channel_count_;
   ChannelLayout channel_layout_;
@@ -192,6 +198,9 @@ class MEDIA_EXPORT MediaCodecAudioDecoder : public AudioDecoder,
   // MediaDrmBridge requires registration/unregistration of the player, this
   // registration id is used for this.
   int cdm_registration_id_;
+
+  // Pool which helps avoid thrashing memory when returning audio buffers.
+  scoped_refptr<AudioBufferMemoryPool> pool_;
 
   // The MediaCrypto object is used in the MediaCodec.configure() in case of
   // an encrypted stream.

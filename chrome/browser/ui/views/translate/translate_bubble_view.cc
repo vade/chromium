@@ -18,6 +18,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/translate/translate_service.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/translate/translate_bubble_model_impl.h"
 #include "chrome/browser/ui/translate/translate_bubble_view_state_transition.h"
@@ -188,6 +189,10 @@ void TranslateBubbleView::ButtonPressed(views::Button* sender,
   HandleButtonPressed(static_cast<ButtonID>(sender->id()));
 }
 
+views::View* TranslateBubbleView::GetInitiallyFocusedView() {
+  return GetCurrentView()->GetNextFocusableView();
+}
+
 bool TranslateBubbleView::ShouldShowCloseButton() const {
   return Use2016Q2UI();
 }
@@ -276,11 +281,10 @@ void TranslateBubbleView::OnMenuButtonClicked(views::MenuButton* source,
         DenialMenuItem::NEVER_TRANSLATE_SITE,
         IDS_TRANSLATE_BUBBLE_NEVER_TRANSLATE_SITE);
 
-    denial_menu_runner_.reset(new views::MenuRunner(denial_menu_model_.get(),
-                                                    views::MenuRunner::ASYNC));
+    denial_menu_runner_.reset(
+        new views::MenuRunner(denial_menu_model_.get(), 0));
   }
   gfx::Rect screen_bounds = source->GetBoundsInScreen();
-  screen_bounds.Inset(source->GetInsets());
   denial_menu_runner_->RunMenuAt(source->GetWidget(), source, screen_bounds,
                                  views::MENU_ANCHOR_TOPRIGHT,
                                  ui::MENU_SOURCE_MOUSE);
@@ -362,6 +366,7 @@ TranslateBubbleView::TranslateBubbleView(
   translate_bubble_view_ = this;
   if (web_contents)  // web_contents can be null in unit_tests.
     mouse_handler_.reset(new WebContentMouseHandler(this, web_contents));
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::TRANSLATE);
 }
 
 views::View* TranslateBubbleView::GetCurrentView() const {
@@ -519,8 +524,13 @@ void TranslateBubbleView::UpdateChildVisibilities() {
 
 views::View* TranslateBubbleView::CreateViewBeforeTranslate() {
   const int kQuestionWidth = 200;
+
   base::string16 original_language_name =
       model_->GetLanguageNameAt(model_->GetOriginalLanguageIndex());
+  if (original_language_name.empty()) {
+    original_language_name =
+        l10n_util::GetStringUTF16(IDS_TRANSLATE_BUBBLE_UNKNOWN_LANGUAGE);
+  }
 
   views::View* view = new views::View();
   views::GridLayout* layout = new views::GridLayout(view);
@@ -618,7 +628,7 @@ views::View* TranslateBubbleView::CreateViewBeforeTranslate() {
     denial_menu_button_ = new views::MenuButton(
         l10n_util::GetStringUTF16(IDS_TRANSLATE_BUBBLE_OPTIONS_MENU_BUTTON),
         this, true);
-    denial_menu_button_->SetStyle(views::Button::STYLE_BUTTON);
+    denial_menu_button_->SetStyleDeprecated(views::Button::STYLE_BUTTON);
     layout->AddView(denial_menu_button_);
   } else {
     std::vector<base::string16> items(

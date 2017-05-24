@@ -9,10 +9,11 @@
 #include <stdint.h>
 
 #include <memory>
+#include <vector>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/weak_ptr.h"
+#include "base/threading/thread_collision_warner.h"
 #include "media/capture/capture_export.h"
 #include "media/capture/video/video_capture_device.h"
 
@@ -34,14 +35,8 @@ using VideoCaptureJpegDecoderFactoryCB =
 // v4l2_thread on Linux, and the UI thread for tab capture.
 // The owner is responsible for making sure that the instance outlives these
 // calls.
-//
-// It has an internal ref counted TextureWrapHelper class used to wrap incoming
-// GpuMemoryBuffers into Texture backed VideoFrames. This class creates and
-// manages the necessary entities to interact with the GPU process, notably an
-// offscreen Context to avoid janking the UI thread.
 class CAPTURE_EXPORT VideoCaptureDeviceClient
-    : public media::VideoCaptureDevice::Client,
-      public base::SupportsWeakPtr<VideoCaptureDeviceClient> {
+    : public media::VideoCaptureDevice::Client {
  public:
   VideoCaptureDeviceClient(
       std::unique_ptr<VideoFrameReceiver> receiver,
@@ -84,6 +79,7 @@ class CAPTURE_EXPORT VideoCaptureDeviceClient
   void OnError(const tracked_objects::Location& from_here,
                const std::string& reason) override;
   void OnLog(const std::string& message) override;
+  void OnStarted() override;
   double GetBufferPoolUtilization() const override;
 
  private:
@@ -103,12 +99,14 @@ class CAPTURE_EXPORT VideoCaptureDeviceClient
 
   // The receiver to which we post events.
   const std::unique_ptr<VideoFrameReceiver> receiver_;
+  std::vector<int> buffer_ids_known_by_receiver_;
 
   const VideoCaptureJpegDecoderFactoryCB jpeg_decoder_factory_callback_;
   std::unique_ptr<VideoCaptureJpegDecoder> external_jpeg_decoder_;
 
   // Whether |external_jpeg_decoder_| has been initialized.
   bool external_jpeg_decoder_initialized_;
+  base::OnceClosure on_started_using_gpu_cb_;
 
   // The pool of shared-memory buffers used for capturing.
   const scoped_refptr<VideoCaptureBufferPool> buffer_pool_;
@@ -122,6 +120,11 @@ class CAPTURE_EXPORT VideoCaptureDeviceClient
 #endif  // DCHECK_IS_ON()
 
   media::VideoPixelFormat last_captured_pixel_format_;
+
+  // Thread collision warner to ensure that producer-facing API is not called
+  // concurrently. Producers are allowed to call from multiple threads, but not
+  // concurrently.
+  DFAKE_MUTEX(call_from_producer_);
 
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureDeviceClient);
 };

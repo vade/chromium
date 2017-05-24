@@ -2,12 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "cc/tiles/image_controller.h"
+
+#include <utility>
+
 #include "base/bind.h"
 #include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/threading/sequenced_task_runner_handle.h"
-#include "cc/tiles/image_controller.h"
+#include "base/threading/thread_checker_impl.h"
+#include "cc/test/skia_common.h"
 #include "cc/tiles/image_decode_cache.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -21,7 +26,7 @@ class TestWorkerThread : public base::SimpleThread {
 
   void Run() override {
     for (;;) {
-      base::Closure task;
+      base::OnceClosure task;
       {
         base::AutoLock hold(lock_);
         if (shutdown_)
@@ -32,10 +37,10 @@ class TestWorkerThread : public base::SimpleThread {
           continue;
         }
 
-        task = queue_.front();
+        task = std::move(queue_.front());
         queue_.erase(queue_.begin());
       }
-      task.Run();
+      std::move(task).Run();
     }
   }
 
@@ -45,16 +50,16 @@ class TestWorkerThread : public base::SimpleThread {
     condition_.Signal();
   }
 
-  void PostTask(const base::Closure& task) {
+  void PostTask(base::OnceClosure task) {
     base::AutoLock hold(lock_);
-    queue_.push_back(task);
+    queue_.push_back(std::move(task));
     condition_.Signal();
   }
 
  private:
   base::Lock lock_;
   base::ConditionVariable condition_;
-  std::vector<base::Closure> queue_;
+  std::vector<base::OnceClosure> queue_;
   bool shutdown_ = false;
 };
 
@@ -63,19 +68,19 @@ class WorkerTaskRunner : public base::SequencedTaskRunner {
   WorkerTaskRunner() { thread_.Start(); }
 
   bool PostNonNestableDelayedTask(const tracked_objects::Location& from_here,
-                                  const base::Closure& task,
+                                  base::OnceClosure task,
                                   base::TimeDelta delay) override {
-    return PostDelayedTask(from_here, task, delay);
+    return PostDelayedTask(from_here, std::move(task), delay);
   }
 
   bool PostDelayedTask(const tracked_objects::Location& from_here,
-                       const base::Closure& task,
+                       base::OnceClosure task,
                        base::TimeDelta delay) override {
-    thread_.PostTask(task);
+    thread_.PostTask(std::move(task));
     return true;
   }
 
-  bool RunsTasksOnCurrentThread() const override { return false; }
+  bool RunsTasksInCurrentSequence() const override { return false; }
 
  protected:
   ~WorkerTaskRunner() override {
@@ -94,6 +99,13 @@ class TestableCache : public ImageDecodeCache {
   bool GetTaskForImageAndRef(const DrawImage& image,
                              const TracingInfo& tracing_info,
                              scoped_refptr<TileTask>* task) override {
+    // Return false for large images to mimic "won't fit in memory"
+    // behavior.
+    if (image.image() &&
+        image.image()->width() * image.image()->height() >= 1000 * 1000) {
+      return false;
+    }
+
     *task = task_to_use_;
     ++number_of_refs_;
     return true;
@@ -101,9 +113,7 @@ class TestableCache : public ImageDecodeCache {
   bool GetOutOfRasterDecodeTaskForImageAndRef(
       const DrawImage& image,
       scoped_refptr<TileTask>* task) override {
-    *task = task_to_use_;
-    ++number_of_refs_;
-    return true;
+    return GetTaskForImageAndRef(image, TracingInfo(), task);
   }
 
   void UnrefImage(const DrawImage& image) override {
@@ -118,6 +128,10 @@ class TestableCache : public ImageDecodeCache {
   void ReduceCacheUsage() override {}
   void SetShouldAggressivelyFreeResources(
       bool aggressively_free_resources) override {}
+  void ClearCache() override {}
+  size_t GetMaximumMemoryLimitBytes() const override {
+    return 256 * 1024 * 1024;
+  }
 
   int number_of_refs() const { return number_of_refs_; }
   void SetTaskToUse(scoped_refptr<TileTask> task) { task_to_use_ = task; }
@@ -131,16 +145,21 @@ class TestableCache : public ImageDecodeCache {
 class DecodeClient {
  public:
   DecodeClient() {}
-  void Callback(const base::Closure& quit_closure,
-                ImageController::ImageDecodeRequestId id) {
+  void Callback(base::OnceClosure quit_closure,
+                ImageController::ImageDecodeRequestId id,
+                ImageController::ImageDecodeResult result) {
     id_ = id;
-    quit_closure.Run();
+    result_ = result;
+    std::move(quit_closure).Run();
   }
 
   ImageController::ImageDecodeRequestId id() { return id_; }
+  ImageController::ImageDecodeResult result() { return result_; }
 
  private:
   ImageController::ImageDecodeRequestId id_ = 0;
+  ImageController::ImageDecodeResult result_ =
+      ImageController::ImageDecodeResult::FAILURE;
 };
 
 // A dummy task that does nothing.
@@ -201,7 +220,8 @@ class BlockingTask : public TileTask {
  private:
   ~BlockingTask() override = default;
 
-  base::ThreadChecker thread_checker_;
+  // Use ThreadCheckerImpl, so that release builds also get correct behavior.
+  base::ThreadCheckerImpl thread_checker_;
   bool has_run_ = false;
   base::Lock lock_;
   base::ConditionVariable run_cv_;
@@ -211,15 +231,13 @@ class BlockingTask : public TileTask {
 };
 
 // For tests that exercise image controller's thread, this is the timeout value
-// to
-// allow the worker thread to do its work.
+// to allow the worker thread to do its work.
 int kDefaultTimeoutSeconds = 10;
 
 class ImageControllerTest : public testing::Test {
  public:
   ImageControllerTest() : task_runner_(base::SequencedTaskRunnerHandle::Get()) {
-    bitmap_.allocN32Pixels(1, 1);
-    image_ = SkImage::MakeFromBitmap(bitmap_);
+    image_ = CreateDiscardableImage(gfx::Size(1, 1));
   }
   ~ImageControllerTest() override = default;
 
@@ -251,17 +269,19 @@ class ImageControllerTest : public testing::Test {
   void RunOrTimeout(base::RunLoop* run_loop) {
     task_runner_->PostDelayedTask(
         FROM_HERE,
-        base::Bind(&ImageControllerTest::Timeout, base::Unretained(run_loop)),
+        base::BindOnce(&ImageControllerTest::Timeout,
+                       base::Unretained(run_loop)),
         base::TimeDelta::FromSeconds(kDefaultTimeoutSeconds));
     run_loop->Run();
   }
+
+  void ResetController() { controller_.reset(); }
 
  private:
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
   scoped_refptr<WorkerTaskRunner> worker_task_runner_;
   TestableCache cache_;
   std::unique_ptr<ImageController> controller_;
-  SkBitmap bitmap_;
   sk_sp<const SkImage> image_;
 };
 
@@ -290,6 +310,43 @@ TEST_F(ImageControllerTest, QueueImageDecode) {
                      run_loop.QuitClosure()));
   RunOrTimeout(&run_loop);
   EXPECT_EQ(expected_id, decode_client.id());
+  EXPECT_EQ(ImageController::ImageDecodeResult::SUCCESS,
+            decode_client.result());
+}
+
+TEST_F(ImageControllerTest, QueueImageDecodeNonLazy) {
+  base::RunLoop run_loop;
+  DecodeClient decode_client;
+
+  SkBitmap bitmap;
+  bitmap.allocN32Pixels(1, 1);
+  sk_sp<const SkImage> image = SkImage::MakeFromBitmap(bitmap);
+
+  ImageController::ImageDecodeRequestId expected_id =
+      controller()->QueueImageDecode(
+          image,
+          base::Bind(&DecodeClient::Callback, base::Unretained(&decode_client),
+                     run_loop.QuitClosure()));
+  RunOrTimeout(&run_loop);
+  EXPECT_EQ(expected_id, decode_client.id());
+  EXPECT_EQ(ImageController::ImageDecodeResult::DECODE_NOT_REQUIRED,
+            decode_client.result());
+}
+
+TEST_F(ImageControllerTest, QueueImageDecodeTooLarge) {
+  base::RunLoop run_loop;
+  DecodeClient decode_client;
+
+  sk_sp<const SkImage> image = CreateDiscardableImage(gfx::Size(2000, 2000));
+  ImageController::ImageDecodeRequestId expected_id =
+      controller()->QueueImageDecode(
+          image,
+          base::Bind(&DecodeClient::Callback, base::Unretained(&decode_client),
+                     run_loop.QuitClosure()));
+  RunOrTimeout(&run_loop);
+  EXPECT_EQ(expected_id, decode_client.id());
+  EXPECT_EQ(ImageController::ImageDecodeResult::FAILURE,
+            decode_client.result());
 }
 
 TEST_F(ImageControllerTest, QueueImageDecodeMultipleImages) {
@@ -314,8 +371,14 @@ TEST_F(ImageControllerTest, QueueImageDecodeMultipleImages) {
                      run_loop.QuitClosure()));
   RunOrTimeout(&run_loop);
   EXPECT_EQ(expected_id1, decode_client1.id());
+  EXPECT_EQ(ImageController::ImageDecodeResult::SUCCESS,
+            decode_client1.result());
   EXPECT_EQ(expected_id2, decode_client2.id());
+  EXPECT_EQ(ImageController::ImageDecodeResult::SUCCESS,
+            decode_client2.result());
   EXPECT_EQ(expected_id3, decode_client3.id());
+  EXPECT_EQ(ImageController::ImageDecodeResult::SUCCESS,
+            decode_client3.result());
 }
 
 TEST_F(ImageControllerTest, QueueImageDecodeWithTask) {
@@ -360,8 +423,14 @@ TEST_F(ImageControllerTest, QueueImageDecodeMultipleImagesSameTask) {
                      run_loop.QuitClosure()));
   RunOrTimeout(&run_loop);
   EXPECT_EQ(expected_id1, decode_client1.id());
+  EXPECT_EQ(ImageController::ImageDecodeResult::SUCCESS,
+            decode_client1.result());
   EXPECT_EQ(expected_id2, decode_client2.id());
+  EXPECT_EQ(ImageController::ImageDecodeResult::SUCCESS,
+            decode_client2.result());
   EXPECT_EQ(expected_id3, decode_client3.id());
+  EXPECT_EQ(ImageController::ImageDecodeResult::SUCCESS,
+            decode_client3.result());
   EXPECT_TRUE(task->has_run());
   EXPECT_TRUE(task->HasCompleted());
 }
@@ -391,6 +460,7 @@ TEST_F(ImageControllerTest, QueueImageDecodeChangeControllerWithTaskQueued) {
   task_one->AllowToRun();
   task_two->AllowToRun();
   controller()->SetImageDecodeCache(nullptr);
+  ResetController();
 
   RunOrTimeout(&run_loop);
 
@@ -425,6 +495,8 @@ TEST_F(ImageControllerTest, QueueImageDecodeImageAlreadyLocked) {
                      run_loop2.QuitClosure()));
   RunOrTimeout(&run_loop2);
   EXPECT_EQ(expected_id2, decode_client2.id());
+  EXPECT_EQ(ImageController::ImageDecodeResult::SUCCESS,
+            decode_client2.result());
 }
 
 TEST_F(ImageControllerTest, QueueImageDecodeLockedImageControllerChange) {
@@ -445,6 +517,83 @@ TEST_F(ImageControllerTest, QueueImageDecodeLockedImageControllerChange) {
 
   controller()->SetImageDecodeCache(nullptr);
   EXPECT_EQ(0, cache()->number_of_refs());
+}
+
+TEST_F(ImageControllerTest, DispatchesDecodeCallbacksAfterCacheReset) {
+  scoped_refptr<SimpleTask> task(new SimpleTask);
+  cache()->SetTaskToUse(task);
+
+  base::RunLoop run_loop1;
+  DecodeClient decode_client1;
+  base::RunLoop run_loop2;
+  DecodeClient decode_client2;
+
+  controller()->QueueImageDecode(
+      image(),
+      base::Bind(&DecodeClient::Callback, base::Unretained(&decode_client1),
+                 run_loop1.QuitClosure()));
+  controller()->QueueImageDecode(
+      image(),
+      base::Bind(&DecodeClient::Callback, base::Unretained(&decode_client2),
+                 run_loop2.QuitClosure()));
+
+  // Now reset the image cache before decode completed callbacks are posted to
+  // the compositor thread. Ensure that the completion callbacks for the decode
+  // is still run.
+  controller()->SetImageDecodeCache(nullptr);
+  ResetController();
+
+  RunOrTimeout(&run_loop1);
+  RunOrTimeout(&run_loop2);
+
+  EXPECT_EQ(ImageController::ImageDecodeResult::FAILURE,
+            decode_client1.result());
+  EXPECT_EQ(ImageController::ImageDecodeResult::FAILURE,
+            decode_client2.result());
+}
+
+TEST_F(ImageControllerTest, DispatchesDecodeCallbacksAfterCacheChanged) {
+  scoped_refptr<SimpleTask> task(new SimpleTask);
+  cache()->SetTaskToUse(task);
+
+  base::RunLoop run_loop1;
+  DecodeClient decode_client1;
+  base::RunLoop run_loop2;
+  DecodeClient decode_client2;
+
+  controller()->QueueImageDecode(
+      image(),
+      base::Bind(&DecodeClient::Callback, base::Unretained(&decode_client1),
+                 run_loop1.QuitClosure()));
+  controller()->QueueImageDecode(
+      image(),
+      base::Bind(&DecodeClient::Callback, base::Unretained(&decode_client2),
+                 run_loop2.QuitClosure()));
+
+  // Now reset the image cache before decode completed callbacks are posted to
+  // the compositor thread. This should orphan the requests.
+  controller()->SetImageDecodeCache(nullptr);
+
+  EXPECT_EQ(0, cache()->number_of_refs());
+
+  TestableCache other_cache;
+  other_cache.SetTaskToUse(task);
+
+  controller()->SetImageDecodeCache(&other_cache);
+
+  RunOrTimeout(&run_loop1);
+  RunOrTimeout(&run_loop2);
+
+  EXPECT_EQ(2, other_cache.number_of_refs());
+  EXPECT_EQ(ImageController::ImageDecodeResult::SUCCESS,
+            decode_client1.result());
+  EXPECT_EQ(ImageController::ImageDecodeResult::SUCCESS,
+            decode_client2.result());
+
+  // Reset the controller since the order of destruction is wrong in this test
+  // (|other_cache| should outlive the controller. This is normally done via
+  // SetImageDecodeCache(nullptr) or it can be done in the dtor of the cache.)
+  ResetController();
 }
 
 }  // namespace

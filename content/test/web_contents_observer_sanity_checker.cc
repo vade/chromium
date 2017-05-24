@@ -4,6 +4,7 @@
 
 #include "content/test/web_contents_observer_sanity_checker.h"
 
+#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
@@ -35,8 +36,9 @@ GlobalRoutingID GetRoutingPair(RenderFrameHost* host) {
 void WebContentsObserverSanityChecker::Enable(WebContents* web_contents) {
   if (web_contents->GetUserData(&kWebContentsObserverSanityCheckerKey))
     return;
-  web_contents->SetUserData(&kWebContentsObserverSanityCheckerKey,
-                            new WebContentsObserverSanityChecker(web_contents));
+  web_contents->SetUserData(
+      &kWebContentsObserverSanityCheckerKey,
+      base::WrapUnique(new WebContentsObserverSanityChecker(web_contents)));
 }
 
 void WebContentsObserverSanityChecker::RenderFrameCreated(
@@ -209,42 +211,6 @@ void WebContentsObserverSanityChecker::DidFinishNavigation(
   ongoing_navigations_.erase(navigation_handle);
 }
 
-void WebContentsObserverSanityChecker::DidStartProvisionalLoadForFrame(
-    RenderFrameHost* render_frame_host,
-    const GURL& validated_url,
-    bool is_error_page) {
-  AssertRenderFrameExists(render_frame_host);
-}
-
-void WebContentsObserverSanityChecker::DidCommitProvisionalLoadForFrame(
-    RenderFrameHost* render_frame_host,
-    const GURL& url,
-    ui::PageTransition transition_type) {
-  AssertRenderFrameExists(render_frame_host);
-}
-
-void WebContentsObserverSanityChecker::DidFailProvisionalLoad(
-    RenderFrameHost* render_frame_host,
-    const GURL& validated_url,
-    int error_code,
-    const base::string16& error_description,
-    bool was_ignored_by_handler) {
-  AssertRenderFrameExists(render_frame_host);
-}
-
-void WebContentsObserverSanityChecker::DidNavigateMainFrame(
-    const LoadCommittedDetails& details,
-    const FrameNavigateParams& params) {
-  AssertMainFrameExists();
-}
-
-void WebContentsObserverSanityChecker::DidNavigateAnyFrame(
-    RenderFrameHost* render_frame_host,
-    const LoadCommittedDetails& details,
-    const FrameNavigateParams& params) {
-  AssertRenderFrameExists(render_frame_host);
-}
-
 void WebContentsObserverSanityChecker::DocumentAvailableInMainFrame() {
   AssertMainFrameExists();
 }
@@ -279,7 +245,9 @@ void WebContentsObserverSanityChecker::DidOpenRequestedURL(
     const GURL& url,
     const Referrer& referrer,
     WindowOpenDisposition disposition,
-    ui::PageTransition transition) {
+    ui::PageTransition transition,
+    bool started_from_context_menu,
+    bool renderer_initiated) {
   AssertRenderFrameExists(source_render_frame_host);
 }
 

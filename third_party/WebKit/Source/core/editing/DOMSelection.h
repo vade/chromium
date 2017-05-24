@@ -30,12 +30,12 @@
 #ifndef DOMSelection_h
 #define DOMSelection_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/editing/Position.h"
 #include "core/editing/VisibleSelection.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Forward.h"
+#include "platform/wtf/Forward.h"
 
 namespace blink {
 
@@ -51,23 +51,23 @@ class CORE_EXPORT DOMSelection final : public GarbageCollected<DOMSelection>,
   USING_GARBAGE_COLLECTED_MIXIN(DOMSelection);
 
  public:
-  static DOMSelection* create(const TreeScope* treeScope) {
-    return new DOMSelection(treeScope);
+  static DOMSelection* Create(const TreeScope* tree_scope) {
+    return new DOMSelection(tree_scope);
   }
 
-  void clearTreeScope();
+  void ClearTreeScope();
 
   // Safari Selection Object API
   // These methods return the valid equivalents of internal editing positions.
   Node* baseNode() const;
-  int baseOffset() const;
+  unsigned baseOffset() const;
   Node* extentNode() const;
-  int extentOffset() const;
+  unsigned extentOffset() const;
   String type() const;
-  void setBaseAndExtent(Node* baseNode,
-                        int baseOffset,
-                        Node* extentNode,
-                        int extentOffset,
+  void setBaseAndExtent(Node* base_node,
+                        unsigned base_offset,
+                        Node* extent_node,
+                        unsigned extent_offset,
                         ExceptionState& = ASSERT_NO_EXCEPTION);
   void modify(const String& alter,
               const String& direction,
@@ -80,20 +80,21 @@ class CORE_EXPORT DOMSelection final : public GarbageCollected<DOMSelection>,
   // reflect expansion.
   // These methods return the valid equivalents of internal editing positions.
   Node* anchorNode() const;
-  int anchorOffset() const;
+  unsigned anchorOffset() const;
   Node* focusNode() const;
-  int focusOffset() const;
+  unsigned focusOffset() const;
   bool isCollapsed() const;
-  int rangeCount() const;
-  void collapse(Node*, int offset, ExceptionState&);
+  unsigned rangeCount() const;
+  void collapse(Node*, unsigned offset, ExceptionState&);
   void collapseToEnd(ExceptionState&);
   void collapseToStart(ExceptionState&);
-  void extend(Node*, int offset, ExceptionState&);
-  Range* getRangeAt(int, ExceptionState&);
+  void extend(Node*, unsigned offset, ExceptionState&);
+  Range* getRangeAt(unsigned, ExceptionState&) const;
+  void removeRange(Range*);
   void removeAllRanges();
   void addRange(Range*);
   void deleteFromDocument();
-  bool containsNode(const Node*, bool partlyContained) const;
+  bool containsNode(const Node*, bool partly_contained) const;
   void selectAllChildren(Node*, ExceptionState&);
 
   String toString();
@@ -106,19 +107,29 @@ class CORE_EXPORT DOMSelection final : public GarbageCollected<DOMSelection>,
  private:
   explicit DOMSelection(const TreeScope*);
 
-  bool isAvailable() const;
+  bool IsAvailable() const;
 
-  // Convenience method for accessors, does not check m_frame present.
-  const VisibleSelection& visibleSelection() const;
+  void UpdateFrameSelection(const SelectionInDOMTree&, Range*) const;
+  // Convenience methods for accessors, does not check m_frame present.
+  const VisibleSelection& GetVisibleSelection() const;
+  bool IsBaseFirstInSelection() const;
+  const Position& AnchorPosition() const;
 
-  Node* shadowAdjustedNode(const Position&) const;
-  int shadowAdjustedOffset(const Position&) const;
+  Node* ShadowAdjustedNode(const Position&) const;
+  unsigned ShadowAdjustedOffset(const Position&) const;
 
-  bool isValidForPosition(Node*) const;
+  bool IsValidForPosition(Node*) const;
 
-  void addConsoleError(const String& message);
+  void AddConsoleError(const String& message);
+  Range* PrimaryRangeOrNull() const;
+  EphemeralRange CreateRangeFromSelectionEditor() const;
 
-  Member<const TreeScope> m_treeScope;
+  bool IsSelectionOfDocument() const;
+  void CacheRangeIfSelectionOfDocument(Range*) const;
+  Range* DocumentCachedRange() const;
+  void ClearCachedRangeIfSelectionOfDocument();
+
+  Member<const TreeScope> tree_scope_;
 };
 
 }  // namespace blink

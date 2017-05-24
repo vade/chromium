@@ -10,17 +10,15 @@
 
 #include "ash/accelerators/magnifier_key_scroller.h"
 #include "ash/accelerators/spoken_feedback_toggler.h"
-#include "ash/common/accessibility_delegate.h"
-#include "ash/common/accessibility_types.h"
-#include "ash/common/session/session_state_delegate.h"
-#include "ash/common/wallpaper/wallpaper_delegate.h"
-#include "ash/common/wm/mru_window_tracker.h"
-#include "ash/common/wm/window_state.h"
-#include "ash/common/wm_shell.h"
-#include "ash/common/wm_window.h"
+#include "ash/accessibility_delegate.h"
+#include "ash/accessibility_types.h"
 #include "ash/content/gpu_support_impl.h"
 #include "ash/shell.h"
+#include "ash/wallpaper/wallpaper_delegate.h"
+#include "ash/wm/mru_window_tracker.h"
+#include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
+#include "ash/wm_window.h"
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
@@ -30,6 +28,7 @@
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/arc/fileapi/arc_content_file_system_url_util.h"
+#include "chrome/browser/chromeos/ash_config.h"
 #include "chrome/browser/chromeos/background/ash_wallpaper_delegate.h"
 #include "chrome/browser/chromeos/display/display_configuration_observer.h"
 #include "chrome/browser/chromeos/display/display_preferences.h"
@@ -45,7 +44,7 @@
 #include "chrome/browser/speech/tts_controller.h"
 #include "chrome/browser/sync/sync_error_notifier_factory_ash.h"
 #include "chrome/browser/ui/ash/chrome_keyboard_ui.h"
-#include "chrome/browser/ui/ash/launcher/chrome_launcher_controller_impl.h"
+#include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/launcher_context_menu.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/ash/palette_delegate_chromeos.h"
@@ -70,7 +69,6 @@
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/common/service_manager_connection.h"
 #include "ui/aura/window.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
@@ -89,7 +87,7 @@ void InitAfterFirstSessionStart() {
   // windows can be opened in background while login UI is still active because
   // we currently restore browser windows before login UI is deleted.
   aura::Window::Windows mru_list = ash::WmWindow::ToAuraWindows(
-      ash::WmShell::Get()->mru_window_tracker()->BuildMruWindowList());
+      ash::Shell::Get()->mru_window_tracker()->BuildMruWindowList());
   if (!mru_list.empty())
     mru_list.front()->Focus();
 
@@ -104,10 +102,10 @@ void InitAfterFirstSessionStart() {
 class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
  public:
   AccessibilityDelegateImpl() {
-    ash::WmShell::Get()->AddShellObserver(AccessibilityManager::Get());
+    ash::Shell::Get()->AddShellObserver(AccessibilityManager::Get());
   }
   ~AccessibilityDelegateImpl() override {
-    ash::WmShell::Get()->RemoveShellObserver(AccessibilityManager::Get());
+    ash::Shell::Get()->RemoveShellObserver(AccessibilityManager::Get());
   }
 
   void ToggleHighContrast() override {
@@ -222,6 +220,26 @@ class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
     return AccessibilityManager::Get()->IsFocusHighlightEnabled();
   }
 
+  void SetStickyKeysEnabled(bool enabled) override {
+    DCHECK(AccessibilityManager::Get());
+    return AccessibilityManager::Get()->EnableStickyKeys(enabled);
+  }
+
+  bool IsStickyKeysEnabled() const override {
+    DCHECK(AccessibilityManager::Get());
+    return AccessibilityManager::Get()->IsStickyKeysEnabled();
+  }
+
+  void SetTapDraggingEnabled(bool enabled) override {
+    DCHECK(AccessibilityManager::Get());
+    return AccessibilityManager::Get()->EnableTapDragging(enabled);
+  }
+
+  bool IsTapDraggingEnabled() const override {
+    DCHECK(AccessibilityManager::Get());
+    return AccessibilityManager::Get()->IsTapDraggingEnabled();
+  }
+
   void SetSelectToSpeakEnabled(bool enabled) override {
     DCHECK(AccessibilityManager::Get());
     AccessibilityManager::Get()->SetSelectToSpeakEnabled(enabled);
@@ -287,6 +305,9 @@ class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
           msg = IDS_A11Y_ALERT_CAPS_OFF;
           break;
         case ash::A11Y_ALERT_SCREEN_ON:
+          // Enable automation manager when alert is screen-on, as it is
+          // previously disabled by alert screen-off.
+          SetAutomationManagerEnabled(profile, true);
           msg = IDS_A11Y_ALERT_SCREEN_ON;
           break;
         case ash::A11Y_ALERT_SCREEN_OFF:
@@ -306,12 +327,26 @@ class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
       if (msg) {
         AutomationManagerAura::GetInstance()->HandleAlert(
             profile, l10n_util::GetStringUTF8(msg));
+        // After handling the alert, if the alert is screen-off, we should
+        // disable automation manager to handle any following a11y events.
+        if (alert == ash::A11Y_ALERT_SCREEN_OFF)
+          SetAutomationManagerEnabled(profile, false);
       }
     }
   }
 
   ash::AccessibilityAlert GetLastAccessibilityAlert() override {
     return ash::A11Y_ALERT_NONE;
+  }
+
+  void OnTwoFingerTouchStart() override {
+    DCHECK(AccessibilityManager::Get());
+    AccessibilityManager::Get()->OnTwoFingerTouchStart();
+  }
+
+  void OnTwoFingerTouchStop() override {
+    DCHECK(AccessibilityManager::Get());
+    AccessibilityManager::Get()->OnTwoFingerTouchStop();
   }
 
   bool ShouldToggleSpokenFeedbackViaTouch() override {
@@ -339,18 +374,26 @@ class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
   }
 
  private:
+  void SetAutomationManagerEnabled(content::BrowserContext* context,
+                                   bool enabled) {
+    DCHECK(context);
+    AutomationManagerAura* manager = AutomationManagerAura::GetInstance();
+    if (enabled)
+      manager->Enable(context);
+    else
+      manager->Disable();
+  }
+
   DISALLOW_COPY_AND_ASSIGN(AccessibilityDelegateImpl);
 };
 
 }  // namespace
 
-ChromeShellDelegate::ChromeShellDelegate()
-    : shelf_delegate_(NULL) {
+ChromeShellDelegate::ChromeShellDelegate() {
   PlatformInit();
 }
 
-ChromeShellDelegate::~ChromeShellDelegate() {
-}
+ChromeShellDelegate::~ChromeShellDelegate() {}
 
 service_manager::Connector* ChromeShellDelegate::GetShellConnector() const {
   return content::ServiceManagerConnection::GetForProcess()->GetConnector();
@@ -407,6 +450,10 @@ bool ChromeShellDelegate::IsForceMaximizeOnFirstRun() const {
 }
 
 void ChromeShellDelegate::PreInit() {
+  // TODO: port to mus. http://crbug.com/678949.
+  if (chromeos::GetAshConfig() != ash::Config::CLASSIC)
+    return;
+
   bool first_run_after_boot = base::CommandLine::ForCurrentProcess()->HasSwitch(
       chromeos::switches::kFirstExecAfterBoot);
   chromeos::LoadDisplayPreferences(first_run_after_boot);
@@ -450,24 +497,34 @@ void ChromeShellDelegate::OpenUrlFromArc(const GURL& url) {
       displayer.browser()->window()->GetNativeWindow());
 }
 
-ash::ShelfDelegate* ChromeShellDelegate::CreateShelfDelegate(
-    ash::ShelfModel* model) {
-  if (!shelf_delegate_) {
-    shelf_delegate_ = new ChromeLauncherControllerImpl(nullptr, model);
-    shelf_delegate_->Init();
+void ChromeShellDelegate::ShelfInit() {
+  if (!launcher_controller_) {
+    launcher_controller_ = base::MakeUnique<ChromeLauncherController>(
+        nullptr, ash::Shell::Get()->shelf_model());
+    launcher_controller_->Init();
   }
-  return shelf_delegate_;
+}
+
+void ChromeShellDelegate::ShelfShutdown() {
+  launcher_controller_.reset();
 }
 
 ui::MenuModel* ChromeShellDelegate::CreateContextMenu(
     ash::WmShelf* wm_shelf,
     const ash::ShelfItem* item) {
-  DCHECK(shelf_delegate_);
   // Don't show context menu for exclusive app runtime mode.
   if (chrome::IsRunningInAppMode())
     return nullptr;
 
-  return LauncherContextMenu::Create(shelf_delegate_, item, wm_shelf);
+  // No context menu before |launcher_controller_| is created. This is possible
+  // now because ShelfInit() is called by session state change via mojo
+  // asynchronously. Context menu could be triggered when the mojo message is
+  // still in-fly and crashes.
+  if (!launcher_controller_)
+    return nullptr;
+
+  return LauncherContextMenu::Create(launcher_controller_.get(), item,
+                                     wm_shelf);
 }
 
 ash::GPUSupport* ChromeShellDelegate::CreateGPUSupport() {
@@ -484,7 +541,7 @@ void ChromeShellDelegate::OpenKeyboardShortcutHelpPage() const {
   Browser* browser = chrome::FindTabbedBrowser(profile, false);
 
   if (!browser) {
-    browser = new Browser(Browser::CreateParams(profile));
+    browser = new Browser(Browser::CreateParams(profile, true));
     browser->window()->Show();
   }
 
@@ -499,6 +556,17 @@ void ChromeShellDelegate::OpenKeyboardShortcutHelpPage() const {
 gfx::Image ChromeShellDelegate::GetDeprecatedAcceleratorImage() const {
   return ui::ResourceBundle::GetSharedInstance().GetImageNamed(
       IDR_BLUETOOTH_KEYBOARD);
+}
+
+PrefService* ChromeShellDelegate::GetActiveUserPrefService() const {
+  const user_manager::User* const user =
+      user_manager::UserManager::Get()->GetActiveUser();
+  if (!user)
+    return nullptr;
+
+  // The user's profile might not be ready yet, so we must check for that too.
+  Profile* profile = chromeos::ProfileHelper::Get()->GetProfileByUser(user);
+  return profile ? profile->GetPrefs() : nullptr;
 }
 
 bool ChromeShellDelegate::IsTouchscreenEnabledInPrefs(
@@ -536,7 +604,7 @@ ash::AccessibilityDelegate* ChromeShellDelegate::CreateAccessibilityDelegate() {
 
 std::unique_ptr<ash::PaletteDelegate>
 ChromeShellDelegate::CreatePaletteDelegate() {
-  return chromeos::PaletteDelegateChromeOS::Create();
+  return base::MakeUnique<chromeos::PaletteDelegateChromeOS>();
 }
 
 ash::SystemTrayDelegate* ChromeShellDelegate::CreateSystemTrayDelegate() {
@@ -563,8 +631,8 @@ void ChromeShellDelegate::Observe(int type,
       // Do not use chrome::NOTIFICATION_PROFILE_ADDED because the
       // profile is not fully initialized by user_manager.  Use
       // chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED instead.
-      if (shelf_delegate_)
-        shelf_delegate_->OnUserProfileReadyToSwitch(profile);
+      if (launcher_controller_)
+        launcher_controller_->OnUserProfileReadyToSwitch(profile);
       break;
     }
     case chrome::NOTIFICATION_SESSION_STARTED:

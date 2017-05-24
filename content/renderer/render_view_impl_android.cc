@@ -17,13 +17,13 @@ namespace content {
 // blink::WebWidget::BrowserControlsState
 // are kept in sync.
 static_assert(int(BROWSER_CONTROLS_STATE_SHOWN) ==
-                  int(blink::WebBrowserControlsShown),
+                  int(blink::kWebBrowserControlsShown),
               "mismatching enums: SHOWN");
 static_assert(int(BROWSER_CONTROLS_STATE_HIDDEN) ==
-                  int(blink::WebBrowserControlsHidden),
+                  int(blink::kWebBrowserControlsHidden),
               "mismatching enums: HIDDEN");
 static_assert(int(BROWSER_CONTROLS_STATE_BOTH) ==
-                  int(blink::WebBrowserControlsBoth),
+                  int(blink::kWebBrowserControlsBoth),
               "mismatching enums: BOTH");
 
 blink::WebBrowserControlsState ContentToBlink(BrowserControlsState state) {
@@ -54,7 +54,7 @@ void RenderViewImpl::UpdateBrowserControlsState(
     BrowserControlsState current,
     bool animate) {
   if (GetWebWidget())
-    GetWebWidget()->updateBrowserControlsState(
+    GetWebWidget()->UpdateBrowserControlsState(
         ContentToBlink(constraints), ContentToBlink(current), animate);
 
   top_controls_constraints_ = constraints;
@@ -69,15 +69,6 @@ void RenderViewImpl::didScrollWithKeyboard(const blink::WebSize& delta) {
                                      : BROWSER_CONTROLS_STATE_HIDDEN;
 
   UpdateBrowserControlsState(top_controls_constraints_, current, true);
-}
-
-void RenderViewImpl::OnExtractSmartClipData(const gfx::Rect& rect) {
-  blink::WebString clip_text;
-  blink::WebString clip_html;
-  blink::WebRect clip_rect;
-  webview()->extractSmartClipData(rect, clip_text, clip_html, clip_rect);
-  Send(new ViewHostMsg_SmartClipDataExtracted(
-      routing_id_, clip_text, clip_html, clip_rect));
 }
 
 }  // namespace content

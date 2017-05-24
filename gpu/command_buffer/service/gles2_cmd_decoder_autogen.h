@@ -2618,7 +2618,7 @@ error::Error GLES2DecoderImpl::HandleScissor(uint32_t immediate_data_size,
     state_.scissor_y = y;
     state_.scissor_width = width;
     state_.scissor_height = height;
-    glScissor(x, y, width, height);
+    DoScissor(x, y, width, height);
   }
   return error::kNoError;
 }
@@ -4569,10 +4569,10 @@ error::Error GLES2DecoderImpl::HandleCopyTextureCHROMIUM(
     const volatile void* cmd_data) {
   const volatile gles2::cmds::CopyTextureCHROMIUM& c =
       *static_cast<const volatile gles2::cmds::CopyTextureCHROMIUM*>(cmd_data);
-  GLenum source_id = static_cast<GLenum>(c.source_id);
+  GLuint source_id = static_cast<GLuint>(c.source_id);
   GLint source_level = static_cast<GLint>(c.source_level);
   GLenum dest_target = static_cast<GLenum>(c.dest_target);
-  GLenum dest_id = static_cast<GLenum>(c.dest_id);
+  GLuint dest_id = static_cast<GLuint>(c.dest_id);
   GLint dest_level = static_cast<GLint>(c.dest_level);
   GLint internalformat = static_cast<GLint>(c.internalformat);
   GLenum dest_type = static_cast<GLenum>(c.dest_type);
@@ -4603,10 +4603,10 @@ error::Error GLES2DecoderImpl::HandleCopySubTextureCHROMIUM(
   const volatile gles2::cmds::CopySubTextureCHROMIUM& c =
       *static_cast<const volatile gles2::cmds::CopySubTextureCHROMIUM*>(
           cmd_data);
-  GLenum source_id = static_cast<GLenum>(c.source_id);
+  GLuint source_id = static_cast<GLuint>(c.source_id);
   GLint source_level = static_cast<GLint>(c.source_level);
   GLenum dest_target = static_cast<GLenum>(c.dest_target);
-  GLenum dest_id = static_cast<GLenum>(c.dest_id);
+  GLuint dest_id = static_cast<GLuint>(c.dest_id);
   GLint dest_level = static_cast<GLint>(c.dest_level);
   GLint xoffset = static_cast<GLint>(c.xoffset);
   GLint yoffset = static_cast<GLint>(c.yoffset);
@@ -4642,8 +4642,8 @@ error::Error GLES2DecoderImpl::HandleCompressedCopyTextureCHROMIUM(
   const volatile gles2::cmds::CompressedCopyTextureCHROMIUM& c =
       *static_cast<const volatile gles2::cmds::CompressedCopyTextureCHROMIUM*>(
           cmd_data);
-  GLenum source_id = static_cast<GLenum>(c.source_id);
-  GLenum dest_id = static_cast<GLenum>(c.dest_id);
+  GLuint source_id = static_cast<GLuint>(c.source_id);
+  GLuint dest_id = static_cast<GLuint>(c.dest_id);
   DoCompressedCopyTextureCHROMIUM(source_id, dest_id);
   return error::kNoError;
 }
@@ -4775,6 +4775,24 @@ error::Error GLES2DecoderImpl::HandleBindTexImage2DCHROMIUM(
     return error::kNoError;
   }
   DoBindTexImage2DCHROMIUM(target, imageId);
+  return error::kNoError;
+}
+
+error::Error GLES2DecoderImpl::HandleBindTexImage2DWithInternalformatCHROMIUM(
+    uint32_t immediate_data_size,
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::BindTexImage2DWithInternalformatCHROMIUM& c =
+      *static_cast<const volatile gles2::cmds::
+                       BindTexImage2DWithInternalformatCHROMIUM*>(cmd_data);
+  GLenum target = static_cast<GLenum>(c.target);
+  GLenum internalformat = static_cast<GLenum>(c.internalformat);
+  GLint imageId = static_cast<GLint>(c.imageId);
+  if (!validators_->texture_bind_target.IsValid(target)) {
+    LOCAL_SET_GL_ERROR_INVALID_ENUM(
+        "glBindTexImage2DWithInternalformatCHROMIUM", target, "target");
+    return error::kNoError;
+  }
+  DoBindTexImage2DWithInternalformatCHROMIUM(target, internalformat, imageId);
   return error::kNoError;
 }
 
@@ -5125,6 +5143,61 @@ error::Error GLES2DecoderImpl::HandleOverlayPromotionHintCHROMIUM(
   GLint display_x = static_cast<GLint>(c.display_x);
   GLint display_y = static_cast<GLint>(c.display_y);
   DoOverlayPromotionHintCHROMIUM(texture, promotion_hint, display_x, display_y);
+  return error::kNoError;
+}
+
+error::Error GLES2DecoderImpl::HandleSwapBuffersWithBoundsCHROMIUMImmediate(
+    uint32_t immediate_data_size,
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::SwapBuffersWithBoundsCHROMIUMImmediate& c =
+      *static_cast<
+          const volatile gles2::cmds::SwapBuffersWithBoundsCHROMIUMImmediate*>(
+          cmd_data);
+  GLsizei count = static_cast<GLsizei>(c.count);
+  uint32_t data_size = 0;
+  if (count >= 0 &&
+      !GLES2Util::ComputeDataSize(count, sizeof(GLint), 4, &data_size)) {
+    return error::kOutOfBounds;
+  }
+  if (data_size > immediate_data_size) {
+    return error::kOutOfBounds;
+  }
+  volatile const GLint* rects = GetImmediateDataAs<volatile const GLint*>(
+      c, data_size, immediate_data_size);
+  if (count < 0) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_VALUE, "glSwapBuffersWithBoundsCHROMIUM",
+                       "count < 0");
+    return error::kNoError;
+  }
+  if (rects == NULL) {
+    return error::kOutOfBounds;
+  }
+  DoSwapBuffersWithBoundsCHROMIUM(count, rects);
+  return error::kNoError;
+}
+
+error::Error GLES2DecoderImpl::HandleSetDrawRectangleCHROMIUM(
+    uint32_t immediate_data_size,
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::SetDrawRectangleCHROMIUM& c =
+      *static_cast<const volatile gles2::cmds::SetDrawRectangleCHROMIUM*>(
+          cmd_data);
+  GLint x = static_cast<GLint>(c.x);
+  GLint y = static_cast<GLint>(c.y);
+  GLint width = static_cast<GLint>(c.width);
+  GLint height = static_cast<GLint>(c.height);
+  DoSetDrawRectangleCHROMIUM(x, y, width, height);
+  return error::kNoError;
+}
+
+error::Error GLES2DecoderImpl::HandleSetEnableDCLayersCHROMIUM(
+    uint32_t immediate_data_size,
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::SetEnableDCLayersCHROMIUM& c =
+      *static_cast<const volatile gles2::cmds::SetEnableDCLayersCHROMIUM*>(
+          cmd_data);
+  GLboolean enabled = static_cast<GLboolean>(c.enabled);
+  DoSetEnableDCLayersCHROMIUM(enabled);
   return error::kNoError;
 }
 

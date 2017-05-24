@@ -4,11 +4,12 @@
 
 #include "chrome/browser/chromeos/hats/hats_notification_controller.h"
 
-#include "ash/common/strings/grit/ash_strings.h"
-#include "ash/common/system/system_notifier.h"
+#include "ash/strings/grit/ash_strings.h"
+#include "ash/system/system_notifier.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
+#include "base/task_scheduler/post_task.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/hats/hats_dialog.h"
 #include "chrome/browser/chromeos/hats/hats_finch_helper.h"
@@ -23,9 +24,8 @@
 #include "chrome/grit/theme_resources.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/network/network_state.h"
-#include "components/image_fetcher/image_fetcher_impl.h"
+#include "components/image_fetcher/core/image_fetcher_impl.h"
 #include "components/prefs/pref_service.h"
-#include "content/public/browser/browser_thread.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_skia_rep.h"
@@ -113,8 +113,8 @@ HatsNotificationController::HatsNotificationController(
     : profile_(profile),
       image_fetcher_(image_fetcher),
       weak_pointer_factory_(this) {
-  base::PostTaskAndReplyWithResult(
-      content::BrowserThread::GetBlockingPool(), FROM_HERE,
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::Bind(&IsNewDevice, kHatsNewDeviceThresholdDays),
       base::Bind(&HatsNotificationController::Initialize,
                  weak_pointer_factory_.GetWeakPtr()));
@@ -241,8 +241,10 @@ void HatsNotificationController::OnPortalDetectionCompleted(
                  weak_pointer_factory_.GetWeakPtr()));
 }
 
-void HatsNotificationController::OnImageFetched(const std::string& id,
-                                                const gfx::Image& image) {
+void HatsNotificationController::OnImageFetched(
+    const std::string& id,
+    const gfx::Image& image,
+    const image_fetcher::RequestMetadata& metadata) {
   DCHECK(id == kImageFetcher1xId || id == kImageFetcher2xId);
 
   completed_requests_++;

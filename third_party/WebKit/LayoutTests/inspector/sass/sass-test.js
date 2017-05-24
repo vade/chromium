@@ -18,13 +18,20 @@ InspectorTest.parseCSS = InspectorTest.parseSCSS;
 
 InspectorTest.loadASTMapping = function(header, callback)
 {
-    var completeSourceMapURL = Common.ParsedURL.completeURL(header.sourceURL, header.sourceMapURL);
-    SDK.TextSourceMap.load(completeSourceMapURL, header.sourceURL).then(onSourceMapLoaded);
+    var sourceMapManager = header.cssModel().sourceMapManager();
+    var sourceMap = sourceMapManager.sourceMapForClient(header);
+    if (sourceMap)  {
+        callback(sourceMap.editable() ? sourceMap : null);
+        return;
+    }
+    sourceMapManager.addEventListener(SDK.SourceMapManager.Events.SourceMapAttached, onAttached);
 
-    function onSourceMapLoaded(sourceMap)
-    {
-        InspectorTest.sassSourceMapFactory().editableSourceMap(header.cssModel().target(), sourceMap)
-            .then(map => callback(map));
+    function onAttached(event) {
+        if (event.data.client !== header)
+            return;
+        sourceMapManager.removeEventListener(SDK.SourceMapManager.Events.SourceMapAttached, onAttached);
+        var sourceMap = event.data.sourceMap;
+        callback(sourceMap.editable()? sourceMap : null);
     }
 }
 
@@ -279,7 +286,7 @@ InspectorTest.runCSSEditTests = function(header, tests)
             var edit = edits[i];
             var range = edit.oldRange;
             var line = String.sprintf("{%d, %d, %d, %d}", range.startLine, range.startColumn, range.endLine, range.endColumn);
-            line += String.sprintf(" '%s' => '%s'", (new Common.Text(text)).extract(range), edit.newText);
+            line += String.sprintf(" '%s' => '%s'", (new TextUtils.Text(text)).extract(range), edit.newText);
             lines.push(line);
         }
         lines = indent(lines);
@@ -298,9 +305,9 @@ InspectorTest.createEdit = function(source, pattern, newText, matchNumber)
     }
     if (!match)
         return null;
-    var sourceRange = new Common.SourceRange(match.index, match[0].length);
-    var textRange = new Common.Text(source).toTextRange(sourceRange);
-    return new Common.SourceEdit("", textRange, newText);
+    var sourceRange = new TextUtils.SourceRange(match.index, match[0].length);
+    var textRange = new TextUtils.Text(source).toTextRange(sourceRange);
+    return new TextUtils.SourceEdit("", textRange, newText);
 }
 
 }

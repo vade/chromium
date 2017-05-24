@@ -22,9 +22,11 @@
 #include "build/build_config.h"
 #include "chrome/browser/after_startup_task_utils.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/lifetime/termination_notification.h"
 #include "chrome/browser/net/net_error_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -81,7 +83,8 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
-#endif
+#include "chrome/browser/ui/webui/options/browser_options_handler.h"
+#endif  // defined(OS_CHROMEOS)
 
 #if defined(USE_ASH)
 #include "chrome/test/base/default_ash_event_generator_delegate.h"
@@ -248,6 +251,18 @@ void InProcessBrowserTest::SetUp() {
 
   google_util::SetMockLinkDoctorBaseURLForTesting();
 
+#if defined(OS_CHROMEOS)
+  // Polymer Elements are used for quick unlock configuration in options page,
+  // which is chromeos specific feature.
+  options::BrowserOptionsHandler::DisablePolymerPreloadForTesting();
+#endif  // defined(OS_CHROMEOS)
+
+  // Use hardcoded quota settings to have a consistent testing environment.
+  const int kQuota = 5 * 1024 * 1024;
+  quota_settings_ = storage::QuotaSettings(kQuota * 5, kQuota, 0, 0);
+  ChromeContentBrowserClient::SetDefaultQuotaSettingsForTesting(
+      &quota_settings_);
+
   BrowserTestBase::SetUp();
 }
 
@@ -284,6 +299,7 @@ void InProcessBrowserTest::SetUpDefaultCommandLine(
 }
 
 bool InProcessBrowserTest::RunAccessibilityChecks(std::string* error_message) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   if (!browser()) {
     *error_message = "browser is NULL";
     return false;
@@ -357,6 +373,7 @@ void InProcessBrowserTest::TearDown() {
 #endif
   BrowserTestBase::TearDown();
   OSCryptMocker::TearDown();
+  ChromeContentBrowserClient::SetDefaultQuotaSettingsForTesting(nullptr);
 }
 
 void InProcessBrowserTest::CloseBrowserSynchronously(Browser* browser) {
@@ -438,22 +455,22 @@ Browser* InProcessBrowserTest::OpenURLOffTheRecord(Profile* profile,
 // Creates a browser with a single tab (about:blank), waits for the tab to
 // finish loading and shows the browser.
 Browser* InProcessBrowserTest::CreateBrowser(Profile* profile) {
-  Browser* browser = new Browser(Browser::CreateParams(profile));
+  Browser* browser = new Browser(Browser::CreateParams(profile, true));
   AddBlankTabAndShow(browser);
   return browser;
 }
 
 Browser* InProcessBrowserTest::CreateIncognitoBrowser() {
   // Create a new browser with using the incognito profile.
-  Browser* incognito = new Browser(
-      Browser::CreateParams(browser()->profile()->GetOffTheRecordProfile()));
+  Browser* incognito = new Browser(Browser::CreateParams(
+      browser()->profile()->GetOffTheRecordProfile(), true));
   AddBlankTabAndShow(incognito);
   return incognito;
 }
 
 Browser* InProcessBrowserTest::CreateBrowserForPopup(Profile* profile) {
   Browser* browser =
-      new Browser(Browser::CreateParams(Browser::TYPE_POPUP, profile));
+      new Browser(Browser::CreateParams(Browser::TYPE_POPUP, profile, true));
   AddBlankTabAndShow(browser);
   return browser;
 }
@@ -461,9 +478,8 @@ Browser* InProcessBrowserTest::CreateBrowserForPopup(Profile* profile) {
 Browser* InProcessBrowserTest::CreateBrowserForApp(
     const std::string& app_name,
     Profile* profile) {
-  Browser* browser = new Browser(
-      Browser::CreateParams::CreateForApp(
-          app_name, false /* trusted_source */, gfx::Rect(), profile));
+  Browser* browser = new Browser(Browser::CreateParams::CreateForApp(
+      app_name, false /* trusted_source */, gfx::Rect(), profile, true));
   AddBlankTabAndShow(browser);
   return browser;
 }
@@ -504,7 +520,7 @@ base::CommandLine InProcessBrowserTest::GetCommandLineForRelaunch() {
 }
 #endif
 
-void InProcessBrowserTest::RunTestOnMainThreadLoop() {
+void InProcessBrowserTest::PreRunTestOnMainThread() {
   AfterStartupTaskUtils::SetBrowserStartupIsCompleteForTesting();
 
   // Pump startup related events.
@@ -551,13 +567,16 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
   if (browser_ && global_browser_set_up_function_)
     ASSERT_TRUE(global_browser_set_up_function_(browser_));
 
-  SetUpOnMainThread();
 #if defined(OS_MACOSX)
   autorelease_pool_->Recycle();
 #endif
 
-  if (!HasFatalFailure())
-    RunTestOnMainThread();
+#if defined(OS_CHROMEOS)  // http://crbug.com/715735
+  disable_io_checks();
+#endif
+}
+
+void InProcessBrowserTest::PostRunTestOnMainThread() {
 #if defined(OS_MACOSX)
   autorelease_pool_->Recycle();
 #endif
@@ -568,9 +587,6 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
     EXPECT_EQ("", error_message);
   }
 
-  // Invoke cleanup and quit even if there are failures. This is similar to
-  // gtest in that it invokes TearDown even if Setup fails.
-  TearDownOnMainThread();
 #if defined(OS_MACOSX)
   autorelease_pool_->Recycle();
 #endif
@@ -588,7 +604,7 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
 
 void InProcessBrowserTest::QuitBrowsers() {
   if (chrome::GetTotalBrowserCount() == 0) {
-    chrome::NotifyAppTerminating();
+    browser_shutdown::NotifyAppTerminating();
     return;
   }
 

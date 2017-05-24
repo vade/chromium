@@ -10,7 +10,7 @@
 Polymer({
   is: 'settings-internet-page',
 
-  behaviors: [I18nBehavior],
+  behaviors: [I18nBehavior, settings.RouteObserverBehavior],
 
   properties: {
     /**
@@ -27,6 +27,37 @@ Polymer({
       type: Object,
       notify: true,
     },
+
+    /**
+     * The device state for each network device type. Set by network-summary.
+     * @type {!Object<chrome.networkingPrivate.DeviceStateProperties>|undefined}
+     * @private
+     */
+    deviceStates: {
+      type: Object,
+      notify: true,
+    },
+
+    /**
+     * Highest priority connected network or null. Set by network-summary.
+     * @type {?CrOnc.NetworkStateProperties|undefined}
+     */
+    defaultNetwork: {
+      type: Object,
+      notify: true,
+    },
+
+    /**
+     * Set by internet-subpage. Controls spinner visibility in subpage header.
+     * @private
+     */
+    showSpinner_: Boolean,
+
+    /**
+     * The network type for the networks subpage. Used in the subpage header.
+     * @private
+     */
+    subpageType_: String,
 
     /**
      * The network type for the known networks subpage.
@@ -57,23 +88,53 @@ Polymer({
         return [];
       }
     },
+
+    /** @private {!Map<string, string>} */
+    focusConfig_: {
+      type: Object,
+      value: function() {
+        return new Map();
+      },
+    },
   },
+
+  /** @private {string} Type of last detail page visited. */
+  detailType_: '',
+
+  // Element event listeners
+  listeners: {
+    'device-enabled-toggled': 'onDeviceEnabledToggled_',
+    'network-connect': 'onNetworkConnect_',
+    'show-detail': 'onShowDetail_',
+    'show-known-networks': 'onShowKnownNetworks_',
+    'show-networks': 'onShowNetworks_',
+  },
+
+  // chrome.networkingPrivate listeners
+  /** @private {Function} */
+  onExtensionAddedListener_: null,
+
+  /** @private {Function} */
+  onExtensionRemovedListener_: null,
+
+  /** @private {Function} */
+  onExtensionDisabledListener_: null,
 
   /** @override */
   attached: function() {
-    this.boundOnExtensionAdded_ = this.boundOnExtensionAdded_ ||
-        this.onExtensionAdded_.bind(this);
-    chrome.management.onInstalled.addListener(this.boundOnExtensionAdded_);
-    chrome.management.onEnabled.addListener(this.boundOnExtensionAdded_);
+    this.onExtensionAddedListener_ =
+        this.onExtensionAddedListener_ || this.onExtensionAdded_.bind(this);
+    chrome.management.onInstalled.addListener(this.onExtensionAddedListener_);
+    chrome.management.onEnabled.addListener(this.onExtensionAddedListener_);
 
-    this.boundOnExtensionRemoved_ = this.boundOnExtensionRemoved_ ||
-        this.onExtensionRemoved_.bind(this);
+    this.onExtensionRemovedListener_ =
+        this.onExtensionRemovedListener_ || this.onExtensionRemoved_.bind(this);
     chrome.management.onUninstalled.addListener(
-        this.boundOnExtensionRemoved_);
+        this.onExtensionRemovedListener_);
 
-    this.boundOnExtensionDisabled_ = this.boundOnExtensionDisabled_ ||
+    this.onExtensionDisabledListener_ = this.onExtensionDisabledListener_ ||
         this.onExtensionDisabled_.bind(this);
-    chrome.management.onDisabled.addListener(this.boundOnExtensionDisabled_);
+    chrome.management.onDisabled.addListener(this.onExtensionDisabledListener_);
 
     chrome.management.getAll(this.onGetAllExtensions_.bind(this));
 
@@ -85,41 +146,106 @@ Polymer({
   /** @override */
   detached: function() {
     chrome.management.onInstalled.removeListener(
-        assert(this.boundOnExtensionAdded_));
+        assert(this.onExtensionAddedListener_));
     chrome.management.onEnabled.removeListener(
-        assert(this.boundOnExtensionAdded_));
+        assert(this.onExtensionAddedListener_));
     chrome.management.onUninstalled.removeListener(
-        assert(this.boundOnExtensionRemoved_));
+        assert(this.onExtensionRemovedListener_));
     chrome.management.onDisabled.removeListener(
-        assert(this.boundOnExtensionDisabled_));
+        assert(this.onExtensionDisabledListener_));
   },
 
   /**
-   * Reference to the bound listener, such that it can be removed on detach.
-   * @private {Function}
+   * settings.RouteObserverBehavior
+   * @param {!settings.Route} route
+   * @param {!settings.Route} oldRoute
+   * @protected
    */
-  boundOnExtensionAdded_: null,
+  currentRouteChanged: function(route, oldRoute) {
+    if (route == settings.Route.INTERNET_NETWORKS) {
+      // Handle direct navigation to the networks page,
+      // e.g. chrome://settings/internet/networks?type=WiFi
+      var queryParams = settings.getQueryParameters();
+      var type = queryParams.get('type');
+      if (type)
+        this.subpageType_ = type;
+    } else if (route == settings.Route.KNOWN_NETWORKS) {
+      // Handle direct navigation to the known networks page,
+      // e.g. chrome://settings/internet/knownNetworks?type=WiFi
+      var queryParams = settings.getQueryParameters();
+      var type = queryParams.get('type');
+      if (type)
+        this.knownNetworksType_ = type;
+    } else if (
+        route != settings.Route.INTERNET && route != settings.Route.BASIC) {
+      // If we are navigating to a non internet section, do not set focus.
+      return;
+    }
+
+    if (!settings.Route.INTERNET.contains(oldRoute))
+      return;
+
+    // Focus the subpage arrow where appropriate.
+    var selector;
+    if (route == settings.Route.INTERNET_NETWORKS) {
+      // iron-list makes the correct timing to focus an item in the list
+      // very complicated, and the item may not exist, so just focus the
+      // entire list for now.
+      selector = '* /deep/ #networkList';
+    } else if (this.detailType_) {
+      selector = '* /deep/ #' + this.detailType_ + ' /deep/ .subpage-arrow';
+    }
+    if (selector && this.querySelector(selector))
+      this.focusConfig_.set(oldRoute.path, selector);
+    else
+      this.focusConfig_.delete(oldRoute.path);
+  },
 
   /**
-   * Reference to the bound listener, such that it can be removed on detach.
-   * @private {Function}
+   * Event triggered by a device state enabled toggle.
+   * @param {!{detail: {enabled: boolean,
+   *                    type: chrome.networkingPrivate.NetworkType}}} event
+   * @private
    */
-  boundOnExtensionRemoved_: null,
-
-  /**
-   * Reference to the bound listener, such that it can be removed on detach.
-   * @private {Function}
-   */
-  boundOnExtensionDisabled_: null,
+  onDeviceEnabledToggled_: function(event) {
+    if (event.detail.enabled)
+      this.networkingPrivate.enableNetworkType(event.detail.type);
+    else
+      this.networkingPrivate.disableNetworkType(event.detail.type);
+  },
 
   /**
    * @param {!{detail: !CrOnc.NetworkStateProperties}} event
    * @private
    */
   onShowDetail_: function(event) {
-    settings.navigateTo(
-        settings.Route.NETWORK_DETAIL,
-        new URLSearchParams('guid=' + event.detail.GUID));
+    this.detailType_ = event.detail.Type;
+    var params = new URLSearchParams;
+    params.append('guid', event.detail.GUID);
+    params.append('type', event.detail.Type);
+    if (event.detail.Name)
+      params.append('name', event.detail.Name);
+    settings.navigateTo(settings.Route.NETWORK_DETAIL, params);
+  },
+
+  /**
+   * @param {!{detail: {type: string}}} event
+   * @private
+   */
+  onShowNetworks_: function(event) {
+    this.detailType_ = event.detail.Type;
+    var params = new URLSearchParams;
+    params.append('type', event.detail.Type);
+    this.subpageType_ = event.detail.Type;
+    settings.navigateTo(settings.Route.INTERNET_NETWORKS, params);
+  },
+
+  /**
+   * @return {string}
+   * @private
+   */
+  getNetworksPageTitle_: function() {
+    return this.i18n('OncType' + this.subpageType_);
   },
 
   /**
@@ -127,8 +253,11 @@ Polymer({
    * @private
    */
   onShowKnownNetworks_: function(event) {
+    this.detailType_ = event.detail.Type;
+    var params = new URLSearchParams;
+    params.append('type', event.detail.Type);
     this.knownNetworksType_ = event.detail.type;
-    settings.navigateTo(settings.Route.KNOWN_NETWORKS);
+    settings.navigateTo(settings.Route.KNOWN_NETWORKS, params);
   },
 
   /**
@@ -233,10 +362,20 @@ Polymer({
   },
 
   /**
+   * @param {!chrome.networkingPrivate.DeviceStateProperties} deviceState
+   * @return {boolean}
+   * @private
+   */
+  deviceIsEnabled_: function(deviceState) {
+    return !!deviceState &&
+        deviceState.State == chrome.networkingPrivate.DeviceStateType.ENABLED;
+  },
+
+  /**
    * @param {!chrome.networkingPrivate.GlobalPolicy} globalPolicy
    * @return {boolean}
    */
-  allowAddConnection_(globalPolicy) {
+  allowAddConnection_: function(globalPolicy) {
     return !globalPolicy.AllowOnlyPolicyNetworksToConnect;
   },
 
@@ -246,5 +385,42 @@ Polymer({
    */
   getAddThirdParrtyVpnLabel_: function(provider) {
     return this.i18n('internetAddThirdPartyVPN', provider.ProviderName);
-  }
+  },
+
+  /**
+   * Handles UI requests to connect to a network.
+   * TODO(stevenjb): Handle Cellular activation, etc.
+   * @param {!{detail:
+   *            {networkProperties:
+                   (!CrOnc.NetworkProperties|!CrOnc.NetworkStateProperties),
+   *             bypassConnectionDialog: (boolean|undefined)}}} event
+   * @private
+   */
+  onNetworkConnect_: function(event) {
+    var properties = event.detail.networkProperties;
+    if (!event.detail.bypassConnectionDialog &&
+        CrOnc.shouldShowTetherDialogBeforeConnection(properties)) {
+      var params = new URLSearchParams;
+      params.append('guid', properties.GUID);
+      params.append('type', properties.Type);
+      params.append('name', CrOnc.getNetworkName(properties));
+      params.append('showConfigure', true.toString());
+
+      settings.navigateTo(settings.Route.NETWORK_DETAIL, params);
+      return;
+    }
+
+    this.networkingPrivate.startConnect(properties.GUID, function() {
+      if (chrome.runtime.lastError) {
+        var message = chrome.runtime.lastError.message;
+        if (message == 'connecting' || message == 'connect-canceled' ||
+            message == 'connected' || message == 'Error.InvalidNetworkGuid') {
+          return;
+        }
+        console.error(
+            'Unexpected networkingPrivate.startConnect error: ' + message +
+                ' For: ' + properties.GUID);
+      }
+    });
+  },
 });

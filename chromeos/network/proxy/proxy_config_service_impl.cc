@@ -10,7 +10,6 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/threading/worker_pool.h"
 #include "base/values.h"
 #include "chromeos/network/network_profile.h"
 #include "chromeos/network/network_profile_handler.h"
@@ -193,7 +192,8 @@ ProxyConfigServiceImpl::GetActiveProxyConfigDictionary(
     bool value_exists = pref->GetValue()->GetAsDictionary(&proxy_config_value);
     DCHECK(value_exists);
 
-    return base::MakeUnique<ProxyConfigDictionary>(proxy_config_value);
+    return base::MakeUnique<ProxyConfigDictionary>(
+        proxy_config_value->CreateDeepCopy());
   }
 
   const NetworkState* network =

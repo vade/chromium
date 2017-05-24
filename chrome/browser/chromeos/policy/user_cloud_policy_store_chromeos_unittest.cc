@@ -15,9 +15,9 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chromeos/dbus/mock_cryptohome_client.h"
@@ -28,12 +28,14 @@
 #include "components/policy/core/common/policy_types.h"
 #include "components/policy/policy_constants.h"
 #include "components/policy/proto/cloud_policy.pb.h"
-#include "components/policy/proto/device_management_local.pb.h"
 #include "crypto/rsa_private_key.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace em = enterprise_management;
+
+using RetrievePolicyResponseType =
+    chromeos::SessionManagerClient::RetrievePolicyResponseType;
 
 using testing::AllOf;
 using testing::AnyNumber;
@@ -42,6 +44,7 @@ using testing::Mock;
 using testing::Property;
 using testing::Return;
 using testing::SaveArg;
+using testing::SetArgPointee;
 using testing::_;
 
 namespace policy {
@@ -59,7 +62,9 @@ ACTION_P2(SendSanitizedUsername, call_status, sanitized_username) {
 
 class UserCloudPolicyStoreChromeOSTest : public testing::Test {
  protected:
-  UserCloudPolicyStoreChromeOSTest() {}
+  UserCloudPolicyStoreChromeOSTest()
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
 
   void SetUp() override {
     EXPECT_CALL(cryptohome_client_, GetSanitizedUsername(cryptohome_id_, _))
@@ -69,8 +74,9 @@ class UserCloudPolicyStoreChromeOSTest : public testing::Test {
 
     ASSERT_TRUE(tmp_dir_.CreateUniqueTempDir());
     store_.reset(new UserCloudPolicyStoreChromeOS(
-        &cryptohome_client_, &session_manager_client_, loop_.task_runner(),
-        account_id_, user_policy_dir(), false /* is_active_directory */));
+        &cryptohome_client_, &session_manager_client_,
+        base::ThreadTaskRunnerHandle::Get(), account_id_, user_policy_dir(),
+        false /* is_active_directory */));
     store_->AddObserver(&observer_);
 
     // Install the initial public key, so that by default the validation of
@@ -111,7 +117,7 @@ class UserCloudPolicyStoreChromeOSTest : public testing::Test {
     ASSERT_FALSE(retrieve_callback.is_null());
 
     // Run the callback.
-    retrieve_callback.Run(response);
+    retrieve_callback.Run(response, RetrievePolicyResponseType::SUCCESS);
     base::RunLoop().RunUntilIdle();
   }
 
@@ -122,13 +128,14 @@ class UserCloudPolicyStoreChromeOSTest : public testing::Test {
     const PolicyMap::Entry* entry =
         store_->policy_map().Get(key::kHomepageLocation);
     ASSERT_TRUE(entry);
-    EXPECT_TRUE(base::StringValue(expected_value).Equals(entry->value.get()));
+    EXPECT_TRUE(base::Value(expected_value).Equals(entry->value.get()));
   }
 
   void StoreUserPolicyKey(const std::string& public_key) {
     ASSERT_TRUE(base::CreateDirectory(user_policy_key_file().DirName()));
-    ASSERT_TRUE(base::WriteFile(user_policy_key_file(), public_key.data(),
-                                public_key.size()));
+    ASSERT_EQ(static_cast<int>(public_key.size()),
+              base::WriteFile(user_policy_key_file(), public_key.data(),
+                              public_key.size()));
   }
 
   // Stores the current |policy_| and verifies that it is published.
@@ -158,7 +165,7 @@ class UserCloudPolicyStoreChromeOSTest : public testing::Test {
     if (previous_value) {
       previous_policy.Set(key::kHomepageLocation, POLICY_LEVEL_MANDATORY,
                           POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                          base::MakeUnique<base::StringValue>(previous_value),
+                          base::MakeUnique<base::Value>(previous_value),
                           nullptr);
     }
     EXPECT_TRUE(previous_policy.Equals(store_->policy_map()));
@@ -183,7 +190,8 @@ class UserCloudPolicyStoreChromeOSTest : public testing::Test {
 
     // Finish the retrieve callback.
     EXPECT_CALL(observer_, OnStoreLoaded(store_.get()));
-    retrieve_callback.Run(policy_.GetBlob());
+    retrieve_callback.Run(policy_.GetBlob(),
+                          RetrievePolicyResponseType::SUCCESS);
     base::RunLoop().RunUntilIdle();
     ASSERT_TRUE(store_->policy());
     EXPECT_EQ(policy_.policy_data().SerializeAsString(),
@@ -207,7 +215,7 @@ class UserCloudPolicyStoreChromeOSTest : public testing::Test {
                             .AppendASCII("policy.pub");
   }
 
-  base::MessageLoopForUI loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   chromeos::MockCryptohomeClient cryptohome_client_;
   chromeos::MockSessionManagerClient session_manager_client_;
   UserPolicyBuilder policy_;
@@ -492,8 +500,9 @@ TEST_F(UserCloudPolicyStoreChromeOSTest, LoadInvalidSignature) {
 TEST_F(UserCloudPolicyStoreChromeOSTest, LoadImmediately) {
   EXPECT_CALL(observer_, OnStoreLoaded(store_.get()));
   EXPECT_CALL(session_manager_client_,
-              BlockingRetrievePolicyForUser(cryptohome_id_))
-      .WillOnce(Return(policy_.GetBlob()));
+              BlockingRetrievePolicyForUser(cryptohome_id_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(policy_.GetBlob()),
+                      Return(RetrievePolicyResponseType::SUCCESS)));
   EXPECT_CALL(cryptohome_client_, BlockingGetSanitizedUsername(cryptohome_id_))
       .WillOnce(Return(kSanitizedUsername));
 
@@ -519,8 +528,9 @@ TEST_F(UserCloudPolicyStoreChromeOSTest, LoadImmediately) {
 TEST_F(UserCloudPolicyStoreChromeOSTest, LoadImmediatelyNoPolicy) {
   EXPECT_CALL(observer_, OnStoreLoaded(store_.get()));
   EXPECT_CALL(session_manager_client_,
-              BlockingRetrievePolicyForUser(cryptohome_id_))
-      .WillOnce(Return(""));
+              BlockingRetrievePolicyForUser(cryptohome_id_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(""),
+                      Return(RetrievePolicyResponseType::SUCCESS)));
 
   EXPECT_FALSE(store_->policy());
   store_->LoadImmediately();
@@ -536,8 +546,9 @@ TEST_F(UserCloudPolicyStoreChromeOSTest, LoadImmediatelyNoPolicy) {
 TEST_F(UserCloudPolicyStoreChromeOSTest, LoadImmediatelyInvalidBlob) {
   EXPECT_CALL(observer_, OnStoreError(store_.get()));
   EXPECT_CALL(session_manager_client_,
-              BlockingRetrievePolicyForUser(cryptohome_id_))
-      .WillOnce(Return("le blob"));
+              BlockingRetrievePolicyForUser(cryptohome_id_, _))
+      .WillOnce(DoAll(SetArgPointee<1>("le blob"),
+                      Return(RetrievePolicyResponseType::SUCCESS)));
 
   EXPECT_FALSE(store_->policy());
   store_->LoadImmediately();
@@ -553,8 +564,9 @@ TEST_F(UserCloudPolicyStoreChromeOSTest, LoadImmediatelyInvalidBlob) {
 TEST_F(UserCloudPolicyStoreChromeOSTest, LoadImmediatelyDBusFailure) {
   EXPECT_CALL(observer_, OnStoreError(store_.get()));
   EXPECT_CALL(session_manager_client_,
-              BlockingRetrievePolicyForUser(cryptohome_id_))
-      .WillOnce(Return(policy_.GetBlob()));
+              BlockingRetrievePolicyForUser(cryptohome_id_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(policy_.GetBlob()),
+                      Return(RetrievePolicyResponseType::SUCCESS)));
   EXPECT_CALL(cryptohome_client_, BlockingGetSanitizedUsername(cryptohome_id_))
       .WillOnce(Return(""));
 
@@ -573,8 +585,9 @@ TEST_F(UserCloudPolicyStoreChromeOSTest, LoadImmediatelyDBusFailure) {
 TEST_F(UserCloudPolicyStoreChromeOSTest, LoadImmediatelyNoUserPolicyKey) {
   EXPECT_CALL(observer_, OnStoreError(store_.get()));
   EXPECT_CALL(session_manager_client_,
-              BlockingRetrievePolicyForUser(cryptohome_id_))
-      .WillOnce(Return(policy_.GetBlob()));
+              BlockingRetrievePolicyForUser(cryptohome_id_, _))
+      .WillOnce(DoAll(SetArgPointee<1>(policy_.GetBlob()),
+                      Return(RetrievePolicyResponseType::SUCCESS)));
   EXPECT_CALL(cryptohome_client_, BlockingGetSanitizedUsername(cryptohome_id_))
       .WillOnce(Return("wrong@example.com"));
 

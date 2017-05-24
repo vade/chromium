@@ -14,7 +14,6 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "net/base/linked_hash_map.h"
 #include "net/quic/core/congestion_control/general_loss_algorithm.h"
 #include "net/quic/core/congestion_control/loss_detection_interface.h"
 #include "net/quic/core/congestion_control/pacing_sender.h"
@@ -24,6 +23,7 @@
 #include "net/quic/core/quic_pending_retransmission.h"
 #include "net/quic/core/quic_sustained_bandwidth_recorder.h"
 #include "net/quic/core/quic_unacked_packet_map.h"
+#include "net/quic/platform/api/quic_containers.h"
 #include "net/quic/platform/api/quic_export.h"
 
 namespace net {
@@ -79,8 +79,6 @@ class QUIC_EXPORT_PRIVATE QuicSentPacketManager {
 
     // Called with the path may be degrading. Note that the path may only be
     // temporarily degrading.
-    // TODO(jri): With multipath, this method should probably have a path_id
-    // parameter, and should maybe result in the path being marked as inactive.
     virtual void OnPathDegrading() = 0;
 
     // Called when the Path MTU may have increased.
@@ -196,6 +194,10 @@ class QUIC_EXPORT_PRIVATE QuicSentPacketManager {
   // Returns debugging information about the state of the congestion controller.
   std::string GetDebugState() const;
 
+  // Returns the number of bytes that are considered in-flight, i.e. not lost or
+  // acknowledged.
+  QuicByteCount GetBytesInFlight() const;
+
   // No longer retransmit data for |stream_id|.
   void CancelRetransmissionsForStream(QuicStreamId stream_id);
 
@@ -222,6 +224,10 @@ class QUIC_EXPORT_PRIVATE QuicSentPacketManager {
 
   const SendAlgorithmInterface* GetSendAlgorithm() const;
 
+  QuicPacketNumber largest_packet_peer_knows_is_acked() const {
+    return largest_packet_peer_knows_is_acked_;
+  }
+
  private:
   friend class test::QuicConnectionPeer;
   friend class test::QuicSentPacketManagerPeer;
@@ -240,7 +246,7 @@ class QUIC_EXPORT_PRIVATE QuicSentPacketManager {
     LOSS_MODE,
   };
 
-  typedef linked_hash_map<QuicPacketNumber, TransmissionType>
+  typedef QuicLinkedHashMap<QuicPacketNumber, TransmissionType>
       PendingRetransmissionMap;
 
   // Updates the least_packet_awaited_by_peer.
@@ -401,6 +407,9 @@ class QUIC_EXPORT_PRIVATE QuicSentPacketManager {
   // Records bandwidth from server to client in normal operation, over periods
   // of time with no loss events.
   QuicSustainedBandwidthRecorder sustained_bandwidth_recorder_;
+
+  // The largest acked value that was sent in an ack, which has then been acked.
+  QuicPacketNumber largest_packet_peer_knows_is_acked_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicSentPacketManager);
 };

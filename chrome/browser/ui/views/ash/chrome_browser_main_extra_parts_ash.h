@@ -10,8 +10,13 @@
 #include "base/macros.h"
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
 
+namespace ash {
+class ShelfModel;
+}
+
+class AshInit;
 class CastConfigClientMediaRouter;
-class ChromeLauncherControllerMus;
+class ChromeLauncherController;
 class ChromeNewWindowClient;
 class ChromeShellContentState;
 class ImmersiveContextMus;
@@ -30,12 +35,13 @@ class ChromeBrowserMainExtraPartsAsh : public ChromeBrowserMainExtraParts {
   ~ChromeBrowserMainExtraPartsAsh() override;
 
   // Overridden from ChromeBrowserMainExtraParts:
+  void ServiceManagerConnectionStarted(
+      content::ServiceManagerConnection* connection) override;
   void PreProfileInit() override;
   void PostProfileInit() override;
   void PostMainMessageLoopRun() override;
 
  private:
-  std::unique_ptr<ChromeLauncherControllerMus> chrome_launcher_controller_mus_;
   std::unique_ptr<ChromeShellContentState> chrome_shell_content_state_;
   std::unique_ptr<CastConfigClientMediaRouter> cast_config_client_media_router_;
   std::unique_ptr<MediaClient> media_client_;
@@ -46,6 +52,12 @@ class ChromeBrowserMainExtraPartsAsh : public ChromeBrowserMainExtraParts {
   std::unique_ptr<ChromeNewWindowClient> new_window_client_;
   std::unique_ptr<VolumeController> volume_controller_;
   std::unique_ptr<VpnListForwarder> vpn_list_forwarder_;
+  std::unique_ptr<AshInit> ash_init_;
+
+  // These are only used in Mash; corresponding instances are owned by Ash's
+  // ShelfController and ChromeShellDelegate in classic Ash.
+  std::unique_ptr<ash::ShelfModel> chrome_shelf_model_;
+  std::unique_ptr<ChromeLauncherController> chrome_launcher_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainExtraPartsAsh);
 };

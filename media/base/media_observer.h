@@ -11,6 +11,20 @@
 
 namespace media {
 
+class MEDIA_EXPORT MediaObserverClient {
+ public:
+  virtual ~MediaObserverClient() {}
+
+  // Requests to restart the media pipeline and create a new renderer as soon as
+  // possible. |is_rendered_remotely| indicates whether the media is rendered
+  // remotely. When it is true, all the optimizations that might suspend the
+  // media pipeline should be disabled.
+  virtual void SwitchRenderer(bool is_rendered_remotely) = 0;
+
+  // Requests to activate monitoring changes on viewport intersection.
+  virtual void ActivateViewportIntersectionMonitoring(bool activate) = 0;
+};
+
 // This class is an observer of media player events.
 class MEDIA_EXPORT MediaObserver {
  public:
@@ -42,9 +56,8 @@ class MEDIA_EXPORT MediaObserver {
   virtual void OnPlaying() = 0;
   virtual void OnPaused() = 0;
 
-  // Called when a poster image URL is set, which happens when media is loaded
-  // or the poster attribute is changed.
-  virtual void OnSetPoster(const GURL& poster) = 0;
+  // Set the MediaObserverClient.
+  virtual void SetClient(MediaObserverClient* client) = 0;
 };
 
 }  // namespace media

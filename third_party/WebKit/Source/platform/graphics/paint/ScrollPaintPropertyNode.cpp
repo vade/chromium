@@ -8,38 +8,49 @@
 
 namespace blink {
 
-ScrollPaintPropertyNode* ScrollPaintPropertyNode::root() {
-  DEFINE_STATIC_REF(ScrollPaintPropertyNode, root,
-                    (ScrollPaintPropertyNode::create(
-                        nullptr, TransformPaintPropertyNode::root(), IntSize(),
-                        IntSize(), false, false, 0)));
+ScrollPaintPropertyNode* ScrollPaintPropertyNode::Root() {
+  DEFINE_STATIC_REF(
+      ScrollPaintPropertyNode, root,
+      (ScrollPaintPropertyNode::Create(nullptr, IntSize(), IntSize(), false,
+                                       false, 0, nullptr)));
   return root;
 }
 
-String ScrollPaintPropertyNode::toString() const {
-  FloatSize scrollOffset =
-      m_scrollOffsetTranslation->matrix().to2DTranslation();
-  std::string mainThreadScrollingReasonsAsText =
-      MainThreadScrollingReason::mainThreadScrollingReasonsAsText(
-          m_mainThreadScrollingReasons);
-  return String::format(
-      "parent=%p scrollOffsetTranslation=%s clip=%s bounds=%s "
-      "userScrollableHorizontal=%s"
-      " userScrollableVertical=%s mainThreadScrollingReasons=%s"
-      "compositorElementId=(%d, %d)",
-      m_parent.get(), scrollOffset.toString().ascii().data(),
-      m_clip.toString().ascii().data(), m_bounds.toString().ascii().data(),
-      m_userScrollableHorizontal ? "yes" : "no",
-      m_userScrollableVertical ? "yes" : "no",
-      mainThreadScrollingReasonsAsText.c_str(), m_compositorElementId.primaryId,
-      m_compositorElementId.secondaryId);
+String ScrollPaintPropertyNode::ToString() const {
+  StringBuilder text;
+  text.Append("parent=");
+  text.Append(String::Format("%p", parent_.Get()));
+  text.Append(" clip=");
+  text.Append(clip_.ToString());
+  text.Append(" bounds=");
+  text.Append(bounds_.ToString());
+
+  text.Append(" userScrollable=");
+  if (user_scrollable_horizontal_ && user_scrollable_vertical_)
+    text.Append("both");
+  else if (!user_scrollable_horizontal_ && !user_scrollable_vertical_)
+    text.Append("none");
+  else
+    text.Append(user_scrollable_horizontal_ ? "horizontal" : "vertical");
+
+  text.Append(" mainThreadReasons=");
+  if (main_thread_scrolling_reasons_) {
+    text.Append(MainThreadScrollingReason::mainThreadScrollingReasonsAsText(
+                    main_thread_scrolling_reasons_)
+                    .c_str());
+  } else {
+    text.Append("none");
+  }
+  if (scroll_client_)
+    text.Append(String::Format(" scrollClient=%p", scroll_client_));
+  return text.ToString();
 }
 
 #if DCHECK_IS_ON()
 
-String ScrollPaintPropertyNode::toTreeString() const {
+String ScrollPaintPropertyNode::ToTreeString() const {
   return blink::PropertyTreeStatePrinter<blink::ScrollPaintPropertyNode>()
-      .pathAsString(this);
+      .PathAsString(this);
 }
 
 #endif

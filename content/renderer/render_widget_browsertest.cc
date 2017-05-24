@@ -9,6 +9,7 @@
 #include "content/renderer/render_widget.h"
 #include "third_party/WebKit/public/web/WebFrameWidget.h"
 #include "third_party/WebKit/public/web/WebInputMethodController.h"
+#include "third_party/WebKit/public/web/WebRange.h"
 #include "ui/base/ime/text_input_type.h"
 
 namespace content {
@@ -119,7 +120,7 @@ class RenderWidgetInitialSizeTest : public RenderWidgetTest {
 
 TEST_F(RenderWidgetInitialSizeTest, InitialSize) {
   EXPECT_EQ(initial_size_, widget()->size());
-  EXPECT_EQ(initial_size_, gfx::Size(widget()->GetWebWidget()->size()));
+  EXPECT_EQ(initial_size_, gfx::Size(widget()->GetWebWidget()->Size()));
   EXPECT_TRUE(next_paint_is_resize_ack());
 }
 
@@ -129,8 +130,8 @@ TEST_F(RenderWidgetTest, GetCompositionRangeValidComposition) {
       "<script> document.querySelector('div').focus(); </script>");
   blink::WebVector<blink::WebCompositionUnderline> emptyUnderlines;
   DCHECK(widget()->GetInputMethodController());
-  widget()->GetInputMethodController()->setComposition("hello", emptyUnderlines,
-                                                       3, 3);
+  widget()->GetInputMethodController()->SetComposition("hello", emptyUnderlines,
+                                                       blink::WebRange(), 3, 3);
   gfx::Range range;
   GetCompositionRange(&range);
   EXPECT_TRUE(range.IsValid());
@@ -180,7 +181,7 @@ TEST_F(RenderWidgetTest, PageFocusIme) {
   CommitText(text);
 
   // The text should be committed since there is page focus in the beginning.
-  EXPECT_EQ(text, GetInputMethodController()->textInputInfo().value.utf8());
+  EXPECT_EQ(text, GetInputMethodController()->TextInputInfo().value.Utf8());
 
   // Drop focus.
   SetFocus(false);
@@ -196,13 +197,13 @@ TEST_F(RenderWidgetTest, PageFocusIme) {
   CommitText(text);
 
   // This time is should not work since |m_imeAcceptEvents| is not set.
-  EXPECT_EQ("hello", GetInputMethodController()->textInputInfo().value.utf8());
+  EXPECT_EQ("hello", GetInputMethodController()->TextInputInfo().value.Utf8());
 
   // Now give focus back again and commit text.
   SetFocus(true);
   CommitText(text);
   EXPECT_EQ("hello world",
-            GetInputMethodController()->textInputInfo().value.utf8());
+            GetInputMethodController()->TextInputInfo().value.Utf8());
 }
 
 }  // namespace content

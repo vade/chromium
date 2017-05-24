@@ -11,12 +11,27 @@
 #include <string>
 #include <vector>
 
+namespace aura {
+class PropertyConverter;
+class Window;
+}
+
 namespace gfx {
 class Rect;
 class Size;
 }
 
+namespace ui {
+namespace mojom {
+enum class WindowType;
+}
+}
+
 namespace ash {
+namespace mojom {
+enum class WindowStyle;
+}
+
 namespace mus {
 
 // Functions for extracting properties that are used at a Window creation time.
@@ -47,6 +62,14 @@ bool GetWindowPreferredSize(const InitProperties& properties, gfx::Size* size);
 bool ShouldRemoveStandardFrame(const InitProperties& properties);
 
 bool ShouldEnableImmersive(const InitProperties& properties);
+
+mojom::WindowStyle GetWindowStyle(const InitProperties& properties);
+
+// Applies |properties| to |window| using |property_converter|.
+void ApplyProperties(
+    aura::Window* window,
+    aura::PropertyConverter* property_converter,
+    const std::map<std::string, std::vector<uint8_t>>& properties);
 
 }  // namespace mus
 }  // namespace ash

@@ -7,10 +7,11 @@
 #include <string>
 #include <vector>
 
+#include "base/sequenced_task_runner.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/version.h"
 #include "components/component_updater/configurator_impl.h"
-#include "components/update_client/component_patcher_operation.h"
+#include "components/update_client/out_of_process_patcher.h"
 #include "components/update_client/update_query_params.h"
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/google/google_brand.h"
@@ -29,7 +30,6 @@ class IOSConfigurator : public update_client::Configurator {
   // update_client::Configurator overrides.
   int InitialDelay() const override;
   int NextCheckDelay() const override;
-  int StepDelay() const override;
   int OnDemandDelay() const override;
   int UpdateDelay() const override;
   std::vector<GURL> UpdateUrl() const override;
@@ -76,10 +76,6 @@ int IOSConfigurator::InitialDelay() const {
 
 int IOSConfigurator::NextCheckDelay() const {
   return configurator_impl_.NextCheckDelay();
-}
-
-int IOSConfigurator::StepDelay() const {
-  return configurator_impl_.StepDelay();
 }
 
 int IOSConfigurator::OnDemandDelay() const {
@@ -179,7 +175,7 @@ bool IOSConfigurator::IsPerUserInstall() const {
 scoped_refptr<update_client::Configurator> MakeIOSComponentUpdaterConfigurator(
     const base::CommandLine* cmdline,
     net::URLRequestContextGetter* context_getter) {
-  return new IOSConfigurator(cmdline, context_getter);
+  return base::MakeRefCounted<IOSConfigurator>(cmdline, context_getter);
 }
 
 }  // namespace component_updater

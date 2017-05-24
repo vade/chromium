@@ -45,6 +45,7 @@
 #include "ui/gfx/geometry/rect.h"
 
 struct BrowserPluginHostMsg_Attach_Params;
+struct BrowserPluginHostMsg_SetComposition_Params;
 
 #if defined(OS_MACOSX)
 struct FrameHostMsg_ShowPopup_Params;
@@ -167,10 +168,7 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
   BrowserPluginGuestManager* GetBrowserPluginGuestManager() const;
 
   // WebContentsObserver implementation.
-  void DidCommitProvisionalLoadForFrame(
-      RenderFrameHost* render_frame_host,
-      const GURL& url,
-      ui::PageTransition transition_type) override;
+  void DidFinishNavigation(NavigationHandle* navigation_handle) override;
 
   void RenderViewReady() override;
   void RenderProcessGone(base::TerminationStatus status) override;
@@ -243,19 +241,15 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
   virtual void SetChildFrameSurface(const cc::SurfaceInfo& surface_info,
                                     const cc::SurfaceSequence& sequence);
 
-  // Find the given |search_text| in the page. Returns true if the find request
-  // is handled by this browser plugin guest.
-  bool HandleFindForEmbedder(int request_id,
-                             const base::string16& search_text,
-                             const blink::WebFindOptions& options);
-  bool HandleStopFindingForEmbedder(StopFindAction action);
-
   void ResendEventToEmbedder(const blink::WebInputEvent& event);
 
   // TODO(ekaramad): Remove this once https://crbug.com/642826 is resolved.
   bool can_use_cross_process_frames() const {
     return can_use_cross_process_frames_;
   }
+
+  gfx::Point GetCoordinatesInEmbedderWebContents(
+      const gfx::Point& relative_point);
 
  protected:
 
@@ -342,14 +336,12 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
   void OnTextInputStateChanged(const TextInputState& params);
   void OnImeSetComposition(
       int instance_id,
-      const std::string& text,
-      const std::vector<blink::WebCompositionUnderline>& underlines,
-      int selection_start,
-      int selection_end);
+      const BrowserPluginHostMsg_SetComposition_Params& params);
   void OnImeCommitText(
       int instance_id,
-      const std::string& text,
+      const base::string16& text,
       const std::vector<blink::WebCompositionUnderline>& underlines,
+      const gfx::Range& replacement_range,
       int relative_cursor_pos);
   void OnImeFinishComposingText(bool keep_selection);
   void OnExtendSelectionAndDelete(int instance_id, int before, int after);

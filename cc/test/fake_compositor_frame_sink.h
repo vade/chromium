@@ -24,6 +24,8 @@
 
 namespace cc {
 
+class BeginFrameSource;
+
 class FakeCompositorFrameSink : public CompositorFrameSink {
  public:
   ~FakeCompositorFrameSink() override;
@@ -46,12 +48,22 @@ class FakeCompositorFrameSink : public CompositorFrameSink {
         TestContextProvider::CreateWorker()));
   }
 
+  static std::unique_ptr<FakeCompositorFrameSink>
+  Create3dForGpuRasterization() {
+    auto context = TestWebGraphicsContext3D::Create();
+    context->set_gpu_rasterization(true);
+    auto context_provider = TestContextProvider::Create(std::move(context));
+    return base::WrapUnique(new FakeCompositorFrameSink(
+        std::move(context_provider), TestContextProvider::CreateWorker()));
+  }
+
   static std::unique_ptr<FakeCompositorFrameSink> CreateSoftware() {
     return base::WrapUnique(new FakeCompositorFrameSink(nullptr, nullptr));
   }
 
   // CompositorFrameSink implementation.
   void SubmitCompositorFrame(CompositorFrame frame) override;
+  bool BindToClient(CompositorFrameSinkClient* client) override;
   void DetachFromClient() override;
 
   CompositorFrame* last_sent_frame() { return last_sent_frame_.get(); }
@@ -64,7 +76,6 @@ class FakeCompositorFrameSink : public CompositorFrameSink {
   }
 
   gfx::Rect last_swap_rect() const {
-    DCHECK(last_swap_rect_valid_);
     return last_swap_rect_;
   }
 
@@ -81,12 +92,12 @@ class FakeCompositorFrameSink : public CompositorFrameSink {
   std::unique_ptr<CompositorFrame> last_sent_frame_;
   size_t num_sent_frames_ = 0;
   TransferableResourceArray resources_held_by_parent_;
-  bool last_swap_rect_valid_ = false;
   gfx::Rect last_swap_rect_;
 
  private:
   void DidReceiveCompositorFrameAck();
 
+  std::unique_ptr<BeginFrameSource> begin_frame_source_;
   base::WeakPtrFactory<FakeCompositorFrameSink> weak_ptr_factory_;
 };
 

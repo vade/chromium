@@ -7,17 +7,23 @@
 #include "chrome/installer/setup/setup_util.h"
 
 #include <windows.h>
+
 #include <stddef.h>
+#include <wtsapi32.h>
 
 #include <algorithm>
+#include <initializer_list>
 #include <iterator>
 #include <limits>
 #include <set>
 #include <string>
+#include <utility>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/cpu.h"
+#include "base/files/file.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -31,6 +37,9 @@
 #include "base/version.h"
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
+#include "chrome/install_static/install_details.h"
+#include "chrome/install_static/install_modes.h"
+#include "chrome/install_static/install_util.h"
 #include "chrome/installer/setup/installer_state.h"
 #include "chrome/installer/setup/setup_constants.h"
 #include "chrome/installer/setup/user_hive_visitor.h"
@@ -54,19 +63,6 @@ namespace {
 // Event log providers registry location.
 constexpr wchar_t kEventLogProvidersRegPath[] =
     L"SYSTEM\\CurrentControlSet\\Services\\EventLog\\Application\\";
-
-// TODO(grt): use install_static::InstallDetails::Get().install_full_name() when
-// InstallDetails is initialized in the installer.
-base::string16 InstallFullName() {
-#if defined(GOOGLE_CHROME_BUILD)
-  base::string16 reg_path(L"Chrome");
-  if (InstallUtil::IsChromeSxSProcess())
-    reg_path.append(L" SxS");
-  return reg_path;
-#else
-  return base::string16(L"Chromium");
-#endif
-}
 
 // Returns true if the "lastrun" value in |root|\|key_path| (a path to Chrome's
 // ClientState key for a user) indicates that Chrome has been used within the
@@ -99,12 +95,40 @@ bool OnUserHive(const base::string16& client_state_path,
   return false;
 }
 
+// Remove the registration of the browser's DelegateExecute verb handler class.
+// This was once registered in support of "metro" mode on Windows 8.
+void RemoveLegacyIExecuteCommandKey(const InstallerState& installer_state) {
+  const base::string16 handler_class_uuid =
+      install_static::GetLegacyCommandExecuteImplClsid();
+
+  // No work to do if this mode of install never registered a DelegateExecute
+  // verb handler.
+  if (handler_class_uuid.empty())
+    return;
+
+  const HKEY root = installer_state.root_key();
+  base::string16 delegate_execute_path(L"Software\\Classes\\CLSID\\");
+  delegate_execute_path.append(handler_class_uuid);
+
+  // Delete both 64 and 32 keys to handle 32->64 or 64->32 migration.
+  for (REGSAM bitness : {KEY_WOW64_32KEY, KEY_WOW64_64KEY}) {
+    if (base::win::RegKey(root, delegate_execute_path.c_str(),
+                          KEY_QUERY_VALUE | bitness)
+            .Valid()) {
+      const bool success =
+          InstallUtil::DeleteRegistryKey(root, delegate_execute_path, bitness);
+      UMA_HISTOGRAM_BOOLEAN("Setup.Install.DeleteIExecuteCommandClassKey",
+                            success);
+    }
+  }
+}
+
 // "The binaries" once referred to the on-disk footprint of Chrome and/or Chrome
 // Frame when the products were configured to share such on-disk bits. Support
 // for this mode of install was dropped from ToT in December 2016. Remove any
 // stray bits in the registry leftover from such installs.
 void RemoveBinariesVersionKey(const InstallerState& installer_state) {
-  base::string16 path(MakeBinariesRegistrationData()->GetVersionKey());
+  base::string16 path(install_static::GetBinariesClientsKeyPath());
   if (base::win::RegKey(installer_state.root_key(), path.c_str(),
                         KEY_QUERY_VALUE | KEY_WOW64_32KEY)
           .Valid()) {
@@ -316,7 +340,7 @@ base::Version* GetMaxVersionFromArchiveDir(const base::FilePath& chrome_path) {
         new base::Version(base::UTF16ToASCII(find_data.GetName().value())));
     if (found_version->IsValid() &&
         found_version->CompareTo(*max_version.get()) > 0) {
-      max_version.reset(found_version.release());
+      max_version = std::move(found_version);
       version_found = true;
     }
   }
@@ -663,6 +687,14 @@ bool IsChromeActivelyUsed(const InstallerState& installer_state) {
   return is_used;
 }
 
+int GetInstallAge(const InstallerState& installer_state) {
+  base::File::Info info;
+  if (!base::GetFileInfo(installer_state.target_path(), &info))
+    return -1;
+  base::TimeDelta age = base::Time::Now() - info.creation_time;
+  return age >= base::TimeDelta() ? age.InDays() : -1;
+}
+
 void RecordUnPackMetrics(UnPackStatus unpack_status,
                          int32_t status,
                          UnPackConsumer consumer) {
@@ -698,7 +730,7 @@ void RecordUnPackMetrics(UnPackStatus unpack_status,
 void RegisterEventLogProvider(const base::FilePath& install_directory,
                               const base::Version& version) {
   base::string16 reg_path(kEventLogProvidersRegPath);
-  reg_path.append(InstallFullName());
+  reg_path.append(install_static::InstallDetails::Get().install_full_name());
   VLOG(1) << "Registering Chrome's event log provider at " << reg_path;
 
   std::unique_ptr<WorkItemList> work_item_list(WorkItem::CreateWorkItemList());
@@ -738,7 +770,7 @@ void RegisterEventLogProvider(const base::FilePath& install_directory,
 
 void DeRegisterEventLogProvider() {
   base::string16 reg_path(kEventLogProvidersRegPath);
-  reg_path.append(InstallFullName());
+  reg_path.append(install_static::InstallDetails::Get().install_full_name());
 
   // TODO(http://crbug.com/668120): If the Event Viewer is open the provider dll
   // will fail to get deleted. This doesn't fail the uninstallation altogether
@@ -748,17 +780,16 @@ void DeRegisterEventLogProvider() {
 }
 
 std::unique_ptr<AppRegistrationData> MakeBinariesRegistrationData() {
-#if defined(GOOGLE_CHROME_BUILD)
-  return base::MakeUnique<UpdatingAppRegistrationData>(
-      L"{4DC8B4CA-1BDA-483e-B5FA-D3C12E15B62D}");
-#else
+  if (install_static::kUseGoogleUpdateIntegration) {
+    return base::MakeUnique<UpdatingAppRegistrationData>(
+        install_static::kBinariesAppGuid);
+  }
   return base::MakeUnique<NonUpdatingAppRegistrationData>(
-      L"Software\\Chromium Binaries");
-#endif
+      base::string16(L"Software\\").append(install_static::kBinariesPathName));
 }
 
 bool AreBinariesInstalled(const InstallerState& installer_state) {
-  if (InstallUtil::IsChromeSxSProcess())
+  if (!install_static::InstallDetails::Get().supported_multi_install())
     return false;
 
   base::win::RegKey key;
@@ -766,7 +797,7 @@ bool AreBinariesInstalled(const InstallerState& installer_state) {
 
   // True if the "pv" value exists and isn't empty.
   return key.Open(installer_state.root_key(),
-                  MakeBinariesRegistrationData()->GetVersionKey().c_str(),
+                  install_static::GetBinariesClientsKeyPath().c_str(),
                   KEY_QUERY_VALUE | KEY_WOW64_32KEY) == ERROR_SUCCESS &&
          key.ReadValue(google_update::kRegVersionField, &pv) == ERROR_SUCCESS &&
          !pv.empty();
@@ -778,8 +809,11 @@ void DoLegacyCleanups(const InstallerState& installer_state,
   if (InstallUtil::GetInstallReturnCode(install_status))
     return;
 
+  // Cleanups that apply to any install mode.
+  RemoveLegacyIExecuteCommandKey(installer_state);
+
   // The cleanups below only apply to normal Chrome, not side-by-side (canary).
-  if (InstallUtil::IsChromeSxSProcess())
+  if (!install_static::InstallDetails::Get().is_primary_mode())
     return;
 
   RemoveBinariesVersionKey(installer_state);
@@ -787,6 +821,31 @@ void DoLegacyCleanups(const InstallerState& installer_state,
   RemoveAppLauncherVersionKey(installer_state);
   RemoveAppHostExe(installer_state);
   RemoveLegacyChromeAppCommands(installer_state);
+}
+
+base::Time GetConsoleSessionStartTime() {
+  constexpr DWORD kInvalidSessionId = 0xFFFFFFFF;
+  DWORD console_session_id = ::WTSGetActiveConsoleSessionId();
+  if (console_session_id == kInvalidSessionId)
+    return base::Time();
+  wchar_t* buffer = nullptr;
+  DWORD buffer_size = 0;
+  if (!::WTSQuerySessionInformation(WTS_CURRENT_SERVER_HANDLE,
+                                    console_session_id, WTSSessionInfo, &buffer,
+                                    &buffer_size)) {
+    return base::Time();
+  }
+  base::ScopedClosureRunner wts_deleter(
+      base::Bind(&::WTSFreeMemory, base::Unretained(buffer)));
+
+  WTSINFO* wts_info = nullptr;
+  if (buffer_size < sizeof(*wts_info))
+    return base::Time();
+
+  wts_info = reinterpret_cast<WTSINFO*>(buffer);
+  FILETIME filetime = {wts_info->LogonTime.u.LowPart,
+                       wts_info->LogonTime.u.HighPart};
+  return base::Time::FromFileTime(filetime);
 }
 
 ScopedTokenPrivilege::ScopedTokenPrivilege(const wchar_t* privilege_name)

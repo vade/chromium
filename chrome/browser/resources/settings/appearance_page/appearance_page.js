@@ -2,6 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+
+/**
+ * This is the absolute difference maintained between standard and
+ * fixed-width font sizes. http://crbug.com/91922.
+ * @const @private {number}
+ */
+var SIZE_DIFFERENCE_FIXED_STANDARD_ = 3;
+
+
 /**
  * 'settings-appearance-page' is the settings page containing appearance
  * settings.
@@ -85,19 +94,32 @@ Polymer({
     themeSublabel_: String,
 
     /** @private */
+    themeUrl_: String,
+
+    /** @private */
     useSystemTheme_: {
       type: Boolean,
       value: false,  // Can only be true on Linux, but value exists everywhere.
+    },
+
+    /** @private {!Map<string, string>} */
+    focusConfig_: {
+      type: Object,
+      value: function() {
+        var map = new Map();
+        map.set(
+            settings.Route.FONTS.path,
+            '#customize-fonts-subpage-trigger .subpage-arrow');
+        return map;
+      },
     },
   },
 
   /** @private {?settings.AppearanceBrowserProxy} */
   browserProxy_: null,
 
-  /** @private {string} */
-  themeUrl_: '',
-
   observers: [
+    'defaultFontSizeChanged_(prefs.webkit.webprefs.default_font_size.value)',
     'themeChanged_(prefs.extensions.theme.id.value, useSystemTheme_)',
 
 // <if expr="is_linux and not chromeos">
@@ -106,10 +128,12 @@ Polymer({
 // </if>
   ],
 
+  /** @override */
   created: function() {
     this.browserProxy_ = settings.AppearanceBrowserProxyImpl.getInstance();
   },
 
+  /** @override */
   ready: function() {
     this.$.defaultFontSize.menuOptions = this.fontSizeOptions_;
     // TODO(dschuyler): Look into adding a listener for the
@@ -129,15 +153,18 @@ Polymer({
   },
 
   /**
+   * @param {boolean} showHomepage Whether to show home page.
    * @param {boolean} isNtp Whether to use the NTP as the home page.
-   * @param {string} homepage If not using NTP, use this URL.
+   * @param {string} homepageValue If not using NTP, use this URL.
    * @return {string} The sub-label.
    * @private
    */
-  getShowHomeSubLabel_: function(isNtp, homepage) {
+  getShowHomeSubLabel_: function(showHomepage, isNtp, homepageValue) {
+    if (!showHomepage)
+      return this.i18n('homeButtonDisabled');
     if (isNtp)
       return this.i18n('homePageNtp');
-    return homepage || this.i18n('exampleDotCom');
+    return homepageValue || this.i18n('customWebAddress');
   },
 
   /** @private */
@@ -150,9 +177,25 @@ Polymer({
     this.fire('refresh-pref', 'homepage');
   },
 
-  /** @private */
-  onThemesTap_: function() {
-    window.open(this.themeUrl_ || loadTimeData.getString('themesGalleryUrl'));
+  /**
+   * @param {number} value The changed font size slider value.
+   * @private
+   */
+  defaultFontSizeChanged_: function(value) {
+    // This pref is handled separately in some extensions, but here it is tied
+    // to default_font_size (to simplify the UI).
+    this.set(
+        'prefs.webkit.webprefs.default_fixed_font_size.value',
+        value - SIZE_DIFFERENCE_FIXED_STANDARD_);
+  },
+
+  /**
+   * URL for either current theme or the theme gallery.
+   * @return {string}
+   * @private
+   */
+  getThemeHref_: function() {
+    return this.themeUrl_ || loadTimeData.getString('themesGalleryUrl');
   },
 
 // <if expr="chromeos">

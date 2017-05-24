@@ -89,11 +89,7 @@ base::TimeTicks EventTimeFromNative(const base::NativeEvent& native_event) {
   return timestamp;
 }
 
-gfx::Point EventLocationFromNative(const base::NativeEvent& native_event) {
-  return gfx::ToFlooredPoint(EventLocationFromNativeF(native_event));
-}
-
-gfx::PointF EventLocationFromNativeF(const base::NativeEvent& native_event) {
+gfx::PointF EventLocationFromNative(const base::NativeEvent& native_event) {
   NSWindow* window = [native_event window];
   if (!window) {
     NOTIMPLEMENTED();  // Point will be in screen coordinates.
@@ -189,11 +185,10 @@ PointerDetails GetTouchPointerDetailsFromNative(
     const base::NativeEvent& native_event) {
   NOTIMPLEMENTED();
   return PointerDetails(EventPointerType::POINTER_TYPE_UNKNOWN,
+                        /* pointer_id*/ 0,
                         /* radius_x */ 1.0,
                         /* radius_y */ 1.0,
-                        /* force */ 0.f,
-                        /* tilt_x */ 0.f,
-                        /* tilt_y */ 0.f);
+                        /* force */ 0.f);
 }
 
 bool GetScrollOffsets(const base::NativeEvent& native_event,

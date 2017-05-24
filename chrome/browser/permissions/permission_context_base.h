@@ -12,10 +12,10 @@
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "chrome/browser/permissions/permission_request.h"
+#include "chrome/browser/permissions/permission_result.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "content/public/browser/permission_type.h"
 
 #if defined(OS_ANDROID)
 class PermissionQueueController;
@@ -25,6 +25,7 @@ class PermissionRequestID;
 class Profile;
 
 namespace content {
+class RenderFrameHost;
 class WebContents;
 }
 
@@ -57,7 +58,6 @@ using BrowserPermissionCallback = base::Callback<void(ContentSetting)>;
 class PermissionContextBase : public KeyedService {
  public:
   PermissionContextBase(Profile* profile,
-                        const content::PermissionType permission_type,
                         const ContentSettingsType content_settings_type);
   ~PermissionContextBase() override;
 
@@ -81,10 +81,22 @@ class PermissionContextBase : public KeyedService {
                                  const BrowserPermissionCallback& callback);
 
   // Returns whether the permission has been granted, denied etc.
+  // |render_frame_host| may be nullptr if the call is coming from a context
+  // other than a specific frame.
   // TODO(meredithl): Ensure that the result accurately reflects whether the
   // origin is blacklisted for this permission.
-  ContentSetting GetPermissionStatus(const GURL& requesting_origin,
-                                     const GURL& embedding_origin) const;
+  PermissionResult GetPermissionStatus(
+      content::RenderFrameHost* render_frame_host,
+      const GURL& requesting_origin,
+      const GURL& embedding_origin) const;
+
+  // Update |result| with any modifications based on the device state. For
+  // example, if |result| is ALLOW but Chrome does not have the relevant
+  // permission at the device level, but will prompt the user, return ASK.
+  virtual PermissionResult UpdatePermissionStatusWithDeviceStatus(
+      PermissionResult result,
+      const GURL& requesting_origin,
+      const GURL& embedding_origin) const;
 
   // Resets the permission to its default value.
   virtual void ResetPermission(const GURL& requesting_origin,
@@ -102,6 +114,7 @@ class PermissionContextBase : public KeyedService {
 
  protected:
   virtual ContentSetting GetPermissionStatusInternal(
+      content::RenderFrameHost* render_frame_host,
       const GURL& requesting_origin,
       const GURL& embedding_origin) const;
 
@@ -155,10 +168,14 @@ class PermissionContextBase : public KeyedService {
   // Whether the permission should be restricted to secure origins.
   virtual bool IsRestrictedToSecureOrigins() const = 0;
 
-  content::PermissionType permission_type() const { return permission_type_; }
   ContentSettingsType content_settings_type() const {
     return content_settings_type_;
   }
+
+  // TODO(timloh): The CONTENT_SETTINGS_TYPE_NOTIFICATIONS type is used to
+  // store both push messaging and notifications permissions. Remove this
+  // once we've unified these types (crbug.com/563297).
+  ContentSettingsType content_settings_storage_type() const;
 
  private:
   friend class PermissionContextBaseTests;
@@ -177,8 +194,15 @@ class PermissionContextBase : public KeyedService {
                                  const BrowserPermissionCallback& callback,
                                  bool permission_blocked);
 
+  // Called when the user has made a permission decision. This is a hook for
+  // descendent classes to do appropriate things they might need to do when this
+  // happens.
+  virtual void UserMadePermissionDecision(const PermissionRequestID& id,
+                                          const GURL& requesting_origin,
+                                          const GURL& embedding_origin,
+                                          ContentSetting content_setting);
+
   Profile* profile_;
-  const content::PermissionType permission_type_;
   const ContentSettingsType content_settings_type_;
 #if defined(OS_ANDROID)
   std::unique_ptr<PermissionQueueController> permission_queue_controller_;

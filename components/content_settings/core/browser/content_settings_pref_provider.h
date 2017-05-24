@@ -36,7 +36,7 @@ class PrefProvider : public ObservableProvider {
  public:
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
-  PrefProvider(PrefService* prefs, bool incognito);
+  PrefProvider(PrefService* prefs, bool incognito, bool store_last_modified);
   ~PrefProvider() override;
 
   // ProviderInterface implementations.
@@ -51,24 +51,21 @@ class PrefProvider : public ObservableProvider {
                          const ResourceIdentifier& resource_identifier,
                          base::Value* value) override;
 
+  // Returns the |last_modified| date of a setting.
+  base::Time GetWebsiteSettingLastModified(
+      const ContentSettingsPattern& primary_pattern,
+      const ContentSettingsPattern& secondary_pattern,
+      ContentSettingsType content_type,
+      const ResourceIdentifier& resource_identifier);
+
   void ClearAllContentSettingsRules(ContentSettingsType content_type) override;
 
   void ShutdownOnUIThread() override;
 
   void ClearPrefs();
 
-  // Records the last time the given pattern has used a certain content setting.
-  void UpdateLastUsage(const ContentSettingsPattern& primary_pattern,
-                       const ContentSettingsPattern& secondary_pattern,
-                       ContentSettingsType content_type);
-
-  base::Time GetLastUsage(const ContentSettingsPattern& primary_pattern,
-                          const ContentSettingsPattern& secondary_pattern,
-                          ContentSettingsType content_type);
-
   ContentSettingsPref* GetPref(ContentSettingsType type) const;
 
-  // Gains ownership of |clock|.
   void SetClockForTesting(std::unique_ptr<base::Clock> clock);
 
  private:
@@ -85,10 +82,9 @@ class PrefProvider : public ObservableProvider {
   // Weak; owned by the Profile and reset in ShutdownOnUIThread.
   PrefService* prefs_;
 
-  // Can be set for testing.
-  std::unique_ptr<base::Clock> clock_;
-
   const bool is_incognito_;
+
+  bool store_last_modified_;
 
   PrefChangeRegistrar pref_change_registrar_;
 
@@ -96,6 +92,8 @@ class PrefProvider : public ObservableProvider {
       content_settings_prefs_;
 
   base::ThreadChecker thread_checker_;
+
+  std::unique_ptr<base::Clock> clock_;
 
   DISALLOW_COPY_AND_ASSIGN(PrefProvider);
 };

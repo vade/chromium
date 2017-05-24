@@ -18,8 +18,8 @@
 #include "third_party/WebKit/public/platform/WebMediaStreamTrack.h"
 
 namespace base {
-class BinaryValue;
 class DictionaryValue;
+class Value;
 }
 
 class CastAudioSink;
@@ -68,7 +68,7 @@ class CastRtpStream {
   // Get serialized raw events for this stream with |extra_data| attached,
   // and invokes |callback| with the result.
   void GetRawEvents(
-      const base::Callback<void(std::unique_ptr<base::BinaryValue>)>& callback,
+      const base::Callback<void(std::unique_ptr<base::Value>)>& callback,
       const std::string& extra_data);
 
   // Get stats in DictionaryValue format and invokves |callback| with

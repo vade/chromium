@@ -6,6 +6,8 @@
 
 #include <stddef.h>
 
+#include <unordered_map>
+
 #include "base/allocator/allocator_extension.h"
 #include "base/allocator/allocator_shim.h"
 #include "base/allocator/features.h"
@@ -35,61 +37,108 @@ namespace {
 
 using allocator::AllocatorDispatch;
 
-void* HookAlloc(const AllocatorDispatch* self, size_t size) {
+void* HookAlloc(const AllocatorDispatch* self, size_t size, void* context) {
   const AllocatorDispatch* const next = self->next;
-  void* ptr = next->alloc_function(next, size);
+  void* ptr = next->alloc_function(next, size, context);
   if (ptr)
     MallocDumpProvider::GetInstance()->InsertAllocation(ptr, size);
   return ptr;
 }
 
-void* HookZeroInitAlloc(const AllocatorDispatch* self, size_t n, size_t size) {
+void* HookZeroInitAlloc(const AllocatorDispatch* self,
+                        size_t n,
+                        size_t size,
+                        void* context) {
   const AllocatorDispatch* const next = self->next;
-  void* ptr = next->alloc_zero_initialized_function(next, n, size);
+  void* ptr = next->alloc_zero_initialized_function(next, n, size, context);
   if (ptr)
     MallocDumpProvider::GetInstance()->InsertAllocation(ptr, n * size);
   return ptr;
 }
 
-void* HookllocAligned(const AllocatorDispatch* self,
-                      size_t alignment,
-                      size_t size) {
+void* HookAllocAligned(const AllocatorDispatch* self,
+                       size_t alignment,
+                       size_t size,
+                       void* context) {
   const AllocatorDispatch* const next = self->next;
-  void* ptr = next->alloc_aligned_function(next, alignment, size);
+  void* ptr = next->alloc_aligned_function(next, alignment, size, context);
   if (ptr)
     MallocDumpProvider::GetInstance()->InsertAllocation(ptr, size);
   return ptr;
 }
 
-void* HookRealloc(const AllocatorDispatch* self, void* address, size_t size) {
+void* HookRealloc(const AllocatorDispatch* self,
+                  void* address,
+                  size_t size,
+                  void* context) {
   const AllocatorDispatch* const next = self->next;
-  void* ptr = next->realloc_function(next, address, size);
+  void* ptr = next->realloc_function(next, address, size, context);
   MallocDumpProvider::GetInstance()->RemoveAllocation(address);
   if (size > 0)  // realloc(size == 0) means free().
     MallocDumpProvider::GetInstance()->InsertAllocation(ptr, size);
   return ptr;
 }
 
-void HookFree(const AllocatorDispatch* self, void* address) {
+void HookFree(const AllocatorDispatch* self, void* address, void* context) {
   if (address)
     MallocDumpProvider::GetInstance()->RemoveAllocation(address);
   const AllocatorDispatch* const next = self->next;
-  next->free_function(next, address);
+  next->free_function(next, address, context);
 }
 
-size_t HookGetSizeEstimate(const AllocatorDispatch* self, void* address) {
+size_t HookGetSizeEstimate(const AllocatorDispatch* self,
+                           void* address,
+                           void* context) {
   const AllocatorDispatch* const next = self->next;
-  return next->get_size_estimate_function(next, address);
+  return next->get_size_estimate_function(next, address, context);
+}
+
+unsigned HookBatchMalloc(const AllocatorDispatch* self,
+                         size_t size,
+                         void** results,
+                         unsigned num_requested,
+                         void* context) {
+  const AllocatorDispatch* const next = self->next;
+  unsigned count =
+      next->batch_malloc_function(next, size, results, num_requested, context);
+  for (unsigned i = 0; i < count; ++i) {
+    MallocDumpProvider::GetInstance()->InsertAllocation(results[i], size);
+  }
+  return count;
+}
+
+void HookBatchFree(const AllocatorDispatch* self,
+                   void** to_be_freed,
+                   unsigned num_to_be_freed,
+                   void* context) {
+  const AllocatorDispatch* const next = self->next;
+  for (unsigned i = 0; i < num_to_be_freed; ++i) {
+    MallocDumpProvider::GetInstance()->RemoveAllocation(to_be_freed[i]);
+  }
+  next->batch_free_function(next, to_be_freed, num_to_be_freed, context);
+}
+
+void HookFreeDefiniteSize(const AllocatorDispatch* self,
+                          void* ptr,
+                          size_t size,
+                          void* context) {
+  if (ptr)
+    MallocDumpProvider::GetInstance()->RemoveAllocation(ptr);
+  const AllocatorDispatch* const next = self->next;
+  next->free_definite_size_function(next, ptr, size, context);
 }
 
 AllocatorDispatch g_allocator_hooks = {
-    &HookAlloc,           /* alloc_function */
-    &HookZeroInitAlloc,   /* alloc_zero_initialized_function */
-    &HookllocAligned,     /* alloc_aligned_function */
-    &HookRealloc,         /* realloc_function */
-    &HookFree,            /* free_function */
-    &HookGetSizeEstimate, /* get_size_estimate_function */
-    nullptr,              /* next */
+    &HookAlloc,            /* alloc_function */
+    &HookZeroInitAlloc,    /* alloc_zero_initialized_function */
+    &HookAllocAligned,     /* alloc_aligned_function */
+    &HookRealloc,          /* realloc_function */
+    &HookFree,             /* free_function */
+    &HookGetSizeEstimate,  /* get_size_estimate_function */
+    &HookBatchMalloc,      /* batch_malloc_function */
+    &HookBatchFree,        /* batch_free_function */
+    &HookFreeDefiniteSize, /* free_definite_size_function */
+    nullptr,               /* next */
 };
 #endif  // BUILDFLAG(USE_EXPERIMENTAL_ALLOCATOR_SHIM)
 
@@ -169,12 +218,18 @@ bool MallocDumpProvider::OnMemoryDump(const MemoryDumpArgs& args,
   total_virtual_size = stats.size_allocated;
   allocated_objects_size = stats.size_in_use;
 
-  // The resident size is approximated to the max size in use, which would count
-  // the total size of all regions other than the free bytes at the end of each
-  // region. In each allocation region the allocations are rounded off to a
-  // fixed quantum, so the excess region will not be resident.
-  // See crrev.com/1531463004 for detailed explanation.
-  resident_size = stats.max_size_in_use;
+  // Resident size is approximated pretty well by stats.max_size_in_use.
+  // However, on macOS, freed blocks are both resident and reusable, which is
+  // semantically equivalent to deallocated. The implementation of libmalloc
+  // will also only hold a fixed number of freed regions before actually
+  // starting to deallocate them, so stats.max_size_in_use is also not
+  // representative of the peak size. As a result, stats.max_size_in_use is
+  // typically somewhere between actually resident [non-reusable] pages, and
+  // peak size. This is not very useful, so we just use stats.size_in_use for
+  // resident_size, even though it's an underestimate and fails to account for
+  // fragmentation. See
+  // https://bugs.chromium.org/p/chromium/issues/detail?id=695263#c1.
+  resident_size = stats.size_in_use;
 #elif defined(OS_WIN)
   WinHeapInfo main_heap_info = {};
   WinHeapMemoryDumpImpl(&main_heap_info);
@@ -239,11 +294,13 @@ bool MallocDumpProvider::OnMemoryDump(const MemoryDumpArgs& args,
 
   tid_dumping_heap_ = PlatformThread::CurrentId();
   // At this point the Insert/RemoveAllocation hooks will ignore this thread.
-  // Enclosing all the temporariy data structures in a scope, so that the heap
-  // profiler does not see unabalanced malloc/free calls from these containers.
+  // Enclosing all the temporary data structures in a scope, so that the heap
+  // profiler does not see unbalanced malloc/free calls from these containers.
   {
+    size_t shim_allocated_objects_size = 0;
+    size_t shim_allocated_objects_count = 0;
     TraceEventMemoryOverhead overhead;
-    hash_map<AllocationContext, AllocationMetrics> metrics_by_context;
+    std::unordered_map<AllocationContext, AllocationMetrics> metrics_by_context;
     {
       AutoLock lock(allocation_register_lock_);
       if (allocation_register_) {
@@ -252,10 +309,21 @@ bool MallocDumpProvider::OnMemoryDump(const MemoryDumpArgs& args,
             AllocationMetrics& metrics = metrics_by_context[alloc_size.context];
             metrics.size += alloc_size.size;
             metrics.count++;
+
+            // Aggregate data for objects allocated through the shim.
+            shim_allocated_objects_size += alloc_size.size;
+            shim_allocated_objects_count++;
           }
         }
         allocation_register_->EstimateTraceMemoryOverhead(&overhead);
       }
+
+      inner_dump->AddScalar("shim_allocated_objects_size",
+                             MemoryAllocatorDump::kUnitsBytes,
+                             shim_allocated_objects_size);
+      inner_dump->AddScalar("shim_allocator_object_count",
+                             MemoryAllocatorDump::kUnitsObjects,
+                             shim_allocated_objects_count);
     }  // lock(allocation_register_lock_)
     pmd->DumpHeapUsage(metrics_by_context, overhead, "malloc");
   }

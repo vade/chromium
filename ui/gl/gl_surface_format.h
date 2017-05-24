@@ -9,6 +9,10 @@
 
 namespace gl {
 
+// Expresses surface format properties that may vary depending
+// on the underlying gl_surface implementation or specific usage
+// scenarios. Intended usage is to support copying formats and
+// checking compatibility.
 class GL_EXPORT GLSurfaceFormat {
  public:
 
@@ -19,19 +23,24 @@ class GL_EXPORT GLSurfaceFormat {
     PIXEL_LAYOUT_RGBA,
   };
 
+  // Default surface format for the underlying gl_surface subtype.
+  // Use the setters below to change attributes if needed.
   GLSurfaceFormat();
+
+  // Use a specified pixel layout, cf. gl_surface_osmesa.
+  GLSurfaceFormat(SurfacePixelLayout layout);
+
+  // Copy constructor from pre-existing format.
+  GLSurfaceFormat(const GLSurfaceFormat& other);
 
   ~GLSurfaceFormat();
 
-  GLSurfaceFormat(SurfacePixelLayout layout);
-
-  GLSurfaceFormat(const GLSurfaceFormat& other);
-
-  bool IsDefault();
-
-  void SetIsSurfaceless();
-  bool IsSurfaceless();
-
+  // A given pair of surfaces is considered compatible if glSetSurface
+  // can be used to switch between them without generating BAD_MATCH
+  // errors, visual errors, or gross inefficiency, and incompatible
+  // otherwise. For example, a pixel layout mismatch would be
+  // considered incompatible. This comparison only makes sense within
+  // the context of a single gl_surface subtype.
   bool IsCompatible(GLSurfaceFormat other_format);
 
   // Default pixel format is RGBA8888. Use this method to select
@@ -53,12 +62,13 @@ class GL_EXPORT GLSurfaceFormat {
 
   SurfacePixelLayout GetPixelLayout();
 
+  // Compute number of bits needed for storing one pixel, not
+  // including any padding. At this point mainly used to distinguish
+  // RGB565 (16) from RGBA8888 (32).
   int GetBufferSize();
 
  private:
-  bool is_default_ = true;
   SurfacePixelLayout pixel_layout_ = PIXEL_LAYOUT_DONT_CARE;
-  bool is_surfaceless_ = false;
   int red_bits_ = -1;
   int green_bits_ = -1;
   int blue_bits_ = -1;

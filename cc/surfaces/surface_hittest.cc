@@ -256,12 +256,9 @@ const RenderPass* SurfaceHittest::GetRenderPassForSurfaceById(
   Surface* surface = manager_->GetSurfaceForId(surface_id);
   if (!surface)
     return nullptr;
-  if (!surface->HasFrame())
+  if (!surface->HasActiveFrame())
     return nullptr;
-  const CompositorFrame& surface_frame = surface->GetEligibleFrame();
-
-  if (surface_frame.render_pass_list.empty())
-    return nullptr;
+  const CompositorFrame& surface_frame = surface->GetActiveFrame();
 
   if (!render_pass_id)
     return surface_frame.render_pass_list.back().get();

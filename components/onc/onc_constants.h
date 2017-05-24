@@ -82,12 +82,14 @@ ONC_EXPORT extern const char kConnectionState[];
 ONC_EXPORT extern const char kRestrictedConnectivity[];
 ONC_EXPORT extern const char kConnectable[];
 ONC_EXPORT extern const char kErrorState[];
+ONC_EXPORT extern const char kTether[];
 ONC_EXPORT extern const char kType[];
 ONC_EXPORT extern const char kVPN[];
 ONC_EXPORT extern const char kWiFi[];
 ONC_EXPORT extern const char kWimax[];
 
 ONC_EXPORT extern std::string CellularProperty(const std::string& property);
+ONC_EXPORT extern std::string TetherProperty(const std::string& property);
 ONC_EXPORT extern std::string VpnProperty(const std::string& property);
 ONC_EXPORT extern std::string WifiProperty(const std::string& property);
 
@@ -96,6 +98,7 @@ ONC_EXPORT extern std::string WifiProperty(const std::string& property);
 namespace network_type {
 ONC_EXPORT extern const char kCellular[];
 ONC_EXPORT extern const char kEthernet[];
+ONC_EXPORT extern const char kTether[];
 ONC_EXPORT extern const char kVPN[];
 ONC_EXPORT extern const char kWiFi[];
 ONC_EXPORT extern const char kWimax[];
@@ -216,6 +219,13 @@ ONC_EXPORT extern const char kEAP[];
 ONC_EXPORT extern const char k8021X[];
 }  // namespace ethernet
 
+namespace tether {
+ONC_EXPORT extern const char kBatteryPercentage[];
+ONC_EXPORT extern const char kCarrier[];
+ONC_EXPORT extern const char kHasConnectedToHost[];
+ONC_EXPORT extern const char kSignalStrength[];
+}  // namespace tether
+
 namespace wifi {
 ONC_EXPORT extern const char kAllowGatewayARPPolling[];
 ONC_EXPORT extern const char kAutoConnect[];
@@ -302,6 +312,7 @@ ONC_EXPORT extern const char kIdentity[];
 ONC_EXPORT extern const char kInner[];
 ONC_EXPORT extern const char kLEAP[];
 ONC_EXPORT extern const char kMD5[];
+ONC_EXPORT extern const char kMSCHAP[];
 ONC_EXPORT extern const char kMSCHAPv2[];
 ONC_EXPORT extern const char kOuter[];
 ONC_EXPORT extern const char kPAP[];
@@ -311,6 +322,7 @@ ONC_EXPORT extern const char kSaveCredentials[];
 ONC_EXPORT extern const char kServerCAPEMs[];
 ONC_EXPORT extern const char kServerCARef[];
 ONC_EXPORT extern const char kServerCARefs[];
+ONC_EXPORT extern const char kSubjectMatch[];
 ONC_EXPORT extern const char kUseSystemCAs[];
 ONC_EXPORT extern const char kUseProactiveKeyCaching[];
 }  // namespace eap

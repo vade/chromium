@@ -32,6 +32,9 @@
 #include "components/supervised_user_error_page/supervised_user_error_page_android.h"
 #include "components/visitedlink/renderer/visitedlink_slave.h"
 #include "components/web_restrictions/interfaces/web_restrictions.mojom.h"
+#include "content/public/child/child_thread.h"
+#include "content/public/common/service_manager_connection.h"
+#include "content/public/common/simple_connection_filter.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/document_state.h"
 #include "content/public/renderer/navigation_state.h"
@@ -40,8 +43,8 @@
 #include "content/public/renderer/render_view.h"
 #include "net/base/escape.h"
 #include "net/base/net_errors.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebURLError.h"
@@ -73,8 +76,14 @@ void AwContentRendererClient::RenderThreadStarted() {
   thread->AddObserver(aw_render_thread_observer_.get());
 
   visited_link_slave_.reset(new visitedlink::VisitedLinkSlave);
-  thread->GetInterfaceRegistry()->AddInterface(
-      visited_link_slave_->GetBindCallback());
+
+  auto registry = base::MakeUnique<service_manager::BinderRegistry>();
+  registry->AddInterface(visited_link_slave_->GetBindCallback(),
+                         base::ThreadTaskRunnerHandle::Get());
+  content::ChildThread::Get()
+      ->GetServiceManagerConnection()
+      ->AddConnectionFilter(base::MakeUnique<content::SimpleConnectionFilter>(
+          std::move(registry)));
 
 #if BUILDFLAG(ENABLE_SPELLCHECK)
   if (!spellcheck_) {
@@ -94,7 +103,7 @@ bool AwContentRendererClient::HandleNavigation(
     blink::WebNavigationPolicy default_policy,
     bool is_redirect) {
   // Only GETs can be overridden.
-  if (!request.httpMethod().equals("GET"))
+  if (!request.HttpMethod().Equals("GET"))
     return false;
 
   // Any navigation from loadUrl, and goBack/Forward are considered application-
@@ -106,14 +115,14 @@ bool AwContentRendererClient::HandleNavigation(
   // works fine. This will stop working if android_webview starts swapping out
   // renderers on navigation.
   bool application_initiated =
-      !is_content_initiated || type == blink::WebNavigationTypeBackForward;
+      !is_content_initiated || type == blink::kWebNavigationTypeBackForward;
 
   // Don't offer application-initiated navigations unless it's a redirect.
   if (application_initiated && !is_redirect)
     return false;
 
-  bool is_main_frame = !frame->parent();
-  const GURL& gurl = request.url();
+  bool is_main_frame = !frame->Parent();
+  const GURL& gurl = request.Url();
   // For HTTP schemes, only top-level navigations can be overridden. Similarly,
   // WebView Classic lets app override only top level about:blank navigations.
   // So we filter out non-top about:blank navigations here.
@@ -136,8 +145,8 @@ bool AwContentRendererClient::HandleNavigation(
   }
 
   bool ignore_navigation = false;
-  base::string16 url = request.url().string();
-  bool has_user_gesture = request.hasUserGesture();
+  base::string16 url = request.Url().GetString().Utf16();
+  bool has_user_gesture = request.HasUserGesture();
 
   int render_frame_id = render_frame->GetRoutingID();
   RenderThread::Get()->Send(new AwViewHostMsg_ShouldOverrideUrlLoading(
@@ -170,6 +179,10 @@ void AwContentRendererClient::RenderFrameCreated(
   autofill::PasswordAutofillAgent* password_autofill_agent =
       new autofill::PasswordAutofillAgent(render_frame);
   new autofill::AutofillAgent(render_frame, password_autofill_agent, NULL);
+
+#if BUILDFLAG(ENABLE_SPELLCHECK)
+  new SpellCheckProvider(render_frame, spellcheck_.get());
+#endif
 }
 
 void AwContentRendererClient::RenderViewCreated(
@@ -177,12 +190,18 @@ void AwContentRendererClient::RenderViewCreated(
   AwRenderViewExt::RenderViewCreated(render_view);
 
 #if BUILDFLAG(ENABLE_SPELLCHECK)
-  new SpellCheckProvider(render_view, spellcheck_.get());
+  // This is a workaround keeping the behavior that, the Blink side spellcheck
+  // enabled state is initialized on RenderView creation.
+  // TODO(xiaochengh): Design better way to sync between Chrome-side and
+  // Blink-side spellcheck enabled states.  See crbug.com/710097.
+  if (SpellCheckProvider* provider =
+          SpellCheckProvider::Get(render_view->GetMainRenderFrame()))
+    provider->EnableSpellcheck(spellcheck_->IsSpellcheckEnabled());
 #endif
 }
 
 bool AwContentRendererClient::HasErrorPage(int http_status_code,
-                          std::string* error_domain) {
+                                           std::string* error_domain) {
   return http_status_code >= 400;
 }
 
@@ -192,56 +211,76 @@ void AwContentRendererClient::GetNavigationErrorStrings(
     const blink::WebURLError& error,
     std::string* error_html,
     base::string16* error_description) {
-  if (error_html) {
-    GURL gurl(failed_request.url());
-    std::string url = net::EscapeForHTML(gurl.possibly_invalid_spec());
-    std::string err =
-        base::UTF16ToUTF8(base::StringPiece16(error.localizedDescription));
-
-    std::vector<std::string> replacements;
-    replacements.push_back(
-        l10n_util::GetStringUTF8(IDS_AW_WEBPAGE_NOT_AVAILABLE));
-    if (err.empty()) {
-      replacements.push_back(l10n_util::GetStringFUTF8(
-          IDS_AW_WEBPAGE_TEMPORARILY_DOWN, base::UTF8ToUTF16(url)));
-      replacements.push_back(l10n_util::GetStringUTF8(
-          IDS_AW_WEBPAGE_TEMPORARILY_DOWN_SUGGESTIONS));
-    } else {
-      replacements.push_back(l10n_util::GetStringFUTF8(
-          IDS_AW_WEBPAGE_CAN_NOT_BE_LOADED, base::UTF8ToUTF16(url)));
-      replacements.push_back(err);
-    }
-    if (base::i18n::IsRTL())
-      replacements.push_back("direction: rtl;");
-    else
-      replacements.push_back("");
-    *error_html = base::ReplaceStringPlaceholders(
-        ResourceBundle::GetSharedInstance().GetRawDataResource(
-            IDR_AW_LOAD_ERROR_HTML),
-        replacements, nullptr);
-    if (error.reason == net::ERR_BLOCKED_BY_ADMINISTRATOR) {
-      // This needs more information
-      render_frame->GetRemoteInterfaces()->GetInterface(
-          &web_restrictions_service_);
-      web_restrictions::mojom::ClientResultPtr result;
-      if (web_restrictions_service_->GetResult(url, &result)) {
-        std::string detailed_error_html =
-            supervised_user_error_page::BuildHtmlFromWebRestrictionsResult(
-                result, RenderThread::Get()->GetLocale());
-        if (!detailed_error_html.empty()) {
-          *error_html = detailed_error_html;
-          supervised_user_error_page::GinWrapper::InstallWhenFrameReady(
-              render_frame, url, web_restrictions_service_);
-        }
-      }
-    }
-  }
   if (error_description) {
-    if (error.localizedDescription.isEmpty())
+    if (error.localized_description.IsEmpty())
       *error_description = base::ASCIIToUTF16(net::ErrorToString(error.reason));
     else
-      *error_description = error.localizedDescription;
+      *error_description = error.localized_description.Utf16();
   }
+
+  if (!error_html)
+    return;
+
+  // Create the error page based on the error reason.
+  GURL gurl(failed_request.Url());
+  std::string url_string = gurl.possibly_invalid_spec();
+  int reason_id = IDS_AW_WEBPAGE_CAN_NOT_BE_LOADED;
+
+  if (error.reason == net::ERR_BLOCKED_BY_ADMINISTRATOR) {
+    // This creates a different error page giving considerably more
+    // detail, and possibly allowing the user to request access.
+    // Get the details this needs from the browser.
+    render_frame->GetRemoteInterfaces()->GetInterface(
+        &web_restrictions_service_);
+    web_restrictions::mojom::ClientResultPtr result;
+    if (web_restrictions_service_->GetResult(url_string, &result)) {
+      std::string detailed_error_html =
+          supervised_user_error_page::BuildHtmlFromWebRestrictionsResult(
+              result, RenderThread::Get()->GetLocale());
+      if (!detailed_error_html.empty()) {
+        *error_html = detailed_error_html;
+        supervised_user_error_page::GinWrapper::InstallWhenFrameReady(
+            render_frame, url_string, web_restrictions_service_);
+        return;
+      }
+      // If the error page isn't available (it is only available in
+      // Monochrome) but the user is a child then we want to give a simple
+      // custom message.
+      if (result->intParams["Is child account"])
+        reason_id = IDS_AW_WEBPAGE_PARENTAL_PERMISSION_NEEDED;
+    }
+  }
+
+  std::string err = error.localized_description.Utf8(
+      blink::WebString::UTF8ConversionMode::kStrictReplacingErrorsWithFFFD);
+
+  if (err.empty())
+    reason_id = IDS_AW_WEBPAGE_TEMPORARILY_DOWN;
+
+  std::string escaped_url = net::EscapeForHTML(url_string);
+  std::vector<std::string> replacements;
+  replacements.push_back(
+      l10n_util::GetStringUTF8(IDS_AW_WEBPAGE_NOT_AVAILABLE));
+  replacements.push_back(
+      l10n_util::GetStringFUTF8(reason_id, base::UTF8ToUTF16(escaped_url)));
+
+  // Having chosen the base reason, chose what extra information to add.
+  if (reason_id == IDS_AW_WEBPAGE_PARENTAL_PERMISSION_NEEDED) {
+    replacements.push_back("");
+  } else if (reason_id == IDS_AW_WEBPAGE_TEMPORARILY_DOWN) {
+    replacements.push_back(
+        l10n_util::GetStringUTF8(IDS_AW_WEBPAGE_TEMPORARILY_DOWN_SUGGESTIONS));
+  } else {
+    replacements.push_back(err);
+  }
+  if (base::i18n::IsRTL())
+    replacements.push_back("direction: rtl;");
+  else
+    replacements.push_back("");
+  *error_html = base::ReplaceStringPlaceholders(
+      ResourceBundle::GetSharedInstance().GetRawDataResource(
+          IDR_AW_LOAD_ERROR_HTML),
+      replacements, nullptr);
 }
 
 unsigned long long AwContentRendererClient::VisitedLinkHash(

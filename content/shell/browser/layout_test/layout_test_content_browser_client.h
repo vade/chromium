@@ -28,7 +28,8 @@ class LayoutTestContentBrowserClient : public ShellContentBrowserClient {
   // ContentBrowserClient overrides.
   void RenderProcessWillLaunch(RenderProcessHost* host) override;
   void ExposeInterfacesToRenderer(
-      service_manager::InterfaceRegistry* registry,
+      service_manager::BinderRegistry* registry,
+      AssociatedInterfaceRegistry* associated_registry,
       RenderProcessHost* render_process_host) override;
   void OverrideWebkitPrefs(RenderViewHost* render_view_host,
                            WebPreferences* prefs) override;
@@ -37,6 +38,10 @@ class LayoutTestContentBrowserClient : public ShellContentBrowserClient {
                                       int child_process_id) override;
   BrowserMainParts* CreateBrowserMainParts(
       const MainFunctionParams& parameters) override;
+  void GetQuotaSettings(
+      content::BrowserContext* context,
+      content::StoragePartition* partition,
+      const storage::OptionalQuotaSettingsCallback& callback) override;
 
   PlatformNotificationService* GetPlatformNotificationService() override;
 

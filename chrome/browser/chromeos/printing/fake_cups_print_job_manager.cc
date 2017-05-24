@@ -48,7 +48,7 @@ bool FakeCupsPrintJobManager::CreatePrintJob(const std::string& printer_name,
   return true;
 }
 
-bool FakeCupsPrintJobManager::CancelPrintJob(CupsPrintJob* job) {
+void FakeCupsPrintJobManager::CancelPrintJob(CupsPrintJob* job) {
   job->set_state(CupsPrintJob::State::STATE_CANCELLED);
   NotifyJobCanceled(job);
 
@@ -59,8 +59,6 @@ bool FakeCupsPrintJobManager::CancelPrintJob(CupsPrintJob* job) {
       break;
     }
   }
-
-  return true;
 }
 
 bool FakeCupsPrintJobManager::SuspendPrintJob(CupsPrintJob* job) {
@@ -122,10 +120,13 @@ void FakeCupsPrintJobManager::ChangePrintJobState(CupsPrintJob* job) {
       }
       break;
     case CupsPrintJob::State::STATE_DOCUMENT_DONE:
-      // Only for testing
-      job->set_state(CupsPrintJob::State::STATE_ERROR);
-      job->set_error_code(CupsPrintJob::ErrorCode::UNKNOWN_ERROR);
-      NotifyJobError(job);
+      // Delete |job| since it's completed.
+      for (auto iter = print_jobs_.begin(); iter != print_jobs_.end(); ++iter) {
+        if (iter->get() == job) {
+          print_jobs_.erase(iter);
+          break;
+        }
+      }
       break;
     default:
       break;

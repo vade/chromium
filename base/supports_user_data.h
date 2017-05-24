@@ -38,7 +38,7 @@ class BASE_EXPORT SupportsUserData {
   // This object will TAKE OWNERSHIP of the given data pointer, and will
   // delete the object if it is changed or the object is destroyed.
   Data* GetUserData(const void* key) const;
-  void SetUserData(const void* key, Data* data);
+  void SetUserData(const void* key, std::unique_ptr<Data> data);
   void RemoveUserData(const void* key);
 
   // SupportsUserData is not thread-safe, and on debug build will assert it is

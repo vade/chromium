@@ -47,7 +47,6 @@ public class BookmarkActionBar extends SelectableListToolbar<BookmarkId>
         inflateMenu(R.menu.bookmark_action_bar_menu);
         setOnMenuItemClickListener(this);
 
-        getMenu().findItem(R.id.search_menu_id).setTitle(R.string.bookmark_action_bar_search);
         getMenu().findItem(R.id.selection_mode_edit_menu_id).setTitle(R.string.edit_bookmark);
         getMenu().findItem(R.id.selection_mode_move_menu_id)
                 .setTitle(R.string.bookmark_action_bar_move);
@@ -57,11 +56,18 @@ public class BookmarkActionBar extends SelectableListToolbar<BookmarkId>
 
     @Override
     public void onNavigationBack() {
+        if (mIsSearching) {
+            super.onNavigationBack();
+            return;
+        }
+
         mDelegate.openFolder(mCurrentFolder.getParentId());
     }
 
     @Override
     public boolean onMenuItemClick(MenuItem menuItem) {
+        hideOverflowMenu();
+
         SelectionDelegate<BookmarkId> selectionDelegate = mDelegate.getSelectionDelegate();
         if (menuItem.getItemId() == R.id.edit_menu_id) {
             BookmarkAddEditFolderActivity.startEditFolderActivity(getContext(),
@@ -125,12 +131,6 @@ public class BookmarkActionBar extends SelectableListToolbar<BookmarkId>
         mDelegate.addUIObserver(this);
         if (!delegate.isDialogUi()) getMenu().removeItem(R.id.close_menu_id);
         delegate.getModel().addObserver(mBookmarkModelObserver);
-
-        // This class will handle setting the title. Pass 0 to the superclass so that it doesn't
-        // try to set the title when a selection is cleared.
-        int titleResId = 0;
-        initialize(delegate.getSelectionDelegate(), titleResId, delegate.getDrawerLayout(),
-                R.id.normal_menu_group, R.id.selection_mode_menu_group, null);
     }
 
     @Override
@@ -146,24 +146,34 @@ public class BookmarkActionBar extends SelectableListToolbar<BookmarkId>
         getMenu().findItem(R.id.search_menu_id).setVisible(true);
         getMenu().findItem(R.id.edit_menu_id).setVisible(mCurrentFolder.isEditable());
 
-        // If the parent folder is a top level node, we don't go up anymore.
-        if (mDelegate.getModel().getTopLevelFolderParentIDs().contains(
-                mCurrentFolder.getParentId())) {
-            if (TextUtils.isEmpty(mCurrentFolder.getTitle())) {
-                setTitle(R.string.bookmarks);
-            } else {
-                setTitle(mCurrentFolder.getTitle());
-            }
-            setNavigationButton(NAVIGATION_BUTTON_MENU);
+        // If this is the root folder, we can't go up anymore.
+        if (folder.equals(mDelegate.getModel().getRootFolderId())) {
+            setTitle(R.string.bookmarks);
+            setNavigationButton(NAVIGATION_BUTTON_NONE);
+            return;
+        }
+
+        if (mDelegate.getModel().getTopLevelFolderParentIDs().contains(mCurrentFolder.getParentId())
+                && TextUtils.isEmpty(mCurrentFolder.getTitle())) {
+            setTitle(R.string.bookmarks);
         } else {
             setTitle(mCurrentFolder.getTitle());
-            setNavigationButton(NAVIGATION_BUTTON_BACK);
         }
+
+        setNavigationButton(NAVIGATION_BUTTON_BACK);
     }
+
+    @Override
+    public void onSearchStateSet() {}
 
     @Override
     public void onSelectionStateChange(List<BookmarkId> selectedBookmarks) {
         super.onSelectionStateChange(selectedBookmarks);
+
+        // The super class registers itself as a SelectionObserver before
+        // #onBookmarkDelegateInitialized() is called. Return early if mDelegate has not been set.
+        if (mDelegate == null) return;
+
         if (mIsSelectionEnabled) {
             // Editing a bookmark action on multiple selected items doesn't make sense. So disable.
             getMenu().findItem(R.id.selection_mode_edit_menu_id).setVisible(

@@ -121,14 +121,14 @@ bool BrowserNavigatorTest::OpenPOSTURLInNewForegroundTabAndGetTitle(
 
 Browser* BrowserNavigatorTest::CreateEmptyBrowserForType(Browser::Type type,
                                                          Profile* profile) {
-  Browser* browser = new Browser(Browser::CreateParams(type, profile));
+  Browser* browser = new Browser(Browser::CreateParams(type, profile, true));
   chrome::AddTabAt(browser, GURL(), -1, true);
   return browser;
 }
 
 Browser* BrowserNavigatorTest::CreateEmptyBrowserForApp(Profile* profile) {
   Browser* browser = new Browser(Browser::CreateParams::CreateForApp(
-      "Test", false /* trusted_source */, gfx::Rect(), profile));
+      "Test", false /* trusted_source */, gfx::Rect(), profile, true));
   chrome::AddTabAt(browser, GURL(), -1, true);
   return browser;
 }
@@ -1302,9 +1302,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, CloseSingletonTab) {
   EXPECT_EQ(0, browser()->tab_strip_model()->active_index());
 }
 
-// TODO(csilv): Update this for uber page. http://crbug.com/111579.
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
-                       DISABLED_NavigateFromDefaultToHistoryInSameTab) {
+                       NavigateFromDefaultToHistoryInSameTab) {
   {
     content::WindowedNotificationObserver observer(
         content::NOTIFICATION_LOAD_STOP,
@@ -1313,7 +1312,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
     observer.Wait();
   }
   EXPECT_EQ(1, browser()->tab_strip_model()->count());
-  EXPECT_EQ(GURL(chrome::kChromeUIHistoryFrameURL),
+  EXPECT_EQ(GURL(chrome::kChromeUIHistoryURL),
             browser()->tab_strip_model()->GetActiveWebContents()->GetURL());
 }
 
@@ -1486,7 +1485,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, ReuseRVHWithWebUI) {
   ASSERT_TRUE(popup);
   EXPECT_EQ(2, browser()->tab_strip_model()->count());
   content::RenderViewHost* webui_rvh = popup->GetRenderViewHost();
-  EXPECT_EQ(content::BINDINGS_POLICY_WEB_UI, webui_rvh->GetEnabledBindings());
+  content::RenderFrameHost* webui_rfh = popup->GetMainFrame();
+  EXPECT_EQ(content::BINDINGS_POLICY_WEB_UI, webui_rfh->GetEnabledBindings());
 
   // Navigate to another page in the popup.
   GURL nonwebui_url(embedded_test_server()->GetURL("a.com", "/title1.html"));
@@ -1500,7 +1500,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, ReuseRVHWithWebUI) {
   back_load_observer.Wait();
   EXPECT_EQ(webui_rvh, popup->GetRenderViewHost());
   EXPECT_TRUE(webui_rvh->IsRenderViewLive());
-  EXPECT_EQ(content::BINDINGS_POLICY_WEB_UI, webui_rvh->GetEnabledBindings());
+  EXPECT_EQ(content::BINDINGS_POLICY_WEB_UI,
+            webui_rvh->GetMainFrame()->GetEnabledBindings());
 }
 
 }  // namespace

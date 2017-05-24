@@ -668,10 +668,14 @@ void ChromotingInstance::HandleConnect(const base::DictionaryValue& data) {
 
   client_.reset(new ChromotingClient(&context_, this, video_renderer_.get(),
                                      audio_player_->GetWeakPtr()));
+  std::string host_experiment_config;
+  if (data.GetString("hostConfiguration", &host_experiment_config)) {
+    client_->set_host_experiment_config(host_experiment_config);
+  }
 
   // Setup the signal strategy.
   signal_strategy_.reset(new DelegatingSignalStrategy(
-      local_jid, plugin_task_runner_,
+      SignalingAddress(local_jid), plugin_task_runner_,
       base::Bind(&ChromotingInstance::SendOutgoingIq,
                  weak_factory_.GetWeakPtr())));
 
@@ -728,7 +732,7 @@ void ChromotingInstance::HandleOnIncomingIq(const base::DictionaryValue& data) {
   // Just ignore the message if it's received before Connect() is called. It's
   // likely to be a leftover from a previous session, so it's safe to ignore it.
   if (signal_strategy_)
-    signal_strategy_->OnIncomingMessage(iq);
+    signal_strategy_->GetIncomingMessageCallback().Run(iq);
 }
 
 void ChromotingInstance::HandleReleaseAllKeys(

@@ -9,13 +9,17 @@
 #include "gpu/command_buffer/common/texture_in_use_response.h"
 #include "gpu/gpu_export.h"
 #include "gpu/ipc/common/surface_handle.h"
-#include "ui/events/latency_info.h"
 #include "ui/gfx/swap_result.h"
+#include "ui/latency/latency_info.h"
 
 #if defined(OS_MACOSX)
 #include "ui/base/cocoa/remote_layer_api.h"
 #include "ui/gfx/mac/io_surface.h"
 #endif
+
+namespace IPC {
+class MessageFilter;
+}
 
 namespace gpu {
 
@@ -72,6 +76,11 @@ class GPU_EXPORT ImageTransportSurfaceDelegate {
   // Informs the delegate about updated vsync parameters.
   virtual void UpdateVSyncParameters(base::TimeTicks timebase,
                                      base::TimeDelta interval) = 0;
+
+  // Add IPC message filter.
+  virtual void AddFilter(IPC::MessageFilter* message_filter) = 0;
+  // Gets route ID for sending / receiving IPC messages.
+  virtual int32_t GetRouteID() const = 0;
 
  protected:
   virtual ~ImageTransportSurfaceDelegate() {}

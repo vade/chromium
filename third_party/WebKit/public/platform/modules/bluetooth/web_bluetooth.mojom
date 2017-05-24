@@ -53,24 +53,16 @@ enum WebBluetoothResult {
   CHARACTERISTIC_NO_LONGER_EXISTS,
   // NetworkError:
   CONNECT_ALREADY_IN_PROGRESS,
-  CONNECT_ATTRIBUTE_LENGTH_INVALID,
   CONNECT_AUTH_CANCELED,
   CONNECT_AUTH_FAILED,
   CONNECT_AUTH_REJECTED,
   CONNECT_AUTH_TIMEOUT,
-  CONNECT_CONNECTION_CONGESTED,
-  CONNECT_INSUFFICIENT_ENCRYPTION,
-  CONNECT_OFFSET_INVALID,
-  CONNECT_READ_NOT_PERMITTED,
-  CONNECT_REQUEST_NOT_SUPPORTED,
   CONNECT_UNKNOWN_ERROR,
   CONNECT_UNKNOWN_FAILURE,
   CONNECT_UNSUPPORTED_DEVICE,
-  CONNECT_WRITE_NOT_PERMITTED,
   DEVICE_NO_LONGER_IN_RANGE,
   GATT_NOT_PAIRED,
   GATT_OPERATION_IN_PROGRESS,
-  UNTRANSLATED_CONNECT_ERROR_CODE,
   // NotFoundError:
   NO_BLUETOOTH_ADAPTER,
   CHOSEN_DEVICE_VANISHED,
@@ -102,17 +94,17 @@ enum WebBluetoothResult {
   NOT_ALLOWED_TO_ACCESS_SERVICE,
   REQUEST_DEVICE_WITH_BLOCKLISTED_UUID,
   REQUEST_DEVICE_FROM_CROSS_ORIGIN_IFRAME,
-  REQUEST_DEVICE_WITHOUT_FRAME,
+  DESCRIPTOR_NO_LONGER_EXISTS,
 };
 
-struct WebBluetoothScanFilter {
+struct WebBluetoothLeScanFilter {
   array<bluetooth.mojom.UUID>? services;
   string? name;
   string? name_prefix;
 };
 
 struct WebBluetoothRequestDeviceOptions {
-  array<WebBluetoothScanFilter>? filters;
+  array<WebBluetoothLeScanFilter>? filters;
   array<bluetooth.mojom.UUID> optional_services;
   bool accept_all_devices;
 };
@@ -156,11 +148,6 @@ struct WebBluetoothRemoteGATTDescriptor {
 // Web Bluetooth Interface that Blink can use to perform
 // Bluetooth GATT Operations on Bluetooth Devices.
 interface WebBluetoothService {
-  // Sets the client for this WebBluetoothService. The service will notify the
-  // client of device events e.g. when a Characteristic's value changes or when
-  // a device disconnects.
-  SetClient(associated WebBluetoothServiceClient client);
-
   RequestDevice(WebBluetoothRequestDeviceOptions options)
     => (WebBluetoothResult result, WebBluetoothDevice? device);
 
@@ -168,7 +155,10 @@ interface WebBluetoothService {
   // if a connection to the device didn't exist already. If a GATT connection
   // existed already then this function increases the ref count to keep that
   // connection alive.
-  RemoteServerConnect(WebBluetoothDeviceId device_id) => (WebBluetoothResult result);
+  // Returns the result of the connection request.
+  RemoteServerConnect(
+    WebBluetoothDeviceId device_id,
+    associated WebBluetoothServerClient client) => (WebBluetoothResult result);
 
   // If a GATT connection exists for Device identified by |device_id| then
   // decreases the ref count for that connection.
@@ -219,8 +209,11 @@ interface WebBluetoothService {
 
   // Starts notifications for the characteristic identified by
   // |characteristic_instance_id|.
+  // Returns the result of the connection request.
   RemoteCharacteristicStartNotifications(
-    string characteristic_instance_id) => (WebBluetoothResult result);
+    string characteristic_instance_id,
+    associated WebBluetoothCharacteristicClient client) => (
+      WebBluetoothResult result);
 
   // Stops notifications for the characteristic identified by
   // |characteristic_instance_id|.
@@ -239,17 +232,35 @@ interface WebBluetoothService {
     bluetooth.mojom.UUID? descriptor_uuid) => (
       WebBluetoothResult result,
       array<WebBluetoothRemoteGATTDescriptor>? descriptors);
+
+  // Reads the value for the descriptor identified by
+  // |descriptor_instance_id|. If the value is successfully read the callback
+  // will be run with WebBluetoothResult::SUCCESS and the descriptor's value. If
+  // the value is not successfully read the callback with be run with the
+  // corresponding error and nullptr for value
+  RemoteDescriptorReadValue(
+    string descriptor_instance_id) => (
+    WebBluetoothResult result,
+    array<uint8>? value);
+
+  // Writes a value to the descriptor identified by
+  // |descriptor_instance_id|. The callback is run with
+  // WebBluetoothResult::SUCCESS if the value was successfully
+  // written.
+  RemoteDescriptorWriteValue(
+    string descriptor_instance_id,
+    array<uint8> value) => (WebBluetoothResult result);
 };
 
-// Classes should implement this interface and pass an associated pointer
-// bound to them to the WebBluetoothService by using SetClient. Classes
-// that do this will be notified of device events e.g. device disconnection.
-interface WebBluetoothServiceClient {
-  // The characteristic identified by |characteristic_instance_id| has received
-  // a notification of value change.
-  RemoteCharacteristicValueChanged(string characteristic_instance_id,
-                                   array<uint8> value);
+// Classes that implement this interface will be notified of device events.
+interface WebBluetoothServerClient {
+  // Called when a device disconnects.
+  GATTServerDisconnected();
+};
 
-  // The device identified by |device_id| has been disconnected.
-  GattServerDisconnected(WebBluetoothDeviceId device_id);
+// Classes that implement this interface will be notified of characteristic
+// events.
+interface WebBluetoothCharacteristicClient {
+  // Called when we receive a notification for the characteristic.
+  RemoteCharacteristicValueChanged(array<uint8> value);
 };

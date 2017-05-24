@@ -6,12 +6,15 @@
 
 #include <stddef.h>
 
+#include <memory>
+#include <vector>
+
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ptr_util.h"
-#include "base/memory/scoped_vector.h"
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
+#include "base/test/scoped_feature_list.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/browsing_instance.h"
 #include "content/browser/child_process_security_policy_impl.h"
@@ -23,12 +26,13 @@
 #include "content/browser/webui/web_ui_controller_factory_registry.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_constants.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/common/url_utils.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "content/test/test_content_browser_client.h"
 #include "content/test/test_content_client.h"
@@ -95,19 +99,14 @@ class SiteInstanceTestBrowserClient : public TestContentBrowserClient {
 
 class SiteInstanceTest : public testing::Test {
  public:
-  SiteInstanceTest()
-      : ui_thread_(BrowserThread::UI, &message_loop_),
-        file_user_blocking_thread_(BrowserThread::FILE_USER_BLOCKING,
-                                   &message_loop_),
-        io_thread_(BrowserThread::IO, &message_loop_),
-        old_browser_client_(nullptr) {}
+  SiteInstanceTest() : old_browser_client_(nullptr) {}
 
   void SetUp() override {
     old_browser_client_ = SetBrowserClientForTesting(&browser_client_);
     url::AddStandardScheme(kPrivilegedScheme, url::SCHEME_WITHOUT_PORT);
     url::AddStandardScheme(kChromeUIScheme, url::SCHEME_WITHOUT_PORT);
 
-    SiteInstanceImpl::set_render_process_host_factory(&rph_factory_);
+    RenderProcessHostImpl::set_render_process_host_factory(&rph_factory_);
   }
 
   void TearDown() override {
@@ -115,7 +114,7 @@ class SiteInstanceTest : public testing::Test {
     EXPECT_TRUE(RenderProcessHost::AllHostsIterator().IsAtEnd());
 
     SetBrowserClientForTesting(old_browser_client_);
-    SiteInstanceImpl::set_render_process_host_factory(nullptr);
+    RenderProcessHostImpl::set_render_process_host_factory(nullptr);
 
     // http://crbug.com/143565 found SiteInstanceTest leaking an
     // AppCacheDatabase. This happens because some part of the test indirectly
@@ -143,10 +142,7 @@ class SiteInstanceTest : public testing::Test {
   SiteInstanceTestBrowserClient* browser_client() { return &browser_client_; }
 
  private:
-  base::MessageLoopForUI message_loop_;
-  TestBrowserThread ui_thread_;
-  TestBrowserThread file_user_blocking_thread_;
-  TestBrowserThread io_thread_;
+  TestBrowserThreadBundle test_browser_thread_bundle_;
 
   SiteInstanceTestBrowserClient browser_client_;
   ContentBrowserClient* old_browser_client_;
@@ -600,9 +596,10 @@ TEST_F(SiteInstanceTest, ProcessSharingByType) {
 
   // Make a bunch of mock renderers so that we hit the limit.
   std::unique_ptr<TestBrowserContext> browser_context(new TestBrowserContext());
-  ScopedVector<MockRenderProcessHost> hosts;
+  std::vector<std::unique_ptr<MockRenderProcessHost>> hosts;
   for (size_t i = 0; i < kMaxRendererProcessCount; ++i)
-    hosts.push_back(new MockRenderProcessHost(browser_context.get()));
+    hosts.push_back(
+        base::MakeUnique<MockRenderProcessHost>(browser_context.get()));
 
   // Create some extension instances and make sure they share a process.
   scoped_refptr<SiteInstanceImpl> extension1_instance(
@@ -635,8 +632,8 @@ TEST_F(SiteInstanceTest, ProcessSharingByType) {
   EXPECT_NE(extension1_instance->GetProcess(), webui1_instance->GetProcess());
 
   for (size_t i = 0; i < kMaxRendererProcessCount; ++i) {
-    EXPECT_NE(extension1_instance->GetProcess(), hosts[i]);
-    EXPECT_NE(webui1_instance->GetProcess(), hosts[i]);
+    EXPECT_NE(extension1_instance->GetProcess(), hosts[i].get());
+    EXPECT_NE(webui1_instance->GetProcess(), hosts[i].get());
   }
 
   DrainMessageLoop();
@@ -801,8 +798,8 @@ TEST_F(SiteInstanceTest, DefaultSubframeSiteInstance) {
   if (AreAllSitesIsolatedForTesting())
     return;  // --top-document-isolation is not possible.
 
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kTopDocumentIsolation);
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(features::kTopDocumentIsolation);
 
   std::unique_ptr<TestBrowserContext> browser_context(new TestBrowserContext());
   scoped_refptr<SiteInstanceImpl> main_instance =

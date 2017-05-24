@@ -6,8 +6,8 @@
 
 #include <stddef.h>
 
+#include "cc/paint/paint_flags.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/gfx/canvas.h"
@@ -67,8 +67,8 @@ void TableHeader::OnPaint(gfx::Canvas* canvas) {
   OnPaintBackground(canvas);
   SkColor border_color =
       theme->GetSystemColor(ui::NativeTheme::kColorId_UnfocusedBorderColor);
-  canvas->DrawLine(gfx::Point(0, height() - 1),
-                   gfx::Point(width(), height() - 1), border_color);
+  canvas->DrawSharpLine(gfx::PointF(0, height() - 1),
+                        gfx::PointF(width(), height() - 1), border_color);
 
   const Columns& columns = table_->visible_columns();
   const int sorted_column_id = table_->sort_descriptors().empty() ? -1 :
@@ -77,9 +77,10 @@ void TableHeader::OnPaint(gfx::Canvas* canvas) {
     if (columns[i].width >= 2) {
       const int separator_x = GetMirroredXInView(
           columns[i].x + columns[i].width - 1);
-      canvas->DrawLine(gfx::Point(separator_x, kSeparatorPadding),
-                       gfx::Point(separator_x, height() - kSeparatorPadding),
-                       separator_color);
+      canvas->DrawSharpLine(
+          gfx::PointF(separator_x, kSeparatorPadding),
+          gfx::PointF(separator_x, height() - kSeparatorPadding),
+          separator_color);
     }
 
     const int x = columns[i].x + kHorizontalPadding;
@@ -105,10 +106,10 @@ void TableHeader::OnPaint(gfx::Canvas* canvas) {
         TableColumnAlignmentToCanvasAlignment(columns[i].column.alignment));
 
     if (paint_sort_indicator) {
-      SkPaint paint;
-      paint.setColor(text_color);
-      paint.setStyle(SkPaint::kFill_Style);
-      paint.setAntiAlias(true);
+      cc::PaintFlags flags;
+      flags.setColor(text_color);
+      flags.setStyle(cc::PaintFlags::kFill_Style);
+      flags.setAntiAlias(true);
 
       int indicator_x = 0;
       ui::TableColumn::Alignment alignment = columns[i].column.alignment;
@@ -156,7 +157,7 @@ void TableHeader::OnPaint(gfx::Canvas* canvas) {
             SkIntToScalar(indicator_y + kSortIndicatorSize));
       }
       indicator_path.close();
-      canvas->DrawPath(indicator_path, paint);
+      canvas->DrawPath(indicator_path, flags);
     }
   }
 }

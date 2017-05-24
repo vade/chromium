@@ -53,9 +53,11 @@ class TabContentManager : public ThumbnailCacheObserver {
   // Get the live layer from the cache.
   scoped_refptr<cc::Layer> GetLiveLayer(int tab_id);
 
+  scoped_refptr<ThumbnailLayer> GetStaticLayer(int tab_id);
+
   // Get the static thumbnail from the cache, or the NTP.
-  scoped_refptr<ThumbnailLayer> GetStaticLayer(int tab_id,
-                                               bool force_disk_read);
+  scoped_refptr<ThumbnailLayer> GetOrCreateStaticLayer(int tab_id,
+                                                       bool force_disk_read);
 
   // Should be called when a tab gets a new live layer that should be served
   // by the cache to the CompositorView.
@@ -88,7 +90,8 @@ class TabContentManager : public ThumbnailCacheObserver {
                            const base::android::JavaParamRef<jstring>& jurl);
   void UpdateVisibleIds(JNIEnv* env,
                         const base::android::JavaParamRef<jobject>& obj,
-                        const base::android::JavaParamRef<jintArray>& priority);
+                        const base::android::JavaParamRef<jintArray>& priority,
+                        jint primary_tab_id);
   void RemoveTabThumbnail(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& obj,
                           jint tab_id);

@@ -6,9 +6,9 @@
 #define CC_LAYERS_PICTURE_LAYER_H_
 
 #include "base/macros.h"
+#include "cc/base/devtools_instrumentation.h"
 #include "cc/base/invalidation_region.h"
-#include "cc/debug/devtools_instrumentation.h"
-#include "cc/debug/micro_benchmark_controller.h"
+#include "cc/benchmarks/micro_benchmark_controller.h"
 #include "cc/layers/layer.h"
 
 namespace cc {
@@ -28,13 +28,15 @@ class CC_EXPORT PictureLayer : public Layer {
     return picture_layer_inputs_.nearest_neighbor;
   }
 
+  void SetAllowTransformedRasterization(bool allowed);
+
   // Layer interface.
   std::unique_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl) override;
   void SetLayerTreeHost(LayerTreeHost* host) override;
   void PushPropertiesTo(LayerImpl* layer) override;
   void SetNeedsDisplayRect(const gfx::Rect& layer_rect) override;
   bool Update() override;
-  void SetIsMask(bool is_mask) override;
+  void SetLayerMaskType(LayerMaskType mask_type) override;
   sk_sp<SkPicture> GetPicture() const override;
 
   bool IsSuitableForGpuRasterization() const override;
@@ -57,6 +59,7 @@ class CC_EXPORT PictureLayer : public Layer {
 
     ContentLayerClient* client = nullptr;
     bool nearest_neighbor = false;
+    bool allow_transformed_rasterization = false;
     gfx::Rect recorded_viewport;
     scoped_refptr<DisplayItemList> display_list;
     size_t painter_reported_memory_usage = 0;
@@ -70,7 +73,7 @@ class CC_EXPORT PictureLayer : public Layer {
 
   bool HasDrawableContent() const override;
 
-  bool is_mask() const { return is_mask_; }
+  LayerMaskType mask_type() { return mask_type_; }
 
   PictureLayerInputs picture_layer_inputs_;
 
@@ -79,6 +82,8 @@ class CC_EXPORT PictureLayer : public Layer {
 
   void DropRecordingSourceContentIfInvalid();
 
+  bool ShouldUseTransformedRasterization() const;
+
   std::unique_ptr<RecordingSource> recording_source_;
   devtools_instrumentation::
       ScopedLayerObjectTracker instrumentation_object_tracker_;
@@ -86,7 +91,7 @@ class CC_EXPORT PictureLayer : public Layer {
   Region last_updated_invalidation_;
 
   int update_source_frame_number_;
-  bool is_mask_;
+  LayerMaskType mask_type_;
 
   DISALLOW_COPY_AND_ASSIGN(PictureLayer);
 };

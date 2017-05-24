@@ -43,7 +43,7 @@ def main(host, bot_test_expectations_factory, argv):
                         help='Open results dashboard for all removed lines')
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(levelname)s: %(message)s")
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format='%(levelname)s: %(message)s')
 
     port = host.port_factory.get()
     expectations_file = port.path_to_generic_test_expectations_file()
@@ -102,6 +102,11 @@ class RemoveFlakesOMatic(object):
 
         # Don't check lines unless they're flaky. i.e. At least one expectation is a PASS.
         if not self._has_pass_expectation(expectations):
+            return False
+
+        # Don't check lines that have expectations for directories, since
+        # the flakiness of all sub-tests isn't as easy to check.
+        if self._port.test_isdir(test_expectation_line.name):
             return False
 
         # The line can be deleted if the only expectation on the line that appears in the actual

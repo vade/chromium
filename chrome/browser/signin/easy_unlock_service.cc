@@ -13,6 +13,7 @@
 #include "base/guid.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sys_info.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -64,20 +65,9 @@
 #include "components/signin/core/account_id/account_id.h"
 #endif
 
-#if defined(OS_WIN)
-#include "base/win/windows_version.h"
-#endif
-
 using proximity_auth::ScreenlockState;
 
 namespace {
-
-enum BluetoothType {
-  BT_NO_ADAPTER,
-  BT_NORMAL,
-  BT_LOW_ENERGY_CAPABLE,
-  BT_MAX_TYPE
-};
 
 PrefService* GetLocalState() {
   return g_browser_process ? g_browser_process->local_state() : NULL;
@@ -117,19 +107,19 @@ class EasyUnlockService::BluetoothDetector
   explicit BluetoothDetector(EasyUnlockService* service)
       : service_(service),
         weak_ptr_factory_(this) {
-    apps::AppLifetimeMonitorFactory::GetForProfile(service_->profile())
+    apps::AppLifetimeMonitorFactory::GetForBrowserContext(service_->profile())
         ->AddObserver(this);
   }
 
   ~BluetoothDetector() override {
     if (adapter_.get())
       adapter_->RemoveObserver(this);
-    apps::AppLifetimeMonitorFactory::GetForProfile(service_->profile())
+    apps::AppLifetimeMonitorFactory::GetForBrowserContext(service_->profile())
         ->RemoveObserver(this);
   }
 
   void Initialize() {
-    if (!device::BluetoothAdapterFactory::IsBluetoothAdapterAvailable())
+    if (!device::BluetoothAdapterFactory::IsBluetoothSupported())
       return;
 
     device::BluetoothAdapterFactory::GetAdapter(
@@ -145,42 +135,29 @@ class EasyUnlockService::BluetoothDetector
     service_->OnBluetoothAdapterPresentChanged();
   }
 
-  device::BluetoothAdapter* getAdapter() {
-    return adapter_.get();
-  }
-
  private:
   void OnAdapterInitialized(scoped_refptr<device::BluetoothAdapter> adapter) {
     adapter_ = adapter;
     adapter_->AddObserver(this);
     service_->OnBluetoothAdapterPresentChanged();
 
-#if !defined(OS_CHROMEOS)
-    // Bluetooth detection causes serious performance degradations on Mac
-    // and possibly other platforms as well: http://crbug.com/467316
-    // Since this feature is currently only offered for ChromeOS we just
-    // turn it off on other platforms once the inforamtion about the
-    // adapter has been gathered and reported.
-    // TODO(bcwhite,xiyuan): Revisit when non-chromeos platforms are supported.
-    adapter_->RemoveObserver(this);
-    adapter_ = NULL;
-#else
     // TODO(tengs): At the moment, there is no way for Bluetooth discoverability
     // to be turned on except through the Easy Unlock setup. If we step on any
     // toes in the future then we need to revisit this guard.
     if (adapter_->IsDiscoverable())
       TurnOffBluetoothDiscoverability();
-#endif  // !defined(OS_CHROMEOS)
   }
 
   // apps::AppLifetimeMonitor::Observer:
-  void OnAppDeactivated(Profile* profile, const std::string& app_id) override {
+  void OnAppDeactivated(content::BrowserContext* context,
+                        const std::string& app_id) override {
     // TODO(tengs): Refactor the lifetime management to EasyUnlockAppManager.
     if (app_id == extension_misc::kEasyUnlockAppId)
       TurnOffBluetoothDiscoverability();
   }
 
-  void OnAppStop(Profile* profile, const std::string& app_id) override {
+  void OnAppStop(content::BrowserContext* context,
+                 const std::string& app_id) override {
     // TODO(tengs): Refactor the lifetime management to EasyUnlockAppManager.
     if (app_id == extension_misc::kEasyUnlockAppId)
       TurnOffBluetoothDiscoverability();
@@ -281,15 +258,11 @@ void EasyUnlockService::RegisterProfilePrefs(
   registry->RegisterBooleanPref(prefs::kEasyUnlockAllowed, true);
   registry->RegisterBooleanPref(prefs::kEasyUnlockEnabled, false);
   registry->RegisterDictionaryPref(prefs::kEasyUnlockPairing,
-                                   new base::DictionaryValue());
+                                   base::MakeUnique<base::DictionaryValue>());
   registry->RegisterBooleanPref(
       prefs::kEasyUnlockProximityRequired,
       false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-
-  cryptauth::CryptAuthGCMManager::RegisterPrefs(registry);
-  cryptauth::CryptAuthDeviceManager::RegisterPrefs(registry);
-  cryptauth::CryptAuthEnrollmentManager::RegisterPrefs(registry);
 
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           proximity_auth::switches::kEnableBluetoothLowEnergyDiscovery))
@@ -744,31 +717,20 @@ void EasyUnlockService::InitializeOnAppManagerReady() {
   CHECK(app_manager_.get());
 
   InitializeInternal();
+
+#if defined(OS_CHROMEOS)
+  // Only start Bluetooth detection for ChromeOS since the feature is
+  // only offered on ChromeOS. Enabling this on non-ChromeOS platforms
+  // previously introduced a performance regression: http://crbug.com/404482
+  // Make sure not to reintroduce a performance regression if re-enabling on
+  // additional platforms.
+  // TODO(xiyuan): Revisit when non-chromeos platforms are supported.
   bluetooth_detector_->Initialize();
+#endif  // defined(OS_CHROMEOS)
 }
 
 void EasyUnlockService::OnBluetoothAdapterPresentChanged() {
   UpdateAppState();
-
-  // Whether we've already passed Bluetooth availability information to UMA.
-  // This is static because there may be multiple instances and we want to
-  // report this system-level stat only once per run of Chrome.
-  static bool bluetooth_adapter_has_been_reported = false;
-
-  if (!bluetooth_adapter_has_been_reported) {
-    bluetooth_adapter_has_been_reported = true;
-    int bttype = BT_NO_ADAPTER;
-    if (bluetooth_detector_->IsPresent()) {
-      bttype = BT_LOW_ENERGY_CAPABLE;
-#if defined(OS_WIN)
-      if (base::win::GetVersion() < base::win::VERSION_WIN8) {
-        bttype = BT_NORMAL;
-      }
-#endif
-    }
-    UMA_HISTOGRAM_ENUMERATION(
-      "EasyUnlock.BluetoothAvailability", bttype, BT_MAX_TYPE);
-  }
 }
 
 void EasyUnlockService::SetHardlockStateForUser(

@@ -25,6 +25,7 @@
 #ifndef NodeComputedStyle_h
 #define NodeComputedStyle_h
 
+#include "core/dom/Element.h"
 #include "core/dom/LayoutTreeBuilderTraversal.h"
 #include "core/dom/Node.h"
 #include "core/dom/shadow/InsertionPoint.h"
@@ -33,31 +34,29 @@
 
 namespace blink {
 
-inline const ComputedStyle* Node::computedStyle() const {
-  return mutableComputedStyle();
+inline const ComputedStyle* Node::GetComputedStyle() const {
+  return MutableComputedStyle();
 }
 
-inline ComputedStyle* Node::mutableComputedStyle() const {
-  if (LayoutObject* layoutObject = this->layoutObject())
-    return layoutObject->mutableStyle();
-  // <option> and <optgroup> can be styled even if they don't get layout
-  // objects, so they store their style internally and return it through
-  // nonLayoutObjectComputedStyle().  We check here explicitly to avoid the
-  // virtual call in the common case.
-  if (isHTMLOptGroupElement(*this) || isHTMLOptionElement(this))
-    return nonLayoutObjectComputedStyle();
+inline ComputedStyle* Node::MutableComputedStyle() const {
+  if (LayoutObject* layout_object = this->GetLayoutObject())
+    return layout_object->MutableStyle();
+
+  if (IsElementNode())
+    return ToElement(this)->MutableNonLayoutObjectComputedStyle();
+
   return 0;
 }
 
-inline const ComputedStyle* Node::parentComputedStyle() const {
-  if (isActiveSlotOrActiveInsertionPoint())
+inline const ComputedStyle* Node::ParentComputedStyle() const {
+  if (IsActiveSlotOrActiveInsertionPoint())
     return 0;
-  ContainerNode* parent = LayoutTreeBuilderTraversal::parent(*this);
-  return parent ? parent->computedStyle() : 0;
+  ContainerNode* parent = LayoutTreeBuilderTraversal::Parent(*this);
+  return parent ? parent->GetComputedStyle() : 0;
 }
 
-inline const ComputedStyle& Node::computedStyleRef() const {
-  const ComputedStyle* style = computedStyle();
+inline const ComputedStyle& Node::ComputedStyleRef() const {
+  const ComputedStyle* style = GetComputedStyle();
   DCHECK(style);
   return *style;
 }

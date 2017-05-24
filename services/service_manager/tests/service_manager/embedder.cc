@@ -11,8 +11,7 @@
 #include "base/message_loop/message_loop.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "services/service_manager/public/c/main.h"
-#include "services/service_manager/public/cpp/interface_factory.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/cpp/service_context.h"
 #include "services/service_manager/public/cpp/service_runner.h"
@@ -28,38 +27,38 @@ class Singleton : public service_manager::Service {
 
  private:
   // service_manager::Service:
-  bool OnConnect(const service_manager::ServiceInfo& remote_info,
-                 service_manager::InterfaceRegistry* registry) override {
-    return false;
-  }
+  void OnBindInterface(const service_manager::BindSourceInfo& source_info,
+                       const std::string& interface_name,
+                       mojo::ScopedMessagePipeHandle interface_pipe) override {}
 
   DISALLOW_COPY_AND_ASSIGN(Singleton);
 };
 
 class Embedder : public service_manager::Service,
-                 public service_manager::InterfaceFactory<
-                     service_manager::mojom::ServiceFactory>,
                  public service_manager::mojom::ServiceFactory {
  public:
-  Embedder() {}
+  Embedder() {
+    registry_.AddInterface<service_manager::mojom::ServiceFactory>(
+        base::Bind(&Embedder::Create, base::Unretained(this)));
+  }
   ~Embedder() override {}
 
  private:
   // service_manager::Service:
-  bool OnConnect(const service_manager::ServiceInfo& remote_info,
-                 service_manager::InterfaceRegistry* registry) override {
-    registry->AddInterface<service_manager::mojom::ServiceFactory>(this);
-    return true;
+  void OnBindInterface(const service_manager::BindSourceInfo& source_info,
+                       const std::string& interface_name,
+                       mojo::ScopedMessagePipeHandle interface_pipe) override {
+    registry_.BindInterface(source_info, interface_name,
+                            std::move(interface_pipe));
   }
 
-  bool OnStop() override {
+  bool OnServiceManagerConnectionLost() override {
     base::MessageLoop::current()->QuitWhenIdle();
     return true;
   }
 
-  // service_manager::InterfaceFactory<ServiceFactory>:
-  void Create(const service_manager::Identity& remote_identity,
-              service_manager::mojom::ServiceFactoryRequest request) override {
+  void Create(const service_manager::BindSourceInfo& source_info,
+              service_manager::mojom::ServiceFactoryRequest request) {
     service_factory_bindings_.AddBinding(this, std::move(request));
   }
 
@@ -73,6 +72,7 @@ class Embedder : public service_manager::Service,
   }
 
   std::unique_ptr<service_manager::ServiceContext> context_;
+  service_manager::BinderRegistry registry_;
   mojo::BindingSet<service_manager::mojom::ServiceFactory>
       service_factory_bindings_;
 

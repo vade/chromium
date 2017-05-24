@@ -9,12 +9,7 @@
         {
           "object": "LayoutView #document",
           "rect": [0, 0, 600, 500],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [0, 0, 600, 8],
-          "reason": "forced by layout"
+          "reason": "background"
         }
       ]
     }
@@ -22,11 +17,7 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutView #document",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
+      "reason": "background"
     }
   ]
 }
@@ -41,12 +32,7 @@
         {
           "object": "LayoutView #document",
           "rect": [0, 0, 600, 250],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [0, 0, 600, 8],
-          "reason": "forced by layout"
+          "reason": "background"
         }
       ]
     }
@@ -54,11 +40,7 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutView #document",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
+      "reason": "background"
     }
   ]
 }
@@ -73,12 +55,7 @@
         {
           "object": "LayoutView #document",
           "rect": [0, 0, 400, 600],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [0, 0, 400, 8],
-          "reason": "forced by layout"
+          "reason": "background"
         }
       ]
     }
@@ -86,11 +63,7 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutView #document",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
+      "reason": "background"
     }
   ]
 }
@@ -105,12 +78,7 @@
         {
           "object": "LayoutView #document",
           "rect": [0, 0, 800, 600],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [0, 0, 800, 8],
-          "reason": "forced by layout"
+          "reason": "background"
         }
       ]
     }
@@ -118,11 +86,7 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutView #document",
-      "reason": "bounds change"
-    },
-    {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
+      "reason": "background"
     }
   ]
 }

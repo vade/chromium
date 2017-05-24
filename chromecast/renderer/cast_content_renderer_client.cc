@@ -5,38 +5,33 @@
 #include "chromecast/renderer/cast_content_renderer_client.h"
 
 #include <stdint.h>
-#include <string>
 
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chromecast/base/chromecast_switches.h"
-#include "chromecast/common/media/cast_media_client.h"
 #include "chromecast/crash/cast_crash_keys.h"
-#include "chromecast/renderer/cast_gin_runner.h"
+#include "chromecast/media/base/media_caps.h"
+#include "chromecast/media/base/media_codec_support.h"
+#include "chromecast/media/base/supported_codec_profile_levels_memo.h"
+#include "chromecast/public/media/media_capabilities_shlib.h"
 #include "chromecast/renderer/cast_render_frame_action_deferrer.h"
-#include "chromecast/renderer/key_systems_cast.h"
+#include "chromecast/renderer/media/key_systems_cast.h"
 #include "chromecast/renderer/media/media_caps_observer_impl.h"
 #include "components/network_hints/renderer/prescient_networking_dispatcher.h"
-#include "content/grit/content_resources.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/service_names.mojom.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
-#include "gin/modules/module_registry.h"
-#include "gin/per_context_data.h"
-#include "gin/public/context_holder.h"
 #include "media/base/media.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "third_party/WebKit/public/platform/WebColor.h"
 #include "third_party/WebKit/public/web/WebFrameWidget.h"
-#include "third_party/WebKit/public/web/WebKit.h"
-#include "third_party/WebKit/public/web/WebLocalFrame.h"
+#include "third_party/WebKit/public/web/WebRuntimeFeatures.h"
 #include "third_party/WebKit/public/web/WebSettings.h"
 #include "third_party/WebKit/public/web/WebView.h"
-#include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_ANDROID)
 #include "media/base/android/media_codec_util.h"
@@ -54,7 +49,8 @@ const blink::WebColor kColorBlack = 0xFF000000;
 }  // namespace
 
 CastContentRendererClient::CastContentRendererClient()
-    : allow_hidden_media_playback_(
+    : supported_profiles_(new media::SupportedCodecProfileLevelsMemo()),
+      allow_hidden_media_playback_(
           base::CommandLine::ForCurrentProcess()->HasSwitch(
               switches::kAllowHiddenMediaPlayback)) {
 #if defined(OS_ANDROID)
@@ -77,12 +73,12 @@ void CastContentRendererClient::RenderThreadStarted() {
   // Register as observer for media capabilities
   content::RenderThread* thread = content::RenderThread::Get();
   media::mojom::MediaCapsPtr media_caps;
-  thread->GetRemoteInterfaces()->GetInterface(&media_caps);
+  thread->GetConnector()->BindInterface(content::mojom::kBrowserServiceName,
+                                        &media_caps);
   media::mojom::MediaCapsObserverPtr proxy;
-  media_caps_observer_.reset(new media::MediaCapsObserverImpl(&proxy));
+  media_caps_observer_.reset(
+      new media::MediaCapsObserverImpl(&proxy, supported_profiles_.get()));
   media_caps->AddObserver(std::move(proxy));
-
-  chromecast::media::CastMediaClient::Initialize();
 
   prescient_networking_dispatcher_.reset(
       new network_hints::PrescientNetworkingDispatcher());
@@ -103,23 +99,71 @@ void CastContentRendererClient::RenderViewCreated(
   blink::WebView* webview = render_view->GetWebView();
   if (webview) {
     blink::WebFrameWidget* web_frame_widget = render_view->GetWebFrameWidget();
-    web_frame_widget->setBaseBackgroundColor(kColorBlack);
-
-    // Settings for ATV (Android defaults are not what we want):
-    webview->settings()->setMediaControlsOverlayPlayButtonEnabled(false);
+    web_frame_widget->SetBaseBackgroundColor(kColorBlack);
 
     // Disable application cache as Chromecast doesn't support off-line
     // application running.
-    webview->settings()->setOfflineWebApplicationCacheEnabled(false);
+    webview->GetSettings()->SetOfflineWebApplicationCacheEnabled(false);
   }
 }
 
 void CastContentRendererClient::AddSupportedKeySystems(
     std::vector<std::unique_ptr<::media::KeySystemProperties>>*
         key_systems_properties) {
-  AddChromecastKeySystems(key_systems_properties,
-                          false /* enable_persistent_license_support */,
-                          false /* force_software_crypto */);
+  media::AddChromecastKeySystems(key_systems_properties,
+                                 false /* enable_persistent_license_support */,
+                                 false /* force_software_crypto */);
+}
+
+bool CastContentRendererClient::IsSupportedAudioConfig(
+    const ::media::AudioConfig& config) {
+#if defined(OS_ANDROID)
+  media::AudioCodec codec = media::ToCastAudioCodec(config.codec);
+
+  // No ATV device we know of has (E)AC3 decoder, so it relies on the audio sink
+  // device.
+  if (codec == media::kCodecEAC3)
+    return media::MediaCapabilities::HdmiSinkSupportsEAC3();
+  if (codec == media::kCodecAC3)
+    return media::MediaCapabilities::HdmiSinkSupportsAC3();
+
+  // TODO(sanfin): Implement this for Android.
+  return true;
+#else
+  media::AudioCodec codec = media::ToCastAudioCodec(config.codec);
+  // Cast platform implements software decoding of Opus and FLAC, so only PCM
+  // support is necessary in order to support Opus and FLAC.
+  if (codec == media::kCodecOpus || codec == media::kCodecFLAC)
+    codec = media::kCodecPCM;
+
+  // If HDMI sink supports AC3/EAC3 codecs then we don't need the vendor backend
+  // to support these codec directly.
+  if (codec == media::kCodecEAC3 &&
+      media::MediaCapabilities::HdmiSinkSupportsEAC3())
+    return true;
+  if (codec == media::kCodecAC3 &&
+      media::MediaCapabilities::HdmiSinkSupportsAC3())
+    return true;
+
+  media::AudioConfig cast_audio_config;
+  cast_audio_config.codec = codec;
+  return media::MediaCapabilitiesShlib::IsSupportedAudioConfig(
+      cast_audio_config);
+#endif
+}
+
+bool CastContentRendererClient::IsSupportedVideoConfig(
+    const ::media::VideoConfig& config) {
+// TODO(servolk): make use of eotf.
+#if defined(OS_ANDROID)
+  return supported_profiles_->IsSupportedVideoConfig(
+      media::ToCastVideoCodec(config.codec, config.profile),
+      media::ToCastVideoProfile(config.profile), config.level);
+#else
+  return media::MediaCapabilitiesShlib::IsSupportedVideoConfig(
+      media::ToCastVideoCodec(config.codec, config.profile),
+      media::ToCastVideoProfile(config.profile), config.level);
+#endif
 }
 
 blink::WebPrescientNetworking*
@@ -151,42 +195,14 @@ void CastContentRendererClient::RunWhenInForeground(
   new CastRenderFrameActionDeferrer(render_frame, closure);
 }
 
-void CastContentRendererClient::RunScriptsAtDocumentStart(
-    content::RenderFrame* render_frame) {
-  // This method enables Mojo bindings in JavaScript for Chromecast.
-
-  v8::HandleScope handle_scope(blink::mainThreadIsolate());
-  v8::Local<v8::Context> context =
-      render_frame->GetWebFrame()->mainWorldScriptContext();
-
-  CastGinRunner* runner = CastGinRunner::Get(render_frame);
-  gin::Runner::Scope scoper(runner);
-
-  // Initialize AMD API for Mojo.
-  render_frame->EnsureMojoBuiltinsAreAvailable(context->GetIsolate(), context);
-  gin::ModuleRegistry::InstallGlobals(context->GetIsolate(), context->Global());
-
-  // Inject JavaScript files in the correct dependency order.
-  static const int mojo_resource_ids[] = {
-      IDR_MOJO_UNICODE_JS,
-      IDR_MOJO_BUFFER_JS,
-      IDR_MOJO_INTERFACE_TYPES_JS,
-      IDR_MOJO_CODEC_JS,
-      IDR_MOJO_CONNECTOR_JS,
-      IDR_MOJO_VALIDATOR_JS,
-      IDR_MOJO_ROUTER_JS,
-      IDR_MOJO_BINDINGS_JS,
-  };
-  for (size_t i = 0; i < arraysize(mojo_resource_ids); i++) {
-    ExecuteJavaScript(render_frame, mojo_resource_ids[i]);
-  }
+bool CastContentRendererClient::AllowMediaSuspend() {
+  return false;
 }
 
-void ExecuteJavaScript(content::RenderFrame* render_frame, int resource_id) {
-  const std::string& js_string = ui::ResourceBundle::GetSharedInstance()
-                                     .GetRawDataResource(resource_id)
-                                     .as_string();
-  render_frame->ExecuteJavaScript(base::UTF8ToUTF16(js_string));
+void CastContentRendererClient::
+    SetRuntimeFeaturesDefaultsBeforeBlinkInitialization() {
+  // Settings for ATV (Android defaults are not what we want).
+  blink::WebRuntimeFeatures::EnableMediaControlsOverlayPlayButton(false);
 }
 
 }  // namespace shell

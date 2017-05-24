@@ -7,14 +7,13 @@
 
 #include <memory>
 
-#include "base/callback.h"
 #include "base/macros.h"
 #include "device/vr/vr_device_provider.h"
 #include "device/vr/vr_export.h"
 
 namespace device {
 
-class GvrDelegate;
+class GvrDelegateProvider;
 class GvrDevice;
 
 class DEVICE_VR_EXPORT GvrDeviceProvider : public VRDeviceProvider {
@@ -27,23 +26,12 @@ class DEVICE_VR_EXPORT GvrDeviceProvider : public VRDeviceProvider {
 
   void SetListeningForActivate(bool listening) override;
 
-  // Called from GvrDevice.
-  void RequestPresent(const base::Callback<void(bool)>& callback);
-  void ExitPresent();
+  device::GvrDelegateProvider* GetDelegateProvider();
 
-  void OnGvrDelegateReady(GvrDelegate* delegate);
-  void OnGvrDelegateRemoved();
-
-  // TODO(mthiesse): Make the NonPresentingDelegate owned by this class so that
-  // it cannot be removed.
-  void OnNonPresentingDelegateRemoved();
-  void OnDisplayBlur();
-  void OnDisplayFocus();
-  void OnDisplayActivate();
+  GvrDevice* Device() { return vr_device_.get(); }
 
  private:
-  void SwitchToNonPresentingDelegate();
-
+  void Initialize(device::GvrDelegateProvider* provider);
   std::unique_ptr<GvrDevice> vr_device_;
 
   DISALLOW_COPY_AND_ASSIGN(GvrDeviceProvider);

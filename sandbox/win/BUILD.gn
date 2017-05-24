@@ -30,6 +30,8 @@ static_library("sandbox") {
     "src/handle_closer.h",
     "src/handle_closer_agent.cc",
     "src/handle_closer_agent.h",
+    "src/heap_helper.cc",
+    "src/heap_helper.h",
     "src/interception.cc",
     "src/interception.h",
     "src/interception_agent.cc",
@@ -191,6 +193,7 @@ test("sbox_integration_tests") {
     "tests/common/controller.h",
     "tests/common/test_utils.cc",
     "tests/common/test_utils.h",
+    "tests/integration_tests/cfi_unittest.cc",
     "tests/integration_tests/integration_tests.cc",
     "tests/integration_tests/integration_tests_common.h",
     "tests/integration_tests/integration_tests_test.cc",
@@ -198,13 +201,28 @@ test("sbox_integration_tests") {
 
   deps = [
     ":sandbox",
-    ":sbox_integration_test_hook_dll",
-    ":sbox_integration_test_win_proc",
     "//base/test:test_support",
     "//testing/gtest",
   ]
 
+  data_deps = [
+    ":cfi_unittest_exe",
+    ":sbox_integration_test_hook_dll",
+    ":sbox_integration_test_win_proc",
+  ]
+
   libs = [ "dxva2.lib" ]
+}
+
+executable("cfi_unittest_exe") {
+  sources = [
+    "tests/integration_tests/cfi_unittest_exe.cc",
+  ]
+  deps = [
+    "//base",
+    "//build/config/sanitizers:deps",
+    "//build/win:default_exe_manifest",
+  ]
 }
 
 loadable_module("sbox_integration_test_hook_dll") {
@@ -298,6 +316,7 @@ shared_library("pocdll") {
     "sandbox_poc/pocdll/handles.cc",
     "sandbox_poc/pocdll/invasive.cc",
     "sandbox_poc/pocdll/network.cc",
+    "sandbox_poc/pocdll/ntundoc.h",
     "sandbox_poc/pocdll/pocdll.cc",
     "sandbox_poc/pocdll/processes_and_threads.cc",
     "sandbox_poc/pocdll/registry.cc",

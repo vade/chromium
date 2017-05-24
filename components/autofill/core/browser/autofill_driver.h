@@ -9,10 +9,6 @@
 
 #include "components/autofill/core/common/form_data.h"
 
-namespace base {
-class SequencedWorkerPool;
-}
-
 namespace net {
 class URLRequestContextGetter;
 }
@@ -40,16 +36,11 @@ class AutofillDriver {
 
   virtual ~AutofillDriver() {}
 
-  // Returns whether the user is currently operating in an off-the-record
-  // (i.e., incognito) context.
-  virtual bool IsOffTheRecord() const = 0;
+  // Returns whether the user is currently operating in an incognito context.
+  virtual bool IsIncognito() const = 0;
 
   // Returns the URL request context information associated with this driver.
   virtual net::URLRequestContextGetter* GetURLRequestContext() = 0;
-
-  // Returns the SequencedWorkerPool on which core Autofill code should run
-  // tasks that may block. This pool must live at least as long as the driver.
-  virtual base::SequencedWorkerPool* GetBlockingPool() = 0;
 
   // Returns true iff the renderer is available for communication.
   virtual bool RendererIsAvailable() = 0;

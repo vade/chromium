@@ -15,14 +15,11 @@
 #include "content/browser/media/session/media_session_controllers_manager.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "device/wake_lock/public/interfaces/wake_lock_service.mojom.h"
 
 #if defined(OS_ANDROID)
 #include "ui/android/view_android.h"
 #endif  // OS_ANDROID
-
-namespace device {
-class PowerSaveBlocker;
-}  // namespace device
 
 namespace media {
 enum class MediaContentType;
@@ -42,6 +39,13 @@ class CONTENT_EXPORT MediaWebContentsObserver : public WebContentsObserver {
   // Called by WebContentsImpl when the audible state may have changed.
   void MaybeUpdateAudibleState();
 
+  // Called by WebContentsImpl to know if an active player is effectively
+  // fullscreen. That means that the video is either fullscreen or it is the
+  // content of a fullscreen page (in other words, a fullscreen video with
+  // custom controls).
+  // It should only be called while the WebContents is fullscreen.
+  bool HasActiveEffectivelyFullscreenVideo() const;
+
   // WebContentsObserver implementation.
   void WebContentsDestroyed() override;
   void RenderFrameDeleted(RenderFrameHost* render_frame_host) override;
@@ -50,12 +54,18 @@ class CONTENT_EXPORT MediaWebContentsObserver : public WebContentsObserver {
   void WasShown() override;
   void WasHidden() override;
 
-  bool has_audio_power_save_blocker_for_testing() const {
-    return !!audio_power_save_blocker_;
+  // TODO(zqzhang): this method is temporarily in MediaWebContentsObserver as
+  // the effectively fullscreen video code is also here. We need to consider
+  // merging the logic of effectively fullscreen, hiding media controls and
+  // fullscreening video element to the same place.
+  void RequestPersistentVideo(bool value);
+
+  bool has_audio_wake_lock_for_testing() const {
+    return has_audio_wake_lock_for_testing_;
   }
 
-  bool has_video_power_save_blocker_for_testing() const {
-    return !!video_power_save_blocker_;
+  bool has_video_wake_lock_for_testing() const {
+    return has_video_wake_lock_for_testing_;
   }
 
  protected:
@@ -74,18 +84,22 @@ class CONTENT_EXPORT MediaWebContentsObserver : public WebContentsObserver {
                       bool has_audio,
                       bool is_remote,
                       media::MediaContentType media_content_type);
+  void OnMediaEffectivelyFullscreenChange(RenderFrameHost* render_frame_host,
+                                          int delegate_id,
+                                          bool is_fullscreen);
 
-  // Clear |render_frame_host|'s tracking entry for its power save blockers.
-  void ClearPowerSaveBlockers(RenderFrameHost* render_frame_host);
+  // Clear |render_frame_host|'s tracking entry for its WakeLocks.
+  void ClearWakeLocks(RenderFrameHost* render_frame_host);
 
-  // Creates an audio or video power save blocker respectively.
-  void CreateAudioPowerSaveBlocker();
-  void CreateVideoPowerSaveBlocker();
+  device::mojom::WakeLockService* GetAudioWakeLock();
+  device::mojom::WakeLockService* GetVideoWakeLock();
 
-  // Releases the audio power save blockers if |active_audio_players_| is empty.
-  // Likewise, releases the video power save blockers if |active_video_players_|
-  // is empty.
-  void MaybeReleasePowerSaveBlockers();
+  void LockAudio();
+  void LockVideo();
+
+  void CancelAudioLock();
+  void CancelVideoLock();
+  void MaybeCancelVideoLock();
 
   // Helper methods for adding or removing player entries in |player_map|.
   using PlayerSet = std::set<int>;
@@ -101,11 +115,14 @@ class CONTENT_EXPORT MediaWebContentsObserver : public WebContentsObserver {
                                    ActiveMediaPlayerMap* player_map,
                                    std::set<MediaPlayerId>* removed_players);
 
-  // Tracking variables and associated power save blockers for media playback.
+  // Tracking variables and associated wake locks for media playback.
   ActiveMediaPlayerMap active_audio_players_;
   ActiveMediaPlayerMap active_video_players_;
-  std::unique_ptr<device::PowerSaveBlocker> audio_power_save_blocker_;
-  std::unique_ptr<device::PowerSaveBlocker> video_power_save_blocker_;
+  device::mojom::WakeLockServicePtr audio_wake_lock_;
+  device::mojom::WakeLockServicePtr video_wake_lock_;
+  base::Optional<MediaPlayerId> fullscreen_player_;
+  bool has_audio_wake_lock_for_testing_;
+  bool has_video_wake_lock_for_testing_;
 
   MediaSessionControllersManager session_controllers_manager_;
 

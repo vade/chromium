@@ -6,11 +6,11 @@
 
 #include "net/quic/core/proto/cached_network_parameters.pb.h"
 #include "net/quic/core/quic_connection.h"
-#include "net/quic/core/quic_flags.h"
-#include "net/quic/core/quic_spdy_session.h"
 #include "net/quic/core/quic_stream.h"
 #include "net/quic/platform/api/quic_bug_tracker.h"
+#include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_logging.h"
+#include "net/quic/platform/api/quic_string_piece.h"
 
 using std::string;
 
@@ -113,7 +113,7 @@ void QuicServerSessionBase::OnCongestionWindowChange(QuicTime now) {
       sent_packet_manager.GetRttStats()->smoothed_rtt().ToMilliseconds();
   int64_t now_ms = (now - last_scup_time_).ToMilliseconds();
   int64_t packets_since_last_scup =
-      connection()->packet_number_of_last_sent_packet() -
+      connection()->sent_packet_manager().GetLargestSentPacket() -
       last_scup_packet_number_;
   if (now_ms < (kMinIntervalBetweenServerConfigUpdatesRTTs * srtt_ms) ||
       now_ms < kMinIntervalBetweenServerConfigUpdatesMs ||
@@ -190,10 +190,12 @@ void QuicServerSessionBase::OnCongestionWindowChange(QuicTime now) {
   connection()->OnSendConnectionState(cached_network_params);
 
   last_scup_time_ = now;
-  last_scup_packet_number_ = connection()->packet_number_of_last_sent_packet();
+  last_scup_packet_number_ =
+      connection()->sent_packet_manager().GetLargestSentPacket();
 }
 
 bool QuicServerSessionBase::ShouldCreateIncomingDynamicStream(QuicStreamId id) {
+  DCHECK(!FLAGS_quic_reloadable_flag_quic_refactor_stream_creation);
   if (!connection()->connected()) {
     QUIC_BUG << "ShouldCreateIncomingDynamicStream called when disconnected";
     return false;
@@ -210,6 +212,7 @@ bool QuicServerSessionBase::ShouldCreateIncomingDynamicStream(QuicStreamId id) {
 }
 
 bool QuicServerSessionBase::ShouldCreateOutgoingDynamicStream() {
+  DCHECK(!FLAGS_quic_reloadable_flag_quic_refactor_stream_creation);
   if (!connection()->connected()) {
     QUIC_BUG << "ShouldCreateOutgoingDynamicStream called when disconnected";
     return false;
@@ -226,7 +229,12 @@ bool QuicServerSessionBase::ShouldCreateOutgoingDynamicStream() {
   return true;
 }
 
-QuicCryptoServerStreamBase* QuicServerSessionBase::GetCryptoStream() {
+QuicCryptoServerStreamBase* QuicServerSessionBase::GetMutableCryptoStream() {
+  return crypto_stream_.get();
+}
+
+const QuicCryptoServerStreamBase* QuicServerSessionBase::GetCryptoStream()
+    const {
   return crypto_stream_.get();
 }
 

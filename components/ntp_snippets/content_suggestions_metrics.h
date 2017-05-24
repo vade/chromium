@@ -23,8 +23,8 @@ void OnSuggestionShown(int global_position,
                        Category category,
                        int position_in_category,
                        base::Time publish_date,
-                       base::Time last_background_fetch_time,
-                       float score);
+                       float score,
+                       base::Time fetch_date);
 
 // TODO(crbug.com/682160): Take struct, so that one could not mix up the
 // order of arguments.
@@ -49,12 +49,22 @@ void OnSuggestionDismissed(int global_position,
 
 void OnSuggestionTargetVisited(Category category, base::TimeDelta visit_time);
 
+void OnCategoryMovedUp(int new_index);
+
 // Should only be called once per NTP for each "more" button.
 void OnMoreButtonShown(Category category, int position);
 
 void OnMoreButtonClicked(Category category, int position);
 
 void OnCategoryDismissed(Category category);
+
+void RecordRemoteSuggestionsProviderState(bool enabled);
+
+void RecordContentSuggestionDismissed();
+
+void RecordCategoryDismissed();
+
+void RecordFetchAction();
 
 }  // namespace metrics
 }  // namespace ntp_snippets

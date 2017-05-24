@@ -63,56 +63,80 @@ struct GPU_EXPORT TextureUnit {
   // glBindTexture
   scoped_refptr<TextureRef> bound_texture_2d_array;
 
-  scoped_refptr<TextureRef> GetInfoForSamplerType(
-      GLenum type) {
+  TextureRef* GetInfoForSamplerType(GLenum type) {
     switch (type) {
       case GL_SAMPLER_2D:
       case GL_SAMPLER_2D_SHADOW:
       case GL_INT_SAMPLER_2D:
       case GL_UNSIGNED_INT_SAMPLER_2D:
-        return bound_texture_2d;
+        return bound_texture_2d.get();
       case GL_SAMPLER_CUBE:
       case GL_SAMPLER_CUBE_SHADOW:
       case GL_INT_SAMPLER_CUBE:
       case GL_UNSIGNED_INT_SAMPLER_CUBE:
-        return bound_texture_cube_map;
+        return bound_texture_cube_map.get();
       case GL_SAMPLER_EXTERNAL_OES:
-        return bound_texture_external_oes;
+        return bound_texture_external_oes.get();
       case GL_SAMPLER_2D_RECT_ARB:
-        return bound_texture_rectangle_arb;
+        return bound_texture_rectangle_arb.get();
       case GL_SAMPLER_3D:
       case GL_INT_SAMPLER_3D:
       case GL_UNSIGNED_INT_SAMPLER_3D:
-        return bound_texture_3d;
+        return bound_texture_3d.get();
       case GL_SAMPLER_2D_ARRAY:
       case GL_SAMPLER_2D_ARRAY_SHADOW:
       case GL_INT_SAMPLER_2D_ARRAY:
       case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
-        return bound_texture_2d_array;
+        return bound_texture_2d_array.get();
+      default:
+        NOTREACHED();
+        return nullptr;
     }
-
-    NOTREACHED();
-    return nullptr;
   }
 
-  scoped_refptr<TextureRef>& GetInfoForTarget(GLenum target) {
+  TextureRef* GetInfoForTarget(GLenum target) {
     switch (target) {
       case GL_TEXTURE_2D:
-        return bound_texture_2d;
+        return bound_texture_2d.get();
       case GL_TEXTURE_CUBE_MAP:
-        return bound_texture_cube_map;
+        return bound_texture_cube_map.get();
       case GL_TEXTURE_EXTERNAL_OES:
-        return bound_texture_external_oes;
+        return bound_texture_external_oes.get();
       case GL_TEXTURE_RECTANGLE_ARB:
-        return bound_texture_rectangle_arb;
+        return bound_texture_rectangle_arb.get();
       case GL_TEXTURE_3D:
-        return bound_texture_3d;
+        return bound_texture_3d.get();
       case GL_TEXTURE_2D_ARRAY:
-        return bound_texture_2d_array;
+        return bound_texture_2d_array.get();
+      default:
+        NOTREACHED();
+        return nullptr;
     }
+  }
 
-    NOTREACHED();
-    return bound_texture_2d;
+  void SetInfoForTarget(GLenum target, TextureRef* texture_ref) {
+    switch (target) {
+      case GL_TEXTURE_2D:
+        bound_texture_2d = texture_ref;
+        break;
+      case GL_TEXTURE_CUBE_MAP:
+        bound_texture_cube_map = texture_ref;
+        break;
+      case GL_TEXTURE_EXTERNAL_OES:
+        bound_texture_external_oes = texture_ref;
+        break;
+      case GL_TEXTURE_RECTANGLE_ARB:
+        bound_texture_rectangle_arb = texture_ref;
+        break;
+      case GL_TEXTURE_3D:
+        bound_texture_3d = texture_ref;
+        break;
+      case GL_TEXTURE_2D_ARRAY:
+        bound_texture_2d_array = texture_ref;
+        break;
+      default:
+        NOTREACHED();
+    }
   }
 };
 
@@ -187,7 +211,8 @@ struct GPU_EXPORT ContextState {
   void InitState(const ContextState* prev_state) const;
 
   void RestoreActiveTexture() const;
-  void RestoreAllTextureUnitBindings(const ContextState* prev_state) const;
+  void RestoreAllTextureUnitAndSamplerBindings(
+      const ContextState* prev_state) const;
   void RestoreActiveTextureUnitBinding(unsigned int target) const;
   void RestoreVertexAttribValues() const;
   void RestoreVertexAttribArrays(
@@ -201,6 +226,7 @@ struct GPU_EXPORT ContextState {
   void RestoreIndexedUniformBufferBindings(const ContextState* prev_state);
   void RestoreTextureUnitBindings(
       GLuint unit, const ContextState* prev_state) const;
+  void RestoreSamplerBinding(GLuint unit, const ContextState* prev_state) const;
 
   void PushTextureDecompressionUnpackState() const;
   void RestoreUnpackState() const;
@@ -285,6 +311,13 @@ struct GPU_EXPORT ContextState {
   PixelStoreParams GetPackParams();
   PixelStoreParams GetUnpackParams(Dimension dimension);
 
+  // If a buffer object is bound to PIXEL_PACK_BUFFER, set all pack parameters
+  // user values; otherwise, set them to 0.
+  void UpdatePackParameters() const;
+  // If a buffer object is bound to PIXEL_UNPACK_BUFFER, set all unpack
+  // parameters user values; otherwise, set them to 0.
+  void UpdateUnpackParameters() const;
+
   void EnableDisableFramebufferSRGB(bool enable);
 
   #include "gpu/command_buffer/service/context_state_autogen.h"
@@ -344,13 +377,6 @@ struct GPU_EXPORT ContextState {
 
  private:
   void EnableDisable(GLenum pname, bool enable) const;
-
-  // If a buffer object is bound to PIXEL_PACK_BUFFER, set all pack parameters
-  // user values; otherwise, set them to 0.
-  void UpdatePackParameters() const;
-  // If a buffer object is bound to PIXEL_UNPACK_BUFFER, set all unpack
-  // parameters user values; otherwise, set them to 0.
-  void UpdateUnpackParameters() const;
 
   void InitStateManual(const ContextState* prev_state) const;
 

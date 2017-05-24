@@ -7,24 +7,21 @@
 #include <utility>
 
 #include "base/command_line.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
-#include "build/build_config.h"
-#include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/extensions/chrome_extensions_client.h"
 #include "chrome/common/extensions/chrome_utility_extensions_messages.h"
 #include "chrome/common/extensions/media_parser.mojom.h"
+#include "chrome/common/extensions/removable_storage_writer.mojom.h"
 #include "chrome/common/media_galleries/metadata_types.h"
-#include "chrome/utility/chrome_content_utility_client.h"
+#include "chrome/utility/image_writer/image_writer_handler.h"
 #include "chrome/utility/media_galleries/ipc_data_source.h"
 #include "chrome/utility/media_galleries/media_metadata_parser.h"
-#include "content/public/common/content_paths.h"
 #include "content/public/utility/utility_thread.h"
-#include "extensions/common/extension.h"
-#include "extensions/common/extension_utility_messages.h"
-#include "extensions/utility/unpacker.h"
 #include "media/base/media.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/bind_source_info.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "ui/base/ui_base_switches.h"
 
 #if !defined(MEDIA_DISABLE_FFMPEG)
@@ -46,62 +43,85 @@
 
 namespace {
 
-void ReleaseProcessIfNeeded() {
-  content::UtilityThread::Get()->ReleaseProcessIfNeeded();
-}
-
 class MediaParserImpl : public extensions::mojom::MediaParser {
  public:
-  static void Create(ChromeContentUtilityClient* utility_client,
+  MediaParserImpl() = default;
+  ~MediaParserImpl() override = default;
+
+  static void Create(const service_manager::BindSourceInfo& source_info,
                      extensions::mojom::MediaParserRequest request) {
-    mojo::MakeStrongBinding(base::MakeUnique<MediaParserImpl>(utility_client),
+    mojo::MakeStrongBinding(base::MakeUnique<MediaParserImpl>(),
                             std::move(request));
   }
 
-  explicit MediaParserImpl(ChromeContentUtilityClient* utility_client)
-      : utility_client_(utility_client) {}
-
-  ~MediaParserImpl() override = default;
-
  private:
   // extensions::mojom::MediaParser:
-  void ParseMediaMetadata(const std::string& mime_type,
-                          int64_t total_size,
-                          bool get_attached_images,
-                          const ParseMediaMetadataCallback& callback) override {
-    // Only one IPCDataSource may be created and added to the list of handlers.
-    auto source = base::MakeUnique<metadata::IPCDataSource>(total_size);
+  void ParseMediaMetadata(
+      const std::string& mime_type,
+      int64_t total_size,
+      bool get_attached_images,
+      extensions::mojom::MediaDataSourcePtr media_data_source,
+      ParseMediaMetadataCallback callback) override {
+    auto source = base::MakeUnique<metadata::IPCDataSource>(
+        std::move(media_data_source), total_size);
     metadata::MediaMetadataParser* parser = new metadata::MediaMetadataParser(
-        source.get(), mime_type, get_attached_images);
-    utility_client_->AddHandler(std::move(source));
-    parser->Start(base::Bind(&MediaParserImpl::ParseMediaMetadataDone, callback,
-                             base::Owned(parser)));
+        std::move(source), mime_type, get_attached_images);
+    parser->Start(base::Bind(&MediaParserImpl::ParseMediaMetadataDone,
+                             base::Passed(&callback), base::Owned(parser)));
   }
 
   static void ParseMediaMetadataDone(
-      const ParseMediaMetadataCallback& callback,
+      ParseMediaMetadataCallback callback,
       metadata::MediaMetadataParser* /* parser */,
       const extensions::api::media_galleries::MediaMetadata& metadata,
       const std::vector<metadata::AttachedImage>& attached_images) {
-    callback.Run(true, metadata.ToValue(), attached_images);
-    ReleaseProcessIfNeeded();
+    std::move(callback).Run(true, metadata.ToValue(), attached_images);
   }
 
   void CheckMediaFile(base::TimeDelta decode_time,
                       base::File file,
-                      const CheckMediaFileCallback& callback) override {
+                      CheckMediaFileCallback callback) override {
 #if !defined(MEDIA_DISABLE_FFMPEG)
     media::MediaFileChecker checker(std::move(file));
-    callback.Run(checker.Start(decode_time));
+    std::move(callback).Run(checker.Start(decode_time));
 #else
-    callback.Run(false);
+    std::move(callback).Run(false);
 #endif
-    ReleaseProcessIfNeeded();
   }
 
-  ChromeContentUtilityClient* const utility_client_;
-
   DISALLOW_COPY_AND_ASSIGN(MediaParserImpl);
+};
+
+class RemovableStorageWriterImpl
+    : public extensions::mojom::RemovableStorageWriter {
+ public:
+  RemovableStorageWriterImpl() = default;
+  ~RemovableStorageWriterImpl() override = default;
+
+  static void Create(const service_manager::BindSourceInfo& source_info,
+                     extensions::mojom::RemovableStorageWriterRequest request) {
+    mojo::MakeStrongBinding(base::MakeUnique<RemovableStorageWriterImpl>(),
+                            std::move(request));
+  }
+
+ private:
+  void Write(
+      const base::FilePath& source,
+      const base::FilePath& target,
+      extensions::mojom::RemovableStorageWriterClientPtr client) override {
+    writer_.Write(source, target, std::move(client));
+  }
+
+  void Verify(
+      const base::FilePath& source,
+      const base::FilePath& target,
+      extensions::mojom::RemovableStorageWriterClientPtr client) override {
+    writer_.Verify(source, target, std::move(client));
+  }
+
+  image_writer::ImageWriterHandler writer_;
+
+  DISALLOW_COPY_AND_ASSIGN(RemovableStorageWriterImpl);
 };
 
 #if defined(OS_WIN)
@@ -111,7 +131,8 @@ class WiFiCredentialsGetterImpl
   WiFiCredentialsGetterImpl() = default;
   ~WiFiCredentialsGetterImpl() override = default;
 
-  static void Create(extensions::mojom::WiFiCredentialsGetterRequest request) {
+  static void Create(const service_manager::BindSourceInfo& source_info,
+                     extensions::mojom::WiFiCredentialsGetterRequest request) {
     mojo::MakeStrongBinding(base::MakeUnique<WiFiCredentialsGetterImpl>(),
                             std::move(request));
   }
@@ -119,9 +140,10 @@ class WiFiCredentialsGetterImpl
  private:
   // extensions::mojom::WiFiCredentialsGetter:
   void GetWiFiCredentials(const std::string& ssid,
-                          const GetWiFiCredentialsCallback& callback) override {
+                          GetWiFiCredentialsCallback callback) override {
     if (ssid == kWiFiTestNetwork) {
-      callback.Run(true, ssid);  // test-mode: return the ssid in key_data.
+      // test-mode: return the ssid in key_data.
+      std::move(callback).Run(true, ssid);
       return;
     }
 
@@ -137,7 +159,7 @@ class WiFiCredentialsGetterImpl
     if (!success)
       key_data.clear();
 
-    callback.Run(success, key_data);
+    std::move(callback).Run(success, key_data);
   }
 
   DISALLOW_COPY_AND_ASSIGN(WiFiCredentialsGetterImpl);
@@ -152,30 +174,35 @@ ExtensionsHandler::ExtensionsHandler() {
   ExtensionsClient::Set(ChromeExtensionsClient::GetInstance());
 }
 
-ExtensionsHandler::~ExtensionsHandler() {
-}
+ExtensionsHandler::~ExtensionsHandler() = default;
 
 // static
 void ExtensionsHandler::PreSandboxStartup() {
-  // Initialize media libraries for media file validation.
-  media::InitializeMediaLibrary();
+  media::InitializeMediaLibrary();  // Used for media file validation.
 }
 
 // static
 void ExtensionsHandler::ExposeInterfacesToBrowser(
-    service_manager::InterfaceRegistry* registry,
-    ChromeContentUtilityClient* utility_client,
+    service_manager::BinderRegistry* registry,
     bool running_elevated) {
   // If our process runs with elevated privileges, only add elevated Mojo
-  // services to the interface registry.
+  // interfaces to the interface registry.
   if (running_elevated) {
 #if defined(OS_WIN)
-    registry->AddInterface(base::Bind(&WiFiCredentialsGetterImpl::Create));
+    registry->AddInterface(base::Bind(&RemovableStorageWriterImpl::Create),
+                           base::ThreadTaskRunnerHandle::Get());
+    registry->AddInterface(base::Bind(&WiFiCredentialsGetterImpl::Create),
+                           base::ThreadTaskRunnerHandle::Get());
 #endif
     return;
   }
 
-  registry->AddInterface(base::Bind(&MediaParserImpl::Create, utility_client));
+  registry->AddInterface(base::Bind(&MediaParserImpl::Create),
+                         base::ThreadTaskRunnerHandle::Get());
+#if !defined(OS_WIN)
+  registry->AddInterface(base::Bind(&RemovableStorageWriterImpl::Create),
+                         base::ThreadTaskRunnerHandle::Get());
+#endif
 }
 
 bool ExtensionsHandler::OnMessageReceived(const IPC::Message& message) {
@@ -198,7 +225,7 @@ bool ExtensionsHandler::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
-  return handled || utility_handler_.OnMessageReceived(message);
+  return handled;
 }
 
 #if defined(OS_WIN)
@@ -208,7 +235,7 @@ void ExtensionsHandler::OnParseITunesPrefXml(
       itunes::FindLibraryLocationInPrefXml(itunes_xml_data));
   content::UtilityThread::Get()->Send(
       new ChromeUtilityHostMsg_GotITunesDirectory(library_path));
-  ReleaseProcessIfNeeded();
+  content::UtilityThread::Get()->ReleaseProcessIfNeeded();
 }
 #endif  // defined(OS_WIN)
 
@@ -220,7 +247,7 @@ void ExtensionsHandler::OnParseITunesLibraryXmlFile(
   bool result = parser.Parse(iapps::ReadFileAsString(std::move(file)));
   content::UtilityThread::Get()->Send(
       new ChromeUtilityHostMsg_GotITunesLibrary(result, parser.library()));
-  ReleaseProcessIfNeeded();
+  content::UtilityThread::Get()->ReleaseProcessIfNeeded();
 }
 
 void ExtensionsHandler::OnParsePicasaPMPDatabase(
@@ -246,7 +273,7 @@ void ExtensionsHandler::OnParsePicasaPMPDatabase(
   content::UtilityThread::Get()->Send(
       new ChromeUtilityHostMsg_ParsePicasaPMPDatabase_Finished(
           parse_success, reader.albums(), reader.folders()));
-  ReleaseProcessIfNeeded();
+  content::UtilityThread::Get()->ReleaseProcessIfNeeded();
 }
 
 void ExtensionsHandler::OnIndexPicasaAlbumsContents(
@@ -257,7 +284,7 @@ void ExtensionsHandler::OnIndexPicasaAlbumsContents(
   content::UtilityThread::Get()->Send(
       new ChromeUtilityHostMsg_IndexPicasaAlbumsContents_Finished(
           indexer.albums_images()));
-  ReleaseProcessIfNeeded();
+  content::UtilityThread::Get()->ReleaseProcessIfNeeded();
 }
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
 

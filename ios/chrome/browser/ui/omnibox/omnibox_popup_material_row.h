@@ -12,16 +12,19 @@
 // View used to display an omnibox autocomplete match in the omnibox popup.
 @interface OmniboxPopupMaterialRow : UITableViewCell
 
-// A truncating version of the textLabel of a UITableViewCell.
-@property(nonatomic, readonly, retain)
+// A truncate-by-fading version of the textLabel of a UITableViewCell.
+@property(nonatomic, readonly, strong)
     OmniboxPopupTruncatingLabel* textTruncatingLabel;
-// A truncating version of the detailTextLabel of a UITableViewCell.
-@property(nonatomic, readonly, retain)
+// A truncate-by-fading version of the detailTextLabel of a UITableViewCell.
+@property(nonatomic, readonly, strong)
     OmniboxPopupTruncatingLabel* detailTruncatingLabel;
-@property(nonatomic, readonly, retain) UIImageView* imageView;
-@property(nonatomic, readonly, retain) UIImageView* answerImageView;
-@property(nonatomic, readonly, retain) UIButton* appendButton;
-@property(nonatomic, readonly, retain) UIButton* physicalWebButton;
+// A standard UILabel for answers, which truncates with ellipses to support
+// multi-line text.
+@property(nonatomic, readonly, strong) UILabel* detailAnswerLabel;
+
+@property(nonatomic, readonly, strong) UIImageView* imageView;
+@property(nonatomic, readonly, strong) UIImageView* answerImageView;
+@property(nonatomic, readonly, strong) UIButton* appendButton;
 @property(nonatomic, assign) CGFloat rowHeight;
 
 // Initialize the row with the given incognito state. The colors and styling are

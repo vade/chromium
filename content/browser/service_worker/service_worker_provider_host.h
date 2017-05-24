@@ -12,6 +12,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "base/gtest_prod_util.h"
@@ -20,7 +21,9 @@
 #include "base/memory/weak_ptr.h"
 #include "content/browser/service_worker/service_worker_registration.h"
 #include "content/common/content_export.h"
+#include "content/common/service_worker/service_worker_provider_host_info.h"
 #include "content/common/service_worker/service_worker_types.h"
+#include "content/common/worker_url_loader_factory_provider.mojom.h"
 #include "content/public/common/request_context_frame_type.h"
 #include "content/public/common/request_context_type.h"
 #include "content/public/common/resource_type.h"
@@ -31,6 +34,7 @@ class BlobStorageContext;
 
 namespace content {
 
+class MessagePort;
 class ResourceRequestBodyImpl;
 class ServiceWorkerContextCore;
 class ServiceWorkerDispatcherHost;
@@ -71,22 +75,15 @@ class CONTENT_EXPORT ServiceWorkerProviderHost
       bool are_ancestors_secure,
       const WebContentsGetter& web_contents_getter);
 
-  enum class FrameSecurityLevel { UNINITIALIZED, INSECURE, SECURE };
+  // Used to create a ServiceWorkerProviderHost when the renderer-side provider
+  // is created. This ProviderHost will be created for the process specified by
+  // |process_id|.
+  static std::unique_ptr<ServiceWorkerProviderHost> Create(
+      int process_id,
+      ServiceWorkerProviderHostInfo info,
+      base::WeakPtr<ServiceWorkerContextCore> context,
+      ServiceWorkerDispatcherHost* dispatcher_host);
 
-  // When this provider host is for a Service Worker context, |route_id| is
-  // MSG_ROUTING_NONE. When this provider host is for a Document,
-  // |route_id| is the frame ID of the Document. When this provider host is for
-  // a Shared Worker, |route_id| is the Shared Worker route ID.
-  // |provider_type| gives additional information whether the provider is
-  // created for controller (ServiceWorker) or controllee (Document or
-  // SharedWorker).
-  ServiceWorkerProviderHost(int render_process_id,
-                            int route_id,
-                            int provider_id,
-                            ServiceWorkerProviderType provider_type,
-                            FrameSecurityLevel parent_frame_security_level,
-                            base::WeakPtr<ServiceWorkerContextCore> context,
-                            ServiceWorkerDispatcherHost* dispatcher_host);
   virtual ~ServiceWorkerProviderHost();
 
   const std::string& client_uuid() const { return client_uuid_; }
@@ -98,15 +95,7 @@ class CONTENT_EXPORT ServiceWorkerProviderHost
     return web_contents_getter_;
   }
 
-  bool is_parent_frame_secure() const {
-    return parent_frame_security_level_ == FrameSecurityLevel::SECURE;
-  }
-  void set_parent_frame_secure(bool is_parent_frame_secure) {
-    CHECK_EQ(parent_frame_security_level_, FrameSecurityLevel::UNINITIALIZED);
-    parent_frame_security_level_ = is_parent_frame_secure
-                                       ? FrameSecurityLevel::SECURE
-                                       : FrameSecurityLevel::INSECURE;
-  }
+  bool is_parent_frame_secure() const { return is_parent_frame_secure_; }
 
   // Returns whether this provider host is secure enough to have a service
   // worker controller.
@@ -232,7 +221,11 @@ class CONTENT_EXPORT ServiceWorkerProviderHost
   // Dispatches message event to the document.
   void PostMessageToClient(ServiceWorkerVersion* version,
                            const base::string16& message,
-                           const std::vector<int>& sent_message_ports);
+                           const std::vector<MessagePort>& sent_message_ports);
+
+  // Notifies the client that its controller used a feature, for UseCounter
+  // purposes. This can only be called if IsProviderForClient() is true.
+  void CountFeature(uint32_t feature);
 
   // Adds reference of this host's process to the |pattern|, the reference will
   // be removed in destructor.
@@ -247,7 +240,7 @@ class CONTENT_EXPORT ServiceWorkerProviderHost
   bool GetRegistrationForReady(const GetRegistrationForReadyCallback& callback);
 
   // Methods to support cross site navigations.
-  void PrepareForCrossSiteTransfer();
+  std::unique_ptr<ServiceWorkerProviderHost> PrepareForCrossSiteTransfer();
   void CompleteCrossSiteTransfer(
       int new_process_id,
       int new_frame_id,
@@ -294,6 +287,12 @@ class CONTENT_EXPORT ServiceWorkerProviderHost
   // cache.
   void NotifyControllerLost();
 
+  // Binds the ServiceWorkerWorkerClient of a dedicated (or shared) worker to
+  // the parent frame's ServiceWorkerProviderHost. (This is used only when
+  // off-main-thread-fetch is enabled.)
+  void BindWorkerFetchContext(
+      mojom::ServiceWorkerWorkerClientAssociatedPtrInfo client_ptr_info);
+
  private:
   friend class ForeignFetchRequestHandlerTest;
   friend class LinkHeaderServiceWorkerTest;
@@ -323,6 +322,14 @@ class CONTENT_EXPORT ServiceWorkerProviderHost
         const GetRegistrationForReadyCallback& callback);
     ~OneShotGetReadyCallback();
   };
+
+  ServiceWorkerProviderHost(int render_process_id,
+                            int route_id,
+                            int provider_id,
+                            ServiceWorkerProviderType provider_type,
+                            bool is_parent_frame_secure,
+                            base::WeakPtr<ServiceWorkerContextCore> context,
+                            ServiceWorkerDispatcherHost* dispatcher_host);
 
   // ServiceWorkerRegistration::Listener overrides.
   void OnVersionAttributesChanged(
@@ -362,6 +369,10 @@ class CONTENT_EXPORT ServiceWorkerProviderHost
                               int frame_routing_id,
                               ServiceWorkerDispatcherHost* dispatcher_host);
 
+  // Clears the information of the ServiceWorkerWorkerClient of dedicated (or
+  // shared) worker, when the connection to the worker is disconnected.
+  void UnregisterWorkerFetchContext(mojom::ServiceWorkerWorkerClient*);
+
   std::string client_uuid_;
   int render_process_id_;
 
@@ -383,7 +394,7 @@ class CONTENT_EXPORT ServiceWorkerProviderHost
   WebContentsGetter web_contents_getter_;
 
   ServiceWorkerProviderType provider_type_;
-  FrameSecurityLevel parent_frame_security_level_;
+  const bool is_parent_frame_secure_;
   GURL document_url_;
   GURL topmost_frame_url_;
 
@@ -406,6 +417,12 @@ class CONTENT_EXPORT ServiceWorkerProviderHost
   bool allow_association_;
 
   std::vector<base::Closure> queued_events_;
+
+  // Keeps ServiceWorkerWorkerClient pointers of dedicated or shared workers
+  // which are associated with the ServiceWorkerProviderHost.
+  std::unordered_map<mojom::ServiceWorkerWorkerClient*,
+                     mojom::ServiceWorkerWorkerClientAssociatedPtr>
+      worker_clients_;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceWorkerProviderHost);
 };

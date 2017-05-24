@@ -16,8 +16,9 @@ WriteFromFileOperation::WriteFromFileOperation(
     base::WeakPtr<OperationManager> manager,
     const ExtensionId& extension_id,
     const base::FilePath& user_file_path,
-    const std::string& device_path)
-    : Operation(manager, extension_id, device_path) {
+    const std::string& device_path,
+    const base::FilePath& download_folder)
+    : Operation(manager, extension_id, device_path, download_folder) {
   image_path_ = user_file_path;
 }
 
@@ -31,16 +32,12 @@ void WriteFromFileOperation::StartImpl() {
   }
 
   BrowserThread::PostTask(
-      BrowserThread::FILE,
-      FROM_HERE,
-      base::Bind(
-          &WriteFromFileOperation::Unzip,
-          this,
+      BrowserThread::FILE, FROM_HERE,
+      base::BindOnce(
+          &WriteFromFileOperation::Unzip, this,
           base::Bind(
-              &WriteFromFileOperation::Write,
-              this,
-              base::Bind(&WriteFromFileOperation::VerifyWrite,
-                         this,
+              &WriteFromFileOperation::Write, this,
+              base::Bind(&WriteFromFileOperation::VerifyWrite, this,
                          base::Bind(&WriteFromFileOperation::Finish, this)))));
 }
 

@@ -62,7 +62,7 @@ public class BrowserStartupController {
     private static BrowserStartupController sInstance;
 
     private static boolean sBrowserMayStartAsynchronously;
-    private static boolean sShouldStartGpuProcessOnBrowserStartup = true;
+    private static boolean sShouldStartGpuProcessOnBrowserStartup;
 
     private static void setAsynchronousStartup(boolean enable) {
         sBrowserMayStartAsynchronously = enable;
@@ -224,6 +224,14 @@ public class BrowserStartupController {
     @VisibleForTesting
     int contentStart() {
         return ContentMain.start();
+    }
+
+    /**
+     * @return Whether the browser process completed successfully.
+     */
+    public boolean isStartupSuccessfullyCompleted() {
+        ThreadUtils.assertOnUiThread();
+        return mStartupDone && mStartupSuccess;
     }
 
     public void addStartupCompletedObserver(StartupCallback callback) {

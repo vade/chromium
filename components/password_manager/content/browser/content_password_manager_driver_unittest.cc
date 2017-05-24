@@ -7,6 +7,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
+#include "base/strings/utf_string_conversions.h"
 #include "components/autofill/content/common/autofill_agent.mojom.h"
 #include "components/autofill/core/browser/test_autofill_client.h"
 #include "components/password_manager/core/browser/stub_log_manager.h"
@@ -21,6 +22,10 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using autofill::PasswordForm;
+using autofill::PasswordFormFillData;
+using base::ASCIIToUTF16;
+using testing::_;
 using testing::Return;
 
 namespace password_manager {
@@ -38,6 +43,9 @@ class MockPasswordManagerClient : public StubPasswordManagerClient {
   ~MockPasswordManagerClient() override = default;
 
   MOCK_CONST_METHOD0(GetLogManager, const LogManager*());
+#if defined(SAFE_BROWSING_DB_LOCAL)
+  MOCK_METHOD2(CheckSafeBrowsingReputation, void(const GURL&, const GURL&));
+#endif
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockPasswordManagerClient);
@@ -54,8 +62,8 @@ class FakePasswordAutofillAgent
   ~FakePasswordAutofillAgent() override {}
 
   void BindRequest(mojo::ScopedMessagePipeHandle handle) {
-    binding_.Bind(mojo::MakeRequest<autofill::mojom::PasswordAutofillAgent>(
-        std::move(handle)));
+    binding_.Bind(
+        autofill::mojom::PasswordAutofillAgentRequest(std::move(handle)));
   }
 
   bool called_set_logging_state() { return called_set_logging_state_; }
@@ -67,12 +75,11 @@ class FakePasswordAutofillAgent
     logging_state_active_ = false;
   }
 
- private:
   // autofill::mojom::PasswordAutofillAgent:
-  void FillPasswordForm(
-      int key,
-      const autofill::PasswordFormFillData& form_data) override {}
+  MOCK_METHOD2(FillPasswordForm,
+               void(int, const autofill::PasswordFormFillData&));
 
+ private:
   void SetLoggingState(bool active) override {
     called_set_logging_state_ = true;
     logging_state_active_ = active;
@@ -82,7 +89,7 @@ class FakePasswordAutofillAgent
       const autofill::FormsPredictionsMap& predictions) override {}
 
   void FindFocusedPasswordForm(
-      const FindFocusedPasswordFormCallback& callback) override {}
+      FindFocusedPasswordFormCallback callback) override {}
 
   // Records whether SetLoggingState() gets called.
   bool called_set_logging_state_;
@@ -91,6 +98,47 @@ class FakePasswordAutofillAgent
 
   mojo::Binding<autofill::mojom::PasswordAutofillAgent> binding_;
 };
+
+PasswordFormFillData GetTestPasswordFormFillData() {
+  // Create the current form on the page.
+  PasswordForm form_on_page;
+  form_on_page.origin = GURL("https://foo.com/");
+  form_on_page.action = GURL("https://foo.com/login");
+  form_on_page.signon_realm = "https://foo.com/";
+  form_on_page.scheme = PasswordForm::SCHEME_HTML;
+
+  // Create an exact match in the database.
+  PasswordForm preferred_match = form_on_page;
+  preferred_match.username_element = ASCIIToUTF16("username");
+  preferred_match.username_value = ASCIIToUTF16("test@gmail.com");
+  preferred_match.password_element = ASCIIToUTF16("password");
+  preferred_match.password_value = ASCIIToUTF16("test");
+  preferred_match.preferred = true;
+
+  std::map<base::string16, const PasswordForm*> matches;
+  PasswordForm non_preferred_match = preferred_match;
+  non_preferred_match.username_value = ASCIIToUTF16("test1@gmail.com");
+  non_preferred_match.password_value = ASCIIToUTF16("test1");
+  matches[non_preferred_match.username_value] = &non_preferred_match;
+
+  PasswordFormFillData result;
+  InitPasswordFormFillData(form_on_page, matches, &preferred_match, true, false,
+                           &result);
+  return result;
+}
+
+MATCHER_P(WerePasswordsCleared,
+          should_preferred_password_cleared,
+          "Passwords not cleared") {
+  if (should_preferred_password_cleared && !arg.password_field.value.empty())
+    return false;
+
+  for (auto& credentials : arg.additional_logins)
+    if (!credentials.second.password.empty())
+      return false;
+
+  return true;
+}
 
 }  // namespace
 
@@ -131,16 +179,14 @@ class ContentPasswordManagerDriverTest
   FakePasswordAutofillAgent fake_agent_;
 };
 
-TEST_P(ContentPasswordManagerDriverTest,
-       AnswerToNotificationsAboutLoggingState) {
+TEST_P(ContentPasswordManagerDriverTest, SendLoggingStateInCtor) {
   const bool should_allow_logging = GetParam();
+  EXPECT_CALL(log_manager_, IsLoggingActive())
+      .WillRepeatedly(Return(should_allow_logging));
   std::unique_ptr<ContentPasswordManagerDriver> driver(
       new ContentPasswordManagerDriver(main_rfh(), &password_manager_client_,
                                        &autofill_client_));
 
-  EXPECT_CALL(log_manager_, IsLoggingActive())
-      .WillRepeatedly(Return(should_allow_logging));
-  driver->SendLoggingAvailability();
   if (should_allow_logging) {
     bool logging_activated = false;
     EXPECT_TRUE(WasLoggingActivationMessageSent(&logging_activated));
@@ -152,20 +198,22 @@ TEST_P(ContentPasswordManagerDriverTest,
   }
 }
 
-TEST_P(ContentPasswordManagerDriverTest, AnswerToIPCPingsAboutLoggingState) {
+TEST_P(ContentPasswordManagerDriverTest, SendLoggingStateAfterLogManagerReady) {
   const bool should_allow_logging = GetParam();
+  EXPECT_CALL(password_manager_client_, GetLogManager())
+      .WillOnce(Return(nullptr));
   std::unique_ptr<ContentPasswordManagerDriver> driver(
       new ContentPasswordManagerDriver(main_rfh(), &password_manager_client_,
                                        &autofill_client_));
+  // Because log manager is not ready yet, should have no logging state sent.
+  EXPECT_FALSE(WasLoggingActivationMessageSent(nullptr));
 
+  // Log manager is ready, send logging state actually.
+  EXPECT_CALL(password_manager_client_, GetLogManager())
+      .WillOnce(Return(&log_manager_));
   EXPECT_CALL(log_manager_, IsLoggingActive())
       .WillRepeatedly(Return(should_allow_logging));
   driver->SendLoggingAvailability();
-  WasLoggingActivationMessageSent(nullptr);
-
-  // Ping the driver for logging activity update.
-  driver->PasswordAutofillAgentConstructed();
-
   bool logging_activated = false;
   EXPECT_TRUE(WasLoggingActivationMessageSent(&logging_activated));
   EXPECT_EQ(should_allow_logging, logging_activated);
@@ -365,6 +413,30 @@ TEST_F(ContentPasswordManagerDriverTest,
   EXPECT_TRUE(!!(entry->GetSSL().content_status &
                  content::SSLStatus::DISPLAYED_PASSWORD_FIELD_ON_HTTP));
 }
+
+TEST_F(ContentPasswordManagerDriverTest, ClearPasswordsOnAutofill) {
+  std::unique_ptr<ContentPasswordManagerDriver> driver(
+      new ContentPasswordManagerDriver(main_rfh(), &password_manager_client_,
+                                       &autofill_client_));
+
+  for (bool wait_for_username : {false, true}) {
+    PasswordFormFillData fill_data = GetTestPasswordFormFillData();
+    fill_data.wait_for_username = wait_for_username;
+    EXPECT_CALL(fake_agent_,
+                FillPasswordForm(_, WerePasswordsCleared(wait_for_username)));
+    driver->FillPasswordForm(fill_data);
+  }
+}
+
+#if defined(SAFE_BROWSING_DB_LOCAL)
+TEST_F(ContentPasswordManagerDriverTest, CheckSafeBrowsingReputationCalled) {
+  std::unique_ptr<ContentPasswordManagerDriver> driver(
+      new ContentPasswordManagerDriver(main_rfh(), &password_manager_client_,
+                                       &autofill_client_));
+  EXPECT_CALL(password_manager_client_, CheckSafeBrowsingReputation(_, _));
+  driver->CheckSafeBrowsingReputation(GURL(), GURL());
+}
+#endif
 
 INSTANTIATE_TEST_CASE_P(,
                         ContentPasswordManagerDriverTest,

@@ -6,7 +6,11 @@ package org.chromium.chrome.browser.download.ui;
 
 import android.text.TextUtils;
 
+import org.chromium.chrome.browser.widget.DateDividedAdapter.TimedItem;
+
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -25,22 +29,15 @@ public abstract class BackendItems extends ArrayList<DownloadHistoryItemWrapper>
      */
     public long getTotalBytes() {
         long totalSize = 0;
+        HashSet<String> filePaths = new HashSet<>();
         for (DownloadHistoryItemWrapper item : this) {
-            if (item.isVisibleToUser(DownloadFilter.FILTER_ALL)) totalSize += item.getFileSize();
+            String path = item.getFilePath();
+            if (item.isVisibleToUser(DownloadFilter.FILTER_ALL) && !filePaths.contains(path)) {
+                totalSize += item.getFileSize();
+            }
+            if (!path.isEmpty()) filePaths.add(path);
         }
         return totalSize;
-    }
-
-    /**
-     * Filters out items that are displayed in this list for the current filter.
-     *
-     * @param filterType    Filter to use.
-     * @param filteredItems List for appending items that match the filter.
-     */
-    public void filter(int filterType, BackendItems filteredItems) {
-        for (DownloadHistoryItemWrapper item : this) {
-            if (item.isVisibleToUser(filterType)) filteredItems.add(item);
-        }
     }
 
     /**
@@ -49,7 +46,12 @@ public abstract class BackendItems extends ArrayList<DownloadHistoryItemWrapper>
      * @param query         The text to match.
      * @param filteredItems List for appending items that match the filter.
      */
-    public void filter(int filterType, String query, BackendItems filteredItems) {
+    public void filter(int filterType, String query, List<TimedItem> filteredItems) {
+        if (TextUtils.isEmpty(query)) {
+            filter(filterType, filteredItems);
+            return;
+        }
+
         for (DownloadHistoryItemWrapper item : this) {
             query = query.toLowerCase(Locale.getDefault());
             Locale locale = Locale.getDefault();
@@ -90,5 +92,17 @@ public abstract class BackendItems extends ArrayList<DownloadHistoryItemWrapper>
 
     public void setIsInitialized() {
         mIsInitialized = true;
+    }
+
+    /**
+     * Filters out items that are displayed in this list for the current filter.
+     *
+     * @param filterType    Filter to use.
+     * @param filteredItems List for appending items that match the filter.
+     */
+    private void filter(int filterType, List<TimedItem> filteredItems) {
+        for (DownloadHistoryItemWrapper item : this) {
+            if (item.isVisibleToUser(filterType)) filteredItems.add(item);
+        }
     }
 }

@@ -7,7 +7,7 @@
 #include <sys/socket.h>
 #include <vector>
 
-#include "ash/common/ash_switches.h"
+#include "ash/ash_switches.h"
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/macros.h"
@@ -104,6 +104,7 @@ void DeriveCommandLine(const GURL& start_url,
     ::switches::kDisableTouchDragDrop,
     ::switches::kDisableZeroCopy,
     ::switches::kEnableBlinkFeatures,
+    ::switches::kEnableColorCorrectRendering,
     ::switches::kDisableDisplayList2dCanvas,
     ::switches::kEnableDisplayList2dCanvas,
     ::switches::kForceDisplayList2dCanvas,
@@ -129,6 +130,7 @@ void DeriveCommandLine(const GURL& start_url,
     ::switches::kEnableZeroCopy,
 #if defined(USE_OZONE)
     ::switches::kExtraTouchNoiseFiltering,
+    ::switches::kEdgeTouchFiltering,
 #endif
     ::switches::kHostWindowBounds,
     ::switches::kMainFrameResizesAreOrientationChanges,
@@ -180,7 +182,7 @@ void DeriveCommandLine(const GURL& start_url,
     app_list::switches::kDisableSyncAppList,
     app_list::switches::kEnableSyncAppList,
     ash::switches::kAshEnableTouchView,
-    ash::switches::kAshEnablePalette,
+    ash::switches::kAshForceEnableStylusTools,
     ash::switches::kAshEnablePaletteOnAllDisplays,
     ash::switches::kAshTouchHud,
     ash::switches::kAuraLegacyPowerButton,
@@ -191,16 +193,12 @@ void DeriveCommandLine(const GURL& start_url,
     // Please keep these in alphabetical order. Non-UI Compositor switches
     // here should also be added to
     // content/browser/renderer_host/render_process_host_impl.cc.
-    cc::switches::kCheckTilePriorityInversion,
-    cc::switches::kDisableCachedPictureRaster,
     cc::switches::kDisableCompositedAntialiasing,
     cc::switches::kDisableMainFrameBeforeActivation,
     cc::switches::kDisableThreadedAnimation,
-    cc::switches::kEnableColorCorrectRendering,
     cc::switches::kEnableGpuBenchmarking,
     cc::switches::kEnableLayerLists,
     cc::switches::kEnableMainFrameBeforeActivation,
-    cc::switches::kEnableTrueColorRendering,
     cc::switches::kShowCompositedLayerBorders,
     cc::switches::kShowFPSCounter,
     cc::switches::kShowLayerAnimationBounds,
@@ -210,6 +208,7 @@ void DeriveCommandLine(const GURL& start_url,
     cc::switches::kSlowDownRasterScaleFactor,
     cc::switches::kUIEnableLayerLists,
     cc::switches::kUIShowFPSCounter,
+    chromeos::switches::kArcAvailability,
     chromeos::switches::kArcAvailable,
     chromeos::switches::kDbusStub,
     chromeos::switches::kDisableArcDataWipe,
@@ -221,6 +220,8 @@ void DeriveCommandLine(const GURL& start_url,
     chromeos::switches::kHasChromeOSDiamondKey,
     chromeos::switches::kLoginProfile,
     chromeos::switches::kNaturalScrollDefault,
+    chromeos::switches::kShowMdLogin,
+    chromeos::switches::kShowNonViewMdLogin,
     chromeos::switches::kSystemInDevMode,
     policy::switches::kDeviceManagementUrl,
     wm::switches::kWindowAnimationsDisabled,

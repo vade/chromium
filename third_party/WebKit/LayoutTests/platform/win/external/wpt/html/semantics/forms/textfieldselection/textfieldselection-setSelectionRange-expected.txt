@@ -14,8 +14,8 @@ FAIL input direction of setSelectionRange(0,1,"none") assert_equals: The directi
 FAIL input direction of setSelectionRange(0,1,"hoge") assert_equals: otherwise expected "none" but got "forward"
 FAIL input direction of setSelectionRange(0,1,"BACKWARD") assert_equals: selectionDirection should be 'none' expected "none" but got "forward"
 FAIL input direction of setSelectionRange(0,1) assert_equals: if the argument is omitted expected "none" but got "forward"
-FAIL input setSelectionRange(1,-1) assert_equals: element.selectionStart should be 1 expected 1 but got 0
-FAIL input setSelectionRange(-1,1) assert_equals: ECMAScript conversion to unsigned long + if end is less than or equal to start then the start of the selection and the end of the selection must both be placed immediately before the character with offset end expected 1 but got 0
+PASS input setSelectionRange(1,-1) 
+PASS input setSelectionRange(-1,1) 
 PASS input setSelectionRange("string",1) 
 PASS input setSelectionRange(true,1) 
 PASS input setSelectionRange([],1) 
@@ -23,6 +23,8 @@ PASS input setSelectionRange({},1)
 PASS input setSelectionRange(NaN,1) 
 PASS input setSelectionRange(null,1) 
 PASS input setSelectionRange(undefined,1) 
+PASS input setSelectionRange(Math.pow(2,32) - 2, Math.pow(2,32) - 1) 
+PASS input setSelectionRange(Math.pow(2,31), Math.pow(2,32) - 1) 
 PASS input setSelectionRange fires a select event 
 PASS test of textarea.setSelectionRange 
 PASS textarea typeof(input.setSelectionRange)' 
@@ -44,6 +46,7 @@ PASS textarea setSelectionRange({},1)
 PASS textarea setSelectionRange(NaN,1) 
 PASS textarea setSelectionRange(null,1) 
 PASS textarea setSelectionRange(undefined,1) 
-PASS textarea setSelectionRange fires a select event 
+PASS textarea setSelectionRange(Math.pow(2,32) - 2, Math.pow(2,32) - 1) 
+PASS textarea setSelectionRange(Math.pow(2,31), Math.pow(2,32) - 1) 
 Harness: the test ran to completion.
 

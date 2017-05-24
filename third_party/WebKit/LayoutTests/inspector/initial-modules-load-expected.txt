@@ -6,16 +6,22 @@ Loaded modules:
     bindings
     common
     components
+    console_model
     dom_extension
     emulation
     extensions
+    help
     host
     main
+    network_conditions
+    network_log
     persistence
     platform
+    product_registry
     protocol
     sdk
     services
+    text_utils
     ui
     workspace
 
@@ -25,18 +31,26 @@ Loaded modules:
     color_picker
     common
     components
+    console_model
     dom_extension
     elements
     emulation
+    event_listeners
     extensions
+    help
     host
     inline_editor
     main
+    network_conditions
+    network_log
+    object_ui
     persistence
     platform
+    product_registry
     protocol
     sdk
     services
+    text_utils
     ui
     workspace
 
@@ -48,27 +62,36 @@ Loaded modules:
     color_picker
     common
     components
+    console_model
     cookie_table
     data_grid
     diff
     dom_extension
     elements
     emulation
+    event_listeners
     extensions
+    help
     host
     inline_editor
     main
     network
+    network_conditions
+    network_log
+    object_ui
     perf_ui
     persistence
     platform
+    product_registry
     protocol
     sdk
     services
     source_frame
     text_editor
+    text_utils
     ui
     workspace
+    workspace_diff
 
 Running: testShowSourcesPanel
 Loaded modules:
@@ -78,20 +101,27 @@ Loaded modules:
     color_picker
     common
     components
+    console_model
     cookie_table
     data_grid
     diff
     dom_extension
     elements
     emulation
+    event_listeners
     extensions
+    help
     host
     inline_editor
     main
     network
+    network_conditions
+    network_log
+    object_ui
     perf_ui
     persistence
     platform
+    product_registry
     protocol
     quick_open
     sdk
@@ -100,8 +130,10 @@ Loaded modules:
     source_frame
     sources
     text_editor
+    text_utils
     ui
     workspace
+    workspace_diff
 
 Running: testOpenUISourceCode
 Loaded modules:
@@ -111,20 +143,27 @@ Loaded modules:
     color_picker
     common
     components
+    console_model
     cookie_table
     data_grid
     diff
     dom_extension
     elements
     emulation
+    event_listeners
     extensions
+    help
     host
     inline_editor
     main
     network
+    network_conditions
+    network_log
+    object_ui
     perf_ui
     persistence
     platform
+    product_registry
     protocol
     quick_open
     sdk
@@ -133,6 +172,8 @@ Loaded modules:
     source_frame
     sources
     text_editor
+    text_utils
     ui
     workspace
+    workspace_diff
 

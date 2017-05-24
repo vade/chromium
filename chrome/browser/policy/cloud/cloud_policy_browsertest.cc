@@ -14,6 +14,7 @@
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -154,11 +155,11 @@ void GetExpectedTestPolicy(PolicyMap* expected, const char* homepage) {
   GetExpectedDefaultPolicy(expected);
 
   expected->Set(key::kShowHomeButton, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-                POLICY_SOURCE_CLOUD,
-                base::MakeUnique<base::FundamentalValue>(true), nullptr);
+                POLICY_SOURCE_CLOUD, base::MakeUnique<base::Value>(true),
+                nullptr);
   expected->Set(key::kRestoreOnStartup, POLICY_LEVEL_MANDATORY,
                 POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                base::MakeUnique<base::FundamentalValue>(4), nullptr);
+                base::MakeUnique<base::Value>(4), nullptr);
   base::ListValue list;
   list.AppendString("dev.chromium.org");
   list.AppendString("youtube.com");
@@ -166,10 +167,10 @@ void GetExpectedTestPolicy(PolicyMap* expected, const char* homepage) {
                 POLICY_SOURCE_CLOUD, list.CreateDeepCopy(), nullptr);
   expected->Set(key::kMaxInvalidationFetchDelay, POLICY_LEVEL_MANDATORY,
                 POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                base::MakeUnique<base::FundamentalValue>(1000), nullptr);
+                base::MakeUnique<base::Value>(1000), nullptr);
   expected->Set(key::kHomepageLocation, POLICY_LEVEL_RECOMMENDED,
                 POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                base::MakeUnique<base::StringValue>(homepage), nullptr);
+                base::MakeUnique<base::Value>(homepage), nullptr);
 }
 
 }  // namespace
@@ -282,6 +283,7 @@ class CloudPolicyTest : public InProcessBrowserTest,
   }
 
   void SetServerPolicy(const std::string& policy) {
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
     int result = base::WriteFile(policy_file_path(), policy.data(),
                                  policy.size());
     ASSERT_EQ(base::checked_cast<int>(policy.size()), result);

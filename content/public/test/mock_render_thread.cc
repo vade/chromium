@@ -18,9 +18,7 @@
 #include "ipc/ipc_message_utils.h"
 #include "ipc/ipc_sync_message.h"
 #include "ipc/message_filter.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
-#include "services/service_manager/public/interfaces/interface_provider_spec.mojom.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/web/WebScriptController.h"
 
@@ -35,30 +33,14 @@ class MockRenderMessageFilterImpl : public mojom::RenderMessageFilter {
   ~MockRenderMessageFilterImpl() override {}
 
   // mojom::RenderMessageFilter:
-  void GenerateRoutingID(const GenerateRoutingIDCallback& callback) override {
+  void GenerateRoutingID(GenerateRoutingIDCallback callback) override {
     NOTREACHED();
-    callback.Run(MSG_ROUTING_NONE);
-  }
-
-  void CreateNewWindow(mojom::CreateNewWindowParamsPtr params,
-                       const CreateNewWindowCallback& callback) override {
-    // NOTE: This implementation of mojom::RenderMessageFilter is used client-
-    // side only. Because sync mojom methods have a different interface for
-    // bindings- and client-side, we only implement the client-side interface
-    // on this object.
-    NOTREACHED();
-  }
-
-  bool CreateNewWindow(mojom::CreateNewWindowParamsPtr params,
-                       mojom::CreateNewWindowReplyPtr* reply) override {
-    *reply = mojom::CreateNewWindowReply::New();
-    thread_->OnCreateWindow(*params, reply->get());
-    return true;
+    std::move(callback).Run(MSG_ROUTING_NONE);
   }
 
   void CreateNewWidget(int32_t opener_id,
-                      blink::WebPopupType popup_type,
-                      const CreateNewWidgetCallback& callback) override {
+                       blink::WebPopupType popup_type,
+                       CreateNewWidgetCallback callback) override {
     // See comment in CreateNewWindow().
     NOTREACHED();
   }
@@ -72,16 +54,12 @@ class MockRenderMessageFilterImpl : public mojom::RenderMessageFilter {
 
   void CreateFullscreenWidget(
       int opener_id,
-      const CreateFullscreenWidgetCallback& callback) override {
+      CreateFullscreenWidgetCallback callback) override {
     NOTREACHED();
   }
 
-  void AllocatedSharedBitmap(mojo::ScopedSharedBufferHandle buffer,
-                             const cc::SharedBitmapId& id) override {
-    NOTREACHED();
-  }
-
-  void DeletedSharedBitmap(const cc::SharedBitmapId& id) override {
+  void GetSharedBitmapManager(
+      cc::mojom::SharedBitmapManagerAssociatedRequest request) override {
     NOTREACHED();
   }
 
@@ -218,7 +196,7 @@ cc::SharedBitmapManager* MockRenderThread::GetSharedBitmapManager() {
 }
 
 void MockRenderThread::RegisterExtension(v8::Extension* extension) {
-  blink::WebScriptController::registerExtension(extension);
+  blink::WebScriptController::RegisterExtension(extension);
 }
 
 void MockRenderThread::ScheduleIdleHandler(int64_t initial_delay_ms) {}
@@ -272,25 +250,16 @@ ServiceManagerConnection* MockRenderThread::GetServiceManagerConnection() {
   return nullptr;
 }
 
-service_manager::InterfaceRegistry* MockRenderThread::GetInterfaceRegistry() {
-  if (!interface_registry_) {
-    interface_registry_ = base::MakeUnique<service_manager::InterfaceRegistry>(
-        service_manager::mojom::kServiceManager_ConnectorSpec);
+service_manager::Connector* MockRenderThread::GetConnector() {
+  if (!connector_) {
+    connector_ =
+        service_manager::Connector::Create(&pending_connector_request_);
   }
-  return interface_registry_.get();
+  return connector_.get();
 }
 
-service_manager::InterfaceProvider* MockRenderThread::GetRemoteInterfaces() {
-  if (!remote_interfaces_) {
-    service_manager::mojom::InterfaceProviderPtr remote_interface_provider;
-    pending_remote_interface_provider_request_ =
-        MakeRequest(&remote_interface_provider);
-    remote_interfaces_.reset(new service_manager::InterfaceProvider);
-    remote_interfaces_->Bind(std::move(remote_interface_provider));
-  }
-  return remote_interfaces_.get();
-}
-
+void MockRenderThread::SetFieldTrialGroup(const std::string& trial_name,
+                                          const std::string& group_name) {}
 void MockRenderThread::SendCloseMessage() {
   ViewMsg_Close msg(routing_id_);
   RenderViewImpl::FromRoutingID(routing_id_)->OnMessageReceived(msg);

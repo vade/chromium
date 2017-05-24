@@ -32,9 +32,7 @@
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
-#include "content/common/child_process_sandbox_support_impl_linux.h"
 #include "content/common/sandbox_linux/sandbox_linux.h"
-#include "content/common/set_process_title.h"
 #include "content/common/zygote_commands_linux.h"
 #include "content/public/common/content_descriptors.h"
 #include "content/public/common/mojo_channel_switches.h"
@@ -45,6 +43,7 @@
 #include "ipc/ipc_channel.h"
 #include "sandbox/linux/services/credentials.h"
 #include "sandbox/linux/services/namespace_sandbox.h"
+#include "services/service_manager/embedder/set_process_title.h"
 
 // See https://chromium.googlesource.com/chromium/src/+/master/docs/linux_zygote.md
 
@@ -91,7 +90,7 @@ void KillAndReap(pid_t pid, ZygoteForkDelegate* helper) {
 }  // namespace
 
 Zygote::Zygote(int sandbox_flags,
-               ScopedVector<ZygoteForkDelegate> helpers,
+               std::vector<std::unique_ptr<ZygoteForkDelegate>> helpers,
                const std::vector<base::ProcessHandle>& extra_children,
                const std::vector<int>& extra_fds)
     : sandbox_flags_(sandbox_flags),
@@ -418,11 +417,9 @@ int Zygote::ForkWithRealPid(const std::string& process_type,
                             int* uma_sample,
                             int* uma_boundary_value) {
   ZygoteForkDelegate* helper = NULL;
-  for (ScopedVector<ZygoteForkDelegate>::iterator i = helpers_.begin();
-       i != helpers_.end();
-       ++i) {
+  for (auto i = helpers_.begin(); i != helpers_.end(); ++i) {
     if ((*i)->CanHelp(process_type, uma_name, uma_sample, uma_boundary_value)) {
-      helper = *i;
+      helper = i->get();
       break;
     }
   }
@@ -624,7 +621,7 @@ base::ProcessId Zygote::ReadArgsAndFork(base::PickleIterator iter,
     // Update the process title. The argv was already cached by the call to
     // SetProcessTitleFromCommandLine in ChromeMain, so we can pass NULL here
     // (we don't have the original argv at this point).
-    SetProcessTitleFromCommandLine(NULL);
+    service_manager::SetProcessTitleFromCommandLine(nullptr);
   } else if (child_pid < 0) {
     LOG(ERROR) << "Zygote could not fork: process_type " << process_type
         << " numfds " << numfds << " child_pid " << child_pid;

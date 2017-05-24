@@ -38,7 +38,7 @@
     [ImplementedAs=getNodeType] readonly attribute unsigned short nodeType;
     readonly attribute DOMString nodeName;
 
-    readonly attribute DOMString? baseURI;
+    readonly attribute USVString baseURI;
 
     [Measure] readonly attribute boolean isConnected;
     [PerWorldBindings] readonly attribute Document? ownerDocument;
@@ -57,7 +57,7 @@
     [CEReactions, CustomElementCallbacks] attribute DOMString? textContent;
     [CEReactions, CustomElementCallbacks] void normalize();
 
-    [NewObject, DoNotTestNewObject, CEReactions, CustomElementCallbacks] Node cloneNode(optional boolean deep = false);
+    [NewObject, DoNotTestNewObject, CEReactions, CustomElementCallbacks, RaisesException] Node cloneNode(optional boolean deep = false);
     boolean isEqualNode(Node? otherNode);
     boolean isSameNode(Node? otherNode); // historical alias of ===
 

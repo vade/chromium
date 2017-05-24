@@ -12,13 +12,13 @@
 
 // Type of HTTP cache; public interface to private implementation defined in
 // URLRequestContextConfig class.
-enum HttpCacheType {
+typedef NS_ENUM(NSInteger, CRNHttpCacheType) {
   // Disabled HTTP cache.  Some data may still be temporarily stored in memory.
-  DISABLED,
+  CRNHttpCacheTypeDisabled,
   // Enable on-disk HTTP cache, including HTTP data.
-  DISK,
+  CRNHttpCacheTypeDisk,
   // Enable in-memory cache, including HTTP data.
-  MEMORY,
+  CRNHttpCacheTypeMemory,
 };
 
 // A block, that takes a request, and returns YES if the request should
@@ -31,6 +31,10 @@ typedef BOOL (^RequestFilterBlock)(NSURLRequest* request);
 GRPC_SUPPORT_EXPORT
 @interface Cronet : NSObject
 
+// Sets the HTTP Accept-Language header.  This method only has any effect before
+// |start| is called.
++ (void)setAcceptLanguages:(NSString*)acceptLanguages;
+
 // Sets whether HTTP/2 should be supported by CronetEngine. This method only has
 // any effect before |start| is called.
 + (void)setHttp2Enabled:(BOOL)http2Enabled;
@@ -42,11 +46,16 @@ GRPC_SUPPORT_EXPORT
 // Set HTTP Cache type to be used by CronetEngine.  This method only has any
 // effect before |start| is called.  See HttpCacheType enum for available
 // options.
-+ (void)setHttpCacheType:(HttpCacheType)httpCacheType;
++ (void)setHttpCacheType:(CRNHttpCacheType)httpCacheType;
 
 // Adds hint that host supports QUIC on altPort. This method only has any effect
 // before |start| is called.
 + (void)addQuicHint:(NSString*)host port:(int)port altPort:(int)altPort;
+
+// Set experimental Cronet options.  Argument is a JSON string; see
+// |URLRequestContextConfig| for more details.  This method only has
+// any effect before |start| is called.
++ (void)setExperimentalOptions:(NSString*)experimentalOptions;
 
 // Sets the User-Agent request header string to be sent with all requests.
 // If |partial| is set to YES, then actual user agent value is based on device

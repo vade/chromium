@@ -18,6 +18,7 @@
 #include "ui/events/base_event_utils.h"
 #include "ui/events/event.h"
 #include "ui/events/keycodes/keyboard_codes.h"
+#include "ui/gfx/range/range.h"
 
 namespace arc {
 
@@ -74,6 +75,8 @@ ArcImeService::~ArcImeService() {
   if (input_method)
     input_method->DetachTextInputClient(this);
 
+  if (focused_arc_window_)
+    focused_arc_window_->RemoveObserver(this);
   if (is_focus_observer_installed_)
     arc_window_delegate_->UnregisterFocusObserver();
   aura::Env* env = aura::Env::GetInstanceDontCreate();
@@ -99,16 +102,18 @@ void ArcImeService::SetInputMethodForTesting(
 
 void ArcImeService::SetArcWindowDelegateForTesting(
     std::unique_ptr<ArcWindowDelegate> delegate) {
-  arc_window_delegate_= std::move(delegate);
+  arc_window_delegate_ = std::move(delegate);
 }
 
 ui::InputMethod* ArcImeService::GetInputMethod() {
-  if (focused_arc_window_.windows().empty())
+  if (!focused_arc_window_)
     return nullptr;
 
   if (test_input_method_)
     return test_input_method_;
-  return focused_arc_window_.windows().front()->GetHost()->GetInputMethod();
+
+  DCHECK(focused_arc_window_->GetHost());
+  return focused_arc_window_->GetHost()->GetInputMethod();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -131,6 +136,23 @@ void ArcImeService::OnWindowInitialized(aura::Window* new_window) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// Overridden from aura::WindowObserver:
+
+void ArcImeService::OnWindowDestroying(aura::Window* window) {
+  // This shouldn't be reached on production, since the window lost the focus
+  // and called OnWindowFocused() before destroying.
+  // But we handle this case for testing.
+  DCHECK_EQ(window, focused_arc_window_);
+  OnWindowFocused(nullptr, focused_arc_window_);
+}
+
+void ArcImeService::OnWindowRemovingFromRootWindow(aura::Window* window,
+                                                   aura::Window* new_root) {
+  DCHECK_EQ(window, focused_arc_window_);
+  OnWindowFocused(nullptr, focused_arc_window_);
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Overridden from exo::WMHelper::FocusChangeObserver:
 
 void ArcImeService::OnWindowFocused(aura::Window* gained_focus,
@@ -138,7 +160,7 @@ void ArcImeService::OnWindowFocused(aura::Window* gained_focus,
   if (lost_focus == gained_focus)
     return;
 
-  const bool detach = (lost_focus && focused_arc_window_.Contains(lost_focus));
+  const bool detach = (lost_focus && focused_arc_window_ == lost_focus);
   const bool attach =
       (gained_focus && arc_window_delegate_->IsArcWindow(gained_focus));
 
@@ -151,10 +173,15 @@ void ArcImeService::OnWindowFocused(aura::Window* gained_focus,
   // must call the method before updating the forcused ARC window.
   ui::InputMethod* const detaching_ime = detach ? GetInputMethod() : nullptr;
 
-  if (detach)
-    focused_arc_window_.Remove(lost_focus);
-  if (attach)
-    focused_arc_window_.Add(gained_focus);
+  if (detach) {
+    focused_arc_window_->RemoveObserver(this);
+    focused_arc_window_ = nullptr;
+  }
+  if (attach) {
+    DCHECK_EQ(nullptr, focused_arc_window_);
+    focused_arc_window_ = gained_focus;
+    focused_arc_window_->AddObserver(this);
+  }
 
   ui::InputMethod* const attaching_ime = attach ? GetInputMethod() : nullptr;
 
@@ -183,6 +210,7 @@ void ArcImeService::OnTextInputTypeChanged(ui::TextInputType type) {
 }
 
 void ArcImeService::OnCursorRectChanged(const gfx::Rect& rect) {
+  InvalidateSurroundingTextAndSelectionRange();
   if (cursor_rect_ == rect)
     return;
   cursor_rect_ = rect;
@@ -193,6 +221,7 @@ void ArcImeService::OnCursorRectChanged(const gfx::Rect& rect) {
 }
 
 void ArcImeService::OnCancelComposition() {
+  InvalidateSurroundingTextAndSelectionRange();
   ui::InputMethod* const input_method = GetInputMethod();
   if (input_method)
     input_method->CancelComposition(this);
@@ -205,12 +234,30 @@ void ArcImeService::ShowImeIfNeeded() {
   }
 }
 
+void ArcImeService::OnCursorRectChangedWithSurroundingText(
+    const gfx::Rect& rect,
+    const gfx::Range& text_range,
+    const base::string16& text_in_range,
+    const gfx::Range& selection_range) {
+  text_range_ = text_range;
+  text_in_range_ = text_in_range;
+  selection_range_ = selection_range;
+
+  if (cursor_rect_ == rect)
+    return;
+  cursor_rect_ = rect;
+
+  ui::InputMethod* const input_method = GetInputMethod();
+  if (input_method)
+    input_method->OnCaretBoundsChanged(this);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Overridden from keyboard::KeyboardControllerObserver
 void ArcImeService::OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) {
-  if (focused_arc_window_.windows().empty())
+  if (!focused_arc_window_)
     return;
-  aura::Window* window = focused_arc_window_.windows().front();
+  aura::Window* window = focused_arc_window_;
   // Multiply by the scale factor. To convert from DPI to physical pixels.
   gfx::Rect bounds_in_px = gfx::ScaleToEnclosingRect(
       new_bounds, window->layer()->device_scale_factor());
@@ -224,16 +271,19 @@ void ArcImeService::OnKeyboardClosed() {}
 
 void ArcImeService::SetCompositionText(
     const ui::CompositionText& composition) {
+  InvalidateSurroundingTextAndSelectionRange();
   has_composition_text_ = !composition.text.empty();
   ime_bridge_->SendSetCompositionText(composition);
 }
 
 void ArcImeService::ConfirmCompositionText() {
+  InvalidateSurroundingTextAndSelectionRange();
   has_composition_text_ = false;
   ime_bridge_->SendConfirmCompositionText();
 }
 
 void ArcImeService::ClearCompositionText() {
+  InvalidateSurroundingTextAndSelectionRange();
   if (has_composition_text_) {
     has_composition_text_ = false;
     ime_bridge_->SendInsertText(base::string16());
@@ -241,6 +291,7 @@ void ArcImeService::ClearCompositionText() {
 }
 
 void ArcImeService::InsertText(const base::string16& text) {
+  InvalidateSurroundingTextAndSelectionRange();
   has_composition_text_ = false;
   ime_bridge_->SendInsertText(text);
 }
@@ -251,6 +302,8 @@ void ArcImeService::InsertChar(const ui::KeyEvent& event) {
   // ARC we are only interested in the event as a method of text input.
   if (ime_type_ == ui::TEXT_INPUT_TYPE_NONE)
     return;
+
+  InvalidateSurroundingTextAndSelectionRange();
 
   // For apps that doesn't handle hardware keyboard events well, keys that are
   // typically on software keyboard and lack of them are fatal, namely,
@@ -289,9 +342,9 @@ ui::TextInputType ArcImeService::GetTextInputType() const {
 }
 
 gfx::Rect ArcImeService::GetCaretBounds() const {
-  if (focused_arc_window_.windows().empty())
+  if (!focused_arc_window_)
     return gfx::Rect();
-  aura::Window* window = focused_arc_window_.windows().front();
+  aura::Window* window = focused_arc_window_;
 
   // |cursor_rect_| holds the rectangle reported from ARC apps, in the "screen
   // coordinates" in ARC, counted by physical pixels.
@@ -311,6 +364,32 @@ gfx::Rect ArcImeService::GetCaretBounds() const {
   return converted;
 }
 
+bool ArcImeService::GetTextRange(gfx::Range* range) const {
+  if (!text_range_.IsValid())
+    return false;
+  *range = text_range_;
+  return true;
+}
+
+bool ArcImeService::GetSelectionRange(gfx::Range* range) const {
+  if (!selection_range_.IsValid())
+    return false;
+  *range = selection_range_;
+  return true;
+}
+
+bool ArcImeService::GetTextFromRange(const gfx::Range& range,
+                                     base::string16* text) const {
+  // It's supposed that this method is called only from
+  // InputMethod::OnCaretBoundsChanged(). In that method, the range obtained
+  // from GetTextRange() is used as the argument of this method. To prevent an
+  // unexpected usage, the check, |range != text_range_|, is added.
+  if (!text_range_.IsValid() || range != text_range_)
+    return false;
+  *text = text_in_range_;
+  return true;
+}
+
 ui::TextInputMode ArcImeService::GetTextInputMode() const {
   return ui::TEXT_INPUT_MODE_DEFAULT;
 }
@@ -320,6 +399,7 @@ base::i18n::TextDirection ArcImeService::GetTextDirection() const {
 }
 
 void ArcImeService::ExtendSelectionAndDelete(size_t before, size_t after) {
+  InvalidateSurroundingTextAndSelectionRange();
   ime_bridge_->SendExtendSelectionAndDelete(before, after);
 }
 
@@ -340,15 +420,7 @@ bool ArcImeService::HasCompositionText() const {
   return has_composition_text_;
 }
 
-bool ArcImeService::GetTextRange(gfx::Range* range) const {
-  return false;
-}
-
 bool ArcImeService::GetCompositionTextRange(gfx::Range* range) const {
-  return false;
-}
-
-bool ArcImeService::GetSelectionRange(gfx::Range* range) const {
   return false;
 }
 
@@ -360,11 +432,6 @@ bool ArcImeService::DeleteRange(const gfx::Range& range) {
   return false;
 }
 
-bool ArcImeService::GetTextFromRange(
-    const gfx::Range& range, base::string16* text) const {
-  return false;
-}
-
 bool ArcImeService::ChangeTextDirectionAndLayoutAlignment(
     base::i18n::TextDirection direction) {
   return false;
@@ -373,6 +440,12 @@ bool ArcImeService::ChangeTextDirectionAndLayoutAlignment(
 bool ArcImeService::IsTextEditCommandEnabled(
     ui::TextEditCommand command) const {
   return false;
+}
+
+void ArcImeService::InvalidateSurroundingTextAndSelectionRange() {
+  text_range_ = gfx::Range::InvalidRange();
+  text_in_range_ = base::string16();
+  selection_range_ = gfx::Range::InvalidRange();
 }
 
 }  // namespace arc

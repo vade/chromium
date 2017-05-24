@@ -22,6 +22,8 @@
 #include "base/win/registry.h"
 #include "base/win/win_util.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/install_static/install_modes.h"
+#include "chrome/install_static/install_util.h"
 #include "chrome/installer/util/app_registration_data.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/channel_info.h"
@@ -165,24 +167,6 @@ bool InitChannelInfo(bool system_install,
   return channel_info->Initialize(key);
 }
 
-bool GetChromeChannelInternal(bool system_install,
-                              base::string16* channel) {
-  // Shortcut in case this distribution knows what channel it is (canary).
-  if (BrowserDistribution::GetDistribution()->GetChromeChannel(channel))
-    return true;
-
-  installer::ChannelInfo channel_info;
-  if (!InitChannelInfo(system_install, &channel_info)) {
-    channel->assign(installer::kChromeChannelUnknown);
-    return false;
-  }
-
-  if (!channel_info.GetChannelName(channel))
-    channel->assign(installer::kChromeChannelUnknown);
-
-  return true;
-}
-
 #if defined(GOOGLE_CHROME_BUILD)
 // Populates |update_policy| with the UpdatePolicy enum value corresponding to a
 // DWORD read from the registry and returns true if |value| is within range.
@@ -206,16 +190,9 @@ bool GetUpdatePolicyFromDword(
 
 }  // namespace
 
+// TODO(grt): Remove this now that it has no added value.
 bool GoogleUpdateSettings::IsSystemInstall() {
-  bool system_install = false;
-  base::FilePath module_dir;
-  if (!PathService::Get(base::DIR_MODULE, &module_dir)) {
-    LOG(WARNING)
-        << "Failed to get directory of module; assuming per-user install.";
-  } else {
-    system_install = !InstallUtil::IsPerUserInstall(module_dir);
-  }
-  return system_install;
+  return !InstallUtil::IsPerUserInstall();
 }
 
 bool GoogleUpdateSettings::GetCollectStatsConsent() {
@@ -429,12 +406,6 @@ bool GoogleUpdateSettings::UpdateDidRunState(bool did_run) {
                                          did_run ? L"1" : L"0");
 }
 
-base::string16 GoogleUpdateSettings::GetChromeChannel(bool system_install) {
-  base::string16 channel;
-  GetChromeChannelInternal(system_install, &channel);
-  return channel;
-}
-
 void GoogleUpdateSettings::UpdateInstallStatus(bool system_install,
     installer::ArchiveType archive_type, int install_return_code,
     const base::string16& product_guid) {
@@ -583,7 +554,7 @@ bool GoogleUpdateSettings::WriteGoogleUpdateSystemClientKey(
 }
 
 GoogleUpdateSettings::UpdatePolicy GoogleUpdateSettings::GetAppUpdatePolicy(
-    const base::string16& app_guid,
+    base::StringPiece16 app_guid,
     bool* is_overridden) {
   bool found_override = false;
   UpdatePolicy update_policy = kDefaultUpdatePolicy;
@@ -598,7 +569,7 @@ GoogleUpdateSettings::UpdatePolicy GoogleUpdateSettings::GetAppUpdatePolicy(
           ERROR_SUCCESS) {
     DWORD value = 0;
     base::string16 app_update_override(kUpdateOverrideValuePrefix);
-    app_update_override.append(app_guid);
+    app_guid.AppendToString(&app_update_override);
     // First try to read and comprehend the app-specific override.
     found_override = (policy_key.ReadValueDW(app_update_override.c_str(),
                                              &value) == ERROR_SUCCESS &&
@@ -634,8 +605,8 @@ bool GoogleUpdateSettings::AreAutoupdatesEnabled() {
     return false;
   }
 
-  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  UpdatePolicy app_policy = GetAppUpdatePolicy(dist->GetAppGuid(), nullptr);
+  UpdatePolicy app_policy =
+      GetAppUpdatePolicy(install_static::GetAppGuid(), nullptr);
   return app_policy == AUTOMATIC_UPDATES || app_policy == AUTO_UPDATES_ONLY;
 #else  // defined(GOOGLE_CHROME_BUILD)
   // Chromium does not auto update.
@@ -665,8 +636,7 @@ bool GoogleUpdateSettings::ReenableAutoupdates() {
     // AUTOMATIC_UPDATES is marginally more likely to let a user update and this
     // code is only called when a stuck user asks for updates.
     base::string16 app_update_override(kUpdateOverrideValuePrefix);
-    app_update_override.append(
-        BrowserDistribution::GetDistribution()->GetAppGuid());
+    app_update_override.append(install_static::GetAppGuid());
     if (policy_key.ReadValueDW(app_update_override.c_str(), &value) !=
         ERROR_SUCCESS) {
       automatic_updates_allowed_by_overrides = false;
@@ -742,12 +712,9 @@ base::string16 GoogleUpdateSettings::GetDownloadPreference() {
 }
 
 void GoogleUpdateSettings::RecordChromeUpdatePolicyHistograms() {
-  const base::string16 app_guid =
-      BrowserDistribution::GetDistribution()->GetAppGuid();
-
   bool is_overridden = false;
-  const UpdatePolicy update_policy = GetAppUpdatePolicy(app_guid,
-                                                        &is_overridden);
+  const UpdatePolicy update_policy =
+      GetAppUpdatePolicy(install_static::GetAppGuid(), &is_overridden);
   UMA_HISTOGRAM_BOOLEAN("GoogleUpdate.UpdatePolicyIsOverridden", is_overridden);
   UMA_HISTOGRAM_ENUMERATION("GoogleUpdate.EffectivePolicy", update_policy,
                             UPDATE_POLICIES_COUNT);
@@ -871,46 +838,45 @@ bool GoogleUpdateSettings::GetUpdateDetailForApp(bool system_install,
   return product_found;
 }
 
-bool GoogleUpdateSettings::GetUpdateDetailForGoogleUpdate(bool system_install,
-                                                          ProductData* data) {
-  return GetUpdateDetailForApp(system_install,
-                               google_update::kGoogleUpdateUpgradeCode,
-                               data);
+bool GoogleUpdateSettings::GetUpdateDetailForGoogleUpdate(ProductData* data) {
+  return GetUpdateDetailForApp(!InstallUtil::IsPerUserInstall(),
+                               google_update::kGoogleUpdateUpgradeCode, data);
 }
 
-bool GoogleUpdateSettings::GetUpdateDetail(bool system_install,
-                                           ProductData* data) {
-  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  return GetUpdateDetailForApp(system_install,
-                               dist->GetAppGuid().c_str(),
-                               data);
+bool GoogleUpdateSettings::GetUpdateDetail(ProductData* data) {
+  return GetUpdateDetailForApp(!InstallUtil::IsPerUserInstall(),
+                               install_static::GetAppGuid(), data);
 }
 
 bool GoogleUpdateSettings::SetExperimentLabels(
     bool system_install,
     const base::string16& experiment_labels) {
+  // There is nothing to do if this brand does not support integration with
+  // Google Update.
+  if (!install_static::kUseGoogleUpdateIntegration)
+    return false;
+
   HKEY reg_root = system_install ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
 
   // Use the browser distribution and install level to write to the correct
   // client state/app guid key.
   bool success = false;
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  if (dist->ShouldSetExperimentLabels()) {
-    base::string16 client_state_path(
-        system_install ? dist->GetStateMediumKey() : dist->GetStateKey());
-    RegKey client_state(
-        reg_root, client_state_path.c_str(), KEY_SET_VALUE | KEY_WOW64_32KEY);
-    // It is possible that the registry keys do not yet exist or have not yet
-    // been ACLed by Google Update to be user writable.
-    if (!client_state.Valid())
-      return false;
-    if (experiment_labels.empty()) {
-      success = client_state.DeleteValue(google_update::kExperimentLabels)
-          == ERROR_SUCCESS;
-    } else {
-      success = client_state.WriteValue(google_update::kExperimentLabels,
-          experiment_labels.c_str()) == ERROR_SUCCESS;
-    }
+  base::string16 client_state_path(system_install ? dist->GetStateMediumKey()
+                                                  : dist->GetStateKey());
+  RegKey client_state(reg_root, client_state_path.c_str(),
+                      KEY_SET_VALUE | KEY_WOW64_32KEY);
+  // It is possible that the registry keys do not yet exist or have not yet
+  // been ACLed by Google Update to be user writable.
+  if (!client_state.Valid())
+    return false;
+  if (experiment_labels.empty()) {
+    success = client_state.DeleteValue(google_update::kExperimentLabels) ==
+              ERROR_SUCCESS;
+  } else {
+    success =
+        client_state.WriteValue(google_update::kExperimentLabels,
+                                experiment_labels.c_str()) == ERROR_SUCCESS;
   }
 
   return success;
@@ -919,14 +885,13 @@ bool GoogleUpdateSettings::SetExperimentLabels(
 bool GoogleUpdateSettings::ReadExperimentLabels(
     bool system_install,
     base::string16* experiment_labels) {
-  HKEY reg_root = system_install ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
-
-  // If this distribution does not set the experiment labels, don't bother
-  // reading.
-  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  if (!dist->ShouldSetExperimentLabels())
+  // There is nothing to do if this brand does not support integration with
+  // Google Update.
+  if (!install_static::kUseGoogleUpdateIntegration)
     return false;
 
+  HKEY reg_root = system_install ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
+  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   base::string16 client_state_path(
       system_install ? dist->GetStateMediumKey() : dist->GetStateKey());
 

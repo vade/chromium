@@ -5,16 +5,17 @@
 #ifndef SERVICES_SHAPE_DETECTION_FACE_DETECTION_IMPL_MAC_H_
 #define SERVICES_SHAPE_DETECTION_FACE_DETECTION_IMPL_MAC_H_
 
-#import <QuartzCore/QuartzCore.h>
-
 #include "base/mac/scoped_nsobject.h"
 #include "services/shape_detection/public/interfaces/facedetection.mojom.h"
+
+@class CIDetector;
 
 namespace shape_detection {
 
 class FaceDetectionImplMac : public shape_detection::mojom::FaceDetection {
  public:
-  FaceDetectionImplMac(shape_detection::mojom::FaceDetectorOptionsPtr options);
+  explicit FaceDetectionImplMac(
+      shape_detection::mojom::FaceDetectorOptionsPtr options);
   ~FaceDetectionImplMac() override;
 
   void Detect(mojo::ScopedSharedBufferHandle frame_data,
@@ -24,7 +25,6 @@ class FaceDetectionImplMac : public shape_detection::mojom::FaceDetection {
                   callback) override;
 
  private:
-  base::scoped_nsobject<CIContext> context_;
   base::scoped_nsobject<CIDetector> detector_;
 
   DISALLOW_COPY_AND_ASSIGN(FaceDetectionImplMac);

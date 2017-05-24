@@ -12,6 +12,7 @@
 #include "content/child/web_url_loader_impl.h"
 #include "content/common/content_export.h"
 #include "content/common/navigation_params.h"
+#include "content/common/url_loader_factory.mojom.h"
 #include "third_party/WebKit/public/platform/WebPageVisibilityState.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
@@ -158,6 +159,22 @@ class CONTENT_EXPORT RequestExtraData
     block_mixed_plugin_content_ = block_mixed_plugin_content;
   }
 
+  // PlzNavigate
+  // Indicates whether a navigation was initiated by the browser or renderer.
+  bool navigation_initiated_by_renderer() const {
+    return navigation_initiated_by_renderer_;
+  }
+  void set_navigation_initiated_by_renderer(bool navigation_by_renderer) {
+    navigation_initiated_by_renderer_ = navigation_by_renderer;
+  }
+
+  mojom::URLLoaderFactory* url_loader_factory_override() const {
+    return url_loader_factory_override_;
+  }
+  void set_url_loader_factory_override(mojom::URLLoaderFactory* factory) {
+    url_loader_factory_override_ = factory;
+  }
+
   void CopyToResourceRequest(ResourceRequest* request) const;
 
  private:
@@ -181,6 +198,8 @@ class CONTENT_EXPORT RequestExtraData
   bool is_prefetch_;
   bool download_to_network_cache_only_;
   bool block_mixed_plugin_content_;
+  bool navigation_initiated_by_renderer_;
+  mojom::URLLoaderFactory* url_loader_factory_override_;
 
   DISALLOW_COPY_AND_ASSIGN(RequestExtraData);
 };

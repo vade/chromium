@@ -29,20 +29,15 @@ bool WebApkUpdateManager::Register(JNIEnv* env) {
 
 // static
 void WebApkUpdateManager::OnBuiltWebApk(const std::string& id,
-                                        bool success,
+                                        WebApkInstallResult result,
+                                        bool relax_updates,
                                         const std::string& webapk_package) {
   JNIEnv* env = base::android::AttachCurrentThread();
 
-  if (success) {
-    DVLOG(1)
-        << "Sent request to update WebAPK to server. Seems to have worked.";
-  } else {
-    LOG(WARNING) << "Server request to update WebAPK failed.";
-  }
-
   base::android::ScopedJavaLocalRef<jstring> java_id =
       base::android::ConvertUTF8ToJavaString(env, id);
-  Java_WebApkUpdateManager_onBuiltWebApk(env, java_id.obj(), success);
+  Java_WebApkUpdateManager_onBuiltWebApk(
+      env, java_id.obj(), static_cast<int>(result), relax_updates);
 }
 
 // static JNI method.
@@ -54,8 +49,8 @@ static void UpdateAsync(
     const JavaParamRef<jstring>& java_scope,
     const JavaParamRef<jstring>& java_name,
     const JavaParamRef<jstring>& java_short_name,
-    const JavaParamRef<jstring>& java_best_icon_url,
-    const JavaParamRef<jobject>& java_best_icon_bitmap,
+    const JavaParamRef<jstring>& java_best_primary_icon_url,
+    const JavaParamRef<jobject>& java_best_primary_icon_bitmap,
     const JavaParamRef<jobjectArray>& java_icon_urls,
     const JavaParamRef<jobjectArray>& java_icon_hashes,
     jint java_display_mode,
@@ -78,7 +73,8 @@ static void UpdateAsync(
   GURL start_url(ConvertJavaStringToUTF8(env, java_start_url));
   GURL scope(ConvertJavaStringToUTF8(env, java_scope));
   GURL web_manifest_url(ConvertJavaStringToUTF8(env, java_web_manifest_url));
-  GURL best_icon_url(ConvertJavaStringToUTF8(env, java_best_icon_url));
+  GURL best_primary_icon_url(
+      ConvertJavaStringToUTF8(env, java_best_primary_icon_url));
   ShortcutInfo info(start_url);
   info.scope = scope;
   info.name = ConvertJavaStringToUTF16(env, java_name);
@@ -87,13 +83,13 @@ static void UpdateAsync(
   info.display = static_cast<blink::WebDisplayMode>(java_display_mode);
   info.orientation =
       static_cast<blink::WebScreenOrientationLockType>(java_orientation);
-  info.theme_color = (long)java_theme_color;
-  info.background_color = (long)java_background_color;
-  info.best_icon_url = best_icon_url;
+  info.theme_color = (int64_t)java_theme_color;
+  info.background_color = (int64_t)java_background_color;
+  info.best_primary_icon_url = best_primary_icon_url;
   info.manifest_url = web_manifest_url;
 
-  base::android::AppendJavaStringArrayToStringVector(
-      env, java_icon_urls.obj(), &info.icon_urls);
+  base::android::AppendJavaStringArrayToStringVector(env, java_icon_urls.obj(),
+                                                     &info.icon_urls);
 
   std::vector<std::string> icon_hashes;
   base::android::AppendJavaStringArrayToStringVector(
@@ -103,10 +99,10 @@ static void UpdateAsync(
   for (size_t i = 0; i < info.icon_urls.size(); ++i)
     icon_url_to_murmur2_hash[info.icon_urls[i]] = icon_hashes[i];
 
-  gfx::JavaBitmap java_bitmap_lock(java_best_icon_bitmap);
-  SkBitmap best_icon_bitmap =
+  gfx::JavaBitmap java_bitmap_lock(java_best_primary_icon_bitmap);
+  SkBitmap best_primary_icon_bitmap =
       gfx::CreateSkBitmapFromJavaBitmap(java_bitmap_lock);
-  best_icon_bitmap.setImmutable();
+  best_primary_icon_bitmap.setImmutable();
 
   std::string webapk_package;
   ConvertJavaStringToUTF8(env, java_webapk_package, &webapk_package);
@@ -115,11 +111,13 @@ static void UpdateAsync(
   if (install_service->IsInstallInProgress(info.manifest_url)) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
-        base::Bind(&WebApkUpdateManager::OnBuiltWebApk, id, false, ""));
+        base::Bind(&WebApkUpdateManager::OnBuiltWebApk, id,
+                   WebApkInstallResult::FAILURE, false /* relax_updates */,
+                   "" /* webapk_package */));
     return;
   }
   install_service->UpdateAsync(
-      info, best_icon_bitmap, webapk_package, java_webapk_version,
+      info, best_primary_icon_bitmap, webapk_package, java_webapk_version,
       icon_url_to_murmur2_hash, java_is_manifest_stale,
       base::Bind(&WebApkUpdateManager::OnBuiltWebApk, id));
 }

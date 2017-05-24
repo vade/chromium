@@ -9,6 +9,8 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.support.test.filters.LargeTest;
 import android.support.test.filters.MediumTest;
+import android.support.test.filters.SmallTest;
+import android.test.MoreAsserts;
 import android.view.ContextMenu;
 import android.view.KeyEvent;
 
@@ -34,6 +36,8 @@ import org.chromium.content.browser.test.util.TestTouchUtils;
 import org.chromium.net.test.EmbeddedTestServer;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
@@ -98,7 +102,7 @@ public class ContextMenuTest extends DownloadTestBase {
     @RetryOnFailure
     public void testCopyLinkURL() throws InterruptedException, TimeoutException {
         Tab tab = getActivity().getActivityTab();
-        ContextMenuUtils.selectContextMenuItem(this, tab, "testLink",
+        ContextMenuUtils.selectContextMenuItem(getInstrumentation(), getActivity(), tab, "testLink",
                 R.id.contextmenu_copy_link_address);
 
         assertStringContains("test_link.html", getClipboardText());
@@ -109,8 +113,8 @@ public class ContextMenuTest extends DownloadTestBase {
     @RetryOnFailure
     public void testCopyImageLinkCopiesLinkURL() throws InterruptedException, TimeoutException {
         Tab tab = getActivity().getActivityTab();
-        ContextMenuUtils.selectContextMenuItem(this, tab, "testImageLink",
-                R.id.contextmenu_copy_link_address);
+        ContextMenuUtils.selectContextMenuItem(getInstrumentation(), getActivity(), tab,
+                "testImageLink", R.id.contextmenu_copy_link_address);
 
         assertStringContains("test_link.html", getClipboardText());
     }
@@ -120,7 +124,7 @@ public class ContextMenuTest extends DownloadTestBase {
     @RetryOnFailure
     public void testCopyLinkTextSimple() throws InterruptedException, TimeoutException {
         Tab tab = getActivity().getActivityTab();
-        ContextMenuUtils.selectContextMenuItem(this, tab, "testLink",
+        ContextMenuUtils.selectContextMenuItem(getInstrumentation(), getActivity(), tab, "testLink",
                 R.id.contextmenu_copy_link_text);
 
         assertEquals("Clipboard text was not what was expected", "Test Link",
@@ -132,8 +136,8 @@ public class ContextMenuTest extends DownloadTestBase {
     @RetryOnFailure
     public void testCopyLinkTextComplex() throws InterruptedException, TimeoutException {
         Tab tab = getActivity().getActivityTab();
-        ContextMenuUtils.selectContextMenuItem(this, tab, "copyLinkTextComplex",
-                R.id.contextmenu_copy_link_text);
+        ContextMenuUtils.selectContextMenuItem(getInstrumentation(), getActivity(), tab,
+                "copyLinkTextComplex", R.id.contextmenu_copy_link_text);
 
         assertEquals("Clipboard text was not what was expected",
                 "This is pretty extreme \n(newline). ", getClipboardText());
@@ -179,8 +183,8 @@ public class ContextMenuTest extends DownloadTestBase {
 
         int callbackCount = newTabCallback.getCallCount();
 
-        ContextMenuUtils.selectContextMenuItem(this, activityTab, domId,
-                R.id.contextmenu_open_image_in_new_tab);
+        ContextMenuUtils.selectContextMenuItem(getInstrumentation(), getActivity(), activityTab,
+                domId, R.id.contextmenu_open_image_in_new_tab);
 
         try {
             newTabCallback.waitForCallback(callbackCount);
@@ -203,7 +207,7 @@ public class ContextMenuTest extends DownloadTestBase {
     @RetryOnFailure
     public void testDismissContextMenuOnBack() throws InterruptedException, TimeoutException {
         Tab tab = getActivity().getActivityTab();
-        ContextMenu menu = ContextMenuUtils.openContextMenu(this, tab, "testImage");
+        ContextMenu menu = ContextMenuUtils.openContextMenu(tab, "testImage");
         assertNotNull("Context menu was not properly created", menu);
         CriteriaHelper.pollUiThread(new Criteria("Context menu did not have window focus") {
             @Override
@@ -226,7 +230,7 @@ public class ContextMenuTest extends DownloadTestBase {
     @RetryOnFailure
     public void testDismissContextMenuOnClick() throws InterruptedException, TimeoutException {
         Tab tab = getActivity().getActivityTab();
-        ContextMenu menu = ContextMenuUtils.openContextMenu(this, tab, "testImage");
+        ContextMenu menu = ContextMenuUtils.openContextMenu(tab, "testImage");
         assertNotNull("Context menu was not properly created", menu);
         CriteriaHelper.pollUiThread(new Criteria("Context menu did not have window focus") {
             @Override
@@ -250,8 +254,8 @@ public class ContextMenuTest extends DownloadTestBase {
     @RetryOnFailure
     public void testCopyEmailAddress() throws InterruptedException, TimeoutException {
         Tab tab = getActivity().getActivityTab();
-        ContextMenuUtils.selectContextMenuItem(this, tab, "testEmail",
-                R.id.contextmenu_copy);
+        ContextMenuUtils.selectContextMenuItem(
+                getInstrumentation(), getActivity(), tab, "testEmail", R.id.contextmenu_copy);
 
         assertEquals("Copied email address is not correct",
                 "someone1@example.com,someone2@example.com", getClipboardText());
@@ -262,8 +266,8 @@ public class ContextMenuTest extends DownloadTestBase {
     @RetryOnFailure
     public void testCopyTelNumber() throws InterruptedException, TimeoutException {
         Tab tab = getActivity().getActivityTab();
-        ContextMenuUtils.selectContextMenuItem(this, tab, "testTel",
-                R.id.contextmenu_copy);
+        ContextMenuUtils.selectContextMenuItem(
+                getInstrumentation(), getActivity(), tab, "testTel", R.id.contextmenu_copy);
 
         assertEquals("Copied tel number is not correct",
                 "10000000000", getClipboardText());
@@ -291,7 +295,7 @@ public class ContextMenuTest extends DownloadTestBase {
     public void testSaveVideo()
             throws InterruptedException, TimeoutException, SecurityException, IOException {
         // Click the video to enable playback
-        DOMUtils.clickNode(this, getActivity().getCurrentContentViewCore(), "videoDOMElement");
+        DOMUtils.clickNode(getActivity().getCurrentContentViewCore(), "videoDOMElement");
         saveMediaFromContextMenu("videoDOMElement", R.id.contextmenu_save_video, FILENAME_WEBM);
     }
 
@@ -310,7 +314,7 @@ public class ContextMenuTest extends DownloadTestBase {
         TabModel tabModel = getActivity().getCurrentTabModel();
         int numOpenedTabs = tabModel.getCount();
         Tab tab = getActivity().getActivityTab();
-        ContextMenuUtils.selectContextMenuItem(this, tab, "testLink",
+        ContextMenuUtils.selectContextMenuItem(getInstrumentation(), getActivity(), tab, "testLink",
                 R.id.contextmenu_open_in_new_tab);
         getInstrumentation().waitForIdleSync();
         int indexOfLinkPage = numOpenedTabs;
@@ -328,8 +332,8 @@ public class ContextMenuTest extends DownloadTestBase {
                     }
                 });
 
-        ContextMenuUtils.selectContextMenuItem(this, tab, "testLink2",
-                R.id.contextmenu_open_in_new_tab);
+        ContextMenuUtils.selectContextMenuItem(getInstrumentation(), getActivity(), tab,
+                "testLink2", R.id.contextmenu_open_in_new_tab);
         getInstrumentation().waitForIdleSync();
         int indexOfLinkPage2 = numOpenedTabs;
         numOpenedTabs += 1;
@@ -348,13 +352,88 @@ public class ContextMenuTest extends DownloadTestBase {
         assertEquals(imageUrl, tabModel.getTabAt(indexOfLinkPage2).getUrl());
     }
 
+    @SmallTest
+    @Feature({"Browser", "ContextMenu"})
+    @RetryOnFailure
+    public void testContextMenuRetrievesLinkOptions()
+            throws TimeoutException, InterruptedException {
+        Tab tab = getActivity().getActivityTab();
+        ContextMenu menu = ContextMenuUtils.openContextMenu(tab, "testLink");
+
+        Integer[] expectedItems = {R.id.contextmenu_open_in_new_tab,
+                R.id.contextmenu_open_in_incognito_tab, R.id.contextmenu_copy_link_address,
+                R.id.contextmenu_copy_link_text, R.id.contextmenu_save_link_as};
+        assertMenuItemsAreEqual(menu, expectedItems);
+    }
+
+    @SmallTest
+    @Feature({"Browser", "ContextMenu"})
+    @RetryOnFailure
+    public void testContextMenuRetrievesImageOptions()
+            throws TimeoutException, InterruptedException {
+        Tab tab = getActivity().getActivityTab();
+        ContextMenu menu = ContextMenuUtils.openContextMenu(tab, "testImage");
+
+        Integer[] expectedItems = {R.id.contextmenu_save_image,
+                R.id.contextmenu_open_image_in_new_tab, R.id.contextmenu_search_by_image,
+                R.id.contextmenu_share_image};
+        assertMenuItemsAreEqual(menu, expectedItems);
+    }
+
+    @SmallTest
+    @Feature({"Browser", "ContextMenu"})
+    @RetryOnFailure
+    public void testContextMenuRetrievesImageLinkOptions()
+            throws TimeoutException, InterruptedException {
+        Tab tab = getActivity().getActivityTab();
+        ContextMenu menu = ContextMenuUtils.openContextMenu(tab, "testImageLink");
+
+        Integer[] expectedItems = {R.id.contextmenu_open_in_new_tab,
+                R.id.contextmenu_open_in_incognito_tab, R.id.contextmenu_copy_link_address,
+                R.id.contextmenu_save_link_as, R.id.contextmenu_save_image,
+                R.id.contextmenu_open_image_in_new_tab, R.id.contextmenu_search_by_image,
+                R.id.contextmenu_share_image};
+        assertMenuItemsAreEqual(menu, expectedItems);
+    }
+
+    @SmallTest
+    @Feature({"Browser", "ContextMenu"})
+    @RetryOnFailure
+    public void testContextMenuRetrievesVideoOptions()
+            throws TimeoutException, InterruptedException {
+        Tab tab = getActivity().getActivityTab();
+        DOMUtils.clickNode(getActivity().getCurrentContentViewCore(), "videoDOMElement");
+        ContextMenu menu = ContextMenuUtils.openContextMenu(tab, "videoDOMElement");
+
+        Integer[] expectedItems = {R.id.contextmenu_save_video};
+        assertMenuItemsAreEqual(menu, expectedItems);
+    }
+
+    /**
+     * Takes all the visible items on the menu and compares them to a the list of expected items.
+     * @param menu A context menu that is displaying visible items.
+     * @param expectedItems A list of items that is expected to appear within a context menu. The
+     *                      list does not need to be ordered.
+     */
+    private void assertMenuItemsAreEqual(ContextMenu menu, Integer... expectedItems) {
+        List<Integer> actualItems = new ArrayList<>();
+        for (int i = 0; i < menu.size(); i++) {
+            if (menu.getItem(i).isVisible()) {
+                actualItems.add(menu.getItem(i).getItemId());
+            }
+        }
+
+        MoreAsserts.assertContentsInAnyOrder(actualItems, expectedItems);
+    }
+
     private void saveMediaFromContextMenu(String mediaDOMElement, int saveMenuID,
             String expectedFilename) throws InterruptedException, TimeoutException,
             SecurityException, IOException {
         // Select "save [image/video]" in that menu.
         Tab tab = getActivity().getActivityTab();
         int callCount = getChromeDownloadCallCount();
-        ContextMenuUtils.selectContextMenuItem(this, tab, mediaDOMElement, saveMenuID);
+        ContextMenuUtils.selectContextMenuItem(
+                getInstrumentation(), getActivity(), tab, mediaDOMElement, saveMenuID);
 
         // Wait for the download to complete and see if we got the right file
         assertTrue(waitForChromeDownloadToFinish(callCount));

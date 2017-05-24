@@ -16,15 +16,12 @@
 #include "base/memory/ref_counted.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/common/content_export.h"
+#include "content/common/worker_url_loader_factory_provider.mojom.h"
 #include "content/public/browser/service_worker_context.h"
 
 namespace base {
 class FilePath;
 class SingleThreadTaskRunner;
-}
-
-namespace blink {
-enum class WebNavigationHintType;
 }
 
 namespace storage {
@@ -109,11 +106,6 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
       const CountExternalRequestsCallback& callback) override;
   void StopAllServiceWorkersForOrigin(const GURL& origin) override;
   void ClearAllServiceWorkersForTest(const base::Closure& callback) override;
-  void StartServiceWorkerForNavigationHint(
-      const GURL& document_url,
-      blink::WebNavigationHintType type,
-      int render_process_id,
-      const ResultCallback& callback) override;
   bool StartingExternalRequest(int64_t service_worker_version_id,
                                const std::string& request_uuid) override;
   bool FinishedExternalRequest(int64_t service_worker_version_id,
@@ -197,6 +189,9 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
   void GetRegistrationUserData(int64_t registration_id,
                                const std::vector<std::string>& keys,
                                const GetUserDataCallback& callback);
+  void GetRegistrationUserDataByKeyPrefix(int64_t registration_id,
+                                          const std::string& key_prefix,
+                                          const GetUserDataCallback& callback);
   void StoreRegistrationUserData(
       int64_t registration_id,
       const GURL& origin,
@@ -207,6 +202,9 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
                                  const StatusCallback& callback);
   void GetUserDataForAllRegistrations(
       const std::string& key,
+      const GetUserDataForAllRegistrationsCallback& callback);
+  void GetUserDataForAllRegistrationsByKeyPrefix(
+      const std::string& key_prefix,
       const GetUserDataForAllRegistrationsCallback& callback);
 
   // This function can be called from any thread, but the callback will always
@@ -227,8 +225,13 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
   // Must be called from the IO thread.
   bool OriginHasForeignFetchRegistrations(const GURL& origin);
 
-  // Must be called from the UI thread.
-  bool IsRunningNavigationHintTask(int render_process_id) const;
+  // Binds the ServiceWorkerWorkerClient of a dedicated (or shared) worker to
+  // the parent frame's ServiceWorkerProviderHost. (This is used only when
+  // off-main-thread-fetch is enabled.)
+  void BindWorkerFetchContext(
+      int render_process_id,
+      int service_worker_provider_id,
+      mojom::ServiceWorkerWorkerClientAssociatedPtrInfo client_ptr_info);
 
  private:
   friend class BackgroundSyncManagerTest;
@@ -270,31 +273,11 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
       const std::vector<ServiceWorkerRegistrationInfo>& registrations);
 
   void DidCheckHasServiceWorker(const CheckHasServiceWorkerCallback& callback,
-                                bool has_service_worker);
+                                content::ServiceWorkerCapability status);
 
   void DidFindRegistrationForUpdate(
       ServiceWorkerStatusCode status,
       scoped_refptr<content::ServiceWorkerRegistration> registration);
-
-  void DidCheckRenderProcessForNavigationHint(const GURL& document_url,
-                                              blink::WebNavigationHintType type,
-                                              int render_process_id,
-                                              const ResultCallback& callback);
-
-  void DidFindRegistrationForNavigationHint(
-      blink::WebNavigationHintType type,
-      int render_process_id,
-      const ResultCallback& callback,
-      ServiceWorkerStatusCode status,
-      scoped_refptr<ServiceWorkerRegistration> registration);
-
-  void DidStartServiceWorkerForNavigationHint(const GURL& pattern,
-                                              int render_process_id,
-                                              const ResultCallback& callback,
-                                              ServiceWorkerStatusCode code);
-  void DidFinishNavigationHintTaskOnUI(int render_process_id,
-                                       const ResultCallback& callback,
-                                       bool result);
 
   // The core context is only for use on the IO thread.
   // Can be null before/during init, during/after shutdown, and after
@@ -315,9 +298,6 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
 
   // The ResourceContext associated with this context.
   ResourceContext* resource_context_;
-
-  // Must be touched on the UI thread.
-  std::map<int, int> navigation_hint_task_count_per_process_;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceWorkerContextWrapper);
 };

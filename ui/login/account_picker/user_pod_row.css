@@ -44,18 +44,9 @@ pin-keyboard {
   transition: all 180ms;
 }
 
-.pod.flying-pin-pod {
-  transition: height 180ms ease-in-out,
-              top 180ms ease-in-out;
-}
-
 .pod.pin-enabled {
   height: 417px;
   top: -87px !important;
-}
-
-.disable-pin-animation .pod.pin-enabled {
-  transition: none;
 }
 
 .pod .pin-container {
@@ -229,6 +220,10 @@ html[dir=rtl] .main-pane {
   display: none;
 }
 
+.pod[is-active-directory] .reauth-warning {
+  display: none;
+}
+
 .pod[auth-type='offlinePassword'].focused .password-entry-container,
 .pod[auth-type='forceOfflinePassword'].focused .password-entry-container {
   display: flex;
@@ -299,8 +294,7 @@ html[dir=rtl] .main-pane {
 }
 
 .custom-icon.faded {
-  -webkit-transition: opacity 200ms ease-in-out,
-                      visibility 200ms ease-in-out;
+  transition: opacity 200ms ease-in-out, visibility 200ms ease-in-out;
 }
 
 .custom-icon-hardlocked {
@@ -395,11 +389,11 @@ html[dir=rtl] .main-pane {
 }
 
 .custom-icon-spinner {
-  -webkit-animation: easy-unlock-spinner-animation 2s steps(45) infinite;
+  animation: easy-unlock-spinner-animation 2s steps(45) infinite;
   background-image: url(chrome://theme/IDR_EASY_UNLOCK_SPINNER);
 }
 
-@-webkit-keyframes easy-unlock-spinner-animation {
+@keyframes easy-unlock-spinner-animation {
   from { background-position: 0 }
   to { background-position: -1215px }
 }
@@ -412,6 +406,7 @@ html[dir=rtl] .main-pane {
   display: none;
 }
 
+.fingerprint-icon-container,
 .custom-icon-container {
   display: flex;
   flex: none;
@@ -436,9 +431,9 @@ html[dir=rtl] .main-pane {
 
 .pod[auth-type='onlineSignIn'] .reauth-hint-container {
   display: flex;
+  justify-content: center;
   margin-top: 8px;
   width: 100%;
-  justify-content: center;
 }
 
 .reauth-hint-container .reauth-warning {
@@ -549,6 +544,42 @@ html[dir=rtl] .user-type-icon-area {
 
 .user-type-icon-area.app .user-type-icon-image {
   background-image: url(chrome://theme/IDR_KIOSK_APP_USER_POD_ICON);
+}
+
+.fingerprint-icon-container.hidden {
+  display: none;
+}
+
+.fingerprint-icon-container.default .fingerprint-icon-image {
+  background-image: url(../../webui/resources/images/fingerprint_default.svg);
+}
+
+.fingerprint-icon-container.default:hover .fingerprint-icon-image {
+  background-image: url(../../webui/resources/images/fingerprint_signin.svg);
+}
+
+.fingerprint-icon-container.signin .fingerprint-icon-image {
+  background-image: url(../../webui/resources/images/fingerprint_signin.svg);
+}
+
+.fingerprint-icon-container.failed .fingerprint-icon-image {
+  background-image: url(../../webui/resources/images/fingerprint_failed.svg);
+}
+
+.pod input[type='password'].hidden::-webkit-input-placeholder {
+  color: grey;
+}
+
+.pod input[type='password'].default::-webkit-input-placeholder {
+  color: grey;
+}
+
+.pod input[type='password'].signin::-webkit-input-placeholder {
+  color: var(--google-blue-500);
+}
+
+.pod input[type='password'].failed::-webkit-input-placeholder {
+  color: var(--google-red-500);
 }
 
 .action-box-menu {
@@ -957,10 +988,10 @@ html[dir=rtl] .expanded-pane-contents {
 
 /* Animations for the animated ellipsis: */
 .animated-ellipsis-component0 {
-  -webkit-animation: ellipsis-component0 1.5s infinite;
+  animation: ellipsis-component0 1.5s infinite;
 }
 
-@-webkit-keyframes ellipsis-component0 {
+@keyframes ellipsis-component0 {
   0% { opacity: 0; }
   25% { opacity: 1; }
   50% { opacity: 1; }
@@ -969,10 +1000,10 @@ html[dir=rtl] .expanded-pane-contents {
 }
 
 .animated-ellipsis-component1 {
-  -webkit-animation: ellipsis-component1 1.5s infinite;
+  animation: ellipsis-component1 1.5s infinite;
 }
 
-@-webkit-keyframes ellipsis-component1 {
+@keyframes ellipsis-component1 {
   0% { opacity: 0; }
   25% { opacity: 0; }
   50% { opacity: 1; }
@@ -981,10 +1012,10 @@ html[dir=rtl] .expanded-pane-contents {
 }
 
 .animated-ellipsis-component2 {
-  -webkit-animation: ellipsis-component2 1.5s infinite;
+  animation: ellipsis-component2 1.5s infinite;
 }
 
-@-webkit-keyframes ellipsis-component2 {
+@keyframes ellipsis-component2 {
   0% { opacity: 0; }
   25% { opacity: 0; }
   50% { opacity: 0; }

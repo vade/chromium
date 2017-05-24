@@ -17,6 +17,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
+#include "media/audio/audio_manager.h"
 
 using content::BrowserThread;
 
@@ -37,11 +38,16 @@ base::FilePath GetAudioDebugRecordingsPrefixPath(
 
 }  // namespace
 
-AudioDebugRecordingsHandler::AudioDebugRecordingsHandler(Profile* profile)
+AudioDebugRecordingsHandler::AudioDebugRecordingsHandler(
+    Profile* profile,
+    media::AudioManager* audio_manager)
     : profile_(profile),
       is_audio_debug_recordings_in_progress_(false),
-      current_audio_debug_recordings_id_(0) {
+      current_audio_debug_recordings_id_(0),
+      audio_manager_(audio_manager) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(profile_);
+  DCHECK(audio_manager_);
 }
 
 AudioDebugRecordingsHandler::~AudioDebugRecordingsHandler() {}
@@ -51,7 +57,7 @@ void AudioDebugRecordingsHandler::StartAudioDebugRecordings(
     base::TimeDelta delay,
     const RecordingDoneCallback& callback,
     const RecordingErrorCallback& error_callback) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::FILE, FROM_HERE,
@@ -65,7 +71,7 @@ void AudioDebugRecordingsHandler::StopAudioDebugRecordings(
     content::RenderProcessHost* host,
     const RecordingDoneCallback& callback,
     const RecordingErrorCallback& error_callback) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   const bool is_manual_stop = true;
   BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::FILE, FROM_HERE,
@@ -94,7 +100,7 @@ void AudioDebugRecordingsHandler::DoStartAudioDebugRecordings(
     const RecordingDoneCallback& callback,
     const RecordingErrorCallback& error_callback,
     const base::FilePath& log_directory) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (is_audio_debug_recordings_in_progress_) {
     error_callback.Run("Audio debug recordings already in progress");
@@ -106,6 +112,14 @@ void AudioDebugRecordingsHandler::DoStartAudioDebugRecordings(
       log_directory, ++current_audio_debug_recordings_id_);
   host->EnableAudioDebugRecordings(prefix_path);
 
+  // AudioManager is deleted on the audio thread, and the AudioManager outlives
+  // this object, which is owned by content::RenderProcessHost, so it's safe to
+  // post unretained.
+  audio_manager_->GetTaskRunner()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&media::AudioManager::EnableOutputDebugRecording,
+                     base::Unretained(audio_manager_), prefix_path));
+
   if (delay.is_zero()) {
     const bool is_stopped = false, is_manual_stop = false;
     callback.Run(prefix_path.AsUTF8Unsafe(), is_stopped, is_manual_stop);
@@ -115,9 +129,10 @@ void AudioDebugRecordingsHandler::DoStartAudioDebugRecordings(
   const bool is_manual_stop = false;
   BrowserThread::PostDelayedTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&AudioDebugRecordingsHandler::DoStopAudioDebugRecordings, this,
-                 host, is_manual_stop, current_audio_debug_recordings_id_,
-                 callback, error_callback, log_directory),
+      base::BindOnce(&AudioDebugRecordingsHandler::DoStopAudioDebugRecordings,
+                     this, host, is_manual_stop,
+                     current_audio_debug_recordings_id_, callback,
+                     error_callback, log_directory),
       delay);
 }
 
@@ -128,7 +143,7 @@ void AudioDebugRecordingsHandler::DoStopAudioDebugRecordings(
     const RecordingDoneCallback& callback,
     const RecordingErrorCallback& error_callback,
     const base::FilePath& log_directory) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK_LE(audio_debug_recordings_id, current_audio_debug_recordings_id_);
 
   base::FilePath prefix_path = GetAudioDebugRecordingsPrefixPath(
@@ -149,7 +164,16 @@ void AudioDebugRecordingsHandler::DoStopAudioDebugRecordings(
     return;
   }
 
+  // AudioManager is deleted on the audio thread, and the AudioManager outlives
+  // this object, which is owned by content::RenderProcessHost, so it's safe to
+  // post unretained.
+  audio_manager_->GetTaskRunner()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&media::AudioManager::DisableOutputDebugRecording,
+                     base::Unretained(audio_manager_)));
+
   host->DisableAudioDebugRecordings();
+
   is_audio_debug_recordings_in_progress_ = false;
   const bool is_stopped = true;
   callback.Run(prefix_path.AsUTF8Unsafe(), is_stopped, is_manual_stop);

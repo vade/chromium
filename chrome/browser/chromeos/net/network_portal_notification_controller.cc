@@ -9,9 +9,9 @@
 #include <memory>
 #include <vector>
 
-#include "ash/common/system/system_notifier.h"
-#include "ash/common/system/tray/system_tray_notifier.h"
-#include "ash/common/wm_shell.h"
+#include "ash/shell.h"
+#include "ash/system/system_notifier.h"
+#include "ash/system/tray/system_tray_notifier.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
@@ -259,6 +259,14 @@ void NetworkPortalNotificationController::DefaultNetworkChanged(
     const NetworkState* network) {
   if (!network)
     return;
+
+  bool network_changed = (default_network_id_ != network->guid());
+  default_network_id_ = network->guid();
+  if (!network_changed && network->connection_state() == shill::kStateOnline &&
+      dialog_) {
+    dialog_->Close();
+  }
+
   Profile* profile = GetProfileForPrimaryUser();
   extensions::NetworkingConfigService* networking_config_service =
       GetNetworkingConfigService(profile);
@@ -275,17 +283,7 @@ void NetworkPortalNotificationController::OnPortalDetectionCompleted(
 
   if (!network ||
       state.status != NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PORTAL) {
-    last_network_path_.clear();
-
-    // In browser tests we initiate fake network portal detection, but network
-    // state usually stays connected. This way, after dialog is shown, it is
-    // immediately closed. The testing check below prevents dialog from closing.
-    if (dialog_ &&
-        (!ignore_no_network_for_testing_ ||
-         state.status == NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE)) {
-      dialog_->Close();
-    }
-
+    last_network_guid_.clear();
     CloseNotification();
     return;
   }
@@ -296,13 +294,13 @@ void NetworkPortalNotificationController::OnPortalDetectionCompleted(
 
   // Don't do anything if notification for |network| already was
   // displayed.
-  if (network->path() == last_network_path_)
+  if (network->guid() == last_network_guid_)
     return;
-  last_network_path_ = network->path();
+  last_network_guid_ = network->guid();
 
-  if (ash::WmShell::HasInstance()) {
-    ash::WmShell::Get()->system_tray_notifier()->NotifyOnCaptivePortalDetected(
-        network->path());
+  if (ash::Shell::HasInstance()) {
+    ash::Shell::Get()->system_tray_notifier()->NotifyOnCaptivePortalDetected(
+        network->guid());
   }
 
   message_center::MessageCenter::Get()->AddNotification(
@@ -430,10 +428,6 @@ NetworkPortalNotificationController::GetNotification(
 void NetworkPortalNotificationController::OnExtensionFinishedAuthentication() {
   if (!retry_detection_callback_.is_null())
     retry_detection_callback_.Run();
-}
-
-void NetworkPortalNotificationController::SetIgnoreNoNetworkForTesting() {
-  ignore_no_network_for_testing_ = true;
 }
 
 void NetworkPortalNotificationController::CloseDialog() {

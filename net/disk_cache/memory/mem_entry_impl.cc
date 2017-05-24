@@ -81,6 +81,8 @@ MemEntryImpl::MemEntryImpl(MemBackendImpl* backend,
                    nullptr,  // parent
                    net_log) {
   Open();
+  // Just creating the entry (without any data) could cause the storage to
+  // grow beyond capacity, but we allow such infractions.
   backend_->ModifyStorageSize(GetStorageSize());
 }
 
@@ -253,6 +255,14 @@ int MemEntryImpl::ReadyForSparseIO(const CompletionCallback& callback) {
   return net::OK;
 }
 
+size_t MemEntryImpl::EstimateMemoryUsage() const {
+  // Subtlety: the entries in children_ are not double counted, as the entry
+  // pointers won't be followed by EstimateMemoryUsage.
+  return base::trace_event::EstimateMemoryUsage(data_) +
+         base::trace_event::EstimateMemoryUsage(key_) +
+         base::trace_event::EstimateMemoryUsage(children_);
+}
+
 // ------------------------------------------------------------------------
 
 MemEntryImpl::MemEntryImpl(MemBackendImpl* backend,
@@ -337,6 +347,13 @@ int MemEntryImpl::InternalWriteData(int index, int offset, IOBuffer* buf,
 
   int old_data_size = data_[index].size();
   if (truncate || old_data_size < offset + buf_len) {
+    int delta = offset + buf_len - old_data_size;
+    backend_->ModifyStorageSize(delta);
+    if (backend_->HasExceededStorageSize()) {
+      backend_->ModifyStorageSize(-delta);
+      return net::ERR_INSUFFICIENT_RESOURCES;
+    }
+
     data_[index].resize(offset + buf_len);
 
     // Zero fill any hole.
@@ -344,8 +361,6 @@ int MemEntryImpl::InternalWriteData(int index, int offset, IOBuffer* buf,
       std::fill(data_[index].begin() + old_data_size,
                 data_[index].begin() + offset, 0);
     }
-
-    backend_->ModifyStorageSize(data_[index].size() - old_data_size);
   }
 
   UpdateStateOnUse(ENTRY_WAS_MODIFIED);

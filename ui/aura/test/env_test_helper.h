@@ -30,12 +30,22 @@ class EnvTestHelper {
     env_->is_touch_down_ = false;
   }
 
-  void SetMode(Env::Mode mode) { env_->mode_ = mode; }
+  void SetMode(Env::Mode mode) {
+    env_->mode_ = mode;
+    if (mode == Env::Mode::MUS)
+      env_->EnableMusOSExchangeDataProvider();
+  }
+
+  WindowTreeClient* GetWindowTreeClient() { return env_->window_tree_client_; }
 
   // This circumvents the DCHECKs in Env::SetWindowTreeClient() and should
   // only be used for tests where Env is long lived.
   void SetWindowTreeClient(WindowTreeClient* window_tree_client) {
     env_->window_tree_client_ = window_tree_client;
+  }
+
+  void SetAlwaysUseLastMouseLocation(bool value) {
+    env_->always_use_last_mouse_location_ = value;
   }
 
  private:

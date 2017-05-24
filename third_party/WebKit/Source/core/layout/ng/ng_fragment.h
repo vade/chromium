@@ -13,45 +13,35 @@
 
 namespace blink {
 
-class CORE_EXPORT NGFragment : public GarbageCollected<NGFragment> {
+struct NGLogicalSize;
+
+class CORE_EXPORT NGFragment {
+  STACK_ALLOCATED();
+
  public:
   NGWritingMode WritingMode() const {
     return static_cast<NGWritingMode>(writing_mode_);
-  }
-  TextDirection Direction() const {
-    return static_cast<TextDirection>(direction_);
   }
 
   // Returns the border-box size.
   LayoutUnit InlineSize() const;
   LayoutUnit BlockSize() const;
+  NGLogicalSize Size() const;
 
-  // Returns the total size, including the contents outside of the border-box.
-  LayoutUnit InlineOverflow() const;
-  LayoutUnit BlockOverflow() const;
-
-  // Returns the offset relative to the parent fragement's content-box.
+  // Returns the offset relative to the parent fragment's content-box.
   LayoutUnit InlineOffset() const;
   LayoutUnit BlockOffset() const;
 
   NGPhysicalFragment::NGFragmentType Type() const;
 
-  NGPhysicalFragment* PhysicalFragment() const { return physical_fragment_; };
-
-  DECLARE_TRACE();
-
  protected:
   NGFragment(NGWritingMode writing_mode,
-             TextDirection direction,
-             NGPhysicalFragment* physical_fragment)
-      : physical_fragment_(physical_fragment),
-        writing_mode_(writing_mode),
-        direction_(static_cast<unsigned>(direction)) {}
+             const NGPhysicalFragment* physical_fragment)
+      : physical_fragment_(physical_fragment), writing_mode_(writing_mode) {}
 
-  Member<NGPhysicalFragment> physical_fragment_;
+  const NGPhysicalFragment* physical_fragment_;
 
   unsigned writing_mode_ : 3;
-  unsigned direction_ : 1;
 };
 
 }  // namespace blink

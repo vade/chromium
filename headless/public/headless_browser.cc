@@ -7,28 +7,49 @@
 #include <utility>
 
 #include "content/public/common/user_agent.h"
+#include "headless/public/version.h"
+
+#if defined(OS_WIN)
+#include "sandbox/win/src/sandbox_types.h"
+#endif
 
 using Options = headless::HeadlessBrowser::Options;
 using Builder = headless::HeadlessBrowser::Options::Builder;
 
 namespace headless {
 
-// Product name for building the default user agent string.
 namespace {
+// Product name for building the default user agent string.
 const char kProductName[] = "HeadlessChrome";
 constexpr gfx::Size kDefaultWindowSize(800, 600);
+
+std::string GetProductNameAndVersion() {
+  return std::string(kProductName) + "/" + PRODUCT_VERSION;
 }
+}  // namespace
 
 Options::Options(int argc, const char** argv)
     : argc(argc),
       argv(argv),
+#if defined(OS_WIN)
+      instance(0),
+      sandbox_info(nullptr),
+#endif
+      devtools_socket_fd(0),
       message_pump(nullptr),
       single_process_mode(false),
       disable_sandbox(false),
+#if !defined(OS_MACOSX)
       gl_implementation("osmesa"),
-      user_agent(content::BuildUserAgentFromProduct(kProductName)),
+#else
+      gl_implementation("any"),
+#endif
+      product_name_and_version(GetProductNameAndVersion()),
+      user_agent(content::BuildUserAgentFromProduct(product_name_and_version)),
       window_size(kDefaultWindowSize),
-      incognito_mode(true) {}
+      incognito_mode(true),
+      enable_crash_reporter(false) {
+}
 
 Options::Options(Options&& options) = default;
 
@@ -36,11 +57,21 @@ Options::~Options() {}
 
 Options& Options::operator=(Options&& options) = default;
 
+bool Options::DevtoolsServerEnabled() {
+  return (devtools_endpoint.address().IsValid() || devtools_socket_fd != 0);
+}
+
 Builder::Builder(int argc, const char** argv) : options_(argc, argv) {}
 
 Builder::Builder() : options_(0, nullptr) {}
 
 Builder::~Builder() {}
+
+Builder& Builder::SetProductNameAndVersion(
+    const std::string& product_name_and_version) {
+  options_.product_name_and_version = product_name_and_version;
+  return *this;
+}
 
 Builder& Builder::SetUserAgent(const std::string& user_agent) {
   options_.user_agent = user_agent;
@@ -49,6 +80,11 @@ Builder& Builder::SetUserAgent(const std::string& user_agent) {
 
 Builder& Builder::EnableDevToolsServer(const net::IPEndPoint& endpoint) {
   options_.devtools_endpoint = endpoint;
+  return *this;
+}
+
+Builder& Builder::EnableDevToolsServer(const size_t socket_fd) {
+  options_.devtools_socket_fd = socket_fd;
   return *this;
 }
 
@@ -87,6 +123,18 @@ Builder& Builder::AddMojoServiceName(const std::string& mojo_service_name) {
   return *this;
 }
 
+#if defined(OS_WIN)
+Builder& Builder::SetInstance(HINSTANCE instance) {
+  options_.instance = instance;
+  return *this;
+}
+
+Builder& Builder::SetSandboxInfo(sandbox::SandboxInterfaceInfo* sandbox_info) {
+  options_.sandbox_info = sandbox_info;
+  return *this;
+}
+#endif  // defined(OS_WIN)
+
 Builder& Builder::SetUserDataDir(const base::FilePath& user_data_dir) {
   options_.user_data_dir = user_data_dir;
   return *this;
@@ -105,6 +153,16 @@ Builder& Builder::SetIncognitoMode(bool incognito_mode) {
 Builder& Builder::SetOverrideWebPreferencesCallback(
     base::Callback<void(WebPreferences*)> callback) {
   options_.override_web_preferences_callback = callback;
+  return *this;
+}
+
+Builder& Builder::SetCrashReporterEnabled(bool enabled) {
+  options_.enable_crash_reporter = enabled;
+  return *this;
+}
+
+Builder& Builder::SetCrashDumpsDir(const base::FilePath& dir) {
+  options_.crash_dumps_dir = dir;
   return *this;
 }
 

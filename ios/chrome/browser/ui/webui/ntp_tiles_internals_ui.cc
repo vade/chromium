@@ -8,7 +8,6 @@
 #include "components/grit/components_resources.h"
 #include "components/ntp_tiles/field_trial.h"
 #include "components/ntp_tiles/most_visited_sites.h"
-#include "components/ntp_tiles/popular_sites.h"
 #include "components/ntp_tiles/webui/ntp_tiles_internals_message_handler.h"
 #include "components/ntp_tiles/webui/ntp_tiles_internals_message_handler_client.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
@@ -35,9 +34,8 @@ class IOSNTPTilesInternalsMessageHandlerBridge
 
   // ntp_tiles::NTPTilesInternalsMessageHandlerClient
   bool SupportsNTPTiles() override;
-  bool DoesSourceExist(ntp_tiles::NTPTileSource source) override;
+  bool DoesSourceExist(ntp_tiles::TileSource source) override;
   std::unique_ptr<ntp_tiles::MostVisitedSites> MakeMostVisitedSites() override;
-  std::unique_ptr<ntp_tiles::PopularSites> MakePopularSites() override;
   PrefService* GetPrefs() override;
   void RegisterMessageCallback(
       const std::string& message,
@@ -56,18 +54,17 @@ void IOSNTPTilesInternalsMessageHandlerBridge::RegisterMessages() {
 }
 
 bool IOSNTPTilesInternalsMessageHandlerBridge::SupportsNTPTiles() {
-  auto* state = ios::ChromeBrowserState::FromWebUIIOS(web_ui());
-  return state == state->GetOriginalChromeBrowserState();
+  return !ios::ChromeBrowserState::FromWebUIIOS(web_ui())->IsOffTheRecord();
 }
 
 bool IOSNTPTilesInternalsMessageHandlerBridge::DoesSourceExist(
-    ntp_tiles::NTPTileSource source) {
+    ntp_tiles::TileSource source) {
   switch (source) {
-    case ntp_tiles::NTPTileSource::TOP_SITES:
-    case ntp_tiles::NTPTileSource::SUGGESTIONS_SERVICE:
-    case ntp_tiles::NTPTileSource::POPULAR:
+    case ntp_tiles::TileSource::TOP_SITES:
+    case ntp_tiles::TileSource::SUGGESTIONS_SERVICE:
+    case ntp_tiles::TileSource::POPULAR:
       return true;
-    case ntp_tiles::NTPTileSource::WHITELIST:
+    case ntp_tiles::TileSource::WHITELIST:
       return false;
   }
   NOTREACHED();
@@ -77,12 +74,6 @@ bool IOSNTPTilesInternalsMessageHandlerBridge::DoesSourceExist(
 std::unique_ptr<ntp_tiles::MostVisitedSites>
 IOSNTPTilesInternalsMessageHandlerBridge::MakeMostVisitedSites() {
   return IOSMostVisitedSitesFactory::NewForBrowserState(
-      ios::ChromeBrowserState::FromWebUIIOS(web_ui()));
-}
-
-std::unique_ptr<ntp_tiles::PopularSites>
-IOSNTPTilesInternalsMessageHandlerBridge::MakePopularSites() {
-  return IOSPopularSitesFactory::NewForBrowserState(
       ios::ChromeBrowserState::FromWebUIIOS(web_ui()));
 }
 
@@ -102,8 +93,6 @@ void IOSNTPTilesInternalsMessageHandlerBridge::CallJavascriptFunctionVector(
   web_ui()->CallJavascriptFunction(name, values);
 }
 
-}  // namespace
-
 web::WebUIIOSDataSource* CreateNTPTilesInternalsHTMLSource() {
   web::WebUIIOSDataSource* source =
       web::WebUIIOSDataSource::Create(kChromeUINTPTilesInternalsHost);
@@ -114,6 +103,8 @@ web::WebUIIOSDataSource* CreateNTPTilesInternalsHTMLSource() {
   source->SetDefaultResource(IDR_NTP_TILES_INTERNALS_HTML);
   return source;
 }
+
+}  // namespace
 
 NTPTilesInternalsUI::NTPTilesInternalsUI(web::WebUIIOS* web_ui)
     : web::WebUIIOSController(web_ui) {

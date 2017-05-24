@@ -26,9 +26,9 @@ struct EntityDataTraits {
   static const EntityData& DefaultValue();
 };
 
-typedef ProtoValuePtr<EntityData, EntityDataTraits> EntityDataPtr;
-typedef std::vector<EntityDataPtr> EntityDataList;
-typedef std::map<std::string, EntityDataPtr> EntityDataMap;
+using EntityDataPtr = ProtoValuePtr<EntityData, EntityDataTraits>;
+using EntityDataList = std::vector<EntityDataPtr>;
+using EntityDataMap = std::map<std::string, EntityDataPtr>;
 
 // A light-weight container for sync entity data which represents either
 // local data created on the ModelTypeSyncBridge side or remote data created
@@ -78,6 +78,9 @@ struct EntityData {
 
   // Dumps all info into a DictionaryValue and returns it.
   std::unique_ptr<base::DictionaryValue> ToDictionaryValue();
+
+  // Returns the estimate of dynamically allocated memory in bytes.
+  size_t EstimateMemoryUsage() const;
 
  private:
   friend struct EntityDataTraits;

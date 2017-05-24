@@ -24,6 +24,7 @@
 #include "net/http/http_network_layer.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/static_http_user_agent_settings.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_job_factory_impl.h"
@@ -63,10 +64,6 @@ void RecordSyncResponseContentLengthHistograms(
 
 }  // namespace
 
-// Enables compression of messages from client to server.
-const base::Feature kSyncClientToServerCompression{
-    "EnableSyncClientToServerCompression", base::FEATURE_DISABLED_BY_DEFAULT};
-
 HttpBridgeFactory::HttpBridgeFactory(
     const scoped_refptr<net::URLRequestContextGetter>& request_context_getter,
     const NetworkTimeUpdateCallback& network_time_update_callback,
@@ -74,11 +71,12 @@ HttpBridgeFactory::HttpBridgeFactory(
     : request_context_getter_(request_context_getter),
       network_time_update_callback_(network_time_update_callback),
       cancelation_signal_(cancelation_signal) {
-  // Registration should never fail.  This should happen on the UI thread during
-  // init.  It would be impossible for a shutdown to have been requested at this
-  // point.
-  bool result = cancelation_signal_->TryRegisterHandler(this);
-  DCHECK(result);
+  // This registration is happening on the Sync thread, while signalling occurs
+  // on the UI thread. We must handle the possibility signalling has already
+  // occurred.
+  if (!cancelation_signal_->TryRegisterHandler(this)) {
+    OnSignalReceived();
+  }
 }
 
 HttpBridgeFactory::~HttpBridgeFactory() {
@@ -237,8 +235,36 @@ void HttpBridge::MakeAsynchronousPost() {
 
   DCHECK(request_context_getter_.get());
   fetch_state_.start_time = base::Time::Now();
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("sync_http_bridge", R"(
+        semantics {
+          sender: "Chrome Sync"
+          description:
+            "Chrome Sync synchronizes profile data between Chromium clients "
+            "and Google for a given user account."
+          trigger:
+            "User makes a change to syncable profile data after enabling sync "
+            "on the device."
+          data:
+            "The device and user identifiers, along with any profile data that "
+            "is changing."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: false
+          setting:
+            "Users can disable Chrome Sync by going into the profile settings "
+            "and choosing to Sign Out."
+          chrome_policy {
+            SyncDisabled {
+              policy_options {mode: MANDATORY}
+              SyncDisabled: true
+            }
+          }
+        })");
   fetch_state_.url_poster =
-      net::URLFetcher::Create(url_for_request_, net::URLFetcher::POST, this)
+      net::URLFetcher::Create(url_for_request_, net::URLFetcher::POST, this,
+                              traffic_annotation)
           .release();
   if (!bind_to_tracker_callback_.is_null())
     bind_to_tracker_callback_.Run(fetch_state_.url_poster);
@@ -246,12 +272,8 @@ void HttpBridge::MakeAsynchronousPost() {
   fetch_state_.url_poster->SetExtraRequestHeaders(extra_headers_);
 
   std::string request_to_send;
-  if (base::FeatureList::IsEnabled(kSyncClientToServerCompression)) {
-    compression::GzipCompress(request_content_, &request_to_send);
-    fetch_state_.url_poster->AddExtraRequestHeader("Content-Encoding: gzip");
-  } else {
-    request_to_send = request_content_;
-  }
+  compression::GzipCompress(request_content_, &request_to_send);
+  fetch_state_.url_poster->AddExtraRequestHeader("Content-Encoding: gzip");
   fetch_state_.url_poster->SetUploadData(content_type_, request_to_send);
   RecordSyncRequestContentLengthHistograms(request_to_send.size(),
                                            request_content_.size());

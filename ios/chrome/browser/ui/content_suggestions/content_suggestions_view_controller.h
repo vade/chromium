@@ -8,26 +8,39 @@
 #import <UIKit/UIKit.h>
 
 #import "ios/chrome/browser/ui/collection_view/collection_view_controller.h"
-#import "ios/chrome/browser/ui/content_suggestions/content_suggestions_expandable_item.h"
-#import "ios/chrome/browser/ui/content_suggestions/content_suggestions_favicon_item.h"
 
+@class ContentSuggestionsSectionInformation;
 @protocol ContentSuggestionsCommands;
+@protocol ContentSuggestionsDataSource;
+@protocol SuggestedContent;
 
 // CollectionViewController to display the suggestions items.
-@interface ContentSuggestionsViewController
-    : CollectionViewController<ContentSuggestionsExpandableCellDelegate,
-                               ContentSuggestionsFaviconCellDelegate>
+@interface ContentSuggestionsViewController : CollectionViewController
+
+- (instancetype)initWithStyle:(CollectionViewControllerStyle)style
+                   dataSource:(id<ContentSuggestionsDataSource>)dataSource
+    NS_DESIGNATED_INITIALIZER;
+
+- (instancetype)initWithStyle:(CollectionViewControllerStyle)style
+    NS_UNAVAILABLE;
 
 // Handler for the commands sent by the ContentSuggestionsViewController.
 @property(nonatomic, weak) id<ContentSuggestionsCommands>
     suggestionCommandHandler;
+// Override from superclass to have a more specific type.
+@property(nonatomic, readonly)
+    CollectionViewModel<CollectionViewItem<SuggestedContent>*>*
+        collectionViewModel;
 
-// Adds a text item with a |title| and a |subtitle| in the section numbered
-// |section|. If |section| is greater than the current number of section, it
-// will add a new section at the end.
-- (void)addTextItem:(NSString*)title
-           subtitle:(NSString*)subtitle
-          toSection:(NSInteger)inputSection;
+// Removes the entry at |indexPath|, from the collection and its model.
+- (void)dismissEntryAtIndexPath:(NSIndexPath*)indexPath;
+// Removes the |section|.
+- (void)dismissSection:(NSInteger)section;
+// Adds the |suggestions| to the collection and its model in the section
+// corresponding to |sectionInfo|.
+- (void)addSuggestions:
+            (NSArray<CollectionViewItem<SuggestedContent>*>*)suggestions
+         toSectionInfo:(ContentSuggestionsSectionInformation*)sectionInfo;
 
 @end
 

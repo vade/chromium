@@ -18,9 +18,11 @@ config("mojo_media_config") {
     defines = [ "ENABLE_MOJO_MEDIA" ]
 
     assert(mojo_media_services != [], "No mojo media service specified")
+    mojo_renderer_enabled = false
     foreach(service, mojo_media_services) {
       if (service == "renderer") {
         defines += [ "ENABLE_MOJO_RENDERER" ]
+        mojo_renderer_enabled = true
       } else if (service == "cdm") {
         defines += [ "ENABLE_MOJO_CDM" ]
       } else if (service == "audio_decoder") {
@@ -31,6 +33,9 @@ config("mojo_media_config") {
         assert(false, "Invalid mojo media service: $service")
       }
     }
+    assert(
+        mojo_renderer_enabled || !enable_runtime_media_renderer_selection,
+        "The mojo renderer must be enabled to use runtime media renderer selection.")
 
     if (mojo_media_host == "browser") {
       defines += [ "ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS" ]
@@ -61,19 +66,25 @@ component("services") {
 # See http://crbug.com/670094
 source_set("lib") {
   sources = [
-    "demuxer_stream_provider_shim.cc",
-    "demuxer_stream_provider_shim.h",
     "gpu_mojo_media_client.cc",
     "gpu_mojo_media_client.h",
     "interface_factory_impl.cc",
     "interface_factory_impl.h",
+    "media_interface_provider.cc",
+    "media_interface_provider.h",
     "media_mojo_export.h",
+    "media_resource_shim.cc",
+    "media_resource_shim.h",
     "media_service.cc",
     "media_service.h",
     "media_service_factory.cc",
     "media_service_factory.h",
     "mojo_audio_decoder_service.cc",
     "mojo_audio_decoder_service.h",
+    "mojo_audio_output_stream.cc",
+    "mojo_audio_output_stream.h",
+    "mojo_audio_output_stream_provider.cc",
+    "mojo_audio_output_stream_provider.h",
     "mojo_cdm_allocator.cc",
     "mojo_cdm_allocator.h",
     "mojo_cdm_promise.cc",
@@ -94,7 +105,6 @@ source_set("lib") {
     "mojo_renderer_service.h",
     "mojo_video_decoder_service.cc",
     "mojo_video_decoder_service.h",
-    "strong_binding_set.h",
     "test_mojo_media_client.cc",
     "test_mojo_media_client.h",
   ]
@@ -117,6 +127,7 @@ source_set("lib") {
 
   deps = [
     "//media:cdm_api",
+    "//media:cdm_manager",
     "//media:shared_memory_support",
     "//media/mojo/common",
     "//mojo/common",
@@ -127,6 +138,8 @@ source_set("lib") {
     sources += [
       "android_mojo_media_client.cc",
       "android_mojo_media_client.h",
+      "mojo_media_drm_storage.cc",
+      "mojo_media_drm_storage.h",
     ]
   }
 }
@@ -169,6 +182,7 @@ if (!(is_win && is_component_build)) {
     catalog = ":media_service_unittests_catalog"
 
     deps = [
+      ":lib",
       "//base",
       "//media",
       "//media/base:test_support",
@@ -196,12 +210,13 @@ service_manifest("test_manifest") {
   source = "test_manifest.json"
 }
 
-test("media_pipeline_integration_unittests") {
+service_test("media_pipeline_integration_unittests") {
   testonly = true
+
+  catalog = ":media_pipeline_integration_unittests_catalog"
 
   deps = [
     "//media/test:mojo_pipeline_integration_tests",
-    "//services/service_manager/public/cpp/test:run_all_service_tests",
   ]
 
   data_deps = [
@@ -216,5 +231,10 @@ service_manifest("pipeline_test_manifest") {
 
 catalog("media_service_unittests_catalog") {
   embedded_services = [ ":test_manifest" ]
+  standalone_services = [ ":media_manifest" ]
+}
+
+catalog("media_pipeline_integration_unittests_catalog") {
+  embedded_services = [ ":pipeline_test_manifest" ]
   standalone_services = [ ":media_manifest" ]
 }

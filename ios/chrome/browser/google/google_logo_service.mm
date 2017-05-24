@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/search_provider_logos/google_logo_api.h"
@@ -91,7 +92,8 @@ void GoogleLogoService::GetLogo(search_provider_logos::LogoObserver* observer) {
   if (!template_url_service)
     return;
 
-  TemplateURL* template_url = template_url_service->GetDefaultSearchProvider();
+  const TemplateURL* template_url =
+      template_url_service->GetDefaultSearchProvider();
   if (!template_url ||
       !template_url->url_ref().HasGoogleBaseURLs(
           template_url_service->search_terms_data()))
@@ -110,7 +112,7 @@ void GoogleLogoService::GetLogo(search_provider_logos::LogoObserver* observer) {
       GetGoogleDoodleURL(browser_state_),
       base::Bind(&search_provider_logos::GoogleParseLogoResponse),
       base::Bind(&search_provider_logos::GoogleAppendQueryparamsToLogoURL),
-      true, false /* transparent */);
+      true, false /* gray_background */);
   logo_tracker_->GetLogo(observer);
 }
 
@@ -119,7 +121,10 @@ void GoogleLogoService::SetCachedLogo(const search_provider_logos::Logo* logo) {
     if (cached_metadata_.fingerprint == logo->metadata.fingerprint) {
       return;
     }
-    logo->image.deepCopyTo(&cached_image_);
+    if (cached_image_.tryAllocPixels(logo->image.info())) {
+      logo->image.readPixels(cached_image_.info(), cached_image_.getPixels(),
+                             cached_image_.rowBytes(), 0, 0);
+    }
     cached_metadata_ = logo->metadata;
   } else {
     cached_image_ = SkBitmap();

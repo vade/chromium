@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/strings/string_piece.h"
@@ -14,6 +15,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/time/time.h"
+#include "chrome/browser/engagement/site_engagement_score.h"
+#include "chrome/browser/engagement/site_engagement_service.h"
 #include "chrome/browser/notifications/desktop_notification_profile_util.h"
 #include "chrome/browser/notifications/message_center_display_service.h"
 #include "chrome/browser/notifications/notification.h"
@@ -22,6 +25,7 @@
 #include "chrome/browser/notifications/web_notification_delegate.h"
 #include "chrome/browser/permissions/permission_manager.h"
 #include "chrome/browser/permissions/permission_request_manager.h"
+#include "chrome/browser/permissions/permission_result.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
@@ -30,7 +34,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/public/browser/permission_type.h"
+#include "components/content_settings/core/common/content_settings_types.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
@@ -85,6 +89,9 @@ class PlatformNotificationServiceBrowserTest : public InProcessBrowserTest {
   void EnableFullscreenNotifications();
   void DisableFullscreenNotifications();
 
+  double GetEngagementScore(const GURL& origin) const;
+  GURL GetLastCommittedURL() const;
+
   // Returns the UI Manager on which notifications will be displayed.
   StubNotificationUIManager* ui_manager() const { return ui_manager_.get(); }
 
@@ -108,6 +115,7 @@ class PlatformNotificationServiceBrowserTest : public InProcessBrowserTest {
     return browser->tab_strip_model()->GetActiveWebContents();
   }
 
+  SiteEngagementService* engagement_service_;
   const base::FilePath server_root_;
   const std::string test_page_url_;
   std::unique_ptr<StubNotificationUIManager> ui_manager_;
@@ -145,6 +153,8 @@ void PlatformNotificationServiceBrowserTest::SetUp() {
 }
 
 void PlatformNotificationServiceBrowserTest::SetUpOnMainThread() {
+  SiteEngagementScore::SetParamValuesForTesting();
+  engagement_service_ = SiteEngagementService::Get(browser()->profile());
   NavigateToTestPage(test_page_url_);
   display_service_.reset(
       new MessageCenterDisplayService(browser()->profile(), ui_manager_.get()));
@@ -161,10 +171,11 @@ void PlatformNotificationServiceBrowserTest::
   GURL origin = TestPageUrl().GetOrigin();
 
   DesktopNotificationProfileUtil::GrantPermission(browser()->profile(), origin);
-  ASSERT_EQ(blink::mojom::PermissionStatus::GRANTED,
+  ASSERT_EQ(CONTENT_SETTING_ALLOW,
             PermissionManager::Get(browser()->profile())
-                ->GetPermissionStatus(content::PermissionType::NOTIFICATIONS,
-                                      origin, origin));
+                ->GetPermissionStatus(CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
+                                      origin, origin)
+                .content_setting);
 }
 
 void PlatformNotificationServiceBrowserTest::NavigateToTestPage(
@@ -224,6 +235,18 @@ void PlatformNotificationServiceBrowserTest::DisableFullscreenNotifications() {
       {features::kAllowFullscreenWebNotificationsFeature});
 }
 
+double PlatformNotificationServiceBrowserTest::GetEngagementScore(
+    const GURL& origin) const {
+  return engagement_service_->GetScore(origin);
+}
+
+GURL PlatformNotificationServiceBrowserTest::GetLastCommittedURL() const {
+  return browser()
+      ->tab_strip_model()
+      ->GetActiveWebContents()
+      ->GetLastCommittedURL();
+}
+
 // -----------------------------------------------------------------------------
 
 // TODO(peter): Move PlatformNotificationService-related tests over from
@@ -246,6 +269,9 @@ IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
                        DisplayPersistentNotificationWithPermission) {
   RequestAndAcceptPermission();
 
+  // Expect 5 engagement for notification permission and 0.5 for the navigation.
+  EXPECT_DOUBLE_EQ(5.5, GetEngagementScore(GetLastCommittedURL()));
+
   std::string script_result;
   ASSERT_TRUE(RunScript("DisplayPersistentNotification('action_none')",
        &script_result));
@@ -258,8 +284,10 @@ IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
       KeepAliveOrigin::PENDING_NOTIFICATION_CLICK_EVENT));
 #endif
 
+  // We expect +1 engagement for the notification interaction.
   const Notification& notification = ui_manager()->GetNotificationAt(0);
   notification.delegate()->Click();
+  EXPECT_DOUBLE_EQ(6.5, GetEngagementScore(GetLastCommittedURL()));
 
 #if BUILDFLAG(ENABLE_BACKGROUND)
   ASSERT_TRUE(KeepAliveRegistry::GetInstance()->IsOriginRegistered(
@@ -323,9 +351,11 @@ IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
   EXPECT_EQ("Title", base::UTF16ToUTF8(all_options_notification.title()));
   EXPECT_EQ("Contents", base::UTF16ToUTF8(all_options_notification.message()));
   EXPECT_EQ("replace-id", all_options_notification.tag());
+#if !defined(OS_MACOSX)
   EXPECT_FALSE(all_options_notification.image().IsEmpty());
   EXPECT_EQ(kIconWidth, all_options_notification.image().Width());
   EXPECT_EQ(kIconHeight, all_options_notification.image().Height());
+#endif
   EXPECT_FALSE(all_options_notification.icon().IsEmpty());
   EXPECT_EQ(kIconWidth, all_options_notification.icon().Width());
   EXPECT_EQ(kIconHeight, all_options_notification.icon().Height());
@@ -347,6 +377,12 @@ IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
                        WebNotificationSiteSettingsButton) {
   ASSERT_NO_FATAL_FAILURE(GrantNotificationPermissionForTest());
 
+  // Expect 5 engagement for notification permission and 0.5 for the navigation.
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  GURL origin = web_contents->GetLastCommittedURL();
+  EXPECT_DOUBLE_EQ(5.5, GetEngagementScore(origin));
+
   std::string script_result;
   ASSERT_TRUE(RunScript("DisplayPersistentNotification('Some title', {})",
                         &script_result));
@@ -361,11 +397,17 @@ IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
 
   notification.delegate()->SettingsClick();
   ASSERT_EQ(1u, ui_manager()->GetNotificationCount());
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
+  web_contents = browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(content::WaitForLoadStop(web_contents));
-  ASSERT_EQ("chrome://settings/contentExceptions#notifications",
-            web_contents->GetLastCommittedURL().spec());
+
+  // No engagement should be granted for clicking on the settings link.
+  EXPECT_DOUBLE_EQ(5.5, GetEngagementScore(origin));
+
+  std::string url = web_contents->GetLastCommittedURL().spec();
+  if (base::FeatureList::IsEnabled(features::kMaterialDesignSettings))
+    ASSERT_EQ("chrome://settings/content/notifications", url);
+  else
+    ASSERT_EQ("chrome://settings/contentExceptions#notifications", url);
 }
 
 IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
@@ -391,6 +433,9 @@ IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
                        CloseDisplayedPersistentNotification) {
   ASSERT_NO_FATAL_FAILURE(GrantNotificationPermissionForTest());
 
+  // Expect 5 engagement for notification permission and 0.5 for the navigation.
+  EXPECT_DOUBLE_EQ(5.5, GetEngagementScore(GetLastCommittedURL()));
+
   std::string script_result;
   ASSERT_TRUE(RunScript("DisplayPersistentNotification('action_close')",
                         &script_result));
@@ -400,6 +445,9 @@ IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
 
   const Notification& notification = ui_manager()->GetNotificationAt(0);
   notification.delegate()->Click();
+
+  // We have interacted with the button, so expect a notification bump.
+  EXPECT_DOUBLE_EQ(6.5, GetEngagementScore(GetLastCommittedURL()));
 
   ASSERT_TRUE(RunScript("GetMessageFromWorker()", &script_result));
   EXPECT_EQ("action_close", script_result);
@@ -411,6 +459,9 @@ IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
                        UserClosesPersistentNotification) {
   ASSERT_NO_FATAL_FAILURE(GrantNotificationPermissionForTest());
 
+  // Expect 5 engagement for notification permission and 0.5 for the navigation.
+  EXPECT_DOUBLE_EQ(5.5, GetEngagementScore(GetLastCommittedURL()));
+
   std::string script_result;
   ASSERT_TRUE(
       RunScript("DisplayPersistentNotification('close_test')", &script_result));
@@ -419,6 +470,9 @@ IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
   ASSERT_EQ(1u, ui_manager()->GetNotificationCount());
   const Notification& notification = ui_manager()->GetNotificationAt(0);
   notification.delegate()->Close(true /* by_user */);
+
+  // The user closed this notification so the score should remain the same.
+  EXPECT_DOUBLE_EQ(5.5, GetEngagementScore(GetLastCommittedURL()));
 
   ASSERT_TRUE(RunScript("GetMessageFromWorker()", &script_result));
   EXPECT_EQ("closing notification: close_test", script_result);
@@ -454,26 +508,26 @@ IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
   EXPECT_EQ(TestPageUrl().spec(), notification.service_worker_scope().spec());
 }
 
-// TODO(felt): This DCHECKs when bubbles are enabled, when the file_url is
-// persisted. crbug.com/502057
 IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
-                       DISABLED_CheckFilePermissionNotGranted) {
+                       CheckFilePermissionNotGranted) {
   // This case should succeed because a normal page URL is used.
   std::string script_result;
 
   PermissionManager* permission_manager =
       PermissionManager::Get(browser()->profile());
 
-  EXPECT_EQ(blink::mojom::PermissionStatus::ASK,
-            permission_manager->GetPermissionStatus(
-                content::PermissionType::NOTIFICATIONS, TestPageUrl(),
-                TestPageUrl()));
+  EXPECT_EQ(CONTENT_SETTING_ASK,
+            permission_manager
+                ->GetPermissionStatus(CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
+                                      TestPageUrl(), TestPageUrl())
+                .content_setting);
 
   RequestAndAcceptPermission();
-  EXPECT_EQ(blink::mojom::PermissionStatus::GRANTED,
-            permission_manager->GetPermissionStatus(
-                content::PermissionType::NOTIFICATIONS, TestPageUrl(),
-                TestPageUrl()));
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            permission_manager
+                ->GetPermissionStatus(CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
+                                      TestPageUrl(), TestPageUrl())
+                .content_setting);
 
   // This case should fail because a file URL is used.
   base::FilePath dir_source_root;
@@ -484,14 +538,18 @@ IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
 
   ui_test_utils::NavigateToURL(browser(), file_url);
 
-  EXPECT_EQ(blink::mojom::PermissionStatus::ASK,
-            permission_manager->GetPermissionStatus(
-                content::PermissionType::NOTIFICATIONS, file_url, file_url));
+  EXPECT_EQ(CONTENT_SETTING_ASK,
+            permission_manager
+                ->GetPermissionStatus(CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
+                                      file_url, file_url)
+                .content_setting);
 
   RequestAndAcceptPermission();
-  EXPECT_EQ(blink::mojom::PermissionStatus::ASK,
-            permission_manager->GetPermissionStatus(
-                content::PermissionType::NOTIFICATIONS, file_url, file_url))
+  EXPECT_EQ(CONTENT_SETTING_ASK,
+            permission_manager
+                ->GetPermissionStatus(CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
+                                      file_url, file_url)
+                .content_setting)
       << "If this test fails, you may have fixed a bug preventing file origins "
       << "from sending their origin from Blink; if so you need to update the "
       << "display function for notification origins to show the file path.";
@@ -539,6 +597,9 @@ IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
                        DisplayPersistentNotificationWithActionButtons) {
   ASSERT_NO_FATAL_FAILURE(GrantNotificationPermissionForTest());
 
+  // Expect 5 engagement for notification permission and 0.5 for the navigation.
+  EXPECT_DOUBLE_EQ(5.5, GetEngagementScore(GetLastCommittedURL()));
+
   std::string script_result;
   ASSERT_TRUE(RunScript("DisplayPersistentNotificationWithActionButtons()",
                         &script_result));
@@ -553,15 +614,20 @@ IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
   notification.delegate()->ButtonClick(0);
   ASSERT_TRUE(RunScript("GetMessageFromWorker()", &script_result));
   EXPECT_EQ("action_button_click actionId1", script_result);
+  EXPECT_DOUBLE_EQ(6.5, GetEngagementScore(GetLastCommittedURL()));
 
   notification.delegate()->ButtonClick(1);
   ASSERT_TRUE(RunScript("GetMessageFromWorker()", &script_result));
   EXPECT_EQ("action_button_click actionId2", script_result);
+  EXPECT_DOUBLE_EQ(7.5, GetEngagementScore(GetLastCommittedURL()));
 }
 
 IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
                        DisplayPersistentNotificationWithReplyButton) {
   ASSERT_NO_FATAL_FAILURE(GrantNotificationPermissionForTest());
+
+  // Expect 5 engagement for notification permission and 0.5 for the navigation.
+  EXPECT_DOUBLE_EQ(5.5, GetEngagementScore(GetLastCommittedURL()));
 
   std::string script_result;
   ASSERT_TRUE(RunScript("DisplayPersistentNotificationWithReplyButton()",
@@ -576,6 +642,7 @@ IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,
   notification.delegate()->ButtonClickWithReply(0, base::ASCIIToUTF16("hello"));
   ASSERT_TRUE(RunScript("GetMessageFromWorker()", &script_result));
   EXPECT_EQ("action_button_click actionId1 hello", script_result);
+  EXPECT_DOUBLE_EQ(6.5, GetEngagementScore(GetLastCommittedURL()));
 }
 
 IN_PROC_BROWSER_TEST_F(PlatformNotificationServiceBrowserTest,

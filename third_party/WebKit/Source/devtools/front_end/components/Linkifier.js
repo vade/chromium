@@ -153,7 +153,7 @@ Components.Linkifier = class {
         sourceURL ? Components.Linkifier.linkifyURL(sourceURL, undefined, classes, lineNumber, columnNumber) : null;
     if (!target || target.isDisposed())
       return fallbackAnchor;
-    var debuggerModel = SDK.DebuggerModel.fromTarget(target);
+    var debuggerModel = target.model(SDK.DebuggerModel);
     if (!debuggerModel)
       return fallbackAnchor;
 
@@ -169,9 +169,9 @@ Components.Linkifier = class {
     info.fallback = fallbackAnchor;
     info.liveLocation = Bindings.debuggerWorkspaceBinding.createLiveLocation(
         rawLocation, this._updateAnchor.bind(this, anchor),
-        /** @type {!Bindings.LiveLocationPool} */ (this._locationPoolByTarget.get(rawLocation.target())));
+        /** @type {!Bindings.LiveLocationPool} */ (this._locationPoolByTarget.get(rawLocation.debuggerModel.target())));
 
-    var anchors = /** @type {!Array<!Element>} */ (this._anchorsByTarget.get(rawLocation.target()));
+    var anchors = /** @type {!Array<!Element>} */ (this._anchorsByTarget.get(rawLocation.debuggerModel.target()));
     anchors.push(anchor);
     return anchor;
   }
@@ -198,8 +198,8 @@ Components.Linkifier = class {
    */
   linkifyRawLocation(rawLocation, fallbackUrl, classes) {
     return this.linkifyScriptLocation(
-        rawLocation.target(), rawLocation.scriptId, fallbackUrl, rawLocation.lineNumber, rawLocation.columnNumber,
-        classes);
+        rawLocation.debuggerModel.target(), rawLocation.scriptId, fallbackUrl, rawLocation.lineNumber,
+        rawLocation.columnNumber, classes);
   }
 
   /**
@@ -228,7 +228,7 @@ Components.Linkifier = class {
     if (target.isDisposed())
       return fallbackAnchor;
 
-    var debuggerModel = SDK.DebuggerModel.fromTarget(target);
+    var debuggerModel = target.model(SDK.DebuggerModel);
     var rawLocations = debuggerModel.createRawLocationsByStackTrace(stackTrace);
     if (rawLocations.length === 0)
       return fallbackAnchor;
@@ -257,25 +257,11 @@ Components.Linkifier = class {
     info.enableDecorator = this._useLinkDecorator;
     info.liveLocation = Bindings.cssWorkspaceBinding.createLiveLocation(
         rawLocation, this._updateAnchor.bind(this, anchor),
-        /** @type {!Bindings.LiveLocationPool} */ (this._locationPoolByTarget.get(rawLocation.target())));
+        /** @type {!Bindings.LiveLocationPool} */ (this._locationPoolByTarget.get(rawLocation.cssModel().target())));
 
-    var anchors = /** @type {!Array<!Element>} */ (this._anchorsByTarget.get(rawLocation.target()));
+    var anchors = /** @type {!Array<!Element>} */ (this._anchorsByTarget.get(rawLocation.cssModel().target()));
     anchors.push(anchor);
     return anchor;
-  }
-
-  /**
-   * @param {!SDK.Target} target
-   * @param {!Element} anchor
-   */
-  disposeAnchor(target, anchor) {
-    Components.Linkifier._unbindUILocation(anchor);
-    var info = Components.Linkifier._linkInfo(anchor);
-    info.fallback = null;
-    if (info.liveLocation) {
-      info.liveLocation.dispose();
-      info.liveLocation = null;
-    }
   }
 
   reset() {
@@ -303,13 +289,8 @@ Components.Linkifier = class {
       return;
 
     Components.Linkifier._bindUILocation(anchor, uiLocation);
-    var text = uiLocation.linkText();
-    var info = Components.Linkifier._linkInfo(anchor);
-    info.originalLinkText = text;
-    text = text.replace(/([a-f0-9]{7})[a-f0-9]{13}[a-f0-9]*/g, '$1\u2026');
-    if (this._maxLength)
-      text = text.trimMiddle(this._maxLength);
-    anchor.textContent = text;
+    var text = uiLocation.linkText(true /* skipTrim */);
+    Components.Linkifier._setTrimmedText(anchor, text, this._maxLength);
 
     var titleText = uiLocation.uiSourceCode.url();
     if (typeof uiLocation.lineNumber === 'number')
@@ -396,9 +377,7 @@ Components.Linkifier = class {
       link.title = title;
     if (href)
       link.href = href;
-    link.textContent = text;
-    if (maxLength)
-      link.textContent = link.textContent.trimMiddle(maxLength);
+    Components.Linkifier._setTrimmedText(link, text, maxLength);
     link[Components.Linkifier._infoSymbol] = {
       icon: null,
       enableDecorator: false,
@@ -408,8 +387,7 @@ Components.Linkifier = class {
       lineNumber: null,
       columnNumber: null,
       revealable: null,
-      fallback: null,
-      originalLinkText: text
+      fallback: null
     };
     if (!preventClick)
       link.addEventListener('click', Components.Linkifier._handleClick, false);
@@ -419,12 +397,70 @@ Components.Linkifier = class {
   }
 
   /**
-   * @param {?Element} link
-   * @return {?string}
+   * @param {!Element} link
+   * @param {string} text
+   * @param {number=} maxLength
    */
-  static originalLinkText(link) {
-    var info = this._linkInfo(link);
-    return info ? info.originalLinkText : null;
+  static _setTrimmedText(link, text, maxLength) {
+    link.removeChildren();
+    if (maxLength && text.length > maxLength) {
+      var middleSplit = splitMiddle(text, maxLength);
+      appendTextWithoutHashes(middleSplit[0]);
+      appendHiddenText(middleSplit[1]);
+      appendTextWithoutHashes(middleSplit[2]);
+    } else {
+      appendTextWithoutHashes(text);
+    }
+
+    /**
+     * @param {string} string
+     */
+    function appendHiddenText(string) {
+      var ellipsisNode = link.createChild('span', 'devtools-link-ellipsis').createTextChild('\u2026');
+      ellipsisNode[Components.Linkifier._untruncatedNodeTextSymbol] = string;
+    }
+
+    /**
+     * @param {string} string
+     */
+    function appendTextWithoutHashes(string) {
+      var hashSplit = TextUtils.TextUtils.splitStringByRegexes(string, [/[a-f0-9]{20,}/g]);
+      for (var match of hashSplit) {
+        if (match.regexIndex === -1) {
+          link.createTextChild(match.value);
+        } else {
+          link.createTextChild(match.value.substring(0, 7));
+          appendHiddenText(match.value.substring(7));
+        }
+      }
+    }
+
+    /**
+     * @param {string} string
+     * @param {number} maxLength
+     * @return {!Array<string>}
+     */
+    function splitMiddle(string, maxLength) {
+      var leftIndex = Math.floor(maxLength / 2);
+      var rightIndex = string.length - Math.ceil(maxLength / 2) + 1;
+
+      // Do not truncate between characters that use multiple code points (emojis).
+      if (string.codePointAt(rightIndex - 1) >= 0x10000) {
+        rightIndex++;
+        leftIndex++;
+      }
+      if (leftIndex > 0 && string.codePointAt(leftIndex - 1) >= 0x10000)
+        leftIndex--;
+      return [string.substring(0, leftIndex), string.substring(leftIndex, rightIndex), string.substring(rightIndex)];
+    }
+  }
+
+  /**
+   * @param {!Node} node
+   * @return {string}
+   */
+  static untruncatedNodeText(node) {
+    return node[Components.Linkifier._untruncatedNodeTextSymbol] || node.textContent;
   }
 
   /**
@@ -497,7 +533,7 @@ Components.Linkifier = class {
       uiLocation = uiSourceCode ? uiSourceCode.uiLocation(info.lineNumber || 0, info.columnNumber || 0) : null;
     }
     var resource = url ? Bindings.resourceForURL(url) : null;
-    var request = url ? SDK.NetworkLog.requestForURL(url) : null;
+    var request = url ? NetworkLog.networkLog.requestForURL(url) : null;
     var contentProvider = uiLocation ? uiLocation.uiSourceCode : resource;
 
     if (info.revealable)
@@ -549,6 +585,7 @@ Components.Linkifier._decorator = null;
 
 Components.Linkifier._sourceCodeAnchors = Symbol('Linkifier.anchors');
 Components.Linkifier._infoSymbol = Symbol('Linkifier.info');
+Components.Linkifier._untruncatedNodeTextSymbol = Symbol('Linkifier.untruncatedNodeText');
 
 /**
  * @typedef {{
@@ -560,8 +597,7 @@ Components.Linkifier._infoSymbol = Symbol('Linkifier.info');
  *     lineNumber: ?number,
  *     columnNumber: ?number,
  *     revealable: ?Object,
- *     fallback: ?Element,
- *     originalLinkText: string
+ *     fallback: ?Element
  * }}
  */
 Components._LinkInfo;

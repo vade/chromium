@@ -6,22 +6,24 @@
 
 #include <utility>
 
-#include "ash/common/ash_constants.h"
-#include "ash/common/wallpaper/wallpaper_controller.h"
-#include "ash/common/wm_shell.h"
+#include "ash/ash_constants.h"
+#include "ash/public/interfaces/constants.mojom.h"
+#include "ash/shell.h"
+#include "ash/wallpaper/wallpaper_controller.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
+#include "base/sequenced_task_runner.h"
 #include "base/sha1.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/sys_info.h"
 #include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "base/threading/worker_pool.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
@@ -197,7 +199,7 @@ void SetKnownUserWallpaperFilesId(
 // A helper to set the wallpaper image for Classic Ash and Mash.
 void SetWallpaper(const gfx::ImageSkia& image,
                   wallpaper::WallpaperLayout layout) {
-  if (chrome::IsRunningInMash()) {
+  if (ash_util::IsRunningInMash()) {
     // In mash, connect to the WallpaperController interface via mojo.
     service_manager::Connector* connector =
         content::ServiceManagerConnection::GetForProcess()->GetConnector();
@@ -205,16 +207,14 @@ void SetWallpaper(const gfx::ImageSkia& image,
       return;
 
     ash::mojom::WallpaperControllerPtr wallpaper_controller;
-    connector->BindInterface(ash_util::GetAshServiceName(),
-                             &wallpaper_controller);
+    connector->BindInterface(ash::mojom::kServiceName, &wallpaper_controller);
     // TODO(crbug.com/655875): Optimize ash wallpaper transport; avoid sending
     // large bitmaps over Mojo; use shared memory like BitmapUploader, etc.
     wallpaper_controller->SetWallpaper(*image.bitmap(), layout);
-  } else if (ash::WmShell::HasInstance()) {
+  } else if (ash::Shell::HasInstance()) {
     // Note: Wallpaper setting is skipped in unit tests without shell instances.
     // In classic ash, interact with the WallpaperController class directly.
-    ash::WmShell::Get()->wallpaper_controller()->SetWallpaperImage(image,
-                                                                   layout);
+    ash::Shell::Get()->wallpaper_controller()->SetWallpaperImage(image, layout);
   }
 }
 
@@ -473,7 +473,7 @@ void WallpaperManager::InitializeWallpaper() {
   // Zero delays is also set in autotests.
   if (WizardController::IsZeroDelayEnabled()) {
     // Ensure tests have some sort of wallpaper.
-    ash::WmShell::Get()->wallpaper_controller()->CreateEmptyWallpaper();
+    ash::Shell::Get()->wallpaper_controller()->CreateEmptyWallpaper();
     return;
   }
 
@@ -714,14 +714,14 @@ void WallpaperManager::SetUserWallpaperInfo(const AccountId& account_id,
   DictionaryPrefUpdate wallpaper_update(local_state,
                                         wallpaper::kUsersWallpaperInfo);
 
-  base::DictionaryValue* wallpaper_info_dict = new base::DictionaryValue();
+  auto wallpaper_info_dict = base::MakeUnique<base::DictionaryValue>();
   wallpaper_info_dict->SetString(kNewWallpaperDateNodeName,
       base::Int64ToString(info.date.ToInternalValue()));
   wallpaper_info_dict->SetString(kNewWallpaperLocationNodeName, info.location);
   wallpaper_info_dict->SetInteger(kNewWallpaperLayoutNodeName, info.layout);
   wallpaper_info_dict->SetInteger(kNewWallpaperTypeNodeName, info.type);
   wallpaper_update->SetWithoutPathExpansion(account_id.GetUserEmail(),
-                                            wallpaper_info_dict);
+                                            std::move(wallpaper_info_dict));
 }
 
 void WallpaperManager::ScheduleSetUserWallpaper(const AccountId& account_id,
@@ -888,7 +888,7 @@ WallpaperManager::WallpaperManager()
   if (connection && connection->GetConnector()) {
     // Connect to the wallpaper controller interface in the ash service.
     ash::mojom::WallpaperControllerPtr wallpaper_controller_ptr;
-    connection->GetConnector()->BindInterface(ash_util::GetAshServiceName(),
+    connection->GetConnector()->BindInterface(ash::mojom::kServiceName,
                                               &wallpaper_controller_ptr);
     // Register this object as the wallpaper picker.
     wallpaper_controller_ptr->SetWallpaperPicker(
@@ -962,7 +962,7 @@ void WallpaperManager::OnDeviceWallpaperExists(const AccountId& account_id,
                                                bool exist) {
   if (exist) {
     base::PostTaskWithTraitsAndReplyWithResult(
-        FROM_HERE, base::TaskTraits().MayBlock(),
+        FROM_HERE, {base::MayBlock()},
         base::Bind(&CheckDeviceWallpaperMatchHash, GetDeviceWallpaperFilePath(),
                    hash),
         base::Bind(&WallpaperManager::OnCheckDeviceWallpaperMatchHash,
@@ -990,7 +990,7 @@ void WallpaperManager::OnDeviceWallpaperDownloaded(const AccountId& account_id,
   }
 
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, base::TaskTraits().MayBlock(),
+      FROM_HERE, {base::MayBlock()},
       base::Bind(&CheckDeviceWallpaperMatchHash, GetDeviceWallpaperFilePath(),
                  hash),
       base::Bind(&WallpaperManager::OnCheckDeviceWallpaperMatchHash,
@@ -1041,20 +1041,10 @@ void WallpaperManager::OnDeviceWallpaperDecoded(
                                   wallpaper::WALLPAPER_LAYOUT_CENTER_CROPPED,
                                   user_manager::User::DEVICE,
                                   base::Time::Now().LocalMidnight()};
-  if (user_manager::UserManager::Get()->IsUserLoggedIn()) {
-    // In a user's session treat the device wallpaper as a normal custom
-    // wallpaper. It should be persistent and can be overriden by other user
-    // selected wallpapers.
-    SetUserWallpaperInfo(account_id, wallpaper_info, true /* is_persistent */);
-    GetPendingWallpaper(account_id, false)
-        ->ResetSetWallpaperImage(user_image->image(), wallpaper_info);
-    wallpaper_cache_[account_id] = CustomWallpaperElement(
-        GetDeviceWallpaperFilePath(), user_image->image());
-  } else {
-    // In the login screen set the device wallpaper as the wallpaper.
-    GetPendingWallpaper(user_manager::SignInAccountId(), false)
-        ->ResetSetWallpaperImage(user_image->image(), wallpaper_info);
-  }
+  DCHECK(!user_manager::UserManager::Get()->IsUserLoggedIn());
+  // In the login screen set the device wallpaper as the wallpaper.
+  GetPendingWallpaper(user_manager::SignInAccountId(), false)
+      ->ResetSetWallpaperImage(user_image->image(), wallpaper_info);
 }
 
 void WallpaperManager::InitializeRegisteredDeviceWallpaper() {
@@ -1150,19 +1140,9 @@ bool WallpaperManager::ShouldSetDeviceWallpaper(const AccountId& account_id,
     return false;
   }
 
-  // Only set the device wallpaper if 1) we're at the login screen or 2) there
-  // is no user policy wallpaper in a user session and the user has the default
-  // wallpaper or device wallpaper in a user session. Note in the latter case,
-  // the device wallpaper can be overridden by user-selected wallpapers.
-  if (user_manager::UserManager::Get()->IsUserLoggedIn()) {
-    WallpaperInfo info;
-    if (GetUserWallpaperInfo(account_id, &info) &&
-        (info.type == user_manager::User::POLICY ||
-         (info.type != user_manager::User::DEFAULT &&
-          info.type != user_manager::User::DEVICE))) {
-      return false;
-    }
-  }
+  // Only set the device wallpaper if we're at the login screen.
+  if (user_manager::UserManager::Get()->IsUserLoggedIn())
+    return false;
 
   return true;
 }
@@ -1306,7 +1286,7 @@ bool WallpaperManager::SetDeviceWallpaperIfApplicable(
     // Check if the device wallpaper exists and matches the hash. If so, use it
     // directly. Otherwise download it first.
     base::PostTaskWithTraitsAndReplyWithResult(
-        FROM_HERE, base::TaskTraits().MayBlock(),
+        FROM_HERE, {base::MayBlock()},
         base::Bind(&base::PathExists, GetDeviceWallpaperFilePath()),
         base::Bind(&WallpaperManager::OnDeviceWallpaperExists,
                    weak_factory_.GetWeakPtr(), account_id, url, hash));
@@ -1369,7 +1349,7 @@ void WallpaperManager::SetDefaultWallpaperPath(
   default_large_wallpaper_file_ = default_large_wallpaper_file;
 
   ash::WallpaperController* controller =
-      ash::WmShell::Get()->wallpaper_controller();
+      ash::Shell::Get()->wallpaper_controller();
 
   // |need_update_screen| is true if the previous default wallpaper is visible
   // now, so we need to update wallpaper on the screen.

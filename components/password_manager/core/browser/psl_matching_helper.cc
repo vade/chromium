@@ -5,6 +5,7 @@
 #include "components/password_manager/core/browser/psl_matching_helper.h"
 
 #include <memory>
+#include <ostream>
 
 #include "base/logging.h"
 #include "base/strings/string_util.h"
@@ -16,6 +17,72 @@
 using autofill::PasswordForm;
 
 namespace password_manager {
+
+std::ostream& operator<<(std::ostream& out, MatchResult result) {
+  switch (result) {
+    case MatchResult::NO_MATCH:
+      return out << "No Match";
+    case MatchResult::EXACT_MATCH:
+      return out << "Exact Match";
+    case MatchResult::PSL_MATCH:
+      return out << "PSL Match";
+    case MatchResult::FEDERATED_MATCH:
+      return out << "Federated Match";
+    case MatchResult::FEDERATED_PSL_MATCH:
+      return out << "Federated PSL Match";
+  }
+  // This should never be reached, it is simply here to suppress compiler
+  // warnings.
+  return out;
+}
+
+bool IsFederatedRealm(const std::string& form_signon_realm,
+                      const GURL& origin) {
+  // The format should be "federation://origin.host/federation.host;
+  std::string federated_realm = "federation://" + origin.host() + "/";
+  return form_signon_realm.size() > federated_realm.size() &&
+         base::StartsWith(form_signon_realm, federated_realm,
+                          base::CompareCase::INSENSITIVE_ASCII);
+}
+
+bool IsFederatedPSLMatch(const std::string& form_signon_realm,
+                         const GURL& form_origin,
+                         const GURL& origin) {
+  if (!IsPublicSuffixDomainMatch(form_origin.spec(), origin.spec()))
+    return false;
+
+  return IsFederatedRealm(form_signon_realm, form_origin);
+}
+
+MatchResult GetMatchResult(const PasswordForm& form,
+                           const PasswordStore::FormDigest& form_digest) {
+  if (form.signon_realm == form_digest.signon_realm)
+    return MatchResult::EXACT_MATCH;
+
+  // PSL and federated matches only apply to HTML forms.
+  if (form_digest.scheme != PasswordForm::SCHEME_HTML ||
+      form.scheme != PasswordForm::SCHEME_HTML)
+    return MatchResult::NO_MATCH;
+
+  const bool allow_psl_match = ShouldPSLDomainMatchingApply(
+      GetRegistryControlledDomain(GURL(form_digest.signon_realm)));
+  const bool allow_federated_match = !form.federation_origin.unique();
+
+  if (allow_psl_match &&
+      IsPublicSuffixDomainMatch(form.signon_realm, form_digest.signon_realm))
+    return MatchResult::PSL_MATCH;
+
+  if (allow_federated_match &&
+      IsFederatedRealm(form.signon_realm, form_digest.origin) &&
+      form.origin.GetOrigin() == form_digest.origin.GetOrigin())
+    return MatchResult::FEDERATED_MATCH;
+
+  if (allow_psl_match && allow_federated_match &&
+      IsFederatedPSLMatch(form.signon_realm, form.origin, form_digest.origin))
+    return MatchResult::FEDERATED_PSL_MATCH;
+
+  return MatchResult::NO_MATCH;
+}
 
 bool ShouldPSLDomainMatchingApply(
     const std::string& registry_controlled_domain) {
@@ -48,36 +115,5 @@ std::string GetRegistryControlledDomain(const GURL& signon_realm) {
   return net::registry_controlled_domains::GetDomainAndRegistry(
       signon_realm,
       net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES);
-}
-
-bool IsFederatedMatch(const std::string& signon_realm, const GURL& origin) {
-  // The format should be "federation://origin.host/federation.host;
-  std::string federated_realm = "federation://" + origin.host() + "/";
-  return signon_realm.size() > federated_realm.size() &&
-         base::StartsWith(signon_realm, federated_realm,
-                          base::CompareCase::INSENSITIVE_ASCII);
-}
-
-bool IsFederatedPSLMatch(const std::string& signon_realm, const GURL& origin) {
-  // The format should be "federation://origin.host/federation.host;
-  // Check for presence of "federation://" prefix.
-  static constexpr char federation_prefix[] = "federation://";
-  if (!base::StartsWith(signon_realm, federation_prefix,
-                        base::CompareCase::INSENSITIVE_ASCII))
-    return false;
-
-  // Replace federation scheme with HTTPS. This results in correct parsing of
-  // host and path, and forces origin to have a HTTPS scheme in order to return
-  // true.
-  GURL::Replacements replacements;
-  replacements.SetSchemeStr(url::kHttpsScheme);
-  GURL https_signon_realm = GURL(signon_realm).ReplaceComponents(replacements);
-
-  // Check for non-empty federation.host.
-  if (!https_signon_realm.has_path() || https_signon_realm.path_piece() == "/")
-    return false;
-
-  return IsPublicSuffixDomainMatch(https_signon_realm.GetOrigin().spec(),
-                                   origin.GetOrigin().spec());
 }
 }  // namespace password_manager

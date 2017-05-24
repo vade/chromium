@@ -12,7 +12,6 @@
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/command_buffer/service/texture_manager.h"
 #include "gpu/ipc/common/android/scoped_surface_request_conduit.h"
-#include "gpu/ipc/common/android/surface_texture_peer.h"
 #include "gpu/ipc/common/gpu_messages.h"
 #include "gpu/ipc/service/gpu_channel.h"
 #include "ui/gfx/geometry/size.h"
@@ -69,7 +68,7 @@ StreamTexture::StreamTexture(GpuCommandBufferStub* owner_stub,
       weak_factory_(this) {
   owner_stub->AddDestructionObserver(this);
   memset(current_matrix_, 0, sizeof(current_matrix_));
-  owner_stub->channel()->AddRoute(route_id, owner_stub->stream_id(), this);
+  owner_stub->channel()->AddRoute(route_id, owner_stub->sequence_id(), this);
   surface_texture_->SetFrameAvailableCallback(base::Bind(
       &StreamTexture::OnFrameAvailable, weak_factory_.GetWeakPtr()));
 }
@@ -198,7 +197,6 @@ bool StreamTexture::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(GpuStreamTextureMsg_StartListening, OnStartListening)
     IPC_MESSAGE_HANDLER(GpuStreamTextureMsg_ForwardForSurfaceRequest,
                         OnForwardForSurfaceRequest)
-    IPC_MESSAGE_HANDLER(GpuStreamTextureMsg_EstablishPeer, OnEstablishPeer)
     IPC_MESSAGE_HANDLER(GpuStreamTextureMsg_SetSize, OnSetSize)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -210,16 +208,6 @@ bool StreamTexture::OnMessageReceived(const IPC::Message& message) {
 void StreamTexture::OnStartListening() {
   DCHECK(!has_listener_);
   has_listener_ = true;
-}
-
-void StreamTexture::OnEstablishPeer(int32_t primary_id, int32_t secondary_id) {
-  if (!owner_stub_)
-    return;
-
-  base::ProcessHandle process = owner_stub_->channel()->GetClientPID();
-
-  SurfaceTexturePeer::GetInstance()->EstablishSurfaceTexturePeer(
-      process, surface_texture_, primary_id, secondary_id);
 }
 
 void StreamTexture::OnForwardForSurfaceRequest(

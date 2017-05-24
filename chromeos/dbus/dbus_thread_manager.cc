@@ -8,11 +8,13 @@
 
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/sys_info.h"
 #include "base/threading/thread.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/arc_obb_mounter_client.h"
 #include "chromeos/dbus/auth_policy_client.h"
+#include "chromeos/dbus/biod/biod_client.h"
 #include "chromeos/dbus/cras_audio_client.h"
 #include "chromeos/dbus/cros_disks_client.h"
 #include "chromeos/dbus/cryptohome_client.h"
@@ -25,6 +27,7 @@
 #include "chromeos/dbus/image_burner_client.h"
 #include "chromeos/dbus/image_loader_client.h"
 #include "chromeos/dbus/lorgnette_manager_client.h"
+#include "chromeos/dbus/media_analytics_client.h"
 #include "chromeos/dbus/modem_messaging_client.h"
 #include "chromeos/dbus/permission_broker_client.h"
 #include "chromeos/dbus/power_manager_client.h"
@@ -116,6 +119,10 @@ AuthPolicyClient* DBusThreadManager::GetAuthPolicyClient() {
                           : nullptr;
 }
 
+BiodClient* DBusThreadManager::GetBiodClient() {
+  return clients_common_->biod_client_.get();
+}
+
 CrasAudioClient* DBusThreadManager::GetCrasAudioClient() {
   return clients_common_->cras_audio_client_.get();
 }
@@ -180,6 +187,11 @@ ImageBurnerClient* DBusThreadManager::GetImageBurnerClient() {
 
 ImageLoaderClient* DBusThreadManager::GetImageLoaderClient() {
   return clients_browser_ ? clients_browser_->image_loader_client_.get()
+                          : nullptr;
+}
+
+MediaAnalyticsClient* DBusThreadManager::GetMediaAnalyticsClient() {
+  return clients_browser_ ? clients_browser_->media_analytics_client_.get()
                           : nullptr;
 }
 
@@ -296,6 +308,11 @@ DBusThreadManagerSetter::DBusThreadManagerSetter() {}
 
 DBusThreadManagerSetter::~DBusThreadManagerSetter() {}
 
+void DBusThreadManagerSetter::SetBiodClient(
+    std::unique_ptr<BiodClient> client) {
+  DBusThreadManager::Get()->clients_common_->biod_client_ = std::move(client);
+}
+
 void DBusThreadManagerSetter::SetCrasAudioClient(
     std::unique_ptr<CrasAudioClient> client) {
   DBusThreadManager::Get()->clients_common_->cras_audio_client_ =
@@ -366,6 +383,12 @@ void DBusThreadManagerSetter::SetImageBurnerClient(
 void DBusThreadManagerSetter::SetImageLoaderClient(
     std::unique_ptr<ImageLoaderClient> client) {
   DBusThreadManager::Get()->clients_browser_->image_loader_client_ =
+      std::move(client);
+}
+
+void DBusThreadManagerSetter::SetMediaAnalyticsClient(
+    std::unique_ptr<MediaAnalyticsClient> client) {
+  DBusThreadManager::Get()->clients_browser_->media_analytics_client_ =
       std::move(client);
 }
 

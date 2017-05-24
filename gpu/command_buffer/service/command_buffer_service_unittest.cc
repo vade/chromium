@@ -9,6 +9,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/memory/ptr_util.h"
 #include "base/threading/thread.h"
 #include "gpu/command_buffer/common/cmd_buffer_common.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
@@ -20,7 +21,7 @@ using base::SharedMemory;
 using testing::_;
 using testing::DoAll;
 using testing::Return;
-using testing::SetArgumentPointee;
+using testing::SetArgPointee;
 using testing::StrictMock;
 
 namespace gpu {
@@ -28,11 +29,7 @@ namespace gpu {
 class CommandBufferServiceTest : public testing::Test {
  protected:
   void SetUp() override {
-    {
-      TransferBufferManager* manager = new TransferBufferManager(nullptr);
-      transfer_buffer_manager_ = manager;
-      EXPECT_TRUE(manager->Initialize());
-    }
+    transfer_buffer_manager_ = base::MakeUnique<TransferBufferManager>(nullptr);
     command_buffer_.reset(
         new CommandBufferService(transfer_buffer_manager_.get()));
   }
@@ -54,7 +51,7 @@ class CommandBufferServiceTest : public testing::Test {
     return true;
   }
 
-  scoped_refptr<TransferBufferManagerInterface> transfer_buffer_manager_;
+  std::unique_ptr<TransferBufferManager> transfer_buffer_manager_;
   std::unique_ptr<CommandBufferService> command_buffer_;
 };
 
@@ -129,8 +126,12 @@ TEST_F(CommandBufferServiceTest, SetGetBuffer) {
   EXPECT_CALL(*change_callback, GetBufferChanged(ring_buffer_id))
       .WillOnce(Return(true));
 
+  uint32_t set_get_buffer_count =
+      command_buffer_->GetLastState().set_get_buffer_count;
   command_buffer_->SetGetBuffer(ring_buffer_id);
   EXPECT_EQ(0, GetGetOffset());
+  EXPECT_EQ(set_get_buffer_count + 1,
+            command_buffer_->GetLastState().set_get_buffer_count);
 }
 
 TEST_F(CommandBufferServiceTest, DefaultTokenIsZero) {

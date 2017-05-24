@@ -31,8 +31,8 @@
 #ifndef HTMLTemplateElement_h
 #define HTMLTemplateElement_h
 
-#include "bindings/core/v8/TraceWrapperMember.h"
 #include "core/html/HTMLElement.h"
+#include "platform/bindings/TraceWrapperMember.h"
 
 namespace blink {
 
@@ -52,12 +52,12 @@ class HTMLTemplateElement final : public HTMLElement {
   DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
  private:
-  Node* cloneNode(bool deep) override;
-  void didMoveToNewDocument(Document& oldDocument) override;
+  Node* cloneNode(bool deep, ExceptionState&) override;
+  void DidMoveToNewDocument(Document& old_document) override;
 
   explicit HTMLTemplateElement(Document&);
 
-  mutable TraceWrapperMember<TemplateContentDocumentFragment> m_content;
+  mutable TraceWrapperMember<TemplateContentDocumentFragment> content_;
 };
 
 }  // namespace blink

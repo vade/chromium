@@ -16,7 +16,6 @@
 #include "chrome/browser/geolocation/geolocation_infobar_delegate_android.h"
 #include "chrome/browser/media/midi_permission_infobar_delegate_android.h"
 #include "chrome/browser/media/protected_media_identifier_infobar_delegate_android.h"
-#include "chrome/browser/media/webrtc/media_stream_devices_controller.h"
 #include "chrome/browser/media/webrtc/media_stream_infobar_delegate_android.h"
 #include "chrome/browser/notifications/notification_permission_infobar_delegate.h"
 #include "chrome/browser/profiles/profile.h"
@@ -40,7 +39,7 @@ const char kModalParamsUserGestureKey[] = "require_gesture";
 // static
 void PermissionDialogDelegate::Create(
     content::WebContents* web_contents,
-    content::PermissionType type,
+    ContentSettingsType type,
     const GURL& requesting_frame,
     bool user_gesture,
     Profile* profile,
@@ -64,13 +63,13 @@ void PermissionDialogDelegate::Create(
 void PermissionDialogDelegate::CreateMediaStreamDialog(
     content::WebContents* web_contents,
     bool user_gesture,
-    std::unique_ptr<MediaStreamDevicesController> controller) {
+    std::unique_ptr<MediaStreamDevicesController::Request> request) {
   DCHECK(web_contents);
 
   // If we don't have a tab, just act as though the prompt was dismissed.
   TabAndroid* tab = TabAndroid::FromWebContents(web_contents);
   if (!tab) {
-    controller->Cancelled();
+    request->Cancelled();
     return;
   }
 
@@ -78,8 +77,7 @@ void PermissionDialogDelegate::CreateMediaStreamDialog(
   std::unique_ptr<PermissionInfoBarDelegate> infobar_delegate;
   infobar_delegate.reset(new MediaStreamInfoBarDelegateAndroid(
       Profile::FromBrowserContext(web_contents->GetBrowserContext()),
-      user_gesture,
-      std::move(controller)));
+      user_gesture, std::move(request)));
 
   // Dispatch the dialog to Java, which manages the lifetime of this object.
   new PermissionDialogDelegate(tab, std::move(infobar_delegate));

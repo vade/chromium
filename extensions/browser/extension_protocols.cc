@@ -29,7 +29,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/timer/elapsed_timer.h"
 #include "build/build_config.h"
@@ -180,8 +180,9 @@ class URLRequestExtensionJob : public net::URLRequestFileJob {
             request,
             network_delegate,
             base::FilePath(),
-            BrowserThread::GetBlockingPool()->GetTaskRunnerWithShutdownBehavior(
-                base::SequencedWorkerPool::SKIP_ON_SHUTDOWN)),
+            base::CreateTaskRunnerWithTraits(
+                {base::MayBlock(), base::TaskPriority::BACKGROUND,
+                 base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})),
         verify_job_(verify_job),
         seek_position_(0),
         bytes_read_(0),
@@ -201,26 +202,20 @@ class URLRequestExtensionJob : public net::URLRequestFileJob {
     *info = response_info_;
   }
 
-  // This always returns 200 because a URLRequestExtensionJob will only get
-  // created in MaybeCreateJob() if the file exists.
-  int GetResponseCode() const override { return 200; }
-
   void Start() override {
     request_timer_.reset(new base::ElapsedTimer());
     base::FilePath* read_file_path = new base::FilePath;
     base::Time* last_modified_time = new base::Time();
-    bool posted = BrowserThread::PostBlockingPoolTaskAndReply(
-        FROM_HERE,
-        base::Bind(&ReadResourceFilePathAndLastModifiedTime,
-                   resource_,
-                   directory_path_,
-                   base::Unretained(read_file_path),
+
+    // Inherit task priority from the calling context.
+    base::PostTaskWithTraitsAndReply(
+        FROM_HERE, {base::MayBlock()},
+        base::Bind(&ReadResourceFilePathAndLastModifiedTime, resource_,
+                   directory_path_, base::Unretained(read_file_path),
                    base::Unretained(last_modified_time)),
         base::Bind(&URLRequestExtensionJob::OnFilePathAndLastModifiedTimeRead,
-                   weak_factory_.GetWeakPtr(),
-                   base::Owned(read_file_path),
+                   weak_factory_.GetWeakPtr(), base::Owned(read_file_path),
                    base::Owned(last_modified_time)));
-    DCHECK(posted);
   }
 
   bool IsRedirectResponse(GURL* location, int* http_status_code) override {
@@ -236,6 +231,20 @@ class URLRequestExtensionJob : public net::URLRequestFileJob {
         verify_job_ = NULL;
     }
     URLRequestFileJob::SetExtraRequestHeaders(headers);
+  }
+
+  void OnOpenComplete(int result) override {
+    if (result < 0) {
+      // This can happen when the file is unreadable (which can happen during
+      // corruption or third-party interaction). We need to be sure to inform
+      // the verification job that we've finished reading so that it can
+      // proceed; see crbug.com/703888.
+      if (verify_job_.get()) {
+        std::string tmp;
+        verify_job_->BytesRead(0, base::string_as_array(&tmp));
+        verify_job_->DoneReading();
+      }
+    }
   }
 
   void OnSeekComplete(int64_t result) override {
@@ -255,12 +264,15 @@ class URLRequestExtensionJob : public net::URLRequestFileJob {
                                   -result);
     if (result > 0) {
       bytes_read_ += result;
-      if (verify_job_.get()) {
+      if (verify_job_.get())
         verify_job_->BytesRead(result, buffer->data());
-        if (!remaining_bytes())
-          verify_job_->DoneReading();
-      }
     }
+  }
+
+  void DoneReading() override {
+    URLRequestFileJob::DoneReading();
+    if (verify_job_.get())
+      verify_job_->DoneReading();
   }
 
  private:

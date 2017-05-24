@@ -8,13 +8,15 @@
 #include <stddef.h>
 
 #include <list>
+#include <memory>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "base/files/file_path.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/strings/string16.h"
 #include "base/synchronization/lock.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/timer/timer.h"
@@ -29,6 +31,11 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+
+namespace base {
+class SingleThreadTaskRunner;
+class SequencedTaskRunner;
+}
 
 namespace chrome {
 struct FaviconImageResult;
@@ -79,6 +86,18 @@ class JumpList : public sessions::TabRestoreServiceObserver,
     // Items in the "Recently Closed" category of the application JumpList,
     // protected by the list_lock_.
     ShellLinkItemList recently_closed_pages_;
+
+    // A boolean flag indicating if "Most Visited" category of the JumpList
+    // has new updates therefore its icons need to be updated.
+    // By default, this flag is set to false. If there's any change in
+    // TabRestoreService, this flag will be set to true.
+    bool most_visited_pages_have_updates_ = false;
+
+    // A boolean flag indicating if "Recently Closed" category of the JumpList
+    // has new updates therefore its icons need to be updated.
+    // By default, this flag is set to false. If there's any change in TopSites
+    // service, this flag will be set to true.
+    bool recently_closed_pages_have_updates_ = false;
   };
 
   // Observer callback for TabRestoreService::Observer to notify when a tab is
@@ -102,7 +121,6 @@ class JumpList : public sessions::TabRestoreServiceObserver,
   void ShutdownOnUIThread() override;
 
   // Returns true if the custom JumpList is enabled.
-  // The custom jumplist works only on Windows 7 and above.
   static bool Enabled();
 
  private:
@@ -110,16 +128,17 @@ class JumpList : public sessions::TabRestoreServiceObserver,
   explicit JumpList(Profile* profile);  // Use JumpListFactory instead
   ~JumpList() override;
 
-  // Creates a ShellLinkItem object from a tab (or a window) and add it to the
-  // given list.
-  // These functions are copied from the RecentlyClosedTabsHandler class for
-  // compatibility with the new-tab page.
+  // Adds a new ShellLinkItem for |tab| to |data| provided that doing so will
+  // not exceed |max_items|.
   bool AddTab(const sessions::TabRestoreService::Tab& tab,
-              ShellLinkItemList* list,
-              size_t max_items);
+              size_t max_items,
+              JumpListData* data);
+
+  // Adds a new ShellLinkItem for each tab in |window| to |data| provided that
+  // doing so will not exceed |max_items|.
   void AddWindow(const sessions::TabRestoreService::Window& window,
-                 ShellLinkItemList* list,
-                 size_t max_items);
+                 size_t max_items,
+                 JumpListData* data);
 
   // Starts loading a favicon for each URL in |icon_urls_|.
   // This function sends a query to HistoryService.
@@ -134,27 +153,65 @@ class JumpList : public sessions::TabRestoreServiceObserver,
   void OnFaviconDataAvailable(
       const favicon_base::FaviconImageResult& image_result);
 
-  // Callback for TopSites that notifies when the "Most
-  // Visited" list is available. This function updates the ShellLinkItemList
-  // objects and send another query that retrieves a favicon for each URL in
-  // the list.
+  // Callback for TopSites that notifies when the "Most Visited" list is
+  // available. This function updates the ShellLinkItemList objects and
+  // begins the process of fetching favicons for the URLs.
   void OnMostVisitedURLsAvailable(
       const history::MostVisitedURLList& data);
 
   // Callback for changes to the incognito mode availability pref.
   void OnIncognitoAvailabilityChanged();
 
-  // Helper for RunUpdate() that determines its parameters.
+  // Posts tasks to update the JumpList and delete any obsolete JumpList related
+  // folders.
   void PostRunUpdate();
-
-  // Called on a timer to invoke RunUpdateOnFileThread() after requests storms
-  // have subsided.
-  void DeferredRunUpdate();
 
   // history::TopSitesObserver implementation.
   void TopSitesLoaded(history::TopSites* top_sites) override;
   void TopSitesChanged(history::TopSites* top_sites,
                        ChangeReason change_reason) override;
+
+  // Called on a timer to update the most visited URLs after requests storms
+  // have subsided.
+  void DeferredTopSitesChanged();
+
+  // Called on a timer to update the "Recently Closed" category of JumpList
+  // after requests storms have subsided.
+  void DeferredTabRestoreServiceChanged();
+
+  // Creates at most |max_items| icon files in |icon_dir| for the
+  // asynchrounously loaded icons stored in |item_list|.
+  void CreateIconFiles(const base::FilePath& icon_dir,
+                       const ShellLinkItemList& item_list,
+                       size_t max_items);
+
+  // Updates icon files in |icon_dir|, which includes deleting old icons and
+  // creating at most |slot_limit| new icons for |page_list|.
+  void UpdateIconFiles(const base::FilePath& icon_dir,
+                       const ShellLinkItemList& page_list,
+                       size_t slot_limit);
+
+  // Updates the jumplist, once all the data has been fetched. This method calls
+  // UpdateJumpList() to do most of the work.
+  void RunUpdateJumpList(
+      IncognitoModePrefs::Availability incognito_availability,
+      const base::string16& app_id,
+      const base::FilePath& profile_dir,
+      base::RefCountedData<JumpListData>* ref_counted_data);
+
+  // Updates the application JumpList, which consists of 1) delete old icon
+  // files; 2) create new icon files; 3) notify the OS. This method is called
+  // from RunUpdateJumpList().
+  // Note that any timeout error along the way results in the old jumplist being
+  // left as-is, while any non-timeout error results in the old jumplist being
+  // left as-is, but without icon files.
+  bool UpdateJumpList(const base::string16& app_id,
+                      const base::FilePath& profile_dir,
+                      const ShellLinkItemList& most_visited_pages,
+                      const ShellLinkItemList& recently_closed_pages,
+                      bool most_visited_pages_have_updates,
+                      bool recently_closed_pages_have_updates,
+                      IncognitoModePrefs::Availability incognito_availability);
 
   // Tracks FaviconService tasks.
   base::CancelableTaskTracker cancelable_task_tracker_;
@@ -166,13 +223,19 @@ class JumpList : public sessions::TabRestoreServiceObserver,
   std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;
 
   // App id to associate with the jump list.
-  std::wstring app_id_;
+  base::string16 app_id_;
 
-  // The directory which contains JumpList icons.
-  base::FilePath icon_dir_;
+  // Timer for requesting delayed updates of the "Most Visited" category of
+  // jumplist.
+  base::OneShotTimer timer_most_visited_;
 
-  // Timer for requesting delayed updates of the jumplist.
-  base::OneShotTimer timer_;
+  // Timer for requesting delayed updates of the "Recently Closed" category of
+  // jumplist.
+  base::OneShotTimer timer_recently_closed_;
+
+  // Number of updates to skip to alleviate the machine when a previous update
+  // was too slow. Updates will be resumed when this reaches 0 again.
+  int updates_to_skip_ = 0;
 
   // Holds data that can be accessed from multiple threads.
   scoped_refptr<base::RefCountedData<JumpListData>> jumplist_data_;
@@ -180,6 +243,13 @@ class JumpList : public sessions::TabRestoreServiceObserver,
   // Id of last favicon task. It's used to cancel current task if a new one
   // comes in before it finishes.
   base::CancelableTaskTracker::TaskId task_id_;
+
+  // A task runner running tasks to update the JumpList.
+  scoped_refptr<base::SingleThreadTaskRunner> update_jumplist_task_runner_;
+
+  // A task runner running tasks to delete JumpListIcons directory and
+  // JumpListIconsOld directory.
+  scoped_refptr<base::SequencedTaskRunner> delete_jumplisticons_task_runner_;
 
   // For callbacks may be run after destruction.
   base::WeakPtrFactory<JumpList> weak_ptr_factory_;

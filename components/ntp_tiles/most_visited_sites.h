@@ -14,12 +14,14 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/optional.h"
 #include "base/scoped_observer.h"
 #include "base/strings/string16.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/top_sites_observer.h"
 #include "components/ntp_tiles/ntp_tile.h"
 #include "components/ntp_tiles/popular_sites.h"
+#include "components/ntp_tiles/tile_source.h"
 #include "components/suggestions/proto/suggestions.pb.h"
 #include "components/suggestions/suggestions_service.h"
 #include "url/gurl.h"
@@ -101,13 +103,26 @@ class MostVisitedSites : public history::TopSitesObserver,
 
   ~MostVisitedSites() override;
 
+  // Returns true if this object was created with a non-null provider for the
+  // given NTP tile source. That source may or may not actually provide tiles,
+  // depending on its configuration and the priority of different sources.
+  bool DoesSourceExist(TileSource source) const;
+
+  // Returns the corresponding object passed at construction.
+  history::TopSites* top_sites() { return top_sites_.get(); }
+  suggestions::SuggestionsService* suggestions() {
+    return suggestions_service_;
+  }
+  PopularSites* popular_sites() { return popular_sites_.get(); }
+  MostVisitedSitesSupervisor* supervisor() { return supervisor_.get(); }
+
   // Sets the observer, and immediately fetches the current suggestions.
   // Does not take ownership of |observer|, which must outlive this object and
   // must not be null.
   void SetMostVisitedURLsObserver(Observer* observer, int num_sites);
 
   // Requests an asynchronous refresh of the suggestions. Notifies the observer
-  // once the request completes.
+  // if the request resulted in the set of tiles changing.
   void Refresh();
 
   void AddOrRemoveBlacklistedUrl(const GURL& url, bool add_url);
@@ -118,15 +133,13 @@ class MostVisitedSites : public history::TopSitesObserver,
 
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
-  // Workhorse for SaveNewTiles. Implemented as a separate static and public
-  // method for ease of testing.
+  // Workhorse for SaveNewTilesAndNotify. Implemented as a separate static and
+  // public method for ease of testing.
   static NTPTilesVector MergeTiles(NTPTilesVector personal_tiles,
                                    NTPTilesVector whitelist_tiles,
                                    NTPTilesVector popular_tiles);
 
  private:
-  void BuildCurrentTiles();
-
   // Initialize the query to Top Sites. Called if the SuggestionsService
   // returned no data.
   void InitiateTopSitesQuery();
@@ -138,8 +151,16 @@ class MostVisitedSites : public history::TopSitesObserver,
   void OnMostVisitedURLsAvailable(
       const history::MostVisitedURLList& visited_list);
 
-  // Callback for when data is available from the SuggestionsService.
-  void OnSuggestionsProfileAvailable(
+  // Callback for when an update is reported by the SuggestionsService.
+  void OnSuggestionsProfileChanged(
+      const suggestions::SuggestionsProfile& suggestions_profile);
+
+  // Builds the current tileset based on available caches and notifies the
+  // observer.
+  void BuildCurrentTiles();
+
+  // Same as above the SuggestionsProfile is provided, no need to read cache.
+  void BuildCurrentTilesGivenSuggestionsProfile(
       const suggestions::SuggestionsProfile& suggestions_profile);
 
   // Takes the personal suggestions and creates whitelist entry point
@@ -153,16 +174,13 @@ class MostVisitedSites : public history::TopSitesObserver,
                                          const NTPTilesVector& whitelist_tiles);
 
   // Takes the personal tiles, creates and merges in whitelist and popular tiles
-  // if appropriate, and saves the new tiles.
-  void SaveNewTiles(NTPTilesVector personal_tiles);
+  // if appropriate, and saves the new tiles. Notifies the observer if the tiles
+  // were actually changed.
+  void SaveNewTilesAndNotify(NTPTilesVector personal_tiles);
 
-  // Notifies the observer about the availability of tiles.
-  // Also records impressions UMA if not done already.
-  void NotifyMostVisitedURLsObserver();
+  void OnPopularSitesDownloaded(bool success);
 
-  void OnPopularSitesAvailable(bool success);
-
-  void OnIconMadeAvailable(const GURL& site_url, bool newly_available);
+  void OnIconMadeAvailable(const GURL& site_url);
 
   // history::TopSitesObserver implementation.
   void TopSitesLoaded(history::TopSites* top_sites) override;
@@ -189,9 +207,12 @@ class MostVisitedSites : public history::TopSitesObserver,
       top_sites_observer_;
 
   // The main source of personal tiles - either TOP_SITES or SUGGESTIONS_SEVICE.
-  NTPTileSource mv_source_;
+  TileSource mv_source_;
 
-  NTPTilesVector current_tiles_;
+  // Current set of tiles. Optional so that the observer can be notified
+  // whenever it changes, including possibily an initial change from
+  // !current_tiles_.has_value() to current_tiles_->empty().
+  base::Optional<NTPTilesVector> current_tiles_;
 
   // For callbacks may be run after destruction, used exclusively for TopSites
   // (since it's used to detect whether there's a query in flight).

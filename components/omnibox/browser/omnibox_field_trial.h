@@ -14,11 +14,26 @@
 
 #include "base/macros.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
-#include "components/metrics/proto/omnibox_input_type.pb.h"
+#include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match_type.h"
 
 namespace base {
+struct Feature;
 class TimeDelta;
+}
+
+namespace omnibox {
+
+extern const base::Feature kNewOmniboxAnswerTypes;
+extern const base::Feature kOmniboxEntitySuggestions;
+extern const base::Feature kEnableClipboardProvider;
+extern const base::Feature kSearchProviderWarmUpOnFocus;
+extern const base::Feature kSearchProviderContextAllowHttpsUrls;
+extern const base::Feature kZeroSuggestRedirectToChrome;
+extern const base::Feature kZeroSuggestSwapTitleAndUrl;
+extern const base::Feature kDisplayTitleForCurrentUrl;
+extern const base::Feature kUIExperimentMaxAutocompleteMatches;
+extern const base::Feature kUIExperimentVerticalMargin;
 }
 
 // The set of parameters customizing the HUP scoring.
@@ -291,6 +306,15 @@ class OmniboxFieldTrial {
   static float HQPExperimentalTopicalityThreshold();
 
   // ---------------------------------------------------------
+  // For experiment to limit HQP url indexing that's part of the bundled
+  // omnibox field trial.
+
+  // Returns the maximum number of history urls to index for HQP at the startup.
+  // Note: this limit is only applied at startup and more urls can be indexed
+  // during the session. Returns -1 if limit is not set by trials.
+  static int MaxNumHQPUrlsIndexedAtStartup();
+
+  // ---------------------------------------------------------
   // For the HQPFixFrequencyScoring experiment that's part of the
   // bundled omnibox field trial.
 
@@ -367,11 +391,11 @@ class OmniboxFieldTrial {
   // field trial.
 
   // Returns the conditions under which the UI code should display the title
-  // of a URL more prominently than the URL for an input of type |input_type|.
-  // Normally the URL is displayed more prominently.  Returns NEVER_EMPHASIZE
-  // if the experiment isn't active.
+  // of a URL more prominently than the URL for input |input|. Normally the URL
+  // is displayed more prominently. Returns NEVER_EMPHASIZE if the experiment
+  // isn't active.
   static EmphasizeTitlesCondition GetEmphasizeTitlesConditionForInput(
-      metrics::OmniboxInputType::Type input_type);
+      const AutocompleteInput& input);
 
   // ---------------------------------------------------------
   // For PhysicalWebProvider related experiments.
@@ -392,6 +416,36 @@ class OmniboxFieldTrial {
   // Returns the base relevance score for Physical Web omnibox suggestions when
   // the user has started typing in the omnibox.
   static int GetPhysicalWebAfterTypingBaseRelevance();
+
+  // ---------------------------------------------------------
+  // For experiment redirecting zero suggest requests to a service provided by
+  // the Chrome team.
+
+  // Returns true whether the user is in the field trial which redirects zero
+  // suggest requests to the service provided by the Chrome team.
+  static bool InZeroSuggestRedirectToChromeFieldTrial();
+
+  // Returns a string representing the address of the server where the zero
+  // suggest requests are being redirected. The return value is a URL
+  // (https://example.com/test) and it doesn't include any query component
+  // (no "?").
+  static std::string ZeroSuggestRedirectToChromeServerAddress();
+
+  // Returns a string representing the parameters that are sent to the
+  // alternative service providing zero suggestions. The returned value is
+  // properly escaped. It can be appended to the string representaiton of a
+  // request URL.
+  static std::string ZeroSuggestRedirectToChromeAdditionalFields();
+
+  // ---------------------------------------------------------
+  // Clipboard URL suggestions:
+
+  // The parameter "ClipboardURLMaximumAge" doesn't live in this file; instead
+  // it lives in
+  // components/open_from_clipboard/clipboard_recent_content.cc.
+  // Please see ClipboardRecentContent::MaximumAgeOfClipboard() for the usage
+  // of it.  The parameter cannot live here because that component cannot
+  // include this component, else there would be a circular dependency.
 
   // ---------------------------------------------------------
   // Exposed publicly for the sake of unittests.
@@ -443,9 +497,23 @@ class OmniboxFieldTrial {
   static const char kHQPExperimentalScoringBucketsParam[];
   static const char kHQPExperimentalScoringTopicalityThresholdParam[];
 
+  // Parameter names used by the experiment that limits the number of history
+  // urls indexed for suggestions.
+  static const char kMaxNumHQPUrlsIndexedAtStartupOnLowEndDevicesParam[];
+  static const char kMaxNumHQPUrlsIndexedAtStartupOnNonLowEndDevicesParam[];
+
   // Parameter names used by the Physical Web experimental scoring experiments.
   static const char kPhysicalWebZeroSuggestBaseRelevanceParam[];
   static const char kPhysicalWebAfterTypingBaseRelevanceParam[];
+
+  // Parameter names used by the experiment redirecting Zero Suggestion requests
+  // to a service provided by the Chrome team.
+  static const char kZeroSuggestRedirectToChromeServerAddressParam[];
+  static const char kZeroSuggestRedirectToChromeAdditionalFieldsParam[];
+
+  // Parameter names used by UI experiments.
+  static const char kUIMaxAutocompleteMatchesParam[];
+  static const char kUIVerticalMarginParam[];
 
   // The amount of time to wait before sending a new suggest request after the
   // previous one unless overridden by a field trial parameter.

@@ -32,7 +32,6 @@ namespace content {
 
 class BrowserContext;
 class FrameTree;
-class PageState;
 class RenderViewHost;
 class RenderViewHostImpl;
 class RenderViewHostDelegateView;
@@ -84,10 +83,6 @@ class CONTENT_EXPORT RenderViewHostDelegate {
   // The RenderView is going to be deleted. This is called when each
   // RenderView is going to be destroyed
   virtual void RenderViewDeleted(RenderViewHost* render_view_host) {}
-
-  // The state for the page changed and should be updated.
-  virtual void UpdateState(RenderViewHost* render_view_host,
-                           const PageState& state) {}
 
   // The destination URL has changed should be updated.
   virtual void UpdateTargetURL(RenderViewHost* render_view_host,
@@ -187,8 +182,15 @@ class CONTENT_EXPORT RenderViewHostDelegate {
 
   virtual bool IsJavaScriptDialogShowing() const;
 
+  // If a timer for an unresponsive renderer fires, whether it should be
+  // ignored.
+  virtual bool ShouldIgnoreUnresponsiveRenderer();
+
   // Whether download UI should be hidden.
   virtual bool HideDownloadUI() const;
+
+  // Whether the WebContents as a persistent video.
+  virtual bool HasPersistentVideo() const;
 
  protected:
   virtual ~RenderViewHostDelegate() {}

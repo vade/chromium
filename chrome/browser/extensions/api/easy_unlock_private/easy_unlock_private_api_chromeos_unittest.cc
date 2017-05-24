@@ -98,12 +98,10 @@ class TestableGetPermitAccessFunction
   DISALLOW_COPY_AND_ASSIGN(TestableGetPermitAccessFunction);
 };
 
-// Converts a string to a base::BinaryValue value whose buffer contains the
+// Converts a string to a base::Value value whose buffer contains the
 // string data without the trailing '\0'.
-std::unique_ptr<base::BinaryValue> StringToBinaryValue(
-    const std::string& value) {
-  return base::BinaryValue::CreateWithCopiedBuffer(value.data(),
-                                                   value.length());
+std::unique_ptr<base::Value> StringToBinaryValue(const std::string& value) {
+  return base::Value::CreateWithCopiedBuffer(value.data(), value.length());
 }
 
 // Copies |private_key_source| and |public_key_source| to |private_key_target|
@@ -164,15 +162,15 @@ class EasyUnlockPrivateApiTest : public extensions::ExtensionApiUnittest {
       return "";
     }
 
-    const base::BinaryValue* result_binary_value;
+    const base::Value* result_binary_value;
     if (!result_list->GetBinary(0, &result_binary_value) ||
         !result_binary_value) {
       LOG(ERROR) << "Result not a binary value.";
       return "";
     }
 
-    return std::string(result_binary_value->GetBuffer(),
-                       result_binary_value->GetSize());
+    return std::string(result_binary_value->GetBlob().data(),
+                       result_binary_value->GetBlob().size());
   }
 
   chromeos::EasyUnlockClient* client_;
@@ -193,17 +191,17 @@ TEST_F(EasyUnlockPrivateApiTest, GenerateEcP256KeyPair) {
   ASSERT_TRUE(result_list);
   ASSERT_EQ(2u, result_list->GetSize());
 
-  const base::BinaryValue* public_key;
+  const base::Value* public_key;
   ASSERT_TRUE(result_list->GetBinary(0, &public_key));
   ASSERT_TRUE(public_key);
 
-  const base::BinaryValue* private_key;
+  const base::Value* private_key;
   ASSERT_TRUE(result_list->GetBinary(1, &private_key));
   ASSERT_TRUE(private_key);
 
   EXPECT_TRUE(chromeos::FakeEasyUnlockClient::IsEcP256KeyPair(
-      std::string(private_key->GetBuffer(), private_key->GetSize()),
-      std::string(public_key->GetBuffer(), public_key->GetSize())));
+      std::string(private_key->GetBlob().data(), private_key->GetBlob().size()),
+      std::string(public_key->GetBlob().data(), public_key->GetBlob().size())));
 }
 
 TEST_F(EasyUnlockPrivateApiTest, PerformECDHKeyAgreement) {

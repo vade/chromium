@@ -27,51 +27,75 @@ InspectorTest.waitForBinding = function(fileName)
         if (uiSourceCode.name() === fileName)
             return Promise.resolve(binding);
     }
-    var fulfill;
-    var promise = new Promise(x => fulfill = x);
-    Persistence.persistence.addEventListener(Persistence.Persistence.Events.BindingCreated, onBindingCreated);
-    return promise;
-
-    function onBindingCreated(event)
-    {
-        var binding = event.data;
-        if (binding.network.name() !== fileName && binding.fileSystem.name() !== fileName)
-            return;
-        Persistence.persistence.removeEventListener(Persistence.Persistence.Events.BindingCreated, onBindingCreated);
-        fulfill(binding);
-    }
-}
-
-InspectorTest.waitForUISourceCode = function(name, projectType)
-{
-    var uiSourceCodes = Workspace.workspace.uiSourceCodes();
-    var uiSourceCode = uiSourceCodes.find(filterCode);
-    if (uiSourceCode)
-        return Promise.resolve(uiSourceCode);
-
-    var fulfill;
-    var promise = new Promise(x => fulfill = x);
-    Workspace.workspace.addEventListener(Workspace.Workspace.Events.UISourceCodeAdded, onUISourceCode);
-    return promise;
-
-    function onUISourceCode(event)
-    {
-        var uiSourceCode = event.data;
-        if (!filterCode(uiSourceCode))
-            return;
-        Workspace.workspace.removeEventListener(Workspace.Workspace.Events.UISourceCodeAdded, onUISourceCode);
-        fulfill(uiSourceCode);
-    }
-
-    function filterCode(uiSourceCode)
-    {
-        return uiSourceCode.name() === name && uiSourceCode.project().type() === projectType;
-    }
+    return InspectorTest.waitForEvent(Persistence.Persistence.Events.BindingCreated, Persistence.persistence,
+        binding => binding.network.name() === fileName || binding.fileSystem.name() === fileName);
 }
 
 InspectorTest.addFooJSFile = function(fs)
 {
     return fs.root.mkdir("inspector").mkdir("persistence").mkdir("resources").addFile("foo.js", "\n\nwindow.foo = ()=>'foo';");
+}
+
+InspectorTest.forceUseDefaultMapping = function() {
+    Persistence.persistence._setMappingForTest((bindingCreated, bindingRemoved) => {
+        return new Persistence.DefaultMapping(Workspace.workspace, Persistence.fileSystemMapping, bindingCreated, bindingRemoved);
+    });
+}
+
+InspectorTest.initializeTestMapping = function() {
+    var testMapping;
+    Persistence.persistence._setMappingForTest((bindingCreated, bindingRemoved) => {
+        testMapping = new TestMapping(bindingCreated, bindingRemoved);
+        return testMapping;
+    });
+    return testMapping;
+}
+
+class TestMapping{
+    constructor(onBindingAdded, onBindingRemoved) {
+        this._onBindingAdded = onBindingAdded;
+        this._onBindingRemoved = onBindingRemoved;
+        this._bindings = new Set();
+    }
+
+    async addBinding(urlSuffix) {
+        if (this._findBinding(urlSuffix)) {
+            InspectorTest.addResult(`FAILED TO ADD BINDING: binding already exists for ${urlSuffix}`);
+            InspectorTest.completeTest();
+            return;
+        }
+        var networkUISourceCode = await InspectorTest.waitForUISourceCode(urlSuffix, Workspace.projectTypes.Network);
+        var fileSystemUISourceCode = await InspectorTest.waitForUISourceCode(urlSuffix, Workspace.projectTypes.FileSystem);
+
+        var binding = new Persistence.PersistenceBinding(networkUISourceCode, fileSystemUISourceCode, false);
+        this._bindings.add(binding);
+        this._onBindingAdded.call(null, binding);
+    }
+
+    _findBinding(urlSuffix) {
+        for (var binding of this._bindings) {
+            if (binding.network.url().endsWith(urlSuffix))
+                return binding;
+        }
+        return null;
+    }
+
+    async removeBinding(urlSuffix) {
+        var binding = this._findBinding(urlSuffix);
+        if (!binding) {
+            InspectorTest.addResult(`FAILED TO REMOVE BINDING: binding does not exist for ${urlSuffix}`);
+            InspectorTest.completeTest();
+            return;
+        }
+        this._bindings.delete(binding);
+        this._onBindingRemoved.call(null, binding);
+    }
+
+    dispose() {
+        for (var binding of this._bindings)
+            this._onBindingRemoved.call(null, binding);
+        this._bindings.clear();
+    }
 }
 
 }

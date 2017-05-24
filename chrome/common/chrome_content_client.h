@@ -73,7 +73,9 @@ class ChromeContentClient : public content::ContentClient {
   void AddPepperPlugins(
       std::vector<content::PepperPluginInfo>* plugins) override;
   void AddContentDecryptionModules(
-      std::vector<content::CdmInfo>* cdms) override;
+      std::vector<content::CdmInfo>* cdms,
+      std::vector<content::CdmHostFilePath>* cdm_host_file_paths) override;
+
   void AddAdditionalSchemes(Schemes* schemes) override;
   std::string GetProduct() const override;
   std::string GetUserAgent() const override;
@@ -99,7 +101,7 @@ class ChromeContentClient : public content::ContentClient {
   content::OriginTrialPolicy* GetOriginTrialPolicy() override;
 
 #if defined(OS_ANDROID)
-  media::MediaClientAndroid* GetMediaClientAndroid() override;
+  media::MediaDrmBridgeClient* GetMediaDrmBridgeClient() override;
 #endif  // OS_ANDROID
 
  private:

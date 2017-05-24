@@ -10,12 +10,14 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/time/time.h"
 #include "chromecast/base/metrics/cast_metrics_test_helper.h"
 #include "chromecast/media/audio/cast_audio_manager.h"
 #include "chromecast/public/media/cast_decoder_buffer.h"
 #include "chromecast/public/media/media_pipeline_backend.h"
+#include "media/audio/test_audio_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -179,9 +181,11 @@ class MockAudioSourceCallback
 
 class FakeAudioManager : public CastAudioManager {
  public:
-  explicit FakeAudioManager(
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner)
-      : CastAudioManager(task_runner, task_runner, nullptr, nullptr, nullptr),
+  FakeAudioManager()
+      : CastAudioManager(base::MakeUnique<::media::TestAudioThread>(),
+                         nullptr,
+                         nullptr,
+                         nullptr),
         media_pipeline_backend_(nullptr) {}
   ~FakeAudioManager() override {}
 
@@ -227,12 +231,10 @@ class CastAudioOutputStreamTest : public ::testing::Test {
  protected:
   void SetUp() override {
     metrics::InitializeMetricsHelperForTesting();
-    audio_manager_.reset(new FakeAudioManager(message_loop_.task_runner()));
+    audio_manager_ = base::MakeUnique<FakeAudioManager>();
   }
 
-  void TearDown() override {
-    audio_manager_.reset();
-  }
+  void TearDown() override { audio_manager_->Shutdown(); }
 
   ::media::AudioParameters GetAudioParams() {
     return ::media::AudioParameters(format_, channel_layout_, sample_rate_,

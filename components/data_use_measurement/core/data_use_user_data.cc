@@ -8,6 +8,7 @@
 #include "base/android/application_status_listener.h"
 #endif
 
+#include "base/memory/ptr_util.h"
 #include "net/url_request/url_fetcher.h"
 
 namespace data_use_measurement {
@@ -40,9 +41,9 @@ const void* const DataUseUserData::kUserDataKey =
     &DataUseUserData::kUserDataKey;
 
 // static
-base::SupportsUserData::Data* DataUseUserData::Create(
+std::unique_ptr<base::SupportsUserData::Data> DataUseUserData::Create(
     ServiceName service_name) {
-  return new DataUseUserData(service_name, GetCurrentAppState());
+  return base::MakeUnique<DataUseUserData>(service_name, GetCurrentAppState());
 }
 
 // static
@@ -78,8 +79,8 @@ std::string DataUseUserData::GetServiceNameAsString(ServiceName service_name) {
       return "Policy";
     case SPELL_CHECKER:
       return "SpellChecker";
-    case NTP_SNIPPETS:
-      return "NTPSnippets";
+    case NTP_SNIPPETS_OBSOLETE:
+      return "NTPSnippetsObsolete";
     case SAFE_BROWSING:
       return "SafeBrowsing";
     case DATA_REDUCTION_PROXY:
@@ -118,6 +119,18 @@ std::string DataUseUserData::GetServiceNameAsString(ServiceName service_name) {
       return "WebResourceService";
     case SIGNIN:
       return "Signin";
+    case NTP_SNIPPETS_SUGGESTIONS:
+      return "NTPSnippetsSuggestions";
+    case NTP_SNIPPETS_THUMBNAILS:
+      return "NTPSnippetsThumbnails";
+    case DOODLE:
+      return "Doodle";
+    case UKM:
+      return "UKM";
+    case PAYMENTS:
+      return "Payments";
+    case LARGE_ICON_SERVICE:
+      return "LargeIconService";
   }
   return "INVALID";
 }

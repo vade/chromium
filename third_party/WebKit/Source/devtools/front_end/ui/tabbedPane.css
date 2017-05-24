@@ -50,6 +50,27 @@
     text-align: center;
     margin-top: 20px;
     text-shadow: rgba(255, 255, 255, 0.75) 0 1px 0;
+    line-height: 28px;
+    overflow: hidden;
+}
+
+.tabbed-pane-placeholder-row {
+    display: flex;
+    white-space: nowrap;
+}
+
+.tabbed-pane-placeholder-key {
+    flex: 1;
+    text-align: right;
+    padding-right: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tabbed-pane-placeholder-value {
+    flex: 1;
+    text-align: left;
+    padding-left: 14px;
 }
 
 .tabbed-pane-header {
@@ -73,9 +94,10 @@
 }
 
 .tabbed-pane-header-tab-icon {
-    margin-right: 6px;
+    min-width: 14px;
     display: flex;
     align-items: center;
+    margin-right: 2px;
 }
 
 .tabbed-pane-header-tab {
@@ -137,29 +159,17 @@
 
 .tabbed-pane-header-tabs-drop-down-container {
     float: left;
-    position: relative;
-    vertical-align: bottom;
-    line-height: 24px;
     opacity: 0.8;
-    color: inherit;
-    font-size: 133%;
     cursor: pointer;
+    display: flex;
+    align-items: center;
+    height: 100%;
 }
 
-.tabbed-pane-header-tabs-drop-down-container > .glyph {
-    height: 26px;
+.tabbed-pane-header-tabs-drop-down-container > .chevron-icon {
     background-color: hsla(0,0%,20%,1);
-    -webkit-mask-image: url(Images/toolbarButtonGlyphs.png);
-    -webkit-mask-position: -68px -143px;
-    -webkit-mask-size: 352px 168px;
-    width: 24px;
+    display: block;
 }
-
-@media (-webkit-min-device-pixel-ratio: 1.1) {
-.tabbed-pane-header-tabs-drop-down-container > .glyph {
-    -webkit-mask-image: url(Images/toolbarButtonGlyphs_2x.png);
-}
-} /* media */
 
 .tabbed-pane-header-tabs-drop-down-container:hover {
     background-color: rgb(229, 229, 229);

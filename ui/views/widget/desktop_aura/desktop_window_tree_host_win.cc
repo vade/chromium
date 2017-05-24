@@ -11,7 +11,7 @@
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/window_event_dispatcher.h"
-#include "ui/aura/window_property.h"
+#include "ui/base/class_property.h"
 #include "ui/base/cursor/cursor_loader_win.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/base/win/shell.h"
@@ -39,14 +39,14 @@
 #include "ui/wm/core/window_animations.h"
 #include "ui/wm/public/scoped_tooltip_disabler.h"
 
-DECLARE_WINDOW_PROPERTY_TYPE(views::DesktopWindowTreeHostWin*);
+DECLARE_UI_CLASS_PROPERTY_TYPE(views::DesktopWindowTreeHostWin*);
 
 namespace views {
 
 namespace {
 
-gfx::Size GetExpandedWindowSize(DWORD window_style, gfx::Size size) {
-  if (!(window_style & WS_EX_COMPOSITED) || !ui::win::IsAeroGlassEnabled())
+gfx::Size GetExpandedWindowSize(bool is_translucent, gfx::Size size) {
+  if (!is_translucent || !ui::win::IsAeroGlassEnabled())
     return size;
 
   // Some AMD drivers can't display windows that are less than 64x64 pixels,
@@ -61,12 +61,13 @@ void InsetBottomRight(gfx::Rect* rect, const gfx::Vector2d& vector) {
 
 }  // namespace
 
-DEFINE_WINDOW_PROPERTY_KEY(aura::Window*, kContentWindowForRootWindow, NULL);
+DEFINE_UI_CLASS_PROPERTY_KEY(aura::Window*, kContentWindowForRootWindow, NULL);
 
 // Identifies the DesktopWindowTreeHostWin associated with the
 // WindowEventDispatcher.
-DEFINE_WINDOW_PROPERTY_KEY(DesktopWindowTreeHostWin*, kDesktopWindowTreeHostKey,
-                           NULL);
+DEFINE_UI_CLASS_PROPERTY_KEY(DesktopWindowTreeHostWin*,
+                             kDesktopWindowTreeHostKey,
+                             NULL);
 
 ////////////////////////////////////////////////////////////////////////////////
 // DesktopWindowTreeHostWin, public:
@@ -223,8 +224,8 @@ bool DesktopWindowTreeHostWin::IsVisible() const {
 void DesktopWindowTreeHostWin::SetSize(const gfx::Size& size) {
   gfx::Size size_in_pixels = display::win::ScreenWin::DIPToScreenSize(GetHWND(),
                                                                       size);
-  gfx::Size expanded = GetExpandedWindowSize(
-      message_handler_->window_ex_style(), size_in_pixels);
+  gfx::Size expanded =
+      GetExpandedWindowSize(message_handler_->is_translucent(), size_in_pixels);
   window_enlargement_ =
       gfx::Vector2d(expanded.width() - size_in_pixels.width(),
                     expanded.height() - size_in_pixels.height());
@@ -245,8 +246,8 @@ void DesktopWindowTreeHostWin::CenterWindow(const gfx::Size& size) {
   gfx::Size size_in_pixels = display::win::ScreenWin::DIPToScreenSize(GetHWND(),
                                                                       size);
   gfx::Size expanded_size;
-  expanded_size = GetExpandedWindowSize(message_handler_->window_ex_style(),
-                                        size_in_pixels);
+  expanded_size =
+      GetExpandedWindowSize(message_handler_->is_translucent(), size_in_pixels);
   window_enlargement_ =
       gfx::Vector2d(expanded_size.width() - size_in_pixels.width(),
                     expanded_size.height() - size_in_pixels.height());
@@ -481,6 +482,10 @@ bool DesktopWindowTreeHostWin::ShouldUseDesktopNativeCursorManager() const {
   return true;
 }
 
+bool DesktopWindowTreeHostWin::ShouldCreateVisibilityController() const {
+  return true;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // DesktopWindowTreeHostWin, WindowTreeHost implementation:
 
@@ -534,7 +539,7 @@ void DesktopWindowTreeHostWin::SetBoundsInPixels(const gfx::Rect& bounds) {
 
   gfx::Rect new_expanded(
       expanded.origin(),
-      GetExpandedWindowSize(message_handler_->window_ex_style(),
+      GetExpandedWindowSize(message_handler_->is_translucent(),
                             expanded.size()));
   window_enlargement_ =
       gfx::Vector2d(new_expanded.width() - expanded.width(),
@@ -827,12 +832,12 @@ void DesktopWindowTreeHostWin::HandleNativeBlur(HWND focused_window) {
 }
 
 bool DesktopWindowTreeHostWin::HandleMouseEvent(const ui::MouseEvent& event) {
-  SendEventToProcessor(const_cast<ui::MouseEvent*>(&event));
+  SendEventToSink(const_cast<ui::MouseEvent*>(&event));
   return event.handled();
 }
 
 void DesktopWindowTreeHostWin::HandleKeyEvent(ui::KeyEvent* event) {
-  GetInputMethod()->DispatchKeyEvent(event);
+  SendEventToSink(event);
 }
 
 void DesktopWindowTreeHostWin::HandleTouchEvent(
@@ -857,11 +862,11 @@ void DesktopWindowTreeHostWin::HandleTouchEvent(
                                   static_cast<View*>(NULL));
       target_event.set_location(gfx::Point(target_location));
       target_event.set_root_location(target_event.location());
-      target->SendEventToProcessor(&target_event);
+      target->SendEventToSink(&target_event);
       return;
     }
   }
-  SendEventToProcessor(const_cast<ui::TouchEvent*>(&event));
+  SendEventToSink(const_cast<ui::TouchEvent*>(&event));
 }
 
 bool DesktopWindowTreeHostWin::HandleIMEMessage(UINT message,
@@ -917,7 +922,7 @@ void DesktopWindowTreeHostWin::PostHandleMSG(UINT message,
 
 bool DesktopWindowTreeHostWin::HandleScrollEvent(
     const ui::ScrollEvent& event) {
-  SendEventToProcessor(const_cast<ui::ScrollEvent*>(&event));
+  SendEventToSink(const_cast<ui::ScrollEvent*>(&event));
   return event.handled();
 }
 

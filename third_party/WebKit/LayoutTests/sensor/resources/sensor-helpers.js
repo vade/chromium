@@ -7,7 +7,7 @@ class CallbackWrapper {
       try {
         callback(args);
       } catch(e) {
-        reject_func();
+        reject_func(e);
       }
     }
   }
@@ -23,7 +23,8 @@ function sensor_mocks(mojo) {
     'mojo/public/js/bindings',
     'device/generic_sensor/public/interfaces/sensor_provider.mojom',
     'device/generic_sensor/public/interfaces/sensor.mojom',
-  ], (core, bindings, sensor_provider, sensor) => {
+    'services/device/public/interfaces/constants.mojom',
+  ], (core, bindings, sensor_provider, sensor, deviceConstants) => {
 
     // Helper function that returns resolved promise with result.
     function sensorResponse(success) {
@@ -34,7 +35,6 @@ function sensor_mocks(mojo) {
     class MockSensor {
       constructor(sensorRequest, handle, offset, size, reportingMode) {
         this.client_ = null;
-        this.expects_modified_reading_ = false;
         this.start_should_fail_ = false;
         this.reporting_mode_ = reportingMode;
         this.sensor_reading_timer_id_ = null;
@@ -129,7 +129,6 @@ function sensor_mocks(mojo) {
       reset() {
         this.stopReading();
 
-        this.expects_modified_reading_ = false;
         this.reading_updates_count_ = 0;
         this.start_should_fail_ = false;
         this.update_reading_function_ = null;
@@ -160,12 +159,6 @@ function sensor_mocks(mojo) {
       // Sets flag that forces sensor to fail when addConfiguration is invoked.
       setStartShouldFail(should_fail) {
         this.start_should_fail_ = should_fail;
-      }
-
-      // Sets flags that asks for a modified reading values at each iteration
-      // to initiate 'onchange' event broadcasting.
-      setExpectsModifiedReading(expects_modified_reading) {
-        this.expects_modified_reading_ = expects_modified_reading;
       }
 
       // Returns resolved promise if suspend() was called, rejected otherwise.
@@ -204,9 +197,10 @@ function sensor_mocks(mojo) {
           let timeout = (1 / max_frequency_used) * 1000;
           this.sensor_reading_timer_id_ = window.setInterval(() => {
             if (this.update_reading_function_) {
-              this.update_reading_function_(this.buffer_,
-                                            this.expects_modified_reading_,
-                                            this.reading_updates_count_);
+              this.update_reading_function_(this.buffer_);
+              // For all tests sensor reading should have monotonically
+              // increasing timestamp in seconds.
+              this.buffer_[1] = window.performance.now() * 0.001;
               this.reading_updates_count_++;
             }
             if (this.reporting_mode_ === sensor.ReportingMode.ON_CHANGE) {
@@ -249,6 +243,7 @@ function sensor_mocks(mojo) {
         this.resolve_func_ = null;
         this.is_continuous_ = false;
         this.max_frequency_ = 60;
+        this.min_frequency_ = 1;
         this.binding_ = new bindings.Binding(sensor_provider.SensorProvider,
                                              this);
       }
@@ -288,6 +283,7 @@ function sensor_mocks(mojo) {
                   buffer_offset: offset,
                   mode: reporting_mode,
                   default_configuration: default_config,
+                  minimum_frequency: this.min_frequency_,
                   maximum_frequency: this.max_frequency_});
 
         if (this.resolve_func_ !== null) {
@@ -319,6 +315,7 @@ function sensor_mocks(mojo) {
         this.get_sensor_should_fail_ = false;
         this.resolve_func_ = null;
         this.max_frequency_ = 60;
+        this.min_frequency_ = 1;
         this.is_continuous_ = false;
         this.binding_.close();
       }
@@ -349,10 +346,16 @@ function sensor_mocks(mojo) {
       setMaximumSupportedFrequency(frequency) {
           this.max_frequency_ = frequency;
       }
+
+      // Sets the minimum frequency for a concrete sensor.
+      setMinimumSupportedFrequency(frequency) {
+          this.min_frequency_ = frequency;
+      }
     }
 
     let mockSensorProvider = new MockSensorProvider;
-    mojo.frameInterfaces.addInterfaceOverrideForTesting(
+    mojo.connector.addInterfaceOverrideForTesting(
+        deviceConstants.kServiceName,
         sensor_provider.SensorProvider.name,
         pipe => {
           mockSensorProvider.bindToPipe(pipe);
@@ -374,9 +377,9 @@ function sensor_test(func, name, properties) {
       return new Promise((resolve, reject) => { setTimeout(resolve, 0); });
     };
 
-    let onFailure = () => {
+    let onFailure = error => {
       sensor.mockSensorProvider.reset();
-      return new Promise((resolve, reject) => { setTimeout(reject, 0); });
+      return new Promise((resolve, reject) => { setTimeout(() => {reject(error);}, 0); });
     };
 
     return Promise.resolve(func(sensor)).then(onSuccess, onFailure);

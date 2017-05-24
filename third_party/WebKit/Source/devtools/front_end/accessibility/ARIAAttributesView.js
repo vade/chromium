@@ -21,7 +21,7 @@ Accessibility.ARIAAttributesPane = class extends Accessibility.AccessibilitySubP
     this._treeOutline.removeChildren();
     if (!this.node())
       return;
-    var target = this.node().target();
+    var target = this.node().domModel().target();
     var attributes = node.attributes();
     for (var i = 0; i < attributes.length; ++i) {
       var attribute = attributes[i];
@@ -136,7 +136,7 @@ Accessibility.ARIAAttributesTreeElement = class extends UI.TreeElement {
 
     proxyElement.addEventListener('keydown', this._editingValueKeyDown.bind(this, previousContent), false);
 
-    valueElement.getComponentSelection().setBaseAndExtent(valueElement, 0, valueElement, 1);
+    valueElement.getComponentSelection().selectAllChildren(valueElement);
   }
 
   _removePrompt() {
@@ -212,7 +212,7 @@ Accessibility.ARIAAttributesPane.ARIAAttributePrompt = class extends UI.TextProm
     prefix = prefix.toLowerCase();
     if (!prefix && !force && (this._isEditingName || expression))
       return Promise.resolve([]);
-    return Promise.resolve(this._ariaCompletions.filter((value) => value.startsWith(prefix)).map(c => ({title: c})));
+    return Promise.resolve(this._ariaCompletions.filter(value => value.startsWith(prefix)).map(c => ({text: c})));
   }
 };
 

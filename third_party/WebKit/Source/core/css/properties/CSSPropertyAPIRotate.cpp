@@ -4,6 +4,7 @@
 
 #include "core/css/properties/CSSPropertyAPIRotate.h"
 
+#include "core/CSSValueKeywords.h"
 #include "core/css/CSSValueList.h"
 #include "core/css/parser/CSSPropertyParserHelpers.h"
 #include "platform/RuntimeEnabledFeatures.h"
@@ -12,25 +13,31 @@ namespace blink {
 
 const CSSValue* CSSPropertyAPIRotate::parseSingleValue(
     CSSParserTokenRange& range,
-    const CSSParserContext* context) {
+    const CSSParserContext& context,
+    CSSPropertyID) {
   DCHECK(RuntimeEnabledFeatures::cssIndependentTransformPropertiesEnabled());
-  CSSValueList* list = CSSValueList::createSpaceSeparated();
+
+  CSSValueID id = range.Peek().Id();
+  if (id == CSSValueNone)
+    return CSSPropertyParserHelpers::ConsumeIdent(range);
+
+  CSSValueList* list = CSSValueList::CreateSpaceSeparated();
 
   for (unsigned i = 0; i < 3; i++) {  // 3 dimensions of rotation
     CSSValue* dimension =
-        CSSPropertyParserHelpers::consumeNumber(range, ValueRangeAll);
+        CSSPropertyParserHelpers::ConsumeNumber(range, kValueRangeAll);
     if (!dimension) {
       if (i == 0)
         break;
       return nullptr;
     }
-    list->append(*dimension);
+    list->Append(*dimension);
   }
 
-  CSSValue* rotation = CSSPropertyParserHelpers::consumeAngle(range);
+  CSSValue* rotation = CSSPropertyParserHelpers::ConsumeAngle(range);
   if (!rotation)
     return nullptr;
-  list->append(*rotation);
+  list->Append(*rotation);
 
   return list;
 }

@@ -35,7 +35,7 @@ function loadIframe(url)
 
 function test()
 {
-    var scriptURL = "http://127.0.0.1:8000/inspector/service-workers/resources/navigation-preload-worker.php";
+    var scriptURL = "http://127.0.0.1:8000/inspector/service-workers/resources/navigation-preload-worker.js";
     var scope = "http://127.0.0.1:8000/inspector/service-workers/resources/navigation-preload-scope.php";
     var preloadRequestIDs = {};
 
@@ -57,6 +57,7 @@ function test()
             return;
         }
         InspectorTest.addResult("onResponseReceived:");
+        InspectorTest.addResult("  statusCode: " + request.statusCode);
         InspectorTest.addResult("  timing available: " + !!request.timing);
         request.requestHeaders().map(header => {
             if (header.name == 'Service-Worker-Navigation-Preload') {
@@ -112,7 +113,7 @@ function test()
         InspectorTest.addResult("-----------------");
         InspectorTest.addResult("Loading another iframe.");
         return InspectorTest.callFunctionInPageAsync(
-            "loadIframe", [ scope + "?RedirectError"]);
+            "loadIframe", [ scope + "?Redirect"]);
       })
       .then(_ => {
         InspectorTest.addResult("The iframe loaded.");

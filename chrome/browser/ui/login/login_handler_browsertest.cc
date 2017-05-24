@@ -10,6 +10,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/prerender/prerender_manager.h"
+#include "chrome/browser/prerender/prerender_origin.h"
 #include "chrome/browser/ssl/ssl_blocking_page.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -47,6 +48,10 @@ class LoginPromptBrowserTest : public InProcessBrowserTest {
     auth_map_["foo"] = AuthInfo("testuser", "foopassword");
     auth_map_["bar"] = AuthInfo("testuser", "barpassword");
     auth_map_["testrealm"] = AuthInfo(username_basic_, password_);
+  }
+
+  void SetUpOnMainThread() override {
+    host_resolver()->AddRule("*", "127.0.0.1");
   }
 
  protected:
@@ -131,7 +136,8 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, PrefetchAuthCancels) {
   class SetPrefetchForTest {
    public:
     explicit SetPrefetchForTest(bool prefetch)
-        : old_prerender_mode_(prerender::PrerenderManager::GetMode()) {
+        : old_prerender_mode_(
+              prerender::PrerenderManager::GetMode(prerender::ORIGIN_NONE)) {
       std::string exp_group = prefetch ? "ExperimentYes" : "ExperimentNo";
       base::FieldTrialList::CreateFieldTrial("Prefetch", exp_group);
       // Disable prerender so this is just a prefetch of the top-level page.
@@ -687,8 +693,6 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
                        BlockCrossdomainPromptForSubresources) {
   const char kTestPage[] = "/login/load_img_from_b.html";
 
-  host_resolver()->AddRule("www.a.com", "127.0.0.1");
-  host_resolver()->AddRule("www.b.com", "127.0.0.1");
   ASSERT_TRUE(embedded_test_server()->Start());
 
   content::WebContents* contents =
@@ -755,8 +759,6 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
                        AllowCrossdomainPromptForSubframes) {
   const char kTestPage[] = "/login/load_iframe_from_b.html";
 
-  host_resolver()->AddRule("www.a.com", "127.0.0.1");
-  host_resolver()->AddRule("www.b.com", "127.0.0.1");
   ASSERT_TRUE(embedded_test_server()->Start());
 
   content::WebContents* contents =
@@ -831,14 +833,15 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, SupplyRedundantAuths) {
   {
     // Open different auth urls in each tab.
     WindowedAuthNeededObserver auth_needed_waiter_1(controller_1);
-    WindowedAuthNeededObserver auth_needed_waiter_2(controller_2);
     contents_1->OpenURL(OpenURLParams(
         embedded_test_server()->GetURL("/auth-basic/1"), content::Referrer(),
         WindowOpenDisposition::CURRENT_TAB, ui::PAGE_TRANSITION_TYPED, false));
+    auth_needed_waiter_1.Wait();
+
+    WindowedAuthNeededObserver auth_needed_waiter_2(controller_2);
     contents_2->OpenURL(OpenURLParams(
         embedded_test_server()->GetURL("/auth-basic/2"), content::Referrer(),
         WindowOpenDisposition::CURRENT_TAB, ui::PAGE_TRANSITION_TYPED, false));
-    auth_needed_waiter_1.Wait();
     auth_needed_waiter_2.Wait();
 
     ASSERT_EQ(2U, observer.handlers().size());
@@ -886,14 +889,15 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, CancelRedundantAuths) {
   {
     // Open different auth urls in each tab.
     WindowedAuthNeededObserver auth_needed_waiter_1(controller_1);
-    WindowedAuthNeededObserver auth_needed_waiter_2(controller_2);
     contents_1->OpenURL(OpenURLParams(
         embedded_test_server()->GetURL("/auth-basic/1"), content::Referrer(),
         WindowOpenDisposition::CURRENT_TAB, ui::PAGE_TRANSITION_TYPED, false));
+    auth_needed_waiter_1.Wait();
+
+    WindowedAuthNeededObserver auth_needed_waiter_2(controller_2);
     contents_2->OpenURL(OpenURLParams(
         embedded_test_server()->GetURL("/auth-basic/2"), content::Referrer(),
         WindowOpenDisposition::CURRENT_TAB, ui::PAGE_TRANSITION_TYPED, false));
-    auth_needed_waiter_1.Wait();
     auth_needed_waiter_2.Wait();
 
     ASSERT_EQ(2U, observer.handlers().size());
@@ -1215,7 +1219,6 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
 // should be shown in the omnibox when the auth dialog is displayed.
 IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
                        ShowCorrectUrlForCrossOriginMainFrameRedirects) {
-  host_resolver()->AddRule("www.a.com", "127.0.0.1");
   ASSERT_TRUE(embedded_test_server()->Start());
 
   const char kTestPage[] = "/login/cross_origin.html";
@@ -1232,8 +1235,6 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
 // the omnibox.
 IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
                        CancelLoginInterstitialOnRedirect) {
-  host_resolver()->AddRule("www.a.com", "127.0.0.1");
-  host_resolver()->AddRule("www.b.com", "127.0.0.1");
   ASSERT_TRUE(embedded_test_server()->Start());
 
   // The test page redirects to www.a.com which triggers an auth dialog.
@@ -1460,7 +1461,6 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
 
   const char* kTestPage = "/login/load_iframe_from_b.html";
 
-  host_resolver()->AddRule("www.b.com", "127.0.0.1");
   ASSERT_TRUE(embedded_test_server()->Start());
 
   content::WebContents* contents =

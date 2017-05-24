@@ -58,7 +58,6 @@ android_library("net_java_test_support") {
     "//base:base_java",
     "//base:base_java_test_support",
     "//third_party/android_tools:android_support_annotations_java",
-    "//third_party/android_tools:legacy_http_javalib",
   ]
   srcjar_deps = [
     ":embedded_test_server_aidl",
@@ -116,8 +115,10 @@ android_library("net_javatests") {
   java_files = [
     "javatests/src/org/chromium/net/AndroidKeyStoreTestUtil.java",
     "javatests/src/org/chromium/net/AndroidNetworkLibraryTestUtil.java",
+    "javatests/src/org/chromium/net/AndroidProxyConfigServiceTestUtil.java",
     "javatests/src/org/chromium/net/AndroidProxySelectorTest.java",
     "javatests/src/org/chromium/net/NetErrorsTest.java",
+    "javatests/src/org/chromium/net/NetworkChangeNotifierNoNativeTest.java",
     "javatests/src/org/chromium/net/NetworkChangeNotifierTest.java",
     "javatests/src/org/chromium/net/X509UtilTest.java",
   ]
@@ -126,12 +127,14 @@ android_library("net_javatests") {
     ":net_java_test_support",
     "//base:base_java",
     "//base:base_java_test_support",
+    "//third_party/android_support_test_runner:rules_java",
     "//third_party/android_support_test_runner:runner_java",
+    "//third_party/junit",
   ]
 }
 
 java_cpp_template("net_errors_java") {
-  package_name = "org/chromium/net"
+  package_path = "org/chromium/net"
   sources = [
     "java/NetError.template",
   ]

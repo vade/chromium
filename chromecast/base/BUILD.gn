@@ -12,7 +12,7 @@ if (is_android) {
 
 declare_args() {
   # Denotes the type of Cast product. This is #defined as CAST_PRODUCT_TYPE in
-  # version.h. This is an integer in the range [0-4].
+  # version.h. This is an integer in the range [0-5].
   if (is_android) {
     cast_product_type = 4
   } else {
@@ -23,11 +23,14 @@ declare_args() {
 if (is_android) {
   assert(cast_product_type == 4)
 } else {
-  assert(cast_product_type >= 0 && cast_product_type <= 3)
+  assert(cast_product_type >= 0 && cast_product_type <= 5 &&
+         cast_product_type != 4)
 }
 
 source_set("base") {
   sources = [
+    "alarm_manager.cc",
+    "alarm_manager.h",
     "android/dumpstate_writer.cc",
     "android/dumpstate_writer.h",
     "android/system_time_change_notifier_android.cc",
@@ -121,6 +124,7 @@ source_set("test_support") {
 
 test("cast_base_unittests") {
   sources = [
+    "alarm_manager_unittest.cc",
     "bind_to_task_runner_unittest.cc",
     "device_capabilities_impl_unittest.cc",
     "error_codes_unittest.cc",

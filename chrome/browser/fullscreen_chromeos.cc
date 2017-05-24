@@ -11,14 +11,14 @@
 #include "ui/display/screen.h"
 
 bool IsFullScreenMode(int64_t display_id) {
-  if (chrome::IsRunningInMash()) {
+  if (ash_util::IsRunningInMash()) {
     // TODO: http://crbug.com/640390.
     NOTIMPLEMENTED();
     return false;
   }
 
   for (ash::RootWindowController* controller :
-       ash::Shell::GetInstance()->GetAllRootWindowControllers()) {
+       ash::Shell::Get()->GetAllRootWindowControllers()) {
     if (display::Screen::GetScreen()
             ->GetDisplayNearestWindow(controller->GetRootWindow())
             .id() == display_id) {

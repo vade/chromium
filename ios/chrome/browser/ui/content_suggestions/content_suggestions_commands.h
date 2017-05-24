@@ -5,17 +5,21 @@
 #ifndef IOS_CHROME_BROWSER_UI_CONTENT_SUGGESTIONS_CONTENT_SUGGESTIONS_COMMANDS_H_
 #define IOS_CHROME_BROWSER_UI_CONTENT_SUGGESTIONS_CONTENT_SUGGESTIONS_COMMANDS_H_
 
+@class CollectionViewItem;
+
 // Commands protocol for the ContentSuggestionsViewController.
 @protocol ContentSuggestionsCommands
 
-// Adds a new empty SuggestionItem.
-- (void)addEmptyItem;
 // Opens the Reading List.
 - (void)openReadingList;
-// Opens the first page of the Reading List.
-- (void)openFirstPageOfReadingList;
-// Opens the favicon associated with the cell with the |index|.
-- (void)openFaviconAtIndex:(NSInteger)index;
+// Opens the page associated with this |item|.
+- (void)openPageForItem:(nonnull CollectionViewItem*)item;
+// Displays a context menu for opening the |articleItem|.
+- (void)displayContextMenuForArticle:(nonnull CollectionViewItem*)item
+                             atPoint:(CGPoint)touchLocation
+                         atIndexPath:(nonnull NSIndexPath*)indexPath;
+// Dismisses the context menu if it is displayed.
+- (void)dismissContextMenu;
 
 @end
 

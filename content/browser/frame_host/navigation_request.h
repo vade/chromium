@@ -17,6 +17,7 @@
 #include "content/common/navigation_params.h"
 #include "content/public/browser/navigation_throttle.h"
 #include "content/public/common/previews_state.h"
+#include "mojo/public/cpp/system/data_pipe.h"
 
 namespace content {
 
@@ -81,6 +82,7 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
       PreviewsState previews_state,
       bool is_same_document_history_load,
       bool is_history_navigation_in_new_child,
+      const scoped_refptr<ResourceRequestBodyImpl>& post_body,
       const base::TimeTicks& navigation_start,
       NavigationControllerImpl* controller);
 
@@ -133,11 +135,6 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
 
   bool may_transfer() const { return may_transfer_; }
 
-  void SetWaitingForRendererResponse() {
-    DCHECK(state_ == NOT_STARTED);
-    state_ = WAITING_FOR_RENDERER_RESPONSE;
-  }
-
   AssociatedSiteInstanceType associated_site_instance_type() const {
     return associated_site_instance_type_;
   }
@@ -148,6 +145,8 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
   NavigationHandleImpl* navigation_handle() const {
     return navigation_handle_.get();
   }
+
+  void SetWaitingForRendererResponse();
 
   // Creates a NavigationHandle. This should be called after any previous
   // NavigationRequest for the FrameTreeNode has been destroyed.
@@ -182,6 +181,7 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
       const scoped_refptr<ResourceResponse>& response) override;
   void OnResponseStarted(const scoped_refptr<ResourceResponse>& response,
                          std::unique_ptr<StreamHandle> body,
+                         mojo::ScopedDataPipeConsumerHandle consumer_handle,
                          const SSLStatus& ssl_status,
                          std::unique_ptr<NavigationData> navigation_data,
                          const GlobalRequestID& request_id,
@@ -248,10 +248,12 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
 
   std::unique_ptr<NavigationHandleImpl> navigation_handle_;
 
-  // Holds the ResourceResponse and the StreamHandle for the navigation while
-  // the WillProcessResponse checks are performed by the NavigationHandle.
+  // Holds the ResourceResponse and the StreamHandle (or
+  // DataPipeConsumerHandle) for the navigation while the WillProcessResponse
+  // checks are performed by the NavigationHandle.
   scoped_refptr<ResourceResponse> response_;
   std::unique_ptr<StreamHandle> body_;
+  mojo::ScopedDataPipeConsumerHandle handle_;
 
   base::Closure on_start_checks_complete_closure_;
 

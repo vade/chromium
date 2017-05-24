@@ -17,7 +17,7 @@
 #include "content/public/browser/bluetooth_chooser.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/common/media_stream_request.h"
-#include "content/public/common/window_container_type.h"
+#include "content/public/common/window_container_type.mojom.h"
 #include "third_party/WebKit/public/platform/WebDisplayMode.h"
 #include "third_party/WebKit/public/platform/WebDragOperation.h"
 #include "third_party/WebKit/public/platform/WebSecurityStyle.h"
@@ -66,6 +66,10 @@ namespace net {
 class X509Certificate;
 }
 
+namespace url {
+class Origin;
+}
+
 namespace blink {
 class WebGestureEvent;
 }
@@ -74,6 +78,8 @@ namespace content {
 
 struct OpenURLParams;
 struct WebContentsUnresponsiveState;
+
+enum class KeyboardEventProcessingResult;
 
 // Objects implement this interface to get notified about changes in the
 // WebContents and to provide necessary functionality.
@@ -255,12 +261,10 @@ class CONTENT_EXPORT WebContentsDelegate {
                                   const PageState& page_state);
 
   // Allows delegates to handle keyboard events before sending to the renderer.
-  // Returns true if the |event| was handled. Otherwise, if the |event| would be
-  // handled in HandleKeyboardEvent() method as a normal keyboard shortcut,
-  // |*is_keyboard_shortcut| should be set to true.
-  virtual bool PreHandleKeyboardEvent(WebContents* source,
-                                      const NativeWebKeyboardEvent& event,
-                                      bool* is_keyboard_shortcut);
+  // See enum for description of return values.
+  virtual KeyboardEventProcessingResult PreHandleKeyboardEvent(
+      WebContents* source,
+      const NativeWebKeyboardEvent& event);
 
   // Allows delegates to handle unhandled keyboard messages coming back from
   // the renderer.
@@ -318,7 +322,7 @@ class CONTENT_EXPORT WebContentsDelegate {
       int32_t route_id,
       int32_t main_frame_route_id,
       int32_t main_frame_widget_route_id,
-      WindowContainerType window_container_type,
+      content::mojom::WindowContainerType window_container_type,
       const GURL& opener_url,
       const std::string& frame_name,
       const GURL& target_url,
@@ -486,12 +490,6 @@ class CONTENT_EXPORT WebContentsDelegate {
                                               MediaStreamType type);
 
 #if defined(OS_ANDROID)
-  // Asks permission to decode media stream. After permission is determined,
-  // |callback| will be called with the result.
-  virtual void RequestMediaDecodePermission(
-      WebContents* web_contents,
-      const base::Callback<void(bool)>& callback);
-
   // Creates a view embedding the video view.
   virtual base::android::ScopedJavaLocalRef<jobject>
       GetContentVideoViewEmbedder();
@@ -554,6 +552,16 @@ class CONTENT_EXPORT WebContentsDelegate {
 
   // Requests the app banner. This method is called from the DevTools.
   virtual void RequestAppBannerFromDevTools(content::WebContents* web_contents);
+
+  // Reports that passive mixed content was found at the specified url.
+  virtual void PassiveInsecureContentFound(const GURL& resource_url) {}
+
+  // Checks if running of active mixed content is allowed for the specified
+  // WebContents/tab.
+  virtual bool ShouldAllowRunningInsecureContent(WebContents* web_contents,
+                                                 bool allowed_per_prefs,
+                                                 const url::Origin& origin,
+                                                 const GURL& resource_url);
 
  protected:
   virtual ~WebContentsDelegate();

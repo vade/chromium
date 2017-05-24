@@ -4,8 +4,7 @@
 
 #include "chrome/browser/ui/ash/app_list/app_list_controller_ash.h"
 
-#include "ash/common/shelf/shelf_delegate.h"
-#include "ash/common/wm_shell.h"
+#include "ash/shelf/shelf_model.h"
 #include "ash/shell.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
@@ -39,21 +38,19 @@ gfx::Rect AppListControllerDelegateAsh::GetAppListBounds() {
 }
 
 bool AppListControllerDelegateAsh::IsAppPinned(const std::string& app_id) {
-  return ash::WmShell::Get()->shelf_delegate()->IsAppPinned(app_id);
+  return ash::Shell::Get()->shelf_model()->IsAppPinned(app_id);
 }
 
 bool AppListControllerDelegateAsh::IsAppOpen(const std::string& app_id) const {
-  ash::ShelfID id =
-      ash::WmShell::Get()->shelf_delegate()->GetShelfIDForAppID(app_id);
-  return id && ChromeLauncherController::instance()->IsOpen(id);
+  return ChromeLauncherController::instance()->IsOpen(ash::ShelfID(app_id));
 }
 
 void AppListControllerDelegateAsh::PinApp(const std::string& app_id) {
-  ash::WmShell::Get()->shelf_delegate()->PinAppWithID(app_id);
+  ash::Shell::Get()->shelf_model()->PinAppWithID(app_id);
 }
 
 void AppListControllerDelegateAsh::UnpinApp(const std::string& app_id) {
-  ash::WmShell::Get()->shelf_delegate()->UnpinAppWithID(app_id);
+  ash::Shell::Get()->shelf_model()->UnpinAppWithID(app_id);
 }
 
 AppListControllerDelegate::Pinnable AppListControllerDelegateAsh::GetPinnable(
@@ -72,16 +69,6 @@ void AppListControllerDelegateAsh::OnCloseChildDialog() {
   app_list::AppListView* app_list_view = app_list_presenter_->GetView();
   if (app_list_view)
     app_list_view->SetAppListOverlayVisible(false);
-}
-
-bool AppListControllerDelegateAsh::CanDoCreateShortcutsFlow() {
-  return false;
-}
-
-void AppListControllerDelegateAsh::DoCreateShortcutsFlow(
-    Profile* profile,
-    const std::string& extension_id) {
-  NOTREACHED();
 }
 
 void AppListControllerDelegateAsh::CreateNewWindow(Profile* profile,
@@ -127,23 +114,13 @@ void AppListControllerDelegateAsh::LaunchApp(
     AppListSource source,
     int event_flags) {
   ChromeLauncherController::instance()->LaunchApp(
-      extension->id(),
-      AppListSourceToLaunchSource(source),
+      ash::ShelfID(extension->id()), AppListSourceToLaunchSource(source),
       event_flags);
   DismissView();
 }
 
-void AppListControllerDelegateAsh::ShowForProfileByPath(
-    const base::FilePath& profile_path) {
-  // Ash doesn't have profile switching.
-  NOTREACHED();
-}
-
-bool AppListControllerDelegateAsh::ShouldShowUserIcon() {
-  return false;
-}
-
-ash::LaunchSource AppListControllerDelegateAsh::AppListSourceToLaunchSource(
+ash::ShelfLaunchSource
+AppListControllerDelegateAsh::AppListSourceToLaunchSource(
     AppListSource source) {
   switch (source) {
     case LAUNCH_FROM_APP_LIST:

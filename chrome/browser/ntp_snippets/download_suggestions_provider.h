@@ -28,6 +28,10 @@ namespace offline_pages {
 struct OfflinePageItem;
 }
 
+namespace base {
+class Clock;
+}
+
 // Provides download content suggestions from the offline pages model and the
 // download manager (obtaining the data through DownloadManager and each
 // DownloadItem). Offline page related downloads are referred to as offline page
@@ -47,7 +51,7 @@ class DownloadSuggestionsProvider
       content::DownloadManager* download_manager,
       DownloadHistory* download_history,
       PrefService* pref_service,
-      bool download_manager_ui_enabled);
+      std::unique_ptr<base::Clock> clock);
   ~DownloadSuggestionsProvider() override;
 
   // ContentSuggestionsProvider implementation.
@@ -137,6 +141,11 @@ class DownloadSuggestionsProvider
   ntp_snippets::ContentSuggestion ConvertDownloadItem(
       const content::DownloadItem& download_item) const;
 
+  // Returns true if a download published and last visited times are considered
+  // too old for the download to be shown.
+  bool IsDownloadOutdated(const base::Time& published_time,
+                          const base::Time& last_visited_time);
+
   // Adds |item| to the internal asset download cache if all of the following
   // holds:
   // - the download is completed;
@@ -206,8 +215,8 @@ class DownloadSuggestionsProvider
   offline_pages::OfflinePageModel* offline_page_model_;
   content::DownloadManager* download_manager_;
   DownloadHistory* download_history_;
-
   PrefService* pref_service_;
+  std::unique_ptr<base::Clock> clock_;
 
   // Cached offline page downloads. If there are not enough asset downloads, all
   // of these could be shown (they are the most recently visited, not dismissed
@@ -221,10 +230,6 @@ class DownloadSuggestionsProvider
   // than |kMaxSuggestionsCount| asset downloads, then all of them which satisfy
   // the criteria above are cached, otherwise only |kMaxSuggestionsCount|.
   std::vector<const content::DownloadItem*> cached_asset_downloads_;
-
-  // Whether the Download Manager UI is enabled, in which case the More button
-  // for the Downloads section can redirect there.
-  const bool download_manager_ui_enabled_;
 
   bool is_asset_downloads_initialization_complete_;
 

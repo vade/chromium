@@ -5,12 +5,11 @@
 #ifndef OpenedFrameTracker_h
 #define OpenedFrameTracker_h
 
-#include "wtf/HashSet.h"
-#include "wtf/Noncopyable.h"
+#include "platform/wtf/HashSet.h"
+#include "platform/wtf/Noncopyable.h"
 
 namespace blink {
 
-class Visitor;
 class WebFrame;
 
 // Small helper class to track the set of frames that a WebFrame has opened.
@@ -23,21 +22,19 @@ class OpenedFrameTracker {
   OpenedFrameTracker();
   ~OpenedFrameTracker();
 
-  bool isEmpty() const;
-  void add(WebFrame*);
-  void remove(WebFrame*);
+  bool IsEmpty() const;
+  void Add(WebFrame*);
+  void Remove(WebFrame*);
 
   // Helper used when swapping a frame into the frame tree: this updates the
   // opener for opened frames to point to the new frame being swapped in.
-  void transferTo(WebFrame*);
+  void TransferTo(WebFrame*);
 
-  void traceFrames(Visitor*);
+  // Helper function to clear the openers when the frame is being detached.
+  void Dispose() { TransferTo(nullptr); }
 
  private:
-  template <typename VisitorDispatcher>
-  void traceFramesImpl(VisitorDispatcher);
-
-  WTF::HashSet<WebFrame*> m_openedFrames;
+  WTF::HashSet<WebFrame*> opened_frames_;
 };
 
 }  // namespace blink

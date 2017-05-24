@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/toolbar/back_forward_menu_model.h"
 
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
@@ -502,7 +503,7 @@ TEST_F(BackFwdMenuModelTest, EscapeLabel) {
 TEST_F(BackFwdMenuModelTest, FaviconLoadTest) {
   ASSERT_TRUE(profile()->CreateHistoryService(true, false));
   profile()->CreateFaviconService();
-  Browser::CreateParams native_params(profile());
+  Browser::CreateParams native_params(profile(), true);
   std::unique_ptr<Browser> browser(
       chrome::CreateBrowserWithTestWindowForParams(&native_params));
   FaviconDelegate favicon_delegate;
@@ -551,9 +552,6 @@ TEST_F(BackFwdMenuModelTest, FaviconLoadTest) {
   SkBitmap default_icon_bitmap = *default_icon.ToSkBitmap();
   SkBitmap valid_icon_bitmap = *valid_icon.ToSkBitmap();
 
-  SkAutoLockPixels a(new_icon_bitmap);
-  SkAutoLockPixels b(valid_icon_bitmap);
-  SkAutoLockPixels c(default_icon_bitmap);
   // Verify we did not get the default favicon.
   EXPECT_NE(0, memcmp(default_icon_bitmap.getPixels(),
                       valid_icon_bitmap.getPixels(),
@@ -565,6 +563,4 @@ TEST_F(BackFwdMenuModelTest, FaviconLoadTest) {
 
   // Make sure the browser deconstructor doesn't have problems.
   browser->tab_strip_model()->CloseAllTabs();
-  // This is required to prevent the message loop from hanging.
-  profile()->DestroyHistoryService();
 }

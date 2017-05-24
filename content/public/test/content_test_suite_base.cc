@@ -11,7 +11,7 @@
 #include "base/test/test_suite.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "build/build_config.h"
-#include "content/browser/gpu/gpu_process_host.h"
+#include "content/browser/gpu/gpu_main_thread_factory.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/utility_process_host_impl.h"
 #include "content/common/url_schemes.h"
@@ -34,6 +34,7 @@
 #include "device/geolocation/android/geolocation_jni_registrar.h"
 #include "media/base/android/media_jni_registrar.h"
 #include "media/capture/video/android/capture_jni_registrar.h"
+#include "mojo/android/system/mojo_jni_registrar.h"
 #include "net/android/net_jni_registrar.h"
 #include "ui/android/ui_android_jni_registrar.h"
 #include "ui/base/android/ui_base_jni_registrar.h"
@@ -79,6 +80,7 @@ void ContentTestSuiteBase::Initialize() {
   gfx::android::RegisterJni(env);
   media::RegisterCaptureJni(env);
   media::RegisterJni(env);
+  mojo::android::RegisterSystemJni(env);
   net::android::RegisterJni(env);
   ui::android::RegisterJni(env);
   ui::RegisterUIAndroidJni(env);
@@ -104,7 +106,7 @@ void ContentTestSuiteBase::RegisterInProcessThreads() {
       CreateInProcessUtilityThread);
   RenderProcessHostImpl::RegisterRendererMainThreadFactory(
       CreateInProcessRendererThread);
-  GpuProcessHost::RegisterGpuMainThreadFactory(CreateInProcessGpuThread);
+  content::RegisterGpuMainThreadFactory(CreateInProcessGpuThread);
 }
 
 }  // namespace content

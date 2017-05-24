@@ -20,7 +20,7 @@
 #include "components/policy/core/browser/policy_error_map.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/prefs/pref_value_map.h"
-#include "grit/components_strings.h"
+#include "components/strings/grit/components_strings.h"
 #include "url/gurl.h"
 
 namespace policy {
@@ -184,7 +184,7 @@ bool StringMappingListPolicyHandler::Convert(const base::Value* input,
 
   for (auto entry = list_value->begin(); entry != list_value->end(); ++entry) {
     std::string entry_value;
-    if (!(*entry)->GetAsString(&entry_value)) {
+    if (!entry->GetAsString(&entry_value)) {
       if (errors) {
         errors->AddError(policy_name(), entry - list_value->begin(),
                          IDS_POLICY_TYPE_ERROR,

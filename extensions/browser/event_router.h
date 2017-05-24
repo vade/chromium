@@ -5,7 +5,6 @@
 #ifndef EXTENSIONS_BROWSER_EVENT_ROUTER_H_
 #define EXTENSIONS_BROWSER_EVENT_ROUTER_H_
 
-#include <map>
 #include <set>
 #include <string>
 #include <utility>
@@ -164,12 +163,6 @@ class EventRouter : public KeyedService,
   virtual bool ExtensionHasEventListener(const std::string& extension_id,
                                          const std::string& event_name);
 
-  // Return or set the list of events for which the given extension has
-  // registered.
-  std::set<std::string> GetRegisteredEvents(const std::string& extension_id);
-  void SetRegisteredEvents(const std::string& extension_id,
-                           const std::set<std::string>& events);
-
   // Broadcasts an event to every listener registered for that event.
   virtual void BroadcastEvent(std::unique_ptr<Event> event);
 
@@ -188,6 +181,16 @@ class EventRouter : public KeyedService,
   void OnEventAck(content::BrowserContext* context,
                   const std::string& extension_id);
 
+  // Returns whether or not the given extension has any registered events.
+  bool HasRegisteredEvents(const ExtensionId& extension_id) const {
+    return !GetRegisteredEvents(extension_id).empty();
+  }
+
+  // Clears registered events for testing purposes.
+  void ClearRegisteredEventsForTest(const ExtensionId& extension_id) {
+    SetRegisteredEvents(extension_id, std::set<std::string>());
+  }
+
   // Reports UMA for an event dispatched to |extension| with histogram value
   // |histogram_value|. Must be called on the UI thread.
   //
@@ -200,14 +203,6 @@ class EventRouter : public KeyedService,
  private:
   friend class EventRouterFilterTest;
   friend class EventRouterTest;
-
-  // The extension and process that contains the event listener for a given
-  // event.
-  struct ListenerProcess;
-
-  // A map between an event name and a set of extensions that are listening
-  // to that event.
-  typedef std::map<std::string, std::set<ListenerProcess> > ListenerMap;
 
   // An identifier for an event dispatch that is used to prevent double dispatch
   // due to race conditions between the direct and lazy dispatch paths.
@@ -225,6 +220,13 @@ class EventRouter : public KeyedService,
       UserGestureState user_gesture,
       const extensions::EventFilteringInfo& info);
 
+  // Returns or sets the list of events for which the given extension has
+  // registered.
+  std::set<std::string> GetRegisteredEvents(
+      const std::string& extension_id) const;
+  void SetRegisteredEvents(const std::string& extension_id,
+                           const std::set<std::string>& events);
+
   void Observe(int type,
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override;
@@ -233,14 +235,7 @@ class EventRouter : public KeyedService,
                          const Extension* extension) override;
   void OnExtensionUnloaded(content::BrowserContext* browser_context,
                            const Extension* extension,
-                           UnloadedExtensionInfo::Reason reason) override;
-
-  // Returns true if the given listener map contains a event listeners for
-  // the given event. If |extension_id| is non-empty, we also check that that
-  // extension is one of the listeners.
-  bool HasEventListenerImpl(const ListenerMap& listeners,
-                            const std::string& extension_id,
-                            const std::string& event_name);
+                           UnloadedExtensionReason reason) override;
 
   // Shared by all event dispatch methods. If |restrict_to_extension_id| is
   // empty, the event is broadcast.  An event that just came off the pending

@@ -39,7 +39,7 @@ void HomePageOverlayHandler::InitializeHandler() {
   Profile* profile = Profile::FromWebUI(web_ui());
   autocomplete_controller_.reset(new AutocompleteController(
       base::MakeUnique<ChromeAutocompleteProviderClient>(profile), this,
-      AutocompleteClassifier::kDefaultOmniboxProviders));
+      AutocompleteClassifier::DefaultOmniboxProviders()));
 }
 
 void HomePageOverlayHandler::GetLocalizedValues(
@@ -55,7 +55,7 @@ void HomePageOverlayHandler::RequestAutocompleteSuggestions(
   CHECK(args->GetString(0, &input));
 
   autocomplete_controller_->Start(AutocompleteInput(
-      input, base::string16::npos, std::string(), GURL(),
+      input, base::string16::npos, std::string(), GURL(), base::string16(),
       metrics::OmniboxEventProto::INVALID_SPEC, true, false, false, true, false,
       ChromeAutocompleteSchemeClassifier(Profile::FromWebUI(web_ui()))));
 }

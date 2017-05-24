@@ -262,7 +262,14 @@ ContentSettingDecoration::CreateAnimatedText() {
 }
 
 NSPoint ContentSettingDecoration::GetBubblePointInFrame(NSRect frame) {
-
+  // Compute the frame as if there is no animation pill in the Omnibox. Place
+  // the bubble where the icon would be without animation, so when the animation
+  // ends, the bubble is pointing in the right place.
+  CGFloat final_width = ImageDecoration::GetWidthForSpace(NSWidth(frame));
+  NSSize image_size = NSMakeSize(final_width, NSHeight(frame));
+  if (!cocoa_l10n_util::ShouldDoExperimentalRTLLayout())
+    frame.origin.x += frame.size.width - image_size.width;
+  frame.size = image_size;
   const NSRect draw_frame = GetDrawRectInFrame(frame);
   return NSMakePoint(NSMidX(draw_frame),
                      NSMaxY(draw_frame) + kPageBubblePointYOffset);
@@ -320,6 +327,10 @@ bool ContentSettingDecoration::OnMousePressed(NSRect frame, NSPoint location) {
   return true;
 }
 
+CGFloat ContentSettingDecoration::DividerPadding() const {
+  return kDividerPadding;
+}
+
 NSString* ContentSettingDecoration::GetToolTip() {
   return tooltip_.get();
 }
@@ -363,6 +374,9 @@ CGFloat ContentSettingDecoration::GetWidthForSpace(CGFloat width) {
 void ContentSettingDecoration::DrawInFrame(NSRect frame, NSView* control_view) {
   const BOOL is_rtl = cocoa_l10n_util::ShouldDoExperimentalRTLLayout();
   if ([animation_ animationState] != kNoAnimation) {
+    // Align to integral points so that drawing isn't blurry or jittery.
+    frame = NSIntegralRect(frame);
+
     NSRect background_rect = NSInsetRect(frame, 0.0, kBorderPadding);
     // This code is almost identical to code that appears in BubbleDecoration.
     // Unfortunately ContentSettingDecoration does not descend from
@@ -415,17 +429,7 @@ void ContentSettingDecoration::DrawInFrame(NSRect frame, NSView* control_view) {
 
     // Draw the divider if available.
     if (state() == DecorationMouseState::NONE && !active()) {
-      const CGFloat divider_x_position =
-          is_rtl ? NSMinX(background_rect) + kDividerPadding
-                 : NSMaxX(background_rect) - kDividerPadding;
-      NSBezierPath* line = [NSBezierPath bezierPath];
-      [line setLineWidth:1];
-      [line
-          moveToPoint:NSMakePoint(divider_x_position, NSMinY(background_rect))];
-      [line
-          lineToPoint:NSMakePoint(divider_x_position, NSMaxY(background_rect))];
-      [GetDividerColor(owner_->IsLocationBarDark()) set];
-      [line stroke];
+      DrawDivider(control_view, background_rect, 1.0);
     }
   } else {
     // No animation, draw the image as normal.

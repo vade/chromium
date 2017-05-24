@@ -18,12 +18,18 @@ TestWebClient::~TestWebClient() {}
 
 void TestWebClient::AddAdditionalSchemes(
     std::vector<url::SchemeWithType>* additional_standard_schemes) const {
-  url::SchemeWithType scheme = {kTestWebUIScheme, url::SCHEME_WITHOUT_PORT};
-  additional_standard_schemes->push_back(scheme);
+  url::SchemeWithType web_ui_scheme = {kTestWebUIScheme,
+                                       url::SCHEME_WITHOUT_PORT};
+  additional_standard_schemes->push_back(web_ui_scheme);
+
+  url::SchemeWithType native_scheme = {kTestNativeContentScheme,
+                                       url::SCHEME_WITHOUT_PORT};
+  additional_standard_schemes->push_back(native_scheme);
 }
 
 bool TestWebClient::IsAppSpecificURL(const GURL& url) const {
-  return url.SchemeIs(kTestWebUIScheme);
+  return url.SchemeIs(kTestWebUIScheme) ||
+         url.SchemeIs(kTestNativeContentScheme);
 }
 
 base::RefCountedMemory* TestWebClient::GetDataResourceBytes(
@@ -33,7 +39,7 @@ base::RefCountedMemory* TestWebClient::GetDataResourceBytes(
   return ResourceBundle::GetSharedInstance().LoadDataResourceBytes(resource_id);
 }
 
-NSString* TestWebClient::GetEarlyPageScript() const {
+NSString* TestWebClient::GetEarlyPageScript(BrowserState* browser_state) const {
   return early_page_script_ ? early_page_script_.get() : @"";
 }
 

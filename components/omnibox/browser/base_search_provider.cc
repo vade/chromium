@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "base/feature_list.h"
 #include "base/i18n/case_conversion.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
@@ -22,6 +23,7 @@
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "url/gurl.h"
@@ -61,9 +63,44 @@ SuggestionDeletionHandler::SuggestionDeletionHandler(
   GURL url(deletion_url);
   DCHECK(url.is_valid());
 
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("omnibox_suggest_deletion", R"(
+        semantics {
+          sender: "Omnibox"
+          description:
+            "When users attempt to delete server-provided personalized search "
+            "or navigation suggestions from the omnibox dropdown, Chrome sends "
+            "a message to the server requesting deletion of the suggestion."
+          trigger:
+            "A user attempt to delete a server-provided omnibox suggestion, "
+            "for which the server provided a custom deletion URL."
+          data:
+            "No user data is explicitly sent with the request, but because the "
+            "requested URL is provided by the server for each specific "
+            "suggestion, it necessarily uniquely identifies the suggestion the "
+            "user is attempting to delete."
+          destination: WEBSITE
+        }
+        policy {
+          cookies_allowed: true
+          cookies_store: "user"
+          setting:
+            "Since this can only be triggered on seeing server-provided "
+            "suggestions in the omnibox dropdown, whether it is enabled is the "
+            "same as whether those suggestions are enabled.\n"
+            "Users can control this feature via the 'Use a prediction service "
+            "to help complete searches and URLs typed in the address bar' "
+            "setting under 'Privacy'. The feature is enabled by default."
+          chrome_policy {
+            SearchSuggestEnabled {
+                policy_options {mode: MANDATORY}
+                SearchSuggestEnabled: false
+            }
+          }
+        })");
   deletion_fetcher_ =
       net::URLFetcher::Create(BaseSearchProvider::kDeletionURLFetcherID, url,
-                              net::URLFetcher::GET, this);
+                              net::URLFetcher::GET, this, traffic_annotation);
   data_use_measurement::DataUseUserData::AttachToFetcher(
       deletion_fetcher_.get(), data_use_measurement::DataUseUserData::OMNIBOX);
   deletion_fetcher_->SetRequestContext(request_context);
@@ -113,9 +150,9 @@ AutocompleteMatch BaseSearchProvider::CreateSearchSuggestion(
   // mode.  They also assume the caller knows what it's doing and we set
   // this match to look as if it was received/created synchronously.
   SearchSuggestionParser::SuggestResult suggest_result(
-      suggestion, type, suggestion, base::string16(), base::string16(),
-      base::string16(), base::string16(), nullptr, std::string(),
-      std::string(), from_keyword_provider, 0, false, false, base::string16());
+      suggestion, type, 0, suggestion, base::string16(), base::string16(),
+      base::string16(), base::string16(), nullptr, std::string(), std::string(),
+      from_keyword_provider, 0, false, false, base::string16());
   suggest_result.set_received_after_last_keystroke(false);
   return CreateSearchSuggestion(
       NULL, AutocompleteInput(), from_keyword_provider, suggest_result,
@@ -132,7 +169,7 @@ void BaseSearchProvider::DeleteMatch(const AutocompleteMatch& match) {
                    base::Unretained(this))));
   }
 
-  TemplateURL* template_url =
+  const TemplateURL* template_url =
       match.GetTemplateURL(client_->GetTemplateURLService(), false);
   // This may be NULL if the template corresponding to the keyword has been
   // deleted or there is no keyword set.
@@ -214,9 +251,10 @@ AutocompleteMatch BaseSearchProvider::CreateSearchSuggestion(
   match.answer_contents = suggestion.answer_contents();
   match.answer_type = suggestion.answer_type();
   match.answer = SuggestionAnswer::copy(suggestion.answer());
+  match.subtype_identifier = suggestion.subtype_identifier();
   if (suggestion.type() == AutocompleteMatchType::SEARCH_SUGGEST_TAIL) {
-    match.RecordAdditionalInfo(
-        kACMatchPropertyInputText, base::UTF16ToUTF8(input.text()));
+    match.RecordAdditionalInfo(kACMatchPropertySuggestionText,
+                               base::UTF16ToUTF8(suggestion.suggestion()));
     match.RecordAdditionalInfo(
         kACMatchPropertyContentsPrefix,
         base::UTF16ToUTF8(suggestion.match_contents_prefix()));
@@ -337,13 +375,18 @@ bool BaseSearchProvider::CanSendURL(
   if (!current_page_url.is_valid())
     return false;
 
-  // Only allow HTTP URLs or HTTPS URLs for the same domain as the search
-  // provider.
-  if ((current_page_url.scheme() != url::kHttpScheme) &&
-      ((current_page_url.scheme() != url::kHttpsScheme) ||
-       !net::registry_controlled_domains::SameDomainOrHost(
-           current_page_url, suggest_url,
-           net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES)))
+  // Only allow HTTP URLs or HTTPS URLs.  For HTTPS URLs, require that either
+  // the appropriate feature flag is enabled or the URL is the same domain as
+  // the search provider.
+  const bool scheme_allowed =
+      (current_page_url.scheme() == url::kHttpScheme) ||
+      ((current_page_url.scheme() == url::kHttpsScheme) &&
+       (base::FeatureList::IsEnabled(
+            omnibox::kSearchProviderContextAllowHttpsUrls) ||
+        net::registry_controlled_domains::SameDomainOrHost(
+            current_page_url, suggest_url,
+            net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES)));
+  if (!scheme_allowed)
     return false;
 
   if (!client->TabSyncEnabledAndUnencrypted())

@@ -107,9 +107,9 @@ OpaqueBrowserFrameView::OpaqueBrowserFrameView(BrowserFrame* frame,
     window_icon_->Update();
   }
 
-  window_title_ = new views::Label(
-      browser_view->GetWindowTitle(),
-      gfx::FontList(BrowserFrame::GetTitleFontList()));
+  window_title_ = new views::Label(browser_view->GetWindowTitle(),
+                                   views::Label::CustomFont{gfx::FontList(
+                                       BrowserFrame::GetTitleFontList())});
   window_title_->SetVisible(browser_view->ShouldShowWindowTitle());
   window_title_->SetEnabledColor(SK_ColorWHITE);
   window_title_->SetSubpixelRenderingEnabled(false);
@@ -295,11 +295,9 @@ void OpaqueBrowserFrameView::OnMenuButtonClicked(views::MenuButton* source,
 #if defined(OS_LINUX)
   views::MenuRunner menu_runner(frame()->GetSystemMenuModel(),
                                 views::MenuRunner::HAS_MNEMONICS);
-  ignore_result(menu_runner.RunMenuAt(browser_view()->GetWidget(),
-                                      window_icon_,
-                                      window_icon_->GetBoundsInScreen(),
-                                      views::MENU_ANCHOR_TOPLEFT,
-                                      ui::MENU_SOURCE_MOUSE));
+  menu_runner.RunMenuAt(browser_view()->GetWidget(), window_icon_,
+                        window_icon_->GetBoundsInScreen(),
+                        views::MENU_ANCHOR_TOPLEFT, ui::MENU_SOURCE_MOUSE);
 #endif
 }
 
@@ -510,7 +508,8 @@ bool OpaqueBrowserFrameView::ShouldShowWindowTitleBar() const {
 
 int OpaqueBrowserFrameView::GetTopAreaHeight() const {
   const gfx::ImageSkia frame_image = GetFrameImage();
-  int top_area_height = frame_image.height();  // Returns 0 if isNull().
+  int top_area_height =
+      std::max(frame_image.height(), layout_->NonClientTopHeight(false));
   if (browser_view()->IsTabStripVisible()) {
     top_area_height =
         std::max(top_area_height,
@@ -644,10 +643,12 @@ void OpaqueBrowserFrameView::PaintClientEdge(gfx::Canvas* canvas) const {
   FillClientEdgeRects(x, y, w, height, true, toolbar_color, canvas);
 
   // For popup windows, draw location bar sides.
+  SkColor location_bar_border_color =
+      browser_view()->toolbar()->location_bar()->GetOpaqueBorderColor(
+          incognito);
   if (!tabstrip_visible && IsToolbarVisible()) {
-    FillClientEdgeRects(
-        x, y, w, toolbar_bounds.height(), false,
-        LocationBarView::GetBorderColor(incognito), canvas);
+    FillClientEdgeRects(x, y, w, toolbar_bounds.height(), false,
+                        location_bar_border_color, canvas);
   }
 }
 

@@ -109,7 +109,7 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
   }
 
   Framebuffer* GetFramebuffer(GLuint client_id) {
-    return group_->framebuffer_manager()->GetFramebuffer(client_id);
+    return decoder_->GetFramebufferManager()->GetFramebuffer(client_id);
   }
 
   Renderbuffer* GetRenderbuffer(GLuint client_id) {
@@ -161,6 +161,10 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
 
   FramebufferCompletenessCache* framebuffer_completeness_cache() const {
     return group_->framebuffer_completeness_cache();
+  }
+
+  FramebufferManager* GetFramebufferManager() {
+    return decoder_->GetFramebufferManager();
   }
 
   ImageManager* GetImageManager() { return decoder_->GetImageManager(); }
@@ -249,6 +253,9 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
   void SetupCubemapProgram();
   void SetupSamplerExternalProgram();
   void SetupTexture();
+
+  // Sets up a sampler on texture unit 0 for certain ES3-specific tests.
+  void SetupSampler();
 
   // Note that the error is returned as GLint instead of GLenum.
   // This is because there is a mismatch in the types of GLenum and
@@ -637,6 +644,8 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
   std::unique_ptr<GLES2Decoder> decoder_;
   MemoryTracker* memory_tracker_;
 
+  bool surface_supports_draw_rectangle_ = false;
+
   GLuint client_buffer_id_;
   GLuint client_framebuffer_id_;
   GLuint client_program_id_;
@@ -702,14 +711,6 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
     }
 
     void set_token(int32_t token) override;
-
-    bool SetGetBuffer(int32_t /* transfer_buffer_id */) override;
-
-    // Overridden from CommandBufferEngine.
-    bool SetGetOffset(int32_t offset) override;
-
-    // Overridden from CommandBufferEngine.
-    int32_t GetGetOffset() override;
 
    private:
     scoped_refptr<gpu::Buffer> valid_buffer_;

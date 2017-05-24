@@ -70,7 +70,7 @@ void TemplateUrlServiceAndroid::SetUserSelectedDefaultSearchProvider(
 jint TemplateUrlServiceAndroid::GetDefaultSearchProviderIndex(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& obj) const {
-  TemplateURL* default_search_provider =
+  const TemplateURL* default_search_provider =
       template_url_service_->GetDefaultSearchProvider();
   auto it = std::find(template_urls_.begin(), template_urls_.end(),
                       default_search_provider);
@@ -111,7 +111,7 @@ jboolean TemplateUrlServiceAndroid::IsSearchByImageAvailable(
 jboolean TemplateUrlServiceAndroid::IsDefaultSearchEngineGoogle(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
-  TemplateURL* default_search_provider =
+  const TemplateURL* default_search_provider =
       template_url_service_->GetDefaultSearchProvider();
   return default_search_provider &&
       default_search_provider->url_ref().HasGoogleBaseURLs(
@@ -158,7 +158,7 @@ void TemplateUrlServiceAndroid::LoadTemplateURLs() {
             });
 
   // Place any user-selected default engine next.
-  TemplateURL* dsp = template_url_service_->GetDefaultSearchProvider();
+  const TemplateURL* dsp = template_url_service_->GetDefaultSearchProvider();
   it = std::partition(it, template_urls_.end(),
                       [dsp](const TemplateURL* t_url) { return t_url == dsp; });
 
@@ -238,7 +238,7 @@ TemplateUrlServiceAndroid::ReplaceSearchTermsInUrl(
     const JavaParamRef<jobject>& obj,
     const JavaParamRef<jstring>& jquery,
     const JavaParamRef<jstring>& jcurrent_url) {
-  TemplateURL* default_provider =
+  const TemplateURL* default_provider =
       template_url_service_->GetDefaultSearchProvider();
 
   base::string16 query(base::android::ConvertJavaStringToUTF16(env, jquery));
@@ -301,7 +301,8 @@ TemplateUrlServiceAndroid::GetSearchEngineUrlFromTemplateUrl(
       base::android::ConvertJavaStringToUTF16(env, jkeyword);
   TemplateURL* template_url =
       template_url_service_->GetTemplateURLForKeyword(keyword);
-  CHECK(template_url) << "Failed to find template URL for keyword: " << keyword;
+  if (!template_url)
+    return base::android::ScopedJavaLocalRef<jstring>(env, nullptr);
   std::string url(template_url->url_ref().ReplaceSearchTerms(
       TemplateURLRef::SearchTermsArgs(base::ASCIIToUTF16("query")),
       template_url_service_->search_terms_data()));

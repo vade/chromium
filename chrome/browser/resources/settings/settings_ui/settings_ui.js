@@ -49,6 +49,8 @@ Polymer({
 
     /**
      * Dictionary defining page visibility.
+     * This is only set when in guest mode. All pages are visible when not set
+     * because polymer only notifies after a property is set.
      * @private {!GuestModePageVisibility}
      */
     pageVisibility_: Object,
@@ -88,6 +90,8 @@ Polymer({
     }.bind(this));
 
     CrPolicyStrings = {
+      controlledSettingExtension:
+          loadTimeData.getString('controlledSettingExtension'),
       controlledSettingPolicy:
           loadTimeData.getString('controlledSettingPolicy'),
       controlledSettingRecommendedMatches:
@@ -104,11 +108,11 @@ Polymer({
 // <if expr="chromeos">
     CrOncStrings = {
       OncTypeCellular: loadTimeData.getString('OncTypeCellular'),
+      OncTypeTether: loadTimeData.getString('OncTypeTether'),
       OncTypeEthernet: loadTimeData.getString('OncTypeEthernet'),
       OncTypeVPN: loadTimeData.getString('OncTypeVPN'),
       OncTypeWiFi: loadTimeData.getString('OncTypeWiFi'),
       OncTypeWiMAX: loadTimeData.getString('OncTypeWiMAX'),
-      networkDisabled: loadTimeData.getString('networkDisabled'),
       networkListItemConnected:
           loadTimeData.getString('networkListItemConnected'),
       networkListItemConnecting:
@@ -123,6 +127,7 @@ Polymer({
 
     if (loadTimeData.getBoolean('isGuest')) {
       this.pageVisibility_ = {
+        passwordsAndForms: false,
         people: false,
         onStartup: false,
         reset: false,
@@ -144,7 +149,6 @@ Polymer({
           searchPrediction: false,
           networkPrediction: false,
         },
-        passwordsAndForms: false,
         downloads: {
           googleDrive: false,
         },
@@ -156,11 +160,44 @@ Polymer({
         loadTimeData.getBoolean('androidAppsAllowed');
   },
 
+  /** @private {?IntersectionObserver} */
+  intersectionObserver_: null,
+
   /** @override */
   attached: function() {
+    document.documentElement.classList.remove('loading');
+
+    setTimeout(function() {
+      chrome.send(
+          'metricsHandler:recordTime',
+          ['Settings.TimeUntilInteractive', window.performance.now()]);
+    });
+
     // Preload bold Roboto so it doesn't load and flicker the first time used.
     document.fonts.load('bold 12px Roboto');
-    settings.setGlobalScrollTarget(this.$.headerPanel.scroller);
+    settings.setGlobalScrollTarget(this.$.container);
+
+    // Setup drop shadow logic.
+    var callback = function(entries) {
+      assert(entries.length == 1);
+      this.$.dropShadow.classList.toggle(
+          'has-shadow', entries[0].intersectionRatio == 0);
+    }.bind(this);
+
+    this.intersectionObserver_ = new IntersectionObserver(
+        callback,
+        /** @type {IntersectionObserverInit} */ ({
+          root: this.$.container,
+          threshold: 0,
+        }));
+    this.intersectionObserver_.observe(this.$.intersectionProbe);
+  },
+
+  /** @override */
+  detached: function() {
+    settings.resetRouteForTesting();
+    this.intersectionObserver_.disconnect();
+    this.intersectionObserver_ = null;
   },
 
   /** @param {!settings.Route} route */
@@ -220,13 +257,24 @@ Polymer({
    * @private
    */
   onIronActivate_: function(event) {
-    if (event.detail.item.id != 'advancedPage')
+    if (event.detail.item.id != 'advancedSubmenu')
       this.$.drawer.closeDrawer();
   },
 
   /** @private */
   onMenuButtonTap_: function() {
     this.$.drawer.toggle();
+  },
+
+  /** @private */
+  onMenuClosed_: function() {
+    // Add tab index so that the container can be focused.
+    this.$.container.setAttribute('tabindex', '-1');
+    this.$.container.focus();
+
+    listenOnce(this.$.container, ['blur', 'pointerdown'], function() {
+      this.$.container.removeAttribute('tabindex');
+    }.bind(this));
   },
 
   /** @private */

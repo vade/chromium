@@ -11,10 +11,12 @@
 #include "services/ui/display/screen_manager_delegate.h"
 
 namespace service_manager {
-class InterfaceRegistry;
+class BinderRegistry;
 }
 
 namespace display {
+
+class ScreenBase;
 
 // ScreenManager provides the necessary functionality to configure all
 // attached physical displays.
@@ -28,7 +30,7 @@ class ScreenManager {
   static ScreenManager* GetInstance();
 
   // Registers Mojo interfaces provided.
-  virtual void AddInterfaces(service_manager::InterfaceRegistry* registry) = 0;
+  virtual void AddInterfaces(service_manager::BinderRegistry* registry) = 0;
 
   // Triggers initial display configuration to start. On device this will
   // configuration the connected displays. Off device this will create one or
@@ -40,7 +42,7 @@ class ScreenManager {
   // Handle requests from the platform to close a display.
   virtual void RequestCloseDisplay(int64_t display_id) = 0;
 
-  virtual int64_t GetPrimaryDisplayId() const = 0;
+  virtual display::ScreenBase* GetScreen() = 0;
 
  private:
   static ScreenManager* instance_;  // Instance is not owned.

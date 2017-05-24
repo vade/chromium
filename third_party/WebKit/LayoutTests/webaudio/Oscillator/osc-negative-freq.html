@@ -1,58 +1,61 @@
 <!doctype html>
 <html>
   <head>
-    <script src="../../resources/js-test.js"></script>
+    <script src="../../resources/testharness.js"></script>
+    <script src="../../resources/testharnessreport.js"></script> 
     <script src="../resources/audit-util.js"></script>
-    <script src="../resources/audio-testing.js"></script>
+    <script src="../resources/audit.js"></script>
     <title>Test OscillatorNode with Negative Frequency</title>
   </head>
 
   <body>
     <script>
-      description("Test OscillatorNode with Negative Frequency.");
-      window.jsTestIsAsync = true;
+      // Some arbitrary sample rate for the offline context. But it MUST be
+      // at least twice the oscillator frequency that we're using for the
+      // test. (Currently 440 Hz.)
+      var sampleRate = 16000;
 
-      // Some arbitrary sample rate for the offline context. 
-      var sampleRate = 48000;
-      var renderDuration = 1;
+      // A fairly arbitrary duration that should have at least 1-2 sample
+      // periods of the oscillator (at a nominal 440 Hz).
+      var renderDuration = 0.1;
       var renderFrames = renderDuration * sampleRate;
 
       var audit = Audit.createTaskRunner();
 
-      audit.defineTask("sine", function (done) {
-        runTest({
+      audit.define("sine", (task, should) => {
+        runTest(should, {
           message: "Sum of positive and negative frequency sine oscillators",
           type: "sine",
-          threshold: 4.7684e-7
-        }).then(done);
+          threshold: 3.5763e-7
+        }).then(() => task.done());
       });
 
-      audit.defineTask("square", function (done) {
-        runTest({
+      audit.define("square", (task, should) => {
+        runTest(should, {
           message: "Sum of positive and negative frequency square oscillators",
           type: "square",
-          threshold: 4.4108e-6
-        }).then(done);
+          threshold: 1.4753e-6
+        }).then(() => task.done());
       });
 
-      audit.defineTask("sawtooth", function (done) {
-        runTest({
+      audit.define("sawtooth", (task, should) => {
+        runTest(should, {
           message: "Sum of positive and negative frequency sawtooth oscillators",
           type: "sawtooth",
-          threshold: 4.3735e-6
-        }).then(done);
+          threshold: 1.4753e-6
+        }).then(() => task.done());
       });
 
-      audit.defineTask("triangle", function (done) {
-        runTest({
+      audit.define("triangle", (task, should) => {
+        runTest(should, {
           message: "Sum of positive and negative frequency triangle oscillators",
           type: "triangle",
-          threshold: 3.5763e-7
-        }).then(done);
+          threshold: 2.9803e-7
+        }).then(() => task.done());
       });
 
-      audit.defineTask("auto-sawtooth", function (done) {
-        runTest({
+      audit.define("auto-sawtooth", (task, should) => {
+        runTest(should, {
           message: "Sum of positive and negative frequency-ramped sawtooth oscillators",
           type: "sawtooth",
           automation: {
@@ -62,11 +65,11 @@
             startFrequency: 440,
             endFrequency: sampleRate / 4
           },
-          threshold: 4.1202e-6
-        }).then(done);
+          threshold: 1.2368e-6
+        }).then(() => task.done());
       });
 
-      audit.defineTask("periodic-wave", function (done) {
+      audit.define("periodic-wave", (task, should) => {
         // Test negative frequencies for a custom oscillator.  Two channels are
         // needed for the context; one for the expected result, and one for the
         // actual, as explained below.
@@ -136,24 +139,17 @@
           var expected = buffer.getChannelData(0);
           var actual = buffer.getChannelData(1);
 
-          Should("Sum of positive and negative frequency custom oscillators",
-              actual, {
-                precision: 6
-              })
-            .beCloseToArray(expected, 4.7684e-7);
-        }).then(done);
+          should(actual,
+              "Sum of positive and negative frequency custom oscillators")
+            .beCloseToArray(expected, {
+              absoluteThreshold: 3.5763e-7
+            });
+        }).then(() => task.done());
       });
 
+      audit.run();
 
-      // All done!
-      audit.defineTask("finish", function (done) {
-        finishJSTest();
-        done();
-      });
-
-      audit.runTasks();
-
-      function runTest(options) {
+      function runTest(should, options) {
         // To test if negative frequencies work, create two oscillators.  One
         // has a positive frequency and the other has a negative frequency.
         // Sum the oscillator outputs; the output should be zero because all of
@@ -187,11 +183,10 @@
         return context.startRendering().then(function (buffer) {
           var result = buffer.getChannelData(0);
 
-          var zero = new Float32Array(result.length);
-          zero.fill(0);
-          Should(options.message, result, {
-            verbose: true
-          }).beCloseToArray(zero, options.threshold || 0);
+          should(result, options.message)
+            .beCloseToArray(new Float32Array(result.length), {
+              absoluteThreshold: options.threshold || 0
+            });
         });
       }
     </script>

@@ -14,55 +14,6 @@
 #error "This file requires ARC support."
 #endif
 
-#pragma mark - UIActivityURLSource
-
-@interface UIActivityURLSource () {
-  // The shared subject.
-  NSString* _subject;
-  // The shared url.
-  NSURL* _url;
-}
-
-@end
-
-@implementation UIActivityURLSource
-
-- (instancetype)init {
-  NOTREACHED();
-  return nil;
-}
-
-- (instancetype)initWithURL:(NSURL*)url subject:(NSString*)subject {
-  DCHECK(subject);
-  DCHECK(url);
-  self = [super init];
-  if (self) {
-    _subject = [subject copy];
-    _url = url;
-  }
-  return self;
-}
-
-#pragma mark - UIActivityItemSource
-
-- (id)activityViewController:(UIActivityViewController*)activityViewController
-         itemForActivityType:(NSString*)activityType {
-  return _url;
-}
-
-- (id)activityViewControllerPlaceholderItem:
-    (UIActivityViewController*)activityViewController {
-  return _url;
-}
-
-- (NSString*)activityViewController:
-                 (UIActivityViewController*)activityViewController
-             subjectForActivityType:(NSString*)activityType {
-  return _subject;
-}
-
-@end
-
 #pragma mark - UIActivityTextSource
 
 @interface UIActivityTextSource () {
@@ -152,28 +103,33 @@
 
 @end
 
-#pragma mark - UIActivityFindLoginActionSource
+#pragma mark - UIActivityURLSource
 
-@interface UIActivityFindLoginActionSource () {
+@interface UIActivityURLSource () {
   NSString* _subject;
   NSURL* _url;
+  ThumbnailGeneratorBlock _thumbnailGenerator;
 }
 @end
 
-@implementation UIActivityFindLoginActionSource
+@implementation UIActivityURLSource
 
 - (instancetype)init {
   NOTREACHED();
   return nil;
 }
 
-- (instancetype)initWithURL:(NSURL*)url subject:(NSString*)subject {
+- (instancetype)initWithURL:(NSURL*)url
+                    subject:(NSString*)subject
+         thumbnailGenerator:(ThumbnailGeneratorBlock)thumbnailGenerator {
   DCHECK(url);
   DCHECK(subject);
+  DCHECK(thumbnailGenerator);
   self = [super init];
   if (self) {
     _url = url;
     _subject = [subject copy];
+    _thumbnailGenerator = thumbnailGenerator;
   }
   return self;
 }
@@ -194,14 +150,14 @@
 
 - (id)activityViewController:(UIActivityViewController*)activityViewController
          itemForActivityType:(NSString*)activityType {
-  NSNumber* versionNumber =
-      activity_type_util::PasswordAppExActivityVersion(activityType);
-  if (!versionNumber)
+  if (activity_type_util::TypeFromString(activityType) !=
+      activity_type_util::APPEX_PASSWORD_MANAGEMENT)
     return _url;
 
   // Constructs an NSExtensionItem object from the URL being "shared".
   NSDictionary* appExItems = @{
-    activity_services::kPasswordAppExVersionNumberKey : versionNumber,
+    activity_services::kPasswordAppExVersionNumberKey :
+        activity_services::kPasswordAppExVersionNumber,
     activity_services::kPasswordAppExURLStringKey : [_url absoluteString]
   };
   NSItemProvider* itemProvider = [[NSItemProvider alloc]
@@ -232,11 +188,17 @@
   // after user made a choice of which AppEx to run, this method may be called
   // with |activityType| equals to the bundle ID of the AppEx selected.
   // Default action is to return @"public.url" UTType.
-  if (!activityType ||
-      activity_type_util::PasswordAppExActivityVersion(activityType)) {
+  if (!activityType || activity_type_util::TypeFromString(activityType) ==
+                           activity_type_util::APPEX_PASSWORD_MANAGEMENT)
     return findLoginType;
-  }
   return (NSString*)kUTTypeURL;
+}
+
+- (UIImage*)activityViewController:
+                (UIActivityViewController*)activityViewController
+     thumbnailImageForActivityType:(UIActivityType)activityType
+                     suggestedSize:(CGSize)size {
+  return _thumbnailGenerator(size);
 }
 
 @end

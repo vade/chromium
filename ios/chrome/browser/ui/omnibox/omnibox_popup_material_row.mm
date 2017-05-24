@@ -5,12 +5,16 @@
 #import "ios/chrome/browser/ui/omnibox/omnibox_popup_material_row.h"
 
 #include "base/logging.h"
-#include "base/mac/objc_property_releaser.h"
+
 #import "ios/chrome/browser/ui/omnibox/truncating_attributed_label.h"
 #include "ios/chrome/browser/ui/rtl_geometry.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 const CGFloat kImageDimensionLength = 19.0;
@@ -22,7 +26,6 @@ const CGFloat kAppendButtonSize = 48.0;
 
 @interface OmniboxPopupMaterialRow () {
   BOOL _incognito;
-  base::mac::ObjCPropertyReleaser _propertyReleaser_OmniboxPopupMaterialRow;
 }
 
 // Set the append button normal and highlighted images.
@@ -34,8 +37,8 @@ const CGFloat kAppendButtonSize = 48.0;
 
 @synthesize textTruncatingLabel = _textTruncatingLabel;
 @synthesize detailTruncatingLabel = _detailTruncatingLabel;
+@synthesize detailAnswerLabel = _detailAnswerLabel;
 @synthesize appendButton = _appendButton;
-@synthesize physicalWebButton = _physicalWebButton;
 @synthesize answerImageView = _answerImageView;
 @synthesize imageView = _imageView;
 @synthesize rowHeight = _rowHeight;
@@ -52,8 +55,6 @@ const CGFloat kAppendButtonSize = 48.0;
     self.isAccessibilityElement = YES;
     self.backgroundColor = [UIColor clearColor];
     _incognito = incognito;
-    _propertyReleaser_OmniboxPopupMaterialRow.Init(
-        self, [OmniboxPopupMaterialRow class]);
 
     _textTruncatingLabel =
         [[OmniboxPopupTruncatingLabel alloc] initWithFrame:CGRectZero];
@@ -67,17 +68,20 @@ const CGFloat kAppendButtonSize = 48.0;
     _detailTruncatingLabel.userInteractionEnabled = NO;
     [self addSubview:_detailTruncatingLabel];
 
-    _appendButton = [[UIButton buttonWithType:UIButtonTypeCustom] retain];
+    // Answers use a UILabel with NSLineBreakByTruncatingTail to produce a
+    // truncation with an ellipse instead of fading on multi-line text.
+    _detailAnswerLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    _detailAnswerLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    _detailAnswerLabel.userInteractionEnabled = NO;
+    _detailAnswerLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    [self addSubview:_detailAnswerLabel];
+
+    _appendButton = [UIButton buttonWithType:UIButtonTypeCustom];
     [_appendButton setContentMode:UIViewContentModeRight];
     [self updateAppendButtonImages];
     // TODO(justincohen): Consider using the UITableViewCell's accessory view.
     // The current implementation is from before using a UITableViewCell.
     [self addSubview:_appendButton];
-
-    _physicalWebButton = [[UIButton buttonWithType:UIButtonTypeCustom] retain];
-    [_physicalWebButton setContentMode:UIViewContentModeRight];
-    [self updatePhysicalWebImage];
-    [self addSubview:_physicalWebButton];
 
     // Leading icon is only displayed on iPad.
     if (IsIPadIdiom()) {
@@ -117,11 +121,13 @@ const CGFloat kAppendButtonSize = 48.0;
       CGRectGetWidth(self.bounds), floor((_rowHeight - kAppendButtonSize) / 2),
       kAppendButtonSize, kAppendButtonSize);
   _appendButton.frame = LayoutRectGetRect(trailingAccessoryLayout);
-  _physicalWebButton.frame = LayoutRectGetRect(trailingAccessoryLayout);
 }
 
 - (void)updateLeadingImage:(int)imageID {
   _imageView.image = NativeImage(imageID);
+
+  _imageView.accessibilityIdentifier =
+      [NSString stringWithFormat:@"leading image id %d", imageID];
 
   // Adjust the vertical position based on the current size of the row.
   CGRect frame = _imageView.frame;
@@ -166,22 +172,14 @@ const CGFloat kAppendButtonSize = 48.0;
                  forState:UIControlStateHighlighted];
 }
 
-- (void)updatePhysicalWebImage {
-  UIImage* physicalWebImage = NativeImage(IDR_IOS_OMNIBOX_PHYSICAL_WEB);
-  [_physicalWebButton setImage:physicalWebImage forState:UIControlStateNormal];
-
-  UIImage* physicalWebImageSelected =
-      NativeImage(IDR_IOS_OMNIBOX_PHYSICAL_WEB_HIGHLIGHTED);
-  [_physicalWebButton setImage:physicalWebImageSelected
-                      forState:UIControlStateHighlighted];
-}
-
 - (NSString*)accessibilityLabel {
   return _textTruncatingLabel.attributedText.string;
 }
 
 - (NSString*)accessibilityValue {
-  return _detailTruncatingLabel.attributedText.string;
+  return _detailTruncatingLabel.hidden
+             ? _detailAnswerLabel.attributedText.string
+             : _detailTruncatingLabel.attributedText.string;
 }
 
 @end

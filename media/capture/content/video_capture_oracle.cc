@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/compiler_specific.h"
 #include "base/format_macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -101,6 +102,7 @@ VideoCaptureOracle::VideoCaptureOracle(
     bool enable_auto_throttling)
     : auto_throttling_enabled_(enable_auto_throttling),
       next_frame_number_(0),
+      source_is_dirty_(true),
       last_successfully_delivered_frame_number_(-1),
       num_frames_pending_(0),
       smoothing_sampler_(min_capture_period),
@@ -138,6 +140,11 @@ bool VideoCaptureOracle::ObserveEventAndDecideCapture(
   }
   last_event_time_[event] = event_time;
 
+  // If the event indicates a change to the source content, set a flag that will
+  // prevent passive refresh requests until a capture is made.
+  if (event != kActiveRefreshRequest && event != kPassiveRefreshRequest)
+    source_is_dirty_ = true;
+
   bool should_sample = false;
   duration_of_next_frame_ = base::TimeDelta();
   switch (event) {
@@ -160,8 +167,11 @@ bool VideoCaptureOracle::ObserveEventAndDecideCapture(
       break;
     }
 
-    case kActiveRefreshRequest:
     case kPassiveRefreshRequest:
+      if (source_is_dirty_)
+        break;
+    // Intentional flow-through to next case here!
+    case kActiveRefreshRequest:
     case kMouseCursorUpdate:
       // Only allow non-compositor samplings when content has not recently been
       // animating, and only if there are no samplings currently in progress.
@@ -221,6 +231,8 @@ int VideoCaptureOracle::next_frame_number() const {
 void VideoCaptureOracle::RecordCapture(double pool_utilization) {
   DCHECK(std::isfinite(pool_utilization) && pool_utilization >= 0.0);
 
+  source_is_dirty_ = false;
+
   smoothing_sampler_.RecordSample();
   const base::TimeTicks timestamp = GetFrameTimestamp(next_frame_number_);
   content_sampler_.RecordSample(timestamp);
@@ -271,6 +283,9 @@ bool VideoCaptureOracle::CompleteCapture(int frame_number,
 
   if (!capture_was_successful) {
     VLOG(2) << "Capture of frame #" << frame_number << " was not successful.";
+    // Since capture of this frame might have been required for capturing an
+    // update to the source content, set the dirty flag.
+    source_is_dirty_ = true;
     return false;
   }
 
@@ -370,9 +385,11 @@ void VideoCaptureOracle::SetFrameTimestamp(int frame_number,
   frame_timestamps_[frame_number % kMaxFrameTimestamps] = timestamp;
 }
 
-bool VideoCaptureOracle::IsFrameInRecentHistory(int frame_number) const {
+NOINLINE bool VideoCaptureOracle::IsFrameInRecentHistory(
+    int frame_number) const {
   // Adding (next_frame_number_ >= 0) helps the compiler deduce that there
-  // is no possibility of overflow here.
+  // is no possibility of overflow here. NOINLINE is also required to ensure the
+  // compiler can make this deduction (some compilers fail to otherwise...).
   return (frame_number >= 0 && next_frame_number_ >= 0 &&
           frame_number <= next_frame_number_ &&
           (next_frame_number_ - frame_number) < kMaxFrameTimestamps);

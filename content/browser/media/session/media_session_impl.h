@@ -44,6 +44,7 @@ class MediaSessionImplVisibilityBrowserTest;
 class MediaSessionObserver;
 class MediaSessionPlayerObserver;
 class MediaSessionServiceImpl;
+class MediaSessionServiceImplBrowserTest;
 
 #if defined(OS_ANDROID)
 class MediaSessionAndroid;
@@ -66,9 +67,8 @@ class MediaSessionAndroid;
 // work with it.
 class MediaSessionImpl : public MediaSession,
                          public WebContentsObserver,
-                         protected WebContentsUserData<MediaSessionImpl> {
+                         public WebContentsUserData<MediaSessionImpl> {
  public:
-  // Only visible to tests.
   enum class State { ACTIVE, SUSPENDED, INACTIVE };
 
   // Returns the MediaSessionImpl associated to this WebContents. Creates one if
@@ -84,9 +84,6 @@ class MediaSessionImpl : public MediaSession,
     return session_android_.get();
   }
 #endif  // defined(OS_ANDROID)
-
-  void AddObserver(MediaSessionObserver* observer);
-  void RemoveObserver(MediaSessionObserver* observer);
 
   void NotifyMediaSessionMetadataChange(
       const base::Optional<MediaMetadata>& metadata);
@@ -138,6 +135,9 @@ class MediaSessionImpl : public MediaSession,
   // recovered.
   CONTENT_EXPORT void StopDucking() override;
 
+  void AddObserver(MediaSessionObserver* observer) override;
+  void RemoveObserver(MediaSessionObserver* observer) override;
+
   // Returns if the session can be controlled by Resume() and Suspend calls
   // above.
   CONTENT_EXPORT bool IsControllable() const;
@@ -146,13 +146,6 @@ class MediaSessionImpl : public MediaSession,
   CONTENT_EXPORT bool IsActive() const;
 
   // Returns if the session is currently suspended.
-  // TODO(mlamouri): IsSuspended() below checks if the state is not ACTIVE
-  // instead of checking if the state is SUSPENDED. In order to not have to
-  // change all the callers and make the current refactoring ridiculously huge,
-  // this method is introduced temporarily and will be removed later.
-  CONTENT_EXPORT bool IsReallySuspended() const;
-
-  // Returns if the session is currently suspended or inactive.
   CONTENT_EXPORT bool IsSuspended() const;
 
   // Returns the audio focus type. The type is updated everytime after the
@@ -166,6 +159,8 @@ class MediaSessionImpl : public MediaSession,
 
   // WebContentsObserver implementation
   void WebContentsDestroyed() override;
+  void RenderFrameDeleted(RenderFrameHost* rfh) override;
+  void DidFinishNavigation(NavigationHandle* navigation_handle) override;
 
   // MediaSessionService-related methods
 
@@ -198,10 +193,10 @@ class MediaSessionImpl : public MediaSession,
   friend class content::AudioFocusManagerTest;
   friend class content::MediaSessionImplServiceRoutingTest;
   friend class content::MediaSessionImplStateObserver;
+  friend class content::MediaSessionServiceImplBrowserTest;
 
   CONTENT_EXPORT void SetDelegateForTests(
       std::unique_ptr<AudioFocusDelegate> delegate);
-  CONTENT_EXPORT bool IsActiveForTest() const;
   CONTENT_EXPORT void RemoveAllPlayersForTest();
   CONTENT_EXPORT MediaSessionUmaHelper* uma_helper_for_test();
 
@@ -241,6 +236,9 @@ class MediaSessionImpl : public MediaSession,
   // delegate to abandon the audio focus.
   CONTENT_EXPORT void AbandonSystemAudioFocusIfNeeded();
 
+  // Notify all information that an observer needs to know when it's added.
+  void NotifyAddedObserver(MediaSessionObserver* observer);
+
   // Notifies observers about the state change of the media session.
   void NotifyAboutStateChange();
 
@@ -254,6 +252,10 @@ class MediaSessionImpl : public MediaSession,
   // Get the volume multiplier, which depends on whether the media session is
   // ducking.
   double GetVolumeMultiplier() const;
+
+  // Compute if the actual playback state is paused by combining the
+  // MediaSessionService declared state and guessed state (audio_focus_state_).
+  bool IsActuallyPaused() const;
 
   // Registers a MediaSessionImpl state change callback.
   CONTENT_EXPORT std::unique_ptr<base::CallbackList<void(State)>::Subscription>

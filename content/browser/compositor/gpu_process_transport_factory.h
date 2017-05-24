@@ -16,6 +16,8 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "build/build_config.h"
+#include "cc/output/renderer_settings.h"
+#include "cc/surfaces/frame_sink_id_allocator.h"
 #include "content/browser/compositor/image_transport_factory.h"
 #include "gpu/ipc/client/gpu_channel_host.h"
 #include "ui/compositor/compositor.h"
@@ -33,6 +35,7 @@ class ContextProviderCommandBuffer;
 
 namespace content {
 class OutputDeviceBacking;
+class FrameSinkManagerHost;
 
 class GpuProcessTransportFactory : public ui::ContextFactory,
                                    public ui::ContextFactoryPrivate,
@@ -46,11 +49,10 @@ class GpuProcessTransportFactory : public ui::ContextFactory,
   void CreateCompositorFrameSink(
       base::WeakPtr<ui::Compositor> compositor) override;
   scoped_refptr<cc::ContextProvider> SharedMainThreadContextProvider() override;
-  uint32_t GetImageTextureTarget(gfx::BufferFormat format,
-                                 gfx::BufferUsage usage) override;
-  bool DoesCreateTestContexts() override;
+  double GetRefreshRate() const override;
   gpu::GpuMemoryBufferManager* GetGpuMemoryBufferManager() override;
   cc::TaskGraphRunner* GetTaskGraphRunner() override;
+  const cc::RendererSettings& GetRendererSettings() const override;
   void AddObserver(ui::ContextFactoryObserver* observer) override;
   void RemoveObserver(ui::ContextFactoryObserver* observer) override;
 
@@ -64,7 +66,8 @@ class GpuProcessTransportFactory : public ui::ContextFactory,
   void ResizeDisplay(ui::Compositor* compositor,
                      const gfx::Size& size) override;
   void SetDisplayColorSpace(ui::Compositor* compositor,
-                            const gfx::ColorSpace& color_space) override;
+                            const gfx::ColorSpace& blending_color_space,
+                            const gfx::ColorSpace& output_color_space) override;
   void SetAuthoritativeVSyncInterval(ui::Compositor* compositor,
                                      base::TimeDelta interval) override;
   void SetDisplayVSyncParameters(ui::Compositor* compositor,
@@ -76,7 +79,8 @@ class GpuProcessTransportFactory : public ui::ContextFactory,
   ui::ContextFactory* GetContextFactory() override;
   ui::ContextFactoryPrivate* GetContextFactoryPrivate() override;
   cc::SurfaceManager* GetSurfaceManager() override;
-  display_compositor::GLHelper* GetGLHelper() override;
+  FrameSinkManagerHost* GetFrameSinkManagerHost() override;
+  viz::GLHelper* GetGLHelper() override;
   void SetGpuChannelEstablishFactory(
       gpu::GpuChannelEstablishFactory* factory) override;
 #if defined(OS_MACOSX)
@@ -102,8 +106,10 @@ class GpuProcessTransportFactory : public ui::ContextFactory,
   scoped_refptr<cc::VulkanInProcessContextProvider>
   SharedVulkanContextProvider();
 
-  std::unique_ptr<cc::SurfaceManager> surface_manager_;
-  uint32_t next_sink_id_ = 1u;
+  // Manages creation and hierarchy of frame sinks.
+  std::unique_ptr<FrameSinkManagerHost> frame_sink_manager_host_;
+
+  cc::FrameSinkIdAllocator frame_sink_id_allocator_;
 
 #if defined(OS_WIN)
   // Used by output surface, stored in PerCompositorData.
@@ -115,13 +121,15 @@ class GpuProcessTransportFactory : public ui::ContextFactory,
       PerCompositorDataMap;
   PerCompositorDataMap per_compositor_data_;
 
+  const cc::RendererSettings renderer_settings_;
   scoped_refptr<ui::ContextProviderCommandBuffer> shared_main_thread_contexts_;
-  std::unique_ptr<display_compositor::GLHelper> gl_helper_;
+  std::unique_ptr<viz::GLHelper> gl_helper_;
   base::ObserverList<ui::ContextFactoryObserver> observer_list_;
   std::unique_ptr<cc::SingleThreadTaskGraphRunner> task_graph_runner_;
   scoped_refptr<ui::ContextProviderCommandBuffer>
       shared_worker_context_provider_;
 
+  bool disable_display_vsync_ = false;
   bool shared_vulkan_context_provider_initialized_ = false;
   scoped_refptr<cc::VulkanInProcessContextProvider>
       shared_vulkan_context_provider_;

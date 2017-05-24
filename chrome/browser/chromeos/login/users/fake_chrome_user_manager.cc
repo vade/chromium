@@ -6,6 +6,7 @@
 
 #include <set>
 
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
 #include "base/sys_info.h"
@@ -36,12 +37,12 @@ class FakeTaskRunner : public base::TaskRunner {
  private:
   // base::TaskRunner overrides.
   bool PostDelayedTask(const tracked_objects::Location& from_here,
-                       const base::Closure& task,
+                       base::OnceClosure task,
                        base::TimeDelta delay) override {
-    task.Run();
+    std::move(task).Run();
     return true;
   }
-  bool RunsTasksOnCurrentThread() const override { return true; }
+  bool RunsTasksInCurrentSequence() const override { return true; }
 
   DISALLOW_COPY_AND_ASSIGN(FakeTaskRunner);
 };
@@ -102,6 +103,16 @@ user_manager::User* FakeChromeUserManager::AddArcKioskAppUser(
   return user;
 }
 
+user_manager::User* FakeChromeUserManager::AddSupervisedUser(
+    const AccountId& account_id) {
+  user_manager::User* user =
+      user_manager::User::CreateSupervisedUser(account_id);
+  user->set_username_hash(ProfileHelper::GetUserIdHashByUserIdForTesting(
+      account_id.GetUserEmail()));
+  users_.push_back(user);
+  return user;
+}
+
 const user_manager::User* FakeChromeUserManager::AddPublicAccountUser(
     const AccountId& account_id) {
   user_manager::User* user =
@@ -125,6 +136,14 @@ void FakeChromeUserManager::LoginUser(const AccountId& account_id) {
   UserLoggedIn(account_id, ProfileHelper::GetUserIdHashByUserIdForTesting(
                                account_id.GetUserEmail()),
                false /* browser_restart */);
+
+  // NOTE: This does not match production. See function comment.
+  for (auto* user : users_) {
+    if (user->GetAccountId() == account_id) {
+      user->set_profile_is_created();
+      break;
+    }
+  }
 }
 
 BootstrapManager* FakeChromeUserManager::GetBootstrapManager() {
@@ -196,6 +215,10 @@ const AccountId& FakeChromeUserManager::GetOwnerAccountId() const {
 }
 
 void FakeChromeUserManager::OnSessionStarted() {}
+
+void FakeChromeUserManager::OnProfileInitialized(user_manager::User* user) {
+  user->set_profile_ever_initialized(true);
+}
 
 void FakeChromeUserManager::RemoveUser(
     const AccountId& account_id,
@@ -362,10 +385,9 @@ user_manager::UserList FakeChromeUserManager::GetUnlockUsers() const {
 void FakeChromeUserManager::UserLoggedIn(const AccountId& account_id,
                                          const std::string& username_hash,
                                          bool browser_restart) {
-  for (const auto& user : users_) {
+  for (auto* user : users_) {
     if (user->username_hash() == username_hash) {
       user->set_is_logged_in(true);
-      user->set_profile_is_created();
       logged_in_users_.push_back(user);
 
       if (!primary_user_)
@@ -373,6 +395,7 @@ void FakeChromeUserManager::UserLoggedIn(const AccountId& account_id,
       break;
     }
   }
+  // TODO(jamescook): This should set active_user_ and call NotifyOnLogin().
 }
 
 void FakeChromeUserManager::SwitchToLastActiveUser() {
@@ -389,7 +412,7 @@ const user_manager::User* FakeChromeUserManager::FindUser(
     return active_user_;
 
   const user_manager::UserList& users = GetUsers();
-  for (const auto& user : users) {
+  for (const auto* user : users) {
     if (user->GetAccountId() == account_id)
       return user;
   }
@@ -428,7 +451,7 @@ void FakeChromeUserManager::SaveForceOnlineSignin(const AccountId& account_id,
 void FakeChromeUserManager::SaveUserDisplayName(
     const AccountId& account_id,
     const base::string16& display_name) {
-  for (const auto& user : users_) {
+  for (auto* user : users_) {
     if (user->GetAccountId() == account_id) {
       user->set_display_name(display_name);
       return;
@@ -469,7 +492,7 @@ bool FakeChromeUserManager::IsCurrentUserOwner() const {
 }
 
 bool FakeChromeUserManager::IsCurrentUserNew() const {
-  return false;
+  return current_user_new_;
 }
 
 bool FakeChromeUserManager::IsCurrentUserNonCryptohomeDataEphemeral() const {
@@ -624,7 +647,7 @@ user_manager::User* FakeChromeUserManager::GetActiveUserInternal() const {
   if (users_.empty())
     return nullptr;
   if (active_account_id_.is_valid()) {
-    for (const auto& user : users_) {
+    for (auto* user : users_) {
       if (user->GetAccountId() == active_account_id_)
         return user;
     }

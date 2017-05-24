@@ -359,6 +359,7 @@ void VideoCaptureDeviceMac::AllocateAndStart(
     return;
   }
 
+  client_->OnStarted();
   state_ = kCapturing;
 }
 
@@ -381,6 +382,35 @@ void VideoCaptureDeviceMac::TakePhoto(TakePhotoCallback callback) {
 
   photo_callback_.reset(new TakePhotoCallback(std::move(callback)));
   [capture_device_ takePhoto];
+}
+
+void VideoCaptureDeviceMac::GetPhotoCapabilities(
+    GetPhotoCapabilitiesCallback callback) {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+
+  auto photo_capabilities = mojom::PhotoCapabilities::New();
+
+  photo_capabilities->exposure_compensation = mojom::Range::New();
+  photo_capabilities->color_temperature = mojom::Range::New();
+  photo_capabilities->iso = mojom::Range::New();
+
+  photo_capabilities->brightness = mojom::Range::New();
+  photo_capabilities->contrast = mojom::Range::New();
+  photo_capabilities->saturation = mojom::Range::New();
+  photo_capabilities->sharpness = mojom::Range::New();
+
+  photo_capabilities->zoom = mojom::Range::New();
+
+  photo_capabilities->red_eye_reduction = mojom::RedEyeReduction::NEVER;
+  photo_capabilities->height = mojom::Range::New(
+      capture_format_.frame_size.height(), capture_format_.frame_size.height(),
+      capture_format_.frame_size.height(), 0 /* step */);
+  photo_capabilities->width = mojom::Range::New(
+      capture_format_.frame_size.width(), capture_format_.frame_size.width(),
+      capture_format_.frame_size.width(), 0 /* step */);
+  photo_capabilities->torch = false;
+
+  callback.Run(std::move(photo_capabilities));
 }
 
 bool VideoCaptureDeviceMac::Init(VideoCaptureApi capture_api_type) {

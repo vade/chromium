@@ -21,7 +21,8 @@ import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.omaha.OmahaClient;
+import org.chromium.chrome.browser.omaha.OmahaBase;
+import org.chromium.chrome.browser.omaha.VersionNumberGetter;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 
@@ -38,8 +39,7 @@ public class ApplicationTestUtils {
 
     // TODO(jbudorick): fix deprecation warning crbug.com/537347
     @SuppressWarnings("deprecation")
-    public static void setUp(Context context, boolean clearAppData)
-            throws Exception {
+    public static void setUp(Context context, boolean clearAppData) {
         if (clearAppData) {
             // Clear data and remove any tasks listed in Android's Overview menu between test runs.
             clearAppData(context);
@@ -55,8 +55,8 @@ public class ApplicationTestUtils {
         sWakeLock.acquire();
 
         // Disable Omaha related activities.
-        OmahaClient.setEnableCommunication(false);
-        OmahaClient.setEnableUpdateDetection(false);
+        OmahaBase.setIsDisabledForTesting(true);
+        VersionNumberGetter.setEnableUpdateDetection(false);
     }
 
     public static void tearDown(Context context) throws Exception {
@@ -157,7 +157,7 @@ public class ApplicationTestUtils {
 
     /** Finishes all tasks Chrome has listed in Android's Overview. */
     @TargetApi(Build.VERSION_CODES.LOLLIPOP)
-    public static void finishAllChromeTasks(final Context context) throws Exception {
+    public static void finishAllChromeTasks(final Context context) {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {

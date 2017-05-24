@@ -6,27 +6,26 @@
 
 test(function() {
   var transformValueObject = new CSSTransformValue();
-    assert_true(transformValueObject instanceof CSSTransformValue);
-    assert_true(transformValueObject instanceof CSSStyleValue);
+    assert_equals(transformValueObject.constructor.name, CSSTransformValue.name);
 }, "A CSSTransformValue object can be constructed");
 
 test(function() {
   var transformArray = [new CSSScale(2,2),
-    new CSSMatrixTransformComponent(1,1,1,1,1,1), new CSSScale(5,6)];
+    new CSSMatrixComponent(1,1,1,1,1,1), new CSSScale(5,6)];
   var transformValue = new CSSTransformValue(transformArray);
-  assert_true(transformValue.is2D());
+  assert_true(transformValue.is2D);
 }, "is2D returns true for transformValues containing only 2D transformComponents");
 
 test(function() {
   var transformArray = [new CSSScale(2,2),
-    new CSSMatrixTransformComponent(1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1), new CSSScale(5,6)];
+    new CSSMatrixComponent(1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1), new CSSScale(5,6)];
   var transformValue = new CSSTransformValue(transformArray);
-  assert_false(transformValue.is2D());
+  assert_false(transformValue.is2D);
 }, "is2D returns false for transformValues containing both 2D and 3D transformComponents");
 
 test(function() {
   var transformArray = [new CSSScale(2,2),
-    new CSSMatrixTransformComponent(1,1,1,1,1,1), new CSSScale(5,6)];
+    new CSSMatrixComponent(1,1,1,1,1,1), new CSSScale(5,6)];
   var transformValue = new CSSTransformValue(transformArray);
 
   var newTransformArray = [];
@@ -34,9 +33,9 @@ test(function() {
     newTransformArray.push(component);
   }
   assert_true(newTransformArray.length == 3);
-  assert_true(newTransformArray[0] instanceof CSSScale);
-  assert_true(newTransformArray[1] instanceof CSSMatrixTransformComponent);
-  assert_true(newTransformArray[2] instanceof CSSScale);
+  assert_equals(newTransformArray[0].constructor.name, CSSScale.name);
+  assert_equals(newTransformArray[1].constructor.name, CSSMatrixComponent.name);
+  assert_equals(newTransformArray[2].constructor.name, CSSScale.name);
 }, "CSSTransformValue can iterate through all its all its transformComponent members");
 
 </script>

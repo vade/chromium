@@ -4,14 +4,17 @@
 
 #include "android_webview/common/aw_content_client.h"
 
-#include "android_webview/common/aw_media_client_android.h"
+#include "android_webview/common/aw_media_drm_bridge_client.h"
 #include "android_webview/common/aw_resource.h"
 #include "android_webview/common/aw_version_info_values.h"
+#include "android_webview/common/crash_reporter/crash_keys.h"
 #include "android_webview/common/url_constants.h"
 #include "base/command_line.h"
+#include "base/debug/crash_logging.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/user_agent.h"
 #include "gpu/config/gpu_info.h"
+#include "gpu/config/gpu_util.h"
 #include "ipc/ipc_message.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -80,14 +83,17 @@ void AwContentClient::SetGpuInfo(const gpu::GPUInfo& gpu_info) {
                      gpu_info.gl_renderer;
   std::replace_if(gpu_fingerprint_.begin(), gpu_fingerprint_.end(),
                   [](char c) { return !::isprint(c); }, '_');
+
+  gpu::SetKeysForCrashLogging(gpu_info);
 }
 
 bool AwContentClient::UsingSynchronousCompositing() {
   return true;
 }
 
-media::MediaClientAndroid* AwContentClient::GetMediaClientAndroid() {
-  return new AwMediaClientAndroid(AwResource::GetConfigKeySystemUuidMapping());
+media::MediaDrmBridgeClient* AwContentClient::GetMediaDrmBridgeClient() {
+  return new AwMediaDrmBridgeClient(
+      AwResource::GetConfigKeySystemUuidMapping());
 }
 
 }  // namespace android_webview

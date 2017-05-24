@@ -8,22 +8,22 @@
 #include <stdint.h>
 
 #include "base/compiler_specific.h"
+#include "mojo/public/cpp/bindings/struct_traits.h"
 #include "ui/display/display_export.h"
 #include "ui/display/types/display_constants.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/icc_profile.h"
 
-#if !defined(OS_IOS)
-#include "mojo/public/cpp/bindings/struct_traits.h"  // nogncheck
-#endif
-
 namespace display {
 
-#if !defined(OS_IOS)
 namespace mojom {
 class DisplayDataView;
 }
-#endif
+
+// Returns true if one of following conditions is met.
+// 1) id1 is internal.
+// 2) output index of id1 < output index of id2 and id2 isn't internal.
+DISPLAY_EXPORT bool CompareDisplayIds(int64_t id1, int64_t id2);
 
 // This class typically, but does not always, correspond to a physical display
 // connected to the system. A fake Display may exist on a headless system, or a
@@ -85,6 +85,9 @@ class DISPLAY_EXPORT Display final {
   // forced from the command line via "--force-device-scale-factor", and thus
   // ensures that the command line is reevaluated.
   static void ResetForceDeviceScaleFactorForTesting();
+
+  // Resets the cache and sets a new force device scale factor.
+  static void SetForceDeviceScaleFactor(double dsf);
 
   // Sets/Gets unique identifier associated with the display.
   // -1 means invalid display and it doesn't not exit.
@@ -194,6 +197,8 @@ class DISPLAY_EXPORT Display final {
   }
 
  private:
+  friend struct mojo::StructTraits<mojom::DisplayDataView, Display>;
+
   int64_t id_;
   gfx::Rect bounds_;
   // If non-empty, then should be same size as |bounds_|. Used to avoid rounding
@@ -208,10 +213,6 @@ class DISPLAY_EXPORT Display final {
   int color_depth_;
   int depth_per_component_;
   bool is_monochrome_ = false;
-
-#if !defined(OS_IOS)
-  friend struct mojo::StructTraits<mojom::DisplayDataView, Display>;
-#endif
 };
 
 }  // namespace display

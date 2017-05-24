@@ -11,7 +11,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread_checker.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/output/context_provider.h"
 #include "cc/output/overlay_candidate_validator.h"
 #include "cc/output/vulkan_context_provider.h"
@@ -27,6 +27,7 @@ namespace cc {
 
 class CompositorFrame;
 class CompositorFrameSinkClient;
+class LocalSurfaceId;
 class SharedBitmapManager;
 
 // An interface for submitting CompositorFrames to a display compositor
@@ -40,9 +41,13 @@ class CC_EXPORT CompositorFrameSink {
   struct Capabilities {
     Capabilities() = default;
 
-    // Whether ForceReclaimResources can be called to reclaim all resources
-    // from the CompositorFrameSink.
-    bool can_force_reclaim_resources = false;
+    // True if we must always swap, even if there is no damage to the frame.
+    // Needed for both the browser compositor as well as layout tests.
+    // TODO(ericrk): This should be test-only for layout tests, but tab
+    // capture has issues capturing offscreen tabs whithout this. We should
+    // remove this dependency. crbug.com/680196
+    bool must_always_swap = false;
+
     // True if sync points for resources are needed when swapping delegated
     // frames.
     bool delegated_sync_points_required = true;
@@ -101,9 +106,9 @@ class CC_EXPORT CompositorFrameSink {
     return shared_bitmap_manager_;
   }
 
-  // If supported, this causes a ReclaimResources for all resources that are
-  // currently in use.
-  virtual void ForceReclaimResources() {}
+  // If supported, this sets the LocalSurfaceId the CompositorFrameSink will use
+  // to submit a CompositorFrame.
+  virtual void SetLocalSurfaceId(const LocalSurfaceId& local_surface_id) {}
 
   // Support for a pull-model where draws are requested by the output surface.
   //
@@ -129,7 +134,6 @@ class CC_EXPORT CompositorFrameSink {
   scoped_refptr<VulkanContextProvider> vulkan_context_provider_;
   gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager_;
   SharedBitmapManager* shared_bitmap_manager_;
-  base::ThreadChecker client_thread_checker_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CompositorFrameSink);

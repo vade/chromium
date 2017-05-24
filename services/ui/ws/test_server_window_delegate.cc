@@ -13,12 +13,7 @@ TestServerWindowDelegate::TestServerWindowDelegate() {}
 
 TestServerWindowDelegate::~TestServerWindowDelegate() {}
 
-cc::mojom::DisplayCompositor* TestServerWindowDelegate::GetDisplayCompositor() {
-  return nullptr;
-}
-
-mojo::AssociatedGroup*
-TestServerWindowDelegate::GetDisplayCompositorAssociatedGroup() {
+cc::mojom::FrameSinkManager* TestServerWindowDelegate::GetFrameSinkManager() {
   return nullptr;
 }
 

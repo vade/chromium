@@ -9,8 +9,6 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/policy/policy_cert_service.h"
-#include "chrome/browser/chromeos/policy/policy_cert_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/safe_browsing/ui_manager.h"
@@ -28,6 +26,11 @@
 #include "net/ssl/ssl_connection_status_flags.h"
 #include "third_party/boringssl/src/include/openssl/ssl.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/policy/policy_cert_service.h"
+#include "chrome/browser/chromeos/policy/policy_cert_service_factory.h"
+#endif  // defined(OS_CHROMEOS)
 
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(SecurityStateTabHelper);
 
@@ -61,30 +64,19 @@ void SecurityStateTabHelper::VisibleSecurityStateChanged() {
   DCHECK(time_of_http_warning_on_current_navigation_.is_null());
   time_of_http_warning_on_current_navigation_ = base::Time::Now();
 
-  std::string warning;
-  bool warning_is_user_visible = false;
-  switch (security_info.security_level) {
-    case security_state::HTTP_SHOW_WARNING:
-      warning =
-          "This page includes a password or credit card input in a non-secure "
-          "context. A warning has been added to the URL bar. For more "
-          "information, see https://goo.gl/zmWq3m.";
-      warning_is_user_visible = true;
-      break;
-    case security_state::NONE:
-    case security_state::DANGEROUS:
-      warning =
-          "This page includes a password or credit card input in a non-secure "
-          "context. A warning will be added to the URL bar in Chrome 56 (Jan "
-          "2017). For more information, see https://goo.gl/zmWq3m.";
-      break;
-    default:
-      return;
-  }
-
   logged_http_warning_on_current_navigation_ = true;
   web_contents()->GetMainFrame()->AddMessageToConsole(
-      content::CONSOLE_MESSAGE_LEVEL_WARNING, warning);
+      content::CONSOLE_MESSAGE_LEVEL_WARNING,
+      "This page includes a password or credit card input in a non-secure "
+      "context. A warning has been added to the URL bar. For more "
+      "information, see https://goo.gl/zmWq3m.");
+
+  // |warning_is_user_visible| will only be false if the user has set the flag
+  // for marking HTTP pages as Dangerous. In that case, the page will be
+  // flagged as Dangerous, but it isn't distinguished from other HTTP pages,
+  // which is why this code records it as not-user-visible.
+  bool warning_is_user_visible =
+      (security_info.security_level == security_state::HTTP_SHOW_WARNING);
 
   if (security_info.displayed_credit_card_field_on_http) {
     UMA_HISTOGRAM_BOOLEAN(
@@ -101,7 +93,8 @@ void SecurityStateTabHelper::VisibleSecurityStateChanged() {
 void SecurityStateTabHelper::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
   if (time_of_http_warning_on_current_navigation_.is_null() ||
-      !navigation_handle->IsInMainFrame() || navigation_handle->IsSamePage()) {
+      !navigation_handle->IsInMainFrame() ||
+      navigation_handle->IsSameDocument()) {
     return;
   }
   // Record how quickly a user leaves a site after encountering an
@@ -120,9 +113,11 @@ void SecurityStateTabHelper::DidStartNavigation(
 
 void SecurityStateTabHelper::DidFinishNavigation(
     content::NavigationHandle* navigation_handle) {
-  if (navigation_handle->IsInMainFrame() && !navigation_handle->IsSamePage()) {
+  if (navigation_handle->IsInMainFrame() &&
+      !navigation_handle->IsSameDocument()) {
     // Only reset the console message flag for main-frame navigations,
-    // and not for same-page navigations like reference fragments and pushState.
+    // and not for same-document navigations like reference fragments and
+    // pushState.
     logged_http_warning_on_current_navigation_ = false;
   }
 }
@@ -183,6 +178,7 @@ SecurityStateTabHelper::GetMaliciousContentStatus() const {
       case safe_browsing::SB_THREAT_TYPE_EXTENSION:
       case safe_browsing::SB_THREAT_TYPE_BLACKLISTED_RESOURCE:
       case safe_browsing::SB_THREAT_TYPE_API_ABUSE:
+      case safe_browsing::SB_THREAT_TYPE_SUBRESOURCE_FILTER:
         // These threat types are not currently associated with
         // interstitials, and thus resources with these threat types are
         // not ever whitelisted or pending whitelisting.

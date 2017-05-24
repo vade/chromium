@@ -675,10 +675,6 @@ virtual GLuint CreateImageCHROMIUM(ClientBuffer buffer,
                                    GLsizei height,
                                    GLenum internalformat) = 0;
 virtual void DestroyImageCHROMIUM(GLuint image_id) = 0;
-virtual GLuint CreateGpuMemoryBufferImageCHROMIUM(GLsizei width,
-                                                  GLsizei height,
-                                                  GLenum internalformat,
-                                                  GLenum usage) = 0;
 virtual void DescheduleUntilFinishedCHROMIUM() = 0;
 virtual void GetTranslatedShaderSourceANGLE(GLuint shader,
                                             GLsizei bufsize,
@@ -688,20 +684,20 @@ virtual void PostSubBufferCHROMIUM(GLint x,
                                    GLint y,
                                    GLint width,
                                    GLint height) = 0;
-virtual void CopyTextureCHROMIUM(GLenum source_id,
+virtual void CopyTextureCHROMIUM(GLuint source_id,
                                  GLint source_level,
                                  GLenum dest_target,
-                                 GLenum dest_id,
+                                 GLuint dest_id,
                                  GLint dest_level,
                                  GLint internalformat,
                                  GLenum dest_type,
                                  GLboolean unpack_flip_y,
                                  GLboolean unpack_premultiply_alpha,
                                  GLboolean unpack_unmultiply_alpha) = 0;
-virtual void CopySubTextureCHROMIUM(GLenum source_id,
+virtual void CopySubTextureCHROMIUM(GLuint source_id,
                                     GLint source_level,
                                     GLenum dest_target,
-                                    GLenum dest_id,
+                                    GLuint dest_id,
                                     GLint dest_level,
                                     GLint xoffset,
                                     GLint yoffset,
@@ -712,8 +708,8 @@ virtual void CopySubTextureCHROMIUM(GLenum source_id,
                                     GLboolean unpack_flip_y,
                                     GLboolean unpack_premultiply_alpha,
                                     GLboolean unpack_unmultiply_alpha) = 0;
-virtual void CompressedCopyTextureCHROMIUM(GLenum source_id,
-                                           GLenum dest_id) = 0;
+virtual void CompressedCopyTextureCHROMIUM(GLuint source_id,
+                                           GLuint dest_id) = 0;
 virtual void DrawArraysInstancedANGLE(GLenum mode,
                                       GLint first,
                                       GLsizei count,
@@ -736,6 +732,9 @@ virtual void BindUniformLocationCHROMIUM(GLuint program,
                                          GLint location,
                                          const char* name) = 0;
 virtual void BindTexImage2DCHROMIUM(GLenum target, GLint imageId) = 0;
+virtual void BindTexImage2DWithInternalformatCHROMIUM(GLenum target,
+                                                      GLenum internalformat,
+                                                      GLint imageId) = 0;
 virtual void ReleaseTexImage2DCHROMIUM(GLenum target, GLint imageId) = 0;
 virtual void TraceBeginCHROMIUM(const char* category_name,
                                 const char* trace_name) = 0;
@@ -780,6 +779,18 @@ virtual void CommitOverlayPlanesCHROMIUM() = 0;
 virtual void SwapInterval(GLint interval) = 0;
 virtual void FlushDriverCachesCHROMIUM() = 0;
 virtual GLuint GetLastFlushIdCHROMIUM() = 0;
+virtual void ScheduleDCLayerSharedStateCHROMIUM(GLfloat opacity,
+                                                GLboolean is_clipped,
+                                                const GLfloat* clip_rect,
+                                                GLint z_order,
+                                                const GLfloat* transform) = 0;
+virtual void ScheduleDCLayerCHROMIUM(GLsizei num_textures,
+                                     const GLuint* contents_texture_ids,
+                                     const GLfloat* contents_rect,
+                                     GLuint background_color,
+                                     GLuint edge_aa_mask,
+                                     const GLfloat* bounds_rect,
+                                     GLuint filter) = 0;
 virtual void MatrixLoadfCHROMIUM(GLenum matrixMode, const GLfloat* m) = 0;
 virtual void MatrixLoadIdentityCHROMIUM(GLenum matrixMode) = 0;
 virtual GLuint GenPathsCHROMIUM(GLsizei range) = 0;
@@ -896,8 +907,11 @@ virtual void OverlayPromotionHintCHROMIUM(GLuint texture,
                                           GLboolean promotion_hint,
                                           GLint display_x,
                                           GLint display_y) = 0;
-virtual void SwapBuffersWithDamageCHROMIUM(GLint x,
-                                           GLint y,
-                                           GLint width,
-                                           GLint height) = 0;
+virtual void SwapBuffersWithBoundsCHROMIUM(GLsizei count,
+                                           const GLint* rects) = 0;
+virtual void SetDrawRectangleCHROMIUM(GLint x,
+                                      GLint y,
+                                      GLint width,
+                                      GLint height) = 0;
+virtual void SetEnableDCLayersCHROMIUM(GLboolean enabled) = 0;
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_INTERFACE_AUTOGEN_H_

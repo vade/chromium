@@ -13,6 +13,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/permissions/permission_request.h"
+#include "chrome/browser/permissions/permission_request_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/grit/generated_resources.h"
@@ -23,7 +24,6 @@
 #include "content/public/browser/web_contents.h"
 #include "storage/common/quota/quota_types.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/vector_icons_public.h"
 #include "url/gurl.h"
 
 #if defined(OS_ANDROID)
@@ -32,7 +32,7 @@
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
 #else
-#include "chrome/browser/permissions/permission_request_manager.h"
+#include "ui/vector_icons/vector_icons.h"
 #endif
 
 namespace {
@@ -87,7 +87,7 @@ PermissionRequest::IconId QuotaPermissionRequest::GetIconId() const {
 #if defined(OS_ANDROID)
   return IDR_ANDROID_INFOBAR_WARNING;
 #else
-  return gfx::VectorIconId::WARNING;
+  return ui::kWarningIcon;
 #endif
 }
 
@@ -249,8 +249,8 @@ void ChromeQuotaPermissionContext::RequestQuotaPermission(
   if (!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI)) {
     content::BrowserThread::PostTask(
         content::BrowserThread::UI, FROM_HERE,
-        base::Bind(&ChromeQuotaPermissionContext::RequestQuotaPermission, this,
-                   params, render_process_id, callback));
+        base::BindOnce(&ChromeQuotaPermissionContext::RequestQuotaPermission,
+                       this, params, render_process_id, callback));
     return;
   }
 
@@ -264,24 +264,26 @@ void ChromeQuotaPermissionContext::RequestQuotaPermission(
     return;
   }
 
+  if (PermissionRequestManager::IsEnabled()) {
+    PermissionRequestManager* permission_request_manager =
+        PermissionRequestManager::FromWebContents(web_contents);
+    if (permission_request_manager) {
+      permission_request_manager->AddRequest(
+          new QuotaPermissionRequest(this, params.origin_url, callback));
+      return;
+    }
 #if defined(OS_ANDROID)
-  InfoBarService* infobar_service =
-      InfoBarService::FromWebContents(web_contents);
-  if (infobar_service) {
-    RequestQuotaInfoBarDelegate::Create(
-        infobar_service, this, params.origin_url, params.requested_size,
-        callback);
-    return;
-  }
-#else
-  PermissionRequestManager* permission_request_manager =
-      PermissionRequestManager::FromWebContents(web_contents);
-  if (permission_request_manager) {
-    permission_request_manager->AddRequest(
-        new QuotaPermissionRequest(this, params.origin_url, callback));
-    return;
-  }
+  } else {
+    InfoBarService* infobar_service =
+        InfoBarService::FromWebContents(web_contents);
+    if (infobar_service) {
+      RequestQuotaInfoBarDelegate::Create(infobar_service, this,
+                                          params.origin_url,
+                                          params.requested_size, callback);
+      return;
+    }
 #endif
+  }
 
   // The tab has no UI service for presenting the permissions request.
   LOG(WARNING) << "Attempt to request quota from a background page: "
@@ -297,8 +299,9 @@ void ChromeQuotaPermissionContext::DispatchCallbackOnIOThread(
   if (!content::BrowserThread::CurrentlyOn(content::BrowserThread::IO)) {
     content::BrowserThread::PostTask(
         content::BrowserThread::IO, FROM_HERE,
-        base::Bind(&ChromeQuotaPermissionContext::DispatchCallbackOnIOThread,
-                   this, callback, response));
+        base::BindOnce(
+            &ChromeQuotaPermissionContext::DispatchCallbackOnIOThread, this,
+            callback, response));
     return;
   }
 

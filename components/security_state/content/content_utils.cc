@@ -19,7 +19,6 @@
 #include "content/public/browser/security_style_explanations.h"
 #include "content/public/browser/ssl_status.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/content_client.h"
 #include "net/base/net_errors.h"
 #include "net/cert/x509_certificate.h"
 #include "net/ssl/ssl_cipher_suite_names.h"
@@ -38,19 +37,19 @@ blink::WebSecurityStyle SecurityLevelToSecurityStyle(
   switch (security_level) {
     case security_state::NONE:
     case security_state::HTTP_SHOW_WARNING:
-      return blink::WebSecurityStyleUnauthenticated;
+      return blink::kWebSecurityStyleNeutral;
     case security_state::SECURITY_WARNING:
     case security_state::SECURE_WITH_POLICY_INSTALLED_CERT:
-      return blink::WebSecurityStyleWarning;
+      return blink::kWebSecurityStyleWarning;
     case security_state::EV_SECURE:
     case security_state::SECURE:
-      return blink::WebSecurityStyleAuthenticated;
+      return blink::kWebSecurityStyleSecure;
     case security_state::DANGEROUS:
-      return blink::WebSecurityStyleAuthenticationBroken;
+      return blink::kWebSecurityStyleInsecure;
   }
 
   NOTREACHED();
-  return blink::WebSecurityStyleUnknown;
+  return blink::kWebSecurityStyleUnknown;
 }
 
 void AddConnectionExplanation(
@@ -155,10 +154,6 @@ std::unique_ptr<security_state::VisibleSecurityState> GetVisibleSecurityState(
   state->key_exchange_group = ssl.key_exchange_group;
   state->security_bits = ssl.security_bits;
   state->pkp_bypassed = ssl.pkp_bypassed;
-  state->sct_verify_statuses.clear();
-  state->sct_verify_statuses.insert(state->sct_verify_statuses.begin(),
-                                    ssl.sct_statuses.begin(),
-                                    ssl.sct_statuses.end());
   state->displayed_mixed_content =
       !!(ssl.content_status & content::SSLStatus::DISPLAYED_INSECURE_CONTENT);
   state->ran_mixed_content =
@@ -168,6 +163,9 @@ std::unique_ptr<security_state::VisibleSecurityState> GetVisibleSecurityState(
          content::SSLStatus::DISPLAYED_CONTENT_WITH_CERT_ERRORS);
   state->ran_content_with_cert_errors =
       !!(ssl.content_status & content::SSLStatus::RAN_CONTENT_WITH_CERT_ERRORS);
+  state->contained_mixed_form =
+      !!(ssl.content_status &
+         content::SSLStatus::DISPLAYED_FORM_WITH_INSECURE_ACTION);
   state->displayed_password_field_on_http =
       !!(ssl.content_status &
          content::SSLStatus::DISPLAYED_PASSWORD_FIELD_ON_HTTP);
@@ -184,27 +182,16 @@ blink::WebSecurityStyle GetSecurityStyle(
   const blink::WebSecurityStyle security_style =
       SecurityLevelToSecurityStyle(security_info.security_level);
 
-  if (security_info.security_level == security_state::HTTP_SHOW_WARNING) {
-    // If the HTTP_SHOW_WARNING field trial is in use, display an
-    // unauthenticated explanation explaining why the omnibox warning is
-    // present.
-    security_style_explanations->unauthenticated_explanations.push_back(
+  // The HTTP_SHOW_WARNING state may occur if the page is served as a data: URI
+  // or if it is served non-securely AND contains a sensitive form field.
+  if (security_info.security_level == security_state::HTTP_SHOW_WARNING &&
+      (security_info.displayed_password_field_on_http ||
+       security_info.displayed_credit_card_field_on_http)) {
+    security_style_explanations->neutral_explanations.push_back(
         content::SecurityStyleExplanation(
             l10n_util::GetStringUTF8(IDS_PRIVATE_USER_DATA_INPUT),
             l10n_util::GetStringUTF8(IDS_PRIVATE_USER_DATA_INPUT_DESCRIPTION)));
-  } else if (security_info.security_level == security_state::NONE &&
-             (security_info.displayed_password_field_on_http ||
-              security_info.displayed_credit_card_field_on_http)) {
-    // If the HTTP_SHOW_WARNING field trial isn't in use yet, display an
-    // informational note that the omnibox will contain a warning for
-    // this site in a future version of Chrome.
-    security_style_explanations->info_explanations.push_back(
-        content::SecurityStyleExplanation(
-            l10n_util::GetStringUTF8(IDS_PRIVATE_USER_DATA_INPUT),
-            l10n_util::GetStringUTF8(
-                IDS_PRIVATE_USER_DATA_INPUT_FUTURE_DESCRIPTION)));
   }
-
   security_style_explanations->ran_insecure_content_style =
       SecurityLevelToSecurityStyle(security_state::kRanInsecureContentLevel);
   security_style_explanations->displayed_insecure_content_style =
@@ -231,10 +218,18 @@ blink::WebSecurityStyle GetSecurityStyle(
   }
 
   if (security_info.sha1_in_chain) {
-    security_style_explanations->unauthenticated_explanations.push_back(
+    security_style_explanations->neutral_explanations.push_back(
         content::SecurityStyleExplanation(
             l10n_util::GetStringUTF8(IDS_SHA1),
             l10n_util::GetStringUTF8(IDS_SHA1_DESCRIPTION),
+            !!security_info.certificate));
+  }
+
+  if (security_info.cert_missing_subject_alt_name) {
+    security_style_explanations->insecure_explanations.push_back(
+        content::SecurityStyleExplanation(
+            l10n_util::GetStringUTF8(IDS_SUBJECT_ALT_NAME_MISSING),
+            l10n_util::GetStringUTF8(IDS_SUBJECT_ALT_NAME_MISSING_DESCRIPTION),
             !!security_info.certificate));
   }
 
@@ -250,6 +245,9 @@ blink::WebSecurityStyle GetSecurityStyle(
           security_state::CONTENT_STATUS_DISPLAYED ||
       security_info.mixed_content_status ==
           security_state::CONTENT_STATUS_DISPLAYED_AND_RAN;
+
+  security_style_explanations->contained_mixed_form =
+      security_info.contained_mixed_form;
 
   bool is_cert_status_error = net::IsCertStatusError(security_info.cert_status);
   bool is_cert_status_minor_error =
@@ -285,10 +283,9 @@ blink::WebSecurityStyle GetSecurityStyle(
         !!security_info.certificate);
 
     if (is_cert_status_minor_error) {
-      security_style_explanations->unauthenticated_explanations.push_back(
-          explanation);
+      security_style_explanations->neutral_explanations.push_back(explanation);
     } else {
-      security_style_explanations->broken_explanations.push_back(explanation);
+      security_style_explanations->insecure_explanations.push_back(explanation);
     }
   } else {
     // If the certificate does not have errors and is not using SHA1, then add

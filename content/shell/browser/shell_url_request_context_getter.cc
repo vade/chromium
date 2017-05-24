@@ -14,8 +14,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "base/threading/sequenced_worker_pool.h"
-#include "base/threading/worker_pool.h"
+#include "base/task_scheduler/post_task.h"
 #include "build/build_config.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
@@ -26,7 +25,8 @@
 #include "net/base/cache_type.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/ct_policy_enforcer.h"
-#include "net/cert/multi_log_ct_verifier.h"
+#include "net/cert/ct_policy_status.h"
+#include "net/cert/do_nothing_ct_verifier.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/dns/host_resolver.h"
 #include "net/dns/mapped_host_resolver.h"
@@ -52,6 +52,29 @@
 namespace content {
 
 namespace {
+
+// TODO(rsleevi): Embedders should see https://crbug.com/700973 before using
+// this pattern.
+class IgnoresCTPolicyEnforcer : public net::CTPolicyEnforcer {
+ public:
+  IgnoresCTPolicyEnforcer() = default;
+  ~IgnoresCTPolicyEnforcer() override = default;
+
+  net::ct::CertPolicyCompliance DoesConformToCertPolicy(
+      net::X509Certificate* cert,
+      const net::SCTList& verified_scts,
+      const net::NetLogWithSource& net_log) override {
+    return net::ct::CertPolicyCompliance::CERT_POLICY_COMPLIES_VIA_SCTS;
+  }
+
+  net::ct::EVPolicyCompliance DoesConformToCTEVPolicy(
+      net::X509Certificate* cert,
+      const net::ct::EVCertsWhitelist* ev_whitelist,
+      const net::SCTList& verified_scts,
+      const net::NetLogWithSource& net_log) override {
+    return net::ct::EVPolicyCompliance::EV_POLICY_DOES_NOT_APPLY;
+  }
+};
 
 void InstallProtocolHandlers(net::URLRequestJobFactoryImpl* job_factory,
                              ProtocolHandlerMap* protocol_handlers) {
@@ -111,7 +134,7 @@ std::unique_ptr<net::ProxyService>
 ShellURLRequestContextGetter::GetProxyService() {
   // TODO(jam): use v8 if possible, look at chrome code.
   return net::ProxyService::CreateUsingSystemProxyResolver(
-      std::move(proxy_config_service_), 0, url_request_context_->net_log());
+      std::move(proxy_config_service_), url_request_context_->net_log());
 }
 
 net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
@@ -129,8 +152,7 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
         new net::URLRequestContextStorage(url_request_context_.get()));
     storage_->set_cookie_store(CreateCookieStore(CookieStoreConfig()));
     storage_->set_channel_id_service(base::WrapUnique(
-        new net::ChannelIDService(new net::DefaultChannelIDStore(NULL),
-                                  base::WorkerPool::GetTaskRunner(true))));
+        new net::ChannelIDService(new net::DefaultChannelIDStore(NULL))));
     url_request_context_->cookie_store()->SetChannelIDServiceID(
         url_request_context_->channel_id_service()->GetUniqueID());
     storage_->set_http_user_agent_settings(
@@ -145,9 +167,9 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
     storage_->set_transport_security_state(
         base::WrapUnique(new net::TransportSecurityState));
     storage_->set_cert_transparency_verifier(
-        base::WrapUnique(new net::MultiLogCTVerifier));
+        base::WrapUnique(new net::DoNothingCTVerifier));
     storage_->set_ct_policy_enforcer(
-        base::WrapUnique(new net::CTPolicyEnforcer));
+        base::WrapUnique(new IgnoresCTPolicyEnforcer));
     storage_->set_proxy_service(GetProxyService());
     storage_->set_ssl_config_service(new net::SSLConfigServiceDefaults);
     storage_->set_http_auth_handler_factory(
@@ -221,7 +243,7 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
         base::MakeUnique<net::HttpNetworkSession>(network_session_params));
     storage_->set_http_transaction_factory(base::MakeUnique<net::HttpCache>(
         storage_->http_network_session(), std::move(main_backend),
-        true /* set_up_quic_server_info */));
+        true /* is_main_cache */));
 
     std::unique_ptr<net::URLRequestJobFactoryImpl> job_factory(
         new net::URLRequestJobFactoryImpl());
@@ -235,8 +257,9 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
     set_protocol = job_factory->SetProtocolHandler(
         url::kFileScheme,
         base::MakeUnique<net::FileProtocolHandler>(
-            BrowserThread::GetBlockingPool()->GetTaskRunnerWithShutdownBehavior(
-                base::SequencedWorkerPool::SKIP_ON_SHUTDOWN)));
+            base::CreateTaskRunnerWithTraits(
+                {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
+                 base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})));
     DCHECK(set_protocol);
 #endif
 

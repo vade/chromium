@@ -17,15 +17,12 @@
 #ifndef NET_QUIC_CORE_QUIC_STREAM_H_
 #define NET_QUIC_CORE_QUIC_STREAM_H_
 
-#include <stddef.h>
-#include <stdint.h>
-#include <sys/types.h>
-
+#include <cstddef>
+#include <cstdint>
 #include <list>
 #include <string>
 
 #include "base/macros.h"
-#include "base/strings/string_piece.h"
 #include "net/base/iovec.h"
 #include "net/quic/core/quic_flow_controller.h"
 #include "net/quic/core/quic_iovector.h"
@@ -34,6 +31,7 @@
 #include "net/quic/core/quic_types.h"
 #include "net/quic/platform/api/quic_export.h"
 #include "net/quic/platform/api/quic_reference_counted.h"
+#include "net/quic/platform/api/quic_string_piece.h"
 
 namespace net {
 
@@ -184,9 +182,12 @@ class QUIC_EXPORT_PRIVATE QuicStream {
   // If fin is true: if it is immediately passed on to the session,
   // write_side_closed() becomes true, otherwise fin_buffered_ becomes true.
   void WriteOrBufferData(
-      base::StringPiece data,
+      QuicStringPiece data,
       bool fin,
       QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener);
+
+  // Adds random padding after the fin is consumed for this stream.
+  void AddRandomPaddingAfterFin();
 
  protected:
   // Sends as many bytes in the first |count| buffers of |iov| to the connection
@@ -315,8 +316,13 @@ class QUIC_EXPORT_PRIVATE QuicStream {
   // limited).
   bool stream_contributes_to_connection_flow_control_;
 
-  // For debugging only, used for busy loop check.
+  // A counter incremented when OnCanWrite() is called and no progress is made.
+  // For debugging only.
   size_t busy_counter_;
+
+  // Indicates whether paddings will be added after the fin is consumed for this
+  // stream.
+  bool add_random_padding_after_fin_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicStream);
 };

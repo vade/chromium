@@ -27,7 +27,6 @@
 #include "build/build_config.h"
 #include "content/common/sandbox_linux/sandbox_bpf_base_policy_linux.h"
 #include "content/common/sandbox_linux/sandbox_seccomp_bpf_linux.h"
-#include "content/common/set_process_title.h"
 #include "content/public/common/content_switches.h"
 #include "sandbox/linux/bpf_dsl/bpf_dsl.h"
 #include "sandbox/linux/seccomp-bpf-helpers/syscall_parameters_restrictions.h"
@@ -35,6 +34,7 @@
 #include "sandbox/linux/syscall_broker/broker_file_permission.h"
 #include "sandbox/linux/syscall_broker/broker_process.h"
 #include "sandbox/linux/system_headers/linux_syscalls.h"
+#include "services/service_manager/embedder/set_process_title.h"
 
 using sandbox::arch_seccomp_data;
 using sandbox::bpf_dsl::Allow;
@@ -224,7 +224,7 @@ void UpdateProcessTypeToGpuBroker() {
   // Update the process title. The argv was already cached by the call to
   // SetProcessTitleFromCommandLine in content_main_runner.cc, so we can pass
   // NULL here (we don't have the original argv at this point).
-  SetProcessTitleFromCommandLine(NULL);
+  service_manager::SetProcessTitleFromCommandLine(nullptr);
 }
 
 bool UpdateProcessTypeAndEnableSandbox(
@@ -337,7 +337,6 @@ void GpuProcessPolicy::InitGpuBrokerProcess(
     sandbox::bpf_dsl::Policy* (*broker_sandboxer_allocator)(void),
     const std::vector<BrokerFilePermission>& permissions_extra) {
   static const char kDriRcPath[] = "/etc/drirc";
-  static const char kDriCard0Path[] = "/dev/dri/card0";
   static const char kDriCardBasePath[] = "/dev/dri/card";
 
   static const char kNvidiaCtlPath[] = "/dev/nvidiactl";
@@ -350,15 +349,14 @@ void GpuProcessPolicy::InitGpuBrokerProcess(
 
   // All GPU process policies need these files brokered out.
   std::vector<BrokerFilePermission> permissions;
-  permissions.push_back(BrokerFilePermission::ReadWrite(kDriCard0Path));
   permissions.push_back(BrokerFilePermission::ReadOnly(kDriRcPath));
 
   if (!IsChromeOS()) {
     // For shared memory.
     permissions.push_back(
         BrokerFilePermission::ReadWriteCreateUnlinkRecursive(kDevShm));
-    // For multi-card DRI setups. NOTE: /dev/dri/card0 was already added above.
-    for (int i = 1; i <= 9; ++i) {
+    // For DRI cards.
+    for (int i = 0; i <= 9; ++i) {
       permissions.push_back(BrokerFilePermission::ReadWrite(
           base::StringPrintf("%s%d", kDriCardBasePath, i)));
     }

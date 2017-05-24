@@ -26,6 +26,7 @@
 #include "content/test/test_background_sync_context.h"
 #include "mojo/public/cpp/bindings/interface_ptr.h"
 #include "net/base/network_change_notifier.h"
+#include "services/service_manager/public/cpp/bind_source_info.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace content {
@@ -133,9 +134,7 @@ class BackgroundSyncServiceImplTest : public testing::Test {
     // Creates a StoragePartition so that the BackgroundSyncManager can
     // use it to access the BrowserContext.
     storage_partition_impl_.reset(new StoragePartitionImpl(
-        embedded_worker_helper_->browser_context(), base::FilePath(), nullptr,
-        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr));
+        embedded_worker_helper_->browser_context(), base::FilePath(), nullptr));
     embedded_worker_helper_->context_wrapper()->set_storage_partition(
         storage_partition_impl_.get());
   }
@@ -183,7 +182,8 @@ class BackgroundSyncServiceImplTest : public testing::Test {
     mojo::InterfaceRequest<blink::mojom::BackgroundSyncService>
         service_request = mojo::MakeRequest(&service_ptr_);
     // Create a new BackgroundSyncServiceImpl bound to the dummy channel.
-    background_sync_context_->CreateService(std::move(service_request));
+    background_sync_context_->CreateService(service_manager::BindSourceInfo(),
+                                            std::move(service_request));
     base::RunLoop().RunUntilIdle();
 
     service_impl_ = background_sync_context_->services_.begin()->first;

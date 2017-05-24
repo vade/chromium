@@ -23,7 +23,7 @@ class _OortOnlineMeasurement(legacy_page_test.LegacyPageTest):
 
   def ValidateAndMeasurePage(self, page, tab, results):
     del page  # unused
-    tab.WaitForJavaScriptExpression('window.benchmarkFinished', 1000)
+    tab.WaitForJavaScriptCondition('window.benchmarkFinished', timeout=1000)
     scores = tab.EvaluateJavaScript('window.benchmarkScore')
     for score in scores:
       valid = score['valid']
@@ -34,6 +34,7 @@ class _OortOnlineMeasurement(legacy_page_test.LegacyPageTest):
 
 
 @benchmark.Disabled('android')
+@benchmark.Owner(emails=['ulan@chromium.org'])
 class OortOnline(perf_benchmark.PerfBenchmark):
   """OortOnline benchmark that measures WebGL and V8 performance.
   URL: http://oortonline.gl/#run
@@ -50,6 +51,7 @@ class OortOnline(perf_benchmark.PerfBenchmark):
 
 
 @benchmark.Disabled('win')
+@benchmark.Owner(emails=['ulan@chromium.org'])
 class OortOnlineTBMv2(perf_benchmark.PerfBenchmark):
   """OortOnline benchmark that measures WebGL and V8 performance.
   URL: http://oortonline.gl/#run

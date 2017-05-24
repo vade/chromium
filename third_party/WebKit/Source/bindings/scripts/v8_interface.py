@@ -33,13 +33,13 @@
 
 Design doc: http://www.chromium.org/developers/design-documents/idl-compiler
 """
+from operator import or_
 
-from collections import defaultdict
-import itertools
-from operator import itemgetter, or_
-
-from idl_definitions import IdlOperation, IdlArgument
+from idl_definitions import IdlAttribute, IdlOperation, IdlArgument
 from idl_types import IdlType, inherits_interface
+from overload_set_algorithm import effective_overload_set_by_length
+from overload_set_algorithm import method_overloads_by_name
+
 import v8_attributes
 from v8_globals import includes
 import v8_methods
@@ -50,21 +50,22 @@ from v8_utilities import (cpp_name_or_partial, cpp_name, has_extended_attribute_
 
 
 INTERFACE_H_INCLUDES = frozenset([
-    'bindings/core/v8/ScriptWrappable.h',
-    'bindings/core/v8/ToV8.h',
-    'bindings/core/v8/V8Binding.h',
-    'bindings/core/v8/V8DOMWrapper.h',
-    'bindings/core/v8/WrapperTypeInfo.h',
+    'bindings/core/v8/GeneratedCodeHelper.h',
+    'bindings/core/v8/NativeValueTraits.h',
+    'platform/bindings/ScriptWrappable.h',
+    'bindings/core/v8/ToV8ForCore.h',
+    'bindings/core/v8/V8BindingForCore.h',
+    'platform/bindings/V8DOMWrapper.h',
+    'platform/bindings/WrapperTypeInfo.h',
     'platform/heap/Handle.h',
 ])
 INTERFACE_CPP_INCLUDES = frozenset([
     'bindings/core/v8/ExceptionState.h',
-    'bindings/core/v8/GeneratedCodeHelper.h',
     'bindings/core/v8/V8DOMConfiguration.h',
-    'bindings/core/v8/V8ObjectConstructor.h',
-    'core/dom/Document.h',
-    'wtf/GetPtr.h',
-    'wtf/RefPtr.h',
+    'platform/bindings/V8ObjectConstructor.h',
+    'core/dom/ExecutionContext.h',
+    'platform/wtf/GetPtr.h',
+    'platform/wtf/RefPtr.h',
 ])
 
 
@@ -120,7 +121,6 @@ def origin_trial_features(interface, constants, attributes, methods):
     origin_trial_attributes = member_filter(attributes)
     origin_trial_methods = member_filter([method for method in methods
                                           if v8_methods.method_is_visible(method, interface.is_partial) and
-                                          not v8_methods.conditionally_exposed(method) and
                                           not v8_methods.custom_registration(method)])
 
     feature_names = set([member[KEY] for member in origin_trial_constants + origin_trial_attributes + origin_trial_methods])
@@ -134,10 +134,13 @@ def origin_trial_features(interface, constants, attributes, methods):
                 for name in feature_names]
     for feature in features:
         members = feature['constants'] + feature['attributes'] + feature['methods']
-        feature['needs_instance'] = reduce(or_, (member.get('on_instance', False) for member in members))
+        feature['needs_instance'] = any(member.get('on_instance', False) for member in members)
+        # TODO(chasej): Need to handle method overloads? e.g.
+        # (method['overloads']['secure_context_test_all'] if 'overloads' in method else method['secure_context_test'])
+        feature['needs_secure_context'] = any(member.get('secure_context_test', False) for member in members)
 
     if features:
-        includes.add('bindings/core/v8/ScriptState.h')
+        includes.add('platform/bindings/ScriptState.h')
         includes.add('core/origin_trials/OriginTrials.h')
     return sorted(features)
 
@@ -213,36 +216,7 @@ def interface_context(interface, interfaces):
     # as in the WebIDL spec?
     is_immutable_prototype = is_global or 'ImmutablePrototype' in extended_attributes
 
-    # [SetWrapperReferenceFrom]
-    set_wrapper_reference_from = extended_attributes.get('SetWrapperReferenceFrom')
-    if set_wrapper_reference_from:
-        includes.update(['bindings/core/v8/V8GCController.h',
-                         'core/dom/Element.h'])
-
-    # [SetWrapperReferenceTo]
-    set_wrapper_reference_to_argument = extended_attributes.get('SetWrapperReferenceTo')
-    set_wrapper_reference_to = None
-    if set_wrapper_reference_to_argument:
-        set_wrapper_reference_to = {
-            'name': set_wrapper_reference_to_argument.name,
-            # FIXME: properly should be:
-            # 'cpp_type': set_wrapper_reference_to_argument.idl_type.cpp_type_args(raw_type=True),
-            # (if type is non-wrapper type like NodeFilter, normally RefPtr)
-            # Raw pointers faster though, and NodeFilter hacky anyway.
-            'cpp_type': set_wrapper_reference_to_argument.idl_type.implemented_as + '*',
-            'idl_type': set_wrapper_reference_to_argument.idl_type,
-            'v8_type': v8_types.v8_type(set_wrapper_reference_to_argument.idl_type.name),
-        }
-        set_wrapper_reference_to['idl_type'].add_includes_for_type()
-
-    # [Custom=VisitDOMWrapper]
-    has_visit_dom_wrapper_custom = (
-        has_extended_attribute_value(interface, 'Custom', 'VisitDOMWrapper'))
-
-    has_visit_dom_wrapper = (has_visit_dom_wrapper_custom or
-        set_wrapper_reference_from or set_wrapper_reference_to)
-
-    wrapper_class_id = ('NodeClassId' if inherits_interface(interface.name, 'Node') else 'ObjectClassId')
+    wrapper_class_id = ('kNodeClassId' if inherits_interface(interface.name, 'Node') else 'kObjectClassId')
 
     # [ActiveScriptWrappable] must be accompanied with [DependentLifetime].
     if active_scriptwrappable and not is_dependent_lifetime:
@@ -261,15 +235,12 @@ def interface_context(interface, interfaces):
     context = {
         'cpp_class': cpp_class_name,
         'cpp_class_or_partial': cpp_class_name_or_partial,
-        'event_target_inheritance': 'InheritFromEventTarget' if is_event_target else 'NotInheritFromEventTarget',
         'is_gc_type': True,
         # FIXME: Remove 'EventTarget' special handling, http://crbug.com/383699
         'has_access_check_callbacks': (is_check_security and
                                        interface.name != 'EventTarget'),
         'has_custom_legacy_call_as_function': has_extended_attribute_value(interface, 'Custom', 'LegacyCallAsFunction'),  # [Custom=LegacyCallAsFunction]
         'has_partial_interface': len(interface.partial_interfaces) > 0,
-        'has_visit_dom_wrapper': has_visit_dom_wrapper,
-        'has_visit_dom_wrapper_custom': has_visit_dom_wrapper_custom,
         'header_includes': header_includes,
         'interface_name': interface.name,
         'is_array_buffer_or_view': is_array_buffer_or_view,
@@ -281,7 +252,7 @@ def interface_context(interface, interfaces):
         'is_node': inherits_interface(interface.name, 'Node'),
         'is_partial': interface.is_partial,
         'is_typed_array_type': is_typed_array_type,
-        'lifetime': 'Dependent' if (has_visit_dom_wrapper or is_dependent_lifetime) else 'Independent',
+        'lifetime': 'kDependent' if is_dependent_lifetime else 'kIndependent',
         'measure_as': v8_utilities.measure_as(interface, None),  # [MeasureAs]
         'needs_runtime_enabled_installer': needs_runtime_enabled_installer,
         'origin_trial_enabled_function': v8_utilities.origin_trial_enabled_function_name(interface),
@@ -289,8 +260,6 @@ def interface_context(interface, interfaces):
         'pass_cpp_type': cpp_name(interface) + '*',
         'active_scriptwrappable': active_scriptwrappable,
         'runtime_enabled_feature_name': runtime_enabled_feature_name(interface),  # [RuntimeEnabled]
-        'set_wrapper_reference_from': set_wrapper_reference_from,
-        'set_wrapper_reference_to': set_wrapper_reference_to,
         'v8_class': v8_class_name,
         'v8_class_or_partial': v8_class_name_or_partial,
         'wrapper_class_id': wrapper_class_id,
@@ -330,13 +299,19 @@ def interface_context(interface, interfaces):
             raise Exception('[Constructor] and [NamedConstructor] MUST NOT be'
                             ' specified on partial interface definitions: '
                             '%s' % interface.name)
+        if named_constructor:
+            includes.add('platform/bindings/V8PrivateProperty.h')
 
-        includes.add('bindings/core/v8/V8ObjectConstructor.h')
+        includes.add('platform/bindings/V8ObjectConstructor.h')
         includes.add('core/frame/LocalDOMWindow.h')
     elif 'Measure' in extended_attributes or 'MeasureAs' in extended_attributes:
         if not interface.is_partial:
             raise Exception('[Measure] or [MeasureAs] specified for interface without a constructor: '
                             '%s' % interface.name)
+
+    # [ConstructorCallWith=Document]
+    if has_extended_attribute_value(interface, 'ConstructorCallWith', 'Document'):
+        includes.add('core/dom/Document.h')
 
     # [Unscopable] attributes and methods
     unscopables = []
@@ -377,12 +352,7 @@ def interface_context(interface, interfaces):
     })
 
     # Attributes
-    attributes = [v8_attributes.attribute_context(interface, attribute, interfaces)
-                  for attribute in interface.attributes]
-
-    has_conditional_attributes = any(attribute['exposed_test'] for attribute in attributes)
-    if has_conditional_attributes and interface.is_partial:
-        raise Exception('Conditional attributes between partial interfaces in modules and the original interfaces(%s) in core are not allowed.' % interface.name)
+    attributes = attributes_context(interface, interfaces)
 
     context.update({
         'attributes': attributes,
@@ -390,8 +360,17 @@ def interface_context(interface, interfaces):
         'accessors': v8_attributes.filter_accessors(attributes),
         'data_attributes': v8_attributes.filter_data_attributes(attributes),
         'lazy_data_attributes': v8_attributes.filter_lazy_data_attributes(attributes),
-        'origin_trial_attributes': v8_attributes.filter_origin_trial_enabled(attributes),
         'runtime_enabled_attributes': v8_attributes.filter_runtime_enabled(attributes),
+    })
+
+    # Conditionally enabled attributes
+    conditional_enabled_attributes = v8_attributes.filter_conditionally_enabled(attributes)
+    has_conditional_attributes_on_prototype = any(  # pylint: disable=invalid-name
+        attribute['on_prototype'] for attribute in conditional_enabled_attributes)
+    context.update({
+        'has_conditional_attributes_on_prototype':
+            has_conditional_attributes_on_prototype,
+        'conditionally_enabled_attributes': conditional_enabled_attributes,
     })
 
     # Methods
@@ -401,6 +380,7 @@ def interface_context(interface, interfaces):
             for method in methods),
         'iterator_method': iterator_method,
         'methods': methods,
+        'conditionally_enabled_methods': v8_methods.filter_conditionally_enabled(methods, interface.is_partial),
     })
 
     # Window.idl in Blink has indexed properties, but the spec says Window
@@ -412,15 +392,17 @@ def interface_context(interface, interfaces):
                           interface.name != 'Window')
     context.update({
         'has_array_iterator': has_array_iterator,
+        'iterable': interface.iterable,
     })
 
     # Conditionally enabled members
-    has_conditional_attributes_on_prototype = any(  # pylint: disable=invalid-name
-        (attribute['exposed_test'] or attribute['secure_context_test']) and attribute['on_prototype']
-        for attribute in attributes)
+    prepare_prototype_and_interface_object_func = None  # pylint: disable=invalid-name
+    if (unscopables or has_conditional_attributes_on_prototype or
+            context['conditionally_enabled_methods']):
+        prepare_prototype_and_interface_object_func = '%s::preparePrototypeAndInterfaceObject' % v8_class_name_or_partial  # pylint: disable=invalid-name
+
     context.update({
-        'has_conditional_attributes_on_prototype':
-            has_conditional_attributes_on_prototype,
+        'prepare_prototype_and_interface_object_func': prepare_prototype_and_interface_object_func,
     })
 
     context.update({
@@ -479,6 +461,45 @@ def interface_context(interface, interfaces):
     return context
 
 
+def attributes_context(interface, interfaces):
+    """Creates a list of Jinja template contexts for attributes of an interface.
+
+    Args:
+        interface: An interface to create contexts for
+        interfaces: A dict which maps an interface name to the definition
+            which can be referred if needed
+
+    Returns:
+        A list of attribute contexts
+    """
+
+    attributes = [v8_attributes.attribute_context(interface, attribute, interfaces)
+                  for attribute in interface.attributes]
+
+    has_conditional_attributes = any(attribute['exposed_test'] for attribute in attributes)
+    if has_conditional_attributes and interface.is_partial:
+        raise Exception(
+            'Conditional attributes between partial interfaces in modules '
+            'and the original interfaces(%s) in core are not allowed.'
+            % interface.name)
+
+    # See also comment in methods_context.
+    if not interface.is_partial and (interface.maplike or interface.setlike):
+        if any(attribute['name'] == 'size' for attribute in attributes):
+            raise ValueError(
+                'An interface cannot define an attribute called "size"; it is '
+                'implied by maplike/setlike in the IDL.')
+        size_attribute = IdlAttribute()
+        size_attribute.name = 'size'
+        size_attribute.idl_type = IdlType('unsigned long')
+        size_attribute.is_read_only = True
+        size_attribute.extended_attributes['NotEnumerable'] = None
+        attributes.append(v8_attributes.attribute_context(
+            interface, size_attribute, interfaces))
+
+    return attributes
+
+
 def methods_context(interface):
     """Creates a list of Jinja template contexts for methods of an interface.
 
@@ -528,7 +549,7 @@ def methods_context(interface):
             argument.extended_attributes.update(extended_attributes)
         return argument
 
-    # [Iterable], iterable<>, maplike<> and setlike<>
+    # iterable<>, maplike<> and setlike<>
     iterator_method = None
 
     # FIXME: support Iterable in partial interfaces. However, we don't
@@ -537,8 +558,7 @@ def methods_context(interface):
     # http://heycam.github.io/webidl/#idl-overloading
     if (not interface.is_partial and (
             interface.iterable or interface.maplike or interface.setlike or
-            interface.has_indexed_elements or
-            'Iterable' in interface.extended_attributes)):
+            interface.has_indexed_elements)):
 
         used_extended_attributes = {}
 
@@ -572,28 +592,36 @@ def methods_context(interface):
                 implemented_as=implemented_as)
 
         if not interface.has_indexed_elements:
-            iterator_method = generated_iterator_method('iterator', implemented_as='iterator')
+            iterator_method = generated_iterator_method('iterator', implemented_as='GetIterator')
 
         if interface.iterable or interface.maplike or interface.setlike:
-            implicit_methods = [
-                generated_iterator_method('keys'),
-                generated_iterator_method('values'),
-                generated_iterator_method('entries'),
+            non_overridable_methods = []
+            overridable_methods = []
 
-                # void forEach(Function callback, [Default=Undefined] optional any thisArg)
-                generated_method(IdlType('void'), 'forEach',
-                                 arguments=[generated_argument(IdlType('Function'), 'callback'),
-                                            generated_argument(IdlType('any'), 'thisArg',
-                                                               is_optional=True,
-                                                               extended_attributes={'Default': 'Undefined'})],
-                                 extended_attributes=forEach_extended_attributes),
-            ]
+            is_value_iterator = interface.iterable and interface.iterable.key_type is None
+
+            # For value iterators, the |entries|, |forEach|, |keys| and |values| are originally set
+            # to corresponding properties in %ArrayPrototype%.
+            if not is_value_iterator:
+                non_overridable_methods.extend([
+                    generated_iterator_method('keys'),
+                    generated_iterator_method('values'),
+                    generated_iterator_method('entries'),
+
+                    # void forEach(Function callback, [Default=Undefined] optional any thisArg)
+                    generated_method(IdlType('void'), 'forEach',
+                                     arguments=[generated_argument(IdlType('Function'), 'callback'),
+                                                generated_argument(IdlType('any'), 'thisArg',
+                                                                   is_optional=True,
+                                                                   extended_attributes={'Default': 'Undefined'})],
+                                     extended_attributes=forEach_extended_attributes),
+                ])
 
             if interface.maplike:
                 key_argument = generated_argument(interface.maplike.key_type, 'key')
                 value_argument = generated_argument(interface.maplike.value_type, 'value')
 
-                implicit_methods.extend([
+                non_overridable_methods.extend([
                     generated_method(IdlType('boolean'), 'has',
                                      arguments=[key_argument],
                                      extended_attributes=used_extended_attributes),
@@ -603,7 +631,7 @@ def methods_context(interface):
                 ])
 
                 if not interface.maplike.is_read_only:
-                    implicit_methods.extend([
+                    overridable_methods.extend([
                         generated_method(IdlType('void'), 'clear',
                                          extended_attributes=used_extended_attributes),
                         generated_method(IdlType('boolean'), 'delete',
@@ -617,14 +645,14 @@ def methods_context(interface):
             if interface.setlike:
                 value_argument = generated_argument(interface.setlike.value_type, 'value')
 
-                implicit_methods.extend([
+                non_overridable_methods.extend([
                     generated_method(IdlType('boolean'), 'has',
                                      arguments=[value_argument],
                                      extended_attributes=used_extended_attributes),
                 ])
 
                 if not interface.setlike.is_read_only:
-                    implicit_methods.extend([
+                    overridable_methods.extend([
                         generated_method(IdlType(interface.name), 'add',
                                          arguments=[value_argument],
                                          extended_attributes=used_extended_attributes),
@@ -639,11 +667,19 @@ def methods_context(interface):
             for method in methods:
                 methods_by_name.setdefault(method['name'], []).append(method)
 
-            for implicit_method in implicit_methods:
-                if implicit_method['name'] in methods_by_name:
+            for non_overridable_method in non_overridable_methods:
+                if non_overridable_method['name'] in methods_by_name:
+                    raise ValueError(
+                        'An interface cannot define an operation called "%s()", it '
+                        'comes from the iterable, maplike or setlike declaration '
+                        'in the IDL.' % non_overridable_method['name'])
+                methods.append(non_overridable_method)
+
+            for overridable_method in overridable_methods:
+                if overridable_method['name'] in methods_by_name:
                     # FIXME: Check that the existing method is compatible.
                     continue
-                methods.append(implicit_method)
+                methods.append(overridable_method)
 
         # FIXME: maplike<> and setlike<> should also imply the presence of a
         # 'size' attribute.
@@ -762,18 +798,6 @@ def compute_method_overloads_context_by_type(interface, methods):
         overloads[-1]['overloads']['name'] = name
 
 
-def method_overloads_by_name(methods):
-    """Returns generator of overloaded methods by name: [name, [method]]"""
-    # Filter to only methods that are actually overloaded
-    method_counts = Counter(method['name'] for method in methods)
-    overloaded_method_names = set(name
-                                  for name, count in method_counts.iteritems()
-                                  if count > 1)
-    overloaded_methods = [method for method in methods
-                          if method['name'] in overloaded_method_names]
-
-    # Group by name (generally will be defined together, but not necessarily)
-    return sort_and_groupby(overloaded_methods, itemgetter('name'))
 
 
 def overloads_context(interface, overloads):
@@ -894,104 +918,6 @@ def overloads_context(interface, overloads):
         'has_partial_overloads': has_partial_overloads,
     }
 
-
-def effective_overload_set(F):
-    """Returns the effective overload set of an overloaded function.
-
-    An effective overload set is the set of overloaded functions + signatures
-    (type list of arguments, with optional and variadic arguments included or
-    not), and is used in the overload resolution algorithm.
-
-    For example, given input [f1(optional long x), f2(DOMString s)], the output
-    is informally [f1(), f1(long), f2(DOMString)], and formally
-    [(f1, [], []), (f1, [long], [optional]), (f2, [DOMString], [required])].
-
-    Currently the optionality list is a list of |is_optional| booleans (True
-    means optional, False means required); to support variadics this needs to
-    be tri-valued as required, optional, or variadic.
-
-    Formally:
-    An effective overload set represents the allowable invocations for a
-    particular operation, constructor (specified with [Constructor] or
-    [NamedConstructor]), legacy caller or callback function.
-
-    An additional argument N (argument count) is needed when overloading
-    variadics, but we don't use that currently.
-
-    Spec: http://heycam.github.io/webidl/#dfn-effective-overload-set
-
-    Formally the input and output lists are sets, but methods are stored
-    internally as dicts, which can't be stored in a set because they are not
-    hashable, so we use lists instead.
-
-    Arguments:
-        F: list of overloads for a given callable name.
-
-    Returns:
-        S: list of tuples of the form (callable, type list, optionality list).
-    """
-    # Code closely follows the algorithm in the spec, for clarity and
-    # correctness, and hence is not very Pythonic.
-
-    # 1. Initialize S to ∅.
-    # (We use a list because we can't use a set, as noted above.)
-    S = []
-
-    # 2. Let F be a set with elements as follows, according to the kind of
-    # effective overload set:
-    # (Passed as argument, nothing to do.)
-
-    # 3. & 4. (maxarg, m) are only needed for variadics, not used.
-
-    # 5. For each operation, extended attribute or callback function X in F:
-    for X in F:  # X is the "callable", F is the overloads.
-        arguments = X['arguments']
-        # 1. Let n be the number of arguments X is declared to take.
-        n = len(arguments)
-        # 2. Let t0..n−1 be a list of types, where ti is the type of X’s
-        # argument at index i.
-        # (“type list”)
-        t = tuple(argument['idl_type_object'] for argument in arguments)
-        # 3. Let o0..n−1 be a list of optionality values, where oi is “variadic”
-        # if X’s argument at index i is a final, variadic argument, “optional”
-        # if the argument is optional, and “required” otherwise.
-        # (“optionality list”)
-        # (We’re just using a boolean for optional/variadic vs. required.)
-        o = tuple(argument['is_optional'] or argument['is_variadic']
-                  for argument in arguments)
-        # 4. Add to S the tuple <X, t0..n−1, o0..n−1>.
-        S.append((X, t, o))
-        # 5. If X is declared to be variadic, then:
-        # (Not used, so not implemented.)
-        # 6. Initialize i to n−1.
-        i = n - 1
-        # 7. While i ≥ 0:
-        # Spec bug (fencepost error); should be “While i > 0:”
-        # https://www.w3.org/Bugs/Public/show_bug.cgi?id=25590
-        while i > 0:
-            # 1. If argument i of X is not optional, then break this loop.
-            if not o[i]:
-                break
-            # 2. Otherwise, add to S the tuple <X, t0..i−1, o0..i−1>.
-            S.append((X, t[:i], o[:i]))
-            # 3. Set i to i−1.
-            i = i - 1
-        # 8. If n > 0 and all arguments of X are optional, then add to S the
-        # tuple <X, (), ()> (where “()” represents the empty list).
-        if n > 0 and all(oi for oi in o):
-            S.append((X, [], []))
-    # 6. The effective overload set is S.
-    return S
-
-
-def effective_overload_set_by_length(overloads):
-    def type_list_length(entry):
-        # Entries in the effective overload set are 3-tuples:
-        # (callable, type list, optionality list)
-        return len(entry[1])
-
-    effective_overloads = effective_overload_set(overloads)
-    return list(sort_and_groupby(effective_overloads, type_list_length))
 
 
 def distinguishing_argument_index(entries):
@@ -1152,7 +1078,7 @@ def resolution_tests_methods(effective_overloads):
     try:
         method = next(method for idl_type, method in idl_types_methods
                       if idl_type.is_nullable)
-        test = 'isUndefinedOrNull(%s)' % cpp_value
+        test = 'IsUndefinedOrNull(%s)' % cpp_value
         yield test, method
     except StopIteration:
         pass
@@ -1216,7 +1142,8 @@ def resolution_tests_methods(effective_overloads):
             # Array in overloaded method: http://crbug.com/262383
             yield '%s->IsArray()' % cpp_value, method
     for idl_type, method in idl_types_methods:
-        if idl_type.is_dictionary or idl_type.name == 'Dictionary' or idl_type.is_callback_interface:
+        if idl_type.is_dictionary or idl_type.name == 'Dictionary' or \
+           idl_type.is_callback_interface or idl_type.is_record_type:
             # FIXME: should be '{1}->IsObject() && !{1}->IsRegExp()'.format(cpp_value)
             # FIXME: the IsRegExp checks can be skipped if we've
             # already generated tests for them.
@@ -1273,14 +1200,6 @@ def resolution_tests_methods(effective_overloads):
 # Utility functions
 ################################################################################
 
-def Counter(iterable):
-    # Once using Python 2.7, using collections.Counter
-    counter = defaultdict(lambda: 0)
-    for item in iterable:
-        counter[item] += 1
-    return counter
-
-
 def common(dicts, f):
     """Returns common result of f across an iterable of dicts, or None.
 
@@ -1309,12 +1228,6 @@ def common_value(dicts, key):
     that appears with the same value on all items in an overload set.
     """
     return common(dicts, lambda d: d.get(key))
-
-
-def sort_and_groupby(l, key=None):
-    """Returns a generator of (key, list), sorting and grouping list by key."""
-    l.sort(key=key)
-    return ((k, list(g)) for k, g in itertools.groupby(l, key))
 
 
 ################################################################################
@@ -1414,11 +1327,11 @@ def property_getter(getter, cpp_arguments):
         if idl_type.use_output_parameter_for_result:
             return 'result.isNull()'
         if idl_type.is_string_type:
-            return 'result.isNull()'
+            return 'result.IsNull()'
         if idl_type.is_interface_type:
             return '!result'
         if idl_type.base_type in ('any', 'object'):
-            return 'result.isEmpty()'
+            return 'result.IsEmpty()'
         return ''
 
     extended_attributes = getter.extended_attributes

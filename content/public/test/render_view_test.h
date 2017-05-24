@@ -11,8 +11,8 @@
 #include <string>
 
 #include "base/command_line.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/test/test_io_thread.h"
 #include "build/build_config.h"
 #include "content/public/browser/native_web_keyboard_event.h"
@@ -75,9 +75,6 @@ class RenderViewTest : public testing::Test, blink::WebLeakDetectorClient {
   ~RenderViewTest() override;
 
  protected:
-  // Spins the message loop to process all messages that are currently pending.
-  void ProcessPendingMessages();
-
   // Returns a pointer to the main frame.
   blink::WebLocalFrame* GetMainFrame();
 
@@ -169,9 +166,9 @@ class RenderViewTest : public testing::Test, blink::WebLeakDetectorClient {
 
   // These are all methods from RenderViewImpl that we expose to testing code.
   bool OnMessageReceived(const IPC::Message& msg);
-  void DidNavigateWithinPage(blink::WebLocalFrame* frame,
-                             bool is_new_navigation,
-                             bool content_initiated);
+  void OnSameDocumentNavigation(blink::WebLocalFrame* frame,
+                                bool is_new_navigation,
+                                bool content_initiated);
   blink::WebWidget* GetWebWidget();
 
   // Allows a subclass to override the various content client implementations.
@@ -188,9 +185,11 @@ class RenderViewTest : public testing::Test, blink::WebLeakDetectorClient {
   void TearDown() override;
 
   // blink::WebLeakDetectorClient implementation.
-  void onLeakDetectionComplete(const Result& result) override;
+  void OnLeakDetectionComplete(const Result& result) override;
 
-  base::MessageLoop msg_loop_;
+ protected:
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
+
   std::unique_ptr<FakeCompositorDependencies> compositor_deps_;
   std::unique_ptr<MockRenderProcess> mock_process_;
   // We use a naked pointer because we don't want to expose RenderViewImpl in

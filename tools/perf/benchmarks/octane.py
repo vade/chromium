@@ -15,6 +15,7 @@ import os
 
 from core import perf_benchmark
 
+from telemetry import benchmark
 from telemetry import page as page_module
 from telemetry.page import legacy_page_test
 from telemetry import story
@@ -99,9 +100,9 @@ class _OctaneMeasurement(legacy_page_test.LegacyPageTest):
     self._power_metric.Start(page, tab)
 
   def ValidateAndMeasurePage(self, page, tab, results):
-    tab.WaitForJavaScriptExpression('window.completed', 10)
-    tab.WaitForJavaScriptExpression(
-        '!document.getElementById("progress-bar-container")', 1200)
+    tab.WaitForJavaScriptCondition('window.completed', timeout=10)
+    tab.WaitForJavaScriptCondition(
+        '!document.getElementById("progress-bar-container")', timeout=1200)
 
     self._power_metric.Stop(page, tab)
     self._power_metric.AddResults(tab, results)
@@ -131,6 +132,7 @@ class _OctaneMeasurement(legacy_page_test.LegacyPageTest):
                            'benchmark collection.'))
 
 
+@benchmark.Owner(emails=['bmeurer@chromium.org', 'mvstanton@chromium.org'])
 class Octane(perf_benchmark.PerfBenchmark):
   """Google's Octane JavaScript benchmark.
 

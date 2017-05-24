@@ -1,6 +1,7 @@
 import hashlib
 import re
 import os
+from six import binary_type
 from six.moves.urllib.parse import urljoin
 from fnmatch import fnmatch
 try:
@@ -15,6 +16,8 @@ from .item import Stub, ManualTest, WebdriverSpecTest, RefTestNode, RefTest, Tes
 from .utils import rel_path_to_url, ContextManagerBytesIO, cached_property
 
 wd_pattern = "*.py"
+js_meta_re = re.compile(b"//\s*META:\s*(\w*)=(.*)$")
+python_meta_re = re.compile(b"#\s*META:\s*(\w*)=(.*)$")
 
 reference_file_re = re.compile(r'(^|[\-_])(not)?ref[0-9]*([\-_]|$)')
 
@@ -25,6 +28,23 @@ def replace_end(s, old, new):
     """
     assert s.endswith(old)
     return s[:-len(old)] + new
+
+
+def read_script_metadata(f, regexp):
+    """
+    Yields any metadata (pairs of bytestrings) from the file-like object `f`,
+    as specified according to a supplied regexp.
+
+    `regexp` - Regexp containing two groups containing the metadata name and
+               value.
+    """
+    for line in f:
+        assert isinstance(line, binary_type), line
+        m = regexp.match(line)
+        if not m:
+            break
+
+        yield (m.groups()[0], m.groups()[1])
 
 
 class SourceFile(object):
@@ -39,7 +59,10 @@ class SourceFile(object):
                         "support",
                         "tools"])
 
-    dir_path_non_test = {("css21", "archive")}
+    dir_path_non_test = {("css21", "archive"),
+                         ("css", "CSS2", "archive"),
+                         ("css", "common"),
+                         ("css", "work-in-progress")}
 
     def __init__(self, tests_root, rel_path, url_base, contents=None):
         """Object representing a file in a source tree.
@@ -51,7 +74,14 @@ class SourceFile(object):
         """
 
         self.tests_root = tests_root
-        self.rel_path = os.path.normcase(rel_path)  # does slash normalization on Windows
+        if os.name == "nt":
+            # do slash normalization on Windows
+            if isinstance(rel_path, binary_type):
+                self.rel_path = rel_path.replace(b"/", b"\\")
+            else:
+                self.rel_path = rel_path.replace(u"/", u"\\")
+        else:
+            self.rel_path = rel_path
         self.url_base = url_base
         self.contents = contents
 
@@ -123,14 +153,10 @@ class SourceFile(object):
 
         parts = self.dir_path.split(os.path.sep)
 
-        if parts[0] in self.root_dir_non_test:
+        if (parts[0] in self.root_dir_non_test or
+            any(item in self.dir_non_test for item in parts) or
+            any(parts[:len(path)] == list(path) for path in self.dir_path_non_test)):
             return True
-        elif any(item in self.dir_non_test for item in parts):
-            return True
-        else:
-            for path in self.dir_path_non_test:
-                if parts[:len(path)] == list(path):
-                    return True
         return False
 
     def in_conformance_checker_dir(self):
@@ -144,6 +170,7 @@ class SourceFile(object):
         return (self.is_dir() or
                 self.name_prefix("MANIFEST") or
                 self.filename.startswith(".") or
+                self.type_flag == "support" or
                 self.in_non_test_dir())
 
     @property
@@ -184,6 +211,12 @@ class SourceFile(object):
         """Check if the file name matches the conditions for the file to
         be a worker js test file"""
         return "worker" in self.meta_flags and self.ext == ".js"
+
+    @property
+    def name_is_window(self):
+        """Check if the file name matches the conditions for the file to
+        be a window js test file"""
+        return "window" in self.meta_flags and self.ext == ".js"
 
     @property
     def name_is_webdriver(self):
@@ -250,16 +283,34 @@ class SourceFile(object):
         return self.root.findall(".//{http://www.w3.org/1999/xhtml}meta[@name='timeout']")
 
     @cached_property
+    def script_metadata(self):
+        if self.name_is_worker or self.name_is_multi_global or self.name_is_window:
+            regexp = js_meta_re
+        elif self.name_is_webdriver:
+            regexp = python_meta_re
+        else:
+            return None
+
+        with self.open() as f:
+            return list(read_script_metadata(f, regexp))
+
+    @cached_property
     def timeout(self):
         """The timeout of a test or reference file. "long" if the file has an extended timeout
         or None otherwise"""
+        if self.script_metadata:
+            if any(m == (b"timeout", b"long") for m in self.script_metadata):
+                return "long"
+
         if self.root is None:
-            return
+            return None
 
         if self.timeout_nodes:
             timeout_str = self.timeout_nodes[0].attrib.get("content", None)
             if timeout_str and timeout_str.lower() == "long":
-                return timeout_str
+                return "long"
+
+        return None
 
     @cached_property
     def viewport_nodes(self):
@@ -445,16 +496,25 @@ class SourceFile(object):
 
         elif self.name_is_multi_global:
             rv = TestharnessTest.item_type, [
-                TestharnessTest(self, replace_end(self.url, ".any.js", ".any.html")),
-                TestharnessTest(self, replace_end(self.url, ".any.js", ".any.worker.html")),
+                TestharnessTest(self, replace_end(self.url, ".any.js", ".any.html"),
+                                timeout=self.timeout),
+                TestharnessTest(self, replace_end(self.url, ".any.js", ".any.worker.html"),
+                                timeout=self.timeout),
             ]
 
         elif self.name_is_worker:
             rv = (TestharnessTest.item_type,
-                  [TestharnessTest(self, replace_end(self.url, ".worker.js", ".worker.html"))])
+                  [TestharnessTest(self, replace_end(self.url, ".worker.js", ".worker.html"),
+                                   timeout=self.timeout)])
+
+        elif self.name_is_window:
+            rv = (TestharnessTest.item_type,
+                  [TestharnessTest(self, replace_end(self.url, ".window.js", ".window.html"),
+                                   timeout=self.timeout)])
 
         elif self.name_is_webdriver:
-            rv = WebdriverSpecTest.item_type, [WebdriverSpecTest(self, self.url)]
+            rv = WebdriverSpecTest.item_type, [WebdriverSpecTest(self, self.url,
+                                                                 timeout=self.timeout)]
 
         elif self.content_is_css_manual and not self.name_is_reference:
             rv = ManualTest.item_type, [ManualTest(self, self.url)]

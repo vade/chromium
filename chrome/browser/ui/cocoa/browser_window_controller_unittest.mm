@@ -8,12 +8,13 @@
 
 #include "base/mac/mac_util.h"
 #import "base/mac/scoped_nsobject.h"
+#import "base/mac/scoped_objc_class_swizzler.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
 #import "chrome/browser/ui/cocoa/fast_resize_view.h"
+#include "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
 #include "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #include "chrome/browser/ui/cocoa/test/cocoa_profile_test.h"
 #include "chrome/browser/ui/cocoa/test/run_loop_testing.h"
@@ -43,6 +44,7 @@ using ::testing::Return;
 - (NSView*)toolbarView;
 - (NSView*)bookmarkView;
 - (BOOL)bookmarkBarVisible;
+- (void)dontFocusLocationBar:(BOOL)selectAll;
 @end
 
 @implementation BrowserWindowController (ExposedForTesting)
@@ -64,6 +66,9 @@ using ::testing::Return;
 
 - (BOOL)bookmarkBarVisible {
   return [bookmarkBarController_ isVisible];
+}
+
+- (void)dontFocusLocationBar:(BOOL)selectAll {
 }
 @end
 
@@ -127,7 +132,7 @@ TEST_F(BrowserWindowControllerTest, TestNormal) {
   // And make sure a controller for a pop-up window is not normal.
   // popup_browser will be owned by its window.
   Browser* popup_browser(
-      new Browser(Browser::CreateParams(Browser::TYPE_POPUP, profile())));
+      new Browser(Browser::CreateParams(Browser::TYPE_POPUP, profile(), true)));
   NSWindow* cocoaWindow = popup_browser->window()->GetNativeWindow();
   BrowserWindowController* controller =
       static_cast<BrowserWindowController*>([cocoaWindow windowController]);
@@ -141,7 +146,7 @@ TEST_F(BrowserWindowControllerTest, TestNormal) {
 
 TEST_F(BrowserWindowControllerTest, TestSetBounds) {
   // Create a normal browser with bounds smaller than the minimum.
-  Browser::CreateParams params(Browser::TYPE_TABBED, profile());
+  Browser::CreateParams params(Browser::TYPE_TABBED, profile(), true);
   params.initial_bounds = gfx::Rect(0, 0, 50, 50);
   Browser* browser = new Browser(params);
   NSWindow* cocoaWindow = browser->window()->GetNativeWindow();
@@ -151,22 +156,50 @@ TEST_F(BrowserWindowControllerTest, TestSetBounds) {
   ASSERT_TRUE([controller isTabbedWindow]);
   BrowserWindow* browser_window = [controller browserWindow];
   EXPECT_EQ(browser_window, browser->window());
-  gfx::Rect bounds = browser_window->GetBounds();
-  EXPECT_EQ(400, bounds.width());
-  EXPECT_EQ(272, bounds.height());
+  EXPECT_EQ(browser_window->GetBounds().size(), kMinCocoaTabbedWindowSize);
 
   // Try to set the bounds smaller than the minimum.
   browser_window->SetBounds(gfx::Rect(0, 0, 50, 50));
-  bounds = browser_window->GetBounds();
-  EXPECT_EQ(400, bounds.width());
-  EXPECT_EQ(272, bounds.height());
+  EXPECT_EQ(browser_window->GetBounds().size(), kMinCocoaTabbedWindowSize);
 
   [controller close];
 }
 
+// https://crbug.com/667698 - When Auto Layout is in use, adding the download
+// shelf without ever showing it shouldn't prevent the window from being
+// resized to its minimum width.
+TEST_F(BrowserWindowControllerTest, TestSetBoundsWithDownloadShelf) {
+  BrowserWindow* browser_window = [controller_ browserWindow];
+  browser_window->SetBounds(gfx::Rect(0, 0, 1000, 50));
+
+  // Auto Layout only acts on the window if it's visible.
+  browser_window->ShowInactive();
+
+  // The browser window should lazily create the download shelf when requested.
+  EXPECT_NE(nullptr, browser_window->GetDownloadShelf());
+
+  // The controller should now have a download shelf, which should have a view.
+  EXPECT_NE(nil, [[controller_ downloadShelf] view]);
+
+  // But, just requesting the download shelf shouldn't make it visible.
+  EXPECT_FALSE([controller_ isDownloadShelfVisible]);
+
+  browser_window->SetBounds(gfx::Rect(0, 0, 50, 50));
+
+  // When linking against an SDK >= 10.11, AppKit may lay out the window
+  // asynchronously (CFExecutableLinkedOnOrAfter check in -[NSThemeFrame
+  // handleSetFrameCommonRedisplay]). Do layout now instead.
+  [[controller_ window] layoutIfNeeded];
+
+  // The window should have returned to its minimum size.
+  EXPECT_EQ(browser_window->GetBounds().size(), kMinCocoaTabbedWindowSize);
+
+  browser_window->Close();
+}
+
 TEST_F(BrowserWindowControllerTest, TestSetBoundsPopup) {
   // Create a popup with bounds smaller than the minimum.
-  Browser::CreateParams params(Browser::TYPE_POPUP, profile());
+  Browser::CreateParams params(Browser::TYPE_POPUP, profile(), true);
   params.initial_bounds = gfx::Rect(0, 0, 50, 50);
   Browser* browser = new Browser(params);
   NSWindow* cocoaWindow = browser->window()->GetNativeWindow();
@@ -206,7 +239,7 @@ TEST_F(BrowserWindowControllerTest, BookmarkBarControllerIndirection) {
 }
 
 TEST_F(BrowserWindowControllerTest, BookmarkBarToggleRespectMinWindowHeight) {
-  Browser::CreateParams params(Browser::TYPE_TABBED, profile());
+  Browser::CreateParams params(Browser::TYPE_TABBED, profile(), true);
   params.initial_bounds = gfx::Rect(0, 0, 50, 280);
   Browser* browser = new Browser(params);
   NSWindow* cocoaWindow = browser->window()->GetNativeWindow();
@@ -233,7 +266,7 @@ TEST_F(BrowserWindowControllerTest, TestIncognitoWidthSpace) {
   std::unique_ptr<TestingProfile> incognito_profile(new TestingProfile());
   incognito_profile->set_off_the_record(true);
   std::unique_ptr<Browser> browser(
-      new Browser(Browser::CreateParams(incognito_profile.get())));
+      new Browser(Browser::CreateParams(incognito_profile.get(), true)));
   controller_.reset([[BrowserWindowController alloc]
                               initWithBrowser:browser.get()
                                 takeOwnership:NO]);
@@ -719,6 +752,18 @@ TEST_F(BrowserWindowControllerTest, TabStripBackgroundViewRedrawTest) {
   [partial_mock verify];
 }
 
+// Test that the window uses Auto Layout. Since frame-based layout and Auto
+// Layout behave differently in subtle ways, we shouldn't start/stop using it
+// accidentally. If we don't want Auto Layout, this test should be changed to
+// expect that chromeContentView has no constraints.
+TEST_F(BrowserWindowControllerTest, UsesAutoLayout) {
+  // If Auto Layout is on, there will be synthesized constraints based on the
+  // view's frame and autoresizing mask.
+  // TODO(sdy): Turn back on (or remove) after investigating a performance
+  // regression: https://crbug.com/706931
+  EXPECT_EQ(0u, [[[controller_ chromeContentView] constraints] count]);
+}
+
 @interface BrowserWindowControllerFakeFullscreen : BrowserWindowController {
  @private
   // We release the window ourselves, so we don't have to rely on the unittest
@@ -768,6 +813,20 @@ TEST_F(BrowserWindowFullScreenControllerTest, TestFullscreen) {
   [controller_ showWindow:nil];
   EXPECT_FALSE([controller_ isInAnyFullscreenMode]);
 
+  // The fix for http://crbug.com/447740 , where the omnibox would lose focus
+  // when switching between normal and fullscreen modes, makes some changes to
+  // -[BrowserWindowController setContentViewSubviews:]. Those changes appear
+  // to have extended the lifetime of the browser window during this test -
+  // specifically, the browser window is no longer visible, but it has not been
+  // fully freed (possibly being kept around by a reference from the
+  // autocompleteTextView). As a result the window still appears in
+  // -[NSApplication windows] and causes the test to fail. To get around this
+  // problem, I disable -[BrowserWindowController focusLocationBar:] and later
+  // force the window to clear its first responder.
+  base::mac::ScopedObjCClassSwizzler tmpSwizzler(
+      [BrowserWindowController class], @selector(focusLocationBar:),
+      @selector(dontFocusLocationBar:));
+
   [controller_ enterBrowserFullscreen];
   WaitForFullScreenTransition();
   EXPECT_TRUE([controller_ isInAnyFullscreenMode]);
@@ -775,6 +834,8 @@ TEST_F(BrowserWindowFullScreenControllerTest, TestFullscreen) {
   [controller_ exitAnyFullscreen];
   WaitForFullScreenTransition();
   EXPECT_FALSE([controller_ isInAnyFullscreenMode]);
+
+  [[controller_ window] makeFirstResponder:nil];
 }
 
 // If this test fails, it is usually a sign that the bots have some sort of
@@ -792,6 +853,12 @@ TEST_F(BrowserWindowFullScreenControllerTest, TestActivate) {
   chrome::testing::NSRunLoopRunAllPending();
   EXPECT_TRUE(IsFrontWindow([controller_ window]));
 
+  // See the comment in TestFullscreen for an explanation of this
+  // swizzling and the makeFirstResponder:nil call below.
+  base::mac::ScopedObjCClassSwizzler tmpSwizzler(
+      [BrowserWindowController class], @selector(focusLocationBar:),
+      @selector(dontFocusLocationBar:));
+
   [controller_ enterBrowserFullscreen];
   WaitForFullScreenTransition();
   [controller_ activate];
@@ -800,6 +867,8 @@ TEST_F(BrowserWindowFullScreenControllerTest, TestActivate) {
   // We have to cleanup after ourselves by unfullscreening.
   [controller_ exitAnyFullscreen];
   WaitForFullScreenTransition();
+
+  [[controller_ window] makeFirstResponder:nil];
 }
 
 @implementation BrowserWindowControllerFakeFullscreen

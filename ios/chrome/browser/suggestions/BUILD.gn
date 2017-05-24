@@ -5,17 +5,14 @@
 source_set("suggestions") {
   configs += [ "//build/config/compiler:enable_arc" ]
   sources = [
-    "image_fetcher_impl.h",
-    "image_fetcher_impl.mm",
-    "ios_image_decoder_impl.h",
-    "ios_image_decoder_impl.mm",
     "suggestions_service_factory.h",
     "suggestions_service_factory.mm",
   ]
   deps = [
     "//base",
     "//components/browser_sync",
-    "//components/image_fetcher",
+    "//components/image_fetcher/core",
+    "//components/image_fetcher/ios",
     "//components/keyed_service/ios",
     "//components/leveldb_proto",
     "//components/signin/core/browser",
@@ -24,23 +21,8 @@ source_set("suggestions") {
     "//ios/chrome/browser/signin",
     "//ios/chrome/browser/sync",
     "//ios/web",
-    "//ios/web/public/image_fetcher",
     "//net",
     "//skia",
-    "//ui/gfx",
-  ]
-}
-
-source_set("unit_tests") {
-  configs += [ "//build/config/compiler:enable_arc" ]
-  testonly = true
-  sources = [
-    "ios_image_decoder_impl_unittest.mm",
-  ]
-  deps = [
-    ":suggestions",
-    "//base",
-    "//testing/gtest",
     "//ui/gfx",
   ]
 }

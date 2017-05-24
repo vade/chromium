@@ -34,6 +34,10 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "url/gurl.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace {
 // Returns an autoreleased string containing the JavaScript loaded from a
 // bundled resource file with the given name (excluding extension).
@@ -108,12 +112,14 @@ std::string ChromeWebClient::GetProduct() const {
   return product;
 }
 
-std::string ChromeWebClient::GetUserAgent(bool desktop_user_agent) const {
+std::string ChromeWebClient::GetUserAgent(web::UserAgentType type) const {
+  // The user agent should not be requested for app-specific URLs.
+  DCHECK_NE(type, web::UserAgentType::NONE);
+
   // Using desktop user agent overrides a command-line user agent, so that
   // request desktop site can still work when using an overridden UA.
-  if (desktop_user_agent) {
+  if (type == web::UserAgentType::DESKTOP)
     return base::SysNSStringToUTF8(ChromeWebView::kDesktopUserAgent);
-  }
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kUserAgent)) {
@@ -124,8 +130,7 @@ std::string ChromeWebClient::GetUserAgent(bool desktop_user_agent) const {
     LOG(WARNING) << "Ignored invalid value for flag --" << switches::kUserAgent;
   }
 
-  std::string product = GetProduct();
-  return web::BuildUserAgentFromProduct(product);
+  return web::BuildUserAgentFromProduct(GetProduct());
 }
 
 base::string16 ChromeWebClient::GetLocalizedString(int message_id) const {
@@ -154,8 +159,9 @@ void ChromeWebClient::PostBrowserURLRewriterCreation(
   rewriter->AddURLRewriter(&WillHandleWebBrowserAboutURL);
 }
 
-NSString* ChromeWebClient::GetEarlyPageScript() const {
-  return GetPageScript(@"print");
+NSString* ChromeWebClient::GetEarlyPageScript(
+    web::BrowserState* browser_state) const {
+  return GetPageScript(@"chrome_bundle");
 }
 
 void ChromeWebClient::AllowCertificateError(
@@ -169,17 +175,9 @@ void ChromeWebClient::AllowCertificateError(
                                      overridable, callback);
 }
 
-void ChromeWebClient::GetTaskSchedulerInitializationParams(
-    std::vector<base::SchedulerWorkerPoolParams>* params_vector,
-    base::TaskScheduler::WorkerPoolIndexForTraitsCallback*
-        index_to_traits_callback) {
-  DCHECK(params_vector);
-  DCHECK(index_to_traits_callback);
-  // If this call fails, web will fall back to the default params.
-  *params_vector =
-      task_scheduler_util::GetBrowserWorkerPoolParamsFromVariations();
-  *index_to_traits_callback =
-      base::Bind(&task_scheduler_util::BrowserWorkerPoolIndexForTraits);
+std::unique_ptr<base::TaskScheduler::InitParams>
+ChromeWebClient::GetTaskSchedulerInitParams() {
+  return task_scheduler_util::GetBrowserTaskSchedulerInitParamsFromVariations();
 }
 
 void ChromeWebClient::PerformExperimentalTaskSchedulerRedirections() {

@@ -96,10 +96,10 @@ static const gchar* browser_accessibility_get_name(AtkAction* atk_action,
     return nullptr;
 
   int action;
-  if (!obj->GetIntAttribute(ui::AX_ATTR_ACTION, &action))
+  if (!obj->GetIntAttribute(ui::AX_ATTR_DEFAULT_ACTION_VERB, &action))
     return nullptr;
-  base::string16 action_verb =
-      ui::ActionToUnlocalizedString(static_cast<ui::AXSupportedAction>(action));
+  base::string16 action_verb = ui::ActionVerbToUnlocalizedString(
+      static_cast<ui::AXDefaultActionVerb>(action));
   return base::UTF16ToUTF8(action_verb).c_str();
 }
 
@@ -471,6 +471,10 @@ static const gchar* browser_accessibility_get_name(AtkObject* atk_object) {
   if (!obj)
     return NULL;
 
+  if (obj->GetStringAttribute(ui::AX_ATTR_NAME).empty() &&
+      !obj->HasExplicitlyEmptyName())
+    return NULL;
+
   return obj->GetStringAttribute(ui::AX_ATTR_NAME).c_str();
 }
 
@@ -489,8 +493,9 @@ static AtkObject* browser_accessibility_get_parent(AtkObject* atk_object) {
       ToBrowserAccessibilityAuraLinux(atk_object);
   if (!obj)
     return NULL;
-  if (obj->GetParent())
-    return ToBrowserAccessibilityAuraLinux(obj->GetParent())->GetAtkObject();
+  if (obj->PlatformGetParent())
+    return ToBrowserAccessibilityAuraLinux(obj->PlatformGetParent())
+        ->GetAtkObject();
 
   BrowserAccessibilityManagerAuraLinux* manager =
       static_cast<BrowserAccessibilityManagerAuraLinux*>(obj->manager());
@@ -784,10 +789,10 @@ void BrowserAccessibilityAuraLinux::OnDataChanged() {
   if (!atk_object_) {
     interface_mask_ = GetInterfaceMaskFromObject(this);
     atk_object_ = ATK_OBJECT(browser_accessibility_new(this));
-    if (this->GetParent()) {
-      atk_object_set_parent(
-          atk_object_,
-          ToBrowserAccessibilityAuraLinux(this->GetParent())->GetAtkObject());
+    if (this->PlatformGetParent()) {
+      atk_object_set_parent(atk_object_, ToBrowserAccessibilityAuraLinux(
+                                             this->PlatformGetParent())
+                                             ->GetAtkObject());
     }
   }
 }
@@ -948,6 +953,9 @@ void BrowserAccessibilityAuraLinux::InitRoleAndState() {
       break;
     case ui::AX_ROLE_TREE_ITEM:
       atk_role_ = ATK_ROLE_TREE_ITEM;
+      break;
+    case ui::AX_ROLE_TREE_GRID:
+      atk_role_ = ATK_ROLE_TREE_TABLE;
       break;
     case ui::AX_ROLE_VIDEO:
 #if defined(ATK_CHECK_VERSION)

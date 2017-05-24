@@ -7,13 +7,12 @@
 
 #include <stdint.h>
 
-#include <map>
 #include <memory>
-#include <string>
 #include <vector>
 
 #include "base/macros.h"
 #include "services/service_manager/public/cpp/connector.h"
+#include "services/ui/public/interfaces/window_manager_constants.mojom.h"
 #include "ui/aura/aura_export.h"
 #include "ui/aura/window_tree_host_platform.h"
 
@@ -24,30 +23,15 @@ class Display;
 namespace aura {
 
 class InputMethodMus;
-class WindowPortMus;
 class WindowTreeClient;
 class WindowTreeHostMusDelegate;
 
+struct DisplayInitParams;
+struct WindowTreeHostMusInitParams;
+
 class AURA_EXPORT WindowTreeHostMus : public aura::WindowTreeHostPlatform {
  public:
-  // |properties| are applied to the window created by this class (using
-  // PropertyConverter).
-  // TODO: this should take an unordered_map, see http://crbug.com/670515.
-  WindowTreeHostMus(
-      std::unique_ptr<WindowPortMus> window_port,
-      WindowTreeClient* window_tree_client,
-      int64_t display_id,
-      const std::map<std::string, std::vector<uint8_t>>* properties = nullptr);
-
-  // This constructor is intended for creating top level windows in
-  // non-window-manager code. |properties| are properties passed verbatim to
-  // the server, that is, no conversion is done before sending |properties| to
-  // the server. Additionally |properties| are passed to PropertyConverter and
-  // any known properties are set on the Window created by this class.
-  // TODO: this should take an unordered_map, see http://crbug.com/670515.
-  explicit WindowTreeHostMus(
-      WindowTreeClient* window_tree_client,
-      const std::map<std::string, std::vector<uint8_t>>* properties = nullptr);
+  explicit WindowTreeHostMus(WindowTreeHostMusInitParams init_params);
 
   ~WindowTreeHostMus() override;
 
@@ -58,8 +42,8 @@ class AURA_EXPORT WindowTreeHostMus : public aura::WindowTreeHostPlatform {
   // Sets the bounds in pixels.
   void SetBoundsFromServer(const gfx::Rect& bounds_in_pixels);
 
-  ui::EventDispatchDetails SendEventToProcessor(ui::Event* event) {
-    return aura::WindowTreeHostPlatform::SendEventToProcessor(event);
+  ui::EventDispatchDetails SendEventToSink(ui::Event* event) {
+    return aura::WindowTreeHostPlatform::SendEventToSink(event);
   }
 
   InputMethodMus* input_method() { return input_method_.get(); }
@@ -72,12 +56,33 @@ class AURA_EXPORT WindowTreeHostMus : public aura::WindowTreeHostPlatform {
   // clear.
   void SetHitTestMask(const base::Optional<gfx::Rect>& rect);
 
+  // Sets the opacity of the underlying mus window.
+  void SetOpacity(float value);
+
   // Requests that the window manager change the activation to the next window.
   void DeactivateWindow();
+
+  // Requests that our root window be stacked above this other root window
+  // which our connection owns.
+  void StackAbove(Window* window);
 
   // Requests that our root window be stacked above all other parallel root
   // windows which we might not own.
   void StackAtTop();
+
+  // Tells the window manager to take control of moving the window. Returns
+  // true if the move wasn't canceled.
+  void PerformWindowMove(ui::mojom::MoveLoopSource mus_source,
+                         const gfx::Point& cursor_location,
+                         const base::Callback<void(bool)>& callback);
+
+  // Tells the window manager to abort any current move initiated by
+  // PerformWindowMove().
+  void CancelWindowMove();
+
+  // Used during initial setup. Returns the DisplayInitParams
+  // supplied to the constructor.
+  std::unique_ptr<DisplayInitParams> ReleaseDisplayInitParams();
 
   // Intended only for WindowTreeClient to call.
   void set_display_id(int64_t id) { display_id_ = id; }
@@ -92,6 +97,8 @@ class AURA_EXPORT WindowTreeHostMus : public aura::WindowTreeHostPlatform {
   void OnActivationChanged(bool active) override;
   void OnCloseRequest() override;
   gfx::ICCProfile GetICCProfileForCurrentDisplay() override;
+  void MoveCursorToScreenLocationInPixels(
+      const gfx::Point& location_in_pixels) override;
 
  private:
   int64_t display_id_;
@@ -101,6 +108,8 @@ class AURA_EXPORT WindowTreeHostMus : public aura::WindowTreeHostPlatform {
   bool in_set_bounds_from_server_ = false;
 
   std::unique_ptr<InputMethodMus> input_method_;
+
+  std::unique_ptr<DisplayInitParams> display_init_params_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowTreeHostMus);
 };

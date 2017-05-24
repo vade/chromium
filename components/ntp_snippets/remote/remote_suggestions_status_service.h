@@ -23,8 +23,6 @@ enum class RemoteSuggestionsStatus : int {
   ENABLED_AND_SIGNED_OUT,
   // Suggestions have been disabled as part of the service configuration.
   EXPLICITLY_DISABLED,
-  // The user is not signed in, but sign-in is required.
-  SIGNED_OUT_AND_DISABLED,
 };
 
 // Aggregates data from preferences and signin to notify the provider of
@@ -36,7 +34,8 @@ class RemoteSuggestionsStatusService {
                           RemoteSuggestionsStatus new_status)>;
 
   RemoteSuggestionsStatusService(SigninManagerBase* signin_manager,
-                                 PrefService* pref_service);
+                                 PrefService* pref_service,
+                                 const std::string& additional_toggle_pref);
 
   virtual ~RemoteSuggestionsStatusService();
 
@@ -66,12 +65,19 @@ class RemoteSuggestionsStatusService {
 
   bool IsSignedIn() const;
 
+  // Returns whether the service is explicitly disabled, by the user or by a
+  // policy for example.
+  bool IsExplicitlyDisabled() const;
+
   RemoteSuggestionsStatus GetStatusFromDeps() const;
 
   RemoteSuggestionsStatus status_;
   StatusChangeCallback status_change_callback_;
 
-  bool require_signin_;
+  // Name of a preference to be used as an additional toggle to guard the
+  // remote suggestions provider.
+  std::string additional_toggle_pref_;
+
   SigninManagerBase* signin_manager_;
   PrefService* pref_service_;
 

@@ -122,9 +122,14 @@ void CompositorView::UpdateLayerTreeHost() {
   Java_CompositorView_onCompositorLayout(env, obj_);
 }
 
-void CompositorView::OnSwapBuffersCompleted(int pending_swap_buffers) {
+void CompositorView::DidSwapFrame(int pending_frames) {
   JNIEnv* env = base::android::AttachCurrentThread();
-  Java_CompositorView_onSwapBuffersCompleted(env, obj_, pending_swap_buffers);
+  Java_CompositorView_didSwapFrame(env, obj_, pending_frames);
+}
+
+void CompositorView::DidSwapBuffers() {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  Java_CompositorView_didSwapBuffers(env, obj_);
 }
 
 ui::UIResourceProvider* CompositorView::GetUIResourceProvider() {
@@ -160,6 +165,18 @@ void CompositorView::SurfaceChanged(JNIEnv* env,
   content_width_ = size.width();
   content_height_ = size.height();
   root_layer_->SetBounds(gfx::Size(content_width_, content_height_));
+}
+
+void CompositorView::OnPhysicalBackingSizeChanged(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jobject>& jweb_contents,
+    jint width,
+    jint height) {
+  content::WebContents* web_contents =
+      content::WebContents::FromJavaWebContents(jweb_contents);
+  gfx::Size size(width, height);
+  web_contents->GetNativeView()->OnPhysicalBackingSizeChanged(size);
 }
 
 void CompositorView::SetLayoutBounds(JNIEnv* env,

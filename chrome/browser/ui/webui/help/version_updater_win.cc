@@ -6,6 +6,7 @@
 
 #include "base/memory/weak_ptr.h"
 #include "base/task_runner_util.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/win/win_util.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/browser_process.h"
@@ -38,7 +39,7 @@ void VersionUpdaterWin::CheckForUpdate(const StatusCallback& callback,
   if (!(base::win::GetVersion() == base::win::VERSION_VISTA &&
         (base::win::OSInfo::GetInstance()->service_pack().major == 0) &&
         !base::win::UserAccountControlIsEnabled())) {
-    callback_.Run(CHECKING, 0, base::string16());
+    callback_.Run(CHECKING, 0, std::string(), 0, base::string16());
     BeginUpdateCheckOnFileThread(false /* !install_update_if_possible */);
   }
 }
@@ -68,18 +69,18 @@ void VersionUpdaterWin::OnUpdateCheckComplete(
     status = UPDATING;
     BeginUpdateCheckOnFileThread(true /* install_update_if_possible */);
   }
-  callback_.Run(status, 0, base::string16());
+  callback_.Run(status, 0, std::string(), 0, base::string16());
 }
 
 void VersionUpdaterWin::OnUpgradeProgress(int progress,
                                           const base::string16& new_version) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  callback_.Run(UPDATING, progress, base::string16());
+  callback_.Run(UPDATING, progress, std::string(), 0, base::string16());
 }
 
 void VersionUpdaterWin::OnUpgradeComplete(const base::string16& new_version) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  callback_.Run(NEARLY_UPDATED, 0, base::string16());
+  callback_.Run(NEARLY_UPDATED, 0, std::string(), 0, base::string16());
 }
 
 void VersionUpdaterWin::OnError(GoogleUpdateErrorCode error_code,
@@ -110,7 +111,7 @@ void VersionUpdaterWin::OnError(GoogleUpdateErrorCode error_code,
       }
       break;
   }
-  callback_.Run(status, 0, message);
+  callback_.Run(status, 0, std::string(), 0, message);
 }
 
 void VersionUpdaterWin::BeginUpdateCheckOnFileThread(
@@ -126,7 +127,7 @@ void VersionUpdaterWin::BeginUpdateCheckOnFileThread(
 
 void VersionUpdaterWin::OnPendingRestartCheck(bool is_update_pending_restart) {
   callback_.Run(is_update_pending_restart ? NEARLY_UPDATED : UPDATED, 0,
-                base::string16());
+                std::string(), 0, base::string16());
 }
 
 VersionUpdater* VersionUpdater::Create(content::WebContents* web_contents) {

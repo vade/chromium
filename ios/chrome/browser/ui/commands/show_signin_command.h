@@ -24,6 +24,10 @@ enum AuthenticationOperation {
   // Operation to start a sign-in operation. The user is presented with the
   // SSOAuth sign in page (SSOAuth account picker or SSOAuth sign-in web page).
   AUTHENTICATION_OPERATION_SIGNIN,
+
+  // Operation to start a sign-in operation based on the first known identity.
+  // The users are presented with the sync confirmation screen.
+  AUTHENTICATION_OPERATION_SIGNIN_PROMO_CONTINUE_AS,
 };
 
 // A command to perform a sign in operation.
@@ -35,14 +39,13 @@ enum AuthenticationOperation {
 // Initializes a command to perform the specified operation with a
 // SigninInteractionController and invoke a possibly-nil callback when finished.
 - (instancetype)initWithOperation:(AuthenticationOperation)operation
-                signInAccessPoint:(signin_metrics::AccessPoint)signInAccessPoint
+                      accessPoint:(signin_metrics::AccessPoint)accessPoint
                          callback:(ShowSigninCommandCompletionCallback)callback
     NS_DESIGNATED_INITIALIZER;
 
 // Initializes a ShowSigninCommand with a nil callback.
 - (instancetype)initWithOperation:(AuthenticationOperation)operation
-                signInAccessPoint:
-                    (signin_metrics::AccessPoint)signInAccessPoint;
+                      accessPoint:(signin_metrics::AccessPoint)accessPoint;
 
 // The callback to be invoked after the operation is complete.
 @property(copy, nonatomic, readonly)
@@ -52,7 +55,7 @@ enum AuthenticationOperation {
 @property(nonatomic, readonly) AuthenticationOperation operation;
 
 // The access point of this authentication operation.
-@property(nonatomic, readonly) signin_metrics::AccessPoint signInAccessPoint;
+@property(nonatomic, readonly) signin_metrics::AccessPoint accessPoint;
 
 @end
 

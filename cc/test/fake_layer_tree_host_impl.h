@@ -5,6 +5,7 @@
 #ifndef CC_TEST_FAKE_LAYER_TREE_HOST_IMPL_H_
 #define CC_TEST_FAKE_LAYER_TREE_HOST_IMPL_H_
 
+#include "base/sequenced_task_runner.h"
 #include "cc/test/fake_layer_tree_host_impl_client.h"
 #include "cc/test/fake_rendering_stats_instrumentation.h"
 #include "cc/trees/layer_tree_host_impl.h"
@@ -21,6 +22,11 @@ class FakeLayerTreeHostImpl : public LayerTreeHostImpl {
   FakeLayerTreeHostImpl(const LayerTreeSettings& settings,
                         TaskRunnerProvider* task_runner_provider,
                         TaskGraphRunner* task_graph_runner);
+  FakeLayerTreeHostImpl(
+      const LayerTreeSettings& settings,
+      TaskRunnerProvider* task_runner_provider,
+      TaskGraphRunner* task_graph_runner,
+      scoped_refptr<base::SequencedTaskRunner> image_worker_task_runner);
   ~FakeLayerTreeHostImpl() override;
 
   void ForcePrepareToDraw() {
@@ -34,12 +40,8 @@ class FakeLayerTreeHostImpl : public LayerTreeHostImpl {
   void NotifyTileStateChanged(const Tile* tile) override;
   BeginFrameArgs CurrentBeginFrameArgs() const override;
   void AdvanceToNextFrame(base::TimeDelta advance_by);
-  void UpdateNumChildrenAndDrawPropertiesForActiveTree(
-      bool force_skip_verify_visible_rect_calculations = false);
-  static void UpdateNumChildrenAndDrawProperties(
-      LayerTreeImpl* layerTree,
-      bool force_skip_verify_visible_rect_calculations = false);
-  static int RecursiveUpdateNumChildren(LayerImpl* layer);
+  void UpdateNumChildrenAndDrawPropertiesForActiveTree();
+  static void UpdateNumChildrenAndDrawProperties(LayerTreeImpl* layerTree);
 
   using LayerTreeHostImpl::ActivateSyncTree;
   using LayerTreeHostImpl::prepare_tiles_needed;
@@ -54,6 +56,8 @@ class FakeLayerTreeHostImpl : public LayerTreeHostImpl {
   }
 
   AnimationHost* animation_host() const;
+
+  FakeLayerTreeHostImplClient* client() { return &client_; }
 
  private:
   FakeLayerTreeHostImplClient client_;

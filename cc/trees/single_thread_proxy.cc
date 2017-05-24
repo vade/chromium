@@ -8,8 +8,8 @@
 #include "base/memory/ptr_util.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/trace_event/trace_event.h"
-#include "cc/debug/benchmark_instrumentation.h"
-#include "cc/debug/devtools_instrumentation.h"
+#include "cc/base/devtools_instrumentation.h"
+#include "cc/benchmarks/benchmark_instrumentation.h"
 #include "cc/output/compositor_frame_sink.h"
 #include "cc/output/context_provider.h"
 #include "cc/quads/draw_quad.h"
@@ -52,6 +52,7 @@ SingleThreadProxy::SingleThreadProxy(LayerTreeHost* layer_tree_host,
       inside_synchronous_composite_(false),
       compositor_frame_sink_creation_requested_(false),
       compositor_frame_sink_lost_(true),
+      frame_sink_bound_weak_factory_(this),
       weak_factory_(this) {
   TRACE_EVENT0("cc", "SingleThreadProxy::SingleThreadProxy");
   DCHECK(task_runner_provider_);
@@ -63,6 +64,9 @@ void SingleThreadProxy::Start() {
   DebugScopedSetImplThread impl(task_runner_provider_);
 
   const LayerTreeSettings& settings = layer_tree_host_->GetSettings();
+  DCHECK(settings.single_thread_proxy_scheduler ||
+         !settings.enable_checker_imaging)
+      << "Checker-imaging is not supported in synchronous single threaded mode";
   if (settings.single_thread_proxy_scheduler && !scheduler_on_impl_thread_) {
     SchedulerSettings scheduler_settings(settings.ToSchedulerSettings());
     scheduler_settings.commit_to_active_tree = CommitToActiveTree();
@@ -120,6 +124,7 @@ void SingleThreadProxy::RequestNewCompositorFrameSink() {
 
 void SingleThreadProxy::ReleaseCompositorFrameSink() {
   compositor_frame_sink_lost_ = true;
+  frame_sink_bound_weak_factory_.InvalidateWeakPtrs();
   if (scheduler_on_impl_thread_)
     scheduler_on_impl_thread_->DidLoseCompositorFrameSink();
   return layer_tree_host_impl_->ReleaseCompositorFrameSink();
@@ -138,6 +143,7 @@ void SingleThreadProxy::SetCompositorFrameSink(
   }
 
   if (success) {
+    frame_sink_bound_weak_ptr_ = frame_sink_bound_weak_factory_.GetWeakPtr();
     layer_tree_host_->DidInitializeCompositorFrameSink();
     if (scheduler_on_impl_thread_)
       scheduler_on_impl_thread_->DidCreateAndInitializeCompositorFrameSink();
@@ -200,6 +206,12 @@ void SingleThreadProxy::DoCommit() {
 
     if (scheduler_on_impl_thread_)
       scheduler_on_impl_thread_->DidCommit();
+
+    // Issue decode callbacks.
+    auto completed_decode_callbacks =
+        layer_tree_host_impl_->TakeCompletedImageDecodeCallbacks();
+    for (auto& callback : completed_decode_callbacks)
+      callback.Run();
 
     layer_tree_host_impl_->CommitComplete();
 
@@ -416,12 +428,22 @@ void SingleThreadProxy::DidReceiveCompositorFrameAckOnImplThread() {
                "SingleThreadProxy::DidReceiveCompositorFrameAckOnImplThread");
   if (scheduler_on_impl_thread_)
     scheduler_on_impl_thread_->DidReceiveCompositorFrameAck();
-  layer_tree_host_->DidReceiveCompositorFrameAck();
+  // We do a PostTask here because freeing resources in some cases (such as in
+  // TextureLayer) is PostTasked and we want to make sure ack is received after
+  // resources are returned.
+  task_runner_provider_->MainThreadTaskRunner()->PostTask(
+      FROM_HERE, base::Bind(&SingleThreadProxy::DidReceiveCompositorFrameAck,
+                            frame_sink_bound_weak_ptr_));
 }
 
 void SingleThreadProxy::OnDrawForCompositorFrameSink(
     bool resourceless_software_draw) {
   NOTREACHED() << "Implemented by ThreadProxy for synchronous compositor.";
+}
+
+void SingleThreadProxy::NeedsImplSideInvalidation() {
+  DCHECK(scheduler_on_impl_thread_);
+  scheduler_on_impl_thread_->SetNeedsImplSideInvalidation();
 }
 
 void SingleThreadProxy::CompositeImmediately(base::TimeTicks frame_begin_time) {
@@ -441,8 +463,9 @@ void SingleThreadProxy::CompositeImmediately(base::TimeTicks frame_begin_time) {
   }
 
   BeginFrameArgs begin_frame_args(BeginFrameArgs::Create(
-      BEGINFRAME_FROM_HERE, 0, 1, frame_begin_time, base::TimeTicks(),
-      BeginFrameArgs::DefaultInterval(), BeginFrameArgs::NORMAL));
+      BEGINFRAME_FROM_HERE, BeginFrameArgs::kManualSourceId, 1,
+      frame_begin_time, base::TimeTicks(), BeginFrameArgs::DefaultInterval(),
+      BeginFrameArgs::NORMAL));
 
   // Start the impl frame.
   {
@@ -456,6 +479,7 @@ void SingleThreadProxy::CompositeImmediately(base::TimeTicks frame_begin_time) {
     DCHECK(inside_impl_frame_);
 #endif
     DoBeginMainFrame(begin_frame_args);
+    DoPainting();
     DoCommit();
 
     DCHECK_EQ(
@@ -477,6 +501,9 @@ void SingleThreadProxy::CompositeImmediately(base::TimeTicks frame_begin_time) {
     layer_tree_host_impl_->Animate();
 
     LayerTreeHostImpl::FrameData frame;
+    frame.begin_frame_ack = BeginFrameAck(
+        begin_frame_args.source_id, begin_frame_args.sequence_number,
+        begin_frame_args.sequence_number, true);
     DoComposite(&frame);
 
     // DoComposite could abort, but because this is a synchronous composite
@@ -596,12 +623,18 @@ void SingleThreadProxy::ScheduledActionSendBeginMainFrame(
 #endif
 
   task_runner_provider_->MainThreadTaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&SingleThreadProxy::BeginMainFrame,
-                            weak_factory_.GetWeakPtr(), begin_frame_args));
+      FROM_HERE, base::BindOnce(&SingleThreadProxy::BeginMainFrame,
+                                weak_factory_.GetWeakPtr(), begin_frame_args));
+  layer_tree_host_impl_->DidSendBeginMainFrame();
 }
 
 void SingleThreadProxy::SendBeginMainFrameNotExpectedSoon() {
   layer_tree_host_->BeginMainFrameNotExpectedSoon();
+}
+
+void SingleThreadProxy::ScheduledActionBeginMainFrameNotExpectedUntil(
+    base::TimeTicks time) {
+  layer_tree_host_->BeginMainFrameNotExpectedUntil(time);
 }
 
 void SingleThreadProxy::BeginMainFrame(const BeginFrameArgs& begin_frame_args) {
@@ -639,6 +672,22 @@ void SingleThreadProxy::BeginMainFrame(const BeginFrameArgs& begin_frame_args) {
   commit_requested_ = true;
 
   DoBeginMainFrame(begin_frame_args);
+
+  // New commits requested inside UpdateLayers should be respected.
+  commit_requested_ = false;
+
+  // At this point the main frame may have deferred commits to avoid committing
+  // right now.
+  if (defer_commits_) {
+    TRACE_EVENT_INSTANT0("cc", "EarlyOut_DeferCommit_InsideBeginMainFrame",
+                         TRACE_EVENT_SCOPE_THREAD);
+    BeginMainFrameAbortedOnImplThread(
+        CommitEarlyOutReason::ABORTED_DEFERRED_COMMIT);
+    layer_tree_host_->DidBeginMainFrame();
+    return;
+  }
+
+  DoPainting();
 }
 
 void SingleThreadProxy::DoBeginMainFrame(
@@ -655,10 +704,9 @@ void SingleThreadProxy::DoBeginMainFrame(
   layer_tree_host_->BeginMainFrame(begin_frame_args);
   layer_tree_host_->AnimateLayers(begin_frame_args.frame_time);
   layer_tree_host_->RequestMainFrameUpdate();
+}
 
-  // New commits requested inside UpdateLayers should be respected.
-  commit_requested_ = false;
-
+void SingleThreadProxy::DoPainting() {
   layer_tree_host_->UpdateLayers();
 
   // TODO(enne): SingleThreadProxy does not support cancelling commits yet,
@@ -683,6 +731,8 @@ void SingleThreadProxy::BeginMainFrameAbortedOnImplThread(
 DrawResult SingleThreadProxy::ScheduledActionDrawIfPossible() {
   DebugScopedSetImplThread impl(task_runner_provider_);
   LayerTreeHostImpl::FrameData frame;
+  frame.begin_frame_ack =
+      scheduler_on_impl_thread_->CurrentBeginFrameAckForActiveTree();
   return DoComposite(&frame);
 }
 
@@ -725,6 +775,22 @@ void SingleThreadProxy::ScheduledActionInvalidateCompositorFrameSink() {
   NOTREACHED();
 }
 
+void SingleThreadProxy::ScheduledActionPerformImplSideInvalidation() {
+  DCHECK(scheduler_on_impl_thread_);
+
+  DebugScopedSetImplThread impl(task_runner_provider_);
+  commit_blocking_task_runner_.reset(new BlockingTaskRunner::CapturePostTasks(
+      task_runner_provider_->blocking_main_thread_task_runner()));
+  layer_tree_host_impl_->InvalidateContentOnImplSide();
+
+  // Invalidations go directly to the active tree, so we synchronously call
+  // NotifyReadyToActivate to update the scheduler and LTHI state correctly.
+  // Since in single-threaded mode the scheduler will wait for a ready to draw
+  // signal from LTHI, the draw will remain blocked till the invalidated tiles
+  // are ready.
+  NotifyReadyToActivate();
+}
+
 void SingleThreadProxy::UpdateBrowserControlsState(
     BrowserControlsState constraints,
     BrowserControlsState current,
@@ -739,6 +805,10 @@ void SingleThreadProxy::DidFinishImplFrame() {
       << "DidFinishImplFrame called while not inside an impl frame!";
   inside_impl_frame_ = false;
 #endif
+}
+
+void SingleThreadProxy::DidReceiveCompositorFrameAck() {
+  layer_tree_host_->DidReceiveCompositorFrameAck();
 }
 
 }  // namespace cc

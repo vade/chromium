@@ -40,6 +40,10 @@
 
 namespace {
 
+// The minimium chrome build no that supports window management devtools
+// commands.
+const int kBrowserWindowDevtoolsBuildNo = 3076;
+
 const int kWifiMask = 0x2;
 const int k4GMask = 0x8;
 const int k3GMask = 0x10;
@@ -154,7 +158,7 @@ Status CheckSessionCreated(Session* session) {
     return Status(kSessionNotCreatedException, status);
 
   base::ListValue args;
-  std::unique_ptr<base::Value> result(new base::FundamentalValue(0));
+  std::unique_ptr<base::Value> result(new base::Value(0));
   status = web_view->CallFunction(session->GetCurrentFrameId(),
                                   "function(s) { return 1; }", args, &result);
   if (status.IsError())
@@ -177,13 +181,21 @@ Status InitSessionHelper(const InitSessionParams& bound_params,
       new WebDriverLog(WebDriverLog::kDriverType, Log::kAll));
   const base::DictionaryValue* desired_caps;
   bool w3c_capability = false;
-  if (params.GetDictionary("capabilities.desiredCapabilities", &desired_caps)
+  if (params.GetDictionary("capabilities.alwaysMatch", &desired_caps)
       && desired_caps->GetBoolean("chromeOptions.w3c", &w3c_capability)
-      && w3c_capability)
+      && w3c_capability) {
+    // TODO(johnchen): Handle capabilities.firstMatch.
     session->w3c_compliant = true;
-  else if (!params.GetDictionary("desiredCapabilities", &desired_caps) &&
-     !params.GetDictionary("capabilities.desiredCapabilities", &desired_caps))
-    return Status(kUnknownError, "cannot find dict 'desiredCapabilities'");
+  } else if (params.GetDictionary("capabilities.desiredCapabilities",
+                                  &desired_caps)
+             && desired_caps->GetBoolean("chromeOptions.w3c", &w3c_capability)
+             && w3c_capability) {
+    // TODO(johnchen): Remove when clients stop using this.
+    session->w3c_compliant = true;
+  } else if (!params.GetDictionary("desiredCapabilities", &desired_caps)) {
+    return Status(kSessionNotCreatedException,
+                  "Missing or invalid capabilities");
+  }
 
   Capabilities capabilities;
   Status status = capabilities.Parse(*desired_caps);
@@ -201,8 +213,8 @@ Status InitSessionHelper(const InitSessionParams& bound_params,
   // Create Log's and DevToolsEventListener's for ones that are DevTools-based.
   // Session will own the Log's, Chrome will own the listeners.
   // Also create |CommandListener|s for the appropriate logs.
-  ScopedVector<DevToolsEventListener> devtools_event_listeners;
-  ScopedVector<CommandListener> command_listeners;
+  std::vector<std::unique_ptr<DevToolsEventListener>> devtools_event_listeners;
+  std::vector<std::unique_ptr<CommandListener>> command_listeners;
   status = CreateLogs(capabilities,
                       session,
                       &session->devtools_logs,
@@ -214,15 +226,12 @@ Status InitSessionHelper(const InitSessionParams& bound_params,
   // |session| will own the |CommandListener|s.
   session->command_listeners.swap(command_listeners);
 
-  status = LaunchChrome(bound_params.context_getter.get(),
-                        bound_params.socket_factory,
-                        bound_params.device_manager,
-                        bound_params.port_server,
-                        bound_params.port_manager,
-                        capabilities,
-                        &devtools_event_listeners,
-                        &session->chrome,
-                        session->w3c_compliant);
+  status =
+      LaunchChrome(bound_params.context_getter.get(),
+                   bound_params.socket_factory, bound_params.device_manager,
+                   bound_params.port_server, bound_params.port_manager,
+                   capabilities, std::move(devtools_event_listeners),
+                   &session->chrome, session->w3c_compliant);
   if (status.IsError())
     return status;
 
@@ -279,8 +288,7 @@ Status ExecuteGetCurrentWindowHandle(Session* session,
   if (status.IsError())
     return status;
 
-  value->reset(
-      new base::StringValue(WebViewIdToWindowHandle(web_view->GetId())));
+  value->reset(new base::Value(WebViewIdToWindowHandle(web_view->GetId())));
   return Status(kOk);
 }
 
@@ -349,7 +357,7 @@ Status ExecuteGetWindowHandles(Session* session,
        it != web_view_ids.end(); ++it) {
     window_ids->AppendString(WebViewIdToWindowHandle(*it));
   }
-  value->reset(window_ids.release());
+  *value = std::move(window_ids);
   return Status(kOk);
 }
 
@@ -436,6 +444,9 @@ Status ExecuteSwitchToWindow(Session* session,
       return status;
   }
 
+  status = session->chrome->ActivateWebView(web_view_id);
+  if (status.IsError())
+    return status;
   session->window = web_view_id;
   session->SwitchToTopFrame();
   session->mouse_position = WebPoint(0, 0);
@@ -509,7 +520,7 @@ Status ExecuteIsLoading(Session* session,
       session->GetCurrentFrameId(), nullptr, &is_pending);
   if (status.IsError())
     return status;
-  value->reset(new base::FundamentalValue(is_pending));
+  value->reset(new base::Value(is_pending));
   return Status(kOk);
 }
 
@@ -544,7 +555,7 @@ Status ExecuteGetNetworkConnection(Session* session,
   int connection_type = 0;
   connection_type = desktop->GetNetworkConnection();
 
-  value->reset(new base::FundamentalValue(connection_type));
+  value->reset(new base::Value(connection_type));
   return Status(kOk);
 }
 
@@ -637,7 +648,7 @@ Status ExecuteSetNetworkConnection(Session* session,
       *session->overridden_network_conditions);
   }
 
-  value->reset(new base::FundamentalValue(connection_type));
+  value->reset(new base::Value(connection_type));
   return Status(kOk);
 }
 
@@ -649,13 +660,19 @@ Status ExecuteGetWindowPosition(Session* session,
   if (status.IsError())
     return status;
 
-  AutomationExtension* extension = NULL;
-  status = desktop->GetAutomationExtension(&extension, session->w3c_compliant);
-  if (status.IsError())
-    return status;
-
   int x, y;
-  status = extension->GetWindowPosition(&x, &y);
+
+  if (desktop->GetBrowserInfo()->build_no >= kBrowserWindowDevtoolsBuildNo) {
+    status = desktop->GetWindowPosition(session->window, &x, &y);
+  } else {
+    AutomationExtension* extension = NULL;
+    status =
+        desktop->GetAutomationExtension(&extension, session->w3c_compliant);
+    if (status.IsError())
+      return status;
+
+    status = extension->GetWindowPosition(&x, &y);
+  }
   if (status.IsError())
     return status;
 
@@ -679,6 +696,11 @@ Status ExecuteSetWindowPosition(Session* session,
   if (status.IsError())
     return status;
 
+  if (desktop->GetBrowserInfo()->build_no >= kBrowserWindowDevtoolsBuildNo) {
+    return desktop->SetWindowPosition(session->window, static_cast<int>(x),
+                                      static_cast<int>(y));
+  }
+
   AutomationExtension* extension = NULL;
   status = desktop->GetAutomationExtension(&extension, session->w3c_compliant);
   if (status.IsError())
@@ -695,13 +717,19 @@ Status ExecuteGetWindowSize(Session* session,
   if (status.IsError())
     return status;
 
-  AutomationExtension* extension = NULL;
-  status = desktop->GetAutomationExtension(&extension, session->w3c_compliant);
-  if (status.IsError())
-    return status;
-
   int width, height;
-  status = extension->GetWindowSize(&width, &height);
+
+  if (desktop->GetBrowserInfo()->build_no >= kBrowserWindowDevtoolsBuildNo) {
+    status = desktop->GetWindowSize(session->window, &width, &height);
+  } else {
+    AutomationExtension* extension = NULL;
+    status =
+        desktop->GetAutomationExtension(&extension, session->w3c_compliant);
+    if (status.IsError())
+      return status;
+
+    status = extension->GetWindowSize(&width, &height);
+  }
   if (status.IsError())
     return status;
 
@@ -726,6 +754,11 @@ Status ExecuteSetWindowSize(Session* session,
   if (status.IsError())
     return status;
 
+  if (desktop->GetBrowserInfo()->build_no >= kBrowserWindowDevtoolsBuildNo) {
+    return desktop->SetWindowSize(session->window, static_cast<int>(width),
+                                  static_cast<int>(height));
+  }
+
   AutomationExtension* extension = NULL;
   status = desktop->GetAutomationExtension(&extension, session->w3c_compliant);
   if (status.IsError())
@@ -742,6 +775,9 @@ Status ExecuteMaximizeWindow(Session* session,
   Status status = session->chrome->GetAsDesktop(&desktop);
   if (status.IsError())
     return status;
+
+  if (desktop->GetBrowserInfo()->build_no >= kBrowserWindowDevtoolsBuildNo)
+    return desktop->MaximizeWindow(session->window);
 
   AutomationExtension* extension = NULL;
   status = desktop->GetAutomationExtension(&extension, session->w3c_compliant);
@@ -822,14 +858,14 @@ Status ExecuteUploadFile(Session* session,
   if (status.IsError())
     return Status(kUnknownError, "unable to unzip 'file'", status);
 
-  value->reset(new base::StringValue(upload.value()));
+  value->reset(new base::Value(upload.value()));
   return Status(kOk);
 }
 
 Status ExecuteIsAutoReporting(Session* session,
                               const base::DictionaryValue& params,
                               std::unique_ptr<base::Value>* value) {
-  value->reset(new base::FundamentalValue(session->auto_reporting_enabled));
+  value->reset(new base::Value(session->auto_reporting_enabled));
   return Status(kOk);
 }
 

@@ -31,7 +31,6 @@ extern "C" int LLVMFuzzerTestOneInput(const unsigned char* data, size_t size) {
   while (i < size) {
     ui::AXNodeData node;
     node.id = data[i++];
-    node.state = 0;
     if (i < size) {
       size_t child_count = data[i++];
       for (size_t j = 0; j < child_count && i < size; j++)
@@ -43,8 +42,8 @@ extern "C" int LLVMFuzzerTestOneInput(const unsigned char* data, size_t size) {
   // Run with --v=1 to aid in debugging a specific crash.
   VLOG(1) << "Input accessibility tree:\n" << initial_state.ToString();
 
-  ui::AXTree tree;
   EmptyAXTreeDelegate delegate;
+  ui::AXTree tree;
   tree.SetDelegate(&delegate);
   tree.Unserialize(initial_state);
 

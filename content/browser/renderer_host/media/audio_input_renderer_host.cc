@@ -22,7 +22,6 @@
 #include "content/browser/media/capture/desktop_capture_device_uma_types.h"
 #include "content/browser/media/capture/web_contents_audio_input_stream.h"
 #include "content/browser/media/media_internals.h"
-#include "content/browser/renderer_host/media/audio_debug_file_writer.h"
 #include "content/browser/renderer_host/media/audio_input_device_manager.h"
 #include "content/browser/renderer_host/media/audio_input_sync_writer.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
@@ -40,8 +39,6 @@ namespace {
 #if BUILDFLAG(ENABLE_WEBRTC)
 const base::FilePath::CharType kDebugRecordingFileNameAddition[] =
     FILE_PATH_LITERAL("source_input");
-const base::FilePath::CharType kDebugRecordingFileNameExtension[] =
-    FILE_PATH_LITERAL("wav");
 #endif
 
 void LogMessage(int stream_id, const std::string& msg, bool add_prefix) {
@@ -95,14 +92,13 @@ AudioInputRendererHost::AudioEntry::~AudioEntry() {
 
 AudioInputRendererHost::AudioInputRendererHost(
     int render_process_id,
-    int32_t renderer_pid,
     media::AudioManager* audio_manager,
     MediaStreamManager* media_stream_manager,
     AudioMirroringManager* audio_mirroring_manager,
     media::UserInputMonitor* user_input_monitor)
     : BrowserMessageFilter(AudioMsgStart),
       render_process_id_(render_process_id),
-      renderer_pid_(renderer_pid),
+      renderer_pid_(0),
       audio_manager_(audio_manager),
       media_stream_manager_(media_stream_manager),
       audio_mirroring_manager_(audio_mirroring_manager),
@@ -118,6 +114,8 @@ AudioInputRendererHost::~AudioInputRendererHost() {
 #if BUILDFLAG(ENABLE_WEBRTC)
 void AudioInputRendererHost::EnableDebugRecording(const base::FilePath& file) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (audio_entries_.empty())
+    return;
   base::FilePath file_with_extensions =
       GetDebugRecordingFilePathWithExtensions(file);
   for (const auto& entry : audio_entries_)
@@ -178,9 +176,9 @@ void AudioInputRendererHost::DoCompleteCreation(
 
   // Once the audio stream is created then complete the creation process by
   // mapping shared memory and sharing with the renderer process.
-  base::SharedMemoryHandle foreign_memory_handle;
-  if (!entry->shared_memory.ShareToProcess(PeerHandle(),
-                                           &foreign_memory_handle)) {
+  base::SharedMemoryHandle foreign_memory_handle =
+      entry->shared_memory.handle().Duplicate();
+  if (!foreign_memory_handle.IsValid()) {
     // If we failed to map and share the shared memory then close the audio
     // stream and send an error message.
     DeleteEntryOnError(entry, MEMORY_SHARING_FAILED);
@@ -341,13 +339,6 @@ void AudioInputRendererHost::DoCreateStream(
     return;
   }
 
-#if BUILDFLAG(ENABLE_WEBRTC)
-  std::unique_ptr<media::AudioFileWriter> debug_writer(
-      new AudioDebugFileWriter(audio_params));
-#else
-  std::unique_ptr<media::AudioFileWriter> debug_writer(nullptr);
-#endif
-
   // If we have successfully created the SyncWriter then assign it to the
   // entry and construct an AudioInputController.
   entry->writer.reset(writer.release());
@@ -363,20 +354,17 @@ void AudioInputRendererHost::DoCreateStream(
         WebContentsAudioInputStream::Create(
             device_id, audio_params, audio_manager_->GetWorkerTaskRunner(),
             audio_mirroring_manager_),
-        entry->writer.get(), std::move(debug_writer), user_input_monitor_);
+        entry->writer.get(), user_input_monitor_,
+        BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE),
+        audio_params);
     // Only count for captures from desktop media picker dialog.
     if (entry->controller.get() && type == MEDIA_DESKTOP_AUDIO_CAPTURE)
       IncrementDesktopCaptureCounter(TAB_AUDIO_CAPTURER_CREATED);
   } else {
-    // We call CreateLowLatency regardless of the value of
-    // |audio_params.format|. Low latency can currently mean different things in
-    // different parts of the stack.
-    // TODO(grunell): Clean up the low latency terminology so that it's less
-    // confusing.
-    entry->controller = media::AudioInputController::CreateLowLatency(
-        audio_manager_, this, audio_params, device_id, entry->writer.get(),
-        std::move(debug_writer), user_input_monitor_,
-        config.automatic_gain_control);
+    entry->controller = media::AudioInputController::Create(
+        audio_manager_, this, entry->writer.get(), user_input_monitor_,
+        audio_params, device_id, config.automatic_gain_control,
+        BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE));
     oss << ", AGC=" << config.automatic_gain_control;
 
     // Only count for captures from desktop media picker dialog and system loop
@@ -566,14 +554,12 @@ void AudioInputRendererHost::MaybeEnableDebugRecordingForId(int stream_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (WebRTCInternals::GetInstance()->IsAudioDebugRecordingsEnabled()) {
     BrowserThread::PostTask(
-        BrowserThread::IO,
-        FROM_HERE,
+        BrowserThread::IO, FROM_HERE,
         base::Bind(
-            &AudioInputRendererHost::EnableDebugRecordingForId,
+            &AudioInputRendererHost::
+                AddExtensionsToPathAndEnableDebugRecordingForId,
             this,
-            GetDebugRecordingFilePathWithExtensions(
-                WebRTCInternals::GetInstance()->
-                    GetAudioDebugRecordingsFilePath()),
+            WebRTCInternals::GetInstance()->GetAudioDebugRecordingsFilePath(),
             stream_id));
   }
 }
@@ -586,6 +572,9 @@ void AudioInputRendererHost::MaybeEnableDebugRecordingForId(int stream_id) {
 
 base::FilePath AudioInputRendererHost::GetDebugRecordingFilePathWithExtensions(
     const base::FilePath& file) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  // We expect |renderer_pid_| to be set.
+  DCHECK_GT(renderer_pid_, 0);
   return file.AddExtension(IntToStringType(renderer_pid_))
              .AddExtension(kDebugRecordingFileNameAddition);
 }
@@ -598,11 +587,18 @@ void AudioInputRendererHost::EnableDebugRecordingForId(
   if (!entry)
     return;
   entry->controller->EnableDebugRecording(
-      file_name.AddExtension(IntToStringType(stream_id))
-          .AddExtension(kDebugRecordingFileNameExtension));
+      file_name.AddExtension(IntToStringType(stream_id)));
 }
 
 #undef IntToStringType
+
+void AudioInputRendererHost::AddExtensionsToPathAndEnableDebugRecordingForId(
+    const base::FilePath& file,
+    int stream_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  EnableDebugRecordingForId(GetDebugRecordingFilePathWithExtensions(file),
+                            stream_id);
+}
 
 #endif  // BUILDFLAG(ENABLE_WEBRTC)
 

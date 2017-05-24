@@ -4,18 +4,12 @@
 
 #include "components/safe_browsing/base_resource_throttle.h"
 
-#include <iterator>
-#include <utility>
-
-#include "base/debug/alias.h"
-#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "components/safe_browsing/base_ui_manager.h"
 #include "components/safe_browsing_db/util.h"
 #include "components/security_interstitials/content/unsafe_resource.h"
-#include "components/subresource_filter/content/browser/content_subresource_filter_driver_factory.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/web_contents.h"
@@ -234,18 +228,9 @@ void BaseResourceThrottle::OnCheckBrowseUrlResult(
     SBThreatType threat_type,
     const ThreatMetadata& metadata) {
   CHECK_EQ(state_, STATE_CHECKING_URL);
-  // TODO(vakh): The following base::debug::Alias() and CHECK calls should be
-  // removed after http://crbug.com/660293 is fixed.
   CHECK(url.is_valid());
   CHECK(url_being_checked_.is_valid());
-  if (url != url_being_checked_) {
-    bool url_had_timed_out = timed_out_urls_.count(url) > 0;
-    char buf[1000];
-    snprintf(buf, sizeof(buf), "sbtr::ocbur:%d:%s -- %s\n", url_had_timed_out,
-             url.spec().c_str(), url_being_checked_.spec().c_str());
-    base::debug::Alias(buf);
-    CHECK(false) << "buf: " << buf;
-  }
+  CHECK_EQ(url, url_being_checked_);
 
   timer_.Stop();  // Cancel the timeout timer.
   threat_type_ = threat_type;
@@ -322,30 +307,6 @@ void BaseResourceThrottle::StartDisplayingBlockingPage(
     const security_interstitials::UnsafeResource& resource) {
   content::WebContents* web_contents = resource.web_contents_getter.Run();
   if (web_contents) {
-    // Once activated, the subresource filter will filter subresources, but is
-    // triggered when the main frame document matches Safe Browsing blacklists.
-    if (!resource.is_subresource) {
-      using subresource_filter::ContentSubresourceFilterDriverFactory;
-      ContentSubresourceFilterDriverFactory* driver_factory =
-          ContentSubresourceFilterDriverFactory::FromWebContents(web_contents);
-      // Content embedders (such as Android Webview) does not have a
-      // driver_factory.
-      if (driver_factory) {
-        // For a redirect chain of A -> B -> C, the subresource filter expects C
-        // as the resource URL and [A, B] as redirect URLs.
-        std::vector<GURL> redirect_parent_urls;
-        if (!resource.redirect_urls.empty()) {
-          redirect_parent_urls.push_back(resource.original_url);
-          redirect_parent_urls.insert(redirect_parent_urls.end(),
-                                      resource.redirect_urls.begin(),
-                                      std::prev(resource.redirect_urls.end()));
-        }
-        driver_factory->OnMainResourceMatchedSafeBrowsingBlacklist(
-            resource.url, redirect_parent_urls, resource.threat_type,
-            resource.threat_metadata.threat_pattern_type);
-      }
-    }
-
     ui_manager->DisplayBlockingPage(resource);
     return;
   }
@@ -424,8 +385,6 @@ void BaseResourceThrottle::OnCheckUrlTimeout() {
 
   OnCheckBrowseUrlResult(url_being_checked_, safe_browsing::SB_THREAT_TYPE_SAFE,
                          ThreatMetadata());
-
-  timed_out_urls_.insert(url_being_checked_);
 }
 
 void BaseResourceThrottle::ResumeRequest() {

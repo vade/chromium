@@ -6,15 +6,17 @@
 #define HEADLESS_PUBLIC_UTIL_URL_REQUEST_DISPATCHER_H_
 
 #include "base/macros.h"
+#include "headless/public/headless_export.h"
 #include "net/base/net_errors.h"
 
 namespace headless {
 class ManagedDispatchURLRequestJob;
+class NavigationRequest;
 
 // Interface to abstract and potentially reorder (for determinism) calls to
 // ManagedDispatchUrlRequestJob::OnHeadersComplete and
 // ManagedDispatchUrlRequestJob::NotifyStartError.
-class URLRequestDispatcher {
+class HEADLESS_EXPORT URLRequestDispatcher {
  public:
   URLRequestDispatcher() {}
   virtual ~URLRequestDispatcher() {}
@@ -35,6 +37,10 @@ class URLRequestDispatcher {
 
   // Tells us the job has finished. Can be called from any thread.
   virtual void JobDeleted(ManagedDispatchURLRequestJob* job) = 0;
+
+  // Tells us a navigation has been requested. Can be called from any thread.
+  virtual void NavigationRequested(
+      std::unique_ptr<NavigationRequest> navigation_request) = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(URLRequestDispatcher);

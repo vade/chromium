@@ -107,8 +107,7 @@ class DemoWindowParentingClient : public aura::client::WindowParentingClient {
   }
 
   // Overridden from aura::client::WindowParentingClient:
-  aura::Window* GetDefaultParent(aura::Window* context,
-                                 aura::Window* window,
+  aura::Window* GetDefaultParent(aura::Window* window,
                                  const gfx::Rect& bounds) override {
     if (!capture_client_) {
       capture_client_.reset(
@@ -139,11 +138,9 @@ int DemoMain() {
 #endif
 
   // The ContextFactory must exist before any Compositors are created.
-  bool context_factory_for_test = false;
   cc::SurfaceManager surface_manager;
-  std::unique_ptr<ui::InProcessContextFactory> context_factory(
-      new ui::InProcessContextFactory(context_factory_for_test,
-                                      &surface_manager));
+  auto context_factory =
+      base::MakeUnique<ui::InProcessContextFactory>(&surface_manager);
   context_factory->set_use_test_surface(false);
 
   // Create the message-loop here before creating the root window.
@@ -154,6 +151,7 @@ int DemoMain() {
 
   std::unique_ptr<aura::Env> env = aura::Env::CreateInstance();
   env->set_context_factory(context_factory.get());
+  env->set_context_factory_private(context_factory.get());
   std::unique_ptr<aura::TestScreen> test_screen(
       aura::TestScreen::Create(gfx::Size()));
   display::Screen::SetScreenInstance(test_screen.get());

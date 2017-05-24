@@ -11,6 +11,8 @@
 namespace internal {
 
 // Expose metrics for tests.
+extern const char kHistogramServiceWorkerParseStart[];
+extern const char kBackgroundHistogramServiceWorkerParseStart[];
 extern const char kHistogramServiceWorkerFirstContentfulPaint[];
 extern const char kBackgroundHistogramServiceWorkerFirstContentfulPaint[];
 extern const char kHistogramServiceWorkerParseStartToFirstContentfulPaint[];
@@ -29,14 +31,17 @@ class ServiceWorkerPageLoadMetricsObserver
  public:
   ServiceWorkerPageLoadMetricsObserver();
   // page_load_metrics::PageLoadMetricsObserver implementation:
-  void OnFirstContentfulPaint(
-      const page_load_metrics::PageLoadTiming& timing,
+  void OnParseStart(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& extra_info) override;
+  void OnFirstContentfulPaintInPage(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
   void OnDomContentLoadedEventStart(
-      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
   void OnLoadEventStart(
-      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
 
  private:

@@ -17,6 +17,7 @@
 #include "net/base/load_flags.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 
@@ -73,6 +74,21 @@ static const int kV4TimerStartIntervalSecMax = 300;
 // Maximum time, in seconds, to wait for a response to an update request.
 static const int kV4TimerUpdateWaitSecMax = 30;
 
+ChromeClientInfo::SafeBrowsingReportingPopulation GetReportingLevelProtoValue(
+    ExtendedReportingLevel reporting_level) {
+  switch (reporting_level) {
+    case SBER_LEVEL_OFF:
+      return ChromeClientInfo::OPT_OUT;
+    case SBER_LEVEL_LEGACY:
+      return ChromeClientInfo::EXTENDED;
+    case SBER_LEVEL_SCOUT:
+      return ChromeClientInfo::SCOUT;
+    default:
+      NOTREACHED() << "Unexpected reporting_level!";
+      return ChromeClientInfo::UNSPECIFIED;
+  }
+}
+
 // The default V4UpdateProtocolManagerFactory.
 class V4UpdateProtocolManagerFactoryImpl
     : public V4UpdateProtocolManagerFactory {
@@ -82,9 +98,12 @@ class V4UpdateProtocolManagerFactoryImpl
   std::unique_ptr<V4UpdateProtocolManager> CreateProtocolManager(
       net::URLRequestContextGetter* request_context_getter,
       const V4ProtocolConfig& config,
-      V4UpdateCallback callback) override {
-    return std::unique_ptr<V4UpdateProtocolManager>(
-        new V4UpdateProtocolManager(request_context_getter, config, callback));
+      V4UpdateCallback update_callback,
+      ExtendedReportingLevelCallback extended_reporting_level_callback)
+      override {
+    return std::unique_ptr<V4UpdateProtocolManager>(new V4UpdateProtocolManager(
+        request_context_getter, config, update_callback,
+        extended_reporting_level_callback));
   }
 
  private:
@@ -100,12 +119,14 @@ V4UpdateProtocolManagerFactory* V4UpdateProtocolManager::factory_ = NULL;
 std::unique_ptr<V4UpdateProtocolManager> V4UpdateProtocolManager::Create(
     net::URLRequestContextGetter* request_context_getter,
     const V4ProtocolConfig& config,
-    V4UpdateCallback callback) {
+    V4UpdateCallback update_callback,
+    ExtendedReportingLevelCallback extended_reporting_level_callback) {
   if (!factory_) {
     factory_ = new V4UpdateProtocolManagerFactoryImpl();
   }
   return factory_->CreateProtocolManager(request_context_getter, config,
-                                         callback);
+                                         update_callback,
+                                         extended_reporting_level_callback);
 }
 
 void V4UpdateProtocolManager::ResetUpdateErrors() {
@@ -116,7 +137,8 @@ void V4UpdateProtocolManager::ResetUpdateErrors() {
 V4UpdateProtocolManager::V4UpdateProtocolManager(
     net::URLRequestContextGetter* request_context_getter,
     const V4ProtocolConfig& config,
-    V4UpdateCallback update_callback)
+    V4UpdateCallback update_callback,
+    ExtendedReportingLevelCallback extended_reporting_level_callback)
     : update_error_count_(0),
       update_back_off_mult_(1),
       next_update_interval_(base::TimeDelta::FromSeconds(
@@ -125,7 +147,8 @@ V4UpdateProtocolManager::V4UpdateProtocolManager(
       config_(config),
       request_context_getter_(request_context_getter),
       url_fetcher_id_(0),
-      update_callback_(update_callback) {
+      update_callback_(update_callback),
+      extended_reporting_level_callback_(extended_reporting_level_callback) {
   // Do not auto-schedule updates. Let the owner (V4LocalDatabaseManager) do it
   // when it is ready to process updates.
 }
@@ -217,6 +240,11 @@ std::string V4UpdateProtocolManager::GetBase64SerializedUpdateRequestProto() {
         RICE);
   }
 
+  if (!extended_reporting_level_callback_.is_null()) {
+    request.mutable_chrome_client_info()->set_reporting_population(
+        GetReportingLevelProtoValue(extended_reporting_level_callback_.Run()));
+  }
+
   V4ProtocolManagerUtil::SetClientInfoFromConfig(request.mutable_client(),
                                                  config_);
 
@@ -284,8 +312,37 @@ void V4UpdateProtocolManager::IssueUpdateRequest() {
   net::HttpRequestHeaders headers;
   GetUpdateUrlAndHeaders(req_base64, &update_url, &headers);
 
-  std::unique_ptr<net::URLFetcher> fetcher = net::URLFetcher::Create(
-      url_fetcher_id_++, update_url, net::URLFetcher::GET, this);
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("safe_browsing_g4_update", R"(
+        semantics {
+          sender: "Safe Browsing"
+          description:
+            "Safe Browsing issues a request to Google every 30 minutes or so "
+            "to get the latest database of hashes of bad URLs."
+          trigger:
+            "On a timer, approximately every 30 minutes."
+          data:
+             "The state of the local DB is sent so the server can send just "
+             "the changes. This doesn't include any user data."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: true
+          cookies_store: "Safe Browsing cookie store"
+          setting:
+            "Users can disable Safe Browsing by unchecking 'Protect you and "
+            "your device from dangerous sites' in Chromium settings under "
+            "Privacy. The feature is enabled by default."
+          chrome_policy {
+            SafeBrowsingEnabled {
+              policy_options {mode: MANDATORY}
+              SafeBrowsingEnabled: false
+            }
+          }
+        })");
+  std::unique_ptr<net::URLFetcher> fetcher =
+      net::URLFetcher::Create(url_fetcher_id_++, update_url,
+                              net::URLFetcher::GET, this, traffic_annotation);
   fetcher->SetExtraRequestHeaders(headers.ToString());
   data_use_measurement::DataUseUserData::AttachToFetcher(
       fetcher.get(), data_use_measurement::DataUseUserData::SAFE_BROWSING);

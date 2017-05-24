@@ -26,14 +26,15 @@
 
 namespace net {
 
-void X509Certificate::Initialize() {
-  x509_util::ParsePrincipal(&cert_handle_->subject, &subject_);
-  x509_util::ParsePrincipal(&cert_handle_->issuer, &issuer_);
-
-  x509_util::ParseDate(&cert_handle_->validity.notBefore, &valid_start_);
-  x509_util::ParseDate(&cert_handle_->validity.notAfter, &valid_expiry_);
-
+bool X509Certificate::Initialize() {
   serial_number_ = x509_util::ParseSerialNumber(cert_handle_);
+
+  return (
+      !serial_number_.empty() &&
+      x509_util::ParsePrincipal(&cert_handle_->subject, &subject_) &&
+      x509_util::ParsePrincipal(&cert_handle_->issuer, &issuer_) &&
+      x509_util::ParseDate(&cert_handle_->validity.notBefore, &valid_start_) &&
+      x509_util::ParseDate(&cert_handle_->validity.notAfter, &valid_expiry_));
 }
 
 std::string X509Certificate::GetDefaultNickname(CertType type) const {
@@ -88,10 +89,10 @@ std::string X509Certificate::GetDefaultNickname(CertType type) const {
   return result;
 }
 
-void X509Certificate::GetSubjectAltName(
+bool X509Certificate::GetSubjectAltName(
     std::vector<std::string>* dns_names,
     std::vector<std::string>* ip_addrs) const {
-  x509_util::GetSubjectAltName(cert_handle_, dns_names, ip_addrs);
+  return x509_util::GetSubjectAltName(cert_handle_, dns_names, ip_addrs);
 }
 
 bool X509Certificate::IsIssuedByEncoded(
@@ -236,28 +237,6 @@ void X509Certificate::GetPublicKeyInfo(OSCertHandle cert_handle,
                                        size_t* size_bits,
                                        PublicKeyType* type) {
   x509_util::GetPublicKeyInfo(cert_handle, size_bits, type);
-}
-
-// static
-X509Certificate::SignatureHashAlgorithm
-X509Certificate::GetSignatureHashAlgorithm(OSCertHandle cert_handle) {
-  SECAlgorithmID& signature = cert_handle->signature;
-  SECOidTag oid_tag = SECOID_FindOIDTag(&signature.algorithm);
-  switch (oid_tag) {
-    case SEC_OID_PKCS1_MD5_WITH_RSA_ENCRYPTION:
-      return kSignatureHashAlgorithmMd5;
-    case SEC_OID_PKCS1_MD2_WITH_RSA_ENCRYPTION:
-      return kSignatureHashAlgorithmMd2;
-    case SEC_OID_PKCS1_MD4_WITH_RSA_ENCRYPTION:
-      return kSignatureHashAlgorithmMd4;
-    case SEC_OID_PKCS1_SHA1_WITH_RSA_ENCRYPTION:
-    case SEC_OID_ISO_SHA1_WITH_RSA_SIGNATURE:
-    case SEC_OID_ANSIX9_DSA_SIGNATURE_WITH_SHA1_DIGEST:
-    case SEC_OID_ANSIX962_ECDSA_SHA1_SIGNATURE:
-      return kSignatureHashAlgorithmSha1;
-    default:
-      return kSignatureHashAlgorithmOther;
-  }
 }
 
 // static

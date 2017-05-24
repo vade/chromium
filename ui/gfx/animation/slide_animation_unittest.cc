@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/animation/test_animation_delegate.h"
@@ -35,13 +36,18 @@ class SlideAnimation::TestApi {
 ////////////////////////////////////////////////////////////////////////////////
 // SlideAnimationTest
 class SlideAnimationTest: public testing::Test {
+ protected:
+  SlideAnimationTest()
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
+
  private:
-  base::MessageLoopForUI message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
 };
 
 // Tests animation construction.
 TEST_F(SlideAnimationTest, InitialState) {
-  SlideAnimation animation(NULL);
+  SlideAnimation animation(nullptr);
   // By default, slide animations are 60 Hz, so the timer interval should be
   // 1/60th of a second.
   EXPECT_EQ(1000 / 60, animation.timer_interval().InMilliseconds());
@@ -55,7 +61,7 @@ TEST_F(SlideAnimationTest, InitialState) {
 }
 
 TEST_F(SlideAnimationTest, Basics) {
-  SlideAnimation animation(NULL);
+  SlideAnimation animation(nullptr);
   SlideAnimation::TestApi test_api(&animation);
 
   // Use linear tweening to make the math easier below.

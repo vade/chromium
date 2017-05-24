@@ -59,6 +59,7 @@ Polymer({
   /** @private */
   onResetProfileDialogClose_: function() {
     settings.navigateToPreviousRoute();
+    cr.ui.focusWithoutInk(assert(this.$.resetProfileArrow));
   },
 
 // <if expr="chromeos">
@@ -74,6 +75,7 @@ Polymer({
   /** @private */
   onPowerwashDialogClose_: function() {
     this.showPowerwashDialog_ = false;
+    cr.ui.focusWithoutInk(assert(this.$.powerwashArrow));
   },
 // </if>
 });

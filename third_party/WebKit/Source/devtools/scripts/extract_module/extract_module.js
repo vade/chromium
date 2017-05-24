@@ -24,17 +24,18 @@ const APPLICATION_DESCRIPTORS = [
 const MODULES_TO_REMOVE = [];
 
 const JS_FILES_MAPPING = [
-  {file: 'common/CSSShadowModel.js', existing: 'inline_editor'}, {file: 'common/Geometry.js', existing: 'ui'},
-  // {file: 'module/file.js', existing: 'module'}
+  {file: 'common/Text.js', new: 'text_utils'},
+  {file: 'common/TextUtils.js', new: 'text_utils'},
+  {file: 'common/TextRange.js', new: 'text_utils'},
 ];
 
 const MODULE_MAPPING = {
-    // heap_snapshot_model: {
-    //   dependencies: [],
-    //   dependents: ['heap_snapshot_worker', 'profiler'],
-    //   applications: ['inspector.json'], // need to manually add to heap snapshot worker b/c it's autostart
-    //   autostart: false,
-    // },
+  text_utils: {
+    dependencies: [],
+    dependents: ['common'],
+    applications: ['inspector.json'],
+    autostart: true,  // set to autostart because of extensions
+  },
 };
 
 const NEW_DEPENDENCIES_BY_EXISTING_MODULES = {
@@ -73,6 +74,7 @@ function extractModule() {
   }, new Map());
 
   const cssFilesMapping = findCSSFiles();
+  console.log('cssFilesMapping', cssFilesMapping);
   const identifiersByFile = calculateIdentifiers();
   const identifierMap = mapIdentifiers(identifiersByFile, cssFilesMapping);
   console.log('identifierMap', identifierMap);
@@ -285,8 +287,8 @@ function updateBuildGNFile(cssFilesMapping, newModuleSet) {
         continue;
 
       const nextContent = top(contentStack) ? top(contentStack).toLowerCase() : '';
-      if ((line === startLine || nextContent > line.toLowerCase()) &&
-          (nextLine === endLine || nextContent < nextLine.toLowerCase()))
+      if ((line === startLine || nextContent >= line.toLowerCase()) &&
+          (nextLine === endLine || nextContent <= nextLine.toLowerCase()))
         lines.splice(i + 1, 0, contentStack.pop());
     }
     if (contentStack.length)
@@ -434,10 +436,16 @@ function removeFromExistingModuleDescriptors(modules, identifierMap, cssFilesMap
       return;
     let remainingExtensions = [];
     for (let extension of moduleObj.extensions) {
-      if (!objectIncludesIdentifier(extension))
+      if (!objectIncludesIdentifier(extension)) {
         remainingExtensions.push(extension);
-      else
-        extensionMap.set(objectIncludesIdentifier(extension), extension);
+      } else {
+        if (extensionMap.has(objectIncludesIdentifier(extension))) {
+          let existingExtensions = extensionMap.get(objectIncludesIdentifier(extension));
+          extensionMap.set(objectIncludesIdentifier(extension), existingExtensions.concat(extension));
+        } else {
+          extensionMap.set(objectIncludesIdentifier(extension), [extension]);
+        }
+      }
     }
     moduleObj.extensions = remainingExtensions;
   }
@@ -511,7 +519,7 @@ function createNewModuleDescriptors(extensionMap, cssFilesMapping, identifiersBy
             .reduce((acc, file) => acc.concat(identifiersByFile.get(targetToOriginalFilesMap.get(file))), []);
     for (let identifier of identifiers) {
       if (extensionMap.has(identifier))
-        extensions.push(extensionMap.get(identifier));
+        extensions = extensions.concat(extensionMap.get(identifier));
     }
     return extensions;
   }
@@ -577,7 +585,7 @@ function updateExistingModuleDescriptors(extensionMap, cssFilesMapping, identifi
             .reduce((acc, file) => acc.concat(identifiersByFile.get(targetToOriginalFilesMap.get(file))), []);
     for (let identifier of identifiers) {
       if (extensionMap.has(identifier))
-        extensions.push(extensionMap.get(identifier));
+        extensions = extensions.concat(extensionMap.get(identifier));
     }
     return extensions;
   }

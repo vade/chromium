@@ -3,8 +3,10 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/media/webrtc/media_stream_device_permission_context.h"
+#include "base/feature_list.h"
 #include "chrome/browser/media/webrtc/media_stream_device_permissions.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
@@ -13,9 +15,8 @@
 
 MediaStreamDevicePermissionContext::MediaStreamDevicePermissionContext(
     Profile* profile,
-    const content::PermissionType permission_type,
     const ContentSettingsType content_settings_type)
-    : PermissionContextBase(profile, permission_type, content_settings_type),
+    : PermissionContextBase(profile, content_settings_type),
       content_settings_type_(content_settings_type) {
   DCHECK(content_settings_type_ == CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC ||
          content_settings_type_ == CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA);
@@ -23,17 +24,22 @@ MediaStreamDevicePermissionContext::MediaStreamDevicePermissionContext(
 
 MediaStreamDevicePermissionContext::~MediaStreamDevicePermissionContext() {}
 
-void MediaStreamDevicePermissionContext::RequestPermission(
+void MediaStreamDevicePermissionContext::DecidePermission(
     content::WebContents* web_contents,
     const PermissionRequestID& id,
-    const GURL& requesting_frame,
+    const GURL& requesting_origin,
+    const GURL& embedding_origin,
     bool user_gesture,
     const BrowserPermissionCallback& callback) {
-  NOTREACHED() << "RequestPermission is not implemented";
-  callback.Run(CONTENT_SETTING_BLOCK);
+  DCHECK(base::FeatureList::IsEnabled(
+      features::kUsePermissionManagerForMediaRequests));
+  PermissionContextBase::DecidePermission(web_contents, id, requesting_origin,
+                                          embedding_origin, user_gesture,
+                                          callback);
 }
 
 ContentSetting MediaStreamDevicePermissionContext::GetPermissionStatusInternal(
+    content::RenderFrameHost* render_frame_host,
     const GURL& requesting_origin,
     const GURL& embedding_origin) const {
   // TODO(raymes): Merge this policy check into content settings
@@ -64,7 +70,7 @@ ContentSetting MediaStreamDevicePermissionContext::GetPermissionStatusInternal(
   // Check the content setting. TODO(raymes): currently mic/camera permission
   // doesn't consider the embedder.
   ContentSetting setting = PermissionContextBase::GetPermissionStatusInternal(
-      requesting_origin, requesting_origin);
+      render_frame_host, requesting_origin, requesting_origin);
 
   if (setting == CONTENT_SETTING_DEFAULT)
     setting = CONTENT_SETTING_ASK;

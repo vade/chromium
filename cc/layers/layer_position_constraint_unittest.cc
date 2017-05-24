@@ -12,6 +12,7 @@
 #include "cc/test/fake_layer_tree_host.h"
 #include "cc/test/fake_proxy.h"
 #include "cc/test/geometry_test_utils.h"
+#include "cc/test/layer_test_common.h"
 #include "cc/test/test_task_graph_runner.h"
 #include "cc/trees/layer_tree_host_common.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -47,9 +48,9 @@ void SetLayerPropertiesForTesting(Layer* layer,
 }
 
 void ExecuteCalculateDrawProperties(LayerImpl* root_layer) {
-  std::vector<LayerImpl*> dummy_render_surface_layer_list;
+  RenderSurfaceList dummy_render_surface_list;
   LayerTreeHostCommon::CalcDrawPropsImplInputsForTesting inputs(
-      root_layer, root_layer->bounds(), &dummy_render_surface_layer_list);
+      root_layer, root_layer->bounds(), &dummy_render_surface_list);
   inputs.inner_viewport_scroll_layer =
       root_layer->layer_tree_impl()->InnerViewportScrollLayer();
   inputs.outer_viewport_scroll_layer =
@@ -134,17 +135,18 @@ class LayerPositionConstraintTest : public testing::Test {
     root_->AddChild(inner_viewport_container_layer_);
 
     layer_tree_host_->SetRootLayer(root_);
-    layer_tree_host_->GetLayerTree()->RegisterViewportLayers(
-        nullptr, root_, scroll_layer_, child_);
+    layer_tree_host_->RegisterViewportLayers(
+        nullptr, root_, inner_viewport_container_layer_,
+        outer_viewport_container_layer_, scroll_layer_, child_);
   }
 
   void CommitAndUpdateImplPointers() {
     LayerTreeHostCommon::CalcDrawPropsMainInputsForTesting inputs(
         root_.get(), root_->bounds());
     inputs.inner_viewport_scroll_layer =
-        layer_tree_host_->GetLayerTree()->inner_viewport_scroll_layer();
+        layer_tree_host_->inner_viewport_scroll_layer();
     inputs.outer_viewport_scroll_layer =
-        layer_tree_host_->GetLayerTree()->outer_viewport_scroll_layer();
+        layer_tree_host_->outer_viewport_scroll_layer();
     LayerTreeHostCommon::CalculateDrawPropertiesForTesting(&inputs);
 
     // Since scroll deltas aren't sent back to the main thread in this test
@@ -207,18 +209,6 @@ class LayerPositionConstraintTest : public testing::Test {
   }
 };
 
-namespace {
-
-void SetFixedContainerSizeDelta(LayerImpl* scroll_layer,
-                                const gfx::Vector2d& delta) {
-  DCHECK(scroll_layer);
-  DCHECK(scroll_layer->scrollable());
-
-  LayerImpl* container_layer = scroll_layer->scroll_clip_layer();
-  container_layer->SetBoundsDelta(delta);
-}
-}  // namespace
-
 TEST_F(LayerPositionConstraintTest,
      ScrollCompensationForFixedPositionLayerWithDirectContainer) {
   // This test checks for correct scroll compensation when the fixed-position
@@ -256,7 +246,8 @@ TEST_F(LayerPositionConstraintTest,
                                   grand_child_impl_->DrawTransform());
 
   // Case 3: fixed-container size delta of 20, 20
-  SetFixedContainerSizeDelta(child_impl_, gfx::Vector2d(20, 20));
+  outer_viewport_container_layer_impl_->SetViewportBoundsDelta(
+      gfx::Vector2d(20, 20));
   ExecuteCalculateDrawProperties(root_impl_);
 
   // Top-left fixed-position layer should not be affected by container size.
@@ -270,7 +261,8 @@ TEST_F(LayerPositionConstraintTest,
   CommitAndUpdateImplPointers();
 
   SetScrollOffsetDelta(child_impl_, gfx::Vector2d(10, 10));
-  SetFixedContainerSizeDelta(child_impl_, gfx::Vector2d(20, 20));
+  outer_viewport_container_layer_impl_->SetViewportBoundsDelta(
+      gfx::Vector2d(20, 20));
   ExecuteCalculateDrawProperties(root_impl_);
 
   // Bottom-right fixed-position layer moves as container resizes.
@@ -331,7 +323,8 @@ TEST_F(LayerPositionConstraintTest,
                                   great_grand_child_impl_->DrawTransform());
 
   // Case 3: fixed-container size delta of 20, 20
-  SetFixedContainerSizeDelta(child_impl_, gfx::Vector2d(20, 20));
+  outer_viewport_container_layer_impl_->SetViewportBoundsDelta(
+      gfx::Vector2d(20, 20));
   ExecuteCalculateDrawProperties(root_impl_);
 
   // Top-left fixed-position layer should not be affected by container size.
@@ -346,7 +339,8 @@ TEST_F(LayerPositionConstraintTest,
   great_grand_child_->SetPositionConstraint(fixed_to_bottom_right_);
   CommitAndUpdateImplPointers();
   SetScrollOffsetDelta(child_impl_, gfx::Vector2d(10, 10));
-  SetFixedContainerSizeDelta(child_impl_, gfx::Vector2d(20, 20));
+  outer_viewport_container_layer_impl_->SetViewportBoundsDelta(
+      gfx::Vector2d(20, 20));
   ExecuteCalculateDrawProperties(root_impl_);
 
   // Bottom-right fixed-position layer moves as container resizes.
@@ -459,12 +453,12 @@ TEST_F(LayerPositionConstraintTest,
   gfx::Transform expected_grand_child_transform;
   gfx::Transform expected_great_grand_child_transform;
   expected_great_grand_child_transform.PreconcatTransform(rotation_about_z);
-  EXPECT_TRUE(grand_child_impl_->render_surface());
+  EXPECT_TRUE(GetRenderSurface(grand_child_impl_));
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_child_transform,
                                   child_impl_->DrawTransform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(
       expected_surface_draw_transform,
-      grand_child_impl_->render_surface()->draw_transform());
+      GetRenderSurface(grand_child_impl_)->draw_transform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_grand_child_transform,
                                   grand_child_impl_->DrawTransform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_great_grand_child_transform,
@@ -496,19 +490,20 @@ TEST_F(LayerPositionConstraintTest,
   expected_great_grand_child_transform.Translate(10.0, 30.0);
   expected_great_grand_child_transform.PreconcatTransform(rotation_about_z);
 
-  EXPECT_TRUE(grand_child_impl_->render_surface());
+  EXPECT_TRUE(GetRenderSurface(grand_child_impl_));
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_child_transform,
                                   child_impl_->DrawTransform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(
       expected_surface_draw_transform,
-      grand_child_impl_->render_surface()->draw_transform());
+      GetRenderSurface(grand_child_impl_)->draw_transform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_grand_child_transform,
                                   grand_child_impl_->DrawTransform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_great_grand_child_transform,
                                   great_grand_child_impl_->DrawTransform());
 
   // Case 3: fixed-container size delta of 20, 20
-  SetFixedContainerSizeDelta(child_impl_, gfx::Vector2d(20, 20));
+  outer_viewport_container_layer_impl_->SetViewportBoundsDelta(
+      gfx::Vector2d(20, 20));
   ExecuteCalculateDrawProperties(root_impl_);
 
   // Top-left fixed-position layer should not be affected by container size.
@@ -524,7 +519,8 @@ TEST_F(LayerPositionConstraintTest,
 
   CommitAndUpdateImplPointers();
   SetScrollOffsetDelta(child_impl_, gfx::Vector2d(10, 30));
-  SetFixedContainerSizeDelta(child_impl_, gfx::Vector2d(20, 20));
+  outer_viewport_container_layer_impl_->SetViewportBoundsDelta(
+      gfx::Vector2d(20, 20));
 
   ExecuteCalculateDrawProperties(root_impl_);
 
@@ -603,18 +599,18 @@ TEST_F(LayerPositionConstraintTest,
   gfx::Transform expected_fixed_position_child_transform;
   expected_fixed_position_child_transform.PreconcatTransform(rotation_about_z);
 
-  EXPECT_TRUE(grand_child_impl_->render_surface());
-  EXPECT_TRUE(great_grand_child_impl_->render_surface());
+  EXPECT_TRUE(GetRenderSurface(grand_child_impl_));
+  EXPECT_TRUE(GetRenderSurface(great_grand_child_impl_));
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_child_transform,
                                   child_impl_->DrawTransform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(
       expected_grand_child_surface_draw_transform,
-      grand_child_impl_->render_surface()->draw_transform());
+      GetRenderSurface(grand_child_impl_)->draw_transform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_grand_child_transform,
                                   grand_child_impl_->DrawTransform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(
       expected_great_grand_child_surface_draw_transform,
-      great_grand_child_impl_->render_surface()->draw_transform());
+      GetRenderSurface(great_grand_child_impl_)->draw_transform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_great_grand_child_transform,
                                   great_grand_child_impl_->DrawTransform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_fixed_position_child_transform,
@@ -643,25 +639,26 @@ TEST_F(LayerPositionConstraintTest,
   expected_fixed_position_child_transform.Translate(10.0, 30.0);
   expected_fixed_position_child_transform.PreconcatTransform(rotation_about_z);
 
-  EXPECT_TRUE(grand_child_impl_->render_surface());
-  EXPECT_TRUE(great_grand_child_impl_->render_surface());
+  EXPECT_TRUE(GetRenderSurface(grand_child_impl_));
+  EXPECT_TRUE(GetRenderSurface(great_grand_child_impl_));
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_child_transform,
                                   child_impl_->DrawTransform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(
       expected_grand_child_surface_draw_transform,
-      grand_child_impl_->render_surface()->draw_transform());
+      GetRenderSurface(grand_child_impl_)->draw_transform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_grand_child_transform,
                                   grand_child_impl_->DrawTransform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(
       expected_great_grand_child_surface_draw_transform,
-      great_grand_child_impl_->render_surface()->draw_transform());
+      GetRenderSurface(great_grand_child_impl_)->draw_transform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_great_grand_child_transform,
                                   great_grand_child_impl_->DrawTransform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_fixed_position_child_transform,
                                   fixed_position_child_impl->DrawTransform());
 
   // Case 3: fixed-container size delta of 20, 20
-  SetFixedContainerSizeDelta(child_impl_, gfx::Vector2d(20, 20));
+  outer_viewport_container_layer_impl_->SetViewportBoundsDelta(
+      gfx::Vector2d(20, 20));
   ExecuteCalculateDrawProperties(root_impl_);
 
   // Top-left fixed-position layer should not be affected by container size.
@@ -680,7 +677,8 @@ TEST_F(LayerPositionConstraintTest,
   fixed_position_child_impl =
       layer_tree_impl_->LayerById(fixed_position_child->id());
   SetScrollOffsetDelta(child_impl_, gfx::Vector2d(10, 30));
-  SetFixedContainerSizeDelta(child_impl_, gfx::Vector2d(20, 20));
+  outer_viewport_container_layer_impl_->SetViewportBoundsDelta(
+      gfx::Vector2d(20, 20));
   ExecuteCalculateDrawProperties(root_impl_);
 
   // Bottom-right fixed-position layer moves as container resizes.
@@ -765,18 +763,18 @@ TEST_F(
   gfx::Transform expected_fixed_position_child_transform;
   expected_fixed_position_child_transform.PreconcatTransform(rotation_about_z);
 
-  EXPECT_TRUE(grand_child_impl_->render_surface());
-  EXPECT_TRUE(great_grand_child_impl_->render_surface());
+  EXPECT_TRUE(GetRenderSurface(grand_child_impl_));
+  EXPECT_TRUE(GetRenderSurface(great_grand_child_impl_));
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_child_transform,
                                   child_impl_->DrawTransform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(
       expected_grand_child_surface_draw_transform,
-      grand_child_impl_->render_surface()->draw_transform());
+      GetRenderSurface(grand_child_impl_)->draw_transform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_grand_child_transform,
                                   grand_child_impl_->DrawTransform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(
       expected_great_grand_child_surface_draw_transform,
-      great_grand_child_impl_->render_surface()->draw_transform());
+      GetRenderSurface(great_grand_child_impl_)->draw_transform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_great_grand_child_transform,
                                   great_grand_child_impl_->DrawTransform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_fixed_position_child_transform,
@@ -810,18 +808,18 @@ TEST_F(
   expected_fixed_position_child_transform.Translate(10.0, 30.0);
   expected_fixed_position_child_transform.PreconcatTransform(rotation_about_z);
 
-  EXPECT_TRUE(grand_child_impl_->render_surface());
-  EXPECT_TRUE(great_grand_child_impl_->render_surface());
+  EXPECT_TRUE(GetRenderSurface(grand_child_impl_));
+  EXPECT_TRUE(GetRenderSurface(great_grand_child_impl_));
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_child_transform,
                                   child_impl_->DrawTransform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(
       expected_grand_child_surface_draw_transform,
-      grand_child_impl_->render_surface()->draw_transform());
+      GetRenderSurface(grand_child_impl_)->draw_transform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_grand_child_transform,
                                   grand_child_impl_->DrawTransform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(
       expected_great_grand_child_surface_draw_transform,
-      great_grand_child_impl_->render_surface()->draw_transform());
+      GetRenderSurface(great_grand_child_impl_)->draw_transform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_great_grand_child_transform,
                                   great_grand_child_impl_->DrawTransform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_fixed_position_child_transform,
@@ -848,10 +846,10 @@ TEST_F(LayerPositionConstraintTest,
   gfx::Transform expected_surface_draw_transform;
   gfx::Transform expected_child_transform;
   gfx::Transform expected_grand_child_transform;
-  EXPECT_TRUE(child_impl_->render_surface());
+  EXPECT_TRUE(GetRenderSurface(child_impl_));
   EXPECT_TRANSFORMATION_MATRIX_EQ(
       expected_surface_draw_transform,
-      child_impl_->render_surface()->draw_transform());
+      GetRenderSurface(child_impl_)->draw_transform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_child_transform,
                                   child_impl_->DrawTransform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_grand_child_transform,
@@ -869,17 +867,18 @@ TEST_F(LayerPositionConstraintTest,
   expected_grand_child_transform.MakeIdentity();
   expected_grand_child_transform.Translate(10.0, 10.0);
 
-  EXPECT_TRUE(child_impl_->render_surface());
+  EXPECT_TRUE(GetRenderSurface(child_impl_));
   EXPECT_TRANSFORMATION_MATRIX_EQ(
       expected_surface_draw_transform,
-      child_impl_->render_surface()->draw_transform());
+      GetRenderSurface(child_impl_)->draw_transform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_child_transform,
                                   child_impl_->DrawTransform());
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected_grand_child_transform,
                                   grand_child_impl_->DrawTransform());
 
   // Case 3: fixed-container size delta of 20, 20
-  SetFixedContainerSizeDelta(child_impl_, gfx::Vector2d(20, 20));
+  outer_viewport_container_layer_impl_->SetViewportBoundsDelta(
+      gfx::Vector2d(20, 20));
   ExecuteCalculateDrawProperties(root_impl_);
 
   // Top-left fixed-position layer should not be affected by container size.
@@ -892,7 +891,8 @@ TEST_F(LayerPositionConstraintTest,
   grand_child_->SetPositionConstraint(fixed_to_bottom_right_);
   CommitAndUpdateImplPointers();
   SetScrollOffsetDelta(child_impl_, gfx::Vector2d(10, 10));
-  SetFixedContainerSizeDelta(child_impl_, gfx::Vector2d(20, 20));
+  outer_viewport_container_layer_impl_->SetViewportBoundsDelta(
+      gfx::Vector2d(20, 20));
   ExecuteCalculateDrawProperties(root_impl_);
 
   // Bottom-right fixed-position layer moves as container resizes.
@@ -950,7 +950,8 @@ TEST_F(LayerPositionConstraintTest,
                                   grand_child_impl_->DrawTransform());
 
   // Case 3: fixed-container size delta of 20, 20
-  SetFixedContainerSizeDelta(child_impl_, gfx::Vector2d(20, 20));
+  outer_viewport_container_layer_impl_->SetViewportBoundsDelta(
+      gfx::Vector2d(20, 20));
   ExecuteCalculateDrawProperties(root_impl_);
 
   // Top-left fixed-position layer should not be affected by container size.
@@ -963,7 +964,8 @@ TEST_F(LayerPositionConstraintTest,
   grand_child_->SetPositionConstraint(fixed_to_bottom_right_);
   CommitAndUpdateImplPointers();
   SetScrollOffsetDelta(child_impl_, gfx::Vector2d(10, 10));
-  SetFixedContainerSizeDelta(child_impl_, gfx::Vector2d(20, 20));
+  outer_viewport_container_layer_impl_->SetViewportBoundsDelta(
+      gfx::Vector2d(20, 20));
 
   ExecuteCalculateDrawProperties(root_impl_);
 
@@ -1017,7 +1019,8 @@ TEST_F(LayerPositionConstraintTest,
 
   // Case 2: sizeDelta
   SetScrollOffsetDelta(child_impl_, gfx::Vector2d(0, 0));
-  SetFixedContainerSizeDelta(child_impl_, gfx::Vector2d(20, 20));
+  outer_viewport_container_layer_impl_->SetViewportBoundsDelta(
+      gfx::Vector2d(20, 20));
   ExecuteCalculateDrawProperties(root_impl_);
 
   expected_child_transform.MakeIdentity();
@@ -1112,7 +1115,8 @@ TEST_F(LayerPositionConstraintTest,
   // Case 1: fixed-container size delta of 20, 20
   SetScrollOffsetDelta(scroll_layer_impl_, gfx::Vector2d(10, 10));
   scroll_layer_impl_->SetDrawsContent(true);
-  SetFixedContainerSizeDelta(scroll_layer_impl_, gfx::Vector2d(20, 20));
+  inner_viewport_container_layer_impl_->SetViewportBoundsDelta(
+      gfx::Vector2d(20, 20));
   gfx::Transform expected_scroll_layer_transform;
   expected_scroll_layer_transform.Translate(-10.0, -10.0);
   gfx::Transform expected_fixed_child_transform;
@@ -1132,7 +1136,8 @@ TEST_F(LayerPositionConstraintTest,
       root_impl_->layer_tree_impl()->FindActiveTreeLayerById(fixed_child->id());
 
   SetScrollOffsetDelta(scroll_layer_impl_, gfx::Vector2d(10, 10));
-  SetFixedContainerSizeDelta(scroll_layer_impl_, gfx::Vector2d(20, 20));
+  inner_viewport_container_layer_impl_->SetViewportBoundsDelta(
+      gfx::Vector2d(20, 20));
   ExecuteCalculateDrawProperties(root_impl_);
 
   // Bottom-right fixed-position layer moves as container resizes.

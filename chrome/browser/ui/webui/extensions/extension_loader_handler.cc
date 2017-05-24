@@ -4,21 +4,24 @@
 
 #include "chrome/browser/ui/webui/extensions/extension_loader_handler.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/values.h"
 #include "chrome/browser/extensions/path_util.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/grit/generated_resources.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
@@ -101,6 +104,31 @@ void ExtensionLoaderHandler::RegisterMessages() {
                  weak_ptr_factory_.GetWeakPtr()));
 }
 
+// static
+void ExtensionLoaderHandler::GetManifestError(
+    const std::string& error,
+    const base::FilePath& extension_path,
+    const GetManifestErrorCallback& callback) {
+  size_t line = 0u;
+  size_t column = 0u;
+  std::string regex = base::StringPrintf("%s  Line: (\\d+), column: (\\d+), .*",
+                                         manifest_errors::kManifestParseError);
+  // If this was a JSON parse error, we can highlight the exact line with the
+  // error. Otherwise, we should still display the manifest (for consistency,
+  // reference, and so that if we ever make this really fancy and add an editor,
+  // it's ready).
+  //
+  // This regex call can fail, but if it does, we just don't highlight anything.
+  re2::RE2::FullMatch(error, regex, &line, &column);
+
+  // This will read the manifest and call AddFailure with the read manifest
+  // contents.
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
+      base::Bind(&ReadFileToString, extension_path.Append(kManifestFilename)),
+      base::Bind(callback, extension_path, error, line));
+}
+
 void ExtensionLoaderHandler::HandleRetry(const base::ListValue* args) {
   DCHECK(args->empty());
   const base::FilePath file_path = failed_paths_.back();
@@ -144,30 +172,9 @@ void ExtensionLoaderHandler::OnLoadFailure(
   if (web_ui()->GetWebContents()->GetBrowserContext() != browser_context)
     return;
 
-  size_t line = 0u;
-  size_t column = 0u;
-  std::string regex =
-      base::StringPrintf("%s  Line: (\\d+), column: (\\d+), .*",
-                         manifest_errors::kManifestParseError);
-  // If this was a JSON parse error, we can highlight the exact line with the
-  // error. Otherwise, we should still display the manifest (for consistency,
-  // reference, and so that if we ever make this really fancy and add an editor,
-  // it's ready).
-  //
-  // This regex call can fail, but if it does, we just don't highlight anything.
-  re2::RE2::FullMatch(error, regex, &line, &column);
-
-  // This will read the manifest and call AddFailure with the read manifest
-  // contents.
-  base::PostTaskAndReplyWithResult(
-      content::BrowserThread::GetBlockingPool(),
-      FROM_HERE,
-      base::Bind(&ReadFileToString, file_path.Append(kManifestFilename)),
-      base::Bind(&ExtensionLoaderHandler::AddFailure,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 file_path,
-                 error,
-                 line));
+  GetManifestError(error, file_path,
+                   base::Bind(&ExtensionLoaderHandler::AddFailure,
+                              weak_ptr_factory_.GetWeakPtr()));
 }
 
 void ExtensionLoaderHandler::DidStartNavigation(
@@ -199,10 +206,9 @@ void ExtensionLoaderHandler::AddFailure(
   highlighter.SetHighlightedRegions(manifest_value.get());
 
   std::unique_ptr<base::DictionaryValue> failure(new base::DictionaryValue());
-  failure->Set("path",
-               new base::StringValue(prettified_path.LossyDisplayName()));
-  failure->Set("error", new base::StringValue(base::UTF8ToUTF16(error)));
-  failure->Set("manifest", manifest_value.release());
+  failure->SetString("path", prettified_path.LossyDisplayName());
+  failure->SetString("error", error);
+  failure->Set("manifest", std::move(manifest_value));
   failures_.Append(std::move(failure));
 
   // Only notify the frontend if the frontend UI is ready.

@@ -122,27 +122,25 @@ class IndexedDBBrowserTest : public ContentBrowserTest,
     return static_cast<IndexedDBContextImpl*>(partition->GetIndexedDBContext());
   }
 
-  void SetQuota(int quota_kilobytes) {
-    const int kTemporaryStorageQuotaSize =
-        quota_kilobytes * 1024 * QuotaManager::kPerHostTemporaryPortion;
-    SetTempQuota(kTemporaryStorageQuotaSize,
-        BrowserContext::GetDefaultStoragePartition(
-            shell()->web_contents()->GetBrowserContext())->GetQuotaManager());
+  void SetQuota(int per_host_quota_kilobytes) {
+    SetTempQuota(per_host_quota_kilobytes,
+                 BrowserContext::GetDefaultStoragePartition(
+                     shell()->web_contents()->GetBrowserContext())
+                     ->GetQuotaManager());
   }
 
-  static void SetTempQuota(int64_t bytes, scoped_refptr<QuotaManager> qm) {
+  static void SetTempQuota(int per_host_quota_kilobytes,
+                           scoped_refptr<QuotaManager> qm) {
     if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-      BrowserThread::PostTask(
-          BrowserThread::IO, FROM_HERE,
-          base::Bind(&IndexedDBBrowserTest::SetTempQuota, bytes, qm));
+      BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                              base::Bind(&IndexedDBBrowserTest::SetTempQuota,
+                                         per_host_quota_kilobytes, qm));
       return;
     }
     DCHECK_CURRENTLY_ON(BrowserThread::IO);
-    qm->SetTemporaryGlobalOverrideQuota(bytes, storage::QuotaCallback());
-    // Don't return until the quota has been set.
-    scoped_refptr<base::ThreadTestHelper> helper(new base::ThreadTestHelper(
-        BrowserThread::GetTaskRunnerForThread(BrowserThread::DB)));
-    ASSERT_TRUE(helper->Run());
+    const int KB = 1024;
+    qm->SetQuotaSettings(
+        storage::GetHardCodedSettings(per_host_quota_kilobytes * KB));
   }
 
   virtual int64_t RequestDiskUsage() {
@@ -202,7 +200,12 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, CursorTest) {
   SimpleTest(GetTestUrl("indexeddb", "cursor_test.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, CursorTestIncognito) {
+#if defined(OS_ANDROID)
+#define MAYBE_CursorTestIncognito DISABLED_CursorTestIncognito
+#else
+#define MAYBE_CursorTestIncognito CursorTestIncogntio
+#endif
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, MAYBE_CursorTestIncognito) {
   SimpleTest(GetTestUrl("indexeddb", "cursor_test.html"),
              true /* incognito */);
 }
@@ -311,7 +314,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithGCExposed,
 static void CopyLevelDBToProfile(Shell* shell,
                                  scoped_refptr<IndexedDBContextImpl> context,
                                  const std::string& test_directory) {
-  DCHECK(context->TaskRunner()->RunsTasksOnCurrentThread());
+  DCHECK(context->TaskRunner()->RunsTasksInCurrentSequence());
   base::FilePath leveldb_dir(FILE_PATH_LITERAL("file__0.indexeddb.leveldb"));
   base::FilePath test_data_dir =
       GetTestFilePath("indexeddb", test_directory.c_str()).Append(leveldb_dir);
@@ -491,10 +494,10 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, BlobsCountAgainstQuota) {
 }
 
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, DeleteForOriginDeletesBlobs) {
-  SimpleTest(GetTestUrl("indexeddb", "write_20mb_blob.html"));
+  SimpleTest(GetTestUrl("indexeddb", "write_4mb_blob.html"));
   int64_t size = RequestDiskUsage();
   // This assertion assumes that we do not compress blobs.
-  EXPECT_GT(size, 20 << 20 /* 20 MB */);
+  EXPECT_GT(size, 4 << 20 /* 4 MB */);
   // TODO(jsbell): Remove static_cast<> when overloads are eliminated.
   GetContext()->TaskRunner()->PostTask(
       FROM_HERE,

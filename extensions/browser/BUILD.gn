@@ -5,7 +5,41 @@
 import("//build/config/features.gni")
 import("//extensions/features/features.gni")
 
-source_set("browser") {
+group("browser") {
+  public_deps = [
+    "//extensions/browser:browser_context_keyed_service_factories",
+    "//extensions/browser:browser_sources",
+    "//extensions/browser/api:api_registration",
+  ]
+
+  if (enable_extensions) {
+    # Includes all API implementations and the ExtensionsApiClient
+    # interface. Moving an API from src/chrome to src/extensions implies
+    # it can be cleanly disabled with enable_extensions=false.
+    # TODO: Eventually the entire extensions module should not be built
+    # when enable_extensions=false.
+    public_deps += [ "//extensions/browser/api" ]
+  }
+}
+
+# Isolate the instantiation of BrowserContextKeyedServiceFactories.
+source_set("browser_context_keyed_service_factories") {
+  visibility = [ ":*" ]
+
+  sources = [
+    "browser_context_keyed_service_factories.cc",
+    "browser_context_keyed_service_factories.h",
+  ]
+
+  deps = [
+    "//extensions/browser:browser_sources",
+    "//extensions/browser/api",
+  ]
+}
+
+source_set("browser_sources") {
+  visibility = [ "./*" ]
+
   sources = []
 
   deps = [
@@ -22,8 +56,8 @@ source_set("browser") {
     "//components/web_modal",
     "//components/zoom",
     "//content/public/browser",
+    "//content/public/common",
     "//crypto:platform",
-    "//extensions/browser/api:api_registration",
     "//extensions/common",
     "//extensions/common/api",
     "//extensions/features",
@@ -40,14 +74,7 @@ source_set("browser") {
   ]
 
   if (enable_extensions) {
-    # Includes all API implementations and the ExtensionsApiClient
-    # interface. Moving an API from src/chrome to src/extensions implies
-    # it can be cleanly disabled with enable_extensions=false.
-    # TODO: Eventually the entire extensions module should not be built
-    # when enable_extensions=false.
     sources = [
-      # NOTE: When moving an API out of Chrome be sure to verify that the
-      # Android build still compiles. See conditions below.
       "api_activity_monitor.cc",
       "api_activity_monitor.h",
       "app_sorting.h",
@@ -58,8 +85,6 @@ source_set("browser") {
       "blob_holder.h",
       "blocked_action_type.h",
       "browser_context_keyed_api_factory.h",
-      "browser_context_keyed_service_factories.cc",
-      "browser_context_keyed_service_factories.h",
       "component_extension_resource_manager.h",
       "computed_hashes.cc",
       "computed_hashes.h",
@@ -199,8 +224,14 @@ source_set("browser") {
       "notification_types.h",
       "null_app_sorting.cc",
       "null_app_sorting.h",
+      "policy_check.cc",
+      "policy_check.h",
       "pref_names.cc",
       "pref_names.h",
+      "preload_check.cc",
+      "preload_check.h",
+      "preload_check_group.cc",
+      "preload_check_group.h",
       "process_manager.cc",
       "process_manager.h",
       "process_manager_delegate.h",
@@ -215,6 +246,7 @@ source_set("browser") {
       "quota_service.h",
       "renderer_startup_helper.cc",
       "renderer_startup_helper.h",
+      "requirements_checker.cc",
       "requirements_checker.h",
       "runtime_data.cc",
       "runtime_data.h",
@@ -254,36 +286,26 @@ source_set("browser") {
     ]
 
     public_deps = [
-      "//extensions/browser/api",
       "//extensions/browser/app_window",
       "//extensions/browser/guest_view",
       "//extensions/browser/install",
       "//extensions/browser/kiosk",
       "//extensions/browser/updater",
       "//extensions/browser/value_store",
+      "//ipc",
     ]
 
     deps += [
-      "//components/browsing_data/content",
-      "//components/onc",
-      "//components/storage_monitor",
+      "//components/crx_file",
+      "//components/prefs",
+      "//components/sync",
       "//components/update_client",
       "//components/variations",
       "//crypto:platform",
-      "//device/base",
-      "//device/bluetooth",
-      "//device/hid",
-      "//device/power_save_blocker",
-      "//device/serial",
-      "//device/usb",
       "//extensions:extensions_browser_resources",
-      "//extensions/common:mojo",
+      "//extensions/common",
       "//services/service_manager/public/cpp",
     ]
-
-    if (is_chromeos) {
-      deps += [ "//chromeos" ]
-    }
   }
 }
 
@@ -291,6 +313,11 @@ source_set("browser_tests") {
   testonly = true
   sources = [
     "api/audio/audio_apitest.cc",
+
+    # TODO(michaelpg): bluetooth_appshell_test.cc is a crutch until we have a
+    # better system for testing APIs in both app_shell and chrome. See
+    # crbug.com/650835.
+    "api/bluetooth/bluetooth_appshell_test.cc",
     "api/bluetooth_socket/bluetooth_socket_apitest.cc",
     "api/display_source/display_source_apitest.cc",
     "api/display_source/display_source_apitestbase.cc",
@@ -342,8 +369,25 @@ source_set("browser_tests") {
     deps += [ "//extensions/shell:app_shell" ]
   }
   if (is_chromeos) {
+    sources += [ "api/virtual_keyboard/virtual_keyboard_apitest.cc" ]
+
     deps += [ "//chromeos" ]
   }
+}
+
+source_set("test_support") {
+  testonly = true
+  sources = [
+    "preload_check_test_util.cc",
+    "preload_check_test_util.h",
+  ]
+
+  deps = [
+    "//base",
+    "//extensions/browser",
+    "//extensions/common",
+    "//testing/gtest",
+  ]
 }
 
 source_set("unit_tests") {
@@ -367,9 +411,14 @@ source_set("unit_tests") {
     "api/document_scan/document_scan_api_unittest.cc",
     "api/document_scan/document_scan_interface_chromeos_unittest.cc",
     "api/document_scan/mock_document_scan_interface.cc",
+    "api/document_scan/mock_document_scan_interface.h",
+    "api/file_handlers/app_file_handler_util_unittest.cc",
+    "api/file_handlers/directory_util_unittest.cc",
+    "api/file_handlers/mime_util_unittest.cc",
     "api/idle/idle_api_unittest.cc",
     "api/mime_handler_private/mime_handler_private_unittest.cc",
     "api/networking_config/networking_config_service_chromeos_unittest.cc",
+    "api/networking_private/networking_private_chromeos_unittest.cc",
     "api/power/power_api_unittest.cc",
     "api/runtime/restart_after_delay_api_unittest.cc",
     "api/sockets_tcp/sockets_tcp_api_unittest.cc",
@@ -386,6 +435,7 @@ source_set("unit_tests") {
     "computed_hashes_unittest.cc",
     "content_hash_fetcher_unittest.cc",
     "content_hash_tree_unittest.cc",
+    "content_verify_job_unittest.cc",
     "error_map_unittest.cc",
     "event_listener_map_unittest.cc",
     "event_router_unittest.cc",
@@ -405,9 +455,13 @@ source_set("unit_tests") {
     "load_monitoring_extension_host_queue_unittest.cc",
     "management_policy_unittest.cc",
     "mojo/keep_alive_impl_unittest.cc",
+    "policy_check_unittest.cc",
+    "preload_check_group_unittest.cc",
     "process_manager_unittest.cc",
     "process_map_unittest.cc",
     "quota_service_unittest.cc",
+    "renderer_startup_helper_unittest.cc",
+    "requirements_checker_unittest.cc",
     "runtime_data_unittest.cc",
     "sandboxed_unpacker_unittest.cc",
     "updater/update_service_unittest.cc",
@@ -424,6 +478,7 @@ source_set("unit_tests") {
 
   deps = [
     ":browser",
+    ":test_support",
     "//base",
     "//base/test:test_support",
     "//components/cast_certificate",
@@ -431,6 +486,7 @@ source_set("unit_tests") {
     "//components/cast_certificate/proto:unittest_proto",
     "//components/crx_file",
     "//components/keyed_service/content",
+    "//components/onc",
     "//components/pref_registry:pref_registry",
     "//components/prefs:test_support",
     "//components/sync_preferences:test_support",
@@ -447,12 +503,17 @@ source_set("unit_tests") {
     "//extensions/features",
     "//ipc:test_support",
     "//net:test_support",
+    "//storage/browser:test_support",
     "//third_party/leveldatabase",
     "//third_party/zlib:zip",
   ]
 
   if (is_chromeos) {
-    sources += [ "api/webcam_private/visca_webcam_unittest.cc" ]
+    sources += [
+      "api/audio/audio_device_id_calculator_unittest.cc",
+      "api/webcam_private/visca_webcam_unittest.cc",
+    ]
+
     deps += [ "//chromeos:test_support" ]
   }
 }

@@ -6,7 +6,7 @@
 #define PaymentRequestEvent_h
 
 #include "modules/EventModules.h"
-#include "modules/payments/PaymentAppRequestData.h"
+#include "modules/payments/PaymentAppRequest.h"
 #include "modules/serviceworkers/ExtendableEvent.h"
 #include "platform/heap/Handle.h"
 
@@ -16,28 +16,33 @@ class AtomicString;
 
 namespace blink {
 
+class RespondWithObserver;
+
 class MODULES_EXPORT PaymentRequestEvent final : public ExtendableEvent {
   DEFINE_WRAPPERTYPEINFO();
   WTF_MAKE_NONCOPYABLE(PaymentRequestEvent);
 
  public:
-  static PaymentRequestEvent* create(const AtomicString& type,
-                                     const PaymentAppRequestData&,
+  static PaymentRequestEvent* Create(const AtomicString& type,
+                                     const PaymentAppRequest&,
+                                     RespondWithObserver*,
                                      WaitUntilObserver*);
   ~PaymentRequestEvent() override;
 
-  const AtomicString& interfaceName() const override;
+  const AtomicString& InterfaceName() const override;
 
-  void data(PaymentAppRequestData&) const;
-  void respondWith(ScriptPromise);
+  void appRequest(PaymentAppRequest&) const;
+  void respondWith(ScriptState*, ScriptPromise, ExceptionState&);
 
   DECLARE_VIRTUAL_TRACE();
 
  private:
   PaymentRequestEvent(const AtomicString& type,
-                      const PaymentAppRequestData&,
+                      const PaymentAppRequest&,
+                      RespondWithObserver*,
                       WaitUntilObserver*);
-  PaymentAppRequestData m_data;
+  PaymentAppRequest app_request_;
+  Member<RespondWithObserver> observer_;
 };
 
 }  // namespace blink

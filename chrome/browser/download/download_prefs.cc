@@ -22,8 +22,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
-#include "chrome/browser/download/download_service.h"
-#include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_target_determiner.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -81,7 +79,7 @@ class DefaultDownloadDirectory {
   const base::FilePath& path() const { return path_; }
 
  private:
-  friend struct base::DefaultLazyInstanceTraits<DefaultDownloadDirectory>;
+  friend struct base::LazyInstanceTraitsBase<DefaultDownloadDirectory>;
 
   DefaultDownloadDirectory() {
     if (!PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS, &path_)) {
@@ -101,7 +99,7 @@ class DefaultDownloadDirectory {
   DISALLOW_COPY_AND_ASSIGN(DefaultDownloadDirectory);
 };
 
-base::LazyInstance<DefaultDownloadDirectory>
+base::LazyInstance<DefaultDownloadDirectory>::DestructorAtExit
     g_default_download_directory = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
@@ -138,9 +136,7 @@ DownloadPrefs::DownloadPrefs(Profile* profile) : profile_(profile) {
 
 #if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_MACOSX)
   should_open_pdf_in_system_reader_ =
-      prefs->GetBoolean(prefs::kOpenPdfDownloadInSystemReader) ||
-      prefs->GetBoolean(prefs::kPluginsAlwaysOpenPdfExternally);
-  disable_adobe_version_check_for_tests_ = false;
+      prefs->GetBoolean(prefs::kOpenPdfDownloadInSystemReader);
 #endif
 
   // If the download path is dangerous we forcefully reset it. But if we do
@@ -342,25 +338,21 @@ void DownloadPrefs::DisableAutoOpenBasedOnExtension(
 
 #if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_MACOSX)
 void DownloadPrefs::SetShouldOpenPdfInSystemReader(bool should_open) {
-  should_open_pdf_in_system_reader_ = should_open ||
-     profile_->GetPrefs()->GetBoolean(prefs::kPluginsAlwaysOpenPdfExternally);
+  if (should_open_pdf_in_system_reader_ == should_open)
+    return;
+  should_open_pdf_in_system_reader_ = should_open;
   profile_->GetPrefs()->SetBoolean(prefs::kOpenPdfDownloadInSystemReader,
                                    should_open);
 }
 
 bool DownloadPrefs::ShouldOpenPdfInSystemReader() const {
 #if defined(OS_WIN)
-  if (!disable_adobe_version_check_for_tests_ &&
-      IsAdobeReaderDefaultPDFViewer() &&
+  if (IsAdobeReaderDefaultPDFViewer() &&
       !DownloadTargetDeterminer::IsAdobeReaderUpToDate()) {
       return false;
   }
 #endif
   return should_open_pdf_in_system_reader_;
-}
-
-void DownloadPrefs::DisableAdobeVersionCheckForTests() {
-  disable_adobe_version_check_for_tests_ = true;
 }
 #endif
 

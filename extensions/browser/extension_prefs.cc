@@ -10,8 +10,6 @@
 #include <iterator>
 #include <utility>
 
-#include "base/debug/crash_logging.h"
-#include "base/debug/dump_without_crashing.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
@@ -317,10 +315,6 @@ T* ExtensionPrefs::ScopedUpdate<T, type_enum_value>::Create() {
     // might be useful. Remove the dumps after we analyze them.
     if (key_value->GetType() != type_enum_value) {
       NOTREACHED();
-      base::debug::SetCrashKeyValue(
-          "existing_extension_pref_value_type",
-          base::IntToString(static_cast<int>(key_value->GetType())));
-      base::debug::DumpWithoutCrashing();
       value_as_t = new T();
       extension->SetWithoutPathExpansion(key_, base::WrapUnique(value_as_t));
     } else {
@@ -447,16 +441,17 @@ const base::DictionaryValue* ExtensionPrefs::GetExtensionPref(
   return extension_dict;
 }
 
-void ExtensionPrefs::UpdateExtensionPref(const std::string& extension_id,
-                                         const std::string& key,
-                                         base::Value* data_value) {
+void ExtensionPrefs::UpdateExtensionPref(
+    const std::string& extension_id,
+    const std::string& key,
+    std::unique_ptr<base::Value> data_value) {
   if (!crx_file::id_util::IdIsValid(extension_id)) {
     NOTREACHED() << "Invalid extension_id " << extension_id;
     return;
   }
   ScopedExtensionPrefUpdate update(prefs_, extension_id);
   if (data_value)
-    update->Set(key, data_value);
+    update->Set(key, std::move(data_value));
   else
     update->Remove(key, NULL);
 }
@@ -556,7 +551,7 @@ void ExtensionPrefs::SetExtensionPrefURLPatternSet(
     const std::string& extension_id,
     const std::string& pref_key,
     const URLPatternSet& new_value) {
-  UpdateExtensionPref(extension_id, pref_key, new_value.ToValue().release());
+  UpdateExtensionPref(extension_id, pref_key, new_value.ToValue());
 }
 
 bool ExtensionPrefs::ReadPrefAsBooleanAndReturn(
@@ -619,9 +614,10 @@ std::unique_ptr<const PermissionSet> ExtensionPrefs::ReadPrefAsPermissionSet(
 //   // permission supports detail, permission detail will be stored in value.
 //   ...
 // ]
-template<typename T>
-static base::ListValue* CreatePermissionList(const T& permissions) {
-  base::ListValue* values = new base::ListValue();
+template <typename T>
+static std::unique_ptr<base::ListValue> CreatePermissionList(
+    const T& permissions) {
+  auto values = base::MakeUnique<base::ListValue>();
   for (typename T::const_iterator i = permissions.begin();
       i != permissions.end(); ++i) {
     std::unique_ptr<base::Value> detail(i->ToValue());
@@ -641,16 +637,13 @@ void ExtensionPrefs::SetExtensionPrefPermissionSet(
     const std::string& pref_key,
     const PermissionSet& new_value) {
   std::string api_pref = JoinPrefs(pref_key, kPrefAPIs);
-  base::ListValue* api_values = CreatePermissionList(new_value.apis());
-  UpdateExtensionPref(extension_id, api_pref, api_values);
+  UpdateExtensionPref(extension_id, api_pref,
+                      CreatePermissionList(new_value.apis()));
 
   std::string manifest_permissions_pref =
       JoinPrefs(pref_key, kPrefManifestPermissions);
-  base::ListValue* manifest_permissions_values =
-      CreatePermissionList(new_value.manifest_permissions());
-  UpdateExtensionPref(extension_id,
-                      manifest_permissions_pref,
-                      manifest_permissions_values);
+  UpdateExtensionPref(extension_id, manifest_permissions_pref,
+                      CreatePermissionList(new_value.manifest_permissions()));
 
   // Set the explicit host permissions.
   if (!new_value.explicit_hosts().is_empty()) {
@@ -673,7 +666,7 @@ int ExtensionPrefs::IncrementAcknowledgePromptCount(
   ReadPrefAsInteger(extension_id, kPrefAcknowledgePromptCount, &count);
   ++count;
   UpdateExtensionPref(extension_id, kPrefAcknowledgePromptCount,
-                      new base::FundamentalValue(count));
+                      base::MakeUnique<base::Value>(count));
   return count;
 }
 
@@ -686,8 +679,8 @@ void ExtensionPrefs::AcknowledgeExternalExtension(
     const std::string& extension_id) {
   DCHECK(crx_file::id_util::IdIsValid(extension_id));
   UpdateExtensionPref(extension_id, kPrefExternalAcknowledged,
-                      new base::FundamentalValue(true));
-  UpdateExtensionPref(extension_id, kPrefAcknowledgePromptCount, NULL);
+                      base::MakeUnique<base::Value>(true));
+  UpdateExtensionPref(extension_id, kPrefAcknowledgePromptCount, nullptr);
 }
 
 bool ExtensionPrefs::IsBlacklistedExtensionAcknowledged(
@@ -699,8 +692,8 @@ void ExtensionPrefs::AcknowledgeBlacklistedExtension(
     const std::string& extension_id) {
   DCHECK(crx_file::id_util::IdIsValid(extension_id));
   UpdateExtensionPref(extension_id, kPrefBlacklistAcknowledged,
-                      new base::FundamentalValue(true));
-  UpdateExtensionPref(extension_id, kPrefAcknowledgePromptCount, NULL);
+                      base::MakeUnique<base::Value>(true));
+  UpdateExtensionPref(extension_id, kPrefAcknowledgePromptCount, nullptr);
 }
 
 bool ExtensionPrefs::IsExternalInstallFirstRun(
@@ -712,7 +705,7 @@ void ExtensionPrefs::SetExternalInstallFirstRun(
     const std::string& extension_id) {
   DCHECK(crx_file::id_util::IdIsValid(extension_id));
   UpdateExtensionPref(extension_id, kPrefExternalInstallFirstRun,
-                      new base::FundamentalValue(true));
+                      base::MakeUnique<base::Value>(true));
 }
 
 bool ExtensionPrefs::SetAlertSystemFirstRun() {
@@ -797,11 +790,10 @@ void ExtensionPrefs::ModifyDisableReasons(const std::string& extension_id,
     return;
 
   if (new_value == Extension::DISABLE_NONE) {
-    UpdateExtensionPref(extension_id, kPrefDisableReasons, NULL);
+    UpdateExtensionPref(extension_id, kPrefDisableReasons, nullptr);
   } else {
-    UpdateExtensionPref(extension_id,
-                        kPrefDisableReasons,
-                        new base::FundamentalValue(new_value));
+    UpdateExtensionPref(extension_id, kPrefDisableReasons,
+                        base::MakeUnique<base::Value>(new_value));
   }
 
   for (auto& observer : observer_list_)
@@ -839,14 +831,13 @@ void ExtensionPrefs::SetExtensionBlacklisted(const std::string& extension_id,
 
   // Always make sure the "acknowledged" bit is cleared since the blacklist bit
   // is changing.
-  UpdateExtensionPref(extension_id, kPrefBlacklistAcknowledged, NULL);
+  UpdateExtensionPref(extension_id, kPrefBlacklistAcknowledged, nullptr);
 
   if (is_blacklisted) {
-    UpdateExtensionPref(extension_id,
-                        kPrefBlacklist,
-                        new base::FundamentalValue(true));
+    UpdateExtensionPref(extension_id, kPrefBlacklist,
+                        base::MakeUnique<base::Value>(true));
   } else {
-    UpdateExtensionPref(extension_id, kPrefBlacklist, NULL);
+    UpdateExtensionPref(extension_id, kPrefBlacklist, nullptr);
     const base::DictionaryValue* dict = GetExtensionPref(extension_id);
     if (dict && dict->empty())
       DeleteExtensionPrefs(extension_id);
@@ -950,7 +941,7 @@ bool ExtensionPrefs::GetActiveBit(const std::string& extension_id) const {
 void ExtensionPrefs::SetActiveBit(const std::string& extension_id,
                                   bool active) {
   UpdateExtensionPref(extension_id, kActiveBit,
-                      new base::FundamentalValue(active));
+                      base::MakeUnique<base::Value>(active));
 }
 
 std::unique_ptr<const PermissionSet> ExtensionPrefs::GetGrantedPermissions(
@@ -1000,8 +991,8 @@ void ExtensionPrefs::SetActivePermissions(const std::string& extension_id,
 
 void ExtensionPrefs::SetExtensionRunning(const std::string& extension_id,
     bool is_running) {
-  base::Value* value = new base::FundamentalValue(is_running);
-  UpdateExtensionPref(extension_id, kPrefRunning, value);
+  UpdateExtensionPref(extension_id, kPrefRunning,
+                      base::MakeUnique<base::Value>(is_running));
 }
 
 bool ExtensionPrefs::IsExtensionRunning(const std::string& extension_id) const {
@@ -1015,8 +1006,8 @@ bool ExtensionPrefs::IsExtensionRunning(const std::string& extension_id) const {
 
 void ExtensionPrefs::SetIsActive(const std::string& extension_id,
                                  bool is_active) {
-  base::Value* value = new base::FundamentalValue(is_active);
-  UpdateExtensionPref(extension_id, kIsActive, value);
+  UpdateExtensionPref(extension_id, kIsActive,
+                      base::MakeUnique<base::Value>(is_active));
 }
 
 bool ExtensionPrefs::IsActive(const std::string& extension_id) const {
@@ -1035,7 +1026,7 @@ bool ExtensionPrefs::IsIncognitoEnabled(const std::string& extension_id) const {
 void ExtensionPrefs::SetIsIncognitoEnabled(const std::string& extension_id,
                                            bool enabled) {
   UpdateExtensionPref(extension_id, kPrefIncognitoEnabled,
-                      new base::FundamentalValue(enabled));
+                      base::MakeUnique<base::Value>(enabled));
   extension_pref_value_map_->SetExtensionIncognitoState(extension_id, enabled);
 }
 
@@ -1046,7 +1037,7 @@ bool ExtensionPrefs::AllowFileAccess(const std::string& extension_id) const {
 void ExtensionPrefs::SetAllowFileAccess(const std::string& extension_id,
                                         bool allow) {
   UpdateExtensionPref(extension_id, kPrefAllowFileAccess,
-                      new base::FundamentalValue(allow));
+                      base::MakeUnique<base::Value>(allow));
 }
 
 bool ExtensionPrefs::HasAllowFileAccessSetting(
@@ -1121,7 +1112,7 @@ void ExtensionPrefs::OnExtensionUninstalled(const std::string& extension_id,
   // no longer lists the extension).
   if (!external_uninstall && Manifest::IsExternalLocation(location)) {
     UpdateExtensionPref(extension_id, kPrefState,
-                        new base::FundamentalValue(
+                        base::MakeUnique<base::Value>(
                             Extension::EXTERNAL_EXTENSION_UNINSTALLED));
     extension_pref_value_map_->SetExtensionState(extension_id, false);
     for (auto& observer : observer_list_)
@@ -1133,7 +1124,7 @@ void ExtensionPrefs::OnExtensionUninstalled(const std::string& extension_id,
 
 void ExtensionPrefs::SetExtensionEnabled(const std::string& extension_id) {
   UpdateExtensionPref(extension_id, kPrefState,
-                      new base::FundamentalValue(Extension::ENABLED));
+                      base::MakeUnique<base::Value>(Extension::ENABLED));
   extension_pref_value_map_->SetExtensionState(extension_id, true);
   UpdateExtensionPref(extension_id, kPrefDisableReasons, nullptr);
   for (auto& observer : observer_list_)
@@ -1144,11 +1135,11 @@ void ExtensionPrefs::SetExtensionDisabled(const std::string& extension_id,
                                           int disable_reasons) {
   if (!IsExternalExtensionUninstalled(extension_id)) {
     UpdateExtensionPref(extension_id, kPrefState,
-                        new base::FundamentalValue(Extension::DISABLED));
+                        base::MakeUnique<base::Value>(Extension::DISABLED));
     extension_pref_value_map_->SetExtensionState(extension_id, false);
   }
   UpdateExtensionPref(extension_id, kPrefDisableReasons,
-                      new base::FundamentalValue(disable_reasons));
+                      base::MakeUnique<base::Value>(disable_reasons));
   for (auto& observer : observer_list_)
     observer.OnExtensionStateChanged(extension_id, false);
 }
@@ -1157,7 +1148,7 @@ void ExtensionPrefs::SetExtensionBlacklistState(const std::string& extension_id,
                                                 BlacklistState state) {
   SetExtensionBlacklisted(extension_id, state == BLACKLISTED_MALWARE);
   UpdateExtensionPref(extension_id, kPrefBlacklistState,
-                      new base::FundamentalValue(state));
+                      base::MakeUnique<base::Value>(state));
 }
 
 BlacklistState ExtensionPrefs::GetExtensionBlacklistState(
@@ -1196,7 +1187,7 @@ void ExtensionPrefs::UpdateManifest(const Extension* extension) {
         !extension->manifest()->value()->Equals(old_manifest);
     if (update_required) {
       UpdateExtensionPref(extension->id(), kPrefManifest,
-                          extension->manifest()->value()->DeepCopy());
+                          extension->manifest()->value()->CreateDeepCopy());
     }
   }
 }
@@ -1312,13 +1303,10 @@ void ExtensionPrefs::SetDelayedInstallInfo(
     DelayReason delay_reason,
     const syncer::StringOrdinal& page_ordinal,
     const std::string& install_parameter) {
-  base::DictionaryValue* extension_dict = new base::DictionaryValue();
-  PopulateExtensionInfoPrefs(extension,
-                             time_provider_->GetCurrentTime(),
-                             initial_state,
-                             install_flags,
-                             install_parameter,
-                             extension_dict);
+  auto extension_dict = base::MakeUnique<base::DictionaryValue>();
+  PopulateExtensionInfoPrefs(extension, time_provider_->GetCurrentTime(),
+                             initial_state, install_flags, install_parameter,
+                             extension_dict.get());
 
   // Add transient data that is needed by FinishDelayedInstallInfo(), but
   // should not be in the final extension prefs. All entries here should have
@@ -1332,7 +1320,8 @@ void ExtensionPrefs::SetDelayedInstallInfo(
   extension_dict->SetInteger(kDelayedInstallReason,
                              static_cast<int>(delay_reason));
 
-  UpdateExtensionPref(extension->id(), kDelayedInstallInfo, extension_dict);
+  UpdateExtensionPref(extension->id(), kDelayedInstallInfo,
+                      std::move(extension_dict));
 }
 
 bool ExtensionPrefs::RemoveDelayedInstallInfo(
@@ -1371,8 +1360,7 @@ bool ExtensionPrefs::FinishDelayedInstallInfo(
   const base::Time install_time = time_provider_->GetCurrentTime();
   pending_install_dict->Set(
       kPrefInstallTime,
-      new base::StringValue(
-          base::Int64ToString(install_time.ToInternalValue())));
+      new base::Value(base::Int64ToString(install_time.ToInternalValue())));
 
   // Commit the delayed install data.
   for (base::DictionaryValue::Iterator it(*pending_install_dict); !it.IsAtEnd();
@@ -1443,7 +1431,7 @@ bool ExtensionPrefs::WasAppDraggedByUser(
 
 void ExtensionPrefs::SetAppDraggedByUser(const std::string& extension_id) {
   UpdateExtensionPref(extension_id, kPrefUserDraggedApp,
-                      new base::FundamentalValue(true));
+                      base::MakeUnique<base::Value>(true));
 }
 
 bool ExtensionPrefs::IsFromWebStore(
@@ -1674,7 +1662,7 @@ const base::DictionaryValue* ExtensionPrefs::GetGeometryCache(
 void ExtensionPrefs::SetGeometryCache(
     const std::string& extension_id,
     std::unique_ptr<base::DictionaryValue> cache) {
-  UpdateExtensionPref(extension_id, kPrefGeometryCache, cache.release());
+  UpdateExtensionPref(extension_id, kPrefGeometryCache, std::move(cache));
 }
 
 const base::DictionaryValue* ExtensionPrefs::GetInstallSignature() const {
@@ -1705,9 +1693,8 @@ std::string ExtensionPrefs::GetInstallParam(
 
 void ExtensionPrefs::SetInstallParam(const std::string& extension_id,
                                      const std::string& install_parameter) {
-  UpdateExtensionPref(extension_id,
-                      kPrefInstallParam,
-                      new base::StringValue(install_parameter));
+  UpdateExtensionPref(extension_id, kPrefInstallParam,
+                      base::MakeUnique<base::Value>(install_parameter));
 }
 
 int ExtensionPrefs::GetCorruptedDisableCount() const {
@@ -1725,8 +1712,9 @@ bool ExtensionPrefs::NeedsSync(const std::string& extension_id) const {
 
 void ExtensionPrefs::SetNeedsSync(const std::string& extension_id,
                                   bool needs_sync) {
-  UpdateExtensionPref(extension_id, kPrefNeedsSync,
-                      needs_sync ? new base::FundamentalValue(true) : nullptr);
+  UpdateExtensionPref(
+      extension_id, kPrefNeedsSync,
+      needs_sync ? base::MakeUnique<base::Value>(true) : nullptr);
 }
 
 ExtensionPrefs::ExtensionPrefs(
@@ -1779,6 +1767,7 @@ void ExtensionPrefs::RegisterProfilePrefs(
   registry->RegisterListPref(pref_names::kInstallAllowList);
   registry->RegisterListPref(pref_names::kInstallDenyList);
   registry->RegisterDictionaryPref(pref_names::kInstallForceList);
+  registry->RegisterDictionaryPref(pref_names::kInstallLoginScreenAppList);
   registry->RegisterListPref(pref_names::kAllowedTypes);
   registry->RegisterBooleanPref(pref_names::kStorageGarbageCollect, false);
   registry->RegisterInt64Pref(pref_names::kLastUpdateCheck, 0);
@@ -1814,7 +1803,7 @@ bool ExtensionPrefs::GetUserExtensionPrefIntoContainer(
   std::string extension_id;
   for (base::ListValue::const_iterator value_it = user_pref_as_list->begin();
        value_it != user_pref_as_list->end(); ++value_it) {
-    if (!(*value_it)->GetAsString(&extension_id)) {
+    if (!value_it->GetAsString(&extension_id)) {
       NOTREACHED();
       continue;
     }
@@ -1843,33 +1832,29 @@ void ExtensionPrefs::PopulateExtensionInfoPrefs(
     int install_flags,
     const std::string& install_parameter,
     base::DictionaryValue* extension_dict) const {
-  extension_dict->Set(kPrefState, new base::FundamentalValue(initial_state));
-  extension_dict->Set(kPrefLocation,
-                      new base::FundamentalValue(extension->location()));
+  extension_dict->Set(kPrefState, new base::Value(initial_state));
+  extension_dict->Set(kPrefLocation, new base::Value(extension->location()));
   extension_dict->Set(kPrefCreationFlags,
-                      new base::FundamentalValue(extension->creation_flags()));
+                      new base::Value(extension->creation_flags()));
   extension_dict->Set(kPrefFromWebStore,
-                      new base::FundamentalValue(extension->from_webstore()));
+                      new base::Value(extension->from_webstore()));
   extension_dict->Set(kPrefFromBookmark,
-                      new base::FundamentalValue(extension->from_bookmark()));
+                      new base::Value(extension->from_bookmark()));
+  extension_dict->Set(kPrefWasInstalledByDefault,
+                      new base::Value(extension->was_installed_by_default()));
+  extension_dict->Set(kPrefWasInstalledByOem,
+                      new base::Value(extension->was_installed_by_oem()));
   extension_dict->Set(
-      kPrefWasInstalledByDefault,
-      new base::FundamentalValue(extension->was_installed_by_default()));
-  extension_dict->Set(
-      kPrefWasInstalledByOem,
-      new base::FundamentalValue(extension->was_installed_by_oem()));
-  extension_dict->Set(kPrefInstallTime,
-                      new base::StringValue(
-                          base::Int64ToString(install_time.ToInternalValue())));
+      kPrefInstallTime,
+      new base::Value(base::Int64ToString(install_time.ToInternalValue())));
   if (install_flags & kInstallFlagIsBlacklistedForMalware)
-    extension_dict->Set(kPrefBlacklist, new base::FundamentalValue(true));
+    extension_dict->Set(kPrefBlacklist, new base::Value(true));
 
   base::FilePath::StringType path = MakePathRelative(install_directory_,
                                                      extension->path());
-  extension_dict->Set(kPrefPath, new base::StringValue(path));
+  extension_dict->Set(kPrefPath, new base::Value(path));
   if (!install_parameter.empty()) {
-    extension_dict->Set(kPrefInstallParam,
-                        new base::StringValue(install_parameter));
+    extension_dict->Set(kPrefInstallParam, new base::Value(install_parameter));
   }
   // We store prefs about LOAD extensions, but don't cache their manifest
   // since it may change on disk.
@@ -1880,7 +1865,7 @@ void ExtensionPrefs::PopulateExtensionInfoPrefs(
 
   // Only writes kPrefDoNotSync when it is not the default.
   if (install_flags & kInstallFlagDoNotSync)
-    extension_dict->Set(kPrefDoNotSync, new base::FundamentalValue(true));
+    extension_dict->Set(kPrefDoNotSync, new base::Value(true));
   else
     extension_dict->Remove(kPrefDoNotSync, NULL);
 }

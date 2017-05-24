@@ -5,6 +5,7 @@
 #include "content/browser/screen_orientation/screen_orientation_delegate_android.h"
 
 #include "content/browser/android/content_view_core_impl.h"
+#include "content/browser/screen_orientation/screen_orientation_provider.h"
 #include "jni/ScreenOrientationProvider_jni.h"
 #include "ui/android/window_android.h"
 #include "ui/gfx/native_widget_types.h"
@@ -12,21 +13,11 @@
 namespace content {
 
 ScreenOrientationDelegateAndroid::ScreenOrientationDelegateAndroid() {
+  ScreenOrientationProvider::SetDelegate(this);
 }
 
 ScreenOrientationDelegateAndroid::~ScreenOrientationDelegateAndroid() {
-}
-
-// static
-void ScreenOrientationDelegateAndroid::StartAccurateListening() {
-  Java_ScreenOrientationProvider_startAccurateListening(
-      base::android::AttachCurrentThread());
-}
-
-// static
-void ScreenOrientationDelegateAndroid::StopAccurateListening() {
-  Java_ScreenOrientationProvider_stopAccurateListening(
-      base::android::AttachCurrentThread());
+  ScreenOrientationProvider::SetDelegate(nullptr);
 }
 
 bool ScreenOrientationDelegateAndroid::FullScreenRequired(

@@ -26,6 +26,7 @@
 #include "content/common/service_worker/embedded_worker.mojom.h"
 #include "content/common/service_worker/service_worker_event_dispatcher.mojom.h"
 #include "content/common/service_worker/service_worker_status_code.h"
+#include "mojo/public/cpp/bindings/associated_binding.h"
 #include "url/gurl.h"
 
 // Windows headers will redefine SendMessage.
@@ -41,14 +42,15 @@ namespace content {
 
 class EmbeddedWorkerRegistry;
 struct EmbeddedWorkerStartParams;
-class MessagePortMessageFilter;
 class ServiceWorkerContextCore;
 
 // This gives an interface to control one EmbeddedWorker instance, which
 // may be 'in-waiting' or running in one of the child processes added by
 // AddProcessReference().
-class CONTENT_EXPORT EmbeddedWorkerInstance {
+class CONTENT_EXPORT EmbeddedWorkerInstance
+    : NON_EXPORTED_BASE(public mojom::EmbeddedWorkerInstanceHost) {
  public:
+  class DevToolsProxy;
   typedef base::Callback<void(ServiceWorkerStatusCode)> StatusCallback;
 
   // This enum is used in UMA histograms. Append-only.
@@ -100,7 +102,7 @@ class CONTENT_EXPORT EmbeddedWorkerInstance {
     CONTENT_EXPORT virtual bool OnMessageReceived(const IPC::Message& message);
   };
 
-  ~EmbeddedWorkerInstance();
+  ~EmbeddedWorkerInstance() override;
 
   // Starts the worker. It is invalid to call this when the worker is not in
   // STOPPED status. |callback| is invoked after the worker script has been
@@ -142,12 +144,11 @@ class CONTENT_EXPORT EmbeddedWorkerInstance {
   // that is, when |process_id()| returns a valid process id.
   bool is_new_process() const;
   int worker_devtools_agent_route_id() const;
-  MessagePortMessageFilter* message_port_message_filter() const;
 
   void AddListener(Listener* listener);
   void RemoveListener(Listener* listener);
 
-  void set_devtools_attached(bool attached) { devtools_attached_ = attached; }
+  void SetDevToolsAttached(bool attached);
   bool devtools_attached() const { return devtools_attached_; }
 
   bool network_accessed_for_script() const {
@@ -191,7 +192,6 @@ class CONTENT_EXPORT EmbeddedWorkerInstance {
 
  private:
   typedef base::ObserverList<Listener> ListenerList;
-  class DevToolsProxy;
   class StartTask;
   class WorkerProcessHandle;
   friend class EmbeddedWorkerRegistry;
@@ -210,9 +210,10 @@ class CONTENT_EXPORT EmbeddedWorkerInstance {
 
   // Called back from StartTask after the worker is registered to
   // WorkerDevToolsManager.
-  void OnRegisteredToDevToolsManager(bool is_new_process,
-                                     int worker_devtools_agent_route_id,
-                                     bool wait_for_debugger);
+  void OnRegisteredToDevToolsManager(
+      bool is_new_process,
+      std::unique_ptr<DevToolsProxy> devtools_proxy,
+      bool wait_for_debugger);
 
   // Sends StartWorker message via Mojo.
   ServiceWorkerStatusCode SendStartWorker(
@@ -221,37 +222,30 @@ class CONTENT_EXPORT EmbeddedWorkerInstance {
   // Called back from StartTask after a start worker message is sent.
   void OnStartWorkerMessageSent();
 
-  // Called back from Registry when the worker instance has ack'ed that
-  // it is ready for inspection.
-  void OnReadyForInspection();
-
-  // Called back from Registry when the worker instance has ack'ed that
-  // it finished loading the script.
-  void OnScriptLoaded();
-
-  // Called back from Registry when the worker instance has ack'ed that
-  // it has started a worker thread.
-  void OnThreadStarted(int thread_id);
-
-  // Called back from Registry when the worker instance has ack'ed that
-  // it failed to load the script.
-  void OnScriptLoadFailed();
-
-  // Called back from Registry when the worker instance has ack'ed that
-  // it finished evaluating the script. This is called before OnStarted.
-  void OnScriptEvaluated(bool success);
-
-  // Called back from Registry when the worker instance has ack'ed that its
-  // WorkerGlobalScope has actually started and evaluated the script. This is
-  // called after OnScriptEvaluated.
-  // This will change the internal status from STARTING to RUNNING.
-  void OnStarted();
-
-  // Called back from Registry when the worker instance has ack'ed that
-  // its WorkerGlobalScope is actually stopped in the child process.
-  // This will change the internal status from STARTING or RUNNING to
-  // STOPPED.
-  void OnStopped();
+  // Implements mojom::EmbeddedWorkerInstanceHost.
+  // These functions all run on the IO thread.
+  void OnReadyForInspection() override;
+  void OnScriptLoaded() override;
+  // Notifies the corresponding provider host that the thread has started and is
+  // ready to receive messages.
+  void OnThreadStarted(int thread_id, int provider_id) override;
+  void OnScriptLoadFailed() override;
+  // Fires the callback passed to Start().
+  void OnScriptEvaluated(bool success) override;
+  // Changes the internal worker status from STARTING to RUNNING.
+  void OnStarted() override;
+  // Resets the embedded worker instance to the initial state. This will change
+  // the internal status from STARTING or RUNNING to STOPPED.
+  void OnStopped() override;
+  void OnReportException(const base::string16& error_message,
+                         int line_number,
+                         int column_number,
+                         const GURL& source_url) override;
+  void OnReportConsoleMessage(int source_identifier,
+                              int message_level,
+                              const base::string16& message,
+                              int line_number,
+                              const GURL& source_url) override;
 
   // Called when ServiceWorkerDispatcherHost for the worker died while it was
   // running.
@@ -261,19 +255,6 @@ class CONTENT_EXPORT EmbeddedWorkerInstance {
   // to the browser (i.e. EmbeddedWorker observers).
   // Returns false if the message is not handled.
   bool OnMessageReceived(const IPC::Message& message);
-
-  // Called back from Registry when the worker instance reports the exception.
-  void OnReportException(const base::string16& error_message,
-                         int line_number,
-                         int column_number,
-                         const GURL& source_url);
-
-  // Called back from Registry when the worker instance reports to the console.
-  void OnReportConsoleMessage(int source_identifier,
-                              int message_level,
-                              const base::string16& message,
-                              int line_number,
-                              const GURL& source_url);
 
   // Resets all running state. After this function is called, |status_| is
   // STOPPED.
@@ -304,6 +285,9 @@ class CONTENT_EXPORT EmbeddedWorkerInstance {
 
   // |client_| is used to send messages to the renderer process.
   mojom::EmbeddedWorkerInstanceClientPtr client_;
+
+  // Binding for EmbeddedWorkerInstanceHost, runs on IO thread.
+  mojo::AssociatedBinding<EmbeddedWorkerInstanceHost> instance_host_binding_;
 
   // TODO(shimazu): Remove this after EmbeddedWorkerStartParams is changed to
   // a mojo struct.

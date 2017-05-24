@@ -20,6 +20,7 @@
 #include "base/path_service.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -117,7 +118,7 @@ void GetDownloadFilePath(
   if (!base::DirectoryExists(download_directory)) {
     if (!base::CreateDirectory(download_directory)) {
       BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                              base::Bind(callback, base::FilePath()));
+                              base::BindOnce(callback, base::FilePath()));
       return;
     }
   }
@@ -140,7 +141,7 @@ void GetDownloadFilePath(
   }
 
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::Bind(callback, file));
+                          base::BindOnce(callback, file));
 }
 
 void MaybeAppendAuthUserParameter(const std::string& authuser, GURL* url) {
@@ -213,10 +214,12 @@ GURL WebstoreInstaller::GetWebstoreInstallURL(
     return GURL(base::StringPrintf(download_url.c_str(),
                                    extension_id.c_str()));
   }
-  std::vector<std::string> params;
-  params.push_back("id=" + extension_id);
+  std::vector<base::StringPiece> params;
+  std::string extension_param = "id=" + extension_id;
+  std::string installsource_param = "installsource=" + install_source;
+  params.push_back(extension_param);
   if (!install_source.empty())
-    params.push_back("installsource=" + install_source);
+    params.push_back(installsource_param);
   params.push_back("uc");
   std::string url_string = extension_urls::GetWebstoreUpdateUrl().spec();
 
@@ -493,12 +496,12 @@ void WebstoreInstaller::OnDownloadStarted(
     if (version_required.IsValid()) {
       approval->minimum_version.reset(new base::Version(version_required));
     }
-    download_item_->SetUserData(kApprovalKey, approval.release());
+    download_item_->SetUserData(kApprovalKey, std::move(approval));
   } else {
     // It is for the main module of the extension. We should use the provided
     // |approval_|.
     if (approval_)
-      download_item_->SetUserData(kApprovalKey, approval_.release());
+      download_item_->SetUserData(kApprovalKey, std::move(approval_));
   }
 
   if (!download_started_) {
@@ -599,8 +602,9 @@ void WebstoreInstaller::DownloadCrx(
 
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      base::Bind(&GetDownloadFilePath, download_directory, extension_id,
-        base::Bind(&WebstoreInstaller::StartDownload, this, extension_id)));
+      base::BindOnce(
+          &GetDownloadFilePath, download_directory, extension_id,
+          base::Bind(&WebstoreInstaller::StartDownload, this, extension_id)));
 }
 
 // http://crbug.com/165634
@@ -671,7 +675,7 @@ void WebstoreInstaller::StartDownload(const std::string& extension_id,
   if (controller.GetVisibleEntry())
     params->set_referrer(content::Referrer::SanitizeForRequest(
         download_url_, content::Referrer(controller.GetVisibleEntry()->GetURL(),
-                                         blink::WebReferrerPolicyDefault)));
+                                         blink::kWebReferrerPolicyDefault)));
   params->set_callback(base::Bind(&WebstoreInstaller::OnDownloadStarted,
                                   this,
                                   extension_id));

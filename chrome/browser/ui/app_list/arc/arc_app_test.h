@@ -17,6 +17,7 @@ namespace mojom {
 class AppInfo;
 class ArcPackageInfo;
 }
+class ArcPlayStoreEnabledPreferenceHandler;
 class ArcServiceManager;
 class ArcSessionManager;
 class FakeAppInstance;
@@ -58,6 +59,8 @@ class ArcAppTest {
 
   void RemovePackage(const arc::mojom::ArcPackageInfo& package);
 
+  void WaitForDefaultApps();
+
   // The 0th item is sticky but not the followings.
   const std::vector<arc::mojom::AppInfo>& fake_apps() const {
     return fake_apps_;
@@ -84,6 +87,10 @@ class ArcAppTest {
     return arc_service_manager_.get();
   }
 
+  void set_wait_default_apps(bool wait_default_apps) {
+    wait_default_apps_ = wait_default_apps;
+  }
+
  private:
   const user_manager::User* CreateUserAndLogin();
   bool FindPackage(const arc::mojom::ArcPackageInfo& package);
@@ -94,8 +101,12 @@ class ArcAppTest {
 
   ArcAppListPrefs* arc_app_list_pref_ = nullptr;
 
+  bool wait_default_apps_ = true;
+
   std::unique_ptr<arc::ArcServiceManager> arc_service_manager_;
   std::unique_ptr<arc::ArcSessionManager> arc_session_manager_;
+  std::unique_ptr<arc::ArcPlayStoreEnabledPreferenceHandler>
+      arc_play_store_enabled_preference_handler_;
   std::unique_ptr<arc::FakeAppInstance> app_instance_;
 
   std::unique_ptr<chromeos::ScopedUserManagerEnabler> user_manager_enabler_;

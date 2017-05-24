@@ -13,14 +13,14 @@
 #include "base/files/file.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
+#include "components/spellcheck/common/spellcheck.mojom.h"
 #include "components/spellcheck/renderer/custom_dictionary_engine.h"
 #include "components/spellcheck/spellcheck_build_features.h"
 #include "content/public/renderer/render_thread_observer.h"
+#include "mojo/public/cpp/bindings/binding_set.h"
 
-struct SpellCheckBDictLanguage;
 class SpellcheckLanguage;
 struct SpellCheckResult;
 
@@ -30,8 +30,8 @@ struct WebTextCheckingResult;
 template <typename T> class WebVector;
 }
 
-namespace IPC {
-class Message;
+namespace service_manager {
+struct BindSourceInfo;
 }
 
 // TODO(morrita): Needs reorg with SpellCheckProvider.
@@ -39,7 +39,8 @@ class Message;
 // Shared spellchecking logic/data for a RenderProcess. All RenderViews use
 // this object to perform spellchecking tasks.
 class SpellCheck : public content::RenderThreadObserver,
-                   public base::SupportsWeakPtr<SpellCheck> {
+                   public base::SupportsWeakPtr<SpellCheck>,
+                   public spellcheck::mojom::SpellChecker {
  public:
   // TODO(groby): I wonder if this can be private, non-mac only.
   class SpellcheckRequest;
@@ -122,16 +123,18 @@ class SpellCheck : public content::RenderThreadObserver,
        const std::vector<std::vector<base::string16>>& suggestions_list,
        std::vector<base::string16>* optional_suggestions);
 
-  // RenderThreadObserver implementation:
-   bool OnControlMessageReceived(const IPC::Message& message) override;
+   // Binds requests for the SpellChecker interface.
+   void SpellCheckerRequest(const service_manager::BindSourceInfo& source_info,
+                            spellcheck::mojom::SpellCheckerRequest request);
 
-  // Message handlers.
-   void OnInit(const std::vector<SpellCheckBDictLanguage>& bdict_languages,
-               const std::set<std::string>& custom_words);
-   void OnCustomDictionaryChanged(const std::set<std::string>& words_added,
-                                  const std::set<std::string>& words_removed);
-  void OnEnableSpellCheck(bool enable);
-  void OnRequestDocumentMarkers();
+   // spellcheck::mojom::SpellChecker:
+   void Initialize(
+       std::vector<spellcheck::mojom::SpellCheckBDictLanguagePtr> dictionaries,
+       const std::vector<std::string>& custom_words,
+       bool enable) override;
+   void CustomDictionaryChanged(
+       const std::vector<std::string>& words_added,
+       const std::vector<std::string>& words_removed) override;
 
 #if !BUILDFLAG(USE_BROWSER_SPELLCHECKER)
   // Posts delayed spellcheck task and clear it if any.
@@ -149,9 +152,12 @@ class SpellCheck : public content::RenderThreadObserver,
   std::unique_ptr<SpellcheckRequest> pending_request_param_;
 #endif
 
+  // Bindings for SpellChecker clients.
+  mojo::BindingSet<spellcheck::mojom::SpellChecker> spellchecker_bindings_;
+
   // A vector of objects used to actually check spelling, one for each enabled
   // language.
-  ScopedVector<SpellcheckLanguage> languages_;
+  std::vector<std::unique_ptr<SpellcheckLanguage>> languages_;
 
   // Custom dictionary spelling engine.
   CustomDictionaryEngine custom_dictionary_;

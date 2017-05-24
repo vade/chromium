@@ -748,6 +748,11 @@ class MetaBuildWrapper(object):
 
       if 'cros_passthrough' in mixin_vals:
         vals['cros_passthrough'] = mixin_vals['cros_passthrough']
+      if 'args_file' in mixin_vals:
+        if vals['args_file']:
+            raise MBErr('args_file specified multiple times in mixins '
+                        'for %s on %s' % (self.args.builder, self.args.master))
+        vals['args_file'] = mixin_vals['args_file']
       if 'gn_args' in mixin_vals:
         if vals['gn_args']:
           vals['gn_args'] += ' ' + mixin_vals['gn_args']
@@ -848,11 +853,6 @@ class MetaBuildWrapper(object):
         runtime_deps_targets = [
             target + '.runtime_deps',
             'obj/%s.stamp.runtime_deps' % label.replace(':', '/')]
-      elif isolate_map[target]['type'] == 'gpu_browser_test':
-        if self.platform == 'win32':
-          runtime_deps_targets = ['browser_tests.exe.runtime_deps']
-        else:
-          runtime_deps_targets = ['browser_tests.runtime_deps']
       elif (isolate_map[target]['type'] == 'script' or
             isolate_map[target].get('label_type') == 'group'):
         # For script targets, the build target is usually a group,
@@ -952,12 +952,6 @@ class MetaBuildWrapper(object):
     labels = []
     err = ''
 
-    def StripTestSuffixes(target):
-      for suffix in ('_apk_run', '_apk', '_run'):
-        if target.endswith(suffix):
-          return target[:-len(suffix)], suffix
-      return None, None
-
     for target in targets:
       if target == 'all':
         labels.append(target)
@@ -965,14 +959,10 @@ class MetaBuildWrapper(object):
         labels.append(target)
       else:
         if target in isolate_map:
-          stripped_target, suffix = target, ''
-        else:
-          stripped_target, suffix = StripTestSuffixes(target)
-        if stripped_target in isolate_map:
-          if isolate_map[stripped_target]['type'] == 'unknown':
+          if isolate_map[target]['type'] == 'unknown':
             err += ('test target "%s" type is unknown\n' % target)
           else:
-            labels.append(isolate_map[stripped_target]['label'] + suffix)
+            labels.append(isolate_map[target]['label'])
         else:
           err += ('target "%s" not found in '
                   '//testing/buildbot/gn_isolate_map.pyl\n' % target)
@@ -1059,15 +1049,15 @@ class MetaBuildWrapper(object):
     isolate_map = self.ReadIsolateMap()
 
     android = 'target_os="android"' in vals['gn_args']
-    ozone = 'use_ozone=true' in vals['gn_args']
-    chromeos = 'target_os="chromeos"' in vals['gn_args']
 
     # This should be true if tests with type='windowed_test_launcher' are
     # expected to run using xvfb. For example, Linux Desktop, X11 CrOS and
-    # Ozone CrOS builds.
-    use_xvfb = (self.platform == 'linux2' and
-               not android and
-               ((not ozone) or (ozone and chromeos)))
+    # Ozone CrOS builds. Note that one Ozone build can be used to run differen
+    # backends. Currently, tests are executed for the headless and X11 backends
+    # and both can run under Xvfb.
+    # TODO(tonikitoo,msisov,fwang): Find a way to run tests for the Wayland
+    # backend.
+    use_xvfb = self.platform == 'linux2' and not android
 
     asan = 'is_asan=true' in vals['gn_args']
     msan = 'is_msan=true' in vals['gn_args']
@@ -1086,23 +1076,13 @@ class MetaBuildWrapper(object):
                                 output_path=None)
 
     if android and test_type != "script":
-      logdog_command = [
-          '--logdog-bin-cmd', './../../bin/logdog_butler',
-          '--project', 'chromium',
-          '--service-account-json',
-          '/creds/service_accounts/service-account-luci-logdog-publisher.json',
-          '--prefix', 'android/swarming/logcats/${SWARMING_TASK_ID}',
-          '--source', '${ISOLATED_OUTDIR}/logcats',
-          '--name', 'unified_logcats',
-      ]
-      test_cmdline = [
-          self.PathJoin('bin', 'run_%s' % target),
-          '--logcat-output-file', '${ISOLATED_OUTDIR}/logcats',
+      cmdline = [
+          '../../build/android/test_wrapper/logdog_wrapper.py',
+          '--target', target,
           '--target-devices-file', '${SWARMING_BOT_FILE}',
-          '-v'
-      ]
-      cmdline = (['./../../build/android/test_wrapper/logdog_wrapper.py']
-                 + logdog_command + test_cmdline)
+          '--logdog-bin-cmd', '../../bin/logdog_butler',
+          '--logcat-output-file', '${ISOLATED_OUTDIR}/logcats',
+          '--store-tombstones']
     elif use_xvfb and test_type == 'windowed_test_launcher':
       extra_files = [
           '../../testing/test_env.py',
@@ -1129,19 +1109,6 @@ class MetaBuildWrapper(object):
           '--asan=%d' % asan,
           '--msan=%d' % msan,
           '--tsan=%d' % tsan,
-      ]
-    elif test_type == 'gpu_browser_test':
-      extra_files = [
-          '../../testing/test_env.py'
-      ]
-      gtest_filter = isolate_map[target]['gtest_filter']
-      cmdline = [
-          '../../testing/test_env.py',
-          './browser_tests' + executable_suffix,
-          '--test-launcher-bot-mode',
-          '--enable-gpu',
-          '--test-launcher-jobs=1',
-          '--gtest_filter=%s' % gtest_filter,
       ]
     elif test_type == 'script':
       extra_files = [

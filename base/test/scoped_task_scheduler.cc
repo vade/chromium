@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
@@ -19,10 +20,17 @@
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/task_runner.h"
+#include "base/task_scheduler/single_thread_task_runner_thread_mode.h"
 #include "base/task_scheduler/task.h"
 #include "base/task_scheduler/task_scheduler.h"
 #include "base/task_scheduler/task_tracker.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
+#include "build/build_config.h"
+
+#if defined(OS_WIN)
+#include "base/win/scoped_com_initializer.h"
+#endif  // defined(OS_WIN)
 
 namespace base {
 namespace test {
@@ -31,6 +39,9 @@ namespace {
 
 enum class ExecutionMode { PARALLEL, SEQUENCED, SINGLE_THREADED };
 
+// ScopedTaskScheduler intentionally breaks the TaskScheduler contract of not
+// running tasks before Start(). This avoid having to call Start() with dummy
+// parameters.
 class TestTaskScheduler : public TaskScheduler {
  public:
   // |external_message_loop| is an externally provided MessageLoop on which to
@@ -40,17 +51,26 @@ class TestTaskScheduler : public TaskScheduler {
   ~TestTaskScheduler() override;
 
   // TaskScheduler:
+  void Start(const TaskScheduler::InitParams& init_params) override;
   void PostDelayedTaskWithTraits(const tracked_objects::Location& from_here,
                                  const TaskTraits& traits,
-                                 const Closure& task,
+                                 OnceClosure task,
                                  TimeDelta delay) override;
   scoped_refptr<TaskRunner> CreateTaskRunnerWithTraits(
       const TaskTraits& traits) override;
   scoped_refptr<SequencedTaskRunner> CreateSequencedTaskRunnerWithTraits(
       const TaskTraits& traits) override;
   scoped_refptr<SingleThreadTaskRunner> CreateSingleThreadTaskRunnerWithTraits(
-      const TaskTraits& traits) override;
+      const TaskTraits& traits,
+      SingleThreadTaskRunnerThreadMode thread_mode) override;
+#if defined(OS_WIN)
+  scoped_refptr<SingleThreadTaskRunner> CreateCOMSTATaskRunnerWithTraits(
+      const TaskTraits& traits,
+      SingleThreadTaskRunnerThreadMode thread_mode) override;
+#endif  // defined(OS_WIN)
   std::vector<const HistogramBase*> GetHistograms() const override;
+  int GetMaxConcurrentTasksWithTraitsDeprecated(
+      const TaskTraits& traits) const override;
   void Shutdown() override;
   void FlushForTesting() override;
   void JoinForTesting() override;
@@ -65,9 +85,26 @@ class TestTaskScheduler : public TaskScheduler {
                const SequenceToken& sequence_token);
 
   // Returns true if this TaskScheduler runs its tasks on the current thread.
-  bool RunsTasksOnCurrentThread() const;
+  bool RunsTasksInCurrentSequence() const;
 
  private:
+  // Returns the TaskRunner to which this TaskScheduler forwards tasks. It may
+  // be |message_loop_->task_runner()| or a reference to it saved on entry to
+  // RunTask().
+  scoped_refptr<SingleThreadTaskRunner> MessageLoopTaskRunner() const {
+    if (saved_task_runner_)
+      return saved_task_runner_;
+    DCHECK(message_loop_->task_runner());
+    return message_loop_->task_runner();
+  }
+
+#if defined(OS_WIN)
+  void EnsureCOMSTA() {
+    if (!scoped_com_initializer_)
+      scoped_com_initializer_ = MakeUnique<win::ScopedCOMInitializer>();
+  }
+#endif  // defined(OS_WIN)
+
   // |message_loop_owned_| will be non-null if this TestTaskScheduler owns the
   // MessageLoop (wasn't provided an external one at construction).
   // |message_loop_| will always be set and is used by this TestTaskScheduler to
@@ -75,9 +112,20 @@ class TestTaskScheduler : public TaskScheduler {
   std::unique_ptr<MessageLoop> message_loop_owned_;
   MessageLoop* message_loop_;
 
-  // The SingleThreadTaskRunner associated with |message_loop_|.
-  const scoped_refptr<SingleThreadTaskRunner> message_loop_task_runner_ =
-      message_loop_->task_runner();
+  // A reference to |message_loop_->task_runner()| saved on entry to RunTask().
+  // This is required because RunTask() overrides
+  // |message_loop_->task_runner()|.
+  //
+  // Note: |message_loop_->task_runner()| is accessed directly outside of
+  // RunTask() to guarantee that ScopedTaskScheduler always uses the latest
+  // TaskRunner set by external code.
+  scoped_refptr<SingleThreadTaskRunner> saved_task_runner_;
+
+#if defined(OS_WIN)
+  // Maintains the lifetime of the COM Single-Threaded Apartment. Allocation and
+  // deallocation should be done in the |message_loop_| via PostTask.
+  std::unique_ptr<win::ScopedCOMInitializer> scoped_com_initializer_;
+#endif  // defined(OS_WIN)
 
   // Handles shutdown behaviors and sets up the environment to run a task.
   internal::TaskTracker task_tracker_;
@@ -93,12 +141,12 @@ class TestTaskSchedulerTaskRunner : public SingleThreadTaskRunner {
 
   // SingleThreadTaskRunner:
   bool PostDelayedTask(const tracked_objects::Location& from_here,
-                       const Closure& closure,
+                       OnceClosure closure,
                        TimeDelta delay) override;
   bool PostNonNestableDelayedTask(const tracked_objects::Location& from_here,
-                                  const Closure& closure,
+                                  OnceClosure closure,
                                   TimeDelta delay) override;
-  bool RunsTasksOnCurrentThread() const override;
+  bool RunsTasksInCurrentSequence() const override;
 
  private:
   ~TestTaskSchedulerTaskRunner() override;
@@ -123,12 +171,17 @@ TestTaskScheduler::~TestTaskScheduler() {
     Shutdown();
 }
 
+void TestTaskScheduler::Start(const TaskScheduler::InitParams&) {
+  NOTREACHED();
+}
+
 void TestTaskScheduler::PostDelayedTaskWithTraits(
     const tracked_objects::Location& from_here,
     const TaskTraits& traits,
-    const Closure& task,
+    OnceClosure task,
     TimeDelta delay) {
-  CreateTaskRunnerWithTraits(traits)->PostDelayedTask(from_here, task, delay);
+  CreateTaskRunnerWithTraits(traits)->PostDelayedTask(from_here,
+                                                      std::move(task), delay);
 }
 
 scoped_refptr<TaskRunner> TestTaskScheduler::CreateTaskRunnerWithTraits(
@@ -146,14 +199,31 @@ TestTaskScheduler::CreateSequencedTaskRunnerWithTraits(
 
 scoped_refptr<SingleThreadTaskRunner>
 TestTaskScheduler::CreateSingleThreadTaskRunnerWithTraits(
-    const TaskTraits& traits) {
+    const TaskTraits& traits,
+    SingleThreadTaskRunnerThreadMode thread_mode) {
   return make_scoped_refptr(new TestTaskSchedulerTaskRunner(
       this, ExecutionMode::SINGLE_THREADED, traits));
 }
 
+#if defined(OS_WIN)
+scoped_refptr<SingleThreadTaskRunner>
+TestTaskScheduler::CreateCOMSTATaskRunnerWithTraits(
+    const TaskTraits& traits,
+    SingleThreadTaskRunnerThreadMode thread_mode) {
+  EnsureCOMSTA();
+  return make_scoped_refptr(new TestTaskSchedulerTaskRunner(
+      this, ExecutionMode::SINGLE_THREADED, traits));
+}
+#endif  // defined(OS_WIN)
+
 std::vector<const HistogramBase*> TestTaskScheduler::GetHistograms() const {
   NOTREACHED();
   return std::vector<const HistogramBase*>();
+}
+
+int TestTaskScheduler::GetMaxConcurrentTasksWithTraitsDeprecated(
+    const TaskTraits& traits) const {
+  return 1;
 }
 
 void TestTaskScheduler::Shutdown() {
@@ -166,7 +236,7 @@ void TestTaskScheduler::Shutdown() {
 }
 
 void TestTaskScheduler::FlushForTesting() {
-  NOTREACHED();
+  RunLoop().RunUntilIdle();
 }
 
 void TestTaskScheduler::JoinForTesting() {
@@ -179,14 +249,18 @@ bool TestTaskScheduler::PostTask(std::unique_ptr<internal::Task> task,
   if (!task_tracker_.WillPostTask(task.get()))
     return false;
   internal::Task* const task_ptr = task.get();
-  return message_loop_task_runner_->PostDelayedTask(
-      task_ptr->posted_from, Bind(&TestTaskScheduler::RunTask, Unretained(this),
-                                  Passed(&task), sequence_token),
+  return MessageLoopTaskRunner()->PostDelayedTask(
+      task_ptr->posted_from,
+      BindOnce(&TestTaskScheduler::RunTask, Unretained(this), Passed(&task),
+               sequence_token),
       task_ptr->delay);
 }
 
 void TestTaskScheduler::RunTask(std::unique_ptr<internal::Task> task,
                                 const SequenceToken& sequence_token) {
+  DCHECK(!saved_task_runner_);
+  saved_task_runner_ = MessageLoop::current()->task_runner();
+
   // Clear the MessageLoop TaskRunner to allow TaskTracker to register its own
   // Thread/SequencedTaskRunnerHandle as appropriate.
   MessageLoop::current()->ClearTaskRunnerForTesting();
@@ -196,12 +270,16 @@ void TestTaskScheduler::RunTask(std::unique_ptr<internal::Task> task,
                                              ? sequence_token
                                              : SequenceToken::Create());
 
+  // Make sure that any task runner that was registered was also cleaned up.
+  DCHECK(!MessageLoop::current()->task_runner());
+
   // Restore the MessageLoop TaskRunner.
-  MessageLoop::current()->SetTaskRunner(message_loop_task_runner_);
+  MessageLoop::current()->SetTaskRunner(saved_task_runner_);
+  saved_task_runner_ = nullptr;
 }
 
-bool TestTaskScheduler::RunsTasksOnCurrentThread() const {
-  return message_loop_task_runner_->RunsTasksOnCurrentThread();
+bool TestTaskScheduler::RunsTasksInCurrentSequence() const {
+  return MessageLoopTaskRunner()->RunsTasksInCurrentSequence();
 }
 
 TestTaskSchedulerTaskRunner::TestTaskSchedulerTaskRunner(
@@ -217,9 +295,10 @@ TestTaskSchedulerTaskRunner::TestTaskSchedulerTaskRunner(
 
 bool TestTaskSchedulerTaskRunner::PostDelayedTask(
     const tracked_objects::Location& from_here,
-    const Closure& closure,
+    OnceClosure closure,
     TimeDelta delay) {
-  auto task = MakeUnique<internal::Task>(from_here, closure, traits_, delay);
+  auto task =
+      MakeUnique<internal::Task>(from_here, std::move(closure), traits_, delay);
   if (execution_mode_ == ExecutionMode::SEQUENCED)
     task->sequenced_task_runner_ref = make_scoped_refptr(this);
   else if (execution_mode_ == ExecutionMode::SINGLE_THREADED)
@@ -229,15 +308,15 @@ bool TestTaskSchedulerTaskRunner::PostDelayedTask(
 
 bool TestTaskSchedulerTaskRunner::PostNonNestableDelayedTask(
     const tracked_objects::Location& from_here,
-    const Closure& closure,
+    OnceClosure closure,
     TimeDelta delay) {
   // Tasks are never nested within the task scheduler.
-  return PostDelayedTask(from_here, closure, delay);
+  return PostDelayedTask(from_here, std::move(closure), delay);
 }
 
-bool TestTaskSchedulerTaskRunner::RunsTasksOnCurrentThread() const {
+bool TestTaskSchedulerTaskRunner::RunsTasksInCurrentSequence() const {
   if (execution_mode_ == ExecutionMode::PARALLEL)
-    return task_scheduler_->RunsTasksOnCurrentThread();
+    return task_scheduler_->RunsTasksInCurrentSequence();
   return sequence_token_ == SequenceToken::GetForCurrentThread();
 }
 
@@ -247,10 +326,9 @@ TestTaskSchedulerTaskRunner::~TestTaskSchedulerTaskRunner() = default;
 
 ScopedTaskScheduler::ScopedTaskScheduler() : ScopedTaskScheduler(nullptr) {}
 
-ScopedTaskScheduler::ScopedTaskScheduler(MessageLoop* external_message_loop) {
+ScopedTaskScheduler::ScopedTaskScheduler(MessageLoop* message_loop) {
   DCHECK(!TaskScheduler::GetInstance());
-  TaskScheduler::SetInstance(
-      MakeUnique<TestTaskScheduler>(external_message_loop));
+  TaskScheduler::SetInstance(MakeUnique<TestTaskScheduler>(message_loop));
   task_scheduler_ = TaskScheduler::GetInstance();
 }
 

@@ -5,21 +5,31 @@
 #ifndef CHROMECAST_BROWSER_MEDIA_MEDIA_CAPS_IMPL_H_
 #define CHROMECAST_BROWSER_MEDIA_MEDIA_CAPS_IMPL_H_
 
+#include <vector>
+
 #include "base/macros.h"
 #include "chromecast/common/media/media_caps.mojom.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "mojo/public/cpp/bindings/interface_ptr_set.h"
 #include "ui/gfx/geometry/size.h"
 
+namespace service_manager {
+struct BindSourceInfo;
+}
+
 namespace chromecast {
 namespace media {
+
+struct CodecProfileLevel;
 
 class MediaCapsImpl : public mojom::MediaCaps {
  public:
   MediaCapsImpl();
   ~MediaCapsImpl() override;
 
-  void AddBinding(mojom::MediaCapsRequest request);
+  void Initialize();
+  void AddBinding(const service_manager::BindSourceInfo& source_info,
+                  mojom::MediaCapsRequest request);
 
   void SetSupportedHdmiSinkCodecs(unsigned int supported_codecs_bitmask);
   void ScreenResolutionChanged(unsigned width, unsigned height);
@@ -30,6 +40,8 @@ class MediaCapsImpl : public mojom::MediaCaps {
                          int screen_height_mm,
                          bool current_mode_supports_hdr,
                          bool current_mode_supports_dv);
+  void AddSupportedCodecProfileLevel(
+      const CodecProfileLevel& codec_profile_level);
 
  private:
   // chromecast::mojom::MediaCaps implementation.
@@ -44,6 +56,7 @@ class MediaCapsImpl : public mojom::MediaCaps {
   bool current_mode_supports_hdr_;
   bool current_mode_supports_dv_;
   gfx::Size screen_resolution_;
+  std::vector<CodecProfileLevel> codec_profile_levels_;
   mojo::InterfacePtrSet<mojom::MediaCapsObserver> observers_;
   mojo::BindingSet<mojom::MediaCaps> bindings_;
 

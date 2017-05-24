@@ -7,49 +7,14 @@
       "drawsContent": true,
       "paintInvalidations": [
         {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [0, 0, 600, 500],
-          "reason": "forced by layout"
-        },
-        {
           "object": "LayoutFrameSet FRAMESET",
           "rect": [0, 0, 600, 500],
-          "reason": "border box change"
+          "reason": "geometry"
         },
         {
           "object": "LayoutView #document",
           "rect": [0, 250, 600, 250],
           "reason": "incremental"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [153, 0, 294, 500],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutFrame FRAME",
-          "rect": [153, 0, 294, 500],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [453, 0, 147, 500],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutFrame FRAME",
-          "rect": [453, 0, 147, 500],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [0, 0, 147, 500],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutFrame FRAME",
-          "rect": [0, 0, 147, 500],
-          "reason": "forced by layout"
         }
       ]
     }
@@ -60,48 +25,20 @@
       "reason": "incremental"
     },
     {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
-    },
-    {
       "object": "LayoutFrameSet FRAMESET",
-      "reason": "border box change"
+      "reason": "geometry"
     },
     {
       "object": "LayoutFrame FRAME",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutFrame FRAME",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutFrame FRAME",
-      "reason": "forced by layout"
-    },
-    {
-      "object": "VerticalScrollbar",
-      "reason": "scroll"
-    },
-    {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
-    },
-    {
-      "object": "VerticalScrollbar",
-      "reason": "scroll"
-    },
-    {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
-    },
-    {
-      "object": "VerticalScrollbar",
-      "reason": "scroll"
-    },
-    {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
+      "reason": "geometry"
     }
   ]
 }
@@ -114,69 +51,14 @@
       "drawsContent": true,
       "paintInvalidations": [
         {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [0, 0, 600, 250],
-          "reason": "forced by layout"
-        },
-        {
           "object": "LayoutFrameSet FRAMESET",
           "rect": [0, 0, 600, 250],
-          "reason": "border box change"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [153, 0, 294, 250],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutFrame FRAME",
-          "rect": [153, 0, 294, 250],
-          "reason": "forced by layout"
+          "reason": "geometry"
         },
         {
           "object": "LayoutView #document",
           "rect": [400, 0, 200, 250],
           "reason": "incremental"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [103, 0, 194, 250],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutFrame FRAME",
-          "rect": [103, 0, 194, 250],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [453, 0, 147, 250],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutFrame FRAME",
-          "rect": [453, 0, 147, 250],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [0, 0, 147, 250],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutFrame FRAME",
-          "rect": [0, 0, 147, 250],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [303, 0, 97, 250],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutFrame FRAME",
-          "rect": [303, 0, 97, 250],
-          "reason": "forced by layout"
         }
       ]
     }
@@ -187,64 +69,44 @@
       "reason": "incremental"
     },
     {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
-    },
-    {
       "object": "LayoutFrameSet FRAMESET",
-      "reason": "border box change"
+      "reason": "geometry"
     },
     {
       "object": "LayoutFrame FRAME",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutFrame FRAME",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutFrame FRAME",
-      "reason": "forced by layout"
-    },
-    {
-      "object": "HorizontalScrollbar",
-      "reason": "scroll"
-    },
-    {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
-    },
-    {
-      "object": "HorizontalScrollbar",
-      "reason": "scroll"
+      "reason": "geometry"
     },
     {
       "object": "LayoutView #document",
-      "reason": "location change"
+      "reason": "geometry"
     },
     {
       "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutBlockFlow BODY",
-      "reason": "location change"
-    },
-    {
-      "object": "HorizontalScrollbar",
-      "reason": "scroll"
+      "reason": "geometry"
     },
     {
       "object": "LayoutView #document",
-      "reason": "location change"
+      "reason": "geometry"
     },
     {
       "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutBlockFlow BODY",
-      "reason": "location change"
+      "reason": "geometry"
     }
   ]
 }
@@ -257,49 +119,14 @@
       "drawsContent": true,
       "paintInvalidations": [
         {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [0, 0, 400, 600],
-          "reason": "forced by layout"
-        },
-        {
           "object": "LayoutFrameSet FRAMESET",
           "rect": [0, 0, 400, 600],
-          "reason": "border box change"
+          "reason": "geometry"
         },
         {
           "object": "LayoutView #document",
           "rect": [0, 250, 400, 350],
           "reason": "incremental"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [103, 0, 194, 600],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutFrame FRAME",
-          "rect": [103, 0, 194, 600],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [303, 0, 97, 600],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutFrame FRAME",
-          "rect": [303, 0, 97, 600],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [0, 0, 97, 600],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutFrame FRAME",
-          "rect": [0, 0, 97, 600],
-          "reason": "forced by layout"
         }
       ]
     }
@@ -310,36 +137,20 @@
       "reason": "incremental"
     },
     {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
-    },
-    {
       "object": "LayoutFrameSet FRAMESET",
-      "reason": "border box change"
+      "reason": "geometry"
     },
     {
       "object": "LayoutFrame FRAME",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutFrame FRAME",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutFrame FRAME",
-      "reason": "forced by layout"
-    },
-    {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
-    },
-    {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
-    },
-    {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
+      "reason": "geometry"
     }
   ]
 }
@@ -352,69 +163,14 @@
       "drawsContent": true,
       "paintInvalidations": [
         {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [0, 0, 800, 600],
-          "reason": "forced by layout"
-        },
-        {
           "object": "LayoutFrameSet FRAMESET",
           "rect": [0, 0, 800, 600],
-          "reason": "border box change"
+          "reason": "geometry"
         },
         {
           "object": "LayoutView #document",
           "rect": [400, 0, 400, 600],
           "reason": "incremental"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [203, 0, 394, 600],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutFrame FRAME",
-          "rect": [203, 0, 394, 600],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [603, 0, 197, 600],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutFrame FRAME",
-          "rect": [603, 0, 197, 600],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [0, 0, 197, 600],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutFrame FRAME",
-          "rect": [0, 0, 197, 600],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [103, 0, 194, 600],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutFrame FRAME",
-          "rect": [103, 0, 194, 600],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [303, 0, 97, 600],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutFrame FRAME",
-          "rect": [303, 0, 97, 600],
-          "reason": "forced by layout"
         }
       ]
     }
@@ -425,52 +181,44 @@
       "reason": "incremental"
     },
     {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
-    },
-    {
       "object": "LayoutFrameSet FRAMESET",
-      "reason": "border box change"
+      "reason": "geometry"
     },
     {
       "object": "LayoutFrame FRAME",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutFrame FRAME",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutFrame FRAME",
-      "reason": "forced by layout"
-    },
-    {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutView #document",
-      "reason": "location change"
+      "reason": "geometry"
     },
     {
       "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutBlockFlow BODY",
-      "reason": "location change"
+      "reason": "geometry"
     },
     {
       "object": "LayoutView #document",
-      "reason": "location change"
+      "reason": "geometry"
     },
     {
       "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutBlockFlow BODY",
-      "reason": "location change"
+      "reason": "geometry"
     }
   ]
 }

@@ -12,11 +12,13 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/trace_event/memory_usage_estimator.h"
 #include "components/sync/base/hash_util.h"
 #include "components/sync/engine/activation_context.h"
 #include "components/sync/engine/commit_queue.h"
 #include "components/sync/engine/model_type_processor_proxy.h"
 #include "components/sync/model_impl/processor_entity_tracker.h"
+#include "components/sync/protocol/proto_memory_estimations.h"
 
 namespace syncer {
 
@@ -82,6 +84,7 @@ void SharedModelTypeProcessor::ModelReadyToSync(
                      weak_ptr_factory_.GetWeakPtr()));
     }
   } else {
+    DCHECK_EQ(0u, batch->TakeAllMetadata().size());
     // First time syncing; initialize metadata.
     model_type_state_.mutable_progress_marker()->set_data_type_id(
         GetSpecificsFieldNumberFromModelType(type_));
@@ -208,19 +211,14 @@ void SharedModelTypeProcessor::Put(const std::string& storage_key,
     return;
   }
 
-  // Fill in some data.
-  data->client_tag_hash = GetClientTagHash(storage_key, *data);
-  if (data->modification_time.is_null()) {
-    data->modification_time = base::Time::Now();
-  }
-
-  ProcessorEntityTracker* entity = GetEntityForTagHash(data->client_tag_hash);
-
+  ProcessorEntityTracker* entity = GetEntityForStorageKey(storage_key);
   if (entity == nullptr) {
     // The bridge is creating a new entity.
-    if (data->creation_time.is_null()) {
-      data->creation_time = data->modification_time;
-    }
+    data->client_tag_hash = GetClientTagHash(storage_key, *data);
+    if (data->creation_time.is_null())
+      data->creation_time = base::Time::Now();
+    if (data->modification_time.is_null())
+      data->modification_time = data->creation_time;
     entity = CreateEntity(storage_key, *data);
   } else if (entity->MatchesData(*data)) {
     // Ignore changes that don't actually change anything.
@@ -257,6 +255,29 @@ void SharedModelTypeProcessor::Delete(
 
   metadata_change_list->UpdateMetadata(storage_key, entity->metadata());
   FlushPendingCommitRequests();
+}
+
+void SharedModelTypeProcessor::UpdateStorageKey(
+    const std::string& old_storage_key,
+    const std::string& new_storage_key,
+    MetadataChangeList* metadata_change_list) {
+  ProcessorEntityTracker* entity = GetEntityForStorageKey(old_storage_key);
+  if (entity == nullptr) {
+    DLOG(WARNING) << "Attempted to update missing item."
+                  << " storage key: " << old_storage_key;
+    return;
+  }
+
+  entity->SetStorageKey(new_storage_key);
+
+  // Update storage key to tag hash map.
+  storage_key_to_tag_hash_.erase(old_storage_key);
+  storage_key_to_tag_hash_[new_storage_key] =
+      entity->metadata().client_tag_hash();
+
+  // Update metadata store.
+  metadata_change_list->ClearMetadata(old_storage_key);
+  metadata_change_list->UpdateMetadata(new_storage_key, entity->metadata());
 }
 
 void SharedModelTypeProcessor::FlushPendingCommitRequests() {
@@ -612,7 +633,9 @@ void SharedModelTypeProcessor::ConsumeDataBatch(
     ProcessorEntityTracker* entity = GetEntityForStorageKey(data.first);
     // If the entity wasn't deleted or updated with new commit.
     if (entity != nullptr && entity->RequiresCommitData()) {
-      entity->CacheCommitData(data.second.get());
+      // SetCommitData will update EntityData's fields with values from
+      // metadata.
+      entity->SetCommitData(data.second.get());
     }
   }
 }
@@ -664,6 +687,15 @@ ProcessorEntityTracker* SharedModelTypeProcessor::CreateEntity(
   // Verify the tag hash matches, may be relaxed in the future.
   DCHECK_EQ(data.client_tag_hash, GetHashForTag(bridge_->GetClientTag(data)));
   return CreateEntity(bridge_->GetStorageKey(data), data);
+}
+
+size_t SharedModelTypeProcessor::EstimateMemoryUsage() const {
+  using base::trace_event::EstimateMemoryUsage;
+  size_t memory_usage = 0;
+  memory_usage += EstimateMemoryUsage(model_type_state_);
+  memory_usage += EstimateMemoryUsage(entities_);
+  memory_usage += EstimateMemoryUsage(storage_key_to_tag_hash_);
+  return memory_usage;
 }
 
 }  // namespace syncer

@@ -11,9 +11,9 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/webui/signin/sync_confirmation_ui.h"
 #include "chrome/common/url_constants.h"
 #include "components/constrained_window/constrained_window_views.h"
-#include "components/signin/core/common/profile_management_switches.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
@@ -22,8 +22,6 @@
 
 namespace {
 
-const int kPasswordCombinedFixedGaiaViewHeight = 440;
-const int kPasswordCombinedFixedGaiaViewWidth = 360;
 const int kFixedGaiaViewHeight = 612;
 const int kModalDialogWidth = 448;
 const int kSyncConfirmationDialogHeight = 487;
@@ -49,7 +47,6 @@ SigninViewControllerDelegateViews::SigninViewControllerDelegateViews(
       content_view_(content_view.release()),
       modal_signin_widget_(nullptr),
       dialog_modal_type_(dialog_modal_type),
-      wait_for_size_(wait_for_size),
       browser_(browser) {
   DCHECK(browser_);
   DCHECK(browser_->tab_strip_model()->GetActiveWebContents())
@@ -57,7 +54,7 @@ SigninViewControllerDelegateViews::SigninViewControllerDelegateViews(
   DCHECK(dialog_modal_type == ui::MODAL_TYPE_CHILD ||
          dialog_modal_type == ui::MODAL_TYPE_WINDOW)
       << "Unsupported dialog modal type " << dialog_modal_type;
-  if (!wait_for_size_)
+  if (!wait_for_size)
     DisplayModal();
 }
 
@@ -107,7 +104,7 @@ void SigninViewControllerDelegateViews::ResizeNativeView(int height) {
       gfx::Size(kModalDialogWidth, std::min(height, max_height)));
   content_view_->Layout();
 
-  if (wait_for_size_) {
+  if (!modal_signin_widget_) {
     // The modal wasn't displayed yet so just show it with the already resized
     // view.
     DisplayModal();
@@ -115,6 +112,8 @@ void SigninViewControllerDelegateViews::ResizeNativeView(int height) {
 }
 
 void SigninViewControllerDelegateViews::DisplayModal() {
+  DCHECK(!modal_signin_widget_);
+
   content::WebContents* host_web_contents =
       browser_->tab_strip_model()->GetActiveWebContents();
 
@@ -157,12 +156,8 @@ SigninViewControllerDelegateViews::CreateGaiaWebView(
       ->GetWebContentsModalDialogHost()
       ->GetMaximumDialogSize().height();
   // Adds Gaia signin webview.
-  const gfx::Size pref_size =
-      switches::UsePasswordSeparatedSigninFlow()
-          ? gfx::Size(kModalDialogWidth,
-                      std::min(kFixedGaiaViewHeight, max_height))
-          : gfx::Size(kPasswordCombinedFixedGaiaViewWidth,
-                      kPasswordCombinedFixedGaiaViewHeight);
+  const gfx::Size pref_size(kModalDialogWidth,
+                            std::min(kFixedGaiaViewHeight, max_height));
   views::WebView* web_view = new views::WebView(browser->profile());
   web_view->LoadInitialURL(url);
 
@@ -183,7 +178,9 @@ SigninViewControllerDelegateViews::CreateSyncConfirmationWebView(
     Browser* browser) {
   views::WebView* web_view = new views::WebView(browser->profile());
   web_view->LoadInitialURL(GURL(chrome::kChromeUISyncConfirmationURL));
-
+  SyncConfirmationUI* sync_confirmation_ui = static_cast<SyncConfirmationUI*>(
+      web_view->GetWebContents()->GetWebUI()->GetController());
+  sync_confirmation_ui->InitializeMessageHandlerWithBrowser(browser);
   int dialog_preferred_height =
       GetSyncConfirmationDialogPreferredHeight(browser->profile());
   int max_height = browser

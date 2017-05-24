@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/critical_closure.h"
 #include "base/debug/alias.h"
 #include "base/files/file.h"
@@ -103,6 +104,7 @@ bool ImportantFileWriter::WriteFileAtomically(const FilePath& path,
   File tmp_file(tmp_file_path, File::FLAG_OPEN | File::FLAG_WRITE);
   if (!tmp_file.IsValid()) {
     LogFailure(path, FAILED_OPENING, "could not open temporary file");
+    DeleteFile(tmp_file_path, false);
     return false;
   }
 
@@ -177,9 +179,10 @@ void ImportantFileWriter::WriteNow(std::unique_ptr<std::string> data) {
   if (HasPendingWrite())
     timer_.Stop();
 
-  Closure task = Bind(&WriteScopedStringToFileAtomically, path_, Passed(&data),
-                      Passed(&before_next_write_callback_),
-                      Passed(&after_next_write_callback_));
+  Closure task = AdaptCallbackForRepeating(
+      BindOnce(&WriteScopedStringToFileAtomically, path_, std::move(data),
+               std::move(before_next_write_callback_),
+               std::move(after_next_write_callback_)));
 
   if (!task_runner_->PostTask(FROM_HERE, MakeCriticalClosure(task))) {
     // Posting the task to background message loop is not expected

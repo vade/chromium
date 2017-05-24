@@ -13,7 +13,7 @@
 //
 // 1) You add a new dependency to "whatever.js"
 // 2) You make changes in "whatever.js"
-// 3) Rebuild "resources.pak" and open Files.app
+// 3) Rebuild "resources.pak" and open the Files app
 // 4) You don't see the changes in "whatever.js". Why is that?
 //
 // Because the dependencies are computed at gyp time, the existing build
@@ -75,7 +75,7 @@
 // 'strict mode' is invoked for this scope.
 'use strict';
 
-// error_util.js must be loaded before all other Files.app's scripts.
+// error_util.js must be loaded before all other scripts of the Files app.
 // <include src="../../common/js/error_util.js">
 //
 // <include src="../../common/js/async_util.js">
@@ -85,6 +85,8 @@
 // <include src="../../common/js/progress_center_common.js">
 // <include src="../../common/js/importer_common.js">
 //
+// <include src="constants.js">
+// <include src="web_store_utils.js">
 // <include src="ui/combobutton.js">
 // <include src="ui/commandbutton.js">
 // <include src="ui/file_manager_dialog_base.js">
@@ -92,10 +94,14 @@
 // <include src="metadata/metadata_provider.js">
 // <include src="metadata/metadata_request.js">
 //
-// <include src="../../../../../components/chrome_apps/webstore_widget/cws_widget/app_installer.js">
-// <include src="../../../../../components/chrome_apps/webstore_widget/cws_widget/cws_webview_client.js">
-// <include src="../../../../../components/chrome_apps/webstore_widget/cws_widget/cws_widget_container.js">
-// <include src="../../../../../components/chrome_apps/webstore_widget/cws_widget/cws_widget_container_error_dialog.js">
+// <include
+// src="../../../../../components/chrome_apps/webstore_widget/cws_widget/app_installer.js">
+// <include
+// src="../../../../../components/chrome_apps/webstore_widget/cws_widget/cws_webview_client.js">
+// <include
+// src="../../../../../components/chrome_apps/webstore_widget/cws_widget/cws_widget_container.js">
+// <include
+// src="../../../../../components/chrome_apps/webstore_widget/cws_widget/cws_widget_container_error_dialog.js">
 //
 // <include src="actions_controller.js">
 // <include src="actions_model.js">
@@ -132,6 +138,7 @@
 // <include src="metadata_update_controller.js">
 // <include src="naming_controller.js">
 // <include src="navigation_list_model.js">
+// <include src="navigation_uma.js">
 // <include src="progress_center_item_group.js">
 // <include src="quick_view_controller.js">
 // <include src="quick_view_model.js">
@@ -173,6 +180,7 @@
 // <include src="ui/suggest_apps_dialog.js">
 // <include src="main_window_component.js">
 // <include src="volume_manager_wrapper.js">
+// <include src="webui_command_extender.js">
 
 // // For accurate load performance tracking place main.js should be
 // // the last include to include.

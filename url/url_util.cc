@@ -10,7 +10,6 @@
 #include "base/debug/leak_annotations.h"
 #include "base/logging.h"
 #include "base/strings/string_util.h"
-#include "url/gurl.h"
 #include "url/url_canon_internal.h"
 #include "url/url_constants.h"
 #include "url/url_file.h"
@@ -73,6 +72,19 @@ const char* kCORSEnabledSchemes[] = {
   kDataScheme,
 };
 
+const char* kWebStorageSchemes[] = {
+  kHttpScheme,
+  kHttpsScheme,
+  kFileScheme,
+  kFtpScheme,
+  kWsScheme,
+  kWssScheme,
+};
+
+const char* kEmptyDocumentSchemes[] = {
+    kAboutScheme,
+};
+
 bool initialized = false;
 
 // Lists of the currently installed standard and referrer schemes. These lists
@@ -86,6 +98,9 @@ std::vector<std::string>* secure_schemes = nullptr;
 std::vector<std::string>* local_schemes = nullptr;
 std::vector<std::string>* no_access_schemes = nullptr;
 std::vector<std::string>* cors_enabled_schemes = nullptr;
+std::vector<std::string>* web_storage_schemes = nullptr;
+std::vector<std::string>* csp_bypassing_schemes = nullptr;
+std::vector<std::string>* empty_document_schemes = nullptr;
 
 // See the LockSchemeRegistries declaration in the header.
 bool scheme_registries_locked = false;
@@ -193,9 +208,7 @@ bool DoCanonicalize(const CHAR* spec,
                     CharsetConverter* charset_converter,
                     CanonOutput* output,
                     Parsed* output_parsed) {
-  // Reserve enough room in the output for the input, plus some extra so that
-  // we have room if we have to escape a few things without reallocating.
-  output->ReserveSizeIfNeeded(spec_len + 8);
+  output->ReserveSizeIfNeeded(spec_len);
 
   // Remove any whitespace from the middle of the relative URL if necessary.
   // Possibly this will result in copying to the new buffer.
@@ -423,7 +436,7 @@ bool DoReplaceComponents(const char* spec,
   // in callers below, and the code checks to see which components are being
   // replaced, and with what length. If this ends up being a hot spot it should
   // be changed.
-  output->ReserveSizeIfNeeded(spec_len + 8);
+  output->ReserveSizeIfNeeded(spec_len);
 
   // If we get here, then we know the scheme doesn't need to be replaced, so can
   // just key off the scheme in the spec to know how to do the replacements.
@@ -514,6 +527,11 @@ void Initialize() {
               arraysize(kNoAccessSchemes));
   InitSchemes(&cors_enabled_schemes, kCORSEnabledSchemes,
               arraysize(kCORSEnabledSchemes));
+  InitSchemes(&web_storage_schemes, kWebStorageSchemes,
+              arraysize(kWebStorageSchemes));
+  InitSchemes(&csp_bypassing_schemes, nullptr, 0);
+  InitSchemes(&empty_document_schemes, kEmptyDocumentSchemes,
+              arraysize(kEmptyDocumentSchemes));
   initialized = true;
 }
 
@@ -531,6 +549,12 @@ void Shutdown() {
   no_access_schemes = nullptr;
   delete cors_enabled_schemes;
   cors_enabled_schemes = nullptr;
+  delete web_storage_schemes;
+  web_storage_schemes = nullptr;
+  delete csp_bypassing_schemes;
+  csp_bypassing_schemes = nullptr;
+  delete empty_document_schemes;
+  empty_document_schemes = nullptr;
 }
 
 void AddStandardScheme(const char* new_scheme, SchemeType type) {
@@ -583,6 +607,36 @@ const std::vector<std::string>& GetCORSEnabledSchemes() {
   return *cors_enabled_schemes;
 }
 
+void AddWebStorageScheme(const char* new_scheme) {
+  Initialize();
+  DoAddScheme(new_scheme, web_storage_schemes);
+}
+
+const std::vector<std::string>& GetWebStorageSchemes() {
+  Initialize();
+  return *web_storage_schemes;
+}
+
+void AddCSPBypassingScheme(const char* new_scheme) {
+  Initialize();
+  DoAddScheme(new_scheme, csp_bypassing_schemes);
+}
+
+const std::vector<std::string>& GetCSPBypassingSchemes() {
+  Initialize();
+  return *csp_bypassing_schemes;
+}
+
+void AddEmptyDocumentScheme(const char* new_scheme) {
+  Initialize();
+  DoAddScheme(new_scheme, empty_document_schemes);
+}
+
+const std::vector<std::string>& GetEmptyDocumentSchemes() {
+  Initialize();
+  return *empty_document_schemes;
+}
+
 void LockSchemeRegistries() {
   scheme_registries_locked = true;
 }
@@ -607,21 +661,6 @@ bool IsReferrerScheme(const char* spec, const Component& scheme) {
   Initialize();
   SchemeType unused_scheme_type;
   return DoIsInSchemes(spec, scheme, &unused_scheme_type, *referrer_schemes);
-}
-
-bool IsAboutBlank(const GURL& url) {
-  if (!url.SchemeIs(url::kAboutScheme))
-    return false;
-
-  if (url.has_host() || url.has_username() || url.has_password() ||
-      url.has_port()) {
-    return false;
-  }
-
-  if (url.path() != kAboutBlankPath && url.path() != kAboutBlankWithHashPath)
-    return false;
-
-  return true;
 }
 
 bool FindAndCompareScheme(const char* str,

@@ -26,12 +26,13 @@ template("service_test") {
     }
     deps += [
       ":$catalog_source_target",
-      "//services/service_manager/public/cpp/test:run_all_service_tests_with_catalog",
+      "//services/service_manager/public/cpp/test:run_all_service_tests",
     ]
   }
 
   catalog_cpp_source(catalog_source_target) {
+    testonly = true
     catalog = invoker.catalog
-    output_symbol_name = "service_manager::test::kServiceTestCatalog"
+    generated_function_name = "service_manager::test::CreateTestCatalog"
   }
 }

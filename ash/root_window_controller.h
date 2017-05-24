@@ -10,9 +10,9 @@
 #include <vector>
 
 #include "ash/ash_export.h"
-#include "ash/common/shell_observer.h"
-#include "ash/common/wm/workspace/workspace_types.h"
 #include "ash/public/cpp/shelf_types.h"
+#include "ash/shell_observer.h"
+#include "ash/wm/workspace/workspace_types.h"
 #include "base/macros.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
@@ -51,7 +51,6 @@ class AnimatingWallpaperWidgetController;
 class AshTouchExplorationManager;
 class AshWindowTreeHost;
 class BootSplashScreen;
-class DockedWindowLayoutManager;
 enum class LoginStatus;
 class PanelLayoutManager;
 class ShelfLayoutManager;
@@ -139,13 +138,11 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   wm::WorkspaceWindowState GetWorkspaceWindowState();
 
   WmShelf* wm_shelf() const { return wm_shelf_.get(); }
+  // TODO(jamescook): Eliminate in favor of wm_shelf().
+  WmShelf* GetShelf() const { return wm_shelf_.get(); }
 
-  bool HasShelf();
-
-  WmShelf* GetShelf();
-
-  // Creates the shelf view for this root window and notifies observers.
-  void CreateShelfView();
+  // Initializes the shelf for this root window and notifies observers.
+  void InitializeShelf();
 
   // Get touch HUDs associated with this root window controller.
   TouchHudDebug* touch_hud_debug() const { return touch_hud_debug_; }
@@ -160,10 +157,6 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   void set_touch_hud_debug(TouchHudDebug* hud) { touch_hud_debug_ = hud; }
   void set_touch_hud_projection(TouchHudProjection* hud) {
     touch_hud_projection_ = hud;
-  }
-
-  DockedWindowLayoutManager* docked_window_layout_manager() {
-    return docked_window_layout_manager_;
   }
 
   PanelLayoutManager* panel_layout_manager() { return panel_layout_manager_; }
@@ -184,7 +177,7 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   // modal container is used if the screen is currently locked. Otherwise, the
   // default modal container is used.
   SystemModalContainerLayoutManager* GetSystemModalLayoutManager(
-      WmWindow* window);
+      aura::Window* window);
 
   AlwaysOnTopController* always_on_top_controller() {
     return always_on_top_controller_.get();
@@ -248,7 +241,7 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   // Deletes associated objects and clears the state, but doesn't delete
   // the root window yet. This is used to delete a secondary displays'
   // root window safely when the display disconnect signal is received,
-  // which may come while we're in the nested message loop.
+  // which may come while we're in the nested run loop.
   void Shutdown();
 
   // Deletes all child windows and performs necessary cleanup.
@@ -285,7 +278,6 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
                        ui::MenuSourceType source_type);
 
   // Called when the login status changes after login (such as lock/unlock).
-  // TODO(oshima): Investigate if we can merge this and |OnLoginStateChanged|.
   void UpdateAfterLoginStatusChange(LoginStatus status);
 
  private:
@@ -319,7 +311,7 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   // Disables projection touch HUD.
   void DisableTouchHudProjection();
 
-  // Resets WmShell::GetRootWindowForNewWindows() if appropriate. This is called
+  // Resets Shell::GetRootWindowForNewWindows() if appropriate. This is called
   // during shutdown to make sure GetRootWindowForNewWindows() isn't referencing
   // this.
   void ResetRootForNewWindowsIfNecessary();
@@ -328,7 +320,6 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   void OnMenuClosed();
 
   // Overridden from ShellObserver.
-  void OnLoginStateChanged(LoginStatus status) override;
   void OnTouchHudProjectionToggled(bool enabled) override;
 
   std::unique_ptr<AshWindowTreeHost> ash_host_;
@@ -337,7 +328,6 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   aura::WindowTreeHost* window_tree_host_;
 
   // LayoutManagers are owned by the window they are installed on.
-  DockedWindowLayoutManager* docked_window_layout_manager_ = nullptr;
   PanelLayoutManager* panel_layout_manager_ = nullptr;
   wm::RootWindowLayoutManager* root_window_layout_manager_ = nullptr;
 
@@ -359,6 +349,10 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   // of the RootWindowController so that it is safe for observers to be added
   // to it during construction of the shelf widget and status tray.
   std::unique_ptr<WmShelf> wm_shelf_;
+
+  // TODO(jamescook): Eliminate this. It is left over from legacy shelf code and
+  // doesn't mean anything in particular.
+  bool shelf_initialized_ = false;
 
   std::unique_ptr<SystemWallpaperController> system_wallpaper_;
 

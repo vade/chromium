@@ -20,6 +20,7 @@
 #include "content/common/content_param_traits.h"
 #include "content/common/date_time_suggestion.h"
 #include "content/common/frame_replication_state.h"
+#include "content/common/message_port.h"
 #include "content/common/navigation_gesture.h"
 #include "content/common/resize_params.h"
 #include "content/common/text_input_state.h"
@@ -33,7 +34,6 @@
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/common/screen_info.h"
 #include "content/public/common/three_d_api_types.h"
-#include "content/public/common/window_container_type.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
 #include "media/base/audio_parameters.h"
@@ -78,23 +78,23 @@
 #define IPC_MESSAGE_START ViewMsgStart
 
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebDeviceEmulationParams::ScreenPosition,
-                          blink::WebDeviceEmulationParams::ScreenPositionLast)
+                          blink::WebDeviceEmulationParams::kScreenPositionLast)
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebMediaPlayerAction::Type,
-                          blink::WebMediaPlayerAction::Type::TypeLast)
+                          blink::WebMediaPlayerAction::Type::kTypeLast)
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebPluginAction::Type,
-                          blink::WebPluginAction::Type::TypeLast)
+                          blink::WebPluginAction::Type::kTypeLast)
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebPopupType,
-                          blink::WebPopupType::WebPopupTypeLast)
+                          blink::WebPopupType::kWebPopupTypeLast)
 // TODO(dcheng): Update WebScreenOrientationType to have a "Last" enum member.
 IPC_ENUM_TRAITS_MIN_MAX_VALUE(blink::WebScreenOrientationType,
-                              blink::WebScreenOrientationUndefined,
-                              blink::WebScreenOrientationLandscapeSecondary)
+                              blink::kWebScreenOrientationUndefined,
+                              blink::kWebScreenOrientationLandscapeSecondary)
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebWorkerCreationError,
-                          blink::WebWorkerCreationErrorLast)
+                          blink::kWebWorkerCreationErrorLast)
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebTextDirection,
-                          blink::WebTextDirection::WebTextDirectionLast)
+                          blink::WebTextDirection::kWebTextDirectionLast)
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebDisplayMode,
-                          blink::WebDisplayMode::WebDisplayModeLast)
+                          blink::WebDisplayMode::kWebDisplayModeLast)
 IPC_ENUM_TRAITS(content::FaviconURL::IconType)
 IPC_ENUM_TRAITS(content::MenuItem::Type)
 IPC_ENUM_TRAITS_MAX_VALUE(content::NavigationGesture,
@@ -120,9 +120,9 @@ IPC_ENUM_TRAITS_MAX_VALUE(ui::TextInputType, ui::TEXT_INPUT_TYPE_MAX)
 #if defined(OS_MACOSX)
 IPC_ENUM_TRAITS_MAX_VALUE(
     blink::WebScrollbarButtonsPlacement,
-    blink::WebScrollbarButtonsPlacement::WebScrollbarButtonsPlacementLast)
+    blink::WebScrollbarButtonsPlacement::kWebScrollbarButtonsPlacementLast)
 
-IPC_ENUM_TRAITS_MAX_VALUE(blink::ScrollerStyle, blink::ScrollerStyleOverlay)
+IPC_ENUM_TRAITS_MAX_VALUE(blink::ScrollerStyle, blink::kScrollerStyleOverlay)
 #endif
 
 IPC_STRUCT_TRAITS_BEGIN(blink::WebMediaPlayerAction)
@@ -153,16 +153,16 @@ IPC_STRUCT_TRAITS_BEGIN(blink::WebSize)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(blink::WebDeviceEmulationParams)
-  IPC_STRUCT_TRAITS_MEMBER(screenPosition)
-  IPC_STRUCT_TRAITS_MEMBER(screenSize)
-  IPC_STRUCT_TRAITS_MEMBER(viewPosition)
-  IPC_STRUCT_TRAITS_MEMBER(deviceScaleFactor)
-  IPC_STRUCT_TRAITS_MEMBER(viewSize)
-  IPC_STRUCT_TRAITS_MEMBER(fitToView)
+  IPC_STRUCT_TRAITS_MEMBER(screen_position)
+  IPC_STRUCT_TRAITS_MEMBER(screen_size)
+  IPC_STRUCT_TRAITS_MEMBER(view_position)
+  IPC_STRUCT_TRAITS_MEMBER(device_scale_factor)
+  IPC_STRUCT_TRAITS_MEMBER(view_size)
+  IPC_STRUCT_TRAITS_MEMBER(fit_to_view)
   IPC_STRUCT_TRAITS_MEMBER(offset)
   IPC_STRUCT_TRAITS_MEMBER(scale)
-  IPC_STRUCT_TRAITS_MEMBER(screenOrientationAngle)
-  IPC_STRUCT_TRAITS_MEMBER(screenOrientationType)
+  IPC_STRUCT_TRAITS_MEMBER(screen_orientation_angle)
+  IPC_STRUCT_TRAITS_MEMBER(screen_orientation_type)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::ScreenInfo)
@@ -184,6 +184,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::ResizeParams)
   IPC_STRUCT_TRAITS_MEMBER(browser_controls_shrink_blink_size)
   IPC_STRUCT_TRAITS_MEMBER(top_controls_height)
   IPC_STRUCT_TRAITS_MEMBER(bottom_controls_height)
+  IPC_STRUCT_TRAITS_MEMBER(local_surface_id)
   IPC_STRUCT_TRAITS_MEMBER(visible_viewport_size)
   IPC_STRUCT_TRAITS_MEMBER(is_fullscreen_granted)
   IPC_STRUCT_TRAITS_MEMBER(display_mode)
@@ -240,7 +241,6 @@ IPC_STRUCT_TRAITS_BEGIN(content::RendererPreferences)
   IPC_STRUCT_TRAITS_MEMBER(webrtc_udp_max_port)
   IPC_STRUCT_TRAITS_MEMBER(user_agent_override)
   IPC_STRUCT_TRAITS_MEMBER(accept_languages)
-  IPC_STRUCT_TRAITS_MEMBER(report_frame_name_changes)
   IPC_STRUCT_TRAITS_MEMBER(tap_multiple_targets_strategy)
   IPC_STRUCT_TRAITS_MEMBER(disable_client_blocked_error_page)
   IPC_STRUCT_TRAITS_MEMBER(plugin_fullscreen_allowed)
@@ -539,7 +539,19 @@ IPC_MESSAGE_ROUTED0(ViewMsg_WorkerScriptLoadFailed)
 
 // Sent when the worker has connected.
 // This message is sent only if the worker successfully loaded the script.
-IPC_MESSAGE_ROUTED0(ViewMsg_WorkerConnected)
+// |used_features| is the set of features that the worker has used. The values
+// must be from blink::UseCounter::Feature enum.
+IPC_MESSAGE_ROUTED1(ViewMsg_WorkerConnected,
+                    std::set<uint32_t> /* used_features */)
+
+// Sent when the worker is destroyed.
+IPC_MESSAGE_ROUTED0(ViewMsg_WorkerDestroyed)
+
+// Sent when the worker calls API that should be recored in UseCounter.
+// |feature| must be one of the values from blink::UseCounter::Feature
+// enum.
+IPC_MESSAGE_ROUTED1(ViewMsg_CountFeatureOnSharedWorker,
+                    uint32_t /* feature */)
 
 // Sent by the browser to synchronize with the next compositor frame. Used only
 // for tests.
@@ -559,10 +571,18 @@ IPC_MESSAGE_ROUTED1(ViewMsg_PpapiBrokerPermissionResult,
                     bool /* result */)
 #endif
 
-// An acknowledge to ViewHostMsg_MultipleTargetsTouched to notify the renderer
-// process to release the magnified image.
+// An acknowledgement to ViewHostMsg_ShowDisambiguationPopup to notify the
+// renderer process to release the magnified image.
 IPC_MESSAGE_ROUTED1(ViewMsg_ReleaseDisambiguationPopupBitmap,
                     cc::SharedBitmapId /* id */)
+
+// If the ViewHostMsg_ShowDisambiguationPopup resulted in the user tapping
+// inside the popup, instruct the renderer to generate a synthetic tap at that
+// offset.
+IPC_MESSAGE_ROUTED3(ViewMsg_ResolveTapDisambiguation,
+                    double /* timestamp_seconds */,
+                    gfx::Point /* tap_viewport_offset */,
+                    bool /* is_long_press */)
 
 // Fetches complete rendered content of a web page as plain text.
 IPC_MESSAGE_ROUTED0(ViewMsg_GetRenderedText)
@@ -575,19 +595,7 @@ IPC_MESSAGE_ROUTED3(ViewMsg_UpdateBrowserControlsState,
                     bool /* enable_showing */,
                     bool /* animate */)
 
-// Extracts the data at the given rect, returning it through the
-// ViewHostMsg_SmartClipDataExtracted IPC.
-IPC_MESSAGE_ROUTED1(ViewMsg_ExtractSmartClipData,
-                    gfx::Rect /* rect */)
 #endif
-
-// Sent by browser to tell renderer compositor that some resources that were
-// given to the browser in a swap are not being used anymore.
-// If this message is in response to a swap then is_swap_ack is set.
-IPC_MESSAGE_ROUTED3(ViewMsg_ReclaimCompositorResources,
-                    uint32_t /* compositor_frame_sink_id */,
-                    bool /* is_swap_ack */,
-                    cc::ReturnedResourceArray /* resources */)
 
 IPC_MESSAGE_ROUTED0(ViewMsg_SelectWordAroundCaret)
 
@@ -658,10 +666,6 @@ IPC_MESSAGE_CONTROL1(ViewHostMsg_Close_ACK,
 // message.
 IPC_MESSAGE_ROUTED0(ViewHostMsg_ClosePage_ACK)
 
-// Notifies the browser that we have session history information.
-IPC_MESSAGE_ROUTED1(ViewHostMsg_UpdateState,
-                    content::PageState /* state */)
-
 // Notifies the browser that we want to show a destination url for a potential
 // action (e.g. when the user is hovering over a link).
 IPC_MESSAGE_ROUTED1(ViewHostMsg_UpdateTargetURL,
@@ -706,8 +710,8 @@ IPC_MESSAGE_CONTROL1(ViewHostMsg_DocumentDetached, uint64_t /* document_id */)
 // A renderer sends this to the browser process when it wants to connect to a
 // worker.
 IPC_MESSAGE_CONTROL2(ViewHostMsg_ConnectToWorker,
-                     int /* route_id */,
-                     int /* sent_message_port_id */)
+                     int32_t /* worker_route_id */,
+                     content::MessagePort /* port */)
 
 // Tells the browser that a specific Appcache manifest in the current page
 // was accessed.
@@ -793,11 +797,14 @@ IPC_MESSAGE_ROUTED2(ViewHostMsg_UpdateZoomLimits,
                     int /* minimum_percent */,
                     int /* maximum_percent */)
 
-IPC_MESSAGE_ROUTED3(
-    ViewHostMsg_SwapCompositorFrame,
-    uint32_t /* compositor_frame_sink_id */,
-    cc::CompositorFrame /* frame */,
-    std::vector<IPC::Message> /* messages_to_deliver_with_frame */)
+IPC_MESSAGE_ROUTED2(ViewHostMsg_FrameSwapMessages,
+                    uint32_t /* frame_token */,
+                    std::vector<IPC::Message> /* messages */)
+
+// Sent if the BeginFrame did not cause a SwapCompositorFrame (e.g. because no
+// updates were required or because it was aborted in the renderer).
+IPC_MESSAGE_ROUTED1(ViewHostMsg_BeginFrameDidNotSwap,
+                    cc::BeginFrameAck /* ack */)
 
 // Send back a string to be recorded by UserMetrics.
 IPC_MESSAGE_CONTROL1(ViewHostMsg_UserMetricsRecordAction,
@@ -829,11 +836,6 @@ IPC_MESSAGE_ROUTED3(ViewHostMsg_ShowDisambiguationPopup,
                     gfx::Size, /* Size of zoomed image */
                     cc::SharedBitmapId /* id */)
 
-// Notifies the browser that document has parsed the body. This is used by the
-// ResourceScheduler as an indication that bandwidth contention won't block
-// first paint.
-IPC_MESSAGE_ROUTED0(ViewHostMsg_WillInsertBody)
-
 // Notification that the urls for the favicon of a site has been determined.
 IPC_MESSAGE_ROUTED1(ViewHostMsg_UpdateFaviconURL,
                     std::vector<content::FaviconURL> /* candidates */)
@@ -864,27 +866,17 @@ IPC_MESSAGE_ROUTED1(ViewHostMsg_MoveValidationMessage,
 // after the frame widget has painted something.
 IPC_MESSAGE_ROUTED0(ViewHostMsg_DidFirstVisuallyNonEmptyPaint)
 
-// Send after a paint happens after any page commit, including a blank one.
-// TODO(kenrb): This, and all ViewHostMsg_* messages that actually pertain to
-// RenderWidget(Host), should be renamed to WidgetHostMsg_*.
-// See https://crbug.com/537793.
-IPC_MESSAGE_ROUTED0(ViewHostMsg_DidFirstPaintAfterLoad)
-
 // Sent in reply to ViewMsg_WaitForNextFrameForTests.
 IPC_MESSAGE_ROUTED0(ViewHostMsg_WaitForNextFrameForTests_ACK)
 
+// Acknowledges that a SelectWordAroundCaret completed with the specified
+// result and adjustments to the selection offsets.
+IPC_MESSAGE_ROUTED3(ViewHostMsg_SelectWordAroundCaretAck,
+                    bool /* did_select */,
+                    int /* start_adjust */,
+                    int /* end_adjust */)
+
 #if defined(OS_ANDROID)
-// Start an android intent with the given URI.
-IPC_MESSAGE_ROUTED2(ViewHostMsg_StartContentIntent,
-                    GURL /* content_url */,
-                    bool /* is_main_frame */)
-
-// Reply to the ViewMsg_ExtractSmartClipData message.
-IPC_MESSAGE_ROUTED3(ViewHostMsg_SmartClipDataExtracted,
-                    base::string16 /* text */,
-                    base::string16 /* html */,
-                    gfx::Rect /* rect */)
-
 // Notifies that an unhandled tap has occurred at the specified x,y position
 // and that the UI may need to be triggered.
 IPC_MESSAGE_ROUTED2(ViewHostMsg_ShowUnhandledTapUIIfNeeded,

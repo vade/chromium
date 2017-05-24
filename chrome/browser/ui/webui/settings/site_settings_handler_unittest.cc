@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "base/test/histogram_tester.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/ui/webui/site_settings_helper.h"
 #include "chrome/test/base/testing_profile.h"
@@ -17,6 +18,11 @@
 #include "content/public/test/test_web_ui.h"
 #include "extensions/common/extension_builder.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/login/users/mock_user_manager.h"
+#include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
+#endif
 
 namespace {
 
@@ -30,7 +36,13 @@ namespace settings {
 
 class SiteSettingsHandlerTest : public testing::Test {
  public:
-  SiteSettingsHandlerTest() : handler_(&profile_) {}
+  SiteSettingsHandlerTest() : handler_(&profile_) {
+#if defined(OS_CHROMEOS)
+    mock_user_manager_ = new chromeos::MockUserManager;
+    user_manager_enabler_.reset(
+        new chromeos::ScopedUserManagerEnabler(mock_user_manager_));
+#endif
+  }
 
   void SetUp() override {
     handler()->set_web_ui(web_ui());
@@ -212,6 +224,10 @@ class SiteSettingsHandlerTest : public testing::Test {
   TestingProfile* incognito_profile_;
   content::TestWebUI web_ui_;
   SiteSettingsHandler handler_;
+#if defined(OS_CHROMEOS)
+  chromeos::MockUserManager* mock_user_manager_;  // Not owned.
+  std::unique_ptr<chromeos::ScopedUserManagerEnabler> user_manager_enabler_;
+#endif
 };
 
 TEST_F(SiteSettingsHandlerTest, GetAndSetDefault) {
@@ -238,15 +254,23 @@ TEST_F(SiteSettingsHandlerTest, GetAndSetDefault) {
 TEST_F(SiteSettingsHandlerTest, Origins) {
   // Test the JS -> C++ -> JS callback path for configuring origins, by setting
   // Google.com to blocked.
-  base::ListValue setArgs;
-  std::string google("http://www.google.com");
-  setArgs.AppendString(google);  // Primary pattern.
-  setArgs.AppendString(google);  // Secondary pattern.
-  setArgs.AppendString("notifications");
-  setArgs.AppendString("block");
-  setArgs.AppendBoolean(false);  // Incognito.
-  handler()->HandleSetCategoryPermissionForOrigin(&setArgs);
-  EXPECT_EQ(1U, web_ui()->call_data().size());
+  const std::string google("http://www.google.com");
+  const std::string kUmaBase("WebsiteSettings.Menu.PermissionChanged");
+  {
+    base::ListValue set_args;
+    set_args.AppendString(google);  // Primary pattern.
+    set_args.AppendString(google);  // Secondary pattern.
+    set_args.AppendString("notifications");
+    set_args.AppendString("block");
+    set_args.AppendBoolean(false);  // Incognito.
+    base::HistogramTester histograms;
+    handler()->HandleSetCategoryPermissionForOrigin(&set_args);
+    EXPECT_EQ(1U, web_ui()->call_data().size());
+    histograms.ExpectTotalCount(kUmaBase, 1);
+    histograms.ExpectTotalCount(kUmaBase + ".Allowed", 0);
+    histograms.ExpectTotalCount(kUmaBase + ".Blocked", 1);
+    histograms.ExpectTotalCount(kUmaBase + ".Reset", 0);
+  }
 
   // Verify the change was successful.
   base::ListValue listArgs;
@@ -255,14 +279,21 @@ TEST_F(SiteSettingsHandlerTest, Origins) {
   handler()->HandleGetExceptionList(&listArgs);
   ValidateOrigin(google, google, google, "block", "preference", 2U);
 
-  // Reset things back to how they were.
-  base::ListValue resetArgs;
-  resetArgs.AppendString(google);
-  resetArgs.AppendString(google);
-  resetArgs.AppendString("notifications");
-  resetArgs.AppendBoolean(false);  // Incognito.
-  handler()->HandleResetCategoryPermissionForOrigin(&resetArgs);
-  EXPECT_EQ(3U, web_ui()->call_data().size());
+  {
+    // Reset things back to how they were.
+    base::ListValue reset_args;
+    reset_args.AppendString(google);
+    reset_args.AppendString(google);
+    reset_args.AppendString("notifications");
+    reset_args.AppendBoolean(false);  // Incognito.
+    base::HistogramTester histograms;
+    handler()->HandleResetCategoryPermissionForOrigin(&reset_args);
+    EXPECT_EQ(3U, web_ui()->call_data().size());
+    histograms.ExpectTotalCount(kUmaBase, 1);
+    histograms.ExpectTotalCount(kUmaBase + ".Allowed", 0);
+    histograms.ExpectTotalCount(kUmaBase + ".Blocked", 0);
+    histograms.ExpectTotalCount(kUmaBase + ".Reset", 1);
+  }
 
   // Verify the reset was successful.
   handler()->HandleGetExceptionList(&listArgs);
@@ -338,6 +369,16 @@ TEST_F(SiteSettingsHandlerTest, Patterns) {
   invalid.AppendString(bad_pattern);
   handler()->HandleIsPatternValid(&invalid);
   ValidatePattern(false, 2U);
+
+  // The wildcard pattern ('*') is a valid pattern, but not allowed to be
+  // entered in site settings as it changes the default setting.
+  // (crbug.com/709539).
+  base::ListValue invalid_wildcard;
+  std::string bad_pattern_wildcard("*");
+  invalid_wildcard.AppendString(kCallbackId);
+  invalid_wildcard.AppendString(bad_pattern_wildcard);
+  handler()->HandleIsPatternValid(&invalid_wildcard);
+  ValidatePattern(false, 3U);
 }
 
 TEST_F(SiteSettingsHandlerTest, Incognito) {

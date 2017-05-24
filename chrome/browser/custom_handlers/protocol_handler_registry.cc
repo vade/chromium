@@ -13,6 +13,7 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile_io_data.h"
@@ -216,14 +217,6 @@ bool ProtocolHandlerRegistry::JobInterceptorFactory::IsHandledProtocol(
       job_factory_->IsHandledProtocol(scheme);
 }
 
-bool ProtocolHandlerRegistry::JobInterceptorFactory::IsHandledURL(
-    const GURL& url) const {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  return (url.is_valid() &&
-      io_thread_delegate_->IsHandledProtocol(url.scheme())) ||
-      job_factory_->IsHandledURL(url);
-}
-
 bool ProtocolHandlerRegistry::JobInterceptorFactory::IsSafeRedirectTarget(
     const GURL& location) const {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
@@ -362,10 +355,9 @@ void ProtocolHandlerRegistry::ClearDefault(const std::string& scheme) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   default_handlers_.erase(scheme);
-  BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&IOThreadDelegate::ClearDefault, io_thread_delegate_, scheme));
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          base::BindOnce(&IOThreadDelegate::ClearDefault,
+                                         io_thread_delegate_, scheme));
   Save();
   NotifyChanged();
 }
@@ -595,8 +587,8 @@ void ProtocolHandlerRegistry::RemoveHandler(
     } else {
       BrowserThread::PostTask(
           BrowserThread::IO, FROM_HERE,
-          base::Bind(&IOThreadDelegate::ClearDefault, io_thread_delegate_,
-                     q->second.protocol()));
+          base::BindOnce(&IOThreadDelegate::ClearDefault, io_thread_delegate_,
+                         q->second.protocol()));
 
       default_handlers_.erase(q);
     }
@@ -630,9 +622,8 @@ void ProtocolHandlerRegistry::Enable() {
   }
   enabled_ = true;
   BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&IOThreadDelegate::Enable, io_thread_delegate_));
+      BrowserThread::IO, FROM_HERE,
+      base::BindOnce(&IOThreadDelegate::Enable, io_thread_delegate_));
 
   ProtocolHandlerMap::const_iterator p;
   for (p = default_handlers_.begin(); p != default_handlers_.end(); ++p) {
@@ -649,9 +640,8 @@ void ProtocolHandlerRegistry::Disable() {
   }
   enabled_ = false;
   BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&IOThreadDelegate::Disable, io_thread_delegate_));
+      BrowserThread::IO, FROM_HERE,
+      base::BindOnce(&IOThreadDelegate::Disable, io_thread_delegate_));
 
   ProtocolHandlerMap::const_iterator p;
   for (p = default_handlers_.begin(); p != default_handlers_.end(); ++p) {
@@ -732,10 +722,9 @@ void ProtocolHandlerRegistry::SetDefault(const ProtocolHandler& handler) {
   default_handlers_.erase(handler.protocol());
   default_handlers_.insert(std::make_pair(handler.protocol(), handler));
   PromoteHandler(handler);
-  BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&IOThreadDelegate::SetDefault, io_thread_delegate_, handler));
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          base::BindOnce(&IOThreadDelegate::SetDefault,
+                                         io_thread_delegate_, handler));
 }
 
 void ProtocolHandlerRegistry::InsertHandler(const ProtocolHandler& handler) {
@@ -763,7 +752,7 @@ base::Value* ProtocolHandlerRegistry::EncodeRegisteredHandlers() {
          j != i->second.end(); ++j) {
       std::unique_ptr<base::DictionaryValue> encoded = j->Encode();
       if (IsDefault(*j)) {
-        encoded->Set("default", new base::FundamentalValue(true));
+        encoded->Set("default", base::MakeUnique<base::Value>(true));
       }
       protocol_handlers->Append(std::move(encoded));
     }

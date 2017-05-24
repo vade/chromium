@@ -20,12 +20,10 @@
 #include "components/suggestions/suggestions_service.h"
 #import "ios/chrome/browser/favicon/favicon_loader.h"
 #include "ios/chrome/browser/favicon/favicon_service_factory.h"
-#include "ios/chrome/browser/favicon/ios_chrome_favicon_loader_factory.h"
-#include "ios/chrome/browser/favicon/ios_chrome_large_icon_cache_factory.h"
-#include "ios/chrome/browser/favicon/ios_chrome_large_icon_service_factory.h"
 #include "ios/chrome/browser/favicon/large_icon_cache.h"
 #include "ios/chrome/browser/history/top_sites_factory.h"
 #include "ios/chrome/browser/suggestions/suggestions_service_factory.h"
+#import "ios/chrome/browser/ui/ntp/google_landing_data_source.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
 #import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
@@ -43,10 +41,10 @@ const CGFloat kMaximumHeight = 100;
 @interface MostVisitedCell () {
   // Backs property with the same name.
   GURL _URL;
-  // Weak reference to the relevant BrowserState.
-  ios::ChromeBrowserState* _browserState;
+  // Weak reference to the relevant GoogleLandingDataSource.
+  base::WeakNSProtocol<id<GoogleLandingDataSource>> _dataSource;
   // Backs property with the same name.
-  ntp_tiles::metrics::MostVisitedTileType _tileType;
+  ntp_tiles::TileVisualType _tileType;
 
   base::scoped_nsobject<UILabel> _label;
   base::scoped_nsobject<UILabel> _noIconLabel;
@@ -66,7 +64,6 @@ const CGFloat kMaximumHeight = 100;
 @implementation MostVisitedCell
 
 @synthesize URL = _URL;
-@synthesize browserState = _browserState;
 @synthesize tileType = _tileType;
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -148,9 +145,9 @@ const CGFloat kMaximumHeight = 100;
 
 - (void)setupWithURL:(GURL)URL
                title:(NSString*)title
-        browserState:(ios::ChromeBrowserState*)browserState {
-  _browserState = browserState;
-  _tileType = ntp_tiles::metrics::NONE;
+          dataSource:(id<GoogleLandingDataSource>)dataSource {
+  _dataSource.reset(dataSource);
+  _tileType = ntp_tiles::TileVisualType::NONE;
   [self setText:title];
   [self setURL:URL];
   base::WeakNSObject<MostVisitedCell> weakSelf(self);
@@ -183,14 +180,14 @@ const CGFloat kMaximumHeight = 100;
         }
 
         if (result.bitmap.is_valid() || result.fallback_icon_style) {
-          IOSChromeLargeIconCacheFactory::GetForBrowserState(
-              [strongSelf browserState])
-              ->SetCachedResult(URL, result);
+          LargeIconCache* largeIconCache =
+              [strongSelf.get()->_dataSource largeIconCache];
+          if (largeIconCache)
+            largeIconCache->SetCachedResult(URL, result);
         }
       };
 
-  LargeIconCache* cache =
-      IOSChromeLargeIconCacheFactory::GetForBrowserState(self.browserState);
+  LargeIconCache* cache = [_dataSource largeIconCache];
   std::unique_ptr<favicon_base::LargeIconResult> cached_result =
       cache->GetCachedResult(URL);
   if (cached_result) {
@@ -199,7 +196,7 @@ const CGFloat kMaximumHeight = 100;
 
   // Always call LargeIconService in case the favicon was updated.
   favicon::LargeIconService* large_icon_service =
-      IOSChromeLargeIconServiceFactory::GetForBrowserState(self.browserState);
+      [_dataSource largeIconService];
   CGFloat faviconSize = [UIScreen mainScreen].scale * kFaviconSize;
   CGFloat faviconMinSize = [UIScreen mainScreen].scale * kFaviconMinSize;
   large_icon_service->GetLargeIconOrFallbackStyle(
@@ -228,15 +225,15 @@ const CGFloat kMaximumHeight = 100;
       setText:base::SysUTF16ToNSString(favicon::GetFallbackIconText(_URL))];
   [_noIconLabel setTextColor:textColor];
   [_imageView setBackgroundColor:backgroundColor];
-  _tileType = isDefaultBackgroundColor ? ntp_tiles::metrics::ICON_DEFAULT
-                                       : ntp_tiles::metrics::ICON_COLOR;
+  _tileType = isDefaultBackgroundColor ? ntp_tiles::TileVisualType::ICON_DEFAULT
+                                       : ntp_tiles::TileVisualType::ICON_COLOR;
 }
 
 - (void)setImage:(UIImage*)image {
   [_imageView setBackgroundColor:nil];
   [_noIconLabel setText:nil];
   [_imageView setImage:image];
-  _tileType = ntp_tiles::metrics::ICON_REAL;
+  _tileType = ntp_tiles::TileVisualType::ICON_REAL;
 }
 
 @end

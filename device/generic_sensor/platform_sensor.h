@@ -12,6 +12,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "base/single_thread_task_runner.h"
 #include "device/generic_sensor/generic_sensor_export.h"
 #include "device/generic_sensor/public/cpp/sensor_reading.h"
 #include "device/generic_sensor/public/interfaces/sensor.mojom.h"
@@ -47,6 +48,10 @@ class DEVICE_GENERIC_SENSOR_EXPORT PlatformSensor
   // return default frequency.
   // The default implementation returns default frequency.
   virtual double GetMaximumSupportedFrequency();
+
+  // Can be overriden to return the sensor minimum sampling frequency.
+  // The default implementation returns '1.0 / (60 * 60)', i.e. once per hour.
+  virtual double GetMinimumSupportedFrequency();
 
   mojom::SensorType GetType() const;
 

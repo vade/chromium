@@ -1,7 +1,8 @@
 include_rules = [
+  "+content/public/child",
   "+content/public/common",
   "+content/public/renderer",
   "+mojo/public",
   "+services/service_manager/public/cpp",
-  "+third_party/WebKit/public/web",
+  "+third_party/WebKit/public/platform/WebCache.h",
 ]

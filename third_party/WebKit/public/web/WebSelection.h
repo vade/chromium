@@ -5,8 +5,8 @@
 #ifndef WebSelection_h
 #define WebSelection_h
 
-#include "../platform/WebCommon.h"
-#include "../platform/WebSelectionBound.h"
+#include "public/platform/WebCommon.h"
+#include "public/platform/WebSelectionBound.h"
 
 namespace blink {
 
@@ -16,37 +16,27 @@ struct CompositedSelection;
 // end points as well as metadata for the selection region.
 class BLINK_EXPORT WebSelection {
  public:
-  enum SelectionType { NoSelection, CaretSelection, RangeSelection };
+  enum SelectionType { kNoSelection, kCaretSelection, kRangeSelection };
 
 #if INSIDE_BLINK
   explicit WebSelection(const CompositedSelection&);
 #endif
   WebSelection(const WebSelection&);
 
-  const WebSelectionBound& start() const { return m_start; }
-  const WebSelectionBound& end() const { return m_end; }
+  const WebSelectionBound& Start() const { return start_; }
+  const WebSelectionBound& end() const { return end_; }
 
-  bool isNone() const { return selectionType() == NoSelection; }
-  bool isCaret() const { return selectionType() == CaretSelection; }
-  bool isRange() const { return selectionType() == RangeSelection; }
-
-  bool isEditable() const { return m_isEditable; }
-  bool isEmptyTextFormControl() const { return m_isEmptyTextControl; }
+  bool IsNone() const { return GetSelectionType() == kNoSelection; }
+  bool IsCaret() const { return GetSelectionType() == kCaretSelection; }
+  bool IsRange() const { return GetSelectionType() == kRangeSelection; }
 
  private:
-  SelectionType selectionType() const { return m_selectionType; }
+  SelectionType GetSelectionType() const { return selection_type_; }
 
-  SelectionType m_selectionType;
+  SelectionType selection_type_;
 
-  WebSelectionBound m_start;
-  WebSelectionBound m_end;
-
-  // Whether the selection region consists of editable text.
-  bool m_isEditable;
-
-  // Whether the selection resides in an empty text form control. Note that
-  // this only applies to caret-type selections.
-  bool m_isEmptyTextControl;
+  WebSelectionBound start_;
+  WebSelectionBound end_;
 };
 
 }  // namespace blink

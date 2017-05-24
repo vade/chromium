@@ -42,25 +42,25 @@ DECLARE_RESOURCE_ID(IDR_ANDROID_INFOBAR_PREVIEWS,
 DECLARE_RESOURCE_ID(IDR_ANDROID_INFOBAR_PROTECTED_MEDIA_IDENTIFIER,
                     R.drawable.infobar_protected_media_identifier)
 DECLARE_RESOURCE_ID(IDR_ANDROID_INFOBAR_SUBRESOURCE_FILTERING,
-                    R.drawable.infobar_subresource_filtering)
+                    R.drawable.infobar_chrome)
 DECLARE_RESOURCE_ID(IDR_ANDROID_INFOBAR_WARNING, R.drawable.infobar_warning)
 
-// WebsiteSettingsUI images, used in ConnectionInfoPopup
+// PageInfoUI images, used in ConnectionInfoPopup
 // Good:
-LINK_RESOURCE_ID(IDR_PAGEINFO_GOOD, R.drawable.pageinfo_good)
+DECLARE_RESOURCE_ID(IDR_PAGEINFO_GOOD, R.drawable.pageinfo_good)
 // Warnings:
-LINK_RESOURCE_ID(IDR_PAGEINFO_WARNING_MINOR, R.drawable.pageinfo_warning)
+DECLARE_RESOURCE_ID(IDR_PAGEINFO_WARNING_MINOR, R.drawable.pageinfo_warning)
 // Bad:
-LINK_RESOURCE_ID(IDR_PAGEINFO_BAD, R.drawable.pageinfo_bad)
+DECLARE_RESOURCE_ID(IDR_PAGEINFO_BAD, R.drawable.pageinfo_bad)
 // Should never occur, use warning just in case:
 // Enterprise managed: ChromeOS only.
-LINK_RESOURCE_ID(IDR_PAGEINFO_ENTERPRISE_MANAGED, R.drawable.pageinfo_warning)
+DECLARE_RESOURCE_ID(IDR_PAGEINFO_ENTERPRISE_MANAGED, R.drawable.pageinfo_warning)
 // Info: Only shown on chrome:// urls, which don't show the connection info
 // popup.
-LINK_RESOURCE_ID(IDR_PAGEINFO_INFO, R.drawable.pageinfo_warning)
+DECLARE_RESOURCE_ID(IDR_PAGEINFO_INFO, R.drawable.pageinfo_warning)
 // Major warning: Used on insecure pages, which don't show the connection info
 // popup.
-LINK_RESOURCE_ID(IDR_PAGEINFO_WARNING_MAJOR, R.drawable.pageinfo_warning)
+DECLARE_RESOURCE_ID(IDR_PAGEINFO_WARNING_MAJOR, R.drawable.pageinfo_warning)
 
 // Autofill popup and keyboard accessory images.
 // We use Android's |VectorDrawableCompat| for the following images that are
@@ -72,6 +72,7 @@ LINK_RESOURCE_ID(IDR_AUTOFILL_CC_GENERIC, R.drawable.ic_credit_card_black)
 LINK_RESOURCE_ID(IDR_AUTOFILL_CC_JCB, R.drawable.ic_credit_card_black)
 LINK_RESOURCE_ID(IDR_AUTOFILL_CC_MASTERCARD, R.drawable.mc_card)
 LINK_RESOURCE_ID(IDR_AUTOFILL_CC_MIR, R.drawable.mir_card)
+LINK_RESOURCE_ID(IDR_AUTOFILL_CC_UNIONPAY, R.drawable.unionpay_card)
 LINK_RESOURCE_ID(IDR_AUTOFILL_CC_VISA, R.drawable.visa_card)
 LINK_RESOURCE_ID(IDR_AUTOFILL_CC_SCAN_NEW, R.drawable.ic_photo_camera_black)
 LINK_RESOURCE_ID(IDR_AUTOFILL_HTTP_WARNING, R.drawable.ic_info_outline_grey)

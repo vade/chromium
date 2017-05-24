@@ -57,8 +57,8 @@ bool IsQuicEnabled(
   bool is_quic_enabled = false;
   content::BrowserThread::PostTaskAndReply(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(IsQuicEnabledOnIOThread, request_context_getter,
-                 &is_quic_enabled),
+      base::BindOnce(IsQuicEnabledOnIOThread, request_context_getter,
+                     &is_quic_enabled),
       run_loop.QuitClosure());
   run_loop.Run();
   return is_quic_enabled;
@@ -127,8 +127,8 @@ class QuicAllowedPolicyIsFalse: public QuicAllowedPolicyTestBase {
  protected:
   void GetQuicAllowedPolicy(PolicyMap* values) override {
     values->Set(key::kQuicAllowed, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_MACHINE,
-                POLICY_SOURCE_CLOUD,
-                base::MakeUnique<base::FundamentalValue>(false), nullptr);
+                POLICY_SOURCE_CLOUD, base::MakeUnique<base::Value>(false),
+                nullptr);
   }
 
  private:
@@ -149,8 +149,8 @@ class QuicAllowedPolicyIsTrue: public QuicAllowedPolicyTestBase {
  protected:
   void GetQuicAllowedPolicy(PolicyMap* values) override {
     values->Set(key::kQuicAllowed, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_MACHINE,
-                POLICY_SOURCE_CLOUD,
-                base::MakeUnique<base::FundamentalValue>(true), nullptr);
+                POLICY_SOURCE_CLOUD, base::MakeUnique<base::Value>(true),
+                nullptr);
   }
 
  private:
@@ -247,8 +247,8 @@ class QuicAllowedPolicyDynamicTest : public InProcessBrowserTest {
                             bool value) {
     PolicyMap policy_map;
     policy_map.Set(key::kQuicAllowed, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-                   POLICY_SOURCE_CLOUD,
-                   base::MakeUnique<base::FundamentalValue>(value), nullptr);
+                   POLICY_SOURCE_CLOUD, base::MakeUnique<base::Value>(value),
+                   nullptr);
     provider->UpdateChromePolicy(policy_map);
     base::RunLoop().RunUntilIdle();
   }

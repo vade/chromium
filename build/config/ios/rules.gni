@@ -102,25 +102,11 @@ template("lipo_binary") {
     }
 
     if (enable_stripping) {
-      # Check whether //build/config/mac:strip_all has been removed from the
-      # configs variables (as this is how stripping is disabled for a single
-      # target).
-      _strip_all_in_config = false
-      if (defined(invoker.configs)) {
-        foreach(_config, invoker.configs) {
-          if (_config == "//build/config/mac:strip_all") {
-            _strip_all_in_config = true
-          }
-        }
-      }
-
-      if (_strip_all_in_config) {
-        args += [ "-Wcrl,strip,-x,-S" ]
-        if (save_unstripped_output) {
-          outputs += [ "$root_out_dir/$_output_name.unstripped" ]
-          args += [ "-Wcrl,unstripped," +
-                    rebase_path("$root_out_dir/.", root_build_dir) ]
-        }
+      args += [ "-Wcrl,strip,-x,-S" ]
+      if (save_unstripped_output) {
+        outputs += [ "$root_out_dir/$_output_name.unstripped" ]
+        args += [ "-Wcrl,unstripped," +
+                  rebase_path("$root_out_dir/.", root_build_dir) ]
       }
     }
   }
@@ -1146,13 +1132,16 @@ template("ios_framework_bundle") {
         ":$_link_target_name($default_toolchain)",
       ]
 
-      if (!defined(public_configs)) {
-        public_configs = []
-      }
-      public_configs += [ ":$_framework_public_config" ]
       if (_has_public_headers) {
+        if (!defined(public_configs)) {
+          public_configs = []
+        }
         public_configs += [ ":$_framework_headers_config" ]
       }
+      if (!defined(all_dependent_configs)) {
+        all_dependent_configs = []
+      }
+      all_dependent_configs += [ ":$_framework_public_config" ]
     }
 
     if (defined(invoker.bundle_deps)) {
@@ -1166,6 +1155,12 @@ template("ios_framework_bundle") {
       _compile_headers_map_target = _target_name + "_compile_headers_map"
       action(_compile_headers_map_target) {
         visibility = [ ":$_framework_headers_target" ]
+        forward_variables_from(invoker,
+                               [
+                                 "deps",
+                                 "public_deps",
+                                 "testonly",
+                               ])
         script = "//build/config/ios/write_framework_hmap.py"
         outputs = [
           _header_map_filename,
@@ -1211,6 +1206,7 @@ template("ios_framework_bundle") {
       }
 
       group(_framework_headers_target) {
+        forward_variables_from(invoker, [ "testonly" ])
         deps = [
           ":$_compile_headers_map_target",
           ":$_copy_public_headers_target",
@@ -1297,13 +1293,16 @@ template("ios_framework_bundle") {
       }
       public_deps += [ ":$_target_name" ]
 
-      if (!defined(public_configs)) {
-        public_configs = []
-      }
-      public_configs += [ ":$_framework_public_config" ]
       if (_has_public_headers) {
+        if (!defined(public_configs)) {
+          public_configs = []
+        }
         public_configs += [ ":$_framework_headers_config" ]
       }
+      if (!defined(all_dependent_configs)) {
+        all_dependent_configs = []
+      }
+      all_dependent_configs += [ ":$_framework_public_config" ]
     }
 
     bundle_data(_target_name + "+bundle") {
@@ -1386,8 +1385,17 @@ template("ios_xctest_test") {
     ios_info_plist(_xctest_info_plist_target) {
       visibility = [ ":$_xctest_info_plist_bundle" ]
       info_plist = "//build/config/ios/Module-Info.plist"
-      extra_substitutions = [ "MODULE_NAME=$_xctest_output" ]
       executable_name = _host_output
+      if (ios_automatically_manage_certs) {
+        # Use the same bundle identifier for EarlGrey tests as for unit tests
+        # when managing certificates as the number of free certs is limited.
+        extra_substitutions = [
+          "EXECUTABLE_NAME=gtest.${ios_generic_test_bundle_id_suffix}",
+          "MODULE_NAME=${ios_generic_test_bundle_id_suffix}-module",
+        ]
+      } else {
+        extra_substitutions = [ "MODULE_NAME=$_xctest_output" ]
+      }
     }
 
     bundle_data(_xctest_info_plist_bundle) {
@@ -1454,6 +1462,15 @@ template("ios_xctest_test") {
 
     if (!defined(invoker.info_plist) && !defined(invoker.info_plist_target)) {
       info_plist = "//build/config/ios/Host-Info.plist"
+      if (ios_automatically_manage_certs) {
+        # Use the same bundle identifier for EarlGrey tests as for unit tests
+        # when managing certificates as the number of free certs is limited.
+        if (!defined(extra_substitutions)) {
+          extra_substitutions = []
+        }
+        extra_substitutions +=
+            [ "EXECUTABLE_NAME=gtest.${ios_generic_test_bundle_id_suffix}" ]
+      }
     }
 
     # Xcode needs those two framework installed in the application (and signed)

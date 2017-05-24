@@ -10,7 +10,6 @@
 #include "base/callback.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/native_web_keyboard_event.h"
-#include "content/public/browser/readback_types.h"
 #include "content/public/common/drop_data.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_sender.h"
@@ -18,21 +17,21 @@
 #include "third_party/WebKit/public/platform/WebGestureEvent.h"
 #include "third_party/WebKit/public/platform/WebInputEvent.h"
 #include "third_party/WebKit/public/web/WebTextDirection.h"
-#include "third_party/skia/include/core/SkImageInfo.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/surface/transport_dib.h"
-
-namespace gfx {
-class Rect;
-}
 
 namespace blink {
 class WebMouseEvent;
 class WebMouseWheelEvent;
 }
 
+namespace ui {
+class LatencyInfo;
+}
+
 namespace content {
 
+struct CursorInfo;
 class RenderProcessHost;
 class RenderWidgetHostIterator;
 class RenderWidgetHostView;
@@ -163,29 +162,6 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Sender {
   // contents, but e.g. in the omnibox.
   virtual void SetActive(bool active) = 0;
 
-  // Copies the given subset of the backing store, and passes the result as a
-  // bitmap to a callback.
-  //
-  // If |src_rect| is empty, the whole contents is copied. If non empty
-  // |accelerated_dst_size| is given and accelerated compositing is active, the
-  // content is shrunk so that it fits in |accelerated_dst_size|. If
-  // |accelerated_dst_size| is larger than the content size, the content is not
-  // resized. If |accelerated_dst_size| is empty, the size copied from the
-  // source contents is used. |callback| is invoked with true on success, false
-  // otherwise, along with a SkBitmap containing the copied pixel data.
-  //
-  // NOTE: |callback| is called synchronously if the backing store is available.
-  // When accelerated compositing is active, |callback| may be called
-  // asynchronously.
-  virtual void CopyFromBackingStore(const gfx::Rect& src_rect,
-                                    const gfx::Size& accelerated_dst_size,
-                                    const ReadbackRequestCallback& callback,
-                                    const SkColorType color_type) = 0;
-  // Ensures that the view does not drop the backing store even when hidden.
-  virtual bool CanCopyFromBackingStore() = 0;
-  virtual void LockBackingStore() = 0;
-  virtual void UnlockBackingStore() = 0;
-
   // Forwards the given message to the renderer. These are called by
   // the view when it has received a message.
   virtual void ForwardMouseEvent(
@@ -194,6 +170,9 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Sender {
       const blink::WebMouseWheelEvent& wheel_event) = 0;
   virtual void ForwardKeyboardEvent(
       const NativeWebKeyboardEvent& key_event) = 0;
+  virtual void ForwardKeyboardEventWithLatencyInfo(
+      const NativeWebKeyboardEvent& key_event,
+      const ui::LatencyInfo& latency_info) = 0;
   virtual void ForwardGestureEvent(
       const blink::WebGestureEvent& gesture_event) = 0;
 
@@ -217,11 +196,6 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Sender {
   // to give the tab a chance to become active and we don't want to display a
   // warning too soon.
   virtual void RestartHangMonitorTimeoutIfNecessary() = 0;
-
-  // Stops and disables hang monitor. This avoids flakiness in tests that need
-  // to observe things like beforeunload dialogs, which could fail if the
-  // timeout skips the dialog.
-  virtual void DisableHangMonitorForTesting() = 0;
 
   virtual void SetIgnoreInputEvents(bool ignore_input_events) = 0;
 
@@ -278,7 +252,8 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Sender {
       const gfx::Point& screen_pt,
       blink::WebDragOperationsMask operations_allowed,
       int key_modifiers) {}
-  virtual void DragTargetDragLeave() {}
+  virtual void DragTargetDragLeave(const gfx::Point& client_point,
+                                   const gfx::Point& screen_point) {}
   virtual void DragTargetDrop(const DropData& drop_data,
                               const gfx::Point& client_pt,
                               const gfx::Point& screen_pt,
@@ -296,6 +271,9 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Sender {
 
   // Filters drop data before it is passed to RenderWidgetHost.
   virtual void FilterDropData(DropData* drop_data) {}
+
+  // Sets cursor to a specified one when it is over this widget.
+  virtual void SetCursor(const CursorInfo& cursor_info) {}
 };
 
 }  // namespace content

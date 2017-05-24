@@ -8,11 +8,10 @@
 
 #include "ash/host/root_window_transformer.h"
 #include "ash/host/transformer_helper.h"
-#include "ash/ime/input_method_event_handler.h"
 #include "base/trace_event/trace_event.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host_platform.h"
-#include "ui/events/event_processor.h"
+#include "ui/events/event_sink.h"
 #include "ui/events/null_event_targeter.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/transform.h"
@@ -75,6 +74,10 @@ void AshWindowTreeHostPlatform::PrepareForShutdown() {
   // coordinates.
   window()->SetEventTargeter(
       std::unique_ptr<ui::EventTargeter>(new ui::NullEventTargeter));
+
+  // Do anything platform specific necessary before shutdown (eg. stop
+  // listening for configuration XEvents).
+  platform_window()->PrepareForShutdown();
 }
 
 void AshWindowTreeHostPlatform::SetRootTransform(
@@ -108,17 +111,7 @@ void AshWindowTreeHostPlatform::DispatchEvent(ui::Event* event) {
   TRACE_EVENT0("input", "AshWindowTreeHostPlatform::DispatchEvent");
   if (event->IsLocatedEvent())
     TranslateLocatedEvent(static_cast<ui::LocatedEvent*>(event));
-  SendEventToProcessor(event);
-}
-
-ui::EventDispatchDetails AshWindowTreeHostPlatform::DispatchKeyEventPostIME(
-    ui::KeyEvent* event) {
-  input_method_handler()->SetPostIME(true);
-  ui::EventDispatchDetails details =
-      event_processor()->OnEventFromSource(event);
-  if (!details.dispatcher_destroyed)
-    input_method_handler()->SetPostIME(false);
-  return details;
+  SendEventToSink(event);
 }
 
 void AshWindowTreeHostPlatform::SetTapToClickPaused(bool state) {

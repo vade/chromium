@@ -5,10 +5,8 @@
 #ifndef CHROME_BROWSER_BANNERS_APP_BANNER_MANAGER_H_
 #define CHROME_BROWSER_BANNERS_APP_BANNER_MANAGER_H_
 
-#include <memory>
 #include <vector>
 
-#include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/engagement/site_engagement_observer.h"
@@ -61,9 +59,6 @@ class AppBannerManager : public content::WebContentsObserver,
   // Sets the total engagement required for triggering the banner in testing.
   static void SetTotalEngagementToTrigger(double engagement);
 
-  // Returns whether or not the URLs match for everything except for the ref.
-  static bool URLsAreForTheSamePage(const GURL& first, const GURL& second);
-
   // Requests an app banner. If |is_debug_mode| is true, any failure in the
   // pipeline will be reported to the devtools console.
   virtual void RequestAppBanner(const GURL& validated_url, bool is_debug_mode);
@@ -81,6 +76,10 @@ class AppBannerManager : public content::WebContentsObserver,
   // nothing if |request_id| does not match the current request.
   void SendBannerDismissed(int request_id);
 
+  // Returns a WeakPtr to this object. Exposed so subclasses/infobars may
+  // may bind callbacks without needing their own WeakPtrFactory.
+  base::WeakPtr<AppBannerManager> GetWeakPtr();
+
   // Overridden and passed through base::Bind on desktop platforms. Called when
   // the bookmark app install initiated by a banner has completed. Not used on
   // Android.
@@ -94,13 +93,27 @@ class AppBannerManager : public content::WebContentsObserver,
   // desktop platforms.
   virtual void OnAppIconFetched(const SkBitmap& bitmap) {}
 
-  // Overridden and passed through base::Bind on Android. Called after a web app
-  // banner was successfully used to add a web app to homescreen to kick off an
-  // asynchronous fetch of a splash screen icon. Not used on desktop platforms.
-  virtual base::Closure FetchWebappSplashScreenImageCallback(
-      const std::string& webapp_id);
-
  protected:
+  enum class State {
+    // The banner pipeline has not yet been triggered for this page load.
+    INACTIVE,
+
+    // The banner pipeline is currently running for this page load.
+    ACTIVE,
+
+    // The banner pipeline has finished running, but is waiting for sufficient
+    // engagement to trigger the banner.
+    PENDING_ENGAGEMENT,
+
+    // The banner pipeline has finished running, but is waiting for an event to
+    // trigger the banner.
+    PENDING_EVENT,
+
+    // The banner pipeline has finished running for this page load and no more
+    // processing is to be done.
+    COMPLETE,
+  };
+
   explicit AppBannerManager(content::WebContents* web_contents);
   ~AppBannerManager() override;
 
@@ -120,13 +133,9 @@ class AppBannerManager : public content::WebContentsObserver,
   // |code|. Returns the empty string if |code| requires no parameter.
   std::string GetStatusParam(InstallableStatusCode code);
 
-  // Returns the ideal and minimum icon sizes required for being installable.
-  virtual int GetIdealIconSizeInPx();
-  virtual int GetMinimumIconSizeInPx();
-
-  // Returns a WeakPtr to this object. Exposed so subclasses/infobars may
-  // may bind callbacks without needing their own WeakPtrFactory.
-  base::WeakPtr<AppBannerManager> GetWeakPtr();
+  // Returns the ideal and minimum primary icon size requirements.
+  virtual int GetIdealPrimaryIconSizeInPx();
+  virtual int GetMinimumPrimaryIconSizeInPx();
 
   // Returns true if |is_debug_mode_| is true or the
   // kBypassAppBannerEngagementChecks flag is set.
@@ -141,6 +150,10 @@ class AppBannerManager : public content::WebContentsObserver,
   // manifest.
   void OnDidGetManifest(const InstallableData& result);
 
+  // Returns an InstallableParams object that requests all checks necessary for
+  // a web app banner.
+  virtual InstallableParams ParamsToPerformInstallableCheck();
+
   // Run at the conclusion of OnDidGetManifest. For web app banners, this calls
   // back to the InstallableManager to continue checking criteria. For native
   // app banners, this checks whether native apps are preferred in the manifest,
@@ -150,7 +163,7 @@ class AppBannerManager : public content::WebContentsObserver,
 
   // Callback invoked by the InstallableManager once it has finished checking
   // all other installable properties.
-  void OnDidPerformInstallableCheck(const InstallableData& result);
+  virtual void OnDidPerformInstallableCheck(const InstallableData& result);
 
   // Records that a banner was shown. The |event_name| corresponds to the RAPPOR
   // metric being recorded.
@@ -161,6 +174,9 @@ class AppBannerManager : public content::WebContentsObserver,
   void ReportStatus(content::WebContents* web_contents,
                     InstallableStatusCode code);
 
+  // Resets all fetched data for the current page.
+  virtual void ResetCurrentPageData();
+
   // Stops the banner pipeline, preventing any outstanding callbacks from
   // running and resetting the manager state. This method is virtual to allow
   // tests to intercept it and verify correct behaviour.
@@ -170,6 +186,9 @@ class AppBannerManager : public content::WebContentsObserver,
   // show a banner. The page can respond to cancel the banner (and possibly
   // display it later), or otherwise allow it to be shown.
   void SendBannerPromptRequest();
+
+  // Updates the current state to |state|. Virtual to allow overriding in tests.
+  virtual void UpdateState(State state);
 
   // content::WebContentsObserver overrides.
   void DidStartNavigation(content::NavigationHandle* handle) override;
@@ -191,7 +210,18 @@ class AppBannerManager : public content::WebContentsObserver,
   // this class.
   InstallableManager* manager() const { return manager_; }
   int event_request_id() const { return event_request_id_; }
-  bool is_active() const { return is_active_; }
+  bool is_active() const { return state_ == State::ACTIVE; }
+  bool is_active_or_pending() const {
+    return state_ == State::ACTIVE || state_ == State::PENDING_ENGAGEMENT ||
+           state_ == State::PENDING_EVENT;
+  }
+  bool is_complete() const { return state_ == State::COMPLETE; }
+  bool is_pending_engagement() const {
+    return state_ == State::PENDING_ENGAGEMENT;
+  }
+  bool is_pending_event() const {
+    return state_ == State::PENDING_EVENT || page_requested_prompt_;
+  }
 
   // The title to display in the banner.
   base::string16 app_title_;
@@ -205,15 +235,18 @@ class AppBannerManager : public content::WebContentsObserver,
   // The manifest object.
   content::Manifest manifest_;
 
-  // The URL of the icon.
-  GURL icon_url_;
+  // The URL of the primary icon.
+  GURL primary_icon_url_;
 
-  // The icon object.
-  std::unique_ptr<SkBitmap> icon_;
+  // The primary icon object.
+  SkBitmap primary_icon_;
 
   // The referrer string (if any) specified in the app URL. Used only for native
   // app banners.
   std::string referrer_;
+
+  // The current banner pipeline state for this page load.
+  State state_;
 
  private:
   friend class AppBannerManagerTest;
@@ -254,17 +287,12 @@ class AppBannerManager : public content::WebContentsObserver,
   blink::mojom::AppBannerEventPtr event_;
   blink::mojom::AppBannerControllerPtr controller_;
 
-  // Whether we are currently working on whether to show a banner.
-  bool is_active_;
-
   // If a banner is requested before the page has finished loading, defer
   // triggering the pipeline until the load is complete.
-  bool banner_request_queued_;
+  bool has_sufficient_engagement_;
   bool load_finished_;
 
-  // Record whether the page decides to defer showing the banner, and if it
-  // requests for it to be shown later on.
-  bool was_canceled_by_page_;
+  // Record whether the page requests for a banner to be shown later on.
   bool page_requested_prompt_;
 
   // Whether we should be logging errors to the console for this request.

@@ -82,6 +82,9 @@ TEST_F(BrowserAboutHandlerTest, WillHandleBrowserAboutURL) {
 // Chrome OS defaults to showing Options in a window and including About in
 // Options.
 TEST_F(BrowserAboutHandlerTest, WillHandleBrowserAboutURLForOptionsChromeOS) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndDisableFeature(features::kMaterialDesignSettings);
+
   std::string chrome_prefix(content::kChromeUIScheme);
   chrome_prefix.append(url::kStandardSchemeSeparator);
   std::vector<AboutURLTestCase> test_cases(
@@ -95,6 +98,9 @@ TEST_F(BrowserAboutHandlerTest, WillHandleBrowserAboutURLForOptionsChromeOS) {
 
 #else
 TEST_F(BrowserAboutHandlerTest, WillHandleBrowserAboutURLForOptions) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndDisableFeature(features::kMaterialDesignSettings);
+
   std::string chrome_prefix(content::kChromeUIScheme);
   chrome_prefix.append(url::kStandardSchemeSeparator);
   std::vector<AboutURLTestCase> test_cases(
@@ -120,11 +126,21 @@ TEST_F(BrowserAboutHandlerTest, WillHandleBrowserAboutURLForMDSettings) {
   chrome_prefix.append(url::kStandardSchemeSeparator);
   std::vector<AboutURLTestCase> test_cases(
       {{GURL(chrome_prefix + chrome::kChromeUISettingsHost),
-        GURL(chrome_prefix + chrome::kChromeUISettingsHost)},
-       {GURL(chrome_prefix + chrome::kChromeUIHelpHost),
-        GURL(chrome_prefix + chrome::kChromeUISettingsHost + "/" +
-             chrome::kChromeUIHelpHost)}});
+        GURL(chrome_prefix + chrome::kChromeUISettingsHost)}});
   TestWillHandleBrowserAboutURL(test_cases);
+}
+
+TEST_F(BrowserAboutHandlerTest, WillHandleBrowserAboutURLForHistory) {
+  TestWillHandleBrowserAboutURL(std::vector<AboutURLTestCase>({
+      {GURL("about:history"), GURL("chrome://history/")},
+      {GURL("about:history-frame"), GURL("chrome://history/")},
+      {GURL("chrome://history"), GURL("chrome://history/")},
+      {GURL("chrome://history-frame"), GURL("chrome://history/")},
+      {GURL("chrome://history/"), GURL("chrome://history/")},
+      {GURL("chrome://history-frame/"), GURL("chrome://history/")},
+      {GURL("chrome://history/?q=foo"), GURL("chrome://history/?q=foo")},
+      {GURL("chrome://history-frame/?q=foo"), GURL("chrome://history/?q=foo")},
+  }));
 }
 
 // Ensure that minor BrowserAboutHandler fixup to a URL does not cause us to

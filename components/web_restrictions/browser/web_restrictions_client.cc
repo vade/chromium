@@ -8,7 +8,8 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/threading/thread_restrictions.h"
 #include "content/public/browser/browser_thread.h"
 #include "jni/WebRestrictionsClient_jni.h"
 
@@ -31,6 +32,7 @@ bool RequestPermissionTask(
 
 bool CheckSupportsRequestTask(
     const base::android::JavaRef<jobject>& java_provider) {
+  base::ThreadRestrictions::AssertIOAllowed();
   JNIEnv* env = base::android::AttachCurrentThread();
   return Java_WebRestrictionsClient_supportsRequest(env, java_provider);
 }
@@ -44,12 +46,9 @@ bool WebRestrictionsClient::Register(JNIEnv* env) {
 
 WebRestrictionsClient::WebRestrictionsClient()
     : initialized_(false), supports_request_(false) {
-  base::SequencedWorkerPool* worker_pool =
-      content::BrowserThread::GetBlockingPool();
-  background_task_runner_ =
-      worker_pool->GetSequencedTaskRunnerWithShutdownBehavior(
-          worker_pool->GetSequenceToken(),
-          base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
+  background_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
+      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
 }
 
 WebRestrictionsClient::~WebRestrictionsClient() {
@@ -91,8 +90,8 @@ void WebRestrictionsClient::SetAuthorityTask(
       base::android::ConvertUTF8ToJavaString(env, content_provider_authority),
       reinterpret_cast<jlong>(this)));
   supports_request_ = false;
-  base::PostTaskAndReplyWithResult(
-      content::BrowserThread::GetBlockingPool(), FROM_HERE,
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::Bind(&CheckSupportsRequestTask, java_provider_),
       base::Bind(&WebRestrictionsClient::RequestSupportKnown,
                  base::Unretained(this), provider_authority_));

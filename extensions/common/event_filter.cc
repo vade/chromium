@@ -22,9 +22,11 @@ EventFilter::EventMatcherEntry::EventMatcherEntry(
     URLMatcher* url_matcher,
     const URLMatcherConditionSet::Vector& condition_sets)
     : event_matcher_(std::move(event_matcher)), url_matcher_(url_matcher) {
-  for (URLMatcherConditionSet::Vector::const_iterator it =
-       condition_sets.begin(); it != condition_sets.end(); it++)
-    condition_set_ids_.push_back((*it)->id());
+  condition_set_ids_.reserve(condition_sets.size());
+  for (const scoped_refptr<URLMatcherConditionSet>& condition_set :
+       condition_sets) {
+    condition_set_ids_.push_back(condition_set->id());
+  }
   url_matcher_->AddConditionSets(condition_sets);
 }
 
@@ -45,27 +47,24 @@ EventFilter::~EventFilter() {
   // Normally when an event matcher entry is removed from event_matchers_ it
   // will remove its condition sets from url_matcher_, but as url_matcher_ is
   // being destroyed anyway there is no need to do that step here.
-  for (EventMatcherMultiMap::iterator it = event_matchers_.begin();
-       it != event_matchers_.end(); it++) {
-    for (EventMatcherMap::iterator it2 = it->second.begin();
-         it2 != it->second.end(); it2++) {
-      it2->second->DontRemoveConditionSetsInDestructor();
-    }
+  for (auto& matcher_map : event_matchers_) {
+    for (auto& matcher : matcher_map.second)
+      matcher.second->DontRemoveConditionSetsInDestructor();
   }
 }
 
 EventFilter::MatcherID EventFilter::AddEventMatcher(
     const std::string& event_name,
     std::unique_ptr<EventMatcher> matcher) {
-  MatcherID id = next_id_++;
   URLMatcherConditionSet::Vector condition_sets;
-  if (!CreateConditionSets(id, matcher.get(), &condition_sets))
+  if (!CreateConditionSets(matcher.get(), &condition_sets))
     return -1;
 
-  for (URLMatcherConditionSet::Vector::iterator it = condition_sets.begin();
-       it != condition_sets.end(); it++) {
+  MatcherID id = next_id_++;
+  for (const scoped_refptr<URLMatcherConditionSet>& condition_set :
+       condition_sets) {
     condition_set_id_to_event_matcher_id_.insert(
-        std::make_pair((*it)->id(), id));
+        std::make_pair(condition_set->id(), id));
   }
   id_to_event_name_[id] = event_name;
   event_matchers_[event_name][id] = base::MakeUnique<EventMatcherEntry>(
@@ -74,27 +73,27 @@ EventFilter::MatcherID EventFilter::AddEventMatcher(
 }
 
 EventMatcher* EventFilter::GetEventMatcher(MatcherID id) {
-  DCHECK(id_to_event_name_.find(id) != id_to_event_name_.end());
-  const std::string& event_name = id_to_event_name_[id];
+  const std::string& event_name = GetEventName(id);
   return event_matchers_[event_name][id]->event_matcher();
 }
 
-const std::string& EventFilter::GetEventName(MatcherID id) {
-  DCHECK(id_to_event_name_.find(id) != id_to_event_name_.end());
-  return id_to_event_name_[id];
+const std::string& EventFilter::GetEventName(MatcherID id) const {
+  auto it = id_to_event_name_.find(id);
+  DCHECK(it != id_to_event_name_.end());
+  return it->second;
 }
 
 bool EventFilter::CreateConditionSets(
-    MatcherID id,
     EventMatcher* matcher,
     URLMatcherConditionSet::Vector* condition_sets) {
-  if (matcher->GetURLFilterCount() == 0) {
+  int url_filter_count = matcher->GetURLFilterCount();
+  if (url_filter_count == 0) {
     // If there are no URL filters then we want to match all events, so create a
     // URLFilter from an empty dictionary.
     base::DictionaryValue empty_dict;
     return AddDictionaryAsConditionSet(&empty_dict, condition_sets);
   }
-  for (int i = 0; i < matcher->GetURLFilterCount(); i++) {
+  for (int i = 0; i < url_filter_count; i++) {
     base::DictionaryValue* url_filter;
     if (!matcher->GetURLFilter(i, &url_filter))
       return false;
@@ -134,29 +133,28 @@ std::string EventFilter::RemoveEventMatcher(MatcherID id) {
 }
 
 std::set<EventFilter::MatcherID> EventFilter::MatchEvent(
-    const std::string& event_name, const EventFilteringInfo& event_info,
-    int routing_id) {
+    const std::string& event_name,
+    const EventFilteringInfo& event_info,
+    int routing_id) const {
   std::set<MatcherID> matchers;
 
-  EventMatcherMultiMap::iterator it = event_matchers_.find(event_name);
+  auto it = event_matchers_.find(event_name);
   if (it == event_matchers_.end())
     return matchers;
 
-  EventMatcherMap& matcher_map = it->second;
-  GURL url_to_match_against = event_info.has_url() ? event_info.url() : GURL();
+  const EventMatcherMap& matcher_map = it->second;
+  const GURL& url_to_match_against =
+      event_info.has_url() ? event_info.url() : GURL::EmptyGURL();
   std::set<URLMatcherConditionSet::ID> matching_condition_set_ids =
       url_matcher_.MatchURL(url_to_match_against);
-  for (std::set<URLMatcherConditionSet::ID>::iterator it =
-       matching_condition_set_ids.begin();
-       it != matching_condition_set_ids.end(); it++) {
-    std::map<URLMatcherConditionSet::ID, MatcherID>::iterator matcher_id =
-        condition_set_id_to_event_matcher_id_.find(*it);
+  for (const auto& id_key : matching_condition_set_ids) {
+    auto matcher_id = condition_set_id_to_event_matcher_id_.find(id_key);
     if (matcher_id == condition_set_id_to_event_matcher_id_.end()) {
-      NOTREACHED() << "id not found in condition set map (" << (*it) << ")";
+      NOTREACHED() << "id not found in condition set map (" << id_key << ")";
       continue;
     }
     MatcherID id = matcher_id->second;
-    EventMatcherMap::iterator matcher_entry = matcher_map.find(id);
+    EventMatcherMap::const_iterator matcher_entry = matcher_map.find(id);
     if (matcher_entry == matcher_map.end()) {
       // Matcher must be for a different event.
       continue;
@@ -164,8 +162,8 @@ std::set<EventFilter::MatcherID> EventFilter::MatchEvent(
     const EventMatcher* event_matcher = matcher_entry->second->event_matcher();
     // The context that installed the event listener should be the same context
     // as the one where the event listener is called.
-    if ((routing_id != MSG_ROUTING_NONE) &&
-        (event_matcher->GetRoutingID() != routing_id)) {
+    if (routing_id != MSG_ROUTING_NONE &&
+        event_matcher->GetRoutingID() != routing_id) {
       continue;
     }
     if (event_matcher->MatchNonURLCriteria(event_info)) {
@@ -177,12 +175,10 @@ std::set<EventFilter::MatcherID> EventFilter::MatchEvent(
   return matchers;
 }
 
-int EventFilter::GetMatcherCountForEvent(const std::string& name) {
+int EventFilter::GetMatcherCountForEventForTesting(
+    const std::string& name) const {
   EventMatcherMultiMap::const_iterator it = event_matchers_.find(name);
-  if (it == event_matchers_.end())
-    return 0;
-
-  return it->second.size();
+  return it != event_matchers_.end() ? it->second.size() : 0;
 }
 
 }  // namespace extensions

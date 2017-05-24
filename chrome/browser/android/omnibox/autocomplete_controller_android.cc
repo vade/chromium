@@ -10,6 +10,7 @@
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -42,6 +43,7 @@
 #include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/omnibox/browser/omnibox_log.h"
 #include "components/omnibox/browser/search_provider.h"
+#include "components/open_from_clipboard/clipboard_recent_content.h"
 #include "components/prefs/pref_service.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/toolbar/toolbar_model.h"
@@ -64,9 +66,6 @@ using bookmarks::BookmarkModel;
 using metrics::OmniboxEventProto;
 
 namespace {
-
-const int kAndroidAutocompleteProviders =
-    AutocompleteClassifier::kDefaultOmniboxProviders;
 
 /**
  * A prefetcher class responsible for triggering zero suggest prefetch.
@@ -99,8 +98,9 @@ ZeroSuggestPrefetcher::ZeroSuggestPrefetcher(Profile* profile)
       "http://www.foobarbazblah.com"));
   controller_->Start(AutocompleteInput(
       fake_request_source, base::string16::npos, std::string(),
-      GURL(fake_request_source), OmniboxEventProto::INVALID_SPEC, false, false,
-      true, true, true, ChromeAutocompleteSchemeClassifier(profile)));
+      GURL(fake_request_source), base::string16(),
+      OmniboxEventProto::INVALID_SPEC, false, false, true, true, true,
+      ChromeAutocompleteSchemeClassifier(profile)));
   // Delete ourselves after 10s. This is enough time to cache results or
   // give up if the results haven't been received.
   expire_timer_.Start(FROM_HERE,
@@ -127,7 +127,7 @@ AutocompleteControllerAndroid::AutocompleteControllerAndroid(Profile* profile)
     : autocomplete_controller_(new AutocompleteController(
           base::WrapUnique(new ChromeAutocompleteProviderClient(profile)),
           this,
-          kAndroidAutocompleteProviders)),
+          AutocompleteClassifier::DefaultOmniboxProviders())),
       inside_synchronous_start_(false),
       profile_(profile) {}
 
@@ -155,11 +155,11 @@ void AutocompleteControllerAndroid::Start(
   OmniboxEventProto::PageClassification page_classification =
       OmniboxEventProto::OTHER;
   size_t cursor_pos = j_cursor_pos == -1 ? base::string16::npos : j_cursor_pos;
-  input_ = AutocompleteInput(text, cursor_pos, desired_tld, current_url,
-                             page_classification, prevent_inline_autocomplete,
-                             prefer_keyword, allow_exact_keyword_match,
-                             want_asynchronous_matches, false,
-                             ChromeAutocompleteSchemeClassifier(profile_));
+  input_ = AutocompleteInput(
+      text, cursor_pos, desired_tld, current_url, base::string16(),
+      page_classification, prevent_inline_autocomplete, prefer_keyword,
+      allow_exact_keyword_match, want_asynchronous_matches, false,
+      ChromeAutocompleteSchemeClassifier(profile_));
   autocomplete_controller_->Start(input_);
 }
 
@@ -192,9 +192,8 @@ void AutocompleteControllerAndroid::OnOmniboxFocused(
 
   input_ = AutocompleteInput(
       omnibox_text, base::string16::npos, std::string(), current_url,
-      ClassifyPage(current_url, focused_from_fakebox),
-      false, false, true, true, true,
-      ChromeAutocompleteSchemeClassifier(profile_));
+      base::string16(), ClassifyPage(current_url, focused_from_fakebox), false,
+      false, true, true, true, ChromeAutocompleteSchemeClassifier(profile_));
   autocomplete_controller_->Start(input_);
 }
 
@@ -229,6 +228,12 @@ void AutocompleteControllerAndroid::OnSuggestionSelected(
   content::WebContents* web_contents =
       content::WebContents::FromJavaWebContents(j_web_contents);
 
+  if (autocomplete_controller_->result().match_at(selected_index).type ==
+      AutocompleteMatchType::CLIPBOARD) {
+    UMA_HISTOGRAM_LONG_TIMES_100(
+        "MobileOmnibox.PressedClipboardSuggestionAge",
+        ClipboardRecentContent::GetInstance()->GetClipboardContentAge());
+  }
   OmniboxLog log(
       // For zero suggest, record an empty input string instead of the
       // current URL.

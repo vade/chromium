@@ -44,10 +44,6 @@ bool WebClient::IsAppSpecificURL(const GURL& url) const {
   return false;
 }
 
-bool WebClient::AllowWebViewAllocInit() const {
-  return false;
-}
-
 base::string16 WebClient::GetPluginNotSupportedText() const {
   return base::string16();
 }
@@ -56,7 +52,7 @@ std::string WebClient::GetProduct() const {
   return std::string();
 }
 
-std::string WebClient::GetUserAgent(bool desktop_user_agent) const {
+std::string WebClient::GetUserAgent(UserAgentType type) const {
   return std::string();
 }
 
@@ -74,7 +70,7 @@ base::RefCountedMemory* WebClient::GetDataResourceBytes(int resource_id) const {
   return nullptr;
 }
 
-NSString* WebClient::GetEarlyPageScript() const {
+NSString* WebClient::GetEarlyPageScript(BrowserState* browser_state) const {
   return @"";
 }
 
@@ -86,6 +82,11 @@ void WebClient::AllowCertificateError(
     bool overridable,
     const base::Callback<void(bool)>& callback) {
   callback.Run(false);
+}
+
+std::unique_ptr<base::TaskScheduler::InitParams>
+WebClient::GetTaskSchedulerInitParams() {
+  return nullptr;
 }
 
 }  // namespace web

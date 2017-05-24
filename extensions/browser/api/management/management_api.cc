@@ -257,8 +257,8 @@ void AddExtensionInfo(const ExtensionSet& extensions,
        iter != extensions.end(); ++iter) {
     const Extension& extension = **iter;
 
-    if (extension.ShouldNotBeVisible())
-      continue;  // Skip built-in extensions/apps.
+    if (!extension.ShouldExposeViaManagementAPI())
+      continue;
 
     extension_list->push_back(CreateExtensionInfo(extension, context));
   }
@@ -416,7 +416,7 @@ ExtensionFunction::ResponseAction ManagementSetEnabledFunction::Run() {
 
   const Extension* extension =
       registry->GetExtensionById(extension_id_, ExtensionRegistry::EVERYTHING);
-  if (!extension || extension->ShouldNotBeVisible())
+  if (!extension || !extension->ShouldExposeViaManagementAPI())
     return RespondNow(Error(keys::kNoExtensionError, extension_id_));
 
   bool enabled = params->enabled;
@@ -447,9 +447,8 @@ ExtensionFunction::ResponseAction ManagementSetEnabledFunction::Run() {
     if (prefs->GetDisableReasons(extension_id_) &
             Extension::DISABLE_UNSUPPORTED_REQUIREMENT) {
       // Recheck the requirements.
-      requirements_checker_ = delegate->CreateRequirementsChecker();
-      requirements_checker_->Check(
-          extension,
+      requirements_checker_ = base::MakeUnique<RequirementsChecker>(extension);
+      requirements_checker_->Start(
           base::Bind(&ManagementSetEnabledFunction::OnRequirementsChecked,
                      this));  // This bind creates a reference.
       return RespondLater();
@@ -469,7 +468,7 @@ void ManagementSetEnabledFunction::OnInstallPromptDone(bool did_accept) {
         ->Get(browser_context())
         ->GetDelegate()
         ->EnableExtension(browser_context(), extension_id_);
-    Respond(OneArgument(base::MakeUnique<base::FundamentalValue>(true)));
+    Respond(OneArgument(base::MakeUnique<base::Value>(true)));
   } else {
     Respond(Error(keys::kUserDidNotReEnableError));
   }
@@ -478,15 +477,15 @@ void ManagementSetEnabledFunction::OnInstallPromptDone(bool did_accept) {
 }
 
 void ManagementSetEnabledFunction::OnRequirementsChecked(
-    const std::vector<std::string>& requirements_errors) {
-  if (requirements_errors.empty()) {
+    PreloadCheck::Errors errors) {
+  if (errors.empty()) {
     ManagementAPI::GetFactoryInstance()->Get(browser_context())->GetDelegate()->
         EnableExtension(browser_context(), extension_id_);
     Respond(NoArguments());
   } else {
     // TODO(devlin): Should we really be noisy here all the time?
     Respond(Error(keys::kMissingRequirementsError,
-                  base::JoinString(requirements_errors, " ")));
+                  base::UTF16ToUTF8(requirements_checker_->GetErrorMessage())));
   }
 }
 
@@ -507,7 +506,7 @@ ExtensionFunction::ResponseAction ManagementUninstallFunctionBase::Uninstall(
       extensions::ExtensionRegistry::Get(browser_context())
           ->GetExtensionById(target_extension_id_,
                              ExtensionRegistry::EVERYTHING);
-  if (!target_extension || target_extension->ShouldNotBeVisible()) {
+  if (!target_extension || !target_extension->ShouldExposeViaManagementAPI()) {
     return RespondNow(Error(keys::kNoExtensionError, target_extension_id_));
   }
 
@@ -801,7 +800,7 @@ void ManagementEventRouter::OnExtensionLoaded(
 void ManagementEventRouter::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const Extension* extension,
-    UnloadedExtensionInfo::Reason reason) {
+    UnloadedExtensionReason reason) {
   BroadcastEvent(extension, events::MANAGEMENT_ON_DISABLED,
                  management::OnDisabled::kEventName);
 }
@@ -826,8 +825,8 @@ void ManagementEventRouter::BroadcastEvent(
     const Extension* extension,
     events::HistogramValue histogram_value,
     const char* event_name) {
-  if (extension->ShouldNotBeVisible())
-    return;  // Don't dispatch events for built-in extenions.
+  if (!extension->ShouldExposeViaManagementAPI())
+    return;
   std::unique_ptr<base::ListValue> args(new base::ListValue());
   if (event_name == management::OnUninstalled::kEventName) {
     args->AppendString(extension->id());
@@ -857,8 +856,9 @@ void ManagementAPI::Shutdown() {
   EventRouter::Get(browser_context_)->UnregisterObserver(this);
 }
 
-static base::LazyInstance<BrowserContextKeyedAPIFactory<ManagementAPI>>
-    g_factory = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<
+    BrowserContextKeyedAPIFactory<ManagementAPI>>::DestructorAtExit g_factory =
+    LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<ManagementAPI>*

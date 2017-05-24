@@ -12,6 +12,7 @@
 
 #include "base/callback.h"
 #include "base/callback_list.h"
+#include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
@@ -19,9 +20,11 @@
 #include "base/scoped_observer.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
+#include "components/signin/core/browser/access_token_fetcher.h"
 #include "components/suggestions/proto/suggestions.pb.h"
 #include "components/suggestions/suggestions_service.h"
 #include "components/sync/driver/sync_service_observer.h"
+#include "google_apis/gaia/google_service_auth_error.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "url/gurl.h"
 
@@ -51,7 +54,7 @@ class SuggestionsServiceImpl : public SuggestionsService,
                                public net::URLFetcherDelegate,
                                public syncer::SyncServiceObserver {
  public:
-  SuggestionsServiceImpl(const SigninManagerBase* signin_manager,
+  SuggestionsServiceImpl(SigninManagerBase* signin_manager,
                          OAuth2TokenService* token_service,
                          syncer::SyncService* sync_service,
                          net::URLRequestContextGetter* url_request_context,
@@ -75,6 +78,16 @@ class SuggestionsServiceImpl : public SuggestionsService,
   bool UndoBlacklistURL(const GURL& url) override;
   void ClearBlacklist() override;
 
+  base::TimeDelta blacklist_delay_for_testing() const {
+    return scheduling_delay_;
+  }
+  void set_blacklist_delay_for_testing(base::TimeDelta delay) {
+    scheduling_delay_ = delay;
+  }
+  bool has_pending_request_for_testing() const {
+    return !!pending_request_.get();
+  }
+
   // Determines which URL a blacklist request was for, irrespective of the
   // request's status. Returns false if |request| is not a blacklist request.
   static bool GetBlacklistedUrl(const net::URLFetcher& request, GURL* url);
@@ -83,23 +96,27 @@ class SuggestionsServiceImpl : public SuggestionsService,
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
  private:
-  friend class SuggestionsServiceTest;
-  FRIEND_TEST_ALL_PREFIXES(SuggestionsServiceTest, FetchSuggestionsData);
-  FRIEND_TEST_ALL_PREFIXES(SuggestionsServiceTest,
-                           FetchSuggestionsDataSyncDisabled);
-  FRIEND_TEST_ALL_PREFIXES(SuggestionsServiceTest,
-                           FetchSuggestionsDataNoAccessToken);
-  FRIEND_TEST_ALL_PREFIXES(SuggestionsServiceTest,
-                           IssueRequestIfNoneOngoingError);
-  FRIEND_TEST_ALL_PREFIXES(SuggestionsServiceTest,
-                           IssueRequestIfNoneOngoingResponseNotOK);
-  FRIEND_TEST_ALL_PREFIXES(SuggestionsServiceTest, BlacklistURL);
-  FRIEND_TEST_ALL_PREFIXES(SuggestionsServiceTest, BlacklistURLRequestFails);
-  FRIEND_TEST_ALL_PREFIXES(SuggestionsServiceTest, ClearBlacklist);
-  FRIEND_TEST_ALL_PREFIXES(SuggestionsServiceTest, UndoBlacklistURL);
-  FRIEND_TEST_ALL_PREFIXES(SuggestionsServiceTest, GetBlacklistedUrl);
-  FRIEND_TEST_ALL_PREFIXES(SuggestionsServiceTest, UpdateBlacklistDelay);
-  FRIEND_TEST_ALL_PREFIXES(SuggestionsServiceTest, CheckDefaultTimeStamps);
+  // Establishes the different sync states that matter to SuggestionsService.
+  enum SyncState {
+    // State: Sync service is not initialized, yet not disabled. History sync
+    //     state is unknown (since not initialized).
+    // Behavior: Do not issue server requests, but serve from cache if
+    //     available.
+    NOT_INITIALIZED_ENABLED,
+
+    // State: Sync service is initialized, sync is enabled and history sync is
+    //     enabled.
+    // Behavior: Update suggestions from the server on FetchSuggestionsData().
+    INITIALIZED_ENABLED_HISTORY,
+
+    // State: Sync service is disabled or history sync is disabled.
+    // Behavior: Do not issue server requests. Clear the cache. Serve empty
+    //     suggestions.
+    SYNC_OR_HISTORY_SYNC_DISABLED,
+  };
+
+  // The action that should be taken as the result of a RefreshSyncState call.
+  enum RefreshAction { NO_ACTION, FETCH_SUGGESTIONS, CLEAR_SUGGESTIONS };
 
   // Helpers to build the various suggestions URLs. These are static members
   // rather than local functions in the .cc file to make them accessible to
@@ -109,8 +126,15 @@ class SuggestionsServiceImpl : public SuggestionsService,
   static GURL BuildSuggestionsBlacklistURL(const GURL& candidate_url);
   static GURL BuildSuggestionsBlacklistClearURL();
 
+  // Computes the appropriate SyncState from |sync_service_|.
+  SyncState ComputeSyncState() const;
+
+  // Re-computes |sync_state_| from the sync service. Returns the action that
+  // should be taken in response.
+  RefreshAction RefreshSyncState() WARN_UNUSED_RESULT;
+
   // syncer::SyncServiceObserver implementation.
-  void OnStateChanged() override;
+  void OnStateChanged(syncer::SyncService* sync) override;
 
   // Sets default timestamp for suggestions which do not have expiry timestamp.
   void SetDefaultExpiryTimestamp(SuggestionsProfile* suggestions,
@@ -119,9 +143,13 @@ class SuggestionsServiceImpl : public SuggestionsService,
   // Issues a network request if there isn't already one happening.
   void IssueRequestIfNoneOngoing(const GURL& url);
 
+  // Called when an access token request completes (successfully or not).
+  void AccessTokenAvailable(const GURL& url,
+                            const GoogleServiceAuthError& error,
+                            const std::string& access_token);
+
   // Issues a network request for suggestions (fetch, blacklist, or clear
-  // blacklist, depending on |url|). |access_token| is used only if OAuth2
-  // authentication is enabled.
+  // blacklist, depending on |url|).
   void IssueSuggestionsRequest(const GURL& url,
                                const std::string& access_token);
 
@@ -153,15 +181,16 @@ class SuggestionsServiceImpl : public SuggestionsService,
   // Adds extra data to suggestions profile.
   void PopulateExtraData(SuggestionsProfile* suggestions);
 
-  // Test seams.
-  base::TimeDelta blacklist_delay() const { return scheduling_delay_; }
-  void set_blacklist_delay(base::TimeDelta delay) { scheduling_delay_ = delay; }
-
   base::ThreadChecker thread_checker_;
+
+  SigninManagerBase* signin_manager_;
+  OAuth2TokenService* token_service_;
 
   syncer::SyncService* sync_service_;
   ScopedObserver<syncer::SyncService, syncer::SyncServiceObserver>
       sync_service_observer_;
+
+  SyncState sync_state_;
 
   net::URLRequestContextGetter* url_request_context_;
 
@@ -177,8 +206,8 @@ class SuggestionsServiceImpl : public SuggestionsService,
   // Delay used when scheduling a blacklisting task.
   base::TimeDelta scheduling_delay_;
 
-  // Helper for fetching OAuth2 access tokens.
-  class AccessTokenFetcher;
+  // Helper for fetching OAuth2 access tokens. This is non-null iff an access
+  // token request is currently in progress.
   std::unique_ptr<AccessTokenFetcher> token_fetcher_;
 
   // Contains the current suggestions fetch request. Will only have a value

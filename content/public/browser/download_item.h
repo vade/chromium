@@ -25,6 +25,7 @@
 
 #include "base/callback_forward.h"
 #include "base/files/file_path.h"
+#include "base/memory/ref_counted.h"
 #include "base/strings/string16.h"
 #include "base/supports_user_data.h"
 #include "content/public/browser/download_danger_type.h"
@@ -37,6 +38,10 @@ namespace base {
 class FilePath;
 class Time;
 class TimeDelta;
+}
+
+namespace net {
+class HttpResponseHeaders;
 }
 
 namespace content {
@@ -101,6 +106,23 @@ class CONTENT_EXPORT DownloadItem : public base::SupportsUserData {
    protected:
     virtual ~Observer() {}
   };
+
+  // A slice of the target file that has been received so far, used when
+  // parallel downloading is enabled. Slices should have different offsets
+  // so that they don't overlap.
+  struct CONTENT_EXPORT ReceivedSlice {
+    ReceivedSlice(int64_t offset, int64_t received_bytes)
+        : offset(offset), received_bytes(received_bytes) {}
+
+    bool operator==(const ReceivedSlice& rhs) const {
+      return offset == rhs.offset && received_bytes == rhs.received_bytes;
+    }
+
+    int64_t offset;
+    int64_t received_bytes;
+  };
+
+  using ReceivedSlices = std::vector<DownloadItem::ReceivedSlice>;
 
   ~DownloadItem() override {}
 
@@ -228,6 +250,13 @@ class CONTENT_EXPORT DownloadItem : public base::SupportsUserData {
   // filename from the download attribute.
   virtual std::string GetSuggestedFilename() const = 0;
 
+  // Returns the HTTP response headers. This contains a nullptr when the
+  // response has not yet been received, and, because the headers are not being
+  // persisted, only capture responses received during the lifetime of the
+  // current process and profile. Only for consuming headers.
+  virtual const scoped_refptr<const net::HttpResponseHeaders>&
+  GetResponseHeaders() const = 0;
+
   // Content-Disposition header value from HTTP response.
   virtual std::string GetContentDisposition() const = 0;
 
@@ -349,6 +378,10 @@ class CONTENT_EXPORT DownloadItem : public base::SupportsUserData {
   // file.
   virtual int64_t GetReceivedBytes() const = 0;
 
+  // Return the slices that have been received so far, ordered by their offset.
+  // This is only used when parallel downloading is enabled.
+  virtual const std::vector<ReceivedSlice>& GetReceivedSlices() const = 0;
+
   // Time the download was first started. This timestamp is always valid and
   // doesn't change.
   virtual base::Time GetStartTime() const = 0;
@@ -377,6 +410,14 @@ class CONTENT_EXPORT DownloadItem : public base::SupportsUserData {
   // Returns true if the download has been opened.
   virtual bool GetOpened() const = 0;
 
+  // Time the download was last accessed. Returns NULL if the download has never
+  // been opened.
+  virtual base::Time GetLastAccessTime() const = 0;
+
+  // Returns whether the download item is transient. Transient items are cleaned
+  // up after completion and not shown in the UI.
+  virtual bool IsTransient() const = 0;
+
   //    Misc State accessors ---------------------------------------------------
 
   // BrowserContext that indirectly owns this download. Always valid.
@@ -402,6 +443,9 @@ class CONTENT_EXPORT DownloadItem : public base::SupportsUserData {
 
   // Mark the download as having been opened (without actually opening it).
   virtual void SetOpened(bool opened) = 0;
+
+  // Updates the last access time of the download.
+  virtual void SetLastAccessTime(base::Time last_access_time) = 0;
 
   // Set a display name for the download that will be independent of the target
   // filename. If |name| is not empty, then GetFileNameToReportUser() will

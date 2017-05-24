@@ -11,6 +11,7 @@
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/bad_message.h"
 #include "content/browser/media/capture/audio_mirroring_manager.h"
@@ -24,9 +25,10 @@
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "media/audio/audio_device_description.h"
-#include "media/audio/audio_file_writer.h"
+#include "media/audio/audio_system_impl.h"
 #include "media/audio/fake_audio_log_factory.h"
 #include "media/audio/fake_audio_manager.h"
+#include "media/audio/test_audio_thread.h"
 #include "media/base/media_switches.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -53,11 +55,13 @@ const int kRendererPid = 21718;
 const int kRenderFrameId = 31415;
 const int kSharedMemoryCount = 11;
 const char kSecurityOrigin[] = "http://localhost";
+#if BUILDFLAG(ENABLE_WEBRTC)
 #if defined(OS_WIN)
 const wchar_t kBaseFileName[] = L"some_file_name";
 #else
 const char kBaseFileName[] = "some_file_name";
-#endif
+#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(ENABLE_WEBRTC)
 
 url::Origin SecurityOrigin() {
   return url::Origin(GURL(kSecurityOrigin));
@@ -97,13 +101,13 @@ class AudioInputRendererHostWithInterception : public AudioInputRendererHost {
       media::UserInputMonitor* user_input_monitor,
       MockRenderer* renderer)
       : AudioInputRendererHost(render_process_id,
-                               renderer_pid,
                                audio_manager,
                                media_stream_manager,
                                audio_mirroring_manager,
                                user_input_monitor),
         renderer_(renderer) {
     set_peer_process_for_testing(base::Process::Current());
+    set_renderer_pid(renderer_pid);
   }
 
  protected:
@@ -161,13 +165,17 @@ class MockAudioInputController : public AudioInputController {
       AudioInputController::SyncWriter* writer,
       media::AudioManager* audio_manager,
       AudioInputController::EventHandler* event_handler,
-      media::UserInputMonitor* user_input_monitor)
+      media::UserInputMonitor* user_input_monitor,
+      const media::AudioParameters& params,
+      StreamType type,
+      scoped_refptr<base::SingleThreadTaskRunner> file_task_runner)
       : AudioInputController(std::move(task_runner),
                              event_handler,
                              writer,
-                             /*debug_writer*/ nullptr,
                              user_input_monitor,
-                             /*agc*/ false) {
+                             params,
+                             type,
+                             std::move(file_task_runner)) {
     GetTaskRunnerForTesting()->PostTask(
         FROM_HERE,
         base::Bind(&AudioInputController::EventHandler::OnCreated,
@@ -221,18 +229,19 @@ class MockControllerFactory : public AudioInputController::Factory {
     AudioInputController::set_factory_for_testing(nullptr);
   }
 
-  // AudioInputController::Factory implementaion:
+  // AudioInputController::Factory implementation:
   AudioInputController* Create(
       scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       AudioInputController::SyncWriter* sync_writer,
       media::AudioManager* audio_manager,
       AudioInputController::EventHandler* event_handler,
       media::AudioParameters params,
-      media::UserInputMonitor* user_input_monitor) override {
+      media::UserInputMonitor* user_input_monitor,
+      AudioInputController::StreamType type) override {
     ControllerCreated();
-    scoped_refptr<MockController> controller =
-        new MockController(std::move(task_runner), sync_writer, audio_manager,
-                           event_handler, user_input_monitor);
+    scoped_refptr<MockController> controller = new MockController(
+        task_runner, sync_writer, audio_manager, event_handler,
+        user_input_monitor, params, type, task_runner);
     controller_list_.push_back(controller);
     return controller.get();
   }
@@ -258,10 +267,10 @@ class AudioInputRendererHostTest : public testing::Test {
     flags->AppendSwitch(switches::kUseFakeUIForMediaStream);
 
     audio_manager_.reset(new media::FakeAudioManager(
-        base::ThreadTaskRunnerHandle::Get(),
-        base::ThreadTaskRunnerHandle::Get(), &log_factory_));
+        base::MakeUnique<media::TestAudioThread>(), &log_factory_));
+    audio_system_ = media::AudioSystemImpl::Create(audio_manager_.get());
     media_stream_manager_ =
-        base::MakeUnique<MediaStreamManager>(audio_manager_.get());
+        base::MakeUnique<MediaStreamManager>(audio_system_.get());
     airh_ = new AudioInputRendererHostWithInterception(
         kRenderProcessId, kRendererPid, media::AudioManager::Get(),
         media_stream_manager_.get(), AudioMirroringManager::GetInstance(),
@@ -271,6 +280,8 @@ class AudioInputRendererHostTest : public testing::Test {
   ~AudioInputRendererHostTest() override {
     airh_->OnChannelClosing();
     base::RunLoop().RunUntilIdle();
+
+    audio_manager_->Shutdown();
   }
 
  protected:
@@ -278,7 +289,7 @@ class AudioInputRendererHostTest : public testing::Test {
   // session id returned.
   int Open(const std::string& device_id, const std::string& name) {
     int session_id = media_stream_manager_->audio_input_device_manager()->Open(
-        StreamDeviceInfo(MEDIA_DEVICE_AUDIO_CAPTURE, name, device_id));
+        MediaStreamDevice(MEDIA_DEVICE_AUDIO_CAPTURE, device_id, name));
     base::RunLoop().RunUntilIdle();
     return session_id;
   }
@@ -308,7 +319,8 @@ class AudioInputRendererHostTest : public testing::Test {
   StrictMock<MockControllerFactory> controller_factory_;
   std::unique_ptr<MediaStreamManager> media_stream_manager_;
   TestBrowserThreadBundle thread_bundle_;
-  media::ScopedAudioManagerPtr audio_manager_;
+  std::unique_ptr<media::AudioManager> audio_manager_;
+  std::unique_ptr<media::AudioSystem> audio_system_;
   StrictMock<MockRenderer> renderer_;
   scoped_refptr<AudioInputRendererHost> airh_;
 

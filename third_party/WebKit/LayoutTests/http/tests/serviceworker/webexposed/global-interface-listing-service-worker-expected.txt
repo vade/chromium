@@ -1,3 +1,34 @@
+interface BackgroundFetchClickEvent : BackgroundFetchEvent
+    getter state
+    method constructor
+interface BackgroundFetchEvent : ExtendableEvent
+    getter tag
+    method constructor
+interface BackgroundFetchFailEvent : BackgroundFetchEvent
+    getter fetches
+    method constructor
+interface BackgroundFetchFetch
+    getter request
+    method constructor
+interface BackgroundFetchManager
+    method constructor
+    method fetch
+    method get
+    method getTags
+interface BackgroundFetchRegistration
+    getter icons
+    getter tag
+    getter title
+    getter totalDownloadSize
+    method abort
+    method constructor
+interface BackgroundFetchSettledFetch : BackgroundFetchFetch
+    getter response
+    method constructor
+interface BackgroundFetchedEvent : BackgroundFetchEvent
+    getter fetches
+    method constructor
+    method updateUI
 interface BarcodeDetector
     method constructor
     method detect
@@ -11,10 +42,12 @@ interface Blob
 interface BroadcastChannel : EventTarget
     getter name
     getter onmessage
+    getter onmessageerror
     method close
     method constructor
     method postMessage
     setter onmessage
+    setter onmessageerror
 interface BudgetService
     method constructor
     method getBudget
@@ -51,6 +84,7 @@ interface CanvasPattern
 interface Client
     getter frameType
     getter id
+    getter type
     getter url
     method constructor
     method postMessage
@@ -217,6 +251,57 @@ interface DOMMatrixReadOnly
     method toString
     method transformPoint
     method translate
+interface DOMPoint : DOMPointReadOnly
+    getter w
+    getter x
+    getter y
+    getter z
+    method constructor
+    setter w
+    setter x
+    setter y
+    setter z
+interface DOMPointReadOnly
+    static method fromPoint
+    getter w
+    getter x
+    getter y
+    getter z
+    method constructor
+    method matrixTransform
+    method toJSON
+interface DOMQuad
+    static method fromQuad
+    static method fromRect
+    getter p1
+    getter p2
+    getter p3
+    getter p4
+    method constructor
+    method getBounds
+    method toJSON
+interface DOMRect : DOMRectReadOnly
+    getter height
+    getter width
+    getter x
+    getter y
+    method constructor
+    setter height
+    setter width
+    setter x
+    setter y
+interface DOMRectReadOnly
+    static method fromRect
+    getter bottom
+    getter height
+    getter left
+    getter right
+    getter top
+    getter width
+    getter x
+    getter y
+    method constructor
+    method toJSON
 interface DOMStringList
     getter length
     method constructor
@@ -305,6 +390,7 @@ interface FaceDetector
 interface FetchEvent : ExtendableEvent
     getter clientId
     getter isReload
+    getter preloadResponse
     getter request
     method constructor
     method respondWith
@@ -343,18 +429,6 @@ interface FileReader : EventTarget
     setter onloadend
     setter onloadstart
     setter onprogress
-interface FileReaderSync
-    method constructor
-    method readAsArrayBuffer
-    method readAsBinaryString
-    method readAsDataURL
-    method readAsText
-interface Float32ImageData
-    getter colorSpace
-    getter data
-    getter height
-    getter width
-    method constructor
 interface ForeignFetchEvent : ExtendableEvent
     getter origin
     getter request
@@ -379,7 +453,6 @@ interface Headers
     method entries
     method forEach
     method get
-    method getAll
     method has
     method keys
     method set
@@ -521,12 +594,12 @@ interface ImageBitmap
     method close
     method constructor
 interface ImageData
-    getter colorSpace
     getter data
+    getter dataUnion
     getter height
     getter width
     method constructor
-    method createImageData
+    method getColorSettings
 interface InstallEvent : ExtendableEvent
     method constructor
     method registerForeignFetch
@@ -545,11 +618,19 @@ interface MessageEvent : Event
     method initMessageEvent
 interface MessagePort : EventTarget
     getter onmessage
+    getter onmessageerror
     method close
     method constructor
     method postMessage
     method start
     setter onmessage
+    setter onmessageerror
+interface NavigationPreloadManager
+    method constructor
+    method disable
+    method enable
+    method getState
+    method setHeaderValue
 interface NetworkInformation : EventTarget
     getter downlinkMax
     getter onchange
@@ -603,6 +684,7 @@ interface OffscreenCanvas : EventTarget
 interface OffscreenCanvasRenderingContext2D
     getter canvas
     getter fillStyle
+    getter filter
     getter globalAlpha
     getter globalCompositeOperation
     getter imageSmoothingEnabled
@@ -655,6 +737,7 @@ interface OffscreenCanvasRenderingContext2D
     method transform
     method translate
     setter fillStyle
+    setter filter
     setter globalAlpha
     setter globalCompositeOperation
     setter imageSmoothingEnabled
@@ -681,8 +764,16 @@ interface Path2D
     method moveTo
     method quadraticCurveTo
     method rect
+interface PaymentInstruments
+    method clear
+    method constructor
+    method delete
+    method get
+    method has
+    method keys
+    method set
 interface PaymentRequestEvent : ExtendableEvent
-    getter data
+    getter appRequest
     method constructor
     method respondWith
 interface PerformanceObserverEntryList
@@ -709,6 +800,7 @@ interface PushEvent : ExtendableEvent
     getter data
     method constructor
 interface PushManager
+    static getter supportedContentEncodings
     method constructor
     method getSubscription
     method permissionState
@@ -721,6 +813,7 @@ interface PushMessageData
     method text
 interface PushSubscription
     getter endpoint
+    getter expirationTime
     getter options
     method constructor
     method getKey
@@ -735,9 +828,12 @@ interface ReadableStream
     method cancel
     method constructor
     method getReader
+    method pipeThrough
+    method pipeTo
     method tee
 interface Request
     getter bodyUsed
+    getter cache
     getter credentials
     getter headers
     getter integrity
@@ -775,9 +871,11 @@ interface ServiceWorkerGlobalScope : WorkerGlobalScope
     method constructor
 interface ServiceWorkerRegistration : EventTarget
     getter active
+    getter backgroundFetch
     getter installing
+    getter navigationPreload
     getter onupdatefound
-    getter paymentAppManager
+    getter paymentManager
     getter pushManager
     getter scope
     getter sync
@@ -788,6 +886,10 @@ interface ServiceWorkerRegistration : EventTarget
     method unregister
     method update
     setter onupdatefound
+interface SharedArrayBuffer
+    getter byteLength
+    method constructor
+    method slice
 interface StorageManager
     method constructor
     method estimate
@@ -1269,7 +1371,6 @@ interface WebGL2RenderingContext
     attribute STENCIL_CLEAR_VALUE
     attribute STENCIL_FAIL
     attribute STENCIL_FUNC
-    attribute STENCIL_INDEX
     attribute STENCIL_INDEX8
     attribute STENCIL_PASS_DEPTH_FAIL
     attribute STENCIL_PASS_DEPTH_PASS
@@ -1870,7 +1971,6 @@ interface WebGLRenderingContext
     attribute STENCIL_CLEAR_VALUE
     attribute STENCIL_FAIL
     attribute STENCIL_FUNC
-    attribute STENCIL_INDEX
     attribute STENCIL_INDEX8
     attribute STENCIL_PASS_DEPTH_FAIL
     attribute STENCIL_PASS_DEPTH_PASS
@@ -2134,6 +2234,7 @@ interface WorkerGlobalScope : EventTarget
     getter onerror
     getter onrejectionhandled
     getter onunhandledrejection
+    getter origin
     getter performance
     getter self
     method atob
@@ -2149,6 +2250,7 @@ interface WorkerGlobalScope : EventTarget
     setter onerror
     setter onrejectionhandled
     setter onunhandledrejection
+    setter origin
 interface WorkerLocation
     getter hash
     getter host
@@ -2181,10 +2283,15 @@ interface WritableStream
     method constructor
     method getWriter
 global object
+    attribute Atomics
     attribute console
     attribute internals
     getter clients
     getter onactivate
+    getter onbackgroundfetchabort
+    getter onbackgroundfetchclick
+    getter onbackgroundfetched
+    getter onbackgroundfetchfail
     getter onfetch
     getter onforeignfetch
     getter oninstall
@@ -2199,6 +2306,10 @@ global object
     method gc
     method skipWaiting
     setter onactivate
+    setter onbackgroundfetchabort
+    setter onbackgroundfetchclick
+    setter onbackgroundfetched
+    setter onbackgroundfetchfail
     setter onfetch
     setter onforeignfetch
     setter oninstall

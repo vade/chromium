@@ -94,8 +94,8 @@ class TimedRunLoop {
 class LanguageListWaiter : public NetworkScreen::Observer {
  public:
   LanguageListWaiter()
-      : network_screen_(
-            NetworkScreen::Get(WizardController::default_controller())),
+      : network_screen_(NetworkScreen::Get(
+            WizardController::default_controller()->screen_manager())),
         loop_(base::TimeDelta::FromSeconds(kTimeoutSeconds), "LanguageList") {
     network_screen_->AddObserver(this);
     CheckLanguageList();
@@ -115,9 +115,7 @@ class LanguageListWaiter : public NetworkScreen::Observer {
   }
 
  private:
-  bool LanguageListReady() const {
-    return network_screen_->GetLanguageList();
-  }
+  bool LanguageListReady() const { return network_screen_->language_list(); }
 
   void CheckLanguageList() {
     if (LanguageListReady())

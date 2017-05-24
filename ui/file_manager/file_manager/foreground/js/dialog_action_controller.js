@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 /**
- * Controler for handling behaviors of Files.app opened as a file/folder
+ * Controler for handling behaviors of the Files app opened as a file/folder
  * selection dialog.
  *
  * @param {DialogType} dialogType Dialog type.
@@ -125,7 +125,8 @@ function DialogActionController(
       this.fileTypes_, launchParam.includeAllFiles);
   this.onFileTypeFilterChanged_();
 
-  this.newFolderCommand_ = document.getElementById('new-folder');
+  this.newFolderCommand_ =
+      /** @type {cr.ui.Command} */ (document.getElementById('new-folder'));
   this.newFolderCommand_.addEventListener(
       'disabledChange', this.updateNewFolderButton_.bind(this));
 }
@@ -138,7 +139,8 @@ DialogActionController.prototype.processOKActionForSaveDialog_ = function() {
 
   // If OK action is clicked when a directory is selected, open the directory.
   if (selection.directoryCount === 1 && selection.fileCount === 0) {
-    this.directoryModel_.changeDirectoryEntry(selection.entries[0]);
+    this.directoryModel_.changeDirectoryEntry(
+        /** @type {!DirectoryEntry} */ (selection.entries[0]));
     return;
   }
 

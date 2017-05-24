@@ -8,7 +8,6 @@
 #include <stdint.h>
 
 #include <memory>
-#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -21,7 +20,6 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/strings/string16.h"
-#include "base/task_runner.h"
 #include "base/timer/timer.h"
 #include "build/build_config.h"
 #include "chrome/browser/memory/tab_manager_observer.h"
@@ -38,7 +36,6 @@ class TickClock;
 }
 
 namespace content {
-class RenderProcessHost;
 class WebContents;
 }
 
@@ -85,10 +82,7 @@ class TabManager : public TabStripModelObserver {
 
   // Returns the list of the stats for all renderers. Must be called on the UI
   // thread. The returned list is sorted by reversed importance.
-  TabStatsList GetTabStats();
-
-  // Returns a sorted list of renderers, from most important to least important.
-  std::vector<content::RenderProcessHost*> GetOrderedRenderers();
+  TabStatsList GetTabStats() const;
 
   // Returns true if |contents| is currently discarded.
   bool IsTabDiscarded(content::WebContents* contents) const;
@@ -128,7 +122,7 @@ class TabManager : public TabStripModelObserver {
 
   // Returns the list of the stats for all renderers. Must be called on the UI
   // thread.
-  TabStatsList GetUnsortedTabStats();
+  TabStatsList GetUnsortedTabStats() const;
 
   void AddObserver(TabManagerObserver* observer);
   void RemoveObserver(TabManagerObserver* observer);
@@ -147,8 +141,10 @@ class TabManager : public TabStripModelObserver {
   // Sets/clears the auto-discardable state of the tab.
   void SetTabAutoDiscardableState(content::WebContents* contents, bool state);
 
-  // Returns true when a given renderer can suspend when it is backgrounded.
-  bool CanSuspendBackgroundedRenderer(int render_process_id);
+  // Returns true when a given renderer can be purged if the specified
+  // renderer is eligible for purging.
+  // TODO(tasak): rename this to CanPurgeBackgroundedRenderer.
+  bool CanSuspendBackgroundedRenderer(int render_process_id) const;
 
   // Returns true if |first| is considered less desirable to be killed than
   // |second|.
@@ -159,9 +155,10 @@ class TabManager : public TabStripModelObserver {
   static int64_t IdFromWebContents(content::WebContents* web_contents);
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
-                           ActivateTabResetPurgeAndSuspendState);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, NextPurgeAndSuspendState);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, PurgeBackgroundRenderer);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, ActivateTabResetPurgeState);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, ShouldPurgeAtDefaultTime);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, DefaultTimeToPurgeInCorrectRange);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, AutoDiscardable);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, CanOnlyDiscardOnce);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, ChildProcessNotifications);
@@ -176,11 +173,25 @@ class TabManager : public TabStripModelObserver {
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, ProtectVideoTabs);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, ReloadDiscardedTabContextMenu);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, TabManagerBasics);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerWebContentsDataTest, PurgeAndSuspendState);
+
+  // The time of the first purging after a renderer is backgrounded.
+  // The initial value was chosen because most of users activate backgrounded
+  // tabs within 30 minutes. (c.f. Tabs.StateTransfer.Time_Inactive_Active)
+  static constexpr base::TimeDelta kDefaultMinTimeToPurge =
+      base::TimeDelta::FromMinutes(30);
+
+  // The min/max time to purge ratio. The max time to purge is set to be
+  // min time to purge times this value.
+  const int kMinMaxTimeToPurgeRatio = 2;
 
   // This is needed so WebContentsData can call OnDiscardedStateChange, and
-  // can use PurgeAndSuspendState.
+  // can use PurgeState.
   friend class WebContentsData;
+
+  // Finds TabStripModel which has a WebContents whose id is the given
+  // web_contents_id, and returns the WebContents index and the TabStripModel.
+  int FindTabStripModelById(int64_t target_web_contents_id,
+                            TabStripModel** model) const;
 
   // Called by WebContentsData whenever the discard state of a WebContents
   // changes, so that observers can be informed.
@@ -191,31 +202,6 @@ class TabManager : public TabStripModelObserver {
   // WebContents changes, so that observers can be informed.
   void OnAutoDiscardableStateChange(content::WebContents* contents,
                                     bool is_auto_discardable);
-
-  // The time that a renderer is given to react to a memory pressure
-  // notification before another renderer is also notified. This prevents all
-  // renderers from receiving and acting upon notifications simultaneously,
-  // which can quickly overload a system. Exposed for unittesting.
-  // NOTE: This value needs to be big enough to allow a process to get over the
-  // hump in responding to memory pressure, so there aren't multiple processes
-  // fighting for CPU and worse, temporary memory, while trying to free things
-  // up. Similarly, it shouldn't be too large otherwise it will take too long
-  // for the entire system to respond. Ideally, there would be a callback from a
-  // child process indicating that the message has been handled. In the meantime
-  // this is chosen to be sufficient to allow a worst-case V8+Oilpan GC to run,
-  // with a little slop.
-  enum : int { kRendererNotificationDelayInSeconds = 2 };
-
-  using MemoryPressureLevel = base::MemoryPressureListener::MemoryPressureLevel;
-
-  // A callback that returns the current memory pressure level.
-  using MemoryPressureLevelCallback = base::Callback<MemoryPressureLevel()>;
-
-  // Callback that notifies a |renderer| of the memory pressure at a given
-  // |level|. Provides a testing seam.
-  using RendererNotificationCallback = base::Callback<
-      void(const content::RenderProcessHost* /* renderer */,
-           MemoryPressureLevel /* level */)>;
 
   static void PurgeMemoryAndDiscardTab();
 
@@ -239,51 +225,40 @@ class TabManager : public TabStripModelObserver {
   int GetTabCount() const;
 
   // Adds all the stats of the tabs to |stats_list|.
-  void AddTabStats(TabStatsList* stats_list);
+  void AddTabStats(TabStatsList* stats_list) const;
 
   // Adds all the stats of the tabs in |tab_strip_model| into |stats_list|.
   // If |active_model| is true, consider its first tab as being active.
   void AddTabStats(const TabStripModel* model,
                    bool is_app,
                    bool active_model,
-                   TabStatsList* stats_list);
+                   TabStatsList* stats_list) const;
 
   // Callback for when |update_timer_| fires. Takes care of executing the tasks
   // that need to be run periodically (see comment in implementation).
   void UpdateTimerCallback();
 
-  // Initially PurgeAndSuspendState is RUNNING.
-  // RUNNING => SUSPENDED
-  // - A tab has been backgrounded for more than purge-and-suspend-time
-  //   seconds.
-  // SUSPENDED => RESUMED
-  // - A suspended tab is still suspended (i.e. last active time < last
-  //   purge-and-suspend modified time), and
-  // - kMaxTimeRendererAllowedToBeSuspendedBeforeResume time passes since
-  //   since the tab was suspended.
-  // RESUMED => SUSPENDED
-  // - A resumed tab is still backgrounded (i.e. last active time < last
-  //   purge-and-suspend modified time), and
-  // - kSuspendedRendererLengthOfResumption time passes since the tab was
-  //   resumed.
-  // SUSPENDED, RESUMED, RUNNING => RUNNING
-  // - When ActiveTabChaged, the newly activated tab's state will be RUNNING.
-  enum PurgeAndSuspendState {
-    RUNNING,
-    RESUMED,
-    SUSPENDED,
-  };
   // Returns WebContents whose contents id matches the given tab_contents_id.
-  content::WebContents* GetWebContentsById(int64_t tab_contents_id);
+  content::WebContents* GetWebContentsById(int64_t tab_contents_id) const;
 
-  // Returns the next state of the purge and suspend.
-  PurgeAndSuspendState GetNextPurgeAndSuspendState(
-      content::WebContents* content,
-      base::TimeTicks current_time,
-      const base::TimeDelta& time_to_first_suspension) const;
+  // Returns a random time-to-purge whose min value is min_time_to_purge and max
+  // value is min_time_to_purge * kMinMaxTimeToPurgeRatio.
+  base::TimeDelta GetTimeToPurge(base::TimeDelta min_time_to_purge) const;
 
-  // Purges and suspends renderers in backgrounded tabs.
-  void PurgeAndSuspendBackgroundedTabs();
+  // Returns true if the tab specified by |content| is now eligible to have
+  // its memory purged.
+  bool ShouldPurgeNow(content::WebContents* content) const;
+
+  // Purges renderers in backgrounded tabs if the following conditions are
+  // satisfied:
+  // - the renderers are not purged yet,
+  // - the renderers are not playing media,
+  //   (CanPurgeBackgroundedRenderer returns true)
+  // - the renderers are left inactive and background for time-to-purge.
+  // If renderers are purged, their internal states become 'purged'.
+  // The state is reset to be 'not purged' only when they are activated
+  // (=ActiveTabChanged is invoked).
+  void PurgeBackgroundedTabsIfNeeded();
 
   // Does the actual discard by destroying the WebContents in |model| at |index|
   // and replacing it by an empty one. Returns the new WebContents or NULL if
@@ -320,16 +295,12 @@ class TabManager : public TabStripModelObserver {
   // for more details.
   base::TimeTicks NowTicks() const;
 
-  // Dispatches a memory pressure message to a single child process, and
-  // schedules another call to itself as long as memory pressure continues.
-  void DoChildProcessDispatch();
-
   // Implementation of DiscardTab. Returns null if no tab was discarded.
   // Otherwise returns the new web_contents of the discarded tab.
   content::WebContents* DiscardTabImpl();
 
   // Returns true if tabs can be discarded only once.
-  bool CanOnlyDiscardOnce();
+  bool CanOnlyDiscardOnce() const;
 
   // Timer to periodically update the stats of the renderers.
   base::RepeatingTimer update_timer_;
@@ -366,8 +337,8 @@ class TabManager : public TabStripModelObserver {
   // backgrounded.
   base::TimeDelta minimum_protection_time_;
 
-  // A backgrounded renderer will be suspended when this time passes.
-  base::TimeDelta time_to_first_suspension_;
+  // A backgrounded renderer will be purged when this time passes.
+  base::TimeDelta min_time_to_purge_;
 
 #if defined(OS_CHROMEOS)
   std::unique_ptr<TabManagerDelegate> delegate_;
@@ -380,30 +351,6 @@ class TabManager : public TabStripModelObserver {
   // Pointer to a test clock. If this is set, NowTicks() returns the value of
   // this test clock. Otherwise it returns the system clock's value.
   base::TickClock* test_tick_clock_;
-
-  // The task runner used for child process notifications. Defaults to the
-  // thread task runner handle that is used by the memory pressure subsystem,
-  // but may be explicitly set for unittesting.
-  scoped_refptr<base::TaskRunner> task_runner_;
-
-  // Indicates that the system is currently experiencing memory pressure. Used
-  // to determine whether a new round of child-process memory pressure
-  // dispatches is starting, or whether an existing one is continuing.
-  bool under_memory_pressure_;
-
-  // The set of child renderers that have received memory pressure notifications
-  // during the current bout of memory pressure. This is emptied when all
-  // children have been notified (restarting another round of notification) and
-  // when a bout of memory pressure ends.
-  std::set<const content::RenderProcessHost*> notified_renderers_;
-
-  // The callback that returns the current memory pressure level. Defaults to
-  // querying base::MemoryPressureMonitor, but can be overridden for testing.
-  MemoryPressureLevelCallback get_current_pressure_level_;
-
-  // The callback to be invoked to notify renderers. Defaults to calling
-  // content::SendPressureNotification, but can be overridden for testing.
-  RendererNotificationCallback notify_renderer_process_;
 
   // Injected tab strip models. Allows this to be tested end-to-end without
   // requiring a full browser environment. If specified these tab strips will be
@@ -418,7 +365,7 @@ class TabManager : public TabStripModelObserver {
   // List of observers that will receive notifications on state changes.
   base::ObserverList<TabManagerObserver> observers_;
 
-  // Weak pointer factory used for posting delayed tasks to task_runner_.
+  // Weak pointer factory used for posting delayed tasks.
   base::WeakPtrFactory<TabManager> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(TabManager);

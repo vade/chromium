@@ -25,6 +25,10 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/notification_types.h"
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/file_manager/path_util.h"
+#endif
+
 namespace image_writer_api = extensions::api::image_writer_private;
 
 namespace extensions {
@@ -56,10 +60,8 @@ void OperationManager::Shutdown() {
   for (OperationMap::iterator iter = operations_.begin();
        iter != operations_.end();
        iter++) {
-    BrowserThread::PostTask(BrowserThread::FILE,
-                            FROM_HERE,
-                            base::Bind(&Operation::Abort,
-                                       iter->second));
+    BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+                            base::BindOnce(&Operation::Abort, iter->second));
   }
 }
 
@@ -87,11 +89,11 @@ void OperationManager::StartWriteFromUrl(
           GetURLRequestContext(),
       url,
       hash,
-      device_path));
+      device_path,
+      GetAssociatedDownloadFolder()));
   operations_[extension_id] = operation;
-  BrowserThread::PostTask(BrowserThread::FILE,
-                          FROM_HERE,
-                          base::Bind(&Operation::Start, operation));
+  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+                          base::BindOnce(&Operation::Start, operation));
   callback.Run(true, "");
 }
 
@@ -112,11 +114,11 @@ void OperationManager::StartWriteFromFile(
   }
 
   scoped_refptr<Operation> operation(new WriteFromFileOperation(
-      weak_factory_.GetWeakPtr(), extension_id, path, device_path));
+      weak_factory_.GetWeakPtr(), extension_id, path, device_path,
+      GetAssociatedDownloadFolder()));
   operations_[extension_id] = operation;
-  BrowserThread::PostTask(BrowserThread::FILE,
-                          FROM_HERE,
-                          base::Bind(&Operation::Start, operation));
+  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+                          base::BindOnce(&Operation::Start, operation));
   callback.Run(true, "");
 }
 
@@ -128,9 +130,9 @@ void OperationManager::CancelWrite(
   if (existing_operation == NULL) {
     callback.Run(false, error::kNoOperationInProgress);
   } else {
-    BrowserThread::PostTask(BrowserThread::FILE,
-                            FROM_HERE,
-                            base::Bind(&Operation::Cancel, existing_operation));
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
+        base::BindOnce(&Operation::Cancel, existing_operation));
     DeleteOperation(extension_id);
     callback.Run(true, "");
   }
@@ -147,11 +149,11 @@ void OperationManager::DestroyPartitions(
   }
 
   scoped_refptr<Operation> operation(new DestroyPartitionsOperation(
-      weak_factory_.GetWeakPtr(), extension_id, device_path));
+      weak_factory_.GetWeakPtr(), extension_id, device_path,
+      GetAssociatedDownloadFolder()));
   operations_[extension_id] = operation;
-  BrowserThread::PostTask(BrowserThread::FILE,
-                          FROM_HERE,
-                          base::Bind(&Operation::Start, operation));
+  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+                          base::BindOnce(&Operation::Start, operation));
   callback.Run(true, "");
 }
 
@@ -213,6 +215,14 @@ void OperationManager::OnError(const ExtensionId& extension_id,
   DeleteOperation(extension_id);
 }
 
+base::FilePath OperationManager::GetAssociatedDownloadFolder() {
+#if defined(OS_CHROMEOS)
+  Profile* profile = Profile::FromBrowserContext(browser_context_);
+  return file_manager::util::GetDownloadsFolderForProfile(profile);
+#endif
+  return base::FilePath();
+}
+
 Operation* OperationManager::GetOperation(const ExtensionId& extension_id) {
   OperationMap::iterator existing_operation = operations_.find(extension_id);
 
@@ -231,7 +241,7 @@ void OperationManager::DeleteOperation(const ExtensionId& extension_id) {
 void OperationManager::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const Extension* extension,
-    UnloadedExtensionInfo::Reason reason) {
+    UnloadedExtensionReason reason) {
   DeleteOperation(extension->id());
 }
 
@@ -262,8 +272,8 @@ OperationManager* OperationManager::Get(content::BrowserContext* context) {
   return BrowserContextKeyedAPIFactory<OperationManager>::Get(context);
 }
 
-static base::LazyInstance<BrowserContextKeyedAPIFactory<OperationManager> >
-    g_factory = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<BrowserContextKeyedAPIFactory<OperationManager>>::
+    DestructorAtExit g_factory = LAZY_INSTANCE_INITIALIZER;
 
 BrowserContextKeyedAPIFactory<OperationManager>*
 OperationManager::GetFactoryInstance() {

@@ -8,6 +8,7 @@
 #include <objidl.h>
 #include <shlobj.h>
 #include <stddef.h>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -20,7 +21,6 @@
 #endif
 
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "base/win/scoped_comptr.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/ui_base_export.h"
@@ -110,7 +110,7 @@ class DataObjectImpl : public DownloadFileObserver,
     ~StoredDataInfo();
   };
 
-  typedef ScopedVector<StoredDataInfo> StoredData;
+  typedef std::vector<std::unique_ptr<StoredDataInfo>> StoredData;
   StoredData contents_;
 
   base::win::ScopedComPtr<IDataObject> source_object_;
@@ -178,18 +178,14 @@ class UI_BASE_EXPORT OSExchangeDataProviderWin
   bool HasCustomFormat(const Clipboard::FormatType& format) const override;
   void SetDownloadFileInfo(
       const OSExchangeData::DownloadFileInfo& download_info) override;
-  void SetDragImage(const gfx::ImageSkia& image,
+  void SetDragImage(const gfx::ImageSkia& image_skia,
                     const gfx::Vector2d& cursor_offset) override;
-  const gfx::ImageSkia& GetDragImage() const override;
-  const gfx::Vector2d& GetDragImageOffset() const override;
+  gfx::ImageSkia GetDragImage() const override;
+  gfx::Vector2d GetDragImageOffset() const override;
 
  private:
   scoped_refptr<DataObjectImpl> data_;
   base::win::ScopedComPtr<IDataObject> source_object_;
-
-  // Drag image and offset data. Only used for Ash.
-  gfx::ImageSkia drag_image_;
-  gfx::Vector2d drag_image_offset_;
 
   DISALLOW_COPY_AND_ASSIGN(OSExchangeDataProviderWin);
 };

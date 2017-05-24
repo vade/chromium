@@ -15,13 +15,13 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/proto/autofill_sync.pb.h"
-#include "components/autofill/core/browser/webdata/autofill_metadata_change_list.h"
 #include "components/autofill/core/browser/webdata/autofill_table.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_backend.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/sync/model/entity_data.h"
 #include "components/sync/model/model_type_change_processor.h"
 #include "components/sync/model/mutable_data_batch.h"
+#include "components/sync/model_impl/sync_metadata_store_change_list.h"
 #include "net/base/escape.h"
 
 using base::Optional;
@@ -35,6 +35,7 @@ using syncer::EntityDataMap;
 using syncer::MetadataChangeList;
 using syncer::ModelError;
 using syncer::ModelTypeChangeProcessor;
+using syncer::ModelTypeSyncBridge;
 using syncer::MutableDataBatch;
 
 namespace autofill {
@@ -57,15 +58,21 @@ void* UserDataKey() {
   return reinterpret_cast<void*>(&user_data_key);
 }
 
+std::string EscapeIdentifiers(const AutofillSpecifics& specifics) {
+  return net::EscapePath(specifics.name()) +
+         std::string(kAutocompleteTagDelimiter) +
+         net::EscapePath(specifics.value());
+}
+
 std::unique_ptr<EntityData> CreateEntityData(const AutofillEntry& entry) {
   auto entity_data = base::MakeUnique<EntityData>();
-  entity_data->non_unique_name = base::UTF16ToUTF8(entry.key().name());
   AutofillSpecifics* autofill = entity_data->specifics.mutable_autofill();
   autofill->set_name(base::UTF16ToUTF8(entry.key().name()));
   autofill->set_value(base::UTF16ToUTF8(entry.key().value()));
   autofill->add_usage_timestamp(entry.date_created().ToInternalValue());
   if (entry.date_created() != entry.date_last_used())
     autofill->add_usage_timestamp(entry.date_last_used().ToInternalValue());
+  entity_data->non_unique_name = EscapeIdentifiers(*autofill);
   return entity_data;
 }
 
@@ -143,17 +150,19 @@ class SyncDifferenceTracker {
       return ModelError(FROM_HERE, "Failed reading from WebDatabase.");
     } else if (!local) {
       save_to_local_.push_back(remote);
-    } else if (remote != local.value()) {
-      if (specifics.usage_timestamp().empty()) {
-        // Skip merging if there are no timestamps. We don't want to wipe out
-        // a local value of |date_created| if the remote copy is oddly formed.
-        save_to_sync_.push_back(local.value());
-      } else {
-        const AutofillEntry merged = MergeEntryDates(local.value(), remote);
-        save_to_local_.push_back(merged);
-        save_to_sync_.push_back(merged);
-      }
+    } else {
       unique_to_local_.erase(local.value());
+      if (remote != local.value()) {
+        if (specifics.usage_timestamp().empty()) {
+          // Skip merging if there are no timestamps. We don't want to wipe out
+          // a local value of |date_created| if the remote copy is oddly formed.
+          save_to_sync_.push_back(local.value());
+        } else {
+          const AutofillEntry merged = MergeEntryDates(local.value(), remote);
+          save_to_local_.push_back(merged);
+          save_to_sync_.push_back(merged);
+        }
+      }
     }
     return {};
   }
@@ -207,7 +216,8 @@ class SyncDifferenceTracker {
                               metadata_change_list.get());
       }
     }
-    return static_cast<AutofillMetadataChangeList*>(metadata_change_list.get())
+    return static_cast<syncer::SyncMetadataStoreChangeList*>(
+               metadata_change_list.get())
         ->TakeError();
   }
 
@@ -275,7 +285,7 @@ void AutocompleteSyncBridge::CreateForWebDataServiceAndBackend(
     AutofillWebDataBackend* web_data_backend) {
   web_data_service->GetDBUserData()->SetUserData(
       UserDataKey(),
-      new AutocompleteSyncBridge(
+      base::MakeUnique<AutocompleteSyncBridge>(
           web_data_backend,
           base::BindRepeating(
               &ModelTypeChangeProcessor::Create,
@@ -283,10 +293,11 @@ void AutocompleteSyncBridge::CreateForWebDataServiceAndBackend(
 }
 
 // static
-AutocompleteSyncBridge* AutocompleteSyncBridge::FromWebDataService(
+base::WeakPtr<ModelTypeSyncBridge> AutocompleteSyncBridge::FromWebDataService(
     AutofillWebDataService* web_data_service) {
   return static_cast<AutocompleteSyncBridge*>(
-      web_data_service->GetDBUserData()->GetUserData(UserDataKey()));
+             web_data_service->GetDBUserData()->GetUserData(UserDataKey()))
+      ->AsWeakPtr();
 }
 
 AutocompleteSyncBridge::AutocompleteSyncBridge(
@@ -309,8 +320,8 @@ AutocompleteSyncBridge::~AutocompleteSyncBridge() {
 std::unique_ptr<MetadataChangeList>
 AutocompleteSyncBridge::CreateMetadataChangeList() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  return base::MakeUnique<AutofillMetadataChangeList>(GetAutofillTable(),
-                                                      syncer::AUTOFILL);
+  return base::MakeUnique<syncer::SyncMetadataStoreChangeList>(
+      GetAutofillTable(), syncer::AUTOFILL);
 }
 
 Optional<syncer::ModelError> AutocompleteSyncBridge::MergeSyncData(
@@ -318,8 +329,7 @@ Optional<syncer::ModelError> AutocompleteSyncBridge::MergeSyncData(
     EntityDataMap entity_data_map) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  // TODO(skym, crbug.com/680218): Uncomment and add unit tests.
-  /*SyncDifferenceTracker tracker(GetAutofillTable());
+  SyncDifferenceTracker tracker(GetAutofillTable());
   for (auto kv : entity_data_map) {
     DCHECK(kv.second->specifics.has_autofill());
     RETURN_IF_ERROR(tracker.IncorporateRemoteSpecifics(
@@ -330,7 +340,7 @@ Optional<syncer::ModelError> AutocompleteSyncBridge::MergeSyncData(
   RETURN_IF_ERROR(tracker.FlushToSync(true, std::move(metadata_change_list),
                                 change_processor()));
   web_data_backend_->RemoveExpiredFormElements();
-  web_data_backend_->NotifyThatSyncHasStarted(syncer::AUTOFILL);*/
+  web_data_backend_->NotifyThatSyncHasStarted(syncer::AUTOFILL);
   return {};
 }
 
@@ -403,8 +413,9 @@ void AutocompleteSyncBridge::ActOnLocalChanges(
     return;
   }
 
-  auto metadata_change_list = base::MakeUnique<AutofillMetadataChangeList>(
-      GetAutofillTable(), syncer::AUTOFILL);
+  auto metadata_change_list =
+      base::MakeUnique<syncer::SyncMetadataStoreChangeList>(GetAutofillTable(),
+                                                            syncer::AUTOFILL);
   for (const auto& change : changes) {
     const std::string storage_key = GetStorageKeyFromModel(change.key());
     switch (change.type()) {
@@ -437,6 +448,13 @@ void AutocompleteSyncBridge::ActOnLocalChanges(
 }
 
 void AutocompleteSyncBridge::LoadMetadata() {
+  if (!web_data_backend_ || !web_data_backend_->GetDatabase() ||
+      !GetAutofillTable()) {
+    change_processor()->ReportError(FROM_HERE,
+                                    "Failed to load AutofillWebDatabase.");
+    return;
+  }
+
   auto batch = base::MakeUnique<syncer::MetadataBatch>();
   if (!GetAutofillTable()->GetAllSyncMetadata(syncer::AUTOFILL, batch.get())) {
     change_processor()->ReportError(
@@ -449,16 +467,19 @@ void AutocompleteSyncBridge::LoadMetadata() {
 std::string AutocompleteSyncBridge::GetClientTag(
     const EntityData& entity_data) {
   DCHECK(entity_data.specifics.has_autofill());
-  const AutofillSpecifics specifics = entity_data.specifics.autofill();
+  // Must have the format "autofill_entry|$name|$value" where $name and $value
+  // are URL escaped. This is to maintain compatibility with the previous sync
+  // integration (Directory and SyncableService).
   return std::string(kAutocompleteEntryNamespaceTag) +
-         net::EscapePath(specifics.name()) +
-         std::string(kAutocompleteTagDelimiter) +
-         net::EscapePath(specifics.value());
+         EscapeIdentifiers(entity_data.specifics.autofill());
 }
 
 std::string AutocompleteSyncBridge::GetStorageKey(
     const EntityData& entity_data) {
   DCHECK(entity_data.specifics.has_autofill());
+  // Marginally more space efficient than GetClientTag() by omitting the
+  // kAutocompleteEntryNamespaceTag prefix and using protobuf serialization
+  // instead of URL escaping for Unicode characters.
   const AutofillSpecifics specifics = entity_data.specifics.autofill();
   return BuildSerializedStorageKey(specifics.name(), specifics.value());
 }

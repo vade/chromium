@@ -32,7 +32,7 @@
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/layout/grid_layout.h"
-#include "ui/views/layout/layout_constants.h"
+#include "ui/views/layout/layout_provider.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_client_view.h"
 
@@ -210,7 +210,7 @@ void WimaxConfigView::Init() {
       &passphrase_ui_data_, wimax, ::onc::wifi::kPassphrase);
 
   views::GridLayout* layout = views::GridLayout::CreatePanel(this);
-  SetLayoutManager(layout);
+  views::LayoutProvider* provider = views::LayoutProvider::Get();
 
   const int column_view_set_id = 0;
   views::ColumnSet* column_set = layout->AddColumnSet(column_view_set_id);
@@ -218,12 +218,16 @@ void WimaxConfigView::Init() {
   // Label
   column_set->AddColumn(views::GridLayout::LEADING, views::GridLayout::FILL, 1,
                         views::GridLayout::USE_PREF, 0, 0);
-  column_set->AddPaddingColumn(0, views::kRelatedControlSmallHorizontalSpacing);
+  column_set->AddPaddingColumn(
+      0,
+      provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_HORIZONTAL));
   // Textfield, combobox.
   column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1,
                         views::GridLayout::USE_PREF, 0,
                         ChildNetworkConfigView::kInputFieldMinWidth);
-  column_set->AddPaddingColumn(0, views::kRelatedControlSmallHorizontalSpacing);
+  column_set->AddPaddingColumn(
+      0,
+      provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_HORIZONTAL));
   // Password visible button / policy indicator.
   column_set->AddColumn(views::GridLayout::CENTER, views::GridLayout::FILL, 1,
                         views::GridLayout::USE_PREF, 0, kPasswordVisibleWidth);
@@ -235,7 +239,8 @@ void WimaxConfigView::Init() {
   views::Label* label = new views::Label(base::UTF8ToUTF16(wimax->name()));
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   layout->AddView(label);
-  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(
+      0, provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_VERTICAL));
 
   // Identity
   layout->StartRow(0, column_view_set_id);
@@ -249,7 +254,8 @@ void WimaxConfigView::Init() {
   identity_textfield_->SetEnabled(identity_ui_data_.IsEditable());
   layout->AddView(identity_textfield_);
   layout->AddView(new ControlledSettingIndicatorView(identity_ui_data_));
-  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(
+      0, provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_VERTICAL));
 
   // Passphrase input
   layout->StartRow(0, column_view_set_id);
@@ -299,7 +305,8 @@ void WimaxConfigView::Init() {
     layout->AddView(passphrase_visible_button_);
   }
 
-  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(
+      0, provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_VERTICAL));
 
   // Checkboxes.
 
@@ -336,7 +343,8 @@ void WimaxConfigView::Init() {
     layout->SkipColumns(1);
     layout->AddView(share_network_checkbox_);
   }
-  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+  layout->AddPaddingRow(
+      0, provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_VERTICAL));
 
   // Create an error label.
   layout->StartRow(0, column_view_set_id);

@@ -10,10 +10,10 @@
 #include "base/android/jni_string.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/ntp_snippets/ntp_snippets_features.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
+#include "components/ntp_snippets/features.h"
 #include "components/prefs/pref_service.h"
 #include "components/variations/variations_associated_data.h"
 #include "jni/ContentSuggestionsNotificationHelper_jni.h"
@@ -22,6 +22,9 @@
 #include "ui/gfx/image/image_skia.h"
 
 using base::android::JavaParamRef;
+using ntp_snippets::kNotificationsFeature;
+using ntp_snippets::kNotificationsIgnoredLimitParam;
+using ntp_snippets::kNotificationsIgnoredDefaultLimit;
 
 namespace ntp_snippets {
 
@@ -29,12 +32,15 @@ namespace {
 
 bool IsDisabledForProfile(Profile* profile) {
   PrefService* prefs = profile->GetPrefs();
+  if (!prefs->GetBoolean(prefs::kContentSuggestionsNotificationsEnabled)) {
+    return true;
+  }
+
   int current =
       prefs->GetInteger(prefs::kContentSuggestionsConsecutiveIgnoredPrefName);
   int limit = variations::GetVariationParamByFeatureAsInt(
-      kContentSuggestionsNotificationsFeature,
-      kContentSuggestionsNotificationsIgnoredLimitParam,
-      kContentSuggestionsNotificationsIgnoredDefaultLimit);
+      kNotificationsFeature, kNotificationsIgnoredLimitParam,
+      kNotificationsIgnoredDefaultLimit);
   return current >= limit;
 }
 
@@ -46,15 +52,16 @@ bool ContentSuggestionsNotificationHelper::SendNotification(
     const base::string16& title,
     const base::string16& text,
     const gfx::Image& image,
-    base::Time timeout_at) {
+    base::Time timeout_at,
+    int priority) {
   JNIEnv* env = base::android::AttachCurrentThread();
   SkBitmap skimage = image.AsImageSkia().GetRepresentation(1.0f).sk_bitmap();
   if (skimage.empty())
     return false;
 
-  jint timeout_at_millis = timeout_at.ToJavaTime();
+  jlong timeout_at_millis = timeout_at.ToJavaTime();
   if (timeout_at == base::Time::Max()) {
-    timeout_at_millis = std::numeric_limits<jint>::max();
+    timeout_at_millis = std::numeric_limits<jlong>::max();
   }
 
   if (Java_ContentSuggestionsNotificationHelper_showNotification(
@@ -63,7 +70,7 @@ bool ContentSuggestionsNotificationHelper::SendNotification(
           base::android::ConvertUTF8ToJavaString(env, url.spec()),
           base::android::ConvertUTF16ToJavaString(env, title),
           base::android::ConvertUTF16ToJavaString(env, text),
-          gfx::ConvertToJavaBitmap(&skimage), timeout_at_millis)) {
+          gfx::ConvertToJavaBitmap(&skimage), timeout_at_millis, priority)) {
     DVLOG(1) << "Displayed notification for " << id;
     return true;
   } else {
@@ -101,6 +108,20 @@ bool ContentSuggestionsNotificationHelper::IsDisabledForProfile(
 // static
 bool ContentSuggestionsNotificationHelper::Register(JNIEnv* env) {
   return RegisterNativesImpl(env);
+}
+
+static void RecordNotificationOptOut(JNIEnv* env,
+                                     const JavaParamRef<jclass>& class_object,
+                                     jint reason) {
+  RecordContentSuggestionsNotificationOptOut(
+      static_cast<ContentSuggestionsNotificationOptOut>(reason));
+}
+
+static void RecordNotificationAction(JNIEnv* env,
+                                     const JavaParamRef<jclass>& class_object,
+                                     jint action) {
+  RecordContentSuggestionsNotificationAction(
+      static_cast<ContentSuggestionsNotificationAction>(action));
 }
 
 static void ReceiveFlushedMetrics(JNIEnv* env,

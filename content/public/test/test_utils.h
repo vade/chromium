@@ -56,8 +56,11 @@ void RunAllPendingInMessageLoop();
 // thread.
 void RunAllPendingInMessageLoop(BrowserThread::ID thread_id);
 
-// Runs until both the blocking pool and the current message loop are empty
-// (have no more scheduled tasks) and no tasks are running.
+// Runs until the blocking pool, task scheduler, and the current message loop
+// are all empty (have no more scheduled tasks) and no tasks are running.
+//
+// TODO(fdoray): Rename to RunAllTaskSchedulerTasksUntilIdle() once the blocking
+// pool is fully deprecated. https://crbug.com/667892
 void RunAllBlockingPoolTasksUntilIdle();
 
 // Get task to quit the given RunLoop. It allows a few generations of pending
@@ -100,7 +103,7 @@ bool RegisterJniForTesting(JNIEnv* env);
 // GetDeferredQuitTaskForRunLoop directly.
 // If you found a case where base::RunLoop is inconvenient or can not be used at
 // all, please post details in a comment on https://crbug.com/668707.
-class MessageLoopRunner : public base::RefCounted<MessageLoopRunner> {
+class MessageLoopRunner : public base::RefCountedThreadSafe<MessageLoopRunner> {
  public:
   enum class QuitMode {
     // Message loop stops after finishing the current task.
@@ -129,7 +132,7 @@ class MessageLoopRunner : public base::RefCounted<MessageLoopRunner> {
   bool loop_running() const { return loop_running_; }
 
  private:
-  friend class base::RefCounted<MessageLoopRunner>;
+  friend class base::RefCountedThreadSafe<MessageLoopRunner>;
   ~MessageLoopRunner();
 
   QuitMode quit_mode_;

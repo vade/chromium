@@ -20,48 +20,48 @@ const char kCommonScript[] = "Zyyy";
   static_assert(static_cast<int>(a) == static_cast<int>(b), \
                 "mismatching enums: " #a)
 
-STATIC_ASSERT_ENUM(EDITING_BEHAVIOR_MAC, WebSettings::EditingBehaviorMac);
-STATIC_ASSERT_ENUM(EDITING_BEHAVIOR_WIN, WebSettings::EditingBehaviorWin);
-STATIC_ASSERT_ENUM(EDITING_BEHAVIOR_UNIX, WebSettings::EditingBehaviorUnix);
+STATIC_ASSERT_ENUM(EDITING_BEHAVIOR_MAC, WebSettings::kEditingBehaviorMac);
+STATIC_ASSERT_ENUM(EDITING_BEHAVIOR_WIN, WebSettings::kEditingBehaviorWin);
+STATIC_ASSERT_ENUM(EDITING_BEHAVIOR_UNIX, WebSettings::kEditingBehaviorUnix);
 STATIC_ASSERT_ENUM(EDITING_BEHAVIOR_ANDROID,
-                   WebSettings::EditingBehaviorAndroid);
+                   WebSettings::kEditingBehaviorAndroid);
 
 STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_DEFAULT,
-                   WebSettings::V8CacheOptionsDefault);
-STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_NONE, WebSettings::V8CacheOptionsNone);
-STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_PARSE, WebSettings::V8CacheOptionsParse);
-STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_CODE, WebSettings::V8CacheOptionsCode);
-STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_LAST, WebSettings::V8CacheOptionsCode);
+                   WebSettings::kV8CacheOptionsDefault);
+STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_NONE, WebSettings::kV8CacheOptionsNone);
+STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_PARSE, WebSettings::kV8CacheOptionsParse);
+STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_CODE, WebSettings::kV8CacheOptionsCode);
+STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_LAST, WebSettings::kV8CacheOptionsCode);
 
 STATIC_ASSERT_ENUM(ProgressBarCompletion::LOAD_EVENT,
-                   WebSettings::ProgressBarCompletion::LoadEvent);
+                   WebSettings::ProgressBarCompletion::kLoadEvent);
 STATIC_ASSERT_ENUM(ProgressBarCompletion::RESOURCES_BEFORE_DCL,
-                   WebSettings::ProgressBarCompletion::ResourcesBeforeDCL);
+                   WebSettings::ProgressBarCompletion::kResourcesBeforeDCL);
 STATIC_ASSERT_ENUM(ProgressBarCompletion::DOM_CONTENT_LOADED,
-                   WebSettings::ProgressBarCompletion::DOMContentLoaded);
+                   WebSettings::ProgressBarCompletion::kDOMContentLoaded);
 STATIC_ASSERT_ENUM(
     ProgressBarCompletion::RESOURCES_BEFORE_DCL_AND_SAME_ORIGIN_IFRAMES,
-    WebSettings::ProgressBarCompletion::ResourcesBeforeDCLAndSameOriginIFrames);
+    WebSettings::ProgressBarCompletion::
+        kResourcesBeforeDCLAndSameOriginIFrames);
 
 STATIC_ASSERT_ENUM(IMAGE_ANIMATION_POLICY_ALLOWED,
-                   WebSettings::ImageAnimationPolicyAllowed);
+                   WebSettings::kImageAnimationPolicyAllowed);
 STATIC_ASSERT_ENUM(IMAGE_ANIMATION_POLICY_ANIMATION_ONCE,
-                   WebSettings::ImageAnimationPolicyAnimateOnce);
+                   WebSettings::kImageAnimationPolicyAnimateOnce);
 STATIC_ASSERT_ENUM(IMAGE_ANIMATION_POLICY_NO_ANIMATION,
-                   WebSettings::ImageAnimationPolicyNoAnimation);
+                   WebSettings::kImageAnimationPolicyNoAnimation);
 
-STATIC_ASSERT_ENUM(ui::POINTER_TYPE_NONE, blink::PointerTypeNone);
-STATIC_ASSERT_ENUM(ui::POINTER_TYPE_COARSE, blink::PointerTypeCoarse);
-STATIC_ASSERT_ENUM(ui::POINTER_TYPE_FINE, blink::PointerTypeFine);
+STATIC_ASSERT_ENUM(ui::POINTER_TYPE_NONE, blink::kPointerTypeNone);
+STATIC_ASSERT_ENUM(ui::POINTER_TYPE_COARSE, blink::kPointerTypeCoarse);
+STATIC_ASSERT_ENUM(ui::POINTER_TYPE_FINE, blink::kPointerTypeFine);
 
-STATIC_ASSERT_ENUM(ui::HOVER_TYPE_NONE, blink::HoverTypeNone);
-STATIC_ASSERT_ENUM(ui::HOVER_TYPE_ON_DEMAND, blink::HoverTypeOnDemand);
-STATIC_ASSERT_ENUM(ui::HOVER_TYPE_HOVER, blink::HoverTypeHover);
+STATIC_ASSERT_ENUM(ui::HOVER_TYPE_NONE, blink::kHoverTypeNone);
+STATIC_ASSERT_ENUM(ui::HOVER_TYPE_HOVER, blink::kHoverTypeHover);
 
-STATIC_ASSERT_ENUM(ViewportStyle::DEFAULT, blink::WebViewportStyle::Default);
-STATIC_ASSERT_ENUM(ViewportStyle::MOBILE, blink::WebViewportStyle::Mobile);
+STATIC_ASSERT_ENUM(ViewportStyle::DEFAULT, blink::WebViewportStyle::kDefault);
+STATIC_ASSERT_ENUM(ViewportStyle::MOBILE, blink::WebViewportStyle::kMobile);
 STATIC_ASSERT_ENUM(ViewportStyle::TELEVISION,
-                   blink::WebViewportStyle::Television);
+                   blink::WebViewportStyle::kTelevision);
 
 WebPreferences::WebPreferences()
     : default_font_size(16),
@@ -80,6 +80,7 @@ WebPreferences::WebPreferences()
       loads_images_automatically(true),
       images_enabled(true),
       plugins_enabled(true),
+      encrypted_media_enabled(true),
       dom_paste_enabled(false),  // enables execCommand("paste")
       shrinks_standalone_images_to_fit(true),
       text_areas_are_resizable(true),
@@ -128,7 +129,6 @@ WebPreferences::WebPreferences()
       should_clear_document_background(true),
       enable_scroll_animator(false),
       touch_event_feature_detection_enabled(false),
-      device_supports_touch(false),
       touch_adjustment_enabled(true),
       pointer_events_max_touch_points(0),
       available_pointer_types(0),
@@ -191,7 +191,6 @@ WebPreferences::WebPreferences()
       force_enable_zoom(false),
       fullscreen_supported(true),
       double_tap_to_zoom_enabled(true),
-      user_gesture_required_for_media_playback(true),
       support_deprecated_target_density_dpi(false),
       use_legacy_background_size_shorthand_behavior(false),
       wide_viewport_quirk(false),
@@ -208,8 +207,9 @@ WebPreferences::WebPreferences()
       progress_bar_completion(ProgressBarCompletion::LOAD_EVENT),
       spellcheck_enabled_by_default(true),
       video_fullscreen_orientation_lock_enabled(false),
-#else  // defined(OS_ANDROID)
-      cross_origin_media_playback_requires_user_gesture(false),
+      video_rotate_to_fullscreen_enabled(false),
+      video_fullscreen_detection_enabled(false),
+      embedded_media_experience_enabled(false),
 #endif  // defined(OS_ANDROID)
 #if defined(OS_ANDROID)
       default_minimum_page_scale_factor(0.25f),
@@ -223,9 +223,15 @@ WebPreferences::WebPreferences()
 #endif
       hide_download_ui(false),
       background_video_track_optimization_enabled(false),
-      max_keyframe_distance_to_disable_background_video(
-          base::TimeDelta::FromSeconds(10)),
-      presentation_receiver(false) {
+      enable_instant_source_buffer_gc(false),
+      presentation_receiver(false),
+      media_controls_enabled(true),
+      do_not_update_selection_on_mutating_selection_range(false),
+#if defined(OS_ANDROID)
+      autoplay_policy(AutoplayPolicy::kUserGestureRequired) {
+#else
+      autoplay_policy(AutoplayPolicy::kNoUserGestureRequired) {
+#endif  // defined(OS_ANDROID)
   standard_font_family_map[kCommonScript] =
       base::ASCIIToUTF16("Times New Roman");
   fixed_font_family_map[kCommonScript] = base::ASCIIToUTF16("Courier New");

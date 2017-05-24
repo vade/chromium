@@ -9,6 +9,7 @@
 #include <tuple>
 
 #include "base/bind.h"
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/stl_util.h"
 #include "base/time/time.h"
@@ -110,8 +111,8 @@ void GalleryWatchManager::FileWatchManager::AddFileWatch(
   // This can occur if the GalleryWatchManager attempts to watch the same path
   // again before recieving the callback. It's benign.
   if (base::ContainsKey(watchers_, path)) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE, base::Bind(callback, false));
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                            base::BindOnce(callback, false));
     return;
   }
 
@@ -124,8 +125,8 @@ void GalleryWatchManager::FileWatchManager::AddFileWatch(
   if (success)
     watchers_[path] = watcher;
 
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE, base::Bind(callback, success));
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                          base::BindOnce(callback, success));
 }
 
 void GalleryWatchManager::FileWatchManager::RemoveFileWatch(
@@ -146,8 +147,8 @@ void GalleryWatchManager::FileWatchManager::OnFilePathChanged(
   DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   if (error)
     RemoveFileWatch(path);
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE, base::Bind(callback_, path, error));
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                          base::BindOnce(callback_, path, error));
 }
 
 GalleryWatchManager::WatchOwner::WatchOwner(BrowserContext* browser_context,
@@ -183,8 +184,8 @@ GalleryWatchManager::GalleryWatchManager()
 GalleryWatchManager::~GalleryWatchManager() {
   weak_factory_.InvalidateWeakPtrs();
 
-  if (storage_monitor_observed_ &&
-      storage_monitor::StorageMonitor::GetInstance()) {
+  if (storage_monitor_observed_) {
+    DCHECK(storage_monitor::StorageMonitor::GetInstance());
     storage_monitor::StorageMonitor::GetInstance()->RemoveObserver(this);
   }
 
@@ -289,12 +290,10 @@ void GalleryWatchManager::AddWatch(BrowserContext* browser_context,
                    owner,
                    path,
                    callback);
-    BrowserThread::PostTask(BrowserThread::FILE,
-                            FROM_HERE,
-                            base::Bind(&FileWatchManager::AddFileWatch,
-                                       watch_manager_->GetWeakPtr(),
-                                       path,
-                                       on_watch_added));
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
+        base::BindOnce(&FileWatchManager::AddFileWatch,
+                       watch_manager_->GetWeakPtr(), path, on_watch_added));
   }
 }
 
@@ -368,11 +367,9 @@ void GalleryWatchManager::DeactivateFileWatch(const WatchOwner& owner,
   it->second.owners.erase(owner);
   if (it->second.owners.empty()) {
     watched_paths_.erase(it);
-    BrowserThread::PostTask(BrowserThread::FILE,
-                            FROM_HERE,
-                            base::Bind(&FileWatchManager::RemoveFileWatch,
-                                       watch_manager_->GetWeakPtr(),
-                                       path));
+    BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+                            base::BindOnce(&FileWatchManager::RemoveFileWatch,
+                                           watch_manager_->GetWeakPtr(), path));
   }
 }
 
@@ -424,12 +421,9 @@ void GalleryWatchManager::OnFilePathChanged(const base::FilePath& path,
           base::TimeDelta::FromSeconds(kMinNotificationDelayInSeconds) -
           base::Time::Now();
       BrowserThread::PostDelayedTask(
-          BrowserThread::UI,
-          FROM_HERE,
-          base::Bind(&GalleryWatchManager::OnFilePathChanged,
-                     weak_factory_.GetWeakPtr(),
-                     path,
-                     error),
+          BrowserThread::UI, FROM_HERE,
+          base::BindOnce(&GalleryWatchManager::OnFilePathChanged,
+                         weak_factory_.GetWeakPtr(), path, error),
           delay_to_next_valid_time);
     }
     return;

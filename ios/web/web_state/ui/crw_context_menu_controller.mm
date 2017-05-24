@@ -9,7 +9,7 @@
 
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/sys_string_conversions.h"
 #import "ios/web/public/web_state/context_menu_params.h"
 #import "ios/web/public/web_state/js/crw_js_injection_evaluator.h"
@@ -58,8 +58,6 @@ void CancelTouches(UIGestureRecognizer* gesture_recognizer) {
 - (void)showContextMenu:(UIGestureRecognizer*)gestureRecognizer;
 // Cancels all touch events in the web view (long presses, tapping, scrolling).
 - (void)cancelAllTouches;
-// Asynchronously fetches full width of the rendered web page.
-- (void)fetchWebPageWidthWithCompletionHandler:(void (^)(CGFloat))handler;
 // Asynchronously fetches information about DOM element for the given point (in
 // UIView coordinates). |handler| can not be nil. See |_DOMElementForLastTouch|
 // for element format description.
@@ -225,33 +223,21 @@ void CancelTouches(UIGestureRecognizer* gesture_recognizer) {
 #pragma mark -
 #pragma mark Web Page Features
 
-- (void)fetchWebPageWidthWithCompletionHandler:(void (^)(CGFloat))handler {
-  [self executeJavaScript:@"__gCrWeb.getPageWidth();"
-        completionHandler:^(id pageWidth, NSError*) {
-          handler([base::mac::ObjCCastStrict<NSNumber>(pageWidth) floatValue]);
-        }];
-}
-
 - (void)fetchDOMElementAtPoint:(CGPoint)point
              completionHandler:(void (^)(NSDictionary*))handler {
   DCHECK(handler);
-  // Convert point into web page's coordinate system (which may be scaled and/or
-  // scrolled).
   CGPoint scrollOffset = self.scrollPosition;
-  CGFloat webViewContentWidth = self.webScrollView.contentSize.width;
-  CRWContextMenuController* weakSelf = self;
-  [self fetchWebPageWidthWithCompletionHandler:^(CGFloat pageWidth) {
-    CGFloat scale = pageWidth / webViewContentWidth;
-    CGPoint localPoint = CGPointMake((point.x + scrollOffset.x) * scale,
-                                     (point.y + scrollOffset.y) * scale);
-    NSString* const kGetElementScript =
-        [NSString stringWithFormat:@"__gCrWeb.getElementFromPoint(%g, %g);",
-                                   localPoint.x, localPoint.y];
-    [weakSelf executeJavaScript:kGetElementScript
-              completionHandler:^(id element, NSError*) {
-                handler(base::mac::ObjCCastStrict<NSDictionary>(element));
-              }];
-  }];
+  CGSize webViewContentSize = self.webScrollView.contentSize;
+  CGFloat webViewContentWidth = webViewContentSize.width;
+  CGFloat webViewContentHeight = webViewContentSize.height;
+  NSString* getElementScript = [NSString
+      stringWithFormat:@"__gCrWeb.getElementFromPoint(%g, %g, %g, %g);",
+                       point.x + scrollOffset.x, point.y + scrollOffset.y,
+                       webViewContentWidth, webViewContentHeight];
+  [self executeJavaScript:getElementScript
+        completionHandler:^(id element, NSError*) {
+          handler(base::mac::ObjCCastStrict<NSDictionary>(element));
+        }];
 }
 
 @end

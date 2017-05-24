@@ -20,8 +20,8 @@
 #include "chrome/browser/safe_browsing/incident_reporting/module_integrity_unittest_util_win.h"
 #include "chrome/browser/safe_browsing/incident_reporting/module_integrity_verifier_win.h"
 #include "chrome/browser/safe_browsing/path_sanitizer.h"
-#include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome_elf/chrome_elf_constants.h"
+#include "components/safe_browsing/csd.pb.h"
 #include "net/base/winsock_init.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -154,7 +154,7 @@ TEST(SafeBrowsingEnvironmentDataCollectionWinTest, VerifyLoadedModules) {
                                 &process_report);
 
   // CollectModuleVerificationData should return the single modified module and
-  // its modified export.  The other module, being unmodified, is omitted from
+  // its modified export. The other module, being unmodified, is omitted from
   // the returned list of modules.
   // AddressSanitizer build is special though, as it patches the code at
   // startup, which makes every single module modified and introduces extra
@@ -183,7 +183,7 @@ TEST(SafeBrowsingEnvironmentDataCollectionWinTest, CollectRegistryData) {
   // Ensure that all values and subkeys from the specified registry keys are
   // correctly stored in the report.
   registry_util::RegistryOverrideManager override_manager;
-  override_manager.OverrideRegistry(HKEY_CURRENT_USER);
+  ASSERT_NO_FATAL_FAILURE(override_manager.OverrideRegistry(HKEY_CURRENT_USER));
 
   const wchar_t kRootKey[] = L"Software\\TestKey";
   const RegistryKeyInfo kRegKeysToCollect[] = {

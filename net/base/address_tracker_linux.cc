@@ -98,7 +98,7 @@ bool GetAddress(const struct nlmsghdr* header,
 // static
 char* AddressTrackerLinux::GetInterfaceName(int interface_index, char* buf) {
   memset(buf, 0, IFNAMSIZ);
-  base::ScopedFD ioctl_socket(socket(AF_INET, SOCK_DGRAM, 0));
+  base::ScopedFD ioctl_socket = GetSocketForIoctl();
   if (!ioctl_socket.is_valid())
     return buf;
 
@@ -116,6 +116,7 @@ AddressTrackerLinux::AddressTrackerLinux()
       link_callback_(base::Bind(&base::DoNothing)),
       tunnel_callback_(base::Bind(&base::DoNothing)),
       netlink_fd_(-1),
+      watcher_(FROM_HERE),
       ignored_interfaces_(),
       connection_type_initialized_(false),
       connection_type_initialized_cv_(&connection_type_lock_),
@@ -133,6 +134,7 @@ AddressTrackerLinux::AddressTrackerLinux(
       link_callback_(link_callback),
       tunnel_callback_(tunnel_callback),
       netlink_fd_(-1),
+      watcher_(FROM_HERE),
       ignored_interfaces_(ignored_interfaces),
       connection_type_initialized_(false),
       connection_type_initialized_cv_(&connection_type_lock_),

@@ -9,8 +9,10 @@
 #include "base/callback_helpers.h"
 #include "chrome/browser/extensions/api/input_ime/input_ime_api_nonchromeos.h"
 #include "chrome/browser/platform_util.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/harmony/chrome_typography.h"
 #include "chrome/browser/ui/views/toolbar/app_menu_button.h"
 #include "chrome/browser/ui/views/toolbar/browser_actions_container.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
@@ -28,9 +30,8 @@ namespace {
 // The column width of the warning bubble.
 const int kColumnWidth = 285;
 
-views::Label* CreateLabel(const base::string16& text,
-                          const gfx::FontList& font) {
-  views::Label* label = new views::Label(text, font);
+views::Label* CreateExtensionNameLabel(const base::string16& text) {
+  views::Label* label = new views::Label(text, CONTEXT_BODY_TEXT_SMALL);
   label->SetMultiLine(true);
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   return label;
@@ -119,6 +120,7 @@ ImeWarningBubbleView::ImeWarningBubbleView(
   }
   views::BubbleDialogDelegateView::CreateBubble(this)->Show();
   bubble_has_shown_ = true;
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::IME_WARNING);
 }
 
 ImeWarningBubbleView::~ImeWarningBubbleView() {
@@ -172,13 +174,11 @@ void ImeWarningBubbleView::InitLayout() {
   main_cs->AddColumn(views::GridLayout::LEADING, views::GridLayout::LEADING, 0,
                      views::GridLayout::FIXED, kColumnWidth, 0);
 
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   layout->StartRow(0, cs_id);
   base::string16 extension_name = base::UTF8ToUTF16(extension_->name());
   base::i18n::AdjustStringForLocaleDirection(&extension_name);
-  views::Label* warning = CreateLabel(
-      l10n_util::GetStringFUTF16(IDS_IME_API_ACTIVATED_WARNING, extension_name),
-      rb.GetFontList(ResourceBundle::BaseFont));
+  views::Label* warning = CreateExtensionNameLabel(l10n_util::GetStringFUTF16(
+      IDS_IME_API_ACTIVATED_WARNING, extension_name));
   layout->AddView(warning);
   layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 

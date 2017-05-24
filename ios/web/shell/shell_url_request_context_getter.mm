@@ -12,8 +12,8 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
-#include "base/threading/worker_pool.h"
-#import "ios/net/cookies/cookie_store_ios.h"
+#include "base/threading/sequenced_worker_pool.h"
+#import "ios/net/cookies/cookie_store_ios_persistent.h"
 #import "ios/web/public/web_client.h"
 #include "ios/web/public/web_thread.h"
 #include "ios/web/shell/shell_network_delegate.h"
@@ -85,17 +85,17 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
                 web::WebThread::GetBlockingPool()->GetSequenceToken()),
             true, nullptr);
     std::unique_ptr<net::CookieStoreIOS> cookie_store(
-        new net::CookieStoreIOS(persistent_store.get()));
+        new net::CookieStoreIOSPersistent(persistent_store.get()));
     storage_->set_cookie_store(std::move(cookie_store));
 
-    std::string user_agent = web::GetWebClient()->GetUserAgent(false);
+    std::string user_agent =
+        web::GetWebClient()->GetUserAgent(web::UserAgentType::MOBILE);
     storage_->set_http_user_agent_settings(
         base::MakeUnique<net::StaticHttpUserAgentSettings>("en-us,en",
                                                            user_agent));
     storage_->set_proxy_service(
         net::ProxyService::CreateUsingSystemProxyResolver(
-            std::move(proxy_config_service_), 0,
-            url_request_context_->net_log()));
+            std::move(proxy_config_service_), url_request_context_->net_log()));
     storage_->set_ssl_config_service(new net::SSLConfigServiceDefaults);
     storage_->set_cert_verifier(net::CertVerifier::CreateDefault());
 
@@ -109,8 +109,7 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
         url_request_context_->transport_security_state(), base_path_,
         file_task_runner_, false));
     storage_->set_channel_id_service(base::MakeUnique<net::ChannelIDService>(
-        new net::DefaultChannelIDStore(nullptr),
-        base::WorkerPool::GetTaskRunner(true)));
+        new net::DefaultChannelIDStore(nullptr)));
     storage_->set_http_server_properties(
         std::unique_ptr<net::HttpServerProperties>(
             new net::HttpServerPropertiesImpl()));

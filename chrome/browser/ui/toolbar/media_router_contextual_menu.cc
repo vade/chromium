@@ -2,12 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/ui/toolbar/media_router_contextual_menu.h"
+
 #include <string>
 
 #include "base/logging.h"
 #include "base/metrics/user_metrics.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/extensions/component_migration_helper.h"
 #include "chrome/browser/media/router/media_router_factory.h"
 #include "chrome/browser/media/router/mojo/media_router_mojo_impl.h"
 #include "chrome/browser/profiles/profile.h"
@@ -15,7 +16,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/toolbar/component_toolbar_actions_factory.h"
-#include "chrome/browser/ui/toolbar/media_router_contextual_menu.h"
+#include "chrome/browser/ui/toolbar/media_router_action_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -24,15 +25,32 @@
 #include "components/signin/core/browser/signin_manager.h"
 #include "extensions/common/constants.h"
 #include "ui/base/models/menu_model_delegate.h"
+#include "ui/gfx/color_palette.h"
+#include "ui/gfx/paint_vector_icon.h"
+#include "ui/vector_icons/vector_icons.h"
 
+// static
+std::unique_ptr<MediaRouterContextualMenu>
+MediaRouterContextualMenu::CreateForToolbar(Browser* browser) {
+  return base::MakeUnique<MediaRouterContextualMenu>(
+      browser, true,
+      MediaRouterActionController::IsActionShownByPolicy(browser->profile()));
+}
 
-MediaRouterContextualMenu::MediaRouterContextualMenu(Browser* browser)
+// static
+std::unique_ptr<MediaRouterContextualMenu>
+MediaRouterContextualMenu::CreateForOverflowMenu(Browser* browser) {
+  return base::MakeUnique<MediaRouterContextualMenu>(
+      browser, false,
+      MediaRouterActionController::IsActionShownByPolicy(browser->profile()));
+}
+
+MediaRouterContextualMenu::MediaRouterContextualMenu(Browser* browser,
+                                                     bool is_action_in_toolbar,
+                                                     bool shown_by_policy)
     : browser_(browser),
       menu_model_(this),
-      component_migration_helper_(ToolbarActionsModel::Get(browser->profile())
-                                      ->component_migration_helper()) {
-  DCHECK(component_migration_helper_);
-
+      is_action_in_toolbar_(is_action_in_toolbar) {
   menu_model_.AddItemWithStringId(IDC_MEDIA_ROUTER_ABOUT,
                                   IDS_MEDIA_ROUTER_ABOUT);
   menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
@@ -40,9 +58,20 @@ MediaRouterContextualMenu::MediaRouterContextualMenu(Browser* browser)
                                   IDS_MEDIA_ROUTER_LEARN_MORE);
   menu_model_.AddItemWithStringId(IDC_MEDIA_ROUTER_HELP,
                                   IDS_MEDIA_ROUTER_HELP);
-  menu_model_.AddCheckItemWithStringId(
-      IDC_MEDIA_ROUTER_ALWAYS_SHOW_TOOLBAR_ACTION,
-      IDS_MEDIA_ROUTER_ALWAYS_SHOW_TOOLBAR_ACTION);
+  if (shown_by_policy) {
+    menu_model_.AddItemWithStringId(IDC_MEDIA_ROUTER_SHOWN_BY_POLICY,
+                                    IDS_MEDIA_ROUTER_SHOWN_BY_POLICY);
+    menu_model_.SetIcon(
+        menu_model_.GetIndexOfCommandId(IDC_MEDIA_ROUTER_SHOWN_BY_POLICY),
+        gfx::Image(gfx::CreateVectorIcon(ui::kBusinessIcon, 16,
+                                         gfx::kChromeIconGrey)));
+  } else {
+    menu_model_.AddCheckItemWithStringId(
+        IDC_MEDIA_ROUTER_ALWAYS_SHOW_TOOLBAR_ACTION,
+        IDS_MEDIA_ROUTER_ALWAYS_SHOW_TOOLBAR_ACTION);
+  }
+  menu_model_.AddItemWithStringId(IDC_MEDIA_ROUTER_SHOW_IN_TOOLBAR,
+                                  GetChangeVisibilityTextId());
   menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
   menu_model_.AddItemWithStringId(IDC_MEDIA_ROUTER_MANAGE_DEVICES,
@@ -57,13 +86,13 @@ MediaRouterContextualMenu::MediaRouterContextualMenu(Browser* browser)
 MediaRouterContextualMenu::~MediaRouterContextualMenu() {}
 
 bool MediaRouterContextualMenu::GetAlwaysShowActionPref() const {
-  return component_migration_helper_->GetComponentActionPref(
-      ComponentToolbarActionsFactory::kMediaRouterActionId);
+  return MediaRouterActionController::GetAlwaysShowActionPref(
+      browser_->profile());
 }
 
 void MediaRouterContextualMenu::SetAlwaysShowActionPref(bool always_show) {
-  component_migration_helper_->SetComponentActionPref(
-      ComponentToolbarActionsFactory::kMediaRouterActionId, always_show);
+  return MediaRouterActionController::SetAlwaysShowActionPref(
+      browser_->profile(), always_show);
 }
 
 bool MediaRouterContextualMenu::IsCommandIdChecked(int command_id) const {
@@ -71,14 +100,18 @@ bool MediaRouterContextualMenu::IsCommandIdChecked(int command_id) const {
     return browser_->profile()->GetPrefs()->GetBoolean(
         prefs::kMediaRouterEnableCloudServices);
   }
-  if (command_id == IDC_MEDIA_ROUTER_ALWAYS_SHOW_TOOLBAR_ACTION) {
+  if (command_id == IDC_MEDIA_ROUTER_ALWAYS_SHOW_TOOLBAR_ACTION)
     return GetAlwaysShowActionPref();
-  }
   return false;
 }
 
 bool MediaRouterContextualMenu::IsCommandIdEnabled(int command_id) const {
-  return true;
+  // If the action is in the ephemeral state, disable the menu item for moving
+  // it between the toolbar and the overflow menu, since the preference would
+  // not persist.
+  if (command_id == IDC_MEDIA_ROUTER_SHOW_IN_TOOLBAR)
+    return GetAlwaysShowActionPref();
+  return command_id != IDC_MEDIA_ROUTER_SHOWN_BY_POLICY;
 }
 
 bool MediaRouterContextualMenu::IsCommandIdVisible(int command_id) const {
@@ -133,6 +166,12 @@ void MediaRouterContextualMenu::ExecuteCommand(int command_id,
     case IDC_MEDIA_ROUTER_REPORT_ISSUE:
       ReportIssue();
       break;
+    case IDC_MEDIA_ROUTER_SHOW_IN_TOOLBAR:
+      ToolbarActionsModel::Get(browser_->profile())
+          ->SetActionVisibility(
+              ComponentToolbarActionsFactory::kMediaRouterActionId,
+              !is_action_in_toolbar_);
+      break;
     default:
       NOTREACHED();
   }
@@ -153,4 +192,9 @@ void MediaRouterContextualMenu::ReportIssue() {
                            media_router->media_route_provider_extension_id() +
                            "/feedback.html");
   chrome::ShowSingletonTab(browser_, GURL(feedback_url));
+}
+
+int MediaRouterContextualMenu::GetChangeVisibilityTextId() {
+  return is_action_in_toolbar_ ? IDS_EXTENSIONS_HIDE_BUTTON_IN_MENU
+                               : IDS_EXTENSIONS_SHOW_BUTTON_IN_TOOLBAR;
 }

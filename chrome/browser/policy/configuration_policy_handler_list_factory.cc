@@ -53,7 +53,7 @@
 #include "components/ssl_config/ssl_config_prefs.h"
 #include "components/sync/base/pref_names.h"
 #include "components/sync/driver/sync_policy_handler.h"
-#include "components/translate/core/common/translate_pref_names.h"
+#include "components/translate/core/browser/translate_pref_names.h"
 #include "components/variations/pref_names.h"
 #include "extensions/features/features.h"
 #include "media/media_features.h"
@@ -64,7 +64,7 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "ash/common/accessibility_types.h"
+#include "ash/accessibility_types.h"
 #include "chrome/browser/chromeos/platform_keys/key_permissions_policy_handler.h"
 #include "chrome/browser/chromeos/policy/configuration_policy_handler_chromeos.h"
 #include "chrome/browser/policy/default_geolocation_policy_handler.h"
@@ -143,7 +143,7 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     prefs::kForceYouTubeRestrict,
     base::Value::Type::INTEGER},
   { key::kPasswordManagerEnabled,
-    password_manager::prefs::kPasswordManagerSavingEnabled,
+    password_manager::prefs::kCredentialsEnableService,
     base::Value::Type::BOOLEAN },
   { key::kPrintingEnabled,
     prefs::kPrintingEnabled,
@@ -247,6 +247,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kEnableSha1ForLocalAnchors,
     ssl_config::prefs::kCertEnableSha1LocalAnchors,
     base::Value::Type::BOOLEAN },
+  { key::kEnableCommonNameFallbackForLocalAnchors,
+    ssl_config::prefs::kCertEnableCommonNameFallbackLocalAnchors,
+    base::Value::Type::BOOLEAN },
   { key::kAuthSchemes,
     prefs::kAuthSchemes,
     base::Value::Type::STRING },
@@ -316,6 +319,8 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kAllowFileSelectionDialogs,
     prefs::kAllowFileSelectionDialogs,
     base::Value::Type::BOOLEAN },
+
+  // First run import.
   { key::kImportBookmarks,
     prefs::kImportBookmarks,
     base::Value::Type::BOOLEAN },
@@ -334,6 +339,25 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kImportAutofillFormData,
     prefs::kImportAutofillFormData,
     base::Value::Type::BOOLEAN },
+
+  // Import data dialog: controlled by same policies as first run import, but
+  // uses different prefs.
+  { key::kImportBookmarks,
+    prefs::kImportDialogBookmarks,
+    base::Value::Type::BOOLEAN },
+  { key::kImportHistory,
+    prefs::kImportDialogHistory,
+    base::Value::Type::BOOLEAN },
+  { key::kImportSearchEngine,
+    prefs::kImportDialogSearchEngine,
+    base::Value::Type::BOOLEAN },
+  { key::kImportSavedPasswords,
+    prefs::kImportDialogSavedPasswords,
+    base::Value::Type::BOOLEAN },
+  { key::kImportAutofillFormData,
+    prefs::kImportDialogAutofillFormData,
+    base::Value::Type::BOOLEAN },
+
   { key::kMaxConnectionsPerProxy,
     prefs::kMaxConnectionsPerProxy,
     base::Value::Type::INTEGER },
@@ -401,14 +425,20 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kForceEphemeralProfiles,
     prefs::kForceEphemeralProfiles,
     base::Value::Type::BOOLEAN },
+  { key::kSSLVersionMax,
+    ssl_config::prefs::kSSLVersionMax,
+    base::Value::Type::STRING },
   { key::kNTPContentSuggestionsEnabled,
     ntp_snippets::prefs::kEnableSnippets,
     base::Value::Type::BOOLEAN },
-#if defined(ENABLE_MEDIA_ROUTER)
   { key::kEnableMediaRouter,
     prefs::kEnableMediaRouter,
     base::Value::Type::BOOLEAN },
-#endif  // defined(ENABLE_MEDIA_ROUTER)
+#if !defined(OS_ANDROID)
+  { key::kShowCastIconInToolbar,
+    prefs::kShowCastIconInToolbar,
+    base::Value::Type::BOOLEAN },
+#endif  // !defined(OS_ANDROID)
 #if BUILDFLAG(ENABLE_WEBRTC)
   { key::kWebRtcUdpPortRange,
     prefs::kWebRTCUDPPortRange,
@@ -519,6 +549,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kEasyUnlockAllowed,
     prefs::kEasyUnlockAllowed,
     base::Value::Type::BOOLEAN },
+  { key::kInstantTetheringAllowed,
+    prefs::kInstantTetheringAllowed,
+    base::Value::Type::BOOLEAN },
   { key::kCaptivePortalAuthenticationIgnoresProxy,
     prefs::kCaptivePortalAuthenticationIgnoresProxy,
     base::Value::Type::BOOLEAN },
@@ -533,6 +566,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     base::Value::Type::BOOLEAN },
   { key::kArcBackupRestoreEnabled,
     prefs::kArcBackupRestoreEnabled,
+    base::Value::Type::BOOLEAN },
+  { key::kArcLocationServiceEnabled,
+    prefs::kArcLocationServiceEnabled,
     base::Value::Type::BOOLEAN },
   { key::kReportArcStatusEnabled,
     prefs::kReportArcStatusEnabled,
@@ -668,7 +704,7 @@ class ForceSafeSearchPolicyHandler : public TypeCheckingPolicyHandler {
       if (value->GetAsBoolean(&enabled)) {
         prefs->SetValue(
             prefs::kForceYouTubeRestrict,
-            base::MakeUnique<base::FundamentalValue>(
+            base::MakeUnique<base::Value>(
                 enabled ? safe_search_util::YOUTUBE_RESTRICT_MODERATE
                         : safe_search_util::YOUTUBE_RESTRICT_OFF));
       }
@@ -697,11 +733,10 @@ class ForceYouTubeSafetyModePolicyHandler : public TypeCheckingPolicyHandler {
     const base::Value* value = policies.GetValue(policy_name());
     bool enabled;
     if (value && value->GetAsBoolean(&enabled)) {
-      prefs->SetValue(
-          prefs::kForceYouTubeRestrict,
-          base::MakeUnique<base::FundamentalValue>(
-              enabled ? safe_search_util::YOUTUBE_RESTRICT_MODERATE
-                      : safe_search_util::YOUTUBE_RESTRICT_OFF));
+      prefs->SetValue(prefs::kForceYouTubeRestrict,
+                      base::MakeUnique<base::Value>(
+                          enabled ? safe_search_util::YOUTUBE_RESTRICT_MODERATE
+                                  : safe_search_util::YOUTUBE_RESTRICT_OFF));
     }
   }
 
@@ -724,8 +759,9 @@ class BrowsingHistoryPolicyHandler : public TypeCheckingPolicyHandler {
         !deleting_history_allowed) {
       prefs->SetBoolean(
           browsing_data::prefs::kDeleteBrowsingHistory, false);
-      prefs->SetBoolean(
-          browsing_data::prefs::kDeleteDownloadHistory, false);
+      prefs->SetBoolean(browsing_data::prefs::kDeleteBrowsingHistoryBasic,
+                        false);
+      prefs->SetBoolean(browsing_data::prefs::kDeleteDownloadHistory, false);
     }
   }
 };
@@ -743,7 +779,7 @@ void GetExtensionAllowedTypesMap(
     result->push_back(
         base::MakeUnique<StringMappingListPolicyHandler::MappingEntry>(
             entry.name, std::unique_ptr<base::Value>(
-                            new base::FundamentalValue(entry.manifest_type))));
+                            new base::Value(entry.manifest_type))));
   }
 }
 
@@ -764,7 +800,7 @@ class DevToolsExtensionsUIPolicyHandler : public TypeCheckingPolicyHandler {
     if (value && value->GetAsBoolean(&developerToolsDisabled) &&
         developerToolsDisabled) {
       prefs->SetValue(prefs::kExtensionsUIDeveloperMode,
-                      base::MakeUnique<base::FundamentalValue>(false));
+                      base::MakeUnique<base::Value>(false));
     }
   }
 
@@ -849,6 +885,9 @@ std::unique_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
       true));
   handlers->AddHandler(
       base::MakeUnique<extensions::ExtensionInstallForcelistPolicyHandler>());
+  handlers->AddHandler(
+      base::MakeUnique<
+          extensions::ExtensionInstallLoginScreenAppListPolicyHandler>());
   handlers->AddHandler(
       base::MakeUnique<extensions::ExtensionURLPatternListPolicyHandler>(
           key::kExtensionInstallSources,

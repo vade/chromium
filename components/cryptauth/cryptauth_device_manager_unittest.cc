@@ -383,12 +383,13 @@ class CryptAuthDeviceManagerTest
     CryptAuthDeviceManager::RegisterPrefs(pref_service_.registry());
     pref_service_.SetUserPref(
         prefs::kCryptAuthDeviceSyncIsRecoveringFromFailure,
-        new base::FundamentalValue(false));
-    pref_service_.SetUserPref(prefs::kCryptAuthDeviceSyncLastSyncTimeSeconds,
-                              new base::FundamentalValue(kLastSyncTimeSeconds));
+        base::MakeUnique<base::Value>(false));
+    pref_service_.SetUserPref(
+        prefs::kCryptAuthDeviceSyncLastSyncTimeSeconds,
+        base::MakeUnique<base::Value>(kLastSyncTimeSeconds));
     pref_service_.SetUserPref(
         prefs::kCryptAuthDeviceSyncReason,
-        new base::FundamentalValue(INVOCATION_REASON_UNKNOWN));
+        base::MakeUnique<base::Value>(INVOCATION_REASON_UNKNOWN));
 
     std::unique_ptr<base::DictionaryValue> device_dictionary(
         new base::DictionaryValue());

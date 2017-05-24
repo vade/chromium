@@ -19,34 +19,24 @@
 #include "ui/views/border.h"
 #include "ui/views/controls/button/blue_button.h"
 #include "ui/views/controls/focus_ring.h"
+#include "ui/views/layout/layout_provider.h"
 #include "ui/views/painter.h"
 #include "ui/views/style/platform_style.h"
+#include "ui/views/style/typography.h"
 
 namespace views {
 
 namespace {
 
-// Minimum size to reserve for the button contents.
-const int kMinWidth = 48;
-
 LabelButton* CreateButton(ButtonListener* listener,
                           const base::string16& text,
                           bool md) {
   if (md)
-    return MdTextButton::Create(listener, text);
+    return MdTextButton::Create(listener, text, style::CONTEXT_BUTTON_MD);
 
-  LabelButton* button = new LabelButton(listener, text);
-  button->SetStyle(CustomButton::STYLE_BUTTON);
+  LabelButton* button = new LabelButton(listener, text, style::CONTEXT_BUTTON);
+  button->SetStyleDeprecated(CustomButton::STYLE_BUTTON);
   return button;
-}
-
-const gfx::FontList& GetMdFontList() {
-  static base::LazyInstance<gfx::FontList>::Leaky font_list =
-      LAZY_INSTANCE_INITIALIZER;
-  const gfx::Font::Weight min_weight = gfx::Font::Weight::MEDIUM;
-  if (font_list.Get().GetFontWeight() < min_weight)
-    font_list.Get() = font_list.Get().DeriveWithWeight(min_weight);
-  return font_list.Get();
 }
 
 }  // namespace
@@ -63,7 +53,8 @@ LabelButton* MdTextButton::CreateSecondaryUiBlueButton(
     ButtonListener* listener,
     const base::string16& text) {
   if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
-    MdTextButton* md_button = MdTextButton::Create(listener, text);
+    MdTextButton* md_button =
+        MdTextButton::Create(listener, text, style::CONTEXT_BUTTON_MD);
     md_button->SetProminent(true);
     return md_button;
   }
@@ -73,8 +64,9 @@ LabelButton* MdTextButton::CreateSecondaryUiBlueButton(
 
 // static
 MdTextButton* MdTextButton::Create(ButtonListener* listener,
-                                   const base::string16& text) {
-  MdTextButton* button = new MdTextButton(listener);
+                                   const base::string16& text,
+                                   int button_context) {
+  MdTextButton* button = new MdTextButton(listener, button_context);
   button->SetText(text);
   button->SetFocusForPlatform();
   return button;
@@ -135,8 +127,8 @@ std::unique_ptr<views::InkDropRipple> MdTextButton::CreateInkDropRipple()
           ink_drop_visible_opacity()));
 }
 
-void MdTextButton::StateChanged() {
-  LabelButton::StateChanged();
+void MdTextButton::StateChanged(ButtonState old_state) {
+  LabelButton::StateChanged(old_state);
   UpdateColors();
 }
 
@@ -172,34 +164,24 @@ void MdTextButton::SetText(const base::string16& text) {
   UpdatePadding();
 }
 
-void MdTextButton::AdjustFontSize(int size_delta) {
-  LabelButton::AdjustFontSize(size_delta);
-  UpdatePadding();
-}
-
 void MdTextButton::UpdateStyleToIndicateDefaultStatus() {
   is_prominent_ = is_prominent_ || is_default();
   UpdateColors();
 }
 
-void MdTextButton::SetFontList(const gfx::FontList& font_list) {
-  NOTREACHED()
-      << "Don't call MdTextButton::SetFontList (it will soon be protected)";
-}
-
-MdTextButton::MdTextButton(ButtonListener* listener)
-    : LabelButton(listener, base::string16()),
+MdTextButton::MdTextButton(ButtonListener* listener, int button_context)
+    : LabelButton(listener, base::string16(), button_context),
       is_prominent_(false) {
-  SetInkDropMode(PlatformStyle::kUseRipples ? InkDropMode::ON
-                                            : InkDropMode::OFF);
+  SetInkDropMode(InkDropMode::ON);
   set_has_ink_drop_action_on_click(true);
   SetHorizontalAlignment(gfx::ALIGN_CENTER);
   SetFocusForPlatform();
-  SetMinSize(gfx::Size(kMinWidth, 0));
+  const int minimum_width = LayoutProvider::Get()->GetDistanceMetric(
+      DISTANCE_DIALOG_BUTTON_MINIMUM_WIDTH);
+  SetMinSize(gfx::Size(minimum_width, 0));
   SetFocusPainter(nullptr);
   label()->SetAutoColorReadabilityEnabled(false);
   set_request_focus_on_press(false);
-  LabelButton::SetFontList(GetMdFontList());
 
   set_animate_on_state_change(true);
 
@@ -228,7 +210,9 @@ void MdTextButton::UpdatePadding() {
   // * Linux user sets base system font size to 17dp. For a normal button, the
   // |size_delta| will be zero, so to adjust upwards we double 17 to get 34.
   int size_delta =
-      label()->font_list().GetFontSize() - GetMdFontList().GetFontSize();
+      label()->font_list().GetFontSize() -
+      style::GetFont(style::CONTEXT_BUTTON_MD, style::STYLE_PRIMARY)
+          .GetFontSize();
   const int kBaseHeight = 28;
   int target_height = std::max(kBaseHeight + size_delta * 2,
                                label()->font_list().GetFontSize() * 2);
@@ -240,9 +224,10 @@ void MdTextButton::UpdatePadding() {
 
   // TODO(estade): can we get rid of the platform style border hoopla if
   // we apply the MD treatment to all buttons, even GTK buttons?
-  const int kHorizontalPadding = 16;
-  SetBorder(CreateEmptyBorder(top_padding, kHorizontalPadding, bottom_padding,
-                              kHorizontalPadding));
+  const int horizontal_padding = LayoutProvider::Get()->GetDistanceMetric(
+      DISTANCE_BUTTON_HORIZONTAL_PADDING);
+  SetBorder(CreateEmptyBorder(top_padding, horizontal_padding, bottom_padding,
+                              horizontal_padding));
 }
 
 void MdTextButton::UpdateColors() {

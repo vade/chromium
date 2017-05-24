@@ -8,7 +8,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/version.h"
 #include "components/prefs/pref_service.h"
-#include "components/update_client/component_patcher_operation.h"
+#include "components/update_client/out_of_process_patcher.h"
 #include "net/url_request/url_request_test_util.h"
 #include "url/gurl.h"
 
@@ -45,10 +45,6 @@ int TestConfigurator::InitialDelay() const {
 
 int TestConfigurator::NextCheckDelay() const {
   return 1;
-}
-
-int TestConfigurator::StepDelay() const {
-  return 0;
 }
 
 int TestConfigurator::OnDemandDelay() const {

@@ -27,8 +27,8 @@
 
 class CommandUpdater;
 class LocationBarView;
+class OmniboxClient;
 class OmniboxPopupView;
-class Profile;
 
 namespace content {
 class WebContents;
@@ -56,7 +56,7 @@ class OmniboxViewViews
   static const char kViewClassName[];
 
   OmniboxViewViews(OmniboxEditController* controller,
-                   Profile* profile,
+                   std::unique_ptr<OmniboxClient> client,
                    CommandUpdater* command_updater,
                    bool popup_window_mode,
                    LocationBarView* location_bar,
@@ -86,6 +86,7 @@ class OmniboxViewViews
   // OmniboxView:
   void Update() override;
   base::string16 GetText() const override;
+  using OmniboxView::SetUserText;
   void SetUserText(const base::string16& text,
                    bool update_popup) override;
   void EnterKeywordModeForDefaultSearchProvider() override;
@@ -106,6 +107,7 @@ class OmniboxViewViews
 
  private:
   FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsTest, CloseOmniboxPopupOnTextDrag);
+  FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsTest, MaintainCursorAfterFocusCycle);
 
   // Update the field with |text| and set the selection.
   void SetTextAndSelectedRange(const base::string16& text,
@@ -153,6 +155,8 @@ class OmniboxViewViews
   void OnMatchOpened(AutocompleteMatch::Type match_type) override;
   int GetOmniboxTextLength() const override;
   void EmphasizeURLComponents() override;
+  void SetEmphasis(bool emphasize, const gfx::Range& range) override;
+  void UpdateSchemeStyle(const gfx::Range& range) override;
 
   // views::Textfield:
   bool IsItemForCommandIdDynamic(int command_id) const override;
@@ -197,8 +201,6 @@ class OmniboxViewViews
       std::set<ui::Clipboard::FormatType>* format_types) override;
   int OnDrop(const ui::OSExchangeData& data) override;
   void UpdateContextMenu(ui::SimpleMenuModel* menu_contents) override;
-
-  Profile* profile_;
 
   // When true, the location bar view is read only and also is has a slightly
   // different presentation (smaller font size). This is used for popups.

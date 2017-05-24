@@ -14,7 +14,7 @@
 #import "ios/chrome/browser/ui/settings/accounts_collection_view_controller.h"
 #import "ios/chrome/browser/ui/settings/import_data_collection_view_controller.h"
 #import "ios/chrome/browser/ui/settings/settings_collection_view_controller.h"
-#import "ios/chrome/browser/ui/tools_menu/tools_menu_view_controller.h"
+#include "ios/chrome/browser/ui/tools_menu/tools_menu_constants.h"
 #import "ios/chrome/browser/ui/tools_menu/tools_popup_controller.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
@@ -24,8 +24,13 @@
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
 #import "ios/public/provider/chrome/browser/signin/fake_chrome_identity.h"
 #import "ios/public/provider/chrome/browser/signin/fake_chrome_identity_service.h"
-#import "ios/testing/earl_grey/disabled_test_macros.h"
 #import "ios/testing/wait_util.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
+using chrome_test_util::NavigationBarDoneButton;
 
 namespace {
 
@@ -83,16 +88,7 @@ void TapButtonWithLabelId(int message_id) {
 // Opens the signin screen from the settings page. Must be called from the NTP.
 // User must not be signed in.
 void OpenSignInFromSettings() {
-  const CGFloat scroll_displacement = 50.0;
-
-  [ChromeEarlGreyUI openToolsMenu];
-  [[[EarlGrey
-      selectElementWithMatcher:grey_accessibilityID(kToolsMenuSettingsId)]
-         usingSearchAction:grey_scrollInDirection(kGREYDirectionDown,
-                                                  scroll_displacement)
-      onElementWithMatcher:grey_accessibilityID(kToolsMenuTableViewId)]
-      performAction:grey_tap()];
-
+  [ChromeEarlGreyUI openSettingsMenu];
   TapViewWithAccessibilityId(kSettingsSignInCellId);
 }
 
@@ -104,10 +100,9 @@ void WaitForMatcher(id<GREYMatcher> matcher) {
                                                              error:&error];
     return error == nil;
   };
-  GREYAssert(
-      testing::WaitUntilConditionOrTimeout(testing::kWaitForUIElementTimeout,
-                                           condition),
-      [NSString stringWithFormat:@"Waiting for matcher %@ failed.", matcher]);
+  GREYAssert(testing::WaitUntilConditionOrTimeout(
+                 testing::kWaitForUIElementTimeout, condition),
+             @"Waiting for matcher %@ failed.", matcher);
 }
 
 // Asserts that |identity| is actually signed in to the active profile.
@@ -150,8 +145,8 @@ void AssertAuthenticatedIdentityInActiveProfile(ChromeIdentity* identity) {
   TapButtonWithLabelId(IDS_IOS_ACCOUNT_CONSISTENCY_SETUP_SIGNIN_BUTTON);
   TapButtonWithLabelId(IDS_IOS_ACCOUNT_CONSISTENCY_CONFIRMATION_OK_BUTTON);
 
-  // Close Settings.
-  TapButtonWithLabelId(IDS_IOS_NAVIGATION_BAR_DONE_BUTTON);
+  [[EarlGrey selectElementWithMatcher:NavigationBarDoneButton()]
+      performAction:grey_tap()];
 
   // Check |identity| is signed-in.
   AssertAuthenticatedIdentityInActiveProfile(identity);
@@ -192,8 +187,8 @@ void AssertAuthenticatedIdentityInActiveProfile(ChromeIdentity* identity) {
   // Check the signed-in user did change.
   AssertAuthenticatedIdentityInActiveProfile(identity2);
 
-  // Close Settings.
-  TapButtonWithLabelId(IDS_IOS_NAVIGATION_BAR_DONE_BUTTON);
+  [[EarlGrey selectElementWithMatcher:NavigationBarDoneButton()]
+      performAction:grey_tap()];
 }
 
 // Tests signing in with one account, switching sync account to a second and
@@ -231,8 +226,8 @@ void AssertAuthenticatedIdentityInActiveProfile(ChromeIdentity* identity) {
   // Check the signed-in user did change.
   AssertAuthenticatedIdentityInActiveProfile(identity2);
 
-  // Close Settings.
-  TapButtonWithLabelId(IDS_IOS_NAVIGATION_BAR_DONE_BUTTON);
+  [[EarlGrey selectElementWithMatcher:NavigationBarDoneButton()]
+      performAction:grey_tap()];
 }
 
 // Tests that switching from a managed account to a non-managed account works
@@ -281,8 +276,8 @@ void AssertAuthenticatedIdentityInActiveProfile(ChromeIdentity* identity) {
 
   AssertAuthenticatedIdentityInActiveProfile(identity);
 
-  // Close Settings.
-  TapButtonWithLabelId(IDS_IOS_NAVIGATION_BAR_DONE_BUTTON);
+  [[EarlGrey selectElementWithMatcher:NavigationBarDoneButton()]
+      performAction:grey_tap()];
 }
 
 // Tests that signing out from the Settings works correctly.
@@ -312,8 +307,8 @@ void AssertAuthenticatedIdentityInActiveProfile(ChromeIdentity* identity) {
   // Check that the settings home screen is shown.
   WaitForMatcher(grey_accessibilityID(kSettingsSignInCellId));
 
-  // Close Settings.
-  TapButtonWithLabelId(IDS_IOS_NAVIGATION_BAR_DONE_BUTTON);
+  [[EarlGrey selectElementWithMatcher:NavigationBarDoneButton()]
+      performAction:grey_tap()];
 
   // Check that there is no signed in user.
   AssertAuthenticatedIdentityInActiveProfile(nil);
@@ -357,8 +352,8 @@ void AssertAuthenticatedIdentityInActiveProfile(ChromeIdentity* identity) {
   // Check that the settings home screen is shown.
   WaitForMatcher(grey_accessibilityID(kSettingsSignInCellId));
 
-  // Close Settings.
-  TapButtonWithLabelId(IDS_IOS_NAVIGATION_BAR_DONE_BUTTON);
+  [[EarlGrey selectElementWithMatcher:NavigationBarDoneButton()]
+      performAction:grey_tap()];
 
   // Check that there is no signed in user.
   AssertAuthenticatedIdentityInActiveProfile(nil);
@@ -367,7 +362,8 @@ void AssertAuthenticatedIdentityInActiveProfile(ChromeIdentity* identity) {
 // Tests that signing in, tapping the Settings link on the confirmation screen
 // and closing the Settings correctly leaves the user signed in without any
 // Settings shown.
-- (void)testSignInOpenSettings {
+// TODO(crbug.com/718023): Re-enable test.
+- (void)DISABLED_testSignInOpenSettings {
   ChromeIdentity* identity = GetFakeIdentity1();
   ios::FakeChromeIdentityService::GetInstanceFromChromeProvider()->AddIdentity(
       identity);
@@ -383,8 +379,8 @@ void AssertAuthenticatedIdentityInActiveProfile(ChromeIdentity* identity) {
   [[EarlGrey selectElementWithMatcher:settings_link_matcher]
       performAction:grey_tap()];
 
-  // Close Settings.
-  TapButtonWithLabelId(IDS_IOS_NAVIGATION_BAR_DONE_BUTTON);
+  [[EarlGrey selectElementWithMatcher:NavigationBarDoneButton()]
+      performAction:grey_tap()];
 
   // All Settings should be gone and user signed in.
   id<GREYMatcher> settings_matcher =
@@ -407,8 +403,8 @@ void AssertAuthenticatedIdentityInActiveProfile(ChromeIdentity* identity) {
   OpenSignInFromSettings();
 
   // Open new tab to cancel sign-in.
-  base::scoped_nsobject<OpenUrlCommand> command(
-      [[OpenUrlCommand alloc] initWithURLFromChrome:GURL("about:blank")]);
+  OpenUrlCommand* command =
+      [[OpenUrlCommand alloc] initWithURLFromChrome:GURL("about:blank")];
   chrome_test_util::RunCommandWithActiveViewController(command);
 
   // Re-open the sign-in screen. If it wasn't correctly dismissed previously,
@@ -422,7 +418,8 @@ void AssertAuthenticatedIdentityInActiveProfile(ChromeIdentity* identity) {
 
   // Close sign-in screen and Settings.
   TapButtonWithLabelId(IDS_IOS_ACCOUNT_CONSISTENCY_SETUP_SKIP_BUTTON);
-  TapButtonWithLabelId(IDS_IOS_NAVIGATION_BAR_DONE_BUTTON);
+  [[EarlGrey selectElementWithMatcher:NavigationBarDoneButton()]
+      performAction:grey_tap()];
 }
 
 // Opens the add account screen and then cancels it by opening a new tab.
@@ -445,8 +442,8 @@ void AssertAuthenticatedIdentityInActiveProfile(ChromeIdentity* identity) {
   [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
 
   // Open new tab to cancel sign-in.
-  base::scoped_nsobject<OpenUrlCommand> command(
-      [[OpenUrlCommand alloc] initWithURLFromChrome:GURL("about:blank")]);
+  OpenUrlCommand* command =
+      [[OpenUrlCommand alloc] initWithURLFromChrome:GURL("about:blank")];
   chrome_test_util::RunCommandWithActiveViewController(command);
 
   // Re-open the sign-in screen. If it wasn't correctly dismissed previously,
@@ -460,7 +457,8 @@ void AssertAuthenticatedIdentityInActiveProfile(ChromeIdentity* identity) {
 
   // Close sign-in screen and Settings.
   TapButtonWithLabelId(IDS_IOS_ACCOUNT_CONSISTENCY_SETUP_SKIP_BUTTON);
-  TapButtonWithLabelId(IDS_IOS_NAVIGATION_BAR_DONE_BUTTON);
+  [[EarlGrey selectElementWithMatcher:NavigationBarDoneButton()]
+      performAction:grey_tap()];
 }
 
 // Starts an authentication flow and cancel it by opening a new tab. Ensures
@@ -504,8 +502,8 @@ void AssertAuthenticatedIdentityInActiveProfile(ChromeIdentity* identity) {
   TapButtonWithLabelId(IDS_IOS_ACCOUNT_CONSISTENCY_SETUP_SIGNIN_BUTTON);
 
   // Open new tab to cancel sign-in.
-  base::scoped_nsobject<OpenUrlCommand> command(
-      [[OpenUrlCommand alloc] initWithURLFromChrome:GURL("about:blank")]);
+  OpenUrlCommand* command =
+      [[OpenUrlCommand alloc] initWithURLFromChrome:GURL("about:blank")];
   chrome_test_util::RunCommandWithActiveViewController(command);
 
   // Re-open the sign-in screen. If it wasn't correctly dismissed previously,
@@ -519,7 +517,8 @@ void AssertAuthenticatedIdentityInActiveProfile(ChromeIdentity* identity) {
 
   // Close sign-in screen and Settings.
   TapButtonWithLabelId(IDS_IOS_ACCOUNT_CONSISTENCY_SETUP_SKIP_BUTTON);
-  TapButtonWithLabelId(IDS_IOS_NAVIGATION_BAR_DONE_BUTTON);
+  [[EarlGrey selectElementWithMatcher:NavigationBarDoneButton()]
+      performAction:grey_tap()];
   AssertAuthenticatedIdentityInActiveProfile(nil);
 }
 
@@ -548,9 +547,7 @@ void AssertAuthenticatedIdentityInActiveProfile(ChromeIdentity* identity) {
   }
 
   // Selects the top level folder (Sign In promo is only shown there).
-  NSString* topLevelFolderTitle = experimental_flags::IsAllBookmarksEnabled()
-                                      ? @"All Bookmarks"
-                                      : @"Mobile Bookmarks";
+  NSString* topLevelFolderTitle = @"Mobile Bookmarks";
   id<GREYMatcher> all_bookmarks_matcher =
       grey_allOf(grey_kindOfClass(NSClassFromString(@"BookmarkMenuCell")),
                  grey_descendant(grey_text(topLevelFolderTitle)), nil);
@@ -567,8 +564,8 @@ void AssertAuthenticatedIdentityInActiveProfile(ChromeIdentity* identity) {
       assertWithMatcher:grey_sufficientlyVisible()];
 
   // Open new tab to cancel sign-in.
-  base::scoped_nsobject<OpenUrlCommand> command(
-      [[OpenUrlCommand alloc] initWithURLFromChrome:GURL("about:blank")]);
+  OpenUrlCommand* command =
+      [[OpenUrlCommand alloc] initWithURLFromChrome:GURL("about:blank")];
   chrome_test_util::RunCommandWithActiveViewController(command);
 
   // Re-open the sign-in screen. If it wasn't correctly dismissed previously,
@@ -593,7 +590,8 @@ void AssertAuthenticatedIdentityInActiveProfile(ChromeIdentity* identity) {
   // Close sign-in screen and Bookmarks.
   TapButtonWithLabelId(IDS_IOS_ACCOUNT_CONSISTENCY_SETUP_SKIP_BUTTON);
   if (!IsIPadIdiom()) {
-    TapButtonWithLabelId(IDS_IOS_NAVIGATION_BAR_DONE_BUTTON);
+    [[EarlGrey selectElementWithMatcher:NavigationBarDoneButton()]
+        performAction:grey_tap()];
   }
 }
 

@@ -16,6 +16,7 @@
 #include "content/browser/media/capture/audio_mirroring_manager.h"
 #include "content/browser/media/media_internals.h"
 #include "content/browser/renderer_host/media/audio_input_device_manager.h"
+#include "content/browser/renderer_host/media/audio_output_delegate_impl.h"
 #include "content/browser/renderer_host/media/audio_sync_reader.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/common/media/audio_messages.h"
@@ -24,7 +25,6 @@
 #include "content/public/browser/media_observer.h"
 #include "content/public/browser/render_frame_host.h"
 #include "media/audio/audio_device_description.h"
-#include "media/audio/audio_streams_tracker.h"
 #include "media/base/audio_bus.h"
 #include "media/base/limits.h"
 
@@ -34,21 +34,6 @@ using media::AudioManager;
 namespace content {
 
 namespace {
-
-// Tracks the maximum number of simultaneous output streams browser-wide.
-// Accessed on IO thread.
-base::LazyInstance<media::AudioStreamsTracker> g_audio_streams_tracker =
-    LAZY_INSTANCE_INITIALIZER;
-
-void NotifyRenderProcessHostThatAudioStateChanged(int render_process_id) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  RenderProcessHost* render_process_host =
-      RenderProcessHost::FromID(render_process_id);
-
-  if (render_process_host)
-    render_process_host->AudioStateChanged();
-}
 
 void UMALogDeviceAuthorizationTime(base::TimeTicks auth_start_time) {
   UMA_HISTOGRAM_CUSTOM_TIMES("Media.Audio.OutputDeviceAuthorizationTime",
@@ -61,12 +46,12 @@ void UMALogDeviceAuthorizationTime(base::TimeTicks auth_start_time) {
 // |callback| on the IO thread with true if the ID is valid.
 void ValidateRenderFrameId(int render_process_id,
                            int render_frame_id,
-                           const base::Callback<void(bool)>& callback) {
+                           base::OnceCallback<void(bool)> callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   const bool frame_exists =
       !!RenderFrameHost::FromID(render_process_id, render_frame_id);
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                          base::Bind(callback, frame_exists));
+                          base::BindOnce(std::move(callback), frame_exists));
 }
 
 }  // namespace
@@ -76,6 +61,7 @@ void ValidateRenderFrameId(int render_process_id,
 
 AudioRendererHost::AudioRendererHost(int render_process_id,
                                      media::AudioManager* audio_manager,
+                                     media::AudioSystem* audio_system,
                                      AudioMirroringManager* mirroring_manager,
                                      MediaStreamManager* media_stream_manager,
                                      const std::string& salt)
@@ -84,11 +70,9 @@ AudioRendererHost::AudioRendererHost(int render_process_id,
       audio_manager_(audio_manager),
       mirroring_manager_(mirroring_manager),
       media_stream_manager_(media_stream_manager),
-      num_playing_streams_(0),
       salt_(salt),
       validate_render_frame_id_function_(&ValidateRenderFrameId),
-      max_simultaneous_streams_(0),
-      authorization_handler_(audio_manager_,
+      authorization_handler_(audio_system,
                              media_stream_manager,
                              render_process_id_,
                              salt) {
@@ -98,35 +82,10 @@ AudioRendererHost::AudioRendererHost(int render_process_id,
 AudioRendererHost::~AudioRendererHost() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(delegates_.empty());
-
-  // If we had any streams, report UMA stats for the maximum number of
-  // simultaneous streams for this render process and for the whole browser
-  // process since last reported.
-  if (max_simultaneous_streams_ > 0) {
-    UMA_HISTOGRAM_CUSTOM_COUNTS("Media.AudioRendererIpcStreams",
-                                max_simultaneous_streams_, 1, 50, 51);
-    UMA_HISTOGRAM_CUSTOM_COUNTS(
-        "Media.AudioRendererIpcStreamsTotal",
-        g_audio_streams_tracker.Get().max_stream_count(),
-        1, 100, 101);
-    g_audio_streams_tracker.Get().ResetMaxStreamCount();
-  }
-}
-
-void AudioRendererHost::GetOutputControllers(
-    const RenderProcessHost::GetAudioOutputControllersCallback&
-        callback) const {
-  BrowserThread::PostTaskAndReplyWithResult(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&AudioRendererHost::DoGetOutputControllers, this), callback);
 }
 
 void AudioRendererHost::OnChannelClosing() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  // Since the IPC sender is gone, close all requested audio streams.
-  // The audio streams tracker isn't automatically decremented since the
-  // removal isn't done through OnCloseStream.
-  g_audio_streams_tracker.Get().DecreaseStreamCount(delegates_.size());
   delegates_.clear();
 
   // Remove any authorizations for streams that were not yet created
@@ -140,7 +99,7 @@ void AudioRendererHost::OnDestruct() const {
 void AudioRendererHost::OnStreamCreated(
     int stream_id,
     base::SharedMemory* shared_memory,
-    base::CancelableSyncSocket* foreign_socket) {
+    std::unique_ptr<base::CancelableSyncSocket> foreign_socket) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   if (!PeerHandle()) {
@@ -154,11 +113,12 @@ void AudioRendererHost::OnStreamCreated(
     return;
   }
 
-  base::SharedMemoryHandle foreign_memory_handle;
   base::SyncSocket::TransitDescriptor socket_descriptor;
   size_t shared_memory_size = shared_memory->requested_size();
 
-  if (!(shared_memory->ShareToProcess(PeerHandle(), &foreign_memory_handle) &&
+  base::SharedMemoryHandle foreign_memory_handle =
+      shared_memory->handle().Duplicate();
+  if (!(foreign_memory_handle.IsValid() &&
         foreign_socket->PrepareTransitDescriptor(PeerHandle(),
                                                  &socket_descriptor))) {
     // Something went wrong in preparing the IPC handles.
@@ -187,17 +147,6 @@ void AudioRendererHost::DidValidateRenderFrame(int stream_id, bool is_valid) {
   DLOG(WARNING) << "Render frame for stream (id=" << stream_id
                 << ") no longer exists.";
   OnStreamError(stream_id);
-}
-
-RenderProcessHost::AudioOutputControllerList
-AudioRendererHost::DoGetOutputControllers() const {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
-  RenderProcessHost::AudioOutputControllerList controllers;
-  for (const auto& delegate : delegates_)
-    controllers.push_back(delegate->controller());
-
-  return controllers;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -242,9 +191,9 @@ void AudioRendererHost::OnRequestDeviceAuthorization(
   // |authorization_handler_| owns the callback.
   authorization_handler_.RequestDeviceAuthorization(
       render_frame_id, session_id, device_id, security_origin,
-      base::Bind(&AudioRendererHost::AuthorizationCompleted,
-                 base::Unretained(this), stream_id, security_origin,
-                 auth_start_time));
+      base::BindOnce(&AudioRendererHost::AuthorizationCompleted,
+                     base::Unretained(this), stream_id, security_origin,
+                     auth_start_time));
 }
 
 void AudioRendererHost::AuthorizationCompleted(
@@ -330,10 +279,10 @@ void AudioRendererHost::OnCreateStream(int stream_id,
   // force-close the stream later if validation fails.
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(validate_render_frame_id_function_, render_process_id_,
-                 render_frame_id,
-                 base::Bind(&AudioRendererHost::DidValidateRenderFrame, this,
-                            stream_id)));
+      base::BindOnce(validate_render_frame_id_function_, render_process_id_,
+                     render_frame_id,
+                     base::BindOnce(&AudioRendererHost::DidValidateRenderFrame,
+                                    this, stream_id)));
 
   MediaObserver* const media_observer =
       GetContentClient()->browser()->GetMediaObserver();
@@ -343,21 +292,20 @@ void AudioRendererHost::OnCreateStream(int stream_id,
       media::AudioLogFactory::AUDIO_OUTPUT_CONTROLLER);
   media_internals->SetWebContentsTitleForAudioLogEntry(
       stream_id, render_process_id_, render_frame_id, audio_log.get());
-  delegates_.push_back(AudioOutputDelegate::Create(
+  auto delegate = AudioOutputDelegateImpl::Create(
       this, audio_manager_, std::move(audio_log), mirroring_manager_,
       media_observer, stream_id, render_frame_id, render_process_id_, params,
-      device_unique_id));
-
-  g_audio_streams_tracker.Get().IncreaseStreamCount();
-
-  if (delegates_.size() > max_simultaneous_streams_)
-    max_simultaneous_streams_ = delegates_.size();
+      device_unique_id);
+  if (delegate)
+    delegates_.push_back(std::move(delegate));
+  else
+    SendErrorMessage(stream_id);
 }
 
 void AudioRendererHost::OnPlayStream(int stream_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  AudioOutputDelegate* delegate = LookupById(stream_id);
+  media::AudioOutputDelegate* delegate = LookupById(stream_id);
   if (!delegate) {
     SendErrorMessage(stream_id);
     return;
@@ -369,7 +317,7 @@ void AudioRendererHost::OnPlayStream(int stream_id) {
 void AudioRendererHost::OnPauseStream(int stream_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  AudioOutputDelegate* delegate = LookupById(stream_id);
+  media::AudioOutputDelegate* delegate = LookupById(stream_id);
   if (!delegate) {
     SendErrorMessage(stream_id);
     return;
@@ -381,7 +329,7 @@ void AudioRendererHost::OnPauseStream(int stream_id) {
 void AudioRendererHost::OnSetVolume(int stream_id, double volume) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  AudioOutputDelegate* delegate = LookupById(stream_id);
+  media::AudioOutputDelegate* delegate = LookupById(stream_id);
   if (!delegate) {
     SendErrorMessage(stream_id);
     return;
@@ -410,59 +358,29 @@ void AudioRendererHost::OnCloseStream(int stream_id) {
 
   std::swap(*i, delegates_.back());
   delegates_.pop_back();
-
-  g_audio_streams_tracker.Get().DecreaseStreamCount();
 }
 
 AudioRendererHost::AudioOutputDelegateVector::iterator
 AudioRendererHost::LookupIteratorById(int stream_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  return std::find_if(delegates_.begin(), delegates_.end(),
-                      [stream_id](const AudioOutputDelegate::UniquePtr& d) {
-                        return d->stream_id() == stream_id;
-                      });
+  return std::find_if(
+      delegates_.begin(), delegates_.end(),
+      [stream_id](const std::unique_ptr<media::AudioOutputDelegate>& d) {
+        return d->GetStreamId() == stream_id;
+      });
 }
 
-AudioOutputDelegate* AudioRendererHost::LookupById(int stream_id) {
+media::AudioOutputDelegate* AudioRendererHost::LookupById(int stream_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   auto i = LookupIteratorById(stream_id);
   return i != delegates_.end() ? i->get() : nullptr;
 }
 
-void AudioRendererHost::OnStreamStateChanged(bool is_playing) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (is_playing) {
-    base::AtomicRefCountInc(&num_playing_streams_);
-
-    // Inform the RenderProcessHost when audio starts playing for the first
-    // time. The nonatomic increment-and-read is ok since this is the only
-    // thread that |num_plaing_streams_| may be updated on.
-    if (base::AtomicRefCountIsOne(&num_playing_streams_)) {
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
-          base::Bind(&NotifyRenderProcessHostThatAudioStateChanged,
-                     render_process_id_));
-    }
-  } else {
-    // Inform the RenderProcessHost when there is no more audio playing.
-    if (!base::AtomicRefCountDec(&num_playing_streams_)) {
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
-          base::Bind(&NotifyRenderProcessHostThatAudioStateChanged,
-                     render_process_id_));
-    }
-  }
-}
-
 bool AudioRendererHost::IsAuthorizationStarted(int stream_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   return authorizations_.find(stream_id) != authorizations_.end();
-}
-
-bool AudioRendererHost::HasActiveAudio() {
-  return !base::AtomicRefCountIsZero(&num_playing_streams_);
 }
 
 void AudioRendererHost::OverrideDevicePermissionsForTesting(bool has_access) {

@@ -92,7 +92,10 @@ FileDescriptorWatcher::Controller::Watcher::Watcher(
     WeakPtr<Controller> controller,
     MessageLoopForIO::Mode mode,
     int fd)
-    : controller_(controller), mode_(mode), fd_(fd) {
+    : file_descriptor_watcher_(FROM_HERE),
+      controller_(controller),
+      mode_(mode),
+      fd_(fd) {
   DCHECK(callback_task_runner_);
   thread_checker_.DetachFromThread();
 }
@@ -121,8 +124,8 @@ void FileDescriptorWatcher::Controller::Watcher::OnFileCanReadWithoutBlocking(
   DCHECK(thread_checker_.CalledOnValidThread());
 
   // Run the callback on the sequence on which the watch was initiated.
-  callback_task_runner_->PostTask(FROM_HERE,
-                                  Bind(&Controller::RunCallback, controller_));
+  callback_task_runner_->PostTask(
+      FROM_HERE, BindOnce(&Controller::RunCallback, controller_));
 }
 
 void FileDescriptorWatcher::Controller::Watcher::OnFileCanWriteWithoutBlocking(
@@ -132,8 +135,8 @@ void FileDescriptorWatcher::Controller::Watcher::OnFileCanWriteWithoutBlocking(
   DCHECK(thread_checker_.CalledOnValidThread());
 
   // Run the callback on the sequence on which the watch was initiated.
-  callback_task_runner_->PostTask(FROM_HERE,
-                                  Bind(&Controller::RunCallback, controller_));
+  callback_task_runner_->PostTask(
+      FROM_HERE, BindOnce(&Controller::RunCallback, controller_));
 }
 
 void FileDescriptorWatcher::Controller::Watcher::
@@ -167,7 +170,7 @@ void FileDescriptorWatcher::Controller::StartWatching() {
   // Controller's destructor. Since this delete task hasn't been posted yet, it
   // can't run before the task posted below.
   message_loop_for_io_task_runner_->PostTask(
-      FROM_HERE, Bind(&Watcher::StartWatching, Unretained(watcher_.get())));
+      FROM_HERE, BindOnce(&Watcher::StartWatching, Unretained(watcher_.get())));
 }
 
 void FileDescriptorWatcher::Controller::RunCallback() {

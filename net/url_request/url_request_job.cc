@@ -200,7 +200,6 @@ void URLRequestJob::Kill() {
 // at URLRequestJobSourceStream::Read, which calls back into
 // URLRequestJob::ReadRawData.
 int URLRequestJob::Read(IOBuffer* buf, int buf_size) {
-  DCHECK_LT(buf_size, 1000000);  // Sanity check.
   DCHECK(buf);
 
   pending_read_buffer_ = buf;
@@ -334,7 +333,10 @@ bool URLRequestJob::GetMimeType(std::string* mime_type) const {
 }
 
 int URLRequestJob::GetResponseCode() const {
-  return -1;
+  HttpResponseHeaders* headers = request_->response_headers();
+  if (!headers)
+    return -1;
+  return headers->response_code();
 }
 
 HostPortPair URLRequestJob::GetSocketAddress() const {

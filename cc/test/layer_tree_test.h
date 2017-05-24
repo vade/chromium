@@ -74,13 +74,15 @@ class LayerTreeTest : public testing::Test, public TestHooks {
       AnimationPlayer* player_to_receive_animation);
   void PostAddLongAnimationToMainThreadPlayer(
       AnimationPlayer* player_to_receive_animation);
+  void PostSetLocalSurfaceIdToMainThread(
+      const LocalSurfaceId& local_surface_id);
   void PostSetDeferCommitsToMainThread(bool defer_commits);
   void PostSetNeedsCommitToMainThread();
   void PostSetNeedsUpdateLayersToMainThread();
   void PostSetNeedsRedrawToMainThread();
   void PostSetNeedsRedrawRectToMainThread(const gfx::Rect& damage_rect);
   void PostSetVisibleToMainThread(bool visible);
-  void PostSetNextCommitForcesRedrawToMainThread();
+  void PostSetNeedsCommitWithForcedRedrawToMainThread();
   void PostCompositeImmediatelyToMainThread();
   void PostNextCommitWaitsForActivationToMainThread();
 
@@ -122,7 +124,6 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   bool TestEnded() const { return ended_; }
 
   LayerTreeHost* layer_tree_host();
-  LayerTree* layer_tree() { return layer_tree_host()->GetLayerTree(); }
   SharedBitmapManager* shared_bitmap_manager() const {
     return shared_bitmap_manager_.get();
   }
@@ -150,17 +151,22 @@ class LayerTreeTest : public testing::Test, public TestHooks {
 
   gfx::Vector2dF ScrollDelta(LayerImpl* layer_impl);
 
+  base::SingleThreadTaskRunner* image_worker_task_runner() const {
+    return image_worker_->task_runner().get();
+  }
+
  private:
   virtual void DispatchAddAnimationToPlayer(
       AnimationPlayer* player_to_receive_animation,
       double animation_duration);
+  void DispatchSetLocalSurfaceId(const LocalSurfaceId& local_surface_id);
   void DispatchSetDeferCommits(bool defer_commits);
   void DispatchSetNeedsCommit();
   void DispatchSetNeedsUpdateLayers();
   void DispatchSetNeedsRedraw();
   void DispatchSetNeedsRedrawRect(const gfx::Rect& damage_rect);
   void DispatchSetVisible(bool visible);
-  void DispatchSetNextCommitForcesRedraw();
+  void DispatchSetNeedsCommitWithForcedRedraw();
   void DispatchDidAddAnimation();
   void DispatchCompositeImmediately();
   void DispatchNextCommitWaitsForActivation();
@@ -187,6 +193,7 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner_;
   std::unique_ptr<base::Thread> impl_thread_;
+  std::unique_ptr<base::Thread> image_worker_;
   std::unique_ptr<SharedBitmapManager> shared_bitmap_manager_;
   std::unique_ptr<TestGpuMemoryBufferManager> gpu_memory_buffer_manager_;
   std::unique_ptr<TestTaskGraphRunner> task_graph_runner_;

@@ -36,12 +36,14 @@ class Size;
 namespace gpu {
 
 struct Mailbox;
+struct SyncToken;
 
 namespace gles2 {
 
 class ContextGroup;
 class ErrorState;
 class FeatureInfo;
+class FramebufferManager;
 class GLES2Util;
 class ImageManager;
 class Logger;
@@ -54,31 +56,25 @@ struct ContextCreationAttribHelper;
 struct ContextState;
 
 struct DisallowedFeatures {
-  DisallowedFeatures()
-      : gpu_memory_manager(false),
-        npot_support(false),
-        chromium_color_buffer_float_rgba(false),
-        chromium_color_buffer_float_rgb(false),
-        ext_color_buffer_float(false),
-        oes_texture_float_linear(false),
-        oes_texture_half_float_linear(false) {
-  }
+  DisallowedFeatures() {}
 
   void AllowExtensions() {
     chromium_color_buffer_float_rgba = false;
     chromium_color_buffer_float_rgb = false;
     ext_color_buffer_float = false;
+    ext_color_buffer_half_float = false;
     oes_texture_float_linear = false;
     oes_texture_half_float_linear = false;
   }
 
-  bool gpu_memory_manager;
-  bool npot_support;
-  bool chromium_color_buffer_float_rgba;
-  bool chromium_color_buffer_float_rgb;
-  bool ext_color_buffer_float;
-  bool oes_texture_float_linear;
-  bool oes_texture_half_float_linear;
+  bool gpu_memory_manager = false;
+  bool npot_support = false;
+  bool chromium_color_buffer_float_rgba = false;
+  bool chromium_color_buffer_float_rgb = false;
+  bool ext_color_buffer_float = false;
+  bool ext_color_buffer_half_float = false;
+  bool oes_texture_float_linear = false;
+  bool oes_texture_half_float_linear = false;
 };
 
 typedef base::Callback<void(const std::string& key,
@@ -91,10 +87,7 @@ class GPU_EXPORT GLES2Decoder : public base::SupportsWeakPtr<GLES2Decoder>,
  public:
   typedef error::Error Error;
   typedef base::Callback<void(uint64_t release)> FenceSyncReleaseCallback;
-  typedef base::Callback<bool(gpu::CommandBufferNamespace namespace_id,
-                              gpu::CommandBufferId command_buffer_id,
-                              uint64_t release)>
-      WaitFenceSyncCallback;
+  typedef base::Callback<bool(const gpu::SyncToken&)> WaitSyncTokenCallback;
   typedef base::Callback<void(void)> NoParamCallback;
 
   // The default stencil mask, which has all bits set.  This really should be a
@@ -186,9 +179,10 @@ class GPU_EXPORT GLES2Decoder : public base::SupportsWeakPtr<GLES2Decoder>,
 
   // Restore States.
   virtual void RestoreActiveTexture() const = 0;
-  virtual void RestoreAllTextureUnitBindings(
+  virtual void RestoreAllTextureUnitAndSamplerBindings(
       const ContextState* prev_state) const = 0;
   virtual void RestoreActiveTextureUnitBinding(unsigned int target) const = 0;
+  virtual void RestoreBufferBinding(unsigned int target) = 0;
   virtual void RestoreBufferBindings() const = 0;
   virtual void RestoreFramebufferBindings() const = 0;
   virtual void RestoreRenderbufferBindings() = 0;
@@ -196,6 +190,7 @@ class GPU_EXPORT GLES2Decoder : public base::SupportsWeakPtr<GLES2Decoder>,
   virtual void RestoreProgramBindings() const = 0;
   virtual void RestoreTextureState(unsigned service_id) const = 0;
   virtual void RestoreTextureUnitBindings(unsigned unit) const = 0;
+  virtual void RestoreVertexAttribArray(unsigned index) = 0;
   virtual void RestoreAllExternalTextureBindingsIfNeeded() = 0;
 
   virtual void ClearAllAttributes() const = 0;
@@ -209,6 +204,9 @@ class GPU_EXPORT GLES2Decoder : public base::SupportsWeakPtr<GLES2Decoder>,
 
   // Gets the QueryManager for this context.
   virtual QueryManager* GetQueryManager() = 0;
+
+  // Gets the FramebufferManager for this context.
+  virtual FramebufferManager* GetFramebufferManager() = 0;
 
   // Gets the TransformFeedbackManager for this context.
   virtual TransformFeedbackManager* GetTransformFeedbackManager() = 0;
@@ -287,11 +285,12 @@ class GPU_EXPORT GLES2Decoder : public base::SupportsWeakPtr<GLES2Decoder>,
   virtual void SetShaderCacheCallback(const ShaderCacheCallback& callback) = 0;
 
   // Sets the callback for fence sync release and wait calls. The wait call
-  // returns true if the channel is still scheduled.
+  // returns false if the wait was a nop or invalid and the command buffer is
+  // still scheduled.
   virtual void SetFenceSyncReleaseCallback(
       const FenceSyncReleaseCallback& callback) = 0;
-  virtual void SetWaitFenceSyncCallback(
-      const WaitFenceSyncCallback& callback) = 0;
+  virtual void SetWaitSyncTokenCallback(
+      const WaitSyncTokenCallback& callback) = 0;
 
   // Sets the callback for the DescheduleUntilFinished and
   // RescheduleAfterFinished calls.
@@ -301,10 +300,6 @@ class GPU_EXPORT GLES2Decoder : public base::SupportsWeakPtr<GLES2Decoder>,
       const NoParamCallback& callback) = 0;
 
   virtual void WaitForReadPixels(base::Closure callback) = 0;
-  virtual uint32_t GetTextureUploadCount() = 0;
-  virtual base::TimeDelta GetTotalTextureUploadTime() = 0;
-  virtual base::TimeDelta GetTotalProcessingCommandsTime() = 0;
-  virtual void AddProcessingCommandsTime(base::TimeDelta) = 0;
 
   // Returns true if the context was lost either by GL_ARB_robustness, forced
   // context loss or command buffer parse error.

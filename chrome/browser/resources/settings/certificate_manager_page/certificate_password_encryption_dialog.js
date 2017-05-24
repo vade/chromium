@@ -10,9 +10,6 @@ Polymer({
   is: 'settings-certificate-password-encryption-dialog',
 
   properties: {
-    /** @private {!settings.CertificatesBrowserProxy} */
-    browserProxy_: Object,
-
     /** @type {!CertificateSubnode} */
     model: Object,
 
@@ -28,6 +25,9 @@ Polymer({
       value: '',
     },
   },
+
+  /** @private {?settings.CertificatesBrowserProxy} */
+  browserProxy_: null,
 
   /** @override */
   ready: function() {
@@ -54,7 +54,7 @@ Polymer({
             /** @param {!CertificatesError} error */
             function(error) {
               this.$.dialog.close();
-              this.fire('certificates-error', error);
+              this.fire('certificates-error', {error: error, anchor: null});
             }.bind(this));
   },
 

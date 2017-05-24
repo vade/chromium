@@ -230,7 +230,9 @@ public class TabModelImpl extends TabModelJniBridge {
         //   * Otherwise, if closing the last incognito tab, select the current normal tab.
         //   * Otherwise, select nothing.
         Tab nextTab = null;
-        if (tabToClose != currentTab && currentTab != null && !currentTab.isClosing()) {
+        if (!isCurrentModel()) {
+            nextTab = TabModelUtils.getCurrentTab(mModelDelegate.getCurrentModel());
+        } else if (tabToClose != currentTab && currentTab != null && !currentTab.isClosing()) {
             nextTab = currentTab;
         } else if (parentTab != null && !parentTab.isClosing()
                 && !mModelDelegate.isInOverviewMode()) {
@@ -239,10 +241,9 @@ public class TabModelImpl extends TabModelJniBridge {
             nextTab = adjacentTab;
         } else if (isIncognito()) {
             nextTab = TabModelUtils.getCurrentTab(mModelDelegate.getModel(false));
-            if (nextTab != null && nextTab.isClosing()) nextTab = null;
         }
 
-        return nextTab;
+        return nextTab != null && nextTab.isClosing() ? null : nextTab;
     }
 
     @Override
@@ -292,7 +293,7 @@ public class TabModelImpl extends TabModelJniBridge {
         WebContents webContents = tab.getWebContents();
         if (webContents != null) webContents.setAudioMuted(false);
 
-        boolean activeModel = mModelDelegate.getCurrentModel() == this;
+        boolean activeModel = isCurrentModel();
 
         if (mIndex == INVALID_TAB_INDEX) {
             // If we're the active model call setIndex to actually select this tab, otherwise just
@@ -398,11 +399,6 @@ public class TabModelImpl extends TabModelJniBridge {
             return;
         }
 
-        if (getCount() == 1) {
-            closeTab(getTabAt(0), true, false, true);
-            return;
-        }
-
         closeAllTabs(true, false, true);
     }
 
@@ -421,10 +417,10 @@ public class TabModelImpl extends TabModelJniBridge {
     public void closeAllTabs(boolean animate, boolean uponExit, boolean canUndo) {
         for (int i = 0; i < getCount(); i++) getTabAt(i).setClosing(true);
 
-        ArrayList<Integer> closedTabs = new ArrayList<Integer>();
+        List<Tab> closedTabs = new ArrayList<>();
         while (getCount() > 0) {
             Tab tab = getTabAt(0);
-            closedTabs.add(tab.getId());
+            closedTabs.add(tab);
             closeTab(tab, animate, uponExit, canUndo, false);
         }
 
@@ -443,14 +439,16 @@ public class TabModelImpl extends TabModelJniBridge {
     // Index of the given tab in the order of the tab stack.
     @Override
     public int indexOf(Tab tab) {
-        return mTabs.indexOf(tab);
+        if (tab == null) return INVALID_TAB_INDEX;
+        int retVal = mTabs.indexOf(tab);
+        return retVal == -1 ? INVALID_TAB_INDEX : retVal;
     }
 
     /**
      * @return true if this is the current model according to the model selector
      */
     private boolean isCurrentModel() {
-        return mModelDelegate.getCurrentModel() == this;
+        return mModelDelegate.getCurrentModel().isIncognito() == isIncognito();
     }
 
     // TODO(aurimas): Move this method to TabModelSelector when notifications move there.
@@ -544,8 +542,8 @@ public class TabModelImpl extends TabModelJniBridge {
         final int closingTabId = tab.getId();
         final int closingTabIndex = indexOf(tab);
 
-        Tab currentTab = TabModelUtils.getCurrentTab(this);
-        Tab adjacentTab = getTabAt(closingTabIndex == 0 ? 1 : closingTabIndex - 1);
+        Tab currentTabInModel = TabModelUtils.getCurrentTab(this);
+        Tab adjacentTabInModel = getTabAt(closingTabIndex == 0 ? 1 : closingTabIndex - 1);
         Tab nextTab = getNextTabIfClosed(closingTabId);
 
         // TODO(dtrainor): Update the list of undoable tabs instead of committing it.
@@ -567,8 +565,8 @@ public class TabModelImpl extends TabModelJniBridge {
         int nextTabIndex = nextTab == null ? INVALID_TAB_INDEX : TabModelUtils.getTabIndexById(
                 mModelDelegate.getModel(nextIsIncognito), nextTabId);
 
-        if (nextTab != currentTab) {
-            if (nextIsIncognito != isIncognito()) mIndex = indexOf(adjacentTab);
+        if (nextTab != currentTabInModel) {
+            if (nextIsIncognito != isIncognito()) mIndex = indexOf(adjacentTabInModel);
 
             TabModel nextModel = mModelDelegate.getModel(nextIsIncognito);
             nextModel.setIndex(nextTabIndex, selectionType);

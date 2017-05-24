@@ -35,8 +35,10 @@ class PrerenderingOffliner : public Offliner {
 
   // Offliner implementation.
   bool LoadAndSave(const SavePageRequest& request,
-                   const CompletionCallback& callback) override;
-  void Cancel() override;
+                   const CompletionCallback& completion_callback,
+                   const ProgressCallback& progress_callback) override;
+  bool Cancel(const CancelCallback& callback) override;
+  bool HandleTimeout(int64_t request_id) override;
 
   // Allows a loader to be injected for testing. This may only be done once
   // and must be called before any of the Offliner interface methods are called.
@@ -57,6 +59,9 @@ class PrerenderingOffliner : public Offliner {
       const SavePageCallback& save_callback);
 
  private:
+  // Progress callback for PrerenderingLoader::LoadPage().
+  void OnNetworkProgress(const SavePageRequest& request, int64_t bytes);
+
   // Callback logic for PrerenderingLoader::LoadPage().
   void OnLoadPageDone(const SavePageRequest& request,
                       Offliner::RequestStatus load_status,
@@ -67,6 +72,9 @@ class PrerenderingOffliner : public Offliner {
                       SavePageResult save_result,
                       int64_t offline_id);
 
+  // Write the payload of the loading signal data MHTML section into a string.
+  std::string SerializeLoadingSignalData();
+
   PrerenderingLoader* GetOrCreateLoader();
 
   // Listener function for changes to application background/foreground state.
@@ -75,6 +83,8 @@ class PrerenderingOffliner : public Offliner {
 
   // Not owned.
   content::BrowserContext* browser_context_;
+  // Not owned.
+  const OfflinerPolicy* policy_;
   // Not owned.
   OfflinePageModel* offline_page_model_;
   // Lazily created.
@@ -85,7 +95,9 @@ class PrerenderingOffliner : public Offliner {
   std::unique_ptr<SavePageRequest> pending_request_;
   // Callback to call when pending request completes/fails.
   CompletionCallback completion_callback_;
+  ProgressCallback progress_callback_;
   bool is_low_end_device_;
+  bool saved_on_last_retry_;
   // ApplicationStatusListener to monitor if the Chrome moves to the foreground.
   std::unique_ptr<base::android::ApplicationStatusListener> app_listener_;
   base::WeakPtrFactory<PrerenderingOffliner> weak_ptr_factory_;

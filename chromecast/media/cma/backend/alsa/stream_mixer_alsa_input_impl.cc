@@ -56,8 +56,18 @@ const int kPausedReadSamples = 512;
 const int kDefaultReadSize = ::media::SincResampler::kDefaultRequestSize;
 const int64_t kNoTimestamp = std::numeric_limits<int64_t>::min();
 
-const int kMaxSlewTimeUpMs = 15;
-const int kMaxSlewTimeDownMs = 15;
+const int kDefaultSlewTimeMs = 15;
+
+std::string AudioContentTypeToString(media::AudioContentType type) {
+  switch (type) {
+    case media::AudioContentType::kAlarm:
+      return "alarm";
+    case media::AudioContentType::kCommunication:
+      return "communication";
+    default:
+      return "media";
+  }
+}
 
 }  // namespace
 
@@ -65,16 +75,24 @@ StreamMixerAlsaInputImpl::StreamMixerAlsaInputImpl(
     StreamMixerAlsaInput::Delegate* delegate,
     int input_samples_per_second,
     bool primary,
+    const std::string& device_id,
+    AudioContentType content_type,
     StreamMixerAlsa* mixer)
     : delegate_(delegate),
       input_samples_per_second_(input_samples_per_second),
       primary_(primary),
+      device_id_(device_id),
+      content_type_(content_type),
       mixer_(mixer),
+      filter_group_(nullptr),
       mixer_task_runner_(mixer_->task_runner()),
       caller_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       resample_ratio_(1.0),
       state_(kStateUninitialized),
-      slew_volume_(kMaxSlewTimeUpMs, kMaxSlewTimeDownMs),
+      stream_volume_multiplier_(1.0f),
+      type_volume_multiplier_(1.0f),
+      mute_volume_multiplier_(1.0f),
+      slew_volume_(kDefaultSlewTimeMs),
       queued_frames_(0),
       queued_frames_including_resampler_(0),
       current_buffer_offset_(0),
@@ -85,14 +103,15 @@ StreamMixerAlsaInputImpl::StreamMixerAlsaInputImpl(
       zeroed_frames_(0),
       is_underflowing_(false),
       weak_factory_(this) {
-  LOG(INFO) << "Create " << this;
+  LOG(INFO) << "Create " << device_id_ << " (" << this
+            << "), content type = " << AudioContentTypeToString(content_type_);
   DCHECK(delegate_);
   DCHECK(mixer_);
   weak_this_ = weak_factory_.GetWeakPtr();
 }
 
 StreamMixerAlsaInputImpl::~StreamMixerAlsaInputImpl() {
-  LOG(INFO) << "Destroy " << this;
+  LOG(INFO) << "Destroy " << device_id_ << " (" << this << ")";
   DCHECK(mixer_task_runner_->BelongsToCurrentThread());
 }
 
@@ -102,6 +121,14 @@ int StreamMixerAlsaInputImpl::input_samples_per_second() const {
 
 bool StreamMixerAlsaInputImpl::primary() const {
   return primary_;
+}
+
+std::string StreamMixerAlsaInputImpl::device_id() const {
+  return device_id_;
+}
+
+AudioContentType StreamMixerAlsaInputImpl::content_type() const {
+  return content_type_;
 }
 
 bool StreamMixerAlsaInputImpl::IsDeleting() const {
@@ -125,6 +152,14 @@ void StreamMixerAlsaInputImpl::Initialize(
   mixer_rendering_delay_ = mixer_rendering_delay;
   fade_out_frames_total_ = NormalFadeFrames();
   fade_frames_remaining_ = NormalFadeFrames();
+}
+
+void StreamMixerAlsaInputImpl::set_filter_group(FilterGroup* filter_group) {
+  filter_group_ = filter_group;
+}
+
+FilterGroup* StreamMixerAlsaInputImpl::filter_group() {
+  return filter_group_;
 }
 
 void StreamMixerAlsaInputImpl::PreventDelegateCalls() {
@@ -208,6 +243,10 @@ MediaPipelineBackendAlsa::RenderingDelay StreamMixerAlsaInputImpl::QueueData(
     queued_frames_including_resampler_ += frames;
   }
 
+  if (is_underflowing_) {
+    return MediaPipelineBackendAlsa::RenderingDelay();
+  }
+
   MediaPipelineBackendAlsa::RenderingDelay delay = mixer_rendering_delay_;
   if (delay.timestamp_microseconds != kNoTimestamp) {
     delay.delay_microseconds += static_cast<int64_t>(
@@ -246,6 +285,7 @@ void StreamMixerAlsaInputImpl::OnSkipped() {
     // Fade in once this input starts providing data again.
     fade_frames_remaining_ = NormalFadeFrames();
   }
+  slew_volume_.Interrupted();
 }
 
 void StreamMixerAlsaInputImpl::AfterWriteFrames(
@@ -422,7 +462,6 @@ int StreamMixerAlsaInputImpl::NormalFadeFrames() {
 
 void StreamMixerAlsaInputImpl::FadeIn(::media::AudioBus* dest, int frames) {
   DCHECK(mixer_task_runner_->BelongsToCurrentThread());
-  LOG(INFO) << "Fading in, " << fade_frames_remaining_ << " frames remaining";
   float fade_in_frames = mixer_->output_samples_per_second() * kFadeMs /
                          base::Time::kMillisecondsPerSecond;
   for (int f = 0; f < frames && fade_frames_remaining_; ++f) {
@@ -435,7 +474,6 @@ void StreamMixerAlsaInputImpl::FadeIn(::media::AudioBus* dest, int frames) {
 
 void StreamMixerAlsaInputImpl::FadeOut(::media::AudioBus* dest, int frames) {
   DCHECK(mixer_task_runner_->BelongsToCurrentThread());
-  LOG(INFO) << "Fading out, " << fade_frames_remaining_ << " frames remaining";
   int f = 0;
   for (; f < frames && fade_frames_remaining_; ++f) {
     float fade_multiplier =
@@ -511,20 +549,54 @@ void StreamMixerAlsaInputImpl::SetPaused(bool paused) {
 
 void StreamMixerAlsaInputImpl::SetVolumeMultiplier(float multiplier) {
   RUN_ON_MIXER_THREAD(SetVolumeMultiplier, multiplier);
-  LOG(INFO) << this << ": stream volume = " << multiplier;
   DCHECK(!IsDeleting());
-  if (multiplier > 1.0f)
-    multiplier = 1.0f;
-  if (multiplier < 0.0f)
-    multiplier = 0.0f;
-  slew_volume_.SetVolume(multiplier);
+  stream_volume_multiplier_ = std::max(0.0f, std::min(multiplier, 1.0f));
+  LOG(INFO) << device_id_ << "(" << this
+            << "): stream volume = " << stream_volume_multiplier_
+            << ", effective multiplier = " << EffectiveVolume();
+  slew_volume_.SetMaxSlewTimeMs(kDefaultSlewTimeMs);
+  slew_volume_.SetVolume(EffectiveVolume());
+}
+
+void StreamMixerAlsaInputImpl::SetContentTypeVolume(float volume, int fade_ms) {
+  DCHECK(mixer_task_runner_->BelongsToCurrentThread());
+  type_volume_multiplier_ = std::max(0.0f, std::min(volume, 1.0f));
+  float effective_volume = stream_volume_multiplier_ * type_volume_multiplier_ *
+                           mute_volume_multiplier_;
+  LOG(INFO) << device_id_ << "(" << this
+            << "): type volume = " << type_volume_multiplier_
+            << ", effective multiplier = " << effective_volume;
+  if (fade_ms < 0) {
+    fade_ms = kDefaultSlewTimeMs;
+  } else {
+    LOG(INFO) << "Fade over " << fade_ms << " ms";
+  }
+  slew_volume_.SetMaxSlewTimeMs(fade_ms);
+  slew_volume_.SetVolume(effective_volume);
+}
+
+void StreamMixerAlsaInputImpl::SetMuted(bool muted) {
+  DCHECK(mixer_task_runner_->BelongsToCurrentThread());
+  mute_volume_multiplier_ = muted ? 0.0f : 1.0f;
+  float effective_volume = stream_volume_multiplier_ * type_volume_multiplier_ *
+                           mute_volume_multiplier_;
+  LOG(INFO) << device_id_ << "(" << this
+            << "): mute volume = " << mute_volume_multiplier_
+            << ", effective multiplier = " << effective_volume;
+  slew_volume_.SetMaxSlewTimeMs(kDefaultSlewTimeMs);
+  slew_volume_.SetVolume(effective_volume);
+}
+
+float StreamMixerAlsaInputImpl::EffectiveVolume() {
+  return stream_volume_multiplier_ * type_volume_multiplier_ *
+         mute_volume_multiplier_;
 }
 
 void StreamMixerAlsaInputImpl::VolumeScaleAccumulate(bool repeat_transition,
                                                      const float* src,
                                                      int frames,
                                                      float* dest) {
-  slew_volume_.ProcessFMAC(repeat_transition, src, frames, dest);
+  slew_volume_.ProcessFMAC(repeat_transition, src, frames, 1, dest);
 }
 
 }  // namespace media

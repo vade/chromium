@@ -7,13 +7,14 @@
 #include <utility>
 
 #include "base/command_line.h"
+#include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
-#include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -28,6 +29,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
@@ -183,7 +185,6 @@ bool SnapshotMatches(const base::FilePath& reference, const SkBitmap& bitmap) {
     return false;
 
   int32_t* ref_pixels = reinterpret_cast<int32_t*>(decoded.data());
-  SkAutoLockPixels lock_image(bitmap);
   int32_t* pixels = static_cast<int32_t*>(bitmap.getPixels());
 
   bool success = true;
@@ -221,6 +222,7 @@ void CompareSnapshotToReference(const base::FilePath& reference,
                                 const base::Closure& done_cb,
                                 const SkBitmap& bitmap,
                                 content::ReadbackResponse response) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   DCHECK(snapshot_matches);
   ASSERT_EQ(content::READBACK_SUCCESS, response);
 
@@ -339,7 +341,7 @@ class PluginPowerSaverBrowserTest : public InProcessBrowserTest {
                                             const gfx::Point& point) {
     WaitForPlaceholderReady(GetActiveWebContents(), element_id);
     content::SimulateMouseClickAt(GetActiveWebContents(), 0 /* modifiers */,
-                                  blink::WebMouseEvent::Button::Left, point);
+                                  blink::WebMouseEvent::Button::kLeft, point);
 
     VerifyPluginMarkedEssential(GetActiveWebContents(), element_id);
   }
@@ -366,13 +368,13 @@ class PluginPowerSaverBrowserTest : public InProcessBrowserTest {
     content::RenderWidgetHost* rwh =
         GetActiveWebContents()->GetRenderViewHost()->GetWidget();
 
-    if (!rwh->CanCopyFromBackingStore()) {
-      ADD_FAILURE() << "Could not copy from backing store.";
+    if (!rwh->GetView() || !rwh->GetView()->IsSurfaceAvailableForCopy()) {
+      ADD_FAILURE() << "RWHV surface not available for copy.";
       return false;
     }
 
     bool snapshot_matches = false;
-    rwh->CopyFromBackingStore(
+    rwh->GetView()->CopyFromSurface(
         gfx::Rect(), gfx::Size(),
         base::Bind(&CompareSnapshotToReference, reference, &snapshot_matches,
                    base::MessageLoop::QuitWhenIdleClosure()),
@@ -568,10 +570,7 @@ IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, BlockTinyPlugins) {
   VerifyPluginMarkedEssential(GetActiveWebContents(), "tiny_same_origin");
   VerifyPluginIsPlaceholderOnly("tiny_cross_origin_1");
   VerifyPluginIsPlaceholderOnly("tiny_cross_origin_2");
-
-  TabSpecificContentSettings* tab_specific_content_settings =
-      TabSpecificContentSettings::FromWebContents(GetActiveWebContents());
-  EXPECT_FALSE(tab_specific_content_settings->blocked_plugin_names().empty());
+  VerifyPluginIsPlaceholderOnly("completely_obscured");
 }
 
 IN_PROC_BROWSER_TEST_F(PluginPowerSaverBrowserTest, BackgroundTabTinyPlugins) {
@@ -615,22 +614,10 @@ class PluginPowerSaverFilterSameOriginTinyPluginsBrowserTest
   base::test::ScopedFeatureList feature_list;
 };
 
-// Flaky on Mac. crbug.com/680544
-// Flaky on Win7. crbug.com/682039
-#if defined(OS_MACOSX) || defined(OS_WIN)
-#define MAYBE_BlockSameOriginTinyPlugin DISABLED_BlockSameOriginTinyPlugin
-#else
-#define MAYBE_BlockSameOriginTinyPlugin BlockSameOriginTinyPlugin
-#endif
 IN_PROC_BROWSER_TEST_F(PluginPowerSaverFilterSameOriginTinyPluginsBrowserTest,
-                       MAYBE_BlockSameOriginTinyPlugin) {
+                       BlockSameOriginTinyPlugin) {
   LoadHTML("/same_origin_tiny_plugin.html");
-
   VerifyPluginIsPlaceholderOnly("tiny_same_origin");
-
-  TabSpecificContentSettings* tab_specific_content_settings =
-      TabSpecificContentSettings::FromWebContents(GetActiveWebContents());
-  EXPECT_FALSE(tab_specific_content_settings->blocked_plugin_names().empty());
 }
 
 // Separate test case with HTML By Default feature flag on.

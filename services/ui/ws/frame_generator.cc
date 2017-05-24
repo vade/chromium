@@ -7,140 +7,159 @@
 #include <utility>
 #include <vector>
 
-#include "base/containers/adapters.h"
 #include "cc/output/compositor_frame.h"
+#include "cc/output/compositor_frame_sink.h"
 #include "cc/quads/render_pass.h"
 #include "cc/quads/render_pass_draw_quad.h"
 #include "cc/quads/shared_quad_state.h"
 #include "cc/quads/surface_draw_quad.h"
-#include "services/ui/ws/frame_generator_delegate.h"
-#include "services/ui/ws/server_window.h"
-#include "services/ui/ws/server_window_compositor_frame_sink_manager.h"
-#include "services/ui/ws/server_window_delegate.h"
 
 namespace ui {
 
 namespace ws {
 
-FrameGenerator::FrameGenerator(FrameGeneratorDelegate* delegate,
-                               ServerWindow* root_window)
-    : delegate_(delegate),
-      root_window_(root_window),
-      binding_(this),
-      weak_factory_(this) {
-  DCHECK(delegate_);
+FrameGenerator::FrameGenerator(
+    std::unique_ptr<cc::CompositorFrameSink> compositor_frame_sink)
+    : compositor_frame_sink_(std::move(compositor_frame_sink)) {
+  compositor_frame_sink_->BindToClient(this);
+}
+
+FrameGenerator::~FrameGenerator() {
+  compositor_frame_sink_->DetachFromClient();
 }
 
 void FrameGenerator::SetDeviceScaleFactor(float device_scale_factor) {
   if (device_scale_factor_ == device_scale_factor)
     return;
   device_scale_factor_ = device_scale_factor;
-  if (compositor_frame_sink_)
-    compositor_frame_sink_->SetNeedsBeginFrame(true);
+  SetNeedsBeginFrame(true);
 }
 
-FrameGenerator::~FrameGenerator() {
-  // Invalidate WeakPtrs now to avoid callbacks back into the
-  // FrameGenerator during destruction of |compositor_frame_sink_|.
-  weak_factory_.InvalidateWeakPtrs();
-  compositor_frame_sink_.reset();
-}
+void FrameGenerator::SetHighContrastMode(bool enabled) {
+  if (high_contrast_mode_enabled_ == enabled)
+    return;
 
-void FrameGenerator::OnAcceleratedWidgetAvailable(
-    gfx::AcceleratedWidget widget) {
-  DCHECK_NE(gfx::kNullAcceleratedWidget, widget);
-  auto associated_group =
-      root_window_->delegate()->GetDisplayCompositorAssociatedGroup();
-  cc::mojom::MojoCompositorFrameSinkAssociatedRequest sink_request =
-      mojo::MakeRequest(&compositor_frame_sink_, associated_group);
-  cc::mojom::DisplayPrivateAssociatedRequest display_request =
-      mojo::MakeRequest(&display_private_, associated_group);
-  root_window_->CreateDisplayCompositorFrameSink(
-      widget, std::move(sink_request), binding_.CreateInterfacePtrAndBind(),
-      std::move(display_request));
+  high_contrast_mode_enabled_ = enabled;
+  SetNeedsBeginFrame(true);
 }
 
 void FrameGenerator::OnSurfaceCreated(const cc::SurfaceInfo& surface_info) {
-  DCHECK(surface_info.id().is_valid());
+  DCHECK(surface_info.is_valid());
 
   // Only handle embedded surfaces changing here. The display root surface
   // changing is handled immediately after the CompositorFrame is submitted.
   if (surface_info != window_manager_surface_info_) {
     window_manager_surface_info_ = surface_info;
-    compositor_frame_sink_->SetNeedsBeginFrame(true);
+    SetNeedsBeginFrame(true);
   }
 }
 
-void FrameGenerator::DidReceiveCompositorFrameAck() {}
+void FrameGenerator::OnWindowDamaged() {
+  SetNeedsBeginFrame(true);
+}
 
-void FrameGenerator::OnBeginFrame(const cc::BeginFrameArgs& begin_frame_arags) {
-  if (!root_window_->visible())
+void FrameGenerator::OnWindowSizeChanged(const gfx::Size& pixel_size) {
+  if (pixel_size_ == pixel_size)
     return;
 
-  // TODO(fsamuel): We should add a trace for generating a top level frame.
-  cc::CompositorFrame frame(GenerateCompositorFrame(root_window_->bounds()));
+  pixel_size_ = pixel_size;
+  SetNeedsBeginFrame(true);
+}
 
-  if (compositor_frame_sink_) {
-    gfx::Size frame_size = last_submitted_frame_size_;
-    if (!frame.render_pass_list.empty())
-      frame_size = frame.render_pass_list[0]->output_rect.size();
+void FrameGenerator::SetBeginFrameSource(cc::BeginFrameSource* source) {
+  if (begin_frame_source_ && observing_begin_frames_)
+    begin_frame_source_->RemoveObserver(this);
 
-    if (!local_frame_id_.is_valid() ||
-        frame_size != last_submitted_frame_size_) {
-      local_frame_id_ = id_allocator_.GenerateId();
-      display_private_->ResizeDisplay(frame_size);
-    }
+  begin_frame_source_ = source;
 
-    compositor_frame_sink_->SubmitCompositorFrame(local_frame_id_,
-                                                  std::move(frame));
-    compositor_frame_sink_->SetNeedsBeginFrame(false);
-    last_submitted_frame_size_ = frame_size;
-  }
+  if (begin_frame_source_ && observing_begin_frames_)
+    begin_frame_source_->AddObserver(this);
 }
 
 void FrameGenerator::ReclaimResources(
     const cc::ReturnedResourceArray& resources) {
   // Nothing to do here because FrameGenerator CompositorFrames don't reference
   // any resources.
+  DCHECK(resources.empty());
 }
 
-void FrameGenerator::WillDrawSurface() {
-  // TODO(fsamuel, staraz): Implement this.
+void FrameGenerator::SetTreeActivationCallback(const base::Closure& callback) {}
+
+void FrameGenerator::DidReceiveCompositorFrameAck() {}
+
+void FrameGenerator::DidLoseCompositorFrameSink() {}
+
+void FrameGenerator::OnDraw(const gfx::Transform& transform,
+                            const gfx::Rect& viewport,
+                            bool resourceless_software_draw) {}
+
+void FrameGenerator::SetMemoryPolicy(const cc::ManagedMemoryPolicy& policy) {}
+
+void FrameGenerator::SetExternalTilePriorityConstraints(
+    const gfx::Rect& viewport_rect,
+    const gfx::Transform& transform) {}
+
+void FrameGenerator::OnBeginFrame(const cc::BeginFrameArgs& begin_frame_args) {
+  current_begin_frame_ack_ = cc::BeginFrameAck(
+      begin_frame_args.source_id, begin_frame_args.sequence_number,
+      begin_frame_args.sequence_number, false);
+  if (begin_frame_args.type == cc::BeginFrameArgs::MISSED) {
+    begin_frame_source_->DidFinishFrame(this, current_begin_frame_ack_);
+    return;
+  }
+
+  current_begin_frame_ack_.has_damage = true;
+  last_begin_frame_args_ = begin_frame_args;
+
+  // TODO(fsamuel): We should add a trace for generating a top level frame.
+  cc::CompositorFrame frame(GenerateCompositorFrame());
+
+  compositor_frame_sink_->SubmitCompositorFrame(std::move(frame));
+
+  begin_frame_source_->DidFinishFrame(this, current_begin_frame_ack_);
+  SetNeedsBeginFrame(false);
 }
 
-cc::CompositorFrame FrameGenerator::GenerateCompositorFrame(
-    const gfx::Rect& output_rect) {
+const cc::BeginFrameArgs& FrameGenerator::LastUsedBeginFrameArgs() const {
+  return last_begin_frame_args_;
+}
+
+void FrameGenerator::OnBeginFrameSourcePausedChanged(bool paused) {}
+
+cc::CompositorFrame FrameGenerator::GenerateCompositorFrame() {
   const int render_pass_id = 1;
+  const gfx::Rect bounds(pixel_size_);
   std::unique_ptr<cc::RenderPass> render_pass = cc::RenderPass::Create();
-  render_pass->SetNew(render_pass_id, output_rect, output_rect,
-                      gfx::Transform());
+  render_pass->SetNew(render_pass_id, bounds, bounds, gfx::Transform());
 
   DrawWindow(render_pass.get());
 
   cc::CompositorFrame frame;
   frame.render_pass_list.push_back(std::move(render_pass));
-  if (delegate_->IsInHighContrastMode()) {
+  if (high_contrast_mode_enabled_) {
     std::unique_ptr<cc::RenderPass> invert_pass = cc::RenderPass::Create();
-    invert_pass->SetNew(2, output_rect, output_rect, gfx::Transform());
+    invert_pass->SetNew(2, bounds, bounds, gfx::Transform());
     cc::SharedQuadState* shared_state =
         invert_pass->CreateAndAppendSharedQuadState();
     gfx::Size scaled_bounds = gfx::ScaleToCeiledSize(
-        output_rect.size(), window_manager_surface_info_.device_scale_factor(),
+        pixel_size_, window_manager_surface_info_.device_scale_factor(),
         window_manager_surface_info_.device_scale_factor());
-    shared_state->SetAll(gfx::Transform(), scaled_bounds, output_rect,
-                         output_rect, false, 1.f, SkBlendMode::kSrcOver, 0);
+    shared_state->SetAll(gfx::Transform(), gfx::Rect(scaled_bounds), bounds,
+                         bounds, false, 1.f, SkBlendMode::kSrcOver, 0);
     auto* quad = invert_pass->CreateAndAppendDrawQuad<cc::RenderPassDrawQuad>();
-    render_pass->filters.Append(cc::FilterOperation::CreateInvertFilter(1.f));
-    quad->SetNew(shared_state, output_rect, output_rect, render_pass_id,
-                 0 /* mask_resource_id */, gfx::Vector2dF() /* mask_uv_scale */,
-                 gfx::Size() /* mask_texture_size */,
-                 gfx::Vector2dF() /* filters_scale */,
-                 gfx::PointF() /* filters_origin */);
+    frame.render_pass_list.back()->filters.Append(
+        cc::FilterOperation::CreateInvertFilter(1.f));
+    quad->SetNew(
+        shared_state, bounds, bounds, render_pass_id, 0 /* mask_resource_id */,
+        gfx::RectF() /* mask_uv_rect */, gfx::Size() /* mask_texture_size */,
+        gfx::Vector2dF() /* filters_scale */,
+        gfx::PointF() /* filters_origin */, gfx::RectF() /* tex_coord_rect */);
     frame.render_pass_list.push_back(std::move(invert_pass));
   }
   frame.metadata.device_scale_factor = device_scale_factor_;
+  frame.metadata.begin_frame_ack = current_begin_frame_ack_;
 
-  if (window_manager_surface_info_.id().is_valid()) {
+  if (window_manager_surface_info_.is_valid()) {
     frame.metadata.referenced_surfaces.push_back(
         window_manager_surface_info_.id());
   }
@@ -149,7 +168,7 @@ cc::CompositorFrame FrameGenerator::GenerateCompositorFrame(
 }
 
 void FrameGenerator::DrawWindow(cc::RenderPass* pass) {
-  DCHECK(window_manager_surface_info_.id().is_valid());
+  DCHECK(window_manager_surface_info_.is_valid());
 
   const gfx::Rect bounds_at_origin(
       window_manager_surface_info_.size_in_pixels());
@@ -167,15 +186,28 @@ void FrameGenerator::DrawWindow(cc::RenderPass* pass) {
 
   // TODO(fsamuel): These clipping and visible rects are incorrect. They need
   // to be populated from CompositorFrame structs.
-  sqs->SetAll(quad_to_target_transform, scaled_bounds /* layer_bounds */,
-              bounds_at_origin /* visible_layer_bounds */,
-              bounds_at_origin /* clip_rect */, false /* is_clipped */,
-              1.0f /* opacity */, SkBlendMode::kSrcOver,
-              0 /* sorting-context_id */);
+  sqs->SetAll(
+      quad_to_target_transform, gfx::Rect(scaled_bounds) /* layer_rect */,
+      bounds_at_origin /* visible_layer_bounds */,
+      bounds_at_origin /* clip_rect */, false /* is_clipped */,
+      1.0f /* opacity */, SkBlendMode::kSrcOver, 0 /* sorting-context_id */);
   auto* quad = pass->CreateAndAppendDrawQuad<cc::SurfaceDrawQuad>();
   quad->SetAll(sqs, bounds_at_origin /* rect */, gfx::Rect() /* opaque_rect */,
                bounds_at_origin /* visible_rect */, true /* needs_blending*/,
-               window_manager_surface_info_.id());
+               window_manager_surface_info_.id(),
+               cc::SurfaceDrawQuadType::PRIMARY, nullptr);
+}
+
+void FrameGenerator::SetNeedsBeginFrame(bool needs_begin_frame) {
+  needs_begin_frame &= window_manager_surface_info_.is_valid();
+  if (needs_begin_frame == observing_begin_frames_)
+    return;
+
+  observing_begin_frames_ = needs_begin_frame;
+  if (needs_begin_frame)
+    begin_frame_source_->AddObserver(this);
+  else
+    begin_frame_source_->RemoveObserver(this);
 }
 
 }  // namespace ws

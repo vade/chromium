@@ -19,7 +19,12 @@ namespace {
 
 // Do not change or reorder this enum, and add new values at the end. It is used
 // in the MarkHttpAs histogram.
-enum MarkHttpStatus { NEUTRAL, NON_SECURE, HTTP_SHOW_WARNING, LAST_STATUS };
+enum MarkHttpStatus {
+  NEUTRAL /* deprecated */,
+  NON_SECURE,
+  HTTP_SHOW_WARNING_ON_SENSITIVE_FIELDS,
+  LAST_STATUS
+};
 
 // If |switch_or_field_trial_group| corresponds to a valid
 // MarkHttpAs group, sets |*level| and |*histogram_status| to the
@@ -29,30 +34,11 @@ bool GetSecurityLevelAndHistogramValueForNonSecureFieldTrial(
     bool displayed_sensitive_input_on_http,
     SecurityLevel* level,
     MarkHttpStatus* histogram_status) {
-  if (switch_or_field_trial_group == switches::kMarkHttpAsNeutral) {
-    *level = NONE;
-    *histogram_status = NEUTRAL;
-    return true;
-  }
-
-  if (switch_or_field_trial_group == switches::kMarkHttpAsDangerous) {
-    *level = DANGEROUS;
-    *histogram_status = NON_SECURE;
-    return true;
-  }
-
-  if (switch_or_field_trial_group ==
-      switches::kMarkHttpWithPasswordsOrCcWithChip) {
-    if (displayed_sensitive_input_on_http) {
-      *level = security_state::HTTP_SHOW_WARNING;
-    } else {
-      *level = NONE;
-    }
-    *histogram_status = HTTP_SHOW_WARNING;
-    return true;
-  }
-
-  return false;
+  if (switch_or_field_trial_group != switches::kMarkHttpAsDangerous)
+    return false;
+  *level = DANGEROUS;
+  *histogram_status = NON_SECURE;
+  return true;
 }
 
 SecurityLevel GetSecurityLevelForNonSecureFieldTrial(
@@ -73,18 +59,10 @@ SecurityLevel GetSecurityLevelForNonSecureFieldTrial(
           choice, displayed_sensitive_input_on_http, &level, &status)) {
     if (!GetSecurityLevelAndHistogramValueForNonSecureFieldTrial(
             group, displayed_sensitive_input_on_http, &level, &status)) {
-      // If neither the command-line switch nor field trial group is set, then
-      // nonsecure defaults to neutral for iOS and HTTP_SHOW_WARNING on other
-      // platforms.
-#if defined(OS_IOS)
-      status = NEUTRAL;
-      level = NONE;
-#else
-      status = HTTP_SHOW_WARNING;
+      status = HTTP_SHOW_WARNING_ON_SENSITIVE_FIELDS;
       level = displayed_sensitive_input_on_http
                   ? security_state::HTTP_SHOW_WARNING
                   : NONE;
-#endif
     }
   }
 
@@ -120,9 +98,9 @@ SecurityLevel GetSecurityLevelForRequest(
     return DANGEROUS;
   }
 
-  GURL url = visible_security_state.url;
+  const GURL url = visible_security_state.url;
 
-  bool is_cryptographic_with_certificate =
+  const bool is_cryptographic_with_certificate =
       (url.SchemeIsCryptographic() && visible_security_state.certificate);
 
   // Set the security level to DANGEROUS for major certificate errors.
@@ -132,9 +110,19 @@ SecurityLevel GetSecurityLevelForRequest(
     return DANGEROUS;
   }
 
-  // Choose the appropriate security level for HTTP requests.
+  // data: URLs don't define a secure context, and are a vector for spoofing.
+  // Display a "Not secure" badge for all data URLs, regardless of whether
+  // they show a password or credit card field.
+  if (url.SchemeIs(url::kDataScheme))
+    return SecurityLevel::HTTP_SHOW_WARNING;
+
+  // Choose the appropriate security level for requests to HTTP and remaining
+  // pseudo URLs (blob:, filesystem:). filesystem: is a standard scheme so does
+  // not need to be explicitly listed here.
+  // TODO(meacer): Remove special case for blob (crbug.com/684751).
   if (!is_cryptographic_with_certificate) {
-    if (!is_origin_secure_callback.Run(url) && url.IsStandard()) {
+    if (!is_origin_secure_callback.Run(url) &&
+        (url.IsStandard() || url.SchemeIs(url::kBlobScheme))) {
       return GetSecurityLevelForNonSecureFieldTrial(
           visible_security_state.displayed_password_field_on_http ||
           visible_security_state.displayed_credit_card_field_on_http);
@@ -168,7 +156,8 @@ SecurityLevel GetSecurityLevelForRequest(
   DCHECK_NE(CONTENT_STATUS_RAN, mixed_content_status);
   DCHECK_NE(CONTENT_STATUS_DISPLAYED_AND_RAN, mixed_content_status);
 
-  if (mixed_content_status == CONTENT_STATUS_DISPLAYED ||
+  if (visible_security_state.contained_mixed_form ||
+      mixed_content_status == CONTENT_STATUS_DISPLAYED ||
       content_with_cert_errors_status == CONTENT_STATUS_DISPLAYED) {
     return kDisplayedInsecureContentLevel;
   }
@@ -224,8 +213,6 @@ void SecurityInfoForRequest(
   security_info->obsolete_ssl_status =
       net::ObsoleteSSLStatus(security_info->connection_status);
   security_info->pkp_bypassed = visible_security_state.pkp_bypassed;
-  security_info->sct_verify_statuses =
-      visible_security_state.sct_verify_statuses;
 
   security_info->malicious_content_status =
       visible_security_state.malicious_content_status;
@@ -234,6 +221,14 @@ void SecurityInfoForRequest(
       visible_security_state.displayed_password_field_on_http;
   security_info->displayed_credit_card_field_on_http =
       visible_security_state.displayed_credit_card_field_on_http;
+  if (visible_security_state.certificate) {
+    security_info->cert_missing_subject_alt_name =
+        !visible_security_state.certificate->GetSubjectAltName(nullptr,
+                                                               nullptr);
+  }
+
+  security_info->contained_mixed_form =
+      visible_security_state.contained_mixed_form;
 
   security_info->security_level = GetSecurityLevelForRequest(
       visible_security_state, used_policy_installed_certificate,
@@ -261,7 +256,9 @@ SecurityInfo::SecurityInfo()
       obsolete_ssl_status(net::OBSOLETE_SSL_NONE),
       pkp_bypassed(false),
       displayed_password_field_on_http(false),
-      displayed_credit_card_field_on_http(false) {}
+      displayed_credit_card_field_on_http(false),
+      contained_mixed_form(false),
+      cert_missing_subject_alt_name(false) {}
 
 SecurityInfo::~SecurityInfo() {}
 
@@ -287,6 +284,7 @@ VisibleSecurityState::VisibleSecurityState()
       key_exchange_group(0),
       security_bits(-1),
       displayed_mixed_content(false),
+      contained_mixed_form(false),
       ran_mixed_content(false),
       displayed_content_with_cert_errors(false),
       ran_content_with_cert_errors(false),
@@ -304,7 +302,6 @@ bool VisibleSecurityState::operator==(const VisibleSecurityState& other) const {
           connection_status == other.connection_status &&
           key_exchange_group == other.key_exchange_group &&
           security_bits == other.security_bits &&
-          sct_verify_statuses == other.sct_verify_statuses &&
           displayed_mixed_content == other.displayed_mixed_content &&
           ran_mixed_content == other.ran_mixed_content &&
           displayed_content_with_cert_errors ==
@@ -314,7 +311,8 @@ bool VisibleSecurityState::operator==(const VisibleSecurityState& other) const {
           displayed_password_field_on_http ==
               other.displayed_password_field_on_http &&
           displayed_credit_card_field_on_http ==
-              other.displayed_credit_card_field_on_http);
+              other.displayed_credit_card_field_on_http &&
+          contained_mixed_form == other.contained_mixed_form);
 }
 
 }  // namespace security_state

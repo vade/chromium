@@ -19,16 +19,21 @@ TestContextSupport::TestContextSupport()
 
 TestContextSupport::~TestContextSupport() {}
 
+int32_t TestContextSupport::GetStreamId() const {
+  return 0;
+}
+
+void TestContextSupport::FlushOrderingBarrierOnStream(int32_t stream_id) {}
+
 void TestContextSupport::SignalSyncToken(const gpu::SyncToken& sync_token,
                                          const base::Closure& callback) {
   sync_point_callbacks_.push_back(callback);
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&TestContextSupport::CallAllSyncPointCallbacks,
-                            weak_ptr_factory_.GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&TestContextSupport::CallAllSyncPointCallbacks,
+                                weak_ptr_factory_.GetWeakPtr()));
 }
 
-bool TestContextSupport::IsSyncTokenSignalled(
-    const gpu::SyncToken& sync_token) {
+bool TestContextSupport::IsSyncTokenSignaled(const gpu::SyncToken& sync_token) {
   return true;
 }
 
@@ -36,8 +41,8 @@ void TestContextSupport::SignalQuery(uint32_t query,
                                      const base::Closure& callback) {
   sync_point_callbacks_.push_back(callback);
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&TestContextSupport::CallAllSyncPointCallbacks,
-                            weak_ptr_factory_.GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&TestContextSupport::CallAllSyncPointCallbacks,
+                                weak_ptr_factory_.GetWeakPtr()));
 }
 
 void TestContextSupport::SetAggressivelyFreeResources(
@@ -66,7 +71,7 @@ void TestContextSupport::SetScheduleOverlayPlaneCallback(
 
 void TestContextSupport::Swap() {}
 
-void TestContextSupport::SwapWithDamage(const gfx::Rect& damage) {}
+void TestContextSupport::SwapWithBounds(const std::vector<gfx::Rect>& rects) {}
 
 void TestContextSupport::PartialSwapBuffers(const gfx::Rect& sub_buffer) {}
 
@@ -92,5 +97,8 @@ uint64_t TestContextSupport::ShareGroupTracingGUID() const {
 
 void TestContextSupport::SetErrorMessageCallback(
     const base::Callback<void(const char*, int32_t)>& callback) {}
+
+void TestContextSupport::AddLatencyInfo(
+    const std::vector<ui::LatencyInfo>& latency_info) {}
 
 }  // namespace cc

@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/containers/hash_tables.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
@@ -21,7 +22,9 @@
 #include "gpu/ipc/service/gpu_channel.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/message_filter.h"
+#include "media/base/media_switches.h"
 #include "media/filters/jpeg_parser.h"
+#include "media/gpu/fake_jpeg_decode_accelerator.h"
 #include "media/gpu/ipc/common/media_messages.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -29,13 +32,43 @@
 #if defined(ARCH_CPU_X86_FAMILY)
 #include "media/gpu/vaapi_jpeg_decode_accelerator.h"
 #endif
-#if defined(USE_V4L2_CODEC)
+#if defined(USE_V4L2_CODEC) && defined(ARCH_CPU_ARM_FAMILY)
 #include "media/gpu/v4l2_device.h"
 #include "media/gpu/v4l2_jpeg_decode_accelerator.h"
 #endif
+
 #endif
 
 namespace {
+
+std::unique_ptr<media::JpegDecodeAccelerator> CreateV4L2JDA(
+    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner) {
+  std::unique_ptr<media::JpegDecodeAccelerator> decoder;
+#if defined(OS_CHROMEOS) && defined(USE_V4L2_CODEC) && \
+    defined(ARCH_CPU_ARM_FAMILY)
+  scoped_refptr<media::V4L2Device> device = media::V4L2Device::Create();
+  if (device)
+    decoder.reset(new media::V4L2JpegDecodeAccelerator(
+        device, std::move(io_task_runner)));
+#endif
+  return decoder;
+}
+
+std::unique_ptr<media::JpegDecodeAccelerator> CreateVaapiJDA(
+    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner) {
+  std::unique_ptr<media::JpegDecodeAccelerator> decoder;
+#if defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
+  decoder.reset(
+      new media::VaapiJpegDecodeAccelerator(std::move(io_task_runner)));
+#endif
+  return decoder;
+}
+
+std::unique_ptr<media::JpegDecodeAccelerator> CreateFakeJDA(
+    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner) {
+  return base::MakeUnique<media::FakeJpegDecodeAccelerator>(
+      std::move(io_task_runner));
+}
 
 void DecodeFinished(std::unique_ptr<base::SharedMemory> shm) {
   // Do nothing. Because VideoFrame is backed by |shm|, the purpose of this
@@ -72,17 +105,22 @@ bool VerifyDecodeParams(const AcceleratedJpegDecoderMsg_Decode_Params& params) {
 
 namespace media {
 
-class GpuJpegDecodeAccelerator::Client : public JpegDecodeAccelerator::Client,
-                                         public base::NonThreadSafe {
+class GpuJpegDecodeAccelerator::Client : public JpegDecodeAccelerator::Client {
  public:
-  Client(GpuJpegDecodeAccelerator* owner, int32_t route_id)
-      : owner_(owner->AsWeakPtr()), route_id_(route_id) {}
+  Client(base::WeakPtr<GpuJpegDecodeAccelerator> owner,
+         int32_t route_id,
+         scoped_refptr<base::SingleThreadTaskRunner> io_task_runner)
+      : owner_(std::move(owner)),
+        route_id_(route_id),
+        io_task_runner_(std::move(io_task_runner)) {
+    DCHECK(thread_checker_.CalledOnValidThread());
+  }
 
-  ~Client() override { DCHECK(CalledOnValidThread()); }
+  ~Client() override { DCHECK(thread_checker_.CalledOnValidThread()); }
 
   // JpegDecodeAccelerator::Client implementation.
   void VideoFrameReady(int32_t bitstream_buffer_id) override {
-    DCHECK(CalledOnValidThread());
+    DCHECK(thread_checker_.CalledOnValidThread());
     if (owner_)
       owner_->NotifyDecodeStatus(route_id_, bitstream_buffer_id,
                                  JpegDecodeAccelerator::NO_ERRORS);
@@ -90,31 +128,34 @@ class GpuJpegDecodeAccelerator::Client : public JpegDecodeAccelerator::Client,
 
   void NotifyError(int32_t bitstream_buffer_id,
                    JpegDecodeAccelerator::Error error) override {
-    DCHECK(CalledOnValidThread());
+    DCHECK(thread_checker_.CalledOnValidThread());
     if (owner_)
       owner_->NotifyDecodeStatus(route_id_, bitstream_buffer_id, error);
   }
 
   void Decode(const BitstreamBuffer& bitstream_buffer,
               const scoped_refptr<VideoFrame>& video_frame) {
-    DCHECK(CalledOnValidThread());
+    DCHECK(io_task_runner_->BelongsToCurrentThread());
     DCHECK(accelerator_);
     accelerator_->Decode(bitstream_buffer, video_frame);
   }
 
   void set_accelerator(std::unique_ptr<JpegDecodeAccelerator> accelerator) {
-    DCHECK(CalledOnValidThread());
+    DCHECK(thread_checker_.CalledOnValidThread());
     accelerator_ = std::move(accelerator);
   }
 
  private:
+  base::ThreadChecker thread_checker_;
   base::WeakPtr<GpuJpegDecodeAccelerator> owner_;
-  int32_t route_id_;
+  const int32_t route_id_;
+  const scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
   std::unique_ptr<JpegDecodeAccelerator> accelerator_;
 };
 
 // Create, destroy, and RemoveClient run on child thread. All other methods run
 // on IO thread.
+// TODO(chfremer): Migrate this to Mojo. See https://crbug.com/699255
 class GpuJpegDecodeAccelerator::MessageFilter : public IPC::MessageFilter {
  public:
   explicit MessageFilter(GpuJpegDecodeAccelerator* owner)
@@ -291,12 +332,51 @@ class GpuJpegDecodeAccelerator::MessageFilter : public IPC::MessageFilter {
   ClientMap client_map_;
 };
 
+// static
+bool GpuJpegDecodeAcceleratorFactoryProvider::
+    IsAcceleratedJpegDecodeSupported() {
+  auto accelerator_factory_functions = GetAcceleratorFactories();
+  for (const auto& create_jda_function : accelerator_factory_functions) {
+    std::unique_ptr<JpegDecodeAccelerator> accelerator =
+        create_jda_function.Run(base::ThreadTaskRunnerHandle::Get());
+    if (accelerator && accelerator->IsSupported())
+      return true;
+  }
+  return false;
+}
+
+// static
+std::vector<GpuJpegDecodeAcceleratorFactoryProvider::CreateAcceleratorCB>
+GpuJpegDecodeAcceleratorFactoryProvider::GetAcceleratorFactories() {
+  // This list is ordered by priority of use.
+  std::vector<CreateAcceleratorCB> result;
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kUseFakeJpegDecodeAccelerator)) {
+    result.push_back(base::Bind(&CreateFakeJDA));
+  } else {
+    result.push_back(base::Bind(&CreateV4L2JDA));
+    result.push_back(base::Bind(&CreateVaapiJDA));
+  }
+  return result;
+}
+
 GpuJpegDecodeAccelerator::GpuJpegDecodeAccelerator(
-    gpu::GpuChannel* channel,
-    const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner)
-    : channel_(channel),
+    gpu::FilteredSender* channel,
+    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner)
+    : GpuJpegDecodeAccelerator(
+          channel,
+          std::move(io_task_runner),
+          GpuJpegDecodeAcceleratorFactoryProvider::GetAcceleratorFactories()) {}
+
+GpuJpegDecodeAccelerator::GpuJpegDecodeAccelerator(
+    gpu::FilteredSender* channel,
+    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
+    std::vector<GpuJpegDecodeAcceleratorFactoryProvider::CreateAcceleratorCB>
+        accelerator_factory_functions)
+    : accelerator_factory_functions_(accelerator_factory_functions),
+      channel_(channel),
       child_task_runner_(base::ThreadTaskRunnerHandle::Get()),
-      io_task_runner_(io_task_runner),
+      io_task_runner_(std::move(io_task_runner)),
       client_number_(0) {}
 
 GpuJpegDecodeAccelerator::~GpuJpegDecodeAccelerator() {
@@ -313,17 +393,12 @@ void GpuJpegDecodeAccelerator::AddClient(int32_t route_id,
   // When adding non-chromeos platforms, VideoCaptureGpuJpegDecoder::Initialize
   // needs to be updated.
 
-  // This list is ordered by priority of use.
-  const GpuJpegDecodeAccelerator::CreateJDAFp create_jda_fps[] = {
-      &GpuJpegDecodeAccelerator::CreateV4L2JDA,
-      &GpuJpegDecodeAccelerator::CreateVaapiJDA,
-  };
-
-  std::unique_ptr<Client> client(new Client(this, route_id));
+  std::unique_ptr<Client> client(
+      new Client(AsWeakPtr(), route_id, io_task_runner_));
   std::unique_ptr<JpegDecodeAccelerator> accelerator;
-  for (const auto& create_jda_function : create_jda_fps) {
+  for (const auto& create_jda_function : accelerator_factory_functions_) {
     std::unique_ptr<JpegDecodeAccelerator> tmp_accelerator =
-        (*create_jda_function)(io_task_runner_);
+        create_jda_function.Run(io_task_runner_);
     if (tmp_accelerator && tmp_accelerator->Initialize(client.get())) {
       accelerator = std::move(tmp_accelerator);
       break;
@@ -377,43 +452,6 @@ void GpuJpegDecodeAccelerator::ClientRemoved() {
 bool GpuJpegDecodeAccelerator::Send(IPC::Message* message) {
   DCHECK(CalledOnValidThread());
   return channel_->Send(message);
-}
-
-// static
-std::unique_ptr<JpegDecodeAccelerator> GpuJpegDecodeAccelerator::CreateV4L2JDA(
-    const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner) {
-  std::unique_ptr<JpegDecodeAccelerator> decoder;
-#if defined(OS_CHROMEOS) && defined(USE_V4L2_CODEC)
-  scoped_refptr<V4L2Device> device = V4L2Device::Create();
-  if (device)
-    decoder.reset(new V4L2JpegDecodeAccelerator(device, io_task_runner));
-#endif
-  return decoder;
-}
-
-// static
-std::unique_ptr<JpegDecodeAccelerator> GpuJpegDecodeAccelerator::CreateVaapiJDA(
-    const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner) {
-  std::unique_ptr<JpegDecodeAccelerator> decoder;
-#if defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
-  decoder.reset(new VaapiJpegDecodeAccelerator(io_task_runner));
-#endif
-  return decoder;
-}
-
-// static
-bool GpuJpegDecodeAccelerator::IsSupported() {
-  const GpuJpegDecodeAccelerator::CreateJDAFp create_jda_fps[] = {
-      &GpuJpegDecodeAccelerator::CreateV4L2JDA,
-      &GpuJpegDecodeAccelerator::CreateVaapiJDA,
-  };
-  for (const auto& create_jda_function : create_jda_fps) {
-    std::unique_ptr<JpegDecodeAccelerator> accelerator =
-        (*create_jda_function)(base::ThreadTaskRunnerHandle::Get());
-    if (accelerator && accelerator->IsSupported())
-      return true;
-  }
-  return false;
 }
 
 }  // namespace media

@@ -7,13 +7,8 @@
       "drawsContent": true,
       "paintInvalidations": [
         {
-          "object": "LayoutSVGInlineText #text",
-          "rect": [33, 23, 699, 189],
-          "reason": "forced by layout"
-        },
-        {
           "object": "LayoutSVGText text",
-          "rect": [33, 23, 699, 189],
+          "rect": [33, 23, 697, 194],
           "reason": "style change"
         }
       ]
@@ -30,23 +25,23 @@
     },
     {
       "object": "LayoutSVGInlineText #text",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'Gradient on fill'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutSVGResourceLinearGradient linearGradient id='dynGrad'",
-      "reason": "layoutObject insertion"
+      "reason": "appeared"
     },
     {
       "object": "LayoutSVGGradientStop stop",
-      "reason": "layoutObject insertion"
+      "reason": "appeared"
     },
     {
       "object": "LayoutSVGGradientStop stop",
-      "reason": "layoutObject insertion"
+      "reason": "appeared"
     }
   ]
 }

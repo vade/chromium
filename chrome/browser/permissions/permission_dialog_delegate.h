@@ -10,8 +10,9 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/callback.h"
 #include "base/macros.h"
+#include "chrome/browser/media/webrtc/media_stream_devices_controller.h"
 #include "chrome/browser/permissions/permission_util.h"
-#include "content/public/browser/permission_type.h"
+#include "components/content_settings/core/common/content_settings_types.h"
 
 using base::android::JavaParamRef;
 using base::android::ScopedJavaLocalRef;
@@ -19,8 +20,6 @@ using base::android::ScopedJavaLocalRef;
 namespace content {
 class WebContents;
 }
-
-class MediaStreamDevicesController;
 class GURL;
 class PermissionInfoBarDelegate;
 class Profile;
@@ -41,7 +40,7 @@ class PermissionDialogDelegate {
 
   // Creates a modal dialog for |type|.
   static void Create(content::WebContents* web_contents,
-                     content::PermissionType type,
+                     ContentSettingsType type,
                      const GURL& requesting_frame,
                      bool user_gesture,
                      Profile* profile,
@@ -53,7 +52,7 @@ class PermissionDialogDelegate {
   static void CreateMediaStreamDialog(
       content::WebContents* web_contents,
       bool user_gesture,
-      std::unique_ptr<MediaStreamDevicesController> controller);
+      std::unique_ptr<MediaStreamDevicesController::Request> request);
 
   // Returns true if we should show the user a modal permission prompt rather
   // than an infobar.

@@ -152,7 +152,7 @@ DropData* WebContentsViewChildFrame::GetDropData() const {
 }
 
 void WebContentsViewChildFrame::UpdateDragCursor(WebDragOperation operation) {
-  if (auto view = GetOuterDelegateView())
+  if (auto* view = GetOuterDelegateView())
     view->UpdateDragCursor(operation);
 }
 
@@ -171,7 +171,8 @@ void WebContentsViewChildFrame::TakeFocus(bool reverse) {
       outer_node->parent()->render_manager()->current_frame_host();
 
   rfhi->AdvanceFocus(
-      reverse ? blink::WebFocusTypeBackward : blink::WebFocusTypeForward, rfp);
+      reverse ? blink::kWebFocusTypeBackward : blink::kWebFocusTypeForward,
+      rfp);
 }
 
 void WebContentsViewChildFrame::ShowContextMenu(
@@ -187,7 +188,7 @@ void WebContentsViewChildFrame::StartDragging(
     const gfx::Vector2d& image_offset,
     const DragEventSourceInfo& event_info,
     RenderWidgetHostImpl* source_rwh) {
-  if (auto view = GetOuterDelegateView()) {
+  if (auto* view = GetOuterDelegateView()) {
     view->StartDragging(
         drop_data, ops, image, image_offset, event_info, source_rwh);
   } else {

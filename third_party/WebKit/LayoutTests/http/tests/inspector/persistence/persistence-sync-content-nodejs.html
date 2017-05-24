@@ -6,8 +6,9 @@
 <script src="./persistence-test.js"></script>
 <script>
 
-function test()
+async function test()
 {
+    var testMapping = InspectorTest.initializeTestMapping();
     // Pretend we are running under V8 front-end.
     SDK.targetManager.mainTarget().setIsNodeJSForTest();
 
@@ -26,20 +27,15 @@ function test()
     InspectorTest.addResult("\n Initial network content:");
     InspectorTest.addResult(indent(nodeContent));
 
-    // Add network UISourceCode.
-    var networkProject = Bindings.NetworkProject.forTarget(SDK.targetManager.mainTarget());
-    var resourceTreeModel = SDK.ResourceTreeModel.fromTarget(SDK.targetManager.mainTarget());
-    var mainFrame = resourceTreeModel.mainFrame;
-    var contentProvider = new Common.StaticContentProvider("http://127.0.0.1:8000/nodejs.js", Common.resourceTypes.Script, () => Promise.resolve(nodeContent));
-    networkProject.addFile(contentProvider, mainFrame, false);
+    await InspectorTest.addScriptUISourceCode("http://127.0.0.1:8000/nodejs.js", nodeContent);
 
     // Add filesystem UISourceCode and mapping.
     var fs = new InspectorTest.TestFileSystem("file:///var/www");
     var fsEntry = fs.root.addFile("nodejs.js", fsContent);
-    fs.addFileMapping("http://127.0.0.1:8000", "/");
     fs.reportCreated(function() { });
 
     var binding;
+    testMapping.addBinding("nodejs.js");
     InspectorTest.waitForBinding("nodejs.js").then(onBindingCreated);
 
     function onBindingCreated(theBinding)

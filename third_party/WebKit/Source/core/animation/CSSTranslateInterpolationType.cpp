@@ -4,165 +4,212 @@
 
 #include "core/animation/CSSTranslateInterpolationType.h"
 
+#include <memory>
 #include "core/animation/LengthInterpolationFunctions.h"
 #include "core/css/CSSValueList.h"
 #include "core/css/resolver/StyleResolverState.h"
 #include "platform/transforms/TranslateTransformOperation.h"
-#include "wtf/PtrUtil.h"
-#include <memory>
+#include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
 namespace {
 
+InterpolationValue CreateNoneValue() {
+  return InterpolationValue(InterpolableList::Create(0));
+}
+
+bool IsNoneValue(const InterpolationValue& value) {
+  return ToInterpolableList(*value.interpolable_value).length() == 0;
+}
+
 class InheritedTranslateChecker : public InterpolationType::ConversionChecker {
  public:
   ~InheritedTranslateChecker() {}
 
-  static std::unique_ptr<InheritedTranslateChecker> create(
-      PassRefPtr<TranslateTransformOperation> inheritedTranslate) {
-    return WTF::wrapUnique(
-        new InheritedTranslateChecker(std::move(inheritedTranslate)));
+  static std::unique_ptr<InheritedTranslateChecker> Create(
+      PassRefPtr<TranslateTransformOperation> inherited_translate) {
+    return WTF::WrapUnique(
+        new InheritedTranslateChecker(std::move(inherited_translate)));
   }
 
-  bool isValid(const InterpolationEnvironment& environment,
+  bool IsValid(const InterpolationEnvironment& environment,
                const InterpolationValue& underlying) const final {
-    const TransformOperation* inheritedTranslate =
-        environment.state().parentStyle()->translate();
-    if (m_inheritedTranslate == inheritedTranslate)
+    const TransformOperation* inherited_translate =
+        environment.GetState().ParentStyle()->Translate();
+    if (inherited_translate_ == inherited_translate)
       return true;
-    if (!m_inheritedTranslate || !inheritedTranslate)
+    if (!inherited_translate_ || !inherited_translate)
       return false;
-    return *m_inheritedTranslate == *inheritedTranslate;
+    return *inherited_translate_ == *inherited_translate;
   }
 
  private:
   InheritedTranslateChecker(
-      PassRefPtr<TranslateTransformOperation> inheritedTranslate)
-      : m_inheritedTranslate(inheritedTranslate) {}
+      PassRefPtr<TranslateTransformOperation> inherited_translate)
+      : inherited_translate_(std::move(inherited_translate)) {}
 
-  RefPtr<TransformOperation> m_inheritedTranslate;
+  RefPtr<TransformOperation> inherited_translate_;
 };
 
 enum TranslateComponentIndex : unsigned {
-  TranslateX,
-  TranslateY,
-  TranslateZ,
-  TranslateComponentIndexCount,
+  kTranslateX,
+  kTranslateY,
+  kTranslateZ,
+  kTranslateComponentIndexCount,
 };
 
-InterpolationValue createNeutralValue() {
+std::unique_ptr<InterpolableValue> CreateTranslateIdentity() {
   std::unique_ptr<InterpolableList> result =
-      InterpolableList::create(TranslateComponentIndexCount);
-  result->set(TranslateX,
-              LengthInterpolationFunctions::createNeutralInterpolableValue());
-  result->set(TranslateY,
-              LengthInterpolationFunctions::createNeutralInterpolableValue());
-  result->set(TranslateZ,
-              LengthInterpolationFunctions::createNeutralInterpolableValue());
-  return InterpolationValue(std::move(result));
+      InterpolableList::Create(kTranslateComponentIndexCount);
+  result->Set(kTranslateX,
+              LengthInterpolationFunctions::CreateNeutralInterpolableValue());
+  result->Set(kTranslateY,
+              LengthInterpolationFunctions::CreateNeutralInterpolableValue());
+  result->Set(kTranslateZ,
+              LengthInterpolationFunctions::CreateNeutralInterpolableValue());
+  return std::move(result);
 }
 
-InterpolationValue convertTranslateOperation(
+InterpolationValue ConvertTranslateOperation(
     const TranslateTransformOperation* translate,
     double zoom) {
   if (!translate)
-    return createNeutralValue();
+    return CreateNoneValue();
 
   std::unique_ptr<InterpolableList> result =
-      InterpolableList::create(TranslateComponentIndexCount);
-  result->set(TranslateX, LengthInterpolationFunctions::maybeConvertLength(
-                              translate->x(), zoom)
-                              .interpolableValue);
-  result->set(TranslateY, LengthInterpolationFunctions::maybeConvertLength(
-                              translate->y(), zoom)
-                              .interpolableValue);
-  result->set(TranslateZ, LengthInterpolationFunctions::maybeConvertLength(
-                              Length(translate->z(), Fixed), zoom)
-                              .interpolableValue);
+      InterpolableList::Create(kTranslateComponentIndexCount);
+  result->Set(kTranslateX, LengthInterpolationFunctions::MaybeConvertLength(
+                               translate->X(), zoom)
+                               .interpolable_value);
+  result->Set(kTranslateY, LengthInterpolationFunctions::MaybeConvertLength(
+                               translate->Y(), zoom)
+                               .interpolable_value);
+  result->Set(kTranslateZ, LengthInterpolationFunctions::MaybeConvertLength(
+                               Length(translate->Z(), kFixed), zoom)
+                               .interpolable_value);
   return InterpolationValue(std::move(result));
 }
 
 }  // namespace
 
-InterpolationValue CSSTranslateInterpolationType::maybeConvertNeutral(
+InterpolationValue CSSTranslateInterpolationType::MaybeConvertNeutral(
     const InterpolationValue& underlying,
     ConversionCheckers&) const {
-  return createNeutralValue();
+  return InterpolationValue(CreateTranslateIdentity());
 }
 
-InterpolationValue CSSTranslateInterpolationType::maybeConvertInitial(
+InterpolationValue CSSTranslateInterpolationType::MaybeConvertInitial(
     const StyleResolverState&,
     ConversionCheckers&) const {
-  return createNeutralValue();
+  return CreateNoneValue();
 }
 
-InterpolationValue CSSTranslateInterpolationType::maybeConvertInherit(
+InterpolationValue CSSTranslateInterpolationType::MaybeConvertInherit(
     const StyleResolverState& state,
-    ConversionCheckers& conversionCheckers) const {
-  TranslateTransformOperation* inheritedTranslate =
-      state.parentStyle()->translate();
-  conversionCheckers.push_back(
-      InheritedTranslateChecker::create(inheritedTranslate));
-  return convertTranslateOperation(inheritedTranslate,
-                                   state.parentStyle()->effectiveZoom());
+    ConversionCheckers& conversion_checkers) const {
+  TranslateTransformOperation* inherited_translate =
+      state.ParentStyle()->Translate();
+  conversion_checkers.push_back(
+      InheritedTranslateChecker::Create(inherited_translate));
+  return ConvertTranslateOperation(inherited_translate,
+                                   state.ParentStyle()->EffectiveZoom());
 }
 
-InterpolationValue CSSTranslateInterpolationType::maybeConvertValue(
+InterpolationValue CSSTranslateInterpolationType::MaybeConvertValue(
     const CSSValue& value,
-    const StyleResolverState&,
+    const StyleResolverState*,
     ConversionCheckers&) const {
-  if (!value.isBaseValueList())
-    return nullptr;
+  if (!value.IsBaseValueList()) {
+    return CreateNoneValue();
+  }
 
-  const CSSValueList& list = toCSSValueList(value);
+  const CSSValueList& list = ToCSSValueList(value);
   if (list.length() < 1 || list.length() > 3)
     return nullptr;
 
   std::unique_ptr<InterpolableList> result =
-      InterpolableList::create(TranslateComponentIndexCount);
-  for (size_t i = 0; i < TranslateComponentIndexCount; i++) {
+      InterpolableList::Create(kTranslateComponentIndexCount);
+  for (size_t i = 0; i < kTranslateComponentIndexCount; i++) {
     InterpolationValue component = nullptr;
     if (i < list.length()) {
       component =
-          LengthInterpolationFunctions::maybeConvertCSSValue(list.item(i));
+          LengthInterpolationFunctions::MaybeConvertCSSValue(list.Item(i));
       if (!component)
         return nullptr;
     } else {
       component = InterpolationValue(
-          LengthInterpolationFunctions::createNeutralInterpolableValue());
+          LengthInterpolationFunctions::CreateNeutralInterpolableValue());
     }
-    result->set(i, std::move(component.interpolableValue));
+    result->Set(i, std::move(component.interpolable_value));
   }
   return InterpolationValue(std::move(result));
 }
 
-InterpolationValue
-CSSTranslateInterpolationType::maybeConvertStandardPropertyUnderlyingValue(
-    const StyleResolverState& state) const {
-  return convertTranslateOperation(state.style()->translate(),
-                                   state.style()->effectiveZoom());
+PairwiseInterpolationValue CSSTranslateInterpolationType::MaybeMergeSingles(
+    InterpolationValue&& start,
+    InterpolationValue&& end) const {
+  size_t start_list_length =
+      ToInterpolableList(*start.interpolable_value).length();
+  size_t end_list_length = ToInterpolableList(*end.interpolable_value).length();
+  if (start_list_length < end_list_length)
+    start.interpolable_value = CreateTranslateIdentity();
+  else if (end_list_length < start_list_length)
+    end.interpolable_value = CreateTranslateIdentity();
+
+  return PairwiseInterpolationValue(std::move(start.interpolable_value),
+                                    std::move(end.interpolable_value));
 }
 
-void CSSTranslateInterpolationType::applyStandardPropertyValue(
-    const InterpolableValue& interpolableValue,
+InterpolationValue
+CSSTranslateInterpolationType::MaybeConvertStandardPropertyUnderlyingValue(
+    const ComputedStyle& style) const {
+  return ConvertTranslateOperation(style.Translate(), style.EffectiveZoom());
+}
+
+void CSSTranslateInterpolationType::Composite(
+    UnderlyingValueOwner& underlying_value_owner,
+    double underlying_fraction,
+    const InterpolationValue& value,
+    double interpolation_fraction) const {
+  if (IsNoneValue(value)) {
+    return;
+  }
+
+  if (IsNoneValue(underlying_value_owner.MutableValue())) {
+    underlying_value_owner.MutableValue().interpolable_value =
+        CreateTranslateIdentity();
+  }
+
+  return CSSInterpolationType::Composite(underlying_value_owner,
+                                         underlying_fraction, value,
+                                         interpolation_fraction);
+}
+
+void CSSTranslateInterpolationType::ApplyStandardPropertyValue(
+    const InterpolableValue& interpolable_value,
     const NonInterpolableValue*,
     StyleResolverState& state) const {
-  const InterpolableList& list = toInterpolableList(interpolableValue);
-  const CSSToLengthConversionData& conversionData =
-      state.cssToLengthConversionData();
-  Length x = LengthInterpolationFunctions::createLength(
-      *list.get(TranslateX), nullptr, conversionData, ValueRangeAll);
-  Length y = LengthInterpolationFunctions::createLength(
-      *list.get(TranslateY), nullptr, conversionData, ValueRangeAll);
-  float z = LengthInterpolationFunctions::createLength(
-                *list.get(TranslateZ), nullptr, conversionData, ValueRangeAll)
-                .pixels();
+  const InterpolableList& list = ToInterpolableList(interpolable_value);
+  if (list.length() == 0) {
+    state.Style()->SetTranslate(nullptr);
+    return;
+  }
+  const CSSToLengthConversionData& conversion_data =
+      state.CssToLengthConversionData();
+  Length x = LengthInterpolationFunctions::CreateLength(
+      *list.Get(kTranslateX), nullptr, conversion_data, kValueRangeAll);
+  Length y = LengthInterpolationFunctions::CreateLength(
+      *list.Get(kTranslateY), nullptr, conversion_data, kValueRangeAll);
+  float z =
+      LengthInterpolationFunctions::CreateLength(
+          *list.Get(kTranslateZ), nullptr, conversion_data, kValueRangeAll)
+          .Pixels();
 
   RefPtr<TranslateTransformOperation> result =
-      TranslateTransformOperation::create(x, y, z,
-                                          TransformOperation::Translate3D);
-  state.style()->setTranslate(std::move(result));
+      TranslateTransformOperation::Create(x, y, z,
+                                          TransformOperation::kTranslate3D);
+  state.Style()->SetTranslate(std::move(result));
 }
 
 }  // namespace blink

@@ -12,10 +12,13 @@ component("generic_sensor") {
   output_name = "generic_sensor"
   sources = [
     "generic_sensor_consts.h",
+    "generic_sensor_export.h",
     "linux/sensor_data_linux.cc",
     "linux/sensor_data_linux.h",
     "platform_sensor.cc",
     "platform_sensor.h",
+    "platform_sensor_accelerometer_mac.cc",
+    "platform_sensor_accelerometer_mac.h",
     "platform_sensor_ambient_light_mac.cc",
     "platform_sensor_ambient_light_mac.h",
     "platform_sensor_android.cc",
@@ -65,8 +68,14 @@ component("generic_sensor") {
   }
 
   if (is_mac) {
-    deps += [ "//device/sensors/public/cpp" ]
-    libs = [ "IOKit.framework" ]
+    deps += [
+      "//device/sensors/public/cpp:full",
+      "//third_party/sudden_motion_sensor",
+    ]
+    libs = [
+      "CoreFoundation.framework",
+      "IOKit.framework",
+    ]
   }
 
   if (use_udev) {

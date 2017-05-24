@@ -8,7 +8,6 @@
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/memory/scoped_vector.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/task_scheduler/task_scheduler.h"
@@ -292,7 +291,7 @@ void WindowManager::OnDisplaysAquired(
   windows_.clear();
 
   gfx::Point origin;
-  for (auto display : displays) {
+  for (auto* display : displays) {
     if (!display->native_mode()) {
       LOG(ERROR) << "Display " << display->display_id()
                  << " doesn't have a native mode";
@@ -338,9 +337,7 @@ int main(int argc, char** argv) {
   // Build UI thread message loop. This is used by platform
   // implementations for event polling & running background tasks.
   base::MessageLoopForUI message_loop;
-  constexpr int kMaxTaskSchedulerThreads = 3;
-  base::TaskScheduler::CreateAndSetSimpleTaskScheduler(
-      kMaxTaskSchedulerThreads);
+  base::TaskScheduler::CreateAndStartWithDefaultParams("OzoneDemo");
 
   ui::OzonePlatform::InitializeForUI();
   ui::KeyboardLayoutEngineManager::GetKeyboardLayoutEngine()

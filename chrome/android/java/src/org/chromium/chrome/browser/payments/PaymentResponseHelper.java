@@ -4,11 +4,10 @@
 
 package org.chromium.chrome.browser.payments;
 
-import android.os.Handler;
-
 import org.chromium.chrome.browser.autofill.PersonalDataManager;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.NormalizedAddressRequestDelegate;
+import org.chromium.chrome.browser.autofill.PhoneNumberUtil;
 import org.chromium.chrome.browser.payments.ui.PaymentOption;
 import org.chromium.payments.mojom.PaymentResponse;
 
@@ -57,6 +56,12 @@ public class PaymentResponseHelper implements NormalizedAddressRequestDelegate {
             mPaymentResponse.payerName = ((AutofillContact) selectedContact).getPayerName();
             mPaymentResponse.payerPhone = ((AutofillContact) selectedContact).getPayerPhone();
             mPaymentResponse.payerEmail = ((AutofillContact) selectedContact).getPayerEmail();
+
+            // Normalize the phone number only if it's not null since this calls native code.
+            if (mPaymentResponse.payerPhone != null) {
+                mPaymentResponse.payerPhone =
+                        PhoneNumberUtil.formatForResponse(mPaymentResponse.payerPhone);
+            }
         }
 
         // Set up the shipping section of the response.
@@ -84,25 +89,8 @@ public class PaymentResponseHelper implements NormalizedAddressRequestDelegate {
             // merchant.
             mIsWaitingForShippingNormalization = true;
             PersonalDataManager.getInstance().normalizeAddress(
-                    mSelectedShippingAddress.getProfile().getGUID(),
+                    mSelectedShippingAddress.getProfile(),
                     AutofillAddress.getCountryCode(mSelectedShippingAddress.getProfile()), this);
-        }
-    }
-
-    /**
-     * Called when the intrument details have started loading. Starts a timeout to stop the shipping
-     * address normalization if it takes too long.
-     */
-    public void onInstrumentsDetailsLoading() {
-        if (mIsWaitingForShippingNormalization) {
-            // If the normalization is not completed yet, start a timer to cancel it if it takes too
-            // long.
-            new Handler().postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    onAddressNormalized(null);
-                }
-            }, PersonalDataManager.getInstance().getNormalizationTimeoutMS());
         }
     }
 
@@ -137,5 +125,10 @@ public class PaymentResponseHelper implements NormalizedAddressRequestDelegate {
 
         // Wait for the payment details before sending the response.
         if (!mIsWaitingForPaymentsDetails) mDelegate.onPaymentResponseReady(mPaymentResponse);
+    }
+
+    @Override
+    public void onCouldNotNormalize(AutofillProfile profile) {
+        onAddressNormalized(profile);
     }
 }

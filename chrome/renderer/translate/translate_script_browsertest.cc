@@ -88,8 +88,9 @@ class TranslateScriptBrowserTest : public ChromeRenderViewTest {
   }
 
   void ExecuteScript(const std::string& script) {
-    WebScriptSource source = WebScriptSource(base::ASCIIToUTF16(script));
-    GetMainFrame()->executeScript(source);
+    WebScriptSource source =
+        WebScriptSource(blink::WebString::FromASCII(script));
+    GetMainFrame()->ExecuteScript(source);
   }
 
   bool GetError() {
@@ -110,10 +111,11 @@ class TranslateScriptBrowserTest : public ChromeRenderViewTest {
   void TearDown() override { ChromeRenderViewTest::TearDown(); }
 
   double ExecuteScriptAndGetNumberResult(const std::string& script) {
-    WebScriptSource source = WebScriptSource(base::ASCIIToUTF16(script));
+    WebScriptSource source =
+        WebScriptSource(blink::WebString::FromASCII(script));
     v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
     v8::Local<v8::Value> result =
-        GetMainFrame()->executeScriptAndReturnValue(source);
+        GetMainFrame()->ExecuteScriptAndReturnValue(source);
     if (result.IsEmpty() || !result->IsNumber()) {
       NOTREACHED();
       // TODO(toyoshim): Return NaN here and the real implementation in
@@ -124,10 +126,11 @@ class TranslateScriptBrowserTest : public ChromeRenderViewTest {
   }
 
   bool ExecuteScriptAndGetBoolResult(const std::string& script) {
-    WebScriptSource source = WebScriptSource(base::ASCIIToUTF16(script));
+    WebScriptSource source =
+        WebScriptSource(blink::WebString::FromASCII(script));
     v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
     v8::Local<v8::Value> result =
-        GetMainFrame()->executeScriptAndReturnValue(source);
+        GetMainFrame()->ExecuteScriptAndReturnValue(source);
     if (result.IsEmpty() || !result->IsBoolean()) {
       NOTREACHED();
       return false;

@@ -5,15 +5,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <tuple>
+#include <vector>
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_message_filter.h"
 #include "chrome/browser/spellchecker/spellcheck_service.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/spellcheck/common/spellcheck_marker.h"
 #include "components/spellcheck/common/spellcheck_messages.h"
 #include "components/spellcheck/spellcheck_build_features.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -27,7 +29,7 @@ class TestingSpellCheckMessageFilter : public SpellCheckMessageFilter {
         spellcheck_(new SpellcheckService(&profile_)) {}
 
   bool Send(IPC::Message* message) override {
-    sent_messages.push_back(message);
+    sent_messages.push_back(base::WrapUnique(message));
     return true;
   }
 
@@ -38,16 +40,15 @@ class TestingSpellCheckMessageFilter : public SpellCheckMessageFilter {
 #if !BUILDFLAG(USE_BROWSER_SPELLCHECKER)
   void OnTextCheckComplete(int route_id,
                            int identifier,
-                           const std::vector<SpellCheckMarker>& markers,
                            bool success,
                            const base::string16& text,
                            const std::vector<SpellCheckResult>& results) {
-    SpellCheckMessageFilter::OnTextCheckComplete(
-        route_id, identifier, markers, success, text, results);
+    SpellCheckMessageFilter::OnTextCheckComplete(route_id, identifier, success,
+                                                 text, results);
   }
 #endif
 
-  ScopedVector<IPC::Message> sent_messages;
+  std::vector<std::unique_ptr<IPC::Message>> sent_messages;
 
  private:
   ~TestingSpellCheckMessageFilter() override {}
@@ -63,7 +64,6 @@ TEST(SpellCheckMessageFilterTest, TestOverrideThread) {
   static const uint32_t kSpellcheckMessages[] = {
     SpellCheckHostMsg_RequestDictionary::ID,
     SpellCheckHostMsg_NotifyChecked::ID,
-    SpellCheckHostMsg_RespondDocumentMarkers::ID,
 #if !BUILDFLAG(USE_BROWSER_SPELLCHECKER)
     SpellCheckHostMsg_CallSpellingService::ID,
 #endif
@@ -86,7 +86,6 @@ TEST(SpellCheckMessageFilterTest, OnTextCheckCompleteTestCustomDictionary) {
   static const std::string kCustomWord = "Helllo";
   static const int kRouteId = 0;
   static const int kCallbackId = 0;
-  static const std::vector<SpellCheckMarker> kMarkers;
   static const base::string16 kText = base::ASCIIToUTF16("Helllo warld.");
   static const bool kSuccess = true;
   static const SpellCheckResult::Decoration kDecoration =
@@ -104,13 +103,12 @@ TEST(SpellCheckMessageFilterTest, OnTextCheckCompleteTestCustomDictionary) {
   scoped_refptr<TestingSpellCheckMessageFilter> filter(
       new TestingSpellCheckMessageFilter);
   filter->GetSpellcheckService()->GetCustomDictionary()->AddWord(kCustomWord);
-  filter->OnTextCheckComplete(
-      kRouteId, kCallbackId, kMarkers, kSuccess, kText, results);
-  EXPECT_EQ(static_cast<size_t>(1), filter->sent_messages.size());
+  filter->OnTextCheckComplete(kRouteId, kCallbackId, kSuccess, kText, results);
+  ASSERT_EQ(1U, filter->sent_messages.size());
 
   SpellCheckMsg_RespondSpellingService::Param params;
   bool ok = SpellCheckMsg_RespondSpellingService::Read(
-      filter->sent_messages[0], &params);
+      filter->sent_messages[0].get(), &params);
   int sent_identifier = std::get<0>(params);
   bool sent_success = std::get<1>(params);
   base::string16 sent_text = std::get<2>(params);
@@ -119,7 +117,7 @@ TEST(SpellCheckMessageFilterTest, OnTextCheckCompleteTestCustomDictionary) {
   EXPECT_EQ(kCallbackId, sent_identifier);
   EXPECT_EQ(kSuccess, sent_success);
   EXPECT_EQ(kText, sent_text);
-  EXPECT_EQ(static_cast<size_t>(1), sent_results.size());
+  ASSERT_EQ(1U, sent_results.size());
   EXPECT_EQ(kDecoration, sent_results[0].decoration);
   EXPECT_EQ(kLocation, sent_results[0].location);
   EXPECT_EQ(kLength, sent_results[0].length);
@@ -135,16 +133,16 @@ TEST(SpellCheckMessageFilterTest, OnTextCheckCompleteTest) {
 
   scoped_refptr<TestingSpellCheckMessageFilter> filter(
       new TestingSpellCheckMessageFilter);
-  filter->OnTextCheckComplete(1, 1, std::vector<SpellCheckMarker>(),
-      true,  base::ASCIIToUTF16("Helllo walrd"), results);
-  EXPECT_EQ(static_cast<size_t>(1), filter->sent_messages.size());
+  filter->OnTextCheckComplete(1, 1, true, base::ASCIIToUTF16("Helllo walrd"),
+                              results);
+  ASSERT_EQ(1U, filter->sent_messages.size());
 
   SpellCheckMsg_RespondSpellingService::Param params;
   bool ok = SpellCheckMsg_RespondSpellingService::Read(
-      filter->sent_messages[0], & params);
-  base::string16 sent_text = std::get<2>(params);
-  std::vector<SpellCheckResult> sent_results = std::get<3>(params);
+      filter->sent_messages[0].get(), &params);
   EXPECT_TRUE(ok);
-  EXPECT_EQ(static_cast<size_t>(2), sent_results.size());
+
+  std::vector<SpellCheckResult> sent_results = std::get<3>(params);
+  EXPECT_EQ(2U, sent_results.size());
 }
 #endif

@@ -9,8 +9,9 @@
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/layers/layer_impl.h"
+#include "cc/quads/surface_draw_quad.h"
 #include "cc/surfaces/surface_id.h"
 #include "cc/surfaces/surface_info.h"
 
@@ -24,8 +25,21 @@ class CC_EXPORT SurfaceLayerImpl : public LayerImpl {
   }
   ~SurfaceLayerImpl() override;
 
-  void SetSurfaceInfo(const SurfaceInfo& surface_info);
-  const SurfaceInfo& surface_info() const { return surface_info_; }
+  void SetPrimarySurfaceInfo(const SurfaceInfo& surface_info);
+  const SurfaceInfo& primary_surface_info() const {
+    return primary_surface_info_;
+  }
+
+  // A fallback Surface is a Surface that is already known to exist in the
+  // display compositor. If surface synchronization is enabled, the display
+  // compositor will use the fallback if the primary surface is unavailable
+  // at the time of surface aggregation. If surface synchronization is not
+  // enabled, then a fallback surface will not be specified.
+  void SetFallbackSurfaceInfo(const SurfaceInfo& surface_info);
+  const SurfaceInfo& fallback_surface_info() const {
+    return fallback_surface_info_;
+  }
+
   void SetStretchContentToFillBounds(bool stretch_content);
 
   // LayerImpl overrides.
@@ -38,12 +52,20 @@ class CC_EXPORT SurfaceLayerImpl : public LayerImpl {
   SurfaceLayerImpl(LayerTreeImpl* tree_impl, int id);
 
  private:
+  SurfaceDrawQuad* CreateSurfaceDrawQuad(
+      RenderPass* render_pass,
+      SurfaceDrawQuadType surface_draw_quad_type,
+      const SurfaceInfo& surface_info,
+      SharedQuadState** common_shared_quad_state);
+
   void GetDebugBorderProperties(SkColor* color, float* width) const override;
   void AppendRainbowDebugBorder(RenderPass* render_pass);
   void AsValueInto(base::trace_event::TracedValue* dict) const override;
   const char* LayerTypeAsString() const override;
 
-  SurfaceInfo surface_info_;
+  SurfaceInfo primary_surface_info_;
+  SurfaceInfo fallback_surface_info_;
+
   bool stretch_content_to_fill_bounds_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(SurfaceLayerImpl);

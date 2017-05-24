@@ -40,7 +40,6 @@ UI.TabbedPane = class extends UI.VBox {
     this.contentElement.tabIndex = -1;
     this._headerElement = this.contentElement.createChild('div', 'tabbed-pane-header');
     this._headerContentsElement = this._headerElement.createChild('div', 'tabbed-pane-header-contents');
-    this._headerContentsElement.setAttribute('aria-label', Common.UIString('Panels'));
     this._tabSlider = createElementWithClass('div', 'tabbed-pane-tab-slider');
     this._tabsElement = this._headerContentsElement.createChild('div', 'tabbed-pane-header-tabs');
     this._tabsElement.setAttribute('role', 'tablist');
@@ -58,6 +57,13 @@ UI.TabbedPane = class extends UI.VBox {
 
     this._dropDownButton = this._createDropDownButton();
     UI.zoomManager.addEventListener(UI.ZoomManager.Events.ZoomChanged, this._zoomChanged, this);
+  }
+
+  /**
+   * @param {string} name
+   */
+  setAccessibleName(name) {
+    UI.ARIAUtils.setAccessibleName(this._tabsElement, name);
   }
 
   /**
@@ -483,10 +489,15 @@ UI.TabbedPane = class extends UI.VBox {
   }
 
   /**
-   * @param {string} text
+   * @param {!Element} element
    */
-  setPlaceholderText(text) {
-    this._noTabsMessage = text;
+  setPlaceholderElement(element) {
+    this._placeholderElement = element;
+
+    if (this._placeholderContainerElement) {
+      this._placeholderContainerElement.removeChildren();
+      this._placeholderContainerElement.appendChild(element);
+    }
   }
 
   _innerUpdateTabElements() {
@@ -495,15 +506,15 @@ UI.TabbedPane = class extends UI.VBox {
 
     if (!this._tabs.length) {
       this._contentElement.classList.add('has-no-tabs');
-      if (this._noTabsMessage && !this._noTabsMessageElement) {
-        this._noTabsMessageElement = this._contentElement.createChild('div', 'tabbed-pane-placeholder fill');
-        this._noTabsMessageElement.textContent = this._noTabsMessage;
+      if (this._placeholderElement && !this._placeholderContainerElement) {
+        this._placeholderContainerElement = this._contentElement.createChild('div', 'tabbed-pane-placeholder fill');
+        this._placeholderContainerElement.appendChild(this._placeholderElement);
       }
     } else {
       this._contentElement.classList.remove('has-no-tabs');
-      if (this._noTabsMessageElement) {
-        this._noTabsMessageElement.remove();
-        delete this._noTabsMessageElement;
+      if (this._placeholderContainerElement) {
+        this._placeholderContainerElement.remove();
+        delete this._placeholderContainerElement;
       }
     }
 
@@ -535,20 +546,34 @@ UI.TabbedPane = class extends UI.VBox {
 
   _createDropDownButton() {
     var dropDownContainer = createElementWithClass('div', 'tabbed-pane-header-tabs-drop-down-container');
-    dropDownContainer.createChild('div', 'glyph');
-    this._dropDownMenu = new UI.DropDownMenu(dropDownContainer);
-    this._dropDownMenu.addEventListener(UI.DropDownMenu.Events.ItemSelected, this._dropDownMenuItemSelected, this);
-
+    var chevronIcon = UI.Icon.create('largeicon-chevron', 'chevron-icon');
+    dropDownContainer.appendChild(chevronIcon);
+    dropDownContainer.addEventListener('mousedown', this._onDropDownMouseDown.bind(this));
     return dropDownContainer;
   }
 
   /**
-   * @param {!Common.Event} event
+   * @param {!Event} event
    */
-  _dropDownMenuItemSelected(event) {
-    var tabId = /** @type {string} */ (event.data);
-    this._lastSelectedOverflowTab = this._tabsById.get(tabId);
-    this.selectTab(tabId, true);
+  _onDropDownMouseDown(event) {
+    if (event.which !== 1)
+      return;
+    var menu = new UI.ContextMenu(event);
+    for (var i = 0; i < this._tabs.length; ++i) {
+      var tab = this._tabs[i];
+      if (tab._shown)
+        continue;
+      menu.appendCheckboxItem(tab.title, this._dropDownMenuItemSelected.bind(this, tab), this._tabsHistory[0] === tab);
+    }
+    menu.show();
+  }
+
+  /**
+   * @param {!UI.TabbedPaneTab} tab
+   */
+  _dropDownMenuItemSelected(tab) {
+    this._lastSelectedOverflowTab = tab;
+    this.selectTab(tab.id, true);
   }
 
   _totalWidth() {
@@ -591,32 +616,17 @@ UI.TabbedPane = class extends UI.VBox {
     }
 
     if (!this._overflowDisabled)
-      this._populateDropDownFromIndex();
+      this._maybeShowDropDown(tabsToShowIndexes.length !== this._tabs.length);
   }
 
-  _populateDropDownFromIndex() {
-    if (this._dropDownButton.parentElement)
-      this._headerContentsElement.removeChild(this._dropDownButton);
-
-    this._dropDownMenu.clear();
-
-    var tabsToShow = [];
-    for (var i = 0; i < this._tabs.length; ++i) {
-      if (!this._tabs[i]._shown)
-        tabsToShow.push(this._tabs[i]);
-    }
-
-    var selectedId = null;
-    for (var i = 0; i < tabsToShow.length; ++i) {
-      var tab = tabsToShow[i];
-      this._dropDownMenu.addItem(tab.id, tab.title);
-      if (this._tabsHistory[0] === tab)
-        selectedId = tab.id;
-    }
-    if (tabsToShow.length) {
+  /**
+   * @param {boolean} hasMoreTabs
+   */
+  _maybeShowDropDown(hasMoreTabs) {
+    if (hasMoreTabs && !this._dropDownButton.parentElement)
       this._headerContentsElement.appendChild(this._dropDownButton);
-      this._dropDownMenu.selectItem(selectedId);
-    }
+    else if (!hasMoreTabs && this._dropDownButton.parentElement)
+      this._headerContentsElement.removeChild(this._dropDownButton);
   }
 
   _measureDropDownButton() {
@@ -752,7 +762,7 @@ UI.TabbedPane = class extends UI.VBox {
    */
   _showTab(tab) {
     tab.tabElement.classList.add('selected');
-    tab.tabElement.setAttribute('aria-selected', 'true');
+    UI.ARIAUtils.setSelected(tab.tabElement, true);
     tab.view.show(this.element);
     this._updateTabSlider();
   }
@@ -1022,8 +1032,8 @@ UI.TabbedPaneTab = class {
     var tabElement = createElementWithClass('div', 'tabbed-pane-header-tab');
     tabElement.id = 'tab-' + this._id;
     tabElement.tabIndex = -1;
-    tabElement.setAttribute('role', 'tab');
-    tabElement.setAttribute('aria-selected', 'false');
+    UI.ARIAUtils.markAsTab(tabElement);
+    UI.ARIAUtils.setSelected(tabElement, false);
     tabElement.selectTabForTest = this._tabbedPane.selectTab.bind(this._tabbedPane, this.id, true);
 
     var titleElement = tabElement.createChild('span', 'tabbed-pane-header-tab-title');

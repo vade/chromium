@@ -5,10 +5,10 @@
 #include "modules/sensor/SensorProviderProxy.h"
 
 #include "modules/sensor/SensorProxy.h"
-#include "modules/sensor/SensorReading.h"
 #include "platform/mojo/MojoHelper.h"
-#include "public/platform/InterfaceProvider.h"
 #include "public/platform/Platform.h"
+#include "services/device/public/interfaces/constants.mojom-blink.h"
+#include "services/service_manager/public/cpp/connector.h"
 
 namespace blink {
 
@@ -16,57 +16,55 @@ namespace blink {
 SensorProviderProxy::SensorProviderProxy(LocalFrame& frame)
     : Supplement<LocalFrame>(frame) {}
 
-void SensorProviderProxy::initializeIfNeeded(LocalFrame* frame) {
-  if (isInitialized())
+void SensorProviderProxy::InitializeIfNeeded() {
+  if (IsInitialized())
     return;
 
-  frame->interfaceProvider()->getInterface(
-      mojo::MakeRequest(&m_sensorProvider));
-  m_sensorProvider.set_connection_error_handler(convertToBaseCallback(
-      WTF::bind(&SensorProviderProxy::onSensorProviderConnectionError,
-                wrapWeakPersistent(this))));
+  Platform::Current()->GetConnector()->BindInterface(
+      device::mojom::blink::kServiceName, mojo::MakeRequest(&sensor_provider_));
+  sensor_provider_.set_connection_error_handler(ConvertToBaseCallback(
+      WTF::Bind(&SensorProviderProxy::OnSensorProviderConnectionError,
+                WrapWeakPersistent(this))));
 }
 
-const char* SensorProviderProxy::supplementName() {
+const char* SensorProviderProxy::SupplementName() {
   return "SensorProvider";
 }
 
 // static
-SensorProviderProxy* SensorProviderProxy::from(LocalFrame* frame) {
+SensorProviderProxy* SensorProviderProxy::From(LocalFrame* frame) {
   DCHECK(frame);
-  SensorProviderProxy* providerProxy = static_cast<SensorProviderProxy*>(
-      Supplement<LocalFrame>::from(*frame, supplementName()));
-  if (!providerProxy) {
-    providerProxy = new SensorProviderProxy(*frame);
-    Supplement<LocalFrame>::provideTo(*frame, supplementName(), providerProxy);
+  SensorProviderProxy* provider_proxy = static_cast<SensorProviderProxy*>(
+      Supplement<LocalFrame>::From(*frame, SupplementName()));
+  if (!provider_proxy) {
+    provider_proxy = new SensorProviderProxy(*frame);
+    Supplement<LocalFrame>::ProvideTo(*frame, SupplementName(), provider_proxy);
   }
-  providerProxy->initializeIfNeeded(frame);
-  return providerProxy;
+  provider_proxy->InitializeIfNeeded();
+  return provider_proxy;
 }
 
 SensorProviderProxy::~SensorProviderProxy() {}
 
 DEFINE_TRACE(SensorProviderProxy) {
-  visitor->trace(m_sensorProxies);
-  Supplement<LocalFrame>::trace(visitor);
+  visitor->Trace(sensor_proxies_);
+  Supplement<LocalFrame>::Trace(visitor);
 }
 
-SensorProxy* SensorProviderProxy::createSensorProxy(
+SensorProxy* SensorProviderProxy::CreateSensorProxy(
     device::mojom::blink::SensorType type,
-    Document* document,
-    std::unique_ptr<SensorReadingFactory> readingFactory) {
-  DCHECK(!getSensorProxy(type));
+    Page* page) {
+  DCHECK(!GetSensorProxy(type));
 
-  SensorProxy* sensor =
-      new SensorProxy(type, this, document, std::move(readingFactory));
-  m_sensorProxies.add(sensor);
+  SensorProxy* sensor = new SensorProxy(type, this, page);
+  sensor_proxies_.insert(sensor);
 
   return sensor;
 }
 
-SensorProxy* SensorProviderProxy::getSensorProxy(
+SensorProxy* SensorProviderProxy::GetSensorProxy(
     device::mojom::blink::SensorType type) {
-  for (SensorProxy* sensor : m_sensorProxies) {
+  for (SensorProxy* sensor : sensor_proxies_) {
     // TODO(Mikhail) : Hash sensors by type for efficiency.
     if (sensor->type() == type)
       return sensor;
@@ -75,15 +73,10 @@ SensorProxy* SensorProviderProxy::getSensorProxy(
   return nullptr;
 }
 
-void SensorProviderProxy::onSensorProviderConnectionError() {
-  if (!Platform::current()) {
-    // TODO(rockot): Clean this up once renderer shutdown sequence is fixed.
-    return;
-  }
-
-  m_sensorProvider.reset();
-  for (SensorProxy* sensor : m_sensorProxies)
-    sensor->handleSensorError();
+void SensorProviderProxy::OnSensorProviderConnectionError() {
+  sensor_provider_.reset();
+  for (SensorProxy* sensor : sensor_proxies_)
+    sensor->HandleSensorError();
 }
 
 }  // namespace blink

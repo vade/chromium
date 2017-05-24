@@ -4,7 +4,6 @@
 
 package org.chromium.net;
 
-import android.os.ConditionVariable;
 import android.support.test.filters.LargeTest;
 import android.support.test.filters.SmallTest;
 
@@ -47,9 +46,7 @@ public class QuicTest extends CronetTestBase {
         // TODO(mgersh): Enable connection migration once it works, see http://crbug.com/634910
         JSONObject quicParams = new JSONObject()
                                         .put("connection_options", "PACE,IW10,FOO,DEADBEEF")
-                                        .put("host_whitelist", "test.example.com")
                                         .put("max_server_configs_stored_in_properties", 2)
-                                        .put("delay_tcp_race", true)
                                         .put("idle_connection_timeout_seconds", 300)
                                         .put("close_sessions_on_ip_change", false)
                                         .put("migrate_sessions_on_network_change", false)
@@ -119,10 +116,8 @@ public class QuicTest extends CronetTestBase {
         builder.setStoragePath(CronetTestFramework.getTestStorage(getContext()));
         builder.enableHttpCache(CronetEngine.Builder.HTTP_CACHE_DISK, 1000 * 1024);
         builder.enableQuic(true);
-        JSONObject quicParams = new JSONObject().put("host_whitelist", "test.example.com");
         JSONObject hostResolverParams = CronetTestUtil.generateHostResolverRules();
         JSONObject experimentalOptions = new JSONObject()
-                                                 .put("QUIC", quicParams)
                                                  .put("HostResolverRules", hostResolverParams);
         builder.setExperimentalOptions(experimentalOptions.toString());
         CronetTestUtil.setMockCertVerifierForTesting(
@@ -153,20 +148,21 @@ public class QuicTest extends CronetTestBase {
         return new String(data, "UTF-8").contains(content);
     }
 
+    /**
+     * Tests that the network quality listeners are propoerly notified when QUIC is enabled.
+     */
     @LargeTest
     @Feature({"Cronet"})
     @OnlyRunNativeCronet
     @SuppressWarnings("deprecation")
-    public void testRealTimeNetworkQualityObservationsWithQuic() throws Exception {
+    public void testNQEWithQuic() throws Exception {
         mTestFramework = startCronetTestFrameworkWithUrlAndCronetEngineBuilder(null, mBuilder);
         String quicURL = QuicTestServer.getServerURL() + "/simple.txt";
-        ConditionVariable waitForThroughput = new ConditionVariable();
 
         TestNetworkQualityRttListener rttListener =
                 new TestNetworkQualityRttListener(Executors.newSingleThreadExecutor());
         TestNetworkQualityThroughputListener throughputListener =
-                new TestNetworkQualityThroughputListener(
-                        Executors.newSingleThreadExecutor(), waitForThroughput);
+                new TestNetworkQualityThroughputListener(Executors.newSingleThreadExecutor());
 
         mTestFramework.mCronetEngine.addRttListener(rttListener);
         mTestFramework.mCronetEngine.addThroughputListener(throughputListener);
@@ -191,7 +187,11 @@ public class QuicTest extends CronetTestBase {
         // Throughput observation is posted to the network quality estimator on the network thread
         // after the UrlRequest is completed. The observations are then eventually posted to
         // throughput listeners on the executor provided to network quality.
-        waitForThroughput.block();
+        throughputListener.waitUntilFirstThroughputObservationReceived();
+
+        // Wait for RTT observation (at the URL request layer) to be posted.
+        rttListener.waitUntilFirstUrlRequestRTTReceived();
+
         assertTrue(throughputListener.throughputObservationCount() > 0);
 
         // Check RTT observation count after throughput observation has been received. This ensures

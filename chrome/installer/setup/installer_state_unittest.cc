@@ -24,6 +24,7 @@
 #include "base/win/registry.h"
 #include "base/win/scoped_handle.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/install_static/install_util.h"
 #include "chrome/installer/util/fake_installation_state.h"
 #include "chrome/installer/util/fake_product_state.h"
 #include "chrome/installer/util/google_update_constants.h"
@@ -87,7 +88,7 @@ TEST_F(InstallerStateTest, WithProduct) {
 
   {
     RegistryOverrideManager override_manager;
-    override_manager.OverrideRegistry(root);
+    ASSERT_NO_FATAL_FAILURE(override_manager.OverrideRegistry(root));
     BrowserDistribution* dist = BrowserDistribution::GetDistribution();
     RegKey chrome_key(root, dist->GetVersionKey().c_str(), KEY_ALL_ACCESS);
     EXPECT_TRUE(chrome_key.Valid());
@@ -123,7 +124,7 @@ TEST_F(InstallerStateTest, InstallerResult) {
   };
   for (const wchar_t* command_line : kCommandLines) {
     RegistryOverrideManager override_manager;
-    override_manager.OverrideRegistry(root);
+    ASSERT_NO_FATAL_FAILURE(override_manager.OverrideRegistry(root));
     base::CommandLine cmd_line = base::CommandLine::FromString(command_line);
     const MasterPreferences prefs(cmd_line);
     InstallationState machine_state;
@@ -164,8 +165,9 @@ TEST_F(InstallerStateTest, InitializeTwice) {
   base::ScopedPathOverride local_app_data_override(base::DIR_LOCAL_APP_DATA,
                                                    temp);
   registry_util::RegistryOverrideManager override_manager;
-  override_manager.OverrideRegistry(HKEY_CURRENT_USER);
-  override_manager.OverrideRegistry(HKEY_LOCAL_MACHINE);
+  ASSERT_NO_FATAL_FAILURE(override_manager.OverrideRegistry(HKEY_CURRENT_USER));
+  ASSERT_NO_FATAL_FAILURE(
+      override_manager.OverrideRegistry(HKEY_LOCAL_MACHINE));
 
   InstallationState machine_state;
   machine_state.Initialize();
@@ -182,9 +184,8 @@ TEST_F(InstallerStateTest, InitializeTwice) {
   EXPECT_EQ(InstallerState::USER_LEVEL, installer_state.level());
   EXPECT_EQ(InstallerState::SINGLE_INSTALL_OR_UPDATE,
             installer_state.operation());
-  EXPECT_TRUE(wcsstr(
-      installer_state.target_path().value().c_str(),
-      BrowserDistribution::GetDistribution()->GetInstallSubDir().c_str()));
+  EXPECT_TRUE(wcsstr(installer_state.target_path().value().c_str(),
+                     install_static::GetChromeInstallSubDirectory().c_str()));
   EXPECT_FALSE(installer_state.verbose_logging());
   EXPECT_EQ(installer_state.state_key(),
             BrowserDistribution::GetDistribution()->GetStateKey());
@@ -201,9 +202,8 @@ TEST_F(InstallerStateTest, InitializeTwice) {
   EXPECT_EQ(InstallerState::SYSTEM_LEVEL, installer_state.level());
   EXPECT_EQ(InstallerState::SINGLE_INSTALL_OR_UPDATE,
             installer_state.operation());
-  EXPECT_TRUE(wcsstr(
-      installer_state.target_path().value().c_str(),
-      BrowserDistribution::GetDistribution()->GetInstallSubDir().c_str()));
+  EXPECT_TRUE(wcsstr(installer_state.target_path().value().c_str(),
+                     install_static::GetChromeInstallSubDirectory().c_str()));
   EXPECT_TRUE(installer_state.verbose_logging());
   EXPECT_EQ(installer_state.state_key(),
             BrowserDistribution::GetDistribution()->GetStateKey());

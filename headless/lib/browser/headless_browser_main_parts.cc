@@ -4,26 +4,15 @@
 
 #include "headless/lib/browser/headless_browser_main_parts.h"
 
+#include "base/command_line.h"
+#include "content/public/common/content_switches.h"
 #include "headless/lib/browser/headless_browser_context_impl.h"
 #include "headless/lib/browser/headless_browser_impl.h"
 #include "headless/lib/browser/headless_devtools.h"
+#include "headless/lib/browser/headless_net_log.h"
 #include "headless/lib/browser/headless_screen.h"
-#include "ui/aura/env.h"
-#include "ui/display/screen.h"
 
 namespace headless {
-
-namespace {
-
-void PlatformInitialize(const gfx::Size& screen_size) {
-  HeadlessScreen* screen = HeadlessScreen::Create(screen_size);
-  display::Screen::SetScreenInstance(screen);
-}
-
-void PlatformExit() {
-}
-
-}  // namespace
 
 HeadlessBrowserMainParts::HeadlessBrowserMainParts(HeadlessBrowserImpl* browser)
     : browser_(browser)
@@ -32,11 +21,19 @@ HeadlessBrowserMainParts::HeadlessBrowserMainParts(HeadlessBrowserImpl* browser)
 HeadlessBrowserMainParts::~HeadlessBrowserMainParts() {}
 
 void HeadlessBrowserMainParts::PreMainMessageLoopRun() {
-  if (browser_->options()->devtools_endpoint.address().IsValid()) {
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kLogNetLog)) {
+    base::FilePath log_path =
+        command_line->GetSwitchValuePath(switches::kLogNetLog);
+    net_log_.reset(new HeadlessNetLog(log_path));
+  }
+
+  if (browser_->options()->DevtoolsServerEnabled()) {
     StartLocalDevToolsHttpHandler(browser_->options());
     devtools_http_handler_started_ = true;
   }
-  PlatformInitialize(browser_->options()->window_size);
+  browser_->PlatformInitialize();
 }
 
 void HeadlessBrowserMainParts::PostMainMessageLoopRun() {
@@ -44,7 +41,6 @@ void HeadlessBrowserMainParts::PostMainMessageLoopRun() {
     StopLocalDevToolsHttpHandler();
     devtools_http_handler_started_ = false;
   }
-  PlatformExit();
 }
 
 }  // namespace headless

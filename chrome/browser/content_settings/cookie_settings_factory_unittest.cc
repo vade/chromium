@@ -2,13 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/message_loop/message_loop.h"
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/prefs/pref_service.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -17,16 +16,14 @@ namespace {
 class CookieSettingsFactoryTest : public testing::Test {
  public:
   CookieSettingsFactoryTest()
-      : ui_thread_(content::BrowserThread::UI, &message_loop_),
-        cookie_settings_(CookieSettingsFactory::GetForProfile(&profile_).get()),
+      : cookie_settings_(CookieSettingsFactory::GetForProfile(&profile_).get()),
         kBlockedSite("http://ads.thirdparty.com"),
         kAllowedSite("http://good.allays.com"),
         kFirstPartySite("http://cool.things.com"),
         kHttpsSite("https://example.com") {}
 
  protected:
-  base::MessageLoop message_loop_;
-  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThreadBundle test_browser_thread_bundle_;
   TestingProfile profile_;
   content_settings::CookieSettings* cookie_settings_;
   const GURL kBlockedSite;
@@ -45,16 +42,16 @@ TEST_F(CookieSettingsFactoryTest, IncognitoBehaviorOfBlockingRules) {
 
   // The modification should apply to the regular profile and incognito profile.
   EXPECT_FALSE(
-      cookie_settings_->IsReadingCookieAllowed(kBlockedSite, kBlockedSite));
+      cookie_settings_->IsCookieAccessAllowed(kBlockedSite, kBlockedSite));
   EXPECT_FALSE(
-      incognito_settings->IsReadingCookieAllowed(kBlockedSite, kBlockedSite));
+      incognito_settings->IsCookieAccessAllowed(kBlockedSite, kBlockedSite));
 
   // Modify an incognito cookie setting and check that this does not propagate
   // into regular mode.
   incognito_settings->SetCookieSetting(kHttpsSite, CONTENT_SETTING_BLOCK);
-  EXPECT_TRUE(cookie_settings_->IsReadingCookieAllowed(kHttpsSite, kHttpsSite));
+  EXPECT_TRUE(cookie_settings_->IsCookieAccessAllowed(kHttpsSite, kHttpsSite));
   EXPECT_FALSE(
-      incognito_settings->IsReadingCookieAllowed(kHttpsSite, kHttpsSite));
+      incognito_settings->IsCookieAccessAllowed(kHttpsSite, kHttpsSite));
 }
 
 TEST_F(CookieSettingsFactoryTest, IncognitoBehaviorOfBlockingEverything) {
@@ -65,25 +62,25 @@ TEST_F(CookieSettingsFactoryTest, IncognitoBehaviorOfBlockingEverything) {
   cookie_settings_->SetDefaultCookieSetting(CONTENT_SETTING_BLOCK);
 
   // It should be effective for regular and incognito session.
-  EXPECT_FALSE(cookie_settings_->IsReadingCookieAllowed(kFirstPartySite,
-                                                        kFirstPartySite));
-  EXPECT_FALSE(incognito_settings->IsReadingCookieAllowed(kFirstPartySite,
-                                                          kFirstPartySite));
+  EXPECT_FALSE(cookie_settings_->IsCookieAccessAllowed(kFirstPartySite,
+                                                       kFirstPartySite));
+  EXPECT_FALSE(incognito_settings->IsCookieAccessAllowed(kFirstPartySite,
+                                                         kFirstPartySite));
 
   // A whitelisted item set in incognito mode should only apply to incognito
   // mode.
   incognito_settings->SetCookieSetting(kAllowedSite, CONTENT_SETTING_ALLOW);
   EXPECT_TRUE(
-      incognito_settings->IsReadingCookieAllowed(kAllowedSite, kAllowedSite));
+      incognito_settings->IsCookieAccessAllowed(kAllowedSite, kAllowedSite));
   EXPECT_FALSE(
-      cookie_settings_->IsReadingCookieAllowed(kAllowedSite, kAllowedSite));
+      cookie_settings_->IsCookieAccessAllowed(kAllowedSite, kAllowedSite));
 
   // A whitelisted item set in regular mode should apply to regular and
   // incognito mode.
   cookie_settings_->SetCookieSetting(kHttpsSite, CONTENT_SETTING_ALLOW);
   EXPECT_TRUE(
-      incognito_settings->IsReadingCookieAllowed(kHttpsSite, kHttpsSite));
-  EXPECT_TRUE(cookie_settings_->IsReadingCookieAllowed(kHttpsSite, kHttpsSite));
+      incognito_settings->IsCookieAccessAllowed(kHttpsSite, kHttpsSite));
+  EXPECT_TRUE(cookie_settings_->IsCookieAccessAllowed(kHttpsSite, kHttpsSite));
 }
 
 }  // namespace

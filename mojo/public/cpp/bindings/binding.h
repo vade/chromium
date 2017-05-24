@@ -23,7 +23,6 @@
 
 namespace mojo {
 
-class AssociatedGroup;
 class MessageReceiver;
 
 // Represents the binding of an interface implementation to a message pipe.
@@ -78,29 +77,6 @@ class Binding {
   // Does not take ownership of |impl|, which must outlive the binding.
   explicit Binding(ImplPointerType impl) : internal_state_(std::move(impl)) {}
 
-  // Constructs a completed binding of message pipe |handle| to implementation
-  // |impl|. Does not take ownership of |impl|, which must outlive the binding.
-  Binding(ImplPointerType impl,
-          ScopedMessagePipeHandle handle,
-          scoped_refptr<base::SingleThreadTaskRunner> runner =
-              base::ThreadTaskRunnerHandle::Get())
-      : Binding(std::move(impl)) {
-    Bind(std::move(handle), std::move(runner));
-  }
-
-  // Constructs a completed binding of |impl| to a new message pipe, passing the
-  // client end to |ptr|, which takes ownership of it. The caller is expected to
-  // pass |ptr| on to the client of the service. Does not take ownership of any
-  // of the parameters. |impl| must outlive the binding. |ptr| only needs to
-  // last until the constructor returns.
-  Binding(ImplPointerType impl,
-          InterfacePtr<Interface>* ptr,
-          scoped_refptr<base::SingleThreadTaskRunner> runner =
-              base::ThreadTaskRunnerHandle::Get())
-      : Binding(std::move(impl)) {
-    Bind(ptr, std::move(runner));
-  }
-
   // Constructs a completed binding of |impl| to the message pipe endpoint in
   // |request|, taking ownership of the endpoint. Does not take ownership of
   // |impl|, which must outlive the binding.
@@ -109,7 +85,7 @@ class Binding {
           scoped_refptr<base::SingleThreadTaskRunner> runner =
               base::ThreadTaskRunnerHandle::Get())
       : Binding(std::move(impl)) {
-    Bind(request.PassMessagePipe(), std::move(runner));
+    Bind(std::move(request), std::move(runner));
   }
 
   // Tears down the binding, closing the message pipe and leaving the interface
@@ -122,32 +98,8 @@ class Binding {
       scoped_refptr<base::SingleThreadTaskRunner> runner =
           base::ThreadTaskRunnerHandle::Get()) {
     InterfacePtr<Interface> interface_ptr;
-    Bind(&interface_ptr, std::move(runner));
+    Bind(MakeRequest(&interface_ptr), std::move(runner));
     return interface_ptr;
-  }
-
-  // Completes a binding that was constructed with only an interface
-  // implementation. Takes ownership of |handle| and binds it to the previously
-  // specified implementation.
-  void Bind(ScopedMessagePipeHandle handle,
-            scoped_refptr<base::SingleThreadTaskRunner> runner =
-                base::ThreadTaskRunnerHandle::Get()) {
-    internal_state_.Bind(std::move(handle), std::move(runner));
-  }
-
-  // Completes a binding that was constructed with only an interface
-  // implementation by creating a new message pipe, binding one end of it to the
-  // previously specified implementation, and passing the other to |ptr|, which
-  // takes ownership of it. The caller is expected to pass |ptr| on to the
-  // eventual client of the service. Does not take ownership of |ptr|.
-  void Bind(InterfacePtr<Interface>* ptr,
-            scoped_refptr<base::SingleThreadTaskRunner> runner =
-                base::ThreadTaskRunnerHandle::Get()) {
-    MessagePipe pipe;
-    ptr->Bind(InterfacePtrInfo<Interface>(std::move(pipe.handle0),
-                                          Interface::Version_),
-              runner);
-    Bind(std::move(pipe.handle1), std::move(runner));
   }
 
   // Completes a binding that was constructed with only an interface
@@ -156,7 +108,7 @@ class Binding {
   void Bind(InterfaceRequest<Interface> request,
             scoped_refptr<base::SingleThreadTaskRunner> runner =
                 base::ThreadTaskRunnerHandle::Get()) {
-    Bind(request.PassMessagePipe(), std::move(runner));
+    internal_state_.Bind(request.PassMessagePipe(), std::move(runner));
   }
 
   // Adds a message filter to be notified of each incoming message before
@@ -193,10 +145,10 @@ class Binding {
   // true if a method was successfully read and dispatched.
   //
   // This method may only be called if the object has been bound to a message
-  // pipe and there are no associated interfaces running.
+  // pipe. This returns once a message is received either on the master
+  // interface or any associated interfaces.
   bool WaitForIncomingMethodCall(
       MojoDeadline deadline = MOJO_DEADLINE_INDEFINITE) {
-    CHECK(!HasAssociatedInterfaces());
     return internal_state_.WaitForIncomingMethodCall(deadline);
   }
 
@@ -256,14 +208,6 @@ class Binding {
   // bound. Ownership of the handle is retained by the Binding, it is not
   // transferred to the caller.
   MessagePipeHandle handle() const { return internal_state_.handle(); }
-
-  // Returns the associated group that this object belongs to. Returns null if:
-  //   - this object is not bound; or
-  //   - the interface doesn't have methods to pass associated interface
-  //     pointers or requests.
-  AssociatedGroup* associated_group() {
-    return internal_state_.associated_group();
-  }
 
   // Sends a no-op message on the underlying message pipe and runs the current
   // message loop until its response is received. This can be used in tests to

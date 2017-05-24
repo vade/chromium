@@ -7,7 +7,6 @@
 #include <memory>
 #include <string>
 
-#include "base/android/context_utils.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
@@ -19,7 +18,6 @@
 using base::android::AttachCurrentThread;
 using base::android::ConvertJavaStringToUTF8;
 using base::android::ConvertUTF8ToJavaString;
-using base::android::GetApplicationContext;
 using base::android::JavaParamRef;
 using base::android::ScopedJavaLocalRef;
 using base::android::ToJavaIntArray;
@@ -28,15 +26,12 @@ using content::BrowserThread;
 namespace safe_browsing {
 
 namespace {
-// Takes ownership of callback ptr.
 void RunCallbackOnIOThread(
-    SafeBrowsingApiHandler::URLCheckCallbackMeta* callback,
+    const SafeBrowsingApiHandler::URLCheckCallbackMeta& callback,
     SBThreatType threat_type,
     const ThreatMetadata& metadata) {
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&SafeBrowsingApiHandler::URLCheckCallbackMeta::Run,
-                 base::Owned(callback), threat_type, metadata));
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          base::Bind(callback, threat_type, metadata));
 }
 
 void ReportUmaResult(safe_browsing::UmaRemoteCallResult result) {
@@ -102,27 +97,21 @@ void OnUrlCheckDone(JNIEnv* env,
           callback_id));
 
   if (result_status != RESULT_STATUS_SUCCESS) {
-    // TODO(nparker): If the API is consistently failing, we might want to
-    // turn it off altogether and retest periodically. This would
-    // alleviate a bad experience if GMSCore is somehow busted.
     if (result_status == RESULT_STATUS_TIMEOUT) {
       ReportUmaResult(UMA_STATUS_TIMEOUT);
       VLOG(1) << "Safe browsing API call timed-out";
     } else {
       DCHECK_EQ(result_status, RESULT_STATUS_INTERNAL_ERROR);
       ReportUmaResult(UMA_STATUS_INTERNAL_ERROR);
-      LOG(WARNING) << "Safe browsing API had internal error";
     }
-    RunCallbackOnIOThread(callback.release(), SB_THREAT_TYPE_SAFE,
-                          ThreatMetadata());
+    RunCallbackOnIOThread(*callback, SB_THREAT_TYPE_SAFE, ThreatMetadata());
     return;
   }
 
   // Shortcut for safe, so we don't have to parse JSON.
   if (metadata_str == "{}") {
     ReportUmaResult(UMA_STATUS_SAFE);
-    RunCallbackOnIOThread(callback.release(), SB_THREAT_TYPE_SAFE,
-                          ThreatMetadata());
+    RunCallbackOnIOThread(*callback, SB_THREAT_TYPE_SAFE, ThreatMetadata());
   } else {
     // Unsafe, assuming we can parse the JSON.
     SBThreatType worst_threat;
@@ -130,10 +119,10 @@ void OnUrlCheckDone(JNIEnv* env,
     ReportUmaResult(
         ParseJsonFromGMSCore(metadata_str, &worst_threat, &threat_metadata));
     if (worst_threat != SB_THREAT_TYPE_SAFE) {
-      DVLOG(1) << "Check " << callback_id << " marked as UNSAFE";
+      DVLOG(1) << "Check " << callback_id << " was a MATCH";
     }
 
-    RunCallbackOnIOThread(callback.release(), worst_threat, threat_metadata);
+    RunCallbackOnIOThread(*callback, worst_threat, threat_metadata);
   }
 }
 
@@ -149,8 +138,7 @@ bool SafeBrowsingApiHandlerBridge::CheckApiIsSupported() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!checked_api_support_) {
     DVLOG(1) << "Checking API support.";
-    j_api_handler_ = Java_SafeBrowsingApiBridge_create(AttachCurrentThread(),
-                                                       GetApplicationContext());
+    j_api_handler_ = Java_SafeBrowsingApiBridge_create(AttachCurrentThread());
     checked_api_support_ = true;
   }
   return j_api_handler_.obj() != nullptr;
@@ -165,8 +153,7 @@ void SafeBrowsingApiHandlerBridge::StartURLCheck(
   if (!CheckApiIsSupported()) {
     // Mark all requests as safe. Only users who have an old, broken GMSCore or
     // have sideloaded Chrome w/o PlayStore should land here.
-    RunCallbackOnIOThread(new URLCheckCallbackMeta(callback),
-                          SB_THREAT_TYPE_SAFE, ThreatMetadata());
+    RunCallbackOnIOThread(callback, SB_THREAT_TYPE_SAFE, ThreatMetadata());
     ReportUmaResult(UMA_STATUS_UNSUPPORTED);
     return;
   }
@@ -179,10 +166,7 @@ void SafeBrowsingApiHandlerBridge::StartURLCheck(
 
   // Default threat types, to support upstream code that doesn't yet set them.
   std::vector<SBThreatType> local_threat_types(threat_types);
-  if (local_threat_types.empty()) {
-    local_threat_types.push_back(SB_THREAT_TYPE_URL_PHISHING);
-    local_threat_types.push_back(SB_THREAT_TYPE_URL_MALWARE);
-  }
+  DCHECK(!local_threat_types.empty());
 
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jstring> j_url = ConvertUTF8ToJavaString(env, url.spec());

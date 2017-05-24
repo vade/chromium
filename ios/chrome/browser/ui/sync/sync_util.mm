@@ -4,7 +4,7 @@
 
 #import "ios/chrome/browser/ui/sync/sync_util.h"
 
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "components/infobars/core/infobar_manager.h"
 #include "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/browser_state/chrome_browser_state.h"
@@ -111,7 +111,7 @@ GenericChromeCommand* GetSyncCommandForBrowserState(
     case SyncSetupService::kSyncServiceSignInNeedsUpdate:
       return [[[ShowSigninCommand alloc]
           initWithOperation:AUTHENTICATION_OPERATION_REAUTHENTICATE
-          signInAccessPoint:signin_metrics::AccessPoint::ACCESS_POINT_UNKNOWN]
+                accessPoint:signin_metrics::AccessPoint::ACCESS_POINT_UNKNOWN]
           autorelease];
     case SyncSetupService::kSyncServiceNeedsPassphrase:
       return [[[GenericChromeCommand alloc]

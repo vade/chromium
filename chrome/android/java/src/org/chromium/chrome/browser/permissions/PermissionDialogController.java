@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.permissions;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.DialogInterface;
 import android.support.annotation.IntDef;
@@ -55,6 +56,7 @@ public class PermissionDialogController implements AndroidPermissionRequester.Re
 
     // Static holder to ensure safe initialization of the singleton instance.
     private static class Holder {
+        @SuppressLint("StaticFieldLeak")
         private static final PermissionDialogController sInstance =
                 new PermissionDialogController();
     }
@@ -191,6 +193,11 @@ public class PermissionDialogController implements AndroidPermissionRequester.Re
         mDialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
             @Override
             public void onDismiss(DialogInterface dialog) {
+                // For some reason this is ocassionally null. See crbug.com/708562.
+                if (mDialogDelegate == null) {
+                    scheduleDisplay();
+                }
+
                 mDialog = null;
                 if (mDecision == ACCEPTED) {
                     // Request Android permissions if necessary. This will call back into either

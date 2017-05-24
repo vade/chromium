@@ -27,7 +27,7 @@ TEST_F(UpdaterStateTest, Serialize) {
   updater_state.updater_version_ = base::Version("1.0");
   updater_state.last_autoupdate_started_ = base::Time::NowFromSystemTime();
   updater_state.last_checked_ = base::Time::NowFromSystemTime();
-  updater_state.is_joined_to_domain_ = false;
+  updater_state.is_enterprise_managed_ = false;
   updater_state.is_autoupdate_check_enabled_ = true;
   updater_state.update_policy_ = 1;
 
@@ -42,9 +42,13 @@ TEST_F(UpdaterStateTest, Serialize) {
   EXPECT_STREQ("1", attributes.at("autoupdatecheckenabled").c_str());
   EXPECT_STREQ("1", attributes.at("updatepolicy").c_str());
 
-#if defined(GOOGLE_CHROME_BUILD) && defined(OS_WIN)
-  // The name of the Windows updater for Chrome.
-  EXPECT_STREQ("Omaha", UpdaterState::GetState(false)->at("name").c_str());
+#if defined(GOOGLE_CHROME_BUILD)
+  #if defined(OS_WIN)
+    // The name of the Windows updater for Chrome.
+    EXPECT_STREQ("Omaha", UpdaterState::GetState(false)->at("name").c_str());
+  #elif defined(OS_MACOSX)
+    EXPECT_STREQ("Keystone", UpdaterState::GetState(false)->at("name").c_str());
+  #endif
 #endif  // GOOGLE_CHROME_BUILD
 
   // Tests some of the remaining values.
@@ -89,7 +93,7 @@ TEST_F(UpdaterStateTest, Serialize) {
   attributes = updater_state.BuildAttributes();
   EXPECT_EQ(0u, attributes.count("lastchecked"));
 
-  updater_state.is_joined_to_domain_ = true;
+  updater_state.is_enterprise_managed_ = true;
   attributes = updater_state.BuildAttributes();
   EXPECT_STREQ("1", attributes.at("domainjoined").c_str());
 

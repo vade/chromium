@@ -25,6 +25,7 @@ class UploadProgress;
 
 namespace content {
 class ResourceBuffer;
+class ResourceController;
 class ResourceDispatcherHostImpl;
 class UploadProgressTracker;
 
@@ -40,22 +41,26 @@ class CONTENT_EXPORT AsyncResourceHandler : public ResourceHandler,
   bool OnMessageReceived(const IPC::Message& message) override;
 
   // ResourceHandler implementation:
-  bool OnRequestRedirected(const net::RedirectInfo& redirect_info,
-                           ResourceResponse* response,
-                           bool* defer) override;
-  bool OnResponseStarted(ResourceResponse* response, bool* defer) override;
-  bool OnWillStart(const GURL& url, bool* defer) override;
-  bool OnWillRead(scoped_refptr<net::IOBuffer>* buf,
+  void OnRequestRedirected(
+      const net::RedirectInfo& redirect_info,
+      ResourceResponse* response,
+      std::unique_ptr<ResourceController> controller) override;
+  void OnResponseStarted(
+      ResourceResponse* response,
+      std::unique_ptr<ResourceController> controller) override;
+  void OnWillStart(const GURL& url,
+                   std::unique_ptr<ResourceController> controller) override;
+  void OnWillRead(scoped_refptr<net::IOBuffer>* buf,
                   int* buf_size,
-                  int min_size) override;
-  bool OnReadCompleted(int bytes_read, bool* defer) override;
-  void OnResponseCompleted(const net::URLRequestStatus& status,
-                           bool* defer) override;
+                  std::unique_ptr<ResourceController> controller) override;
+  void OnReadCompleted(int bytes_read,
+                       std::unique_ptr<ResourceController> controller) override;
+  void OnResponseCompleted(
+      const net::URLRequestStatus& status,
+      std::unique_ptr<ResourceController> controller) override;
   void OnDataDownloaded(int bytes_downloaded) override;
 
  private:
-  class InliningHelper;
-
   // IPC message handlers:
   void OnFollowRedirect(int request_id);
   void OnDataReceivedACK(int request_id);
@@ -63,7 +68,7 @@ class CONTENT_EXPORT AsyncResourceHandler : public ResourceHandler,
 
   bool EnsureResourceBufferIsInitialized();
   void ResumeIfDeferred();
-  void OnDefer();
+  void OnDefer(std::unique_ptr<ResourceController> controller);
   bool CheckForSufficientResource();
   int CalculateEncodedDataLengthToReport();
   int CalculateEncodedBodyLengthToReport();
@@ -85,13 +90,10 @@ class CONTENT_EXPORT AsyncResourceHandler : public ResourceHandler,
 
   bool first_chunk_read_ = false;
 
-  bool did_defer_;
-
   bool has_checked_for_sufficient_resources_;
   bool sent_received_response_msg_;
   bool sent_data_buffer_msg_;
 
-  std::unique_ptr<InliningHelper> inlining_helper_;
   base::TimeTicks response_started_ticks_;
 
   std::unique_ptr<UploadProgressTracker> upload_progress_tracker_;

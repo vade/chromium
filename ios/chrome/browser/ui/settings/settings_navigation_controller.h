@@ -109,13 +109,6 @@ newContextualSearchController:(ios::ChromeBrowserState*)browserState
 newSavePasswordsController:(ios::ChromeBrowserState*)browserState
                   delegate:(id<SettingsNavigationControllerDelegate>)delegate;
 
-// Creates and displays a new PhysicalWebCollectionViewController and the chrome
-// around it. |browserState| is used to personalize some settings aspects and
-// should not be null. |delegate| may be nil.
-+ (SettingsNavigationController*)
-newPhysicalWebController:(ios::ChromeBrowserState*)browserState
-                delegate:(id<SettingsNavigationControllerDelegate>)delegate;
-
 // Creates and displays a new UserFeedbackViewController. |browserState| is used
 // to personalize some settings aspects and should not be nil. |dataSource| is
 // used to populate the UserFeedbackViewController. |delegate| may be nil.
@@ -133,6 +126,13 @@ newImportDataController:(ios::ChromeBrowserState*)browserState
               fromEmail:(NSString*)fromEmail
                 toEmail:(NSString*)toEmail
              isSignedIn:(BOOL)isSignedIn;
+
+// Creates a new AutofillCollectionViewController and the chrome around it.
+// |browserState| is used to personalize some settings aspects and should not be
+// nil. |delegate| may be nil.
++ (SettingsNavigationController*)
+newAutofillController:(ios::ChromeBrowserState*)browserState
+             delegate:(id<SettingsNavigationControllerDelegate>)delegate;
 
 // Returns a new Done button for a UINavigationItem which will call
 // closeSettings when it is pressed. Should only be called by view controllers

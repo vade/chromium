@@ -23,6 +23,7 @@ import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ShortcutHelper;
+import org.chromium.chrome.browser.browsing_data.ClearBrowsingDataTab;
 import org.chromium.chrome.browser.preferences.ButtonPreference;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.preferences.Preferences;
@@ -51,6 +52,8 @@ public class ClearBrowsingDataPreferencesTest
 
     @Override
     protected void setUp() throws Exception {
+        SigninTestUtil.setUpAuthForTest(getInstrumentation());
+
         super.setUp();
         mTestServer = EmbeddedTestServer.createAndStartServer(getInstrumentation().getContext());
     }
@@ -59,6 +62,8 @@ public class ClearBrowsingDataPreferencesTest
     protected void tearDown() throws Exception {
         mTestServer.stopAndDestroyServer();
         super.tearDown();
+
+        SigninTestUtil.tearDownAuthForTest();
     }
 
     public ClearBrowsingDataPreferencesTest() {
@@ -67,7 +72,6 @@ public class ClearBrowsingDataPreferencesTest
 
     @Override
     public void startMainActivity() throws InterruptedException {
-        SigninTestUtil.setUpAuthForTest(getInstrumentation());
         startMainActivityOnBlankPage();
     }
 
@@ -443,7 +447,7 @@ public class ClearBrowsingDataPreferencesTest
             @Override
             public void run() {
                 for (String origin : importantOrigins) {
-                    PrefServiceBridge.markOriginAsImportantForTesting(origin);
+                    BrowsingDataBridge.markOriginAsImportantForTesting(origin);
                 }
             }
         };
@@ -605,7 +609,7 @@ public class ClearBrowsingDataPreferencesTest
                 for (DialogOption option : DialogOption.values()) {
                     boolean enabled = typesToClear.contains(option);
                     PrefServiceBridge.getInstance().setBrowsingDataDeletionPreference(
-                            option.getDataType(), enabled);
+                            option.getDataType(), ClearBrowsingDataTab.ADVANCED, enabled);
                 }
             }
         });

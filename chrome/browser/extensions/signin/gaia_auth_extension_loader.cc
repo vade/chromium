@@ -68,7 +68,6 @@ namespace extensions {
 GaiaAuthExtensionLoader::GaiaAuthExtensionLoader(BrowserContext* context)
     : browser_context_(context),
       load_count_(0),
-      last_data_id_(0),
       weak_ptr_factory_(this) {
 }
 
@@ -84,16 +83,14 @@ void GaiaAuthExtensionLoader::LoadIfNeeded() {
 
 void GaiaAuthExtensionLoader::UnloadIfNeededAsync() {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE,
-      base::Bind(&GaiaAuthExtensionLoader::UnloadIfNeeded,
-                 weak_ptr_factory_.GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&GaiaAuthExtensionLoader::UnloadIfNeeded,
+                                weak_ptr_factory_.GetWeakPtr()));
 }
 
 void GaiaAuthExtensionLoader::UnloadIfNeeded() {
   --load_count_;
   if (load_count_ == 0) {
     UnloadGaiaAuthExtension(browser_context_);
-    data_.clear();
   }
 }
 
@@ -102,7 +99,6 @@ void GaiaAuthExtensionLoader::Shutdown() {
     UnloadGaiaAuthExtension(browser_context_);
     load_count_ = 0;
   }
-  data_.clear();
 }
 
 // static
@@ -111,8 +107,8 @@ GaiaAuthExtensionLoader* GaiaAuthExtensionLoader::Get(BrowserContext* context) {
 }
 
 static base::LazyInstance<
-    BrowserContextKeyedAPIFactory<GaiaAuthExtensionLoader> > g_factory =
-    LAZY_INSTANCE_INITIALIZER;
+    BrowserContextKeyedAPIFactory<GaiaAuthExtensionLoader>>::DestructorAtExit
+    g_factory = LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<GaiaAuthExtensionLoader>*

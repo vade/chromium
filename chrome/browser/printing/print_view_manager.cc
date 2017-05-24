@@ -31,7 +31,7 @@ namespace {
 
 // Keeps track of pending scripted print preview closures.
 // No locking, only access on the UI thread.
-base::LazyInstance<std::map<content::RenderProcessHost*, base::Closure>>
+base::LazyInstance<std::map<content::RenderProcessHost*, base::Closure>>::Leaky
     g_scripted_print_preview_closure_map = LAZY_INSTANCE_INITIALIZER;
 
 void EnableInternalPDFPluginForContents(int render_process_id,
@@ -94,13 +94,7 @@ bool PrintViewManager::BasicPrint(content::RenderFrameHost* rfh) {
   if (!print_preview_dialog)
     return PrintNow(rfh);
 
-  if (!print_preview_dialog->GetWebUI())
-    return false;
-
-  PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(
-      print_preview_dialog->GetWebUI()->GetController());
-  print_preview_ui->OnShowSystemDialog();
-  return true;
+  return !!print_preview_dialog->GetWebUI();
 }
 #endif  // BUILDFLAG(ENABLE_BASIC_PRINTING)
 
@@ -135,7 +129,8 @@ void PrintViewManager::PrintPreviewForWebNode(content::RenderFrameHost* rfh) {
 
 void PrintViewManager::PrintPreviewDone() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DCHECK_NE(NOT_PREVIEWING, print_preview_state_);
+  if (print_preview_state_ == NOT_PREVIEWING)
+    return;
 
   if (print_preview_state_ == SCRIPTED_PREVIEW) {
     auto& map = g_scripted_print_preview_closure_map.Get();
@@ -160,7 +155,7 @@ void PrintViewManager::RenderFrameCreated(
 void PrintViewManager::RenderFrameDeleted(
     content::RenderFrameHost* render_frame_host) {
   if (render_frame_host == print_preview_rfh_)
-    print_preview_state_ = NOT_PREVIEWING;
+    PrintPreviewDone();
   PrintViewManagerBase::RenderFrameDeleted(render_frame_host);
 }
 

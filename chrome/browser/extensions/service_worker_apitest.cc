@@ -8,22 +8,26 @@
 #include "base/macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_restrictions.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/gcm/fake_gcm_profile_service.h"
+#include "chrome/browser/gcm/gcm_profile_service_factory.h"
 #include "chrome/browser/notifications/desktop_notification_profile_util.h"
+#include "chrome/browser/notifications/notification_display_service_factory.h"
+#include "chrome/browser/notifications/stub_notification_display_service.h"
 #include "chrome/browser/permissions/permission_manager.h"
+#include "chrome/browser/permissions/permission_result.h"
 #include "chrome/browser/push_messaging/push_messaging_app_identifier.h"
 #include "chrome/browser/push_messaging/push_messaging_service_factory.h"
 #include "chrome/browser/push_messaging/push_messaging_service_impl.h"
-#include "chrome/browser/services/gcm/fake_gcm_profile_service.h"
-#include "chrome/browser/services/gcm/gcm_profile_service_factory.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/content_settings/core/common/content_settings_types.h"
 #include "components/gcm_driver/instance_id/fake_gcm_driver_for_instance_id.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/permission_type.h"
 #include "content/public/browser/service_worker_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
@@ -94,6 +98,11 @@ class ServiceWorkerTest : public ExtensionApiTest {
   ServiceWorkerTest() : current_channel_(version_info::Channel::STABLE) {}
 
   ~ServiceWorkerTest() override {}
+
+  void SetUpOnMainThread() override {
+    ExtensionApiTest::SetUpOnMainThread();
+    host_resolver()->AddRule("a.com", "127.0.0.1");
+  }
 
  protected:
   // Returns the ProcessManager for the test's profile.
@@ -223,9 +232,11 @@ class ServiceWorkerPushMessagingTest : public ServiceWorkerTest {
   void GrantNotificationPermissionForTest(const GURL& url) {
     GURL origin = url.GetOrigin();
     DesktopNotificationProfileUtil::GrantPermission(profile(), origin);
-    ASSERT_EQ(blink::mojom::PermissionStatus::GRANTED,
-              PermissionManager::Get(profile())->GetPermissionStatus(
-                  content::PermissionType::NOTIFICATIONS, origin, origin));
+    ASSERT_EQ(CONTENT_SETTING_ALLOW,
+              PermissionManager::Get(profile())
+                  ->GetPermissionStatus(CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
+                                        origin, origin)
+                  .content_setting);
   }
 
   PushMessagingAppIdentifier GetAppIdentifierForServiceWorkerRegistration(
@@ -246,6 +257,9 @@ class ServiceWorkerPushMessagingTest : public ServiceWorkerTest {
     ServiceWorkerTest::SetUpCommandLine(command_line);
   }
   void SetUpOnMainThread() override {
+    NotificationDisplayServiceFactory::GetInstance()->SetTestingFactory(
+        profile(), &StubNotificationDisplayService::FactoryForTests);
+
     gcm::FakeGCMProfileService* gcm_service =
         static_cast<gcm::FakeGCMProfileService*>(
             gcm::GCMProfileServiceFactory::GetInstance()
@@ -275,6 +289,7 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerTest, RegisterSucceeds) {
 }
 
 IN_PROC_BROWSER_TEST_F(ServiceWorkerTest, UpdateRefreshesServiceWorker) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::ScopedTempDir scoped_temp_dir;
   ASSERT_TRUE(scoped_temp_dir.CreateUniqueTempDir());
   base::FilePath pem_path = test_data_dir_.AppendASCII("service_worker")
@@ -315,6 +330,7 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerTest, UpdateRefreshesServiceWorker) {
 }
 
 IN_PROC_BROWSER_TEST_F(ServiceWorkerTest, UpdateWithoutSkipWaiting) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::ScopedTempDir scoped_temp_dir;
   ASSERT_TRUE(scoped_temp_dir.CreateUniqueTempDir());
   base::FilePath pem_path = test_data_dir_.AppendASCII("service_worker")
@@ -652,7 +668,14 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerTest, TabsCreate) {
 
 // Tests that worker ref count increments while extension API function is
 // active.
-IN_PROC_BROWSER_TEST_F(ServiceWorkerTest, WorkerRefCount) {
+
+// Flaky on Linux and ChromeOS, https://crbug.com/702126
+#if defined(OS_LINUX)
+#define MAYBE_WorkerRefCount DISABLED_WorkerRefCount
+#else
+#define MAYBE_WorkerRefCount WorkerRefCount
+#endif
+IN_PROC_BROWSER_TEST_F(ServiceWorkerTest, MAYBE_WorkerRefCount) {
   // Extensions APIs from SW are only enabled on trunk.
   ScopedCurrentChannel current_channel_override(version_info::Channel::UNKNOWN);
   const Extension* extension = LoadExtensionWithFlags(
@@ -735,7 +758,6 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerTest, WebAccessibleResourcesIframeSrc) {
   // (non-localhost, non-https) URL for the web page. This page will create
   // iframes that load extension pages that must be controllable by service
   // worker.
-  host_resolver()->AddRule("a.com", "127.0.0.1");
   GURL page_url =
       embedded_test_server()->GetURL("a.com",
                                      "/extensions/api_test/service_worker/"

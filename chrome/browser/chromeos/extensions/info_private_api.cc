@@ -8,12 +8,12 @@
 
 #include <utility>
 
-#include "base/command_line.h"
+#include "base/memory/ptr_util.h"
 #include "base/sys_info.h"
 #include "base/values.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/arc/arc_session_manager.h"
+#include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -24,8 +24,9 @@
 #include "chromeos/network/network_handler.h"
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/settings/cros_settings_names.h"
+#include "chromeos/system/devicetype.h"
 #include "chromeos/system/statistics_provider.h"
-#include "components/arc/arc_bridge_service.h"
+#include "components/arc/arc_util.h"
 #include "components/metrics/metrics_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/user_manager/user_manager.h"
@@ -136,6 +137,33 @@ const char kPlayStoreStatusAvailable[] = "available";
 // JS.
 const char kPlayStoreStatusEnabled[] = "enabled";
 
+// Key which corresponds to the managedDeviceStatus property in JS.
+const char kPropertyManagedDeviceStatus[] = "managedDeviceStatus";
+
+// Value to which managedDeviceStatus property is set for unmanaged devices.
+const char kManagedDeviceStatusNotManaged[] = "not managed";
+
+// Value to which managedDeviceStatus property is set for managed devices.
+const char kManagedDeviceStatusManaged[] = "managed";
+
+// Key which corresponds to the deviceType property in JS.
+const char kPropertyDeviceType[] = "deviceType";
+
+// Value to which deviceType property is set for Chromebase.
+const char kDeviceTypeChromebase[] = "chromebase";
+
+// Value to which deviceType property is set for Chromebit.
+const char kDeviceTypeChromebit[] = "chromebit";
+
+// Value to which deviceType property is set for Chromebook.
+const char kDeviceTypeChromebook[] = "chromebook";
+
+// Value to which deviceType property is set for Chromebox.
+const char kDeviceTypeChromebox[] = "chromebox";
+
+// Value to which deviceType property is set when the specific type is unknown.
+const char kDeviceTypeChromedevice[] = "chromedevice";
+
 const struct {
   const char* api_name;
   const char* preference_name;
@@ -201,23 +229,23 @@ bool ChromeosInfoPrivateGetFunction::RunAsync() {
   for (size_t i = 0; i < list->GetSize(); ++i) {
     std::string property_name;
     EXTENSION_FUNCTION_VALIDATE(list->GetString(i, &property_name));
-    base::Value* value = GetValue(property_name);
+    std::unique_ptr<base::Value> value = GetValue(property_name);
     if (value)
-      result->Set(property_name, value);
+      result->Set(property_name, std::move(value));
   }
   SetResult(std::move(result));
   SendResponse(true);
   return true;
 }
 
-base::Value* ChromeosInfoPrivateGetFunction::GetValue(
+std::unique_ptr<base::Value> ChromeosInfoPrivateGetFunction::GetValue(
     const std::string& property_name) {
   if (property_name == kPropertyHWID) {
     std::string hwid;
     chromeos::system::StatisticsProvider* provider =
         chromeos::system::StatisticsProvider::GetInstance();
     provider->GetMachineStatistic(chromeos::system::kHardwareClassKey, &hwid);
-    return new base::StringValue(hwid);
+    return base::MakeUnique<base::Value>(hwid);
   }
 
   if (property_name == kPropertyCustomizationID) {
@@ -226,7 +254,7 @@ base::Value* ChromeosInfoPrivateGetFunction::GetValue(
         chromeos::system::StatisticsProvider::GetInstance();
     provider->GetMachineStatistic(chromeos::system::kCustomizationIdKey,
                                   &customization_id);
-    return new base::StringValue(customization_id);
+    return base::MakeUnique<base::Value>(customization_id);
   }
 
   if (property_name == kPropertyHomeProvider) {
@@ -236,67 +264,91 @@ base::Value* ChromeosInfoPrivateGetFunction::GetValue(
     std::string home_provider_id;
     if (cellular_device)
       home_provider_id = cellular_device->home_provider_id();
-    return new base::StringValue(home_provider_id);
+    return base::MakeUnique<base::Value>(home_provider_id);
   }
 
   if (property_name == kPropertyInitialLocale) {
-    return new base::StringValue(
+    return base::MakeUnique<base::Value>(
         chromeos::StartupUtils::GetInitialLocale());
   }
 
   if (property_name == kPropertyBoard) {
-    return new base::StringValue(base::SysInfo::GetLsbReleaseBoard());
+    return base::MakeUnique<base::Value>(base::SysInfo::GetLsbReleaseBoard());
   }
 
   if (property_name == kPropertyOwner) {
-    return new base::FundamentalValue(
+    return base::MakeUnique<base::Value>(
         user_manager::UserManager::Get()->IsCurrentUserOwner());
   }
 
   if (property_name == kPropertySessionType) {
     if (ExtensionsBrowserClient::Get()->IsRunningInForcedAppMode())
-      return new base::StringValue(kSessionTypeKiosk);
+      return base::MakeUnique<base::Value>(kSessionTypeKiosk);
     if (ExtensionsBrowserClient::Get()->IsLoggedInAsPublicAccount())
-      return new base::StringValue(kSessionTypePublicSession);
-    return new base::StringValue(kSessionTypeNormal);
+      return base::MakeUnique<base::Value>(kSessionTypePublicSession);
+    return base::MakeUnique<base::Value>(kSessionTypeNormal);
   }
 
   if (property_name == kPropertyPlayStoreStatus) {
-    if (arc::ArcSessionManager::IsAllowedForProfile(
-            Profile::FromBrowserContext(context_))) {
-      return new base::StringValue(kPlayStoreStatusEnabled);
+    if (arc::IsArcAllowedForProfile(Profile::FromBrowserContext(context_)))
+      return base::MakeUnique<base::Value>(kPlayStoreStatusEnabled);
+    if (arc::IsArcAvailable())
+      return base::MakeUnique<base::Value>(kPlayStoreStatusAvailable);
+    return base::MakeUnique<base::Value>(kPlayStoreStatusNotAvailable);
+  }
+
+  if (property_name == kPropertyManagedDeviceStatus) {
+    policy::BrowserPolicyConnectorChromeOS* connector =
+        g_browser_process->platform_part()->browser_policy_connector_chromeos();
+    if (connector->IsEnterpriseManaged()) {
+      return base::MakeUnique<base::Value>(kManagedDeviceStatusManaged);
     }
-    if (arc::ArcBridgeService::GetAvailable(
-            base::CommandLine::ForCurrentProcess())) {
-      return new base::StringValue(kPlayStoreStatusAvailable);
+    return base::MakeUnique<base::Value>(kManagedDeviceStatusNotManaged);
+  }
+
+  if (property_name == kPropertyDeviceType) {
+    switch (chromeos::GetDeviceType()) {
+      case chromeos::DeviceType::kChromebox:
+        return base::MakeUnique<base::Value>(kDeviceTypeChromebox);
+      case chromeos::DeviceType::kChromebase:
+        return base::MakeUnique<base::Value>(kDeviceTypeChromebase);
+      case chromeos::DeviceType::kChromebit:
+        return base::MakeUnique<base::Value>(kDeviceTypeChromebit);
+      case chromeos::DeviceType::kChromebook:
+        return base::MakeUnique<base::Value>(kDeviceTypeChromebook);
+      default:
+        return base::MakeUnique<base::Value>(kDeviceTypeChromedevice);
     }
-    return new base::StringValue(kPlayStoreStatusNotAvailable);
   }
 
   if (property_name == kPropertyClientId) {
-    return new base::StringValue(GetClientId());
+    return base::MakeUnique<base::Value>(GetClientId());
   }
 
   if (property_name == kPropertyTimezone) {
-    return chromeos::CrosSettings::Get()->GetPref(
-            chromeos::kSystemTimezone)->DeepCopy();
+    // TODO(crbug.com/697817): Convert CrosSettings::Get to take a unique_ptr.
+    return base::WrapUnique<base::Value>(
+        chromeos::CrosSettings::Get()
+            ->GetPref(chromeos::kSystemTimezone)
+            ->DeepCopy());
   }
 
   if (property_name == kPropertySupportedTimezones) {
     std::unique_ptr<base::ListValue> values =
         chromeos::system::GetTimezoneList();
-    return values.release();
+    // TODO(crbug.com/703565): remove std::move() once Xcode 9.0+ is required.
+    return std::move(values);
   }
 
   const char* pref_name = GetBoolPrefNameForApiProperty(property_name.c_str());
   if (pref_name) {
-    return new base::FundamentalValue(
+    return base::MakeUnique<base::Value>(
         Profile::FromBrowserContext(context_)->GetPrefs()->GetBoolean(
             pref_name));
   }
 
   DLOG(ERROR) << "Unknown property request: " << property_name;
-  return NULL;
+  return nullptr;
 }
 
 ChromeosInfoPrivateSetFunction::ChromeosInfoPrivateSetFunction() {
@@ -312,7 +364,7 @@ ExtensionFunction::ResponseAction ChromeosInfoPrivateSetFunction::Run() {
     std::string param_value;
     EXTENSION_FUNCTION_VALIDATE(args_->GetString(1, &param_value));
     chromeos::CrosSettings::Get()->Set(chromeos::kSystemTimezone,
-                                       base::StringValue(param_value));
+                                       base::Value(param_value));
   } else {
     const char* pref_name = GetBoolPrefNameForApiProperty(param_name.c_str());
     if (pref_name) {

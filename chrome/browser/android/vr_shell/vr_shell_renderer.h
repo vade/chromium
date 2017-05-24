@@ -6,29 +6,37 @@
 #define CHROME_BROWSER_ANDROID_VR_SHELL_VR_SHELL_RENDERER_H_
 
 #include <memory>
+#include <queue>
 #include <vector>
 
 #include "base/macros.h"
-#include "chrome/browser/android/vr_shell/vr_math.h"
-#include "third_party/gvr-android-sdk/src/libraries/headers/vr/gvr/capi/include/gvr_types.h"
+#include "chrome/browser/android/vr_shell/vr_controller_model.h"
+#include "device/vr/vr_types.h"
 #include "ui/gl/gl_bindings.h"
 
 namespace vr_shell {
 
-typedef unsigned int GLuint;
+// TODO(tiborg): set background color through JS API.
+constexpr float kFogBrightness = 0.57f;
 
 enum ShaderID {
   SHADER_UNRECOGNIZED = 0,
-  TEXTURE_QUAD_VERTEX_SHADER,
-  TEXTURE_QUAD_FRAGMENT_SHADER,
+  EXTERNAL_TEXTURED_QUAD_VERTEX_SHADER,
+  EXTERNAL_TEXTURED_QUAD_FRAGMENT_SHADER,
   WEBVR_VERTEX_SHADER,
   WEBVR_FRAGMENT_SHADER,
   RETICLE_VERTEX_SHADER,
   RETICLE_FRAGMENT_SHADER,
   LASER_VERTEX_SHADER,
   LASER_FRAGMENT_SHADER,
-  BACKGROUND_VERTEX_SHADER,
-  BACKGROUND_FRAGMENT_SHADER,
+  GRADIENT_QUAD_VERTEX_SHADER,
+  GRADIENT_QUAD_FRAGMENT_SHADER,
+  GRADIENT_GRID_VERTEX_SHADER,
+  GRADIENT_GRID_FRAGMENT_SHADER,
+  CONTROLLER_VERTEX_SHADER,
+  CONTROLLER_FRAGMENT_SHADER,
+  TEXTURED_QUAD_VERTEX_SHADER,
+  TEXTURED_QUAD_FRAGMENT_SHADER,
   SHADER_ID_MAX
 };
 
@@ -38,9 +46,23 @@ struct Vertex3d {
   float z;
 };
 
+struct RectF {
+  float x;
+  float y;
+  float width;
+  float height;
+};
+
 struct Line3d {
   Vertex3d start;
   Vertex3d end;
+};
+
+struct SkiaQuad {
+  int texture_data_handle;
+  vr::Mat4f view_proj_matrix;
+  RectF copy_rect;
+  float opacity;
 };
 
 class BaseRenderer {
@@ -50,9 +72,6 @@ class BaseRenderer {
  protected:
   BaseRenderer(ShaderID vertex_id, ShaderID fragment_id);
 
-  void PrepareToDraw(GLuint view_proj_matrix_handle,
-                     const gvr::Mat4f& view_proj_matrix);
-
   GLuint program_handle_;
   GLuint position_handle_;
   GLuint tex_coord_handle_;
@@ -60,15 +79,31 @@ class BaseRenderer {
   DISALLOW_COPY_AND_ASSIGN(BaseRenderer);
 };
 
-class TexturedQuadRenderer : public BaseRenderer {
+class BaseQuadRenderer : public BaseRenderer {
  public:
-  TexturedQuadRenderer();
-  ~TexturedQuadRenderer() override;
+  BaseQuadRenderer(ShaderID vertex_id, ShaderID fragment_id);
+  ~BaseQuadRenderer() override;
+
+  static void SetVertexBuffer();
+
+ protected:
+  void PrepareToDraw(GLuint view_proj_matrix_handle,
+                     const vr::Mat4f& view_proj_matrix);
+
+  static GLuint vertex_buffer_;
+
+  DISALLOW_COPY_AND_ASSIGN(BaseQuadRenderer);
+};
+
+class ExternalTexturedQuadRenderer : public BaseQuadRenderer {
+ public:
+  ExternalTexturedQuadRenderer();
+  ~ExternalTexturedQuadRenderer() override;
 
   // Draw the content rect in the texture quad.
   void Draw(int texture_data_handle,
-            const gvr::Mat4f& view_proj_matrix,
-            const Rectf& copy_rect,
+            const vr::Mat4f& view_proj_matrix,
+            const gfx::RectF& copy_rect,
             float opacity);
 
  private:
@@ -77,11 +112,35 @@ class TexturedQuadRenderer : public BaseRenderer {
   GLuint tex_uniform_handle_;
   GLuint opacity_handle_;
 
+  DISALLOW_COPY_AND_ASSIGN(ExternalTexturedQuadRenderer);
+};
+
+class TexturedQuadRenderer : public BaseQuadRenderer {
+ public:
+  TexturedQuadRenderer();
+  ~TexturedQuadRenderer() override;
+
+  // Draw the content rect in the texture quad.
+  void AddQuad(int texture_data_handle,
+               const vr::Mat4f& view_proj_matrix,
+               const gfx::RectF& copy_rect,
+               float opacity);
+
+  void Flush();
+
+ private:
+  GLuint model_view_proj_matrix_handle_;
+  GLuint copy_rect_uniform_handle_;
+  GLuint tex_uniform_handle_;
+  GLuint opacity_handle_;
+
+  std::queue<SkiaQuad> quad_queue_;
+
   DISALLOW_COPY_AND_ASSIGN(TexturedQuadRenderer);
 };
 
 // Renders a page-generated stereo VR view.
-class WebVrRenderer : public BaseRenderer {
+class WebVrRenderer : public BaseQuadRenderer {
  public:
   WebVrRenderer();
   ~WebVrRenderer() override;
@@ -89,22 +148,17 @@ class WebVrRenderer : public BaseRenderer {
   void Draw(int texture_handle);
 
  private:
-  static constexpr size_t VERTEX_STRIDE = sizeof(float) * 4;
-  static constexpr size_t VERTEX_ELEMENTS = 4;
-  static constexpr size_t VERTEX_OFFSET = 0;
-
   GLuint tex_uniform_handle_;
-  GLuint vertex_buffer_;
 
   DISALLOW_COPY_AND_ASSIGN(WebVrRenderer);
 };
 
-class ReticleRenderer : public BaseRenderer {
+class ReticleRenderer : public BaseQuadRenderer {
  public:
   ReticleRenderer();
   ~ReticleRenderer() override;
 
-  void Draw(const gvr::Mat4f& view_proj_matrix);
+  void Draw(const vr::Mat4f& view_proj_matrix);
 
  private:
   GLuint model_view_proj_matrix_handle_;
@@ -119,12 +173,12 @@ class ReticleRenderer : public BaseRenderer {
   DISALLOW_COPY_AND_ASSIGN(ReticleRenderer);
 };
 
-class LaserRenderer : public BaseRenderer {
+class LaserRenderer : public BaseQuadRenderer {
  public:
   LaserRenderer();
   ~LaserRenderer() override;
 
-  void Draw(const gvr::Mat4f& view_proj_matrix);
+  void Draw(float opacity, const vr::Mat4f& view_proj_matrix);
 
  private:
   GLuint model_view_proj_matrix_handle_;
@@ -133,33 +187,89 @@ class LaserRenderer : public BaseRenderer {
   GLuint color_handle_;
   GLuint fade_point_handle_;
   GLuint fade_end_handle_;
+  GLuint opacity_handle_;
 
   DISALLOW_COPY_AND_ASSIGN(LaserRenderer);
 };
 
-class BackgroundRenderer : public BaseRenderer {
+class ControllerRenderer : public BaseRenderer {
  public:
-  static constexpr float kFogBrightness = 0.57f;
-  static constexpr float kGroundCeilingBrightness = 0.48f;
-  static constexpr float kGridBrightness = 0.57f;
+  ControllerRenderer();
+  ~ControllerRenderer() override;
 
-  BackgroundRenderer();
-  ~BackgroundRenderer() override;
+  void SetUp(std::unique_ptr<VrControllerModel> model);
+  void Draw(VrControllerModel::State state,
+            float opacity,
+            const vr::Mat4f& view_proj_matrix);
+  bool IsSetUp() const { return setup_; }
 
-  void Draw(const gvr::Mat4f& view_proj_matrix);
+ private:
+  GLuint model_view_proj_matrix_handle_;
+  GLuint tex_uniform_handle_;
+  GLuint opacity_handle_;
+  GLuint indices_buffer_ = 0;
+  GLuint vertex_buffer_ = 0;
+  GLint position_components_ = 0;
+  GLenum position_type_ = GL_FLOAT;
+  GLsizei position_stride_ = 0;
+  const GLvoid* position_offset_ = nullptr;
+  GLint tex_coord_components_ = 0;
+  GLenum tex_coord_type_ = GL_FLOAT;
+  GLsizei tex_coord_stride_ = 0;
+  const GLvoid* tex_coord_offset_ = nullptr;
+  GLenum draw_mode_ = GL_TRIANGLES;
+  GLsizei indices_count_ = 0;
+  GLenum indices_type_ = GL_INT;
+  const GLvoid* indices_offset_ = nullptr;
+  std::vector<GLuint> texture_handles_;
+  bool setup_ = false;
+
+  DISALLOW_COPY_AND_ASSIGN(ControllerRenderer);
+};
+
+class GradientQuadRenderer : public BaseQuadRenderer {
+ public:
+  GradientQuadRenderer();
+  ~GradientQuadRenderer() override;
+
+  void Draw(const vr::Mat4f& view_proj_matrix,
+            const vr::Colorf& edge_color,
+            const vr::Colorf& center_color,
+            float opacity);
 
  private:
   GLuint model_view_proj_matrix_handle_;
   GLuint scene_radius_handle_;
   GLuint center_color_handle_;
   GLuint edge_color_handle_;
-  std::vector<Line3d>  ground_grid_lines_;
-  std::vector<float> ground_ceiling_plane_positions_;
-  gvr::Mat4f ground_plane_transform_mat_;
-  gvr::Mat4f ceiling_plane_transform_mat_;
-  float scene_radius_;
+  GLuint opacity_handle_;
 
-  DISALLOW_COPY_AND_ASSIGN(BackgroundRenderer);
+  DISALLOW_COPY_AND_ASSIGN(GradientQuadRenderer);
+};
+
+class GradientGridRenderer : public BaseRenderer {
+ public:
+  GradientGridRenderer();
+  ~GradientGridRenderer() override;
+
+  void Draw(const vr::Mat4f& view_proj_matrix,
+            const vr::Colorf& edge_color,
+            const vr::Colorf& center_color,
+            int gridline_count,
+            float opacity);
+
+ private:
+  void MakeGridLines(int gridline_count);
+
+  GLuint vertex_buffer_ = 0;
+  GLuint model_view_proj_matrix_handle_;
+  GLuint scene_radius_handle_;
+  GLuint center_color_handle_;
+  GLuint edge_color_handle_;
+  GLuint opacity_handle_;
+  std::vector<Line3d> grid_lines_;
+
+  DISALLOW_COPY_AND_ASSIGN(GradientGridRenderer);
 };
 
 class VrShellRenderer {
@@ -167,32 +277,26 @@ class VrShellRenderer {
   VrShellRenderer();
   ~VrShellRenderer();
 
-  TexturedQuadRenderer* GetTexturedQuadRenderer() {
-    return textured_quad_renderer_.get();
-  }
-
-  WebVrRenderer* GetWebVrRenderer() {
-    return webvr_renderer_.get();
-  }
-
-  ReticleRenderer* GetReticleRenderer() {
-    return reticle_renderer_.get();
-  }
-
-  LaserRenderer* GetLaserRenderer() {
-    return laser_renderer_.get();
-  }
-
-  BackgroundRenderer* GetBackgroundRenderer() {
-    return background_renderer_.get();
-  }
+  ExternalTexturedQuadRenderer* GetExternalTexturedQuadRenderer();
+  TexturedQuadRenderer* GetTexturedQuadRenderer();
+  WebVrRenderer* GetWebVrRenderer();
+  ReticleRenderer* GetReticleRenderer();
+  LaserRenderer* GetLaserRenderer();
+  ControllerRenderer* GetControllerRenderer();
+  GradientQuadRenderer* GetGradientQuadRenderer();
+  GradientGridRenderer* GetGradientGridRenderer();
+  void Flush();
 
  private:
+  std::unique_ptr<ExternalTexturedQuadRenderer>
+      external_textured_quad_renderer_;
   std::unique_ptr<TexturedQuadRenderer> textured_quad_renderer_;
   std::unique_ptr<WebVrRenderer> webvr_renderer_;
   std::unique_ptr<ReticleRenderer> reticle_renderer_;
   std::unique_ptr<LaserRenderer> laser_renderer_;
-  std::unique_ptr<BackgroundRenderer> background_renderer_;
+  std::unique_ptr<ControllerRenderer> controller_renderer_;
+  std::unique_ptr<GradientQuadRenderer> gradient_quad_renderer_;
+  std::unique_ptr<GradientGridRenderer> gradient_grid_renderer_;
 
   DISALLOW_COPY_AND_ASSIGN(VrShellRenderer);
 };

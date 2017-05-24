@@ -3,6 +3,8 @@
 <script src="../../../resources/testharness.js"></script>
 <script src="../../../resources/testharnessreport.js"></script>
 <script src="../../../resources/bluetooth/bluetooth-helpers.js"></script>
+<script src="../../../resources/bluetooth/web-bluetooth-test.js"></script>
+<script src="../../../resources/mojo-helpers.js"></script>
 <script>
 'use strict';
 promise_test(() => {
@@ -31,7 +33,8 @@ promise_test(() => {
           continue;
         }
         let error = new DOMException(
-          'Service is no longer valid. Remember to retrieve the service ' +
+          'Service with UUID ' + service.uuid +
+          ' is no longer valid. Remember to retrieve the service ' +
           'again after reconnecting.',
           'InvalidStateError');
         promises = promises.then(() =>

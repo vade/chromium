@@ -6,7 +6,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
-#include "content/public/browser/browser_thread.h"
+#include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/public/browser/resource_context.h"
 #include "content/public/browser/resource_hints.h"
 #include "net/base/address_list.h"
@@ -34,9 +34,8 @@ class RequestHolder {
   std::unique_ptr<net::HostResolver::Request> request_;
 };
 
-// Note that the lifetime of |request| and |addresses| is managed by the caller.
-void OnResolveComplete(RequestHolder* request_holder,
-                       net::AddressList* addresses,
+void OnResolveComplete(std::unique_ptr<RequestHolder> request_holder,
+                       std::unique_ptr<net::AddressList> addresses,
                        const net::CompletionCallback& callback,
                        int result) {
   // Plumb the resolution result into the callback if future consumers want
@@ -52,7 +51,9 @@ void PreconnectUrl(content::ResourceContext* resource_context,
                    int count,
                    bool allow_credentials,
                    net::HttpRequestInfo::RequestMotivation motivation) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK(ResourceDispatcherHostImpl::Get()
+             ->io_thread_task_runner()
+             ->BelongsToCurrentThread());
   DCHECK(resource_context);
 
   net::URLRequestContext* context = resource_context->GetRequestContext();
@@ -90,19 +91,27 @@ void PreconnectUrl(content::ResourceContext* resource_context,
 int PreresolveUrl(content::ResourceContext* resource_context,
                   const GURL& url,
                   const net::CompletionCallback& callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK(ResourceDispatcherHostImpl::Get()
+             ->io_thread_task_runner()
+             ->BelongsToCurrentThread());
   DCHECK(resource_context);
 
-  RequestHolder* request_holder = new RequestHolder();
-  net::AddressList* addresses = new net::AddressList;
+  auto request_holder = base::MakeUnique<RequestHolder>();
+  auto addresses = base::MakeUnique<net::AddressList>();
+
+  // Save raw pointers before the unique_ptr is invalidated by base::Passed.
+  net::AddressList* raw_addresses = addresses.get();
+  std::unique_ptr<net::HostResolver::Request>* out_request =
+      request_holder->GetRequest();
+
   net::HostResolver* resolver = resource_context->GetHostResolver();
   net::HostResolver::RequestInfo resolve_info(net::HostPortPair::FromURL(url));
   resolve_info.set_is_speculative(true);
   return resolver->Resolve(
-      resolve_info, net::IDLE, addresses,
-      base::Bind(&OnResolveComplete, base::Owned(request_holder),
-                 base::Owned(addresses), callback),
-      request_holder->GetRequest(), net::NetLogWithSource());
+      resolve_info, net::IDLE, raw_addresses,
+      base::Bind(&OnResolveComplete, base::Passed(&request_holder),
+                 base::Passed(&addresses), callback),
+      out_request, net::NetLogWithSource());
 }
 
 }  // namespace content

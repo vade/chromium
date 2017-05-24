@@ -209,9 +209,7 @@ void GetOsPasswordStatus() {
   OsPasswordStatus* status_weak = status.get();
   // This task calls ::LogonUser(), hence MayBlock().
   base::PostTaskWithTraitsAndReply(
-      FROM_HERE, base::TaskTraits()
-                     .WithPriority(base::TaskPriority::BACKGROUND)
-                     .MayBlock(),
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::Bind(&GetOsPasswordStatusInternal, prefs_weak, status_weak),
       base::Bind(&ReplyOsPasswordStatus, base::Passed(&prefs),
                  base::Passed(&status)));
@@ -240,12 +238,6 @@ bool AuthenticateUser(gfx::NativeWindow window) {
   bool use_displayname = false;
   bool use_principalname = false;
   DWORD logon_result = 0;
-
-  // Disable password manager reauthentication before Windows 7.
-  // This is because of an interaction between LogonUser() and the sandbox.
-  // http://crbug.com/345916
-  if (base::win::GetVersion() < base::win::VERSION_WIN7)
-    return true;
 
   // On a domain, we obtain the User Principal Name
   // for domain authentication.

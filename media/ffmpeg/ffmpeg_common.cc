@@ -540,6 +540,15 @@ bool AVStreamToVideoDecoderConfig(const AVStream* stream,
   config->Initialize(codec, profile, format, color_space, coded_size,
                      visible_rect, natural_size, extra_data,
                      GetEncryptionScheme(stream));
+
+  const AVCodecParameters* codec_parameters = stream->codecpar;
+  config->set_color_space_info(VideoColorSpace(
+      codec_parameters->color_primaries, codec_parameters->color_trc,
+      codec_parameters->color_space,
+      codec_parameters->color_range == AVCOL_RANGE_JPEG
+          ? gfx::ColorSpace::RangeID::FULL
+          : gfx::ColorSpace::RangeID::LIMITED));
+
   return true;
 }
 
@@ -735,69 +744,17 @@ ColorSpace AVColorSpaceToColorSpace(AVColorSpace color_space,
   return COLOR_SPACE_UNSPECIFIED;
 }
 
+std::string AVErrorToString(int errnum) {
+  char errbuf[AV_ERROR_MAX_STRING_SIZE] = {0};
+  av_strerror(errnum, errbuf, AV_ERROR_MAX_STRING_SIZE);
+  return std::string(errbuf);
+}
+
 int32_t HashCodecName(const char* codec_name) {
   // Use the first 32-bits from the SHA1 hash as the identifier.
   int32_t hash;
   memcpy(&hash, base::SHA1HashString(codec_name).substr(0, 4).c_str(), 4);
   return hash;
 }
-
-#define TEST_PRIMARY(P)                                                 \
-  static_assert(                                                        \
-      static_cast<int>(gfx::ColorSpace::PrimaryID::P) == AVCOL_PRI_##P, \
-      "gfx::ColorSpace::PrimaryID::" #P " does not match AVCOL_PRI_" #P);
-
-#define TEST_TRANSFER(T)                                                 \
-  static_assert(                                                         \
-      static_cast<int>(gfx::ColorSpace::TransferID::T) == AVCOL_TRC_##T, \
-      "gfx::ColorSpace::TransferID::" #T " does not match AVCOL_TRC_" #T);
-
-#define TEST_COLORSPACE(C)                                             \
-  static_assert(                                                       \
-      static_cast<int>(gfx::ColorSpace::MatrixID::C) == AVCOL_SPC_##C, \
-      "gfx::ColorSpace::MatrixID::" #C " does not match AVCOL_SPC_" #C);
-
-TEST_PRIMARY(RESERVED0);
-TEST_PRIMARY(BT709);
-TEST_PRIMARY(UNSPECIFIED);
-TEST_PRIMARY(RESERVED);
-TEST_PRIMARY(BT470M);
-TEST_PRIMARY(BT470BG);
-TEST_PRIMARY(SMPTE170M);
-TEST_PRIMARY(SMPTE240M);
-TEST_PRIMARY(FILM);
-TEST_PRIMARY(BT2020);
-TEST_PRIMARY(SMPTEST428_1);
-
-TEST_TRANSFER(RESERVED0);
-TEST_TRANSFER(BT709);
-TEST_TRANSFER(UNSPECIFIED);
-TEST_TRANSFER(RESERVED);
-TEST_TRANSFER(GAMMA22);
-TEST_TRANSFER(GAMMA28);
-TEST_TRANSFER(SMPTE170M);
-TEST_TRANSFER(SMPTE240M);
-TEST_TRANSFER(LINEAR);
-TEST_TRANSFER(LOG);
-TEST_TRANSFER(LOG_SQRT);
-TEST_TRANSFER(IEC61966_2_4);
-TEST_TRANSFER(BT1361_ECG);
-TEST_TRANSFER(IEC61966_2_1);
-TEST_TRANSFER(BT2020_10);
-TEST_TRANSFER(BT2020_12);
-TEST_TRANSFER(SMPTEST2084);
-TEST_TRANSFER(SMPTEST428_1);
-
-TEST_COLORSPACE(RGB);
-TEST_COLORSPACE(BT709);
-TEST_COLORSPACE(UNSPECIFIED);
-TEST_COLORSPACE(RESERVED);
-TEST_COLORSPACE(FCC);
-TEST_COLORSPACE(BT470BG);
-TEST_COLORSPACE(SMPTE170M);
-TEST_COLORSPACE(SMPTE240M);
-TEST_COLORSPACE(YCOCG);
-TEST_COLORSPACE(BT2020_NCL);
-TEST_COLORSPACE(BT2020_CL);
 
 }  // namespace media

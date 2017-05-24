@@ -7,39 +7,13 @@
 #include "core/dom/Document.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
-#include "modules/webaudio/AudioWorklet.h"
 
 namespace blink {
 
-WindowAudioWorklet::WindowAudioWorklet(LocalDOMWindow& window)
-    : ContextLifecycleObserver(window.frame()->document()) {}
-
-const char* WindowAudioWorklet::supplementName() {
-  return "WindowAudioWorklet";
-}
-
-WindowAudioWorklet& WindowAudioWorklet::from(LocalDOMWindow& window) {
-  WindowAudioWorklet* supplement = static_cast<WindowAudioWorklet*>(
-      Supplement<LocalDOMWindow>::from(window, supplementName()));
-  if (!supplement) {
-    supplement = new WindowAudioWorklet(window);
-    provideTo(window, supplementName(), supplement);
-  }
-  return *supplement;
-}
-
-Worklet* WindowAudioWorklet::audioWorklet(DOMWindow& window) {
-  if (!window.frame())
-    return nullptr;
-  return from(toLocalDOMWindow(window)).audioWorklet(toLocalDOMWindow(window));
-}
-
 AudioWorklet* WindowAudioWorklet::audioWorklet(LocalDOMWindow& window) {
-  if (!m_audioWorklet && getExecutionContext()) {
-    DCHECK(window.frame());
-    m_audioWorklet = AudioWorklet::create(window.frame());
-  }
-  return m_audioWorklet.get();
+  if (!window.GetFrame())
+    return nullptr;
+  return From(window).audio_worklet_.Get();
 }
 
 // Break the following cycle when the context gets detached.
@@ -51,14 +25,34 @@ AudioWorklet* WindowAudioWorklet::audioWorklet(LocalDOMWindow& window) {
 // => ThreadedWorkletMessagingProxy
 // => Document
 // => ... => window
-void WindowAudioWorklet::contextDestroyed(ExecutionContext*) {
-  m_audioWorklet = nullptr;
+void WindowAudioWorklet::ContextDestroyed(ExecutionContext*) {
+  audio_worklet_ = nullptr;
 }
 
 DEFINE_TRACE(WindowAudioWorklet) {
-  visitor->trace(m_audioWorklet);
-  Supplement<LocalDOMWindow>::trace(visitor);
-  ContextLifecycleObserver::trace(visitor);
+  visitor->Trace(audio_worklet_);
+  Supplement<LocalDOMWindow>::Trace(visitor);
+  ContextLifecycleObserver::Trace(visitor);
+}
+
+WindowAudioWorklet& WindowAudioWorklet::From(LocalDOMWindow& window) {
+  WindowAudioWorklet* supplement = static_cast<WindowAudioWorklet*>(
+      Supplement<LocalDOMWindow>::From(window, SupplementName()));
+  if (!supplement) {
+    supplement = new WindowAudioWorklet(window);
+    ProvideTo(window, SupplementName(), supplement);
+  }
+  return *supplement;
+}
+
+WindowAudioWorklet::WindowAudioWorklet(LocalDOMWindow& window)
+    : ContextLifecycleObserver(window.GetFrame()->GetDocument()),
+      audio_worklet_(AudioWorklet::Create(window.GetFrame())) {
+  DCHECK(GetExecutionContext());
+}
+
+const char* WindowAudioWorklet::SupplementName() {
+  return "WindowAudioWorklet";
 }
 
 }  // namespace blink

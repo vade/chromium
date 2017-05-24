@@ -269,8 +269,6 @@ class SyncManager {
     std::unique_ptr<SyncEncryptionHandler::NigoriState> saved_nigori_state;
   };
 
-  typedef base::Callback<void(void)> ClearServerDataCallback;
-
   SyncManager();
   virtual ~SyncManager();
 
@@ -304,8 +302,11 @@ class SyncManager {
   virtual void UpdateCredentials(const SyncCredentials& credentials) = 0;
 
   // Put the syncer in normal mode ready to perform nudges and polls.
-  virtual void StartSyncingNormally(const ModelSafeRoutingInfo& routing_info,
-                                    base::Time last_poll_time) = 0;
+  virtual void StartSyncingNormally(base::Time last_poll_time) = 0;
+
+  // Put syncer in configuration mode. Only configuration sync cycles are
+  // performed. No local changes are committed to the server.
+  virtual void StartConfiguration() = 0;
 
   // Switches the mode of operation to CONFIGURATION_MODE and performs
   // any configuration tasks needed as determined by the params. Once complete,
@@ -317,7 +318,6 @@ class SyncManager {
   //              does finish.
   virtual void ConfigureSyncer(ConfigureReason reason,
                                ModelTypeSet to_download,
-                               const ModelSafeRoutingInfo& new_routing_info,
                                const base::Closure& ready_task,
                                const base::Closure& retry_task) = 0;
 
@@ -352,7 +352,13 @@ class SyncManager {
   // May be called from any thread.
   virtual UserShare* GetUserShare() = 0;
 
-  // Returns an instance of the main interface for non-blocking sync types.
+  // Returns non-owning pointer to ModelTypeConnector. In contrast with
+  // ModelTypeConnectorProxy all calls are executed synchronously, thus the
+  // pointer should be used on sync thread.
+  virtual ModelTypeConnector* GetModelTypeConnector() = 0;
+
+  // Returns an instance of the main interface for registering sync types with
+  // sync engine.
   virtual std::unique_ptr<ModelTypeConnector> GetModelTypeConnectorProxy() = 0;
 
   // Returns the cache_guid of the currently open database.
@@ -395,7 +401,7 @@ class SyncManager {
   // This is an asynchronous operation that requires interaction with the sync
   // server. The operation will automatically be retried with backoff until it
   // completes successfully or sync is shutdown.
-  virtual void ClearServerData(const ClearServerDataCallback& callback) = 0;
+  virtual void ClearServerData(const base::Closure& callback) = 0;
 
   // Updates Sync's tracking of whether the cookie jar has a mismatch with the
   // chrome account. See ClientConfigParams proto message for more info.

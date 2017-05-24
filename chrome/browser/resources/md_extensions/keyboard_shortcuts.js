@@ -19,8 +19,8 @@ cr.define('extensions', function() {
     ready: function() {
       /** @type {!extensions.AnimationHelper} */
       this.animationHelper = new extensions.AnimationHelper(this, this.$.main);
-      this.animationHelper.setEntryAnimation(extensions.Animation.FADE_IN);
-      this.animationHelper.setExitAnimation(extensions.Animation.SCALE_DOWN);
+      this.animationHelper.setEntryAnimations([extensions.Animation.FADE_IN]);
+      this.animationHelper.setExitAnimations([extensions.Animation.SCALE_DOWN]);
       this.sharedElements = {hero: this.$.main};
     },
 
@@ -44,6 +44,16 @@ cr.define('extensions', function() {
      */
     hasKeybinding_: function(keybinding) {
       return !!keybinding;
+    },
+
+    /**
+     * Determines whether to disable the dropdown menu for the command's scope.
+     * @param {!chrome.developerPrivate.Command} command
+     * @return {boolean}
+     * @private
+     */
+    computeScopeDisabled_: function(command) {
+      return command.isExtensionAction || !command.isActive;
     },
 
     /**

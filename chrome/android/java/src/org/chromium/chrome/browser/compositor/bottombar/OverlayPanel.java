@@ -17,12 +17,11 @@ import org.chromium.chrome.browser.compositor.LayerTitleCache;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelManager.PanelPriority;
 import org.chromium.chrome.browser.compositor.layouts.LayoutUpdateHost;
 import org.chromium.chrome.browser.compositor.layouts.components.VirtualView;
-import org.chromium.chrome.browser.compositor.layouts.eventfilter.EdgeSwipeEventFilter.ScrollDirection;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.EdgeSwipeHandler;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.EventFilter;
-import org.chromium.chrome.browser.compositor.layouts.eventfilter.EventFilterHost;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.GestureHandler;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.OverlayPanelEventFilter;
+import org.chromium.chrome.browser.compositor.layouts.eventfilter.ScrollDirection;
 import org.chromium.chrome.browser.compositor.overlays.SceneOverlay;
 import org.chromium.chrome.browser.compositor.scene_layer.SceneOverlayLayer;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
@@ -138,14 +137,14 @@ public class OverlayPanel extends OverlayPanelAnimation implements ActivityState
      * @param eventHost The {@link EventFilterHost} used to propagate events.
      * @param panelManager The {@link OverlayPanelManager} responsible for showing panels.
      */
-    public OverlayPanel(Context context, LayoutUpdateHost updateHost, EventFilterHost eventHost,
-                OverlayPanelManager panelManager) {
+    public OverlayPanel(
+            Context context, LayoutUpdateHost updateHost, OverlayPanelManager panelManager) {
         super(context, updateHost);
         mContentFactory = this;
 
         mPanelManager = panelManager;
         mPanelManager.registerPanel(this);
-        mEventFilter = new OverlayPanelEventFilter(mContext, eventHost, this);
+        mEventFilter = new OverlayPanelEventFilter(mContext, this);
     }
 
     /**
@@ -365,6 +364,14 @@ public class OverlayPanel extends OverlayPanelAnimation implements ActivityState
     public ContentViewCore getContentViewCore() {
         // Expose OverlayPanelContent method.
         return mContent != null ? mContent.getContentViewCore() : null;
+    }
+
+    /**
+     * Call this when a loadUrl request has failed to notify the panel that the WebContents can
+     * be reused.  See crbug.com/682953 for details.
+     */
+    public void onLoadUrlFailed() {
+        if (mContent != null) mContent.onLoadUrlFailed();
     }
 
     /**
@@ -804,12 +811,10 @@ public class OverlayPanel extends OverlayPanelAnimation implements ActivityState
      */
     protected void resizePanelContentViewCore(float width, float height) {
         if (!isShowing()) return;
-        ContentViewCore panelContent = getContentViewCore();
-        if (panelContent != null) {
-            panelContent.onSizeChanged((int) (width / mPxToDp),
-                    (int) (height / mPxToDp), panelContent.getViewportWidthPix(),
-                    panelContent.getViewportHeightPix());
-            panelContent.onPhysicalBackingSizeChanged(
+        if (getContentViewCore() != null) {
+            getOverlayPanelContent().onSizeChanged(
+                    (int) (width / mPxToDp), (int) (height / mPxToDp));
+            getOverlayPanelContent().onPhysicalBackingSizeChanged(
                     (int) (width / mPxToDp), (int) (height / mPxToDp));
         }
     }

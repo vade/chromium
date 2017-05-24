@@ -16,6 +16,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/test_timeouts.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -87,7 +88,7 @@ static const struct VideoQualityTestConfig {
 // FileVideoCaptureDevice and its sibling with kYuvFileExtension is used for
 // comparison.
 //
-// You must also compile the chromium_builder_webrtc target before you run this
+// You must also compile the frame_analyzer target before you run this
 // test to get all the tools built.
 //
 // The external compare_videos.py script also depends on two external
@@ -198,7 +199,7 @@ class WebRtcVideoQualityBrowserTest : public WebRtcTestBase,
     if (!base::PathExists(path_to_analyzer)) {
       LOG(ERROR) << "Missing frame analyzer: should be in "
           << path_to_analyzer.value()
-          << ". Try building the chromium_builder_webrtc target.";
+          << ". Try building the frame_analyzer target.";
       return false;
     }
     if (!base::PathExists(path_to_compare_script)) {
@@ -344,18 +345,28 @@ INSTANTIATE_TEST_CASE_P(
 
 IN_PROC_BROWSER_TEST_P(WebRtcVideoQualityBrowserTest,
                        MANUAL_TestVideoQualityVp8) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   TestVideoQuality("VP8");
 }
 
 IN_PROC_BROWSER_TEST_P(WebRtcVideoQualityBrowserTest,
                        MANUAL_TestVideoQualityVp9) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   TestVideoQuality("VP9");
 }
 
 #if BUILDFLAG(RTC_USE_H264)
 
+// TODO(philipel): Remove disable condition when H264 flakyness has been
+//                 investigated (crbug.com/722746).
+#if defined(OS_WIN)
+#define MAYBE_TestVideoQualityH264 DISABLED_TestVideoQualityH264
+#else
+#define MAYBE_TestVideoQualityH264 MANUAL_TestVideoQualityH264
+#endif
 IN_PROC_BROWSER_TEST_P(WebRtcVideoQualityBrowserTest,
-                       MANUAL_TestVideoQualityH264) {
+                       MAYBE_TestVideoQualityH264) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   // Only run test if run-time feature corresponding to |rtc_use_h264| is on.
   if (!base::FeatureList::IsEnabled(content::kWebRtcH264WithOpenH264FFmpeg)) {
     LOG(WARNING) << "Run-time feature WebRTC-H264WithOpenH264FFmpeg disabled. "

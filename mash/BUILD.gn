@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/nacl/config.gni")
 import("//services/catalog/public/tools/catalog.gni")
 import("//services/service_manager/public/service_manifest.gni")
 import("//testing/test.gni")
@@ -26,6 +27,7 @@ group("all") {
   if (is_chromeos) {
     deps += [
       "//ash/autoclick/mus:accessibility_autoclick",
+      "//ash/mus/standalone:ash_standalone",
       "//ash/touch_hud/mus:touch_hud",
       "//mash:mash_unittests",
     ]
@@ -43,7 +45,6 @@ catalog("catalog") {
     "//mash/quick_launch:manifest",
     "//mash/session:manifest",
     "//mash/task_viewer:manifest",
-    "//services/tracing:manifest",
     "//services/ui:manifest",
     "//services/ui/demo:manifest",
     "//services/ui/ime/test_ime_driver:manifest",
@@ -57,21 +58,32 @@ catalog("catalog") {
     # if you have such a binary built, the runner will be able to locate it.
     "//chrome/app:chrome_content_browser_manifest",
     "//chrome/app:chrome_content_gpu_manifest",
+    "//chrome/app:chrome_content_packaged_services_manifest_for_mash",
     "//chrome/app:chrome_content_plugin_manifest",
     "//chrome/app:chrome_content_renderer_manifest",
     "//chrome/app:chrome_content_utility_manifest",
   ]
 
-  executable_overrides = [ "content_browser:@EXE_DIR/chrome" ]
+  executable_overrides = [ "content_packaged_services:@EXE_DIR/chrome" ]
 
   catalog_deps = [ "//mash/example:catalog" ]
 
   if (is_chromeos) {
-    standalone_services += [ "//ash/mus:manifest" ]
+    standalone_services += [
+      "//ash/mus:manifest",
+      "//ash/mus/standalone:manifest",
+    ]
   }
 
   if (is_linux && !is_android) {
     standalone_services += [ "//components/font_service:manifest" ]
+  }
+
+  if (enable_nacl) {
+    standalone_services += [ "//components/nacl/loader:nacl_loader_manifest" ]
+    if (is_win && target_cpu == "x86") {
+      standalone_services += [ "//components/nacl/broker:nacl_broker_manifest" ]
+    }
   }
 }
 
@@ -105,14 +117,15 @@ if (is_chromeos) {
       "test/mash_unittests.cc",
     ]
     deps = [
-      "//ash/common:unittests",
-      "//ash/common/test:test_support",
+      "//ash:common_unittests",
       "//ash/mus:resources",
       "//ash/mus:unittests",
+      "//ash/public/cpp:ash_public_cpp",
       "//base",
       "//base/test:test_support",
       "//cc",
       "//cc:test_support",
+      "//cc/surfaces",
       "//mojo/edk/system",
       "//services/catalog:lib",
       "//ui/aura",

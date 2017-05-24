@@ -29,47 +29,61 @@
 #define PluginView_h
 
 #include "core/CoreExport.h"
-#include "platform/Widget.h"
+#include "core/frame/FrameOrPlugin.h"
+#include "platform/geometry/IntRect.h"
 #include "platform/scroll/ScrollTypes.h"
-#include "wtf/text/WTFString.h"
-#include <v8.h>
-
-namespace blink {
-class WebLayer;
-}
+#include "platform/wtf/text/WTFString.h"
+#include "public/platform/WebFocusType.h"
+#include "v8/include/v8.h"
 
 namespace blink {
 
+class Event;
+class FrameView;
 class ResourceResponse;
+class WebLayer;
 
-class CORE_EXPORT PluginView : public Widget {
+// TODO(joelhockey): Remove this class.
+// The only implementation of this class is web/WebPluginContainerImpl.
+// It can be used directly.
+class CORE_EXPORT PluginView : public FrameOrPlugin {
  public:
-  bool isPluginView() const final { return true; }
+  virtual ~PluginView() {}
 
-  virtual WebLayer* platformLayer() const { return 0; }
-  virtual v8::Local<v8::Object> scriptableObject(v8::Isolate*) {
+  bool IsPluginView() const override { return true; }
+
+  virtual void SetParent(FrameView*) = 0;
+  virtual FrameView* Parent() const = 0;
+  virtual void SetParentVisible(bool) = 0;
+  virtual void SetFocused(bool, WebFocusType) = 0;
+  virtual void FrameRectsChanged() = 0;
+  virtual void GeometryMayHaveChanged() = 0;
+  virtual void HandleEvent(Event*) = 0;
+  virtual void EventListenersRemoved() = 0;
+  virtual bool IsPluginContainer() const { return false; }
+  virtual bool IsErrorplaceholder() { return false; }
+
+  virtual WebLayer* PlatformLayer() const { return 0; }
+  virtual v8::Local<v8::Object> ScriptableObject(v8::Isolate*) {
     return v8::Local<v8::Object>();
   }
-  virtual bool wantsWheelEvents() { return false; }
-  virtual bool supportsKeyboardFocus() const { return false; }
-  virtual bool supportsInputMethod() const { return false; }
-  virtual bool canProcessDrag() const { return false; }
+  virtual bool WantsWheelEvents() { return false; }
+  virtual bool SupportsKeyboardFocus() const { return false; }
+  virtual bool SupportsInputMethod() const { return false; }
+  virtual bool CanProcessDrag() const { return false; }
 
-  virtual void didReceiveResponse(const ResourceResponse&) {}
-  virtual void didReceiveData(const char*, int) {}
+  virtual void DidReceiveResponse(const ResourceResponse&) {}
+  virtual void DidReceiveData(const char*, int) {}
 
-  virtual void updateAllLifecyclePhases() {}
-  virtual void invalidatePaintIfNeeded() {}
-
- protected:
-  PluginView() : Widget() {}
+  virtual void UpdateAllLifecyclePhases() {}
+  virtual void InvalidatePaint() {}
 };
 
 DEFINE_TYPE_CASTS(PluginView,
-                  Widget,
-                  widget,
-                  widget->isPluginView(),
-                  widget.isPluginView());
+                  FrameOrPlugin,
+                  frame_or_plugin,
+                  frame_or_plugin->IsPluginView(),
+                  frame_or_plugin.IsPluginView());
 
 }  // namespace blink
 

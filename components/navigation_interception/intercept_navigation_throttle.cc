@@ -62,6 +62,10 @@ InterceptNavigationThrottle::WillRedirectRequest() {
   return CheckIfShouldIgnoreNavigation(true);
 }
 
+const char* InterceptNavigationThrottle::GetNameForLogging() {
+  return "InterceptNavigationThrottle";
+}
+
 content::NavigationThrottle::ThrottleCheckResult
 InterceptNavigationThrottle::CheckIfShouldIgnoreNavigation(bool is_redirect) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -69,7 +73,8 @@ InterceptNavigationThrottle::CheckIfShouldIgnoreNavigation(bool is_redirect) {
       navigation_handle()->GetURL(), navigation_handle()->GetReferrer(),
       navigation_handle()->HasUserGesture(), navigation_handle()->IsPost(),
       navigation_handle()->GetPageTransition(), is_redirect,
-      navigation_handle()->IsExternalProtocol(), true);
+      navigation_handle()->IsExternalProtocol(), true,
+      navigation_handle()->GetBaseURLForDataURL());
 
   if (run_callback_synchronously_) {
     bool should_ignore_navigation = should_ignore_callback_.Run(

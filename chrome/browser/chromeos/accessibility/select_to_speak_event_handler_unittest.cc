@@ -11,6 +11,7 @@
 #include "ash/test/ash_test_helper.h"
 #include "ash/test/ash_test_views_delegate.h"
 #include "base/macros.h"
+#include "chrome/browser/chromeos/accessibility/speech_monitor.h"
 #include "chrome/browser/ui/aura/accessibility/automation_manager_aura.h"
 #include "chrome/test/base/testing_profile.h"
 #include "ui/aura/window.h"
@@ -84,8 +85,9 @@ class SelectToSpeakEventHandlerTest : public ash::test::AshTestBase {
   void SetUp() override {
     ash::test::AshTestBase::SetUp();
     event_delegate_.reset(new SelectToSpeakAccessibilityEventDelegate());
-    ash_test_helper()->views_delegate()->set_test_accessibility_event_delegate(
-        event_delegate_.get());
+    ash_test_helper()
+        ->test_views_delegate()
+        ->set_test_accessibility_event_delegate(event_delegate_.get());
     generator_ = &AshTestBase::GetEventGenerator();
     CurrentContext()->AddPreTargetHandler(select_to_speak_event_handler_.get());
     CurrentContext()->AddPreTargetHandler(&event_capturer_);
@@ -113,6 +115,8 @@ class SelectToSpeakEventHandlerTest : public ash::test::AshTestBase {
 };
 
 }  // namespace
+
+namespace chromeos {
 
 TEST_F(SelectToSpeakEventHandlerTest, PressAndReleaseSearchNotHandled) {
   // If the user presses and releases the Search key, with no mouse
@@ -215,30 +219,6 @@ TEST_F(SelectToSpeakEventHandlerTest, SearchPlusClickTwice) {
   EXPECT_FALSE(event_capturer_.last_key_event());
 }
 
-TEST_F(SelectToSpeakEventHandlerTest, SearchPlusMouseThenCancel) {
-  // If the user holds the Search key and then presses the mouse button,
-  // but then releases the Search key first while the mouse is still down,
-  // a cancel AX event is sent and the subsequent mouse up is canceled too.
-
-  generator_->PressKey(ui::VKEY_LWIN, ui::EF_COMMAND_DOWN);
-  ASSERT_TRUE(event_capturer_.last_key_event());
-  EXPECT_FALSE(event_capturer_.last_key_event()->handled());
-
-  generator_->set_current_location(gfx::Point(100, 12));
-  generator_->PressLeftButton();
-  EXPECT_FALSE(event_capturer_.last_mouse_event());
-  EXPECT_TRUE(event_delegate_->CapturedAXEvent(ui::AX_EVENT_MOUSE_PRESSED));
-
-  event_capturer_.Reset();
-  generator_->ReleaseKey(ui::VKEY_LWIN, ui::EF_COMMAND_DOWN);
-  EXPECT_FALSE(event_capturer_.last_key_event());
-
-  EXPECT_TRUE(event_delegate_->CapturedAXEvent(ui::AX_EVENT_MOUSE_CANCELED));
-
-  generator_->ReleaseLeftButton();
-  EXPECT_FALSE(event_capturer_.last_mouse_event());
-}
-
 TEST_F(SelectToSpeakEventHandlerTest, SearchPlusKeyIgnoresClicks) {
   // If the user presses the Search key and then some other key,
   // we should assume the user does not want select-to-speak, and
@@ -275,3 +255,37 @@ TEST_F(SelectToSpeakEventHandlerTest, SearchPlusKeyIgnoresClicks) {
   ASSERT_TRUE(event_capturer_.last_key_event());
   EXPECT_FALSE(event_capturer_.last_key_event()->handled());
 }
+
+TEST_F(SelectToSpeakEventHandlerTest, TappingControlStopsSpeech) {
+  SpeechMonitor monitor;
+  EXPECT_FALSE(monitor.DidStop());
+  generator_->PressKey(ui::VKEY_CONTROL, ui::EF_CONTROL_DOWN);
+  generator_->ReleaseKey(ui::VKEY_CONTROL, ui::EF_CONTROL_DOWN);
+  EXPECT_TRUE(monitor.DidStop());
+}
+
+TEST_F(SelectToSpeakEventHandlerTest, TappingSearchStopsSpeech) {
+  SpeechMonitor monitor;
+  EXPECT_FALSE(monitor.DidStop());
+  generator_->PressKey(ui::VKEY_LWIN, ui::EF_COMMAND_DOWN);
+  generator_->ReleaseKey(ui::VKEY_LWIN, ui::EF_COMMAND_DOWN);
+  EXPECT_TRUE(monitor.DidStop());
+}
+
+TEST_F(SelectToSpeakEventHandlerTest, TappingShiftDoesNotStopSpeech) {
+  SpeechMonitor monitor;
+  generator_->PressKey(ui::VKEY_SHIFT, ui::EF_SHIFT_DOWN);
+  generator_->ReleaseKey(ui::VKEY_SHIFT, ui::EF_SHIFT_DOWN);
+  EXPECT_FALSE(monitor.DidStop());
+}
+
+TEST_F(SelectToSpeakEventHandlerTest, PressingControlZDoesNotStopSpeech) {
+  SpeechMonitor monitor;
+  generator_->PressKey(ui::VKEY_CONTROL, ui::EF_CONTROL_DOWN);
+  generator_->PressKey(ui::VKEY_Z, ui::EF_CONTROL_DOWN);
+  generator_->ReleaseKey(ui::VKEY_Z, ui::EF_CONTROL_DOWN);
+  generator_->ReleaseKey(ui::VKEY_CONTROL, ui::EF_CONTROL_DOWN);
+  EXPECT_FALSE(monitor.DidStop());
+}
+
+}  // namespace chromeos

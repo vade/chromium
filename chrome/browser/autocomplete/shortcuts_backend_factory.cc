@@ -7,7 +7,6 @@
 #include <memory>
 
 #include "base/memory/ptr_util.h"
-#include "chrome/browser/autocomplete/shortcuts_extensions_manager.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -19,11 +18,13 @@
 #include "content/public/browser/browser_thread.h"
 #include "extensions/features/features.h"
 
-namespace {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
+#include "chrome/browser/autocomplete/shortcuts_extensions_manager.h"
+
+namespace {
 const char kShortcutsExtensionsManagerKey[] = "ShortcutsExtensionsManager";
-#endif
 }
+#endif
 
 // static
 scoped_refptr<ShortcutsBackend> ShortcutsBackendFactory::GetForProfile(
@@ -100,9 +101,10 @@ scoped_refptr<ShortcutsBackend> ShortcutsBackendFactory::CreateShortcutsBackend(
           content::BrowserThread::DB),
       profile->GetPath().Append(kShortcutsDatabaseName), suppress_db));
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-  ShortcutsExtensionsManager* extensions_manager =
-      new ShortcutsExtensionsManager(profile);
-  profile->SetUserData(kShortcutsExtensionsManagerKey, extensions_manager);
+  auto extensions_manager =
+      base::MakeUnique<ShortcutsExtensionsManager>(profile);
+  profile->SetUserData(kShortcutsExtensionsManagerKey,
+                       std::move(extensions_manager));
 #endif
   return backend->Init() ? backend : nullptr;
 }

@@ -9,6 +9,7 @@
 
 #include "cc/output/in_process_context_provider.h"
 #include "cc/output/output_surface.h"
+#include "ui/latency/latency_tracker.h"
 
 namespace cc {
 class SyntheticBeginFrameSource;
@@ -30,6 +31,7 @@ class DisplayOutputSurface : public cc::OutputSurface {
   void EnsureBackbuffer() override;
   void DiscardBackbuffer() override;
   void BindFramebuffer() override;
+  void SetDrawRectangle(const gfx::Rect& draw_rectangle) override;
   void Reshape(const gfx::Size& size,
                float device_scale_factor,
                const gfx::ColorSpace& color_space,
@@ -44,10 +46,16 @@ class DisplayOutputSurface : public cc::OutputSurface {
   bool HasExternalStencilTest() const override;
   void ApplyExternalStencil() override;
 
+ protected:
+  cc::OutputSurfaceClient* client() const { return client_; }
+
+  // Called when a swap completion is signaled from ImageTransportSurface.
+  virtual void DidReceiveSwapBuffersAck(gfx::SwapResult result);
+
  private:
   // Called when a swap completion is signaled from ImageTransportSurface.
   void OnGpuSwapBuffersCompleted(
-      const std::vector<ui::LatencyInfo>& latency_info,
+      const std::vector<LatencyInfo>& latency_info,
       gfx::SwapResult result,
       const gpu::GpuProcessHostedCALayerTreeParamsMac* params_mac);
   void OnVSyncParametersUpdated(base::TimeTicks timebase,
@@ -55,6 +63,12 @@ class DisplayOutputSurface : public cc::OutputSurface {
 
   cc::OutputSurfaceClient* client_ = nullptr;
   cc::SyntheticBeginFrameSource* const synthetic_begin_frame_source_;
+  LatencyTracker latency_tracker_;
+
+  bool set_draw_rectangle_for_frame_ = false;
+  // True if the draw rectangle has been set at all since the last resize.
+  bool has_set_draw_rectangle_since_last_resize_ = false;
+  gfx::Size size_;
 
   base::WeakPtrFactory<DisplayOutputSurface> weak_ptr_factory_;
 };

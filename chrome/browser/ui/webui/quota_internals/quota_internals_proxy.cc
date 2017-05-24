@@ -28,23 +28,16 @@ void QuotaInternalsProxy::RequestInfo(
   if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        base::Bind(&QuotaInternalsProxy::RequestInfo, this, quota_manager));
+        base::BindOnce(&QuotaInternalsProxy::RequestInfo, this, quota_manager));
     return;
   }
   quota_manager_ = quota_manager;
-  {
-    // crbug.com/349708
-    TRACE_EVENT0("io", "QuotaInternalsProxy::RequestInfo");
 
-    quota_manager_->GetAvailableSpace(
-        base::Bind(&QuotaInternalsProxy::DidGetAvailableSpace,
-                   weak_factory_.GetWeakPtr()));
-  }
+  quota_manager_->GetQuotaSettings(base::Bind(
+      &QuotaInternalsProxy::DidGetSettings, weak_factory_.GetWeakPtr()));
 
-  quota_manager_->GetTemporaryGlobalQuota(
-      base::Bind(&QuotaInternalsProxy::DidGetGlobalQuota,
-                 weak_factory_.GetWeakPtr(),
-                 storage::kStorageTypeTemporary));
+  quota_manager_->GetStorageCapacity(base::Bind(
+      &QuotaInternalsProxy::DidGetCapacity, weak_factory_.GetWeakPtr()));
 
   quota_manager_->GetGlobalUsage(
       storage::kStorageTypeTemporary,
@@ -79,18 +72,18 @@ void QuotaInternalsProxy::RequestInfo(
 
 QuotaInternalsProxy::~QuotaInternalsProxy() {}
 
-#define RELAY_TO_HANDLER(func, arg_t) \
-  void QuotaInternalsProxy::func(arg_t arg) {                 \
-    if (!handler_)                                            \
-      return;                                                 \
-    if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {     \
-      BrowserThread::PostTask(                                \
-          BrowserThread::UI, FROM_HERE,                       \
-          base::Bind(&QuotaInternalsProxy::func, this, arg)); \
-      return;                                                 \
-    }                                                         \
-                                                              \
-    handler_->func(arg);                                      \
+#define RELAY_TO_HANDLER(func, arg_t)                             \
+  void QuotaInternalsProxy::func(arg_t arg) {                     \
+    if (!handler_)                                                \
+      return;                                                     \
+    if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {         \
+      BrowserThread::PostTask(                                    \
+          BrowserThread::UI, FROM_HERE,                           \
+          base::BindOnce(&QuotaInternalsProxy::func, this, arg)); \
+      return;                                                     \
+    }                                                             \
+                                                                  \
+    handler_->func(arg);                                          \
   }
 
 RELAY_TO_HANDLER(ReportAvailableSpace, int64_t)
@@ -101,23 +94,18 @@ RELAY_TO_HANDLER(ReportStatistics, const Statistics&)
 
 #undef RELAY_TO_HANDLER
 
-void QuotaInternalsProxy::DidGetAvailableSpace(storage::QuotaStatusCode status,
-                                               int64_t space) {
-  // crbug.com/349708
-  TRACE_EVENT0("io", "QuotaInternalsProxy::DidGetAvailableSpace");
-
-  if (status == storage::kQuotaStatusOk)
-    ReportAvailableSpace(space);
+void QuotaInternalsProxy::DidGetSettings(
+    const storage::QuotaSettings& settings) {
+  // TODO(michaeln): also report the other config fields
+  GlobalStorageInfo info(storage::kStorageTypeTemporary);
+  info.set_quota(settings.pool_size);
+  ReportGlobalInfo(info);
 }
 
-void QuotaInternalsProxy::DidGetGlobalQuota(storage::StorageType type,
-                                            storage::QuotaStatusCode status,
-                                            int64_t quota) {
-  if (status == storage::kQuotaStatusOk) {
-    GlobalStorageInfo info(type);
-    info.set_quota(quota);
-    ReportGlobalInfo(info);
-  }
+void QuotaInternalsProxy::DidGetCapacity(int64_t total_space,
+                                         int64_t available_space) {
+  // TODO(michaeln): also report total_space
+  ReportAvailableSpace(available_space);
 }
 
 void QuotaInternalsProxy::DidGetGlobalUsage(storage::StorageType type,

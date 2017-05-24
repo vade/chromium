@@ -28,6 +28,7 @@ namespace device {
 
 class BluetoothAdapterMac;
 class BluetoothRemoteGattServiceMac;
+class BluetoothRemoteGattDescriptorMac;
 
 class DEVICE_BLUETOOTH_EXPORT BluetoothLowEnergyDeviceMac
     : public BluetoothDeviceMac {
@@ -90,6 +91,8 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothLowEnergyDeviceMac
   void DidUpdateNotificationState(CBCharacteristic* characteristic,
                                   NSError* error);
   void DidDiscoverDescriptors(CBCharacteristic* characteristic, NSError* error);
+  void DidUpdateValueForDescriptor(CBDescriptor* cb_descriptor, NSError* error);
+  void DidWriteValueForDescriptor(CBDescriptor* descriptor, NSError* error);
 
   static std::string GetPeripheralIdentifier(CBPeripheral* peripheral);
 
@@ -107,6 +110,12 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothLowEnergyDeviceMac
   friend class BluetoothTestMac;
   friend class BluetoothRemoteGattServiceMac;
 
+  // Called by the adapter when the device is connected.
+  void DidConnectPeripheral();
+
+  // Calls macOS to discover primary services.
+  void DiscoverPrimaryServices();
+
   // Sends notification if this device is ready with all services discovered.
   void SendNotificationIfDiscoveryComplete();
 
@@ -120,6 +129,10 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothLowEnergyDeviceMac
   BluetoothRemoteGattServiceMac* GetBluetoothRemoteGattService(
       CBService* service) const;
 
+  // Returns BluetoothRemoteGattDescriptorMac based on the CBDescriptor.
+  BluetoothRemoteGattDescriptorMac* GetBluetoothRemoteGattDescriptor(
+      CBDescriptor* cb_descriptor) const;
+
   // Callback used when the CoreBluetooth Peripheral is disconnected.
   void DidDisconnectPeripheral(NSError* error);
 
@@ -130,8 +143,8 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothLowEnergyDeviceMac
   base::scoped_nsobject<BluetoothLowEnergyPeripheralDelegate>
       peripheral_delegate_;
 
-  // Whether the device is connectable.
-  bool connectable_;
+  // Whether the device is connected.
+  bool connected_;
 
   // The peripheral's identifier, as returned by [CBPeripheral identifier].
   std::string identifier_;
@@ -140,8 +153,18 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothLowEnergyDeviceMac
   // identifier.
   std::string hash_address_;
 
+  // Increases each time -[CBPeripheral discoverServices:] is called, and
+  // decreases each time DidDiscoverPrimaryServices() is called. Once the
+  // value is set to 0, characteristics and properties are discovered.
+  int discovery_pending_count_;
+
   DISALLOW_COPY_AND_ASSIGN(BluetoothLowEnergyDeviceMac);
 };
+
+// Stream operator for logging.
+DEVICE_BLUETOOTH_EXPORT std::ostream& operator<<(
+    std::ostream& out,
+    const BluetoothLowEnergyDeviceMac& device);
 
 }  // namespace device
 

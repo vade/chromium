@@ -34,13 +34,13 @@ namespace {
 struct AfterStartupTask {
   AfterStartupTask(const tracked_objects::Location& from_here,
                    const scoped_refptr<base::TaskRunner>& task_runner,
-                   const base::Closure& task)
-      : from_here(from_here), task_runner(task_runner), task(task) {}
+                   base::OnceClosure task)
+      : from_here(from_here), task_runner(task_runner), task(std::move(task)) {}
   ~AfterStartupTask() {}
 
   const tracked_objects::Location from_here;
   const scoped_refptr<base::TaskRunner> task_runner;
-  const base::Closure task;
+  base::OnceClosure task;
 };
 
 // The flag may be read on any thread, but must only be set on the UI thread.
@@ -59,8 +59,8 @@ bool IsBrowserStartupComplete() {
 
 void RunTask(std::unique_ptr<AfterStartupTask> queued_task) {
   // We're careful to delete the caller's |task| on the target runner's thread.
-  DCHECK(queued_task->task_runner->RunsTasksOnCurrentThread());
-  queued_task->task.Run();
+  DCHECK(queued_task->task_runner->RunsTasksInCurrentSequence());
+  std::move(queued_task->task).Run();
 }
 
 void ScheduleTask(std::unique_ptr<AfterStartupTask> queued_task) {
@@ -70,15 +70,21 @@ void ScheduleTask(std::unique_ptr<AfterStartupTask> queued_task) {
   scoped_refptr<base::TaskRunner> target_runner = queued_task->task_runner;
   tracked_objects::Location from_here = queued_task->from_here;
   target_runner->PostDelayedTask(
-      from_here, base::Bind(&RunTask, base::Passed(std::move(queued_task))),
+      from_here, base::BindOnce(&RunTask, base::Passed(std::move(queued_task))),
       base::TimeDelta::FromSeconds(base::RandInt(kMinDelaySec, kMaxDelaySec)));
 }
 
 void QueueTask(std::unique_ptr<AfterStartupTask> queued_task) {
+  DCHECK(queued_task);
+
+  // Use CHECK instead of DCHECK to crash earlier. See http://crbug.com/711167
+  // for details.
+  CHECK(queued_task->task);
+
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        base::Bind(QueueTask, base::Passed(std::move(queued_task))));
+        base::BindOnce(QueueTask, base::Passed(std::move(queued_task))));
     return;
   }
 
@@ -166,7 +172,7 @@ void StartupObserver::Start() {
     contents = browser->tab_strip_model()->GetActiveWebContents();
     if (contents && contents->GetMainFrame() &&
         contents->GetMainFrame()->GetVisibilityState() ==
-            blink::WebPageVisibilityStateVisible) {
+            blink::kWebPageVisibilityStateVisible) {
       break;
     }
   }
@@ -184,10 +190,11 @@ void StartupObserver::Start() {
   delay = base::TimeDelta::FromMinutes(kLongerDelayMins);
 #endif  // !defined(OS_ANDROID)
 
-  BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE,
-                                 base::Bind(&StartupObserver::OnFailsafeTimeout,
-                                            weak_factory_.GetWeakPtr()),
-                                 delay);
+  BrowserThread::PostDelayedTask(
+      BrowserThread::UI, FROM_HERE,
+      base::BindOnce(&StartupObserver::OnFailsafeTimeout,
+                     weak_factory_.GetWeakPtr()),
+      delay);
 }
 
 }  // namespace
@@ -202,15 +209,16 @@ AfterStartupTaskUtils::Runner::~Runner() = default;
 
 bool AfterStartupTaskUtils::Runner::PostDelayedTask(
     const tracked_objects::Location& from_here,
-    const base::Closure& task,
+    base::OnceClosure task,
     base::TimeDelta delay) {
   DCHECK(delay.is_zero());
-  AfterStartupTaskUtils::PostTask(from_here, destination_runner_, task);
+  AfterStartupTaskUtils::PostTask(from_here, destination_runner_,
+                                  std::move(task));
   return true;
 }
 
-bool AfterStartupTaskUtils::Runner::RunsTasksOnCurrentThread() const {
-  return destination_runner_->RunsTasksOnCurrentThread();
+bool AfterStartupTaskUtils::Runner::RunsTasksInCurrentSequence() const {
+  return destination_runner_->RunsTasksInCurrentSequence();
 }
 
 void AfterStartupTaskUtils::StartMonitoringStartup() {
@@ -221,14 +229,14 @@ void AfterStartupTaskUtils::StartMonitoringStartup() {
 void AfterStartupTaskUtils::PostTask(
     const tracked_objects::Location& from_here,
     const scoped_refptr<base::TaskRunner>& destination_runner,
-    const base::Closure& task) {
+    base::OnceClosure task) {
   if (IsBrowserStartupComplete()) {
-    destination_runner->PostTask(from_here, task);
+    destination_runner->PostTask(from_here, std::move(task));
     return;
   }
 
   std::unique_ptr<AfterStartupTask> queued_task(
-      new AfterStartupTask(from_here, destination_runner, task));
+      new AfterStartupTask(from_here, destination_runner, std::move(task)));
   QueueTask(std::move(queued_task));
 }
 

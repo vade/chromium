@@ -4,7 +4,6 @@
 
 #include "media/filters/ffmpeg_glue.h"
 
-#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
@@ -87,44 +86,21 @@ static int LockManagerOperation(void** lock, enum AVLockOp op) {
   return 1;
 }
 
-// FFmpeg must only be initialized once, so use a LazyInstance to ensure this.
-class FFmpegInitializer {
- public:
-  bool initialized() { return initialized_; }
-
- private:
-  friend struct base::DefaultLazyInstanceTraits<FFmpegInitializer>;
-
-  FFmpegInitializer()
-      : initialized_(false) {
+void FFmpegGlue::InitializeFFmpeg() {
+  static bool initialized = []() {
     // Register our protocol glue code with FFmpeg.
     if (av_lockmgr_register(&LockManagerOperation) != 0)
-      return;
+      return false;
 
     // Now register the rest of FFmpeg.
     av_register_all();
+    return true;
+  }();
 
-    initialized_ = true;
-  }
-
-  ~FFmpegInitializer() {
-    NOTREACHED() << "FFmpegInitializer should be leaky!";
-  }
-
-  bool initialized_;
-
-  DISALLOW_COPY_AND_ASSIGN(FFmpegInitializer);
-};
-
-static base::LazyInstance<FFmpegInitializer>::Leaky g_lazy_instance =
-    LAZY_INSTANCE_INITIALIZER;
-void FFmpegGlue::InitializeFFmpeg() {
-  // Get() will invoke the FFmpegInitializer constructor once.
-  CHECK(g_lazy_instance.Get().initialized());
+  CHECK(initialized);
 }
 
-FFmpegGlue::FFmpegGlue(FFmpegURLProtocol* protocol)
-    : open_called_(false) {
+FFmpegGlue::FFmpegGlue(FFmpegURLProtocol* protocol) {
   InitializeFFmpeg();
 
   // Initialize an AVIOContext using our custom read and seek operations.  Don't
@@ -160,25 +136,60 @@ bool FFmpegGlue::OpenContext() {
   // destruction path to avoid double frees.
   open_called_ = true;
 
-  // Attempt to recognize the container by looking at the first few bytes of the
-  // stream. The stream position is left unchanged.
-  std::unique_ptr<std::vector<uint8_t>> buffer(new std::vector<uint8_t>(8192));
-
-  int64_t pos = AVIOSeekOperation(avio_context_.get()->opaque, 0, SEEK_CUR);
-  AVIOSeekOperation(avio_context_.get()->opaque, 0, SEEK_SET);
-  int numRead = AVIOReadOperation(
-      avio_context_.get()->opaque, buffer.get()->data(), buffer.get()->size());
-  AVIOSeekOperation(avio_context_.get()->opaque, pos, SEEK_SET);
-  if (numRead > 0) {
-    // < 0 means Read failed
-    container_names::MediaContainerName container =
-        container_names::DetermineContainer(buffer.get()->data(), numRead);
-    UMA_HISTOGRAM_SPARSE_SLOWLY("Media.DetectedContainer", container);
-  }
-
   // By passing nullptr for the filename (second parameter) we are telling
   // FFmpeg to use the AVIO context we setup from the AVFormatContext structure.
-  return avformat_open_input(&format_context_, nullptr, nullptr, nullptr) == 0;
+  const int ret =
+      avformat_open_input(&format_context_, nullptr, nullptr, nullptr);
+
+  // If FFmpeg can't identify the file, read the first 8k and attempt to guess
+  // at the container type ourselves. This way we can track emergent formats.
+  // Only try on AVERROR_INVALIDDATA to avoid running after I/O errors.
+  if (ret == AVERROR_INVALIDDATA) {
+    std::vector<uint8_t> buffer(8192);
+
+    const int64_t pos = AVIOSeekOperation(avio_context_->opaque, 0, SEEK_SET);
+    if (pos < 0)
+      return false;
+
+    const int num_read =
+        AVIOReadOperation(avio_context_->opaque, buffer.data(), buffer.size());
+    if (num_read < container_names::kMinimumContainerSize)
+      return false;
+
+    container_ = container_names::DetermineContainer(buffer.data(), num_read);
+    UMA_HISTOGRAM_SPARSE_SLOWLY("Media.DetectedContainer", container_);
+    return false;
+  } else if (ret < 0) {
+    return false;
+  }
+
+  // Rely on ffmpeg's parsing if we're able to succesfully open the file.
+  if (strcmp(format_context_->iformat->name, "mov,mp4,m4a,3gp,3g2,mj2") == 0)
+    container_ = container_names::CONTAINER_MOV;
+  else if (strcmp(format_context_->iformat->name, "flac") == 0)
+    container_ = container_names::CONTAINER_FLAC;
+  else if (strcmp(format_context_->iformat->name, "matroska,webm") == 0)
+    container_ = container_names::CONTAINER_WEBM;
+  else if (strcmp(format_context_->iformat->name, "ogg") == 0)
+    container_ = container_names::CONTAINER_OGG;
+  else if (strcmp(format_context_->iformat->name, "wav") == 0)
+    container_ = container_names::CONTAINER_WAV;
+  else if (strcmp(format_context_->iformat->name, "aac") == 0)
+    container_ = container_names::CONTAINER_AAC;
+  else if (strcmp(format_context_->iformat->name, "mp3") == 0)
+    container_ = container_names::CONTAINER_MP3;
+  else if (strcmp(format_context_->iformat->name, "amr") == 0)
+    container_ = container_names::CONTAINER_AMR;
+  else if (strcmp(format_context_->iformat->name, "avi") == 0)
+    container_ = container_names::CONTAINER_AVI;
+  // TODO(jrummell): Remove GSM detection. http://crbug.com/711774
+  else if (strcmp(format_context_->iformat->name, "gsm") == 0)
+    container_ = container_names::CONTAINER_GSM;
+
+  DCHECK_NE(container_, container_names::CONTAINER_UNKNOWN);
+  UMA_HISTOGRAM_SPARSE_SLOWLY("Media.DetectedContainer", container_);
+
+  return true;
 }
 
 FFmpegGlue::~FFmpegGlue() {

@@ -13,7 +13,6 @@
 #include "base/logging.h"
 #include "base/mac/bind_objc_block.h"
 #include "base/stl_util.h"
-#include "base/threading/worker_pool.h"
 #include "components/net_log/chrome_net_log.h"
 #include "components/prefs/pref_service.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
@@ -191,8 +190,7 @@ void OffTheRecordChromeBrowserStateIOData::InitializeInternal(
       web::WebThread::GetTaskRunnerForThread(web::WebThread::DB));
 
   net::ChannelIDService* channel_id_service = new net::ChannelIDService(
-      new net::DefaultChannelIDStore(channel_id_store.get()),
-      base::WorkerPool::GetTaskRunner(true));
+      new net::DefaultChannelIDStore(channel_id_store.get()));
   set_channel_id_service(channel_id_service);
   main_context->set_channel_id_service(channel_id_service);
 
@@ -214,16 +212,9 @@ void OffTheRecordChromeBrowserStateIOData::InitializeInternal(
       new net::URLRequestJobFactoryImpl());
 
   InstallProtocolHandlers(main_job_factory.get(), protocol_handlers);
-  URLRequestInterceptorScopedVector empty_interceptors;
   main_job_factory_ = SetUpJobFactoryDefaults(std::move(main_job_factory),
-                                              std::move(empty_interceptors),
                                               main_context->network_delegate());
   main_context->set_job_factory(main_job_factory_.get());
-
-  // Setup SDCH for this profile.
-  sdch_manager_.reset(new net::SdchManager);
-  sdch_policy_.reset(new net::SdchOwner(sdch_manager_.get(), main_context));
-  main_context->set_sdch_manager(sdch_manager_.get());
 }
 
 ChromeBrowserStateIOData::AppRequestContext*

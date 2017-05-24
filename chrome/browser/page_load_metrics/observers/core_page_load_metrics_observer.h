@@ -41,6 +41,9 @@ extern const char kHistogramLoadTypeParseStartNewNavigation[];
 
 extern const char kHistogramFailedProvisionalLoad[];
 
+extern const char kHistogramPageTimingForegroundDuration[];
+extern const char kHistogramPageTimingForegroundDurationNoCommit[];
+
 extern const char kRapporMetricsNameCoarseTiming[];
 extern const char kHistogramFirstMeaningfulPaintStatus[];
 
@@ -50,6 +53,22 @@ extern const char kHistogramFirstScrollInputAfterFirstPaint[];
 extern const char kHistogramTotalBytes[];
 extern const char kHistogramNetworkBytes[];
 extern const char kHistogramCacheBytes[];
+
+extern const char kHistogramLoadTypeTotalBytesForwardBack[];
+extern const char kHistogramLoadTypeNetworkBytesForwardBack[];
+extern const char kHistogramLoadTypeCacheBytesForwardBack[];
+
+extern const char kHistogramLoadTypeTotalBytesReload[];
+extern const char kHistogramLoadTypeNetworkBytesReload[];
+extern const char kHistogramLoadTypeCacheBytesReload[];
+
+extern const char kHistogramLoadTypeTotalBytesNewNavigation[];
+extern const char kHistogramLoadTypeNetworkBytesNewNavigation[];
+extern const char kHistogramLoadTypeCacheBytesNewNavigation[];
+
+extern const char kHistogramTotalCompletedResources[];
+extern const char kHistogramNetworkCompletedResources[];
+extern const char kHistogramCacheCompletedResources[];
 
 enum FirstMeaningfulPaintStatus {
   FIRST_MEANINGFUL_PAINT_RECORDED,
@@ -72,51 +91,64 @@ class CorePageLoadMetricsObserver
   ~CorePageLoadMetricsObserver() override;
 
   // page_load_metrics::PageLoadMetricsObserver:
+  ObservePolicy OnRedirect(
+      content::NavigationHandle* navigation_handle) override;
   ObservePolicy OnCommit(content::NavigationHandle* navigation_handle) override;
   void OnDomContentLoadedEventStart(
-      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
   void OnLoadEventStart(
-      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
   void OnFirstLayout(
-      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
-  void OnFirstPaint(
-      const page_load_metrics::PageLoadTiming& timing,
+  void OnFirstPaintInPage(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
-  void OnFirstTextPaint(
-      const page_load_metrics::PageLoadTiming& timing,
+  void OnFirstTextPaintInPage(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
-  void OnFirstImagePaint(
-      const page_load_metrics::PageLoadTiming& timing,
+  void OnFirstImagePaintInPage(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
-  void OnFirstContentfulPaint(
-      const page_load_metrics::PageLoadTiming& timing,
+  void OnFirstContentfulPaintInPage(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
-  void OnFirstMeaningfulPaint(
-      const page_load_metrics::PageLoadTiming& timing,
+  void OnFirstMeaningfulPaintInMainFrameDocument(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
   void OnParseStart(
-      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
   void OnParseStop(
-      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
-  void OnComplete(const page_load_metrics::PageLoadTiming& timing,
+  void OnComplete(const page_load_metrics::mojom::PageLoadTiming& timing,
                   const page_load_metrics::PageLoadExtraInfo& info) override;
   void OnFailedProvisionalLoad(
       const page_load_metrics::FailedProvisionalLoadInfo& failed_load_info,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
+  ObservePolicy FlushMetricsOnAppEnterBackground(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& info) override;
   void OnUserInput(const blink::WebInputEvent& event) override;
-  void OnLoadedResource(
-      const page_load_metrics::ExtraRequestInfo& extra_request_info) override;
+  void OnLoadedResource(const page_load_metrics::ExtraRequestCompleteInfo&
+                            extra_request_complete_info) override;
 
  private:
-  void RecordTimingHistograms(const page_load_metrics::PageLoadTiming& timing,
-                              const page_load_metrics::PageLoadExtraInfo& info);
-  void RecordRappor(const page_load_metrics::PageLoadTiming& timing,
+  void RecordTimingHistograms(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& info);
+  void RecordByteAndResourceHistograms(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& info);
+  void RecordRappor(const page_load_metrics::mojom::PageLoadTiming& timing,
                     const page_load_metrics::PageLoadExtraInfo& info);
+  void RecordForegroundDurationHistograms(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& info,
+      base::TimeTicks app_background_time);
 
   ui::PageTransition transition_;
   bool was_no_store_main_resource_;
@@ -124,13 +156,16 @@ class CorePageLoadMetricsObserver
   // Note: these are only approximations, based on WebContents attribution from
   // ResourceRequestInfo objects while this is the currently committed load in
   // the WebContents.
-  int num_cache_requests_;
-  int num_network_requests_;
+  int num_cache_resources_;
+  int num_network_resources_;
 
   // The number of body (not header) prefilter bytes consumed by requests for
   // the page.
   int64_t cache_bytes_;
   int64_t network_bytes_;
+
+  // Size of the redirect chain, which excludes the first URL.
+  int redirect_chain_size_;
 
   // True if we've received a non-scroll input (touch tap or mouse up)
   // after first paint has happened.
@@ -139,7 +174,6 @@ class CorePageLoadMetricsObserver
   // True if we've received a scroll input after first paint has happened.
   bool received_scroll_input_after_first_paint_ = false;
 
-  base::TimeTicks navigation_start_;
   base::TimeTicks first_user_interaction_after_first_paint_;
   base::TimeTicks first_paint_;
 

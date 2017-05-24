@@ -110,6 +110,7 @@ var noServerHeader =
 var typeBasic = checkFetchResponseType.bind(this, 'basic');
 var typeCors = checkFetchResponseType.bind(this, 'cors');
 var typeOpaque = checkFetchResponseType.bind(this, 'opaque');
+var typeOpaqueredirect = checkFetchResponseType.bind(this, 'opaqueredirect');
 var responseRedirected = checkFetchResponseRedirected.bind(this, true);
 var responseNotRedirected = checkFetchResponseRedirected.bind(this, false);
 
@@ -162,16 +163,16 @@ var checkJsonpError = checkJsonpResult.bind(this, 'error');
 var checkJsonpSuccess = checkJsonpResult.bind(this, 'success');
 var checkJsonpNoRedirect = checkJsonpResult.bind(this, 'noredirect');
 var hasCustomHeader =
-  checkJsonpHeader.bind(this, 'x-serviceworker-test', 'test');
+  checkJsonpHeader.bind(this, 'X-ServiceWorker-Test', 'test');
 var hasCustomHeader2 = function(url, data) {
-  checkJsonpHeader('x-serviceworker-s', 'test1', url, data);
-  checkJsonpHeader('x-serviceworker-test', 'test2,test3', url, data);
-  checkJsonpHeader('x-serviceworker-ua', 'test4', url, data);
-  checkJsonpHeader('x-serviceworker-u', 'test5', url, data);
-  checkJsonpHeader('x-serviceworker-v', 'test6', url, data);
+  checkJsonpHeader('X-ServiceWorker-s', 'test1', url, data);
+  checkJsonpHeader('X-ServiceWorker-Test', 'test2, test3', url, data);
+  checkJsonpHeader('X-ServiceWorker-ua', 'test4', url, data);
+  checkJsonpHeader('X-ServiceWorker-U', 'test5', url, data);
+  checkJsonpHeader('X-ServiceWorker-V', 'test6', url, data);
 };
 var noCustomHeader =
-  checkJsonpHeader.bind(this, 'x-serviceworker-test', undefined);
+  checkJsonpHeader.bind(this, 'X-ServiceWorker-Test', undefined);
 var methodIsGET = checkJsonpMethod.bind(this, 'GET');
 var methodIsPOST = checkJsonpMethod.bind(this, 'POST');
 var methodIsPUT = checkJsonpMethod.bind(this, 'PUT');
@@ -307,6 +308,9 @@ function getRequestInit(params) {
   if (params['mode']) {
     init['mode'] = params['mode'];
   }
+  if (params['redirectmode']) {
+    init['redirect'] = params['redirectmode'];
+  }
   if (params['credentials']) {
     init['credentials'] = params['credentials'];
   }
@@ -341,14 +345,10 @@ function headersToArray(headers) {
   // iterable.
   ['content-length', 'content-type', 'x-serviceworker-serverheader'].forEach(
     function(name) {
-      for (var value of headers.getAll(name))
-        ret.push([name, value]);
+      for (var header of headers){
+        ret.push(header);
+      }
     });
-
-  // Original code:
-  // for (var header of headers) {
-  //   ret.push(header);
-  // }
 
   return ret;
 }

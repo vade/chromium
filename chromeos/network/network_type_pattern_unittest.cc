@@ -4,6 +4,7 @@
 
 #include "chromeos/network/network_type_pattern.h"
 
+#include "chromeos/network/tether_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -20,7 +21,8 @@ class NetworkTypePatternTest : public testing::Test {
         mobile_(NetworkTypePattern::Mobile()),
         non_virtual_(NetworkTypePattern::NonVirtual()),
         wimax_(NetworkTypePattern::Wimax()),
-        wireless_(NetworkTypePattern::Wireless()) {}
+        wireless_(NetworkTypePattern::Wireless()),
+        tether_(NetworkTypePattern::Tether()) {}
 
   bool MatchesPattern(const NetworkTypePattern& a,
                       const NetworkTypePattern& b) {
@@ -37,6 +39,7 @@ class NetworkTypePatternTest : public testing::Test {
   const NetworkTypePattern non_virtual_;
   const NetworkTypePattern wimax_;
   const NetworkTypePattern wireless_;
+  const NetworkTypePattern tether_;
 };
 
 }  // namespace
@@ -50,6 +53,9 @@ TEST_F(NetworkTypePatternTest, MatchesType) {
   EXPECT_TRUE(wireless_.MatchesType(shill::kTypeCellular));
   EXPECT_TRUE(wireless_.MatchesType(shill::kTypeWimax));
   EXPECT_FALSE(wireless_.MatchesType(shill::kTypeEthernet));
+
+  EXPECT_FALSE(wireless_.MatchesType(kTypeTether));
+  EXPECT_FALSE(wimax_.MatchesType(kTypeTether));
 }
 
 TEST_F(NetworkTypePatternTest, MatchesPattern) {
@@ -68,6 +74,9 @@ TEST_F(NetworkTypePatternTest, MatchesPattern) {
   EXPECT_TRUE(MatchesPattern(cellular_, non_virtual_));
   EXPECT_TRUE(MatchesPattern(non_virtual_, ethernet_));
   EXPECT_FALSE(MatchesPattern(cellular_, ethernet_));
+
+  EXPECT_FALSE(MatchesPattern(tether_, wireless_));
+  EXPECT_FALSE(MatchesPattern(tether_, non_virtual_));
 
   // Default matches anything.
   EXPECT_TRUE(MatchesPattern(default_, default_));

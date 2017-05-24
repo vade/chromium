@@ -10,7 +10,7 @@ from common import TestDriver
 from common import IntegrationTest
 
 
-class SimpleSmoke(IntegrationTest):
+class Examples(IntegrationTest):
 
   # Simple example integration test.
   def testCheckPageWithProxy(self):
@@ -53,6 +53,12 @@ class SimpleSmoke(IntegrationTest):
       t.LoadURL('http://html5test.com/')
       t.WaitForJavascriptExpression(
         'document.getElementsByClassName("pointsPanel")', 15)
+
+  # Show how to use SetNetworkConnection
+  def testSetNetworkConnection(self):
+    with TestDriver(control_network_connection=True) as t:
+      t.SetNetworkConnection("2G")
+      t.LoadURL('https://www.google.com')
 
 if __name__ == '__main__':
   IntegrationTest.RunAllTests()

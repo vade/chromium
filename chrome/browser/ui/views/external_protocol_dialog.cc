@@ -10,6 +10,7 @@
 #include "base/strings/string_util.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/external_protocol_dialog_delegate.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
@@ -79,11 +80,12 @@ void ExternalProtocolDialog::DeleteDelegate() {
 }
 
 bool ExternalProtocolDialog::Cancel() {
-  delegate_->DoCancel(delegate_->url(),
-                      message_box_view_->IsCheckBoxSelected());
+  bool is_checked = message_box_view_->IsCheckBoxSelected();
+  delegate_->DoCancel(delegate_->url(), is_checked);
 
-  ExternalProtocolHandler::RecordMetrics(
-      message_box_view_->IsCheckBoxSelected());
+  ExternalProtocolHandler::RecordCheckboxStateMetrics(is_checked);
+  ExternalProtocolHandler::RecordHandleStateMetrics(
+      is_checked, ExternalProtocolHandler::BLOCK);
 
   // Returning true closes the dialog.
   return true;
@@ -96,11 +98,12 @@ bool ExternalProtocolDialog::Accept() {
   UMA_HISTOGRAM_LONG_TIMES("clickjacking.launch_url",
                            base::TimeTicks::Now() - creation_time_);
 
-  ExternalProtocolHandler::RecordMetrics(
-      message_box_view_->IsCheckBoxSelected());
+  bool is_checked = message_box_view_->IsCheckBoxSelected();
+  ExternalProtocolHandler::RecordCheckboxStateMetrics(is_checked);
+  ExternalProtocolHandler::RecordHandleStateMetrics(
+      is_checked, ExternalProtocolHandler::DONT_BLOCK);
 
-  delegate_->DoAccept(delegate_->url(),
-                      message_box_view_->IsCheckBoxSelected());
+  delegate_->DoAccept(delegate_->url(), is_checked);
 
   // Returning true closes the dialog.
   return true;
@@ -153,4 +156,5 @@ ExternalProtocolDialog::ExternalProtocolDialog(
   // request.
   if (web_contents)
     constrained_window::ShowWebModalDialogViews(this, web_contents);
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::EXTERNAL_PROTOCOL);
 }

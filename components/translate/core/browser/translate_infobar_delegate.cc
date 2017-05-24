@@ -7,12 +7,14 @@
 #include <algorithm>
 #include <utility>
 
+#include "base/feature_list.h"
 #include "base/i18n/string_compare.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
 #include "components/infobars/core/infobar.h"
 #include "components/infobars/core/infobar_manager.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/translate/core/browser/language_state.h"
 #include "components/translate/core/browser/translate_accept_languages.h"
 #include "components/translate/core/browser/translate_client.h"
@@ -20,7 +22,6 @@
 #include "components/translate/core/browser/translate_driver.h"
 #include "components/translate/core/browser/translate_manager.h"
 #include "components/translate/core/common/translate_constants.h"
-#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace translate {
@@ -44,8 +45,10 @@ const int kNeverTranslateMinCount = 2;
 const int kAlwaysTranslateMinCount = 3;
 const int kNeverTranslateMinCount = 3;
 #endif
-
 }  // namespace
+
+const base::Feature kTranslateCompactUI{"TranslateCompactUI",
+                                        base::FEATURE_DISABLED_BY_DEFAULT};
 
 const size_t TranslateInfoBarDelegate::kNoIndex = TranslateUIDelegate::kNoIndex;
 
@@ -85,7 +88,6 @@ void TranslateInfoBarDelegate::Create(
   }
 
   // Do not create the after translate infobar if we are auto translating.
-  TranslateClient* translate_client = translate_manager->translate_client();
   if (((step == translate::TRANSLATE_STEP_AFTER_TRANSLATE) ||
        (step == translate::TRANSLATE_STEP_TRANSLATING)) &&
       translate_manager->GetLanguageState().InTranslateNavigation()) {
@@ -99,22 +101,27 @@ void TranslateInfoBarDelegate::Create(
     old_infobar = infobar_manager->infobar_at(i);
     old_delegate = old_infobar->delegate()->AsTranslateInfoBarDelegate();
     if (old_delegate) {
-      if (!replace_existing_infobar)
+      if (!replace_existing_infobar || IsCompactUIEnabled())
         return;
       break;
     }
   }
 
   // Add the new delegate.
+  TranslateClient* translate_client = translate_manager->translate_client();
   std::unique_ptr<infobars::InfoBar> infobar(translate_client->CreateInfoBar(
       base::WrapUnique(new TranslateInfoBarDelegate(
-          translate_manager, is_off_the_record, step, old_delegate,
-          original_language, target_language, error_type,
-          triggered_from_menu))));
+          translate_manager, is_off_the_record, step, original_language,
+          target_language, error_type, triggered_from_menu))));
   if (old_delegate)
     infobar_manager->ReplaceInfoBar(old_infobar, std::move(infobar));
   else
     infobar_manager->AddInfoBar(std::move(infobar));
+}
+
+// static
+bool TranslateInfoBarDelegate::IsCompactUIEnabled() {
+  return base::FeatureList::IsEnabled(kTranslateCompactUI);
 }
 
 void TranslateInfoBarDelegate::UpdateOriginalLanguage(
@@ -133,6 +140,8 @@ void TranslateInfoBarDelegate::Translate() {
 
 void TranslateInfoBarDelegate::RevertTranslation() {
   ui_delegate_.RevertTranslation();
+  if (IsCompactUIEnabled())
+    return;
   infobar()->RemoveSelf();
 }
 
@@ -287,6 +296,14 @@ void TranslateInfoBarDelegate::ShowNeverTranslateInfobar() {
 }
 #endif
 
+int TranslateInfoBarDelegate::GetTranslationAcceptedCount() {
+  return prefs_->GetTranslationAcceptedCount(original_language_code());
+}
+
+int TranslateInfoBarDelegate::GetTranslationDeniedCount() {
+  return prefs_->GetTranslationDeniedCount(original_language_code());
+}
+
 // static
 void TranslateInfoBarDelegate::GetAfterTranslateStrings(
     std::vector<base::string16>* strings,
@@ -333,7 +350,6 @@ TranslateInfoBarDelegate::TranslateInfoBarDelegate(
     const base::WeakPtr<TranslateManager>& translate_manager,
     bool is_off_the_record,
     translate::TranslateStep step,
-    TranslateInfoBarDelegate* old_delegate,
     const std::string& original_language,
     const std::string& target_language,
     TranslateErrors::Type error_type,
@@ -341,7 +357,6 @@ TranslateInfoBarDelegate::TranslateInfoBarDelegate(
     : infobars::InfoBarDelegate(),
       is_off_the_record_(is_off_the_record),
       step_(step),
-      background_animation_(NONE),
       ui_delegate_(translate_manager, original_language, target_language),
       translate_manager_(translate_manager),
       error_type_(error_type),
@@ -350,9 +365,6 @@ TranslateInfoBarDelegate::TranslateInfoBarDelegate(
   DCHECK_NE((step_ == translate::TRANSLATE_STEP_TRANSLATE_ERROR),
             (error_type_ == TranslateErrors::NONE));
   DCHECK(translate_manager_);
-
-  if (old_delegate && (old_delegate->is_error() != is_error()))
-    background_animation_ = is_error() ? NORMAL_TO_ERROR : ERROR_TO_NORMAL;
 }
 
 infobars::InfoBarDelegate::Type
@@ -367,7 +379,8 @@ int TranslateInfoBarDelegate::GetIconId() const {
 void TranslateInfoBarDelegate::InfoBarDismissed() {
   if (step_ != translate::TRANSLATE_STEP_BEFORE_TRANSLATE)
     return;
-
+  if (IsCompactUIEnabled())
+    return;
   // The user closed the infobar without clicking the translate button.
   TranslationDeclined();
   UMA_HISTOGRAM_BOOLEAN("Translate.DeclineTranslateCloseInfobar", true);

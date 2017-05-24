@@ -351,7 +351,8 @@ void ResolveLanguageListOnBlockingPool(
         language_switch_result,
     const scoped_refptr<base::TaskRunner> task_runner,
     const UILanguageListResolvedCallback& resolved_callback) {
-  DCHECK(content::BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
+  // DCHECK(task_runner->RunsTasksInCurrentSequence());
+  base::ThreadRestrictions::AssertIOAllowed();
 
   std::string selected_language;
   if (!language_switch_result) {
@@ -477,9 +478,9 @@ std::string FindMostRelevantLocale(
     for (base::ListValue::const_iterator available_it =
              available_locales.begin();
          available_it != available_locales.end(); ++available_it) {
-      base::DictionaryValue* dict;
+      const base::DictionaryValue* dict;
       std::string available_locale;
-      if (!(*available_it)->GetAsDictionary(&dict) ||
+      if (!available_it->GetAsDictionary(&dict) ||
           !dict->GetString("value", &available_locale)) {
         NOTREACHED();
         continue;

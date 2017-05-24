@@ -22,7 +22,7 @@
 
 namespace base {
 template <typename T>
-struct DefaultLazyInstanceTraits;
+struct LazyInstanceTraitsBase;
 }  // namespace base
 
 namespace net {
@@ -54,6 +54,11 @@ class NET_EXPORT_PRIVATE EVRootCAMetadata {
   // the EV policy OID policy_oid.
   bool HasEVPolicyOID(const SHA1HashValue& fingerprint,
                       PolicyOID policy_oid) const;
+
+  // Returns true if |policy_oid| is for 2.23.140.1.1 (CA/Browser Forum's
+  // Extended Validation Policy).
+  // TODO(eroman): Remove this and instead test each candidate OID.
+  static bool IsCaBrowserForumEvOid(PolicyOID policy_oid);
 #endif
 
   // AddEVCA adds an EV CA to the list of known EV CAs with the given policy.
@@ -66,7 +71,7 @@ class NET_EXPORT_PRIVATE EVRootCAMetadata {
   bool RemoveEVCA(const SHA1HashValue& fingerprint);
 
  private:
-  friend struct base::DefaultLazyInstanceTraits<EVRootCAMetadata>;
+  friend struct base::LazyInstanceTraitsBase<EVRootCAMetadata>;
 
   EVRootCAMetadata();
   ~EVRootCAMetadata();

@@ -20,10 +20,13 @@ namespace content {
 class CONTENT_EXPORT SyntheticWebMouseEventBuilder {
  public:
   static blink::WebMouseEvent Build(blink::WebInputEvent::Type type);
-  static blink::WebMouseEvent Build(blink::WebInputEvent::Type type,
-                                    int window_x,
-                                    int window_y,
-                                    int modifiers);
+  static blink::WebMouseEvent Build(
+      blink::WebInputEvent::Type type,
+      int window_x,
+      int window_y,
+      int modifiers,
+      blink::WebPointerProperties::PointerType pointer_type =
+          blink::WebPointerProperties::PointerType::kMouse);
 };
 
 class CONTENT_EXPORT SyntheticWebMouseWheelEventBuilder {
@@ -59,7 +62,8 @@ class CONTENT_EXPORT SyntheticWebGestureEventBuilder {
   static blink::WebGestureEvent BuildScrollBegin(
       float dx_hint,
       float dy_hint,
-      blink::WebGestureDevice source_device);
+      blink::WebGestureDevice source_device,
+      int pointer_count = 1);
   static blink::WebGestureEvent BuildScrollUpdate(
       float dx,
       float dy,

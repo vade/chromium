@@ -109,8 +109,9 @@ void ContentSettingsStore::SetExtensionContentSetting(
     if (setting == CONTENT_SETTING_DEFAULT) {
       map->DeleteValue(primary_pattern, secondary_pattern, type, identifier);
     } else {
+      // Do not set a timestamp for extension settings.
       map->SetValue(primary_pattern, secondary_pattern, type, identifier,
-                    new base::FundamentalValue(setting));
+                    base::Time(), new base::Value(setting));
     }
   }
 
@@ -245,7 +246,7 @@ void ContentSettingsStore::ClearContentSettingsForExtension(
   }
 }
 
-base::ListValue* ContentSettingsStore::GetSettingsForExtension(
+std::unique_ptr<base::ListValue> ContentSettingsStore::GetSettingsForExtension(
     const std::string& extension_id,
     ExtensionPrefsScope scope) const {
   base::AutoLock lock(lock_);
@@ -253,7 +254,7 @@ base::ListValue* ContentSettingsStore::GetSettingsForExtension(
   if (!map)
     return nullptr;
 
-  base::ListValue* settings = new base::ListValue();
+  auto settings = base::MakeUnique<base::ListValue>();
   for (const auto& it : *map) {
     const auto& key = it.first;
     std::unique_ptr<RuleIterator> rule_iterator(
@@ -294,8 +295,8 @@ void ContentSettingsStore::SetExtensionContentSettingFromList(
     const base::ListValue* list,
     ExtensionPrefsScope scope) {
   for (const auto& value : *list) {
-    base::DictionaryValue* dict;
-    if (!value->GetAsDictionary(&dict)) {
+    const base::DictionaryValue* dict = nullptr;
+    if (!value.GetAsDictionary(&dict)) {
       NOTREACHED();
       continue;
     }

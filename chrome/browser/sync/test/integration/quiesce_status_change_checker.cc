@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 #include "base/format_macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/scoped_observer.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -79,7 +80,7 @@ class ProgressMarkerWatcher : public syncer::SyncServiceObserver {
   ProgressMarkerWatcher(browser_sync::ProfileSyncService* service,
                         QuiesceStatusChangeChecker* quiesce_checker);
   ~ProgressMarkerWatcher() override;
-  void OnStateChanged() override;
+  void OnStateChanged(syncer::SyncService* sync) override;
 
   bool HasLatestProgressMarkers();
   bool IsSyncDisabled();
@@ -107,7 +108,7 @@ ProgressMarkerWatcher::ProgressMarkerWatcher(
 
 ProgressMarkerWatcher::~ProgressMarkerWatcher() { }
 
-void ProgressMarkerWatcher::OnStateChanged() {
+void ProgressMarkerWatcher::OnStateChanged(syncer::SyncService* sync) {
   UpdateHasLatestProgressMarkers();
   quiesce_checker_->OnServiceStateChanged(service_);
 }
@@ -153,7 +154,8 @@ QuiesceStatusChangeChecker::QuiesceStatusChangeChecker(
     : services_(services) {
   DCHECK_LE(1U, services_.size());
   for (size_t i = 0; i < services_.size(); ++i) {
-    observers_.push_back(new ProgressMarkerWatcher(services[i], this));
+    observers_.push_back(
+        base::MakeUnique<ProgressMarkerWatcher>(services[i], this));
   }
 }
 
@@ -161,8 +163,7 @@ QuiesceStatusChangeChecker::~QuiesceStatusChangeChecker() {}
 
 bool QuiesceStatusChangeChecker::IsExitConditionSatisfied() {
   // Check that all progress markers are up to date.
-  for (ScopedVector<ProgressMarkerWatcher>::const_iterator it =
-       observers_.begin(); it != observers_.end(); ++it) {
+  for (auto it = observers_.begin(); it != observers_.end(); ++it) {
     if ((*it)->IsSyncDisabled()) {
       continue;  // Skip disabled services.
     }

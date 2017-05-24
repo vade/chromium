@@ -9,6 +9,7 @@
 
 #include "base/bind.h"
 #include "base/json/json_writer.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chrome/test/chromedriver/chrome/browser_info.h"
@@ -41,7 +42,13 @@ bool IsEnabled(const PerfLoggingPrefs::InspectorDomainStatus& domain_status) {
 }
 
 // Returns whether |command| is in kRequestTraceCommands[] (case-insensitive).
-bool ShouldRequestTraceEvents(const std::string& command) {
+// In the case of GetLog, also check if it has been called previously, that it
+// was emptying an empty log.
+bool ShouldRequestTraceEvents(const std::string& command,
+                              const bool log_emptied) {
+  if (base::EqualsCaseInsensitiveASCII(command, "GetLog") && !log_emptied)
+    return false;
+
   for (auto* request_command : kRequestTraceCommands) {
     if (base::EqualsCaseInsensitiveASCII(command, request_command))
       return true;
@@ -102,7 +109,8 @@ Status PerformanceLogger::OnEvent(
 
 Status PerformanceLogger::BeforeCommand(const std::string& command_name) {
   // Only dump trace buffer after tracing has been started.
-  if (trace_buffering_ && ShouldRequestTraceEvents(command_name)) {
+  if (trace_buffering_ &&
+      ShouldRequestTraceEvents(command_name, log_->Emptied())) {
     Status status = CollectTraceEvents();
     if (status.IsError())
       return status;
@@ -182,8 +190,8 @@ Status PerformanceLogger::HandleTraceEvents(
                     "received DevTools trace data in unexpected format");
     }
     for (const auto& trace : *traces) {
-      base::DictionaryValue* event_dict;
-      if (!trace->GetAsDictionary(&event_dict))
+      const base::DictionaryValue* event_dict;
+      if (!trace.GetAsDictionary(&event_dict))
         return Status(kUnknownError, "trace event must be a dictionary");
       AddLogEntry(client->GetId(), "Tracing.dataCollected", *event_dict);
     }
@@ -191,7 +199,7 @@ Status PerformanceLogger::HandleTraceEvents(
     // 'value' will be between 0-1 and represents how full the DevTools trace
     // buffer is. If the buffer is full, warn the user.
     double buffer_usage = 0;
-    if (!params.GetDouble("value", &buffer_usage)) {
+    if (!params.GetDouble("percentFull", &buffer_usage)) {
       // Tracing.bufferUsage event will occur once per second, and it really
       // only serves as a warning, so if we can't reliably tell whether the
       // buffer is full, just fail silently instead of spamming the logs.
@@ -221,8 +229,14 @@ Status PerformanceLogger::StartTrace() {
     LOG(WARNING) << "tried to start tracing, but a trace was already started";
     return Status(kOk);
   }
+  std::unique_ptr<base::ListValue> categories(new base::ListValue());
+  categories->AppendStrings(base::SplitString(prefs_.trace_categories,
+                                              ",",
+                                              base::TRIM_WHITESPACE,
+                                              base::SPLIT_WANT_NONEMPTY));
   base::DictionaryValue params;
-  params.SetString("categories", prefs_.trace_categories);
+  params.Set("traceConfig.includedCategories", std::move(categories));
+  params.SetString("traceConfig.recordingMode", "recordAsMuchAsPossible");
   // Ask DevTools to report buffer usage.
   params.SetInteger("bufferUsageReportingInterval",
                     prefs_.buffer_usage_reporting_interval);

@@ -45,7 +45,6 @@ class CONTENT_EXPORT RendererWebMediaPlayerDelegate
   // WebMediaPlayerDelegate implementation.
   bool IsFrameHidden() override;
   bool IsFrameClosed() override;
-  bool IsBackgroundVideoPlaybackUnlocked() override;
   int AddObserver(Observer* observer) override;
   void RemoveObserver(int player_id) override;
   void DidPlay(int player_id,
@@ -58,6 +57,7 @@ class CONTENT_EXPORT RendererWebMediaPlayerDelegate
   bool IsIdle(int player_id) override;
   void ClearStaleFlag(int player_id) override;
   bool IsStale(int player_id) override;
+  void SetIsEffectivelyFullscreen(int player_id, bool is_fullscreen) override;
 
   // content::RenderFrameObserver overrides.
   void WasHidden() override;
@@ -66,11 +66,11 @@ class CONTENT_EXPORT RendererWebMediaPlayerDelegate
   void OnDestruct() override;
 
   // Zeros out |idle_cleanup_interval_|, sets |idle_timeout_| to |idle_timeout|,
-  // and |is_low_end_device_| to |is_low_end_device|. A zero cleanup interval
+  // and |is_jelly_bean_| to |is_jelly_bean|. A zero cleanup interval
   // will cause the idle timer to run with each run of the message loop.
   void SetIdleCleanupParamsForTesting(base::TimeDelta idle_timeout,
                                       base::TickClock* tick_clock,
-                                      bool is_low_end_device);
+                                      bool is_jelly_bean);
   bool IsIdleCleanupTimerRunningForTesting() const;
 
   // Note: Does not call OnFrameHidden()/OnFrameShown().
@@ -83,6 +83,7 @@ class CONTENT_EXPORT RendererWebMediaPlayerDelegate
   void OnMediaDelegatePlay(int player_id);
   void OnMediaDelegateSuspendAllMediaPlayers();
   void OnMediaDelegateVolumeMultiplierUpdate(int player_id, double multiplier);
+  void OnMediaDelegateBecamePersistentVideo(int player_id, bool value);
 
   // Schedules UpdateTask() to run soon.
   void ScheduleUpdateTask();
@@ -101,7 +102,6 @@ class CONTENT_EXPORT RendererWebMediaPlayerDelegate
   // autoplay logic in RenderFrameImpl.
   bool has_played_media_ = false;
 
-  bool background_video_allowed_ = false;
   bool is_frame_closed_ = false;
   bool is_frame_hidden_for_testing_ = false;
 
@@ -145,7 +145,7 @@ class CONTENT_EXPORT RendererWebMediaPlayerDelegate
 
   // Determined at construction time based on system information; determines
   // when the idle cleanup timer should be fired more aggressively.
-  bool is_low_end_device_;
+  bool is_jelly_bean_;
 
   DISALLOW_COPY_AND_ASSIGN(RendererWebMediaPlayerDelegate);
 };

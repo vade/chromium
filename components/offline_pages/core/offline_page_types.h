@@ -34,6 +34,10 @@ enum class SavePageResult {
   // are already locally accessible.
   SKIPPED,
   SECURITY_CERTIFICATE_ERROR,
+  // Returned when we detect trying to save a chrome error page.
+  ERROR_PAGE,
+  // Returned when we detect trying to save a chrome interstitial page.
+  INTERSTITIAL_PAGE,
   // NOTE: always keep this entry at the end. Add new result types only
   // immediately above this line. Make sure to update the corresponding
   // histogram enum accordingly.
@@ -73,6 +77,7 @@ typedef base::Callback<void(const OfflinePageItem*)>
 typedef base::Callback<void(const MultipleOfflinePageItemResult&)>
     MultipleOfflinePageItemCallback;
 typedef base::Callback<bool(const GURL&)> UrlPredicate;
+typedef base::Callback<void(int64_t)> SizeInBytesCallback;
 }  // namespace offline_pages
 
 #endif  // COMPONENTS_OFFLINE_PAGES_CORE_OFFLINE_PAGE_TYPES_H_

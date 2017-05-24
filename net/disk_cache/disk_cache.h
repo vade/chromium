@@ -25,7 +25,12 @@
 namespace base {
 class FilePath;
 class SingleThreadTaskRunner;
+
+namespace trace_event {
+class ProcessMemoryDump;
 }
+
+}  // namespace base
 
 namespace net {
 class IOBuffer;
@@ -174,6 +179,11 @@ class NET_EXPORT Backend {
   // Called whenever an external cache in the system reuses the resource
   // referred to by |key|.
   virtual void OnExternalCacheHit(const std::string& key) = 0;
+
+  // Returns the estimate of dynamically allocated memory in bytes.
+  virtual size_t DumpMemoryStats(
+      base::trace_event::ProcessMemoryDump* pmd,
+      const std::string& parent_absolute_name) const = 0;
 };
 
 // This interface represents an entry in the disk cache.

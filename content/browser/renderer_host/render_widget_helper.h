@@ -18,48 +18,17 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/global_request_id.h"
-#include "content/public/common/window_container_type.h"
 #include "third_party/WebKit/public/web/WebPopupType.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace content {
+
 class ResourceDispatcherHostImpl;
-class SessionStorageNamespace;
 
 // Instantiated per RenderProcessHost to provide various optimizations on
 // behalf of a RenderWidgetHost.  This class bridges between the IO thread
 // where the RenderProcessHost's MessageFilter lives and the UI thread where
 // the RenderWidgetHost lives.
-//
-//
-// OPTIMIZED TAB SWITCHING
-//
-//   When a RenderWidgetHost is in a background tab, it is flagged as hidden.
-//   This causes the corresponding RenderWidget to stop sending BackingStore
-//   messages. The RenderWidgetHost also discards its backingstore when it is
-//   hidden, which helps free up memory.  As a result, when a RenderWidgetHost
-//   is restored, it can be momentarily be without a backingstore.  (Restoring
-//   a RenderWidgetHost results in a WasShown message being sent to the
-//   RenderWidget, which triggers a full BackingStore message.)  This can lead
-//   to an observed rendering glitch as the WebContentsImpl will just have to
-//   fill white overtop the RenderWidgetHost until the RenderWidgetHost
-//   receives a BackingStore message to refresh its backingstore.
-//
-//   To avoid this 'white flash', the RenderWidgetHost again makes use of the
-//   RenderWidgetHelper's WaitForBackingStoreMsg method.  When the
-//   RenderWidgetHost's GetBackingStore method is called, it will call
-//   WaitForBackingStoreMsg if it has no backingstore.
-//
-// TRANSPORT DIB CREATION
-//
-//   On some platforms (currently the Mac) the renderer cannot create transport
-//   DIBs because of sandbox limitations. Thus, it has to make synchronous IPCs
-//   to the browser for them. Since these requests are synchronous, they cannot
-//   terminate on the UI thread. Thus, in this case, this object performs the
-//   allocation and maintains the set of allocated transport DIBs which the
-//   renderers can refer to.
-//
-
 class RenderWidgetHelper
     : public base::RefCountedThreadSafe<RenderWidgetHelper,
                                         BrowserThread::DeleteOnIOThread> {
@@ -87,13 +56,6 @@ class RenderWidgetHelper
   void ResumeDeferredNavigation(const GlobalRequestID& request_id);
 
   // IO THREAD ONLY -----------------------------------------------------------
-
-  void CreateNewWindow(mojom::CreateNewWindowParamsPtr params,
-                       bool no_javascript_access,
-                       int32_t* render_view_route_id,
-                       int32_t* main_frame_route_id,
-                       int32_t* main_frame_widget_route_id,
-                       SessionStorageNamespace* session_storage_namespace);
   void CreateNewWidget(int opener_id,
                        blink::WebPopupType popup_type,
                        int* route_id);
@@ -105,14 +67,6 @@ class RenderWidgetHelper
   friend class base::DeleteHelper<RenderWidgetHelper>;
 
   ~RenderWidgetHelper();
-
-  // Called on the UI thread to finish creating a window.
-  void OnCreateNewWindowOnUI(
-      mojom::CreateNewWindowParamsPtr params,
-      int32_t render_view_route_id,
-      int32_t main_frame_route_id,
-      int32_t main_frame_widget_route_id,
-      SessionStorageNamespace* session_storage_namespace);
 
   // Called on the UI thread to finish creating a widget.
   void OnCreateWidgetOnUI(int32_t opener_id,

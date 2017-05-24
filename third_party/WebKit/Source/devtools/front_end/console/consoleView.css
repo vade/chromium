@@ -45,6 +45,15 @@
     overflow: hidden;
 }
 
+.console-settings-pane {
+    flex: none;
+    border-bottom: 1px solid #dadada;
+}
+
+.console-settings-pane .toolbar {
+    flex: 1 1;
+}
+
 #console-messages {
     flex: 1 1;
     padding: 2px 0;
@@ -98,14 +107,14 @@
 .console-timestamp {
     color: gray;
     -webkit-user-select: none;
-    flex-grow: 0;
+    flex: none;
     margin-right: 5px;
 }
 
 .message-level-icon, .command-result-icon {
     position: absolute;
     left: -17px;
-    top: 5px;
+    top: 4px;
     -webkit-user-select: none;
 }
 
@@ -137,6 +146,7 @@
 .console-info {
     color: rgb(128, 128, 128);
     font-style: italic;
+    padding-bottom: 2px;
 }
 
 .console-group .console-group > .console-group-messages {
@@ -233,10 +243,6 @@
     color: hsl(0, 100%, 75%) !important;
 }
 
-.console-verbose-level .console-message-text {
-    color: blue;
-}
-
 .-theme-with-dark-background .console-verbose-level .console-message-text {
     color: hsl(220, 100%, 65%) !important;
 }
@@ -291,6 +297,7 @@
 .console-object-preview {
     white-space: normal;
     word-wrap: break-word;
+    font-style: italic;
 }
 
 .console-object-preview .name {
@@ -311,6 +318,11 @@
     float: right;
     text-align: right;
     max-width: 100%;
+    margin-left: 4px;
+}
+
+.console-message-badge {
+    float: right;
     margin-left: 4px;
 }
 
@@ -344,6 +356,10 @@
     content: "i";
 }
 
+.console-view-object-properties-section:not(.expanded) .info-note {
+    display: none;
+}
+
 .console-view-object-properties-section {
     padding: 0px;
 }
@@ -363,4 +379,8 @@
 
 .console-message-stack-trace-wrapper > * {
     flex: none;
+}
+
+.console-message-expand-icon {
+    margin-bottom: -2px;
 }

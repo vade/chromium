@@ -15,6 +15,7 @@ android_library("java") {
   deps = [
     "//base:base_java",
     "//net/android:net_java",
+    "//third_party/android_tools:android_support_annotations_java",
     google_play_services_library,
   ]
 
@@ -47,12 +48,13 @@ android_library("signin_java_test_support") {
     ":java",
     "//base:base_java",
     "//base:base_java_test_support",
+    "//third_party/android_tools:android_support_annotations_java",
     "//third_party/jsr-305:jsr_305_javalib",
   ]
 
   java_files = [
     "javatests/src/org/chromium/components/signin/test/util/AccountHolder.java",
-    "javatests/src/org/chromium/components/signin/test/util/MockAccountManager.java",
+    "javatests/src/org/chromium/components/signin/test/util/FakeAccountManagerDelegate.java",
     "javatests/src/org/chromium/components/signin/test/util/SimpleFuture.java",
   ]
 }

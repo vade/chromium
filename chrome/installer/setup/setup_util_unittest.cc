@@ -27,12 +27,12 @@
 #include "base/win/registry.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/windows_version.h"
+#include "chrome/install_static/install_details.h"
 #include "chrome/installer/setup/installer_state.h"
 #include "chrome/installer/setup/setup_constants.h"
 #include "chrome/installer/setup/setup_util.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/google_update_constants.h"
-#include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/installation_state.h"
 #include "chrome/installer/util/updating_app_registration_data.h"
 #include "chrome/installer/util/util_constants.h"
@@ -197,24 +197,17 @@ TEST(SetupUtilTest, GuidToSquid) {
 
 TEST(SetupUtilTest, RegisterEventLogProvider) {
   registry_util::RegistryOverrideManager registry_override_manager;
-  registry_override_manager.OverrideRegistry(HKEY_LOCAL_MACHINE);
+  ASSERT_NO_FATAL_FAILURE(
+      registry_override_manager.OverrideRegistry(HKEY_LOCAL_MACHINE));
 
   const base::Version version("1.2.3.4");
   const base::FilePath install_directory(
       FILE_PATH_LITERAL("c:\\some_path\\test"));
   installer::RegisterEventLogProvider(install_directory, version);
 
-  // TODO(grt): use install_static::InstallDetails::Get().install_full_name()
-  // when InstallDetails is initialized in the installer.
   base::string16 reg_path(
       L"SYSTEM\\CurrentControlSet\\Services\\EventLog\\Application\\");
-#if defined(GOOGLE_CHROME_BUILD)
-  reg_path.append(L"Chrome");
-  if (InstallUtil::IsChromeSxSProcess())
-    reg_path.append(L" SxS");
-#else
-  reg_path.append(L"Chromium");
-#endif
+  reg_path.append(install_static::InstallDetails::Get().install_full_name());
   base::win::RegKey key;
   ASSERT_EQ(ERROR_SUCCESS,
             key.Open(HKEY_LOCAL_MACHINE, reg_path.c_str(), KEY_READ));
@@ -320,6 +313,40 @@ TEST(SetupUtilTest, AdjustFromBelowNormalPriority) {
     EXPECT_EQ(PCCR_UNCHANGED, RelaunchAndDoProcessPriorityAdjustment());
 }
 
+TEST(SetupUtilTest, GetInstallAge) {
+  base::ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+
+  installer::InstallerState installer_state;
+  installer_state.set_target_path_for_testing(temp_dir.GetPath());
+
+  // Wait a beat to let time advance.
+  base::PlatformThread::Sleep(TestTimeouts::tiny_timeout());
+  EXPECT_GE(0, installer::GetInstallAge(installer_state));
+
+  // Crank back the directory's creation time.
+  constexpr int kAgeDays = 28;
+  base::Time now = base::Time::Now();
+  base::win::ScopedHandle dir(::CreateFile(
+      temp_dir.GetPath().value().c_str(),
+      FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+      OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr));
+  ASSERT_TRUE(dir.IsValid());
+
+  FILE_BASIC_INFO info = {};
+  ASSERT_NE(0, ::GetFileInformationByHandleEx(dir.Get(), FileBasicInfo, &info,
+                                              sizeof(info)));
+  FILETIME creation_time =
+      (now - base::TimeDelta::FromDays(kAgeDays)).ToFileTime();
+  info.CreationTime.u.LowPart = creation_time.dwLowDateTime;
+  info.CreationTime.u.HighPart = creation_time.dwHighDateTime;
+  ASSERT_NE(0, ::SetFileInformationByHandle(dir.Get(), FileBasicInfo, &info,
+                                            sizeof(info)));
+
+  EXPECT_EQ(kAgeDays, installer::GetInstallAge(installer_state));
+}
+
 TEST(SetupUtilTest, RecordUnPackMetricsTest) {
   base::HistogramTester histogram_tester;
   std::string unpack_status_metrics_name =
@@ -374,8 +401,10 @@ class FindArchiveToPatchTest : public testing::Test {
 
   void SetUp() override {
     ASSERT_TRUE(test_dir_.CreateUniqueTempDir());
-    registry_override_manager_.OverrideRegistry(HKEY_CURRENT_USER);
-    registry_override_manager_.OverrideRegistry(HKEY_LOCAL_MACHINE);
+    ASSERT_NO_FATAL_FAILURE(
+        registry_override_manager_.OverrideRegistry(HKEY_CURRENT_USER));
+    ASSERT_NO_FATAL_FAILURE(
+        registry_override_manager_.OverrideRegistry(HKEY_LOCAL_MACHINE));
     product_version_ = base::Version("30.0.1559.0");
     max_version_ = base::Version("47.0.1559.0");
 
@@ -523,6 +552,11 @@ TEST(SetupUtilTest, GetRegistrationDataCommandKey) {
                              base::CompareCase::SENSITIVE));
 }
 
+TEST(SetupUtilTest, GetConsoleSessionStartTime) {
+  base::Time start_time = installer::GetConsoleSessionStartTime();
+  EXPECT_FALSE(start_time.is_null());
+}
+
 namespace installer {
 
 class DeleteRegistryKeyPartialTest : public ::testing::Test {
@@ -530,7 +564,7 @@ class DeleteRegistryKeyPartialTest : public ::testing::Test {
   using RegKey = base::win::RegKey;
 
   void SetUp() override {
-    _registry_override_manager.OverrideRegistry(root_);
+    ASSERT_NO_FATAL_FAILURE(_registry_override_manager.OverrideRegistry(root_));
     to_preserve_.push_back(L"preSERve1");
     to_preserve_.push_back(L"1evRESerp");
   }
@@ -641,12 +675,16 @@ class LegacyCleanupsTest : public ::testing::Test {
   LegacyCleanupsTest() = default;
   void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    registry_override_manager_.OverrideRegistry(HKEY_CURRENT_USER);
+    ASSERT_NO_FATAL_FAILURE(
+        registry_override_manager_.OverrideRegistry(HKEY_CURRENT_USER));
     installer_state_ =
         base::MakeUnique<FakeInstallerState>(temp_dir_.GetPath());
     // Create the state to be cleared.
     ASSERT_TRUE(base::win::RegKey(HKEY_CURRENT_USER, kBinariesClientsKeyPath,
                                   KEY_WRITE | KEY_WOW64_32KEY)
+                    .Valid());
+    ASSERT_TRUE(base::win::RegKey(HKEY_CURRENT_USER, kCommandExecuteImplClsid,
+                                  KEY_WRITE)
                     .Valid());
 #if defined(GOOGLE_CHROME_BUILD)
     ASSERT_TRUE(base::win::RegKey(HKEY_CURRENT_USER, kGCFClientsKeyPath,
@@ -669,6 +707,12 @@ class LegacyCleanupsTest : public ::testing::Test {
   bool HasBinariesVersionKey() const {
     return base::win::RegKey(HKEY_CURRENT_USER, kBinariesClientsKeyPath,
                              KEY_QUERY_VALUE | KEY_WOW64_32KEY)
+        .Valid();
+  }
+
+  bool HasCommandExecuteImplClassKey() const {
+    return base::win::RegKey(HKEY_CURRENT_USER, kCommandExecuteImplClsid,
+                             KEY_QUERY_VALUE)
         .Valid();
   }
 
@@ -725,6 +769,7 @@ class LegacyCleanupsTest : public ::testing::Test {
 #endif  // GOOGLE_CHROME_BUILD
 
   static const wchar_t kBinariesClientsKeyPath[];
+  static const wchar_t kCommandExecuteImplClsid[];
 #if defined(GOOGLE_CHROME_BUILD)
   static const wchar_t kGCFClientsKeyPath[];
   static const wchar_t kAppLauncherClientsKeyPath[];
@@ -740,6 +785,8 @@ class LegacyCleanupsTest : public ::testing::Test {
 const wchar_t LegacyCleanupsTest::kBinariesClientsKeyPath[] =
     L"SOFTWARE\\Google\\Update\\Clients\\"
     L"{4DC8B4CA-1BDA-483e-B5FA-D3C12E15B62D}";
+const wchar_t LegacyCleanupsTest::kCommandExecuteImplClsid[] =
+    L"Software\\Classes\\CLSID\\{5C65F4B0-3651-4514-B207-D10CB699B14B}";
 const wchar_t LegacyCleanupsTest::kGCFClientsKeyPath[] =
     L"SOFTWARE\\Google\\Update\\Clients\\"
     L"{8BA986DA-5100-405E-AA35-86F34A02ACBF}";
@@ -749,11 +796,14 @@ const wchar_t LegacyCleanupsTest::kAppLauncherClientsKeyPath[] =
 #else   // GOOGLE_CHROME_BUILD
 const wchar_t LegacyCleanupsTest::kBinariesClientsKeyPath[] =
     L"SOFTWARE\\Chromium Binaries";
+const wchar_t LegacyCleanupsTest::kCommandExecuteImplClsid[] =
+    L"Software\\Classes\\CLSID\\{A2DF06F9-A21A-44A8-8A99-8B9C84F29160}";
 #endif  // !GOOGLE_CHROME_BUILD
 
 TEST_F(LegacyCleanupsTest, NoOpOnFailedUpdate) {
   DoLegacyCleanups(installer_state(), INSTALL_FAILED);
   EXPECT_TRUE(HasBinariesVersionKey());
+  EXPECT_TRUE(HasCommandExecuteImplClassKey());
 #if defined(GOOGLE_CHROME_BUILD)
   EXPECT_TRUE(HasMultiGCFVersionKey());
   EXPECT_TRUE(HasAppLauncherVersionKey());
@@ -765,6 +815,7 @@ TEST_F(LegacyCleanupsTest, NoOpOnFailedUpdate) {
 TEST_F(LegacyCleanupsTest, Do) {
   DoLegacyCleanups(installer_state(), NEW_VERSION_UPDATED);
   EXPECT_FALSE(HasBinariesVersionKey());
+  EXPECT_FALSE(HasCommandExecuteImplClassKey());
 #if defined(GOOGLE_CHROME_BUILD)
   EXPECT_FALSE(HasMultiGCFVersionKey());
   EXPECT_FALSE(HasAppLauncherVersionKey());

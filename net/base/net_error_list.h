@@ -386,6 +386,24 @@ NET_ERROR(SSL_OBSOLETE_CIPHER, -172)
 // upgraded, the URLRequest is cancelled with this error code.
 NET_ERROR(WS_UPGRADE, -173)
 
+// Socket ReadIfReady support is not implemented. This error should not be user
+// visible, because the normal Read() method is used as a fallback.
+NET_ERROR(READ_IF_READY_NOT_IMPLEMENTED, -174)
+
+// This error is emitted if TLS 1.3 is enabled, connecting with it failed, but
+// retrying at a downgraded maximum version succeeded. This could mean:
+//
+// 1. This is a transient network error that will be resolved when the user
+//    reloads.
+//
+// 2. The user is behind a buggy network middlebox, firewall, or proxy which is
+//    interfering with TLS 1.3.
+//
+// 3. The server is buggy and does not implement TLS version negotiation
+//    correctly. TLS 1.3 was tweaked to avoid a common server bug here, so this
+//    is unlikely.
+NET_ERROR(SSL_VERSION_INTERFERENCE, -175)
+
 // Certificate error codes
 //
 // The values of certificate error codes must be consecutive.
@@ -624,8 +642,11 @@ NET_ERROR(RESPONSE_HEADERS_MULTIPLE_CONTENT_DISPOSITION, -349)
 // The HTTP response contained multiple Location headers.
 NET_ERROR(RESPONSE_HEADERS_MULTIPLE_LOCATION, -350)
 
-// SPDY server refused the stream. Client should retry. This should never be a
-// user-visible error.
+// HTTP/2 server refused the request without processing, and sent either a
+// GOAWAY frame with error code NO_ERROR and Last-Stream-ID lower than the
+// stream id corresponding to the request indicating that this request has not
+// been processed yet, or a RST_STREAM frame with error code REFUSED_STREAM.
+// Client MAY retry (on a different connection).  See RFC7540 Section 8.1.4.
 NET_ERROR(SPDY_SERVER_REFUSED_STREAM, -351)
 
 // SPDY server didn't respond to the PING message.

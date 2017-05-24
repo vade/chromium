@@ -18,20 +18,10 @@ test(function() {
 test(function() {
   var properties = computedStyleMap.getProperties();
   assert_equals(properties.length, computedStyle.length);
-}, "Computed StyleMap.getProperties returns the same number of properties as ComputedStyle");
-
-test(function() {
-  var properties = computedStyleMap.getProperties();
-  for (var i = 0; i < properties.length; i++) {
-    var property = properties[i];
-    var styleValues = computedStyleMap.getAll(property);
-    if (styleValues.length == 1) {
-      // TODO(meade): Remove this if statement once all properties are supported.
-      // TODO(meade): Handle sequence types.
-      assert_equals(computedStyleMap.get(property).cssText, computedStyle[property]);
-    }
+  for (var i = 0; i < computedStyle.length; ++i) {
+    assert_equals(properties[i], computedStyle[i]);
   }
-}, 'Properties retrieved from ComputedStyleMap reflect the same values as from ComputedStyle');
+}, "Computed StyleMap.getProperties returns the same list of property names as ComputedStyle");
 
 test(function() {
   testElement.style.border = '1px solid #00ff00';
@@ -47,7 +37,11 @@ test(function() {
 }, 'Unsupported and unserializable property returns null.');
 
 test(function() {
-  assert_false(computedStyleMap.has('max-zoom'));
+  assert_throws(null, function() { computedStyleMap.get('bananas'); });
+}, 'get() throws for an invalid property.');
+
+test(function() {
+  assert_false(computedStyleMap.has('-webkit-mask'));
 }, 'has() return false for an unsupported property.');
 
 test(function() {
@@ -68,5 +62,12 @@ test(function() {
 test(function() {
   assert_true(computedStyleMap.has('width'));
 }, 'has() returns true for a supported property.');
+
+test(function() {
+  testElement.style.width = '100px';
+  assert_equals(computedStyleMap.get('width').cssText, '100px');
+  testElement.style.display = 'none';
+  assert_equals(computedStyleMap.get('width').cssText, '100px');
+}, 'get() returns correct values for an element with display: none.');
 
 </script>

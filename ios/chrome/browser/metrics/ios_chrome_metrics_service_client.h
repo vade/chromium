@@ -15,10 +15,12 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
+#include "components/metrics/metrics_log_uploader.h"
 #include "components/metrics/metrics_service_client.h"
 #include "components/metrics/profiler/tracking_synchronizer_observer.h"
 #include "components/omnibox/browser/omnibox_event_global_tracker.h"
 #include "components/ukm/observers/history_delete_observer.h"
+#include "components/ukm/observers/sync_disable_observer.h"
 #include "ios/web/public/web_state/global_web_state_observer.h"
 
 class IOSChromeStabilityMetricsProvider;
@@ -45,6 +47,7 @@ class IOSChromeMetricsServiceClient
     : public metrics::MetricsServiceClient,
       public metrics::TrackingSynchronizerObserver,
       public ukm::HistoryDeleteObserver,
+      public ukm::SyncDisableObserver,
       public web::GlobalWebStateObserver {
  public:
   ~IOSChromeMetricsServiceClient() override;
@@ -69,15 +72,21 @@ class IOSChromeMetricsServiceClient
       const base::Closure& done_callback) override;
   void CollectFinalMetricsForLog(const base::Closure& done_callback) override;
   std::unique_ptr<metrics::MetricsLogUploader> CreateUploader(
-      const std::string& server_url,
-      const std::string& mime_type,
-      const base::Callback<void(int)>& on_upload_complete) override;
+      base::StringPiece server_url,
+      base::StringPiece mime_type,
+      metrics::MetricsLogUploader::MetricServiceType service_type,
+      const metrics::MetricsLogUploader::UploadCallback& on_upload_complete)
+      override;
   base::TimeDelta GetStandardUploadInterval() override;
   base::string16 GetRegistryBackupKey() override;
   void OnRendererProcessCrash() override;
+  bool IsHistorySyncEnabledOnAllProfiles() override;
 
-  // ukm::HistoryDeleteObserver
+  // ukm::HistoryDeleteObserver:
   void OnHistoryDeleted() override;
+
+  // ukm::SyncDisableObserver:
+  void OnSyncPrefsChanged(bool must_purge) override;
 
   // web::GlobalWebStateObserver:
   void WebStateDidStartLoading(web::WebState* web_state) override;
@@ -118,8 +127,8 @@ class IOSChromeMetricsServiceClient
   // there was recent activity.
   void RegisterForNotifications();
 
-  // Register to observe history delete events on a browser state.
-  void RegisterForHistoryDeletions(ios::ChromeBrowserState* browser_state);
+  // Register to observe events on a browser state's services.
+  void RegisterForBrowserStateEvents(ios::ChromeBrowserState* browser_state);
 
   // Called when a tab is parented.
   void OnTabParented(web::WebState* web_state);

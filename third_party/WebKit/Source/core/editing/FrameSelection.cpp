@@ -25,9 +25,9 @@
 
 #include "core/editing/FrameSelection.h"
 
+#include <stdio.h>
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/HTMLNames.h"
-#include "core/InputTypeNames.h"
 #include "core/css/StylePropertySet.h"
 #include "core/dom/AXObjectCache.h"
 #include "core/dom/CharacterData.h"
@@ -37,13 +37,13 @@
 #include "core/dom/NodeTraversal.h"
 #include "core/dom/NodeWithIndex.h"
 #include "core/dom/Text.h"
-#include "core/editing/CaretBase.h"
+#include "core/editing/CaretDisplayItemClient.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/Editor.h"
 #include "core/editing/FrameCaret.h"
 #include "core/editing/GranularityStrategy.h"
 #include "core/editing/InputMethodController.h"
-#include "core/editing/PendingSelection.h"
+#include "core/editing/LayoutSelection.h"
 #include "core/editing/SelectionController.h"
 #include "core/editing/SelectionEditor.h"
 #include "core/editing/SelectionModifier.h"
@@ -79,9 +79,8 @@
 #include "platform/geometry/FloatQuad.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/text/UnicodeUtilities.h"
-#include "wtf/PtrUtil.h"
-#include "wtf/text/CString.h"
-#include <stdio.h>
+#include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/text/CString.h"
 
 #define EDIT_DEBUG 0
 
@@ -89,148 +88,160 @@ namespace blink {
 
 using namespace HTMLNames;
 
-static inline bool shouldAlwaysUseDirectionalSelection(LocalFrame* frame) {
-  return frame->editor().behavior().shouldConsiderSelectionAsDirectional();
+static inline bool ShouldAlwaysUseDirectionalSelection(LocalFrame* frame) {
+  return frame->GetEditor().Behavior().ShouldConsiderSelectionAsDirectional();
 }
 
 FrameSelection::FrameSelection(LocalFrame& frame)
-    : m_frame(frame),
-      m_pendingSelection(PendingSelection::create(*this)),
-      m_selectionEditor(SelectionEditor::create(frame)),
-      m_granularity(CharacterGranularity),
-      m_xPosForVerticalArrowNavigation(NoXPosForVerticalArrowNavigation()),
-      m_focused(frame.page() &&
-                frame.page()->focusController().focusedFrame() == frame),
-      m_frameCaret(new FrameCaret(frame, *m_selectionEditor)) {}
+    : frame_(frame),
+      layout_selection_(LayoutSelection::Create(*this)),
+      selection_editor_(SelectionEditor::Create(frame)),
+      granularity_(kCharacterGranularity),
+      x_pos_for_vertical_arrow_navigation_(NoXPosForVerticalArrowNavigation()),
+      focused_(frame.GetPage() &&
+               frame.GetPage()->GetFocusController().FocusedFrame() == frame),
+      frame_caret_(new FrameCaret(frame, *selection_editor_)) {}
 
 FrameSelection::~FrameSelection() {}
 
-const DisplayItemClient& FrameSelection::caretDisplayItemClientForTesting()
+const DisplayItemClient& FrameSelection::CaretDisplayItemClientForTesting()
     const {
-  return m_frameCaret->displayItemClient();
+  return frame_caret_->GetDisplayItemClient();
 }
 
-const Document& FrameSelection::document() const {
-  DCHECK(m_document);
-  return *m_document;
+Document& FrameSelection::GetDocument() const {
+  DCHECK(LifecycleContext());
+  return *LifecycleContext();
 }
 
-Document& FrameSelection::document() {
-  DCHECK(m_document);
-  return *m_document;
+bool FrameSelection::IsHandleVisible() const {
+  return GetSelectionInDOMTree().IsHandleVisible();
 }
 
-// TODO(yosin): To avoid undefined symbols in clang, we explicitly
-// have specialized version of |FrameSelection::visibleSelection<Strategy>|
-// before |FrameSelection::selection()| which refers this.
-template <>
-const VisibleSelection& FrameSelection::visibleSelection<EditingStrategy>()
+const VisibleSelection& FrameSelection::ComputeVisibleSelectionInDOMTree()
     const {
-  return m_selectionEditor->visibleSelection<EditingStrategy>();
+  return selection_editor_->ComputeVisibleSelectionInDOMTree();
 }
 
-template <>
 const VisibleSelectionInFlatTree&
-FrameSelection::visibleSelection<EditingInFlatTreeStrategy>() const {
-  return m_selectionEditor->visibleSelection<EditingInFlatTreeStrategy>();
+FrameSelection::ComputeVisibleSelectionInFlatTree() const {
+  return selection_editor_->ComputeVisibleSelectionInFlatTree();
 }
 
-Element* FrameSelection::rootEditableElementOrDocumentElement() const {
-  Element* selectionRoot = selection().rootEditableElement();
-  return selectionRoot ? selectionRoot : document().documentElement();
+const SelectionInDOMTree& FrameSelection::GetSelectionInDOMTree() const {
+  return selection_editor_->GetSelectionInDOMTree();
 }
 
-ContainerNode* FrameSelection::rootEditableElementOrTreeScopeRootNode() const {
-  Element* selectionRoot = selection().rootEditableElement();
-  if (selectionRoot)
-    return selectionRoot;
-
-  Node* node = selection().base().computeContainerNode();
-  return node ? &node->treeScope().rootNode() : 0;
+Element* FrameSelection::RootEditableElementOrDocumentElement() const {
+  Element* selection_root =
+      ComputeVisibleSelectionInDOMTreeDeprecated().RootEditableElement();
+  return selection_root ? selection_root : GetDocument().documentElement();
 }
 
-const VisibleSelection& FrameSelection::selection() const {
-  return visibleSelection<EditingStrategy>();
+// TODO(yosin): We should move |rootEditableElementOrTreeScopeRootNodeOf()| to
+// "EditingUtilities.cpp"
+ContainerNode* RootEditableElementOrTreeScopeRootNodeOf(
+    const Position& position) {
+  Element* selection_root = RootEditableElementOf(position);
+  if (selection_root)
+    return selection_root;
+
+  Node* const node = position.ComputeContainerNode();
+  return node ? &node->GetTreeScope().RootNode() : 0;
 }
 
-const VisibleSelectionInFlatTree& FrameSelection::selectionInFlatTree() const {
-  return visibleSelection<EditingInFlatTreeStrategy>();
+const VisibleSelection&
+FrameSelection::ComputeVisibleSelectionInDOMTreeDeprecated() const {
+  // TODO(editing-dev): Hoist updateStyleAndLayoutIgnorePendingStylesheets
+  // to caller. See http://crbug.com/590369 for more details.
+  GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
+  return ComputeVisibleSelectionInDOMTree();
 }
 
-void FrameSelection::moveCaretSelection(const IntPoint& point) {
-  DCHECK(!document().needsLayoutTreeUpdate());
+const VisibleSelectionInFlatTree& FrameSelection::GetSelectionInFlatTree()
+    const {
+  return ComputeVisibleSelectionInFlatTree();
+}
 
-  Element* const editable = rootEditableElement();
+void FrameSelection::MoveCaretSelection(const IntPoint& point) {
+  DCHECK(!GetDocument().NeedsLayoutTreeUpdate());
+
+  Element* const editable =
+      ComputeVisibleSelectionInDOMTree().RootEditableElement();
   if (!editable)
     return;
 
   const VisiblePosition position =
-      visiblePositionForContentsPoint(point, frame());
+      VisiblePositionForContentsPoint(point, GetFrame());
   SelectionInDOMTree::Builder builder;
-  builder.setIsDirectional(selection().isDirectional());
-  if (position.isNotNull())
-    builder.collapse(position.toPositionWithAffinity());
-  setSelection(builder.build(),
-               CloseTyping | ClearTypingStyle | UserTriggered | HandleVisible);
+  builder.SetIsDirectional(GetSelectionInDOMTree().IsDirectional());
+  builder.SetIsHandleVisible(true);
+  if (position.IsNotNull())
+    builder.Collapse(position.ToPositionWithAffinity());
+  SetSelection(builder.Build(),
+               kCloseTyping | kClearTypingStyle | kUserTriggered);
 }
 
-template <typename Strategy>
-void FrameSelection::setSelectionAlgorithm(
-    const VisibleSelectionTemplate<Strategy>& newSelection,
+void FrameSelection::SetSelection(const SelectionInDOMTree& passed_selection,
+                                  SetSelectionOptions options,
+                                  CursorAlignOnScroll align,
+                                  TextGranularity granularity) {
+  if (SetSelectionDeprecated(passed_selection, options, granularity))
+    DidSetSelectionDeprecated(options, align);
+}
+
+bool FrameSelection::SetSelectionDeprecated(
+    const SelectionInDOMTree& passed_selection,
     SetSelectionOptions options,
-    CursorAlignOnScroll align,
     TextGranularity granularity) {
-  DCHECK(isAvailable());
-  DCHECK(newSelection.isValidFor(document()));
-  const Document& currentDocument = document();
-  if (m_granularityStrategy &&
-      (options & FrameSelection::DoNotClearStrategy) == 0)
-    m_granularityStrategy->Clear();
-  bool closeTyping = options & CloseTyping;
-  bool shouldClearTypingStyle = options & ClearTypingStyle;
-  const HandleVisibility handleVisibility = options & HandleVisible
-                                                ? HandleVisibility::Visible
-                                                : HandleVisibility::NotVisible;
-  EUserTriggered userTriggered = selectionOptionsToUserTriggered(options);
+  DCHECK(IsAvailable());
+  passed_selection.AssertValidFor(GetDocument());
 
-  // TODO(editing-dev): We should rename variable |s| to another name to avoid
-  // using one letter variable name.
-  VisibleSelectionTemplate<Strategy> s = newSelection;
-  if (shouldAlwaysUseDirectionalSelection(m_frame))
-    s.setIsDirectional(true);
-
-  m_granularity = granularity;
+  SelectionInDOMTree::Builder builder(passed_selection);
+  if (ShouldAlwaysUseDirectionalSelection(frame_))
+    builder.SetIsDirectional(true);
+  SelectionInDOMTree new_selection = builder.Build();
+  if (granularity_strategy_ &&
+      (options & FrameSelection::kDoNotClearStrategy) == 0)
+    granularity_strategy_->Clear();
+  bool close_typing = options & kCloseTyping;
+  bool should_clear_typing_style = options & kClearTypingStyle;
+  granularity_ = granularity;
 
   // TODO(yosin): We should move to call |TypingCommand::closeTyping()| to
   // |Editor| class.
-  if (closeTyping)
-    TypingCommand::closeTyping(m_frame);
+  if (close_typing)
+    TypingCommand::CloseTyping(frame_);
 
-  if (shouldClearTypingStyle)
-    m_frame->editor().clearTypingStyle();
+  if (should_clear_typing_style)
+    frame_->GetEditor().ClearTypingStyle();
 
-  if (m_selectionEditor->visibleSelection<Strategy>() == s &&
-      m_handleVisibility == handleVisibility) {
-    // Even if selection was not changed, selection offsets may have been
-    // changed.
-    m_frame->inputMethodController().cancelCompositionIfSelectionIsInvalid();
-    notifyLayoutObjectOfSelectionChange(userTriggered);
-    return;
-  }
+  const SelectionInDOMTree old_selection_in_dom_tree =
+      selection_editor_->GetSelectionInDOMTree();
+  if (old_selection_in_dom_tree == new_selection)
+    return false;
+  selection_editor_->SetSelection(new_selection);
+  ScheduleVisualUpdateForPaintInvalidationIfNeeded();
 
-  const VisibleSelectionTemplate<Strategy> oldSelection =
-      visibleSelection<Strategy>();
-  const Position& oldSelectionStart = selection().start();
+  const Document& current_document = GetDocument();
+  // TODO(yosin): We should get rid of unsued |options| for
+  // |Editor::respondToChangedSelection()|.
+  // Note: Since, setting focus can modify DOM tree, we should use
+  // |oldSelection| before setting focus
+  frame_->GetEditor().RespondToChangedSelection(
+      old_selection_in_dom_tree.ComputeStartPosition(), options);
+  DCHECK_EQ(current_document, GetDocument());
+  return true;
+}
 
-  m_handleVisibility = handleVisibility;
-  m_selectionEditor->setVisibleSelection(s, options);
-  m_frameCaret->setCaretRectNeedsUpdate();
-
-  if (!s.isNone() && !(options & DoNotSetFocus)) {
-    setFocusedNodeIfNeeded();
+void FrameSelection::DidSetSelectionDeprecated(SetSelectionOptions options,
+                                               CursorAlignOnScroll align) {
+  const Document& current_document = GetDocument();
+  if (!GetSelectionInDOMTree().IsNone() && !(options & kDoNotSetFocus)) {
+    SetFocusedNodeIfNeeded();
     // |setFocusedNodeIfNeeded()| dispatches sync events "FocusOut" and
     // "FocusIn", |m_frame| may associate to another document.
-    if (!isAvailable() || document() != currentDocument) {
+    if (!IsAvailable() || GetDocument() != current_document) {
       // Once we get test case to reach here, we should change this
       // if-statement to |DCHECK()|.
       NOTREACHED();
@@ -238,402 +249,103 @@ void FrameSelection::setSelectionAlgorithm(
     }
   }
 
-  if (!(options & DoNotUpdateAppearance)) {
-    // Hits in
-    // compositing/overflow/do-not-paint-outline-into-composited-scrolling-contents.html
-    DisableCompositingQueryAsserts disabler;
-    m_frameCaret->stopCaretBlinkTimer();
-    updateAppearance();
-  }
+  frame_caret_->StopCaretBlinkTimer();
+  UpdateAppearance();
 
   // Always clear the x position used for vertical arrow navigation.
   // It will be restored by the vertical arrow navigation code if necessary.
-  m_xPosForVerticalArrowNavigation = NoXPosForVerticalArrowNavigation();
+  x_pos_for_vertical_arrow_navigation_ = NoXPosForVerticalArrowNavigation();
+
+  // TODO(yosin): Can we move this to at end of this function?
   // This may dispatch a synchronous focus-related events.
-  selectFrameElementInParentIfFullySelected();
-  if (!isAvailable() || document() != currentDocument) {
-    // editing/selection/selectallchildren-crash.html and
-    // editing/selection/longpress-selection-in-iframe-removed-crash.html
-    // reach here.
-    return;
+  if (!(options & kDoNotSetFocus)) {
+    SelectFrameElementInParentIfFullySelected();
+    if (!IsAvailable() || GetDocument() != current_document) {
+      // editing/selection/selectallchildren-crash.html and
+      // editing/selection/longpress-selection-in-iframe-removed-crash.html
+      // reach here.
+      return;
+    }
   }
-  notifyLayoutObjectOfSelectionChange(userTriggered);
-  // If the selections are same in the DOM tree but not in the flat tree,
-  // don't fire events. For example, if the selection crosses shadow tree
-  // boundary, selection for the DOM tree is shrunk while that for the
-  // flat tree is not. Additionally, this case occurs in some edge cases.
-  // See also: editing/pasteboard/4076267-3.html
-  if (oldSelection == m_selectionEditor->visibleSelection<Strategy>()) {
-    m_frame->inputMethodController().cancelCompositionIfSelectionIsInvalid();
-    return;
-  }
-  m_frame->editor().respondToChangedSelection(oldSelectionStart, options);
-  if (userTriggered == UserTriggered) {
+
+  EUserTriggered user_triggered = SelectionOptionsToUserTriggered(options);
+  NotifyTextControlOfSelectionChange(user_triggered);
+  if (user_triggered == kUserTriggered) {
     ScrollAlignment alignment;
 
-    if (m_frame->editor().behavior().shouldCenterAlignWhenSelectionIsRevealed())
-      alignment = (align == CursorAlignOnScroll::Always)
-                      ? ScrollAlignment::alignCenterAlways
-                      : ScrollAlignment::alignCenterIfNeeded;
+    if (frame_->GetEditor()
+            .Behavior()
+            .ShouldCenterAlignWhenSelectionIsRevealed())
+      alignment = (align == CursorAlignOnScroll::kAlways)
+                      ? ScrollAlignment::kAlignCenterAlways
+                      : ScrollAlignment::kAlignCenterIfNeeded;
     else
-      alignment = (align == CursorAlignOnScroll::Always)
-                      ? ScrollAlignment::alignTopAlways
-                      : ScrollAlignment::alignToEdgeIfNeeded;
+      alignment = (align == CursorAlignOnScroll::kAlways)
+                      ? ScrollAlignment::kAlignTopAlways
+                      : ScrollAlignment::kAlignToEdgeIfNeeded;
 
-    revealSelection(alignment, RevealExtent);
+    RevealSelection(alignment, kRevealExtent);
   }
 
-  notifyAccessibilityForSelectionChange();
-  notifyCompositorForSelectionChange();
-  notifyEventHandlerForSelectionChange();
-  m_frame->domWindow()->enqueueDocumentEvent(
-      Event::create(EventTypeNames::selectionchange));
+  NotifyAccessibilityForSelectionChange();
+  NotifyCompositorForSelectionChange();
+  NotifyEventHandlerForSelectionChange();
+  frame_->DomWindow()->EnqueueDocumentEvent(
+      Event::Create(EventTypeNames::selectionchange));
 }
 
-// TODO(yosin): We will make |selectionInDOMTree| version of |SetSelection()|
-// as primary function instead of wrapper.
-void FrameSelection::setSelection(const SelectionInDOMTree& newSelection,
+void FrameSelection::SetSelection(const SelectionInFlatTree& new_selection,
                                   SetSelectionOptions options,
                                   CursorAlignOnScroll align,
                                   TextGranularity granularity) {
-  if (!newSelection.isNone()) {
-    // TODO(editing-dev): The use of
-    // updateStyleAndLayoutIgnorePendingStylesheets
-    // needs to be audited.  See http://crbug.com/590369 for more details.
-    newSelection.base()
-        .document()
-        ->updateStyleAndLayoutIgnorePendingStylesheets();
-  }
-  setSelection(createVisibleSelection(newSelection), options, align,
-               granularity);
+  new_selection.AssertValidFor(GetDocument());
+  SelectionInDOMTree::Builder builder;
+  builder.SetAffinity(new_selection.Affinity())
+      .SetBaseAndExtent(ToPositionInDOMTree(new_selection.Base()),
+                        ToPositionInDOMTree(new_selection.Extent()))
+      .SetGranularity(new_selection.Granularity())
+      .SetIsDirectional(new_selection.IsDirectional())
+      .SetIsHandleVisible(new_selection.IsHandleVisible())
+      .SetHasTrailingWhitespace(new_selection.HasTrailingWhitespace());
+  return SetSelection(builder.Build(), options, align, granularity);
 }
 
-// TODO(yosin): We will make |selectionInFlatTree| version of |SetSelection()|
-// as primary function instead of wrapper.
-void FrameSelection::setSelection(const SelectionInFlatTree& newSelection,
-                                  SetSelectionOptions options,
-                                  CursorAlignOnScroll align,
-                                  TextGranularity granularity) {
-  if (!newSelection.isNone()) {
-    // TODO(editing-dev): The use of
-    // updateStyleAndLayoutIgnorePendingStylesheets
-    // needs to be audited.  See http://crbug.com/590369 for more details.
-    newSelection.base()
-        .document()
-        ->updateStyleAndLayoutIgnorePendingStylesheets();
-  }
-  setSelection(createVisibleSelection(newSelection), options, align,
-               granularity);
-}
-
-void FrameSelection::setSelection(const VisibleSelection& newSelection,
-                                  SetSelectionOptions options,
-                                  CursorAlignOnScroll align,
-                                  TextGranularity granularity) {
-  setSelectionAlgorithm<EditingStrategy>(newSelection, options, align,
-                                         granularity);
-}
-
-void FrameSelection::setSelection(
-    const VisibleSelectionInFlatTree& newSelection,
-    SetSelectionOptions options,
-    CursorAlignOnScroll align,
-    TextGranularity granularity) {
-  setSelectionAlgorithm<EditingInFlatTreeStrategy>(newSelection, options, align,
-                                                   granularity);
-}
-
-static bool removingNodeRemovesPosition(Node& node, const Position& position) {
-  if (!position.anchorNode())
-    return false;
-
-  if (position.anchorNode() == node)
-    return true;
-
-  if (!node.isElementNode())
-    return false;
-
-  Element& element = toElement(node);
-  return element.isShadowIncludingInclusiveAncestorOf(position.anchorNode());
-}
-
-static Position computePositionForChildrenRemoval(const Position& position,
-                                                  ContainerNode& container) {
-  Node* node = position.computeContainerNode();
-  if (container.containsIncludingHostElements(*node))
-    return Position::firstPositionInNode(&container);
-  return position;
-}
-
-void FrameSelection::nodeChildrenWillBeRemoved(ContainerNode& container) {
-  if (isNone() || !container.inActiveDocument())
+void FrameSelection::NodeChildrenWillBeRemoved(ContainerNode& container) {
+  if (!container.InActiveDocument())
     return;
-  const Position& oldStart = selection().start();
-  const Position& newStart =
-      computePositionForChildrenRemoval(oldStart, container);
-  const Position& oldEnd = selection().end();
-  const Position& newEnd = computePositionForChildrenRemoval(oldEnd, container);
-  const Position& oldBase = selection().base();
-  const Position& newBase =
-      computePositionForChildrenRemoval(oldBase, container);
-  const Position& oldExtent = selection().extent();
-  const Position& newExtent =
-      computePositionForChildrenRemoval(oldExtent, container);
-  if (newStart == oldStart && newEnd == oldEnd && newBase == oldBase &&
-      newExtent == oldExtent)
-    return;
-  if (selection().isBaseFirst())
-    m_selectionEditor->setWithoutValidation(newStart, newEnd);
-  else
-    m_selectionEditor->setWithoutValidation(newEnd, newStart);
-  m_frameCaret->setCaretRectNeedsUpdate();
-  if (document().isRunningExecCommand())
-    return;
-  TypingCommand::closeTyping(m_frame);
+  // TODO(yosin): We should move to call |TypingCommand::closeTyping()| to
+  // |Editor| class.
+  if (!GetDocument().IsRunningExecCommand())
+    TypingCommand::CloseTyping(frame_);
 }
 
-void FrameSelection::nodeWillBeRemoved(Node& node) {
+void FrameSelection::NodeWillBeRemoved(Node& node) {
   // There can't be a selection inside a fragment, so if a fragment's node is
   // being removed, the selection in the document that created the fragment
   // needs no adjustment.
-  if (isNone() || !node.inActiveDocument())
-    return;
-
-  respondToNodeModification(
-      node, removingNodeRemovesPosition(node, selection().base()),
-      removingNodeRemovesPosition(node, selection().extent()),
-      removingNodeRemovesPosition(node, selection().start()),
-      removingNodeRemovesPosition(node, selection().end()));
-}
-
-static SelectionState selectionStateOf(const Node& node) {
-  const LayoutObject* layoutObject = node.layoutObject();
-  if (!layoutObject)
-    return SelectionNone;
-  return layoutObject->getSelectionState();
-}
-
-void FrameSelection::respondToNodeModification(Node& node,
-                                               bool baseRemoved,
-                                               bool extentRemoved,
-                                               bool startRemoved,
-                                               bool endRemoved) {
-  DCHECK(node.document().isActive()) << node;
-
-  bool clearLayoutTreeSelection = false;
-  bool clearDOMTreeSelection = false;
-
-  if (startRemoved || endRemoved) {
-    Position start = selection().start();
-    Position end = selection().end();
-    if (startRemoved)
-      updatePositionForNodeRemoval(start, node);
-    if (endRemoved)
-      updatePositionForNodeRemoval(end, node);
-
-    if (Position::commonAncestorTreeScope(start, end) && start.isNotNull() &&
-        end.isNotNull()) {
-      if (selection().isBaseFirst())
-        m_selectionEditor->setWithoutValidation(start, end);
-      else
-        m_selectionEditor->setWithoutValidation(end, start);
-    } else {
-      clearDOMTreeSelection = true;
-    }
-
-    clearLayoutTreeSelection = true;
-  } else if (baseRemoved || extentRemoved) {
-    // The base and/or extent are about to be removed, but the start and end
-    // aren't. Change the base and extent to the start and end, but don't
-    // re-validate the selection, since doing so could move the start and end
-    // into the node that is about to be removed.
-    if (selection().isBaseFirst())
-      m_selectionEditor->setWithoutValidation(selection().start(),
-                                              selection().end());
-    else
-      m_selectionEditor->setWithoutValidation(selection().end(),
-                                              selection().start());
-  } else if (selectionStateOf(node) != SelectionNone) {
-    // When node to be removed is part of selection, we invalidate
-    // selection to paint again.
-    // TODO(yosin): We should paint changed area only rather than whole
-    // selected range.
-    clearLayoutTreeSelection = true;
-  }
-
-  if (clearLayoutTreeSelection)
-    selection().start().document()->layoutViewItem().clearSelection();
-
-  if (clearDOMTreeSelection)
-    setSelection(SelectionInDOMTree(), DoNotSetFocus);
-  m_frameCaret->setCaretRectNeedsUpdate();
-
-  // TODO(yosin): We should move to call |TypingCommand::closeTyping()| to
-  // |Editor| class.
-  if (!document().isRunningExecCommand())
-    TypingCommand::closeTyping(m_frame);
-}
-
-static Position updatePositionAfterAdoptingTextReplacement(
-    const Position& position,
-    CharacterData* node,
-    unsigned offset,
-    unsigned oldLength,
-    unsigned newLength) {
-  if (!position.anchorNode() || position.anchorNode() != node ||
-      !position.isOffsetInAnchor())
-    return position;
-
-  // See:
-  // http://www.w3.org/TR/DOM-Level-2-Traversal-Range/ranges.html#Level-2-Range-Mutation
-  DCHECK_GE(position.offsetInContainerNode(), 0);
-  unsigned positionOffset =
-      static_cast<unsigned>(position.offsetInContainerNode());
-  // Replacing text can be viewed as a deletion followed by insertion.
-  if (positionOffset >= offset && positionOffset <= offset + oldLength)
-    positionOffset = offset;
-
-  // Adjust the offset if the position is after the end of the deleted contents
-  // (positionOffset > offset + oldLength) to avoid having a stale offset.
-  if (positionOffset > offset + oldLength)
-    positionOffset = positionOffset - oldLength + newLength;
-
-  // Due to case folding
-  // (http://unicode.org/Public/UCD/latest/ucd/CaseFolding.txt), LayoutText
-  // length may be different from Text length.  A correct implementation would
-  // translate the LayoutText offset to a Text offset; this is just a safety
-  // precaution to avoid offset values that run off the end of the Text.
-  if (positionOffset > node->length())
-    positionOffset = node->length();
-
-  // CharacterNode in VisibleSelection must be Text node, because Comment
-  // and ProcessingInstruction node aren't visible.
-  return Position(toText(node), positionOffset);
-}
-
-void FrameSelection::didUpdateCharacterData(CharacterData* node,
-                                            unsigned offset,
-                                            unsigned oldLength,
-                                            unsigned newLength) {
-  // The fragment check is a performance optimization. See
-  // http://trac.webkit.org/changeset/30062.
-  if (isNone() || !node || !node->isConnected())
-    return;
-
-  Position base = updatePositionAfterAdoptingTextReplacement(
-      selection().base(), node, offset, oldLength, newLength);
-  Position extent = updatePositionAfterAdoptingTextReplacement(
-      selection().extent(), node, offset, oldLength, newLength);
-  Position start = updatePositionAfterAdoptingTextReplacement(
-      selection().start(), node, offset, oldLength, newLength);
-  Position end = updatePositionAfterAdoptingTextReplacement(
-      selection().end(), node, offset, oldLength, newLength);
-  updateSelectionIfNeeded(base, extent, start, end);
-}
-
-static Position updatePostionAfterAdoptingTextNodesMerged(
-    const Position& position,
-    const Text& oldNode,
-    unsigned offset) {
-  if (!position.anchorNode() || !position.isOffsetInAnchor())
-    return position;
-
-  DCHECK_GE(position.offsetInContainerNode(), 0);
-  unsigned positionOffset =
-      static_cast<unsigned>(position.offsetInContainerNode());
-
-  if (position.anchorNode() == &oldNode)
-    return Position(toText(oldNode.previousSibling()), positionOffset + offset);
-
-  if (position.anchorNode() == oldNode.parentNode() && positionOffset == offset)
-    return Position(toText(oldNode.previousSibling()), offset);
-
-  return position;
-}
-
-void FrameSelection::didMergeTextNodes(
-    const Text& mergedNode,
-    const NodeWithIndex& nodeToBeRemovedWithIndex,
-    unsigned offset) {
-  const Text& oldNode = toText(nodeToBeRemovedWithIndex.node());
-  if (isNone() || !oldNode.isConnected())
-    return;
-  Position base = updatePostionAfterAdoptingTextNodesMerged(selection().base(),
-                                                            oldNode, offset);
-  Position extent = updatePostionAfterAdoptingTextNodesMerged(
-      selection().extent(), oldNode, offset);
-  Position start = updatePostionAfterAdoptingTextNodesMerged(
-      selection().start(), oldNode, offset);
-  Position end = updatePostionAfterAdoptingTextNodesMerged(selection().end(),
-                                                           oldNode, offset);
-  updateSelectionIfNeeded(base, extent, start, end);
-}
-
-static Position updatePostionAfterAdoptingTextNodeSplit(
-    const Position& position,
-    const Text& oldNode) {
-  if (!position.anchorNode() || position.anchorNode() != &oldNode ||
-      !position.isOffsetInAnchor())
-    return position;
-  // See:
-  // http://www.w3.org/TR/DOM-Level-2-Traversal-Range/ranges.html#Level-2-Range-Mutation
-  DCHECK_GE(position.offsetInContainerNode(), 0);
-  unsigned positionOffset =
-      static_cast<unsigned>(position.offsetInContainerNode());
-  unsigned oldLength = oldNode.length();
-  if (positionOffset <= oldLength)
-    return position;
-  return Position(toText(oldNode.nextSibling()), positionOffset - oldLength);
-}
-
-void FrameSelection::didSplitTextNode(const Text& oldNode) {
-  if (isNone() || !oldNode.isConnected())
-    return;
-  Position base =
-      updatePostionAfterAdoptingTextNodeSplit(selection().base(), oldNode);
-  Position extent =
-      updatePostionAfterAdoptingTextNodeSplit(selection().extent(), oldNode);
-  Position start =
-      updatePostionAfterAdoptingTextNodeSplit(selection().start(), oldNode);
-  Position end =
-      updatePostionAfterAdoptingTextNodeSplit(selection().end(), oldNode);
-  updateSelectionIfNeeded(base, extent, start, end);
-}
-
-void FrameSelection::updateSelectionIfNeeded(const Position& base,
-                                             const Position& extent,
-                                             const Position& start,
-                                             const Position& end) {
-  if (base == selection().base() && extent == selection().extent() &&
-      start == selection().start() && end == selection().end())
+  if (!node.InActiveDocument())
     return;
   // TODO(yosin): We should move to call |TypingCommand::closeTyping()| to
   // |Editor| class.
-  if (!document().isRunningExecCommand())
-    TypingCommand::closeTyping(m_frame);
-  VisibleSelection newSelection;
-  if (selection().isBaseFirst())
-    newSelection.setWithoutValidation(start, end);
-  else
-    newSelection.setWithoutValidation(end, start);
-  setSelection(newSelection, DoNotSetFocus);
+  if (!GetDocument().IsRunningExecCommand())
+    TypingCommand::CloseTyping(frame_);
 }
 
-void FrameSelection::didChangeFocus() {
+void FrameSelection::DidChangeFocus() {
   // Hits in
   // virtual/gpu/compositedscrolling/scrollbars/scrollbar-miss-mousemove-disabled.html
   DisableCompositingQueryAsserts disabler;
-  updateAppearance();
+  UpdateAppearance();
 }
 
-static DispatchEventResult dispatchSelectStart(
+static DispatchEventResult DispatchSelectStart(
     const VisibleSelection& selection) {
-  Node* selectStartTarget = selection.extent().computeContainerNode();
-  if (!selectStartTarget)
-    return DispatchEventResult::NotCanceled;
+  Node* select_start_target = selection.Extent().ComputeContainerNode();
+  if (!select_start_target)
+    return DispatchEventResult::kNotCanceled;
 
-  return selectStartTarget->dispatchEvent(
-      Event::createCancelableBubble(EventTypeNames::selectstart));
+  return select_start_target->DispatchEvent(
+      Event::CreateCancelableBubble(EventTypeNames::selectstart));
 }
 
 // The return value of |FrameSelection::modify()| is different based on
@@ -642,24 +354,28 @@ static DispatchEventResult dispatchSelectStart(
 // "selectstart" event is dispatched and canceled, otherwise returns true.
 // When |userTriggered| is |NotUserTrigged|, return value specifies whether
 // selection is modified or not.
-bool FrameSelection::modify(EAlteration alter,
+bool FrameSelection::Modify(EAlteration alter,
                             SelectionDirection direction,
                             TextGranularity granularity,
-                            EUserTriggered userTriggered) {
-  SelectionModifier selectionModifier(*frame(), selection(),
-                                      m_xPosForVerticalArrowNavigation);
-  const bool modified = selectionModifier.modify(alter, direction, granularity);
-  if (userTriggered == UserTriggered &&
-      selectionModifier.selection().isRange() && selection().isCaret() &&
-      dispatchSelectStart(selection()) != DispatchEventResult::NotCanceled) {
+                            EUserTriggered user_triggered) {
+  SelectionModifier selection_modifier(*GetFrame(),
+                                       ComputeVisibleSelectionInDOMTree(),
+                                       x_pos_for_vertical_arrow_navigation_);
+  const bool modified =
+      selection_modifier.Modify(alter, direction, granularity);
+  if (user_triggered == kUserTriggered &&
+      selection_modifier.Selection().IsRange() &&
+      ComputeVisibleSelectionInDOMTree().IsCaret() &&
+      DispatchSelectStart(ComputeVisibleSelectionInDOMTree()) !=
+          DispatchEventResult::kNotCanceled) {
     return false;
   }
   if (!modified) {
-    if (userTriggered == NotUserTriggered)
+    if (user_triggered == kNotUserTriggered)
       return false;
     // If spatial navigation enabled, focus navigator will move focus to
     // another element. See snav-input.html and snav-textarea.html
-    if (isSpatialNavigationEnabled(m_frame))
+    if (IsSpatialNavigationEnabled(frame_))
       return false;
     // Even if selection isn't changed, we prevent to default action, e.g.
     // scroll window when caret is at end of content editable.
@@ -667,128 +383,188 @@ bool FrameSelection::modify(EAlteration alter,
   }
 
   const SetSelectionOptions options =
-      CloseTyping | ClearTypingStyle | userTriggered;
-  setSelection(selectionModifier.selection(), options);
+      kCloseTyping | kClearTypingStyle | user_triggered;
+  SetSelection(selection_modifier.Selection().AsSelection(), options);
 
-  if (granularity == LineGranularity || granularity == ParagraphGranularity)
-    m_xPosForVerticalArrowNavigation =
-        selectionModifier.xPosForVerticalArrowNavigation();
+  if (granularity == kLineGranularity || granularity == kParagraphGranularity)
+    x_pos_for_vertical_arrow_navigation_ =
+        selection_modifier.XPosForVerticalArrowNavigation();
 
-  if (userTriggered == UserTriggered)
-    m_granularity = CharacterGranularity;
+  if (user_triggered == kUserTriggered)
+    granularity_ = kCharacterGranularity;
 
-  m_frameCaret->setCaretRectNeedsUpdate();
+  ScheduleVisualUpdateForPaintInvalidationIfNeeded();
 
   return true;
 }
 
-bool FrameSelection::modify(EAlteration alter,
-                            unsigned verticalDistance,
+bool FrameSelection::Modify(EAlteration alter,
+                            unsigned vertical_distance,
                             VerticalDirection direction) {
-  SelectionModifier selectionModifier(*frame(), selection());
-  if (!selectionModifier.modifyWithPageGranularity(alter, verticalDistance,
-                                                   direction)) {
+  SelectionModifier selection_modifier(*GetFrame(),
+                                       ComputeVisibleSelectionInDOMTree());
+  if (!selection_modifier.ModifyWithPageGranularity(alter, vertical_distance,
+                                                    direction)) {
     return false;
   }
 
-  setSelection(selectionModifier.selection(),
-               CloseTyping | ClearTypingStyle | UserTriggered,
-               alter == AlterationMove ? CursorAlignOnScroll::Always
-                                       : CursorAlignOnScroll::IfNeeded);
+  SetSelection(selection_modifier.Selection().AsSelection(),
+               kCloseTyping | kClearTypingStyle | kUserTriggered,
+               alter == kAlterationMove ? CursorAlignOnScroll::kAlways
+                                        : CursorAlignOnScroll::kIfNeeded);
 
-  m_granularity = CharacterGranularity;
+  granularity_ = kCharacterGranularity;
 
   return true;
 }
 
-void FrameSelection::clear() {
-  m_granularity = CharacterGranularity;
-  if (m_granularityStrategy)
-    m_granularityStrategy->Clear();
-  setSelection(SelectionInDOMTree());
+void FrameSelection::Clear() {
+  granularity_ = kCharacterGranularity;
+  if (granularity_strategy_)
+    granularity_strategy_->Clear();
+  SetSelection(SelectionInDOMTree());
 }
 
-void FrameSelection::documentAttached(Document* document) {
+bool FrameSelection::SelectionHasFocus() const {
+  // TODO(editing-dev): Hoist UpdateStyleAndLayoutIgnorePendingStylesheets
+  // to caller. See http://crbug.com/590369 for more details.
+  GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
+  const Node* current =
+      ComputeVisibleSelectionInDOMTree().Start().ComputeContainerNode();
+  if (!current)
+    return false;
+
+  // No focused element means document root has focus.
+  const Element* const focused_element = GetDocument().FocusedElement()
+                                             ? GetDocument().FocusedElement()
+                                             : GetDocument().documentElement();
+  if (!focused_element)
+    return false;
+
+  if (focused_element->IsTextControl())
+    return focused_element->ContainsIncludingHostElements(*current);
+
+  bool has_editable_style = HasEditableStyle(*current);
+  do {
+    // If the selection is within an editable sub tree and that sub tree
+    // doesn't have focus, the selection doesn't have focus either.
+    if (has_editable_style && !HasEditableStyle(*current))
+      return false;
+
+    // Selection has focus if its sub tree has focus.
+    if (current == focused_element)
+      return true;
+    current = current->ParentOrShadowHostNode();
+  } while (current);
+
+  return false;
+}
+
+bool FrameSelection::IsHidden() const {
+  if (SelectionHasFocus())
+    return false;
+
+  const Node* start =
+      ComputeVisibleSelectionInDOMTree().Start().ComputeContainerNode();
+  if (!start)
+    return true;
+
+  // The selection doesn't have focus, so hide everything but range selections.
+  if (!GetSelectionInDOMTree().IsRange())
+    return true;
+
+  // Here we know we have an unfocused range selection. Let's say that
+  // selection resides inside a text control. Since the selection doesn't have
+  // focus neither does the text control. Meaning, if the selection indeed
+  // resides inside a text control, it should be hidden.
+  return EnclosingTextControl(start);
+}
+
+void FrameSelection::DocumentAttached(Document* document) {
   DCHECK(document);
-  DCHECK(!m_document) << "FrameSelection is already attached to " << m_document;
-  m_document = document;
-  m_useSecureKeyboardEntryWhenActive = false;
-  m_selectionEditor->documentAttached(document);
-  m_frameCaret->documentAttached(document);
-  setContext(document);
+  use_secure_keyboard_entry_when_active_ = false;
+  selection_editor_->DocumentAttached(document);
+  SetContext(document);
 }
 
-void FrameSelection::contextDestroyed(Document* document) {
-  DCHECK_EQ(m_document, document);
-  m_document = nullptr;
-  m_granularity = CharacterGranularity;
+void FrameSelection::ContextDestroyed(Document* document) {
+  granularity_ = kCharacterGranularity;
 
-  LayoutViewItem view = m_frame->contentLayoutItem();
-  if (!view.isNull())
-    view.clearSelection();
+  layout_selection_->OnDocumentShutdown();
 
-  m_frame->editor().clearTypingStyle();
-  m_selectionEditor->documentDetached(*document);
+  frame_->GetEditor().ClearTypingStyle();
 }
 
-LayoutBlock* FrameSelection::caretLayoutObject() const {
-  DCHECK(selection().isValidFor(document()));
-  if (!isCaret())
-    return nullptr;
-  return CaretBase::caretLayoutObject(selection().start().anchorNode());
+void FrameSelection::ClearPreviousCaretVisualRect(const LayoutBlock& block) {
+  frame_caret_->ClearPreviousVisualRect(block);
 }
 
-IntRect FrameSelection::absoluteCaretBounds() {
-  DCHECK(selection().isValidFor(*m_frame->document()));
-  return m_frameCaret->absoluteCaretBounds();
+void FrameSelection::LayoutBlockWillBeDestroyed(const LayoutBlock& block) {
+  frame_caret_->LayoutBlockWillBeDestroyed(block);
 }
 
-void FrameSelection::invalidateCaretRect(bool forceInvalidation) {
-  m_frameCaret->invalidateCaretRect(forceInvalidation);
+void FrameSelection::UpdateStyleAndLayoutIfNeeded() {
+  frame_caret_->UpdateStyleAndLayoutIfNeeded();
 }
 
-void FrameSelection::dataWillChange(const CharacterData& node) {
-  m_frameCaret->dataWillChange(node);
+void FrameSelection::InvalidatePaint(const LayoutBlock& block,
+                                     const PaintInvalidatorContext& context) {
+  frame_caret_->InvalidatePaint(block, context);
 }
 
-void FrameSelection::paintCaret(GraphicsContext& context,
-                                const LayoutPoint& paintOffset) {
-  m_frameCaret->paintCaret(context, paintOffset);
+bool FrameSelection::ShouldPaintCaret(const LayoutBlock& block) const {
+  DCHECK_GE(GetDocument().Lifecycle().GetState(),
+            DocumentLifecycle::kLayoutClean);
+  bool result = frame_caret_->ShouldPaintCaret(block);
+  DCHECK(!result || (ComputeVisibleSelectionInDOMTree().IsCaret() &&
+                     ComputeVisibleSelectionInDOMTree().HasEditableStyle()));
+  return result;
 }
 
-bool FrameSelection::contains(const LayoutPoint& point) {
-  if (document().layoutViewItem().isNull())
+IntRect FrameSelection::AbsoluteCaretBounds() {
+  DCHECK(ComputeVisibleSelectionInDOMTree().IsValidFor(*frame_->GetDocument()));
+  return frame_caret_->AbsoluteCaretBounds();
+}
+
+void FrameSelection::PaintCaret(GraphicsContext& context,
+                                const LayoutPoint& paint_offset) {
+  frame_caret_->PaintCaret(context, paint_offset);
+}
+
+bool FrameSelection::Contains(const LayoutPoint& point) {
+  if (GetDocument().GetLayoutViewItem().IsNull())
     return false;
 
   // Treat a collapsed selection like no selection.
-  const VisibleSelectionInFlatTree& visibleSelection =
-      this->visibleSelection<EditingInFlatTreeStrategy>();
-  if (!visibleSelection.isRange())
+  const VisibleSelectionInFlatTree& visible_selection =
+      ComputeVisibleSelectionInFlatTree();
+  if (!visible_selection.IsRange())
     return false;
 
-  HitTestRequest request(HitTestRequest::ReadOnly | HitTestRequest::Active);
+  HitTestRequest request(HitTestRequest::kReadOnly | HitTestRequest::kActive);
   HitTestResult result(request, point);
-  document().layoutViewItem().hitTest(result);
-  Node* innerNode = result.innerNode();
-  if (!innerNode || !innerNode->layoutObject())
+  GetDocument().GetLayoutViewItem().HitTest(result);
+  Node* inner_node = result.InnerNode();
+  if (!inner_node || !inner_node->GetLayoutObject())
     return false;
 
-  const VisiblePositionInFlatTree& visiblePos =
-      createVisiblePosition(fromPositionInDOMTree<EditingInFlatTreeStrategy>(
-          innerNode->layoutObject()->positionForPoint(result.localPoint())));
-  if (visiblePos.isNull())
+  const VisiblePositionInFlatTree& visible_pos =
+      CreateVisiblePosition(FromPositionInDOMTree<EditingInFlatTreeStrategy>(
+          inner_node->GetLayoutObject()->PositionForPoint(
+              result.LocalPoint())));
+  if (visible_pos.IsNull())
     return false;
 
-  const VisiblePositionInFlatTree& visibleStart =
-      visibleSelection.visibleStart();
-  const VisiblePositionInFlatTree& visibleEnd = visibleSelection.visibleEnd();
-  if (visibleStart.isNull() || visibleEnd.isNull())
+  const VisiblePositionInFlatTree& visible_start =
+      visible_selection.VisibleStart();
+  const VisiblePositionInFlatTree& visible_end = visible_selection.VisibleEnd();
+  if (visible_start.IsNull() || visible_end.IsNull())
     return false;
 
-  const PositionInFlatTree& start = visibleStart.deepEquivalent();
-  const PositionInFlatTree& end = visibleEnd.deepEquivalent();
-  const PositionInFlatTree& pos = visiblePos.deepEquivalent();
-  return start.compareTo(pos) <= 0 && pos.compareTo(end) <= 0;
+  const PositionInFlatTree& start = visible_start.DeepEquivalent();
+  const PositionInFlatTree& end = visible_end.DeepEquivalent();
+  const PositionInFlatTree& pos = visible_pos.DeepEquivalent();
+  return start.CompareTo(pos) <= 0 && pos.CompareTo(end) <= 0;
 }
 
 // Workaround for the fact that it's hard to delete a frame.
@@ -797,387 +573,397 @@ bool FrameSelection::contains(const LayoutPoint& point) {
 // setSelection call because in some contexts it might not be good for the focus
 // to move to another frame. So instead we call it from places where we are
 // selecting with the mouse or the keyboard after setting the selection.
-void FrameSelection::selectFrameElementInParentIfFullySelected() {
+void FrameSelection::SelectFrameElementInParentIfFullySelected() {
   // Find the parent frame; if there is none, then we have nothing to do.
-  Frame* parent = m_frame->tree().parent();
+  Frame* parent = frame_->Tree().Parent();
   if (!parent)
     return;
-  Page* page = m_frame->page();
+  Page* page = frame_->GetPage();
   if (!page)
     return;
 
   // Check if the selection contains the entire frame contents; if not, then
   // there is nothing to do.
-  if (!isRange())
+  if (GetSelectionInDOMTree().SelectionTypeWithLegacyGranularity() !=
+      kRangeSelection) {
     return;
+  }
 
-  // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
   // needs to be audited.  See http://crbug.com/590369 for more details.
-  document().updateStyleAndLayoutIgnorePendingStylesheets();
+  GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
 
-  if (!isStartOfDocument(selection().visibleStart()))
+  if (!IsStartOfDocument(ComputeVisibleSelectionInDOMTree().VisibleStart()))
     return;
-  if (!isEndOfDocument(selection().visibleEnd()))
+  if (!IsEndOfDocument(ComputeVisibleSelectionInDOMTree().VisibleEnd()))
     return;
 
   // FIXME: This is not yet implemented for cross-process frame relationships.
-  if (!parent->isLocalFrame())
+  if (!parent->IsLocalFrame())
     return;
 
   // Get to the <iframe> or <frame> (or even <object>) element in the parent
   // frame.
   // FIXME: Doesn't work for OOPI.
-  HTMLFrameOwnerElement* ownerElement = m_frame->deprecatedLocalOwner();
-  if (!ownerElement)
+  HTMLFrameOwnerElement* owner_element = frame_->DeprecatedLocalOwner();
+  if (!owner_element)
     return;
-  ContainerNode* ownerElementParent = ownerElement->parentNode();
-  if (!ownerElementParent)
+  ContainerNode* owner_element_parent = owner_element->parentNode();
+  if (!owner_element_parent)
     return;
 
-  // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
   // needs to be audited.  See http://crbug.com/590369 for more details.
-  ownerElementParent->document().updateStyleAndLayoutIgnorePendingStylesheets();
+  owner_element_parent->GetDocument()
+      .UpdateStyleAndLayoutIgnorePendingStylesheets();
 
   // This method's purpose is it to make it easier to select iframes (in order
   // to delete them).  Don't do anything if the iframe isn't deletable.
-  if (!blink::hasEditableStyle(*ownerElementParent))
+  if (!blink::HasEditableStyle(*owner_element_parent))
     return;
 
   // Create compute positions before and after the element.
-  unsigned ownerElementNodeIndex = ownerElement->nodeIndex();
-  VisiblePosition beforeOwnerElement = createVisiblePosition(
-      Position(ownerElementParent, ownerElementNodeIndex));
-  VisiblePosition afterOwnerElement = createVisiblePosition(
-      Position(ownerElementParent, ownerElementNodeIndex + 1),
+  unsigned owner_element_node_index = owner_element->NodeIndex();
+  VisiblePosition before_owner_element = CreateVisiblePosition(
+      Position(owner_element_parent, owner_element_node_index));
+  VisiblePosition after_owner_element = CreateVisiblePosition(
+      Position(owner_element_parent, owner_element_node_index + 1),
       VP_UPSTREAM_IF_POSSIBLE);
 
   SelectionInDOMTree::Builder builder;
   builder
-      .setBaseAndExtentDeprecated(beforeOwnerElement.deepEquivalent(),
-                                  afterOwnerElement.deepEquivalent())
-      .setAffinity(beforeOwnerElement.affinity());
+      .SetBaseAndExtentDeprecated(before_owner_element.DeepEquivalent(),
+                                  after_owner_element.DeepEquivalent())
+      .SetAffinity(before_owner_element.Affinity());
 
   // Focus on the parent frame, and then select from before this element to
   // after.
-  VisibleSelection newSelection = createVisibleSelection(builder.build());
+  VisibleSelection new_selection = CreateVisibleSelection(builder.Build());
   // TODO(yosin): We should call |FocusController::setFocusedFrame()| before
   // |createVisibleSelection()|.
-  page->focusController().setFocusedFrame(parent);
+  page->GetFocusController().SetFocusedFrame(parent);
   // setFocusedFrame can dispatch synchronous focus/blur events.  The document
   // tree might be modified.
-  if (newSelection.isNonOrphanedCaretOrRange())
-    toLocalFrame(parent)->selection().setSelection(newSelection);
+  if (new_selection.IsNonOrphanedCaretOrRange())
+    ToLocalFrame(parent)->Selection().SetSelection(new_selection.AsSelection());
 }
 
 // Returns a shadow tree node for legacy shadow trees, a child of the
 // ShadowRoot node for new shadow trees, or 0 for non-shadow trees.
-static Node* nonBoundaryShadowTreeRootNode(const Position& position) {
-  return position.anchorNode() && !position.anchorNode()->isShadowRoot()
-             ? position.anchorNode()->nonBoundaryShadowTreeRootNode()
+static Node* NonBoundaryShadowTreeRootNode(const Position& position) {
+  return position.AnchorNode() && !position.AnchorNode()->IsShadowRoot()
+             ? position.AnchorNode()->NonBoundaryShadowTreeRootNode()
              : nullptr;
 }
 
-void FrameSelection::selectAll() {
-  if (isHTMLSelectElement(document().focusedElement())) {
-    HTMLSelectElement* selectElement =
-        toHTMLSelectElement(document().focusedElement());
-    if (selectElement->canSelectAll()) {
-      selectElement->selectAll();
+void FrameSelection::SelectAll() {
+  if (isHTMLSelectElement(GetDocument().FocusedElement())) {
+    HTMLSelectElement* select_element =
+        toHTMLSelectElement(GetDocument().FocusedElement());
+    if (select_element->CanSelectAll()) {
+      select_element->SelectAll();
       return;
     }
   }
 
   Node* root = nullptr;
-  Node* selectStartTarget = nullptr;
-  if (isContentEditable()) {
-    root = highestEditableRoot(selection().start());
-    if (Node* shadowRoot = nonBoundaryShadowTreeRootNode(selection().start()))
-      selectStartTarget = shadowRoot->ownerShadowHost();
+  Node* select_start_target = nullptr;
+  if (ComputeVisibleSelectionInDOMTree().IsContentEditable()) {
+    root = HighestEditableRoot(ComputeVisibleSelectionInDOMTree().Start());
+    if (Node* shadow_root = NonBoundaryShadowTreeRootNode(
+            ComputeVisibleSelectionInDOMTree().Start()))
+      select_start_target = shadow_root->OwnerShadowHost();
     else
-      selectStartTarget = root;
+      select_start_target = root;
   } else {
-    root = nonBoundaryShadowTreeRootNode(selection().start());
+    root = NonBoundaryShadowTreeRootNode(
+        ComputeVisibleSelectionInDOMTree().Start());
     if (root) {
-      selectStartTarget = root->ownerShadowHost();
+      select_start_target = root->OwnerShadowHost();
     } else {
-      root = document().documentElement();
-      selectStartTarget = document().body();
+      root = GetDocument().documentElement();
+      select_start_target = GetDocument().body();
     }
   }
-  if (!root || editingIgnoresContent(*root))
+  if (!root || EditingIgnoresContent(*root))
     return;
 
-  if (selectStartTarget) {
-    const Document& expectedDocument = document();
-    if (selectStartTarget->dispatchEvent(Event::createCancelableBubble(
-            EventTypeNames::selectstart)) != DispatchEventResult::NotCanceled)
+  if (select_start_target) {
+    const Document& expected_document = GetDocument();
+    if (select_start_target->DispatchEvent(Event::CreateCancelableBubble(
+            EventTypeNames::selectstart)) != DispatchEventResult::kNotCanceled)
       return;
+    // The frame may be detached due to selectstart event.
+    if (!IsAvailable()) {
+      // Reached by editing/selection/selectstart_detach_frame.html
+      return;
+    }
     // |root| may be detached due to selectstart event.
-    if (!root->isConnected() || expectedDocument != root->document())
+    if (!root->isConnected() || expected_document != root->GetDocument())
       return;
   }
 
-  setSelection(SelectionInDOMTree::Builder().selectAllChildren(*root).build());
-  selectFrameElementInParentIfFullySelected();
-  notifyLayoutObjectOfSelectionChange(UserTriggered);
+  SetSelection(SelectionInDOMTree::Builder()
+                   .SelectAllChildren(*root)
+                   .SetIsHandleVisible(IsHandleVisible())
+                   .Build());
+  SelectFrameElementInParentIfFullySelected();
+  NotifyTextControlOfSelectionChange(kUserTriggered);
 }
 
-bool FrameSelection::setSelectedRange(const EphemeralRange& range,
+bool FrameSelection::SetSelectedRange(const EphemeralRange& range,
                                       TextAffinity affinity,
                                       SelectionDirectionalMode directional,
                                       SetSelectionOptions options) {
-  if (range.isNull())
+  if (range.IsNull())
     return false;
-  m_selectionEditor->resetLogicalRange();
-  // Since |FrameSeleciton::setSelection()| dispatches events and DOM tree
-  // can be modified by event handlers, we should create |Range| object before
-  // calling it.
-  Range* logicalRange = createRange(range);
-  setSelection(SelectionInDOMTree::Builder()
-                   .setBaseAndExtent(range)
-                   .setAffinity(affinity)
-                   .setIsDirectional(directional ==
-                                     SelectionDirectionalMode::Directional)
-                   .build(),
+  SetSelection(SelectionInDOMTree::Builder()
+                   .SetBaseAndExtent(range)
+                   .SetAffinity(affinity)
+                   .SetIsDirectional(directional ==
+                                     SelectionDirectionalMode::kDirectional)
+                   .Build(),
                options);
-  m_selectionEditor->setLogicalRange(logicalRange);
   return true;
 }
 
-Range* FrameSelection::firstRange() const {
-  return m_selectionEditor->firstRange();
+void FrameSelection::NotifyAccessibilityForSelectionChange() {
+  if (GetSelectionInDOMTree().IsNone())
+    return;
+  AXObjectCache* cache = GetDocument().ExistingAXObjectCache();
+  if (!cache)
+    return;
+  const Position& start = GetSelectionInDOMTree().ComputeStartPosition();
+  cache->SelectionChanged(start.ComputeContainerNode());
 }
 
-bool FrameSelection::isInPasswordField() const {
-  TextControlElement* textControl = enclosingTextControl(start());
-  return isHTMLInputElement(textControl) &&
-         toHTMLInputElement(textControl)->type() == InputTypeNames::password;
-}
-
-void FrameSelection::notifyAccessibilityForSelectionChange() {
-  if (selection().start().isNotNull() && selection().end().isNotNull()) {
-    if (AXObjectCache* cache = document().existingAXObjectCache())
-      cache->selectionChanged(selection().start().computeContainerNode());
-  }
-}
-
-void FrameSelection::notifyCompositorForSelectionChange() {
+void FrameSelection::NotifyCompositorForSelectionChange() {
   if (!RuntimeEnabledFeatures::compositedSelectionUpdateEnabled())
     return;
 
-  scheduleVisualUpdate();
+  ScheduleVisualUpdate();
 }
 
-void FrameSelection::notifyEventHandlerForSelectionChange() {
-  m_frame->eventHandler().selectionController().notifySelectionChanged();
+void FrameSelection::NotifyEventHandlerForSelectionChange() {
+  frame_->GetEventHandler().GetSelectionController().NotifySelectionChanged();
 }
 
-void FrameSelection::focusedOrActiveStateChanged() {
-  bool activeAndFocused = isFocusedAndActive();
+void FrameSelection::FocusedOrActiveStateChanged() {
+  bool active_and_focused = FrameIsFocusedAndActive();
 
   // Trigger style invalidation from the focused element. Even though
   // the focused element hasn't changed, the evaluation of focus pseudo
   // selectors are dependent on whether the frame is focused and active.
-  if (Element* element = document().focusedElement())
-    element->focusStateChanged();
+  if (Element* element = GetDocument().FocusedElement())
+    element->FocusStateChanged();
 
-  document().updateStyleAndLayoutTree();
+  GetDocument().UpdateStyleAndLayoutTree();
 
   // Because LayoutObject::selectionBackgroundColor() and
   // LayoutObject::selectionForegroundColor() check if the frame is active,
   // we have to update places those colors were painted.
-  LayoutViewItem view = document().layoutViewItem();
-  if (!view.isNull())
-    view.invalidatePaintForSelection();
+  LayoutViewItem view = GetDocument().GetLayoutViewItem();
+  if (!view.IsNull())
+    layout_selection_->InvalidatePaintForSelection();
 
   // Caret appears in the active frame.
-  if (activeAndFocused)
-    setSelectionFromNone();
+  if (active_and_focused)
+    SetSelectionFromNone();
   else
-    m_frame->spellChecker().spellCheckAfterBlur();
-  m_frameCaret->setCaretVisibility(activeAndFocused ? CaretVisibility::Visible
-                                                    : CaretVisibility::Hidden);
+    frame_->GetSpellChecker().SpellCheckAfterBlur();
+  frame_caret_->SetCaretVisibility(active_and_focused
+                                       ? CaretVisibility::kVisible
+                                       : CaretVisibility::kHidden);
 
   // Update for caps lock state
-  m_frame->eventHandler().capsLockStateMayHaveChanged();
+  frame_->GetEventHandler().CapsLockStateMayHaveChanged();
 
   // Secure keyboard entry is set by the active frame.
-  if (m_useSecureKeyboardEntryWhenActive)
-    setUseSecureKeyboardEntry(activeAndFocused);
+  if (use_secure_keyboard_entry_when_active_)
+    SetUseSecureKeyboardEntry(active_and_focused);
 }
 
-void FrameSelection::pageActivationChanged() {
-  focusedOrActiveStateChanged();
+void FrameSelection::PageActivationChanged() {
+  FocusedOrActiveStateChanged();
 }
 
-void FrameSelection::updateSecureKeyboardEntryIfActive() {
-  if (!isFocusedAndActive())
+void FrameSelection::UpdateSecureKeyboardEntryIfActive() {
+  if (!FrameIsFocusedAndActive())
     return;
-  setUseSecureKeyboardEntry(m_useSecureKeyboardEntryWhenActive);
+  SetUseSecureKeyboardEntry(use_secure_keyboard_entry_when_active_);
 }
 
-void FrameSelection::setUseSecureKeyboardEntryWhenActive(
-    bool usesSecureKeyboard) {
-  if (m_useSecureKeyboardEntryWhenActive == usesSecureKeyboard)
+void FrameSelection::SetUseSecureKeyboardEntryWhenActive(
+    bool uses_secure_keyboard) {
+  if (use_secure_keyboard_entry_when_active_ == uses_secure_keyboard)
     return;
-  m_useSecureKeyboardEntryWhenActive = usesSecureKeyboard;
-  updateSecureKeyboardEntryIfActive();
+  use_secure_keyboard_entry_when_active_ = uses_secure_keyboard;
+  UpdateSecureKeyboardEntryIfActive();
 }
 
-void FrameSelection::setUseSecureKeyboardEntry(bool enable) {
+void FrameSelection::SetUseSecureKeyboardEntry(bool enable) {
   if (enable)
-    enableSecureTextInput();
+    EnableSecureTextInput();
   else
-    disableSecureTextInput();
+    DisableSecureTextInput();
 }
 
-void FrameSelection::setFocused(bool flag) {
-  if (m_focused == flag)
+void FrameSelection::SetFrameIsFocused(bool flag) {
+  if (focused_ == flag)
     return;
-  m_focused = flag;
+  focused_ = flag;
 
-  focusedOrActiveStateChanged();
+  FocusedOrActiveStateChanged();
 }
 
-bool FrameSelection::isFocusedAndActive() const {
-  return m_focused && m_frame->page() &&
-         m_frame->page()->focusController().isActive();
+bool FrameSelection::FrameIsFocusedAndActive() const {
+  return focused_ && frame_->GetPage() &&
+         frame_->GetPage()->GetFocusController().IsActive();
 }
 
-bool FrameSelection::isAppearanceDirty() const {
-  return m_pendingSelection->hasPendingSelection();
+bool FrameSelection::NeedsLayoutSelectionUpdate() const {
+  return layout_selection_->HasPendingSelection();
 }
 
-void FrameSelection::commitAppearanceIfNeeded(LayoutView& layoutView) {
-  return m_pendingSelection->commit(layoutView);
+void FrameSelection::CommitAppearanceIfNeeded() {
+  return layout_selection_->Commit();
 }
 
-void FrameSelection::didLayout() {
-  setCaretRectNeedsUpdate();
-  updateAppearance();
+void FrameSelection::DidLayout() {
+  UpdateAppearance();
 }
 
-void FrameSelection::updateAppearance() {
-  m_frameCaret->updateAppearance();
+void FrameSelection::UpdateAppearance() {
+  DCHECK(!frame_->ContentLayoutItem().IsNull());
+  frame_caret_->ScheduleVisualUpdateForPaintInvalidationIfNeeded();
+  layout_selection_->SetHasPendingSelection();
+}
 
-  if (m_frame->contentLayoutItem().isNull())
+void FrameSelection::NotifyTextControlOfSelectionChange(
+    EUserTriggered user_triggered) {
+  TextControlElement* text_control =
+      EnclosingTextControl(GetSelectionInDOMTree().Base());
+  if (!text_control)
     return;
-  m_pendingSelection->setHasPendingSelection();
-}
-
-void FrameSelection::notifyLayoutObjectOfSelectionChange(
-    EUserTriggered userTriggered) {
-  if (TextControlElement* textControl = enclosingTextControl(start()))
-    textControl->selectionChanged(userTriggered == UserTriggered);
+  text_control->SelectionChanged(user_triggered == kUserTriggered);
 }
 
 // Helper function that tells whether a particular node is an element that has
 // an entire LocalFrame and FrameView, a <frame>, <iframe>, or <object>.
-static bool isFrameElement(const Node* n) {
+static bool IsFrameElement(const Node* n) {
   if (!n)
     return false;
-  LayoutObject* layoutObject = n->layoutObject();
-  if (!layoutObject || !layoutObject->isLayoutPart())
+  LayoutObject* layout_object = n->GetLayoutObject();
+  if (!layout_object || !layout_object->IsLayoutPart())
     return false;
-  Widget* widget = toLayoutPart(layoutObject)->widget();
-  return widget && widget->isFrameView();
+  return ToLayoutPart(layout_object)->ChildFrameView();
 }
 
-void FrameSelection::setFocusedNodeIfNeeded() {
-  if (isNone() || !isFocused())
+void FrameSelection::SetFocusedNodeIfNeeded() {
+  if (ComputeVisibleSelectionInDOMTreeDeprecated().IsNone() ||
+      !FrameIsFocused())
     return;
 
-  if (Element* target = rootEditableElement()) {
+  if (Element* target =
+          ComputeVisibleSelectionInDOMTreeDeprecated().RootEditableElement()) {
     // Walk up the DOM tree to search for a node to focus.
-    document().updateStyleAndLayoutTreeIgnorePendingStylesheets();
+    GetDocument().UpdateStyleAndLayoutTreeIgnorePendingStylesheets();
     while (target) {
       // We don't want to set focus on a subframe when selecting in a parent
       // frame, so add the !isFrameElement check here. There's probably a better
       // way to make this work in the long term, but this is the safest fix at
       // this time.
-      if (target->isMouseFocusable() && !isFrameElement(target)) {
-        m_frame->page()->focusController().setFocusedElement(target, m_frame);
+      if (target->IsMouseFocusable() && !IsFrameElement(target)) {
+        frame_->GetPage()->GetFocusController().SetFocusedElement(target,
+                                                                  frame_);
         return;
       }
-      target = target->parentOrShadowHostElement();
+      target = target->ParentOrShadowHostElement();
     }
-    document().clearFocusedElement();
+    GetDocument().ClearFocusedElement();
   }
 }
 
-static String extractSelectedText(const FrameSelection& selection,
+static String ExtractSelectedText(const FrameSelection& selection,
                                   TextIteratorBehavior behavior) {
-  const VisibleSelectionInFlatTree& visibleSelection =
-      selection.visibleSelection<EditingInFlatTreeStrategy>();
+  const VisibleSelectionInFlatTree& visible_selection =
+      selection.ComputeVisibleSelectionInFlatTree();
   const EphemeralRangeInFlatTree& range =
-      visibleSelection.toNormalizedEphemeralRange();
+      visible_selection.ToNormalizedEphemeralRange();
   // We remove '\0' characters because they are not visibly rendered to the
   // user.
-  return plainText(range, behavior).replace(0, "");
+  return PlainText(range, behavior).Replace(0, "");
 }
 
-String FrameSelection::selectedHTMLForClipboard() const {
-  const VisibleSelectionInFlatTree& visibleSelection =
-      this->visibleSelection<EditingInFlatTreeStrategy>();
+String FrameSelection::SelectedHTMLForClipboard() const {
+  const VisibleSelectionInFlatTree& visible_selection =
+      ComputeVisibleSelectionInFlatTree();
   const EphemeralRangeInFlatTree& range =
-      visibleSelection.toNormalizedEphemeralRange();
-  return createMarkup(range.startPosition(), range.endPosition(),
-                      AnnotateForInterchange,
-                      ConvertBlocksToInlines::NotConvert, ResolveNonLocalURLs);
+      visible_selection.ToNormalizedEphemeralRange();
+  return CreateMarkup(
+      range.StartPosition(), range.EndPosition(), kAnnotateForInterchange,
+      ConvertBlocksToInlines::kNotConvert, kResolveNonLocalURLs);
 }
 
-String FrameSelection::selectedText(TextIteratorBehavior behavior) const {
-  return extractSelectedText(*this, behavior);
+String FrameSelection::SelectedText(
+    const TextIteratorBehavior& behavior) const {
+  return ExtractSelectedText(*this, behavior);
 }
 
-String FrameSelection::selectedTextForClipboard() const {
-  if (m_frame->settings() &&
-      m_frame->settings()->getSelectionIncludesAltImageText())
-    return extractSelectedText(*this, TextIteratorEmitsImageAltText);
-  return extractSelectedText(*this, TextIteratorDefaultBehavior);
+String FrameSelection::SelectedText() const {
+  return SelectedText(TextIteratorBehavior());
 }
 
-LayoutRect FrameSelection::bounds() const {
-  FrameView* view = m_frame->view();
+String FrameSelection::SelectedTextForClipboard() const {
+  return ExtractSelectedText(
+      *this, TextIteratorBehavior::Builder()
+                 .SetEmitsImageAltText(
+                     frame_->GetSettings() &&
+                     frame_->GetSettings()->GetSelectionIncludesAltImageText())
+                 .Build());
+}
+
+LayoutRect FrameSelection::Bounds() const {
+  FrameView* view = frame_->View();
   if (!view)
     return LayoutRect();
 
-  return intersection(unclippedBounds(),
-                      LayoutRect(view->visibleContentRect()));
+  return Intersection(UnclippedBounds(),
+                      LayoutRect(view->VisibleContentRect()));
 }
 
-LayoutRect FrameSelection::unclippedBounds() const {
-  FrameView* view = m_frame->view();
-  LayoutViewItem layoutView = m_frame->contentLayoutItem();
+LayoutRect FrameSelection::UnclippedBounds() const {
+  FrameView* view = frame_->View();
+  LayoutViewItem layout_view = frame_->ContentLayoutItem();
 
-  if (!view || layoutView.isNull())
+  if (!view || layout_view.IsNull())
     return LayoutRect();
 
-  view->updateLifecycleToLayoutClean();
-  return LayoutRect(layoutView.selectionBounds());
+  view->UpdateLifecycleToLayoutClean();
+  return LayoutRect(layout_selection_->SelectionBounds());
 }
 
-static inline HTMLFormElement* associatedFormElement(HTMLElement& element) {
+static inline HTMLFormElement* AssociatedFormElement(HTMLElement& element) {
   if (isHTMLFormElement(element))
     return &toHTMLFormElement(element);
   return element.formOwner();
 }
 
 // Scans logically forward from "start", including any child frames.
-static HTMLFormElement* scanForForm(Node* start) {
+static HTMLFormElement* ScanForForm(Node* start) {
   if (!start)
     return 0;
 
-  for (HTMLElement& element : Traversal<HTMLElement>::startsAt(
-           start->isHTMLElement() ? toHTMLElement(start)
-                                  : Traversal<HTMLElement>::next(*start))) {
-    if (HTMLFormElement* form = associatedFormElement(element))
+  for (HTMLElement& element : Traversal<HTMLElement>::StartsAt(
+           start->IsHTMLElement() ? ToHTMLElement(start)
+                                  : Traversal<HTMLElement>::Next(*start))) {
+    if (HTMLFormElement* form = AssociatedFormElement(element))
       return form;
 
-    if (isHTMLFrameElementBase(element)) {
-      Node* childDocument = toHTMLFrameElementBase(element).contentDocument();
-      if (HTMLFormElement* frameResult = scanForForm(childDocument))
-        return frameResult;
+    if (IsHTMLFrameElementBase(element)) {
+      Node* child_document = ToHTMLFrameElementBase(element).contentDocument();
+      if (HTMLFormElement* frame_result = ScanForForm(child_document))
+        return frame_result;
     }
   }
   return 0;
@@ -1185,93 +971,90 @@ static HTMLFormElement* scanForForm(Node* start) {
 
 // We look for either the form containing the current focus, or for one
 // immediately after it
-HTMLFormElement* FrameSelection::currentForm() const {
+HTMLFormElement* FrameSelection::CurrentForm() const {
   // Start looking either at the active (first responder) node, or where the
   // selection is.
-  Node* start = document().focusedElement();
+  Node* start = GetDocument().FocusedElement();
   if (!start)
-    start = this->start().anchorNode();
+    start = ComputeVisibleSelectionInDOMTree().Start().AnchorNode();
   if (!start)
     return 0;
 
   // Try walking up the node tree to find a form element.
   for (HTMLElement* element =
-           Traversal<HTMLElement>::firstAncestorOrSelf(*start);
-       element; element = Traversal<HTMLElement>::firstAncestor(*element)) {
-    if (HTMLFormElement* form = associatedFormElement(*element))
+           Traversal<HTMLElement>::FirstAncestorOrSelf(*start);
+       element; element = Traversal<HTMLElement>::FirstAncestor(*element)) {
+    if (HTMLFormElement* form = AssociatedFormElement(*element))
       return form;
   }
 
   // Try walking forward in the node tree to find a form element.
-  return scanForForm(start);
+  return ScanForForm(start);
 }
 
-void FrameSelection::revealSelection(const ScrollAlignment& alignment,
-                                     RevealExtentOption revealExtentOption) {
-  DCHECK(isAvailable());
+void FrameSelection::RevealSelection(const ScrollAlignment& alignment,
+                                     RevealExtentOption reveal_extent_option) {
+  DCHECK(IsAvailable());
 
   // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
   // needs to be audited.  See http://crbug.com/590369 for more details.
   // Calculation of absolute caret bounds requires clean layout.
-  document().updateStyleAndLayoutIgnorePendingStylesheets();
+  GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
 
   LayoutRect rect;
 
-  switch (getSelectionType()) {
-    case NoSelection:
+  switch (ComputeVisibleSelectionInDOMTree().GetSelectionType()) {
+    case kNoSelection:
       return;
-    case CaretSelection:
-      rect = LayoutRect(absoluteCaretBounds());
+    case kCaretSelection:
+      rect = LayoutRect(AbsoluteCaretBounds());
       break;
-    case RangeSelection:
-      rect = LayoutRect(
-          revealExtentOption == RevealExtent
-              ? absoluteCaretBoundsOf(createVisiblePosition(extent()))
-              : enclosingIntRect(unclippedBounds()));
+    case kRangeSelection:
+      rect = LayoutRect(reveal_extent_option == kRevealExtent
+                            ? AbsoluteCaretBoundsOf(CreateVisiblePosition(
+                                  ComputeVisibleSelectionInDOMTree().Extent()))
+                            : EnclosingIntRect(UnclippedBounds()));
       break;
   }
 
-  Position start = this->start();
-  DCHECK(start.anchorNode());
-  if (start.anchorNode() && start.anchorNode()->layoutObject()) {
+  Position start = ComputeVisibleSelectionInDOMTree().Start();
+  DCHECK(start.AnchorNode());
+  if (start.AnchorNode() && start.AnchorNode()->GetLayoutObject()) {
     // FIXME: This code only handles scrolling the startContainer's layer, but
     // the selection rect could intersect more than just that.
-    if (DocumentLoader* documentLoader = m_frame->loader().documentLoader())
-      documentLoader->initialScrollState().wasScrolledByUser = true;
-    if (start.anchorNode()->layoutObject()->scrollRectToVisible(rect, alignment,
-                                                                alignment))
-      updateAppearance();
+    if (DocumentLoader* document_loader = frame_->Loader().GetDocumentLoader())
+      document_loader->GetInitialScrollState().was_scrolled_by_user = true;
+    if (start.AnchorNode()->GetLayoutObject()->ScrollRectToVisible(
+            rect, alignment, alignment))
+      UpdateAppearance();
   }
 }
 
-void FrameSelection::setSelectionFromNone() {
+void FrameSelection::SetSelectionFromNone() {
   // Put a caret inside the body if the entire frame is editable (either the
   // entire WebView is editable or designMode is on for this document).
 
-  Document* document = m_frame->document();
-  if (!isNone() || !(blink::hasEditableStyle(*document)))
+  Document* document = frame_->GetDocument();
+  if (!ComputeVisibleSelectionInDOMTreeDeprecated().IsNone() ||
+      !(blink::HasEditableStyle(*document)))
     return;
 
-  Element* documentElement = document->documentElement();
-  if (!documentElement)
+  Element* document_element = document->documentElement();
+  if (!document_element)
     return;
   if (HTMLBodyElement* body =
-          Traversal<HTMLBodyElement>::firstChild(*documentElement)) {
-    // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
-    // needs to be audited.  See http://crbug.com/590369 for more details.
-    document->updateStyleAndLayoutIgnorePendingStylesheets();
-
-    setSelection(SelectionInDOMTree::Builder()
-                     .collapse(firstPositionInOrBeforeNode(body))
-                     .build());
+          Traversal<HTMLBodyElement>::FirstChild(*document_element)) {
+    SetSelection(SelectionInDOMTree::Builder()
+                     .Collapse(FirstPositionInOrBeforeNode(body))
+                     .Build());
   }
 }
 
 // TODO(yoichio): We should have LocalFrame having FrameCaret,
 // Editor and PendingSelection using FrameCaret directly
 // and get rid of this.
-bool FrameSelection::shouldShowBlockCursor() const {
-  return m_frameCaret->shouldShowBlockCursor();
+bool FrameSelection::ShouldShowBlockCursor() const {
+  return frame_caret_->ShouldShowBlockCursor();
 }
 
 // TODO(yoichio): We should have LocalFrame having FrameCaret,
@@ -1281,47 +1064,53 @@ bool FrameSelection::shouldShowBlockCursor() const {
 // Module Level 4" https://drafts.csswg.org/css-ui-4/
 // To use "caret-shape", we need to expose inserting mode information to CSS;
 // https://github.com/w3c/csswg-drafts/issues/133
-void FrameSelection::setShouldShowBlockCursor(bool shouldShowBlockCursor) {
-  m_frameCaret->setShouldShowBlockCursor(shouldShowBlockCursor);
+void FrameSelection::SetShouldShowBlockCursor(bool should_show_block_cursor) {
+  frame_caret_->SetShouldShowBlockCursor(should_show_block_cursor);
 }
 
 #ifndef NDEBUG
 
-void FrameSelection::showTreeForThis() const {
-  selection().showTreeForThis();
+void FrameSelection::ShowTreeForThis() const {
+  ComputeVisibleSelectionInDOMTreeDeprecated().ShowTreeForThis();
 }
 
 #endif
 
 DEFINE_TRACE(FrameSelection) {
-  visitor->trace(m_document);
-  visitor->trace(m_frame);
-  visitor->trace(m_pendingSelection);
-  visitor->trace(m_selectionEditor);
-  visitor->trace(m_frameCaret);
-  SynchronousMutationObserver::trace(visitor);
+  visitor->Trace(frame_);
+  visitor->Trace(layout_selection_);
+  visitor->Trace(selection_editor_);
+  visitor->Trace(frame_caret_);
+  SynchronousMutationObserver::Trace(visitor);
 }
 
-void FrameSelection::scheduleVisualUpdate() const {
-  if (Page* page = m_frame->page())
-    page->animator().scheduleVisualUpdate(m_frame->localFrameRoot());
+void FrameSelection::ScheduleVisualUpdate() const {
+  if (Page* page = frame_->GetPage())
+    page->Animator().ScheduleVisualUpdate(&frame_->LocalFrameRoot());
 }
 
-bool FrameSelection::selectWordAroundPosition(const VisiblePosition& position) {
-  static const EWordSide wordSideList[2] = {RightWordIfOnBoundary,
-                                            LeftWordIfOnBoundary};
-  for (EWordSide wordSide : wordSideList) {
-    VisiblePosition start = startOfWord(position, wordSide);
-    VisiblePosition end = endOfWord(position, wordSide);
+void FrameSelection::ScheduleVisualUpdateForPaintInvalidationIfNeeded() const {
+  if (FrameView* frame_view = frame_->View())
+    frame_view->ScheduleVisualUpdateForPaintInvalidationIfNeeded();
+}
+
+bool FrameSelection::SelectWordAroundPosition(const VisiblePosition& position) {
+  static const EWordSide kWordSideList[2] = {kRightWordIfOnBoundary,
+                                             kLeftWordIfOnBoundary};
+  for (EWordSide word_side : kWordSideList) {
+    // TODO(yoichio): We should have Position version of |start/endOfWord|
+    // for avoiding unnecessary canonicalization.
+    VisiblePosition start = StartOfWord(position, word_side);
+    VisiblePosition end = EndOfWord(position, word_side);
     String text =
-        plainText(EphemeralRange(start.deepEquivalent(), end.deepEquivalent()));
-    if (!text.isEmpty() && !isSeparator(text.characterStartingAt(0))) {
-      setSelection(SelectionInDOMTree::Builder()
-                       .collapse(start.toPositionWithAffinity())
-                       .extend(end.deepEquivalent())
-                       .build(),
-                   CloseTyping | ClearTypingStyle,
-                   CursorAlignOnScroll::IfNeeded, WordGranularity);
+        PlainText(EphemeralRange(start.DeepEquivalent(), end.DeepEquivalent()));
+    if (!text.IsEmpty() && !IsSeparator(text.CharacterStartingAt(0))) {
+      SetSelection(SelectionInDOMTree::Builder()
+                       .Collapse(start.ToPositionWithAffinity())
+                       .Extend(end.DeepEquivalent())
+                       .Build(),
+                   kCloseTyping | kClearTypingStyle,
+                   CursorAlignOnScroll::kIfNeeded, kWordGranularity);
       return true;
     }
   }
@@ -1329,91 +1118,95 @@ bool FrameSelection::selectWordAroundPosition(const VisiblePosition& position) {
   return false;
 }
 
-GranularityStrategy* FrameSelection::granularityStrategy() {
+GranularityStrategy* FrameSelection::GetGranularityStrategy() {
   // We do lazy initalization for m_granularityStrategy, because if we
   // initialize it right in the constructor - the correct settings may not be
   // set yet.
-  SelectionStrategy strategyType = SelectionStrategy::Character;
-  Settings* settings = m_frame ? m_frame->settings() : 0;
+  SelectionStrategy strategy_type = SelectionStrategy::kCharacter;
+  Settings* settings = frame_ ? frame_->GetSettings() : 0;
   if (settings &&
-      settings->getSelectionStrategy() == SelectionStrategy::Direction)
-    strategyType = SelectionStrategy::Direction;
+      settings->GetSelectionStrategy() == SelectionStrategy::kDirection)
+    strategy_type = SelectionStrategy::kDirection;
 
-  if (m_granularityStrategy && m_granularityStrategy->GetType() == strategyType)
-    return m_granularityStrategy.get();
+  if (granularity_strategy_ &&
+      granularity_strategy_->GetType() == strategy_type)
+    return granularity_strategy_.get();
 
-  if (strategyType == SelectionStrategy::Direction)
-    m_granularityStrategy = WTF::makeUnique<DirectionGranularityStrategy>();
+  if (strategy_type == SelectionStrategy::kDirection)
+    granularity_strategy_ = WTF::MakeUnique<DirectionGranularityStrategy>();
   else
-    m_granularityStrategy = WTF::makeUnique<CharacterGranularityStrategy>();
-  return m_granularityStrategy.get();
+    granularity_strategy_ = WTF::MakeUnique<CharacterGranularityStrategy>();
+  return granularity_strategy_.get();
 }
 
-void FrameSelection::moveRangeSelectionExtent(const IntPoint& contentsPoint) {
-  if (isNone())
+void FrameSelection::MoveRangeSelectionExtent(const IntPoint& contents_point) {
+  if (ComputeVisibleSelectionInDOMTree().IsNone())
     return;
 
-  VisibleSelection newSelection =
-      granularityStrategy()->updateExtent(contentsPoint, m_frame);
-  setSelection(newSelection,
-               FrameSelection::CloseTyping | FrameSelection::ClearTypingStyle |
-                   FrameSelection::DoNotClearStrategy | UserTriggered |
-                   FrameSelection::HandleVisible,
-               CursorAlignOnScroll::IfNeeded, CharacterGranularity);
+  const SetSelectionOptions kOptions =
+      FrameSelection::kCloseTyping | FrameSelection::kClearTypingStyle |
+      FrameSelection::kDoNotClearStrategy | kUserTriggered;
+  SetSelection(
+      SelectionInDOMTree::Builder(
+          GetGranularityStrategy()->UpdateExtent(contents_point, frame_))
+          .SetIsHandleVisible(true)
+          .Build(),
+      kOptions);
 }
 
 // TODO(yosin): We should make |FrameSelection::moveRangeSelection()| to take
 // two |IntPoint| instead of two |VisiblePosition| like
 // |moveRangeSelectionExtent()|.
-void FrameSelection::moveRangeSelection(const VisiblePosition& basePosition,
-                                        const VisiblePosition& extentPosition,
+void FrameSelection::MoveRangeSelection(const VisiblePosition& base_position,
+                                        const VisiblePosition& extent_position,
                                         TextGranularity granularity) {
-  VisibleSelection newSelection = createVisibleSelection(
+  SelectionInDOMTree new_selection =
       SelectionInDOMTree::Builder()
-          .setBaseAndExtentDeprecated(basePosition.deepEquivalent(),
-                                      extentPosition.deepEquivalent())
-          .setAffinity(basePosition.affinity())
-          .setGranularity(granularity)
-          .build());
+          .SetBaseAndExtentDeprecated(base_position.DeepEquivalent(),
+                                      extent_position.DeepEquivalent())
+          .SetAffinity(base_position.Affinity())
+          .SetGranularity(granularity)
+          .SetIsHandleVisible(IsHandleVisible())
+          .Build();
 
-  if (newSelection.isNone())
+  if (new_selection.IsNone())
     return;
 
-  SetSelectionOptions options = CloseTyping | ClearTypingStyle;
-  if (isHandleVisible())
-    options |= HandleVisible;
-  setSelection(newSelection, options, CursorAlignOnScroll::IfNeeded,
-               granularity);
+  SetSelection(new_selection, kCloseTyping | kClearTypingStyle,
+               CursorAlignOnScroll::kIfNeeded, granularity);
 }
 
-void FrameSelection::updateIfNeeded() {
-  DCHECK(!m_frame->document()->needsLayoutTreeUpdate());
-  m_selectionEditor->updateIfNeeded();
+void FrameSelection::SetCaretVisible(bool caret_is_visible) {
+  frame_caret_->SetCaretVisibility(caret_is_visible ? CaretVisibility::kVisible
+                                                    : CaretVisibility::kHidden);
 }
 
-void FrameSelection::setCaretVisible(bool caretIsVisible) {
-  m_frameCaret->setCaretVisibility(caretIsVisible ? CaretVisibility::Visible
-                                                  : CaretVisibility::Hidden);
+void FrameSelection::SetCaretBlinkingSuspended(bool suspended) {
+  frame_caret_->SetCaretBlinkingSuspended(suspended);
 }
 
-bool FrameSelection::shouldPaintCaretForTesting() const {
-  return m_frameCaret->shouldPaintCaretForTesting();
+bool FrameSelection::IsCaretBlinkingSuspended() const {
+  return frame_caret_->IsCaretBlinkingSuspended();
 }
 
-bool FrameSelection::isPreviousCaretDirtyForTesting() const {
-  return m_frameCaret->isPreviousCaretDirtyForTesting();
+void FrameSelection::CacheRangeOfDocument(Range* range) {
+  selection_editor_->CacheRangeOfDocument(range);
 }
 
-void FrameSelection::setCaretRectNeedsUpdate() {
-  m_frameCaret->setCaretRectNeedsUpdate();
+Range* FrameSelection::DocumentCachedRange() const {
+  return selection_editor_->DocumentCachedRange();
 }
 
-void FrameSelection::setCaretBlinkingSuspended(bool suspended) {
-  m_frameCaret->setCaretBlinkingSuspended(suspended);
+void FrameSelection::ClearDocumentCachedRange() {
+  selection_editor_->ClearDocumentCachedRange();
 }
 
-bool FrameSelection::isCaretBlinkingSuspended() const {
-  return m_frameCaret->isCaretBlinkingSuspended();
+std::pair<int, int> FrameSelection::LayoutSelectionStartEnd() {
+  return layout_selection_->SelectionStartEnd();
+}
+
+void FrameSelection::ClearLayoutSelection() {
+  layout_selection_->ClearSelection();
 }
 
 }  // namespace blink
@@ -1421,12 +1214,12 @@ bool FrameSelection::isCaretBlinkingSuspended() const {
 #ifndef NDEBUG
 
 void showTree(const blink::FrameSelection& sel) {
-  sel.showTreeForThis();
+  sel.ShowTreeForThis();
 }
 
 void showTree(const blink::FrameSelection* sel) {
   if (sel)
-    sel->showTreeForThis();
+    sel->ShowTreeForThis();
   else
     LOG(INFO) << "Cannot showTree for <null> FrameSelection.";
 }

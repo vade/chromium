@@ -6,12 +6,28 @@
  * @fileoverview Behavior common to Site Settings classes.
  */
 
+
+/**
+ * The source information on site exceptions doesn't exactly match the
+ * controlledBy values.
+ * TODO(dschuyler): Can they be unified (and this dictionary removed)?
+ * @type {!Object}
+ */
+var kControlledByLookup = {
+  'extension': chrome.settingsPrivate.ControlledBy.EXTENSION,
+  'HostedApp': chrome.settingsPrivate.ControlledBy.EXTENSION,
+  'platform_app': chrome.settingsPrivate.ControlledBy.EXTENSION,
+  'policy': chrome.settingsPrivate.ControlledBy.USER_POLICY,
+};
+
+
 /** @polymerBehavior */
 var SiteSettingsBehaviorImpl = {
   properties: {
     /**
      * The string ID of the category this element is displaying data for.
      * See site_settings/constants.js for possible values.
+     * @type {!settings.ContentSettingsTypes}
      */
     category: String,
 
@@ -23,123 +39,15 @@ var SiteSettingsBehaviorImpl = {
     browserProxy: Object,
   },
 
+  /** @override */
   created: function() {
     this.browserProxy =
         settings.SiteSettingsPrefsBrowserProxyImpl.getInstance();
   },
 
+  /** @override */
   ready: function() {
     this.PermissionValues = settings.PermissionValues;
-  },
-
-  /**
-   * A utility function to compute the description for the category.
-   * @param {string} category The category to show the description for.
-   * @param {string} setting The string value of the setting.
-   * @param {boolean} showRecommendation Whether to show the '(recommended)'
-   *     label prefix.
-   * @return {string} The category description.
-   * @protected
-   */
-  computeCategoryDesc: function(category, setting, showRecommendation) {
-    var categoryEnabled = this.computeIsSettingEnabled(setting);
-    switch (category) {
-      case settings.ContentSettingsTypes.JAVASCRIPT:
-        // "Allowed (recommended)" vs "Blocked".
-        if (!categoryEnabled) {
-          return loadTimeData.getString('siteSettingsBlocked');
-        }
-        return showRecommendation ?
-            loadTimeData.getString('siteSettingsAllowedRecommended') :
-            loadTimeData.getString('siteSettingsAllowed');
-      case settings.ContentSettingsTypes.POPUPS:
-        // "Allowed" vs "Blocked (recommended)".
-        if (categoryEnabled) {
-          return loadTimeData.getString('siteSettingsAllowed');
-        }
-        return showRecommendation ?
-            loadTimeData.getString('siteSettingsBlockedRecommended') :
-            loadTimeData.getString('siteSettingsBlocked');
-      case settings.ContentSettingsTypes.NOTIFICATIONS:
-        // "Ask before sending (recommended)" vs "Blocked".
-        if (!categoryEnabled) {
-          return loadTimeData.getString('siteSettingsBlocked');
-        }
-        return showRecommendation ?
-            loadTimeData.getString('siteSettingsAskBeforeSendingRecommended') :
-            loadTimeData.getString('siteSettingsAskBeforeSending');
-      case settings.ContentSettingsTypes.CAMERA:
-      case settings.ContentSettingsTypes.GEOLOCATION:
-      case settings.ContentSettingsTypes.MIC:
-        // "Ask before accessing (recommended)" vs "Blocked".
-        if (!categoryEnabled) {
-          return loadTimeData.getString('siteSettingsBlocked');
-        }
-        return showRecommendation ?
-            loadTimeData.getString(
-                'siteSettingsAskBeforeAccessingRecommended') :
-            loadTimeData.getString('siteSettingsAskBeforeAccessing');
-      case settings.ContentSettingsTypes.COOKIES:
-        // Tri-state: "Allow sites to save and read cookie data" vs "Blocked"
-        //     vs "Keep local data only until you quit your browser".
-        if (setting == settings.PermissionValues.BLOCK)
-          return loadTimeData.getString('siteSettingsBlocked');
-        if (setting == settings.PermissionValues.SESSION_ONLY)
-          return loadTimeData.getString('deleteDataPostSession');
-        return showRecommendation ?
-            loadTimeData.getString('siteSettingsCookiesAllowedRecommended') :
-            loadTimeData.getString('siteSettingsCookiesAllowed');
-      case settings.ContentSettingsTypes.PROTOCOL_HANDLERS:
-        // "Allow sites to ask to become default handlers" vs "Blocked".
-        if (!categoryEnabled) {
-          return loadTimeData.getString('siteSettingsHandlersBlocked');
-        }
-        return showRecommendation ?
-            loadTimeData.getString('siteSettingsHandlersAskRecommended') :
-            loadTimeData.getString('siteSettingsHandlersAsk');
-      case settings.ContentSettingsTypes.IMAGES:
-        if (!categoryEnabled) {
-          return loadTimeData.getString('siteSettingsDontShowImages');
-        }
-        return showRecommendation ?
-            loadTimeData.getString('siteSettingsShowAllRecommended') :
-            loadTimeData.getString('siteSettingsShowAll');
-      case settings.ContentSettingsTypes.PLUGINS:
-        if (setting == settings.PermissionValues.ALLOW)
-          return loadTimeData.getString('siteSettingsFlashAllow');
-        if (setting == settings.PermissionValues.BLOCK)
-          return loadTimeData.getString('siteSettingsFlashBlock');
-        return loadTimeData.getString('siteSettingsFlashAskBefore');
-      case settings.ContentSettingsTypes.BACKGROUND_SYNC:
-        // "Allow sites to finish sending and receiving data" vs "Do not allow".
-        if (!categoryEnabled) {
-          return loadTimeData.getString('siteSettingsBackgroundSyncBlocked');
-        }
-        return showRecommendation ?
-            loadTimeData.getString(
-                 'siteSettingsAllowRecentlyClosedSitesRecommended') :
-            loadTimeData.getString('siteSettingsAllowRecentlyClosedSites');
-      case settings.ContentSettingsTypes.AUTOMATIC_DOWNLOADS:
-        // "Ask when a site wants to auto-download multiple" vs "Do not allow".
-        if (!categoryEnabled) {
-          return loadTimeData.getString('siteSettingsAutoDownloadBlock');
-        }
-        return showRecommendation ?
-            loadTimeData.getString('siteSettingsAutoDownloadAskRecommended') :
-            loadTimeData.getString('siteSettingsAutoDownloadAsk');
-      case settings.ContentSettingsTypes.UNSANDBOXED_PLUGINS:
-        // "Ask when a plugin accesses your computer" vs "Do not allow".
-        if (!categoryEnabled) {
-          return loadTimeData.getString('siteSettingsUnsandboxedPluginsBlock');
-        }
-        return showRecommendation ?
-            loadTimeData.getString(
-                'siteSettingsUnsandboxedPluginsAskRecommended') :
-            loadTimeData.getString('siteSettingsUnsandboxedPluginsAsk');
-      default:
-        assertNotReached('Invalid category: ' + category);
-        return '';
-    }
   },
 
   /**
@@ -148,7 +56,8 @@ var SiteSettingsBehaviorImpl = {
    * @return {string} The URL with a scheme, or an empty string.
    */
   ensureUrlHasScheme: function(url) {
-    if (url.length == 0) return url;
+    if (url.length == 0)
+      return url;
     return url.includes('://') ? url : 'http://' + url;
   },
 
@@ -168,25 +77,6 @@ var SiteSettingsBehaviorImpl = {
       return url.slice(0, -3);
     }
     return url;
-  },
-
-  /**
-   * Adds the wildcard prefix to a pattern string (if missing).
-   * @param {string} pattern The pattern to add the wildcard to.
-   * @return {string} The resulting pattern.
-   * @private
-   */
-  addPatternWildcard: function(pattern) {
-    if (pattern.indexOf('[*.]') > -1)
-      return pattern;
-    if (pattern.startsWith('http://'))
-      return pattern.replace('http://', 'http://[*.]');
-    else if (pattern.startsWith('https://'))
-      return pattern.replace('https://', 'https://[*.]');
-    else if (pattern.startsWith('chrome-extension://'))
-      return pattern;  // No need for a wildcard for this.
-    else
-      return '[*.]' + pattern;
   },
 
   /**
@@ -219,17 +109,6 @@ var SiteSettingsBehaviorImpl = {
     }
     return loadTimeData.getStringF(
         'embeddedOnHost', this.sanitizePort(embeddingOrigin));
-  },
-
-  /**
-   * Returns true if this exception is controlled by, for example, a policy or
-   * set by an extension.
-   * @param {string} source The source controlling the extension
-   * @return {boolean} Whether it is being controlled.
-   * @protected
-   */
-  isExceptionControlled_: function(source) {
-    return source != undefined && source != 'preference';
   },
 
   /**
@@ -275,8 +154,8 @@ var SiteSettingsBehaviorImpl = {
   /**
    * Convert an exception (received from the C++ handler) to a full
    * SiteException.
-   * @param {!Object} exception The raw site exception from C++.
-   * @return {SiteException} The expanded (full) SiteException.
+   * @param {!RawSiteException} exception The raw site exception from C++.
+   * @return {!SiteException} The expanded (full) SiteException.
    * @private
    */
   expandSiteException: function(exception) {
@@ -288,14 +167,22 @@ var SiteSettingsBehaviorImpl = {
           this.getEmbedderString(embeddingOrigin, this.category);
     }
 
+    var enforcement = '';
+    if (exception.source == 'policy' || exception.source == 'extension')
+      enforcement = chrome.settingsPrivate.Enforcement.ENFORCED;
+
+    var controlledBy = kControlledByLookup[exception.source] || '';
+
     return {
+      category: this.category,
       origin: origin,
       displayName: exception.displayName,
       embeddingOrigin: embeddingOrigin,
       embeddingDisplayName: embeddingDisplayName,
       incognito: exception.incognito,
       setting: exception.setting,
-      source: exception.source,
+      enforcement: enforcement,
+      controlledBy: controlledBy,
     };
   },
 

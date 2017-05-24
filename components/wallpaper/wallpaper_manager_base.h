@@ -276,6 +276,11 @@ class WALLPAPER_EXPORT WallpaperManagerBase {
                                   const gfx::ImageSkia& image,
                                   bool update_wallpaper) = 0;
 
+  // Updates wallpaper info for |account_id| to default. If |update_wallpaper|
+  // is false, don't change wallpaper but only update cache.
+  virtual void SetDefaultWallpaper(const AccountId& account_id,
+                                   bool update_wallpaper);
+
   // Use given files as new default wallpaper.
   // Reloads current wallpaper, if old default was loaded.
   // Current value of default_wallpaper_image_ is destroyed.
@@ -354,12 +359,8 @@ class WALLPAPER_EXPORT WallpaperManagerBase {
   // Ruturns files identifier for the |account_id|.
   virtual WallpaperFilesId GetFilesId(const AccountId& account_id) const = 0;
 
-  // If the device is enterprise managed and we're at the login screen, set the
-  // device wallpaper as the login screen wallpaper. If the device is enterprise
-  // managed and we're in a user session, only set the device wallpaper if there
-  // is no user policy wallpaper and the user hasn't changed the default or the
-  // device wallpaper. Returns true if the device wallpaper should be set as the
-  // wallpaper, otherwise returns false.
+  // If the device is enterprise managed and the device wallpaper policy exists,
+  // set the device wallpaper as the login screen wallpaper.
   virtual bool SetDeviceWallpaperIfApplicable(const AccountId& account_id) = 0;
 
  protected:

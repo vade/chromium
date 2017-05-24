@@ -14,6 +14,11 @@
 #include "components/offline_pages/core/offline_event_logger.h"
 #include "net/base/network_change_notifier.h"
 
+namespace {
+const int kBatteryPercentageHigh = 75;
+const bool kPowerRequired = true;
+}  // namespace
+
 namespace offline_pages {
 
 namespace android {
@@ -35,11 +40,7 @@ void GetAllRequestsDone(
     Profile* profile = ProfileManager::GetLastUsedProfile();
     RequestCoordinator* coordinator =
         RequestCoordinatorFactory::GetInstance()->GetForBrowserContext(profile);
-    // TODO(romax) Maybe get current real condition.
-    DeviceConditions device_conditions(
-        true, 0, net::NetworkChangeNotifier::GetConnectionType());
-    coordinator->StartImmediateProcessing(device_conditions,
-                                          base::Bind(&ProcessingDoneCallback));
+    coordinator->StartImmediateProcessing(base::Bind(&ProcessingDoneCallback));
   }
 }
 
@@ -60,10 +61,18 @@ void StartProcessing() {
 
 }  // namespace
 
+EvaluationTestScheduler::EvaluationTestScheduler()
+    : coordinator_(nullptr),
+      device_conditions_(kPowerRequired,
+                         kBatteryPercentageHigh,
+                         net::NetworkChangeNotifier::CONNECTION_2G) {}
+
+EvaluationTestScheduler::~EvaluationTestScheduler() {}
+
 void EvaluationTestScheduler::Schedule(
     const TriggerConditions& trigger_conditions) {
-  Profile* profile = ProfileManager::GetLastUsedProfile();
   if (!coordinator_) {
+    Profile* profile = ProfileManager::GetLastUsedProfile();
     coordinator_ =
         RequestCoordinatorFactory::GetInstance()->GetForBrowserContext(profile);
     // It's not expected that the coordinator would be nullptr since this bridge
@@ -81,15 +90,21 @@ void EvaluationTestScheduler::BackupSchedule(
     long delay_in_seconds) {
   // This method is not expected to be called in test harness. Adding a log in
   // case we somehow get called here and need to implement the method.
-  coordinator_->GetLogger()->RecordActivity(std::string(kLogTag) +
-                                            " BackupSchedule called!");
+  if (coordinator_)
+    coordinator_->GetLogger()->RecordActivity(std::string(kLogTag) +
+                                              " BackupSchedule called!");
 }
 
 void EvaluationTestScheduler::Unschedule() {
   // This method is not expected to be called in test harness. Adding a log in
   // case we somehow get called here and need to implement the method.
-  coordinator_->GetLogger()->RecordActivity(std::string(kLogTag) +
-                                            " Unschedule called!");
+  if (coordinator_)
+    coordinator_->GetLogger()->RecordActivity(std::string(kLogTag) +
+                                              " Unschedule called!");
+}
+
+DeviceConditions& EvaluationTestScheduler::GetCurrentDeviceConditions() {
+  return device_conditions_;
 }
 
 void EvaluationTestScheduler::ImmediateScheduleCallback(bool result) {

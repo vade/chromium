@@ -17,6 +17,7 @@ function loadScriptWithSyntaxError()
 
 function test()
 {
+    InspectorTest.completeTest(); // NeedsManualRebaseline
     var panel = UI.panels.sources;
 
     InspectorTest.runDebuggerTestSuite([
@@ -116,7 +117,6 @@ function test()
             function didShowScriptSource(sourceFrame)
             {
                 testSourceFrame = sourceFrame;
-                InspectorTest.prepareSourceFrameForBreakpointTest(sourceFrame);
                 InspectorTest.waitJavaScriptSourceFrameBreakpoints(sourceFrame).then(breakpointAdded);
                 InspectorTest.setBreakpoint(sourceFrame, 2, "", true);
             }
@@ -144,7 +144,6 @@ function test()
             function didShowScriptSource(sourceFrame)
             {
                 testSourceFrame = sourceFrame;
-                InspectorTest.prepareSourceFrameForBreakpointTest(sourceFrame);
                 InspectorTest.waitJavaScriptSourceFrameBreakpoints(testSourceFrame).then(breakpointAdded);
                 InspectorTest.setBreakpoint(sourceFrame, 3, "", true);
             }

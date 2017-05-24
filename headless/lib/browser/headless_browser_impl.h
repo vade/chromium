@@ -13,23 +13,20 @@
 #include <vector>
 
 #include "base/memory/weak_ptr.h"
+#include "base/single_thread_task_runner.h"
+#include "content/public/browser/web_contents.h"
 #include "headless/lib/browser/headless_devtools_manager_delegate.h"
 #include "headless/lib/browser/headless_web_contents_impl.h"
-
-namespace aura {
-class WindowTreeHost;
-
-namespace client {
-class WindowParentingClient;
-}
-}
+#include "headless/public/headless_export.h"
 
 namespace headless {
 
 class HeadlessBrowserContextImpl;
 class HeadlessBrowserMainParts;
 
-class HeadlessBrowserImpl : public HeadlessBrowser {
+// Exported for tests.
+class HEADLESS_EXPORT HeadlessBrowserImpl : public HeadlessBrowser,
+                                            public HeadlessDevToolsTarget {
  public:
   HeadlessBrowserImpl(
       const base::Callback<void(HeadlessBrowser*)>& on_start_callback,
@@ -54,6 +51,13 @@ class HeadlessBrowserImpl : public HeadlessBrowser {
   void SetDefaultBrowserContext(
       HeadlessBrowserContext* browser_context) override;
   HeadlessBrowserContext* GetDefaultBrowserContext() override;
+  HeadlessDevToolsTarget* GetDevToolsTarget() override;
+
+  // HeadlessDevToolsTarget implementation:
+  bool AttachClient(HeadlessDevToolsClient* client) override;
+  void ForceAttachClient(HeadlessDevToolsClient* client) override;
+  void DetachClient(HeadlessDevToolsClient* client) override;
+  bool IsAttached() override;
 
   void set_browser_main_parts(HeadlessBrowserMainParts* browser_main_parts);
   HeadlessBrowserMainParts* browser_main_parts() const;
@@ -70,22 +74,24 @@ class HeadlessBrowserImpl : public HeadlessBrowser {
 
   base::WeakPtr<HeadlessBrowserImpl> GetWeakPtr();
 
-  aura::WindowTreeHost* window_tree_host() const;
+  // All the methods that begin with Platform need to be implemented by the
+  // platform specific headless implementation.
+  // Helper for one time initialization of application
+  void PlatformInitialize();
+  void PlatformCreateWindow();
+  void PlatformInitializeWebContents(const gfx::Size& initial_size,
+                                     HeadlessWebContentsImpl* web_contents);
 
  protected:
   base::Callback<void(HeadlessBrowser*)> on_start_callback_;
   HeadlessBrowser::Options options_;
   HeadlessBrowserMainParts* browser_main_parts_;  // Not owned.
 
-  // TODO(eseckler): Currently one window and one window_tree_host
-  // is used for all web contents. We should probably use one
-  // window per web contents, but additional investigation is needed.
-  std::unique_ptr<aura::WindowTreeHost> window_tree_host_;
-  std::unique_ptr<aura::client::WindowParentingClient> window_parenting_client_;
-
   std::unordered_map<std::string, std::unique_ptr<HeadlessBrowserContextImpl>>
       browser_contexts_;
   HeadlessBrowserContext* default_browser_context_;  // Not owned.
+
+  scoped_refptr<content::DevToolsAgentHost> agent_host_;
 
   base::WeakPtrFactory<HeadlessBrowserImpl> weak_ptr_factory_;
 

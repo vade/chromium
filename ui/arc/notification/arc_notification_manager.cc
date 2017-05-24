@@ -7,14 +7,13 @@
 #include <memory>
 #include <utility>
 
-#include "ash/common/system/toast/toast_manager.h"
-#include "ash/common/wm_shell.h"
+#include "ash/shell.h"
+#include "ash/system/toast/toast_manager.h"
 #include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/arc/arc_bridge_service.h"
-#include "ui/arc/notification/arc_custom_notification_item.h"
-#include "ui/arc/notification/arc_notification_item.h"
+#include "ui/arc/notification/arc_notification_item_impl.h"
 
 namespace arc {
 
@@ -66,23 +65,16 @@ void ArcNotificationManager::OnNotificationPosted(
   const std::string& key = data->key;
   auto it = items_.find(key);
   if (it == items_.end()) {
-    // Old client with version < 5 would have use_custom_notification default,
-    // which is false.
-    const bool use_custom_notification = data->use_custom_notification;
     // Show a notification on the primary logged-in user's desktop.
     // TODO(yoshiki): Reconsider when ARC supports multi-user.
-    ArcNotificationItem* item =
-        use_custom_notification
-            ? new ArcCustomNotificationItem(this, message_center_, key,
-                                            main_profile_id_)
-            : new ArcNotificationItem(this, message_center_, key,
-                                      main_profile_id_);
+    auto item = base::MakeUnique<ArcNotificationItemImpl>(
+        this, message_center_, key, main_profile_id_);
     // TODO(yoshiki): Use emplacement for performance when it's available.
-    auto result = items_.insert(std::make_pair(key, base::WrapUnique(item)));
+    auto result = items_.insert(std::make_pair(key, std::move(item)));
     DCHECK(result.second);
     it = result.first;
   }
-  it->second->UpdateWithArcNotificationData(std::move(data));
+  it->second->OnUpdatedFromAndroid(std::move(data));
 }
 
 void ArcNotificationManager::OnNotificationRemoved(const std::string& key) {
@@ -115,7 +107,7 @@ void ArcNotificationManager::SendNotificationRemovedFromChrome(
   auto* notifications_instance = ARC_GET_INSTANCE_FOR_METHOD(
       arc_bridge_service()->notifications(), SendNotificationEventToAndroid);
 
-  // On shutdown, the ARC channel may quit earlier then notifications.
+  // On shutdown, the ARC channel may quit earlier than notifications.
   if (!notifications_instance) {
     VLOG(2) << "ARC Notification (key: " << key
             << ") is closed, but the ARC channel has already gone.";
@@ -137,7 +129,7 @@ void ArcNotificationManager::SendNotificationClickedOnChrome(
   auto* notifications_instance = ARC_GET_INSTANCE_FOR_METHOD(
       arc_bridge_service()->notifications(), SendNotificationEventToAndroid);
 
-  // On shutdown, the ARC channel may quit earlier then notifications.
+  // On shutdown, the ARC channel may quit earlier than notifications.
   if (!notifications_instance) {
     VLOG(2) << "ARC Notification (key: " << key
             << ") is clicked, but the ARC channel has already gone.";
@@ -160,7 +152,7 @@ void ArcNotificationManager::SendNotificationButtonClickedOnChrome(
   auto* notifications_instance = ARC_GET_INSTANCE_FOR_METHOD(
       arc_bridge_service()->notifications(), SendNotificationEventToAndroid);
 
-  // On shutdown, the ARC channel may quit earlier then notifications.
+  // On shutdown, the ARC channel may quit earlier than notifications.
   if (!notifications_instance) {
     VLOG(2) << "ARC Notification (key: " << key
             << ")'s button is clicked, but the ARC channel has already gone.";
@@ -223,17 +215,62 @@ void ArcNotificationManager::CloseNotificationWindow(const std::string& key) {
   notifications_instance->CloseNotificationWindow(key);
 }
 
+void ArcNotificationManager::OpenNotificationSettings(const std::string& key) {
+  if (items_.find(key) == items_.end()) {
+    DVLOG(3) << "Chrome requests to fire a click event on the notification "
+             << "settings button (key: " << key << "), but it is gone.";
+    return;
+  }
+
+  auto* notifications_instance = ARC_GET_INSTANCE_FOR_METHOD(
+      arc_bridge_service()->notifications(), OpenNotificationSettings);
+
+  // On shutdown, the ARC channel may quit earlier than notifications.
+  if (!notifications_instance)
+    return;
+
+  notifications_instance->OpenNotificationSettings(key);
+}
+
+bool ArcNotificationManager::IsOpeningSettingsSupported() const {
+  const auto* notifications_instance = ARC_GET_INSTANCE_FOR_METHOD(
+      arc_bridge_service()->notifications(), OpenNotificationSettings);
+  return notifications_instance != nullptr;
+}
+
+void ArcNotificationManager::SendNotificationToggleExpansionOnChrome(
+    const std::string& key) {
+  if (items_.find(key) == items_.end()) {
+    VLOG(3) << "Chrome requests to fire a click event on notification (key: "
+            << key << "), but it is gone.";
+    return;
+  }
+
+  auto* notifications_instance = ARC_GET_INSTANCE_FOR_METHOD(
+      arc_bridge_service()->notifications(), SendNotificationEventToAndroid);
+
+  // On shutdown, the ARC channel may quit earlier than notifications.
+  if (!notifications_instance) {
+    VLOG(2) << "ARC Notification (key: " << key
+            << ") is clicked, but the ARC channel has already gone.";
+    return;
+  }
+
+  notifications_instance->SendNotificationEventToAndroid(
+      key, mojom::ArcNotificationEvent::TOGGLE_EXPANSION);
+}
+
 void ArcNotificationManager::OnToastPosted(mojom::ArcToastDataPtr data) {
   const base::string16 text16(
       base::UTF8ToUTF16(data->text.has_value() ? *data->text : std::string()));
   const base::string16 dismiss_text16(base::UTF8ToUTF16(
       data->dismiss_text.has_value() ? *data->dismiss_text : std::string()));
-  ash::WmShell::Get()->toast_manager()->Show(
+  ash::Shell::Get()->toast_manager()->Show(
       ash::ToastData(data->id, text16, data->duration, dismiss_text16));
 }
 
 void ArcNotificationManager::OnToastCancelled(mojom::ArcToastDataPtr data) {
-  ash::WmShell::Get()->toast_manager()->Cancel(data->id);
+  ash::Shell::Get()->toast_manager()->Cancel(data->id);
 }
 
 }  // namespace arc

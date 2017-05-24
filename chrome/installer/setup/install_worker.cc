@@ -27,6 +27,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/version.h"
 #include "base/win/registry.h"
+#include "chrome/install_static/install_details.h"
+#include "chrome/install_static/install_util.h"
 #include "chrome/installer/setup/installer_state.h"
 #include "chrome/installer/setup/persistent_histogram_storage.h"
 #include "chrome/installer/setup/setup_constants.h"
@@ -175,7 +177,10 @@ void AddDeleteUninstallEntryForMSIWorkItems(
       << "This must only be called for MSI installations!";
 
   HKEY reg_root = installer_state.root_key();
-  base::string16 uninstall_reg(product.distribution()->GetUninstallRegPath());
+  // Assert that this is only called with the one relevant distribution.
+  // TODO(grt): Remove this when BrowserDistribution goes away.
+  DCHECK_EQ(BrowserDistribution::GetDistribution(), product.distribution());
+  base::string16 uninstall_reg = install_static::GetUninstallRegistryPath();
 
   WorkItem* delete_reg_key = work_item_list->AddDeleteRegKeyWorkItem(
       reg_root, uninstall_reg, KEY_WOW64_32KEY);
@@ -264,24 +269,6 @@ void AddChromeWorkItems(const InstallationState& original_state,
       ->set_best_effort(true);
 }
 
-// Adds work items to remove COM registration for |product|'s deprecated
-// DelegateExecute verb handler.
-void AddCleanupDelegateExecuteWorkItems(const InstallerState& installer_state,
-                                        const Product& product,
-                                        WorkItemList* list) {
-  VLOG(1) << "Adding unregistration items for DelegateExecute verb handler.";
-  const base::string16 handler_class_uuid =
-      product.distribution()->GetCommandExecuteImplClsid();
-  DCHECK(!handler_class_uuid.empty());
-
-  const HKEY root = installer_state.root_key();
-  base::string16 delegate_execute_path(L"Software\\Classes\\CLSID\\");
-  delegate_execute_path.append(handler_class_uuid);
-  // Delete both 64 and 32 keys to handle 32->64 or 64->32 migration.
-  list->AddDeleteRegKeyWorkItem(root, delegate_execute_path, KEY_WOW64_32KEY);
-  list->AddDeleteRegKeyWorkItem(root, delegate_execute_path, KEY_WOW64_64KEY);
-}
-
 // Add to the ACL of an object on disk. This follows the method from MSDN:
 // https://msdn.microsoft.com/en-us/library/windows/desktop/aa379283.aspx
 // This is done using explicit flags rather than the "security string" format
@@ -335,8 +322,8 @@ bool AddAclToPath(const base::FilePath& path,
 // Chrome when migrating multi-install Chrome to single-install.
 void AddMigrateUsageStatsWorkItems(const InstallerState& installer_state,
                                    WorkItemList* install_list) {
-  // This operation doesn't apply to SxS Chrome.
-  if (InstallUtil::IsChromeSxSProcess())
+  // This operation only applies to modes that once supported multi-install.
+  if (install_static::InstallDetails::Get().supported_multi_install())
     return;
 
   // Bail out if an existing multi-install Chrome is not being migrated to
@@ -433,7 +420,10 @@ void AddUninstallShortcutWorkItems(const InstallerState& installer_state,
     DCHECK_EQ(quoted_uninstall_cmd.GetCommandLineString()[0], '"');
     quoted_uninstall_cmd.AppendArguments(uninstall_arguments, false);
 
-    base::string16 uninstall_reg = browser_dist->GetUninstallRegPath();
+    // Assert that this is only called with the one relevant distribution.
+    // TODO(grt): Remove this when BrowserDistribution goes away.
+    DCHECK_EQ(BrowserDistribution::GetDistribution(), browser_dist);
+    base::string16 uninstall_reg = install_static::GetUninstallRegistryPath();
     install_list->AddCreateRegKeyWorkItem(
         reg_root, uninstall_reg, KEY_WOW64_32KEY);
     install_list->AddSetRegValueWorkItem(reg_root,
@@ -456,9 +446,9 @@ void AddUninstallShortcutWorkItems(const InstallerState& installer_state,
                                          install_path.value(),
                                          true);
 
-    BrowserDistribution* dist = product.distribution();
-    base::string16 chrome_icon = ShellUtil::FormatIconLocation(
-        install_path.Append(dist->GetIconFilename()), dist->GetIconIndex());
+    base::string16 chrome_icon =
+        ShellUtil::FormatIconLocation(install_path.Append(kChromeExe),
+                                      install_static::GetIconResourceIndex());
     install_list->AddSetRegValueWorkItem(reg_root,
                                          uninstall_reg,
                                          KEY_WOW64_32KEY,
@@ -599,14 +589,6 @@ bool AppendPostInstallTasks(const InstallerState& installer_state,
         installer_state.GetInstallerDirectory(new_version).Append(
             setup_path.BaseName()));
 
-    base::CommandLine rename(installer_path);
-    rename.AppendSwitch(switches::kRenameChromeExe);
-    if (installer_state.system_install())
-      rename.AppendSwitch(switches::kSystemLevel);
-
-    if (installer_state.verbose_logging())
-      rename.AppendSwitch(switches::kVerboseLogging);
-
     BrowserDistribution* dist = installer_state.product().distribution();
     const base::string16 version_key(dist->GetVersionKey());
 
@@ -627,10 +609,14 @@ bool AppendPostInstallTasks(const InstallerState& installer_state,
           google_update::kRegCriticalVersionField);
     }
 
-    // Append the distribution-specific flags to the command line (e.g.,
-    // "--chrome-sxs" for SxS/canary).
-    base::CommandLine product_rename_cmd(rename);
-    installer_state.product().AppendRenameFlags(&product_rename_cmd);
+    // Form the mode-specific rename command.
+    base::CommandLine product_rename_cmd(installer_path);
+    product_rename_cmd.AppendSwitch(switches::kRenameChromeExe);
+    if (installer_state.system_install())
+      product_rename_cmd.AppendSwitch(switches::kSystemLevel);
+    if (installer_state.verbose_logging())
+      product_rename_cmd.AppendSwitch(switches::kVerboseLogging);
+    InstallUtil::AppendModeSwitch(&product_rename_cmd);
     in_use_update_work_items->AddSetRegValueWorkItem(
         root, version_key, KEY_WOW64_32KEY, google_update::kRegRenameCmdField,
         product_rename_cmd.GetCommandLineString(), true);
@@ -735,7 +721,6 @@ void AddInstallWorkItems(const InstallationState& original_state,
   AddVersionKeyWorkItems(root, dist->GetVersionKey(), dist->GetDisplayName(),
                          new_version, add_language_identifier, install_list);
 
-  AddCleanupDelegateExecuteWorkItems(installer_state, product, install_list);
   AddCleanupDeprecatedPerUserRegistrationsWorkItems(product, install_list);
 
   AddActiveSetupWorkItems(installer_state, new_version, product, install_list);
@@ -780,16 +765,18 @@ void AddSetMsiMarkerWorkItem(const InstallerState& installer_state,
 
 void AddCleanupDeprecatedPerUserRegistrationsWorkItems(const Product& product,
                                                        WorkItemList* list) {
-  BrowserDistribution* dist = product.distribution();
+  DCHECK_EQ(BrowserDistribution::GetDistribution(), product.distribution());
 
   // This cleanup was added in M49. There are still enough active users on M48
   // and earlier today (M55 timeframe) to justify keeping this cleanup in-place.
   // Remove this when that population stops shrinking.
   VLOG(1) << "Adding unregistration items for per-user Metro keys.";
-  list->AddDeleteRegKeyWorkItem(
-      HKEY_CURRENT_USER, dist->GetRegistryPath() + L"\\Metro", KEY_WOW64_32KEY);
-  list->AddDeleteRegKeyWorkItem(
-      HKEY_CURRENT_USER, dist->GetRegistryPath() + L"\\Metro", KEY_WOW64_64KEY);
+  list->AddDeleteRegKeyWorkItem(HKEY_CURRENT_USER,
+                                install_static::GetRegistryPath() + L"\\Metro",
+                                KEY_WOW64_32KEY);
+  list->AddDeleteRegKeyWorkItem(HKEY_CURRENT_USER,
+                                install_static::GetRegistryPath() + L"\\Metro",
+                                KEY_WOW64_64KEY);
 }
 
 void AddActiveSetupWorkItems(const InstallerState& installer_state,
@@ -807,7 +794,7 @@ void AddActiveSetupWorkItems(const InstallerState& installer_state,
   DCHECK(installer_state.RequiresActiveSetup());
 
   const HKEY root = HKEY_LOCAL_MACHINE;
-  const base::string16 active_setup_path(InstallUtil::GetActiveSetupPath(dist));
+  const base::string16 active_setup_path(install_static::GetActiveSetupPath());
 
   VLOG(1) << "Adding registration items for Active Setup.";
   list->AddCreateRegKeyWorkItem(
@@ -825,7 +812,7 @@ void AddActiveSetupWorkItems(const InstallerState& installer_state,
   cmd.AppendSwitch(installer::switches::kConfigureUserSettings);
   cmd.AppendSwitch(installer::switches::kVerboseLogging);
   cmd.AppendSwitch(installer::switches::kSystemLevel);
-  product.AppendProductFlags(&cmd);
+  InstallUtil::AppendModeSwitch(&cmd);
   list->AddSetRegValueWorkItem(root,
                                active_setup_path,
                                WorkItem::kWow64Default,
@@ -860,8 +847,7 @@ void AppendUninstallCommandLineFlags(const InstallerState& installer_state,
 
   uninstall_cmd->AppendSwitch(installer::switches::kUninstall);
 
-  // Append the product-specific uninstall flags.
-  product.AppendProductFlags(uninstall_cmd);
+  InstallUtil::AppendModeSwitch(uninstall_cmd);
   if (installer_state.is_msi())
     uninstall_cmd->AppendSwitch(installer::switches::kMsi);
   if (installer_state.system_install())
@@ -890,8 +876,7 @@ void AddOsUpgradeWorkItems(const InstallerState& installer_state,
             .Append(setup_path.BaseName()));
     // Add the main option to indicate OS upgrade flow.
     cmd_line.AppendSwitch(installer::switches::kOnOsUpgrade);
-    // Add product-specific options.
-    product.AppendProductFlags(&cmd_line);
+    InstallUtil::AppendModeSwitch(&cmd_line);
     if (installer_state.system_install())
       cmd_line.AppendSwitch(installer::switches::kSystemLevel);
     // Log everything for now.

@@ -17,7 +17,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/autofill/core/common/autofill_switches.h"
-#include "components/reading_list/core/reading_list_switches.h"
+#include "components/signin/core/common/signin_switches.h"
 #include "components/variations/variations_associated_data.h"
 #include "ios/chrome/browser/chrome_switches.h"
 #include "ios/web/public/web_view_creation_util.h"
@@ -33,7 +33,6 @@ NSString* const kEnableAlertOnBackgroundUpload =
 NSString* const kEnableNewClearBrowsingDataUI = @"EnableNewClearBrowsingDataUI";
 NSString* const kEnableStartupCrash = @"EnableStartupCrash";
 NSString* const kEnableViewCopyPasswords = @"EnableViewCopyPasswords";
-NSString* const kExternalAppPromptDisabled = @"ExternalAppPromptDisabled";
 NSString* const kFirstRunForceEnabled = @"FirstRunForceEnabled";
 NSString* const kForceResetContextualSearch = @"ForceResetContextualSearch";
 NSString* const kGaiaEnvironment = @"GAIAEnvironment";
@@ -41,13 +40,8 @@ NSString* const kHeuristicsForPasswordGeneration =
     @"HeuristicsForPasswordGeneration";
 NSString* const kMDMIntegrationDisabled = @"MDMIntegrationDisabled";
 NSString* const kOriginServerHost = @"AlternateOriginServerHost";
-NSString* const kPendingIndexNavigationDisabled =
-    @"PendingIndexNavigationDisabled";
 NSString* const kSafariVCSignInDisabled = @"SafariVCSignInDisabled";
 NSString* const kWhatsNewPromoStatus = @"WhatsNewPromoStatus";
-
-const base::Feature kIOSDownloadImageRenaming{
-    "IOSDownloadImageRenaming", base::FEATURE_DISABLED_BY_DEFAULT};
 
 }  // namespace
 
@@ -75,33 +69,22 @@ std::string GetOriginServerHost() {
 }
 
 WhatsNewPromoStatus GetWhatsNewPromoStatus() {
-  NSInteger status = [[NSUserDefaults standardUserDefaults]
-      integerForKey:kWhatsNewPromoStatus];
+  NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+  NSInteger status = [defaults integerForKey:kWhatsNewPromoStatus];
+  // If |status| is set to a value greater than or equal to the count of items
+  // defined in WhatsNewPromoStatus, set it to |WHATS_NEW_DEFAULT| and correct
+  // the value in NSUserDefaults. This error case can happen when a user
+  // upgrades to a version with fewer Whats New Promo settings.
+  if (status >= static_cast<NSInteger>(WHATS_NEW_PROMO_STATUS_COUNT)) {
+    status = static_cast<NSInteger>(WHATS_NEW_DEFAULT);
+    [defaults setInteger:status forKey:kWhatsNewPromoStatus];
+  }
   return static_cast<WhatsNewPromoStatus>(status);
 }
 
 bool IsAlertOnBackgroundUploadEnabled() {
   return [[NSUserDefaults standardUserDefaults]
       boolForKey:kEnableAlertOnBackgroundUpload];
-}
-
-bool IsAllBookmarksEnabled() {
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kEnableAllBookmarksView)) {
-    return true;
-  } else if (command_line->HasSwitch(switches::kDisableAllBookmarksView)) {
-    return false;
-  }
-
-  // Check if the finch experiment exists.
-  std::string group_name =
-      base::FieldTrialList::FindFullName("RemoveAllBookmarks");
-
-  if (group_name.empty()) {
-    return false;  // If no finch experiment, all bookmarks is disabled.
-  }
-  return base::StartsWith(group_name, "Enabled",
-                          base::CompareCase::INSENSITIVE_ASCII);
 }
 
 bool IsAutoReloadEnabled() {
@@ -113,29 +96,6 @@ bool IsAutoReloadEnabled() {
     return false;
   return base::StartsWith(group_name, "Enabled",
                           base::CompareCase::INSENSITIVE_ASCII);
-}
-
-bool IsCredentialManagementEnabled() {
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  return command_line->HasSwitch(switches::kEnableCredentialManagerAPI);
-}
-
-bool IsDownloadRenamingEnabled() {
-  // Check if the experimental flag is forced on or off.
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kEnableDownloadImageRenaming)) {
-    return true;
-  } else if (command_line->HasSwitch(switches::kDisableDownloadImageRenaming)) {
-    return false;
-  }
-
-  // Check if the finch experiment is turned on.
-  return base::FeatureList::IsEnabled(kIOSDownloadImageRenaming);
-}
-
-bool IsExternalApplicationPromptEnabled() {
-  return ![[NSUserDefaults standardUserDefaults]
-      boolForKey:kExternalAppPromptDisabled];
 }
 
 bool IsForceResetContextualSearchEnabled() {
@@ -225,11 +185,6 @@ bool IsPaymentRequestEnabled() {
                           base::CompareCase::INSENSITIVE_ASCII);
 }
 
-bool IsPendingIndexNavigationEnabled() {
-  return ![[NSUserDefaults standardUserDefaults]
-      boolForKey:kPendingIndexNavigationDisabled];
-}
-
 bool IsPhysicalWebEnabled() {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kEnableIOSPhysicalWeb)) {
@@ -245,28 +200,14 @@ bool IsPhysicalWebEnabled() {
                           base::CompareCase::INSENSITIVE_ASCII);
 }
 
-bool IsQRCodeReaderEnabled() {
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  return !command_line->HasSwitch(switches::kDisableQRScanner);
-}
-
 bool IsReaderModeEnabled() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableReaderModeToolbarIcon);
 }
 
-bool IsReadingListEnabled() {
-  return reading_list::switches::IsReadingListEnabled();
-}
-
 bool IsSafariVCSignInEnabled() {
   return ![[NSUserDefaults standardUserDefaults]
       boolForKey:kSafariVCSignInDisabled];
-}
-
-bool IsSpotlightActionsEnabled() {
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  return !command_line->HasSwitch(switches::kDisableSpotlightActions);
 }
 
 bool IsStartupCrashEnabled() {
@@ -276,19 +217,6 @@ bool IsStartupCrashEnabled() {
 bool IsTabStripAutoScrollNewTabsEnabled() {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   return !command_line->HasSwitch(switches::kDisableTabStripAutoScrollNewTabs);
-}
-
-bool IsTabSwitcherEnabled() {
-  // Check if the experimental flag is forced off.
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kDisableTabSwitcher)) {
-    return false;
-  }
-
-  // Check if the finch experiment is turned off.
-  std::string group_name = base::FieldTrialList::FindFullName("IOSTabSwitcher");
-  return !base::StartsWith(group_name, "Disabled",
-                           base::CompareCase::INSENSITIVE_ASCII);
 }
 
 bool IsViewCopyPasswordsEnabled() {
@@ -320,6 +248,23 @@ bool IsSuggestionsUIEnabled() {
 
   // By default, disable it.
   return false;
+}
+
+bool IsSigninPromoEnabled() {
+  // Check if the experimental flag is forced on or off.
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kEnableSigninPromo))
+    return true;
+  if (command_line->HasSwitch(switches::kDisableSigninPromo))
+    return false;
+  std::string group_name = base::FieldTrialList::FindFullName("IOSSigninPromo");
+  return base::StartsWith(group_name, "Enabled",
+                          base::CompareCase::INSENSITIVE_ASCII);
+}
+
+bool IsNativeAppLauncherEnabled() {
+  return [[NSUserDefaults standardUserDefaults]
+      boolForKey:@"NativeAppLauncherEnabled"];
 }
 
 }  // namespace experimental_flags

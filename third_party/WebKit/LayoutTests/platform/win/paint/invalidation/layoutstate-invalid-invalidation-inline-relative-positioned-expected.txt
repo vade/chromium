@@ -8,43 +8,23 @@
       "paintInvalidations": [
         {
           "object": "LayoutBlockFlow (anonymous)",
-          "rect": [8, 40, 784, 104],
-          "reason": "forced by layout"
+          "rect": [8, 40, 784, 105],
+          "reason": "geometry"
         },
         {
           "object": "LayoutInline (relative positioned) SPAN id='target'",
-          "rect": [8, 220, 100, 103],
-          "reason": "forced by layout"
+          "rect": [8, 220, 100, 104],
+          "reason": "geometry"
         },
         {
           "object": "LayoutInline (relative positioned) SPAN id='target'",
-          "rect": [8, 200, 100, 103],
-          "reason": "forced by layout"
+          "rect": [8, 200, 100, 104],
+          "reason": "geometry"
         },
         {
           "object": "LayoutInline (relative positioned) SPAN",
-          "rect": [8, 120, 100, 103],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutBlockFlow DIV",
-          "rect": [8, 220, 100, 100],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [8, 220, 100, 100],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutBlockFlow DIV",
-          "rect": [8, 200, 100, 100],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [8, 200, 100, 100],
-          "reason": "bounds change"
+          "rect": [8, 120, 100, 104],
+          "reason": "geometry"
         }
       ]
     }
@@ -52,51 +32,51 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutBlockFlow (anonymous)",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "RootInlineBox",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutInline (relative positioned) SPAN",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineFlowBox",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutInline (relative positioned) SPAN id='target'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineFlowBox",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutText #text",
-      "reason": "location change"
+      "reason": "geometry"
     },
     {
       "object": "LayoutBlockFlow DIV",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "RootInlineBox",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutText #text",
-      "reason": "bounds change"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'x'",
-      "reason": "bounds change"
+      "reason": "geometry"
     },
     {
       "object": "LayoutText #text",
-      "reason": "location change"
+      "reason": "geometry"
     }
   ]
 }

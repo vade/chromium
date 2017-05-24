@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
 
 #include "build/build_config.h"
+#include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/avatar_menu.h"
 #include "chrome/browser/profiles/profile.h"
@@ -20,7 +21,6 @@
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/gfx/vector_icons_public.h"
 #include "ui/views/background.h"
 
 #if defined(OS_WIN)
@@ -52,7 +52,7 @@ void BrowserNonClientFrameView::OnBrowserViewInitViewsComplete() {}
 gfx::ImageSkia BrowserNonClientFrameView::GetIncognitoAvatarIcon() const {
   const SkColor icon_color = color_utils::PickContrastingColor(
       SK_ColorWHITE, gfx::kChromeIconGrey, GetFrameColor());
-  return gfx::CreateVectorIcon(gfx::VectorIconId::INCOGNITO, icon_color);
+  return gfx::CreateVectorIcon(kIncognitoIcon, icon_color);
 }
 
 SkColor BrowserNonClientFrameView::GetToolbarTopSeparatorColor() const {
@@ -68,6 +68,8 @@ SkColor BrowserNonClientFrameView::GetToolbarTopSeparatorColor() const {
 views::View* BrowserNonClientFrameView::GetProfileSwitcherView() const {
   return nullptr;
 }
+
+void BrowserNonClientFrameView::UpdateClientArea() {}
 
 void BrowserNonClientFrameView::VisibilityChanged(views::View* starting_from,
                                                   bool is_visible) {
@@ -207,7 +209,7 @@ bool BrowserNonClientFrameView::DoesIntersectRect(const views::View* target,
   View::ConvertRectToTarget(this, tabstrip, &rect_in_tabstrip_coords_f);
   gfx::Rect rect_in_tabstrip_coords =
       gfx::ToEnclosingRect(rect_in_tabstrip_coords_f);
-  if (rect_in_tabstrip_coords.bottom() > tabstrip->GetLocalBounds().bottom()) {
+  if (rect_in_tabstrip_coords.y() >= tabstrip->GetLocalBounds().bottom()) {
     // |rect| is below the tabstrip.
     return false;
   }

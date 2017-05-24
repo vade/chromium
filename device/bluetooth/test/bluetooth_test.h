@@ -13,7 +13,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
+#include "base/test/scoped_task_environment.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/bluetooth_discovery_session.h"
@@ -56,6 +56,12 @@ class BluetoothTestBase : public testing::Test {
     HEART_RATE_DEVICE,
   };
 
+  enum class NotifyValueState {
+    NONE,
+    NOTIFY,
+    INDICATE,
+  };
+
   static const std::string kTestAdapterName;
   static const std::string kTestAdapterAddress;
 
@@ -81,11 +87,24 @@ class BluetoothTestBase : public testing::Test {
     LOWER = -20,
   };
 
+  // Services
   static const std::string kTestUUIDGenericAccess;
   static const std::string kTestUUIDGenericAttribute;
   static const std::string kTestUUIDImmediateAlert;
   static const std::string kTestUUIDLinkLoss;
   static const std::string kTestUUIDHeartRate;
+  // Characteristics
+  // The following three characteristics are for kTestUUIDGenericAccess.
+  static const std::string kTestUUIDDeviceName;
+  static const std::string kTestUUIDAppearance;
+  static const std::string kTestUUIDReconnectionAddress;
+  // This characteristic is for kTestUUIDHeartRate.
+  static const std::string kTestUUIDHeartRateMeasurement;
+  // Descriptors
+  static const std::string kTestUUIDCharacteristicUserDescription;
+  static const std::string kTestUUIDClientCharacteristicConfiguration;
+  static const std::string kTestUUIDServerCharacteristicConfiguration;
+  static const std::string kTestUUIDCharacteristicPresentationFormat;
 
   BluetoothTestBase();
   ~BluetoothTestBase() override;
@@ -124,6 +143,14 @@ class BluetoothTestBase : public testing::Test {
   virtual bool DenyPermission();
 
   // Create a fake Low Energy device and discover it.
+  // |device_ordinal| with the same device address stands for the same fake
+  // device with different properties.
+  // For example:
+  // SimulateLowEnergyDevice(2); << First call will create a device with address
+  // kTestDeviceAddress1
+  // SimulateLowEnergyDevice(3); << Second call will update changes to the
+  // device of address kTestDeviceAddress1.
+  //
   // |device_ordinal| selects between multiple fake device data sets to produce:
   //   1: Name: kTestDeviceName
   //      Address:           kTestDeviceAddress1
@@ -135,8 +162,8 @@ class BluetoothTestBase : public testing::Test {
   //      Address:           kTestDeviceAddress1
   //      RSSI:              kTestRSSI2
   //      Advertised UUIDs: {kTestUUIDImmediateAlert, kTestUUIDLinkLoss}
-  //      Service Data:     {kTestUUIDHeartRate: [2],
-  //                         kTestUUIDImmediateAlert: [0]}
+  //      Service Data:     {kTestUUIDHeartRate: [],
+  //                         kTestUUIDImmediateAlert: [0, 2]}
   //      Tx Power:          kTestTxPower2
   //   3: Name:    kTestDeviceNameEmpty
   //      Address: kTestDeviceAddress1
@@ -401,6 +428,15 @@ class BluetoothTestBase : public testing::Test {
   virtual void SimulateGattDescriptorWriteWillFailSynchronouslyOnce(
       BluetoothRemoteGattDescriptor* descriptor) {}
 
+  // Tests that functions to change the notify value have been called |attempts|
+  // times.
+  virtual void ExpectedChangeNotifyValueAttempts(int attempts);
+
+  // Tests that the notify value is |expected_value_state|. The default
+  // implementation checks that the correct value has been written to the CCC
+  // Descriptor.
+  virtual void ExpectedNotifyValue(NotifyValueState expected_value_state);
+
   // Returns a list of local GATT services registered with the adapter.
   virtual std::vector<BluetoothLocalGattService*> RegisteredGattServices();
 
@@ -465,13 +501,13 @@ class BluetoothTestBase : public testing::Test {
       bool error_in_reentrant);
 
   // Reset all event count members to 0.
-  void ResetEventCounts();
+  virtual void ResetEventCounts();
 
   void RemoveTimedOutDevices();
 
-  // A Message loop is required by some implementations that will PostTasks and
-  // by base::RunLoop().RunUntilIdle() use in this fixture.
-  base::MessageLoop message_loop_;
+  // A ScopedTaskEnvironment is required by some implementations that will
+  // PostTasks and by base::RunLoop().RunUntilIdle() use in this fixture.
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
 
   scoped_refptr<BluetoothAdapter> adapter_;
   std::vector<std::unique_ptr<BluetoothDiscoverySession>> discovery_sessions_;

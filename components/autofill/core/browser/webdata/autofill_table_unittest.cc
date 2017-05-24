@@ -2,14 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <stddef.h>
+#include "components/autofill/core/browser/webdata/autofill_table.h"
 
 #include <map>
 #include <set>
-#include <string>
 #include <tuple>
 #include <utility>
-#include <vector>
 
 #include "base/command_line.h"
 #include "base/files/file_util.h"
@@ -29,7 +27,6 @@
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/webdata/autofill_change.h"
 #include "components/autofill/core/browser/webdata/autofill_entry.h"
-#include "components/autofill/core/browser/webdata/autofill_table.h"
 #include "components/autofill/core/common/autofill_constants.h"
 #include "components/autofill/core/common/autofill_switches.h"
 #include "components/autofill/core/common/autofill_util.h"
@@ -44,6 +41,10 @@
 using base::ASCIIToUTF16;
 using base::Time;
 using base::TimeDelta;
+using sync_pb::EntityMetadata;
+using sync_pb::ModelTypeState;
+using syncer::EntityMetadataMap;
+using syncer::MetadataBatch;
 
 namespace autofill {
 
@@ -1028,6 +1029,24 @@ TEST_F(AutofillTableTest, CreditCard) {
   EXPECT_FALSE(db_creditcard);
 }
 
+TEST_F(AutofillTableTest, AddFullServerCreditCard) {
+  CreditCard credit_card;
+  credit_card.set_record_type(CreditCard::FULL_SERVER_CARD);
+  credit_card.set_server_id("server_id");
+  credit_card.set_origin("https://www.example.com/");
+  credit_card.SetRawInfo(CREDIT_CARD_NAME_FULL, ASCIIToUTF16("Jack Torrance"));
+  credit_card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("1234567890123456"));
+  credit_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("04"));
+  credit_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2013"));
+
+  EXPECT_TRUE(table_->AddFullServerCreditCard(credit_card));
+
+  std::vector<std::unique_ptr<CreditCard>> outputs;
+  ASSERT_TRUE(table_->GetServerCreditCards(&outputs));
+  ASSERT_EQ(1U, outputs.size());
+  EXPECT_EQ(0, credit_card.Compare(*outputs[0]));
+}
+
 TEST_F(AutofillTableTest, UpdateAutofillProfile) {
   // Add a profile to the db.
   AutofillProfile profile;
@@ -1608,7 +1627,7 @@ TEST_F(AutofillTableTest, SetGetServerCards) {
   inputs[1].SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("12"));
   inputs[1].SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("1997"));
   inputs[1].SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("1111"));
-  inputs[1].SetTypeForMaskedCard(kVisaCard);
+  inputs[1].SetNetworkForMaskedCard(kVisaCard);
   inputs[1].SetServerStatus(CreditCard::EXPIRED);
 
   test::SetServerCreditCards(table_.get(), inputs);
@@ -1644,7 +1663,7 @@ TEST_F(AutofillTableTest, MaskUnmaskServerCards) {
   inputs[0].SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("1"));
   inputs[0].SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2020"));
   inputs[0].SetRawInfo(CREDIT_CARD_NUMBER, masked_number);
-  inputs[0].SetTypeForMaskedCard(kVisaCard);
+  inputs[0].SetNetworkForMaskedCard(kVisaCard);
   test::SetServerCreditCards(table_.get(), inputs);
 
   // Unmask the number. The full number should be available.
@@ -1680,7 +1699,7 @@ TEST_F(AutofillTableTest, SetServerCardModify) {
   masked_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("1"));
   masked_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2020"));
   masked_card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("1111"));
-  masked_card.SetTypeForMaskedCard(kVisaCard);
+  masked_card.SetNetworkForMaskedCard(kVisaCard);
 
   std::vector<CreditCard> inputs;
   inputs.push_back(masked_card);
@@ -1717,7 +1736,7 @@ TEST_F(AutofillTableTest, SetServerCardModify) {
   random_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("12"));
   random_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("1997"));
   random_card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("2222"));
-  random_card.SetTypeForMaskedCard(kVisaCard);
+  random_card.SetNetworkForMaskedCard(kVisaCard);
   inputs[0] = random_card;
   test::SetServerCreditCards(table_.get(), inputs);
 
@@ -1752,7 +1771,7 @@ TEST_F(AutofillTableTest, SetServerCardUpdateUsageStatsAndBillingAddress) {
   masked_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2020"));
   masked_card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("1111"));
   masked_card.set_billing_address_id("1");
-  masked_card.SetTypeForMaskedCard(kVisaCard);
+  masked_card.SetNetworkForMaskedCard(kVisaCard);
 
   std::vector<CreditCard> inputs;
   inputs.push_back(masked_card);
@@ -1848,8 +1867,8 @@ TEST_F(AutofillTableTest, SetServerProfileUpdateUsageStats) {
   table_->GetServerProfiles(&outputs);
   ASSERT_EQ(1u, outputs.size());
   EXPECT_EQ(one.server_id(), outputs[0]->server_id());
-  EXPECT_EQ(0U, outputs[0]->use_count());
-  EXPECT_EQ(base::Time(), outputs[0]->use_date());
+  EXPECT_EQ(1U, outputs[0]->use_count());
+  EXPECT_NE(base::Time(), outputs[0]->use_date());
   // We don't track modification date for server profiles. It should always be
   // base::Time().
   EXPECT_EQ(base::Time(), outputs[0]->modification_date());
@@ -1876,18 +1895,6 @@ TEST_F(AutofillTableTest, SetServerProfileUpdateUsageStats) {
   EXPECT_NE(base::Time(), outputs[0]->use_date());
   EXPECT_EQ(base::Time(), outputs[0]->modification_date());
   outputs.clear();
-
-  // Set a null profile list --- this should clear metadata.
-  table_->SetServerProfiles(std::vector<AutofillProfile>());
-  // Reset the old profile list and see the metadata is reset.
-  table_->SetServerProfiles(inputs);
-  table_->GetServerProfiles(&outputs);
-  ASSERT_EQ(1u, outputs.size());
-  EXPECT_EQ(one.server_id(), outputs[0]->server_id());
-  EXPECT_EQ(0U, outputs[0]->use_count());
-  EXPECT_EQ(base::Time(), outputs[0]->use_date());
-  EXPECT_EQ(base::Time(), outputs[0]->modification_date());
-  outputs.clear();
 }
 
 // Tests that deleting time ranges re-masks server credit cards that were
@@ -1905,7 +1912,7 @@ TEST_F(AutofillTableTest, DeleteUnmaskedCard) {
   masked_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("1"));
   masked_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2020"));
   masked_card.SetRawInfo(CREDIT_CARD_NUMBER, masked_number);
-  masked_card.SetTypeForMaskedCard(kVisaCard);
+  masked_card.SetNetworkForMaskedCard(kVisaCard);
 
   std::vector<CreditCard> inputs;
   inputs.push_back(masked_card);
@@ -1966,63 +1973,122 @@ TEST_F(AutofillTableTest, DeleteUnmaskedCard) {
   outputs.clear();
 }
 
-TEST_F(AutofillTableTest, GetFormValuesForElementName_SubstringMatchEnabled) {
+const size_t kMaxCount = 2;
+struct GetFormValuesTestCase {
+  const char* const field_suggestion[kMaxCount];
+  const char* const field_contents;
+  size_t expected_suggestion_count;
+  const char* const expected_suggestion[kMaxCount];
+};
+
+class GetFormValuesTest : public testing::TestWithParam<GetFormValuesTestCase> {
+ public:
+  GetFormValuesTest() {}
+  ~GetFormValuesTest() override {}
+
+ protected:
+  void SetUp() override {
+    OSCryptMocker::SetUpWithSingleton();
+    ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
+    file_ = temp_dir_.GetPath().AppendASCII("TestWebDatabase");
+
+    table_.reset(new AutofillTable);
+    db_.reset(new WebDatabase);
+    db_->AddTable(table_.get());
+    ASSERT_EQ(sql::INIT_OK, db_->Init(file_));
+  }
+
+  void TearDown() override { OSCryptMocker::TearDown(); }
+
+  base::FilePath file_;
+  base::ScopedTempDir temp_dir_;
+  std::unique_ptr<AutofillTable> table_;
+  std::unique_ptr<WebDatabase> db_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(GetFormValuesTest);
+};
+
+TEST_P(GetFormValuesTest, GetFormValuesForElementName_SubstringMatchEnabled) {
   // Token matching is currently behind a flag.
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableSuggestionsWithSubstringMatch);
 
-  const size_t kMaxCount = 2;
-  const struct {
-    const char* const field_suggestion[kMaxCount];
-    const char* const field_contents;
-    size_t expected_suggestion_count;
-    const char* const expected_suggestion[kMaxCount];
-  } kTestCases[] = {
-      {{"user.test", "test_user"}, "TEST",   2, {"test_user", "user.test"}},
-      {{"user test", "test-user"}, "user",   2, {"user test", "test-user"}},
-      {{"user test", "test-rest"}, "user",   1, {"user test", nullptr}},
-      {{"user@test", "test_user"}, "user@t", 1, {"user@test", nullptr}},
-      {{"user.test", "test_user"}, "er.tes", 0, {nullptr,     nullptr}},
-      {{"user test", "test_user"}, "_ser",   0, {nullptr,     nullptr}},
-      {{"user.test", "test_user"}, "%ser",   0, {nullptr,     nullptr}},
-      {{"user.test", "test_user"},
-       "; DROP TABLE autofill;",
-       0,
-       {nullptr, nullptr}},
-  };
+  auto test_case = GetParam();
+  SCOPED_TRACE(testing::Message()
+               << "suggestion = " << test_case.field_suggestion[0]
+               << ", contents = " << test_case.field_contents);
 
-  for (const auto& test_case : kTestCases) {
-    SCOPED_TRACE(testing::Message()
-                 << "suggestion = " << test_case.field_suggestion[0]
-                 << ", contents = " << test_case.field_contents);
+  Time t1 = Time::Now();
 
-    Time t1 = Time::Now();
-
-    // Simulate the submission of a handful of entries in a field called "Name".
-    AutofillChangeList changes;
-    FormFieldData field;
-    for (size_t k = 0; k < kMaxCount; ++k) {
-      field.name = ASCIIToUTF16("Name");
-      field.value = ASCIIToUTF16(test_case.field_suggestion[k]);
-      table_->AddFormFieldValue(field, &changes);
-    }
-
-    std::vector<base::string16> v;
-    table_->GetFormValuesForElementName(
-        ASCIIToUTF16("Name"), ASCIIToUTF16(test_case.field_contents), &v, 6);
-
-    EXPECT_EQ(test_case.expected_suggestion_count, v.size());
-    for (size_t j = 0; j < test_case.expected_suggestion_count; ++j) {
-      EXPECT_EQ(ASCIIToUTF16(test_case.expected_suggestion[j]), v[j]);
-    }
-
-    changes.clear();
-    table_->RemoveFormElementsAddedBetween(t1, Time(), &changes);
+  // Simulate the submission of a handful of entries in a field called "Name".
+  AutofillChangeList changes;
+  FormFieldData field;
+  for (size_t k = 0; k < kMaxCount; ++k) {
+    field.name = ASCIIToUTF16("Name");
+    field.value = ASCIIToUTF16(test_case.field_suggestion[k]);
+    table_->AddFormFieldValue(field, &changes);
   }
+
+  std::vector<base::string16> v;
+  table_->GetFormValuesForElementName(
+      ASCIIToUTF16("Name"), ASCIIToUTF16(test_case.field_contents), &v, 6);
+
+  EXPECT_EQ(test_case.expected_suggestion_count, v.size());
+  for (size_t j = 0; j < test_case.expected_suggestion_count; ++j) {
+    EXPECT_EQ(ASCIIToUTF16(test_case.expected_suggestion[j]), v[j]);
+  }
+
+  changes.clear();
+  table_->RemoveFormElementsAddedBetween(t1, Time(), &changes);
 }
 
-TEST_F(AutofillTableTest, GetAllSyncMetadata) {
-  sync_pb::EntityMetadata metadata;
+INSTANTIATE_TEST_CASE_P(
+    AutofillTableTest,
+    GetFormValuesTest,
+    testing::Values(GetFormValuesTestCase{{"user.test", "test_user"},
+                                          "TEST",
+                                          2,
+                                          {"test_user", "user.test"}},
+                    GetFormValuesTestCase{{"user test", "test-user"},
+                                          "user",
+                                          2,
+                                          {"user test", "test-user"}},
+                    GetFormValuesTestCase{{"user test", "test-rest"},
+                                          "user",
+                                          1,
+                                          {"user test", nullptr}},
+                    GetFormValuesTestCase{{"user@test", "test_user"},
+                                          "user@t",
+                                          1,
+                                          {"user@test", nullptr}},
+                    GetFormValuesTestCase{{"user.test", "test_user"},
+                                          "er.tes",
+                                          0,
+                                          {nullptr, nullptr}},
+                    GetFormValuesTestCase{{"user test", "test_user"},
+                                          "_ser",
+                                          0,
+                                          {nullptr, nullptr}},
+                    GetFormValuesTestCase{{"user.test", "test_user"},
+                                          "%ser",
+                                          0,
+                                          {nullptr, nullptr}},
+                    GetFormValuesTestCase{{"user.test", "test_user"},
+                                          "; DROP TABLE autofill;",
+                                          0,
+                                          {nullptr, nullptr}}));
+
+TEST_F(AutofillTableTest, AutofillNoMetadata) {
+  MetadataBatch metadata_batch;
+  EXPECT_TRUE(table_->GetAllSyncMetadata(syncer::AUTOFILL, &metadata_batch));
+  EXPECT_EQ(0u, metadata_batch.TakeAllMetadata().size());
+  EXPECT_EQ(ModelTypeState().SerializeAsString(),
+            metadata_batch.GetModelTypeState().SerializeAsString());
+}
+
+TEST_F(AutofillTableTest, AutofillGetAllSyncMetadata) {
+  EntityMetadata metadata;
   std::string storage_key = "storage_key";
   std::string storage_key2 = "storage_key2";
   metadata.set_sequence_number(1);
@@ -2030,7 +2096,7 @@ TEST_F(AutofillTableTest, GetAllSyncMetadata) {
   EXPECT_TRUE(
       table_->UpdateSyncMetadata(syncer::AUTOFILL, storage_key, metadata));
 
-  sync_pb::ModelTypeState model_type_state;
+  ModelTypeState model_type_state;
   model_type_state.set_initial_sync_done(true);
 
   EXPECT_TRUE(table_->UpdateModelTypeState(syncer::AUTOFILL, model_type_state));
@@ -2039,12 +2105,12 @@ TEST_F(AutofillTableTest, GetAllSyncMetadata) {
   EXPECT_TRUE(
       table_->UpdateSyncMetadata(syncer::AUTOFILL, storage_key2, metadata));
 
-  syncer::MetadataBatch metadata_batch;
+  MetadataBatch metadata_batch;
   EXPECT_TRUE(table_->GetAllSyncMetadata(syncer::AUTOFILL, &metadata_batch));
 
   EXPECT_TRUE(metadata_batch.GetModelTypeState().initial_sync_done());
 
-  syncer::EntityMetadataMap metadata_records = metadata_batch.TakeAllMetadata();
+  EntityMetadataMap metadata_records = metadata_batch.TakeAllMetadata();
 
   EXPECT_EQ(metadata_records.size(), 2u);
   EXPECT_EQ(metadata_records[storage_key].sequence_number(), 1);
@@ -2058,11 +2124,11 @@ TEST_F(AutofillTableTest, GetAllSyncMetadata) {
   EXPECT_FALSE(metadata_batch.GetModelTypeState().initial_sync_done());
 }
 
-TEST_F(AutofillTableTest, WriteThenDeleteSyncMetadata) {
-  sync_pb::EntityMetadata metadata;
-  syncer::MetadataBatch metadata_batch;
+TEST_F(AutofillTableTest, AutofillWriteThenDeleteSyncMetadata) {
+  EntityMetadata metadata;
+  MetadataBatch metadata_batch;
   std::string storage_key = "storage_key";
-  sync_pb::ModelTypeState model_type_state;
+  ModelTypeState model_type_state;
 
   model_type_state.set_initial_sync_done(true);
 
@@ -2077,32 +2143,35 @@ TEST_F(AutofillTableTest, WriteThenDeleteSyncMetadata) {
   // It shouldn't be there any more.
   EXPECT_TRUE(table_->GetAllSyncMetadata(syncer::AUTOFILL, &metadata_batch));
 
-  syncer::EntityMetadataMap metadata_records = metadata_batch.TakeAllMetadata();
+  EntityMetadataMap metadata_records = metadata_batch.TakeAllMetadata();
   EXPECT_EQ(metadata_records.size(), 0u);
 
   // Now delete the model type state.
   EXPECT_TRUE(table_->ClearModelTypeState(syncer::AUTOFILL));
-  EXPECT_FALSE(table_->GetAllSyncMetadata(syncer::AUTOFILL, &metadata_batch));
+  EXPECT_TRUE(table_->GetAllSyncMetadata(syncer::AUTOFILL, &metadata_batch));
+  EXPECT_EQ(ModelTypeState().SerializeAsString(),
+            metadata_batch.GetModelTypeState().SerializeAsString());
 }
 
-TEST_F(AutofillTableTest, CorruptSyncMetadata) {
-  syncer::MetadataBatch metadata_batch;
-  sync_pb::ModelTypeState state;
-  std::string storage_key = "storage_key";
-
+TEST_F(AutofillTableTest, AutofillCorruptSyncMetadata) {
+  MetadataBatch metadata_batch;
   sql::Statement s(db_->GetSQLConnection()->GetUniqueStatement(
       "INSERT OR REPLACE INTO autofill_sync_metadata "
       "(storage_key, value) VALUES(?, ?)"));
-  s.BindString(0, storage_key);
+  s.BindString(0, "storage_key");
   s.BindString(1, "unparseable");
+  EXPECT_TRUE(s.Run());
 
-  sql::Statement s2(db_->GetSQLConnection()->GetUniqueStatement(
+  EXPECT_FALSE(table_->GetAllSyncMetadata(syncer::AUTOFILL, &metadata_batch));
+}
+
+TEST_F(AutofillTableTest, AutofillCorruptModelTypeState) {
+  MetadataBatch metadata_batch;
+  sql::Statement s(db_->GetSQLConnection()->GetUniqueStatement(
       "INSERT OR REPLACE INTO autofill_model_type_state "
       "(rowid, value) VALUES(1, ?)"));
-  s2.BindString(0, "unparseable");
-
+  s.BindString(0, "unparseable");
   EXPECT_TRUE(s.Run());
-  EXPECT_TRUE(s2.Run());
 
   EXPECT_FALSE(table_->GetAllSyncMetadata(syncer::AUTOFILL, &metadata_batch));
 }

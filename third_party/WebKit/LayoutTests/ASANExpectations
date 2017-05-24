@@ -1,5 +1,7 @@
 # This file is used for tests that only need to be suppressed on
 # the Chromium WebKit ASAN bots.
+# Further documentation:
+# https://chromium.googlesource.com/chromium/src/+/master/docs/testing/layout_test_expectations.md
 
 # NULL deref in libflashplayer.so, http://crbug.com/145940
 # ==12527== ERROR: AddressSanitizer: SEGV on unknown address 0x7f628058b38b
@@ -89,11 +91,10 @@ crbug.com/438499 [ Linux ] virtual/threaded/animations/unanimated-style.html [ T
 
 # Flakily timeout on Linux ASAN bots.
 crbug.com/243871 [ Linux ] virtual/threaded/fast/scroll-behavior/ [ Skip ]
+crbug.com/700795 [ Linux ] inspector/animation/animation-transition-setTiming-crash.html [ Skip ]
 
 # Reliably timeout on Linux ASAN bots.
 crbug.com/248938 [ Linux ] virtual/threaded/animations/transition-and-animation-2.html [ Skip ]
-
-crbug.com/446661 [Linux ] fast/dom/Geolocation/success-clear-watch.html [ Timeout Pass ]
 
 crbug.com/464065 [ Linux ] media/track/css-cue-for-video-in-shadow.html [ Timeout ]
 crbug.com/464065 [ Linux ] media/track/css-cue-for-video-in-shadow-2.html [ Timeout ]
@@ -111,3 +112,6 @@ crbug.com/572723 [ Linux ] inspector/sources/debugger/debugger-completions-on-ca
 crbug.com/577889 [ Linux ] fast/js/typed-array-allocation-failure.html [ Crash ]
 
 crbug.com/624712 [ Linux ] virtual/threaded/fast/compositorworker/compositor-attribute-change-worker.html [ Timeout ]
+
+crbug.com/717019 [ Linux ] virtual/gpu/fast/canvas/canvas-clip-rule.html [ Crash ]
+crbug.com/717019 [ Linux ] virtual/gpu/fast/canvas/canvas-path-context-clip.html [ Crash ]

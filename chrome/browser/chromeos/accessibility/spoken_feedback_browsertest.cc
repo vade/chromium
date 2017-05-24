@@ -4,13 +4,11 @@
 
 #include <queue>
 
-#include "ash/common/accelerators/accelerator_controller.h"
-#include "ash/common/accelerators/accelerator_table.h"
-#include "ash/common/accessibility_types.h"
-#include "ash/common/material_design/material_design_controller.h"
-#include "ash/common/system/tray/system_tray.h"
-#include "ash/common/wm_shell.h"
+#include "ash/accelerators/accelerator_controller.h"
+#include "ash/accelerators/accelerator_table.h"
+#include "ash/accessibility_types.h"
 #include "ash/shell.h"
+#include "ash/system/tray/system_tray.h"
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/strings/pattern.h"
@@ -111,7 +109,7 @@ class LoggedInSpokenFeedbackTest : public InProcessBrowserTest {
 
   bool PerformAcceleratorAction(ash::AcceleratorAction action) {
     ash::AcceleratorController* controller =
-        ash::WmShell::Get()->accelerator_controller();
+        ash::Shell::Get()->accelerator_controller();
     return controller->PerformActionIfEnabled(action);
   }
 
@@ -438,13 +436,6 @@ IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, NavigateSystemTray) {
   }
   SendKeyPress(ui::VKEY_RETURN);
 
-  if (!ash::MaterialDesignController::IsSystemTrayMenuMaterial()) {
-    while (true) {
-      if (base::MatchPattern(speech_monitor_.GetNextUtterance(), "*Bluetooth"))
-        break;
-    }
-  }
-
   // Navigate to return to previous menu button and press it.
   while (true) {
     std::string utterance = speech_monitor_.GetNextUtterance();
@@ -456,13 +447,8 @@ IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, NavigateSystemTray) {
 
   while (true) {
     std::string utterance = speech_monitor_.GetNextUtterance();
-    if (ash::MaterialDesignController::IsSystemTrayMenuMaterial()) {
-      if (base::MatchPattern(utterance, "Bluetooth*"))
-        break;
-    } else {
-      if (base::MatchPattern(utterance, "*Bluetooth"))
-        break;
-    }
+    if (base::MatchPattern(utterance, "Bluetooth*"))
+      break;
   }
 }
 
@@ -546,8 +532,9 @@ IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, MAYBE_ChromeVoxShiftSearch) {
   }
 }
 
-#if defined(MEMORY_SANITIZER)
+#if defined(MEMORY_SANITIZER) || defined(OS_CHROMEOS)
 // Fails under MemorySanitizer: http://crbug.com/472125
+// TODO(crbug.com/721475): Flaky on CrOS.
 #define MAYBE_ChromeVoxNavigateAndSelect DISABLED_ChromeVoxNavigateAndSelect
 #else
 #define MAYBE_ChromeVoxNavigateAndSelect ChromeVoxNavigateAndSelect
@@ -628,7 +615,7 @@ IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, TouchExploreStatusTray) {
 
   // Send an accessibility hover event on the system tray, which is
   // what we get when you tap it on a touch screen when ChromeVox is on.
-  ash::SystemTray* tray = ash::Shell::GetInstance()->GetPrimarySystemTray();
+  ash::SystemTray* tray = ash::Shell::Get()->GetPrimarySystemTray();
   tray->NotifyAccessibilityEvent(ui::AX_EVENT_HOVER, true);
 
   EXPECT_EQ("Status tray,", speech_monitor_.GetNextUtterance());

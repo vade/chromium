@@ -8,10 +8,11 @@
 #include "base/trace_event/trace_event.h"
 #include "cc/layers/content_layer_client.h"
 #include "cc/layers/picture_layer_impl.h"
-#include "cc/playback/recording_source.h"
+#include "cc/layers/recording_source.h"
+#include "cc/paint/paint_record.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_impl.h"
-#include "third_party/skia/include/core/SkPictureRecorder.h"
+#include "cc/trees/transform_node.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 
 namespace cc {
@@ -27,7 +28,7 @@ scoped_refptr<PictureLayer> PictureLayer::Create(ContentLayerClient* client) {
 PictureLayer::PictureLayer(ContentLayerClient* client)
     : instrumentation_object_tracker_(id()),
       update_source_frame_number_(-1),
-      is_mask_(false) {
+      mask_type_(LayerMaskType::NOT_MASK) {
   picture_layer_inputs_.client = client;
 }
 
@@ -42,48 +43,53 @@ PictureLayer::~PictureLayer() {
 
 std::unique_ptr<LayerImpl> PictureLayer::CreateLayerImpl(
     LayerTreeImpl* tree_impl) {
-  return PictureLayerImpl::Create(tree_impl, id(), is_mask_);
+  return PictureLayerImpl::Create(tree_impl, id(), mask_type_);
 }
 
 void PictureLayer::PushPropertiesTo(LayerImpl* base_layer) {
   Layer::PushPropertiesTo(base_layer);
   TRACE_EVENT0("cc", "PictureLayer::PushPropertiesTo");
   PictureLayerImpl* layer_impl = static_cast<PictureLayerImpl*>(base_layer);
-  // TODO(danakj): Make is_mask_ a constructor parameter for PictureLayer.
-  DCHECK_EQ(layer_impl->is_mask(), is_mask_);
+  layer_impl->SetLayerMaskType(mask_type());
   DropRecordingSourceContentIfInvalid();
 
   layer_impl->SetNearestNeighbor(picture_layer_inputs_.nearest_neighbor);
+  layer_impl->SetUseTransformedRasterization(
+      ShouldUseTransformedRasterization());
 
   // Preserve lcd text settings from the current raster source.
   bool can_use_lcd_text = layer_impl->RasterSourceUsesLCDText();
   scoped_refptr<RasterSource> raster_source =
       recording_source_->CreateRasterSource(can_use_lcd_text);
   layer_impl->set_gpu_raster_max_texture_size(
-      GetLayerTree()->device_viewport_size());
-  layer_impl->UpdateRasterSource(raster_source, &last_updated_invalidation_,
-                                 nullptr);
+      layer_tree_host()->device_viewport_size());
+  layer_impl->UpdateRasterSource(std::move(raster_source),
+                                 &last_updated_invalidation_, nullptr);
   DCHECK(last_updated_invalidation_.IsEmpty());
 }
 
 void PictureLayer::SetLayerTreeHost(LayerTreeHost* host) {
   Layer::SetLayerTreeHost(host);
+
   if (!host)
     return;
+
+  if (!host->GetSettings().enable_mask_tiling &&
+      mask_type_ == LayerMaskType::MULTI_TEXTURE_MASK)
+    mask_type_ = LayerMaskType::SINGLE_TEXTURE_MASK;
 
   if (!recording_source_)
     recording_source_.reset(new RecordingSource);
   recording_source_->SetSlowdownRasterScaleFactor(
       host->GetDebugState().slow_down_raster_scale_factor);
-  // If we need to enable image decode tasks, then we have to generate the
-  // discardable images metadata.
-  const LayerTreeSettings& settings = layer_tree_host()->GetSettings();
-  recording_source_->SetGenerateDiscardableImagesMetadata(
-      settings.image_decode_tasks_enabled);
+
+  // Source frame numbers are relative the LayerTreeHost, so this needs
+  // to be reset.
+  update_source_frame_number_ = -1;
 }
 
 void PictureLayer::SetNeedsDisplayRect(const gfx::Rect& layer_rect) {
-  DCHECK(!layer_tree_host() || !GetLayerTree()->in_paint_layer_contents());
+  DCHECK(!layer_tree_host() || !layer_tree_host()->in_paint_layer_contents());
   if (recording_source_)
     recording_source_->SetNeedsDisplayRect(layer_rect);
   Layer::SetNeedsDisplayRect(layer_rect);
@@ -93,7 +99,7 @@ bool PictureLayer::Update() {
   update_source_frame_number_ = layer_tree_host()->SourceFrameNumber();
   bool updated = Layer::Update();
 
-  gfx::Size layer_size = paint_properties().bounds;
+  gfx::Size layer_size = bounds();
 
   recording_source_->SetBackgroundColor(SafeOpaqueBackgroundColor());
   recording_source_->SetRequiresClear(
@@ -137,14 +143,19 @@ bool PictureLayer::Update() {
   return updated;
 }
 
-void PictureLayer::SetIsMask(bool is_mask) {
-  is_mask_ = is_mask;
+void PictureLayer::SetLayerMaskType(LayerMaskType mask_type) {
+  // We do not allow converting SINGLE_TEXTURE_MASK to MULTI_TEXTURE_MASK in
+  // order to avoid rerastering when a mask's transform is being animated.
+  if (mask_type_ == LayerMaskType::SINGLE_TEXTURE_MASK &&
+      mask_type == LayerMaskType::MULTI_TEXTURE_MASK)
+    return;
+  mask_type_ = mask_type;
 }
 
 sk_sp<SkPicture> PictureLayer::GetPicture() const {
-  // We could either flatten the RecordingSource into a single
-  // SkPicture, or paint a fresh one depending on what we intend to do with the
-  // picture. For now we just paint a fresh one to get consistent results.
+  // We could either flatten the RecordingSource into a single SkPicture, or
+  // paint a fresh one depending on what we intend to do with it.  For now we
+  // just paint a fresh one to get consistent results.
   if (!DrawsContent())
     return nullptr;
 
@@ -193,6 +204,14 @@ void PictureLayer::SetNearestNeighbor(bool nearest_neighbor) {
   SetNeedsCommit();
 }
 
+void PictureLayer::SetAllowTransformedRasterization(bool allowed) {
+  if (picture_layer_inputs_.allow_transformed_rasterization == allowed)
+    return;
+
+  picture_layer_inputs_.allow_transformed_rasterization = allowed;
+  SetNeedsCommit();
+}
+
 bool PictureLayer::HasDrawableContent() const {
   return picture_layer_inputs_.client && Layer::HasDrawableContent();
 }
@@ -206,8 +225,6 @@ void PictureLayer::DropRecordingSourceContentIfInvalid() {
   gfx::Size recording_source_bounds = recording_source_->GetSize();
 
   gfx::Size layer_bounds = bounds();
-  if (paint_properties().source_frame_number == source_frame_number)
-    layer_bounds = paint_properties().bounds;
 
   // If update called, then recording source size must match bounds pushed to
   // impl layer.
@@ -226,6 +243,46 @@ void PictureLayer::DropRecordingSourceContentIfInvalid() {
     picture_layer_inputs_.display_list = nullptr;
     picture_layer_inputs_.painter_reported_memory_usage = 0;
   }
+}
+
+bool PictureLayer::ShouldUseTransformedRasterization() const {
+  if (!picture_layer_inputs_.allow_transformed_rasterization)
+    return false;
+
+  // Background color overfill is undesirable with transformed rasterization.
+  // However, without background overfill, the tiles will be non-opaque on
+  // external edges, and layer opaque region can't be computed in layer space
+  // due to rounding under extreme scaling. This defeats many opaque layer
+  // optimization. Prefer optimization over quality for this particular case.
+  if (contents_opaque())
+    return false;
+
+  const TransformTree& transform_tree =
+      layer_tree_host()->property_trees()->transform_tree;
+  DCHECK(!transform_tree.needs_update());
+  auto* transform_node = transform_tree.Node(transform_tree_index());
+  DCHECK(transform_node);
+  // TODO(pdr): This is a workaround for https://crbug.com/708951 to avoid
+  // crashing when there's no transform node. This workaround should be removed.
+  if (!transform_node)
+    return false;
+
+  if (transform_node->to_screen_is_potentially_animated)
+    return false;
+
+  const gfx::Transform& to_screen =
+      transform_tree.ToScreen(transform_tree_index());
+  if (!to_screen.IsScaleOrTranslation())
+    return false;
+
+  float origin_x =
+      to_screen.matrix().getFloat(0, 3) + offset_to_transform_parent().x();
+  float origin_y =
+      to_screen.matrix().getFloat(1, 3) + offset_to_transform_parent().y();
+  if (origin_x - floorf(origin_x) == 0.f && origin_y - floorf(origin_y) == 0.f)
+    return false;
+
+  return true;
 }
 
 const DisplayItemList* PictureLayer::GetDisplayItemList() {

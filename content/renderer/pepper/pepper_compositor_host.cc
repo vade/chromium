@@ -16,7 +16,6 @@
 #include "cc/layers/texture_layer.h"
 #include "cc/resources/texture_mailbox.h"
 #include "cc/trees/layer_tree_host.h"
-#include "content/child/child_shared_bitmap_manager.h"
 #include "content/public/renderer/renderer_ppapi_host.h"
 #include "content/renderer/pepper/gfx_conversion.h"
 #include "content/renderer/pepper/host_globals.h"
@@ -29,6 +28,7 @@
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/ppb_image_data_api.h"
+#include "services/ui/public/cpp/bitmap/child_shared_bitmap_manager.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/transform.h"
@@ -410,8 +410,8 @@ int32_t PepperCompositorHost::OnHostMsgCommitLayers(
   // We need to force a commit for each CommitLayers() call, even if no layers
   // changed since the last call to CommitLayers(). This is so
   // WiewInitiatedPaint() will always be called.
-  if (layer_->GetLayerTree())
-    layer_->GetLayerTree()->SetNeedsCommit();
+  if (layer_->layer_tree_host())
+    layer_->layer_tree_host()->SetNeedsCommit();
 
   // If the host is not bound to the instance, return PP_OK immediately.
   if (!bound_instance_)

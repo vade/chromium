@@ -20,7 +20,7 @@
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/task_runner_util.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
@@ -41,7 +41,6 @@
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/user_manager/user_image/user_image.h"
 #include "components/user_manager/user_manager.h"
-#include "content/public/browser/browser_thread.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_skia.h"
 
@@ -544,13 +543,15 @@ void UserImageManagerImpl::Job::UpdateLocalState() {
     return;
 
   std::unique_ptr<base::DictionaryValue> entry(new base::DictionaryValue);
-  entry->Set(kImagePathNodeName, new base::StringValue(image_path_.value()));
-  entry->Set(kImageIndexNodeName, new base::FundamentalValue(image_index_));
+  entry->Set(kImagePathNodeName,
+             base::MakeUnique<base::Value>(image_path_.value()));
+  entry->Set(kImageIndexNodeName, base::MakeUnique<base::Value>(image_index_));
   if (!image_url_.is_empty())
-    entry->Set(kImageURLNodeName, new base::StringValue(image_url_.spec()));
+    entry->Set(kImageURLNodeName,
+               base::MakeUnique<base::Value>(image_url_.spec()));
   DictionaryPrefUpdate update(g_browser_process->local_state(),
                               kUserImageProperties);
-  update->SetWithoutPathExpansion(user_id(), entry.release());
+  update->SetWithoutPathExpansion(user_id(), std::move(entry));
 
   parent_->user_manager_->NotifyLocalStateChanged();
 }
@@ -568,12 +569,9 @@ UserImageManagerImpl::UserImageManagerImpl(
       profile_image_requested_(false),
       has_managed_image_(false),
       weak_factory_(this) {
-  base::SequencedWorkerPool* blocking_pool =
-      content::BrowserThread::GetBlockingPool();
-  background_task_runner_ =
-      blocking_pool->GetSequencedTaskRunnerWithShutdownBehavior(
-          blocking_pool->GetSequenceToken(),
-          base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
+  background_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
+      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN});
 }
 
 UserImageManagerImpl::~UserImageManagerImpl() {}
@@ -646,9 +644,9 @@ void UserImageManagerImpl::UserLoggedIn(bool user_is_new,
     if (!user_is_local)
       SetInitialUserImage();
   } else {
-    UMA_HISTOGRAM_ENUMERATION("UserImage.LoggedIn",
-                              ImageIndexToHistogramIndex(user->image_index()),
-                              default_user_image::kHistogramImagesCount);
+    UMA_HISTOGRAM_EXACT_LINEAR("UserImage.LoggedIn",
+                               ImageIndexToHistogramIndex(user->image_index()),
+                               default_user_image::kHistogramImagesCount);
   }
 
   // Reset the downloaded profile image as a new user logged in.

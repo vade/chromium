@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/strings/string16.h"
+#include "base/time/time.h"
 #include "third_party/skia/include/core/SkColor.h"
 
 class PrefService;
@@ -25,11 +26,16 @@ namespace autofill {
 struct Suggestion;
 
 extern const base::Feature kAutofillCreditCardAssist;
-extern const base::Feature kAutofillCreditCardSigninPromo;
 extern const base::Feature kAutofillScanCardholderName;
 extern const base::Feature kAutofillCreditCardPopupLayout;
+extern const base::Feature kAutofillCreditCardLastUsedDateDisplay;
+extern const base::Feature kAutofillUkmLogging;
+extern const base::Feature kAutofillUpstreamRequestCvcIfMissing;
+extern const base::Feature kAutofillUpstreamUseAutofillProfileComparatorForName;
+extern const base::Feature kAutofillUpstreamUseNotRecentlyUsedAutofillProfile;
 extern const char kCreditCardSigninPromoImpressionLimitParamKey[];
-extern const char kAutofillCreditCardPopupSettingsSuggestionValueKey[];
+extern const char kAutofillCreditCardLastUsedDateShowExpirationDateKey[];
+extern const char kAutofillUpstreamMaxMinutesSinceAutofillProfileUseKey[];
 
 // Returns true if autofill should be enabled. See also
 // IsInAutofillSuggestionsDisabledExperiment below.
@@ -41,15 +47,8 @@ bool IsAutofillEnabled(const PrefService* pref_service);
 // disables providing suggestions.
 bool IsInAutofillSuggestionsDisabledExperiment();
 
-// Returns whether the Autofill credit card signin promo should be shown.
-bool IsAutofillCreditCardSigninPromoEnabled();
-
 // Returns whether the Autofill credit card assist infobar should be shown.
 bool IsAutofillCreditCardAssistEnabled();
-
-// Returns the maximum number of impressions of the credit card signin promo, or
-// 0 if there are no limits.
-int GetCreditCardSigninPromoImpressionLimit();
 
 // Returns true if the user should be offered to locally store unmasked cards.
 // This controls whether the option is presented at all rather than the default
@@ -66,6 +65,13 @@ bool IsCreditCardUploadEnabled(const PrefService* pref_service,
 // Returns whether the new Autofill credit card popup layout experiment is
 // enabled.
 bool IsAutofillCreditCardPopupLayoutExperimentEnabled();
+
+// Returns whether Autofill credit card last used date display experiment is
+// enabled.
+bool IsAutofillCreditCardLastUsedDateDisplayExperimentEnabled();
+
+// Returns whether Autofill credit card last used date shows expiration date.
+bool ShowExpirationDateInAutofillCreditCardLastUsedDate();
 
 // Returns the background color for credit card autofill popup, or
 // |SK_ColorTRANSPARENT| if the new credit card autofill popup layout experiment
@@ -93,6 +99,23 @@ bool IsIconInCreditCardPopupAtStart();
 // Modifies the suggestion value and label if the new credit card autofill popup
 // experiment is enabled to tweak the display of the value and label.
 void ModifyAutofillCreditCardSuggestion(struct Suggestion* suggestion);
+
+// Returns the margin for the icon, label and between icon and label. Returns 0
+// if the margin isn't configured in an experiment to tweak autofill popup
+// layout.
+unsigned int GetPopupMargin();
+
+// Returns whether the feature to log UKMs is enabled.
+bool IsUkmLoggingEnabled();
+
+// Returns whether the experiment is enabled where Chrome Upstream requests CVC
+// in the offer to save bubble if it was not detected during the checkout flow.
+bool IsAutofillUpstreamRequestCvcIfMissingExperimentEnabled();
+
+// Returns the maximum time that could have elapsed since an address profile's
+// most recent use for the adress profile to be included in the candidate set
+// for card upload. Returns 0 if the experiment is not enabled.
+base::TimeDelta GetMaxTimeSinceAutofillProfileUseForCardUpload();
 
 }  // namespace autofill
 

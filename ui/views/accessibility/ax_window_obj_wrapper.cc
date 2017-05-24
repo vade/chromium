@@ -8,6 +8,7 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "ui/accessibility/ax_node_data.h"
+#include "ui/accessibility/platform/aura_window_properties.h"
 #include "ui/aura/window.h"
 #include "ui/views/accessibility/ax_aura_obj_cache.h"
 #include "ui/views/widget/widget.h"
@@ -52,8 +53,24 @@ void AXWindowObjWrapper::Serialize(ui::AXNodeData* out_node_data) {
   out_node_data->role = is_alert_ ? ui::AX_ROLE_ALERT : ui::AX_ROLE_WINDOW;
   out_node_data->AddStringAttribute(ui::AX_ATTR_NAME,
                                     base::UTF16ToUTF8(window_->GetTitle()));
-  out_node_data->state = 0;
-  out_node_data->location = gfx::RectF(window_->bounds());
+  out_node_data->location = gfx::RectF(window_->GetBoundsInScreen());
+
+  ui::AXTreeIDRegistry::AXTreeID child_ax_tree_id =
+      window_->GetProperty(ui::kChildAXTreeID);
+  if (child_ax_tree_id != ui::AXTreeIDRegistry::kNoAXTreeID) {
+    // Most often, child AX trees are parented to Views. We need to handle
+    // the case where they're not here, but we don't want the same AX tree
+    // to be a child of two different parents.
+    //
+    // To avoid this double-parenting, only add the child tree ID of this
+    // window if the top-level window doesn't have an associated Widget.
+    if (!window_->GetToplevelWindow() ||
+        Widget::GetWidgetForNativeView(window_->GetToplevelWindow())) {
+      return;
+    }
+
+    out_node_data->AddIntAttribute(ui::AX_ATTR_CHILD_TREE_ID, child_ax_tree_id);
+  }
 }
 
 int32_t AXWindowObjWrapper::GetID() {
@@ -74,6 +91,31 @@ void AXWindowObjWrapper::OnWindowHierarchyChanged(
     const HierarchyChangeParams& params) {
   if (params.phase == WindowObserver::HierarchyChangeParams::HIERARCHY_CHANGED)
     AXAuraObjCache::GetInstance()->Remove(params.target, params.old_parent);
+}
+
+void AXWindowObjWrapper::OnWindowBoundsChanged(aura::Window* window,
+                                               const gfx::Rect& old_bounds,
+                                               const gfx::Rect& new_bounds) {
+  if (window != window_)
+    return;
+
+  AXAuraObjCache::GetInstance()->FireEvent(this, ui::AX_EVENT_LOCATION_CHANGED);
+
+  Widget* widget = Widget::GetWidgetForNativeView(window);
+  if (widget) {
+    views::View* root_view = widget->GetRootView();
+    if (root_view)
+      root_view->NotifyAccessibilityEvent(ui::AX_EVENT_LOCATION_CHANGED, true);
+  }
+}
+
+void AXWindowObjWrapper::OnWindowPropertyChanged(aura::Window* window,
+                                                 const void* key,
+                                                 intptr_t old) {
+  if (window == window_ && key == ui::kChildAXTreeID) {
+    AXAuraObjCache::GetInstance()->FireEvent(this,
+                                             ui::AX_EVENT_CHILDREN_CHANGED);
+  }
 }
 
 }  // namespace views

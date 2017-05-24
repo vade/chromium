@@ -15,6 +15,7 @@
 #include "content/public/renderer/chrome_object_extensions_utils.h"
 #include "content/renderer/render_thread_impl.h"
 #include "gin/arguments.h"
+#include "gin/data_object_builder.h"
 #include "gin/handle.h"
 #include "gin/object_template_builder.h"
 #include "skia/ext/benchmarking_canvas.h"
@@ -144,9 +145,9 @@ gin::WrapperInfo SkiaBenchmarking::kWrapperInfo = {gin::kEmbedderNativeGin};
 
 // static
 void SkiaBenchmarking::Install(blink::WebFrame* frame) {
-  v8::Isolate* isolate = blink::mainThreadIsolate();
+  v8::Isolate* isolate = blink::MainThreadIsolate();
   v8::HandleScope handle_scope(isolate);
-  v8::Local<v8::Context> context = frame->mainWorldScriptContext();
+  v8::Local<v8::Context> context = frame->MainWorldScriptContext();
   if (context.IsEmpty())
     return;
 
@@ -246,9 +247,9 @@ void SkiaBenchmarking::Rasterize(gin::Arguments* args) {
   picture->picture->playback(&benchmarking_canvas, &controller);
 
   blink::WebArrayBuffer buffer =
-      blink::WebArrayBuffer::create(bitmap.getSize(), 1);
+      blink::WebArrayBuffer::Create(bitmap.getSize(), 1);
   uint32_t* packed_pixels = reinterpret_cast<uint32_t*>(bitmap.getPixels());
-  uint8_t* buffer_pixels = reinterpret_cast<uint8_t*>(buffer.data());
+  uint8_t* buffer_pixels = reinterpret_cast<uint8_t*>(buffer.Data());
   // Swizzle from native Skia format to RGBA as we copy out.
   for (size_t i = 0; i < bitmap.getSize(); i += 4) {
     uint32_t c = packed_pixels[i >> 2];
@@ -258,16 +259,12 @@ void SkiaBenchmarking::Rasterize(gin::Arguments* args) {
     buffer_pixels[i + 3] = SkGetPackedA32(c);
   }
 
-  v8::Local<v8::Object> result = v8::Object::New(isolate);
-  result->Set(v8::String::NewFromUtf8(isolate, "width"),
-              v8::Number::New(isolate, snapped_clip.width()));
-  result->Set(v8::String::NewFromUtf8(isolate, "height"),
-              v8::Number::New(isolate, snapped_clip.height()));
-  result->Set(v8::String::NewFromUtf8(isolate, "data"),
-              blink::WebArrayBufferConverter::toV8Value(
-                  &buffer, context->Global(), isolate));
-
-  args->Return(result);
+  args->Return(gin::DataObjectBuilder(isolate)
+                   .Set("width", snapped_clip.width())
+                   .Set("height", snapped_clip.height())
+                   .Set("data", blink::WebArrayBufferConverter::ToV8Value(
+                                    &buffer, context->Global(), isolate))
+                   .Build());
 }
 
 void SkiaBenchmarking::GetOps(gin::Arguments* args) {

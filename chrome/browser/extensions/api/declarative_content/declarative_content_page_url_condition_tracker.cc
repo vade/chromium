@@ -9,9 +9,9 @@
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/api/declarative_content/content_constants.h"
 #include "components/url_matcher/url_matcher_factory.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/common/api/declarative/declarative_constants.h"
 
 namespace extensions {
 
@@ -192,8 +192,7 @@ void DeclarativeContentPageUrlConditionTracker::TrackForWebContents(
 
 void DeclarativeContentPageUrlConditionTracker::OnWebContentsNavigation(
     content::WebContents* contents,
-    const content::LoadCommittedDetails& details,
-    const content::FrameNavigateParams& params) {
+    content::NavigationHandle* navigation_handle) {
   DCHECK(base::ContainsKey(per_web_contents_tracker_, contents));
   per_web_contents_tracker_[contents]->UpdateMatchesForCurrentUrl(true);
 }

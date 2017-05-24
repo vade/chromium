@@ -14,9 +14,9 @@
 #import "ios/chrome/browser/find_in_page/find_in_page_model.h"
 #import "ios/chrome/browser/find_in_page/js_findinpage_manager.h"
 #import "ios/chrome/browser/web/dom_altering_lock.h"
-#import "ios/web/public/web_state/crw_web_view_proxy.h"
-#import "ios/web/public/web_state/crw_web_view_scroll_view_proxy.h"
 #import "ios/web/public/web_state/js/crw_js_injection_receiver.h"
+#import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
+#import "ios/web/public/web_state/ui/crw_web_view_scroll_view_proxy.h"
 #import "ios/web/public/web_state/web_state.h"
 #import "ios/web/public/web_state/web_state_observer_bridge.h"
 
@@ -39,7 +39,7 @@ static NSString* gSearchTerm;
 }
 
 @interface FindInPageController () <DOMAltering, CRWWebStateObserver>
-// The find in page controller delegate.
+// The find in page controller delegate.  Can be nil.
 @property(nonatomic, readonly) id<FindInPageControllerDelegate> delegate;
 
 // The web view's scroll view.
@@ -73,10 +73,9 @@ static NSString* gSearchTerm;
 @end
 
 @implementation FindInPageController {
- @private
   // Object that manages find_in_page.js injection into the web view.
-  __unsafe_unretained JsFindinpageManager* _findInPageJsManager;
-  __unsafe_unretained id<FindInPageControllerDelegate> _delegate;
+  __weak JsFindinpageManager* _findInPageJsManager;
+  __weak id<FindInPageControllerDelegate> _delegate;
 
   // Access to the web view from the web state.
   id<CRWWebViewProxy> _webViewProxy;
@@ -90,6 +89,7 @@ static NSString* gSearchTerm;
 }
 
 @synthesize delegate = _delegate;
+@synthesize findInPageModel = _findInPageModel;
 
 + (void)setSearchTerm:(NSString*)string {
   gSearchTerm = [string copy];
@@ -103,10 +103,11 @@ static NSString* gSearchTerm;
               delegate:(id<FindInPageControllerDelegate>)delegate {
   self = [super init];
   if (self) {
-    DCHECK(delegate);
+    _findInPageModel = [[FindInPageModel alloc] init];
     _findInPageJsManager = base::mac::ObjCCastStrict<JsFindinpageManager>(
         [webState->GetJSInjectionReceiver()
             instanceOfClass:[JsFindinpageManager class]]);
+    _findInPageJsManager.findInPageModel = _findInPageModel;
     _delegate = delegate;
     _webStateObserverBridge.reset(
         new web::WebStateObserverBridge(webState, self));
@@ -128,10 +129,6 @@ static NSString* gSearchTerm;
 
 - (void)dealloc {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
-}
-
-- (FindInPageModel*)findInPageModel {
-  return [_findInPageJsManager findInPageModel];
 }
 
 - (BOOL)canFindInPage {
@@ -271,15 +268,17 @@ static NSString* gSearchTerm;
 // Remove highlights from the page and disable the model.
 - (void)disableFindInPageWithCompletionHandler:
     (ProceduralBlock)completionHandler {
-  if (![self canFindInPage])
+  if (![self canFindInPage]) {
+    if (completionHandler)
+      completionHandler();
     return;
+  }
   // Cancel any queued calls to |recurringPumpWithCompletionHandler|.
   [NSObject cancelPreviousPerformRequestsWithTarget:self];
   __weak FindInPageController* weakSelf = self;
   ProceduralBlock handler = ^{
     FindInPageController* strongSelf = weakSelf;
     if (strongSelf) {
-      [strongSelf.findInPageModel setEnabled:NO];
       web::WebState* webState = [strongSelf webState];
       if (webState)
         DOMAlteringLock::FromWebState(webState)->Release(strongSelf);

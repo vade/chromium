@@ -5,11 +5,17 @@
 #ifndef NET_NQE_EFFECTIVE_CONNECTION_TYPE_H_
 #define NET_NQE_EFFECTIVE_CONNECTION_TYPE_H_
 
-#include <string>
-
+#include "base/strings/string_piece.h"
 #include "net/base/net_export.h"
 
 namespace net {
+
+NET_EXPORT extern const char kEffectiveConnectionTypeUnknown[];
+NET_EXPORT extern const char kEffectiveConnectionTypeOffline[];
+NET_EXPORT extern const char kEffectiveConnectionTypeSlow2G[];
+NET_EXPORT extern const char kEffectiveConnectionType2G[];
+NET_EXPORT extern const char kEffectiveConnectionType3G[];
+NET_EXPORT extern const char kEffectiveConnectionType4G[];
 
 // EffectiveConnectionType is the connection type whose typical performance is
 // most similar to the measured performance of the network in use. In many
@@ -62,8 +68,13 @@ NET_EXPORT const char* GetNameForEffectiveConnectionType(
 // EFFECTIVE_CONNECTION_TYPE_UNKNOWN. |effective_connection_type| must be
 // non-null.
 NET_EXPORT bool GetEffectiveConnectionTypeForName(
-    const std::string& connection_type_name,
+    base::StringPiece connection_type_name,
     EffectiveConnectionType* effective_connection_type);
+
+// Returns the string equivalent of |type|. Deprecated, and replaced by
+// GetNameForEffectiveConnectionType.
+NET_EXPORT_PRIVATE const char* DeprecatedGetNameForEffectiveConnectionType(
+    EffectiveConnectionType type);
 
 }  // namespace net
 

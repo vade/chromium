@@ -71,83 +71,106 @@ const char kHistogramDocWriteBlockCount[] =
     "PageLoad.Clients.DocWrite.Block.Count";
 const char kHistogramDocWriteBlockReloadCount[] =
     "PageLoad.Clients.DocWrite.Block.ReloadCount";
+const char kHistogramDocWriteBlockLoadingBehavior[] =
+    "PageLoad.Clients.DocWrite.Block.DocumentWriteLoadingBehavior";
 
 }  // namespace internal
 
-void DocumentWritePageLoadMetricsObserver::OnFirstContentfulPaint(
-    const page_load_metrics::PageLoadTiming& timing,
+void DocumentWritePageLoadMetricsObserver::OnFirstContentfulPaintInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
-  if (info.metadata.behavior_flags &
-      blink::WebLoadingBehaviorFlag::WebLoadingBehaviorDocumentWriteEvaluator) {
+  if (info.main_frame_metadata.behavior_flags &
+      blink::WebLoadingBehaviorFlag::
+          kWebLoadingBehaviorDocumentWriteEvaluator) {
     LogDocumentWriteEvaluatorFirstContentfulPaint(timing, info);
   }
-  if (info.metadata.behavior_flags &
-      blink::WebLoadingBehaviorFlag::WebLoadingBehaviorDocumentWriteBlock) {
+  if (info.main_frame_metadata.behavior_flags &
+      blink::WebLoadingBehaviorFlag::kWebLoadingBehaviorDocumentWriteBlock) {
     LogDocumentWriteBlockFirstContentfulPaint(timing, info);
   }
 }
 
-void DocumentWritePageLoadMetricsObserver::OnFirstMeaningfulPaint(
-    const page_load_metrics::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
-  if (info.metadata.behavior_flags &
-      blink::WebLoadingBehaviorFlag::WebLoadingBehaviorDocumentWriteEvaluator) {
+void DocumentWritePageLoadMetricsObserver::
+    OnFirstMeaningfulPaintInMainFrameDocument(
+        const page_load_metrics::mojom::PageLoadTiming& timing,
+        const page_load_metrics::PageLoadExtraInfo& info) {
+  if (info.main_frame_metadata.behavior_flags &
+      blink::WebLoadingBehaviorFlag::
+          kWebLoadingBehaviorDocumentWriteEvaluator) {
     LogDocumentWriteEvaluatorFirstMeaningfulPaint(timing, info);
   }
-  if (info.metadata.behavior_flags &
-      blink::WebLoadingBehaviorFlag::WebLoadingBehaviorDocumentWriteBlock) {
+  if (info.main_frame_metadata.behavior_flags &
+      blink::WebLoadingBehaviorFlag::kWebLoadingBehaviorDocumentWriteBlock) {
     LogDocumentWriteBlockFirstMeaningfulPaint(timing, info);
   }
 }
 
 void DocumentWritePageLoadMetricsObserver::OnParseStop(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
-  if (info.metadata.behavior_flags &
-      blink::WebLoadingBehaviorFlag::WebLoadingBehaviorDocumentWriteEvaluator) {
+  if (info.main_frame_metadata.behavior_flags &
+      blink::WebLoadingBehaviorFlag::
+          kWebLoadingBehaviorDocumentWriteEvaluator) {
     LogDocumentWriteEvaluatorParseStop(timing, info);
   }
-  if (info.metadata.behavior_flags &
-      blink::WebLoadingBehaviorFlag::WebLoadingBehaviorDocumentWriteBlock) {
+  if (info.main_frame_metadata.behavior_flags &
+      blink::WebLoadingBehaviorFlag::kWebLoadingBehaviorDocumentWriteBlock) {
     LogDocumentWriteBlockParseStop(timing, info);
   }
 }
 
+void LogLoadingBehaviorMetrics(
+ DocumentWritePageLoadMetricsObserver::DocumentWriteLoadingBehavior behavior) {
+  UMA_HISTOGRAM_ENUMERATION(internal::kHistogramDocWriteBlockLoadingBehavior,
+                            behavior,
+                  DocumentWritePageLoadMetricsObserver::LOADING_BEHAVIOR_MAX);
+}
+
 void DocumentWritePageLoadMetricsObserver::OnLoadingBehaviorObserved(
     const page_load_metrics::PageLoadExtraInfo& info) {
-  if ((info.metadata.behavior_flags &
+  if ((info.main_frame_metadata.behavior_flags &
        blink::WebLoadingBehaviorFlag::
-           WebLoadingBehaviorDocumentWriteBlockReload) &&
+           kWebLoadingBehaviorDocumentWriteBlockReload) &&
       !doc_write_block_reload_observed_) {
-    DCHECK(
-        !(info.metadata.behavior_flags &
-          blink::WebLoadingBehaviorFlag::WebLoadingBehaviorDocumentWriteBlock));
+    DCHECK(!(
+        info.main_frame_metadata.behavior_flags &
+        blink::WebLoadingBehaviorFlag::kWebLoadingBehaviorDocumentWriteBlock));
     UMA_HISTOGRAM_COUNTS(internal::kHistogramDocWriteBlockReloadCount, 1);
+    LogLoadingBehaviorMetrics(LOADING_BEHAVIOR_RELOAD);
     doc_write_block_reload_observed_ = true;
   }
-  if ((info.metadata.behavior_flags &
-       blink::WebLoadingBehaviorFlag::WebLoadingBehaviorDocumentWriteBlock) &&
+  if ((info.main_frame_metadata.behavior_flags &
+       blink::WebLoadingBehaviorFlag::kWebLoadingBehaviorDocumentWriteBlock) &&
       !doc_write_block_observed_) {
     UMA_HISTOGRAM_BOOLEAN(internal::kHistogramDocWriteBlockCount, true);
+    LogLoadingBehaviorMetrics(LOADING_BEHAVIOR_BLOCK);
     doc_write_block_observed_ = true;
+  }
+  if ((info.main_frame_metadata.behavior_flags &
+       blink::WebLoadingBehaviorFlag::
+           kWebLoadingBehaviorDocumentWriteBlockDifferentScheme) &&
+      !doc_write_same_site_diff_scheme_) {
+    LogLoadingBehaviorMetrics(LOADING_BEHAVIOR_SAME_SITE_DIFF_SCHEME);
+    doc_write_same_site_diff_scheme_ = true;
   }
 }
 
 void DocumentWritePageLoadMetricsObserver::
     LogDocumentWriteEvaluatorFirstContentfulPaint(
-        const page_load_metrics::PageLoadTiming& timing,
+        const page_load_metrics::mojom::PageLoadTiming& timing,
         const page_load_metrics::PageLoadExtraInfo& info) {
   if (WasStartedInForegroundOptionalEventInForeground(
-          timing.first_contentful_paint, info)) {
+          timing.paint_timing->first_contentful_paint, info)) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramDocWriteFirstContentfulPaint,
-                        timing.first_contentful_paint.value());
+                        timing.paint_timing->first_contentful_paint.value());
     PAGE_LOAD_HISTOGRAM(
         internal::kHistogramDocWriteParseStartToFirstContentfulPaint,
-        timing.first_contentful_paint.value() - timing.parse_start.value());
+        timing.paint_timing->first_contentful_paint.value() -
+            timing.parse_timing->parse_start.value());
   } else {
     PAGE_LOAD_HISTOGRAM(
         internal::kBackgroundHistogramDocWriteFirstContentfulPaint,
-        timing.first_contentful_paint.value());
+        timing.paint_timing->first_contentful_paint.value());
   }
 }
 
@@ -159,103 +182,114 @@ void DocumentWritePageLoadMetricsObserver::
 // the consumer wants.
 void DocumentWritePageLoadMetricsObserver::
     LogDocumentWriteEvaluatorFirstMeaningfulPaint(
-        const page_load_metrics::PageLoadTiming& timing,
+        const page_load_metrics::mojom::PageLoadTiming& timing,
         const page_load_metrics::PageLoadExtraInfo& info) {
   if (WasStartedInForegroundOptionalEventInForeground(
-          timing.first_meaningful_paint, info)) {
+          timing.paint_timing->first_meaningful_paint, info)) {
     PAGE_LOAD_HISTOGRAM(
         "PageLoad.Clients.DocWrite.Evaluator.Experimental.PaintTiming."
         "ParseStartToFirstMeaningfulPaint",
-        timing.first_meaningful_paint.value() - timing.parse_start.value());
+        timing.paint_timing->first_meaningful_paint.value() -
+            timing.parse_timing->parse_start.value());
   }
 }
 
 void DocumentWritePageLoadMetricsObserver::
     LogDocumentWriteBlockFirstMeaningfulPaint(
-        const page_load_metrics::PageLoadTiming& timing,
+        const page_load_metrics::mojom::PageLoadTiming& timing,
         const page_load_metrics::PageLoadExtraInfo& info) {
   if (WasStartedInForegroundOptionalEventInForeground(
-          timing.first_meaningful_paint, info)) {
+          timing.paint_timing->first_meaningful_paint, info)) {
     PAGE_LOAD_HISTOGRAM(
         "PageLoad.Clients.DocWrite.Block.Experimental.PaintTiming."
         "ParseStartToFirstMeaningfulPaint",
-        timing.first_meaningful_paint.value() - timing.parse_start.value());
+        timing.paint_timing->first_meaningful_paint.value() -
+            timing.parse_timing->parse_start.value());
   }
 }
 
 void DocumentWritePageLoadMetricsObserver::LogDocumentWriteEvaluatorParseStop(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
-  base::TimeDelta parse_duration =
-      timing.parse_stop.value() - timing.parse_start.value();
-  if (WasStartedInForegroundOptionalEventInForeground(timing.parse_stop,
-                                                      info)) {
+  base::TimeDelta parse_duration = timing.parse_timing->parse_stop.value() -
+                                   timing.parse_timing->parse_start.value();
+  if (WasStartedInForegroundOptionalEventInForeground(
+          timing.parse_timing->parse_stop, info)) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramDocWriteParseDuration,
                         parse_duration);
-    PAGE_LOAD_HISTOGRAM(internal::kHistogramDocWriteParseBlockedOnScriptLoad,
-                        timing.parse_blocked_on_script_load_duration.value());
+    PAGE_LOAD_HISTOGRAM(
+        internal::kHistogramDocWriteParseBlockedOnScriptLoad,
+        timing.parse_timing->parse_blocked_on_script_load_duration.value());
     PAGE_LOAD_HISTOGRAM(
         internal::kHistogramDocWriteParseBlockedOnScriptLoadDocumentWrite,
-        timing.parse_blocked_on_script_load_from_document_write_duration
+        timing.parse_timing
+            ->parse_blocked_on_script_load_from_document_write_duration
             .value());
     PAGE_LOAD_HISTOGRAM(
         internal::kHistogramDocWriteParseBlockedOnScriptExecution,
-        timing.parse_blocked_on_script_execution_duration.value());
+        timing.parse_timing->parse_blocked_on_script_execution_duration
+            .value());
     PAGE_LOAD_HISTOGRAM(
         internal::kHistogramDocWriteParseBlockedOnScriptExecutionDocumentWrite,
-        timing.parse_blocked_on_script_execution_from_document_write_duration
+        timing.parse_timing
+            ->parse_blocked_on_script_execution_from_document_write_duration
             .value());
   } else {
     PAGE_LOAD_HISTOGRAM(internal::kBackgroundHistogramDocWriteParseDuration,
                         parse_duration);
     PAGE_LOAD_HISTOGRAM(
         internal::kBackgroundHistogramDocWriteParseBlockedOnScriptLoad,
-        timing.parse_blocked_on_script_load_duration.value());
+        timing.parse_timing->parse_blocked_on_script_load_duration.value());
     PAGE_LOAD_HISTOGRAM(
         internal::
             kBackgroundHistogramDocWriteParseBlockedOnScriptLoadDocumentWrite,
-        timing.parse_blocked_on_script_load_from_document_write_duration
+        timing.parse_timing
+            ->parse_blocked_on_script_load_from_document_write_duration
             .value());
   }
 }
 
 void DocumentWritePageLoadMetricsObserver::
     LogDocumentWriteBlockFirstContentfulPaint(
-        const page_load_metrics::PageLoadTiming& timing,
+        const page_load_metrics::mojom::PageLoadTiming& timing,
         const page_load_metrics::PageLoadExtraInfo& info) {
   if (WasStartedInForegroundOptionalEventInForeground(
-          timing.first_contentful_paint, info)) {
+          timing.paint_timing->first_contentful_paint, info)) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramDocWriteBlockFirstContentfulPaint,
-                        timing.first_contentful_paint.value());
+                        timing.paint_timing->first_contentful_paint.value());
     PAGE_LOAD_HISTOGRAM(
         internal::kHistogramDocWriteBlockParseStartToFirstContentfulPaint,
-        timing.first_contentful_paint.value() - timing.parse_start.value());
+        timing.paint_timing->first_contentful_paint.value() -
+            timing.parse_timing->parse_start.value());
   }
 }
 
 void DocumentWritePageLoadMetricsObserver::LogDocumentWriteBlockParseStop(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
-  base::TimeDelta parse_duration =
-      timing.parse_stop.value() - timing.parse_start.value();
-  if (WasStartedInForegroundOptionalEventInForeground(timing.parse_stop,
-                                                      info)) {
+  base::TimeDelta parse_duration = timing.parse_timing->parse_stop.value() -
+                                   timing.parse_timing->parse_start.value();
+  if (WasStartedInForegroundOptionalEventInForeground(
+          timing.parse_timing->parse_stop, info)) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramDocWriteBlockParseDuration,
                         parse_duration);
     PAGE_LOAD_HISTOGRAM(
         internal::kHistogramDocWriteBlockParseBlockedOnScriptLoad,
-        timing.parse_blocked_on_script_load_duration.value());
+        timing.parse_timing->parse_blocked_on_script_load_duration.value());
     PAGE_LOAD_HISTOGRAM(
         internal::kHistogramDocWriteBlockParseBlockedOnScriptLoadDocumentWrite,
-        timing.parse_blocked_on_script_load_from_document_write_duration
+        timing.parse_timing
+            ->parse_blocked_on_script_load_from_document_write_duration
             .value());
     PAGE_LOAD_HISTOGRAM(
         internal::kHistogramDocWriteBlockParseBlockedOnScriptExecution,
-        timing.parse_blocked_on_script_execution_duration.value());
+        timing.parse_timing->parse_blocked_on_script_execution_duration
+            .value());
     PAGE_LOAD_HISTOGRAM(
         internal::
             kHistogramDocWriteBlockParseBlockedOnScriptExecutionDocumentWrite,
-        timing.parse_blocked_on_script_execution_from_document_write_duration
+        timing.parse_timing
+            ->parse_blocked_on_script_execution_from_document_write_duration
             .value());
   } else {
     PAGE_LOAD_HISTOGRAM(
@@ -263,10 +297,11 @@ void DocumentWritePageLoadMetricsObserver::LogDocumentWriteBlockParseStop(
         parse_duration);
     PAGE_LOAD_HISTOGRAM(
         internal::kBackgroundHistogramDocWriteBlockParseBlockedOnScriptLoad,
-        timing.parse_blocked_on_script_load_duration.value());
+        timing.parse_timing->parse_blocked_on_script_load_duration.value());
     PAGE_LOAD_HISTOGRAM(
         internal::kBackgroundDocWriteBlockParseBlockedOnScriptLoadDocumentWrite,
-        timing.parse_blocked_on_script_load_from_document_write_duration
+        timing.parse_timing
+            ->parse_blocked_on_script_load_from_document_write_duration
             .value());
   }
 }

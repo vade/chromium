@@ -9,8 +9,8 @@
 #include "net/quic/core/congestion_control/prr_sender.h"
 #include "net/quic/core/congestion_control/rtt_stats.h"
 #include "net/quic/core/crypto/crypto_protocol.h"
-#include "net/quic/core/quic_flags.h"
 #include "net/quic/platform/api/quic_bug_tracker.h"
+#include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_logging.h"
 
 namespace net {
@@ -54,6 +54,11 @@ void TcpCubicSenderPackets::SetFromConfig(const QuicConfig& config,
       config.HasReceivedConnectionOptions() &&
       ContainsQuicTag(config.ReceivedConnectionOptions(), kBLMX)) {
     cubic_.SetFixBetaLastMax(true);
+  }
+  if (FLAGS_quic_reloadable_flag_quic_enable_cubic_per_ack_updates &&
+      config.HasReceivedConnectionOptions() &&
+      ContainsQuicTag(config.ReceivedConnectionOptions(), kCPAU)) {
+    cubic_.SetAllowPerAckUpdates(true);
   }
 }
 
@@ -204,14 +209,14 @@ void TcpCubicSenderPackets::MaybeIncreaseCwnd(
 }
 
 void TcpCubicSenderPackets::HandleRetransmissionTimeout() {
-  cubic_.Reset();
+  cubic_.ResetCubicState();
   slowstart_threshold_ = congestion_window_ / 2;
   congestion_window_ = min_congestion_window_;
 }
 
 void TcpCubicSenderPackets::OnConnectionMigration() {
   TcpCubicSenderBase::OnConnectionMigration();
-  cubic_.Reset();
+  cubic_.ResetCubicState();
   congestion_window_count_ = 0;
   congestion_window_ = initial_tcp_congestion_window_;
   slowstart_threshold_ = initial_max_tcp_congestion_window_;

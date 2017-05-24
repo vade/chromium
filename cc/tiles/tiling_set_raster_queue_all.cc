@@ -180,7 +180,6 @@ void TilingSetRasterQueueAll::OnePriorityRectIterator::AdvanceToNextTile(
     }
     Tile* tile = tiling_->TileAt(iterator->index_x(), iterator->index_y());
     if (IsTileValid(tile)) {
-      tiling_->UpdateRequiredStatesOnTile(tile);
       current_tile_ = tiling_->MakePrioritizedTile(tile, priority_rect_type_);
       break;
     }
@@ -195,22 +194,36 @@ bool TilingSetRasterQueueAll::OnePriorityRectIterator::
     current_tile_ = PrioritizedTile();
     return false;
   }
-  tiling_->UpdateRequiredStatesOnTile(tile);
   current_tile_ = tiling_->MakePrioritizedTile(tile, priority_rect_type_);
   return true;
 }
 
 bool TilingSetRasterQueueAll::OnePriorityRectIterator::IsTileValid(
     const Tile* tile) const {
-  if (!tile || !TileNeedsRaster(tile))
+  if (!tile)
     return false;
+
+  // A tile is valid for raster if it needs raster and is unoccluded.
+  bool tile_is_valid_for_raster =
+      tile->draw_info().NeedsRaster() && !tiling_->IsTileOccluded(tile);
+
+  // A tile is not valid for the raster queue if it is not valid for raster or
+  // processing for checker-images.
+  if (!tile_is_valid_for_raster) {
+    bool tile_is_valid_for_checker_images =
+        tile->draw_info().is_checker_imaged() &&
+        tiling_->ShouldDecodeCheckeredImagesForTile(tile);
+    if (!tile_is_valid_for_checker_images)
+      return false;
+  }
+
   // After the pending visible rect has been processed, we must return false
   // for pending visible rect tiles as tiling iterators do not ignore those
   // tiles.
   if (priority_rect_type_ > PictureLayerTiling::PENDING_VISIBLE_RECT) {
-    gfx::Rect tile_rect = tiling_->tiling_data()->TileBounds(
-        tile->tiling_i_index(), tile->tiling_j_index());
-    if (pending_visible_rect_.Intersects(tile_rect))
+    gfx::Rect tile_bounds = tiling_data_->TileBounds(tile->tiling_i_index(),
+                                                     tile->tiling_j_index());
+    if (pending_visible_rect_.Intersects(tile_bounds))
       return false;
   }
   return true;

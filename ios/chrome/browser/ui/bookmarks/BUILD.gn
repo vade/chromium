@@ -3,9 +3,8 @@
 # found in the LICENSE file.
 
 source_set("bookmarks") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   sources = [
-    "bookmark_all_collection_view.h",
-    "bookmark_all_collection_view.mm",
     "bookmark_collection_cells.h",
     "bookmark_collection_cells.mm",
     "bookmark_collection_view.h",
@@ -57,6 +56,8 @@ source_set("bookmarks") {
     "bookmark_promo_cell.mm",
     "bookmark_promo_controller.h",
     "bookmark_promo_controller.mm",
+    "bookmark_signin_promo_cell.h",
+    "bookmark_signin_promo_cell.mm",
     "bookmark_utils_ios.h",
     "bookmark_utils_ios.mm",
     "undo_manager_bridge_observer.h",
@@ -91,6 +92,8 @@ source_set("bookmarks") {
     "//ios/chrome/browser/tabs",
     "//ios/chrome/browser/ui",
     "//ios/chrome/browser/ui/alert_coordinator",
+    "//ios/chrome/browser/ui/authentication:authentication_arc",
+    "//ios/chrome/browser/ui/authentication:authentication_ui",
     "//ios/chrome/browser/ui/bookmarks/bars",
     "//ios/chrome/browser/ui/bookmarks/cells",
     "//ios/chrome/browser/ui/collection_view",
@@ -124,9 +127,11 @@ source_set("bookmarks") {
 }
 
 source_set("unit_tests") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
     "bookmark_home_view_controller_unittest.mm",
+    "bookmark_ios_unittest.h",
     "bookmark_ios_unittest.mm",
     "bookmark_position_cache_unittest.mm",
     "bookmark_utils_ios_unittest.mm",
@@ -145,6 +150,7 @@ source_set("unit_tests") {
 }
 
 source_set("eg_tests") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
     "bookmarks_egtest.mm",
@@ -204,9 +210,6 @@ bundle_data("resources") {
     "resources/bookmark_blue_folder.png",
     "resources/bookmark_blue_folder@2x.png",
     "resources/bookmark_blue_folder@3x.png",
-    "resources/bookmark_blue_star.png",
-    "resources/bookmark_blue_star@2x.png",
-    "resources/bookmark_blue_star@3x.png",
     "resources/bookmark_gray_back.png",
     "resources/bookmark_gray_back@2x.png",
     "resources/bookmark_gray_back@3x.png",
@@ -228,9 +231,6 @@ bundle_data("resources") {
     "resources/bookmark_gray_new_folder.png",
     "resources/bookmark_gray_new_folder@2x.png",
     "resources/bookmark_gray_new_folder@3x.png",
-    "resources/bookmark_gray_star.png",
-    "resources/bookmark_gray_star@2x.png",
-    "resources/bookmark_gray_star@3x.png",
     "resources/bookmark_gray_star_large.png",
     "resources/bookmark_gray_star_large@2x.png",
     "resources/bookmark_gray_star_large@3x.png",

@@ -8,10 +8,11 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
+#include "content/public/browser/web_contents.h"
 #include "ui/events/event.h"
 
 namespace content {
-class BrowserContext;
 class WebContents;
 }
 
@@ -50,12 +51,6 @@ class CastContentWindow {
   // |window_manager| should outlive this CastContentWindow.
   virtual void ShowWebContents(content::WebContents* web_contents,
                                CastWindowManager* window_manager) = 0;
-
-  // Creates a WebContents.
-  // TODO(derekjchow): remove this function from this class, since it doesn't
-  // have anything to do with displaying web_contents.
-  virtual std::unique_ptr<content::WebContents> CreateWebContents(
-      content::BrowserContext* browser_context) = 0;
 };
 
 }  // namespace shell

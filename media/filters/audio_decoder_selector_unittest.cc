@@ -4,10 +4,10 @@
 
 #include <stddef.h>
 #include <utility>
-#include <vector>
 
 #include "base/bind.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "build/build_config.h"
@@ -42,6 +42,9 @@ MATCHER(ClearConfig, "") {
 
 namespace media {
 
+const char kDecoder1[] = "Decoder1";
+const char kDecoder2[] = "Decoder2";
+
 class AudioDecoderSelectorTest : public ::testing::Test {
  public:
   enum DecryptorCapability {
@@ -52,14 +55,13 @@ class AudioDecoderSelectorTest : public ::testing::Test {
   };
 
   AudioDecoderSelectorTest()
-      : media_log_(new MediaLog()),
-        traits_(media_log_),
+      : traits_(&media_log_),
         demuxer_stream_(
             new StrictMock<MockDemuxerStream>(DemuxerStream::AUDIO)),
-        decoder_1_(new StrictMock<MockAudioDecoder>()),
-        decoder_2_(new StrictMock<MockAudioDecoder>()) {
-    all_decoders_.push_back(decoder_1_);
-    all_decoders_.push_back(decoder_2_);
+        decoder_1_(new StrictMock<MockAudioDecoder>(kDecoder1)),
+        decoder_2_(new StrictMock<MockAudioDecoder>(kDecoder2)) {
+    all_decoders_.push_back(base::WrapUnique(decoder_1_));
+    all_decoders_.push_back(base::WrapUnique(decoder_2_));
     // |cdm_context_| and |decryptor_| are conditionally created in
     // InitializeDecoderSelector().
   }
@@ -89,6 +91,10 @@ class AudioDecoderSelectorTest : public ::testing::Test {
     demuxer_stream_->set_audio_decoder_config(encrypted_audio_config);
   }
 
+  std::vector<std::unique_ptr<AudioDecoder>> CreateAudioDecodersForTest() {
+    return std::move(all_decoders_);
+  }
+
   void InitializeDecoderSelector(DecryptorCapability decryptor_capability,
                                  int num_decoders) {
     if (decryptor_capability != kNoCdm) {
@@ -112,18 +118,24 @@ class AudioDecoderSelectorTest : public ::testing::Test {
         all_decoders_.begin() + num_decoders, all_decoders_.end());
 
     decoder_selector_.reset(new AudioDecoderSelector(
-        message_loop_.task_runner(), std::move(all_decoders_), media_log_));
+        message_loop_.task_runner(),
+        base::Bind(&AudioDecoderSelectorTest::CreateAudioDecodersForTest,
+                   base::Unretained(this)),
+        &media_log_));
   }
 
-  void SelectDecoder() {
+  void SelectDecoderWithBlacklist(const std::string& blacklisted_decoder) {
     decoder_selector_->SelectDecoder(
         &traits_, demuxer_stream_.get(), cdm_context_.get(),
+        blacklisted_decoder,
         base::Bind(&AudioDecoderSelectorTest::MockOnDecoderSelected,
                    base::Unretained(this)),
         base::Bind(&AudioDecoderSelectorTest::OnDecoderOutput),
         base::Bind(&AudioDecoderSelectorTest::OnWaitingForDecryptionKey));
     base::RunLoop().RunUntilIdle();
   }
+
+  void SelectDecoder() { SelectDecoderWithBlacklist(""); }
 
   void SelectDecoderAndDestroy() {
     SelectDecoder();
@@ -141,7 +153,7 @@ class AudioDecoderSelectorTest : public ::testing::Test {
     NOTREACHED();
   }
 
-  scoped_refptr<MediaLog> media_log_;
+  MediaLog media_log_;
 
   // Stream traits specific to audio decoding.
   DecoderStreamTraits<DemuxerStream::AUDIO> traits_;
@@ -160,7 +172,7 @@ class AudioDecoderSelectorTest : public ::testing::Test {
 
   StrictMock<MockAudioDecoder>* decoder_1_;
   StrictMock<MockAudioDecoder>* decoder_2_;
-  ScopedVector<AudioDecoder> all_decoders_;
+  std::vector<std::unique_ptr<AudioDecoder>> all_decoders_;
   std::unique_ptr<AudioDecoder> selected_decoder_;
 
   base::MessageLoop message_loop_;
@@ -169,24 +181,24 @@ class AudioDecoderSelectorTest : public ::testing::Test {
   DISALLOW_COPY_AND_ASSIGN(AudioDecoderSelectorTest);
 };
 
-// TODO(xhwang): Add kNoCdm tests for clear stream.
+// Tests for clear streams. The CDM will not be used for clear streams so
+// DecryptorCapability doesn't really matter.
 
-// The stream is not encrypted but we have no clear decoder. No decoder can be
-// selected.
-TEST_F(AudioDecoderSelectorTest, ClearStream_NoDecryptor_NoClearDecoder) {
+TEST_F(AudioDecoderSelectorTest, ClearStream_NoClearDecoder) {
   UseClearStream();
-  InitializeDecoderSelector(kNoDecryptor, 0);
+
+  // DecoderSelector will not try decrypting decoders for clear stream, even
+  // if the CDM is capable of doing decrypt and decode.
+  InitializeDecoderSelector(kDecryptAndDecode, 0);
 
   EXPECT_CALL(*this, OnDecoderSelected(IsNull(), IsNull()));
 
   SelectDecoder();
 }
 
-// The stream is not encrypted and we have one clear decoder. The decoder
-// will be selected.
-TEST_F(AudioDecoderSelectorTest, ClearStream_NoDecryptor_OneClearDecoder) {
+TEST_F(AudioDecoderSelectorTest, ClearStream_OneClearDecoder) {
   UseClearStream();
-  InitializeDecoderSelector(kNoDecryptor, 1);
+  InitializeDecoderSelector(kNoCdm, 1);
 
   EXPECT_CALL(*decoder_1_, Initialize(ClearConfig(), _, _, _))
       .WillOnce(RunCallback<2>(true));
@@ -195,21 +207,18 @@ TEST_F(AudioDecoderSelectorTest, ClearStream_NoDecryptor_OneClearDecoder) {
   SelectDecoder();
 }
 
-TEST_F(AudioDecoderSelectorTest,
-       Destroy_ClearStream_NoDecryptor_OneClearDecoder) {
+TEST_F(AudioDecoderSelectorTest, Destroy_ClearStream_OneClearDecoder) {
   UseClearStream();
-  InitializeDecoderSelector(kNoDecryptor, 1);
+  InitializeDecoderSelector(kNoCdm, 1);
 
   EXPECT_CALL(*decoder_1_, Initialize(ClearConfig(), _, _, _));
 
   SelectDecoderAndDestroy();
 }
 
-// The stream is not encrypted and we have multiple clear decoders. The first
-// decoder that can decode the input stream will be selected.
-TEST_F(AudioDecoderSelectorTest, ClearStream_NoDecryptor_MultipleClearDecoder) {
+TEST_F(AudioDecoderSelectorTest, ClearStream_MultipleClearDecoder) {
   UseClearStream();
-  InitializeDecoderSelector(kNoDecryptor, 2);
+  InitializeDecoderSelector(kNoCdm, 2);
 
   EXPECT_CALL(*decoder_1_, Initialize(ClearConfig(), _, _, _))
       .WillOnce(RunCallback<2>(false));
@@ -220,10 +229,9 @@ TEST_F(AudioDecoderSelectorTest, ClearStream_NoDecryptor_MultipleClearDecoder) {
   SelectDecoder();
 }
 
-TEST_F(AudioDecoderSelectorTest,
-       Destroy_ClearStream_NoDecryptor_MultipleClearDecoder) {
+TEST_F(AudioDecoderSelectorTest, Destroy_ClearStream_MultipleClearDecoder) {
   UseClearStream();
-  InitializeDecoderSelector(kNoDecryptor, 2);
+  InitializeDecoderSelector(kNoCdm, 2);
 
   EXPECT_CALL(*decoder_1_, Initialize(ClearConfig(), _, _, _))
       .WillOnce(RunCallback<2>(false));
@@ -232,30 +240,20 @@ TEST_F(AudioDecoderSelectorTest,
   SelectDecoderAndDestroy();
 }
 
-// There is a decryptor but the stream is not encrypted. The decoder will be
-// selected.
-TEST_F(AudioDecoderSelectorTest, ClearStream_HasDecryptor) {
+TEST_F(AudioDecoderSelectorTest, ClearStream_BlackListedDecoder) {
   UseClearStream();
-  InitializeDecoderSelector(kDecryptOnly, 1);
+  InitializeDecoderSelector(kNoCdm, 2);
 
-  EXPECT_CALL(*decoder_1_, Initialize(ClearConfig(), _, _, _))
+  // Decoder 1 is blacklisted and will not even be tried.
+  EXPECT_CALL(*decoder_2_, Initialize(ClearConfig(), _, _, _))
       .WillOnce(RunCallback<2>(true));
-  EXPECT_CALL(*this, OnDecoderSelected(decoder_1_, IsNull()));
+  EXPECT_CALL(*this, OnDecoderSelected(decoder_2_, IsNull()));
 
-  SelectDecoder();
+  SelectDecoderWithBlacklist(kDecoder1);
 }
 
-TEST_F(AudioDecoderSelectorTest, Destroy_ClearStream_HasDecryptor) {
-  UseClearStream();
-  InitializeDecoderSelector(kDecryptOnly, 1);
+// Tests for encrypted streams.
 
-  EXPECT_CALL(*decoder_1_, Initialize(ClearConfig(), _, _, _));
-
-  SelectDecoderAndDestroy();
-}
-
-// The stream is encrypted and there's no decryptor. The decoder only supports
-// clear streams so no decoder can be selected.
 TEST_F(AudioDecoderSelectorTest, EncryptedStream_NoDecryptor_OneClearDecoder) {
   UseEncryptedStream();
   InitializeDecoderSelector(kNoDecryptor, 1);
@@ -277,8 +275,6 @@ TEST_F(AudioDecoderSelectorTest,
   SelectDecoderAndDestroy();
 }
 
-// The stream is encrypted and there's no decryptor. There are multiple decoders
-// and the first one that supports encrypted streams is selected.
 TEST_F(AudioDecoderSelectorTest, EncryptedStream_NoDecryptor_MultipleDecoders) {
   UseEncryptedStream();
   InitializeDecoderSelector(kNoDecryptor, 2);
@@ -304,8 +300,6 @@ TEST_F(AudioDecoderSelectorTest,
   SelectDecoderAndDestroy();
 }
 
-// Decryptor can only do decryption and there's no decoder available. No decoder
-// can be selected.
 TEST_F(AudioDecoderSelectorTest, EncryptedStream_DecryptOnly_NoClearDecoder) {
   UseEncryptedStream();
   InitializeDecoderSelector(kDecryptOnly, 0);
@@ -315,8 +309,6 @@ TEST_F(AudioDecoderSelectorTest, EncryptedStream_DecryptOnly_NoClearDecoder) {
   SelectDecoder();
 }
 
-// Decryptor can do decryption-only and there's a decoder available. The decoder
-// will be selected and a DecryptingDemuxerStream will be created.
 TEST_F(AudioDecoderSelectorTest, EncryptedStream_DecryptOnly_OneClearDecoder) {
   UseEncryptedStream();
   InitializeDecoderSelector(kDecryptOnly, 1);
@@ -338,9 +330,6 @@ TEST_F(AudioDecoderSelectorTest,
   SelectDecoderAndDestroy();
 }
 
-// Decryptor can only do decryption and there are multiple decoders available.
-// The first decoder that can decode the input stream will be selected and
-// a DecryptingDemuxerStream will be created.
 TEST_F(AudioDecoderSelectorTest,
        EncryptedStream_DecryptOnly_MultipleClearDecoder) {
   UseEncryptedStream();
@@ -367,7 +356,6 @@ TEST_F(AudioDecoderSelectorTest,
   SelectDecoderAndDestroy();
 }
 
-// Decryptor can do decryption and decoding.
 TEST_F(AudioDecoderSelectorTest, EncryptedStream_DecryptAndDecode) {
   UseEncryptedStream();
   InitializeDecoderSelector(kDecryptAndDecode, 1);
@@ -386,6 +374,50 @@ TEST_F(AudioDecoderSelectorTest, EncryptedStream_DecryptAndDecode) {
 #endif
 
   SelectDecoder();
+}
+
+TEST_F(AudioDecoderSelectorTest,
+       EncryptedStream_NoDecryptor_BlackListedDecoder) {
+  UseEncryptedStream();
+  InitializeDecoderSelector(kNoDecryptor, 2);
+
+  EXPECT_CALL(*decoder_2_, Initialize(EncryptedConfig(), _, _, _))
+      .WillOnce(RunCallback<2>(true));
+  EXPECT_CALL(*this, OnDecoderSelected(decoder_2_, IsNull()));
+
+  SelectDecoderWithBlacklist(kDecoder1);
+}
+
+TEST_F(AudioDecoderSelectorTest,
+       EncryptedStream_DecryptOnly_BlackListedDecoder) {
+  UseEncryptedStream();
+  InitializeDecoderSelector(kDecryptOnly, 2);
+
+  // When DecryptingDemuxerStream is chosen, the blacklist is ignored.
+  EXPECT_CALL(*decoder_1_, Initialize(ClearConfig(), _, _, _))
+      .WillOnce(RunCallback<2>(false));
+  EXPECT_CALL(*decoder_2_, Initialize(ClearConfig(), _, _, _))
+      .WillOnce(RunCallback<2>(true));
+  EXPECT_CALL(*this, OnDecoderSelected(decoder_2_, NotNull()));
+
+  SelectDecoderWithBlacklist(kDecoder2);
+}
+
+TEST_F(AudioDecoderSelectorTest,
+       EncryptedStream_DecryptAndDecode_BlackListedDecoder) {
+  UseEncryptedStream();
+  InitializeDecoderSelector(kDecryptAndDecode, 2);
+
+  // DecryptingAudioDecoder is blacklisted so we'll fall back to use
+  // DecryptingDemuxerStream to do decrypt-only.
+  EXPECT_CALL(*decoder_1_, Initialize(ClearConfig(), _, _, _))
+      .WillOnce(RunCallback<2>(false));
+  EXPECT_CALL(*decoder_2_, Initialize(ClearConfig(), _, _, _))
+      .WillOnce(RunCallback<2>(true));
+  EXPECT_CALL(*this, OnDecoderSelected(decoder_2_, NotNull()));
+
+  // TODO(xhwang): Avoid the hardcoded string here.
+  SelectDecoderWithBlacklist("DecryptingAudioDecoder");
 }
 
 }  // namespace media

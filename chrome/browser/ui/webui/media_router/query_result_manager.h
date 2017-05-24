@@ -15,13 +15,15 @@
 #include "base/macros.h"
 #include "base/observer_list.h"
 #include "chrome/browser/media/router/media_routes_observer.h"
-#include "chrome/browser/media/router/media_sink.h"
-#include "chrome/browser/media/router/media_source.h"
 #include "chrome/browser/ui/webui/media_router/cast_modes_with_media_sources.h"
 #include "chrome/browser/ui/webui/media_router/media_cast_mode.h"
 #include "chrome/browser/ui/webui/media_router/media_sink_with_cast_modes.h"
+#include "chrome/common/media_router/media_sink.h"
+#include "chrome/common/media_router/media_source.h"
 
-class GURL;
+namespace url {
+class Origin;
+}  // namespace url
 
 namespace media_router {
 
@@ -36,7 +38,7 @@ class MediaSinksObserver;
 //
 // Typical use:
 //
-//   GURL origin("https://origin.com");
+//   url::Origin origin{GURL("https://origin.com")};
 //   QueryResultManager::Observer* observer = ...;
 //   QueryResultManager result_manager(router);
 //   result_manager.AddObserver(observer);
@@ -89,7 +91,7 @@ class QueryResultManager {
   // with another cast mode, no new queries are begun.
   void SetSourcesForCastMode(MediaCastMode cast_mode,
                              const std::vector<MediaSource>& sources,
-                             const GURL& origin);
+                             const url::Origin& origin);
 
   // Stops notifying observers for |cast_mode|, and removes it from the set of
   // supported cast modes.
@@ -127,7 +129,7 @@ class QueryResultManager {
   // doesn't already have an associated observer.
   void AddObserversForCastMode(MediaCastMode cast_mode,
                                const std::vector<MediaSource>& sources,
-                               const GURL& origin);
+                               const url::Origin& origin);
 
   // Modifies the set of sinks compatible with |cast_mode| and |source|
   // to |new_sinks|.

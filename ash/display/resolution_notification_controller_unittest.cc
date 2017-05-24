@@ -6,10 +6,10 @@
 
 #include "ash/screen_util.h"
 #include "ash/shell.h"
+#include "ash/strings/grit/ash_strings.h"
 #include "ash/test/ash_test_base.h"
 #include "base/bind.h"
 #include "base/strings/utf_string_conversions.h"
-#include "grit/ash_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/gfx/geometry/size.h"
@@ -66,12 +66,10 @@ class ResolutionNotificationControllerTest : public ash::test::AshTestBase {
             old_mode->native(), old_mode->ui_scale(),
             old_mode->device_scale_factor()));
 
-    if (display_manager()->SetDisplayMode(display.id(), new_mode)) {
-      controller()->PrepareNotification(
-          display.id(), old_mode, new_mode,
-          base::Bind(&ResolutionNotificationControllerTest::OnAccepted,
-                     base::Unretained(this)));
-    }
+    EXPECT_TRUE(controller()->PrepareNotificationAndSetDisplayMode(
+        display.id(), old_mode, new_mode,
+        base::Bind(&ResolutionNotificationControllerTest::OnAccepted,
+                   base::Unretained(this))));
 
     // OnConfigurationChanged event won't be emitted in the test environment,
     // so invoke UpdateDisplay() to emit that event explicitly.
@@ -132,7 +130,7 @@ class ResolutionNotificationControllerTest : public ash::test::AshTestBase {
   static void TickTimer() { controller()->OnTimerTick(); }
 
   static ResolutionNotificationController* controller() {
-    return Shell::GetInstance()->resolution_notification_controller();
+    return Shell::Get()->resolution_notification_controller();
   }
 
   int accept_count() const { return accept_count_; }
@@ -307,7 +305,6 @@ TEST_F(ResolutionNotificationControllerTest, DisplayDisconnected) {
   scoped_refptr<display::ManagedDisplayMode> mode =
       display_manager()->GetSelectedModeForDisplayId(id2);
   EXPECT_TRUE(!!mode);
-  gfx::Size resolution;
   EXPECT_EQ("200x200", mode->size().ToString());
   EXPECT_EQ(59.0f, mode->refresh_rate());
 }

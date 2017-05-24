@@ -63,6 +63,7 @@ struct PasswordFormFillData {
   // that the original saved username is correct. This data is keyed by the
   // saved username/password to ensure uniqueness, though the username is not
   // used.
+  // TODO(crbug/188908). Remove |other_possible_usernames| or launch.
   UsernamesCollection other_possible_usernames;
 
   // Tells us whether we need to wait for the user to enter a valid username
@@ -74,10 +75,6 @@ struct PasswordFormFillData {
 
   // True if this form is a change password form.
   bool is_possible_change_password_form;
-
-  // True if a "form not secure" warning should be shown when the form is
-  // autofilled.
-  bool show_form_not_secure_warning_on_autofill;
 
   PasswordFormFillData();
   PasswordFormFillData(const PasswordFormFillData& other);
@@ -99,6 +96,10 @@ void InitPasswordFormFillData(
     bool wait_for_username_before_autofill,
     bool enable_other_possible_usernames,
     PasswordFormFillData* result);
+
+// Renderer needs to have only a password that should be autofilled, all other
+// passwords might be safety erased.
+PasswordFormFillData ClearPasswordValues(const PasswordFormFillData& data);
 
 }  // namespace autofill
 

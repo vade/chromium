@@ -7,6 +7,7 @@
 #include <avrt.h>
 #include <mmreg.h>
 #include <mmsystem.h>
+#include <objbase.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <windows.h>
@@ -17,6 +18,7 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/synchronization/lock.h"
+#include "remoting/host/win/default_audio_device_change_detector.h"
 
 namespace {
 const int kChannels = 2;
@@ -41,72 +43,16 @@ const int kMaxExpectedTimerLag = 30;
 
 namespace remoting {
 
-class AudioCapturerWin::MMNotificationClient : public IMMNotificationClient {
- public:
-  HRESULT __stdcall OnDefaultDeviceChanged(
-      EDataFlow flow,
-      ERole role,
-      LPCWSTR pwstrDefaultDevice) override {
-    base::AutoLock lock(lock_);
-    default_audio_device_changed_ = true;
-    return S_OK;
-  }
-
-  HRESULT __stdcall QueryInterface(REFIID iid, void** object) override {
-    if (iid == IID_IUnknown || iid == __uuidof(IMMNotificationClient)) {
-      *object = static_cast<IMMNotificationClient*>(this);
-      return S_OK;
-    }
-    *object = nullptr;
-    return E_NOINTERFACE;
-  }
-
-  // No Ops overrides.
-  HRESULT __stdcall OnDeviceAdded(LPCWSTR pwstrDeviceId) override {
-    return S_OK;
-  }
-  HRESULT __stdcall OnDeviceRemoved(LPCWSTR pwstrDeviceId) override {
-    return S_OK;
-  }
-  HRESULT __stdcall OnDeviceStateChanged(LPCWSTR pwstrDeviceId,
-                                         DWORD dwNewState) override {
-    return S_OK;
-  }
-  HRESULT __stdcall OnPropertyValueChanged(LPCWSTR pwstrDeviceId,
-                                           const PROPERTYKEY key) override {
-    return S_OK;
-  }
-  ULONG __stdcall AddRef() override { return 1; }
-  ULONG __stdcall Release() override { return 1; }
-
-  bool GetAndResetDefaultAudioDeviceChanged() {
-    base::AutoLock lock(lock_);
-    if (default_audio_device_changed_) {
-      default_audio_device_changed_ = false;
-      return true;
-    }
-    return false;
-  }
-
- private:
-  // |lock_| musted be locked when accessing |default_audio_device_changed_|.
-  bool default_audio_device_changed_ = false;
-  base::Lock lock_;
-};
-
 AudioCapturerWin::AudioCapturerWin()
     : sampling_rate_(AudioPacket::SAMPLING_RATE_INVALID),
       silence_detector_(kSilenceThreshold),
-      mm_notification_client_(new MMNotificationClient()),
       last_capture_error_(S_OK) {
   thread_checker_.DetachFromThread();
 }
 
 AudioCapturerWin::~AudioCapturerWin() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (audio_client_) {
-    audio_client_->Stop();
-  }
+  Deinitialize();
 }
 
 bool AudioCapturerWin::Start(const PacketCapturedCallback& callback) {
@@ -138,39 +84,39 @@ bool AudioCapturerWin::ResetAndInitialize() {
 void AudioCapturerWin::Deinitialize() {
   DCHECK(thread_checker_.CalledOnValidThread());
   wave_format_ex_.Reset(nullptr);
-  mm_device_enumerator_.Release();
-  audio_capture_client_.Release();
-  audio_client_.Release();
-  mm_device_.Release();
-  audio_volume_.Release();
+  default_device_detector_.reset();
+  audio_capture_client_.Reset();
+  if (audio_client_) {
+    audio_client_->Stop();
+  }
+  audio_client_.Reset();
+  mm_device_.Reset();
+  audio_volume_.Reset();
 }
 
 bool AudioCapturerWin::Initialize() {
-  DCHECK(!audio_capture_client_.get());
-  DCHECK(!audio_client_.get());
-  DCHECK(!mm_device_.get());
-  DCHECK(!audio_volume_.get());
+  DCHECK(!audio_capture_client_.Get());
+  DCHECK(!audio_client_.Get());
+  DCHECK(!mm_device_.Get());
+  DCHECK(!audio_volume_.Get());
   DCHECK(static_cast<PWAVEFORMATEX>(wave_format_ex_) == nullptr);
   DCHECK(thread_checker_.CalledOnValidThread());
 
   HRESULT hr = S_OK;
-  hr = mm_device_enumerator_.CreateInstance(__uuidof(MMDeviceEnumerator));
+  base::win::ScopedComPtr<IMMDeviceEnumerator> mm_device_enumerator;
+  hr = ::CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                          IID_PPV_ARGS(&mm_device_enumerator));
   if (FAILED(hr)) {
     LOG(ERROR) << "Failed to create IMMDeviceEnumerator. Error " << hr;
     return false;
   }
 
-  hr = mm_device_enumerator_->RegisterEndpointNotificationCallback(
-      mm_notification_client_.get());
-  if (FAILED(hr)) {
-    // We cannot predict which kind of error the API may return, but this is
-    // not a fatal error.
-    LOG(ERROR) << "Failed to register IMMNotificationClient. Error " << hr;
-  }
+  default_device_detector_.reset(
+      new DefaultAudioDeviceChangeDetector(mm_device_enumerator));
 
   // Get the audio endpoint.
-  hr = mm_device_enumerator_->GetDefaultAudioEndpoint(eRender, eConsole,
-                                                      mm_device_.Receive());
+  hr = mm_device_enumerator->GetDefaultAudioEndpoint(eRender, eConsole,
+                                                     mm_device_.GetAddressOf());
   if (FAILED(hr)) {
     LOG(ERROR) << "Failed to get IMMDevice. Error " << hr;
     return false;
@@ -180,7 +126,7 @@ bool AudioCapturerWin::Initialize() {
   hr = mm_device_->Activate(__uuidof(IAudioClient),
                             CLSCTX_ALL,
                             nullptr,
-                            audio_client_.ReceiveVoid());
+                            &audio_client_);
   if (FAILED(hr)) {
     LOG(ERROR) << "Failed to get an IAudioClient. Error " << hr;
     return false;
@@ -275,8 +221,7 @@ bool AudioCapturerWin::Initialize() {
   }
 
   // Get an IAudioCaptureClient.
-  hr = audio_client_->GetService(__uuidof(IAudioCaptureClient),
-                                 audio_capture_client_.ReceiveVoid());
+  hr = audio_client_->GetService(IID_PPV_ARGS(&audio_capture_client_));
   if (FAILED(hr)) {
     LOG(ERROR) << "Failed to get an IAudioCaptureClient. Error " << hr;
     return false;
@@ -292,7 +237,7 @@ bool AudioCapturerWin::Initialize() {
   // Initialize IAudioEndpointVolume.
   // TODO(zijiehe): Do we need to control per process volume?
   hr = mm_device_->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr,
-                            audio_volume_.ReceiveVoid());
+                            &audio_volume_);
   if (FAILED(hr)) {
     LOG(ERROR) << "Failed to get an IAudioEndpointVolume. Error " << hr;
     return false;
@@ -375,8 +320,7 @@ void AudioCapturerWin::DoCapture() {
   DCHECK(AudioCapturer::IsValidSampleRate(sampling_rate_));
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  if (!is_initialized() ||
-      mm_notification_client_->GetAndResetDefaultAudioDeviceChanged()) {
+  if (!is_initialized() || default_device_detector_->GetAndReset()) {
     if (!ResetAndInitialize()) {
       // Initialization failed, we should wait for next DoCapture call.
       return;

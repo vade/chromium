@@ -55,8 +55,8 @@ class PipeReaderWrapper : public base::SupportsWeakPtr<PipeReaderWrapper> {
  public:
   explicit PipeReaderWrapper(const DebugDaemonClient::GetLogsCallback& callback)
       : pipe_reader_(base::CreateTaskRunnerWithTraits(
-                         base::TaskTraits().MayBlock().WithShutdownBehavior(
-                             base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN)),
+                         {base::MayBlock(),
+                          base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN}),
                      base::Bind(&PipeReaderWrapper::OnIOComplete, AsWeakPtr())),
         callback_(callback) {}
 
@@ -466,19 +466,37 @@ class DebugDaemonClientImpl : public DebugDaemonClient {
                    weak_ptr_factory_.GetWeakPtr(), callback));
   }
 
-  void CupsAddPrinter(const std::string& name,
-                      const std::string& uri,
-                      const std::string& ppd_path,
-                      bool ipp_everywhere,
-                      const DebugDaemonClient::CupsAddPrinterCallback& callback,
-                      const base::Closure& error_callback) override {
+  void CupsAddManuallyConfiguredPrinter(
+      const std::string& name,
+      const std::string& uri,
+      const std::string& ppd_contents,
+      const DebugDaemonClient::CupsAddPrinterCallback& callback,
+      const base::Closure& error_callback) override {
     dbus::MethodCall method_call(debugd::kDebugdInterface,
-                                 debugd::kCupsAddPrinter);
+                                 debugd::kCupsAddManuallyConfiguredPrinter);
     dbus::MessageWriter writer(&method_call);
     writer.AppendString(name);
     writer.AppendString(uri);
-    writer.AppendString(ppd_path);
-    writer.AppendBool(ipp_everywhere);
+    writer.AppendArrayOfBytes(
+        reinterpret_cast<const uint8_t*>(ppd_contents.data()),
+        ppd_contents.size());
+
+    debugdaemon_proxy_->CallMethod(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::Bind(&DebugDaemonClientImpl::OnPrinterAdded,
+                   weak_ptr_factory_.GetWeakPtr(), callback, error_callback));
+  }
+
+  void CupsAddAutoConfiguredPrinter(
+      const std::string& name,
+      const std::string& uri,
+      const DebugDaemonClient::CupsAddPrinterCallback& callback,
+      const base::Closure& error_callback) override {
+    dbus::MethodCall method_call(debugd::kDebugdInterface,
+                                 debugd::kCupsAddAutoConfiguredPrinter);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendString(name);
+    writer.AppendString(uri);
 
     debugdaemon_proxy_->CallMethod(
         &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
@@ -716,9 +734,9 @@ class DebugDaemonClientImpl : public DebugDaemonClient {
   void OnPrinterAdded(const CupsAddPrinterCallback& callback,
                       const base::Closure& error_callback,
                       dbus::Response* response) {
-    bool result = false;
+    int32_t result;
     dbus::MessageReader reader(response);
-    if (response && reader.PopBool(&result)) {
+    if (response && reader.PopInt32(&result)) {
       callback.Run(result);
     } else {
       error_callback.Run();

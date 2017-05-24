@@ -6,6 +6,7 @@
  * @fileoverview 'settings-about-page' contains version and OS related
  * information.
  */
+
 Polymer({
   is: 'settings-about-page',
 
@@ -73,6 +74,27 @@ Polymer({
       type: Boolean,
       computed: 'computeShowCheckUpdates_(currentUpdateStatusEvent_)',
     },
+
+    /** @private {!Map<string, string>} */
+    focusConfig_: {
+      type: Object,
+      value: function() {
+        var map = new Map();
+        map.set(
+            settings.Route.DETAILED_BUILD_INFO.path,
+            '#detailed-build-info-trigger');
+        return map;
+      },
+    },
+
+    /** @private */
+    showUpdateWarningDialog_: {
+      type: Boolean,
+      value: false,
+    },
+
+    /** @private {!AboutPageUpdateInfo|undefined} */
+    updateInfo_: Object,
 // </if>
   },
 
@@ -151,6 +173,10 @@ Polymer({
 // <if expr="chromeos">
     if (event.status == UpdateStatus.CHECKING)
       this.hasCheckedForUpdates_ = true;
+    else if (event.status == UpdateStatus.NEED_PERMISSION_TO_UPDATE) {
+      this.showUpdateWarningDialog_ = true;
+      this.updateInfo_ = {version: event.version, size: event.size};
+    }
 // </if>
     this.currentUpdateStatusEvent_ = event;
   },
@@ -214,7 +240,7 @@ Polymer({
 
   /**
    * Hide the button container if all buttons are hidden, otherwise the
-   * container displayes an unwanted border (see secondary-action class).
+   * container displays an unwanted border (see separator class).
    * @private
    */
   updateShowButtonContainer_: function() {
@@ -246,6 +272,13 @@ Polymer({
     switch (this.currentUpdateStatusEvent_.status) {
       case UpdateStatus.CHECKING:
         return this.i18n('aboutUpgradeCheckStarted');
+      case UpdateStatus.NEED_PERMISSION_TO_UPDATE:
+        // This status is immediately followed by an reporting error status.
+        // When update engine reports error, UI just shows that your device is
+        // up to date. This is a bug that needs to be fixed in the future.
+        // TODO(weidongg/581071): Show proper message when update engine aborts
+        // due to cellular connection.
+        return '';
       case UpdateStatus.NEARLY_UPDATED:
 // <if expr="chromeos">
         if (this.currentChannel_ != this.targetChannel_)
@@ -260,7 +293,8 @@ Polymer({
 
 // <if expr="chromeos">
         if (this.currentChannel_ != this.targetChannel_) {
-          return this.i18n('aboutUpgradeUpdatingChannelSwitch',
+          return this.i18n(
+              'aboutUpgradeUpdatingChannelSwitch',
               this.i18n(settings.browserChannelToI18nId(this.targetChannel_)),
               progressPercent);
         }
@@ -275,10 +309,18 @@ Polymer({
         }
         return this.i18n('aboutUpgradeUpdating');
       default:
+        function formatMessage(msg) {
+          return parseHtmlSubset(
+              '<b>' + msg + '</b>', ['br', 'pre']).firstChild.innerHTML;
+        }
+        var result = '';
         var message = this.currentUpdateStatusEvent_.message;
-        return message ?
-            parseHtmlSubset('<b>' + message + '</b>').firstChild.innerHTML :
-            '';
+        if (message)
+          result += formatMessage(message);
+        var connectMessage = this.currentUpdateStatusEvent_.connectionTypes;
+        if (connectMessage)
+          result += '<div>' + formatMessage(connectMessage) + '</div>';
+        return result;
     }
   },
 
@@ -294,14 +336,14 @@ Polymer({
 
     switch (this.currentUpdateStatusEvent_.status) {
       case UpdateStatus.DISABLED_BY_ADMIN:
-        return 'cr:domain';
+        return 'cr20:domain';
       case UpdateStatus.FAILED:
         return 'settings:error';
       case UpdateStatus.UPDATED:
       case UpdateStatus.NEARLY_UPDATED:
-          return 'settings:check-circle';
+        return 'settings:check-circle';
       default:
-          return null;
+        return null;
     }
   },
 
@@ -373,8 +415,13 @@ Polymer({
    * @private
    */
   computeShowCheckUpdates_: function() {
-    return !this.hasCheckedForUpdates_ ||
-        this.checkStatus_(UpdateStatus.FAILED);
+    // Enable the update button if we are in a stale 'updated' status or
+    // update has failed. Disable it otherwise.
+    var staleUpdatedStatus = !this.hasCheckedForUpdates_ &&
+        this.checkStatus_(UpdateStatus.UPDATED);
+
+    return staleUpdatedStatus || this.checkStatus_(UpdateStatus.FAILED) ||
+        this.checkStatus_(UpdateStatus.NEED_PERMISSION_TO_UPDATE);
   },
 
   /**
@@ -383,6 +430,11 @@ Polymer({
    */
   shouldShowRegulatoryInfo_: function() {
     return this.regulatoryInfo_ !== null;
+  },
+
+  /** @private */
+  onUpdateWarningDialogClose_: function() {
+    this.showUpdateWarningDialog_ = false;
   },
 // </if>
 

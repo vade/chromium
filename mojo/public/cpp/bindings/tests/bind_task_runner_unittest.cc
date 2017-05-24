@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/message_loop/message_loop.h"
@@ -10,7 +12,6 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/platform_thread.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
-#include "mojo/public/cpp/bindings/associated_group.h"
 #include "mojo/public/cpp/bindings/associated_interface_ptr.h"
 #include "mojo/public/cpp/bindings/associated_interface_ptr_info.h"
 #include "mojo/public/cpp/bindings/associated_interface_request.h"
@@ -31,23 +32,23 @@ class TestTaskRunner : public base::SingleThreadTaskRunner {
                     base::WaitableEvent::InitialState::NOT_SIGNALED) {}
 
   bool PostNonNestableDelayedTask(const tracked_objects::Location& from_here,
-                                  const base::Closure& task,
+                                  base::OnceClosure task,
                                   base::TimeDelta delay) override {
     NOTREACHED();
     return false;
   }
 
   bool PostDelayedTask(const tracked_objects::Location& from_here,
-                       const base::Closure& task,
+                       base::OnceClosure task,
                        base::TimeDelta delay) override {
     {
       base::AutoLock locker(lock_);
-      tasks_.push(task);
+      tasks_.push(std::move(task));
     }
     task_ready_.Signal();
     return true;
   }
-  bool RunsTasksOnCurrentThread() const override {
+  bool RunsTasksInCurrentSequence() const override {
     return base::PlatformThread::CurrentRef() == thread_id_;
   }
 
@@ -60,12 +61,12 @@ class TestTaskRunner : public base::SingleThreadTaskRunner {
       {
         base::AutoLock locker(lock_);
         while (!tasks_.empty()) {
-          auto task = tasks_.front();
+          auto task = std::move(tasks_.front());
           tasks_.pop();
 
           {
             base::AutoUnlock unlocker(lock_);
-            task.Run();
+            std::move(task).Run();
             if (quit_called_)
               return;
           }
@@ -88,12 +89,12 @@ class TestTaskRunner : public base::SingleThreadTaskRunner {
       {
         base::AutoLock locker(lock_);
         if (!tasks_.empty()) {
-          auto task = tasks_.front();
+          auto task = std::move(tasks_.front());
           tasks_.pop();
 
           {
             base::AutoUnlock unlocker(lock_);
-            task.Run();
+            std::move(task).Run();
             return;
           }
         }
@@ -111,7 +112,7 @@ class TestTaskRunner : public base::SingleThreadTaskRunner {
 
   // Protect |tasks_|.
   base::Lock lock_;
-  std::queue<base::Closure> tasks_;
+  std::queue<base::OnceClosure> tasks_;
 
   DISALLOW_COPY_AND_ASSIGN(TestTaskRunner);
 };
@@ -222,9 +223,8 @@ class AssociatedBindTaskRunnerTest : public testing::Test {
         base::Bind(&AssociatedBindTaskRunnerTest::QuitTaskRunner,
                    base::Unretained(this)));
 
-    connection_ptr_->GetSender(MakeRequest(&sender_ptr_,
-                                           connection_ptr_.associated_group(),
-                                           sender_ptr_task_runner_));
+    connection_ptr_->GetSender(
+        MakeRequest(&sender_ptr_, sender_ptr_task_runner_));
     connection_binding_task_runner_->Run();
   }
 

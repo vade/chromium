@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "ash/ash_export.h"
-#include "ash/common/shell_observer.h"
+#include "ash/session/session_observer.h"
 #include "ash/wm/session_state_animator.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
@@ -50,7 +50,7 @@ class LockStateControllerTestApi;
 // OnLockStateChanged is called. It leads to
 // StartUnlockAnimationAfterUIDestroyed.
 class ASH_EXPORT LockStateController : public aura::WindowTreeHostObserver,
-                                       public ShellObserver {
+                                       public SessionObserver {
  public:
   // Amount of time to wait for our lock requests to be honored before giving
   // up.
@@ -112,18 +112,17 @@ class ASH_EXPORT LockStateController : public aura::WindowTreeHostObserver,
   // Called when ScreenLocker is ready to close, but not yet destroyed.
   // Can be used to display "hiding" animations on unlock.
   // |callback| will be called when all animations are done.
-  void OnLockScreenHide(base::Closure& callback);
+  void OnLockScreenHide(base::OnceClosure callback);
 
   // Sets up the callback that should be called once lock animation is finished.
   // Callback is guaranteed to be called once and then discarded.
-  void SetLockScreenDisplayedCallback(const base::Closure& callback);
+  void SetLockScreenDisplayedCallback(base::OnceClosure callback);
 
   // aura::WindowTreeHostObserver override:
   void OnHostCloseRequested(const aura::WindowTreeHost* host) override;
 
-  // ShellObserver overrides:
-  void OnLoginStateChanged(LoginStatus status) override;
-  void OnAppTerminating() override;
+  // SessionObserver overrides:
+  void OnChromeTerminating() override;
   void OnLockStateChanged(bool locked) override;
 
   void set_animator_for_test(SessionStateAnimator* animator) {
@@ -174,7 +173,7 @@ class ASH_EXPORT LockStateController : public aura::WindowTreeHostObserver,
   void CancelPreLockAnimation();
   void StartPostLockAnimation();
   // This method calls |callback| when animation completes.
-  void StartUnlockAnimationBeforeUIDestroyed(base::Closure& callback);
+  void StartUnlockAnimationBeforeUIDestroyed(base::OnceClosure callback);
   void StartUnlockAnimationAfterUIDestroyed();
 
   // These methods are called when corresponding animation completes.
@@ -198,9 +197,6 @@ class ASH_EXPORT LockStateController : public aura::WindowTreeHostObserver,
       SessionStateAnimator::AnimationSequence* animation_sequence);
 
   std::unique_ptr<SessionStateAnimator> animator_;
-
-  // The current login status, or original login status from before we locked.
-  LoginStatus login_status_;
 
   // Current lock status.
   bool system_is_locked_;
@@ -244,7 +240,9 @@ class ASH_EXPORT LockStateController : public aura::WindowTreeHostObserver,
   // etc. are shut down.
   base::OneShotTimer real_shutdown_timer_;
 
-  base::Closure lock_screen_displayed_callback_;
+  base::OnceClosure lock_screen_displayed_callback_;
+
+  ScopedSessionObserver scoped_session_observer_;
 
   base::WeakPtrFactory<LockStateController> weak_ptr_factory_;
 

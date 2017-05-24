@@ -18,12 +18,13 @@
 #include "net/base/load_timing_info.h"
 #include "net/base/net_export.h"
 #include "net/http/http_response_info.h"
+#include "net/http/http_server_properties.h"
 #include "net/log/net_log_with_source.h"
 #include "net/quic/chromium/quic_chromium_client_session.h"
 #include "net/quic/chromium/quic_chromium_client_stream.h"
 #include "net/quic/core/quic_client_push_promise_index.h"
 #include "net/quic/core/quic_packets.h"
-#include "net/spdy/multiplexed_http_stream.h"
+#include "net/spdy/chromium/multiplexed_http_stream.h"
 
 namespace net {
 
@@ -35,13 +36,12 @@ class QuicHttpStreamPeer;
 // non-owning pointer to a QuicChromiumClientStream which it uses to
 // send and receive data.
 class NET_EXPORT_PRIVATE QuicHttpStream
-    : public QuicChromiumClientSession::Observer,
-      public QuicChromiumClientStream::Delegate,
+    : public QuicChromiumClientStream::Delegate,
       public QuicClientPushPromiseIndex::Delegate,
       public MultiplexedHttpStream {
  public:
-  explicit QuicHttpStream(
-      const base::WeakPtr<QuicChromiumClientSession>& session);
+  QuicHttpStream(std::unique_ptr<QuicChromiumClientSession::Handle> session,
+                 HttpServerProperties* http_server_properties);
 
   ~QuicHttpStream() override;
 
@@ -63,26 +63,27 @@ class NET_EXPORT_PRIVATE QuicHttpStream
   int64_t GetTotalReceivedBytes() const override;
   int64_t GetTotalSentBytes() const override;
   bool GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const override;
+  bool GetAlternativeService(
+      AlternativeService* alternative_service) const override;
   void PopulateNetErrorDetails(NetErrorDetails* details) override;
   void SetPriority(RequestPriority priority) override;
 
   // QuicChromiumClientStream::Delegate implementation
-  void OnHeadersAvailable(const SpdyHeaderBlock& headers,
-                          size_t frame_len) override;
+  void OnInitialHeadersAvailable(const SpdyHeaderBlock& headers,
+                                 size_t frame_len) override;
   void OnDataAvailable() override;
+  void OnTrailingHeadersAvailable(const SpdyHeaderBlock& headers,
+                                  size_t frame_len) override;
   void OnClose() override;
   void OnError(int error) override;
-  bool HasSendHeadersComplete() override;
-
-  // QuicChromiumClientSession::Observer implementation
-  void OnCryptoHandshakeConfirmed() override;
-  void OnSuccessfulVersionNegotiation(const QuicVersion& version) override;
-  void OnSessionClosed(int error, bool port_migration_detected) override;
 
   // QuicClientPushPromiseIndex::Delegate implementation
   bool CheckVary(const SpdyHeaderBlock& client_request,
                  const SpdyHeaderBlock& promise_request,
                  const SpdyHeaderBlock& promise_response) override;
+  // TODO(rch): QuicClientPushPromiseIndex::Delegate is part of shared code.
+  // Figure out how to make the QuicHttpStream receive a Handle in this
+  // case instead of a QuicSpdyStream.
   void OnRendezvousResult(QuicSpdyStream* stream) override;
 
   static HttpResponseInfo::ConnectionInfo ConnectionInfoFromQuicVersion(
@@ -98,8 +99,6 @@ class NET_EXPORT_PRIVATE QuicHttpStream
     STATE_REQUEST_STREAM,
     STATE_REQUEST_STREAM_COMPLETE,
     STATE_SET_REQUEST_PRIORITY,
-    STATE_WAIT_FOR_CONFIRMATION,
-    STATE_WAIT_FOR_CONFIRMATION_COMPLETE,
     STATE_SEND_HEADERS,
     STATE_SEND_HEADERS_COMPLETE,
     STATE_READ_REQUEST_BODY,
@@ -118,8 +117,6 @@ class NET_EXPORT_PRIVATE QuicHttpStream
   int DoRequestStream();
   int DoRequestStreamComplete(int rv);
   int DoSetRequestPriority();
-  int DoWaitForConfirmation();
-  int DoWaitForConfirmationComplete(int rv);
   int DoSendHeaders();
   int DoSendHeadersComplete(int rv);
   int DoReadRequestBody();
@@ -134,14 +131,31 @@ class NET_EXPORT_PRIVATE QuicHttpStream
 
   void ResetStream();
 
+  // If |has_response_status_| is false, sets |response_status| to the result
+  // of ComputeResponseStatus(). Returns |response_status_|.
+  int GetResponseStatus();
+  // Sets the result of |ComputeResponseStatus()| as the |response_status_|.
+  void SaveResponseStatus();
+  // Sets |response_status_| to |response_status| and sets
+  // |has_response_status_| to true.
+  void SetResponseStatus(int response_status);
+  // Computes the correct response status based on the status of the handshake,
+  // |session_error|, |connection_error| and |stream_error|.
+  int ComputeResponseStatus() const;
+
+  QuicChromiumClientSession::Handle* quic_session() {
+    return static_cast<QuicChromiumClientSession::Handle*>(session());
+  }
+
+  const QuicChromiumClientSession::Handle* quic_session() const {
+    return static_cast<const QuicChromiumClientSession::Handle*>(session());
+  }
+
   State next_state_;
 
-  base::WeakPtr<QuicChromiumClientSession> session_;
-  QuicVersion quic_version_;
-  int session_error_;             // Error code from the connection shutdown.
-  bool was_handshake_confirmed_;  // True if the crypto handshake succeeded.
-  QuicChromiumClientSession::StreamRequest stream_request_;
-  QuicChromiumClientStream* stream_;  // Non-owning.
+  HttpServerProperties* http_server_properties_;  // Unowned.
+
+  std::unique_ptr<QuicChromiumClientStream::Handle> stream_;
 
   // The following three fields are all owned by the caller and must
   // outlive this object, according to the HttpStream contract.
@@ -159,6 +173,7 @@ class NET_EXPORT_PRIVATE QuicHttpStream
   // |response_info_| is the HTTP response data object which is filled in
   // when a the response headers are read.  It is not owned by this stream.
   HttpResponseInfo* response_info_;
+  bool has_response_status_;  // true if response_status_ as been set.
   // Because response data is buffered, also buffer the response status if the
   // stream is explicitly closed via OnError or OnClose with an error.
   // Once all buffered data has been returned, this will be used as the final
@@ -169,9 +184,6 @@ class NET_EXPORT_PRIVATE QuicHttpStream
   SpdyHeaderBlock request_headers_;
 
   bool response_headers_received_;
-
-  // Serialized HTTP request.
-  std::string request_;
 
   // Number of bytes received by the headers stream on behalf of this stream.
   int64_t headers_bytes_received_;
@@ -201,10 +213,9 @@ class NET_EXPORT_PRIVATE QuicHttpStream
 
   NetLogWithSource stream_net_log_;
 
-  QuicErrorCode quic_connection_error_;
-
-  // True when this stream receives a go away from server due to port migration.
-  bool port_migration_detected_;
+  int session_error_;  // Error code from the connection shutdown.
+  QuicErrorCode quic_connection_error_;       // Cached connection error code.
+  QuicRstStreamErrorCode quic_stream_error_;  // Cached stream error code.
 
   bool found_promise_;
   // |QuicClientPromisedInfo| owns this. It will be set when |Try()|

@@ -11,6 +11,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/metrics/user_metrics.h"
+#include "base/stl_util.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/affiliated_match_helper.h"
 #include "components/password_manager/core/browser/password_bubble_experiment.h"
@@ -26,8 +27,10 @@ namespace {
 
 // Send a UMA histogram about if |local_results| has empty or duplicate
 // usernames.
-void ReportAccountChooserUsabilityMetrics(bool had_duplicates,
-                                          bool had_empty_username) {
+void ReportAccountChooserUsabilityMetrics(
+    const std::vector<std::unique_ptr<autofill::PasswordForm>>& forms,
+    bool had_duplicates,
+    bool had_empty_username) {
   metrics_util::AccountChooserUsabilityMetric metric;
   if (had_empty_username && had_duplicates)
     metric = metrics_util::ACCOUNT_CHOOSER_EMPTY_USERNAME_AND_DUPLICATES;
@@ -37,7 +40,14 @@ void ReportAccountChooserUsabilityMetrics(bool had_duplicates,
     metric = metrics_util::ACCOUNT_CHOOSER_DUPLICATES;
   else
     metric = metrics_util::ACCOUNT_CHOOSER_LOOKS_OK;
-  metrics_util::LogAccountChooserUsability(metric);
+
+  int count_empty_icons =
+      std::count_if(forms.begin(), forms.end(),
+                    [](const std::unique_ptr<autofill::PasswordForm>& form) {
+                      return !form->icon_url.is_valid();
+                    });
+  metrics_util::LogAccountChooserUsability(metric, count_empty_icons,
+                                           forms.size());
 }
 
 // Returns true iff |form1| is better suitable for showing in the account
@@ -86,15 +96,14 @@ void FilterDuplicatesAndEmptyUsername(
     bool* has_empty_username,
     bool* has_duplicates) {
   // Remove empty usernames from the list.
-  auto begin_empty =
-      std::remove_if(forms->begin(), forms->end(),
-                     [](const std::unique_ptr<autofill::PasswordForm>& form) {
-                       return form->username_value.empty();
-                     });
-  *has_empty_username = (begin_empty != forms->end());
-  forms->erase(begin_empty, forms->end());
+  size_t size_before = forms->size();
+  base::EraseIf(*forms,
+                [](const std::unique_ptr<autofill::PasswordForm>& form) {
+                  return form->username_value.empty();
+                });
+  *has_empty_username = (size_before != forms->size());
 
-  const size_t size_before = forms->size();
+  size_before = forms->size();
   FilterDuplicates(forms);
   *has_duplicates = (size_before != forms->size());
 }
@@ -122,10 +131,11 @@ CredentialManagerPendingRequestTask::~CredentialManagerPendingRequestTask() =
 
 void CredentialManagerPendingRequestTask::OnGetPasswordStoreResults(
     std::vector<std::unique_ptr<autofill::PasswordForm>> results) {
-  if (results.empty()) {
+  // localhost is a secure origin but not https.
+  if (results.empty() && origin_.SchemeIs(url::kHttpsScheme)) {
     // Try to migrate the HTTP passwords and process them later.
-    http_migrator_ = base::MakeUnique<HttpPasswordMigrator>(
-        origin_, delegate_->client()->GetPasswordStore(), this);
+    http_migrator_ = base::MakeUnique<HttpPasswordStoreMigrator>(
+        origin_, delegate_->client(), this);
     return;
   }
   ProcessForms(std::move(results));
@@ -242,7 +252,8 @@ void CredentialManagerPendingRequestTask::ProcessForms(
     return;
   }
 
-  ReportAccountChooserUsabilityMetrics(has_duplicates, has_empty_username);
+  ReportAccountChooserUsabilityMetrics(local_results, has_duplicates,
+                                       has_empty_username);
   if (!delegate_->client()->PromptUserToChooseCredentials(
           std::move(local_results), origin_,
           base::Bind(

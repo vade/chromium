@@ -6,15 +6,11 @@ cr.define('sync.confirmation', function() {
   'use strict';
 
   function onConfirm(e) {
-    chrome.send('confirm');
+    chrome.send('confirm', [$('configure-before-signing-in').checked]);
   }
 
   function onUndo(e) {
     chrome.send('undo');
-  }
-
-  function onGoToSettings(e) {
-    chrome.send('goToSettings');
   }
 
   function initialize() {
@@ -22,17 +18,21 @@ cr.define('sync.confirmation', function() {
     $('confirmButton').addEventListener('click', onConfirm);
     $('undoButton').addEventListener('click', onUndo);
     if (loadTimeData.getBoolean('isSyncAllowed')) {
-      $('settingsLink').addEventListener('click', onGoToSettings);
       $('profile-picture').addEventListener('load', onPictureLoaded);
       $('syncDisabledDetails').hidden = true;
     } else {
       $('syncConfirmationDetails').hidden = true;
     }
-    chrome.send('initializedWithSize', [document.body.scrollHeight]);
+
+    // Prefer using |document.body.offsetHeight| instead of
+    // |document.body.scrollHeight| as it returns the correct height of the
+    // even when the page zoom in Chrome is different than 100%.
+    chrome.send('initializedWithSize', [document.body.offsetHeight]);
   }
 
   function clearFocus() {
     document.activeElement.blur();
+    document.documentElement.classList.add('focus-allowed');
   }
 
   function setUserImageURL(url) {
@@ -52,7 +52,7 @@ cr.define('sync.confirmation', function() {
     // on "enter" being pressed and the user hits "enter", perform the default
     // action of the dialog, which is "OK, Got It".
     if (e.key == 'Enter' &&
-        !/^(A|PAPER-BUTTON)$/.test(document.activeElement.tagName)) {
+        !/^(A|PAPER-(BUTTON|CHECKBOX))$/.test(document.activeElement.tagName)) {
       $('confirmButton').click();
       e.preventDefault();
     }

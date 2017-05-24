@@ -30,6 +30,7 @@
 
 [
     CheckSecurity=Receiver,
+    DependentLifetime,
     Unforgeable,
 ] interface Location {
     // |assign| is *NOT* cross-origin accessible in the spec, but it needs
@@ -60,7 +61,7 @@
     // using DOMString instead of USVString.
     [SetterCallWith=(CurrentWindow,EnteredWindow), CrossOrigin=Setter, RaisesException=Setter] attribute DOMString href;
     [NotEnumerable, ImplementedAs=href] DOMString toString();
-    readonly attribute DOMString origin;
+    [MeasureAs=LocationOrigin] readonly attribute DOMString origin;
 
     [SetterCallWith=(CurrentWindow,EnteredWindow), RaisesException=Setter] attribute DOMString protocol;
     [SetterCallWith=(CurrentWindow,EnteredWindow), RaisesException=Setter] attribute DOMString host;

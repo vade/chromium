@@ -12,7 +12,7 @@
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/content_settings/host_content_settings_map_factory.h"
 #import "ios/chrome/browser/ui/settings/settings_collection_view_controller.h"
-#import "ios/chrome/browser/ui/tools_menu/tools_menu_view_controller.h"
+#include "ios/chrome/browser/ui/tools_menu/tools_menu_constants.h"
 #import "ios/chrome/browser/ui/tools_menu/tools_popup_controller.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
@@ -31,27 +31,31 @@
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "url/gurl.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
+using chrome_test_util::NavigationBarDoneButton;
+
 namespace {
 
 // URLs used in the tests.
 const char* kBlockPopupsUrl = "http://blockpopups";
 const char* kOpenedWindowUrl = "http://openedwindow";
 
-// JavaScript to open a new window after a short delay.
+// Page with a button that opens a new window after a short delay.
 NSString* kBlockPopupsResponseTemplate =
     @"<input type=\"button\" onclick=\"setTimeout(function() {"
      "window.open('%@')}, 1)\" "
-     "id=\"openWindow\" "
+     "id=\"open-window\" "
      "value=\"openWindow\">";
+// JavaScript that clicks that button.
+NSString* kOpenPopupScript = @"document.getElementById('open-window').click()";
 const std::string kOpenedWindowResponse = "Opened window";
 
 // Opens the block popups settings page.  Must be called from the NTP.
 void OpenBlockPopupsSettings() {
   const CGFloat scroll_displacement = 50.0;
-  id<GREYMatcher> tools_menu_table_view_matcher =
-      grey_accessibilityID(kToolsMenuTableViewId);
-  id<GREYMatcher> settings_button_matcher =
-      grey_accessibilityID(kToolsMenuSettingsId);
   id<GREYMatcher> content_settings_button_matcher =
       chrome_test_util::ButtonWithAccessibilityLabelId(
           IDS_IOS_CONTENT_SETTINGS_TITLE);
@@ -60,12 +64,7 @@ void OpenBlockPopupsSettings() {
   id<GREYMatcher> block_popups_button_matcher =
       chrome_test_util::ButtonWithAccessibilityLabelId(IDS_IOS_BLOCK_POPUPS);
 
-  [ChromeEarlGreyUI openToolsMenu];
-  [[[EarlGrey selectElementWithMatcher:settings_button_matcher]
-         usingSearchAction:grey_scrollInDirection(kGREYDirectionDown,
-                                                  scroll_displacement)
-      onElementWithMatcher:tools_menu_table_view_matcher]
-      performAction:grey_tap()];
+  [ChromeEarlGreyUI openSettingsMenu];
 
   [[[EarlGrey selectElementWithMatcher:content_settings_button_matcher]
          usingSearchAction:grey_scrollInDirection(kGREYDirectionDown,
@@ -91,9 +90,7 @@ void CloseSettings() {
                                    grey_accessibilityTrait(
                                        UIAccessibilityTraitButton),
                                    nil)] performAction:grey_tap()];
-  [[EarlGrey
-      selectElementWithMatcher:chrome_test_util::ButtonWithAccessibilityLabelId(
-                                   IDS_IOS_NAVIGATION_BAR_DONE_BUTTON)]
+  [[EarlGrey selectElementWithMatcher:NavigationBarDoneButton()]
       performAction:grey_tap()];
 }
 
@@ -201,8 +198,10 @@ class ScopedBlockPopupsException {
   [ChromeEarlGrey loadURL:blockPopupsURL];
   chrome_test_util::AssertMainTabCount(1U);
 
-  // Tap the "Open Window" link and make sure the popup opened in a new tab.
-  chrome_test_util::TapWebViewElementWithId("openWindow");
+  // Request popup and make sure the popup opened in a new tab.
+  __unsafe_unretained NSError* error = nil;
+  chrome_test_util::ExecuteJavaScript(kOpenPopupScript, &error);
+  GREYAssert(!error, @"Error during script execution: %@", error);
   chrome_test_util::AssertMainTabCount(2U);
 
   // No infobar should be displayed.
@@ -229,10 +228,13 @@ class ScopedBlockPopupsException {
   [ChromeEarlGrey loadURL:blockPopupsURL];
   chrome_test_util::AssertMainTabCount(1U);
 
-  // Tap the "Open Window" link, then make sure the popup was blocked and an
-  // infobar was displayed.  The window.open() call is run via async JS, so the
-  // infobar may not open immediately.
-  chrome_test_util::TapWebViewElementWithId("openWindow");
+  // Request popup, then make sure it was blocked and an infobar was displayed.
+  // The window.open() call is run via async JS, so the infobar may not open
+  // immediately.
+  __unsafe_unretained NSError* error = nil;
+  chrome_test_util::ExecuteJavaScript(kOpenPopupScript, &error);
+  GREYAssert(!error, @"Error during script execution: %@", error);
+
   [[GREYCondition
       conditionWithName:@"Wait for blocked popups infobar to show"
                   block:^BOOL {
@@ -267,7 +269,7 @@ class ScopedBlockPopupsException {
   [[EarlGrey
       selectElementWithMatcher:chrome_test_util::CollectionViewSwitchCell(
                                    @"blockPopupsContentView_switch", YES)]
-      performAction:chrome_test_util::turnCollectionViewSwitchOn(NO)];
+      performAction:chrome_test_util::TurnCollectionViewSwitchOn(NO)];
   [[EarlGrey selectElementWithMatcher:grey_text(base::SysUTF8ToNSString(
                                           allowedPattern))]
       assertWithMatcher:grey_notVisible()];
@@ -275,9 +277,7 @@ class ScopedBlockPopupsException {
       selectElementWithMatcher:grey_accessibilityLabel(l10n_util::GetNSString(
                                    IDS_IOS_NAVIGATION_BAR_EDIT_BUTTON))]
       assertWithMatcher:grey_notVisible()];
-  [[EarlGrey
-      selectElementWithMatcher:grey_accessibilityLabel(l10n_util::GetNSString(
-                                   IDS_IOS_NAVIGATION_BAR_DONE_BUTTON))]
+  [[EarlGrey selectElementWithMatcher:NavigationBarDoneButton()]
       assertWithMatcher:grey_sufficientlyVisible()];
 
   // Toggle the switch back on via the UI and make sure the exceptions are now
@@ -285,7 +285,7 @@ class ScopedBlockPopupsException {
   [[EarlGrey
       selectElementWithMatcher:chrome_test_util::CollectionViewSwitchCell(
                                    @"blockPopupsContentView_switch", NO)]
-      performAction:chrome_test_util::turnCollectionViewSwitchOn(YES)];
+      performAction:chrome_test_util::TurnCollectionViewSwitchOn(YES)];
   [[EarlGrey selectElementWithMatcher:grey_text(base::SysUTF8ToNSString(
                                           allowedPattern))]
       assertWithMatcher:grey_sufficientlyVisible()];

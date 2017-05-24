@@ -8,7 +8,7 @@
 #include "cc/animation/animation_id_provider.h"
 #include "cc/animation/animation_player.h"
 #include "cc/animation/animation_timeline.h"
-#include "cc/debug/lap_timer.h"
+#include "cc/base/lap_timer.h"
 #include "cc/test/fake_impl_task_runner_provider.h"
 #include "cc/test/fake_layer_tree_host.h"
 #include "cc/test/fake_layer_tree_host_client.h"
@@ -56,7 +56,7 @@ class AnimationHostPerfTest : public testing::Test {
     return layer_tree_host_->host_impl()->animation_host();
   }
 
-  void CreatePlayers(const int num_players) {
+  void CreatePlayers(int num_players) {
     all_players_timeline_ =
         AnimationTimeline::Create(AnimationIdProvider::NextTimelineId());
     host()->AddAnimationTimeline(all_players_timeline_);
@@ -89,7 +89,7 @@ class AnimationHostPerfTest : public testing::Test {
       EXPECT_TRUE(timeline_impl->GetPlayerById(i));
   }
 
-  void CreateTimelines(const int num_timelines) {
+  void CreateTimelines(int num_timelines) {
     first_timeline_id_ = AnimationIdProvider::NextTimelineId();
     last_timeline_id_ = first_timeline_id_;
 

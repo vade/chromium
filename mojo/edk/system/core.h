@@ -27,6 +27,7 @@
 #include "mojo/public/c/system/message_pipe.h"
 #include "mojo/public/c/system/platform_handle.h"
 #include "mojo/public/c/system/types.h"
+#include "mojo/public/c/system/watcher.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 
 namespace base {
@@ -54,14 +55,43 @@ class MOJO_SYSTEM_IMPL_EXPORT Core {
 
   void SetDefaultProcessErrorCallback(const ProcessErrorCallback& callback);
 
-  // Called in the parent process any time a new child is launched.
-  void AddChild(base::ProcessHandle process_handle,
-                ScopedPlatformHandle platform_handle,
-                const std::string& child_token,
-                const ProcessErrorCallback& process_error_callback);
+  // Creates a message pipe endpoint with an unbound peer port returned in
+  // |*peer|. Useful for setting up cross-process bootstrap message pipes. The
+  // returned message pipe handle is usable immediately by the caller.
+  //
+  // The value returned in |*peer| may be passed along with a broker client
+  // invitation. See SendBrokerClientInvitation() below.
+  ScopedMessagePipeHandle CreatePartialMessagePipe(ports::PortRef* peer);
 
-  // Called in the parent process when a child process fails to launch.
-  void ChildLaunchFailed(const std::string& child_token);
+  // Like above but exchanges an existing ports::PortRef for a message pipe
+  // handle which wraps it.
+  ScopedMessagePipeHandle CreatePartialMessagePipe(const ports::PortRef& port);
+
+  // Sends a broker client invitation to |target_process| over the connection
+  // medium in |connection_params|. The other end of the connection medium in
+  // |connection_params| can be used within the target process to call
+  // AcceptBrokerClientInvitation() and complete the process's admission into
+  // this process graph.
+  //
+  // |attached_ports| is a list of named port references to be attached to the
+  // invitation. An attached port can be claimed (as a message pipe handle) by
+  // the invitee.
+  void SendBrokerClientInvitation(
+      base::ProcessHandle target_process,
+      ConnectionParams connection_params,
+      const std::vector<std::pair<std::string, ports::PortRef>>& attached_ports,
+      const ProcessErrorCallback& process_error_callback);
+
+  // Accepts a broker client invitation via |connection_params|. The other end
+  // of the connection medium in |connection_params| must have been used by some
+  // other process to send an OutgoingBrokerClientInvitation.
+  void AcceptBrokerClientInvitation(ConnectionParams connection_params);
+
+  // Extracts a named message pipe endpoint from the broker client invitation
+  // accepted by this process. Must only be called after
+  // AcceptBrokerClientInvitation.
+  ScopedMessagePipeHandle ExtractMessagePipeFromInvitation(
+      const std::string& name);
 
   // Called to connect to a peer process. This should be called only if there
   // is no common ancestor for the processes involved within this mojo system.
@@ -70,18 +100,6 @@ class MOJO_SYSTEM_IMPL_EXPORT Core {
   ScopedMessagePipeHandle ConnectToPeerProcess(ScopedPlatformHandle pipe_handle,
                                                const std::string& peer_token);
   void ClosePeerConnection(const std::string& peer_token);
-
-  // Called in a child process exactly once during early initialization.
-  void InitChild(ScopedPlatformHandle platform_handle);
-
-  // Creates a message pipe endpoint associated with |token|, which a child
-  // holding the token can later locate and connect to.
-  ScopedMessagePipeHandle CreateParentMessagePipe(
-      const std::string& token, const std::string& child_token);
-
-  // Creates a message pipe endpoint and connects it to a pipe the parent has
-  // associated with |token|.
-  ScopedMessagePipeHandle CreateChildMessagePipe(const std::string& token);
 
   // Sets the mach port provider for this process.
   void SetMachPortProvider(base::PortProvider* port_provider);
@@ -135,21 +153,20 @@ class MOJO_SYSTEM_IMPL_EXPORT Core {
   // "mojo/public/c/system/functions.h":
   MojoTimeTicks GetTimeTicksNow();
   MojoResult Close(MojoHandle handle);
-  MojoResult Wait(MojoHandle handle,
-                  MojoHandleSignals signals,
-                  MojoDeadline deadline,
-                  MojoHandleSignalsState* signals_state);
-  MojoResult WaitMany(const MojoHandle* handles,
-                      const MojoHandleSignals* signals,
-                      uint32_t num_handles,
-                      MojoDeadline deadline,
-                      uint32_t* result_index,
-                      MojoHandleSignalsState* signals_states);
-  MojoResult Watch(MojoHandle handle,
+  MojoResult QueryHandleSignalsState(MojoHandle handle,
+                                     MojoHandleSignalsState* signals_state);
+  MojoResult CreateWatcher(MojoWatcherCallback callback,
+                           MojoHandle* watcher_handle);
+  MojoResult Watch(MojoHandle watcher_handle,
+                   MojoHandle handle,
                    MojoHandleSignals signals,
-                   MojoWatchCallback callback,
                    uintptr_t context);
-  MojoResult CancelWatch(MojoHandle handle, uintptr_t context);
+  MojoResult CancelWatch(MojoHandle watcher_handle, uintptr_t context);
+  MojoResult ArmWatcher(MojoHandle watcher_handle,
+                        uint32_t* num_ready_contexts,
+                        uintptr_t* ready_contexts,
+                        MojoResult* ready_results,
+                        MojoHandleSignalsState* ready_signals_states);
   MojoResult AllocMessage(uint32_t num_bytes,
                           const MojoHandle* handles,
                           uint32_t num_handles,
@@ -158,20 +175,6 @@ class MOJO_SYSTEM_IMPL_EXPORT Core {
   MojoResult FreeMessage(MojoMessageHandle message);
   MojoResult GetMessageBuffer(MojoMessageHandle message, void** buffer);
   MojoResult GetProperty(MojoPropertyType type, void* value);
-
-  // These methods correspond to the API functions defined in
-  // "mojo/public/c/system/wait_set.h":
-  MojoResult CreateWaitSet(MojoHandle* wait_set_handle);
-  MojoResult AddHandle(MojoHandle wait_set_handle,
-                       MojoHandle handle,
-                       MojoHandleSignals signals);
-  MojoResult RemoveHandle(MojoHandle wait_set_handle,
-                          MojoHandle handle);
-  MojoResult GetReadyHandles(MojoHandle wait_set_handle,
-                             uint32_t* count,
-                             MojoHandle* handles,
-                             MojoResult* results,
-                             MojoHandleSignalsState* signals_states);
 
   // These methods correspond to the API functions defined in
   // "mojo/public/c/system/message_pipe.h":
@@ -269,13 +272,6 @@ class MOJO_SYSTEM_IMPL_EXPORT Core {
   void GetActiveHandlesForTest(std::vector<MojoHandle>* handles);
 
  private:
-  MojoResult WaitManyInternal(const MojoHandle* handles,
-                              const MojoHandleSignals* signals,
-                              uint32_t num_handles,
-                              MojoDeadline deadline,
-                              uint32_t* result_index,
-                              HandleSignalsState* signals_states);
-
   // Used to pass ownership of our NodeController over to the IO thread in the
   // event that we're torn down before said thread.
   static void PassNodeControllerToIOThread(

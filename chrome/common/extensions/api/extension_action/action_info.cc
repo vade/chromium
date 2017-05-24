@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/common/extensions/api/commands/commands_handler.h"
 #include "extensions/common/constants.h"
@@ -67,8 +68,7 @@ std::unique_ptr<ActionInfo> ActionInfo::Load(const Extension* extension,
         dict->GetList(keys::kPageActionIcons, &icons)) {
       base::ListValue::const_iterator iter = icons->begin();
       std::string path;
-      if (iter == icons->end() ||
-          !(*iter)->GetAsString(&path) ||
+      if (iter == icons->end() || !iter->GetAsString(&path) ||
           !manifest_handler_helpers::NormalizeAndValidatePath(&path)) {
         *error = base::ASCIIToUTF16(errors::kInvalidPageActionIconPath);
         return std::unique_ptr<ActionInfo>();
@@ -198,19 +198,20 @@ const ActionInfo* ActionInfo::GetSystemIndicatorInfo(
 // static
 void ActionInfo::SetBrowserActionInfo(Extension* extension, ActionInfo* info) {
   extension->SetManifestData(keys::kBrowserAction,
-                             new ActionInfoData(info));
+                             base::MakeUnique<ActionInfoData>(info));
 }
 
 // static
 void ActionInfo::SetPageActionInfo(Extension* extension, ActionInfo* info) {
   extension->SetManifestData(keys::kPageAction,
-                             new ActionInfoData(info));
+                             base::MakeUnique<ActionInfoData>(info));
 }
 
 // static
 void ActionInfo::SetSystemIndicatorInfo(Extension* extension,
                                         ActionInfo* info) {
-  extension->SetManifestData(keys::kSystemIndicator, new ActionInfoData(info));
+  extension->SetManifestData(keys::kSystemIndicator,
+                             base::MakeUnique<ActionInfoData>(info));
 }
 
 // static

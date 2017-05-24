@@ -36,7 +36,9 @@ using device::UsbDeviceHandle;
 using device::UsbInterfaceDescriptor;
 using device::UsbEndpointDescriptor;
 using device::UsbService;
+using device::UsbTransferDirection;
 using device::UsbTransferStatus;
+using device::UsbTransferType;
 
 namespace {
 
@@ -59,7 +61,7 @@ typedef std::vector<scoped_refptr<UsbDevice> > UsbDevices;
 typedef std::set<scoped_refptr<UsbDevice> > UsbDeviceSet;
 
 // Stores android wrappers around claimed usb devices on caller thread.
-base::LazyInstance<std::vector<AndroidUsbDevice*> >::Leaky g_devices =
+base::LazyInstance<std::vector<AndroidUsbDevice*>>::Leaky g_devices =
     LAZY_INSTANCE_INITIALIZER;
 
 bool IsAndroidInterface(const UsbInterfaceDescriptor& interface) {
@@ -88,7 +90,7 @@ void CountAndroidDevices(const base::Callback<void(int)>& callback,
   }
 
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::Bind(callback, device_count));
+                          base::BindOnce(callback, device_count));
 }
 
 uint32_t Checksum(const std::string& data) {
@@ -160,7 +162,7 @@ void RespondOnUIThread(
     scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   caller_task_runner->PostTask(
-      FROM_HERE, base::Bind(&RespondOnCallerThread, callback, devices));
+      FROM_HERE, base::BindOnce(&RespondOnCallerThread, callback, devices));
 }
 
 void CreateDeviceOnInterfaceClaimed(AndroidUsbDevices* devices,
@@ -227,9 +229,9 @@ void OpenAndroidDevice(AndroidUsbDevices* devices,
   int zero_mask = 0;
 
   for (const UsbEndpointDescriptor& endpoint : interface.endpoints) {
-    if (endpoint.transfer_type != device::USB_TRANSFER_BULK)
+    if (endpoint.transfer_type != UsbTransferType::BULK)
       continue;
-    if (endpoint.direction == device::USB_DIRECTION_INBOUND)
+    if (endpoint.direction == UsbTransferDirection::INBOUND)
       inbound_address = endpoint.address;
     else
       outbound_address = endpoint.address;
@@ -289,7 +291,7 @@ void EnumerateOnUIThread(
   UsbService* service = device::DeviceClient::Get()->GetUsbService();
   if (service == NULL) {
     caller_task_runner->PostTask(FROM_HERE,
-                                 base::Bind(callback, AndroidUsbDevices()));
+                                 base::BindOnce(callback, AndroidUsbDevices()));
   } else {
     service->GetDevices(
         base::Bind(&OpenAndroidDevices, rsa_key, callback, caller_task_runner));
@@ -314,7 +316,7 @@ void AndroidUsbDevice::CountDevices(const base::Callback<void(int)>& callback) {
     service->GetDevices(base::Bind(&CountAndroidDevices, callback));
   } else {
     base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                  base::Bind(callback, 0));
+                                                  base::BindOnce(callback, 0));
   }
 }
 
@@ -324,16 +326,18 @@ void AndroidUsbDevice::Enumerate(crypto::RSAPrivateKey* rsa_key,
   // Collect devices with closed handles.
   for (AndroidUsbDevice* device : g_devices.Get()) {
     if (device->usb_handle_.get()) {
-      BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                              base::Bind(&AndroidUsbDevice::TerminateIfReleased,
-                                         device, device->usb_handle_));
+      BrowserThread::PostTask(
+          BrowserThread::UI, FROM_HERE,
+          base::BindOnce(&AndroidUsbDevice::TerminateIfReleased, device,
+                         device->usb_handle_));
     }
   }
 
   // Then look for the new devices.
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::Bind(&EnumerateOnUIThread, rsa_key, callback,
-                                     base::ThreadTaskRunnerHandle::Get()));
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::BindOnce(&EnumerateOnUIThread, rsa_key, callback,
+                     base::ThreadTaskRunnerHandle::Get()));
 }
 
 AndroidUsbDevice::AndroidUsbDevice(crypto::RSAPrivateKey* rsa_key,
@@ -379,11 +383,10 @@ void AndroidUsbDevice::Send(uint32_t command,
                             uint32_t arg0,
                             uint32_t arg1,
                             const std::string& body) {
-  std::unique_ptr<AdbMessage> message(
-      new AdbMessage(command, arg0, arg1, body));
+  auto message = base::MakeUnique<AdbMessage>(command, arg0, arg1, body);
   // Delay open request if not yet connected.
   if (!is_connected_) {
-    pending_messages_.push_back(message.release());
+    pending_messages_.push_back(std::move(message));
     return;
   }
   Queue(std::move(message));
@@ -447,7 +450,7 @@ void AndroidUsbDevice::ProcessOutgoing() {
   DumpMessage(true, message->data(), message->size());
 
   usb_handle_->GenericTransfer(
-      device::USB_DIRECTION_OUTBOUND, outbound_address_, message,
+      UsbTransferDirection::OUTBOUND, outbound_address_, message,
       message->size(), kUsbTimeout,
       base::Bind(&AndroidUsbDevice::OutgoingMessageSent,
                  weak_factory_.GetWeakPtr()));
@@ -456,12 +459,12 @@ void AndroidUsbDevice::ProcessOutgoing() {
 void AndroidUsbDevice::OutgoingMessageSent(UsbTransferStatus status,
                                            scoped_refptr<net::IOBuffer> buffer,
                                            size_t result) {
-  if (status != device::USB_TRANSFER_COMPLETED) {
+  if (status != UsbTransferStatus::COMPLETED) {
     return;
   }
 
-  task_runner_->PostTask(FROM_HERE,
-                         base::Bind(&AndroidUsbDevice::ProcessOutgoing, this));
+  task_runner_->PostTask(
+      FROM_HERE, base::BindOnce(&AndroidUsbDevice::ProcessOutgoing, this));
 }
 
 void AndroidUsbDevice::ReadHeader() {
@@ -473,7 +476,7 @@ void AndroidUsbDevice::ReadHeader() {
 
   scoped_refptr<net::IOBuffer> buffer = new net::IOBuffer(kHeaderSize);
   usb_handle_->GenericTransfer(
-      device::USB_DIRECTION_INBOUND, inbound_address_, buffer, kHeaderSize,
+      UsbTransferDirection::INBOUND, inbound_address_, buffer, kHeaderSize,
       kUsbTimeout,
       base::Bind(&AndroidUsbDevice::ParseHeader, weak_factory_.GetWeakPtr()));
 }
@@ -483,13 +486,13 @@ void AndroidUsbDevice::ParseHeader(UsbTransferStatus status,
                                    size_t result) {
   DCHECK(task_runner_->BelongsToCurrentThread());
 
-  if (status == device::USB_TRANSFER_TIMEOUT) {
+  if (status == UsbTransferStatus::TIMEOUT) {
     task_runner_->PostTask(FROM_HERE,
-                           base::Bind(&AndroidUsbDevice::ReadHeader, this));
+                           base::BindOnce(&AndroidUsbDevice::ReadHeader, this));
     return;
   }
 
-  if (status != device::USB_TRANSFER_COMPLETED || result != kHeaderSize) {
+  if (status != UsbTransferStatus::COMPLETED || result != kHeaderSize) {
     TransferError(status);
     return;
   }
@@ -503,18 +506,19 @@ void AndroidUsbDevice::ParseHeader(UsbTransferStatus status,
   uint32_t data_check = header[4];
   uint32_t magic = header[5];
   if ((message->command ^ 0xffffffff) != magic) {
-    TransferError(device::USB_TRANSFER_ERROR);
+    TransferError(UsbTransferStatus::TRANSFER_ERROR);
     return;
   }
 
   if (data_length == 0) {
-    task_runner_->PostTask(FROM_HERE,
-                           base::Bind(&AndroidUsbDevice::HandleIncoming, this,
-                                      base::Passed(&message)));
+    task_runner_->PostTask(
+        FROM_HERE, base::BindOnce(&AndroidUsbDevice::HandleIncoming, this,
+                                  base::Passed(&message)));
   } else {
     task_runner_->PostTask(
-        FROM_HERE, base::Bind(&AndroidUsbDevice::ReadBody, this,
-                              base::Passed(&message), data_length, data_check));
+        FROM_HERE,
+        base::BindOnce(&AndroidUsbDevice::ReadBody, this,
+                       base::Passed(&message), data_length, data_check));
   }
 }
 
@@ -530,7 +534,7 @@ void AndroidUsbDevice::ReadBody(std::unique_ptr<AdbMessage> message,
   scoped_refptr<net::IOBuffer> buffer =
       new net::IOBuffer(static_cast<size_t>(data_length));
   usb_handle_->GenericTransfer(
-      device::USB_DIRECTION_INBOUND, inbound_address_, buffer, data_length,
+      UsbTransferDirection::INBOUND, inbound_address_, buffer, data_length,
       kUsbTimeout,
       base::Bind(&AndroidUsbDevice::ParseBody, weak_factory_.GetWeakPtr(),
                  base::Passed(&message), data_length, data_check));
@@ -544,14 +548,15 @@ void AndroidUsbDevice::ParseBody(std::unique_ptr<AdbMessage> message,
                                  size_t result) {
   DCHECK(task_runner_->BelongsToCurrentThread());
 
-  if (status == device::USB_TRANSFER_TIMEOUT) {
+  if (status == UsbTransferStatus::TIMEOUT) {
     task_runner_->PostTask(
-        FROM_HERE, base::Bind(&AndroidUsbDevice::ReadBody, this,
-                              base::Passed(&message), data_length, data_check));
+        FROM_HERE,
+        base::BindOnce(&AndroidUsbDevice::ReadBody, this,
+                       base::Passed(&message), data_length, data_check));
     return;
   }
 
-  if (status != device::USB_TRANSFER_COMPLETED ||
+  if (status != UsbTransferStatus::COMPLETED ||
       static_cast<uint32_t>(result) != data_length) {
     TransferError(status);
     return;
@@ -560,13 +565,13 @@ void AndroidUsbDevice::ParseBody(std::unique_ptr<AdbMessage> message,
   DumpMessage(false, buffer->data(), data_length);
   message->body = std::string(buffer->data(), result);
   if (Checksum(message->body) != data_check) {
-    TransferError(device::USB_TRANSFER_ERROR);
+    TransferError(UsbTransferStatus::TRANSFER_ERROR);
     return;
   }
 
   task_runner_->PostTask(FROM_HERE,
-                         base::Bind(&AndroidUsbDevice::HandleIncoming, this,
-                                    base::Passed(&message)));
+                         base::BindOnce(&AndroidUsbDevice::HandleIncoming, this,
+                                        base::Passed(&message)));
 }
 
 void AndroidUsbDevice::HandleIncoming(std::unique_ptr<AdbMessage> message) {
@@ -600,10 +605,8 @@ void AndroidUsbDevice::HandleIncoming(std::unique_ptr<AdbMessage> message) {
         is_connected_ = true;
         PendingMessages pending;
         pending.swap(pending_messages_);
-        for (PendingMessages::iterator it = pending.begin();
-             it != pending.end(); ++it) {
-          Queue(base::WrapUnique(*it));
-        }
+        for (auto& msg : pending)
+          Queue(std::move(msg));
       }
       break;
     case AdbMessage::kCommandOKAY:
@@ -635,7 +638,7 @@ void AndroidUsbDevice::TerminateIfReleased(
   }
 
   task_runner_->PostTask(FROM_HERE,
-                         base::Bind(&AndroidUsbDevice::Terminate, this));
+                         base::BindOnce(&AndroidUsbDevice::Terminate, this));
 }
 
 void AndroidUsbDevice::Terminate() {
@@ -664,7 +667,7 @@ void AndroidUsbDevice::Terminate() {
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&ReleaseInterface, usb_handle, interface_id_));
+      base::BindOnce(&ReleaseInterface, usb_handle, interface_id_));
 }
 
 void AndroidUsbDevice::SocketDeleted(uint32_t socket_id) {

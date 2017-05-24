@@ -8,7 +8,7 @@
 
 #include "content/browser/permissions/permission_service_impl.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/browser/navigation_details.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/permission_manager.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -72,9 +72,10 @@ PermissionServiceContext::~PermissionServiceContext() {
 }
 
 void PermissionServiceContext::CreateService(
-    mojo::InterfaceRequest<blink::mojom::PermissionService> request) {
-  services_.push_back(
-      base::MakeUnique<PermissionServiceImpl>(this, std::move(request)));
+    const service_manager::BindSourceInfo& source_info,
+    blink::mojom::PermissionServiceRequest request) {
+  services_.AddBinding(base::MakeUnique<PermissionServiceImpl>(this),
+                       std::move(request));
 }
 
 void PermissionServiceContext::CreateSubscription(
@@ -101,17 +102,6 @@ void PermissionServiceContext::CreateSubscription(
   subscriptions_[subscription_id] = std::move(subscription);
 }
 
-void PermissionServiceContext::ServiceHadConnectionError(
-    PermissionServiceImpl* service) {
-  auto it = std::find_if(
-      services_.begin(), services_.end(),
-      [service](const std::unique_ptr<PermissionServiceImpl>& this_service) {
-        return service == this_service.get();
-      });
-  DCHECK(it != services_.end());
-  services_.erase(it);
-}
-
 void PermissionServiceContext::ObserverHadConnectionError(int subscription_id) {
   auto it = subscriptions_.find(subscription_id);
   DCHECK(it != subscriptions_.end());
@@ -121,33 +111,29 @@ void PermissionServiceContext::ObserverHadConnectionError(int subscription_id) {
 void PermissionServiceContext::RenderFrameHostChanged(
     RenderFrameHost* old_host,
     RenderFrameHost* new_host) {
-  CancelPendingOperations(old_host);
+  CloseBindings(old_host);
 }
 
 void PermissionServiceContext::FrameDeleted(
     RenderFrameHost* render_frame_host) {
-  CancelPendingOperations(render_frame_host);
+  CloseBindings(render_frame_host);
 }
 
-void PermissionServiceContext::DidNavigateAnyFrame(
-    RenderFrameHost* render_frame_host,
-    const LoadCommittedDetails& details,
-    const FrameNavigateParams& params) {
-  if (details.is_in_page)
+void PermissionServiceContext::DidFinishNavigation(
+    NavigationHandle* navigation_handle) {
+  if (!navigation_handle->HasCommitted() || navigation_handle->IsSameDocument())
     return;
 
-  CancelPendingOperations(render_frame_host);
+  CloseBindings(navigation_handle->GetRenderFrameHost());
 }
 
-void PermissionServiceContext::CancelPendingOperations(
+void PermissionServiceContext::CloseBindings(
     RenderFrameHost* render_frame_host) {
   DCHECK(render_frame_host_);
   if (render_frame_host != render_frame_host_)
     return;
 
-  for (const auto& service : services_)
-    service->CancelPendingOperations();
-
+  services_.CloseAllBindings();
   subscriptions_.clear();
 }
 

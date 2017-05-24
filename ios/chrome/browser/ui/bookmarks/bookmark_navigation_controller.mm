@@ -4,8 +4,11 @@
 
 #import "ios/chrome/browser/ui/bookmarks/bookmark_navigation_controller.h"
 
-#include "base/mac/scoped_nsobject.h"
 #import "ios/chrome/browser/ui/bookmarks/bookmark_utils_ios.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 @implementation BookmarkNavigationController
 
@@ -26,6 +29,12 @@
   // This allows us to hide the keyboard when controllers are being displayed in
   // a modal form sheet on the iPad.
   return NO;
+}
+
+#pragma mark - UIResponder
+
+- (BOOL)canBecomeFirstResponder {
+  return YES;
 }
 
 @end

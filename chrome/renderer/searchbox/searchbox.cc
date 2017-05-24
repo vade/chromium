@@ -63,10 +63,6 @@ const char* GetIconTypeUrlHost(SearchBox::ImageSourceType type) {
   switch (type) {
     case SearchBox::FAVICON:
       return "favicon";
-    case SearchBox::LARGE_ICON:
-      return "large-icon";
-    case SearchBox::FALLBACK_ICON:
-      return "fallback-icon";
     case SearchBox::THUMB:
       return "thumb";
     default:
@@ -83,16 +79,7 @@ int GetImagePathStartOfPageURL(SearchBox::ImageSourceType type,
   switch (type) {
     case SearchBox::FAVICON: {
       chrome::ParsedFaviconPath parsed;
-      return chrome::ParseFaviconPath(
-          path, favicon_base::FAVICON, &parsed) ? parsed.path_index : -1;
-    }
-    case SearchBox::LARGE_ICON: {
-      LargeIconUrlParser parser;
-      return parser.Parse(path) ? parser.path_index() : -1;
-    }
-    case SearchBox::FALLBACK_ICON: {
-      chrome::ParsedFallbackIconPath parser;
-      return parser.Parse(path) ? parser.path_index() : -1;
+      return chrome::ParseFaviconPath(path, &parsed) ? parsed.path_index : -1;
     }
     case SearchBox::THUMB: {
       return 0;
@@ -244,19 +231,21 @@ SearchBox::SearchBox(content::RenderFrame* render_frame)
       most_visited_items_cache_(kMaxInstantMostVisitedItemCacheSize),
       query_(),
       binding_(this) {
-  render_frame->GetRemoteAssociatedInterfaces()->GetInterface(
-      &instant_service_);
-  render_frame->GetAssociatedInterfaceRegistry()->AddInterface(
-      base::Bind(&SearchBox::Bind, base::Unretained(this)));
+  // Connect to the embedded search interface in the browser.
+  chrome::mojom::EmbeddedSearchConnectorAssociatedPtr connector;
+  render_frame->GetRemoteAssociatedInterfaces()->GetInterface(&connector);
+  chrome::mojom::SearchBoxAssociatedPtrInfo search_box;
+  binding_.Bind(mojo::MakeRequest(&search_box));
+  connector->Connect(mojo::MakeRequest(&instant_service_),
+                     std::move(search_box));
 }
 
-SearchBox::~SearchBox() {
-}
+SearchBox::~SearchBox() = default;
 
 void SearchBox::LogEvent(NTPLoggingEventType event) {
   // navigation_start in ms.
   uint64_t start =
-      1000 * (render_frame()->GetWebFrame()->performance().navigationStart());
+      1000 * (render_frame()->GetWebFrame()->Performance().NavigationStart());
   uint64_t now =
       (base::TimeTicks::Now() - base::TimeTicks::UnixEpoch()).InMilliseconds();
   DCHECK(now >= start);
@@ -265,15 +254,17 @@ void SearchBox::LogEvent(NTPLoggingEventType event) {
 }
 
 void SearchBox::LogMostVisitedImpression(int position,
-                                         ntp_tiles::NTPTileSource tile_source) {
+                                         ntp_tiles::TileSource tile_source,
+                                         ntp_tiles::TileVisualType tile_type) {
   instant_service_->LogMostVisitedImpression(page_seq_no_, position,
-                                             tile_source);
+                                             tile_source, tile_type);
 }
 
 void SearchBox::LogMostVisitedNavigation(int position,
-                                         ntp_tiles::NTPTileSource tile_source) {
+                                         ntp_tiles::TileSource tile_source,
+                                         ntp_tiles::TileVisualType tile_type) {
   instant_service_->LogMostVisitedNavigation(page_seq_no_, position,
-                                             tile_source);
+                                             tile_source, tile_type);
 }
 
 void SearchBox::CheckIsUserSignedInToChromeAs(const base::string16& identity) {
@@ -286,8 +277,10 @@ void SearchBox::CheckIsUserSyncingHistory() {
 
 void SearchBox::DeleteMostVisitedItem(
     InstantRestrictedID most_visited_item_id) {
-  instant_service_->SearchBoxDeleteMostVisitedItem(
-      page_seq_no_, GetURLForMostVisitedItem(most_visited_item_id));
+  GURL url = GetURLForMostVisitedItem(most_visited_item_id);
+  if (!url.is_valid())
+    return;
+  instant_service_->DeleteMostVisitedItem(page_seq_no_, url);
 }
 
 bool SearchBox::GenerateImageURLFromTransientURL(const GURL& transient_url,
@@ -299,7 +292,7 @@ bool SearchBox::GenerateImageURLFromTransientURL(const GURL& transient_url,
 
 void SearchBox::GetMostVisitedItems(
     std::vector<InstantMostVisitedItemIDPair>* items) const {
-  return most_visited_items_cache_.GetCurrentItems(items);
+  most_visited_items_cache_.GetCurrentItems(items);
 }
 
 bool SearchBox::GetMostVisitedItemWithID(
@@ -330,13 +323,15 @@ void SearchBox::StopCapturingKeyStrokes() {
 }
 
 void SearchBox::UndoAllMostVisitedDeletions() {
-  instant_service_->SearchBoxUndoAllMostVisitedDeletions(page_seq_no_);
+  instant_service_->UndoAllMostVisitedDeletions(page_seq_no_);
 }
 
 void SearchBox::UndoMostVisitedDeletion(
     InstantRestrictedID most_visited_item_id) {
-  instant_service_->SearchBoxUndoMostVisitedDeletion(
-      page_seq_no_, GetURLForMostVisitedItem(most_visited_item_id));
+  GURL url = GetURLForMostVisitedItem(most_visited_item_id);
+  if (!url.is_valid())
+    return;
+  instant_service_->UndoMostVisitedDeletion(page_seq_no_, url);
 }
 
 void SearchBox::SetPageSequenceNumber(int page_seq_no) {
@@ -347,13 +342,6 @@ void SearchBox::ChromeIdentityCheckResult(const base::string16& identity,
                                           bool identity_match) {
   extensions_v8::SearchBoxExtension::DispatchChromeIdentityCheckResult(
       render_frame()->GetWebFrame(), identity, identity_match);
-}
-
-void SearchBox::DetermineIfPageSupportsInstant() {
-  bool result = extensions_v8::SearchBoxExtension::PageSupportsInstant(
-      render_frame()->GetWebFrame());
-  DVLOG(1) << render_frame() << " PageSupportsInstant: " << result;
-  instant_service_->InstantSupportDetermined(page_seq_no_, result);
 }
 
 void SearchBox::FocusChanged(OmniboxFocusState new_focus_state,

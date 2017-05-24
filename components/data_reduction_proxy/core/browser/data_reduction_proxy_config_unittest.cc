@@ -19,6 +19,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
 #include "base/strings/safe_sprintf.h"
@@ -38,6 +39,8 @@
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_server.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
 #include "components/data_reduction_proxy/proto/client_config.pb.h"
+#include "components/previews/core/previews_decider.h"
+#include "components/previews/core/previews_experiments.h"
 #include "components/variations/variations_associated_data.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
@@ -49,6 +52,7 @@
 #include "net/nqe/network_quality_estimator_test_util.h"
 #include "net/proxy/proxy_server.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request.h"
@@ -78,6 +82,28 @@ std::string GetRetryMapKeyFromOrigin(const std::string& origin) {
   return origin;
 }
 
+class TestPreviewsDecider : public previews::PreviewsDecider {
+ public:
+  TestPreviewsDecider(bool allow_previews) : allow_previews_(allow_previews) {}
+  ~TestPreviewsDecider() override {}
+
+  // previews::PreviewsDecider:
+  bool ShouldAllowPreviewAtECT(
+      const net::URLRequest& request,
+      previews::PreviewsType type,
+      net::EffectiveConnectionType effective_connection_type_threshold)
+      const override {
+    return allow_previews_;
+  }
+  bool ShouldAllowPreview(const net::URLRequest& request,
+                          previews::PreviewsType type) const override {
+    return allow_previews_;
+  }
+
+ private:
+  bool allow_previews_;
+};
+
 }  // namespace
 
 class DataReductionProxyConfigTest : public testing::Test {
@@ -87,6 +113,7 @@ class DataReductionProxyConfigTest : public testing::Test {
 
   void SetUp() override {
     net::NetworkChangeNotifier::SetTestNotificationsOnly(true);
+    base::RunLoop().RunUntilIdle();
     network_change_notifier_.reset(net::NetworkChangeNotifier::CreateMock());
 
     test_context_ = DataReductionProxyTestContext::Builder()
@@ -164,17 +191,6 @@ class DataReductionProxyConfigTest : public testing::Test {
         1);
   }
 
-  void WarmupURLFetchedCallBack() const {
-    warmup_url_fetched_run_loop_->Quit();
-  }
-
-  void WarmUpURLFetchedRunLoop() {
-    warmup_url_fetched_run_loop_.reset(new base::RunLoop());
-    // |warmup_url_fetched_run_loop_| will run until WarmupURLFetchedCallBack()
-    // is called.
-    warmup_url_fetched_run_loop_->Run();
-  }
-
   void RunUntilIdle() {
     test_context_->RunUntilIdle();
   }
@@ -212,7 +228,6 @@ class DataReductionProxyConfigTest : public testing::Test {
   std::unique_ptr<net::NetworkChangeNotifier> network_change_notifier_;
 
   base::MessageLoopForIO message_loop_;
-  std::unique_ptr<base::RunLoop> warmup_url_fetched_run_loop_;
   std::unique_ptr<DataReductionProxyTestContext> test_context_;
   std::unique_ptr<TestDataReductionProxyParams> expected_params_;
 };
@@ -374,31 +389,44 @@ TEST_F(DataReductionProxyConfigTest, WarmupURL) {
         new net::TestURLRequestContextGetter(task_runner());
     config.InitializeOnIOThread(request_context_getter_.get(),
                                 request_context_getter_.get());
-    config.SetWarmupURLFetcherCallbackForTesting(
-        base::Bind(&DataReductionProxyConfigTest::WarmupURLFetchedCallBack,
-                   base::Unretained(this)));
+
+    // Set the connection type to WiFi so that warm up URL is fetched even if
+    // the test device does not have connectivity.
+    config.connection_type_ = net::NetworkChangeNotifier::CONNECTION_WIFI;
     config.SetProxyConfig(test.data_reduction_proxy_enabled, true);
     bool warmup_url_enabled =
         test.data_reduction_proxy_enabled && test.enabled_via_field_trial;
 
     if (warmup_url_enabled) {
-      // Block until warm up URL is fetched successfully.
-      WarmUpURLFetchedRunLoop();
       histogram_tester.ExpectUniqueSample(
           "DataReductionProxy.WarmupURL.FetchInitiated", 1, 1);
-      histogram_tester.ExpectUniqueSample(
-          "DataReductionProxy.WarmupURL.FetchSuccessful", 1, 1);
     }
 
-    config.OnIPAddressChanged();
+    // Set the connection type to 4G so that warm up URL is fetched even if
+    // the test device does not have connectivity.
+    net::NetworkChangeNotifier::NotifyObserversOfConnectionTypeChangeForTests(
+        net::NetworkChangeNotifier::CONNECTION_4G);
+    RunUntilIdle();
 
     if (warmup_url_enabled) {
-      // Block until warm up URL is fetched successfully.
-      WarmUpURLFetchedRunLoop();
       histogram_tester.ExpectUniqueSample(
           "DataReductionProxy.WarmupURL.FetchInitiated", 1, 2);
+    } else {
+      histogram_tester.ExpectTotalCount(
+          "DataReductionProxy.WarmupURL.FetchInitiated", 0);
+      histogram_tester.ExpectTotalCount(
+          "DataReductionProxy.WarmupURL.FetchSuccessful", 0);
+    }
+
+    // Warm up URL should not be fetched since the device does not have
+    // connectivity.
+    net::NetworkChangeNotifier::NotifyObserversOfConnectionTypeChangeForTests(
+        net::NetworkChangeNotifier::CONNECTION_NONE);
+    RunUntilIdle();
+
+    if (warmup_url_enabled) {
       histogram_tester.ExpectUniqueSample(
-          "DataReductionProxy.WarmupURL.FetchSuccessful", 1, 2);
+          "DataReductionProxy.WarmupURL.FetchInitiated", 1, 2);
     } else {
       histogram_tester.ExpectTotalCount(
           "DataReductionProxy.WarmupURL.FetchInitiated", 0);
@@ -809,90 +837,194 @@ TEST_F(DataReductionProxyConfigTest, IsDataReductionProxyWithMutableConfig) {
 
 TEST_F(DataReductionProxyConfigTest, LoFiOn) {
   const struct {
-    bool lofi_switch_enabled;
+    bool lofi_enabled;
+    bool previews_black_list_used;
     const std::string lofi_field_trial_group_name;
     bool network_prohibitively_slow;
     bool expect_lofi_header;
     int bucket_to_check_for_auto_lofi_uma;
     int expect_bucket_count;
+    bool is_opted_out;
   } tests[] = {
       {
           // The Lo-Fi switch is off and the user is not in the enabled field
           // trial group. Lo-Fi should not be used.
-          false, std::string(), false, false, 0,
+          false, false, std::string(), false, false, 0,
           0,  // not in enabled field trial, UMA is not recorded
+          false,
       },
       {
           // The Lo-Fi switch is off and the user is not in enabled field trial
           // group and the network quality is bad. Lo-Fi should not be used.
-          false, std::string(), true, false, 0,
+          false, false, std::string(), true, false, 0,
           0,  // not in enabled field trial, UMA is not recorded
+          false,
+
+      },
+      {
+          // Lo-Fi is enabled through command line switch, but opted out. LoFi
+          // should not be used.
+          true, false, std::string(), false, false, 0,
+          0,  // not in enabled field trial, UMA is not recorded
+          true,
       },
       {
           // Lo-Fi is enabled through command line switch. LoFi should be used.
-          true, std::string(), false, true, 0,
+          true, false, std::string(), false, true, 0,
           0,  // not in enabled field trial, UMA is not recorded
+          false,
       },
       {
           // The user is in the enabled field trial group but the network
           // quality is not bad. Lo-Fi should not be used.
-          false, "Enabled", false, false,
+          false, false, "Enabled", false, false,
           0,  // Lo-Fi request header is not used (state change: empty to empty)
-          1,
+          1, false,
       },
       {
           // The user is in the enabled field trial group but the network
           // quality is not bad. Lo-Fi should not be used.
-          false, "Enabled_Control", false, false,
+          false, false, "Enabled_Control", false, false,
           0,  // Lo-Fi request header is not used (state change: empty to empty)
-          1,
+          1, false,
       },
       {
           // The user is in the enabled field trial group and the network
           // quality is bad. Lo-Fi should be used.
-          false, "Enabled", true, true,
+          false, false, "Enabled", true, true,
           1,  // Lo-Fi request header is now used (state change: empty to low)
-          1,
+          1, false,
       },
       {
           // The user is in the enabled field trial group and the network
           // quality is bad. Lo-Fi should be used.
-          false, "Enabled_Control", true, true,
+          false, false, "Enabled_Control", true, true,
           3,  // Lo-Fi request header is now used (state change: low to low)
-          1,
+          1, false,
       },
       {
           // The user is in the enabled field trial group and the network
           // quality is bad. Lo-Fi should be used again.
-          false, "Enabled", true, true,
+          false, false, "Enabled", true, true,
           3,  // Lo-Fi request header is now used (state change: low to low)
-          1,
+          1, false,
       },
       {
           // The user is in the enabled field trial group and the network
           // quality is bad. Lo-Fi should be used again.
-          false, "Enabled_Control", true, true,
+          false, false, "Enabled_Control", true, true,
           3,  // Lo-Fi request header is now used (state change: low to low)
-          1,
+          1, false,
       },
       {
           // The user is in the enabled field trial group but the network
           // quality is not bad. Lo-Fi should not be used.
-          false, "Enabled", false, false,
+          false, false, "Enabled", false, false,
           2,  // Lo-Fi request header is not used (state change: low to empty)
-          1,
+          1, false,
       },
       {
           // The user is in the enabled field trial group but the network
           // quality is not bad. Lo-Fi should not be used.
-          false, "Enabled_Control", false, false,
+          false, false, "Enabled_Control", false, false,
           0,  // Lo-Fi request header is not used (state change: empty to empty)
-          1,
+          1, false,
+      },
+      {
+          // The Lo-Fi switch is off and the user is not in the enabled field
+          // trial group. Lo-Fi should not be used.
+          false, true, std::string(), false, false, 0,
+          0,  // not in enabled field trial, UMA is not recorded
+          false,
+      },
+      {
+          // The Lo-Fi switch is off and the user is not in enabled field trial
+          // group and the network quality is bad. Lo-Fi should not be used.
+          false, true, std::string(), true, false, 0,
+          0,  // not in enabled field trial, UMA is not recorded
+          false,
+      },
+      {
+          // Lo-Fi is enabled through command line switch. LoFi should be used.
+          true, true, std::string(), false, true, 0,
+          0,  // not in enabled field trial, UMA is not recorded
+          false,
+      },
+      {
+          // Lo-Fi is enabled through command line switch, but opted out. LoFi
+          // should not be used.
+          true, true, std::string(), false, false, 0,
+          0,  // not in enabled field trial, UMA is not recorded
+          true,
+      },
+      {
+          // The user is in the enabled field trial group but the network
+          // quality is not bad. Lo-Fi should not be used.
+          false, true, "Enabled", false, false,
+          0,  // Lo-Fi request header is not used (state change: empty to empty)
+          1, false,
+      },
+      {
+          // The user is in the enabled field trial group but the network
+          // quality is not bad. Lo-Fi should not be used.
+          false, true, "Enabled_Control", false, false,
+          0,  // Lo-Fi request header is not used (state change: empty to empty)
+          1, false,
+      },
+      {
+          // The user is in the enabled field trial group and the network
+          // quality is bad. Lo-Fi should be used.
+          false, true, "Enabled", true, true,
+          1,  // Lo-Fi request header is now used (state change: empty to low)
+          1, false,
+      },
+      {
+          // The user is in the enabled field trial group and the network
+          // quality is bad. Lo-Fi should be used.
+          false, true, "Enabled_Control", true, true,
+          3,  // Lo-Fi request header is now used (state change: low to low)
+          1, false,
+      },
+      {
+          // The user is in the enabled field trial group and the network
+          // quality is bad. Lo-Fi should be used again.
+          false, true, "Enabled", true, true,
+          3,  // Lo-Fi request header is now used (state change: low to low)
+          1, false,
+      },
+      {
+          // The user is in the enabled field trial group and the network
+          // quality is bad. Lo-Fi should be used again.
+          false, true, "Enabled_Control", true, true,
+          3,  // Lo-Fi request header is now used (state change: low to low)
+          1, false,
+      },
+      {
+          // The user is in the enabled field trial group but the network
+          // quality is not bad. Lo-Fi should not be used.
+          false, true, "Enabled", false, false,
+          2,  // Lo-Fi request header is not used (state change: low to empty)
+          1, false,
+      },
+      {
+          // The user is in the enabled field trial group but the network
+          // quality is not bad. Lo-Fi should not be used.
+          false, true, "Enabled_Control", false, false,
+          0,  // Lo-Fi request header is not used (state change: empty to empty)
+          1, false,
       },
   };
   for (size_t i = 0; i < arraysize(tests); ++i) {
     config()->ResetLoFiStatusForTest();
-    if (tests[i].lofi_switch_enabled) {
+
+    base::FieldTrialList field_trial_list(nullptr);
+    if (tests[i].previews_black_list_used) {
+      base::FieldTrialList::CreateFieldTrial(
+          "DataReductionProxyPreviewsBlackListTransition", "Enabled_");
+    } else if (tests[i].is_opted_out) {
+      config()->SetLoFiModeOff();
+    }
+    if (tests[i].lofi_enabled) {
       base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
           switches::kDataReductionProxyLoFi,
           switches::kDataReductionProxyLoFiValueAlwaysOn);
@@ -901,7 +1033,6 @@ TEST_F(DataReductionProxyConfigTest, LoFiOn) {
           switches::kDataReductionProxyLoFi, std::string());
     }
 
-    base::FieldTrialList field_trial_list(nullptr);
     if (!tests[i].lofi_field_trial_group_name.empty()) {
       base::FieldTrialList::CreateFieldTrial(
           params::GetLoFiFieldTrialName(),
@@ -914,11 +1045,14 @@ TEST_F(DataReductionProxyConfigTest, LoFiOn) {
     base::HistogramTester histogram_tester;
     net::TestURLRequestContext context_;
     net::TestDelegate delegate_;
-    std::unique_ptr<net::URLRequest> request =
-        context_.CreateRequest(GURL(), net::IDLE, &delegate_);
+    std::unique_ptr<net::URLRequest> request = context_.CreateRequest(
+        GURL(), net::IDLE, &delegate_, TRAFFIC_ANNOTATION_FOR_TESTS);
     request->SetLoadFlags(request->load_flags() |
                           net::LOAD_MAIN_FRAME_DEPRECATED);
-    bool should_enable_lofi = config()->ShouldEnableLoFiMode(*request.get());
+    std::unique_ptr<TestPreviewsDecider> previews_decider =
+        base::MakeUnique<TestPreviewsDecider>(!tests[i].is_opted_out);
+    bool should_enable_lofi =
+        config()->ShouldEnableLoFi(*request.get(), previews_decider.get());
     if (tests[i].expect_bucket_count != 0) {
       histogram_tester.ExpectBucketCount(
           "DataReductionProxy.AutoLoFiRequestHeaderState.Unknown",
@@ -957,6 +1091,11 @@ TEST_F(DataReductionProxyConfigTest, AutoLoFiParams) {
                                          "Enabled");
   base::FieldTrialList::CreateFieldTrial(params::GetLoFiFlagFieldTrialName(),
                                          "Enabled");
+
+  scoped_refptr<net::URLRequestContextGetter> request_context_getter =
+      new net::TestURLRequestContextGetter(task_runner());
+  config.InitializeOnIOThread(request_context_getter.get(),
+                              request_context_getter.get());
 
   const struct {
     bool lofi_flag_group;
@@ -1022,7 +1161,12 @@ TEST_F(DataReductionProxyConfigTest, AutoLoFiParams) {
       &test_network_quality_estimator));
 
   // Change in connection type changes the network quality despite hysteresis.
-  config.connection_type_ = net::NetworkChangeNotifier::CONNECTION_WIFI;
+  EXPECT_FALSE(config.connection_type_changed_);
+  net::NetworkChangeNotifier::NotifyObserversOfConnectionTypeChangeForTests(
+      net::NetworkChangeNotifier::CONNECTION_WIFI);
+  RunUntilIdle();
+
+  EXPECT_TRUE(config.connection_type_changed_);
   EXPECT_TRUE(config.IsNetworkQualityProhibitivelySlow(
       &test_network_quality_estimator));
   }
@@ -1059,6 +1203,10 @@ TEST_F(DataReductionProxyConfigTest, AutoLoFiParamsSlowConnectionsFlag) {
   base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kDataReductionProxyLoFi,
       switches::kDataReductionProxyLoFiValueSlowConnectionsOnly);
+  scoped_refptr<net::URLRequestContextGetter> request_context_getter =
+      new net::TestURLRequestContextGetter(task_runner());
+  config.InitializeOnIOThread(request_context_getter.get(),
+                              request_context_getter.get());
 
   config.PopulateAutoLoFiParams();
 
@@ -1100,7 +1248,12 @@ TEST_F(DataReductionProxyConfigTest, AutoLoFiParamsSlowConnectionsFlag) {
       &test_network_quality_estimator));
 
   // Change in connection type changes the network quality despite hysteresis.
-  config.connection_type_ = net::NetworkChangeNotifier::CONNECTION_WIFI;
+  EXPECT_FALSE(config.connection_type_changed_);
+  net::NetworkChangeNotifier::NotifyObserversOfConnectionTypeChangeForTests(
+      net::NetworkChangeNotifier::CONNECTION_WIFI);
+  RunUntilIdle();
+
+  EXPECT_TRUE(config.connection_type_changed_);
   EXPECT_TRUE(config.IsNetworkQualityProhibitivelySlow(
       &test_network_quality_estimator));
 }

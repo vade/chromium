@@ -25,28 +25,37 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
 /**
  * @implements {Protocol.ProfilerDispatcher}
- * @unrestricted
  */
 SDK.CPUProfilerModel = class extends SDK.SDKModel {
   /**
    * @param {!SDK.Target} target
    */
   constructor(target) {
-    super(SDK.CPUProfilerModel, target);
+    super(target);
     this._isRecording = false;
+    this._nextAnonymousConsoleProfileNumber = 1;
+    this._anonymousConsoleProfileIdToTitle = new Map();
+    this._profilerAgent = target.profilerAgent();
     target.registerProfilerDispatcher(this);
-    target.profilerAgent().enable();
-
-    this._configureCpuProfilerSamplingInterval();
-    Common.moduleSetting('highResolutionCpuProfiling')
-        .addChangeListener(this._configureCpuProfilerSamplingInterval, this);
+    this._profilerAgent.enable();
+    this._debuggerModel = /** @type {!SDK.DebuggerModel} */ (target.model(SDK.DebuggerModel));
   }
 
-  _configureCpuProfilerSamplingInterval() {
-    var intervalUs = Common.moduleSetting('highResolutionCpuProfiling').get() ? 100 : 1000;
-    this.target().profilerAgent().setSamplingInterval(intervalUs);
+  /**
+   * @return {!SDK.RuntimeModel}
+   */
+  runtimeModel() {
+    return this._debuggerModel.runtimeModel();
+  }
+
+  /**
+   * @return {!SDK.DebuggerModel}
+   */
+  debuggerModel() {
+    return this._debuggerModel;
   }
 
   /**
@@ -56,6 +65,10 @@ SDK.CPUProfilerModel = class extends SDK.SDKModel {
    * @param {string=} title
    */
   consoleProfileStarted(id, scriptLocation, title) {
+    if (!title) {
+      title = Common.UIString('Profile %d', this._nextAnonymousConsoleProfileNumber++);
+      this._anonymousConsoleProfileIdToTitle.set(id, title);
+    }
     this._dispatchProfileEvent(SDK.CPUProfilerModel.Events.ConsoleProfileStarted, id, scriptLocation, title);
   }
 
@@ -67,8 +80,15 @@ SDK.CPUProfilerModel = class extends SDK.SDKModel {
    * @param {string=} title
    */
   consoleProfileFinished(id, scriptLocation, cpuProfile, title) {
-    this._dispatchProfileEvent(
-        SDK.CPUProfilerModel.Events.ConsoleProfileFinished, id, scriptLocation, title, cpuProfile);
+    if (!title) {
+      title = this._anonymousConsoleProfileIdToTitle.get(id);
+      this._anonymousConsoleProfileIdToTitle.delete(id);
+    }
+    // Make sure ProfilesPanel is initialized and CPUProfileType is created.
+    self.runtime.loadModulePromise('profiler').then(() => {
+      this._dispatchProfileEvent(
+          SDK.CPUProfilerModel.Events.ConsoleProfileFinished, id, scriptLocation, title, cpuProfile);
+    });
   }
 
   /**
@@ -79,16 +99,11 @@ SDK.CPUProfilerModel = class extends SDK.SDKModel {
    * @param {!Protocol.Profiler.Profile=} cpuProfile
    */
   _dispatchProfileEvent(eventName, id, scriptLocation, title, cpuProfile) {
-    // Make sure ProfilesPanel is initialized and CPUProfileType is created.
-    self.runtime.loadModulePromise('profiler').then(_ => {
-      var debuggerModel =
-          /** @type {!SDK.DebuggerModel} */ (SDK.DebuggerModel.fromTarget(this.target()));
-      var debuggerLocation = SDK.DebuggerModel.Location.fromPayload(debuggerModel, scriptLocation);
-      var globalId = this.target().id() + '.' + id;
-      var data = /** @type {!SDK.CPUProfilerModel.EventData} */ (
-          {id: globalId, scriptLocation: debuggerLocation, cpuProfile: cpuProfile, title: title});
-      this.dispatchEventToListeners(eventName, data);
-    });
+    var debuggerLocation = SDK.DebuggerModel.Location.fromPayload(this._debuggerModel, scriptLocation);
+    var globalId = this.target().id() + '.' + id;
+    var data = /** @type {!SDK.CPUProfilerModel.EventData} */ (
+        {id: globalId, scriptLocation: debuggerLocation, cpuProfile: cpuProfile, title: title, cpuProfilerModel: this});
+    this.dispatchEventToListeners(eventName, data);
   }
 
   /**
@@ -100,34 +115,42 @@ SDK.CPUProfilerModel = class extends SDK.SDKModel {
 
   startRecording() {
     this._isRecording = true;
-    this.target().profilerAgent().start();
-    Host.userMetrics.actionTaken(Host.UserMetrics.Action.ProfilesCPUProfileTaken);
+    var intervalUs = Common.moduleSetting('highResolutionCpuProfiling').get() ? 100 : 1000;
+    this._profilerAgent.setSamplingInterval(intervalUs);
+    this._profilerAgent.start();
   }
 
   /**
-   * @return {!Promise.<?Protocol.Profiler.Profile>}
+   * @return {!Promise<?Protocol.Profiler.Profile>}
    */
   stopRecording() {
-    /**
-     * @param {?Protocol.Error} error
-     * @param {?Protocol.Profiler.Profile} profile
-     * @return {?Protocol.Profiler.Profile}
-     */
-    function extractProfile(error, profile) {
-      return !error && profile ? profile : null;
-    }
     this._isRecording = false;
-    return this.target().profilerAgent().stop(extractProfile);
+    return this._profilerAgent.stop();
   }
 
   /**
-   * @override
+   * @return {!Promise}
    */
-  dispose() {
-    Common.moduleSetting('highResolutionCpuProfiling')
-        .removeChangeListener(this._configureCpuProfilerSamplingInterval, this);
+  startPreciseCoverage() {
+    return this._profilerAgent.startPreciseCoverage();
+  }
+
+  /**
+   * @return {!Promise<!Array<!Protocol.Profiler.ScriptCoverage>>}
+   */
+  takePreciseCoverage() {
+    return this._profilerAgent.takePreciseCoverage().then(result => result || []);
+  }
+
+  /**
+   * @return {!Promise}
+   */
+  stopPreciseCoverage() {
+    return this._profilerAgent.stopPreciseCoverage();
   }
 };
+
+SDK.SDKModel.register(SDK.CPUProfilerModel, SDK.Target.Capability.JS, true);
 
 /** @enum {symbol} */
 SDK.CPUProfilerModel.Events = {
@@ -135,5 +158,5 @@ SDK.CPUProfilerModel.Events = {
   ConsoleProfileFinished: Symbol('ConsoleProfileFinished')
 };
 
-/** @typedef {!{id: string, scriptLocation: !SDK.DebuggerModel.Location, title: (string|undefined), cpuProfile: (!Protocol.Profiler.Profile|undefined)}} */
+/** @typedef {!{id: string, scriptLocation: !SDK.DebuggerModel.Location, title: string, cpuProfile: (!Protocol.Profiler.Profile|undefined), cpuProfilerModel: !SDK.CPUProfilerModel}} */
 SDK.CPUProfilerModel.EventData;

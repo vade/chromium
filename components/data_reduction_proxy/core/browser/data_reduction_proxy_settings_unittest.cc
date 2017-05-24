@@ -12,6 +12,7 @@
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/md5.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_samples.h"
 #include "base/test/histogram_tester.h"
@@ -66,17 +67,14 @@ TEST_F(DataReductionProxySettingsTest, TestIsProxyEnabledOrManaged) {
   test_context_->config()->UpdateConfigForTesting(false, true);
 
   EXPECT_FALSE(settings_->IsDataReductionProxyEnabled());
-  EXPECT_FALSE(settings_->UpdateDataSavings(std::string(), 0, 0));
   EXPECT_FALSE(settings_->IsDataReductionProxyManaged());
 
   CheckOnPrefChange(true, true, false);
   EXPECT_TRUE(settings_->IsDataReductionProxyEnabled());
-  EXPECT_TRUE(settings_->UpdateDataSavings(std::string(), 0, 0));
   EXPECT_FALSE(settings_->IsDataReductionProxyManaged());
 
   CheckOnPrefChange(true, true, true);
   EXPECT_TRUE(settings_->IsDataReductionProxyEnabled());
-  EXPECT_TRUE(settings_->UpdateDataSavings(std::string(), 0, 0));
   EXPECT_TRUE(settings_->IsDataReductionProxyManaged());
 
   test_context_->RunUntilIdle();

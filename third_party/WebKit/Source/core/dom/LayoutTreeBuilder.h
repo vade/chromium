@@ -33,7 +33,7 @@
 #include "core/dom/Node.h"
 #include "core/dom/Text.h"
 #include "core/layout/LayoutObject.h"
-#include "wtf/RefPtr.h"
+#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -44,55 +44,60 @@ class LayoutTreeBuilder {
   STACK_ALLOCATED();
 
  protected:
-  LayoutTreeBuilder(NodeType& node, LayoutObject* layoutObjectParent)
-      : m_node(node), m_layoutObjectParent(layoutObjectParent) {
-    DCHECK(!node.layoutObject());
-    DCHECK(node.needsAttach());
-    DCHECK(node.document().inStyleRecalc());
-    DCHECK(node.inActiveDocument());
+  LayoutTreeBuilder(NodeType& node, LayoutObject* layout_object_parent)
+      : node_(node), layout_object_parent_(layout_object_parent) {
+    DCHECK(!node.GetLayoutObject());
+    DCHECK(node.NeedsAttach());
+    DCHECK(node.GetDocument().InStyleRecalc());
+    DCHECK(node.InActiveDocument());
   }
 
-  LayoutObject* nextLayoutObject() const {
-    DCHECK(m_layoutObjectParent);
+  LayoutObject* NextLayoutObject() const {
+    DCHECK(layout_object_parent_);
 
     // Avoid an O(N^2) walk over the children when reattaching all children of a
     // node.
-    if (m_layoutObjectParent->node() &&
-        m_layoutObjectParent->node()->needsAttach())
+    if (layout_object_parent_->GetNode() &&
+        layout_object_parent_->GetNode()->NeedsAttach())
       return 0;
 
-    return LayoutTreeBuilderTraversal::nextSiblingLayoutObject(*m_node);
+    return LayoutTreeBuilderTraversal::NextSiblingLayoutObject(*node_);
   }
 
-  Member<NodeType> m_node;
-  LayoutObject* m_layoutObjectParent;
+  Member<NodeType> node_;
+  LayoutObject* layout_object_parent_;
 };
 
 class LayoutTreeBuilderForElement : public LayoutTreeBuilder<Element> {
  public:
   LayoutTreeBuilderForElement(Element&, ComputedStyle*);
 
-  void createLayoutObjectIfNeeded() {
-    if (shouldCreateLayoutObject())
-      createLayoutObject();
+  void CreateLayoutObjectIfNeeded() {
+    if (ShouldCreateLayoutObject())
+      CreateLayoutObject();
   }
 
- private:
-  LayoutObject* parentLayoutObject() const;
-  LayoutObject* nextLayoutObject() const;
-  bool shouldCreateLayoutObject() const;
-  ComputedStyle& style() const;
-  void createLayoutObject();
+  ComputedStyle* ResolvedStyle() const { return style_.Get(); }
 
-  mutable RefPtr<ComputedStyle> m_style;
+ private:
+  LayoutObject* ParentLayoutObject() const;
+  LayoutObject* NextLayoutObject() const;
+  bool ShouldCreateLayoutObject() const;
+  ComputedStyle& Style() const;
+  void CreateLayoutObject();
+
+  mutable RefPtr<ComputedStyle> style_;
 };
 
 class LayoutTreeBuilderForText : public LayoutTreeBuilder<Text> {
  public:
-  LayoutTreeBuilderForText(Text& text, LayoutObject* layoutParent)
-      : LayoutTreeBuilder(text, layoutParent) {}
+  LayoutTreeBuilderForText(Text& text,
+                           LayoutObject* layout_parent,
+                           ComputedStyle* style_from_parent)
+      : LayoutTreeBuilder(text, layout_parent), style_(style_from_parent) {}
 
-  void createLayoutObject();
+  RefPtr<ComputedStyle> style_;
+  void CreateLayoutObject();
 };
 
 }  // namespace blink

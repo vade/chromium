@@ -46,7 +46,7 @@
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_CHROMEOS)
-#include "ash/common/system/chromeos/devicetype_utils.h"
+#include "ash/system/devicetype_utils.h"
 #include "chromeos/chromeos_switches.h"
 #include "components/chrome_apps/grit/chrome_apps_resources.h"
 #include "components/user_manager/user_manager.h"
@@ -317,6 +317,16 @@ void ComponentLoader::AddGalleryExtension() {
 #endif
 }
 
+void ComponentLoader::AddZipArchiverExtension() {
+#if defined(OS_CHROMEOS)
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+      chromeos::switches::kEnableZipArchiverOnFileManager)) {
+    Add(IDR_ZIP_ARCHIVER_MANIFEST,
+        base::FilePath(FILE_PATH_LITERAL("zip_archiver")));
+  }
+#endif  // defined(OS_CHROMEOS)
+}
+
 void ComponentLoader::AddWebstoreWidgetExtension() {
 #if defined(OS_CHROMEOS)
   AddWithNameAndDescription(
@@ -553,6 +563,7 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
     AddAudioPlayerExtension();
     AddFileManagerExtension();
     AddGalleryExtension();
+    AddZipArchiverExtension();
     AddWebstoreWidgetExtension();
 
     AddHangoutServicesExtension();

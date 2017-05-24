@@ -23,9 +23,12 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "url/scheme_host_port.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 using chrome_test_util::BackButton;
 using chrome_test_util::ForwardButton;
-using chrome_test_util::StaticHtmlViewContainingText;
 using chrome_test_util::TapWebViewElementWithId;
 using chrome_test_util::WebViewContainingText;
 
@@ -61,11 +64,11 @@ id<GREYMatcher> WaitForOmniboxText(std::string text) {
     [description appendText:base::SysUTF8ToNSString(text)];
   };
 
-  return grey_allOf(chrome_test_util::Omnibox(),
-                    [[[GREYElementMatcherBlock alloc]
-                        initWithMatchesBlock:matches
-                            descriptionBlock:describe] autorelease],
-                    nil);
+  return grey_allOf(
+      chrome_test_util::Omnibox(),
+      [[GREYElementMatcherBlock alloc] initWithMatchesBlock:matches
+                                           descriptionBlock:describe],
+      nil);
 }
 
 }  // namespace
@@ -87,8 +90,8 @@ id<GREYMatcher> WaitForOmniboxText(std::string text) {
       assertWithMatcher:grey_notNil()];
 
   // Verify that mobile User Agent string is present on the page.
-  const bool isDesktopUA = false;
-  const std::string userAgent = web::GetWebClient()->GetUserAgent(isDesktopUA);
+  const std::string userAgent =
+      web::GetWebClient()->GetUserAgent(web::UserAgentType::MOBILE);
   [[EarlGrey selectElementWithMatcher:WebViewContainingText(userAgent)]
       assertWithMatcher:grey_notNil()];
 }
@@ -117,8 +120,8 @@ id<GREYMatcher> WaitForOmniboxText(std::string text) {
   // Verify that the resulting page is chrome://terms.
   [[EarlGrey selectElementWithMatcher:WaitForOmniboxText("chrome://terms")]
       assertWithMatcher:grey_sufficientlyVisible()];
-  NSString* kTermsText = @"Google Chrome Terms of Service";
-  [[EarlGrey selectElementWithMatcher:StaticHtmlViewContainingText(kTermsText)]
+  const std::string kTermsText = "Google Chrome Terms of Service";
+  [[EarlGrey selectElementWithMatcher:WebViewContainingText(kTermsText)]
       assertWithMatcher:grey_notNil()];
 }
 
@@ -178,8 +181,7 @@ id<GREYMatcher> WaitForOmniboxText(std::string text) {
     const char* host = kChromeHostURLs[i];
     // Exclude non-WebUI pages, as they do not go through a "loading" phase as
     // expected in LoadWebUIUrl.
-    if (host == kChromeUIBookmarksHost || host == kChromeUINewTabHost ||
-        host == kChromeUITermsHost) {
+    if (host == kChromeUIBookmarksHost || host == kChromeUINewTabHost) {
       continue;
     }
     if (host == kChromeUIPhysicalWebHost &&
@@ -192,11 +194,6 @@ id<GREYMatcher> WaitForOmniboxText(std::string text) {
     [[EarlGrey selectElementWithMatcher:WaitForOmniboxText(chrome_url_path)]
         assertWithMatcher:grey_sufficientlyVisible()];
   }
-  // Load chrome://terms differently since it is a Native page and is never in
-  // the "loading" phase.
-  chrome_test_util::LoadUrl(GURL(kChromeUITermsURL));
-  [[EarlGrey selectElementWithMatcher:WaitForOmniboxText("chrome://terms")]
-      assertWithMatcher:grey_sufficientlyVisible()];
 }
 
 // Tests that loading an invalid Chrome URL results in an error page.

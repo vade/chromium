@@ -19,7 +19,7 @@
 #include "base/debug/alias.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/run_loop.h"
@@ -31,6 +31,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/lifetime/keep_alive_types.h"
 #include "chrome/browser/lifetime/scoped_keep_alive.h"
+#include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/sessions/session_restore_delegate.h"
@@ -45,6 +46,7 @@
 #include "chrome/browser/ui/browser_tabrestore.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/extension_metrics.h"
 #include "chrome/common/url_constants.h"
@@ -74,6 +76,15 @@ using content::WebContents;
 using RestoredTab = SessionRestoreDelegate::RestoredTab;
 
 namespace {
+
+bool HasSingleNewTabPage(Browser* browser) {
+  if (browser->tab_strip_model()->count() != 1)
+    return false;
+  const content::WebContents* active_tab =
+      browser->tab_strip_model()->GetWebContentsAt(0);
+  return active_tab->GetURL() == chrome::kChromeUINewTabURL ||
+         search::IsInstantNTP(active_tab);
+}
 
 class SessionRestoreImpl;
 
@@ -202,10 +213,9 @@ class SessionRestoreImpl : public content::NotificationObserver {
 
     bool use_new_window = disposition == WindowOpenDisposition::NEW_WINDOW;
 
-    Browser* browser =
-        use_new_window
-            ? new Browser(Browser::CreateParams(profile_))
-            : browser_;
+    Browser* browser = use_new_window
+                           ? new Browser(Browser::CreateParams(profile_, true))
+                           : browser_;
 
     RecordAppLaunchForTab(browser, tab, selected_index);
 
@@ -282,7 +292,7 @@ class SessionRestoreImpl : public content::NotificationObserver {
                                std::vector<RestoredTab>* contents_created) {
     Browser* browser = nullptr;
     if (!created_tabbed_browser && always_create_tabbed_browser_) {
-      browser = new Browser(Browser::CreateParams(profile_));
+      browser = new Browser(Browser::CreateParams(profile_, false));
       if (urls_to_open_.empty()) {
         // No tab browsers were created and no URLs were supplied on the command
         // line. Open the new tab page.
@@ -619,11 +629,11 @@ class SessionRestoreImpl : public content::NotificationObserver {
                                  const std::string& workspace,
                                  ui::WindowShowState show_state,
                                  const std::string& app_name) {
-    Browser::CreateParams params(type, profile_);
+    Browser::CreateParams params(type, profile_, false);
     if (!app_name.empty()) {
       const bool trusted_source = true;  // We only store trusted app windows.
       params = Browser::CreateParams::CreateForApp(app_name, trusted_source,
-                                                   bounds, profile_);
+                                                   bounds, profile_, false);
     } else {
       params.initial_bounds = bounds;
     }
@@ -707,10 +717,10 @@ class SessionRestoreImpl : public content::NotificationObserver {
   // Responsible for loading the tabs.
   scoped_refptr<TabLoader> tab_loader_;
 
-  // When synchronous we run a nested message loop. To avoid creating windows
-  // from the nested message loop (which can make exiting the nested message
+  // When synchronous we run a nested run loop. To avoid creating windows
+  // from the nested run loop (which can make exiting the nested message
   // loop take a while) we cache the SessionWindows here and create the actual
-  // windows when the nested message loop exits.
+  // windows when the nested run loop exits.
   std::vector<std::unique_ptr<sessions::SessionWindow>> windows_;
   SessionID::id_type active_window_id_;
 
@@ -736,9 +746,8 @@ class SessionRestoreImpl : public content::NotificationObserver {
 
 // static
 Browser* SessionRestore::RestoreSession(
-    Profile* profile,
-    Browser* browser,
-    uint32_t behavior,
+    Profile* profile, Browser* browser,
+    SessionRestore::BehaviorBitmask behavior,
     const std::vector<GURL>& urls_to_open) {
 #if defined(OS_CHROMEOS)
   chromeos::BootTimesRecorder::Get()->AddLoginTimeMarker(
@@ -764,19 +773,21 @@ Browser* SessionRestore::RestoreSession(
 
 // static
 void SessionRestore::RestoreSessionAfterCrash(Browser* browser) {
-  uint32_t behavior = 0;
-  if (browser->tab_strip_model()->count() == 1) {
-    const content::WebContents* active_tab =
-        browser->tab_strip_model()->GetWebContentsAt(0);
-    if (active_tab->GetURL() == chrome::kChromeUINewTabURL ||
-        search::IsInstantNTP(active_tab)) {
-      // There is only one tab and its the new tab page, make session restore
-      // clobber it.
-      behavior = SessionRestore::CLOBBER_CURRENT_TAB;
-    }
-  }
+  SessionRestore::BehaviorBitmask behavior =
+      HasSingleNewTabPage(browser) ? SessionRestore::CLOBBER_CURRENT_TAB : 0;
   SessionRestore::RestoreSession(browser->profile(), browser, behavior,
                                  std::vector<GURL>());
+}
+
+// static
+void SessionRestore::OpenStartupPagesAfterCrash(Browser* browser) {
+  WebContents* tab_to_clobber = nullptr;
+  if (HasSingleNewTabPage(browser))
+    tab_to_clobber = browser->tab_strip_model()->GetActiveWebContents();
+
+  StartupBrowserCreator::OpenStartupPages(browser, true);
+  if (tab_to_clobber && browser->tab_strip_model()->count() > 1)
+    chrome::CloseWebContents(browser, tab_to_clobber, true);
 }
 
 // static

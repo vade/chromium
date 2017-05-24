@@ -24,9 +24,9 @@
 #include "net/cert/cert_verify_result.h"
 #include "net/cert/crl_set.h"
 #include "net/cert/ev_root_ca_metadata.h"
+#include "net/cert/known_roots_win.h"
 #include "net/cert/test_root_certs.h"
 #include "net/cert/x509_certificate.h"
-#include "net/cert/x509_certificate_known_roots_win.h"
 
 #if !defined(CERT_TRUST_HAS_WEAK_SIGNATURE)
 // This was introduced in Windows 8 / Windows Server 2012, but retroactively
@@ -284,46 +284,7 @@ bool IsIssuedByKnownRoot(PCCERT_CHAIN_CONTEXT chain_context) {
     return false;
   PCERT_CHAIN_ELEMENT* element = first_chain->rgpElement;
   PCCERT_CONTEXT cert = element[num_elements - 1]->pCertContext;
-
-  SHA256HashValue hash = X509Certificate::CalculateFingerprint256(cert);
-  bool is_builtin =
-      IsSHA256HashInSortedArray(hash, &kKnownRootCertSHA256Hashes[0][0],
-                                sizeof(kKnownRootCertSHA256Hashes));
-
-  // Test to see if the use of a built-in set of known roots on Windows can be
-  // replaced with using AuthRoot's SHA-256 property. On any system other than
-  // a fresh RTM with no AuthRoot updates, this property should always exist for
-  // roots delivered via AuthRoot.stl, but should not exist on any manually or
-  // administratively deployed roots.
-  BYTE hash_prop[32] = {0};
-  DWORD size = sizeof(hash_prop);
-  bool found_property =
-      CertGetCertificateContextProperty(
-          cert, CERT_AUTH_ROOT_SHA256_HASH_PROP_ID, &hash_prop, &size) &&
-      size == sizeof(hash_prop);
-
-  enum BuiltinStatus {
-    BUILT_IN_PROPERTY_NOT_FOUND_BUILTIN_NOT_SET = 0,
-    BUILT_IN_PROPERTY_NOT_FOUND_BUILTIN_SET = 1,
-    BUILT_IN_PROPERTY_FOUND_BUILTIN_NOT_SET = 2,
-    BUILT_IN_PROPERTY_FOUND_BUILTIN_SET = 3,
-    BUILT_IN_MAX_VALUE,
-  } status;
-  if (!found_property && !is_builtin) {
-    status = BUILT_IN_PROPERTY_NOT_FOUND_BUILTIN_NOT_SET;
-  } else if (!found_property && is_builtin) {
-    status = BUILT_IN_PROPERTY_NOT_FOUND_BUILTIN_SET;
-  } else if (found_property && !is_builtin) {
-    status = BUILT_IN_PROPERTY_FOUND_BUILTIN_NOT_SET;
-  } else if (found_property && is_builtin) {
-    status = BUILT_IN_PROPERTY_FOUND_BUILTIN_SET;
-  } else {
-    status = BUILT_IN_MAX_VALUE;
-  }
-  UMA_HISTOGRAM_ENUMERATION("Net.SSL_AuthRootConsistency", status,
-                            BUILT_IN_MAX_VALUE);
-
-  return is_builtin;
+  return IsKnownRoot(cert);
 }
 
 // Saves some information about the certificate chain |chain_context| in
@@ -369,8 +330,12 @@ void GetCertChainInfo(PCCERT_CHAIN_CONTEXT chain_context,
     // Add the root certificate, if present, as it was not added above.
     if (has_root_ca)
       verified_chain.push_back(element[num_elements]->pCertContext);
-    verify_result->verified_cert =
-          X509Certificate::CreateFromHandle(verified_cert, verified_chain);
+    scoped_refptr<X509Certificate> verified_cert_with_chain =
+        X509Certificate::CreateFromHandle(verified_cert, verified_chain);
+    if (verified_cert_with_chain)
+      verify_result->verified_cert = std::move(verified_cert_with_chain);
+    else
+      verify_result->cert_status |= CERT_STATUS_INVALID;
   }
 }
 
@@ -662,7 +627,7 @@ class RevocationInjector {
   void SetCRLSet(CRLSet* crl_set) { thread_local_crlset.Set(crl_set); }
 
  private:
-  friend struct base::DefaultLazyInstanceTraits<RevocationInjector>;
+  friend struct base::LazyInstanceTraitsBase<RevocationInjector>;
 
   RevocationInjector() {
     const CRYPT_OID_FUNC_ENTRY kInterceptFunction[] = {
@@ -942,7 +907,11 @@ int CertVerifyProcWin::VerifyInternal(
           chain_para.RequestedIssuancePolicy.Usage.cUsageIdentifier = 1;
           chain_para.RequestedIssuancePolicy.Usage.rgpszUsageIdentifier =
               &ev_policy_oid;
-          break;
+
+          // De-prioritize the CA/Browser forum Extended Validation policy
+          // (2.23.140.1.1). See crbug.com/705285.
+          if (!EVRootCAMetadata::IsCaBrowserForumEvOid(ev_policy_oid))
+            break;
         }
       }
     }
@@ -1192,13 +1161,6 @@ int CertVerifyProcWin::VerifyInternal(
   // TODO(wtc): Suppress CERT_STATUS_NO_REVOCATION_MECHANISM for now to be
   // compatible with WinHTTP, which doesn't report this error (bug 3004).
   verify_result->cert_status &= ~CERT_STATUS_NO_REVOCATION_MECHANISM;
-
-  // Perform hostname verification independent of
-  // CertVerifyCertificateChainPolicy.
-  if (!cert->VerifyNameMatch(hostname,
-                             &verify_result->common_name_fallback_used)) {
-    verify_result->cert_status |= CERT_STATUS_COMMON_NAME_INVALID;
-  }
 
   if (!rev_checking_enabled) {
     // If we didn't do online revocation checking then Windows will report

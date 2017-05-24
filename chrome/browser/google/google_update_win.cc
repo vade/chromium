@@ -6,6 +6,7 @@
 
 #include <atlbase.h>
 #include <atlcom.h>
+#include <objbase.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -33,7 +34,7 @@
 #include "base/win/windows_version.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/installer/util/browser_distribution.h"
+#include "chrome/install_static/install_util.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/helper.h"
 #include "chrome/installer/util/install_util.h"
@@ -92,11 +93,9 @@ bool IsElevationRequiredForSystemLevelUpdates() {
 GoogleUpdateErrorCode CanUpdateCurrentChrome(
     const base::FilePath& chrome_exe_path,
     bool system_level_install) {
-  DCHECK_NE(InstallUtil::IsPerUserInstall(chrome_exe_path),
-            system_level_install);
-  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  base::FilePath user_exe_path = installer::GetChromeInstallPath(false, dist);
-  base::FilePath machine_exe_path = installer::GetChromeInstallPath(true, dist);
+  DCHECK_NE(InstallUtil::IsPerUserInstall(), system_level_install);
+  base::FilePath user_exe_path = installer::GetChromeInstallPath(false);
+  base::FilePath machine_exe_path = installer::GetChromeInstallPath(true);
   if (!base::FilePath::CompareEqualIgnoreCase(chrome_exe_path.value(),
                                         user_exe_path.value()) &&
       !base::FilePath::CompareEqualIgnoreCase(chrome_exe_path.value(),
@@ -128,9 +127,9 @@ void ConfigureProxyBlanket(IUnknown* interface_pointer) {
 // Vista+. |hwnd| must refer to a foregound window in order to get the UAC
 // prompt to appear in the foreground if running on Vista+. It can also be NULL
 // if background UAC prompts are desired.
-HRESULT CoGetClassObjectAsAdmin(REFCLSID class_id,
+HRESULT CoGetClassObjectAsAdmin(gfx::AcceleratedWidget hwnd,
+                                REFCLSID class_id,
                                 REFIID interface_id,
-                                gfx::AcceleratedWidget hwnd,
                                 void** interface_ptr) {
   if (!interface_ptr)
     return E_POINTER;
@@ -184,24 +183,20 @@ HRESULT CreateGoogleUpdate3WebClass(
       !install_update_if_possible ||
       !IsElevationRequiredForSystemLevelUpdates()) {
     hresult = ::CoGetClassObject(google_update_clsid, CLSCTX_ALL, nullptr,
-                                 base::win::ScopedComPtr<IClassFactory>::iid(),
-                                 class_factory.ReceiveVoid());
+                                 IID_PPV_ARGS(&class_factory));
   } else {
     // With older versions of GoogleUpdate, a system-level update requires Admin
     // privileges. Elevate while instantiating the MachineClass.
-    hresult = CoGetClassObjectAsAdmin(
-        google_update_clsid, base::win::ScopedComPtr<IClassFactory>::iid(),
-        elevation_window, class_factory.ReceiveVoid());
+    hresult = CoGetClassObjectAsAdmin(elevation_window, google_update_clsid,
+                                      IID_PPV_ARGS(&class_factory));
   }
   if (FAILED(hresult))
     return hresult;
 
-  ConfigureProxyBlanket(class_factory.get());
+  ConfigureProxyBlanket(class_factory.Get());
 
   return class_factory->CreateInstance(
-      nullptr,
-      base::win::ScopedComPtr<IGoogleUpdate3Web>::iid(),
-      google_update->ReceiveVoid());
+      nullptr, IID_PPV_ARGS(google_update->GetAddressOf()));
 }
 
 // UpdateCheckDriver -----------------------------------------------------------
@@ -504,7 +499,7 @@ HRESULT UpdateCheckDriver::BeginUpdateCheckInternal(
     if (!PathService::Get(base::DIR_EXE, &chrome_exe))
       NOTREACHED();
 
-    system_level_install_ = !InstallUtil::IsPerUserInstall(chrome_exe);
+    system_level_install_ = !InstallUtil::IsPerUserInstall();
 
     // Make sure ATL is initialized in this module.
     ui::win::CreateATLModuleIfNeeded();
@@ -521,7 +516,7 @@ HRESULT UpdateCheckDriver::BeginUpdateCheckInternal(
       return hresult;
     }
 
-    ConfigureProxyBlanket(google_update_.get());
+    ConfigureProxyBlanket(google_update_.Get());
   }
 
   // The class was created, so all subsequent errors are reported as:
@@ -531,15 +526,15 @@ HRESULT UpdateCheckDriver::BeginUpdateCheckInternal(
   if (!app_bundle_) {
     base::win::ScopedComPtr<IAppBundleWeb> app_bundle;
     base::win::ScopedComPtr<IDispatch> dispatch;
-    hresult = google_update_->createAppBundleWeb(dispatch.Receive());
+    hresult = google_update_->createAppBundleWeb(dispatch.GetAddressOf());
     if (FAILED(hresult))
       return hresult;
-    hresult = dispatch.QueryInterface(app_bundle.Receive());
+    hresult = dispatch.CopyTo(app_bundle.GetAddressOf());
     if (FAILED(hresult))
       return hresult;
-    dispatch.Release();
+    dispatch.Reset();
 
-    ConfigureProxyBlanket(app_bundle.get());
+    ConfigureProxyBlanket(app_bundle.Get());
 
     if (!locale_.empty()) {
       // Ignore the result of this since, while setting the display language is
@@ -563,29 +558,28 @@ HRESULT UpdateCheckDriver::BeginUpdateCheckInternal(
 
   // Get a reference to the Chrome app in the bundle.
   if (!app_) {
-    base::string16 app_guid =
-        BrowserDistribution::GetDistribution()->GetAppGuid();
-    DCHECK(!app_guid.empty());
+    const wchar_t* app_guid = install_static::GetAppGuid();
+    DCHECK(app_guid);
+    DCHECK(*app_guid);
 
     base::win::ScopedComPtr<IDispatch> dispatch;
     // It is common for this call to fail with APP_USING_EXTERNAL_UPDATER if
     // an auto update is in progress.
-    hresult = app_bundle_->createInstalledApp(
-        base::win::ScopedBstr(app_guid.c_str()));
+    hresult = app_bundle_->createInstalledApp(base::win::ScopedBstr(app_guid));
     if (FAILED(hresult))
       return hresult;
     // Move the IAppBundleWeb reference into a local now so that failures from
     // this point onward result in it being released.
     base::win::ScopedComPtr<IAppBundleWeb> app_bundle;
     app_bundle.swap(app_bundle_);
-    hresult = app_bundle->get_appWeb(0, dispatch.Receive());
+    hresult = app_bundle->get_appWeb(0, dispatch.GetAddressOf());
     if (FAILED(hresult))
       return hresult;
     base::win::ScopedComPtr<IAppWeb> app;
-    hresult = dispatch.QueryInterface(app.Receive());
+    hresult = dispatch.CopyTo(app.GetAddressOf());
     if (FAILED(hresult))
       return hresult;
-    ConfigureProxyBlanket(app.get());
+    ConfigureProxyBlanket(app.Get());
     hresult = app_bundle->checkForUpdate();
     if (FAILED(hresult))
       return hresult;
@@ -601,13 +595,13 @@ bool UpdateCheckDriver::GetCurrentState(
     CurrentState* state_value,
     HRESULT* hresult) const {
   base::win::ScopedComPtr<IDispatch> dispatch;
-  *hresult = app_->get_currentState(dispatch.Receive());
+  *hresult = app_->get_currentState(dispatch.GetAddressOf());
   if (FAILED(*hresult))
     return false;
-  *hresult = dispatch.QueryInterface(current_state->Receive());
+  *hresult = dispatch.CopyTo(current_state->GetAddressOf());
   if (FAILED(*hresult))
     return false;
-  ConfigureProxyBlanket(current_state->get());
+  ConfigureProxyBlanket(current_state->Get());
   LONG value = 0;
   *hresult = (*current_state)->get_stateValue(&value);
   if (FAILED(*hresult))
@@ -825,10 +819,10 @@ void UpdateCheckDriver::PollGoogleUpdate() {
 
   // Release the reference on the COM objects before bouncing back to the
   // caller's thread.
-  state.Release();
-  app_.Release();
-  app_bundle_.Release();
-  google_update_.Release();
+  state.Reset();
+  app_.Reset();
+  app_bundle_.Reset();
+  google_update_.Reset();
 
   result_runner_->DeleteSoon(FROM_HERE, this);
 }

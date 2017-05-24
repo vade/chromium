@@ -10,8 +10,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include "base/command_line.h"
 #include "base/containers/adapters.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "build/build_config.h"
 #include "chrome/browser/task_manager/providers/browser_process_task_provider.h"
 #include "chrome/browser/task_manager/providers/child_process_task_provider.h"
@@ -25,7 +25,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/task_manager/providers/arc/arc_process_task_provider.h"
-#include "components/arc/arc_bridge_service.h"
+#include "components/arc/arc_util.h"
 #endif  // defined(OS_CHROMEOS)
 
 namespace task_manager {
@@ -39,8 +39,8 @@ scoped_refptr<base::SequencedTaskRunner> GetBlockingPoolRunner() {
       blocking_pool->GetSequenceToken());
 }
 
-base::LazyInstance<TaskManagerImpl> lazy_task_manager_instance =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<TaskManagerImpl>::DestructorAtExit
+    lazy_task_manager_instance = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
@@ -50,24 +50,20 @@ TaskManagerImpl::TaskManagerImpl()
                      base::Unretained(this))),
       blocking_pool_runner_(GetBlockingPoolRunner()),
       shared_sampler_(new SharedSampler(blocking_pool_runner_)),
-      is_running_(false) {
+      is_running_(false),
+      weak_ptr_factory_(this) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   task_providers_.emplace_back(new BrowserProcessTaskProvider());
   task_providers_.emplace_back(new ChildProcessTaskProvider());
   task_providers_.emplace_back(new WebContentsTaskProvider());
 #if defined(OS_CHROMEOS)
-  if (arc::ArcBridgeService::GetEnabled(
-          base::CommandLine::ForCurrentProcess())) {
+  if (arc::IsArcAvailable())
     task_providers_.emplace_back(new ArcProcessTaskProvider());
-  }
 #endif  // defined(OS_CHROMEOS)
-
-  content::GpuDataManager::GetInstance()->AddObserver(this);
 }
 
 TaskManagerImpl::~TaskManagerImpl() {
-  content::GpuDataManager::GetInstance()->RemoveObserver(this);
 }
 
 // static
@@ -273,6 +269,14 @@ bool TaskManagerImpl::GetWebCacheStats(
   return true;
 }
 
+int TaskManagerImpl::GetKeepaliveCount(TaskId task_id) const {
+  const Task* task = GetTaskByTaskId(task_id);
+  if (!task)
+    return -1;
+
+  return task->GetKeepaliveCount();
+}
+
 const TaskIdList& TaskManagerImpl::GetTaskIdsList() const {
   DCHECK(is_running_) << "Task manager is not running. You must observe the "
       "task manager for it to start running";
@@ -446,13 +450,6 @@ void TaskManagerImpl::TaskUnresponsive(Task* task) {
   NotifyObserversOnTaskUnresponsive(task->task_id());
 }
 
-void TaskManagerImpl::OnVideoMemoryUsageStatsUpdate(
-    const gpu::VideoMemoryUsageStats& gpu_memory_stats) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-
-  gpu_memory_stats_ = gpu_memory_stats;
-}
-
 // static
 void TaskManagerImpl::OnMultipleBytesReadUI(
     std::vector<BytesReadParam>* params) {
@@ -475,10 +472,18 @@ void TaskManagerImpl::OnMultipleBytesReadUI(
   }
 }
 
+void TaskManagerImpl::OnVideoMemoryUsageStatsUpdate(
+    const gpu::VideoMemoryUsageStats& gpu_memory_stats) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  gpu_memory_stats_ = gpu_memory_stats;
+}
+
 void TaskManagerImpl::Refresh() {
   if (IsResourceRefreshEnabled(REFRESH_TYPE_GPU_MEMORY)) {
-    content::GpuDataManager::GetInstance()->
-        RequestVideoMemoryUsageStatsUpdate();
+    content::GpuDataManager::GetInstance()->RequestVideoMemoryUsageStatsUpdate(
+        base::Bind(&TaskManagerImpl::OnVideoMemoryUsageStatsUpdate,
+                   weak_ptr_factory_.GetWeakPtr()));
   }
 
   for (auto& groups_itr : task_groups_by_proc_id_) {

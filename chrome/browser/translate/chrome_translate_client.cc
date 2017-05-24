@@ -16,6 +16,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/translate/language_model_factory.h"
 #include "chrome/browser/translate/translate_accept_languages_factory.h"
+#include "chrome/browser/translate/translate_ranker_factory.h"
 #include "chrome/browser/translate/translate_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -71,11 +72,13 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(ChromeTranslateClient);
 ChromeTranslateClient::ChromeTranslateClient(content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
       translate_driver_(&web_contents->GetController()),
-      translate_manager_(
-          new translate::TranslateManager(this, prefs::kAcceptLanguages)),
-      language_model_(
-          LanguageModelFactory::GetInstance()->GetForBrowserContext(
-              web_contents->GetBrowserContext())) {
+      translate_manager_(new translate::TranslateManager(
+          this,
+          translate::TranslateRankerFactory::GetForBrowserContext(
+              web_contents->GetBrowserContext()),
+          prefs::kAcceptLanguages)),
+      language_model_(LanguageModelFactory::GetInstance()->GetForBrowserContext(
+          web_contents->GetBrowserContext())) {
   translate_driver_.AddObserver(this);
   translate_driver_.set_translate_manager(translate_manager_.get());
 }
@@ -169,6 +172,7 @@ void ChromeTranslateClient::GetTranslateLanguages(
 // static
 void ChromeTranslateClient::BindContentTranslateDriver(
     content::RenderFrameHost* render_frame_host,
+    const service_manager::BindSourceInfo& source_info,
     translate::mojom::ContentTranslateDriverRequest request) {
   content::WebContents* web_contents =
       content::WebContents::FromRenderFrameHost(render_frame_host);
@@ -217,25 +221,12 @@ void ChromeTranslateClient::ShowTranslateUI(
 #endif
 
   // Bubble UI.
-  if (step == translate::TRANSLATE_STEP_BEFORE_TRANSLATE) {
-    // TODO(droger): Move this logic out of UI code.
-    GetLanguageState().SetTranslateEnabled(true);
-    // In the new UI, continue offering translation after the user navigates to
-    // another page.
-    if (!base::FeatureList::IsEnabled(translate::kTranslateUI2016Q2) &&
-        !GetLanguageState().HasLanguageChanged()) {
-      translate_manager_->RecordTranslateEvent(
-          metrics::TranslateEventProto::MATCHES_PREVIOUS_LANGUAGE);
-      return;
-    }
-
-    if (!triggered_from_menu &&
-        GetTranslatePrefs()->IsTooOftenDenied(source_language)) {
-      translate_manager_->RecordTranslateEvent(
-          metrics::TranslateEventProto::LANGUAGE_DISABLED_BY_AUTO_BLACKLIST);
-      return;
-    }
+  if (step == translate::TRANSLATE_STEP_BEFORE_TRANSLATE &&
+      translate_manager_->ShouldSuppressBubbleUI(triggered_from_menu,
+                                                 source_language)) {
+    return;
   }
+
   ShowTranslateBubbleResult result = ShowBubble(step, error_type);
   if (result != ShowTranslateBubbleResult::SUCCESS &&
       step == translate::TRANSLATE_STEP_BEFORE_TRANSLATE) {

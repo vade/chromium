@@ -25,6 +25,9 @@ Polymer({
      */
     contentSetting: String,
 
+    /** @private */
+    showIncognitoSessionOnly_: Boolean,
+
     /**
      * The site to add an exception for.
      * @private
@@ -38,14 +41,13 @@ Polymer({
     assert(this.contentSetting);
   },
 
-  /**
-   * Opens the dialog.
-   * @param {string} type Whether this was launched from an Allow list or a
-   *     Block list.
-   */
-  open: function(type) {
-    this.addWebUIListener('onIncognitoStatusChanged',
-        this.onIncognitoStatusChanged_.bind(this));
+  /** Open the dialog. */
+  open: function() {
+    this.addWebUIListener('onIncognitoStatusChanged', function(hasIncognito) {
+      this.$.incognito.checked = false;
+      this.showIncognitoSessionOnly_ = hasIncognito &&
+          this.contentSetting != settings.PermissionValues.SESSION_ONLY;
+    }.bind(this));
     this.browserProxy.updateIncognitoStatus();
     this.$.dialog.showModal();
   },
@@ -55,7 +57,16 @@ Polymer({
    * @private
    */
   validate_: function() {
+    // If input is empty, disable the action button, but don't show the red
+    // invalid message.
+    if (this.$.site.value.trim() == '') {
+      this.$.site.invalid = false;
+      this.$.add.disabled = true;
+      return;
+    }
+
     this.browserProxy.isPatternValid(this.site_).then(function(isValid) {
+      this.$.site.invalid = !isValid;
       this.$.add.disabled = !isValid;
     }.bind(this));
   },
@@ -66,19 +77,6 @@ Polymer({
   },
 
   /**
-   * A handler for when we get notified of the current profile creating or
-   * destroying their incognito counterpart.
-   * @param {boolean} incognitoEnabled Whether the current profile has an
-   *     incognito profile.
-   * @private
-   */
-  onIncognitoStatusChanged_: function(incognitoEnabled) {
-    this.$.incognito.disabled = !incognitoEnabled;
-    if (!incognitoEnabled)
-      this.$.incognito.checked = false;
-  },
-
-  /**
    * The tap handler for the Add [Site] button (adds the pattern and closes
    * the dialog).
    * @private
@@ -86,9 +84,8 @@ Polymer({
   onSubmit_: function() {
     if (this.$.add.disabled)
       return;  // Can happen when Enter is pressed.
-    var pattern = this.addPatternWildcard(this.site_);
     this.browserProxy.setCategoryPermissionForOrigin(
-        pattern, pattern, this.category, this.contentSetting,
+        this.site_, this.site_, this.category, this.contentSetting,
         this.$.incognito.checked);
     this.$.dialog.close();
   },

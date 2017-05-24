@@ -4,16 +4,16 @@
 
 #include "base/path_service.h"
 
+#include <unordered_map>
+
 #if defined(OS_WIN)
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #endif
 
-#include "base/containers/hash_tables.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/synchronization/lock.h"
 #include "build/build_config.h"
@@ -36,7 +36,7 @@ bool PathProviderPosix(int key, FilePath* result);
 
 namespace {
 
-typedef hash_map<int, FilePath> PathMap;
+typedef std::unordered_map<int, FilePath> PathMap;
 
 // We keep a linked list of providers.  In a debug build we ensure that no two
 // providers claim overlapping keys.
@@ -129,10 +129,9 @@ struct PathData {
   }
 };
 
-static LazyInstance<PathData>::Leaky g_path_data = LAZY_INSTANCE_INITIALIZER;
-
 static PathData* GetPathData() {
-  return g_path_data.Pointer();
+  static auto* path_data = new PathData();
+  return path_data;
 }
 
 // Tries to find |key| in the cache. |path_data| should be locked by the caller!

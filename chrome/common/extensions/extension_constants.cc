@@ -53,9 +53,7 @@ const char kHotwordNewExtensionId[] = "nbpagnldghgfoolbancepceaanlmhfmd";
 const char kHotwordSharedModuleId[] = "lccekmodgklaepjeofjdjpbminllajkg";
 const char kYoutubeAppId[] = "blpcfgokakmgnkcojhhkbfbldkacnbeo";
 const char kInAppPaymentsSupportAppId[] = "nmmhkkegccagdldgiimedpiccmgmieda";
-#if defined(ENABLE_MEDIA_ROUTER)
 const char kMediaRouterStableExtensionId[] = "pkedcjkdefgpdelpbcmbmeomcjbeemfm";
-#endif  // defined(ENABLE_MEDIA_ROUTER)
 
 #if defined(OS_CHROMEOS)
 // The extension id for the built-in component extension.
@@ -63,6 +61,8 @@ const char kChromeVoxExtensionId[] = "mndnfokpggljbaajbnioimlmbfngpief";
 const char kChromeVoxExtensionPath[] = "chromeos/chromevox";
 const char kSelectToSpeakExtensionId[] = "klbcgckkldhdhonijdbnhhaiedfkllef";
 const char kSelectToSpeakExtensionPath[] = "chromeos/select_to_speak";
+const char kSwitchAccessExtensionId[] = "pmehocpgjmkenlokgjfkaichfjdhpeol";
+const char kSwitchAccessExtensionPath[] = "chromeos/switch_access";
 const char kGuestManifestFilename[] = "manifest_guest.json";
 const char kBrailleImeExtensionId[] =
     "jddehjeebkoimngcbdkaahpobgicbffp";

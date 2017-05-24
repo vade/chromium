@@ -33,25 +33,20 @@ class ContextualSearchManager
   // content view core object).
   // Any outstanding server requests are canceled.
   // When the server responds with the search term, the Java object is notified
-  // by
-  // calling OnSearchTermResolutionResponse().
+  // by calling OnSearchTermResolutionResponse().
   void StartSearchTermResolutionRequest(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
-      const base::android::JavaParamRef<jstring>& j_selection,
-      const base::android::JavaParamRef<jstring>& j_home_country,
-      const base::android::JavaParamRef<jobject>& j_base_web_contents,
-      jboolean j_may_send_base_page_url);
+      const base::android::JavaParamRef<jobject>& j_contextual_search_context,
+      const base::android::JavaParamRef<jobject>& j_base_web_contents);
 
   // Gathers the surrounding text around the selection and saves it locally.
   // Does not send a search term resolution request to the server.
   void GatherSurroundingText(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
-      const base::android::JavaParamRef<jstring>& j_selection,
-      const base::android::JavaParamRef<jstring>& j_home_country,
-      const base::android::JavaParamRef<jobject>& j_base_web_contents,
-      jboolean j_may_send_base_page_url);
+      const base::android::JavaParamRef<jobject>& j_contextual_search_context,
+      const base::android::JavaParamRef<jobject>& j_base_web_contents);
 
   // Gets the target language for translation purposes.
   base::android::ScopedJavaLocalRef<jstring> GetTargetLanguage(
@@ -76,14 +71,13 @@ class ContextualSearchManager
   void OnSearchTermResolutionResponse(
       const ResolvedSearchTerm& resolved_search_term);
 
-  // Calls back to Java with the surrounding text to be displayed.
-  void OnSurroundingTextAvailable(const std::string& after_text);
-
-  // Calls back to Java with notification for Icing selection.
-  void OnIcingSelectionAvailable(const std::string& encoding,
-                                 const base::string16& surrounding_text,
-                                 size_t start_offset,
-                                 size_t end_offset);
+  // Calls back to Java with notification when a sample of text surrounding the
+  // selection is available.
+  void OnTextSurroundingSelectionAvailable(
+      const std::string& encoding,
+      const base::string16& surrounding_text,
+      size_t start_offset,
+      size_t end_offset);
 
   // Our global reference to the Java ContextualSearchManager.
   base::android::ScopedJavaGlobalRef<jobject> java_manager_;

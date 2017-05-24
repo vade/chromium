@@ -13,14 +13,47 @@
 
 class Profile;
 
+namespace user_prefs {
+class PrefRegistrySyncable;
+}
+
+// Helper methods for important sites.
+// All methods should be used on the UI thread.
 class ImportantSitesUtil {
  public:
+#if defined(OS_ANDROID)
+  static const int kMaxImportantSites = 5;
+#else
+  static const int kMaxImportantSites = 10;
+#endif
+
   struct ImportantDomainInfo {
     std::string registerable_domain;
     GURL example_origin;
     double engagement_score = 0;
     int32_t reason_bitfield = 0;
+    // |usage| has to be initialized by ImportantSitesUsageCounter before it
+    // will contain the number of bytes used for quota and localstorage.
+    int64_t usage = 0;
   };
+
+  // Do not change the values here, as they are used for UMA histograms.
+  enum ImportantReason {
+    ENGAGEMENT = 0,
+    DURABLE = 1,
+    BOOKMARKS = 2,
+    HOME_SCREEN = 3,
+    NOTIFICATIONS = 4,
+    REASON_BOUNDARY
+  };
+
+  static std::string GetRegisterableDomainOrIP(const GURL& url);
+
+  static std::string GetRegisterableDomainOrIPFromHost(base::StringPiece host);
+
+  static bool IsDialogDisabled(Profile* profile);
+
+  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   // This returns the top |<=max_results| important registrable domains. This
   // uses site engagement and notifications to generate the list. |max_results|

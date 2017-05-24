@@ -21,6 +21,7 @@
 #include "extensions/browser/notification_types.h"
 #include "extensions/browser/null_app_sorting.h"
 #include "extensions/browser/quota_service.h"
+#include "extensions/browser/renderer_startup_helper.h"
 #include "extensions/browser/runtime_data.h"
 #include "extensions/browser/service_worker_manager.h"
 #include "extensions/browser/value_store/value_store_factory_impl.h"
@@ -78,10 +79,8 @@ const Extension* ShellExtensionSystem::LoadApp(const base::FilePath& app_dir) {
           &ShellExtensionSystem::OnExtensionRegisteredWithRequestContexts,
           weak_factory_.GetWeakPtr(), extension));
 
-  content::NotificationService::current()->Notify(
-      NOTIFICATION_EXTENSION_LOADED_DEPRECATED,
-      content::Source<BrowserContext>(browser_context_),
-      content::Details<const Extension>(extension.get()));
+  RendererStartupHelperFactory::GetForBrowserContext(browser_context_)
+      ->OnExtensionLoaded(*extension);
 
   return extension.get();
 }
@@ -176,8 +175,7 @@ void ShellExtensionSystem::RegisterExtensionWithRequestContexts(
 
 void ShellExtensionSystem::UnregisterExtensionWithRequestContexts(
     const std::string& extension_id,
-    const UnloadedExtensionInfo::Reason reason) {
-}
+    const UnloadedExtensionReason reason) {}
 
 const OneShotEvent& ShellExtensionSystem::ready() const {
   return ready_;

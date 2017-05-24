@@ -108,7 +108,7 @@ void AddAllStringValues(const base::ListValue& from,
   std::string as_string;
   for (base::ListValue::const_iterator it = from.begin();
        it != from.end(); ++it) {
-    if ((*it)->GetAsString(&as_string)) {
+    if (it->GetAsString(&as_string)) {
       to->push_back(as_string);
     }
   }
@@ -217,7 +217,7 @@ StorageStorageAreaGetBytesInUseFunction::RunWithStorage(ValueStore* storage) {
   }
 
   return OneArgument(
-      base::MakeUnique<base::FundamentalValue>(static_cast<int>(bytes_in_use)));
+      base::MakeUnique<base::Value>(static_cast<int>(bytes_in_use)));
 }
 
 ExtensionFunction::ResponseValue StorageStorageAreaSetFunction::RunWithStorage(

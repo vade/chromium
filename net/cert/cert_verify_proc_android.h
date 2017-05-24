@@ -26,6 +26,12 @@ class NET_EXPORT CertVerifyProcAndroid : public CertVerifyProc {
   // only be called once.
   static void SetCertNetFetcher(scoped_refptr<CertNetFetcher> cert_net_fetcher);
 
+  // Like SetCertNetFetcher, but allows the global CertNetFetcher to be set more
+  // than once. If one has already been set, shuts it down and then sets it to
+  // |cert_net_fetcher|.
+  static void SetCertNetFetcherForTesting(
+      scoped_refptr<CertNetFetcher> cert_net_fetcher);
+
   // Shuts down the global CertNetFetcher used for AIA fetches required by
   // VerifyInternal(). In-progress fetches will be cancelled and subsequent
   // fetches cancelled immediately. Assumes that SetCertNetFetcher() has been

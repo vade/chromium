@@ -7,7 +7,7 @@
 #include <string>
 #include <utility>
 
-#include "ash/common/system/chromeos/devicetype_utils.h"
+#include "ash/system/devicetype_utils.h"
 #include "base/bind.h"
 #include "base/i18n/timezone.h"
 #include "base/json/json_reader.h"
@@ -19,6 +19,7 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
@@ -93,10 +94,9 @@ constexpr char kEventOnSendFeedbackClicked[] = "onSendFeedbackClicked";
 void RequestOpenApp(Profile* profile) {
   const extensions::Extension* extension =
       extensions::ExtensionRegistry::Get(profile)->GetInstalledExtension(
-          ArcSupportHost::kHostAppId);
+          arc::kPlayStoreAppId);
   DCHECK(extension);
-  DCHECK(
-      extensions::util::IsAppLaunchable(ArcSupportHost::kHostAppId, profile));
+  DCHECK(extensions::util::IsAppLaunchable(arc::kPlayStoreAppId, profile));
   OpenApplication(CreateAppLaunchParamsUserContainer(
       profile, extension, WindowOpenDisposition::NEW_WINDOW,
       extensions::SOURCE_CHROME_INTERNAL));
@@ -140,6 +140,8 @@ std::ostream& operator<<(std::ostream& os, ArcSupportHost::Error error) {
       return os << "SERVER_COMMUNICATION_ERROR";
     case ArcSupportHost::Error::ANDROID_MANAGEMENT_REQUIRED_ERROR:
       return os << "ANDROID_MANAGEMENT_REQUIRED_ERROR";
+    case ArcSupportHost::Error::NETWORK_UNAVAILABLE_ERROR:
+      return os << "NETWORK_UNAVAILABLE_ERROR";
   }
 
   // Some compiler reports an error even if all values of an enum-class are
@@ -149,9 +151,6 @@ std::ostream& operator<<(std::ostream& os, ArcSupportHost::Error error) {
 }
 
 }  // namespace
-
-// static
-const char ArcSupportHost::kHostAppId[] = "cnbgggchhmkkdmeppjobngjoejnihlei";
 
 // static
 const char ArcSupportHost::kStorageId[] = "arc_support";
@@ -288,6 +287,9 @@ void ArcSupportHost::ShowError(Error error, bool should_show_send_feedback) {
       break;
     case Error::ANDROID_MANAGEMENT_REQUIRED_ERROR:
       message_id = IDS_ARC_ANDROID_MANAGEMENT_REQUIRED_ERROR;
+      break;
+    case Error::NETWORK_UNAVAILABLE_ERROR:
+      message_id = IDS_ARC_NETWORK_UNAVAILABLE_ERROR;
       break;
   }
   message.SetString(kErrorMessage, l10n_util::GetStringUTF16(message_id));

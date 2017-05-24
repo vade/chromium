@@ -14,7 +14,8 @@
 #include "chrome/common/search/instant_types.h"
 #include "chrome/common/search/ntp_logging_events.h"
 #include "chrome/renderer/instant_restricted_id_cache.h"
-#include "components/ntp_tiles/ntp_tile_source.h"
+#include "components/ntp_tiles/tile_source.h"
+#include "components/ntp_tiles/tile_visual_type.h"
 #include "components/omnibox/common/omnibox_focus_state.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_frame_observer_tracker.h"
@@ -29,8 +30,6 @@ class SearchBox : public content::RenderFrameObserver,
   enum ImageSourceType {
     NONE = -1,
     FAVICON,
-    LARGE_ICON,
-    FALLBACK_ICON,
     THUMB
   };
 
@@ -55,11 +54,13 @@ class SearchBox : public content::RenderFrameObserver,
 
   // Sends LogMostVisitedImpression to the browser.
   void LogMostVisitedImpression(int position,
-                                ntp_tiles::NTPTileSource tile_source);
+                                ntp_tiles::TileSource tile_source,
+                                ntp_tiles::TileVisualType tile_type);
 
   // Sends LogMostVisitedNavigation to the browser.
   void LogMostVisitedNavigation(int position,
-                                ntp_tiles::NTPTileSource tile_source);
+                                ntp_tiles::TileSource tile_source,
+                                ntp_tiles::TileVisualType tile_type);
 
   // Sends ChromeIdentityCheck to the browser.
   void CheckIsUserSignedInToChromeAs(const base::string16& identity);
@@ -67,24 +68,17 @@ class SearchBox : public content::RenderFrameObserver,
   // Sends HistorySyncCheck to the browser.
   void CheckIsUserSyncingHistory();
 
-  // Sends SearchBoxDeleteMostVisitedItem to the browser.
+  // Sends DeleteMostVisitedItem to the browser.
   void DeleteMostVisitedItem(InstantRestrictedID most_visited_item_id);
 
   // Generates the image URL of |type| for the most visited item specified in
   // |transient_url|. If |transient_url| is valid, |url| with a translated URL
   // and returns true.  Otherwise it depends on |type|:
   // - FAVICON: Returns true and renders an URL to display the default favicon.
-  // - LARGE_ICON and FALLBACK_ICON: Returns false.
   //
   // For |type| == FAVICON, valid forms of |transient_url|:
   //    chrome-search://favicon/<view_id>/<restricted_id>
   //    chrome-search://favicon/<favicon_parameters>/<view_id>/<restricted_id>
-  //
-  // For |type| == LARGE_ICON, valid form of |transient_url|:
-  //    chrome-search://large-icon/<size>/<view_id>/<restricted_id>
-  //
-  // For |type| == FALLBACK_ICON, valid form of |transient_url|:
-  //    chrome-search://fallback-icon/<icon specs>/<view_id>/<restricted_id>
   //
   // For |type| == THUMB, valid form of |transient_url|:
   //    chrome-search://thumb/<render_view_id>/<most_visited_item_id>
@@ -121,10 +115,10 @@ class SearchBox : public content::RenderFrameObserver,
   // Sends ChromeViewHostMsg_StopCapturingKeyStrokes to the browser.
   void StopCapturingKeyStrokes();
 
-  // Sends SearchBoxUndoAllMostVisitedDeletions to the browser.
+  // Sends UndoAllMostVisitedDeletions to the browser.
   void UndoAllMostVisitedDeletions();
 
-  // Sends SearchBoxUndoMostVisitedDeletion to the browser.
+  // Sends UndoMostVisitedDeletion to the browser.
   void UndoMostVisitedDeletion(InstantRestrictedID most_visited_item_id);
 
   bool is_focused() const { return is_focused_; }
@@ -141,7 +135,6 @@ class SearchBox : public content::RenderFrameObserver,
   void SetPageSequenceNumber(int page_seq_no) override;
   void ChromeIdentityCheckResult(const base::string16& identity,
                                  bool identity_match) override;
-  void DetermineIfPageSupportsInstant() override;
   void FocusChanged(OmniboxFocusState new_focus_state,
                     OmniboxFocusChangeReason reason) override;
   void HistorySyncCheckResult(bool sync_history) override;

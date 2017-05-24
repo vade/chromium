@@ -4,13 +4,12 @@
 /**
  * @unrestricted
  */
-Accessibility.AccessibilityNode = class extends SDK.SDKObject {
+Accessibility.AccessibilityNode = class {
   /**
    * @param {!Accessibility.AccessibilityModel} accessibilityModel
    * @param {!Protocol.Accessibility.AXNode} payload
    */
   constructor(accessibilityModel, payload) {
-    super(accessibilityModel.target());
     this._accessibilityModel = accessibilityModel;
     this._agent = accessibilityModel._agent;
 
@@ -19,7 +18,7 @@ Accessibility.AccessibilityNode = class extends SDK.SDKObject {
     if (payload.backendDOMNodeId) {
       accessibilityModel._setAXNodeForBackendDOMNodeId(payload.backendDOMNodeId, this);
       this._backendDOMNodeId = payload.backendDOMNodeId;
-      this._deferredDOMNode = new SDK.DeferredDOMNode(this.target(), payload.backendDOMNodeId);
+      this._deferredDOMNode = new SDK.DeferredDOMNode(accessibilityModel.target(), payload.backendDOMNodeId);
     } else {
       this._backendDOMNodeId = null;
       this._deferredDOMNode = null;
@@ -35,6 +34,13 @@ Accessibility.AccessibilityNode = class extends SDK.SDKObject {
     this._properties = payload.properties || null;
     this._childIds = payload.childIds || null;
     this._parentNode = null;
+  }
+
+  /**
+   * @return {!Accessibility.AccessibilityModel}
+   */
+  accessibilityModel() {
+    return this._accessibilityModel;
   }
 
   /**
@@ -140,10 +146,17 @@ Accessibility.AccessibilityNode = class extends SDK.SDKObject {
   }
 
   highlightDOMNode() {
-    if (!this.isDOMNode())
+    if (!this.deferredDOMNode())
       return;
-    this.deferredDOMNode().resolvePromise().then((node) => {
-      SDK.DOMModel.fromTarget(this.target()).nodeHighlightRequested(node.id);
+
+    // Highlight node in page.
+    this.deferredDOMNode().highlight();
+
+    // Highlight node in Elements tree.
+    this.deferredDOMNode().resolvePromise().then(node => {
+      if (!node)
+        return;
+      node.domModel().overlayModel().nodeHighlightRequested(node.id);
     });
   }
 
@@ -180,7 +193,7 @@ Accessibility.AccessibilityNode = class extends SDK.SDKObject {
     if (!this._childIds || !this._childIds.length)
       return false;
 
-    return !this._childIds.some((id) => this._accessibilityModel.axNodeForId(id) !== undefined);
+    return !this._childIds.some(id => this._accessibilityModel.axNodeForId(id) !== undefined);
   }
 
   /**
@@ -215,23 +228,12 @@ Accessibility.AccessibilityModel = class extends SDK.SDKModel {
    * @param {!SDK.Target} target
    */
   constructor(target) {
-    super(Accessibility.AccessibilityModel, target);
+    super(target);
     this._agent = target.accessibilityAgent();
 
     /** @type {!Map<string, !Accessibility.AccessibilityNode>} */
     this._axIdToAXNode = new Map();
     this._backendDOMNodeIdToAXNode = new Map();
-  }
-
-  /**
-   * @param {!SDK.Target} target
-   * @return {!Accessibility.AccessibilityModel}
-   */
-  static fromTarget(target) {
-    if (!target[Accessibility.AccessibilityModel._symbol])
-      target[Accessibility.AccessibilityModel._symbol] = new Accessibility.AccessibilityModel(target);
-
-    return target[Accessibility.AccessibilityModel._symbol];
   }
 
   clear() {
@@ -314,4 +316,4 @@ Accessibility.AccessibilityModel = class extends SDK.SDKModel {
   }
 };
 
-Accessibility.AccessibilityModel._symbol = Symbol('AccessibilityModel');
+SDK.SDKModel.register(Accessibility.AccessibilityModel, SDK.Target.Capability.DOM, false);

@@ -8,6 +8,8 @@
 #include <map>
 #include <string>
 
+#include "ash/shell_observer.h"
+#include "ash/system/status_area_focus_observer.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
@@ -16,6 +18,7 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "ui/keyboard/keyboard_controller_observer.h"
 #include "ui/views/controls/webview/unhandled_keyboard_event_handler.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -38,10 +41,13 @@ class OobeUI;
 // View used to render a WebUI supporting Widget. This widget is used for the
 // WebUI based start up and lock screens. It contains a WebView.
 class WebUILoginView : public views::View,
+                       public ash::ShellObserver,
+                       public keyboard::KeyboardControllerObserver,
                        public content::WebContentsDelegate,
                        public content::NotificationObserver,
                        public ChromeWebModalDialogManagerDelegate,
-                       public web_modal::WebContentsModalDialogHost {
+                       public web_modal::WebContentsModalDialogHost,
+                       public ash::StatusAreaFocusObserver {
  public:
   struct WebViewSettings {
     // If true, this will check for and consume a preloaded views::WebView
@@ -135,6 +141,14 @@ class WebUILoginView : public views::View,
   // Map type for the accelerator-to-identifier map.
   typedef std::map<ui::Accelerator, std::string> AccelMap;
 
+  // ash::ShellObserver:
+  void OnVirtualKeyboardStateChanged(bool activated,
+                                     aura::Window* root_window) override;
+
+  // keyboard::KeyboardControllerObserver:
+  void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) override;
+  void OnKeyboardClosed() override;
+
   // Overridden from content::WebContentsDelegate.
   bool HandleContextMenu(const content::ContextMenuParams& params) override;
   void HandleKeyboardEvent(
@@ -151,6 +165,9 @@ class WebUILoginView : public views::View,
                                   content::MediaStreamType type) override;
   bool PreHandleGestureEvent(content::WebContents* source,
                              const blink::WebGestureEvent& event) override;
+
+  // Overridden from ash::StatusAreaFocusObserver.
+  void OnFocusOut(bool reverse) override;
 
   // Performs series of actions when login prompt is considered
   // to be ready and visible.
@@ -187,17 +204,6 @@ class WebUILoginView : public views::View,
 
   // True to forward keyboard event.
   bool forward_keyboard_event_ = true;
-
-  // A FocusTraversable for StatusAreaWidget that uses
-  // |status_area_widget_host_| as placeholder in WebUiLoginView's focus chain.
-  class StatusAreaFocusTraversable;
-  std::unique_ptr<StatusAreaFocusTraversable> status_area_focus_traversable_;
-  views::View* status_area_widget_host_ = nullptr;
-
-  // A FocusTraversable for WebUILoginView that loops back at the end of its
-  // focus chain.
-  class CycleFocusTraversable;
-  std::unique_ptr<CycleFocusTraversable> cycle_focus_traversable_;
 
   base::ObserverList<web_modal::ModalDialogHostObserver> observer_list_;
 

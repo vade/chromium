@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "base/auto_reset.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "content/browser/loader/layered_resource_handler.h"
@@ -23,6 +24,7 @@ class URLRequest;
 namespace content {
 class InterceptingResourceHandler;
 class PluginService;
+class ResourceController;
 class ResourceDispatcherHostImpl;
 struct WebPluginInfo;
 
@@ -39,8 +41,7 @@ struct WebPluginInfo;
 // Accept header on the request based on its ResourceType, if one isn't already
 // present.
 class CONTENT_EXPORT MimeSniffingResourceHandler
-    : public LayeredResourceHandler,
-      public ResourceController {
+    : public LayeredResourceHandler {
  public:
   MimeSniffingResourceHandler(std::unique_ptr<ResourceHandler> next_handler,
                               ResourceDispatcherHostImpl* host,
@@ -51,6 +52,8 @@ class CONTENT_EXPORT MimeSniffingResourceHandler
   ~MimeSniffingResourceHandler() override;
 
  private:
+  class Controller;
+
   friend class MimeSniffingResourceHandlerTest;
   enum State {
     // Starting state of the MimeSniffingResourceHandler. In this state, it is
@@ -62,6 +65,11 @@ class CONTENT_EXPORT MimeSniffingResourceHandler
     // data in read_buffer_, waiting to sniff the mime type and make a choice
     // about request interception.
     STATE_BUFFERING,
+
+    // In these states, the MimeSniffingResourceHandler is calling OnWillRead on
+    // the downstream ResourceHandler and then waiting for the response.
+    STATE_CALLING_ON_WILL_READ,
+    STATE_WAITING_FOR_BUFFER,
 
     // In this state, the MimeSniffingResourceHandler has identified the mime
     // type and made a decision on whether the request should be intercepted or
@@ -80,21 +88,21 @@ class CONTENT_EXPORT MimeSniffingResourceHandler
   };
 
   // ResourceHandler implementation:
-  void SetController(ResourceController* controller) override;
-  bool OnWillStart(const GURL&, bool* defer) override;
-  bool OnResponseStarted(ResourceResponse* response, bool* defer) override;
-  bool OnWillRead(scoped_refptr<net::IOBuffer>* buf,
+  void OnWillStart(const GURL&,
+                   std::unique_ptr<ResourceController> controller) override;
+  void OnResponseStarted(
+      ResourceResponse* response,
+      std::unique_ptr<ResourceController> controller) override;
+  void OnWillRead(scoped_refptr<net::IOBuffer>* buf,
                   int* buf_size,
-                  int min_size) override;
-  bool OnReadCompleted(int bytes_read, bool* defer) override;
-  void OnResponseCompleted(const net::URLRequestStatus& status,
-                           bool* defer) override;
+                  std::unique_ptr<ResourceController> controller) override;
+  void OnReadCompleted(int bytes_read,
+                       std::unique_ptr<ResourceController> controller) override;
+  void OnResponseCompleted(
+      const net::URLRequestStatus& status,
+      std::unique_ptr<ResourceController> controller) override;
 
-  // ResourceController implementation:
-  void Resume() override;
-  void Cancel() override;
-  void CancelAndIgnore() override;
-  void CancelWithError(int error_code) override;
+  void ResumeInternal();
 
   // --------------------------------------------------------------------------
   // The following methods replay the buffered data to the downstream
@@ -104,16 +112,21 @@ class CONTENT_EXPORT MimeSniffingResourceHandler
 
   // Used to advance through the states of the state machine.
   void AdvanceState();
-  bool ProcessState(bool* defer);
 
   // Intercepts the request as a stream/download if needed.
-  bool MaybeIntercept(bool* defer);
+  void MaybeIntercept();
+
+  // Calls OnWillRead on the downstream handlers.
+  void CallOnWillRead();
+
+  // Copies received buffer to parent.
+  void BufferReceived();
 
   // Replays OnResponseStarted on the downstream handlers.
-  bool ReplayResponseReceived(bool* defer);
+  void ReplayResponseReceived();
 
   // Replays OnReadCompleted on the downstreams handlers.
-  bool ReplayReadCompleted(bool* defer);
+  void ReplayReadCompleted();
 
   // --------------------------------------------------------------------------
 
@@ -123,18 +136,20 @@ class CONTENT_EXPORT MimeSniffingResourceHandler
 
   // Checks whether this request should be intercepted as a stream or a
   // download. If this is the case, sets up the new ResourceHandler that will be
-  // used for interception. Returns false if teh request should be cancelled,
-  // true otherwise. |defer| is set to true if the interception check needs to
-  // finish asynchronously.
-  bool MaybeStartInterception(bool* defer);
+  // used for interception.
+  //
+  // Returns true on synchronous success, false if the operation will need to
+  // complete asynchronously or failure. On failure, also cancels the request.
+  bool MaybeStartInterception();
 
   // Determines whether a plugin will handle the current request. Returns false
   // if there is an error and the request should be cancelled and true
-  // otherwise. |defer| is set to true if plugin data is stale and needs to be
-  // refreshed before the request can be handled (in this case the function
-  // still returns true). If the request is directed to a plugin,
-  // |handled_by_plugin| is set to true.
-  bool CheckForPluginHandler(bool* defer, bool* handled_by_plugin);
+  // otherwise. If the request is directed to a plugin, |handled_by_plugin| is
+  // set to true.
+  //
+  // Returns true on synchronous success, false if the operation will need to
+  // complete asynchronously or failure. On failure, also cancels the request.
+  bool CheckForPluginHandler(bool* handled_by_plugin);
 
   // Whether this request is allowed to be intercepted as a download or a
   // stream.
@@ -164,11 +179,24 @@ class CONTENT_EXPORT MimeSniffingResourceHandler
   int read_buffer_size_;
   int bytes_read_;
 
+  // Pointers to parent-owned read buffer and its size.  Only used for first
+  // OnWillRead call.
+  scoped_refptr<net::IOBuffer>* parent_read_buffer_;
+  int* parent_read_buffer_size_;
+
   // The InterceptingResourceHandler that will perform ResourceHandler swap if
   // needed.
   InterceptingResourceHandler* intercepting_handler_;
 
   RequestContextType request_context_type_;
+
+  // True if current in an AdvanceState loop. Used to prevent re-entrancy and
+  // avoid an extra PostTask.
+  bool in_state_loop_;
+  // Set to true if Resume() is called while |in_state_loop_| is true. When
+  // returning to the parent AdvanceState loop, will synchronously advance to
+  // the next state when control returns to the AdvanceState loop.
+  bool advance_state_;
 
   base::WeakPtrFactory<MimeSniffingResourceHandler> weak_ptr_factory_;
 

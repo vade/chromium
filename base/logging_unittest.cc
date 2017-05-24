@@ -2,24 +2,46 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/bind.h"
+#include "base/callback.h"
+#include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "base/strings/string_piece.h"
 
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if defined(OS_POSIX)
+#include <signal.h>
+#include <unistd.h>
+#include "base/posix/eintr_wrapper.h"
+#endif  // OS_POSIX
+
+#if defined(OS_LINUX) || defined(OS_ANDROID)
+#include <ucontext.h>
+#endif
+
+#if defined(OS_WIN)
+#include <excpt.h>
+#include <windows.h>
+#endif  // OS_WIN
 
 namespace logging {
 
 namespace {
 
 using ::testing::Return;
+using ::testing::_;
 
 // Needs to be global since log assert handlers can't maintain state.
 int log_sink_call_count = 0;
 
 #if !defined(OFFICIAL_BUILD) || defined(DCHECK_ALWAYS_ON) || !defined(NDEBUG)
-void LogSink(const std::string& str) {
+void LogSink(const char* file,
+             int line,
+             const base::StringPiece message,
+             const base::StringPiece stack_trace) {
   ++log_sink_call_count;
 }
 #endif
@@ -32,7 +54,6 @@ class LogStateSaver {
 
   ~LogStateSaver() {
     SetMinLogLevel(old_min_log_level_);
-    SetLogAssertHandler(NULL);
     log_sink_call_count = 0;
   }
 
@@ -52,18 +73,23 @@ class MockLogSource {
   MOCK_METHOD0(Log, const char*());
 };
 
+class MockLogAssertHandler {
+ public:
+  MOCK_METHOD4(
+      HandleLogAssert,
+      void(const char*, int, const base::StringPiece, const base::StringPiece));
+};
+
 TEST_F(LoggingTest, BasicLogging) {
   MockLogSource mock_log_source;
-  EXPECT_CALL(mock_log_source, Log()).Times(DEBUG_MODE ? 16 : 8).
-      WillRepeatedly(Return("log message"));
+  EXPECT_CALL(mock_log_source, Log())
+      .Times(DCHECK_IS_ON() ? 16 : 8)
+      .WillRepeatedly(Return("log message"));
 
   SetMinLogLevel(LOG_INFO);
 
   EXPECT_TRUE(LOG_IS_ON(INFO));
-  // As of g++-4.5, the first argument to EXPECT_EQ cannot be a
-  // constant expression.
-  const bool kIsDebugMode = (DEBUG_MODE != 0);
-  EXPECT_TRUE(kIsDebugMode == DLOG_IS_ON(INFO));
+  EXPECT_TRUE((DCHECK_IS_ON() != 0) == DLOG_IS_ON(INFO));
   EXPECT_TRUE(VLOG_IS_ON(0));
 
   LOG(INFO) << mock_log_source.Log();
@@ -172,13 +198,19 @@ TEST_F(LoggingTest, LoggingIsLazyByDestination) {
 // Official builds have CHECKs directly call BreakDebugger.
 #if !defined(OFFICIAL_BUILD)
 
-TEST_F(LoggingTest, CheckStreamsAreLazy) {
+// https://crbug.com/709067 tracks test flakiness on iOS.
+#if defined(OS_IOS)
+#define MAYBE_CheckStreamsAreLazy DISABLED_CheckStreamsAreLazy
+#else
+#define MAYBE_CheckStreamsAreLazy CheckStreamsAreLazy
+#endif
+TEST_F(LoggingTest, MAYBE_CheckStreamsAreLazy) {
   MockLogSource mock_log_source, uncalled_mock_log_source;
   EXPECT_CALL(mock_log_source, Log()).Times(8).
       WillRepeatedly(Return("check message"));
   EXPECT_CALL(uncalled_mock_log_source, Log()).Times(0);
 
-  SetLogAssertHandler(&LogSink);
+  ScopedLogAssertHandler scoped_assert_handler(base::Bind(LogSink));
 
   CHECK(mock_log_source.Log()) << uncalled_mock_log_source.Log();
   PCHECK(!mock_log_source.Log()) << mock_log_source.Log();
@@ -189,6 +221,154 @@ TEST_F(LoggingTest, CheckStreamsAreLazy) {
 }
 
 #endif
+
+#if defined(OFFICIAL_BUILD) && defined(OS_WIN)
+NOINLINE void CheckContainingFunc(int death_location) {
+  CHECK(death_location != 1);
+  CHECK(death_location != 2);
+  CHECK(death_location != 3);
+}
+
+int GetCheckExceptionData(EXCEPTION_POINTERS* p, DWORD* code, void** addr) {
+  *code = p->ExceptionRecord->ExceptionCode;
+  *addr = p->ExceptionRecord->ExceptionAddress;
+  return EXCEPTION_EXECUTE_HANDLER;
+}
+
+TEST_F(LoggingTest, CheckCausesDistinctBreakpoints) {
+  DWORD code1 = 0;
+  DWORD code2 = 0;
+  DWORD code3 = 0;
+  void* addr1 = nullptr;
+  void* addr2 = nullptr;
+  void* addr3 = nullptr;
+
+  // Record the exception code and addresses.
+  __try {
+    CheckContainingFunc(1);
+  } __except (
+      GetCheckExceptionData(GetExceptionInformation(), &code1, &addr1)) {
+  }
+
+  __try {
+    CheckContainingFunc(2);
+  } __except (
+      GetCheckExceptionData(GetExceptionInformation(), &code2, &addr2)) {
+  }
+
+  __try {
+    CheckContainingFunc(3);
+  } __except (
+      GetCheckExceptionData(GetExceptionInformation(), &code3, &addr3)) {
+  }
+
+  // Ensure that the exception codes are correct (in particular, breakpoints,
+  // not access violations).
+  EXPECT_EQ(STATUS_BREAKPOINT, code1);
+  EXPECT_EQ(STATUS_BREAKPOINT, code2);
+  EXPECT_EQ(STATUS_BREAKPOINT, code3);
+
+  // Ensure that none of the CHECKs are colocated.
+  EXPECT_NE(addr1, addr2);
+  EXPECT_NE(addr1, addr3);
+  EXPECT_NE(addr2, addr3);
+}
+
+#elif defined(OS_POSIX) && !defined(OS_NACL) && !defined(OS_IOS) && \
+    (defined(ARCH_CPU_X86_FAMILY) || defined(ARCH_CPU_ARM_FAMILY))
+
+int g_child_crash_pipe;
+
+void CheckCrashTestSighandler(int, siginfo_t* info, void* context_ptr) {
+  // Conversely to what clearly stated in "man 2 sigaction", some Linux kernels
+  // do NOT populate the |info->si_addr| in the case of a SIGTRAP. Hence we
+  // need the arch-specific boilerplate below, which is inspired by breakpad.
+  // At the same time, on OSX, ucontext.h is deprecated but si_addr works fine.
+  uintptr_t crash_addr = 0;
+#if defined(OS_MACOSX)
+  crash_addr = reinterpret_cast<uintptr_t>(info->si_addr);
+#else  // OS_POSIX && !OS_MACOSX
+  struct ucontext* context = reinterpret_cast<struct ucontext*>(context_ptr);
+#if defined(ARCH_CPU_X86)
+  crash_addr = static_cast<uintptr_t>(context->uc_mcontext.gregs[REG_EIP]);
+#elif defined(ARCH_CPU_X86_64)
+  crash_addr = static_cast<uintptr_t>(context->uc_mcontext.gregs[REG_RIP]);
+#elif defined(ARCH_CPU_ARMEL)
+  crash_addr = static_cast<uintptr_t>(context->uc_mcontext.arm_pc);
+#elif defined(ARCH_CPU_ARM64)
+  crash_addr = static_cast<uintptr_t>(context->uc_mcontext.pc);
+#endif  // ARCH_*
+#endif  // OS_POSIX && !OS_MACOSX
+  HANDLE_EINTR(write(g_child_crash_pipe, &crash_addr, sizeof(uintptr_t)));
+  _exit(0);
+}
+
+// CHECK causes a direct crash (without jumping to another function) only in
+// official builds. Unfortunately, continuous test coverage on official builds
+// is lower. DO_CHECK here falls back on a home-brewed implementation in
+// non-official builds, to catch regressions earlier in the CQ.
+#if defined(OFFICIAL_BUILD)
+#define DO_CHECK CHECK
+#else
+#define DO_CHECK(cond) \
+  if (!(cond))         \
+  IMMEDIATE_CRASH()
+#endif
+
+void CrashChildMain(int death_location) {
+  struct sigaction act = {};
+  act.sa_sigaction = CheckCrashTestSighandler;
+  act.sa_flags = SA_SIGINFO;
+  ASSERT_EQ(0, sigaction(SIGTRAP, &act, NULL));
+  ASSERT_EQ(0, sigaction(SIGBUS, &act, NULL));
+  ASSERT_EQ(0, sigaction(SIGILL, &act, NULL));
+  DO_CHECK(death_location != 1);
+  DO_CHECK(death_location != 2);
+  printf("\n");
+  DO_CHECK(death_location != 3);
+
+  // Should never reach this point.
+  const uintptr_t failed = 0;
+  HANDLE_EINTR(write(g_child_crash_pipe, &failed, sizeof(uintptr_t)));
+};
+
+void SpawnChildAndCrash(int death_location, uintptr_t* child_crash_addr) {
+  int pipefd[2];
+  ASSERT_EQ(0, pipe(pipefd));
+
+  int pid = fork();
+  ASSERT_GE(pid, 0);
+
+  if (pid == 0) {      // child process.
+    close(pipefd[0]);  // Close reader (parent) end.
+    g_child_crash_pipe = pipefd[1];
+    CrashChildMain(death_location);
+    FAIL() << "The child process was supposed to crash. It didn't.";
+  }
+
+  close(pipefd[1]);  // Close writer (child) end.
+  DCHECK(child_crash_addr);
+  int res = HANDLE_EINTR(read(pipefd[0], child_crash_addr, sizeof(uintptr_t)));
+  ASSERT_EQ(static_cast<int>(sizeof(uintptr_t)), res);
+}
+
+TEST_F(LoggingTest, CheckCausesDistinctBreakpoints) {
+  uintptr_t child_crash_addr_1 = 0;
+  uintptr_t child_crash_addr_2 = 0;
+  uintptr_t child_crash_addr_3 = 0;
+
+  SpawnChildAndCrash(1, &child_crash_addr_1);
+  SpawnChildAndCrash(2, &child_crash_addr_2);
+  SpawnChildAndCrash(3, &child_crash_addr_3);
+
+  ASSERT_NE(0u, child_crash_addr_1);
+  ASSERT_NE(0u, child_crash_addr_2);
+  ASSERT_NE(0u, child_crash_addr_3);
+  ASSERT_NE(child_crash_addr_1, child_crash_addr_2);
+  ASSERT_NE(child_crash_addr_1, child_crash_addr_3);
+  ASSERT_NE(child_crash_addr_2, child_crash_addr_3);
+}
+#endif  // OS_POSIX
 
 TEST_F(LoggingTest, DebugLoggingReleaseBehavior) {
 #if !defined(NDEBUG) || defined(DCHECK_ALWAYS_ON)
@@ -225,19 +405,25 @@ void DcheckEmptyFunction1() {
 }
 void DcheckEmptyFunction2() {}
 
-TEST_F(LoggingTest, Dcheck) {
+// https://crbug.com/709067 tracks test flakiness on iOS.
+#if defined(OS_IOS)
+#define MAYBE_Dcheck DISABLED_Dcheck
+#else
+#define MAYBE_Dcheck Dcheck
+#endif
+TEST_F(LoggingTest, MAYBE_Dcheck) {
 #if defined(NDEBUG) && !defined(DCHECK_ALWAYS_ON)
   // Release build.
   EXPECT_FALSE(DCHECK_IS_ON());
   EXPECT_FALSE(DLOG_IS_ON(DCHECK));
 #elif defined(NDEBUG) && defined(DCHECK_ALWAYS_ON)
   // Release build with real DCHECKS.
-  SetLogAssertHandler(&LogSink);
+  ScopedLogAssertHandler scoped_assert_handler(base::Bind(LogSink));
   EXPECT_TRUE(DCHECK_IS_ON());
   EXPECT_TRUE(DLOG_IS_ON(DCHECK));
 #else
   // Debug build.
-  SetLogAssertHandler(&LogSink);
+  ScopedLogAssertHandler scoped_assert_handler(base::Bind(LogSink));
   EXPECT_TRUE(DCHECK_IS_ON());
   EXPECT_TRUE(DLOG_IS_ON(DCHECK));
 #endif
@@ -324,6 +510,43 @@ TEST_F(LoggingTest, CheckEqStatements) {
 
   if (false)
     CHECK_EQ(false, true);           // Unreached.
+}
+
+TEST_F(LoggingTest, NestedLogAssertHandlers) {
+  ::testing::InSequence dummy;
+  ::testing::StrictMock<MockLogAssertHandler> handler_a, handler_b;
+
+  EXPECT_CALL(
+      handler_a,
+      HandleLogAssert(
+          _, _, base::StringPiece("First assert must be caught by handler_a"),
+          _));
+  EXPECT_CALL(
+      handler_b,
+      HandleLogAssert(
+          _, _, base::StringPiece("Second assert must be caught by handler_b"),
+          _));
+  EXPECT_CALL(
+      handler_a,
+      HandleLogAssert(
+          _, _,
+          base::StringPiece("Last assert must be caught by handler_a again"),
+          _));
+
+  logging::ScopedLogAssertHandler scoped_handler_a(base::Bind(
+      &MockLogAssertHandler::HandleLogAssert, base::Unretained(&handler_a)));
+
+  // Using LOG(FATAL) rather than CHECK(false) here since log messages aren't
+  // preserved for CHECKs in official builds.
+  LOG(FATAL) << "First assert must be caught by handler_a";
+
+  {
+    logging::ScopedLogAssertHandler scoped_handler_b(base::Bind(
+        &MockLogAssertHandler::HandleLogAssert, base::Unretained(&handler_b)));
+    LOG(FATAL) << "Second assert must be caught by handler_b";
+  }
+
+  LOG(FATAL) << "Last assert must be caught by handler_a again";
 }
 
 // Test that defining an operator<< for a type in a namespace doesn't prevent

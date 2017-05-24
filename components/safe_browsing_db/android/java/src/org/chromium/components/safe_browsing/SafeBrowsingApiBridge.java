@@ -4,8 +4,7 @@
 
 package org.chromium.components.safe_browsing;
 
-import android.content.Context;
-
+import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
@@ -27,7 +26,7 @@ public final class SafeBrowsingApiBridge {
      * Set the class-file for the implementation of SafeBrowsingApiHandler to use when the safe
      * browsing api is invoked.
      */
-    public static void setSafeBrowingHandlerType(Class<? extends SafeBrowsingApiHandler> handler) {
+    public static void setSafeBrowsingHandlerType(Class<? extends SafeBrowsingApiHandler> handler) {
         sHandler = handler;
     }
 
@@ -38,7 +37,7 @@ public final class SafeBrowsingApiBridge {
      * @return the handler if it's usable, or null if the API is not supported.
      */
     @CalledByNative
-    private static SafeBrowsingApiHandler create(Context context) {
+    private static SafeBrowsingApiHandler create() {
         SafeBrowsingApiHandler handler;
         try {
             handler = sHandler.newInstance();
@@ -46,12 +45,13 @@ public final class SafeBrowsingApiBridge {
             Log.e(TAG, "Failed to init handler: " + e.getMessage());
             return null;
         }
-        boolean initSuccesssful = handler.init(context, new SafeBrowsingApiHandler.Observer() {
-            @Override
-            public void onUrlCheckDone(long callbackId, int resultStatus, String metadata) {
-                nativeOnUrlCheckDone(callbackId, resultStatus, metadata);
-            }
-        });
+        boolean initSuccesssful = handler.init(
+                ContextUtils.getApplicationContext(), new SafeBrowsingApiHandler.Observer() {
+                    @Override
+                    public void onUrlCheckDone(long callbackId, int resultStatus, String metadata) {
+                        nativeOnUrlCheckDone(callbackId, resultStatus, metadata);
+                    }
+                });
         return initSuccesssful ? handler : null;
     }
 

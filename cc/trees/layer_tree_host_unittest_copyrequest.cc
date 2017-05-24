@@ -8,7 +8,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "cc/layers/layer_iterator.h"
+#include "cc/layers/effect_tree_layer_list_iterator.h"
 #include "cc/output/copy_output_request.h"
 #include "cc/output/copy_output_result.h"
 #include "cc/output/direct_renderer.h"
@@ -43,7 +43,7 @@ class LayerTreeHostCopyRequestTestMultipleRequests
     grand_child->SetBounds(gfx::Size(5, 5));
     child->AddChild(grand_child);
 
-    layer_tree()->SetRootLayer(root);
+    layer_tree_host()->SetRootLayer(root);
     LayerTreeHostCopyRequestTest::SetupTree();
     client_.set_bounds(root->bounds());
   }
@@ -55,8 +55,8 @@ class LayerTreeHostCopyRequestTestMultipleRequests
   void WaitForCallback() {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
-        base::Bind(&LayerTreeHostCopyRequestTestMultipleRequests::NextStep,
-                   base::Unretained(this)));
+        base::BindOnce(&LayerTreeHostCopyRequestTestMultipleRequests::NextStep,
+                       base::Unretained(this)));
   }
 
   void NextStep() {
@@ -205,7 +205,7 @@ class LayerTreeHostCopyRequestCompletionCausesCommit
     layer_->SetBounds(gfx::Size(15, 15));
     root_->AddChild(layer_);
 
-    layer_tree()->SetRootLayer(root_);
+    layer_tree_host()->SetRootLayer(root_);
     LayerTreeHostCopyRequestTest::SetupTree();
     client_.set_bounds(root_->bounds());
   }
@@ -260,7 +260,7 @@ class LayerTreeHostCopyRequestTestLayerDestroyed
     impl_destroyed_->SetBounds(gfx::Size(10, 10));
     root_->AddChild(impl_destroyed_);
 
-    layer_tree()->SetRootLayer(root_);
+    layer_tree_host()->SetRootLayer(root_);
     LayerTreeHostCopyRequestTest::SetupTree();
     client_.set_bounds(root_->bounds());
   }
@@ -292,7 +292,7 @@ class LayerTreeHostCopyRequestTestLayerDestroyed
         EXPECT_EQ(1, callback_count_);
 
         // Prevent drawing so we can't make a copy of the impl_destroyed layer.
-        layer_tree()->SetViewportSize(gfx::Size());
+        layer_tree_host()->SetViewportSize(gfx::Size());
         break;
       case 2:
         // Flush the message loops and make sure the callbacks run.
@@ -359,7 +359,7 @@ class LayerTreeHostCopyRequestTestInHiddenSubtree
     copy_layer_->SetBounds(gfx::Size(10, 10));
     parent_layer_->AddChild(copy_layer_);
 
-    layer_tree()->SetRootLayer(root_);
+    layer_tree_host()->SetRootLayer(root_);
     LayerTreeHostCopyRequestTest::SetupTree();
     client_.set_bounds(root_->bounds());
   }
@@ -459,7 +459,7 @@ class LayerTreeHostTestHiddenSurfaceNotAllocatedForSubtreeCopyRequest
     copy_layer_->SetBounds(gfx::Size(10, 10));
     parent_layer_->AddChild(copy_layer_);
 
-    layer_tree()->SetRootLayer(root_);
+    layer_tree_host()->SetRootLayer(root_);
     LayerTreeHostCopyRequestTest::SetupTree();
     client_.set_bounds(root_->bounds());
   }
@@ -563,7 +563,7 @@ class LayerTreeHostCopyRequestTestClippedOut
     copy_layer_->SetBounds(gfx::Size(10, 10));
     parent_layer_->AddChild(copy_layer_);
 
-    layer_tree()->SetRootLayer(root_);
+    layer_tree_host()->SetRootLayer(root_);
     LayerTreeHostCopyRequestTest::SetupTree();
     client_.set_bounds(root_->bounds());
   }
@@ -597,6 +597,10 @@ SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostCopyRequestTestClippedOut);
 class LayerTreeHostCopyRequestTestScaledLayer
     : public LayerTreeHostCopyRequestTest {
  protected:
+  void InitializeSettings(LayerTreeSettings* settings) override {
+    settings->layer_transforms_should_scale_layer_contents = true;
+  }
+
   void SetupTree() override {
     root_ = Layer::Create();
     root_->SetBounds(gfx::Size(20, 20));
@@ -613,7 +617,7 @@ class LayerTreeHostCopyRequestTestScaledLayer
     child_layer_->SetBounds(gfx::Size(10, 10));
     copy_layer_->AddChild(child_layer_);
 
-    layer_tree()->SetRootLayer(root_);
+    layer_tree_host()->SetRootLayer(root_);
     LayerTreeHostCopyRequestTest::SetupTree();
     client_.set_bounds(root_->bounds());
   }
@@ -657,7 +661,7 @@ class LayerTreeHostTestAsyncTwoReadbacksWithoutDraw
     copy_layer_->SetBounds(gfx::Size(10, 10));
     root_->AddChild(copy_layer_);
 
-    layer_tree()->SetRootLayer(root_);
+    layer_tree_host()->SetRootLayer(root_);
     LayerTreeHostCopyRequestTest::SetupTree();
     client_.set_bounds(root_->bounds());
   }
@@ -675,7 +679,7 @@ class LayerTreeHostTestAsyncTwoReadbacksWithoutDraw
     PostSetNeedsCommitToMainThread();
 
     // Prevent drawing.
-    layer_tree()->SetViewportSize(gfx::Size(0, 0));
+    layer_tree_host()->SetViewportSize(gfx::Size(0, 0));
 
     AddCopyRequest(copy_layer_.get());
   }
@@ -690,7 +694,7 @@ class LayerTreeHostTestAsyncTwoReadbacksWithoutDraw
   void DidCommit() override {
     if (layer_tree_host()->SourceFrameNumber() == 1) {
       // Allow drawing.
-      layer_tree()->SetViewportSize(gfx::Size(root_->bounds()));
+      layer_tree_host()->SetViewportSize(gfx::Size(root_->bounds()));
 
       AddCopyRequest(copy_layer_.get());
     }
@@ -747,7 +751,7 @@ class LayerTreeHostCopyRequestTestDeleteTexture
     copy_layer_->SetBounds(gfx::Size(10, 10));
     root_->AddChild(copy_layer_);
 
-    layer_tree()->SetRootLayer(root_);
+    layer_tree_host()->SetRootLayer(root_);
     LayerTreeHostCopyRequestTest::SetupTree();
     client_.set_bounds(root_->bounds());
   }
@@ -780,9 +784,9 @@ class LayerTreeHostCopyRequestTestDeleteTexture
     result_ = nullptr;
 
     ImplThreadTaskRunner()->PostTask(
-        FROM_HERE, base::Bind(&LayerTreeHostCopyRequestTestDeleteTexture::
-                                  CheckNumTexturesAfterReadbackDestroyed,
-                              base::Unretained(this)));
+        FROM_HERE, base::BindOnce(&LayerTreeHostCopyRequestTestDeleteTexture::
+                                      CheckNumTexturesAfterReadbackDestroyed,
+                                  base::Unretained(this)));
   }
 
   void CheckNumTexturesAfterReadbackDestroyed() {
@@ -809,11 +813,16 @@ class LayerTreeHostCopyRequestTestDeleteTexture
         // Request a copy of the layer. This will use another texture.
         MainThreadTaskRunner()->PostTask(
             FROM_HERE,
-            base::Bind(
+            base::BindOnce(
                 &LayerTreeHostCopyRequestTestDeleteTexture::InsertCopyRequest,
                 base::Unretained(this)));
         break;
       case 1:
+        // Copy requests cause a followup commit and draw without the separate
+        // RenderPass required. This changes the number of active textures. So
+        // wait for that draw before counting textures and proceeding.
+        break;
+      case 2:
         // We did a readback, so there will be a readback texture around now.
         num_textures_after_readback_ =
             display_context_provider_->TestContext3d()->NumTextures();
@@ -823,9 +832,10 @@ class LayerTreeHostCopyRequestTestDeleteTexture
         // to the compositor. Then check the resulting number of allocated
         // textures.
         MainThreadTaskRunner()->PostTask(
-            FROM_HERE, base::Bind(&LayerTreeHostCopyRequestTestDeleteTexture::
-                                      DestroyCopyResultAndCheckNumTextures,
-                                  base::Unretained(this)));
+            FROM_HERE,
+            base::BindOnce(&LayerTreeHostCopyRequestTestDeleteTexture::
+                               DestroyCopyResultAndCheckNumTextures,
+                           base::Unretained(this)));
         break;
     }
   }
@@ -875,13 +885,18 @@ class LayerTreeHostCopyRequestTestCountTextures
     copy_layer_ = FakePictureLayer::Create(&copy_client_);
     copy_layer_->SetBounds(gfx::Size(10, 10));
     copy_client_.set_bounds(copy_layer_->bounds());
+    PaintFlags flags;
+    flags.setColor(SK_ColorRED);
+    // Ensure the layer isn't completely transparent so the RenderPass isn't
+    // optimized away.
+    copy_client_.add_draw_rect(gfx::Rect(0, 0, 10, 10), flags);
     // Doing a copy makes the layer have a render surface which can cause
     // texture allocations. So get those allocations out of the way in the
     // first frame by forcing it to have a render surface.
     copy_layer_->SetForceRenderSurfaceForTesting(true);
     root_->AddChild(copy_layer_);
 
-    layer_tree()->SetRootLayer(root_);
+    layer_tree_host()->SetRootLayer(root_);
     LayerTreeHostCopyRequestTest::SetupTree();
   }
 
@@ -922,8 +937,9 @@ class LayerTreeHostCopyRequestTestCountTextures
         // readback.
         MainThreadTaskRunner()->PostTask(
             FROM_HERE,
-            base::Bind(&LayerTreeHostCopyRequestTestCountTextures::DoEndTest,
-                       base::Unretained(this)));
+            base::BindOnce(
+                &LayerTreeHostCopyRequestTestCountTextures::DoEndTest,
+                base::Unretained(this)));
         break;
     }
   }
@@ -1042,7 +1058,7 @@ class LayerTreeHostCopyRequestTestDestroyBeforeCopy
     copy_layer_->SetBounds(gfx::Size(10, 10));
     root_->AddChild(copy_layer_);
 
-    layer_tree()->SetRootLayer(root_);
+    layer_tree_host()->SetRootLayer(root_);
     LayerTreeHostCopyRequestTest::SetupTree();
     client_.set_bounds(root_->bounds());
   }
@@ -1060,8 +1076,9 @@ class LayerTreeHostCopyRequestTestDestroyBeforeCopy
   void DidActivateTreeOnThread(LayerTreeHostImpl* impl) override {
     MainThreadTaskRunner()->PostTask(
         FROM_HERE,
-        base::Bind(&LayerTreeHostCopyRequestTestDestroyBeforeCopy::DidActivate,
-                   base::Unretained(this)));
+        base::BindOnce(
+            &LayerTreeHostCopyRequestTestDestroyBeforeCopy::DidActivate,
+            base::Unretained(this)));
   }
 
   void DidActivate() {
@@ -1077,7 +1094,7 @@ class LayerTreeHostCopyRequestTestDestroyBeforeCopy
                            base::Unretained(this)));
         copy_layer_->RequestCopyOfOutput(std::move(request));
 
-        layer_tree()->SetViewportSize(gfx::Size());
+        layer_tree_host()->SetViewportSize(gfx::Size());
         break;
       }
       case 2:
@@ -1088,7 +1105,8 @@ class LayerTreeHostCopyRequestTestDestroyBeforeCopy
       case 3:
         EXPECT_EQ(1, callback_count_);
         // Allow us to draw now.
-        layer_tree()->SetViewportSize(layer_tree()->root_layer()->bounds());
+        layer_tree_host()->SetViewportSize(
+            layer_tree_host()->root_layer()->bounds());
         break;
       case 4:
         EXPECT_EQ(1, callback_count_);
@@ -1118,7 +1136,7 @@ class LayerTreeHostCopyRequestTestShutdownBeforeCopy
     copy_layer_->SetBounds(gfx::Size(10, 10));
     root_->AddChild(copy_layer_);
 
-    layer_tree()->SetRootLayer(root_);
+    layer_tree_host()->SetRootLayer(root_);
     LayerTreeHostCopyRequestTest::SetupTree();
     client_.set_bounds(root_->bounds());
   }
@@ -1136,8 +1154,9 @@ class LayerTreeHostCopyRequestTestShutdownBeforeCopy
   void DidActivateTreeOnThread(LayerTreeHostImpl* impl) override {
     MainThreadTaskRunner()->PostTask(
         FROM_HERE,
-        base::Bind(&LayerTreeHostCopyRequestTestShutdownBeforeCopy::DidActivate,
-                   base::Unretained(this)));
+        base::BindOnce(
+            &LayerTreeHostCopyRequestTestShutdownBeforeCopy::DidActivate,
+            base::Unretained(this)));
   }
 
   void DidActivate() {
@@ -1153,7 +1172,7 @@ class LayerTreeHostCopyRequestTestShutdownBeforeCopy
                            base::Unretained(this)));
         copy_layer_->RequestCopyOfOutput(std::move(request));
 
-        layer_tree()->SetViewportSize(gfx::Size());
+        layer_tree_host()->SetViewportSize(gfx::Size());
         break;
       }
       case 2:
@@ -1162,8 +1181,9 @@ class LayerTreeHostCopyRequestTestShutdownBeforeCopy
         // the main thread.
         MainThreadTaskRunner()->PostTask(
             FROM_HERE,
-            base::Bind(&LayerTreeHostCopyRequestTestShutdownBeforeCopy::EndTest,
-                       base::Unretained(this)));
+            base::BindOnce(
+                &LayerTreeHostCopyRequestTestShutdownBeforeCopy::EndTest,
+                base::Unretained(this)));
         break;
     }
   }
@@ -1190,7 +1210,7 @@ class LayerTreeHostCopyRequestTestMultipleDrawsHiddenCopyRequest
     root->AddChild(child_);
     child_->SetHideLayerAndSubtree(true);
 
-    layer_tree()->SetRootLayer(root);
+    layer_tree_host()->SetRootLayer(root);
     LayerTreeHostCopyRequestTest::SetupTree();
     client_.set_bounds(root->bounds());
   }
@@ -1221,14 +1241,12 @@ class LayerTreeHostCopyRequestTestMultipleDrawsHiddenCopyRequest
 
     bool saw_root = false;
     bool saw_child = false;
-    for (LayerIterator it =
-             LayerIterator::Begin(frame_data->render_surface_layer_list);
-         it != LayerIterator::End(frame_data->render_surface_layer_list);
-         ++it) {
-      if (it.represents_itself()) {
-        if (*it == root)
+    for (EffectTreeLayerListIterator it(host_impl->active_tree());
+         it.state() != EffectTreeLayerListIterator::State::END; ++it) {
+      if (it.state() == EffectTreeLayerListIterator::State::LAYER) {
+        if (it.current_layer() == root)
           saw_root = true;
-        else if (*it == child)
+        else if (it.current_layer() == child)
           saw_child = true;
         else
           NOTREACHED();
@@ -1260,13 +1278,12 @@ class LayerTreeHostCopyRequestTestMultipleDrawsHiddenCopyRequest
 
         // End the test! Don't race with copy request callbacks, so post the end
         // to the main thread.
-        draw_happened_ = true;
         MainThreadTaskRunner()->PostTask(
             FROM_HERE,
-            base::Bind(
+            base::BindOnce(
                 &LayerTreeHostCopyRequestTestMultipleDrawsHiddenCopyRequest::
                     TryEndTest,
-                base::Unretained(this)));
+                base::Unretained(this), WhatHappened::DRAW));
         break;
     }
     return draw_result;
@@ -1274,11 +1291,23 @@ class LayerTreeHostCopyRequestTestMultipleDrawsHiddenCopyRequest
 
   void CopyOutputCallback(std::unique_ptr<CopyOutputResult> result) {
     EXPECT_FALSE(TestEnded());
-    copy_happened_ = true;
-    TryEndTest();
+    TryEndTest(WhatHappened::COPY);
   }
 
-  void TryEndTest() {
+  enum class WhatHappened {
+    DRAW,
+    COPY,
+  };
+
+  void TryEndTest(WhatHappened what) {
+    switch (what) {
+      case WhatHappened::DRAW:
+        draw_happened_ = true;
+        break;
+      case WhatHappened::COPY:
+        copy_happened_ = true;
+        break;
+    }
     if (draw_happened_ && copy_happened_)
       EndTest();
   }

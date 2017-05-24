@@ -22,6 +22,7 @@
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/invalidate_type.h"
+#include "content/public/browser/keyboard_event_processing_result.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
@@ -80,7 +81,7 @@ void SetConstraintProperty(const std::string& name,
   if (value != SizeConstraints::kUnboundedSize)
     bounds_properties->SetInteger(name, value);
   else
-    bounds_properties->Set(name, base::Value::CreateNullValue());
+    bounds_properties->Set(name, base::MakeUnique<base::Value>());
 }
 
 void SetBoundsProperties(const gfx::Rect& bounds,
@@ -379,13 +380,12 @@ void AppWindow::AddNewContents(WebContents* source,
                                 was_blocked);
 }
 
-bool AppWindow::PreHandleKeyboardEvent(
+content::KeyboardEventProcessingResult AppWindow::PreHandleKeyboardEvent(
     content::WebContents* source,
-    const content::NativeWebKeyboardEvent& event,
-    bool* is_keyboard_shortcut) {
+    const content::NativeWebKeyboardEvent& event) {
   const Extension* extension = GetExtension();
   if (!extension)
-    return false;
+    return content::KeyboardEventProcessingResult::NOT_HANDLED;
 
   // Here, we can handle a key event before the content gets it. When we are
   // fullscreen and it is not forced, we want to allow the user to leave
@@ -395,15 +395,15 @@ bool AppWindow::PreHandleKeyboardEvent(
   // ::HandleKeyboardEvent() will only be called if the KeyEvent's default
   // action is not prevented.
   // Thus, we should handle the KeyEvent here only if the permission is not set.
-  if (event.windowsKeyCode == ui::VKEY_ESCAPE && IsFullscreen() &&
+  if (event.windows_key_code == ui::VKEY_ESCAPE && IsFullscreen() &&
       !IsForcedFullscreen() &&
       !extension->permissions_data()->HasAPIPermission(
           APIPermission::kOverrideEscFullscreen)) {
     Restore();
-    return true;
+    return content::KeyboardEventProcessingResult::HANDLED;
   }
 
-  return false;
+  return content::KeyboardEventProcessingResult::NOT_HANDLED;
 }
 
 void AppWindow::HandleKeyboardEvent(
@@ -412,7 +412,7 @@ void AppWindow::HandleKeyboardEvent(
   // If the window is currently fullscreen and not forced, ESC should leave
   // fullscreen.  If this code is being called for ESC, that means that the
   // KeyEvent's default behavior was not prevented by the content.
-  if (event.windowsKeyCode == ui::VKEY_ESCAPE && IsFullscreen() &&
+  if (event.windows_key_code == ui::VKEY_ESCAPE && IsFullscreen() &&
       !IsForcedFullscreen()) {
     Restore();
     return;
@@ -561,6 +561,10 @@ base::string16 AppWindow::GetTitle() const {
   return title;
 }
 
+bool AppWindow::HasCustomIcon() const {
+  return window_icon_url_.is_valid() || app_icon_url_.is_valid();
+}
+
 void AppWindow::SetAppIconUrl(const GURL& url) {
   // Avoid using any previous icons that were being downloaded.
   image_loader_ptr_factory_.InvalidateWeakPtrs();
@@ -595,7 +599,8 @@ void AppWindow::UpdateAppIcon(const gfx::Image& image) {
   // Set the showInShelf=true window icon and add the app_icon_image_
   // as a badge. If the image is empty, set the default app icon placeholder
   // as the base image.
-  if (window_icon_url_.is_valid() && !app_icon_image_->image().IsEmpty()) {
+  if (window_icon_url_.is_valid() && app_icon_image_ &&
+      !app_icon_image_->image().IsEmpty()) {
     gfx::Image base_image =
         !image.IsEmpty()
             ? image
@@ -972,8 +977,8 @@ bool AppWindow::IsFullscreenForTabOrPending(const content::WebContents* source)
 
 blink::WebDisplayMode AppWindow::GetDisplayMode(
     const content::WebContents* source) const {
-  return IsFullscreen() ? blink::WebDisplayModeFullscreen
-                        : blink::WebDisplayModeStandalone;
+  return IsFullscreen() ? blink::kWebDisplayModeFullscreen
+                        : blink::kWebDisplayModeStandalone;
 }
 
 WindowController* AppWindow::GetExtensionWindowController() const {
@@ -986,7 +991,7 @@ content::WebContents* AppWindow::GetAssociatedWebContents() const {
 
 void AppWindow::OnExtensionUnloaded(BrowserContext* browser_context,
                                     const Extension* extension,
-                                    UnloadedExtensionInfo::Reason reason) {
+                                    UnloadedExtensionReason reason) {
   if (extension_id_ == extension->id())
     native_app_window_->Close();
 }

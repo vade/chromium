@@ -198,20 +198,8 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 #   define SK_SUPPORT_LEGACY_ANISOTROPIC_MIPMAP_SCALE
 #endif
 
-#ifndef    SK_IGNORE_ETC1_SUPPORT
-#   define SK_IGNORE_ETC1_SUPPORT
-#endif
-
 #ifndef    SK_IGNORE_GPU_DITHER
 #   define SK_IGNORE_GPU_DITHER
-#endif
-
-#ifndef    SK_DISABLE_COLOR_XFORM_PIPELINE
-#   define SK_DISABLE_COLOR_XFORM_PIPELINE
-#endif
-
-#ifndef    SK_SUPPORT_LEGACY_BITMAP_SETPIXELREF
-#   define SK_SUPPORT_LEGACY_BITMAP_SETPIXELREF
 #endif
 
 // Remove this after we fixed all the issues related to the new SDF algorithm
@@ -220,12 +208,12 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 #   define SK_USE_LEGACY_DISTANCE_FIELDS
 #endif
 
-#ifndef    SK_SUPPORT_LEGACY_CLIPOP_EXOTIC_NAMES
-#   define SK_SUPPORT_LEGACY_CLIPOP_EXOTIC_NAMES
+#ifndef SK_DISABLE_DEFERRED_PROXIES
+#define SK_DISABLE_DEFERRED_PROXIES
 #endif
 
-#ifndef    SK_SUPPORT_LEGACY_GETCLIPBOUNDS
-#   define SK_SUPPORT_LEGACY_GETCLIPBOUNDS
+#ifndef SK_LEGACY_SWEEP_GRADIENT
+#define SK_LEGACY_SWEEP_GRADIENT
 #endif
 
 ///////////////////////// Imported from BUILD.gn and skia_common.gypi
@@ -244,26 +232,12 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 
 #define SK_IGNORE_BLURRED_RRECT_OPT
 #define SK_USE_DISCARDABLE_SCALEDIMAGECACHE
-#define SK_WILL_NEVER_DRAW_PERSPECTIVE_TEXT
 
 #define SK_ATTR_DEPRECATED          SK_NOTHING_ARG1
-#define SK_ENABLE_INST_COUNT        0
 #define GR_GL_CUSTOM_SETUP_HEADER   "GrGLConfig_chrome.h"
 
 // mtklein's fiddling with Src / SrcOver.  Will rebaseline these only once when done.
 #define SK_SUPPORT_LEGACY_X86_BLITS
-
-#define SK_DISABLE_TILE_IMAGE_FILTER_OPTIMIZATION
-
-// Updating to a correct SkPMColor lerp will require layout test rebaselines.
-#define SK_SUPPORT_LEGACY_BROKEN_LERP
-
-// Enabling the screenspace AA tessellating path renderer needs rebaselines.
-#define SK_DISABLE_SCREENSPACE_TESS_AA_PATH_RENDERER
-
-#ifndef    SK_SUPPORT_LEGACY_AAA
-#   define SK_SUPPORT_LEGACY_AAA
-#endif
 
 // ===== End Chrome-specific definitions =====
 

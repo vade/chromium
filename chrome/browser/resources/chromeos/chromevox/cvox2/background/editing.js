@@ -15,16 +15,18 @@ goog.require('Output');
 goog.require('Output.EventType');
 goog.require('cursors.Cursor');
 goog.require('cursors.Range');
+goog.require('cvox.BrailleBackground');
 goog.require('cvox.ChromeVoxEditableTextBase');
 
 goog.scope(function() {
 var AutomationEvent = chrome.automation.AutomationEvent;
 var AutomationNode = chrome.automation.AutomationNode;
 var Cursor = cursors.Cursor;
-var Dir = AutomationUtil.Dir;
+var Dir = constants.Dir;
 var EventType = chrome.automation.EventType;
 var Range = cursors.Range;
 var RoleType = chrome.automation.RoleType;
+var StateType = chrome.automation.StateType;
 var Movement = cursors.Movement;
 var Unit = cursors.Unit;
 
@@ -39,6 +41,12 @@ editing.TextEditHandler = function(node) {
   this.node_ = node;
 };
 
+/**
+ * Flag set to indicate whether ChromeVox uses experimental rich text support.
+ * @type {boolean}
+ */
+editing.useRichText = false;
+
 editing.TextEditHandler.prototype = {
   /** @return {!AutomationNode} */
   get node() {
@@ -51,7 +59,7 @@ editing.TextEditHandler.prototype = {
    * |valueChanged|.
    * An implementation of this method should emit the appropritate braille and
    * spoken feedback for the event.
-   * @param {!AutomationEvent} evt
+   * @param {!(AutomationEvent|CustomAutomationEvent)} evt
    */
   onEvent: goog.abstractMethod,
 };
@@ -64,8 +72,15 @@ editing.TextEditHandler.prototype = {
  */
 function TextFieldTextEditHandler(node) {
   editing.TextEditHandler.call(this, node);
-  /** @type {AutomationEditableText} @private */
-  this.editableText_ = new AutomationEditableText(node);
+
+  chrome.automation.getDesktop(function(desktop) {
+    var useRichText = editing.useRichText &&
+        node.state.richlyEditable;
+
+    /** @private {!AutomationEditableText} */
+    this.editableText_ = useRichText ?
+        new AutomationRichEditableText(node) : new AutomationEditableText(node);
+  }.bind(this));
 }
 
 TextFieldTextEditHandler.prototype = {
@@ -73,10 +88,10 @@ TextFieldTextEditHandler.prototype = {
 
   /** @override */
   onEvent: function(evt) {
-    if (evt.type !== EventType.textChanged &&
-        evt.type !== EventType.textSelectionChanged &&
-        evt.type !== EventType.valueChanged &&
-        evt.type !== EventType.focus)
+    if (evt.type !== EventType.TEXT_CHANGED &&
+        evt.type !== EventType.TEXT_SELECTION_CHANGED &&
+        evt.type !== EventType.VALUE_CHANGED &&
+        evt.type !== EventType.FOCUS)
       return;
     if (!evt.target.state.focused ||
         !evt.target.state.editable ||
@@ -101,13 +116,13 @@ function AutomationEditableText(node) {
   var end = node.textSelEnd;
   cvox.ChromeVoxEditableTextBase.call(
       this,
-      node.value,
+      node.value || '',
       Math.min(start, end),
       Math.max(start, end),
-      node.state.protected /**password*/,
+      node.state[StateType.PROTECTED] /**password*/,
       cvox.ChromeVox.tts);
   /** @override */
-  this.multiline = node.state.multiline || false;
+  this.multiline = node.state[StateType.MULTILINE] || false;
   /** @type {!AutomationNode} @private */
   this.node_ = node;
   /** @type {Array<number>} @private */
@@ -121,15 +136,15 @@ AutomationEditableText.prototype = {
    * Called when the text field has been updated.
    */
   onUpdate: function() {
-    var newValue = this.node_.value;
+    var newValue = this.node_.value || '';
 
     if (this.value != newValue)
       this.lineBreaks_ = [];
 
     var textChangeEvent = new cvox.TextChangeEvent(
         newValue,
-        this.node_.textSelStart,
-        this.node_.textSelEnd,
+        this.node_.textSelStart || 0,
+        this.node_.textSelEnd || 0,
         true /* triggered by user */);
     this.changed(textChangeEvent);
     this.outputBraille_();
@@ -197,6 +212,138 @@ AutomationEditableText.prototype = {
   }
 };
 
+
+/**
+ * A |ChromeVoxEditableTextBase| that implements text editing feedback
+ * for automation tree text fields using anchor and focus selection.
+ * @constructor
+ * @param {!AutomationNode} node
+ * @extends {AutomationEditableText}
+ */
+function AutomationRichEditableText(node) {
+  AutomationEditableText.call(this, node);
+
+  var root = this.node_.root;
+  if (!root || !root.anchorObject || !root.focusObject)
+    return;
+
+  this.range = new cursors.Range(
+      new cursors.Cursor(root.anchorObject, root.anchorOffset || 0),
+      new cursors.Cursor(root.focusObject, root.focusOffset || 0));
+}
+
+AutomationRichEditableText.prototype = {
+  __proto__: AutomationEditableText.prototype,
+
+  /** @override */
+  onUpdate: function() {
+    var root = this.node_.root;
+    if (!root.anchorObject || !root.focusObject)
+      return;
+
+    var cur = new cursors.Range(
+        new cursors.Cursor(root.anchorObject, root.anchorOffset || 0),
+        new cursors.Cursor(root.focusObject, root.focusOffset || 0));
+    var prev = this.range;
+
+    this.range = cur;
+
+    if (prev.start.node == cur.start.node &&
+        prev.end.node == cur.end.node &&
+        cur.start.node == cur.end.node) {
+      // Plain text: diff the two positions.
+      this.changed(new cvox.TextChangeEvent(
+          root.anchorObject.name || '',
+          root.anchorOffset || 0,
+          root.focusOffset || 0,
+          true));
+
+      var lineIndex = this.getLineIndex(this.start);
+      var brailleLineStart = this.getLineStart(lineIndex);
+      var brailleLineEnd = this.getLineEnd(lineIndex);
+      var buff = new Spannable(this.value);
+      buff.setSpan(new cvox.ValueSpan(0), brailleLineStart, brailleLineEnd);
+
+      var selStart = this.start - brailleLineStart;
+      var selEnd = this.end - brailleLineStart;
+      buff.setSpan(new cvox.ValueSelectionSpan(), selStart, selEnd);
+      cvox.ChromeVox.braille.write(new cvox.NavBraille({text: buff,
+          startIndex: selStart,
+          endIndex: selEnd}));
+      return;
+    } else {
+      // Rich text:
+      // If the position is collapsed, expand to the current line.
+      var start = cur.start;
+      var end = cur.end;
+      if (start.equals(end)) {
+        start = start.move(Unit.LINE, Movement.BOUND, Dir.BACKWARD);
+        end = end.move(Unit.LINE, Movement.BOUND, Dir.FORWARD);
+      }
+      var range = new cursors.Range(start, end);
+      var output = new Output().withRichSpeechAndBraille(
+          range, prev, Output.EventType.NAVIGATE);
+
+      // This position is not describable.
+      if (!output.hasSpeech) {
+        cvox.ChromeVox.tts.speak('blank', cvox.QueueMode.CATEGORY_FLUSH);
+        cvox.ChromeVox.braille.write(
+            new cvox.NavBraille({text: '', startIndex: 0, endIndex: 0}));
+      } else {
+        output.go();
+      }
+    }
+
+    // Keep the other members in sync for any future editable text base state
+    // machine changes.
+    this.value = cur.start.node.name || '';
+    this.start = cur.start.index;
+    this.end = cur.start.index;
+  },
+
+  /** @override */
+  describeSelectionChanged: function(evt) {
+    // Ignore end of text announcements.
+    if ((this.start + 1) == evt.start && evt.start == this.value.length)
+      return;
+
+    cvox.ChromeVoxEditableTextBase.prototype.describeSelectionChanged.call(
+        this, evt);
+  },
+
+  /** @override */
+  getLineIndex: function(charIndex) {
+    var breaks = this.getLineBreaks_();
+    var index = 0;
+    while (index < breaks.length && breaks[index] <= charIndex)
+      ++index;
+    return index;
+  },
+
+  /** @override */
+  getLineStart: function(lineIndex) {
+    if (lineIndex == 0)
+      return 0;
+    var breaks = this.getLineBreaks_();
+    return breaks[lineIndex - 1] ||
+        this.node_.root.focusObject.value.length;
+  },
+
+  /** @override */
+  getLineEnd: function(lineIndex) {
+    var breaks = this.getLineBreaks_();
+    var value = this.node_.root.focusObject.name;
+    if (lineIndex >= breaks.length)
+      return value.length;
+    return breaks[lineIndex];
+  },
+
+  /** @override */
+  getLineBreaks_: function() {
+    return this.node_.root.focusObject.lineStartOffsets || [];
+  }
+};
+
 /**
  * @param {!AutomationNode} node The root editable node, i.e. the root of a
  *     contenteditable subtree or a text field.
@@ -207,7 +354,7 @@ editing.TextEditHandler.createForNode = function(node) {
   var testNode = node;
 
   do {
-    if (testNode.state.focused && testNode.state.editable)
+    if (testNode.state[StateType.FOCUSED] && testNode.state[StateType.EDITABLE])
       rootFocusedEditable = testNode;
     testNode = testNode.parent;
   } while (testNode);
@@ -217,5 +364,36 @@ editing.TextEditHandler.createForNode = function(node) {
 
   return null;
 };
+
+/**
+ * An observer that reacts to ChromeVox range changes that modifies braille
+ * table output when over email or url text fields.
+ * @constructor
+ * @implements {ChromeVoxStateObserver}
+ */
+editing.EditingChromeVoxStateObserver = function() {
+  ChromeVoxState.addObserver(this);
+};
+
+editing.EditingChromeVoxStateObserver.prototype = {
+  __proto__: ChromeVoxStateObserver,
+
+  /** @override */
+  onCurrentRangeChanged: function(range) {
+    var inputType = range && range.start.node.inputType;
+    if (inputType == 'email' || inputType == 'url') {
+      cvox.BrailleBackground.getInstance().getTranslatorManager().refresh(
+          localStorage['brailleTable8']);
+      return;
+    }
+    cvox.BrailleBackground.getInstance().getTranslatorManager().refresh(
+        localStorage['brailleTable']);
+  }
+};
+
+/**
+ * @private {ChromeVoxStateObserver}
+ */
+editing.observer_ = new editing.EditingChromeVoxStateObserver();
 
 });

@@ -15,7 +15,7 @@
 #include "components/sync/driver/sync_service_observer.h"
 
 namespace base {
-class StringValue;
+class Value;
 }
 
 namespace options {
@@ -46,7 +46,7 @@ class ManageProfileHandler : public OptionsPageUIHandler,
   void OnProfileAvatarChanged(const base::FilePath& profile_path) override;
 
   // syncer::SyncServiceObserver:
-  void OnStateChanged() override;
+  void OnStateChanged(syncer::SyncService* sync) override;
 
  private:
   // This function creates signed in user specific strings in loadTimeData.
@@ -64,7 +64,7 @@ class ManageProfileHandler : public OptionsPageUIHandler,
 
   // Send all profile icons and their default names to the overlay.
   // |mode| is the dialog mode, i.e. "create" or "manage".
-  void SendProfileIconsAndNames(const base::StringValue& mode);
+  void SendProfileIconsAndNames(const base::Value& mode);
 
   // Sends an object to WebUI of the form:
   //   profileNames = {

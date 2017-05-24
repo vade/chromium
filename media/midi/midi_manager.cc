@@ -22,7 +22,7 @@ using midi::mojom::Result;
 
 // If many users have more devices, this number will be increased.
 // But the number is expected to be big enough for now.
-const Sample kMaxUmaDevices = 31;
+constexpr Sample kMaxUmaDevices = 31;
 
 // Used to count events for usage histogram.
 enum class Usage {
@@ -35,7 +35,7 @@ enum class Usage {
   OUTPUT_PORT_ADDED,
 
   // New items should be inserted here, and |MAX| should point the last item.
-  MAX = INITIALIZED,
+  MAX = OUTPUT_PORT_ADDED,
 };
 
 void ReportUsage(Usage usage) {
@@ -46,10 +46,11 @@ void ReportUsage(Usage usage) {
 
 }  // namespace
 
-MidiManager::MidiManager()
+MidiManager::MidiManager(MidiService* service)
     : initialization_state_(InitializationState::NOT_STARTED),
       finalized_(false),
-      result_(Result::NOT_INITIALIZED) {
+      result_(Result::NOT_INITIALIZED),
+      service_(service) {
   ReportUsage(Usage::CREATED);
 }
 
@@ -62,9 +63,9 @@ MidiManager::~MidiManager() {
 
 #if !defined(OS_MACOSX) && !defined(OS_WIN) && \
     !(defined(USE_ALSA) && defined(USE_UDEV)) && !defined(OS_ANDROID)
-MidiManager* MidiManager::Create() {
+MidiManager* MidiManager::Create(MidiService* service) {
   ReportUsage(Usage::CREATED_ON_UNSUPPORTED_PLATFORMS);
-  return new MidiManager;
+  return new MidiManager(service);
 }
 #endif
 
@@ -72,15 +73,24 @@ void MidiManager::Shutdown() {
   UMA_HISTOGRAM_ENUMERATION("Media.Midi.ResultOnShutdown",
                             static_cast<int>(result_),
                             static_cast<int>(Result::MAX) + 1);
-  base::AutoLock auto_lock(lock_);
-  if (session_thread_runner_) {
-    session_thread_runner_->PostTask(
-        FROM_HERE, base::Bind(&MidiManager::ShutdownOnSessionThread,
-                              base::Unretained(this)));
-    session_thread_runner_ = nullptr;
-  } else {
-    finalized_ = true;
+  bool shutdown_synchronously = false;
+  {
+    base::AutoLock auto_lock(lock_);
+    if (session_thread_runner_) {
+      if (session_thread_runner_->BelongsToCurrentThread()) {
+        shutdown_synchronously = true;
+      } else {
+        session_thread_runner_->PostTask(
+            FROM_HERE, base::Bind(&MidiManager::ShutdownOnSessionThread,
+                                  base::Unretained(this)));
+      }
+      session_thread_runner_ = nullptr;
+    } else {
+      finalized_ = true;
+    }
   }
+  if (shutdown_synchronously)
+    ShutdownOnSessionThread();
 }
 
 void MidiManager::StartSession(MidiManagerClient* client) {
@@ -175,12 +185,21 @@ void MidiManager::StartInitialization() {
 }
 
 void MidiManager::CompleteInitialization(Result result) {
-  base::AutoLock auto_lock(lock_);
-  if (session_thread_runner_) {
-    session_thread_runner_->PostTask(
-        FROM_HERE, base::Bind(&MidiManager::CompleteInitializationInternal,
-                              base::Unretained(this), result));
+  bool complete_asynchronously = false;
+  {
+    base::AutoLock auto_lock(lock_);
+    if (session_thread_runner_) {
+      if (session_thread_runner_->BelongsToCurrentThread()) {
+        complete_asynchronously = true;
+      } else {
+        session_thread_runner_->PostTask(
+            FROM_HERE, base::Bind(&MidiManager::CompleteInitializationInternal,
+                                  base::Unretained(this), result));
+      }
+    }
   }
+  if (complete_asynchronously)
+    CompleteInitializationInternal(result);
 }
 
 void MidiManager::AddInputPort(const MidiPortInfo& info) {

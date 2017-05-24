@@ -6,7 +6,7 @@
 <translation id="10623998915015855">botón de activación</translation>
 <translation id="1088086359088493902">Segundos</translation>
 <translation id="1171774979989969504">Introduce una dirección de correo electrónico</translation>
-<translation id="1178581264944972037">Detener</translation>
+<translation id="1178581264944972037">Pausar</translation>
 <translation id="1188858454923323853">complementario</translation>
 <translation id="1206619573307042055">marquee</translation>
 <translation id="1206693055195146388">control deslizante</translation>
@@ -45,6 +45,7 @@
 <translation id="2613802280814924224">Introduce un valor válido. El valor válido más aproximado es <ph name="VALID_VALUE" />.</translation>
 <translation id="2653659639078652383">Enviar</translation>
 <translation id="2674318244760992338">pie de página</translation>
+<translation id="2709516037105925701">Autocompletar</translation>
 <translation id="2723001399770238859">audio</translation>
 <translation id="2746543609216772311">El valor debe ser igual o posterior a <ph name="MINIMUM_DATE_OR_TIME" />.</translation>
 <translation id="2759744352195237655">botón emergente</translation>
@@ -64,7 +65,7 @@
 <translation id="3450233048674729344">El valor debe inferior o igual a <ph name="MAXIMUM" /></translation>
 <translation id="3486220673238053218">definición</translation>
 <translation id="3557673793733683882">encabezado <ph name="HEADING_LEVEL" /></translation>
-<translation id="3632707345189162177">número de segundos restantes de la película</translation>
+<translation id="3639613635497528239">número de segundos restantes de la película</translation>
 <translation id="3706100364254443312">interruptor</translation>
 <translation id="3732799496749320381">mm</translation>
 <translation id="3785482301506746191">control deslizante de duración de la película</translation>
@@ -128,6 +129,7 @@
 <translation id="6404546809543547843">control deslizante de duración de audio</translation>
 <translation id="648732519525291180">selector de hora</translation>
 <translation id="658823671542763450">activar pantalla completa</translation>
+<translation id="663493177488814956">feed</translation>
 <translation id="6637586476836377253">registro</translation>
 <translation id="6643016212128521049">Eliminar</translation>
 <translation id="6663448176199120256">Búsquedas recientes</translation>
@@ -142,6 +144,7 @@
 <translation id="6885760532393684712">directorio</translation>
 <translation id="6934078000481955284">blockquote</translation>
 <translation id="6941933287844615239">descargar archivos multimedia</translation>
+<translation id="6989848892321993519">Aumenta la longitud de este texto a <ph name="MIN_CHARACTERS" /> caracteres o más (actualmente, el texto tiene 1 carácter).</translation>
 <translation id="7057186640035488495">cronología de la película</translation>
 <translation id="709897737746224366">Utiliza un formato que coincida con el solicitado</translation>
 <translation id="7223624360433298498">tiempo transcurrido</translation>
@@ -174,6 +177,7 @@
 <translation id="8451268428117625855">Selecciona un archivo</translation>
 <translation id="8461852803063341183">botón de selección</translation>
 <translation id="8511325616783751178">botón desplegable</translation>
+<translation id="8519420564908284378">Reproducir en ambas pantallas</translation>
 <translation id="8534579021159131403">Minutos</translation>
 <translation id="8541249477527128034">control de medios</translation>
 <translation id="8583702881314752957">lista de definiciones</translation>
@@ -181,6 +185,7 @@
 <translation id="8613126697340063924">reproducción de control remoto</translation>
 <translation id="8750798805984357768">Selecciona una de estas opciones</translation>
 <translation id="8785498733064193001">iniciar reproducción</translation>
+<translation id="8845239796550121995">Se está enviando contenido a tu TV</translation>
 <translation id="8851136666856101339">principal</translation>
 <translation id="8987927404178983737">Mes</translation>
 <translation id="901493112792887934">tiempo actual en segundos</translation>

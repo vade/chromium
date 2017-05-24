@@ -4,8 +4,7 @@
 
 <style>
   .reflection {
-    -webkit-box-reflect: below 5px -webkit-gradient(linear, left top, left bottom,
-        from(transparent), color-stop(0, transparent), to(white));
+    -webkit-box-reflect: below 5px linear-gradient(transparent, white);
     background: url("resources/red-at-12-oclock-with-color-profile.jpg");
     height: 260px;
   }
@@ -16,6 +15,11 @@
 
 <script>
 window.onload = function() {
+  if (window.testRunner) {
+    testRunner.dumpAsTextWithPixelResults();
+    testRunner.waitUntilDone();
+  }
+
   document.querySelector('div').classList.add('reflection');
 
   if (window.testRunner)
@@ -27,12 +31,8 @@ function changeColorProfile() {
 }
 
 function done() {
-  setTimeout(function() { testRunner.notifyDone() }, 0);
+  runAfterLayoutAndPaint(function() { testRunner.notifyDone() });
 }
 
-if (window.testRunner) {
-  testRunner.dumpAsTextWithPixelResults();
-  testRunner.waitUntilDone();
-}
 </script>
 </html>

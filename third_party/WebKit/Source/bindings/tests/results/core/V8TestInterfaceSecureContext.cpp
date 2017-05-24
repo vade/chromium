@@ -12,13 +12,14 @@
 #include "V8TestInterfaceSecureContext.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/GeneratedCodeHelper.h"
+#include "bindings/core/v8/IDLTypes.h"
+#include "bindings/core/v8/NativeValueTraitsImpl.h"
 #include "bindings/core/v8/V8DOMConfiguration.h"
-#include "bindings/core/v8/V8ObjectConstructor.h"
-#include "core/dom/Document.h"
+#include "core/dom/ExecutionContext.h"
 #include "platform/RuntimeEnabledFeatures.h"
-#include "wtf/GetPtr.h"
-#include "wtf/RefPtr.h"
+#include "platform/bindings/V8ObjectConstructor.h"
+#include "platform/wtf/GetPtr.h"
+#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -28,15 +29,15 @@ namespace blink {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 #endif
-const WrapperTypeInfo V8TestInterfaceSecureContext::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceSecureContext::domTemplate, V8TestInterfaceSecureContext::trace, V8TestInterfaceSecureContext::traceWrappers, 0, V8TestInterfaceSecureContext::preparePrototypeAndInterfaceObject, "TestInterfaceSecureContext", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromActiveScriptWrappable, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent };
+const WrapperTypeInfo V8TestInterfaceSecureContext::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceSecureContext::domTemplate, V8TestInterfaceSecureContext::Trace, V8TestInterfaceSecureContext::TraceWrappers, V8TestInterfaceSecureContext::preparePrototypeAndInterfaceObject, "TestInterfaceSecureContext", 0, WrapperTypeInfo::kWrapperTypeObjectPrototype, WrapperTypeInfo::kObjectClassId, WrapperTypeInfo::kNotInheritFromActiveScriptWrappable, WrapperTypeInfo::kIndependent };
 #if defined(COMPONENT_BUILD) && defined(WIN32) && COMPILER(CLANG)
 #pragma clang diagnostic pop
 #endif
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestInterfaceSecureContext.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
-// bindings/core/v8/ScriptWrappable.h.
-const WrapperTypeInfo& TestInterfaceSecureContext::s_wrapperTypeInfo = V8TestInterfaceSecureContext::wrapperTypeInfo;
+// platform/bindings/ScriptWrappable.h.
+const WrapperTypeInfo& TestInterfaceSecureContext::wrapper_type_info_ = V8TestInterfaceSecureContext::wrapperTypeInfo;
 
 // not [ActiveScriptWrappable]
 static_assert(
@@ -45,8 +46,8 @@ static_assert(
     "[ActiveScriptWrappable] extended attribute in the IDL file.  "
     "Be consistent.");
 static_assert(
-    std::is_same<decltype(&TestInterfaceSecureContext::hasPendingActivity),
-                 decltype(&ScriptWrappable::hasPendingActivity)>::value,
+    std::is_same<decltype(&TestInterfaceSecureContext::HasPendingActivity),
+                 decltype(&ScriptWrappable::HasPendingActivity)>::value,
     "TestInterfaceSecureContext is overriding hasPendingActivity(), but is not specifying "
     "[ActiveScriptWrappable] extended attribute in the IDL file.  "
     "Be consistent.");
@@ -58,35 +59,30 @@ static void secureContextAttributeAttributeGetter(const v8::FunctionCallbackInfo
 
   TestInterfaceSecureContext* impl = V8TestInterfaceSecureContext::toImpl(holder);
 
-  v8SetReturnValueFast(info, WTF::getPtr(impl->secureContextAttribute()), impl);
-}
-
-CORE_EXPORT void secureContextAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  TestInterfaceSecureContextV8Internal::secureContextAttributeAttributeGetter(info);
+  V8SetReturnValueFast(info, WTF::GetPtr(impl->secureContextAttribute()), impl);
 }
 
 static void secureContextAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Isolate* isolate = info.GetIsolate();
+  ALLOW_UNUSED_LOCAL(isolate);
+
   v8::Local<v8::Object> holder = info.Holder();
+  ALLOW_UNUSED_LOCAL(holder);
+
   TestInterfaceSecureContext* impl = V8TestInterfaceSecureContext::toImpl(holder);
 
-  ExceptionState exceptionState(info.GetIsolate(), ExceptionState::SetterContext, "TestInterfaceSecureContext", "secureContextAttribute");
+  ExceptionState exceptionState(isolate, ExceptionState::kSetterContext, "TestInterfaceSecureContext", "secureContextAttribute");
 
   // Prepare the value to be set.
   bool* cppValue = V8bool::toImplWithTypeCheck(info.GetIsolate(), v8Value);
 
   // Type check per: http://heycam.github.io/webidl/#es-interface
   if (!cppValue) {
-    exceptionState.throwTypeError("The provided value is not of type 'bool'.");
+    exceptionState.ThrowTypeError("The provided value is not of type 'bool'.");
     return;
   }
 
   impl->setSecureContextAttribute(cppValue);
-}
-
-CORE_EXPORT void secureContextAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  v8::Local<v8::Value> v8Value = info[0];
-
-  TestInterfaceSecureContextV8Internal::secureContextAttributeAttributeSetter(v8Value, info);
 }
 
 static void secureContextRuntimeEnabledAttributeAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -94,35 +90,30 @@ static void secureContextRuntimeEnabledAttributeAttributeGetter(const v8::Functi
 
   TestInterfaceSecureContext* impl = V8TestInterfaceSecureContext::toImpl(holder);
 
-  v8SetReturnValueFast(info, WTF::getPtr(impl->secureContextRuntimeEnabledAttribute()), impl);
-}
-
-CORE_EXPORT void secureContextRuntimeEnabledAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  TestInterfaceSecureContextV8Internal::secureContextRuntimeEnabledAttributeAttributeGetter(info);
+  V8SetReturnValueFast(info, WTF::GetPtr(impl->secureContextRuntimeEnabledAttribute()), impl);
 }
 
 static void secureContextRuntimeEnabledAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Isolate* isolate = info.GetIsolate();
+  ALLOW_UNUSED_LOCAL(isolate);
+
   v8::Local<v8::Object> holder = info.Holder();
+  ALLOW_UNUSED_LOCAL(holder);
+
   TestInterfaceSecureContext* impl = V8TestInterfaceSecureContext::toImpl(holder);
 
-  ExceptionState exceptionState(info.GetIsolate(), ExceptionState::SetterContext, "TestInterfaceSecureContext", "secureContextRuntimeEnabledAttribute");
+  ExceptionState exceptionState(isolate, ExceptionState::kSetterContext, "TestInterfaceSecureContext", "secureContextRuntimeEnabledAttribute");
 
   // Prepare the value to be set.
   bool* cppValue = V8bool::toImplWithTypeCheck(info.GetIsolate(), v8Value);
 
   // Type check per: http://heycam.github.io/webidl/#es-interface
   if (!cppValue) {
-    exceptionState.throwTypeError("The provided value is not of type 'bool'.");
+    exceptionState.ThrowTypeError("The provided value is not of type 'bool'.");
     return;
   }
 
   impl->setSecureContextRuntimeEnabledAttribute(cppValue);
-}
-
-CORE_EXPORT void secureContextRuntimeEnabledAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  v8::Local<v8::Value> v8Value = info[0];
-
-  TestInterfaceSecureContextV8Internal::secureContextRuntimeEnabledAttributeAttributeSetter(v8Value, info);
 }
 
 static void secureContextWindowExposedAttributeAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -130,35 +121,30 @@ static void secureContextWindowExposedAttributeAttributeGetter(const v8::Functio
 
   TestInterfaceSecureContext* impl = V8TestInterfaceSecureContext::toImpl(holder);
 
-  v8SetReturnValueFast(info, WTF::getPtr(impl->secureContextWindowExposedAttribute()), impl);
-}
-
-CORE_EXPORT void secureContextWindowExposedAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  TestInterfaceSecureContextV8Internal::secureContextWindowExposedAttributeAttributeGetter(info);
+  V8SetReturnValueFast(info, WTF::GetPtr(impl->secureContextWindowExposedAttribute()), impl);
 }
 
 static void secureContextWindowExposedAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Isolate* isolate = info.GetIsolate();
+  ALLOW_UNUSED_LOCAL(isolate);
+
   v8::Local<v8::Object> holder = info.Holder();
+  ALLOW_UNUSED_LOCAL(holder);
+
   TestInterfaceSecureContext* impl = V8TestInterfaceSecureContext::toImpl(holder);
 
-  ExceptionState exceptionState(info.GetIsolate(), ExceptionState::SetterContext, "TestInterfaceSecureContext", "secureContextWindowExposedAttribute");
+  ExceptionState exceptionState(isolate, ExceptionState::kSetterContext, "TestInterfaceSecureContext", "secureContextWindowExposedAttribute");
 
   // Prepare the value to be set.
   bool* cppValue = V8bool::toImplWithTypeCheck(info.GetIsolate(), v8Value);
 
   // Type check per: http://heycam.github.io/webidl/#es-interface
   if (!cppValue) {
-    exceptionState.throwTypeError("The provided value is not of type 'bool'.");
+    exceptionState.ThrowTypeError("The provided value is not of type 'bool'.");
     return;
   }
 
   impl->setSecureContextWindowExposedAttribute(cppValue);
-}
-
-CORE_EXPORT void secureContextWindowExposedAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  v8::Local<v8::Value> v8Value = info[0];
-
-  TestInterfaceSecureContextV8Internal::secureContextWindowExposedAttributeAttributeSetter(v8Value, info);
 }
 
 static void secureContextWorkerExposedAttributeAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -166,35 +152,30 @@ static void secureContextWorkerExposedAttributeAttributeGetter(const v8::Functio
 
   TestInterfaceSecureContext* impl = V8TestInterfaceSecureContext::toImpl(holder);
 
-  v8SetReturnValueFast(info, WTF::getPtr(impl->secureContextWorkerExposedAttribute()), impl);
-}
-
-CORE_EXPORT void secureContextWorkerExposedAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  TestInterfaceSecureContextV8Internal::secureContextWorkerExposedAttributeAttributeGetter(info);
+  V8SetReturnValueFast(info, WTF::GetPtr(impl->secureContextWorkerExposedAttribute()), impl);
 }
 
 static void secureContextWorkerExposedAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Isolate* isolate = info.GetIsolate();
+  ALLOW_UNUSED_LOCAL(isolate);
+
   v8::Local<v8::Object> holder = info.Holder();
+  ALLOW_UNUSED_LOCAL(holder);
+
   TestInterfaceSecureContext* impl = V8TestInterfaceSecureContext::toImpl(holder);
 
-  ExceptionState exceptionState(info.GetIsolate(), ExceptionState::SetterContext, "TestInterfaceSecureContext", "secureContextWorkerExposedAttribute");
+  ExceptionState exceptionState(isolate, ExceptionState::kSetterContext, "TestInterfaceSecureContext", "secureContextWorkerExposedAttribute");
 
   // Prepare the value to be set.
   bool* cppValue = V8bool::toImplWithTypeCheck(info.GetIsolate(), v8Value);
 
   // Type check per: http://heycam.github.io/webidl/#es-interface
   if (!cppValue) {
-    exceptionState.throwTypeError("The provided value is not of type 'bool'.");
+    exceptionState.ThrowTypeError("The provided value is not of type 'bool'.");
     return;
   }
 
   impl->setSecureContextWorkerExposedAttribute(cppValue);
-}
-
-CORE_EXPORT void secureContextWorkerExposedAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  v8::Local<v8::Value> v8Value = info[0];
-
-  TestInterfaceSecureContextV8Internal::secureContextWorkerExposedAttributeAttributeSetter(v8Value, info);
 }
 
 static void secureContextWindowExposedRuntimeEnabledAttributeAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -202,35 +183,30 @@ static void secureContextWindowExposedRuntimeEnabledAttributeAttributeGetter(con
 
   TestInterfaceSecureContext* impl = V8TestInterfaceSecureContext::toImpl(holder);
 
-  v8SetReturnValueFast(info, WTF::getPtr(impl->secureContextWindowExposedRuntimeEnabledAttribute()), impl);
-}
-
-CORE_EXPORT void secureContextWindowExposedRuntimeEnabledAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  TestInterfaceSecureContextV8Internal::secureContextWindowExposedRuntimeEnabledAttributeAttributeGetter(info);
+  V8SetReturnValueFast(info, WTF::GetPtr(impl->secureContextWindowExposedRuntimeEnabledAttribute()), impl);
 }
 
 static void secureContextWindowExposedRuntimeEnabledAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Isolate* isolate = info.GetIsolate();
+  ALLOW_UNUSED_LOCAL(isolate);
+
   v8::Local<v8::Object> holder = info.Holder();
+  ALLOW_UNUSED_LOCAL(holder);
+
   TestInterfaceSecureContext* impl = V8TestInterfaceSecureContext::toImpl(holder);
 
-  ExceptionState exceptionState(info.GetIsolate(), ExceptionState::SetterContext, "TestInterfaceSecureContext", "secureContextWindowExposedRuntimeEnabledAttribute");
+  ExceptionState exceptionState(isolate, ExceptionState::kSetterContext, "TestInterfaceSecureContext", "secureContextWindowExposedRuntimeEnabledAttribute");
 
   // Prepare the value to be set.
   bool* cppValue = V8bool::toImplWithTypeCheck(info.GetIsolate(), v8Value);
 
   // Type check per: http://heycam.github.io/webidl/#es-interface
   if (!cppValue) {
-    exceptionState.throwTypeError("The provided value is not of type 'bool'.");
+    exceptionState.ThrowTypeError("The provided value is not of type 'bool'.");
     return;
   }
 
   impl->setSecureContextWindowExposedRuntimeEnabledAttribute(cppValue);
-}
-
-CORE_EXPORT void secureContextWindowExposedRuntimeEnabledAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  v8::Local<v8::Value> v8Value = info[0];
-
-  TestInterfaceSecureContextV8Internal::secureContextWindowExposedRuntimeEnabledAttributeAttributeSetter(v8Value, info);
 }
 
 static void secureContextWorkerExposedRuntimeEnabledAttributeAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -238,35 +214,30 @@ static void secureContextWorkerExposedRuntimeEnabledAttributeAttributeGetter(con
 
   TestInterfaceSecureContext* impl = V8TestInterfaceSecureContext::toImpl(holder);
 
-  v8SetReturnValueFast(info, WTF::getPtr(impl->secureContextWorkerExposedRuntimeEnabledAttribute()), impl);
-}
-
-CORE_EXPORT void secureContextWorkerExposedRuntimeEnabledAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  TestInterfaceSecureContextV8Internal::secureContextWorkerExposedRuntimeEnabledAttributeAttributeGetter(info);
+  V8SetReturnValueFast(info, WTF::GetPtr(impl->secureContextWorkerExposedRuntimeEnabledAttribute()), impl);
 }
 
 static void secureContextWorkerExposedRuntimeEnabledAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Isolate* isolate = info.GetIsolate();
+  ALLOW_UNUSED_LOCAL(isolate);
+
   v8::Local<v8::Object> holder = info.Holder();
+  ALLOW_UNUSED_LOCAL(holder);
+
   TestInterfaceSecureContext* impl = V8TestInterfaceSecureContext::toImpl(holder);
 
-  ExceptionState exceptionState(info.GetIsolate(), ExceptionState::SetterContext, "TestInterfaceSecureContext", "secureContextWorkerExposedRuntimeEnabledAttribute");
+  ExceptionState exceptionState(isolate, ExceptionState::kSetterContext, "TestInterfaceSecureContext", "secureContextWorkerExposedRuntimeEnabledAttribute");
 
   // Prepare the value to be set.
   bool* cppValue = V8bool::toImplWithTypeCheck(info.GetIsolate(), v8Value);
 
   // Type check per: http://heycam.github.io/webidl/#es-interface
   if (!cppValue) {
-    exceptionState.throwTypeError("The provided value is not of type 'bool'.");
+    exceptionState.ThrowTypeError("The provided value is not of type 'bool'.");
     return;
   }
 
   impl->setSecureContextWorkerExposedRuntimeEnabledAttribute(cppValue);
-}
-
-CORE_EXPORT void secureContextWorkerExposedRuntimeEnabledAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  v8::Local<v8::Value> v8Value = info[0];
-
-  TestInterfaceSecureContextV8Internal::secureContextWorkerExposedRuntimeEnabledAttributeAttributeSetter(v8Value, info);
 }
 
 static void secureContextMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -275,18 +246,10 @@ static void secureContextMethodMethod(const v8::FunctionCallbackInfo<v8::Value>&
   impl->secureContextMethod();
 }
 
-CORE_EXPORT  void secureContextMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  TestInterfaceSecureContextV8Internal::secureContextMethodMethod(info);
-}
-
 static void secureContextRuntimeEnabledMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& info) {
   TestInterfaceSecureContext* impl = V8TestInterfaceSecureContext::toImpl(info.Holder());
 
   impl->secureContextRuntimeEnabledMethod();
-}
-
-CORE_EXPORT  void secureContextRuntimeEnabledMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  TestInterfaceSecureContextV8Internal::secureContextRuntimeEnabledMethodMethod(info);
 }
 
 static void secureContextWindowExposedMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -295,18 +258,10 @@ static void secureContextWindowExposedMethodMethod(const v8::FunctionCallbackInf
   impl->secureContextWindowExposedMethod();
 }
 
-CORE_EXPORT  void secureContextWindowExposedMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  TestInterfaceSecureContextV8Internal::secureContextWindowExposedMethodMethod(info);
-}
-
 static void secureContextWorkerExposedMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& info) {
   TestInterfaceSecureContext* impl = V8TestInterfaceSecureContext::toImpl(info.Holder());
 
   impl->secureContextWorkerExposedMethod();
-}
-
-CORE_EXPORT  void secureContextWorkerExposedMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  TestInterfaceSecureContextV8Internal::secureContextWorkerExposedMethodMethod(info);
 }
 
 static void secureContextWindowExposedRuntimeEnabledMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -315,25 +270,101 @@ static void secureContextWindowExposedRuntimeEnabledMethodMethod(const v8::Funct
   impl->secureContextWindowExposedRuntimeEnabledMethod();
 }
 
-CORE_EXPORT  void secureContextWindowExposedRuntimeEnabledMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  TestInterfaceSecureContextV8Internal::secureContextWindowExposedRuntimeEnabledMethodMethod(info);
-}
-
 static void secureContextWorkerExposedRuntimeEnabledMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& info) {
   TestInterfaceSecureContext* impl = V8TestInterfaceSecureContext::toImpl(info.Holder());
 
   impl->secureContextWorkerExposedRuntimeEnabledMethod();
 }
 
-CORE_EXPORT  void secureContextWorkerExposedRuntimeEnabledMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+} // namespace TestInterfaceSecureContextV8Internal
+
+void V8TestInterfaceSecureContext::secureContextAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  TestInterfaceSecureContextV8Internal::secureContextAttributeAttributeGetter(info);
+}
+
+void V8TestInterfaceSecureContext::secureContextAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Local<v8::Value> v8Value = info[0];
+
+  TestInterfaceSecureContextV8Internal::secureContextAttributeAttributeSetter(v8Value, info);
+}
+
+void V8TestInterfaceSecureContext::secureContextRuntimeEnabledAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  TestInterfaceSecureContextV8Internal::secureContextRuntimeEnabledAttributeAttributeGetter(info);
+}
+
+void V8TestInterfaceSecureContext::secureContextRuntimeEnabledAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Local<v8::Value> v8Value = info[0];
+
+  TestInterfaceSecureContextV8Internal::secureContextRuntimeEnabledAttributeAttributeSetter(v8Value, info);
+}
+
+void V8TestInterfaceSecureContext::secureContextWindowExposedAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  TestInterfaceSecureContextV8Internal::secureContextWindowExposedAttributeAttributeGetter(info);
+}
+
+void V8TestInterfaceSecureContext::secureContextWindowExposedAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Local<v8::Value> v8Value = info[0];
+
+  TestInterfaceSecureContextV8Internal::secureContextWindowExposedAttributeAttributeSetter(v8Value, info);
+}
+
+void V8TestInterfaceSecureContext::secureContextWorkerExposedAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  TestInterfaceSecureContextV8Internal::secureContextWorkerExposedAttributeAttributeGetter(info);
+}
+
+void V8TestInterfaceSecureContext::secureContextWorkerExposedAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Local<v8::Value> v8Value = info[0];
+
+  TestInterfaceSecureContextV8Internal::secureContextWorkerExposedAttributeAttributeSetter(v8Value, info);
+}
+
+void V8TestInterfaceSecureContext::secureContextWindowExposedRuntimeEnabledAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  TestInterfaceSecureContextV8Internal::secureContextWindowExposedRuntimeEnabledAttributeAttributeGetter(info);
+}
+
+void V8TestInterfaceSecureContext::secureContextWindowExposedRuntimeEnabledAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Local<v8::Value> v8Value = info[0];
+
+  TestInterfaceSecureContextV8Internal::secureContextWindowExposedRuntimeEnabledAttributeAttributeSetter(v8Value, info);
+}
+
+void V8TestInterfaceSecureContext::secureContextWorkerExposedRuntimeEnabledAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  TestInterfaceSecureContextV8Internal::secureContextWorkerExposedRuntimeEnabledAttributeAttributeGetter(info);
+}
+
+void V8TestInterfaceSecureContext::secureContextWorkerExposedRuntimeEnabledAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Local<v8::Value> v8Value = info[0];
+
+  TestInterfaceSecureContextV8Internal::secureContextWorkerExposedRuntimeEnabledAttributeAttributeSetter(v8Value, info);
+}
+
+void V8TestInterfaceSecureContext::secureContextMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  TestInterfaceSecureContextV8Internal::secureContextMethodMethod(info);
+}
+
+void V8TestInterfaceSecureContext::secureContextRuntimeEnabledMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  TestInterfaceSecureContextV8Internal::secureContextRuntimeEnabledMethodMethod(info);
+}
+
+void V8TestInterfaceSecureContext::secureContextWindowExposedMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  TestInterfaceSecureContextV8Internal::secureContextWindowExposedMethodMethod(info);
+}
+
+void V8TestInterfaceSecureContext::secureContextWorkerExposedMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  TestInterfaceSecureContextV8Internal::secureContextWorkerExposedMethodMethod(info);
+}
+
+void V8TestInterfaceSecureContext::secureContextWindowExposedRuntimeEnabledMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  TestInterfaceSecureContextV8Internal::secureContextWindowExposedRuntimeEnabledMethodMethod(info);
+}
+
+void V8TestInterfaceSecureContext::secureContextWorkerExposedRuntimeEnabledMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
   TestInterfaceSecureContextV8Internal::secureContextWorkerExposedRuntimeEnabledMethodMethod(info);
 }
 
-} // namespace TestInterfaceSecureContextV8Internal
-
 static void installV8TestInterfaceSecureContextTemplate(v8::Isolate* isolate, const DOMWrapperWorld& world, v8::Local<v8::FunctionTemplate> interfaceTemplate) {
   // Initialize the interface object's template.
-  V8DOMConfiguration::initializeDOMInterfaceTemplate(isolate, interfaceTemplate, V8TestInterfaceSecureContext::wrapperTypeInfo.interfaceName, v8::Local<v8::FunctionTemplate>(), V8TestInterfaceSecureContext::internalFieldCount);
+  V8DOMConfiguration::InitializeDOMInterfaceTemplate(isolate, interfaceTemplate, V8TestInterfaceSecureContext::wrapperTypeInfo.interface_name, v8::Local<v8::FunctionTemplate>(), V8TestInterfaceSecureContext::internalFieldCount);
 
   v8::Local<v8::Signature> signature = v8::Signature::New(isolate, interfaceTemplate);
   ALLOW_UNUSED_LOCAL(signature);
@@ -346,101 +377,145 @@ static void installV8TestInterfaceSecureContextTemplate(v8::Isolate* isolate, co
 }
 
 v8::Local<v8::FunctionTemplate> V8TestInterfaceSecureContext::domTemplate(v8::Isolate* isolate, const DOMWrapperWorld& world) {
-  return V8DOMConfiguration::domClassTemplate(isolate, world, const_cast<WrapperTypeInfo*>(&wrapperTypeInfo), installV8TestInterfaceSecureContextTemplate);
+  return V8DOMConfiguration::DomClassTemplate(isolate, world, const_cast<WrapperTypeInfo*>(&wrapperTypeInfo), installV8TestInterfaceSecureContextTemplate);
 }
 
 bool V8TestInterfaceSecureContext::hasInstance(v8::Local<v8::Value> v8Value, v8::Isolate* isolate) {
-  return V8PerIsolateData::from(isolate)->hasInstance(&wrapperTypeInfo, v8Value);
+  return V8PerIsolateData::From(isolate)->HasInstance(&wrapperTypeInfo, v8Value);
 }
 
 v8::Local<v8::Object> V8TestInterfaceSecureContext::findInstanceInPrototypeChain(v8::Local<v8::Value> v8Value, v8::Isolate* isolate) {
-  return V8PerIsolateData::from(isolate)->findInstanceInPrototypeChain(&wrapperTypeInfo, v8Value);
+  return V8PerIsolateData::From(isolate)->FindInstanceInPrototypeChain(&wrapperTypeInfo, v8Value);
 }
 
 TestInterfaceSecureContext* V8TestInterfaceSecureContext::toImplWithTypeCheck(v8::Isolate* isolate, v8::Local<v8::Value> value) {
   return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : nullptr;
 }
 
+TestInterfaceSecureContext* NativeValueTraits<TestInterfaceSecureContext>::NativeValue(v8::Isolate* isolate, v8::Local<v8::Value> value, ExceptionState& exceptionState) {
+  TestInterfaceSecureContext* nativeValue = V8TestInterfaceSecureContext::toImplWithTypeCheck(isolate, value);
+  if (!nativeValue) {
+    exceptionState.ThrowTypeError(ExceptionMessages::FailedToConvertJSValue(
+        "TestInterfaceSecureContext"));
+  }
+  return nativeValue;
+}
+
 void V8TestInterfaceSecureContext::preparePrototypeAndInterfaceObject(v8::Local<v8::Context> context, const DOMWrapperWorld& world, v8::Local<v8::Object> prototypeObject, v8::Local<v8::Function> interfaceObject, v8::Local<v8::FunctionTemplate> interfaceTemplate) {
   v8::Isolate* isolate = context->GetIsolate();
-  ExecutionContext* executionContext = toExecutionContext(context);
   v8::Local<v8::Signature> signature = v8::Signature::New(isolate, interfaceTemplate);
-  if (executionContext && (executionContext->isSecureContext())) {
-    const V8DOMConfiguration::AccessorConfiguration accessorConfiguration = {"secureContextAttribute", TestInterfaceSecureContextV8Internal::secureContextAttributeAttributeGetterCallback, TestInterfaceSecureContextV8Internal::secureContextAttributeAttributeSetterCallback, 0, 0, nullptr, 0, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder};
-    V8DOMConfiguration::installAccessor(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, accessorConfiguration);
-  }
-  if (executionContext && (executionContext->isSecureContext())) {
-    if (RuntimeEnabledFeatures::secureFeatureEnabled()) {
-      const V8DOMConfiguration::AccessorConfiguration accessorConfiguration = {"secureContextRuntimeEnabledAttribute", TestInterfaceSecureContextV8Internal::secureContextRuntimeEnabledAttributeAttributeGetterCallback, TestInterfaceSecureContextV8Internal::secureContextRuntimeEnabledAttributeAttributeSetterCallback, 0, 0, nullptr, 0, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder};
-      V8DOMConfiguration::installAccessor(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, accessorConfiguration);
-    }
-  }
-  if (executionContext && (executionContext->isDocument())) {
-    if (executionContext && (executionContext->isSecureContext())) {
-      const V8DOMConfiguration::AccessorConfiguration accessorConfiguration = {"secureContextWindowExposedAttribute", TestInterfaceSecureContextV8Internal::secureContextWindowExposedAttributeAttributeGetterCallback, TestInterfaceSecureContextV8Internal::secureContextWindowExposedAttributeAttributeSetterCallback, 0, 0, nullptr, 0, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder};
-      V8DOMConfiguration::installAccessor(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, accessorConfiguration);
-    }
-  }
-  if (executionContext && (executionContext->isWorkerGlobalScope())) {
-    if (executionContext && (executionContext->isSecureContext())) {
-      const V8DOMConfiguration::AccessorConfiguration accessorConfiguration = {"secureContextWorkerExposedAttribute", TestInterfaceSecureContextV8Internal::secureContextWorkerExposedAttributeAttributeGetterCallback, TestInterfaceSecureContextV8Internal::secureContextWorkerExposedAttributeAttributeSetterCallback, 0, 0, nullptr, 0, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder};
-      V8DOMConfiguration::installAccessor(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, accessorConfiguration);
-    }
-  }
-  if (executionContext && (executionContext->isDocument())) {
-    if (executionContext && (executionContext->isSecureContext())) {
-      if (RuntimeEnabledFeatures::secureFeatureEnabled()) {
-        const V8DOMConfiguration::AccessorConfiguration accessorConfiguration = {"secureContextWindowExposedRuntimeEnabledAttribute", TestInterfaceSecureContextV8Internal::secureContextWindowExposedRuntimeEnabledAttributeAttributeGetterCallback, TestInterfaceSecureContextV8Internal::secureContextWindowExposedRuntimeEnabledAttributeAttributeSetterCallback, 0, 0, nullptr, 0, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder};
-        V8DOMConfiguration::installAccessor(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, accessorConfiguration);
-      }
-    }
-  }
-  if (executionContext && (executionContext->isWorkerGlobalScope())) {
-    if (executionContext && (executionContext->isSecureContext())) {
-      if (RuntimeEnabledFeatures::secureFeatureEnabled()) {
-        const V8DOMConfiguration::AccessorConfiguration accessorConfiguration = {"secureContextWorkerExposedRuntimeEnabledAttribute", TestInterfaceSecureContextV8Internal::secureContextWorkerExposedRuntimeEnabledAttributeAttributeGetterCallback, TestInterfaceSecureContextV8Internal::secureContextWorkerExposedRuntimeEnabledAttributeAttributeSetterCallback, 0, 0, nullptr, 0, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder};
-        V8DOMConfiguration::installAccessor(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, accessorConfiguration);
-      }
-    }
-  }
-  v8::Local<v8::Signature> signature = v8::Signature::New(isolate, interfaceTemplate);
-  ExecutionContext* executionContext = toExecutionContext(prototypeObject->CreationContext());
+  ExecutionContext* executionContext = ToExecutionContext(context);
   DCHECK(executionContext);
-  if (executionContext && (executionContext->isSecureContext())) {
-    const V8DOMConfiguration::MethodConfiguration secureContextMethodMethodConfiguration = {"secureContextMethod", TestInterfaceSecureContextV8Internal::secureContextMethodMethodCallback, 0, 0, v8::None, V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder};
-    V8DOMConfiguration::installMethod(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, secureContextMethodMethodConfiguration);
+
+  if (executionContext && (executionContext->IsSecureContext())) {
+    static const V8DOMConfiguration::AccessorConfiguration accessorConfiguration[] = {
+      { "secureContextAttribute", V8TestInterfaceSecureContext::secureContextAttributeAttributeGetterCallback, V8TestInterfaceSecureContext::secureContextAttributeAttributeSetterCallback, nullptr, nullptr, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kAllWorlds }
+    };
+    for (const auto& accessorConfig : accessorConfiguration)
+      V8DOMConfiguration::InstallAccessor(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, accessorConfig);
   }
-  if (executionContext && (executionContext->isSecureContext())) {
+  if (executionContext && (executionContext->IsSecureContext())) {
     if (RuntimeEnabledFeatures::secureFeatureEnabled()) {
-      const V8DOMConfiguration::MethodConfiguration secureContextRuntimeEnabledMethodMethodConfiguration = {"secureContextRuntimeEnabledMethod", TestInterfaceSecureContextV8Internal::secureContextRuntimeEnabledMethodMethodCallback, 0, 0, v8::None, V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder};
-      V8DOMConfiguration::installMethod(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, secureContextRuntimeEnabledMethodMethodConfiguration);
+      static const V8DOMConfiguration::AccessorConfiguration accessorConfiguration[] = {
+        { "secureContextRuntimeEnabledAttribute", V8TestInterfaceSecureContext::secureContextRuntimeEnabledAttributeAttributeGetterCallback, V8TestInterfaceSecureContext::secureContextRuntimeEnabledAttributeAttributeSetterCallback, nullptr, nullptr, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kAllWorlds }
+      };
+      for (const auto& accessorConfig : accessorConfiguration)
+        V8DOMConfiguration::InstallAccessor(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, accessorConfig);
     }
   }
-  if (executionContext && (executionContext->isSecureContext())) {
-    if (executionContext && (executionContext->isDocument())) {
-      const V8DOMConfiguration::MethodConfiguration secureContextWindowExposedMethodMethodConfiguration = {"secureContextWindowExposedMethod", TestInterfaceSecureContextV8Internal::secureContextWindowExposedMethodMethodCallback, 0, 0, v8::None, V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder};
-      V8DOMConfiguration::installMethod(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, secureContextWindowExposedMethodMethodConfiguration);
+  if (executionContext && (executionContext->IsDocument())) {
+    if (executionContext && (executionContext->IsSecureContext())) {
+      static const V8DOMConfiguration::AccessorConfiguration accessorConfiguration[] = {
+        { "secureContextWindowExposedAttribute", V8TestInterfaceSecureContext::secureContextWindowExposedAttributeAttributeGetterCallback, V8TestInterfaceSecureContext::secureContextWindowExposedAttributeAttributeSetterCallback, nullptr, nullptr, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kAllWorlds }
+      };
+      for (const auto& accessorConfig : accessorConfiguration)
+        V8DOMConfiguration::InstallAccessor(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, accessorConfig);
     }
   }
-  if (executionContext && (executionContext->isSecureContext())) {
-    if (executionContext && (executionContext->isWorkerGlobalScope())) {
-      const V8DOMConfiguration::MethodConfiguration secureContextWorkerExposedMethodMethodConfiguration = {"secureContextWorkerExposedMethod", TestInterfaceSecureContextV8Internal::secureContextWorkerExposedMethodMethodCallback, 0, 0, v8::None, V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder};
-      V8DOMConfiguration::installMethod(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, secureContextWorkerExposedMethodMethodConfiguration);
+  if (executionContext && (executionContext->IsWorkerGlobalScope())) {
+    if (executionContext && (executionContext->IsSecureContext())) {
+      static const V8DOMConfiguration::AccessorConfiguration accessorConfiguration[] = {
+        { "secureContextWorkerExposedAttribute", V8TestInterfaceSecureContext::secureContextWorkerExposedAttributeAttributeGetterCallback, V8TestInterfaceSecureContext::secureContextWorkerExposedAttributeAttributeSetterCallback, nullptr, nullptr, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kAllWorlds }
+      };
+      for (const auto& accessorConfig : accessorConfiguration)
+        V8DOMConfiguration::InstallAccessor(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, accessorConfig);
     }
   }
-  if (executionContext && (executionContext->isSecureContext())) {
-    if (executionContext && (executionContext->isDocument())) {
+  if (executionContext && (executionContext->IsDocument())) {
+    if (executionContext && (executionContext->IsSecureContext())) {
       if (RuntimeEnabledFeatures::secureFeatureEnabled()) {
-        const V8DOMConfiguration::MethodConfiguration secureContextWindowExposedRuntimeEnabledMethodMethodConfiguration = {"secureContextWindowExposedRuntimeEnabledMethod", TestInterfaceSecureContextV8Internal::secureContextWindowExposedRuntimeEnabledMethodMethodCallback, 0, 0, v8::None, V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder};
-        V8DOMConfiguration::installMethod(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, secureContextWindowExposedRuntimeEnabledMethodMethodConfiguration);
+        static const V8DOMConfiguration::AccessorConfiguration accessorConfiguration[] = {
+          { "secureContextWindowExposedRuntimeEnabledAttribute", V8TestInterfaceSecureContext::secureContextWindowExposedRuntimeEnabledAttributeAttributeGetterCallback, V8TestInterfaceSecureContext::secureContextWindowExposedRuntimeEnabledAttributeAttributeSetterCallback, nullptr, nullptr, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kAllWorlds }
+        };
+        for (const auto& accessorConfig : accessorConfiguration)
+          V8DOMConfiguration::InstallAccessor(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, accessorConfig);
       }
     }
   }
-  if (executionContext && (executionContext->isSecureContext())) {
-    if (executionContext && (executionContext->isWorkerGlobalScope())) {
+  if (executionContext && (executionContext->IsWorkerGlobalScope())) {
+    if (executionContext && (executionContext->IsSecureContext())) {
       if (RuntimeEnabledFeatures::secureFeatureEnabled()) {
-        const V8DOMConfiguration::MethodConfiguration secureContextWorkerExposedRuntimeEnabledMethodMethodConfiguration = {"secureContextWorkerExposedRuntimeEnabledMethod", TestInterfaceSecureContextV8Internal::secureContextWorkerExposedRuntimeEnabledMethodMethodCallback, 0, 0, v8::None, V8DOMConfiguration::OnPrototype, V8DOMConfiguration::CheckHolder};
-        V8DOMConfiguration::installMethod(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, secureContextWorkerExposedRuntimeEnabledMethodMethodConfiguration);
+        static const V8DOMConfiguration::AccessorConfiguration accessorConfiguration[] = {
+          { "secureContextWorkerExposedRuntimeEnabledAttribute", V8TestInterfaceSecureContext::secureContextWorkerExposedRuntimeEnabledAttributeAttributeGetterCallback, V8TestInterfaceSecureContext::secureContextWorkerExposedRuntimeEnabledAttributeAttributeSetterCallback, nullptr, nullptr, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kAllWorlds }
+        };
+        for (const auto& accessorConfig : accessorConfiguration)
+          V8DOMConfiguration::InstallAccessor(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, accessorConfig);
+      }
+    }
+  }
+  if (executionContext && (executionContext->IsSecureContext())) {
+    const V8DOMConfiguration::MethodConfiguration secureContextMethodMethodConfiguration[] = {
+      {"secureContextMethod", V8TestInterfaceSecureContext::secureContextMethodMethodCallback, 0, v8::None, V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kDoNotCheckAccess, V8DOMConfiguration::kAllWorlds}
+    };
+    for (const auto& methodConfig : secureContextMethodMethodConfiguration)
+      V8DOMConfiguration::InstallMethod(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, methodConfig);
+  }
+  if (executionContext && (executionContext->IsSecureContext())) {
+    if (RuntimeEnabledFeatures::secureFeatureEnabled()) {
+      const V8DOMConfiguration::MethodConfiguration secureContextRuntimeEnabledMethodMethodConfiguration[] = {
+        {"secureContextRuntimeEnabledMethod", V8TestInterfaceSecureContext::secureContextRuntimeEnabledMethodMethodCallback, 0, v8::None, V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kDoNotCheckAccess, V8DOMConfiguration::kAllWorlds}
+      };
+      for (const auto& methodConfig : secureContextRuntimeEnabledMethodMethodConfiguration)
+        V8DOMConfiguration::InstallMethod(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, methodConfig);
+    }
+  }
+  if (executionContext && (executionContext->IsSecureContext())) {
+    if (executionContext && (executionContext->IsDocument())) {
+      const V8DOMConfiguration::MethodConfiguration secureContextWindowExposedMethodMethodConfiguration[] = {
+        {"secureContextWindowExposedMethod", V8TestInterfaceSecureContext::secureContextWindowExposedMethodMethodCallback, 0, v8::None, V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kDoNotCheckAccess, V8DOMConfiguration::kAllWorlds}
+      };
+      for (const auto& methodConfig : secureContextWindowExposedMethodMethodConfiguration)
+        V8DOMConfiguration::InstallMethod(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, methodConfig);
+    }
+  }
+  if (executionContext && (executionContext->IsSecureContext())) {
+    if (executionContext && (executionContext->IsWorkerGlobalScope())) {
+      const V8DOMConfiguration::MethodConfiguration secureContextWorkerExposedMethodMethodConfiguration[] = {
+        {"secureContextWorkerExposedMethod", V8TestInterfaceSecureContext::secureContextWorkerExposedMethodMethodCallback, 0, v8::None, V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kDoNotCheckAccess, V8DOMConfiguration::kAllWorlds}
+      };
+      for (const auto& methodConfig : secureContextWorkerExposedMethodMethodConfiguration)
+        V8DOMConfiguration::InstallMethod(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, methodConfig);
+    }
+  }
+  if (executionContext && (executionContext->IsSecureContext())) {
+    if (executionContext && (executionContext->IsDocument())) {
+      if (RuntimeEnabledFeatures::secureFeatureEnabled()) {
+        const V8DOMConfiguration::MethodConfiguration secureContextWindowExposedRuntimeEnabledMethodMethodConfiguration[] = {
+          {"secureContextWindowExposedRuntimeEnabledMethod", V8TestInterfaceSecureContext::secureContextWindowExposedRuntimeEnabledMethodMethodCallback, 0, v8::None, V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kDoNotCheckAccess, V8DOMConfiguration::kAllWorlds}
+        };
+        for (const auto& methodConfig : secureContextWindowExposedRuntimeEnabledMethodMethodConfiguration)
+          V8DOMConfiguration::InstallMethod(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, methodConfig);
+      }
+    }
+  }
+  if (executionContext && (executionContext->IsSecureContext())) {
+    if (executionContext && (executionContext->IsWorkerGlobalScope())) {
+      if (RuntimeEnabledFeatures::secureFeatureEnabled()) {
+        const V8DOMConfiguration::MethodConfiguration secureContextWorkerExposedRuntimeEnabledMethodMethodConfiguration[] = {
+          {"secureContextWorkerExposedRuntimeEnabledMethod", V8TestInterfaceSecureContext::secureContextWorkerExposedRuntimeEnabledMethodMethodCallback, 0, v8::None, V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kDoNotCheckAccess, V8DOMConfiguration::kAllWorlds}
+        };
+        for (const auto& methodConfig : secureContextWorkerExposedRuntimeEnabledMethodMethodConfiguration)
+          V8DOMConfiguration::InstallMethod(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, methodConfig);
       }
     }
   }

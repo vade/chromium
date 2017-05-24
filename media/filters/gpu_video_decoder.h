@@ -17,6 +17,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "gpu/command_buffer/common/sync_token.h"
+#include "media/base/overlay_info.h"
 #include "media/base/pipeline_status.h"
 #include "media/base/surface_manager.h"
 #include "media/base/video_decoder.h"
@@ -47,8 +48,9 @@ class MEDIA_EXPORT GpuVideoDecoder
       public VideoDecodeAccelerator::Client {
  public:
   GpuVideoDecoder(GpuVideoAcceleratorFactories* factories,
-                  const RequestSurfaceCB& request_surface_cb,
-                  scoped_refptr<MediaLog> media_log);
+                  const RequestOverlayInfoCB& request_overlay_info_cb,
+                  MediaLog* media_log);
+  ~GpuVideoDecoder() override;
 
   // VideoDecoder implementation.
   std::string GetDisplayName() const override;
@@ -79,9 +81,6 @@ class MEDIA_EXPORT GpuVideoDecoder
   void NotifyError(media::VideoDecodeAccelerator::Error error) override;
 
   static const char kDecoderName[];
-
- protected:
-  ~GpuVideoDecoder() override;
 
  private:
   enum State {
@@ -154,15 +153,19 @@ class MEDIA_EXPORT GpuVideoDecoder
   // Assert the contract that this class is operated on the right thread.
   void DCheckGpuVideoAcceleratorFactoriesTaskRunnerIsCurrent() const;
 
-  // Provided to the |request_surface_cb_| callback given during construction;
-  // sets or changes the output surface.
-  void OnSurfaceAvailable(int surface_id);
+  // Provided to the |request_overlay_info_cb_| callback given during
+  // construction.  Sets or changes the output surface.
+  void OnOverlayInfoAvailable(
+      int surface_id,
+      const base::Optional<base::UnguessableToken>& routing_token);
 
   // If the VDA supports external surfaces, we must wait for the surface before
   // completing initialization. This will be called by OnSurfaceAvailable() once
   // the surface is known or immediately by Initialize() if external surfaces
   // are unsupported.
-  void CompleteInitialization(int surface_id);
+  void CompleteInitialization(
+      int surface_id,
+      const base::Optional<base::UnguessableToken>& token);
 
   bool needs_bitstream_conversion_;
 
@@ -170,9 +173,9 @@ class MEDIA_EXPORT GpuVideoDecoder
 
   // For requesting a suface to render to. If this is null the VDA will return
   // normal video frames and not render them to a surface.
-  RequestSurfaceCB request_surface_cb_;
+  RequestOverlayInfoCB request_overlay_info_cb_;
 
-  scoped_refptr<MediaLog> media_log_;
+  MediaLog* media_log_;
 
   // Populated during Initialize() (on success) and unchanged until an error
   // occurs.

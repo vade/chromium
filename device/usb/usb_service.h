@@ -49,10 +49,11 @@ class UsbService : public base::NonThreadSafe {
     virtual void WillDestroyUsbService();
   };
 
-  // The file task runner reference is used for blocking I/O operations.
   // Returns nullptr when initialization fails.
-  static std::unique_ptr<UsbService> Create(
-      scoped_refptr<base::SequencedTaskRunner> blocking_task_runner);
+  static std::unique_ptr<UsbService> Create();
+
+  // Creates a SequencedTaskRunner appropriate for blocking I/O operations.
+  static scoped_refptr<base::SequencedTaskRunner> CreateBlockingTaskRunner();
 
   virtual ~UsbService();
 
@@ -76,17 +77,16 @@ class UsbService : public base::NonThreadSafe {
   void GetTestDevices(std::vector<scoped_refptr<UsbDevice>>* devices);
 
  protected:
-  UsbService(scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-             scoped_refptr<base::SequencedTaskRunner> blocking_task_runner);
+  UsbService(scoped_refptr<base::SequencedTaskRunner> blocking_task_runner);
 
   void NotifyDeviceAdded(scoped_refptr<UsbDevice> device);
   void NotifyDeviceRemoved(scoped_refptr<UsbDevice> device);
 
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner() {
+  const scoped_refptr<base::SingleThreadTaskRunner>& task_runner() const {
     return task_runner_;
   }
 
-  scoped_refptr<base::SequencedTaskRunner> blocking_task_runner() {
+  const scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner() const {
     return blocking_task_runner_;
   }
 

@@ -18,8 +18,9 @@
 #include "base/i18n/rtl.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
+#include "cc/paint/paint_canvas.h"
+#include "cc/paint/paint_flags.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "ui/gfx/break_list.h"
 #include "ui/gfx/font_list.h"
@@ -34,7 +35,6 @@
 #include "ui/gfx/shadow_value.h"
 #include "ui/gfx/text_constants.h"
 
-class SkCanvas;
 class SkDrawLooper;
 struct SkPoint;
 class SkShader;
@@ -64,7 +64,6 @@ class GFX_EXPORT SkiaTextRenderer {
   void SetTextSize(SkScalar size);
   void SetForegroundColor(SkColor foreground);
   void SetShader(sk_sp<SkShader> shader);
-  void SetHaloEffect();
   // Sets underline metrics to use if the text will be drawn with an underline.
   // If not set, default values based on the size of the text will be used. The
   // two metrics must be set together.
@@ -90,7 +89,7 @@ class GFX_EXPORT SkiaTextRenderer {
   // lengths and colors; to support text selection appearances.
   class DiagonalStrike {
    public:
-    DiagonalStrike(Canvas* canvas, Point start, const SkPaint& paint);
+    DiagonalStrike(Canvas* canvas, Point start, const cc::PaintFlags& flags);
     ~DiagonalStrike();
 
     void AddPiece(int length, SkColor color);
@@ -101,7 +100,7 @@ class GFX_EXPORT SkiaTextRenderer {
 
     Canvas* canvas_;
     const Point start_;
-    SkPaint paint_;
+    cc::PaintFlags flags_;
     int total_length_;
     std::vector<Piece> pieces_;
 
@@ -109,8 +108,8 @@ class GFX_EXPORT SkiaTextRenderer {
   };
 
   Canvas* canvas_;
-  SkCanvas* canvas_skia_;
-  SkPaint paint_;
+  cc::PaintCanvas* canvas_skia_;
+  cc::PaintFlags flags_;
   SkScalar underline_thickness_;
   SkScalar underline_position_;
   std::unique_ptr<DiagonalStrike> diagonal_;
@@ -196,10 +195,10 @@ sk_sp<SkTypeface> CreateSkiaTypeface(const Font& font,
                                      bool italic,
                                      Font::Weight weight);
 
-// Applies the given FontRenderParams to a Skia |paint|.
+// Applies the given FontRenderParams to the PaintFlags.
 void ApplyRenderParams(const FontRenderParams& params,
                        bool subpixel_rendering_suppressed,
-                       SkPaint* paint);
+                       cc::PaintFlags* flags);
 
 }  // namespace internal
 
@@ -245,16 +244,10 @@ class GFX_EXPORT RenderText {
   void SetHorizontalAlignment(HorizontalAlignment alignment);
 
   const FontList& font_list() const { return font_list_; }
-  void SetFontList(const FontList& font_list);
+  virtual void SetFontList(const FontList& font_list);
 
   bool cursor_enabled() const { return cursor_enabled_; }
   void SetCursorEnabled(bool cursor_enabled);
-
-  bool cursor_visible() const { return cursor_visible_; }
-  void set_cursor_visible(bool visible) { cursor_visible_ = visible; }
-
-  SkColor cursor_color() const { return cursor_color_; }
-  void set_cursor_color(SkColor color) { cursor_color_ = color; }
 
   SkColor selection_color() const { return selection_color_; }
   void set_selection_color(SkColor color) { selection_color_ = color; }
@@ -328,9 +321,6 @@ class GFX_EXPORT RenderText {
   void set_subpixel_rendering_suppressed(bool suppressed) {
     subpixel_rendering_suppressed_ = suppressed;
   }
-
-  bool halo_effect() const { return halo_effect_; }
-  void set_halo_effect(bool halo_effect) { halo_effect_ = halo_effect; }
 
   const SelectionModel& selection_model() const { return selection_model_; }
 
@@ -452,9 +442,6 @@ class GFX_EXPORT RenderText {
   int GetBaseline();
 
   void Draw(Canvas* canvas);
-
-  // Draws a cursor at |position|.
-  void DrawCursor(Canvas* canvas, const SelectionModel& position);
 
   // Gets the SelectionModel from a visual point in local coordinates.
   virtual SelectionModel FindCursorPosition(const Point& point) = 0;
@@ -693,6 +680,10 @@ class GFX_EXPORT RenderText {
                                  size_t caret_pos,
                                  LogicalCursorDirection caret_affinity);
 
+  // Returns the baseline, with which the text best appears vertically centered.
+  static int DetermineBaselineCenteringText(const int display_height,
+                                            const FontList& font_list);
+
  private:
   friend class test::RenderTextTestApi;
 
@@ -764,12 +755,6 @@ class GFX_EXPORT RenderText {
   // Specifies whether the cursor is enabled. If disabled, no space is reserved
   // for the cursor when positioning text.
   bool cursor_enabled_;
-
-  // The cursor visibility.
-  bool cursor_visible_;
-
-  // The color used for the cursor.
-  SkColor cursor_color_;
 
   // The color used for drawing selected text.
   SkColor selection_color_;
@@ -868,9 +853,6 @@ class GFX_EXPORT RenderText {
 
   // A list of valid display text line break positions.
   BreakList<size_t> line_breaks_;
-
-  // Draw text with 1px border.
-  bool halo_effect_ = false;
 
   // Lines computed by EnsureLayout. These should be invalidated upon
   // OnLayoutTextAttributeChanged and OnDisplayTextAttributeChanged calls.

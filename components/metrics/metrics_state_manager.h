@@ -12,6 +12,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
+#include "base/single_thread_task_runner.h"
 #include "components/metrics/client_info.h"
 
 class PrefService;
@@ -118,9 +119,8 @@ class MetricsStateManager {
   // Backs up the current client info via |store_client_info_|.
   void BackUpCurrentClientInfo();
 
-  // Loads the client info via |load_client_info_| and potentially migrates it
-  // before returning it if it comes back in its old form.
-  std::unique_ptr<ClientInfo> LoadClientInfoAndMaybeMigrate();
+  // Loads the client info via |load_client_info_|.
+  std::unique_ptr<ClientInfo> LoadClientInfo();
 
   // Returns the low entropy source for this client. This is a random value
   // that is non-identifying amongst browser clients. This method will

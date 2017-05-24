@@ -79,11 +79,9 @@ namespace content {
 bool BluetoothDeviceChooserController::use_test_scan_duration_ = false;
 
 namespace {
-// Max length of device name in filter. A name coming from an adv packet
-// is max 29 bytes (adv packet max size 31 bytes - 2 byte length field),
-// but the name can also be acquired via gap.device_name, so it is limited
-// to the max EIR packet size of 240 bytes. See Core Spec 5.0, vol 3, C, 8.1.2.
-constexpr size_t kMaxLengthForDeviceName = 240;
+// Max length of device name in filter. Bluetooth 5.0 3.C.3.2.2.3 states that
+// the maximum device name length is 248 bytes (UTF-8 encoded).
+constexpr size_t kMaxLengthForDeviceName = 248;
 
 // The duration of a Bluetooth Scan in seconds.
 constexpr int kScanDuration = 60;
@@ -117,7 +115,7 @@ void LogRequestDeviceOptions(
 }
 
 bool IsEmptyOrInvalidFilter(
-    const blink::mojom::WebBluetoothScanFilterPtr& filter) {
+    const blink::mojom::WebBluetoothLeScanFilterPtr& filter) {
   // At least one member needs to be present.
   if (!filter->name && !filter->name_prefix && !filter->services)
     return true;
@@ -136,8 +134,8 @@ bool IsEmptyOrInvalidFilter(
 }
 
 bool HasEmptyOrInvalidFilter(
-    const base::Optional<std::vector<blink::mojom::WebBluetoothScanFilterPtr>>&
-        filters) {
+    const base::Optional<
+        std::vector<blink::mojom::WebBluetoothLeScanFilterPtr>>& filters) {
   if (!filters) {
     return true;
   }
@@ -159,7 +157,7 @@ bool IsOptionsInvalid(
 
 bool MatchesFilter(const std::string* device_name,
                    const UUIDSet& device_uuids,
-                   const blink::mojom::WebBluetoothScanFilterPtr& filter) {
+                   const blink::mojom::WebBluetoothLeScanFilterPtr& filter) {
   if (filter->name) {
     if (device_name == nullptr)
       return false;
@@ -189,8 +187,8 @@ bool MatchesFilter(const std::string* device_name,
 bool MatchesFilters(
     const std::string* device_name,
     const UUIDSet& device_uuids,
-    const base::Optional<std::vector<blink::mojom::WebBluetoothScanFilterPtr>>&
-        filters) {
+    const base::Optional<
+        std::vector<blink::mojom::WebBluetoothLeScanFilterPtr>>& filters) {
   DCHECK(!HasEmptyOrInvalidFilter(filters));
   for (const auto& filter : filters.value()) {
     if (MatchesFilter(device_name, device_uuids, filter)) {
@@ -201,8 +199,8 @@ bool MatchesFilters(
 }
 
 std::unique_ptr<device::BluetoothDiscoveryFilter> ComputeScanFilter(
-    const base::Optional<std::vector<blink::mojom::WebBluetoothScanFilterPtr>>&
-        filters) {
+    const base::Optional<
+        std::vector<blink::mojom::WebBluetoothLeScanFilterPtr>>& filters) {
   std::unordered_set<BluetoothUUID, device::BluetoothUUIDHash> services;
 
   if (filters) {

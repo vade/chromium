@@ -12,10 +12,11 @@
 #include "base/format_macros.h"
 #include "base/macros.h"
 #include "base/memory/aligned_memory.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "gpu/command_buffer/common/mailbox_holder.h"
-#include "media/base/yuv_convert.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/libyuv/include/libyuv.h"
 
 namespace media {
 
@@ -64,16 +65,14 @@ void ExpectFrameColor(media::VideoFrame* yv12_frame,
                              VideoFrame::kFrameSizePadding,
                          VideoFrame::kFrameAddressAlignment));
 
-  media::ConvertYUVToRGB32(yv12_frame->data(VideoFrame::kYPlane),
-                           yv12_frame->data(VideoFrame::kUPlane),
-                           yv12_frame->data(VideoFrame::kVPlane),
-                           rgb_data,
-                           yv12_frame->coded_size().width(),
-                           yv12_frame->coded_size().height(),
-                           yv12_frame->stride(VideoFrame::kYPlane),
-                           yv12_frame->stride(VideoFrame::kUPlane),
-                           bytes_per_row,
-                           media::YV12);
+  libyuv::I420ToARGB(yv12_frame->data(VideoFrame::kYPlane),
+                     yv12_frame->stride(VideoFrame::kYPlane),
+                     yv12_frame->data(VideoFrame::kUPlane),
+                     yv12_frame->stride(VideoFrame::kUPlane),
+                     yv12_frame->data(VideoFrame::kVPlane),
+                     yv12_frame->stride(VideoFrame::kVPlane), rgb_data,
+                     bytes_per_row, yv12_frame->coded_size().width(),
+                     yv12_frame->coded_size().height());
 
   for (int row = 0; row < yv12_frame->coded_size().height(); ++row) {
     uint32_t* rgb_row_data =
@@ -541,7 +540,7 @@ TEST(VideoFrameMetadata, SetAndThenGetAllKeysForAllTypes) {
     metadata.Clear();
 
     EXPECT_FALSE(metadata.HasKey(key));
-    metadata.SetValue(key, base::Value::CreateNullValue());
+    metadata.SetValue(key, base::MakeUnique<base::Value>());
     EXPECT_TRUE(metadata.HasKey(key));
     const base::Value* const null_value = metadata.GetValue(key);
     EXPECT_TRUE(null_value);

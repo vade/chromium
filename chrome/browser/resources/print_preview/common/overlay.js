@@ -7,31 +7,21 @@ cr.define('print_preview', function() {
 
   /**
    * Modal dialog base component.
-   * @param {!print_preview.MetricsContext} metricsContext Metrics
-   *     context to record usage statistics.
    * @constructor
    * @extends {print_preview.Component}
    */
-  function Overlay(metricsContext) {
+  function Overlay() {
     print_preview.Component.call(this);
-
-    /** @private {!print_preview.MetricsContext} */
-    this.metricsContext_ = metricsContext;
-  };
+  }
 
   Overlay.prototype = {
     __proto__: print_preview.Component.prototype,
-
-    /** @return {!print_preview.MetricsContext} */
-    get metricsContext() {
-      return this.metricsContext_;
-    },
 
     /** @override */
     enterDocument: function() {
       print_preview.Component.prototype.enterDocument.call(this);
 
-      this.getElement().addEventListener('webkitTransitionEnd', function f(e) {
+      this.getElement().addEventListener('transitionend', function f(e) {
         if (e.target == e.currentTarget && e.propertyName == 'opacity' &&
             e.target.classList.contains('transparent')) {
           setIsVisible(e.target, false);
@@ -67,7 +57,7 @@ cr.define('print_preview', function() {
           this.getElement(), 'click', this.onOverlayClick_.bind(this));
       this.tracker.add(
           this.getChildElement('.page'),
-          'webkitAnimationEnd',
+          'animationend',
           this.onAnimationEnd_.bind(this));
     },
 

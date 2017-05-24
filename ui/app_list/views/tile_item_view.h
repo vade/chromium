@@ -49,10 +49,11 @@ class APP_LIST_EXPORT TileItemView : public views::CustomButton,
   void SetHoverStyle(HoverStyle hover_style);
 
   // Overridden from views::CustomButton:
-  void StateChanged() override;
+  void StateChanged(ButtonState old_state) override;
 
   // Overridden from views::View:
   void Layout() override;
+  const char* GetClassName() const override;
 
   // Overridden from ImageShadowAnimator::Delegate:
   void ImageShadowAnimationProgressed(ImageShadowAnimator* animator) override;

@@ -9,37 +9,22 @@
         {
           "object": "LayoutBlockFlow P",
           "rect": [24, 991, 737, 21],
-          "reason": "forced by layout"
+          "reason": "geometry"
         },
         {
           "object": "LayoutText #text",
-          "rect": [177, 992, 202, 20],
-          "reason": "forced by layout"
+          "rect": [177, 991, 202, 22],
+          "reason": "geometry"
         },
         {
           "object": "LayoutText #text",
-          "rect": [432, 992, 176, 20],
-          "reason": "forced by layout"
+          "rect": [432, 991, 176, 22],
+          "reason": "geometry"
         },
         {
           "object": "LayoutInline A",
           "rect": [378, 987, 55, 29],
           "reason": "style change"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [383, 992, 45, 19],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [427, 992, 6, 19],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [378, 992, 6, 19],
-          "reason": "forced by layout"
         }
       ]
     }
@@ -47,27 +32,27 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutBlockFlow P",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "RootInlineBox",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutText #text",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'pservers-pattern-01-b \u2190'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutText #text",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox '\n'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutInline A",
@@ -79,27 +64,27 @@
     },
     {
       "object": "LayoutText #text",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'index'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutText #text",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox '\n'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutText #text",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox '\u2192 script-handle-01-b'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     }
   ]
 }

@@ -4,17 +4,37 @@
 {% macro expand_sourceset(variables, prefix) %}
 {% if variables is defined %}
         {{ prefix }} {
+{% if variables.android_manifest is defined %}
             manifest.srcFile "{{ variables.android_manifest }}"
+{% endif %}
+{% if variables.java_dirs is defined %}
             java.srcDirs = [
 {% for path in variables.java_dirs %}
                 "{{ path }}",
 {% endfor %}
             ]
+{% endif %}
+{% if variables.java_excludes is defined %}
+            java.filter.exclude(
+{% for path in variables.java_excludes %}
+                "{{ path }}",
+{% endfor %}
+            )
+{% endif %}
+{% if variables.jni_libs is defined %}
             jniLibs.srcDirs = [
 {% for path in variables.jni_libs %}
                 "{{ path }}",
 {% endfor %}
             ]
+{% endif %}
+{% if variables.res_dirs is defined %}
+            res.srcDirs = [
+{% for path in variables.res_dirs %}
+                "{{ path }}",
+{% endfor %}
+            ]
+{% endif %}
         }
 {% endif %}
 {% endmacro %}
@@ -27,9 +47,11 @@ apply plugin: "com.android.application"
 {% endif %}
 
 android {
-    compileSdkVersion {{ compile_sdk_version }}
+    compileSdkVersion "{{ compile_sdk_version }}"
     buildToolsVersion "{{ build_tools_version }}"
     publishNonDefault true
+    // Multiple targets use the package name "org.dummy"
+    enforceUniquePackageName false
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_7
@@ -67,9 +89,9 @@ afterEvaluate {
     def tasksToDisable = tasks.findAll {
         return (it.name.equals('generateDebugSources')  // causes unwanted AndroidManifest.java
                 || it.name.equals('generateReleaseSources')
-                || it.name.endsWith('Assets')
                 || it.name.endsWith('BuildConfig')  // causes unwanted BuildConfig.java
 {% if not use_gradle_process_resources %}
+                || it.name.endsWith('Assets')
                 || it.name.endsWith('Resources')
                 || it.name.endsWith('ResValues')
 {% endif %}
@@ -80,4 +102,9 @@ afterEvaluate {
     tasksToDisable.each { Task task ->
       task.enabled = false
     }
+{% if bootclasspath is defined %}
+    tasks.withType(JavaCompile) {
+      options.bootClasspath = "{{ bootclasspath }}"
+    }
+{% endif %}
 }

@@ -10,13 +10,14 @@
 #include <vector>
 
 #include "base/strings/string16.h"
-#include "content/browser/accessibility/ax_tree_id_registry.h"
-#include "content/browser/accessibility/browser_accessibility.h"
 #include "ui/accessibility/ax_position.h"
+#include "ui/accessibility/ax_tree_id_registry.h"
 
 namespace content {
 
-using AXTreeID = content::AXTreeIDRegistry::AXTreeID;
+class BrowserAccessibility;
+
+using AXTreeID = ui::AXTreeIDRegistry::AXTreeID;
 
 class AXPlatformPosition
     : public ui::AXPosition<AXPlatformPosition, BrowserAccessibility> {
@@ -39,6 +40,7 @@ class AXPlatformPosition
   BrowserAccessibility* GetNodeInTree(AXTreeID tree_id,
                                       int32_t node_id) const override;
   int MaxTextOffset() const override;
+  int MaxTextOffsetInParent() const override;
   bool IsInLineBreak() const override;
   std::vector<int32_t> GetWordStartOffsets() const override;
   std::vector<int32_t> GetWordEndOffsets() const override;

@@ -9,14 +9,14 @@
 
 #include "net/quic/platform/api/quic_logging.h"
 #include "net/quic/platform/api/quic_map_util.h"
+#include "net/quic/platform/api/quic_string_piece.h"
 #include "net/quic/platform/api/quic_text_utils.h"
 #include "net/quic/platform/api/quic_url_utils.h"
-#include "net/spdy/spdy_flags.h"
-#include "net/spdy/spdy_frame_builder.h"
-#include "net/spdy/spdy_framer.h"
-#include "net/spdy/spdy_protocol.h"
+#include "net/spdy/chromium/spdy_flags.h"
+#include "net/spdy/core/spdy_frame_builder.h"
+#include "net/spdy/core/spdy_framer.h"
+#include "net/spdy/core/spdy_protocol.h"
 
-using base::StringPiece;
 using std::string;
 
 namespace net {
@@ -32,24 +32,6 @@ string SpdyUtils::SerializeUncompressedHeaders(const SpdyHeaderBlock& headers) {
 }
 
 // static
-bool SpdyUtils::ParseHeaders(const char* data,
-                             uint32_t data_len,
-                             int64_t* content_length,
-                             SpdyHeaderBlock* headers) {
-  SpdyFramer framer(SpdyFramer::ENABLE_COMPRESSION);
-  if (!framer.ParseHeaderBlockInBuffer(data, data_len, headers) ||
-      headers->empty()) {
-    return false;  // Headers were invalid.
-  }
-
-  if (!QuicContainsKey(*headers, "content-length")) {
-    return true;
-  }
-
-  return ExtractContentLengthFromHeaders(content_length, headers);
-}
-
-// static
 bool SpdyUtils::ExtractContentLengthFromHeaders(int64_t* content_length,
                                                 SpdyHeaderBlock* headers) {
   auto it = headers->find("content-length");
@@ -57,12 +39,12 @@ bool SpdyUtils::ExtractContentLengthFromHeaders(int64_t* content_length,
     return false;
   } else {
     // Check whether multiple values are consistent.
-    StringPiece content_length_header = it->second;
-    std::vector<StringPiece> values =
+    QuicStringPiece content_length_header = it->second;
+    std::vector<QuicStringPiece> values =
         QuicTextUtils::Split(content_length_header, '\0');
-    for (const StringPiece& value : values) {
-      int64_t new_value;
-      if (!base::StringToInt64(value, &new_value) || new_value < 0) {
+    for (const QuicStringPiece& value : values) {
+      uint64_t new_value;
+      if (!QuicTextUtils::StringToUint64(value, &new_value)) {
         QUIC_DLOG(ERROR)
             << "Content length was either unparseable or negative.";
         return false;
@@ -71,7 +53,7 @@ bool SpdyUtils::ExtractContentLengthFromHeaders(int64_t* content_length,
         *content_length = new_value;
         continue;
       }
-      if (new_value != *content_length) {
+      if (new_value != static_cast<uint64_t>(*content_length)) {
         QUIC_DLOG(ERROR)
             << "Parsed content length " << new_value << " is "
             << "inconsistent with previously detected content length "
@@ -83,54 +65,13 @@ bool SpdyUtils::ExtractContentLengthFromHeaders(int64_t* content_length,
   }
 }
 
-// static
-bool SpdyUtils::ParseTrailers(const char* data,
-                              uint32_t data_len,
-                              size_t* final_byte_offset,
-                              SpdyHeaderBlock* trailers) {
-  SpdyFramer framer(SpdyFramer::ENABLE_COMPRESSION);
-  if (!framer.ParseHeaderBlockInBuffer(data, data_len, trailers) ||
-      trailers->empty()) {
-    QUIC_DVLOG(1) << "Request Trailers are invalid.";
-    return false;  // Trailers were invalid.
-  }
-
-  // Pull out the final offset pseudo header which indicates the number of
-  // response body bytes expected.
-  auto it = trailers->find(kFinalOffsetHeaderKey);
-  if (it == trailers->end() ||
-      !base::StringToSizeT(it->second, final_byte_offset)) {
-    QUIC_DVLOG(1) << "Required key '" << kFinalOffsetHeaderKey
-                  << "' not present";
-    return false;
-  }
-  // The final offset header is no longer needed.
-  trailers->erase(it->first);
-
-  // Trailers must not have empty keys, and must not contain pseudo headers.
-  for (const auto& trailer : *trailers) {
-    StringPiece key = trailer.first;
-    StringPiece value = trailer.second;
-    if (QuicTextUtils::StartsWith(key, ":")) {
-      QUIC_DVLOG(1) << "Trailers must not contain pseudo-header: '" << key
-                    << "','" << value << "'.";
-      return false;
-    }
-
-    // TODO(rjshade): Check for other forbidden keys, following the HTTP/2 spec.
-  }
-
-  QUIC_DVLOG(1) << "Successfully parsed Trailers.";
-  return true;
-}
-
 bool SpdyUtils::CopyAndValidateHeaders(const QuicHeaderList& header_list,
                                        int64_t* content_length,
                                        SpdyHeaderBlock* headers) {
   for (const auto& p : header_list) {
     const string& name = p.first;
     if (name.empty()) {
-      QUIC_DVLOG(1) << "Header name must not be empty.";
+      QUIC_DLOG(ERROR) << "Header name must not be empty.";
       return false;
     }
 
@@ -161,29 +102,28 @@ bool SpdyUtils::CopyAndValidateTrailers(const QuicHeaderList& header_list,
 
     // Pull out the final offset pseudo header which indicates the number of
     // response body bytes expected.
-    int offset;
     if (!found_final_byte_offset && name == kFinalOffsetHeaderKey &&
-        base::StringToInt(p.second, &offset)) {
-      *final_byte_offset = offset;
+        QuicTextUtils::StringToSizeT(p.second, final_byte_offset)) {
       found_final_byte_offset = true;
       continue;
     }
 
     if (name.empty() || name[0] == ':') {
-      QUIC_DVLOG(1)
+      QUIC_DLOG(ERROR)
           << "Trailers must not be empty, and must not contain pseudo-"
           << "headers. Found: '" << name << "'";
       return false;
     }
 
     if (QuicTextUtils::ContainsUpperCase(name)) {
-      QUIC_DLOG(INFO) << "Malformed header: Header name " << name
-                      << " contains upper-case characters.";
+      QUIC_DLOG(ERROR) << "Malformed header: Header name " << name
+                       << " contains upper-case characters.";
       return false;
     }
 
     if (trailers->find(name) != trailers->end()) {
-      QUIC_DLOG(INFO) << "Duplicate header '" << name << "' found in trailers.";
+      QUIC_DLOG(ERROR) << "Duplicate header '" << name
+                       << "' found in trailers.";
       return false;
     }
 
@@ -191,8 +131,8 @@ bool SpdyUtils::CopyAndValidateTrailers(const QuicHeaderList& header_list,
   }
 
   if (!found_final_byte_offset) {
-    QUIC_DVLOG(1) << "Required key '" << kFinalOffsetHeaderKey
-                  << "' not present";
+    QUIC_DLOG(ERROR) << "Required key '" << kFinalOffsetHeaderKey
+                     << "' not present";
     return false;
   }
 

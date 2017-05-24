@@ -18,7 +18,6 @@
 #include "chromecast/media/cma/base/decoder_buffer_adapter.h"
 #include "chromecast/media/cma/base/decoder_buffer_base.h"
 #include "chromecast/public/media/cast_decoder_buffer.h"
-#include "media/base/audio_buffer.h"
 #include "media/base/audio_bus.h"
 #include "media/base/channel_layout.h"
 #include "media/base/decoder_buffer.h"
@@ -72,6 +71,7 @@ AudioDecoderAlsa::AudioDecoderAlsa(MediaPipelineBackendAlsa* backend)
       current_pts_(kInvalidTimestamp),
       pending_output_frames_(kNoPendingOutput),
       volume_multiplier_(1.0f),
+      pool_(new ::media::AudioBufferMemoryPool()),
       weak_factory_(this) {
   TRACE_FUNCTION_ENTRY0();
   DCHECK(backend_);
@@ -109,7 +109,8 @@ bool AudioDecoderAlsa::Start(int64_t start_pts) {
   current_pts_ = start_pts;
   DCHECK(IsValidConfig(config_));
   mixer_input_.reset(new StreamMixerAlsaInput(
-      this, config_.samples_per_second, backend_->Primary()));
+      this, config_.samples_per_second, backend_->Primary(),
+      backend_->DeviceId(), backend_->ContentType()));
   mixer_input_->SetVolumeMultiplier(volume_multiplier_);
   // Create decoder_ if necessary. This can happen if Stop() was called, and
   // SetConfig() was not called since then.
@@ -153,10 +154,18 @@ bool AudioDecoderAlsa::SetPlaybackRate(float rate) {
   }
   LOG(INFO) << "SetPlaybackRate to " << rate;
 
-  while (!rate_shifter_info_.empty() &&
-         rate_shifter_info_.back().input_frames == 0) {
-    rate_shifter_info_.pop_back();
+  // Remove info for rates that have no pending output left.
+  while (!rate_shifter_info_.empty()) {
+    RateShifterInfo* rate_info = &rate_shifter_info_.back();
+    int64_t possible_output_frames = rate_info->input_frames / rate_info->rate;
+    DCHECK_GE(possible_output_frames, rate_info->output_frames);
+    if (rate_info->output_frames == possible_output_frames) {
+      rate_shifter_info_.pop_back();
+    } else {
+      break;
+    }
   }
+
   rate_shifter_info_.push_back(RateShifterInfo(rate));
   return true;
 }
@@ -230,7 +239,8 @@ bool AudioDecoderAlsa::SetConfig(const AudioConfig& config) {
     // is updated.
     mixer_input_.reset();
     mixer_input_.reset(new StreamMixerAlsaInput(
-        this, config.samples_per_second, backend_->Primary()));
+        this, config.samples_per_second, backend_->Primary(),
+        backend_->DeviceId(), backend_->ContentType()));
     mixer_input_->SetVolumeMultiplier(volume_multiplier_);
     pending_output_frames_ = kNoPendingOutput;
   }
@@ -270,10 +280,13 @@ void AudioDecoderAlsa::CreateRateShifter(int samples_per_second) {
   rate_shifter_info_.push_back(RateShifterInfo(1.0f));
 
   rate_shifter_.reset(new ::media::AudioRendererAlgorithm());
-  rate_shifter_->Initialize(::media::AudioParameters(
-      ::media::AudioParameters::AUDIO_PCM_LINEAR,
-      ::media::CHANNEL_LAYOUT_STEREO, samples_per_second, kBitsPerSample,
-      kDefaultFramesPerBuffer));
+  bool is_encrypted = false;
+  rate_shifter_->Initialize(
+      ::media::AudioParameters(::media::AudioParameters::AUDIO_PCM_LINEAR,
+                               ::media::CHANNEL_LAYOUT_STEREO,
+                               samples_per_second, kBitsPerSample,
+                               kDefaultFramesPerBuffer),
+      is_encrypted);
 }
 
 bool AudioDecoderAlsa::SetVolume(float multiplier) {
@@ -351,7 +364,8 @@ void AudioDecoderAlsa::OnBufferDecoded(
     // Bypass rate shifter if the rate is 1.0, and there are no frames queued
     // in the rate shifter.
     if (rate_info->rate == 1.0 && rate_shifter_->frames_buffered() == 0 &&
-        pending_output_frames_ == kNoPendingOutput) {
+        pending_output_frames_ == kNoPendingOutput &&
+        rate_shifter_info_.size() == 1) {
       DCHECK_EQ(rate_info->output_frames, rate_info->input_frames);
       pending_output_frames_ = input_frames;
       if (got_eos_) {
@@ -369,7 +383,7 @@ void AudioDecoderAlsa::OnBufferDecoded(
     scoped_refptr<::media::AudioBuffer> buffer = ::media::AudioBuffer::CopyFrom(
         ::media::kSampleFormatPlanarF32, ::media::CHANNEL_LAYOUT_STEREO,
         kNumChannels, config_.samples_per_second, input_frames, channels,
-        base::TimeDelta());
+        base::TimeDelta(), pool_);
     rate_shifter_->EnqueueBuffer(buffer);
     rate_shifter_info_.back().input_frames += input_frames;
   }
@@ -463,7 +477,7 @@ void AudioDecoderAlsa::PushRateShifted() {
   mixer_input_->WritePcm(output_buffer);
 
   if (rate_shifter_info_.size() > 1 &&
-      possible_output_frames == rate_info->output_frames) {
+      rate_info->output_frames == possible_output_frames) {
     double remaining_input_frames =
         rate_info->input_frames - (rate_info->output_frames * rate_info->rate);
     rate_shifter_info_.pop_front();

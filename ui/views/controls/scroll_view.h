@@ -17,6 +17,8 @@ class ScrollOffset;
 }
 
 namespace views {
+class ViewObserverTest;
+
 namespace test {
 class ScrollViewTestApi;
 }
@@ -45,6 +47,10 @@ class VIEWS_EXPORT ScrollView : public View, public ScrollBarController {
 
   // Creates a ScrollView with a theme specific border.
   static ScrollView* CreateScrollViewWithBorder();
+
+  // Returns the ScrollView for which |contents| is its contents, or null if
+  // |contents| is not in a ScrollView.
+  static ScrollView* GetScrollViewForContents(View* contents);
 
   // Set the contents. Any previous contents will be deleted. The contents
   // is the view that needs to scroll.
@@ -88,8 +94,8 @@ class VIEWS_EXPORT ScrollView : public View, public ScrollBarController {
   void SetHorizontalScrollBar(ScrollBar* horiz_sb);
   void SetVerticalScrollBar(ScrollBar* vert_sb);
 
-  // Sets whether this ScrollView has a focus ring or not.
-  void SetHasFocusRing(bool has_focus_ring);
+  // Sets whether this ScrollView has a focus indicator or not.
+  void SetHasFocusIndicator(bool has_focus_indicator);
 
   // View overrides:
   gfx::Size GetPreferredSize() const override;
@@ -100,6 +106,10 @@ class VIEWS_EXPORT ScrollView : public View, public ScrollBarController {
   void OnScrollEvent(ui::ScrollEvent* event) override;
   void OnGestureEvent(ui::GestureEvent* event) override;
   const char* GetClassName() const override;
+  void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
+  void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) override;
+  void OnChildLayerChanged(View* child) override;
 
   // ScrollBarController overrides:
   void ScrollToPosition(ScrollBar* source, int position) override;
@@ -113,6 +123,7 @@ class VIEWS_EXPORT ScrollView : public View, public ScrollBarController {
 
  private:
   friend class test::ScrollViewTestApi;
+  FRIEND_TEST_ALL_PREFIXES(ViewObserverTest, ScrollViewChildAddLayerTest);
 
   class Viewport;
 
@@ -149,10 +160,18 @@ class VIEWS_EXPORT ScrollView : public View, public ScrollBarController {
   bool ScrollsWithLayers() const;
 
   // Callback entrypoint when hosted Layers are scrolled by the Compositor.
-  void OnLayerScrolled();
+  void OnLayerScrolled(const gfx::ScrollOffset& offset);
 
   // Horizontally scrolls the header (if any) to match the contents.
   void ScrollHeader();
+
+  void AddBorder();
+  void UpdateBorder();
+
+  // Enables view port layering if |child| or any of its descendants has a
+  // layer. Returns true if yes. We short circuit the recursion if we enabled
+  // layering.
+  bool EnableLayeringRecursivelyForChild(View* child);
 
   // The current contents and its viewport. |contents_| is contained in
   // |contents_viewport_|.
@@ -186,8 +205,21 @@ class VIEWS_EXPORT ScrollView : public View, public ScrollBarController {
   // than the viewport).
   bool hide_horizontal_scrollbar_;
 
+  // In Harmony, the indicator is a focus ring. Pre-Harmony, the indicator is a
+  // different border painter.
+  bool draw_focus_indicator_ = false;
+
+  // Only needed for pre-Harmony. Remove when Harmony is default.
+  bool draw_border_ = false;
+
   // Focus ring, if one is installed.
   View* focus_ring_ = nullptr;
+
+  // Set to true if we enabled layering for the viewport.
+  bool viewport_layer_enabled_ = false;
+
+  // Set to true if the scroll with layers feature is enabled.
+  const bool scroll_with_layers_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(ScrollView);
 };

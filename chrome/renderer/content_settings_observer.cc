@@ -11,6 +11,7 @@
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
 #include "extensions/features/features.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "third_party/WebKit/public/platform/URLConversion.h"
 #include "third_party/WebKit/public/platform/WebContentSettingCallbacks.h"
 #include "third_party/WebKit/public/platform/WebSecurityOrigin.h"
@@ -46,14 +47,14 @@ using content::NavigationState;
 namespace {
 
 GURL GetOriginOrURL(const WebFrame* frame) {
-  url::Origin top_origin = url::Origin(frame->top()->getSecurityOrigin());
+  url::Origin top_origin = url::Origin(frame->Top()->GetSecurityOrigin());
   // The |top_origin| is unique ("null") e.g., for file:// URLs. Use the
   // document URL as the primary URL in those cases.
   // TODO(alexmos): This is broken for --site-per-process, since top() can be a
   // WebRemoteFrame which does not have a document(), and the WebRemoteFrame's
   // URL is not replicated.  See https://crbug.com/628759.
-  if (top_origin.unique() && frame->top()->isWebLocalFrame())
-    return frame->top()->document().url();
+  if (top_origin.unique() && frame->Top()->IsWebLocalFrame())
+    return frame->Top()->GetDocument().Url();
   return top_origin.GetURL();
 }
 
@@ -102,7 +103,11 @@ ContentSettingsObserver::ContentSettingsObserver(
       current_request_id_(0),
       should_whitelist_(should_whitelist) {
   ClearBlockedContentSettings();
-  render_frame->GetWebFrame()->setContentSettingsClient(this);
+  render_frame->GetWebFrame()->SetContentSettingsClient(this);
+
+  render_frame->GetInterfaceRegistry()->AddInterface(
+      base::Bind(&ContentSettingsObserver::OnInsecureContentRendererRequest,
+                 base::Unretained(this)));
 
   content::RenderFrame* main_frame =
       render_frame->GetRenderView()->GetMainRenderFrame();
@@ -158,9 +163,6 @@ bool ContentSettingsObserver::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ContentSettingsObserver, message)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetAsInterstitial, OnSetAsInterstitial)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SetAllowRunningInsecureContent,
-                        OnSetAllowRunningInsecureContent)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_ReloadFrame, OnReloadFrame);
     IPC_MESSAGE_HANDLER(ChromeViewMsg_RequestFileSystemAccessAsyncResponse,
                         OnRequestFileSystemAccessAsyncResponse)
     IPC_MESSAGE_UNHANDLED(handled = false)
@@ -179,12 +181,12 @@ bool ContentSettingsObserver::OnMessageReceived(const IPC::Message& message) {
 
 void ContentSettingsObserver::DidCommitProvisionalLoad(
     bool is_new_navigation,
-    bool is_same_page_navigation) {
+    bool is_same_document_navigation) {
   WebFrame* frame = render_frame()->GetWebFrame();
-  if (frame->parent())
+  if (frame->Parent())
     return;  // Not a top-level navigation.
 
-  if (!is_same_page_navigation) {
+  if (!is_same_document_navigation) {
     // Clear "block" flags for the new page. This needs to happen before any of
     // |allowScript()|, |allowScriptFromSource()|, |allowImage()|, or
     // |allowPlugins()| is called for the new page so that these functions can
@@ -194,10 +196,10 @@ void ContentSettingsObserver::DidCommitProvisionalLoad(
     temporarily_allowed_plugins_.clear();
   }
 
-  GURL url = frame->document().url();
+  GURL url = frame->GetDocument().Url();
   // If we start failing this DCHECK, please makes sure we don't regress
   // this bug: http://code.google.com/p/chromium/issues/detail?id=79304
-  DCHECK(frame->document().getSecurityOrigin().toString() == "null" ||
+  DCHECK(frame->GetDocument().GetSecurityOrigin().ToString() == "null" ||
          !url.SchemeIs(url::kDataScheme));
 }
 
@@ -205,29 +207,44 @@ void ContentSettingsObserver::OnDestruct() {
   delete this;
 }
 
-bool ContentSettingsObserver::allowDatabase(const WebString& name,
+void ContentSettingsObserver::SetAllowRunningInsecureContent() {
+  allow_running_insecure_content_ = true;
+
+  // Reload if we are the main frame.
+  blink::WebLocalFrame* frame = render_frame()->GetWebFrame();
+  if (!frame->Parent())
+    frame->Reload(blink::WebFrameLoadType::kReload);
+}
+
+void ContentSettingsObserver::OnInsecureContentRendererRequest(
+    const service_manager::BindSourceInfo& source_info,
+    chrome::mojom::InsecureContentRendererRequest request) {
+  insecure_content_renderer_bindings_.AddBinding(this, std::move(request));
+}
+
+bool ContentSettingsObserver::AllowDatabase(const WebString& name,
                                             const WebString& display_name,
                                             unsigned estimated_size) {
   WebFrame* frame = render_frame()->GetWebFrame();
-  if (frame->getSecurityOrigin().isUnique() ||
-      frame->top()->getSecurityOrigin().isUnique())
+  if (frame->GetSecurityOrigin().IsUnique() ||
+      frame->Top()->GetSecurityOrigin().IsUnique())
     return false;
 
   bool result = false;
   Send(new ChromeViewHostMsg_AllowDatabase(
-      routing_id(), url::Origin(frame->getSecurityOrigin()).GetURL(),
-      url::Origin(frame->top()->getSecurityOrigin()).GetURL(), name.utf16(),
-      display_name.utf16(), &result));
+      routing_id(), url::Origin(frame->GetSecurityOrigin()).GetURL(),
+      url::Origin(frame->Top()->GetSecurityOrigin()).GetURL(), name.Utf16(),
+      display_name.Utf16(), &result));
   return result;
 }
 
-void ContentSettingsObserver::requestFileSystemAccessAsync(
+void ContentSettingsObserver::RequestFileSystemAccessAsync(
     const WebContentSettingCallbacks& callbacks) {
   WebFrame* frame = render_frame()->GetWebFrame();
-  if (frame->getSecurityOrigin().isUnique() ||
-      frame->top()->getSecurityOrigin().isUnique()) {
+  if (frame->GetSecurityOrigin().IsUnique() ||
+      frame->Top()->GetSecurityOrigin().IsUnique()) {
     WebContentSettingCallbacks permissionCallbacks(callbacks);
-    permissionCallbacks.doDeny();
+    permissionCallbacks.DoDeny();
     return;
   }
   ++current_request_id_;
@@ -240,11 +257,11 @@ void ContentSettingsObserver::requestFileSystemAccessAsync(
 
   Send(new ChromeViewHostMsg_RequestFileSystemAccessAsync(
       routing_id(), current_request_id_,
-      url::Origin(frame->getSecurityOrigin()).GetURL(),
-      url::Origin(frame->top()->getSecurityOrigin()).GetURL()));
+      url::Origin(frame->GetSecurityOrigin()).GetURL(),
+      url::Origin(frame->Top()->GetSecurityOrigin()).GetURL()));
 }
 
-bool ContentSettingsObserver::allowImage(bool enabled_per_settings,
+bool ContentSettingsObserver::AllowImage(bool enabled_per_settings,
                                          const WebURL& image_url) {
   bool allow = enabled_per_settings;
   if (enabled_per_settings) {
@@ -265,26 +282,26 @@ bool ContentSettingsObserver::allowImage(bool enabled_per_settings,
   return allow;
 }
 
-bool ContentSettingsObserver::allowIndexedDB(const WebString& name,
+bool ContentSettingsObserver::AllowIndexedDB(const WebString& name,
                                              const WebSecurityOrigin& origin) {
   WebFrame* frame = render_frame()->GetWebFrame();
-  if (frame->getSecurityOrigin().isUnique() ||
-      frame->top()->getSecurityOrigin().isUnique())
+  if (frame->GetSecurityOrigin().IsUnique() ||
+      frame->Top()->GetSecurityOrigin().IsUnique())
     return false;
 
   bool result = false;
   Send(new ChromeViewHostMsg_AllowIndexedDB(
-      routing_id(), url::Origin(frame->getSecurityOrigin()).GetURL(),
-      url::Origin(frame->top()->getSecurityOrigin()).GetURL(), name.utf16(),
+      routing_id(), url::Origin(frame->GetSecurityOrigin()).GetURL(),
+      url::Origin(frame->Top()->GetSecurityOrigin()).GetURL(), name.Utf16(),
       &result));
   return result;
 }
 
-bool ContentSettingsObserver::allowPlugins(bool enabled_per_settings) {
+bool ContentSettingsObserver::AllowPlugins(bool enabled_per_settings) {
   return enabled_per_settings;
 }
 
-bool ContentSettingsObserver::allowScript(bool enabled_per_settings) {
+bool ContentSettingsObserver::AllowScript(bool enabled_per_settings) {
   if (!enabled_per_settings)
     return false;
   if (is_interstitial_page_)
@@ -302,7 +319,7 @@ bool ContentSettingsObserver::allowScript(bool enabled_per_settings) {
   if (content_setting_rules_) {
     ContentSetting setting = GetContentSettingFromRules(
         content_setting_rules_->script_rules, frame,
-        url::Origin(frame->document().getSecurityOrigin()).GetURL());
+        url::Origin(frame->GetDocument().GetSecurityOrigin()).GetURL());
     allow = setting != CONTENT_SETTING_BLOCK;
   }
   allow = allow || IsWhitelistedForContentSettings();
@@ -311,7 +328,7 @@ bool ContentSettingsObserver::allowScript(bool enabled_per_settings) {
   return allow;
 }
 
-bool ContentSettingsObserver::allowScriptFromSource(
+bool ContentSettingsObserver::AllowScriptFromSource(
     bool enabled_per_settings,
     const blink::WebURL& script_url) {
   if (!enabled_per_settings)
@@ -329,27 +346,27 @@ bool ContentSettingsObserver::allowScriptFromSource(
   return allow || IsWhitelistedForContentSettings();
 }
 
-bool ContentSettingsObserver::allowStorage(bool local) {
+bool ContentSettingsObserver::AllowStorage(bool local) {
   WebFrame* frame = render_frame()->GetWebFrame();
-  if (frame->getSecurityOrigin().isUnique() ||
-      frame->top()->getSecurityOrigin().isUnique())
+  if (frame->GetSecurityOrigin().IsUnique() ||
+      frame->Top()->GetSecurityOrigin().IsUnique())
     return false;
 
   StoragePermissionsKey key(
-      url::Origin(frame->document().getSecurityOrigin()).GetURL(), local);
+      url::Origin(frame->GetDocument().GetSecurityOrigin()).GetURL(), local);
   const auto permissions = cached_storage_permissions_.find(key);
   if (permissions != cached_storage_permissions_.end())
     return permissions->second;
 
   bool result = false;
   Send(new ChromeViewHostMsg_AllowDOMStorage(
-      routing_id(), url::Origin(frame->getSecurityOrigin()).GetURL(),
-      url::Origin(frame->top()->getSecurityOrigin()).GetURL(), local, &result));
+      routing_id(), url::Origin(frame->GetSecurityOrigin()).GetURL(),
+      url::Origin(frame->Top()->GetSecurityOrigin()).GetURL(), local, &result));
   cached_storage_permissions_[key] = result;
   return result;
 }
 
-bool ContentSettingsObserver::allowReadFromClipboard(bool default_value) {
+bool ContentSettingsObserver::AllowReadFromClipboard(bool default_value) {
   bool allowed = default_value;
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   extensions::ScriptContext* current_context =
@@ -362,7 +379,7 @@ bool ContentSettingsObserver::allowReadFromClipboard(bool default_value) {
   return allowed;
 }
 
-bool ContentSettingsObserver::allowWriteToClipboard(bool default_value) {
+bool ContentSettingsObserver::AllowWriteToClipboard(bool default_value) {
   bool allowed = default_value;
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   // All blessed extension pages could historically write to the clipboard, so
@@ -382,14 +399,16 @@ bool ContentSettingsObserver::allowWriteToClipboard(bool default_value) {
   return allowed;
 }
 
-bool ContentSettingsObserver::allowMutationEvents(bool default_value) {
+bool ContentSettingsObserver::AllowMutationEvents(bool default_value) {
   return IsPlatformApp() ? false : default_value;
 }
 
-bool ContentSettingsObserver::allowRunningInsecureContent(
+bool ContentSettingsObserver::AllowRunningInsecureContent(
     bool allowed_per_settings,
     const blink::WebSecurityOrigin& origin,
     const blink::WebURL& resource_url) {
+  // Note: this implementation is a mirror of
+  // Browser::ShouldAllowRunningInsecureContent.
   FilteredReportInsecureContentRan(GURL(resource_url));
 
   if (!allow_running_insecure_content_ && !allowed_per_settings) {
@@ -400,28 +419,30 @@ bool ContentSettingsObserver::allowRunningInsecureContent(
   return true;
 }
 
-bool ContentSettingsObserver::allowAutoplay(bool default_value) {
+bool ContentSettingsObserver::AllowAutoplay(bool default_value) {
   if (!content_setting_rules_)
     return default_value;
 
   WebFrame* frame = render_frame()->GetWebFrame();
   return GetContentSettingFromRules(
              content_setting_rules_->autoplay_rules, frame,
-             url::Origin(frame->document().getSecurityOrigin()).GetURL()) ==
+             url::Origin(frame->GetDocument().GetSecurityOrigin()).GetURL()) ==
          CONTENT_SETTING_ALLOW;
 }
 
-void ContentSettingsObserver::passiveInsecureContentFound(
+void ContentSettingsObserver::PassiveInsecureContentFound(
     const blink::WebURL& resource_url) {
+  // Note: this implementation is a mirror of
+  // Browser::PassiveInsecureContentFound.
   ReportInsecureContent(SslInsecureContentType::DISPLAY);
   FilteredReportInsecureContentDisplayed(GURL(resource_url));
 }
 
-void ContentSettingsObserver::didNotAllowPlugins() {
+void ContentSettingsObserver::DidNotAllowPlugins() {
   DidBlockContentType(CONTENT_SETTINGS_TYPE_PLUGINS);
 }
 
-void ContentSettingsObserver::didNotAllowScript() {
+void ContentSettingsObserver::DidNotAllowScript() {
   DidBlockContentType(CONTENT_SETTINGS_TYPE_JAVASCRIPT);
 }
 
@@ -432,17 +453,6 @@ void ContentSettingsObserver::OnLoadBlockedPlugins(
 
 void ContentSettingsObserver::OnSetAsInterstitial() {
   is_interstitial_page_ = true;
-}
-
-void ContentSettingsObserver::OnSetAllowRunningInsecureContent(bool allow) {
-  allow_running_insecure_content_ = allow;
-}
-
-void ContentSettingsObserver::OnReloadFrame() {
-  DCHECK(!render_frame()->GetWebFrame()->parent()) <<
-      "Should only be called on the main frame";
-  render_frame()->GetWebFrame()->reload(
-      blink::WebFrameLoadType::ReloadMainResource);
 }
 
 void ContentSettingsObserver::OnRequestFileSystemAccessAsyncResponse(
@@ -456,10 +466,10 @@ void ContentSettingsObserver::OnRequestFileSystemAccessAsyncResponse(
   permission_requests_.erase(it);
 
   if (allowed) {
-    callbacks.doAllow();
+    callbacks.DoAllow();
     return;
   }
-  callbacks.doDeny();
+  callbacks.DoDeny();
 }
 
 void ContentSettingsObserver::ClearBlockedContentSettings() {
@@ -471,7 +481,7 @@ void ContentSettingsObserver::ClearBlockedContentSettings() {
 bool ContentSettingsObserver::IsPlatformApp() {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   WebFrame* frame = render_frame()->GetWebFrame();
-  WebSecurityOrigin origin = frame->document().getSecurityOrigin();
+  WebSecurityOrigin origin = frame->GetDocument().GetSecurityOrigin();
   const extensions::Extension* extension = GetExtension(origin);
   return extension && extension->is_platform_app();
 #else
@@ -482,10 +492,10 @@ bool ContentSettingsObserver::IsPlatformApp() {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 const extensions::Extension* ContentSettingsObserver::GetExtension(
     const WebSecurityOrigin& origin) const {
-  if (origin.protocol().ascii() != extensions::kExtensionScheme)
+  if (origin.Protocol().Ascii() != extensions::kExtensionScheme)
     return NULL;
 
-  const std::string extension_id = origin.host().utf8().data();
+  const std::string extension_id = origin.Host().Utf8().data();
   if (!extension_dispatcher_->IsExtensionActive(extension_id))
     return NULL;
 
@@ -502,21 +512,21 @@ bool ContentSettingsObserver::IsWhitelistedForContentSettings() const {
   if (render_frame()->IsFTPDirectoryListing())
     return true;
 
-  const WebDocument& document = render_frame()->GetWebFrame()->document();
-  return IsWhitelistedForContentSettings(document.getSecurityOrigin(),
-                                         document.url());
+  const WebDocument& document = render_frame()->GetWebFrame()->GetDocument();
+  return IsWhitelistedForContentSettings(document.GetSecurityOrigin(),
+                                         document.Url());
 }
 
 bool ContentSettingsObserver::IsWhitelistedForContentSettings(
     const WebSecurityOrigin& origin,
     const WebURL& document_url) {
-  if (document_url.string() == content::kUnreachableWebDataURL)
+  if (document_url.GetString() == content::kUnreachableWebDataURL)
     return true;
 
-  if (origin.isUnique())
+  if (origin.IsUnique())
     return false;  // Uninitialized document?
 
-  blink::WebString protocol = origin.protocol();
+  blink::WebString protocol = origin.Protocol();
 
   if (protocol == content::kChromeUIScheme)
     return true;  // Browser UI elements should still work.
@@ -532,7 +542,7 @@ bool ContentSettingsObserver::IsWhitelistedForContentSettings(
   // If the scheme is file:, an empty file name indicates a directory listing,
   // which requires JavaScript to function properly.
   if (protocol == url::kFileScheme &&
-      document_url.protocolIs(url::kFileScheme)) {
+      document_url.ProtocolIs(url::kFileScheme)) {
     return GURL(document_url).ExtractFileName().empty();
   }
   return false;

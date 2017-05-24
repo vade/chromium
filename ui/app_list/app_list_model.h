@@ -131,9 +131,6 @@ class APP_LIST_EXPORT AppListModel : public AppListItemListObserver {
   // has a single child left.
   void DeleteUninstalledItem(const std::string& id);
 
-  // Call OnExtensionPreferenceChanged() for all items in the model.
-  void NotifyExtensionPreferenceChanged();
-
   // Sets whether or not the folder UI should be enabled. If |folders_enabled|
   // is false, removes any non-OEM folders.
   void SetFoldersEnabled(bool folders_enabled);
@@ -168,6 +165,8 @@ class APP_LIST_EXPORT AppListModel : public AppListItemListObserver {
 
   void SetSearchEngineIsGoogle(bool is_google);
   bool search_engine_is_google() const { return search_engine_is_google_; }
+
+  void SetSearchAnswerAvailable(bool has_answer);
 
   // Filters the given |results| by |display_type|. The returned list is
   // truncated to |max_results|.

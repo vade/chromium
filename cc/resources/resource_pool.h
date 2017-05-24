@@ -16,7 +16,7 @@
 #include "base/memory/memory_coordinator_client.h"
 #include "base/memory/ptr_util.h"
 #include "base/trace_event/memory_dump_provider.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/resources/resource.h"
 #include "cc/resources/resource_format.h"
 #include "cc/resources/scoped_resource.h"
@@ -33,18 +33,22 @@ class CC_EXPORT ResourcePool : public base::trace_event::MemoryDumpProvider,
       ResourceProvider* resource_provider,
       base::SingleThreadTaskRunner* task_runner,
       gfx::BufferUsage usage,
-      const base::TimeDelta& expiration_delay) {
+      const base::TimeDelta& expiration_delay,
+      bool disallow_non_exact_reuse) {
     return base::WrapUnique(new ResourcePool(resource_provider, task_runner,
-                                             usage, expiration_delay));
+                                             usage, expiration_delay,
+                                             disallow_non_exact_reuse));
   }
 
   static std::unique_ptr<ResourcePool> Create(
       ResourceProvider* resource_provider,
       base::SingleThreadTaskRunner* task_runner,
       ResourceProvider::TextureHint hint,
-      const base::TimeDelta& expiration_delay) {
+      const base::TimeDelta& expiration_delay,
+      bool disallow_non_exact_reuse) {
     return base::WrapUnique(new ResourcePool(resource_provider, task_runner,
-                                             hint, expiration_delay));
+                                             hint, expiration_delay,
+                                             disallow_non_exact_reuse));
   }
 
   ~ResourcePool() override;
@@ -85,7 +89,7 @@ class CC_EXPORT ResourcePool : public base::trace_event::MemoryDumpProvider,
                     base::trace_event::ProcessMemoryDump* pmd) override;
 
   // Overriden from base::MemoryCoordinatorClient.
-  void OnMemoryStateChange(base::MemoryState state) override;
+  void OnPurgeMemory() override;
 
   size_t GetTotalMemoryUsageForTesting() const {
     return total_memory_usage_bytes_;
@@ -102,16 +106,19 @@ class CC_EXPORT ResourcePool : public base::trace_event::MemoryDumpProvider,
   ResourcePool(ResourceProvider* resource_provider,
                base::SingleThreadTaskRunner* task_runner,
                gfx::BufferUsage usage,
-               const base::TimeDelta& expiration_delay);
+               const base::TimeDelta& expiration_delay,
+               bool disallow_non_exact_reuse);
 
   // Constructor for creating standard resources.
   ResourcePool(ResourceProvider* resource_provider,
                base::SingleThreadTaskRunner* task_runner,
                ResourceProvider::TextureHint hint,
-               const base::TimeDelta& expiration_delay);
+               const base::TimeDelta& expiration_delay,
+               bool disallow_non_exact_reuse);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ResourcePoolTest, ReuseResource);
+  FRIEND_TEST_ALL_PREFIXES(ResourcePoolTest, ExactRequestsRespected);
   class PoolResource : public ScopedResource {
    public:
     static std::unique_ptr<PoolResource> Create(
@@ -186,6 +193,7 @@ class CC_EXPORT ResourcePool : public base::trace_event::MemoryDumpProvider,
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   bool evict_expired_resources_pending_ = false;
   const base::TimeDelta resource_expiration_delay_;
+  const bool disallow_non_exact_reuse_ = false;
 
   base::WeakPtrFactory<ResourcePool> weak_ptr_factory_;
 

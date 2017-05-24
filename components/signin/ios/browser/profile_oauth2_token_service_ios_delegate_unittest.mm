@@ -5,6 +5,7 @@
 #include "components/signin/ios/browser/profile_oauth2_token_service_ios_delegate.h"
 
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/testing_pref_service.h"
@@ -288,13 +289,12 @@ TEST_F(ProfileOAuth2TokenServiceIOSDelegateTest,
   base::RunLoop().RunUntilIdle();
 
   ResetObserverCounts();
-  GoogleServiceAuthError cancelled_error(
-      GoogleServiceAuthError::REQUEST_CANCELED);
-  oauth2_delegate_->UpdateAuthError(GetAccountId(account1), cancelled_error);
+  GoogleServiceAuthError error(GoogleServiceAuthError::SERVICE_ERROR);
+  oauth2_delegate_->UpdateAuthError(GetAccountId(account1), error);
   EXPECT_EQ(1, error_changed_count_);
 
   oauth2_delegate_->RevokeAllCredentials();
   ResetObserverCounts();
-  oauth2_delegate_->UpdateAuthError(GetAccountId(account1), cancelled_error);
+  oauth2_delegate_->UpdateAuthError(GetAccountId(account1), error);
   EXPECT_EQ(0, error_changed_count_);
 }

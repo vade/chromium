@@ -288,23 +288,25 @@ const CGFloat kAnimationDuration = 0.2;
 }
 
 - (NSPoint)bubblePointForDecoration:(LocationBarDecoration*)decoration {
-  NSPoint point;
-  if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
-    // Under MD, dialogs have no arrow and anchor to corner of the decoration
-    // frame, not a specific point within it. See http://crbug.com/566115.
-    BOOL isLeftDecoration;
-    const NSRect frame =
-        [[self cell] backgroundFrameForDecoration:decoration
-                                          inFrame:[self bounds]
-                                 isLeftDecoration:&isLeftDecoration];
-    point.y = NSMaxY(frame);
-    point.x = isLeftDecoration ? NSMinX(frame) : NSMaxX(frame);
-  } else {
-    const NSRect frame =
-        [[self cell] frameForDecoration:decoration inFrame:[self bounds]];
-    point = decoration->GetBubblePointInFrame(frame);
-  }
+  if (!ui::MaterialDesignController::IsSecondaryUiMaterial())
+    return [self arrowAnchorPointForDecoration:decoration];
 
+  // Under MD, dialogs have no arrow and anchor to corner of the decoration
+  // frame, not a specific point within it. See http://crbug.com/566115.
+  BOOL isLeftDecoration;
+  const NSRect frame =
+      [[self cell] backgroundFrameForDecoration:decoration
+                                        inFrame:[self bounds]
+                               isLeftDecoration:&isLeftDecoration];
+  NSPoint point = NSMakePoint(isLeftDecoration ? NSMinX(frame) : NSMaxX(frame),
+                              NSMaxY(frame));
+  return [self convertPoint:point toView:nil];
+}
+
+- (NSPoint)arrowAnchorPointForDecoration:(LocationBarDecoration*)decoration {
+  const NSRect frame =
+      [[self cell] frameForDecoration:decoration inFrame:[self bounds]];
+  NSPoint point = decoration->GetBubblePointInFrame(frame);
   return [self convertPoint:point toView:nil];
 }
 
@@ -505,12 +507,6 @@ const CGFloat kAnimationDuration = 0.2;
 
 // (URLDropTarget protocol)
 - (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
-  // Make ourself the first responder, which will select the text to indicate
-  // that our contents would be replaced by a drop.
-  // TODO(viettrungluu): crbug.com/30809 -- this is a hack since it steals focus
-  // and doesn't return it.
-  [[self window] makeFirstResponder:self];
-
   bool canDropAtLocation =
       [[self cell] canDropAtLocationInWindow:[sender draggingLocation]
                                       ofView:self];

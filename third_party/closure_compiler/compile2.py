@@ -75,7 +75,7 @@ class Checker(object):
     """
     print >> sys.stderr, "(ERROR) %s" % msg
 
-  def _run_jar(self, jar, args):
+  def run_jar(self, jar, args):
     """Runs a .jar from the command line with arguments.
 
     Args:
@@ -188,8 +188,8 @@ class Checker(object):
       tmp_file.write(contents)
     return tmp_file.name
 
-  def check(self, sources, out_file=None, closure_args=None,
-            custom_sources=True):
+  def check(self, sources, out_file, closure_args=None,
+            custom_sources=True, custom_includes=False):
     """Closure compile |sources| while checking for errors.
 
     Args:
@@ -209,6 +209,10 @@ class Checker(object):
     externs_and_deps = [self._POLYMER_EXTERNS]
 
     if custom_sources:
+      if custom_includes:
+        # TODO(dbeam): this is fairly hacky. Can we just remove custom_sources
+        # soon when all the things kept on life support using it die?
+        self._target = sources.pop()
       externs_and_deps += sources
     else:
       self._target = sources[0]
@@ -225,7 +229,8 @@ class Checker(object):
 
     js_args = deps + ([self._target] if self._target else [])
 
-    if not custom_sources:
+    process_includes = custom_includes or not custom_sources
+    if process_includes:
       # TODO(dbeam): compiler.jar automatically detects "@externs" in a --js arg
       # and moves these files to a different AST tree. However, because we use
       # one big funky <include> meta-file, it thinks all the code is one big
@@ -250,16 +255,21 @@ class Checker(object):
            ["--js=%s" % s for s in js_args] + \
            ["--%s" % arg for arg in closure_args]
 
-    if out_file:
-      out_dir = os.path.dirname(out_file)
-      if not os.path.exists(out_dir):
-        os.makedirs(out_dir)
+    assert out_file
+
+    out_dir = os.path.dirname(out_file)
+    if not os.path.exists(out_dir):
+      os.makedirs(out_dir)
+
+    checks_only = 'checks_only' in closure_args
+
+    if not checks_only:
       args += ["--js_output_file=%s" % out_file]
       args += ["--create_source_map=%s" % (self._MAP_FILE_FORMAT % out_file)]
 
     self._log_debug("Args: %s" % " ".join(args))
 
-    _, stderr = self._run_jar(self._compiler_jar, args)
+    _, stderr = self.run_jar(self._compiler_jar, args)
 
     errors = stderr.strip().split("\n\n")
     maybe_summary = errors.pop()
@@ -273,13 +283,19 @@ class Checker(object):
       self._nuke_temp_files()
       sys.exit(1)
 
-    if summary.group('error_count') != "0" and out_file:
+    if summary.group('error_count') != "0":
       if os.path.exists(out_file):
         os.remove(out_file)
       if os.path.exists(self._MAP_FILE_FORMAT % out_file):
         os.remove(self._MAP_FILE_FORMAT % out_file)
+    elif checks_only:
+      # Compile succeeded but --checks_only disables --js_output_file from
+      # actually writing a file. Write a file ourselves so incremental builds
+      # still work.
+      with open(out_file, 'w') as f:
+        f.write('')
 
-    if not custom_sources:
+    if process_includes:
       filtered_errors = self._filter_errors(errors)
       errors = map(self._clean_up_error, filtered_errors)
       output = self._format_errors(errors)
@@ -301,7 +317,10 @@ if __name__ == "__main__":
                       help="Path to a source file to typecheck")
   parser.add_argument("--custom_sources", action="store_true",
                       help="Whether this rules has custom sources.")
-  parser.add_argument("-o", "--out_file",
+  parser.add_argument("--custom_includes", action="store_true",
+                      help="If present, <include>s are processed when"
+                           "using --custom_files.")
+  parser.add_argument("-o", "--out_file", required=True,
                       help="A file where the compiled output is written to")
   parser.add_argument("-c", "--closure_args", nargs=argparse.ZERO_OR_MORE,
                       help="Arguments passed directly to the Closure compiler")
@@ -313,7 +332,8 @@ if __name__ == "__main__":
 
   found_errors, stderr = checker.check(opts.sources, out_file=opts.out_file,
                                        closure_args=opts.closure_args,
-                                       custom_sources=opts.custom_sources)
+                                       custom_sources=opts.custom_sources,
+                                       custom_includes=opts.custom_includes)
 
   if found_errors:
     if opts.custom_sources:

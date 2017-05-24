@@ -18,6 +18,7 @@
 // <include src="oobe_screen_user_image.js">
 
 // <include src="screen_app_launch_splash.js">
+// <include src="screen_arc_kiosk_splash.js">
 // <include src="screen_arc_terms_of_service.js">
 // <include src="screen_error_message.js">
 // <include src="screen_gaia_signin.js">
@@ -30,6 +31,7 @@
 // <include src="screen_device_disabled.js">
 // <include src="screen_unrecoverable_cryptohome_error.js">
 // <include src="screen_active_directory_password_change.js">
+// <include src="screen_encryption_migration.js">
 
 // <include src="../../gaia_auth_host/authenticator.js">
 

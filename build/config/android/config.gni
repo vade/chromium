@@ -12,7 +12,19 @@ if (is_android) {
                   [ rebase_path("//clank", root_build_dir) ],
                   "string") == "True"
 
-  if (has_chrome_android_internal) {
+  # We are using a separate declare_args block for only this argument so that
+  # we can decide if we have to pull in definitions from the internal config
+  # early.
+  declare_args() {
+    # Enables using the internal Chrome for Android repository. The default
+    # value depends on whether the repository is available, and if it's not but
+    # this argument is manually set to True, the generation will fail.
+    # The main purpose of this argument is to avoid having to maintain 2
+    # repositories to support both public only and internal builds.
+    enable_chrome_android_internal = has_chrome_android_internal
+  }
+
+  if (enable_chrome_android_internal) {
     import("//clank/config.gni")
   }
 
@@ -31,15 +43,15 @@ if (is_android) {
 
   if (!defined(default_android_sdk_root)) {
     default_android_sdk_root = "//third_party/android_tools/sdk"
-    default_android_sdk_version = "24"
-    default_android_sdk_build_tools_version = "24.0.2"
+    default_android_sdk_version = "25"
+    default_android_sdk_build_tools_version = "25.0.2"
   }
 
   if (!defined(default_lint_android_sdk_root)) {
     # Purposefully repeated so that downstream can change
     # default_android_sdk_root without changing lint version.
     default_lint_android_sdk_root = "//third_party/android_tools/sdk"
-    default_lint_android_sdk_version = "24"
+    default_lint_android_sdk_version = "25"
   }
 
   if (!defined(default_extras_android_sdk_root)) {
@@ -56,18 +68,26 @@ if (is_android) {
     default_android_keystore_password = "chromium"
   }
 
+  # TODO(paulmiller): Remove; superseded by google_play_services_package.
   if (!defined(google_play_services_library)) {
     google_play_services_library =
         "//third_party/android_tools:google_play_services_default_java"
   }
 
+  # TODO(paulmiller): Remove; superseded by google_play_services_package.
   if (!defined(google_play_services_resources)) {
     google_play_services_resources =
         "//third_party/android_tools:google_play_services_default_resources"
   }
 
+  # google_play_services_package contains the path where individual client
+  # targets (e.g. google_play_services_base_java) are located.
+  if (!defined(google_play_services_package)) {
+    google_play_services_package = "//third_party/android_tools"
+  }
+
   webview_public_framework_jar =
-      "//third_party/android_platform/webview/frameworks_7.0.0_r1.jar"
+      "//third_party/android_platform/webview/frameworks_7.1.1_r28.jar"
   if (!defined(webview_framework_jar)) {
     webview_framework_jar = webview_public_framework_jar
   }

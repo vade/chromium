@@ -7,9 +7,9 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
+#include "base/metrics/user_metrics.h"
 #include "components/dom_distiller/content/browser/distiller_ui_handle.h"
 #include "components/dom_distiller/core/feedback_reporter.h"
-#include "content/public/browser/user_metrics.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace dom_distiller {
@@ -22,27 +22,9 @@ DistillerJavaScriptServiceImpl::DistillerJavaScriptServiceImpl(
 
 DistillerJavaScriptServiceImpl::~DistillerJavaScriptServiceImpl() {}
 
-void DistillerJavaScriptServiceImpl::HandleDistillerFeedbackCall(
-    bool good) {
-  FeedbackReporter::ReportQuality(good);
-  if (good) {
-    return;
-  }
-
-  // If feedback is bad try to start up external feedback.
-  if (!distiller_ui_handle_) {
-    return;
-  }
-  content::WebContents* contents =
-      content::WebContents::FromRenderFrameHost(render_frame_host_);
-  distiller_ui_handle_->ReportExternalFeedback(
-      contents, contents->GetURL(), false);
-  return;
-}
-
 void DistillerJavaScriptServiceImpl::HandleDistillerClosePanelCall(
     bool animate) {
-  content::RecordAction(base::UserMetricsAction("DomDistiller_ViewOriginal"));
+  base::RecordAction(base::UserMetricsAction("DomDistiller_ViewOriginal"));
   if (!distiller_ui_handle_) {
     return;
   }
@@ -61,7 +43,8 @@ void DistillerJavaScriptServiceImpl::HandleDistillerOpenSettingsCall() {
 void CreateDistillerJavaScriptService(
     content::RenderFrameHost* render_frame_host,
     DistillerUIHandle* distiller_ui_handle,
-    mojo::InterfaceRequest<mojom::DistillerJavaScriptService> request) {
+    const service_manager::BindSourceInfo& source_info,
+    mojom::DistillerJavaScriptServiceRequest request) {
   mojo::MakeStrongBinding(base::MakeUnique<DistillerJavaScriptServiceImpl>(
                               render_frame_host, distiller_ui_handle),
                           std::move(request));

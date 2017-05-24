@@ -200,7 +200,8 @@ Profiler.ProfileType = class extends Common.Object {
   }
 
   reset() {
-    this._profiles.slice(0).forEach(this._disposeProfile.bind(this));
+    for (var profile of this._profiles.slice())
+      this._disposeProfile(profile);
     this._profiles = [];
     this._nextProfileUid = 1;
   }

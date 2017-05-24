@@ -8,6 +8,8 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "cc/output/compositor_frame_sink_client.h"
 #include "cc/resources/returned_resource.h"
+#include "cc/scheduler/begin_frame_source.h"
+#include "cc/scheduler/delay_based_time_source.h"
 #include "cc/test/begin_frame_args_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -29,6 +31,16 @@ FakeCompositorFrameSink::FakeCompositorFrameSink(
 
 FakeCompositorFrameSink::~FakeCompositorFrameSink() = default;
 
+bool FakeCompositorFrameSink::BindToClient(CompositorFrameSinkClient* client) {
+  if (!CompositorFrameSink::BindToClient(client))
+    return false;
+  begin_frame_source_ = base::MakeUnique<BackToBackBeginFrameSource>(
+      base::MakeUnique<DelayBasedTimeSource>(
+          base::ThreadTaskRunnerHandle::Get().get()));
+  client_->SetBeginFrameSource(begin_frame_source_.get());
+  return true;
+}
+
 void FakeCompositorFrameSink::DetachFromClient() {
   ReturnResourcesHeldByParent();
   CompositorFrameSink::DetachFromClient();
@@ -40,13 +52,7 @@ void FakeCompositorFrameSink::SubmitCompositorFrame(CompositorFrame frame) {
   last_sent_frame_.reset(new CompositorFrame(std::move(frame)));
   ++num_sent_frames_;
 
-  if (!last_sent_frame_->render_pass_list.empty()) {
-    last_swap_rect_ = last_sent_frame_->render_pass_list.back()->damage_rect;
-    last_swap_rect_valid_ = true;
-  } else {
-    last_swap_rect_ = gfx::Rect();
-    last_swap_rect_valid_ = false;
-  }
+  last_swap_rect_ = last_sent_frame_->render_pass_list.back()->damage_rect;
 
   resources_held_by_parent_.insert(resources_held_by_parent_.end(),
                                    last_sent_frame_->resource_list.begin(),
@@ -54,8 +60,8 @@ void FakeCompositorFrameSink::SubmitCompositorFrame(CompositorFrame frame) {
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&FakeCompositorFrameSink::DidReceiveCompositorFrameAck,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&FakeCompositorFrameSink::DidReceiveCompositorFrameAck,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void FakeCompositorFrameSink::DidReceiveCompositorFrameAck() {

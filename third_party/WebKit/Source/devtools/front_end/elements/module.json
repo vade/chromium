@@ -21,7 +21,7 @@
             "type": "@Common.Renderer",
             "contextTypes": [
                 "SDK.DOMNode",
-                "SDK.RemoteObject"
+                "SDK.DeferredDOMNode"
             ],
             "className": "Elements.ElementsTreeOutline.Renderer"
         },
@@ -219,6 +219,7 @@
         {
             "type": "@UI.ViewLocationResolver",
             "name": "elements-sidebar",
+            "category": "Elements",
             "className": "Elements.ElementsPanel"
         },
         {
@@ -234,15 +235,6 @@
         {
             "type": "view",
             "location": "elements-sidebar",
-            "id": "elements.domBreakpoints",
-            "title": "DOM Breakpoints",
-            "order": 6,
-            "persistence": "permanent",
-            "factoryName": "Components.DOMBreakpointsSidebarPane.Proxy"
-        },
-        {
-            "type": "view",
-            "location": "elements-sidebar",
             "id": "elements.domProperties",
             "title": "Properties",
             "order": 7,
@@ -254,7 +246,8 @@
         "components",
         "extensions",
         "inline_editor",
-        "color_picker"
+        "color_picker",
+        "event_listeners"
     ],
     "scripts": [
         "InspectElementModeController.js",

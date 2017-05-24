@@ -62,7 +62,7 @@ std::unique_ptr<base::Value> ConvertValue(const base::Value& value,
       for (base::ListValue::const_iterator entry(list->begin());
            entry != list->end(); ++entry) {
         std::unique_ptr<base::Value> converted =
-            ConvertValue(**entry, schema.GetItems());
+            ConvertValue(*entry, schema.GetItems());
         if (converted)
           result->Append(std::move(converted));
       }
@@ -76,15 +76,14 @@ std::unique_ptr<base::Value> ConvertValue(const base::Value& value,
   int int_value = 0;
   switch (schema.type()) {
     case base::Value::Type::NONE: {
-      return base::Value::CreateNullValue();
+      return base::MakeUnique<base::Value>();
     }
     case base::Value::Type::BOOLEAN: {
       // Accept booleans encoded as either string or integer.
       if (value.GetAsInteger(&int_value) ||
           (value.GetAsString(&string_value) &&
            base::StringToInt(string_value, &int_value))) {
-        return std::unique_ptr<base::Value>(
-            new base::FundamentalValue(int_value != 0));
+        return std::unique_ptr<base::Value>(new base::Value(int_value != 0));
       }
       break;
     }
@@ -92,8 +91,7 @@ std::unique_ptr<base::Value> ConvertValue(const base::Value& value,
       // Integers may be string-encoded.
       if (value.GetAsString(&string_value) &&
           base::StringToInt(string_value, &int_value)) {
-        return std::unique_ptr<base::Value>(
-            new base::FundamentalValue(int_value));
+        return std::unique_ptr<base::Value>(new base::Value(int_value));
       }
       break;
     }
@@ -103,8 +101,7 @@ std::unique_ptr<base::Value> ConvertValue(const base::Value& value,
       if (value.GetAsDouble(&double_value) ||
           (value.GetAsString(&string_value) &&
            base::StringToDouble(string_value, &double_value))) {
-        return std::unique_ptr<base::Value>(
-            new base::FundamentalValue(double_value));
+        return std::unique_ptr<base::Value>(new base::Value(double_value));
       }
       break;
     }
@@ -263,8 +260,8 @@ void RegistryDict::ReadRegistry(HKEY hive, const base::string16& root) {
     switch (it.Type()) {
       case REG_SZ:
       case REG_EXPAND_SZ:
-        SetValue(name, std::unique_ptr<base::Value>(new base::StringValue(
-                           base::UTF16ToUTF8(it.Value()))));
+        SetValue(name, std::unique_ptr<base::Value>(
+                           new base::Value(base::UTF16ToUTF8(it.Value()))));
         continue;
       case REG_DWORD_LITTLE_ENDIAN:
       case REG_DWORD_BIG_ENDIAN:
@@ -274,9 +271,8 @@ void RegistryDict::ReadRegistry(HKEY hive, const base::string16& root) {
             dword_value = base::NetToHost32(dword_value);
           else
             dword_value = base::ByteSwapToLE32(dword_value);
-          SetValue(name,
-                   std::unique_ptr<base::Value>(new base::FundamentalValue(
-                       static_cast<int>(dword_value))));
+          SetValue(name, std::unique_ptr<base::Value>(
+                             new base::Value(static_cast<int>(dword_value))));
           continue;
         }
       case REG_NONE:

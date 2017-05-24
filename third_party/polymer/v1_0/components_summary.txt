@@ -12,9 +12,9 @@ Tree link: https://github.com/PolymerElements/iron-a11y-announcer/tree/v1.0.5
 
 Name: iron-a11y-keys
 Repository: https://github.com/PolymerElements/iron-a11y-keys.git
-Tree: v1.0.6
-Revision: aa9374f069b942dfabcaabb587cbb00b0dd28c63
-Tree link: https://github.com/PolymerElements/iron-a11y-keys/tree/v1.0.6
+Tree: v1.0.7
+Revision: 7830e675c3d0df6e7a7377d64fc3d6e6ae0e65a5
+Tree link: https://github.com/PolymerElements/iron-a11y-keys/tree/v1.0.7
 
 Name: iron-a11y-keys-behavior
 Repository: https://github.com/PolymerElements/iron-a11y-keys-behavior.git
@@ -96,9 +96,9 @@ Tree link: https://github.com/PolymerElements/iron-input/tree/1.0.10
 
 Name: iron-list
 Repository: https://github.com/PolymerElements/iron-list.git
-Tree: v1.3.12
-Revision: 856ebcf90b2834aae728fc295b5dd5aa5ebc18ca
-Tree link: https://github.com/PolymerElements/iron-list/tree/v1.3.12
+Tree: v1.4.6
+Revision: c1c7301e66705f7d080187e7afe2caf148d203d4
+Tree link: https://github.com/PolymerElements/iron-list/tree/v1.4.6
 
 Name: iron-location
 Repository: https://github.com/PolymerElements/iron-location.git
@@ -114,9 +114,9 @@ Tree link: https://github.com/PolymerElements/iron-media-query/tree/v1.0.8
 
 Name: iron-menu-behavior
 Repository: https://github.com/PolymerElements/iron-menu-behavior.git
-Tree: v1.1.10
-Revision: a0c185a39ef85f96a0316223db4d34f067fcb7f4
-Tree link: https://github.com/PolymerElements/iron-menu-behavior/tree/v1.1.10
+Tree: v1.3.0
+Revision: 707791b8166d9233a582fee5b2df0f6eaea40973
+Tree link: https://github.com/PolymerElements/iron-menu-behavior/tree/v1.3.0
 
 Name: iron-meta
 Repository: https://github.com/PolymerElements/iron-meta.git
@@ -240,9 +240,9 @@ Tree link: https://github.com/PolymerElements/paper-header-panel/tree/v1.1.6
 
 Name: paper-icon-button
 Repository: https://github.com/PolymerElements/paper-icon-button.git
-Tree: v1.1.2
-Revision: 0a6c65f73765d6f6ae6cfe90ddc9905a2cf45f20
-Tree link: https://github.com/PolymerElements/paper-icon-button/tree/v1.1.2
+Tree: v1.1.6
+Revision: 22fd17e262f5e1dd543f67cb4b7fee6ad94c759c
+Tree link: https://github.com/PolymerElements/paper-icon-button/tree/v1.1.6
 
 Name: paper-input
 Repository: https://github.com/PolymerElements/paper-input.git
@@ -270,9 +270,9 @@ Tree link: https://github.com/PolymerElements/paper-material/tree/v1.0.6
 
 Name: paper-menu
 Repository: https://github.com/PolymerElements/paper-menu.git
-Tree: v1.2.2
-Revision: f31a1dbc5b594a84c8c01eca0f23f9bcb8f6ba76
-Tree link: https://github.com/PolymerElements/paper-menu/tree/v1.2.2
+Tree: v1.3.0
+Revision: 7ca8ebfbdcca22fc98e5115c0ed72bf9d05848fe
+Tree link: https://github.com/PolymerElements/paper-menu/tree/v1.3.0
 
 Name: paper-menu-button
 Repository: https://github.com/PolymerElements/paper-menu-button.git
@@ -288,9 +288,9 @@ Tree link: https://github.com/PolymerElements/paper-progress/tree/v1.0.10
 
 Name: paper-radio-button
 Repository: https://github.com/PolymerElements/paper-radio-button.git
-Tree: v1.3.1
-Revision: 3a961e367e3d25d7e192fca0c1496af0f3feab44
-Tree link: https://github.com/PolymerElements/paper-radio-button/tree/v1.3.1
+Tree: v1.4.0
+Revision: 853490b37537ed1675e14c3f68a40db0be45fe9a
+Tree link: https://github.com/PolymerElements/paper-radio-button/tree/v1.4.0
 
 Name: paper-radio-group
 Repository: https://github.com/PolymerElements/paper-radio-group.git
@@ -306,9 +306,9 @@ Tree link: https://github.com/PolymerElements/paper-ripple/tree/v1.0.9
 
 Name: paper-slider
 Repository: https://github.com/PolymerElements/paper-slider.git
-Tree: v1.0.13
-Revision: ed9d5b512be1591b402e8a9c4961145576f8cc02
-Tree link: https://github.com/PolymerElements/paper-slider/tree/v1.0.13
+Tree: v1.0.15
+Revision: b678296daa93526adc8bf4b75628a7a5759bdeea
+Tree link: https://github.com/PolymerElements/paper-slider/tree/v1.0.15
 
 Name: paper-spinner
 Repository: https://github.com/PolymerElements/paper-spinner.git
@@ -330,9 +330,9 @@ Tree link: https://github.com/PolymerElements/paper-tabs/tree/v1.6.2
 
 Name: paper-toggle-button
 Repository: https://github.com/PolymerElements/paper-toggle-button.git
-Tree: v1.2.0
-Revision: 6aab07244c07f9598584e6dbce366574f96072a3
-Tree link: https://github.com/PolymerElements/paper-toggle-button/tree/v1.2.0
+Tree: v1.3.0
+Revision: 2f279868a9c8965aba76017c7ee6008ac4879f6a
+Tree link: https://github.com/PolymerElements/paper-toggle-button/tree/v1.3.0
 
 Name: paper-toolbar
 Repository: https://github.com/PolymerElements/paper-toolbar.git
@@ -348,7 +348,7 @@ Tree link: https://github.com/PolymerElements/paper-tooltip/tree/v1.1.3
 
 Name: polymer
 Repository: https://github.com/Polymer/polymer.git
-Tree: v1.6.1
-Revision: 1f197d9d7874b1e5808b2a5c26f34446a7d912fc
-Tree link: https://github.com/Polymer/polymer/tree/v1.6.1
+Tree: v1.8.1
+Revision: d89302fc3755b04ad4171f431e719a08b5b816f3
+Tree link: https://github.com/Polymer/polymer/tree/v1.8.1
 

@@ -58,8 +58,16 @@ cr.define('print_preview', function() {
     this.inFlightRequestId_ = -1;
 
     /**
+     * Whether the current in flight request requires generating draft pages for
+     * print preview. This is true only for modifiable documents when the print
+     * settings has changed sufficiently to require re-rendering.
+     * @private {boolean}
+     */
+    this.generateDraft_ = false;
+
+    /**
      * Media size to generate preview with. {@code null} indicates default size.
-     * @type {cp.cdd.MediaSizeTicketItem}
+     * @type {print_preview.ValueType}
      * @private
      */
     this.mediaSize_ = null;
@@ -86,13 +94,6 @@ cr.define('print_preview', function() {
     this.colorValue_ = false;
 
     /**
-     * Whether the document should be printed as a raster PDF.
-     * @type {boolean}
-     * @private
-     */
-    this.rasterizeValue_ = false;
-
-    /**
      * Whether the document should be fitted to the page.
      * @type {boolean}
      * @private
@@ -109,17 +110,17 @@ cr.define('print_preview', function() {
 
     /**
      * Page ranges setting used used to generate the last preview.
-     * @type {!Array<object<{from: number, to: number}>>}
+     * @type {Array<{from: number, to: number}>}
      * @private
      */
     this.pageRanges_ = null;
 
     /**
      * Margins type used to generate the last preview.
-     * @type {!print_preview.ticket_items.MarginsType.Value}
+     * @type {!print_preview.ticket_items.MarginsTypeValue}
      * @private
      */
-    this.marginsType_ = print_preview.ticket_items.MarginsType.Value.DEFAULT;
+    this.marginsType_ = print_preview.ticket_items.MarginsTypeValue.DEFAULT;
 
     /**
      * Whether the document should have element CSS backgrounds printed.
@@ -143,7 +144,7 @@ cr.define('print_preview', function() {
     this.tracker_ = new EventTracker();
 
     this.addEventListeners_();
-  };
+  }
 
   /**
    * Event types dispatched by the preview generator.
@@ -180,7 +181,8 @@ cr.define('print_preview', function() {
           !this.destinationStore_.selectedDestination) {
         return false;
       }
-      if (!this.hasPreviewChanged_()) {
+      var previewChanged = this.hasPreviewChanged_();
+      if (!previewChanged && !this.hasPreviewPageRangeChanged_()) {
         // Changes to these ticket items might not trigger a new preview, but
         // they still need to be recorded.
         this.marginsType_ = this.printTicketStore_.marginsType.getValue();
@@ -191,7 +193,6 @@ cr.define('print_preview', function() {
       this.isHeaderFooterEnabled_ =
           this.printTicketStore_.headerFooter.getValue();
       this.colorValue_ = this.printTicketStore_.color.getValue();
-      this.rasterizeValue_ = this.printTicketStore_.rasterize.getValue();
       this.isFitToPageEnabled_ = this.printTicketStore_.fitToPage.getValue();
       this.scalingValue_ = this.printTicketStore_.scaling.getValueAsNumber();
       this.pageRanges_ = this.printTicketStore_.pageRange.getPageRanges();
@@ -203,10 +204,12 @@ cr.define('print_preview', function() {
       this.selectedDestination_ = this.destinationStore_.selectedDestination;
 
       this.inFlightRequestId_++;
+      this.generateDraft_ = this.documentInfo_.isModifiable && previewChanged;
       this.nativeLayer_.startGetPreview(
           this.destinationStore_.selectedDestination,
           this.printTicketStore_,
           this.documentInfo_,
+          this.generateDraft_,
           this.inFlightRequestId_);
       return true;
     },
@@ -281,8 +284,9 @@ cr.define('print_preview', function() {
     },
 
     /**
-     * @return {boolean} Whether the print ticket has changed sufficiently to
-     *     determine whether a new preview request should be issued.
+     * @return {boolean} Whether the print ticket, excluding the page range, has
+     *     changed sufficiently to determine whether a new preview request
+     *     should be issued.
      * @private
      */
     hasPreviewChanged_: function() {
@@ -292,17 +296,13 @@ cr.define('print_preview', function() {
           !ticketStore.landscape.isValueEqual(this.isLandscapeEnabled_) ||
           !ticketStore.headerFooter.isValueEqual(this.isHeaderFooterEnabled_) ||
           !ticketStore.color.isValueEqual(this.colorValue_) ||
-          !ticketStore.rasterize.isValueEqual(this.rasterizeValue_) ||
           !ticketStore.scaling.isValueEqual(this.scalingValue_) ||
           !ticketStore.fitToPage.isValueEqual(this.isFitToPageEnabled_) ||
-          this.pageRanges_ == null ||
-          !areRangesEqual(ticketStore.pageRange.getPageRanges(),
-                          this.pageRanges_) ||
           (!ticketStore.marginsType.isValueEqual(this.marginsType_) &&
               !ticketStore.marginsType.isValueEqual(
-                  print_preview.ticket_items.MarginsType.Value.CUSTOM)) ||
+                  print_preview.ticket_items.MarginsTypeValue.CUSTOM)) ||
           (ticketStore.marginsType.isValueEqual(
-              print_preview.ticket_items.MarginsType.Value.CUSTOM) &&
+              print_preview.ticket_items.MarginsTypeValue.CUSTOM) &&
               !ticketStore.customMargins.isValueEqual(
                   this.documentInfo_.margins)) ||
           !ticketStore.cssBackground.isValueEqual(
@@ -311,6 +311,17 @@ cr.define('print_preview', function() {
               this.isSelectionOnlyEnabled_) ||
           (this.selectedDestination_ !=
               this.destinationStore_.selectedDestination);
+    },
+
+    /**
+     * @return {boolean} Whether the page range in the print ticket has changed.
+     * @private
+     */
+    hasPreviewPageRangeChanged_: function() {
+      return this.pageRanges_ == null ||
+          !areRangesEqual(
+              this.printTicketStore_.pageRange.getPageRanges(),
+              this.pageRanges_);
     },
 
     /**
@@ -336,7 +347,7 @@ cr.define('print_preview', function() {
           Math.round(event.pageLayout.marginBottom),
           Math.round(event.pageLayout.marginLeft));
 
-      var o = print_preview.ticket_items.CustomMargins.Orientation;
+      var o = print_preview.ticket_items.CustomMarginsOrientation;
       var pageSize = new print_preview.Size(
           event.pageLayout.contentWidth +
               margins.get(o.LEFT) + margins.get(o.RIGHT),
@@ -396,9 +407,10 @@ cr.define('print_preview', function() {
       if (this.inFlightRequestId_ != event.previewResponseId) {
         return; // Ignore old response.
       }
-      // Dispatch a PREVIEW_START event since non-modifiable documents don't
-      // trigger PAGE_READY events.
-      if (!this.documentInfo_.isModifiable) {
+      if (!this.generateDraft_) {
+        // Dispatch a PREVIEW_START event since not generating a draft PDF,
+        // which includes print preview for non-modifiable documents, does not
+        // trigger PAGE_READY events.
         this.dispatchPreviewStartEvent_(event.previewUid, 0);
       }
       cr.dispatchSimpleEvent(this, PreviewGenerator.EventType.DOCUMENT_READY);

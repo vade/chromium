@@ -43,6 +43,8 @@ class TestNavigationThrottle : public NavigationThrottle {
     return result_;
   }
 
+  const char* GetNameForLogging() override { return "TestNavigationThrottle"; }
+
   int will_start_calls() const { return will_start_calls_; }
   int will_redirect_calls() const { return will_redirect_calls_; }
   int will_process_response_calls() const {
@@ -68,11 +70,13 @@ class NavigationHandleImplTest : public RenderViewHostImplTestHarness {
   void SetUp() override {
     RenderViewHostImplTestHarness::SetUp();
     test_handle_ = NavigationHandleImpl::Create(
-        GURL(), main_test_rfh()->frame_tree_node(),
+        GURL(), std::vector<GURL>(), main_test_rfh()->frame_tree_node(),
         true,   // is_renderer_initiated
         false,  // is_same_page
         base::TimeTicks::Now(), 0,
-        false);  // started_from_context_menu
+        false,                  // started_from_context_menu
+        CSPDisposition::CHECK,  // should_check_main_world_csp
+        false);                 // is_form_submission
     EXPECT_EQ(REQUEST_CONTEXT_TYPE_UNSPECIFIED,
               test_handle_->request_context_type_);
     contents()->GetMainFrame()->InitializeRenderFrameIfNeeded();
@@ -113,7 +117,7 @@ class NavigationHandleImplTest : public RenderViewHostImplTestHarness {
     test_handle_->WillStartRequest(
         "GET", nullptr, Referrer(), false, ui::PAGE_TRANSITION_LINK, false,
         REQUEST_CONTEXT_TYPE_LOCATION,
-        blink::WebMixedContentContextType::Blockable,
+        blink::WebMixedContentContextType::kBlockable,
         base::Bind(&NavigationHandleImplTest::UpdateThrottleCheckResult,
                    base::Unretained(this)));
   }

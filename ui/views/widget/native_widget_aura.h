@@ -40,6 +40,9 @@ class VIEWS_EXPORT NativeWidgetAura
       public aura::client::FocusChangeObserver,
       public aura::client::DragDropDelegate {
  public:
+  // |is_parallel_widget_in_window_manager| is true only when this
+  // NativeWidgetAura is created in the window manager to represent a client
+  // window, in all other cases it's false.
   explicit NativeWidgetAura(internal::NativeWidgetDelegate* delegate,
                             bool is_parallel_widget_in_window_manager = false);
 
@@ -53,6 +56,11 @@ class VIEWS_EXPORT NativeWidgetAura
   static void AssignIconToAuraWindow(aura::Window* window,
                                      const gfx::ImageSkia& window_icon,
                                      const gfx::ImageSkia& app_icon);
+
+  // If necessary, sets the ShadowElevation of |window| from |params|.
+  static void SetShadowElevationFromInitParams(
+      aura::Window* window,
+      const Widget::InitParams& params);
 
   // Overridden from internal::NativeWidgetPrivate:
   void InitNativeWidget(const Widget::InitParams& params) override;
@@ -196,7 +204,6 @@ class VIEWS_EXPORT NativeWidgetAura
   internal::NativeWidgetDelegate* delegate() { return delegate_; }
 
  private:
-  bool IsDocked() const;
   void SetInitialFocus(ui::WindowShowState show_state);
 
   internal::NativeWidgetDelegate* delegate_;

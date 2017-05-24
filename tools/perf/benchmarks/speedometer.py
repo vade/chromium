@@ -56,7 +56,6 @@ class SpeedometerMeasurement(legacy_page_test.LegacyPageTest):
     if tab.browser.platform.GetOSName() == 'android':
       iterationCount = 3
 
-    # TODO(catapult:#3028): Fix interpolation of JavaScript values.
     tab.ExecuteJavaScript("""
         // Store all the results in the benchmarkClient
         benchmarkClient._measuredValues = []
@@ -64,31 +63,35 @@ class SpeedometerMeasurement(legacy_page_test.LegacyPageTest):
           benchmarkClient._measuredValues.push(measuredValues);
           benchmarkClient._timeValues.push(measuredValues.total);
         };
-        benchmarkClient.iterationCount = %d;
+        benchmarkClient.iterationCount = {{ count }};
         startTest();
-        """ % iterationCount)
-    tab.WaitForJavaScriptExpression(
-        'benchmarkClient._finishedTestCount == benchmarkClient.testsCount', 600)
+        """,
+        count=iterationCount)
+    tab.WaitForJavaScriptCondition(
+        'benchmarkClient._finishedTestCount == benchmarkClient.testsCount',
+        timeout=600)
     results.AddValue(list_of_scalar_values.ListOfScalarValues(
         page, 'Total', 'ms',
-        tab.EvaluateJavaScript('benchmarkClient._timeValues'), important=True))
+        tab.EvaluateJavaScript('benchmarkClient._timeValues'),
+        important=True))
 
     # Extract the timings for each suite
     for suite_name in self.enabled_suites:
       results.AddValue(list_of_scalar_values.ListOfScalarValues(
           page, suite_name, 'ms',
-          # TODO(catapult:#3028): Fix interpolation of JavaScript values.
           tab.EvaluateJavaScript("""
               var suite_times = [];
               for(var i = 0; i < benchmarkClient.iterationCount; i++) {
                 suite_times.push(
-                    benchmarkClient._measuredValues[i].tests['%s'].total);
+                    benchmarkClient._measuredValues[i].tests[{{ key }}].total);
               };
               suite_times;
-              """ % suite_name), important=False))
+              """,
+              key=suite_name), important=False))
     keychain_metric.KeychainMetric().AddResults(tab, results)
 
 
+@benchmark.Owner(emails=['bmeurer@chromium.org', 'mvstanton@chromium.org'])
 class Speedometer(perf_benchmark.PerfBenchmark):
   test = SpeedometerMeasurement
 
@@ -107,17 +110,8 @@ class Speedometer(perf_benchmark.PerfBenchmark):
     return ps
 
 
-@benchmark.Disabled('reference')  # crbug.com/579546
-class SpeedometerIgnition(Speedometer):
-  def SetExtraBrowserOptions(self, options):
-    super(SpeedometerIgnition, self).SetExtraBrowserOptions(options)
-    v8_helper.EnableIgnition(options)
-
-  @classmethod
-  def Name(cls):
-    return 'speedometer-ignition'
-
-
+@benchmark.Owner(emails=['hablich@chromium.org'])
+@benchmark.Disabled('all')
 class SpeedometerTurbo(Speedometer):
   def SetExtraBrowserOptions(self, options):
     super(SpeedometerTurbo, self).SetExtraBrowserOptions(options)
@@ -126,3 +120,14 @@ class SpeedometerTurbo(Speedometer):
   @classmethod
   def Name(cls):
     return 'speedometer-turbo'
+
+
+@benchmark.Owner(emails=['hablich@chromium.org'])
+class SpeedometerClassic(Speedometer):
+  def SetExtraBrowserOptions(self, options):
+    super(SpeedometerClassic, self).SetExtraBrowserOptions(options)
+    v8_helper.EnableClassic(options)
+
+  @classmethod
+  def Name(cls):
+    return 'speedometer-classic'

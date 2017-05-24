@@ -12,11 +12,9 @@
 #include <unistd.h>
 
 #include "base/run_loop.h"
-#include "net/base/sockaddr_storage.h"
 #include "net/quic/core/crypto/quic_random.h"
 #include "net/quic/core/quic_connection.h"
 #include "net/quic/core/quic_data_reader.h"
-#include "net/quic/core/quic_flags.h"
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_server_id.h"
 #include "net/quic/core/spdy_utils.h"
@@ -32,7 +30,6 @@
 
 // TODO(rtenneti): Add support for MMSG_MORE.
 #define MMSG_MORE 0
-using base::StringPiece;
 using std::string;
 
 namespace net {

@@ -9,7 +9,7 @@
 #include <memory>
 #include <vector>
 
-#include "ash/common/shell_observer.h"
+#include "ash/shell_observer.h"
 #include "base/macros.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "chrome/browser/ui/ash/launcher/app_window_launcher_controller.h"
@@ -17,10 +17,6 @@
 #include "mojo/public/cpp/bindings/binding.h"
 #include "ui/aura/env_observer.h"
 #include "ui/aura/window_observer.h"
-
-namespace ash {
-class ShelfDelegate;
-}
 
 namespace aura {
 class Window;
@@ -37,17 +33,10 @@ class ArcAppWindowLauncherController : public AppWindowLauncherController,
                                        public ash::ShellObserver,
                                        public ArcAppListPrefs::Observer {
  public:
-  ArcAppWindowLauncherController(ChromeLauncherController* owner,
-                                 ash::ShelfDelegate* shelf_delegate);
+  explicit ArcAppWindowLauncherController(ChromeLauncherController* owner);
   ~ArcAppWindowLauncherController() override;
 
-  // Returns shelf app id. Play Store app is mapped to Arc platform host app.
-  static std::string GetShelfAppIdFromArcAppId(const std::string& arc_app_id);
-
-  // Returns Arc app id. Arc platform host app is mapped to Play Store app.
-  static std::string GetArcAppIdFromShelfAppId(const std::string& shelf_app_id);
-
-  // Returns Arc task id for the window.
+  // Returns ARC task id for the window.
   static int GetWindowTaskId(aura::Window* window);
 
   // AppWindowLauncherController:
@@ -118,8 +107,6 @@ class ArcAppWindowLauncherController : public AppWindowLauncherController,
   AppWindowLauncherItemController* ControllerForWindow(
       aura::Window* window) override;
 
-  // Not owned
-  ash::ShelfDelegate* shelf_delegate_;
   int active_task_id_ = -1;
   TaskIdToAppWindowInfo task_id_to_app_window_info_;
   ShelfGroupToAppControllerMap app_shelf_group_to_controller_map_;

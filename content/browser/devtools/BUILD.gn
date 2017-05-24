@@ -3,11 +3,25 @@
 # found in the LICENSE file.
 
 import("//tools/grit/grit_rule.gni")
+import("//third_party/brotli/brotli.gni")
 import("//third_party/inspector_protocol/inspector_protocol.gni")
 
 group("resources") {
-  public_deps = [
-    ":devtools_resources",
+  if (!is_android) {
+    public_deps = [
+      ":devtools_resources",
+    ]
+  }
+}
+
+compressed_protocol_file =
+    "$root_gen_dir/blink/core/inspector/protocol.json.bro"
+
+compress_file_brotli("compressed_protocol_json") {
+  input_file = "$root_gen_dir/blink/core/inspector/protocol.json"
+  output_file = compressed_protocol_file
+  deps = [
+    "//third_party/WebKit/Source/core/inspector:protocol_version",
   ]
 }
 
@@ -15,9 +29,6 @@ grit("devtools_resources") {
   source = "$root_gen_dir/devtools/devtools_resources.grd"
   source_is_generated = true
 
-  # TOOD(brettw) remove this so the output file goes into the target_gen_dir,
-  # but keep this for not for GYP compat.
-  output_dir = "$root_gen_dir/blink"
   outputs = [
     "grit/devtools_resources.h",
     "devtools_resources.pak",
@@ -25,10 +36,18 @@ grit("devtools_resources") {
     "grit/devtools_resources_map.h",
   ]
 
+  grit_flags = [
+    "-E",
+    "compressed_protocol_file=" +
+        rebase_path(compressed_protocol_file, root_build_dir),
+  ]
+
   defines =
       [ "SHARED_INTERMEDIATE_DIR=" + rebase_path(root_gen_dir, root_build_dir) ]
 
   deps = [
+    ":compressed_protocol_json",
+
     # This is the action that generates out .grd input file.
     "//third_party/WebKit/public:blink_generate_devtools_grd",
   ]
@@ -74,6 +93,8 @@ inspector_protocol_generate("protocol_sources") {
     "protocol/page.h",
     "protocol/protocol.cc",
     "protocol/protocol.h",
+    "protocol/runtime.cc",
+    "protocol/runtime.h",
     "protocol/schema.cc",
     "protocol/schema.h",
     "protocol/security.cc",

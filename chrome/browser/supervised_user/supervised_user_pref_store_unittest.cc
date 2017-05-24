@@ -5,6 +5,7 @@
 #include <set>
 #include <string>
 
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/values.h"
 #include "chrome/browser/net/safe_search_util.h"
@@ -59,7 +60,7 @@ void SupervisedUserPrefStoreFixture::OnPrefValueChanged(
     const std::string& key) {
   const base::Value* value = NULL;
   ASSERT_TRUE(pref_store_->GetValue(key, &value));
-  changed_prefs_.Set(key, value->DeepCopy());
+  changed_prefs_.Set(key, base::MakeUnique<base::Value>(*value));
 }
 
 void SupervisedUserPrefStoreFixture::OnInitializationCompleted(bool succeeded) {
@@ -147,7 +148,7 @@ TEST_F(SupervisedUserPrefStoreTest, ConfigureSettings) {
   fixture.changed_prefs()->Clear();
   service_.SetLocalSetting(
       supervised_users::kForceSafeSearch,
-      std::unique_ptr<base::Value>(new base::FundamentalValue(false)));
+      std::unique_ptr<base::Value>(new base::Value(false)));
   EXPECT_EQ(1u, fixture.changed_prefs()->size());
   EXPECT_TRUE(fixture.changed_prefs()->GetBoolean(prefs::kForceGoogleSafeSearch,
                                                   &force_google_safesearch));

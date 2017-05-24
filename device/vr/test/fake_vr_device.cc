@@ -7,8 +7,7 @@
 namespace device {
 
 FakeVRDevice::FakeVRDevice() {
-  device_ = mojom::VRDisplayInfo::New();
-  pose_ = mojom::VRPose::New();
+  display_info_ = mojom::VRDisplayInfo::New();
 
   InitBasicDevice();
 }
@@ -16,17 +15,16 @@ FakeVRDevice::FakeVRDevice() {
 FakeVRDevice::~FakeVRDevice() {}
 
 void FakeVRDevice::InitBasicDevice() {
-  device_->index = id();
-  device_->displayName = "FakeVRDevice";
+  display_info_->index = id();
+  display_info_->displayName = "FakeVRDevice";
 
-  device_->capabilities = mojom::VRDisplayCapabilities::New();
-  device_->capabilities->hasOrientation = true;
-  device_->capabilities->hasPosition = false;
-  device_->capabilities->hasExternalDisplay = false;
-  device_->capabilities->canPresent = false;
+  display_info_->capabilities = mojom::VRDisplayCapabilities::New();
+  display_info_->capabilities->hasPosition = false;
+  display_info_->capabilities->hasExternalDisplay = false;
+  display_info_->capabilities->canPresent = false;
 
-  device_->leftEye = InitEye(45, -0.03f, 1024);
-  device_->rightEye = InitEye(45, 0.03f, 1024);
+  display_info_->leftEye = InitEye(45, -0.03f, 1024);
+  display_info_->rightEye = InitEye(45, 0.03f, 1024);
 }
 
 mojom::VREyeParametersPtr FakeVRDevice::InitEye(float fov,
@@ -51,26 +49,18 @@ mojom::VREyeParametersPtr FakeVRDevice::InitEye(float fov,
   return eye;
 }
 
-void FakeVRDevice::SetVRDevice(const mojom::VRDisplayInfoPtr& device) {
-  device_ = device.Clone();
+void FakeVRDevice::SetVRDevice(const mojom::VRDisplayInfoPtr& display_info) {
+  display_info_ = display_info.Clone();
 }
 
-void FakeVRDevice::SetPose(const mojom::VRPosePtr& pose) {
-  pose_ = pose.Clone();
+void FakeVRDevice::CreateVRDisplayInfo(
+    const base::Callback<void(mojom::VRDisplayInfoPtr)>& on_created) {
+  mojom::VRDisplayInfoPtr display = display_info_.Clone();
+  on_created.Run(std::move(display));
 }
 
-mojom::VRDisplayInfoPtr FakeVRDevice::GetVRDevice() {
-  mojom::VRDisplayInfoPtr display = device_.Clone();
-  return display.Clone();
-}
-
-mojom::VRPosePtr FakeVRDevice::GetPose() {
-  return pose_.Clone();
-}
-
-void FakeVRDevice::ResetPose() {}
-
-void FakeVRDevice::RequestPresent(const base::Callback<void(bool)>& callback) {
+void FakeVRDevice::RequestPresent(mojom::VRSubmitFrameClientPtr submit_client,
+                                  const base::Callback<void(bool)>& callback) {
   callback.Run(true);
 }
 
@@ -80,9 +70,15 @@ void FakeVRDevice::ExitPresent() {
   OnExitPresent();
 }
 
-void FakeVRDevice::SubmitFrame(mojom::VRPosePtr pose) {}
+void FakeVRDevice::SubmitFrame(int16_t frame_index,
+                               const gpu::MailboxHolder& mailbox) {}
 
-void FakeVRDevice::UpdateLayerBounds(mojom::VRLayerBoundsPtr leftBounds,
-                                     mojom::VRLayerBoundsPtr rightBounds) {}
+void FakeVRDevice::UpdateLayerBounds(int16_t frame_index,
+                                     mojom::VRLayerBoundsPtr leftBounds,
+                                     mojom::VRLayerBoundsPtr rightBounds,
+                                     int16_t source_width,
+                                     int16_t source_height) {}
+
+void FakeVRDevice::GetVRVSyncProvider(mojom::VRVSyncProviderRequest request) {}
 
 }  // namespace device

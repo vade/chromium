@@ -10,11 +10,12 @@
 #include <vector>
 
 #include "base/time/time.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/debug/layer_tree_debug_state.h"
 #include "cc/output/managed_memory_policy.h"
 #include "cc/output/renderer_settings.h"
 #include "cc/scheduler/scheduler_settings.h"
+#include "cc/tiles/tile_manager_settings.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -26,9 +27,8 @@ class CC_EXPORT LayerTreeSettings {
   LayerTreeSettings(const LayerTreeSettings& other);
   virtual ~LayerTreeSettings();
 
-  bool operator==(const LayerTreeSettings& other) const;
-
   SchedulerSettings ToSchedulerSettings() const;
+  TileManagerSettings ToTileManagerSettings() const;
 
   RendererSettings renderer_settings;
   bool single_thread_proxy_scheduler = true;
@@ -37,21 +37,20 @@ class CC_EXPORT LayerTreeSettings {
   bool enable_latency_recovery = true;
   bool can_use_lcd_text = true;
   bool use_distance_field_text = false;
-  bool gpu_rasterization_enabled = false;
   bool gpu_rasterization_forced = false;
   bool async_worker_context_enabled = false;
   int gpu_rasterization_msaa_sample_count = 0;
   float gpu_rasterization_skewport_target_time_in_seconds = 0.2f;
   bool create_low_res_tiling = false;
+  bool use_stream_video_draw_quad = false;
 
   enum ScrollbarAnimator {
     NO_ANIMATOR,
-    LINEAR_FADE,
-    THINNING,
+    ANDROID_OVERLAY,
+    AURA_OVERLAY,
   };
   ScrollbarAnimator scrollbar_animator = NO_ANIMATOR;
   base::TimeDelta scrollbar_fade_delay;
-  base::TimeDelta scrollbar_fade_resize_delay;
   base::TimeDelta scrollbar_fade_duration;
   base::TimeDelta scrollbar_thinning_duration;
   SkColor solid_color_scrollbar_color = SK_ColorWHITE;
@@ -80,26 +79,39 @@ class CC_EXPORT LayerTreeSettings {
   bool ignore_root_layer_flings = false;
   size_t scheduled_raster_task_limit = 32;
   bool use_occlusion_for_tile_prioritization = false;
-  bool verify_clip_tree_calculations = false;
-  bool image_decode_tasks_enabled = false;
   bool use_layer_lists = false;
   int max_staging_buffer_usage_in_bytes = 32 * 1024 * 1024;
   ManagedMemoryPolicy gpu_memory_policy;
   ManagedMemoryPolicy software_memory_policy;
-  size_t gpu_decoded_image_budget_bytes = 96 * 1024 * 1024;
-  size_t software_decoded_image_budget_bytes = 128 * 1024 * 1024;
+  size_t decoded_image_cache_budget_bytes = 128 * 1024 * 1024;
+  size_t decoded_image_working_set_budget_bytes = 128 * 1024 * 1024;
   int max_preraster_distance_in_screen_pixels = 1000;
 
-  // If set to true, the display item list will internally cache a SkPicture for
-  // raster rather than directly using the display items.
-  bool use_cached_picture_raster = true;
-  bool enable_color_correct_rendering = false;
+  bool enable_color_correct_rasterization = false;
 
-  // If set to true, this causes TileManager to verify that all required and NOW
-  // tiles come before lower priority tiles.
-  bool check_tile_priority_inversion = false;
+  // TODO(sunxd): remove this flag when filter demoting and aa of mask layers
+  // are implemented.
+  bool enable_mask_tiling = false;
+
+  // If set to true, the compositor may selectively defer image decodes to the
+  // Image Decode Service and raster tiles without images until the decode is
+  // ready.
+  bool enable_checker_imaging = false;
 
   LayerTreeDebugState initial_debug_state;
+
+  // Indicates that the LayerTreeHost should defer commits unless it has a valid
+  // LocalSurfaceId set.
+  bool enable_surface_synchronization = false;
+
+  // Indicates the case when a sub-frame gets its own LayerTree because it's
+  // rendered in a different process from its ancestor frames.
+  bool is_layer_tree_for_subframe = false;
+
+  // Determines whether we disallow non-exact matches when finding resources
+  // in ResourcePool. Only used for layout or pixel tests, as non-deterministic
+  // resource sizes can lead to floating point error and noise in these tests.
+  bool disallow_non_exact_resource_reuse = false;
 };
 
 }  // namespace cc

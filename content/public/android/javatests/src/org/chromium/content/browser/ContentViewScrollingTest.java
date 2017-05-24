@@ -17,6 +17,7 @@ import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.ContentViewCore.InternalAccessDelegate;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
+import org.chromium.content_shell_apk.ContentShellActivityTestRule.RerunWithUpdatedContainerView;
 import org.chromium.content_shell_apk.ContentShellTestBase;
 
 /**
@@ -109,7 +110,7 @@ public class ContentViewScrollingTest extends ContentShellTestBase {
         runTestOnUiThread(new Runnable() {
             @Override
             public void run() {
-                getContentViewCore().flingViewport(SystemClock.uptimeMillis(), vx, vy);
+                getContentViewCore().flingViewport(SystemClock.uptimeMillis(), vx, vy, false);
             }
         });
     }

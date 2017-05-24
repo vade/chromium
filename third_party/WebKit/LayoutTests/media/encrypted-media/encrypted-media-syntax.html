@@ -128,7 +128,7 @@
             async_test(function(test)
             {
                 assert_equals(typeof navigator.requestMediaKeySystemAccess, 'function');
-                navigator.requestMediaKeySystemAccess('org.w3.clearkey', [{}]).then(function(access) {
+                navigator.requestMediaKeySystemAccess('org.w3.clearkey', getSimpleConfiguration()).then(function(access) {
                     assert_not_equals(access, null);
                     assert_equals(typeof access, 'object');
                     assert_equals(access.keySystem, 'org.w3.clearkey');
@@ -144,7 +144,7 @@
             {
                 var access;
 
-                navigator.requestMediaKeySystemAccess('org.w3.clearkey', [{}]).then(function(result) {
+                navigator.requestMediaKeySystemAccess('org.w3.clearkey', getSimpleConfiguration()).then(function(result) {
                     access = result;
                     assert_equals(access.keySystem, 'org.w3.clearkey');
                     return access.createMediaKeys();
@@ -228,7 +228,7 @@
 
             async_test(function(test)
             {
-                navigator.requestMediaKeySystemAccess('org.w3.clearkey', [{}]).then(function(access) {
+                navigator.requestMediaKeySystemAccess('org.w3.clearkey', getSimpleConfiguration()).then(function(access) {
                     return access.createMediaKeys();
                 }).then(function(mediaKeys) {
                     var sessionPromises = kCreateSessionExceptionsTestCases.map(function(testCase) {
@@ -371,7 +371,7 @@
                     return isInitDataTypeSupported('cenc');
                 }).then(function(result) {
                     isCencSupported = result;
-                    return navigator.requestMediaKeySystemAccess('org.w3.clearkey', [{}]);
+                    return navigator.requestMediaKeySystemAccess('org.w3.clearkey', getSimpleConfiguration());
                 }).then(function(access) {
                     return access.createMediaKeys();
                 }).then(function(mediaKeys) {
@@ -434,7 +434,7 @@
 
             async_test(function(test)
             {
-                navigator.requestMediaKeySystemAccess('org.w3.clearkey', [{}]).then(function(access) {
+                navigator.requestMediaKeySystemAccess('org.w3.clearkey', getSimpleConfiguration()).then(function(access) {
                     return access.createMediaKeys();
                 }).then(function(mediaKeys) {
                     var initData = stringToUint8Array('init data');
@@ -518,7 +518,7 @@
 
             async_test(function(test)
             {
-                navigator.requestMediaKeySystemAccess('org.w3.clearkey', [{}]).then(function(access) {
+                navigator.requestMediaKeySystemAccess('org.w3.clearkey', getSimpleConfiguration()).then(function(access) {
                     return access.createMediaKeys();
                 }).then(function(mediaKeys) {
                     kCreateSessionTestCases.map(function(testCase) {
@@ -555,7 +555,7 @@
                     return isInitDataTypeSupported('cenc');
                 }).then(function(result) {
                     isCencSupported = result;
-                    return navigator.requestMediaKeySystemAccess('org.w3.clearkey', [{}]);
+                    return navigator.requestMediaKeySystemAccess('org.w3.clearkey', getSimpleConfiguration());
                 }).then(function(access) {
                     return access.createMediaKeys();
                 }).then(function(mediaKeys) {
@@ -631,7 +631,7 @@
                     return isInitDataTypeSupported('cenc');
                 }).then(function(result) {
                     isCencSupported = result;
-                    return navigator.requestMediaKeySystemAccess('org.w3.clearkey', [{}]);
+                    return navigator.requestMediaKeySystemAccess('org.w3.clearkey', getSimpleConfiguration());
                 }).then(function(access) {
                     return access.createMediaKeys();
                 }).then(function(mediaKeys) {
@@ -691,7 +691,7 @@
                     return isInitDataTypeSupported('cenc');
                 }).then(function(result) {
                     isCencSupported = result;
-                    return navigator.requestMediaKeySystemAccess('org.w3.clearkey', [{}]);
+                    return navigator.requestMediaKeySystemAccess('org.w3.clearkey', getSimpleConfiguration());
                 }).then(function(access) {
                     return access.createMediaKeys();
                 }).then(function(mediaKeys) {
@@ -736,7 +736,7 @@
                     return isInitDataTypeSupported('cenc');
                 }).then(function(result) {
                     isCencSupported = result;
-                    return navigator.requestMediaKeySystemAccess('org.w3.clearkey', [{}]);
+                    return navigator.requestMediaKeySystemAccess('org.w3.clearkey', getSimpleConfiguration());
                 }).then(function(access) {
                     return access.createMediaKeys();
                 }).then(function(mediaKeys) {
@@ -783,7 +783,7 @@
                     return isInitDataTypeSupported('cenc');
                 }).then(function(result) {
                     isCencSupported = result;
-                    return navigator.requestMediaKeySystemAccess('org.w3.clearkey', [{}]);
+                    return navigator.requestMediaKeySystemAccess('org.w3.clearkey', getSimpleConfiguration());
                 }).then(function(access) {
                     return access.createMediaKeys();
                 }).then(function(mediaKeys) {
@@ -814,15 +814,6 @@
                     assert_unreached('remove() should not succeed if session uninitialized');
                 }, function(error) {
                     assert_equals(error.name, 'InvalidStateError');
-
-                    // remove() on a temporary session should fail.
-                    return mediaKeySession.generateRequest(type, initData);
-                }).then(function(result) {
-                    return mediaKeySession.remove();
-                }).then(function(result) {
-                    assert_unreached('remove() should not succeed for temporary sessions');
-                }, function(error) {
-                    assert_equals(error.name, 'TypeError');
                 });
             }
 
@@ -836,7 +827,7 @@
                     return isInitDataTypeSupported('cenc');
                 }).then(function(result) {
                     isCencSupported = result;
-                    return navigator.requestMediaKeySystemAccess('org.w3.clearkey', [{}]);
+                    return navigator.requestMediaKeySystemAccess('org.w3.clearkey', getSimpleConfiguration());
                 }).then(function(access) {
                     return access.createMediaKeys();
                 }).then(function(mediaKeys) {
@@ -861,17 +852,26 @@
 
             function create_remove_test(mediaKeys, type, initData)
             {
-                // Clear Key may not support persistent-license sessions.
-                var mediaKeySession;
-                try {
-                    mediaKeySession = mediaKeys.createSession('persistent-license');
-                } catch (error) {
-                    // Not supported, so return a resolved promise.
-                    assert_equals(error.name, 'NotSupportedError');
-                    return Promise.resolve();
-                }
-                return mediaKeySession.generateRequest(type, initData).then(function(result) {
+                var mediaKeySession = mediaKeys.createSession();
+                var promise = mediaKeySession.generateRequest(type, initData).then(function(result) {
                     return mediaKeySession.remove();
+                }).then(function() {
+                    // remove() doesn't close the session, so must call close().
+                    return mediaKeySession.close();
+                }).then(function() {
+                    try {
+                        // Clear Key may not support persistent-license sessions.
+                        mediaKeySession = mediaKeys.createSession('persistent-license');
+                        return mediaKeySession.generateRequest(type, initData).then(function(result) {
+                            return mediaKeySession.remove();
+                        }).then(function() {
+                            return mediaKeySession.close();
+                        });
+                    } catch (error) {
+                        // Not supported, so return a resolved promise.
+                        assert_equals(error.name, 'NotSupportedError');
+                        return Promise.resolve();
+                    }
                 });
             }
 
@@ -885,7 +885,7 @@
                     return isInitDataTypeSupported('cenc');
                 }).then(function(result) {
                     isCencSupported = result;
-                    return navigator.requestMediaKeySystemAccess('org.w3.clearkey', [{}]);
+                    return navigator.requestMediaKeySystemAccess('org.w3.clearkey', getSimpleConfiguration());
                 }).then(function(access) {
                     return access.createMediaKeys();
                 }).then(function(mediaKeys) {
@@ -940,7 +940,7 @@
 
             async_test(function(test)
             {
-                navigator.requestMediaKeySystemAccess('org.w3.clearkey', [{}]).then(function(access) {
+                navigator.requestMediaKeySystemAccess('org.w3.clearkey', getSimpleConfiguration()).then(function(access) {
                     return access.createMediaKeys();
                 }).then(function(mediaKeys) {
                     var promises = kSetServerCertificateExceptionsTestCases.map(function(testCase) {
@@ -981,7 +981,7 @@
             async_test(function(test)
             {
                 var expected_result;
-                navigator.requestMediaKeySystemAccess('org.w3.clearkey', [{}]).then(function(access) {
+                navigator.requestMediaKeySystemAccess('org.w3.clearkey', getSimpleConfiguration()).then(function(access) {
                     return access.createMediaKeys();
                 }).then(function(mediaKeys) {
                     var promises = kSetServerCertificateTestCases.map(function(testCase) {

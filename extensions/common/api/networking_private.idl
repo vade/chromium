@@ -58,7 +58,7 @@ namespace networkingPrivate {
   };
 
   enum NetworkType {
-    All, Cellular, Ethernet, VPN, Wireless, WiFi, WiMAX
+    All, Cellular, Ethernet, Tether, VPN, Wireless, WiFi, WiMAX
   };
 
   enum ProxySettingsType {
@@ -202,14 +202,14 @@ namespace networkingPrivate {
     DOMString? CommonName;
     DOMString? Locality;
     DOMString? Organization;
-    DOMString? OrganizationalUnit;    
+    DOMString? OrganizationalUnit;
   };
 
   dictionary ManagedIssuerSubjectPattern {
     ManagedDOMString? CommonName;
     ManagedDOMString? Locality;
     ManagedDOMString? Organization;
-    ManagedDOMString? OrganizationalUnit;    
+    ManagedDOMString? OrganizationalUnit;
   };
 
   dictionary CertificatePattern {
@@ -233,10 +233,14 @@ namespace networkingPrivate {
     DOMString? ClientCertType;
     DOMString? Identity;
     DOMString? Inner;
-    DOMString Outer;
+    // The outer EAP type. Required by ONC, but may not be provided when
+    // translating from Shill.
+    DOMString? Outer;
     DOMString? Password;
     boolean? SaveCredentials;
+    DOMString[]? ServerCAPEMs;
     DOMString[]? ServerCARefs;
+    DOMString? SubjectMatch;
     boolean? UseProactiveKeyCaching;
     boolean? UseSystemCAs;
   };
@@ -248,10 +252,14 @@ namespace networkingPrivate {
     ManagedDOMString? ClientCertType;
     ManagedDOMString? Identity;
     ManagedDOMString? Inner;
-    ManagedDOMString Outer;
+    // The outer EAP type. Required by ONC, but may not be provided when
+    // translating from Shill.
+    ManagedDOMString? Outer;
     ManagedDOMString? Password;
     ManagedBoolean? SaveCredentials;
+    ManagedDOMStringList? ServerCAPEMs;
     ManagedDOMStringList? ServerCARefs;
+    ManagedDOMString? SubjectMatch;
     ManagedBoolean? UseProactiveKeyCaching;
     ManagedBoolean? UseSystemCAs;
   };
@@ -574,6 +582,13 @@ namespace networkingPrivate {
     DOMString Authentication;
   };
 
+  dictionary TetherProperties {
+    long? BatteryPercentage;
+    DOMString? Carrier;
+    boolean HasConnectedToHost;
+    long? SignalStrength;
+  };
+
   dictionary VPNProperties {
     boolean? AutoConnect;
     DOMString? Host;
@@ -689,6 +704,7 @@ namespace networkingPrivate {
     IPConfigProperties? StaticIPConfig;
     IPConfigProperties? SavedIPConfig;
     DOMString? Source;
+    TetherProperties? Tether;
     NetworkType Type;
     VPNProperties? VPN;
     WiFiProperties? WiFi;
@@ -713,6 +729,7 @@ namespace networkingPrivate {
     ManagedIPConfigProperties? StaticIPConfig;
     IPConfigProperties? SavedIPConfig;
     DOMString? Source;
+    TetherProperties? Tether;
     NetworkType Type;
     ManagedVPNProperties? VPN;
     ManagedWiFiProperties? WiFi;
@@ -729,6 +746,7 @@ namespace networkingPrivate {
     DOMString? Name;
     long? Priority;
     DOMString? Source;
+    TetherProperties? Tether;
     NetworkType Type;
     VPNStateProperties? VPN;
     WiFiStateProperties? WiFi;
@@ -961,6 +979,7 @@ namespace networkingPrivate {
     //     is a trusted device.
     // |callback|: A callback function that indicates whether or not the device
     //     is a trusted device.
+    [nodoc, deprecated = "Use networking.castPrivate API."]
     static void verifyDestination(VerificationProperties properties,
                                   BooleanCallback callback);
 
@@ -971,6 +990,7 @@ namespace networkingPrivate {
     // |networkGuid|: The GUID of the Cellular network to activate.
     // |callback|: A callback function that receives base64-encoded encrypted
     //     credential data to send to a trusted device.
+    [nodoc, deprecated = "Use networking.castPrivate API."]
     static void verifyAndEncryptCredentials(VerificationProperties properties,
                                             DOMString networkGuid,
                                             StringCallback callback);
@@ -982,6 +1002,7 @@ namespace networkingPrivate {
     // |data|: A string containing the base64-encoded data to encrypt.
     // |callback|: A callback function that receives base64-encoded encrypted
     //     data to send to a trusted device.
+    [nodoc, deprecated = "Use networking.castPrivate API."]
     static void verifyAndEncryptData(VerificationProperties properties,
                                      DOMString data,
                                      StringCallback callback);
@@ -995,6 +1016,7 @@ namespace networkingPrivate {
     //     (e.g. MAC address lookup failed). 'Timeout' indicates that the lookup
     //     timed out. Otherwise a valid status is returned (see
     //     $(ref:getWifiTDLSStatus)).
+    [nodoc, deprecated = "Use networking.castPrivate API."]
     static void setWifiTDLSEnabledState(DOMString ip_or_mac_address,
                                         boolean enabled,
                                         optional StringCallback callback);
@@ -1004,6 +1026,7 @@ namespace networkingPrivate {
     // |callback|: A callback function that receives a string with the current
     //     TDLS status which can be 'Connected', 'Disabled', 'Disconnected',
     //     'Nonexistent', or 'Unknown'.
+    [nodoc, deprecated = "Use networking.castPrivate API."]
     static void getWifiTDLSStatus(DOMString ip_or_mac_address,
                                   StringCallback callback);
 

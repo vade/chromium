@@ -192,34 +192,9 @@ test(function() {
 }, 'Shipping type should be \'pickup\' if shipping type is specified as \'pickup\'.');
 
 test(function() {
-    var request = new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(), {'requestShipping': true, 'shippingType': 'invalid'});
-    assert_equals('shipping', request.shippingType);
-}, 'Shipping type should be \'shipping\' if shipping type is specified as invalid string.');
-
-test(function() {
-    var request = new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(), {'requestShipping': true, 'shippingType': null});
-    assert_equals('shipping', request.shippingType);
-}, 'Shipping type should be \'shipping\' if shipping type is specified as null.');
-
-test(function() {
     var request = new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(), {'requestShipping': true, 'shippingType': undefined});
     assert_equals('shipping', request.shippingType);
 }, 'Shipping type should be \'shipping\' if shipping type is specified as undefined.');
-
-test(function() {
-    var request = new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(), {'requestShipping': true, 'shippingType': []});
-    assert_equals('shipping', request.shippingType);
-}, 'Shipping type should be \'shipping\' if shipping type is specified as [].');
-
-test(function() {
-    var request = new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(), {'requestShipping': true, 'shippingType': {}});
-    assert_equals('shipping', request.shippingType);
-}, 'Shipping type should be \'shipping\' if shipping type is specified as {}.');
-
-test(function() {
-    var request = new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(), {'requestShipping': true, 'shippingType': 0});
-    assert_equals('shipping', request.shippingType);
-}, 'Shipping type should be \'shipping\' if shipping type is specified as a number.');
 
 test(function() {
     new PaymentRequest([{'supportedMethods': ['foo']}], {'total': buildItem(), 'displayItems': undefined});
@@ -251,7 +226,7 @@ test(function() {
 
 test(function() {
     new PaymentRequest([{'supportedMethods': ['foo']}, {'supportedMethods': ['foo']}], buildDetails(), {});
-}, 'Duplicate supported payment method identifiers should not throw.');
+}, 'Duplicate supported payment method identifiers in separate methodData objects should not throw.');
 
 test(function() {
     new PaymentRequest([{'supportedMethods': ['foo']}], {'total': buildItem(), 'modifiers': [{'supportedMethods': ['foo', 'foo']}]});
@@ -259,7 +234,7 @@ test(function() {
 
 test(function() {
     new PaymentRequest([{'supportedMethods': ['foo']}], {'total': buildItem(), 'modifiers': [{'supportedMethods': ['foo']}, {'supportedMethods': ['foo']}]});
-}, 'Duplicate supported payment method identifiers in modifiers should not throw.');
+}, 'Duplicate supported payment method identifiers in separate methoData objects of modifiers should not throw.');
 
 test(function() {
     new PaymentRequest([{'supportedMethods': ['https://android.com/pay'], 'data': {'environment': 'TEST', 'merchantName': 'Merchant Inc', 'merchantId': '123', 'allowedCardNetworks': ['AMEX', 'DISCOVER', 'MASTERCARD', 'VISA'], 'paymentMethodTokenizationParameters': {'tokenizationType': 'GATEWAY_TOKEN', 'parameters': {'key': 'value'}}}}], buildDetails());
@@ -296,6 +271,10 @@ test(function() {
 test(function() {
     new PaymentRequest([{'supportedMethods': ['https://android.com/pay'], 'data': {'allowedCardNetworks': 0}}], buildDetails());
 }, 'Invalid Android Pay parameters should not throw even when method name is "https://android.com/pay".');
+
+test(function() {
+    new PaymentRequest([{'supportedMethods': ['foo'], 'data': []}], buildDetails());
+}, 'Array value for payment method specific data parameter should not throw');
 
 promise_test(function(t) {
     return promise_rejects(t, null, new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails()).abort());
@@ -338,9 +317,6 @@ generate_tests(assert_throws, [
     ['Absence of supportedMethods in modifiers should throw TypeError.', null, function() {
         new PaymentRequest([{'supportedMethods': ['foo']}], {'total': buildItem(), 'modifiers': [{'total': buildItem()}]})
     }],
-    ['Empty modifiers should throw TypeError.', null, function() {
-        new PaymentRequest([{'supportedMethods': ['foo']}], {'total': buildItem(), 'modifiers': []})
-    }],
     ['Empty details should throw', null, function() {
         new PaymentRequest([{'supportedMethods': ['foo']}], {})
     }],
@@ -350,11 +326,23 @@ generate_tests(assert_throws, [
     ['Null shipping options should throw', new TypeError(), function() {
         new PaymentRequest([{'supportedMethods': ['foo']}], {'total': buildItem(), 'displayItems': [buildItem()], 'shippingOptions': null});
     }],
+    ['Undefined PaymentShippingType value for shppingType should throw a TypeError', new TypeError(), function() {
+        var request = new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(), {'requestShipping': true, 'shippingType': 'invalid'});
+    }],
+    ['Null for shppingType should throw a TypeError', new TypeError(), function() {
+        var request = new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(), {'requestShipping': true, 'shippingType': null});
+    }],
+    ['Array value for shppingType should throw a TypeError', new TypeError(), function() {
+        var request = new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(), {'requestShipping': true, 'shippingType': []});
+    }],
+    ['Object value for shppingType should throw a TypeError', new TypeError(), function() {
+        var request = new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(), {'requestShipping': true, 'shippingType': {}});
+    }],
+    ['Numeric value for shppingType should throw a TypeError', new TypeError(), function() {
+        var request = new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(), {'requestShipping': true, 'shippingType': 0});
+    }],
 
     // Payment method specific data should be a JSON-serializable object.
-    ['Array value for payment method specific data parameter should throw', null, function() {
-        new PaymentRequest([{'supportedMethods': ['foo'], 'data': []}], buildDetails(), {})
-    }],
     ['String value for payment method specific data parameter should throw', null, function() {
         new PaymentRequest([{'supportedMethods': ['foo'], 'data': 'foo'}], buildDetails(), {})
     }],
@@ -371,15 +359,6 @@ generate_tests(assert_throws, [
     }],
     ['Empty string for payment method specific data parameter should throw', null, function() {
         new PaymentRequest([{'supportedMethods': ['foo'], 'data': ''}], buildDetails())
-    }],
-    ['If details contains a null value for error, then throw a TypeError', new TypeError(), function() {
-        new PaymentRequest([{'supportedMethods': ['foo']}], {'total': buildItem(), 'error': null})
-    }],
-    ['If details contains an empty string value for error, then throw a TypeError', new TypeError(), function() {
-        new PaymentRequest([{'supportedMethods': ['foo']}], {'total': buildItem(), 'error': ''})
-    }],
-    ['If details contains a non-empty string value for error, then throw a TypeError', new TypeError(), function() {
-        new PaymentRequest([{'supportedMethods': ['foo']}], {'total': buildItem(), 'error': 'Message'})
     }]
 ]);
 
@@ -387,51 +366,51 @@ var detailNames = ['total', 'displayItems.0', 'shippingOptions.0', 'modifiers.0.
 for (var i in detailNames) {
     generate_tests(assert_throws, [
         // Invalid currency code formats.
-        ['Undefined currency code should throw', null, function() {
+        ['Undefined currency code in ' + detailNames[i] + ' should throw', null, function() {
             new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(detailNames[i], {'currency': undefined}), {requestShipping: true})
         }],
 
         // Invalid amount formats.
-        ['Invalid amount "-" should throw', null, function() {
+        ['Invalid amount "-" in ' + detailNames[i] + ' should throw', null, function() {
             new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(detailNames[i], {'value': '-'}), {requestShipping: true})
         }],
-        ['Invalid amount "notdigits" should throw', null, function() {
+        ['Invalid amount "notdigits" in ' + detailNames[i] + ' should throw', null, function() {
             new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(detailNames[i], {'value': 'notdigits'}), {requestShipping: true})
         }],
-        ['Invalid amount "ALSONOTDIGITS" should throw', null, function() {
+        ['Invalid amount "ALSONOTDIGITS" in ' + detailNames[i] + ' should throw', null, function() {
             new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(detailNames[i], {'value': 'ALSONOTDIGITS'}), {requestShipping: true})
         }],
-        ['Invalid amount "10." should throw', null, function() {
+        ['Invalid amount "10." in ' + detailNames[i] + ' should throw', null, function() {
             new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(detailNames[i], {'value': '10.'}), {requestShipping: true})
         }],
-        ['Invalid amount ".99" should throw', null, function() {
+        ['Invalid amount ".99" in ' + detailNames[i] + ' should throw', null, function() {
             new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(detailNames[i], {'value': '.99'}), {requestShipping: true})
         }],
-        ['Invalid amount "-10." should throw', null, function() {
+        ['Invalid amount "-10." in ' + detailNames[i] + ' should throw', null, function() {
             new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(detailNames[i], {'value': '-10.'}), {requestShipping: true})
         }],
-        ['Invalid amount "-.99" should throw', null, function() {
+        ['Invalid amount "-.99" in ' + detailNames[i] + ' should throw', null, function() {
             new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(detailNames[i], {'value': '-.99'}), {requestShipping: true})
         }],
-        ['Invalid amount "10-" should throw', null, function() {
+        ['Invalid amount "10-" in ' + detailNames[i] + ' should throw', null, function() {
             new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(detailNames[i], {'value': '10-'}), {requestShipping: true})
         }],
-        ['Invalid amount "1-0" should throw', null, function() {
+        ['Invalid amount "1-0" in ' + detailNames[i] + ' should throw', null, function() {
             new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(detailNames[i], {'value': '1-0'}), {requestShipping: true})
         }],
-        ['Invalid amount "1.0.0" should throw', null, function() {
+        ['Invalid amount "1.0.0" in ' + detailNames[i] + ' should throw', null, function() {
             new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(detailNames[i], {'value': '1.0.0'}), {requestShipping: true})
         }],
-        ['Invalid amount "1/3" should throw', null, function() {
+        ['Invalid amount "1/3" in ' + detailNames[i] + ' should throw', null, function() {
             new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(detailNames[i], {'value': '1/3'}), {requestShipping: true})
         }],
-        ['Empty amount should throw', null, function() {
+        ['Empty amount in ' + detailNames[i] + ' should throw', null, function() {
             new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(detailNames[i], {'value': ''}), {requestShipping: true})
         }],
-        ['Null amount should throw', null, function() {
+        ['Null amount in ' + detailNames[i] + ' should throw', null, function() {
             new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(detailNames[i], {'value': null}), {requestShipping: true})
         }],
-        ['Undefined amount should throw', null, function() {
+        ['Undefined amount in ' + detailNames[i] + ' should throw', null, function() {
             new PaymentRequest([{'supportedMethods': ['foo']}], buildDetails(detailNames[i], {'value': undefined}), {requestShipping: true})
         }],
     ]);

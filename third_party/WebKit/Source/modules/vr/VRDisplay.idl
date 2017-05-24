@@ -17,9 +17,8 @@ enum VREye {
     readonly attribute unsigned long displayId;
 
     // A user-readable name identifying the device.
-    readonly attribute DOMString displayName;
+    [MeasureAs=VRDisplayDisplayName] readonly attribute DOMString displayName;
 
-    readonly attribute boolean isConnected;
     readonly attribute boolean isPresenting;
 
     // [Constant]?
@@ -28,8 +27,6 @@ enum VREye {
     readonly attribute VRStageParameters stageParameters;
 
     boolean getFrameData(VRFrameData frameData);
-    [DeprecateAs=VRDeprecatedGetPose] VRPose getPose();
-    void resetPose();
 
     attribute double depthNear;
     attribute double depthFar;

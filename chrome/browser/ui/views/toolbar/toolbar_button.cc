@@ -70,9 +70,10 @@ bool ToolbarButton::OnMousePressed(const ui::MouseEvent& event) {
     // Schedule a task that will show the menu.
     const int kMenuTimerDelay = 500;
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE, base::Bind(&ToolbarButton::ShowDropDownMenu,
-                              show_menu_factory_.GetWeakPtr(),
-                              ui::GetMenuSourceTypeForEvent(event)),
+        FROM_HERE,
+        base::BindOnce(&ToolbarButton::ShowDropDownMenu,
+                       show_menu_factory_.GetWeakPtr(),
+                       ui::GetMenuSourceTypeForEvent(event)),
         base::TimeDelta::FromMilliseconds(kMenuTimerDelay));
   }
 
@@ -129,10 +130,10 @@ void ToolbarButton::OnGestureEvent(ui::GestureEvent* event) {
 void ToolbarButton::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   CustomButton::GetAccessibleNodeData(node_data);
   node_data->role = ui::AX_ROLE_BUTTON_DROP_DOWN;
-  node_data->AddStateFlag(ui::AX_STATE_HASPOPUP);
+  node_data->AddState(ui::AX_STATE_HASPOPUP);
   if (enabled()) {
-    node_data->AddIntAttribute(ui::AX_ATTR_ACTION,
-                               ui::AX_SUPPORTED_ACTION_PRESS);
+    node_data->AddIntAttribute(ui::AX_ATTR_DEFAULT_ACTION_VERB,
+                               ui::AX_DEFAULT_ACTION_VERB_PRESS);
   }
 }
 
@@ -176,15 +177,13 @@ void ToolbarButton::ShowDropDownMenu(ui::MenuSourceType source_type) {
 
   View::ConvertPointToScreen(this, &menu_position);
 
-#if defined(OS_WIN)
-  int left_bound = GetSystemMetrics(SM_XVIRTUALSCREEN);
-#elif defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
   // A window won't overlap between displays on ChromeOS.
   // Use the left bound of the display on which
   // the menu button exists.
   gfx::NativeView view = GetWidget()->GetNativeView();
   display::Display display =
-      display::Screen::GetScreen()->GetDisplayNearestWindow(view);
+      display::Screen::GetScreen()->GetDisplayNearestView(view);
   int left_bound = display.bounds().x();
 #else
   // The window might be positioned over the edge between two screens. We'll
@@ -213,12 +212,11 @@ void ToolbarButton::ShowDropDownMenu(ui::MenuSourceType source_type) {
       model_.get(),
       base::Bind(&ToolbarButton::OnMenuClosed, base::Unretained(this))));
   menu_model_adapter_->set_triggerable_event_flags(triggerable_event_flags());
-  menu_runner_.reset(new views::MenuRunner(
-      menu_model_adapter_->CreateMenu(),
-      views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::ASYNC));
-  ignore_result(menu_runner_->RunMenuAt(
-      GetWidget(), nullptr, gfx::Rect(menu_position, gfx::Size(0, 0)),
-      views::MENU_ANCHOR_TOPLEFT, source_type));
+  menu_runner_.reset(new views::MenuRunner(menu_model_adapter_->CreateMenu(),
+                                           views::MenuRunner::HAS_MNEMONICS));
+  menu_runner_->RunMenuAt(GetWidget(), nullptr,
+                          gfx::Rect(menu_position, gfx::Size(0, 0)),
+                          views::MENU_ANCHOR_TOPLEFT, source_type);
 }
 
 void ToolbarButton::OnMenuClosed() {

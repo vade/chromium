@@ -104,12 +104,14 @@ InspectorTest.runTestFunctionAndWaitUntilPausedPromise = function()
 
 InspectorTest.runAsyncCallStacksTest = function(totalDebuggerStatements, maxAsyncCallStackDepth)
 {
+    var defaultMaxAsyncCallStackDepth = 32;
+
     InspectorTest.setQuiet(true);
     InspectorTest.startDebuggerTest(step1);
 
     function step1()
     {
-        InspectorTest.DebuggerAgent.setAsyncCallStackDepth(maxAsyncCallStackDepth, step2);
+        InspectorTest.DebuggerAgent.setAsyncCallStackDepth(maxAsyncCallStackDepth || defaultMaxAsyncCallStackDepth, step2);
     }
 
     function step2()
@@ -345,7 +347,7 @@ InspectorTest.captureStackTraceIntoString = function(callFrames, asyncStackTrace
     printCallFrames(callFrames, SDK.DebuggerModel.CallFrame.prototype.location, SDK.DebuggerModel.CallFrame.prototype.returnValue);
     while (asyncStackTrace) {
         results.push("    [" + (asyncStackTrace.description || "Async Call") + "]");
-        var debuggerModel = SDK.DebuggerModel.fromTarget(SDK.targetManager.mainTarget());
+        var debuggerModel = InspectorTest.debuggerModel;
         var printed = printCallFrames(asyncStackTrace.callFrames, runtimeCallFramePosition);
         if (!printed)
             results.pop();
@@ -367,7 +369,7 @@ InspectorTest._pausedScript = function(callFrames, reason, auxData, breakpointId
 {
     if (!InspectorTest._quiet)
         InspectorTest.addResult("Script execution paused.");
-    var debuggerModel = SDK.DebuggerModel.fromTarget(this.target());
+    var debuggerModel = this.target().model(SDK.DebuggerModel);
     InspectorTest._pausedScriptArguments = [SDK.DebuggerModel.CallFrame.fromPayloadArray(debuggerModel, callFrames), reason, breakpointIds, asyncStackTrace, auxData];
     if (InspectorTest._waitUntilPausedCallback) {
         var callback = InspectorTest._waitUntilPausedCallback;
@@ -572,25 +574,20 @@ InspectorTest.setQuiet = function(quiet)
 
 InspectorTest.queryScripts = function(filter)
 {
-    var scripts = [];
-    for (var scriptId in InspectorTest.debuggerModel._scripts) {
-        var script = InspectorTest.debuggerModel._scripts[scriptId];
-        if (!filter || filter(script))
-            scripts.push(script);
-    }
-    return scripts;
+    var scripts = InspectorTest.debuggerModel.scripts();
+    return filter ? scripts.filter(filter) : scripts;
 };
 
 InspectorTest.createScriptMock = function(url, startLine, startColumn, isContentScript, source, target, preRegisterCallback)
 {
     target = target || SDK.targetManager.mainTarget();
-    var debuggerModel = SDK.DebuggerModel.fromTarget(target);
+    var debuggerModel = target.model(SDK.DebuggerModel);
     var scriptId = ++InspectorTest._lastScriptId + "";
     var lineCount = source.computeLineEndings().length;
     var endLine = startLine + lineCount - 1;
     var endColumn = lineCount === 1 ? startColumn + source.length : source.length - source.computeLineEndings()[lineCount - 2];
     var hasSourceURL = !!source.match(/\/\/#\ssourceURL=\s*(\S*?)\s*$/m) || !!source.match(/\/\/@\ssourceURL=\s*(\S*?)\s*$/m);
-    var script = new SDK.Script(debuggerModel, scriptId, url, startLine, startColumn, endLine, endColumn, 0, "", isContentScript, false, undefined, hasSourceURL);
+    var script = new SDK.Script(debuggerModel, scriptId, url, startLine, startColumn, endLine, endColumn, 0, "", isContentScript, false, undefined, hasSourceURL, source.length);
     script.requestContent = function()
     {
         var trimmedSource = SDK.Script._trimSourceURLComment(source);
@@ -632,24 +629,24 @@ InspectorTest.scriptFormatter = function()
 
 InspectorTest.waitForExecutionContextInTarget = function(target, callback)
 {
-    if (target.runtimeModel.executionContexts().length) {
-        callback(target.runtimeModel.executionContexts()[0]);
+    var runtimeModel = target.model(SDK.RuntimeModel);
+    if (runtimeModel.executionContexts().length) {
+        callback(runtimeModel.executionContexts()[0]);
         return;
     }
-    target.runtimeModel.addEventListener(SDK.RuntimeModel.Events.ExecutionContextCreated, contextCreated);
+    runtimeModel.addEventListener(SDK.RuntimeModel.Events.ExecutionContextCreated, contextCreated);
 
     function contextCreated()
     {
-        target.runtimeModel.removeEventListener(SDK.RuntimeModel.Events.ExecutionContextCreated, contextCreated);
-        callback(target.runtimeModel.executionContexts()[0]);
+        runtimeModel.removeEventListener(SDK.RuntimeModel.Events.ExecutionContextCreated, contextCreated);
+        callback(runtimeModel.executionContexts()[0]);
     }
 }
 
 InspectorTest.selectThread = function(target)
 {
     var threadsPane = self.runtime.sharedInstance(Sources.ThreadsSidebarPane);
-    var listItem = threadsPane._targetToListItem.get(target);
-    threadsPane._onListItemClick(listItem, target);
+    threadsPane._list.selectItem(target.model(SDK.DebuggerModel));
 }
 
 InspectorTest.evaluateOnCurrentCallFrame = function(code)
@@ -657,26 +654,8 @@ InspectorTest.evaluateOnCurrentCallFrame = function(code)
     return new Promise(succ => InspectorTest.debuggerModel.evaluateOnSelectedCallFrame(code, "console", false, true, false, false, InspectorTest.safeWrap(succ)));
 }
 
-InspectorTest.prepareSourceFrameForBreakpointTest = function(sourceFrame)
-{
-    var symbol = Symbol('waitedDecorations');
-    sourceFrame[symbol] = 0;
-    InspectorTest.addSniffer(sourceFrame.__proto__, "_willAddInlineDecorationsForTest", () => sourceFrame[symbol]++, true);
-    InspectorTest.addSniffer(sourceFrame.__proto__, "_didAddInlineDecorationsForTest", (updateWasScheduled) => {
-        sourceFrame[symbol]--;
-        if (!updateWasScheduled)
-            sourceFrame._breakpointDecorationsUpdatedForTest();
-    }, true);
-    sourceFrame._waitingForPossibleLocationsForTest = () => !!sourceFrame[symbol];
-}
-
 InspectorTest.waitJavaScriptSourceFrameBreakpoints = function(sourceFrame, inline)
 {
-    if (!sourceFrame._waitingForPossibleLocationsForTest) {
-        InspectorTest.addResult("Error: source frame should be prepared with InspectorTest.prepareSourceFrameForBreakpointTest function.");
-        InspectorTest.completeTest();
-        return;
-    }
     return waitUpdate().then(checkIfReady);
     function waitUpdate()
     {
@@ -684,8 +663,6 @@ InspectorTest.waitJavaScriptSourceFrameBreakpoints = function(sourceFrame, inlin
     }
     function checkIfReady()
     {
-        if (sourceFrame._waitingForPossibleLocationsForTest())
-            return waitUpdate().then(checkIfReady);
         for (var breakpoint of Bindings.breakpointManager._allBreakpoints()) {
             if (breakpoint._fakePrimaryLocation && breakpoint.enabled())
                 return waitUpdate().then(checkIfReady);
@@ -704,7 +681,7 @@ InspectorTest.dumpJavaScriptSourceFrameBreakpoints = function(sourceFrame)
         var conditional = textEditor.hasLineClass(lineNumber, "cm-breakpoint-conditional")
         InspectorTest.addResult("breakpoint at " + lineNumber + (disabled ? " disabled" : "") + (conditional ? " conditional" : ""));
 
-        var range = new Common.TextRange(lineNumber, 0, lineNumber, textEditor.line(lineNumber).length);
+        var range = new TextUtils.TextRange(lineNumber, 0, lineNumber, textEditor.line(lineNumber).length);
         var bookmarks = textEditor.bookmarks(range, Sources.JavaScriptSourceFrame.BreakpointDecoration._bookmarkSymbol);
         bookmarks = bookmarks.filter(bookmark => !!bookmark.position());
         bookmarks.sort((bookmark1, bookmark2) => bookmark1.position().startColumn - bookmark2.position().startColumn);
@@ -718,14 +695,33 @@ InspectorTest.dumpJavaScriptSourceFrameBreakpoints = function(sourceFrame)
     }
 }
 
-InspectorTest.clickJavaScriptSourceFrameBreakpoint = function(sourceFrame, lineNumber, index)
+InspectorTest.clickJavaScriptSourceFrameBreakpoint = function(sourceFrame, lineNumber, index, next)
 {
     var textEditor = sourceFrame._textEditor;
     var lineLength = textEditor.line(lineNumber).length;
-    var lineRange = new Common.TextRange(lineNumber, 0, lineNumber, lineLength);
+    var lineRange = new TextUtils.TextRange(lineNumber, 0, lineNumber, lineLength);
     var bookmarks = textEditor.bookmarks(lineRange, Sources.JavaScriptSourceFrame.BreakpointDecoration._bookmarkSymbol);
     bookmarks.sort((bookmark1, bookmark2) => bookmark1.position().startColumn - bookmark2.position().startColumn);
-    bookmarks[index][Sources.JavaScriptSourceFrame.BreakpointDecoration._elementSymbolForTest].click();
+    var bookmark = bookmarks[index];
+    if (bookmark) {
+        bookmark[Sources.JavaScriptSourceFrame.BreakpointDecoration._elementSymbolForTest].click();
+    } else {
+        InspectorTest.addResult(`Could not click on Javascript breakpoint - lineNumber: ${lineNumber}, index: ${index}`);
+        next();
+    }
+}
+
+InspectorTest.setEventListenerBreakpoint = function(id, enabled, targetName)
+{
+    var pane = self.runtime.sharedInstance(Sources.EventListenerBreakpointsSidebarPane);
+    var auxData = {'eventName': id};
+    if (targetName)
+        auxData.targetName = targetName;
+    var breakpoint = SDK.domDebuggerManager.resolveEventListenerBreakpoint(auxData);
+    if (breakpoint.enabled() !== enabled) {
+        pane._breakpoints.get(breakpoint).checkbox.checked = enabled;
+        pane._breakpointCheckboxClicked(breakpoint);
+    }
 }
 
 };

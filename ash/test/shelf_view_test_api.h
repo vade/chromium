@@ -5,7 +5,7 @@
 #ifndef ASH_TEST_SHELF_VIEW_TEST_API_H_
 #define ASH_TEST_SHELF_VIEW_TEST_API_H_
 
-#include "ash/common/shelf/shelf_item_types.h"
+#include "ash/public/cpp/shelf_item.h"
 #include "base/macros.h"
 
 namespace gfx {
@@ -28,7 +28,6 @@ class OverflowBubble;
 class OverflowButton;
 class ShelfButton;
 class ShelfButtonPressedMetricTracker;
-class ShelfDelegate;
 class ShelfTooltipManager;
 class ShelfView;
 
@@ -96,12 +95,6 @@ class ShelfViewTestAPI {
   // Returns the preferred size of |shelf_view_|.
   gfx::Size GetPreferredSize();
 
-  // Returns the button size.
-  int GetButtonSize();
-
-  // Returns the button space size.
-  int GetButtonSpacing();
-
   // Returns minimum distance before drag starts.
   int GetMinimumDragDistance() const;
 
@@ -113,17 +106,15 @@ class ShelfViewTestAPI {
   // Wrapper for ShelfView::SameDragType.
   bool SameDragType(ShelfItemType typea, ShelfItemType typeb) const;
 
-  // Sets ShelfDelegate.
-  void SetShelfDelegate(ShelfDelegate* delegate);
-
   // Returns re-insertable bounds in screen.
   gfx::Rect GetBoundsForDragInsertInScreen();
 
   // Returns true if item is ripped off.
   bool IsRippedOffFromShelf();
 
-  // Returns true if an item is ripped off and entered into shelf.
-  bool DraggedItemFromOverflowToShelf();
+  // Returns true when an item is dragged from one shelf to another (eg.
+  // overflow).
+  bool DraggedItemToAnotherShelf();
 
   // An accessor for |shelf_button_pressed_metric_tracker_|.
   ShelfButtonPressedMetricTracker* shelf_button_pressed_metric_tracker();

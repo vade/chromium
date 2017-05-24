@@ -6,7 +6,7 @@
 #define CSSSkew_h
 
 #include "core/css/cssom/CSSAngleValue.h"
-#include "core/css/cssom/CSSMatrixTransformComponent.h"
+#include "core/css/cssom/CSSMatrixComponent.h"
 #include "core/css/cssom/CSSTransformComponent.h"
 
 namespace blink {
@@ -16,37 +16,37 @@ class CORE_EXPORT CSSSkew final : public CSSTransformComponent {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static CSSSkew* create(const CSSAngleValue* ax, const CSSAngleValue* ay) {
+  static CSSSkew* Create(const CSSAngleValue* ax, const CSSAngleValue* ay) {
     return new CSSSkew(ax, ay);
   }
 
-  static CSSSkew* fromCSSValue(const CSSFunctionValue&);
+  static CSSSkew* FromCSSValue(const CSSFunctionValue&);
 
   // Bindings requires returning non-const pointers. This is safe because
   // CSSAngleValues are immutable.
-  CSSAngleValue* ax() const { return const_cast<CSSAngleValue*>(m_ax.get()); }
-  CSSAngleValue* ay() const { return const_cast<CSSAngleValue*>(m_ay.get()); }
+  CSSAngleValue* ax() const { return const_cast<CSSAngleValue*>(ax_.Get()); }
+  CSSAngleValue* ay() const { return const_cast<CSSAngleValue*>(ay_.Get()); }
 
-  TransformComponentType type() const override { return SkewType; }
+  TransformComponentType GetType() const override { return kSkewType; }
 
-  CSSMatrixTransformComponent* asMatrix() const override {
-    return CSSMatrixTransformComponent::skew(m_ax->degrees(), m_ay->degrees());
+  CSSMatrixComponent* asMatrix() const override {
+    return CSSMatrixComponent::Skew(ax_->degrees(), ay_->degrees());
   }
 
-  CSSFunctionValue* toCSSValue() const override;
+  CSSFunctionValue* ToCSSValue() const override;
 
   DEFINE_INLINE_VIRTUAL_TRACE() {
-    visitor->trace(m_ax);
-    visitor->trace(m_ay);
-    CSSTransformComponent::trace(visitor);
+    visitor->Trace(ax_);
+    visitor->Trace(ay_);
+    CSSTransformComponent::Trace(visitor);
   }
 
  private:
   CSSSkew(const CSSAngleValue* ax, const CSSAngleValue* ay)
-      : CSSTransformComponent(), m_ax(ax), m_ay(ay) {}
+      : CSSTransformComponent(), ax_(ax), ay_(ay) {}
 
-  Member<const CSSAngleValue> m_ax;
-  Member<const CSSAngleValue> m_ay;
+  Member<const CSSAngleValue> ax_;
+  Member<const CSSAngleValue> ay_;
 };
 
 }  // namespace blink

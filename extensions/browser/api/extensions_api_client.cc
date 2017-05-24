@@ -103,7 +103,17 @@ MetricsPrivateDelegate* ExtensionsAPIClient::GetMetricsPrivateDelegate() {
   return nullptr;
 }
 
+NetworkingCastPrivateDelegate*
+ExtensionsAPIClient::GetNetworkingCastPrivateDelegate() {
+  return nullptr;
+}
+
 #if defined(OS_CHROMEOS)
+NonNativeFileSystemDelegate*
+ExtensionsAPIClient::GetNonNativeFileSystemDelegate() {
+  return nullptr;
+}
+
 void ExtensionsAPIClient::SaveImageDataToClipboard(
     const std::vector<char>& image_data,
     api::clipboard::ImageType type,

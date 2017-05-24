@@ -4,11 +4,12 @@
 
 #include "content/renderer/media/webrtc/media_stream_remote_video_source.h"
 
+#include <memory>
 #include <utility>
 
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/child/child_process.h"
 #include "content/renderer/media/media_stream_video_track.h"
@@ -18,6 +19,7 @@
 #include "media/base/video_frame.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/web/WebHeap.h"
+#include "third_party/webrtc/api/video/i420_buffer.h"
 
 namespace content {
 
@@ -38,26 +40,28 @@ class MediaStreamRemoteVideoSourceTest
     : public ::testing::Test {
  public:
   MediaStreamRemoteVideoSourceTest()
-      : child_process_(new ChildProcess()),
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI),
+        child_process_(new ChildProcess()),
         mock_factory_(new MockPeerConnectionDependencyFactory()),
         webrtc_video_track_(MockWebRtcVideoTrack::Create("test")),
         remote_source_(new MediaStreamRemoteVideoSourceUnderTest(
             std::unique_ptr<TrackObserver>(
                 new TrackObserver(base::ThreadTaskRunnerHandle::Get(),
                                   webrtc_video_track_.get())))),
-        number_of_successful_constraints_applied_(0),
-        number_of_failed_constraints_applied_(0) {
-    webkit_source_.initialize(blink::WebString::fromASCII("dummy_source_id"),
-                              blink::WebMediaStreamSource::TypeVideo,
-                              blink::WebString::fromASCII("dummy_source_name"),
+        number_of_successful_track_starts_(0),
+        number_of_failed_track_starts_(0) {
+    webkit_source_.Initialize(blink::WebString::FromASCII("dummy_source_id"),
+                              blink::WebMediaStreamSource::kTypeVideo,
+                              blink::WebString::FromASCII("dummy_source_name"),
                               true /* remote */);
-    webkit_source_.setExtraData(remote_source_);
+    webkit_source_.SetExtraData(remote_source_);
   }
 
   void TearDown() override {
     remote_source_->OnSourceTerminated();
-    webkit_source_.reset();
-    blink::WebHeap::collectAllGarbageForTesting();
+    webkit_source_.Reset();
+    blink::WebHeap::CollectAllGarbageForTesting();
   }
 
   MediaStreamRemoteVideoSourceUnderTest* source() {
@@ -66,23 +70,19 @@ class MediaStreamRemoteVideoSourceTest
 
   MediaStreamVideoTrack* CreateTrack() {
     bool enabled = true;
-    blink::WebMediaConstraints constraints;
-    constraints.initialize();
     return new MediaStreamVideoTrack(
         source(),
-        constraints,
-        base::Bind(
-            &MediaStreamRemoteVideoSourceTest::OnConstraintsApplied,
-            base::Unretained(this)),
+        base::Bind(&MediaStreamRemoteVideoSourceTest::OnTrackStarted,
+                   base::Unretained(this)),
         enabled);
   }
 
   int NumberOfSuccessConstraintsCallbacks() const {
-    return number_of_successful_constraints_applied_;
+    return number_of_successful_track_starts_;
   }
 
   int NumberOfFailedConstraintsCallbacks() const {
-    return number_of_failed_constraints_applied_;
+    return number_of_failed_track_starts_;
   }
 
   void StopWebRtcTrack() {
@@ -94,25 +94,25 @@ class MediaStreamRemoteVideoSourceTest
   }
 
  private:
-  void OnConstraintsApplied(MediaStreamSource* source,
-                            MediaStreamRequestResult result,
-                            const blink::WebString& result_name) {
+  void OnTrackStarted(MediaStreamSource* source,
+                      MediaStreamRequestResult result,
+                      const blink::WebString& result_name) {
     ASSERT_EQ(source, remote_source_);
     if (result == MEDIA_DEVICE_OK)
-      ++number_of_successful_constraints_applied_;
+      ++number_of_successful_track_starts_;
     else
-      ++number_of_failed_constraints_applied_;
+      ++number_of_failed_track_starts_;
   }
 
-  base::MessageLoopForUI message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   std::unique_ptr<ChildProcess> child_process_;
   std::unique_ptr<MockPeerConnectionDependencyFactory> mock_factory_;
   scoped_refptr<webrtc::VideoTrackInterface> webrtc_video_track_;
   // |remote_source_| is owned by |webkit_source_|.
   MediaStreamRemoteVideoSourceUnderTest* remote_source_;
   blink::WebMediaStreamSource webkit_source_;
-  int number_of_successful_constraints_applied_;
-  int number_of_failed_constraints_applied_;
+  int number_of_successful_track_starts_;
+  int number_of_failed_track_starts_;
 };
 
 TEST_F(MediaStreamRemoteVideoSourceTest, StartTrack) {
@@ -128,7 +128,7 @@ TEST_F(MediaStreamRemoteVideoSourceTest, StartTrack) {
   rtc::scoped_refptr<webrtc::I420Buffer> buffer(
       new rtc::RefCountedObject<webrtc::I420Buffer>(320, 240));
 
-  buffer->SetToBlack();
+  webrtc::I420Buffer::SetBlack(buffer);
 
   source()->SinkInterfaceForTest()->OnFrame(
       webrtc::VideoFrame(buffer, webrtc::kVideoRotation_0, 1000));
@@ -143,14 +143,14 @@ TEST_F(MediaStreamRemoteVideoSourceTest, RemoteTrackStop) {
 
   MockMediaStreamVideoSink sink;
   track->AddSink(&sink, sink.GetDeliverFrameCB(), false);
-  EXPECT_EQ(blink::WebMediaStreamSource::ReadyStateLive, sink.state());
-  EXPECT_EQ(blink::WebMediaStreamSource::ReadyStateLive,
-            webkit_source().getReadyState());
+  EXPECT_EQ(blink::WebMediaStreamSource::kReadyStateLive, sink.state());
+  EXPECT_EQ(blink::WebMediaStreamSource::kReadyStateLive,
+            webkit_source().GetReadyState());
   StopWebRtcTrack();
   base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(blink::WebMediaStreamSource::ReadyStateEnded,
-            webkit_source().getReadyState());
-  EXPECT_EQ(blink::WebMediaStreamSource::ReadyStateEnded, sink.state());
+  EXPECT_EQ(blink::WebMediaStreamSource::kReadyStateEnded,
+            webkit_source().GetReadyState());
+  EXPECT_EQ(blink::WebMediaStreamSource::kReadyStateEnded, sink.state());
 
   track->RemoveSink(&sink);
 }

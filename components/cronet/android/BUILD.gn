@@ -14,10 +14,6 @@ import("//url/features.gni")
 
 assert(!is_component_build, "Cronet requires static library build.")
 
-declare_args() {
-  cronet_enable_data_reduction_proxy_support = false
-}
-
 generate_jni("cronet_jni_headers") {
   sources = [
     "java/src/org/chromium/net/impl/CronetBidirectionalStream.java",
@@ -72,7 +68,7 @@ java_cpp_template("load_states_list") {
   inputs = [
     "//net/base/load_states_list.h",
   ]
-  package_name = "org/chromium/net/impl"
+  package_path = "org/chromium/net/impl"
 }
 
 _generated_api_version_java_dir =
@@ -181,8 +177,6 @@ template("cronet_static_tmpl") {
       "//components/cronet/android/cert/cert_verifier_cache_serializer.h",
       "//components/cronet/android/cronet_bidirectional_stream_adapter.cc",
       "//components/cronet/android/cronet_bidirectional_stream_adapter.h",
-      "//components/cronet/android/cronet_in_memory_pref_store.cc",
-      "//components/cronet/android/cronet_in_memory_pref_store.h",
       "//components/cronet/android/cronet_library_loader.cc",
       "//components/cronet/android/cronet_library_loader.h",
       "//components/cronet/android/cronet_upload_data_stream.cc",
@@ -219,14 +213,6 @@ template("cronet_static_tmpl") {
       "log",
     ]
 
-    if (cronet_enable_data_reduction_proxy_support) {
-      defines += [ "DATA_REDUCTION_PROXY_SUPPORT" ]
-      sources += [
-        "//components/cronet/android/cronet_data_reduction_proxy.cc",
-        "//components/cronet/android/cronet_data_reduction_proxy.h",
-      ]
-    }
-
     if (defined(invoker.defines)) {
       defines += invoker.defines
     }
@@ -243,19 +229,16 @@ cronet_static_tmpl("cronet_static") {
     "//url",
   ]
 
-  if (cronet_enable_data_reduction_proxy_support) {
-    deps += [
-      "//components/data_reduction_proxy/core/browser:browser_small",
-      "//components/data_reduction_proxy/core/common",
-    ]
-  }
-
   if (!use_platform_icu_alternatives) {
     deps += [ "//base:i18n" ]
   }
 }
 
+_cronet_shared_lib_name = "cronet.$chrome_version_full"
+_cronet_shared_lib_file_name = "lib" + _cronet_shared_lib_name + ".so"
+
 shared_library("cronet") {
+  output_name = _cronet_shared_lib_name
   sources = [
     "cronet_jni.cc",
   ]
@@ -264,13 +247,6 @@ shared_library("cronet") {
     "//base",
     "//net:net",
   ]
-  ldflags = [ "-Wl,--version-script=" +
-              rebase_path("//components/cronet/android/only_jni_exports.lst") ]
-
-  # Avoid hide_native_jni_exports as it adds another version script, and the
-  # ARM64 linker throws an error for multiple version scripts with anonymous
-  # version tags.
-  configs -= [ "//build/config/android:hide_native_jni_exports" ]
 }
 
 cronet_api_srcjar_deps = [ ":cronet_api_version_srcjar" ]
@@ -551,18 +527,6 @@ shared_library("cronet_tests") {
   ]
 
   include_dirs = [ _cronet_version_header_include_dir ]
-
-  ldflags = [ "-Wl,--version-script=" +
-              rebase_path("//components/cronet/android/only_jni_exports.lst") ]
-
-  # Avoid hide_native_jni_exports as it adds another version script, and the
-  # ARM64 linker throws an error for multiple version scripts with anonymous
-  # version tags.
-  configs -= [ "//build/config/android:hide_native_jni_exports" ]
-
-  if (cronet_enable_data_reduction_proxy_support) {
-    deps += [ "//components/data_reduction_proxy/core/browser:browser_small" ]
-  }
 }
 
 android_resources("cronet_test_apk_resources") {
@@ -598,7 +562,6 @@ android_library("cronet_test_apk_java") {
     "//base:base_java",
     "//base:base_java_test_support",
     "//net/android:net_java_test_support",
-    "//third_party/netty-tcnative:netty-tcnative_java",
     "//third_party/netty4:netty_all_java",
   ]
 
@@ -643,8 +606,6 @@ android_assets("cronet_test_apk_assets") {
     "test/assets/test/cacheable.txt.mock-http-headers",
     "test/assets/test/content_length_mismatch.html",
     "test/assets/test/content_length_mismatch.html.mock-http-headers",
-    "test/assets/test/datareductionproxysuccess.txt",
-    "test/assets/test/datareductionproxysuccess.txt.mock-http-headers",
     "test/assets/test/gzipped.html",
     "test/assets/test/gzipped.html.mock-http-headers",
     "test/assets/test/multiredirect.html",
@@ -709,6 +670,7 @@ android_library("cronet_javatests") {
   java_files = [
     "test/javatests/src/org/chromium/net/BidirectionalStreamQuicTest.java",
     "test/javatests/src/org/chromium/net/BidirectionalStreamTest.java",
+    "test/javatests/src/org/chromium/net/BrotliTest.java",
     "test/javatests/src/org/chromium/net/Criteria.java",
     "test/javatests/src/org/chromium/net/CronetEngineBuilderTest.java",
     "test/javatests/src/org/chromium/net/CronetTestBase.java",
@@ -716,9 +678,11 @@ android_library("cronet_javatests") {
     "test/javatests/src/org/chromium/net/CronetUrlRequestContextTest.java",
     "test/javatests/src/org/chromium/net/CronetUrlRequestTest.java",
     "test/javatests/src/org/chromium/net/DiskStorageTest.java",
+    "test/javatests/src/org/chromium/net/ExperimentalOptionsTest.java",
     "test/javatests/src/org/chromium/net/GetStatusTest.java",
     "test/javatests/src/org/chromium/net/MetricsTestUtil.java",
     "test/javatests/src/org/chromium/net/NetworkChangeNotifierTest.java",
+    "test/javatests/src/org/chromium/net/NQETest.java",
     "test/javatests/src/org/chromium/net/PkpTest.java",
     "test/javatests/src/org/chromium/net/QuicTest.java",
     "test/javatests/src/org/chromium/net/RequestFinishedInfoTest.java",
@@ -891,6 +855,7 @@ instrumentation_test_apk(
 
 android_library("cronet_perf_test_apk_java") {
   testonly = true
+  android_manifest = "test/javaperftests/AndroidManifest.xml"
   java_files =
       [ "test/javaperftests/src/org/chromium/net/CronetPerfTestActivity.java" ]
 
@@ -948,6 +913,7 @@ test("cronet_unittests") {
     "//components/metrics",
     "//net",
     "//net:test_support",
+    "//net/android:net_java",
     "//testing/gtest",
   ]
 
@@ -1031,7 +997,6 @@ action("extract_cronet_test_jars") {
     "$root_out_dir/lib.java/components/cronet/android/cronet_test_apk_java.jar",
     "$root_out_dir/lib.java/net/android/net_java.jar",
     "$root_out_dir/lib.java/net/android/net_java_test_support.jar",
-    "$root_out_dir/lib.java/third_party/netty-tcnative/netty-tcnative_java.jar",
     "$root_out_dir/lib.java/url/url_java.jar",
     NETTY4_JAR_FILE,
   ]
@@ -1060,7 +1025,6 @@ action("extract_cronet_test_jars") {
     "//base:base_java_test_support",
     "//net/android:net_java",
     "//net/android:net_java_test_support",
-    "//third_party/netty-tcnative:netty-tcnative_java",
     "//third_party/netty4:netty_all_java",
     "//url:url_java",
   ]
@@ -1285,25 +1249,23 @@ copy("cronet_package_copy") {
 
 action("cronet_combine_proguard_flags") {
   script = "//components/cronet/tools/generate_proguard_file.py"
+  sources = [
+    "//base/android/proguard/chromium_code.flags",
+    "//components/cronet/android/cronet_impl_native_proguard.cfg",
+  ]
   outputs = [
     "$target_gen_dir/cronet_impl_native_proguard.cfg",
   ]
-  args = [
-    "--output-file",
-    rebase_path("$target_gen_dir/cronet_impl_native_proguard.cfg",
-                root_build_dir),
-    rebase_path("//components/cronet/android/cronet_impl_native_proguard.cfg",
-                root_build_dir),
-    rebase_path("//base/android/proguard/chromium_code.flags", root_build_dir),
-  ]
+  args = [ "--output-file" ] + rebase_path(outputs, root_build_dir) +
+         rebase_path(sources, root_build_dir)
 }
 
 copy("cronet_package_copy_native_lib") {
   sources = [
-    "$root_out_dir/libcronet.so",
+    "$root_out_dir/" + _cronet_shared_lib_file_name,
   ]
   outputs = [
-    "$_package_dir/libs/${android_app_abi}/libcronet.so",
+    "$_package_dir/libs/${android_app_abi}/" + _cronet_shared_lib_file_name,
   ]
   deps = [
     ":cronet",
@@ -1312,10 +1274,10 @@ copy("cronet_package_copy_native_lib") {
 
 copy("cronet_package_copy_native_lib_unstripped") {
   sources = [
-    "$root_out_dir/lib.unstripped/libcronet.so",
+    "$root_out_dir/lib.unstripped/" + _cronet_shared_lib_file_name,
   ]
   outputs = [
-    "$_package_dir/symbols/${android_app_abi}/libcronet.so",
+    "$_package_dir/symbols/${android_app_abi}/" + _cronet_shared_lib_file_name,
   ]
   deps = [
     ":cronet",
@@ -1391,6 +1353,15 @@ copy("cronet_package_copy_test_files") {
     # Not really dependent, but builds can fail if these two targets attempt
     # to create the "assets" subdirectory simultaneously.
     ":cronet_package_copy_test_assets",
+  ]
+}
+
+copy("cronet_package_copy_resources") {
+  sources = [
+    "api/res/raw/keep_cronet_api.xml",
+  ]
+  outputs = [
+    "$_package_dir/res/raw/{{source_file_part}}",
   ]
 }
 
@@ -1473,6 +1444,7 @@ group("cronet_package") {
       ":cronet_package_copy",
       ":cronet_package_copy_native_lib",
       ":cronet_package_copy_native_lib_unstripped",
+      ":cronet_package_copy_resources",
       ":cronet_test_package",
       ":generate_javadoc",
       ":generate_licenses",

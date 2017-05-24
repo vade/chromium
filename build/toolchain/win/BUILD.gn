@@ -6,6 +6,7 @@ import("//build/config/clang/clang.gni")
 import("//build/config/compiler/compiler.gni")
 import("//build/config/sanitizers/sanitizers.gni")
 import("//build/config/win/visual_studio_version.gni")
+import("//build/toolchain/clang_static_analyzer.gni")
 import("//build/toolchain/goma.gni")
 import("//build/toolchain/toolchain.gni")
 
@@ -93,6 +94,14 @@ template("msvc_toolchain") {
       cl = "${invoker.cl} --rsp-quoting=posix"
     } else {
       cl = invoker.cl
+    }
+
+    if (toolchain_uses_clang && use_clang_static_analyzer) {
+      analyzer_prefix =
+          "$python_path " +
+          rebase_path("//build/toolchain/clang_static_analyzer_wrapper.py",
+                      root_build_dir) + " --mode=cl"
+      cl = "${analyzer_prefix} ${cl}"
     }
 
     if (use_lld) {
@@ -312,13 +321,6 @@ template("msvc_toolchain") {
   }
 }
 
-if (is_clang) {
-  sys_include_prefix = "-imsvc"
-} else {
-  # MSVC doesn't have the concept of system headers.
-  sys_include_prefix = "/I"
-}
-
 if (host_os == "win") {
   clang_cl = "clang-cl.exe"
 } else {
@@ -335,7 +337,6 @@ if (target_cpu == "x86") {
                                      windows_sdk_path,
                                      visual_studio_runtime_dirs,
                                      "x86",
-                                     "${sys_include_prefix}",
                                    ],
                                    "scope")
 
@@ -352,7 +353,7 @@ if (target_cpu == "x86") {
     environment = "environment.x86"
     prefix = rebase_path("$clang_base_path/bin", root_build_dir)
     cl = "${goma_prefix}$prefix/${clang_cl}"
-    sys_include_flags = "${x86_toolchain_data.include_flags}"
+    sys_include_flags = "${x86_toolchain_data.include_flags_imsvc}"
 
     toolchain_args = {
       current_cpu = "x86"
@@ -368,7 +369,6 @@ x64_toolchain_data = exec_script("setup_toolchain.py",
                                    windows_sdk_path,
                                    visual_studio_runtime_dirs,
                                    "x64",
-                                   "${sys_include_prefix}",
                                  ],
                                  "scope")
 
@@ -390,7 +390,7 @@ template("win_x64_toolchains") {
     environment = "environment.x64"
     prefix = rebase_path("$clang_base_path/bin", root_build_dir)
     cl = "${goma_prefix}$prefix/${clang_cl}"
-    sys_include_flags = "${x64_toolchain_data.include_flags}"
+    sys_include_flags = "${x64_toolchain_data.include_flags_imsvc}"
 
     toolchain_args = {
       if (defined(invoker.toolchain_args)) {

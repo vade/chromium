@@ -3,27 +3,24 @@
 # found in the LICENSE file.
 
 source_set("utils") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   sources = [
     "content_setting_backed_boolean.h",
     "content_setting_backed_boolean.mm",
     "observable_boolean.h",
     "pref_backed_boolean.h",
     "pref_backed_boolean.mm",
-    "resized_avatar_cache.h",
-    "resized_avatar_cache.mm",
   ]
   deps = [
     "//base",
     "//components/content_settings/core/browser",
     "//components/content_settings/core/common",
     "//components/prefs",
-    "//ios/chrome/browser/ui",
-    "//ios/public/provider/chrome/browser",
-    "//ios/public/provider/chrome/browser/signin",
   ]
 }
 
 source_set("test_support") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
     "fake_observable_boolean.h",
@@ -35,6 +32,7 @@ source_set("test_support") {
 }
 
 source_set("unit_tests") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
     "content_setting_backed_boolean_unittest.mm",

@@ -7,6 +7,7 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
+#include "base/single_thread_task_runner.h"
 #include "media/audio/audio_input_controller.h"
 #include "media/base/audio_parameters.h"
 
@@ -60,7 +61,8 @@ class TestAudioInputController : public AudioInputController {
                            const AudioParameters& audio_parameters,
                            EventHandler* event_handler,
                            SyncWriter* sync_writer,
-                           UserInputMonitor* user_input_monitor);
+                           UserInputMonitor* user_input_monitor,
+                           StreamType type);
 
   // Returns the event handler installed on the AudioInputController.
   EventHandler* event_handler() const { return event_handler_; }
@@ -109,7 +111,8 @@ class TestAudioInputControllerFactory : public AudioInputController::Factory {
       AudioManager* audio_manager,
       AudioInputController::EventHandler* event_handler,
       AudioParameters params,
-      UserInputMonitor* user_input_monitor) override;
+      UserInputMonitor* user_input_monitor,
+      AudioInputController::StreamType type) override;
 
   void set_delegate(TestAudioInputControllerDelegate* delegate) {
     delegate_ = delegate;

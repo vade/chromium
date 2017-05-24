@@ -5,17 +5,21 @@
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_SCREENS_USER_IMAGE_VIEW_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_SCREENS_USER_IMAGE_VIEW_H_
 
+#include "chrome/browser/chromeos/login/oobe_screen.h"
+
 namespace chromeos {
 
-class UserImageModel;
+class UserImageScreen;
 
 // Interface for dependency injection between UserImageScreen and its actual
 // representation, either views based or WebUI.
 class UserImageView {
  public:
+  constexpr static OobeScreen kScreenId = OobeScreen::SCREEN_USER_IMAGE_PICKER;
+
   virtual ~UserImageView() {}
 
-  virtual void Bind(UserImageModel& model) = 0;
+  virtual void Bind(UserImageScreen* screen) = 0;
 
   virtual void Unbind() = 0;
 

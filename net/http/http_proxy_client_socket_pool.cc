@@ -23,10 +23,10 @@
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/ssl_client_socket_pool.h"
 #include "net/socket/transport_client_socket_pool.h"
-#include "net/spdy/spdy_proxy_client_socket.h"
-#include "net/spdy/spdy_session.h"
-#include "net/spdy/spdy_session_pool.h"
-#include "net/spdy/spdy_stream.h"
+#include "net/spdy/chromium/spdy_proxy_client_socket.h"
+#include "net/spdy/chromium/spdy_session.h"
+#include "net/spdy/chromium/spdy_session_pool.h"
+#include "net/spdy/chromium/spdy_stream.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "url/gurl.h"
 
@@ -245,6 +245,12 @@ void HttpProxyClientSocketPool::CancelRequest(
   base_.CancelRequest(group_name, handle);
 }
 
+void HttpProxyClientSocketPool::SetPriority(const std::string& group_name,
+                                            ClientSocketHandle* handle,
+                                            RequestPriority priority) {
+  base_.SetPriority(group_name, handle, priority);
+}
+
 void HttpProxyClientSocketPool::ReleaseSocket(
     const std::string& group_name,
     std::unique_ptr<StreamSocket> socket,
@@ -258,6 +264,11 @@ void HttpProxyClientSocketPool::FlushWithError(int error) {
 
 void HttpProxyClientSocketPool::CloseIdleSockets() {
   base_.CloseIdleSockets();
+}
+
+void HttpProxyClientSocketPool::CloseIdleSocketsInGroup(
+    const std::string& group_name) {
+  base_.CloseIdleSocketsInGroup(group_name);
 }
 
 int HttpProxyClientSocketPool::IdleSocketCount() const {

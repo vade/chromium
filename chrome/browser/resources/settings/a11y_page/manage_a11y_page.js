@@ -51,6 +51,12 @@ Polymer({
         return loadTimeData.getBoolean('showExperimentalA11yFeatures');
       },
     },
+
+    /** @private */
+    isGuest_: {
+      type: Boolean,
+      value: function() { return loadTimeData.getBoolean('isGuest'); }
+    },
   },
 
   /** @private */
@@ -59,28 +65,40 @@ Polymer({
   },
 
   /** @private */
+  onSelectToSpeakSettingsTap_: function() {
+    chrome.send('showSelectToSpeakSettings');
+  },
+
+  /** @private */
+  onSwitchAccessSettingsTap_: function() {
+    chrome.send('showSwitchAccessSettings');
+  },
+
+  /** @private */
   onDisplayTap_: function() {
-    settings.navigateTo(settings.Route.DISPLAY);
+    settings.navigateTo(
+        settings.Route.DISPLAY,
+        /* dynamicParams */ null, /* removeSearch */ true);
   },
 
   /** @private */
   onAppearanceTap_: function() {
-    settings.navigateTo(settings.Route.APPEARANCE);
+    settings.navigateTo(
+        settings.Route.APPEARANCE,
+        /* dynamicParams */ null, /* removeSearch */ true);
   },
 
   /** @private */
   onKeyboardTap_: function() {
-    settings.navigateTo(settings.Route.KEYBOARD);
+    settings.navigateTo(
+        settings.Route.KEYBOARD,
+        /* dynamicParams */ null, /* removeSearch */ true);
   },
 
   /** @private */
   onMouseTap_: function() {
-    settings.navigateTo(settings.Route.POINTERS);
-  },
-
-  /** @private */
-  onMoreFeaturesTap_: function() {
-    window.open(
-        'https://chrome.google.com/webstore/category/collection/accessibility');
+    settings.navigateTo(
+        settings.Route.POINTERS,
+        /* dynamicParams */ null, /* removeSearch */ true);
   },
 });

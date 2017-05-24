@@ -4,6 +4,8 @@
 
 #include "ash/shell/window_watcher_shelf_item_delegate.h"
 
+#include <utility>
+
 #include "ash/shell/window_watcher.h"
 #include "ash/wm/window_util.h"
 #include "ui/aura/window.h"
@@ -14,26 +16,30 @@ namespace shell {
 WindowWatcherShelfItemDelegate::WindowWatcherShelfItemDelegate(
     ShelfID id,
     WindowWatcher* watcher)
-    : id_(id), watcher_(watcher) {
-  DCHECK_GT(id_, 0);
+    : ShelfItemDelegate(id), watcher_(watcher) {
+  DCHECK(!id.IsNull());
   DCHECK(watcher_);
 }
 
 WindowWatcherShelfItemDelegate::~WindowWatcherShelfItemDelegate() {}
 
-ShelfItemDelegate::PerformedAction WindowWatcherShelfItemDelegate::ItemSelected(
-    const ui::Event& event) {
-  aura::Window* window = watcher_->GetWindowByID(id_);
+void WindowWatcherShelfItemDelegate::ItemSelected(
+    std::unique_ptr<ui::Event> event,
+    int64_t display_id,
+    ShelfLaunchSource source,
+    ItemSelectedCallback callback) {
+  aura::Window* window = watcher_->GetWindowByID(shelf_id());
   if (window->type() == ui::wm::WINDOW_TYPE_PANEL)
-    wm::MoveWindowToEventRoot(window, event);
+    wm::MoveWindowToDisplay(window, display_id);
   window->Show();
   wm::ActivateWindow(window);
-  return kExistingWindowActivated;
+  std::move(callback).Run(SHELF_ACTION_WINDOW_ACTIVATED, base::nullopt);
 }
 
-ShelfMenuModel* WindowWatcherShelfItemDelegate::CreateApplicationMenu(
-    int event_flags) {
-  return nullptr;
+void WindowWatcherShelfItemDelegate::ExecuteCommand(uint32_t command_id,
+                                                    int32_t event_flags) {
+  // This delegate does not support showing an application menu.
+  NOTIMPLEMENTED();
 }
 
 void WindowWatcherShelfItemDelegate::Close() {}

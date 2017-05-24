@@ -84,9 +84,6 @@ class Domain;
 namespace profiler {
 class Domain;
 }
-namespace rendering {
-class Domain;
-}
 namespace runtime {
 class Domain;
 }
@@ -139,12 +136,36 @@ class HEADLESS_EXPORT HeadlessDevToolsClient {
   virtual network::Domain* GetNetwork() = 0;
   virtual page::Domain* GetPage() = 0;
   virtual profiler::Domain* GetProfiler() = 0;
-  virtual rendering::Domain* GetRendering() = 0;
   virtual runtime::Domain* GetRuntime() = 0;
   virtual security::Domain* GetSecurity() = 0;
   virtual service_worker::Domain* GetServiceWorker() = 0;
   virtual target::Domain* GetTarget() = 0;
   virtual tracing::Domain* GetTracing() = 0;
+
+  class HEADLESS_EXPORT RawProtocolListener {
+   public:
+    RawProtocolListener() {}
+    virtual ~RawProtocolListener() {}
+
+    // Returns true if the listener handled the message.
+    virtual bool OnProtocolMessage(
+        const std::string& devtools_agent_host_id,
+        const std::string& json_message,
+        const base::DictionaryValue& parsed_message) = 0;
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(RawProtocolListener);
+  };
+
+  virtual void SetRawProtocolListener(
+      RawProtocolListener* raw_protocol_listener) = 0;
+
+  // Generates an odd numbered ID.
+  virtual int GetNextRawDevToolsMessageId() = 0;
+
+  // The id within the message must be odd to prevent collisions.
+  virtual void SendRawDevToolsMessage(const std::string& json_message) = 0;
+  virtual void SendRawDevToolsMessage(const base::DictionaryValue& message) = 0;
 
   // TODO(skyostil): Add notification for disconnection.
 

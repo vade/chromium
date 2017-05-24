@@ -95,8 +95,11 @@ Browser* GetBrowserInProfileWithId(Profile* profile,
   return NULL;
 }
 
-Browser* CreateBrowser(Profile* profile, int window_id, std::string* error) {
-  Browser::CreateParams params(Browser::TYPE_TABBED, profile);
+Browser* CreateBrowser(Profile* profile,
+                       int window_id,
+                       bool user_gesture,
+                       std::string* error) {
+  Browser::CreateParams params(Browser::TYPE_TABBED, profile, user_gesture);
   Browser* browser = new Browser(params);
   browser->window()->Show();
   return browser;
@@ -112,6 +115,8 @@ int GetTabIdForExtensions(const WebContents* web_contents) {
   return SessionTabHelper::IdForTab(web_contents);
 }
 
+ExtensionTabUtil::Delegate* g_delegate = nullptr;
+
 }  // namespace
 
 ExtensionTabUtil::OpenTabParams::OpenTabParams()
@@ -126,6 +131,7 @@ ExtensionTabUtil::OpenTabParams::~OpenTabParams() {
 base::DictionaryValue* ExtensionTabUtil::OpenTab(
     UIThreadExtensionFunction* function,
     const OpenTabParams& params,
+    bool user_gesture,
     std::string* error) {
   ChromeExtensionFunctionDetails chrome_details(function);
   Profile* profile = chrome_details.GetProfile();
@@ -139,7 +145,7 @@ base::DictionaryValue* ExtensionTabUtil::OpenTab(
     if (!params.create_browser_if_needed) {
       return NULL;
     }
-    browser = CreateBrowser(profile, window_id, error);
+    browser = CreateBrowser(profile, window_id, user_gesture, error);
     if (!browser)
       return NULL;
   }
@@ -215,8 +221,9 @@ base::DictionaryValue* ExtensionTabUtil::OpenTab(
 
     browser = chrome::FindTabbedBrowser(profile, false);
     if (!browser) {
-      browser =
-          new Browser(Browser::CreateParams(Browser::TYPE_TABBED, profile));
+      Browser::CreateParams params =
+          Browser::CreateParams(Browser::TYPE_TABBED, profile, user_gesture);
+      browser = new Browser(params);
       browser->window()->Show();
     }
   }
@@ -249,8 +256,14 @@ base::DictionaryValue* ExtensionTabUtil::OpenTab(
   tab_strip = navigate_params.browser->tab_strip_model();
   int new_index =
       tab_strip->GetIndexOfWebContents(navigate_params.target_contents);
-  if (opener)
-    tab_strip->SetOpenerOfWebContentsAt(new_index, opener);
+  if (opener) {
+    // Only set the opener if the opener tab is in the same tab strip as the
+    // new tab.
+    // TODO(devlin): We should be a) catching this sooner and b) alerting that
+    // this failed by reporting an error.
+    if (tab_strip->GetIndexOfWebContents(opener) != TabStripModel::kNoTab)
+      tab_strip->SetOpenerOfWebContentsAt(new_index, opener);
+  }
 
   if (active)
     navigate_params.target_contents->SetInitialFocus();
@@ -375,38 +388,41 @@ std::unique_ptr<api::tabs::Tab> ExtensionTabUtil::CreateTabObject(
   if (!tab_strip)
     ExtensionTabUtil::GetTabStripModel(contents, &tab_strip, &tab_index);
   bool is_loading = contents->IsLoading();
-  std::unique_ptr<api::tabs::Tab> tab_object(new api::tabs::Tab);
-  tab_object->id.reset(new int(GetTabIdForExtensions(contents)));
+  auto tab_object = base::MakeUnique<api::tabs::Tab>();
+  tab_object->id = base::MakeUnique<int>(GetTabIdForExtensions(contents));
   tab_object->index = tab_index;
   tab_object->window_id = GetWindowIdOfTab(contents);
-  tab_object->status.reset(new std::string(GetTabStatusText(is_loading)));
+  tab_object->status =
+      base::MakeUnique<std::string>(GetTabStatusText(is_loading));
   tab_object->active = tab_strip && tab_index == tab_strip->active_index();
   tab_object->selected = tab_strip && tab_index == tab_strip->active_index();
   tab_object->highlighted = tab_strip && tab_strip->IsTabSelected(tab_index);
   tab_object->pinned = tab_strip && tab_strip->IsTabPinned(tab_index);
-  tab_object->audible.reset(new bool(contents->WasRecentlyAudible()));
+  tab_object->audible = base::MakeUnique<bool>(contents->WasRecentlyAudible());
   tab_object->discarded =
       g_browser_process->GetTabManager()->IsTabDiscarded(contents);
   tab_object->auto_discardable =
       g_browser_process->GetTabManager()->IsTabAutoDiscardable(contents);
   tab_object->muted_info = CreateMutedInfo(contents);
   tab_object->incognito = contents->GetBrowserContext()->IsOffTheRecord();
-  tab_object->width.reset(
-      new int(contents->GetContainerBounds().size().width()));
-  tab_object->height.reset(
-      new int(contents->GetContainerBounds().size().height()));
+  gfx::Size contents_size = contents->GetContainerBounds().size();
+  tab_object->width = base::MakeUnique<int>(contents_size.width());
+  tab_object->height = base::MakeUnique<int>(contents_size.height());
 
-  tab_object->url.reset(new std::string(contents->GetURL().spec()));
-  tab_object->title.reset(
-      new std::string(base::UTF16ToUTF8(contents->GetTitle())));
+  tab_object->url = base::MakeUnique<std::string>(contents->GetURL().spec());
+  tab_object->title =
+      base::MakeUnique<std::string>(base::UTF16ToUTF8(contents->GetTitle()));
   NavigationEntry* entry = contents->GetController().GetVisibleEntry();
-  if (entry && entry->GetFavicon().valid)
-    tab_object->fav_icon_url.reset(
-        new std::string(entry->GetFavicon().url.spec()));
+  if (entry && entry->GetFavicon().valid) {
+    tab_object->fav_icon_url =
+        base::MakeUnique<std::string>(entry->GetFavicon().url.spec());
+  }
   if (tab_strip) {
     WebContents* opener = tab_strip->GetOpenerOfWebContentsAt(tab_index);
-    if (opener)
-      tab_object->opener_tab_id.reset(new int(GetTabIdForExtensions(opener)));
+    if (opener) {
+      tab_object->opener_tab_id =
+          base::MakeUnique<int>(GetTabIdForExtensions(opener));
+    }
   }
 
   return tab_object;
@@ -438,31 +454,42 @@ std::unique_ptr<api::tabs::MutedInfo> ExtensionTabUtil::CreateMutedInfo(
 }
 
 // static
+void ExtensionTabUtil::SetPlatformDelegate(Delegate* delegate) {
+  // Allow setting it only once (also allow reset to nullptr, but then take
+  // special care to free it).
+  CHECK(!g_delegate || !delegate);
+  g_delegate = delegate;
+}
+
+// static
 void ExtensionTabUtil::ScrubTabForExtension(const Extension* extension,
                                             content::WebContents* contents,
                                             api::tabs::Tab* tab) {
-  DCHECK(extension);
-
-  bool api_permission = false;
-  std::string url;
-  if (contents) {
-    api_permission = extension->permissions_data()->HasAPIPermissionForTab(
-        GetTabId(contents), APIPermission::kTab);
-    url = contents->GetURL().spec();
-  } else {
-    api_permission =
-        extension->permissions_data()->HasAPIPermission(APIPermission::kTab);
-    url = *tab->url;
+  bool has_permission = false;
+  if (extension) {
+    bool api_permission = false;
+    std::string url;
+    if (contents) {
+      api_permission = extension->permissions_data()->HasAPIPermissionForTab(
+          GetTabId(contents), APIPermission::kTab);
+      url = contents->GetURL().spec();
+    } else {
+      api_permission =
+          extension->permissions_data()->HasAPIPermission(APIPermission::kTab);
+      url = *tab->url;
+    }
+    bool host_permission = extension->permissions_data()
+                               ->active_permissions()
+                               .HasExplicitAccessToOrigin(GURL(url));
+    has_permission = api_permission || host_permission;
   }
-  bool host_permission = extension->permissions_data()
-                             ->active_permissions()
-                             .HasExplicitAccessToOrigin(GURL(url));
-  bool has_permission = api_permission || host_permission;
   if (!has_permission) {
     tab->url.reset();
     tab->title.reset();
     tab->fav_icon_url.reset();
   }
+  if (g_delegate)
+    g_delegate->ScrubTabForExtension(extension, contents, tab);
 }
 
 bool ExtensionTabUtil::GetTabStripModel(const WebContents* web_contents,
@@ -582,8 +609,10 @@ void ExtensionTabUtil::CreateTab(WebContents* web_contents,
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
   Browser* browser = chrome::FindTabbedBrowser(profile, false);
   const bool browser_created = !browser;
-  if (!browser)
-    browser = new Browser(Browser::CreateParams(profile));
+  if (!browser) {
+    Browser::CreateParams params = Browser::CreateParams(profile, user_gesture);
+    browser = new Browser(params);
+  }
   chrome::NavigateParams params(browser, web_contents);
 
   // The extension_app_id parameter ends up as app_name in the Browser
@@ -622,15 +651,35 @@ WindowController* ExtensionTabUtil::GetWindowControllerOfTab(
   return NULL;
 }
 
+bool ExtensionTabUtil::OpenOptionsPageFromAPI(
+    const Extension* extension,
+    content::BrowserContext* browser_context) {
+  if (!OptionsPageInfo::HasOptionsPage(extension))
+    return false;
+  Profile* profile = Profile::FromBrowserContext(browser_context);
+  // This version of OpenOptionsPage() is only called when the extension
+  // initiated the command via chrome.runtime.openOptionsPage. For a spanning
+  // mode extension, this API could only be called from a regular profile, since
+  // that's the only place it's running.
+  DCHECK(!profile->IsOffTheRecord() || IncognitoInfo::IsSplitMode(extension));
+  Browser* browser = chrome::FindBrowserWithProfile(profile);
+  if (!browser)
+    browser = new Browser(Browser::CreateParams(profile, true));
+  return extensions::ExtensionTabUtil::OpenOptionsPage(extension, browser);
+}
+
 bool ExtensionTabUtil::OpenOptionsPage(const Extension* extension,
                                        Browser* browser) {
   if (!OptionsPageInfo::HasOptionsPage(extension))
     return false;
 
-  // Force the options page to open in non-OTR window, because it won't be
-  // able to save settings from OTR.
+  // Force the options page to open in non-OTR window if the extension is not
+  // running in split mode, because it won't be able to save settings from OTR.
+  // This version of OpenOptionsPage() can be called from an OTR window via e.g.
+  // the action menu, since that's not initiated by the extension.
   std::unique_ptr<chrome::ScopedTabbedBrowserDisplayer> displayer;
-  if (browser->profile()->IsOffTheRecord()) {
+  if (browser->profile()->IsOffTheRecord() &&
+      !IncognitoInfo::IsSplitMode(extension)) {
     displayer.reset(new chrome::ScopedTabbedBrowserDisplayer(
         browser->profile()->GetOriginalProfile()));
     browser = displayer->browser();

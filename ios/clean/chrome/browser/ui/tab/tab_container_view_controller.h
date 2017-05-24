@@ -2,10 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// ======                        New Architecture                         =====
-// =         This code is only used in the new iOS Chrome architecture.       =
-// ============================================================================
-
 #ifndef IOS_CLEAN_CHROME_BROWSER_UI_TAB_TAB_CONTAINER_VIEW_CONTROLLER_H_
 #define IOS_CLEAN_CHROME_BROWSER_UI_TAB_TAB_CONTAINER_VIEW_CONTROLLER_H_
 
@@ -14,9 +10,8 @@
 #import "ios/clean/chrome/browser/ui/animators/zoom_transition_delegate.h"
 #import "ios/clean/chrome/browser/ui/presenters/menu_presentation_delegate.h"
 
-// Base class for a view controller that contains a content view (generally
-// some kind of web view, but nothing in this class assumes that) and a toolbar
-// view, each managed by their own view controllers.
+// Abstract base class for a view controller that contains several views,
+// each managed by their own view controllers.
 // Subclasses manage the specific layout of these view controllers.
 @interface TabContainerViewController
     : UIViewController<MenuPresentationDelegate, ZoomTransitionDelegate>
@@ -30,6 +25,16 @@
 // height (determined internally by the tab container), but will span the
 // width of the tab.
 @property(nonatomic, strong) UIViewController* toolbarViewController;
+
+// View controller showing the tab strip. It will be of a fixed
+// height (determined internally by the tab container), but will span the
+// width of the tab.
+@property(nonatomic, strong) UIViewController* tabStripViewController;
+
+// View controller showing the find bar.  The location of this controller's view
+// is determined by size class and device type.  May be nil if the find bar is
+// currently closed.
+@property(nonatomic, strong) UIViewController* findBarViewController;
 
 @end
 

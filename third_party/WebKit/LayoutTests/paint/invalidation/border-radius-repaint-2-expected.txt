@@ -15,22 +15,12 @@
         {
           "object": "LayoutBlockFlow DIV",
           "rect": [8, 8, 866, 764],
-          "reason": "border box change"
-        },
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [0, 0, 800, 780],
-          "reason": "forced by layout"
+          "reason": "geometry"
         },
         {
           "object": "LayoutBlockFlow BODY",
           "rect": [8, 224, 784, 548],
           "reason": "incremental"
-        },
-        {
-          "object": "LayoutBlockFlow DIV",
-          "rect": [137, 88, 607, 604],
-          "reason": "border box change"
         }
       ]
     }
@@ -41,20 +31,16 @@
       "reason": "incremental"
     },
     {
-      "object": "LayoutBlockFlow HTML",
-      "reason": "forced by layout"
-    },
-    {
       "object": "LayoutBlockFlow BODY",
       "reason": "incremental"
     },
     {
       "object": "LayoutBlockFlow DIV",
-      "reason": "border box change"
+      "reason": "geometry"
     },
     {
       "object": "LayoutBlockFlow DIV",
-      "reason": "border box change"
+      "reason": "geometry"
     }
   ]
 }

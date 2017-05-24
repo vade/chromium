@@ -5,9 +5,7 @@
 #ifndef CHROME_TEST_BASE_TEST_BROWSER_WINDOW_H_
 #define CHROME_TEST_BASE_TEST_BROWSER_WINDOW_H_
 
-#include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "build/build_config.h"
 #include "chrome/browser/download/test_download_shelf.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -82,15 +80,15 @@ class TestBrowserWindow : public BrowserWindow {
   void FocusInfobars() override {}
   void RotatePaneFocus(bool forwards) override {}
   void ShowAppMenu() override {}
-  bool PreHandleKeyboardEvent(const content::NativeWebKeyboardEvent& event,
-                              bool* is_keyboard_shortcut) override;
+  content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
+      const content::NativeWebKeyboardEvent& event) override;
   void HandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) override {}
-
   bool IsBookmarkBarVisible() const override;
   bool IsBookmarkBarAnimating() const override;
   bool IsTabStripEditable() const override;
   bool IsToolbarVisible() const override;
+  bool IsToolbarShowing() const override;
   void ShowUpdateChromeDialog() override {}
   void ShowBookmarkBubble(const GURL& url, bool already_bookmarked) override {}
   void ShowBookmarkAppBubble(
@@ -118,7 +116,7 @@ class TestBrowserWindow : public BrowserWindow {
       bool app_modal,
       const base::Callback<void(bool)>& callback) override {}
   void UserChangedTheme() override {}
-  void ShowWebsiteSettings(
+  void ShowPageInfo(
       Profile* profile,
       content::WebContents* web_contents,
       const GURL& virtual_url,
@@ -132,7 +130,8 @@ class TestBrowserWindow : public BrowserWindow {
   void ShowAvatarBubbleFromAvatarButton(
       AvatarBubbleMode mode,
       const signin::ManageAccountsParams& manage_accounts_params,
-      signin_metrics::AccessPoint access_point) override {}
+      signin_metrics::AccessPoint access_point,
+      bool is_source_keyboard) override {}
   int GetRenderViewHeightInsetWithDetachedBookmarkBar() override;
   void ExecuteExtensionCommand(const extensions::Extension* extension,
                                const extensions::Command& command) override;
@@ -164,12 +163,9 @@ class TestBrowserWindow : public BrowserWindow {
     void UpdateContentSettingsIcons() override {}
     void UpdateManagePasswordsIconAndBubble() override {}
     void UpdateSaveCreditCardIcon() override {}
-    void UpdatePageActions() override {}
     void UpdateBookmarkStarVisibility() override {}
+    void UpdateZoomViewVisibility() override {}
     void UpdateLocationBarVisibility(bool visible, bool animate) override {}
-    bool ShowPageActionPopup(const extensions::Extension* extension,
-                             bool grant_active_tab) override;
-    void UpdateOpenPDFInReaderPrompt() override {}
     void SaveStateToContents(content::WebContents* contents) override {}
     void Revert() override {}
     const OmniboxView* GetOmniboxView() const override;

@@ -19,6 +19,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/sequenced_task_runner.h"
 #include "base/sha1.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
@@ -474,11 +475,11 @@ class CacheStorage::SimpleCacheLoader : public CacheStorage::CacheLoader {
     }
 
     if (index_modified) {
-      if (!index.SerializeToString(&body))
+      base::FilePath tmp_path = origin_path.AppendASCII("index.txt.tmp");
+      if (!index.SerializeToString(&body) ||
+          !WriteIndexWriteToFileInPool(tmp_path, index_path, body)) {
         return proto::CacheStorageIndex();
-      if (base::WriteFile(index_path, body.c_str(), body.size()) !=
-          base::checked_cast<int>(body.size()))
-        return proto::CacheStorageIndex();
+      }
     }
 
     return index;

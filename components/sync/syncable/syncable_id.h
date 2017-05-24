@@ -15,7 +15,7 @@
 #include "base/trace_event/memory_usage_estimator.h"
 
 namespace base {
-class StringValue;
+class Value;
 }  // namespace base
 
 namespace sql {
@@ -71,7 +71,7 @@ class Id {
 
   // Dumps the ID as a value and returns it.  Transfers ownership of
   // the StringValue to the caller.
-  base::StringValue* ToValue() const;
+  base::Value* ToValue() const;
 
   // Three functions are used to work with our proto buffers.
   std::string GetServerId() const;

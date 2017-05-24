@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_SYNC_SESSIONS_SYNCED_TAB_DELEGATE_H__
 #define COMPONENTS_SYNC_SESSIONS_SYNCED_TAB_DELEGATE_H__
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,8 @@ class SyncSessionsClient;
 
 namespace sync_sessions {
 
+enum InvalidTab { kInvalidTabID = -1 };
+
 // A SyncedTabDelegate is used to insulate the sync code from depending
 // directly on WebContents, NavigationController, and the extensions TabHelper.
 class SyncedTabDelegate {
@@ -29,6 +32,10 @@ class SyncedTabDelegate {
   virtual SessionID::id_type GetWindowId() const = 0;
   virtual SessionID::id_type GetSessionId() const = 0;
   virtual bool IsBeingDestroyed() const = 0;
+
+  // Get the tab id of the tab responsible for opening this tab, if applicable.
+  // Returns kUnknownTabID(-1) if no such tab relationship is known.
+  virtual SessionID::id_type GetSourceTabID() const = 0;
 
   // Method derived from extensions TabHelper.
   virtual std::string GetExtensionAppId() const = 0;

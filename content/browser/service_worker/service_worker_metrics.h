@@ -6,6 +6,8 @@
 #define CONTENT_BROWSER_SERVICE_WORKER_SERVICE_WORKER_METRICS_H_
 
 #include <stddef.h>
+#include <map>
+#include <set>
 
 #include "base/macros.h"
 #include "base/time/time.h"
@@ -109,13 +111,17 @@ class ServiceWorkerMetrics {
     FOREIGN_FETCH = 15,
     FETCH_WAITUNTIL = 16,
     FOREIGN_FETCH_WAITUNTIL = 17,
-    NAVIGATION_HINT_LINK_MOUSE_DOWN = 18,
-    NAVIGATION_HINT_LINK_TAP_UNCONFIRMED = 19,
-    NAVIGATION_HINT_LINK_TAP_DOWN = 20,
+    // NAVIGATION_HINT_LINK_MOUSE_DOWN = 18,  // Obsolete
+    // NAVIGATION_HINT_LINK_TAP_UNCONFIRMED = 19,  // Obsolete
+    // NAVIGATION_HINT_LINK_TAP_DOWN = 20,  // Obsolete
     // Used when external consumers want to add a request to
     // ServiceWorkerVersion to keep it alive.
     EXTERNAL_REQUEST = 21,
     PAYMENT_REQUEST = 22,
+    BACKGROUND_FETCH_ABORT = 23,
+    BACKGROUND_FETCH_CLICK = 24,
+    BACKGROUND_FETCH_FAIL = 25,
+    BACKGROUND_FETCHED = 26,
     // Add new events to record here.
     NUM_TYPES
   };
@@ -169,14 +175,34 @@ class ServiceWorkerMetrics {
   // Not used for UMA.
   enum class LoadSource { NETWORK, HTTP_CACHE, SERVICE_WORKER_STORAGE };
 
+  class ScopedEventRecorder {
+   public:
+    explicit ScopedEventRecorder();
+    ~ScopedEventRecorder();
+
+    void RecordEventHandledStatus(EventType event, bool handled);
+
+   private:
+    struct EventStat {
+      size_t fired_events = 0;
+      size_t handled_events = 0;
+    };
+
+    // Records how much of dispatched events are handled.
+    static void RecordEventHandledRatio(EventType event,
+                                        size_t handled_events,
+                                        size_t fired_events);
+
+    std::map<EventType, EventStat> event_stats_;
+
+    DISALLOW_COPY_AND_ASSIGN(ScopedEventRecorder);
+  };
+
   // Converts an event type to a string. Used for tracing.
   static const char* EventTypeToString(EventType event_type);
 
   // If the |url| is not a special site, returns Site::OTHER.
   static Site SiteFromURL(const GURL& url);
-
-  // Returns true when the event is for a navigation hint.
-  static bool IsNavigationHintEvent(EventType event_type);
 
   // Excludes NTP scope from UMA for now as it tends to dominate the stats and
   // makes the results largely skewed. Some metrics don't follow this policy
@@ -238,19 +264,6 @@ class ServiceWorkerMetrics {
 
   static void RecordForeignFetchRegistrationCount(size_t scope_count,
                                                   size_t origin_count);
-
-  // Records how much of dispatched events are handled while a Service
-  // Worker is awake (i.e. after it is woken up until it gets stopped).
-  static void RecordEventHandledRatio(EventType event,
-                                      size_t handled_events,
-                                      size_t fired_events);
-
-  // Records the precision of the speculative launch of Service Workers for
-  // each navigation hint type when the worker is stopped. If there was no
-  // main/sub frame fetch event fired on the worker, |frame_fetch_event_fired|
-  // is false. This means that the speculative launch wasn't helpful.
-  static void RecordNavigationHintPrecision(EventType start_worker_purpose,
-                                            bool frame_fetch_event_fired);
 
   // Records how often a dispatched event times out.
   static void RecordEventTimeout(EventType event);
@@ -336,6 +349,8 @@ class ServiceWorkerMetrics {
       ServiceWorkerContextRequestHandler::CreateJobStatus status,
       bool is_installed,
       bool is_main_script);
+
+  static void RecordRuntime(base::TimeDelta time);
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(ServiceWorkerMetrics);

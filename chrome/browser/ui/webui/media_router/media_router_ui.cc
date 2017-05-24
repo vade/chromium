@@ -18,25 +18,26 @@
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/media/router/create_presentation_connection_request.h"
-#include "chrome/browser/media/router/issue.h"
 #include "chrome/browser/media/router/issues_observer.h"
-#include "chrome/browser/media/router/media_route.h"
 #include "chrome/browser/media/router/media_router.h"
 #include "chrome/browser/media/router/media_router_factory.h"
 #include "chrome/browser/media/router/media_router_metrics.h"
 #include "chrome/browser/media/router/media_routes_observer.h"
-#include "chrome/browser/media/router/media_sink.h"
 #include "chrome/browser/media/router/media_sinks_observer.h"
-#include "chrome/browser/media/router/media_source.h"
-#include "chrome/browser/media/router/media_source_helper.h"
 #include "chrome/browser/media/router/mojo/media_router_mojo_impl.h"
 #include "chrome/browser/media/router/presentation_service_delegate_impl.h"
-#include "chrome/browser/media/router/route_request_result.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/webui/media_router/media_router_localized_strings_provider.h"
 #include "chrome/browser/ui/webui/media_router/media_router_resources_provider.h"
 #include "chrome/browser/ui/webui/media_router/media_router_webui_message_handler.h"
+#include "chrome/common/chrome_features.h"
+#include "chrome/common/media_router/issue.h"
+#include "chrome/common/media_router/media_route.h"
+#include "chrome/common/media_router/media_sink.h"
+#include "chrome/common/media_router/media_source.h"
+#include "chrome/common/media_router/media_source_helper.h"
+#include "chrome/common/media_router/route_request_result.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
@@ -153,6 +154,26 @@ void MediaRouterUI::UIMediaRoutesObserver::OnRoutesUpdated(
   callback_.Run(routes, joinable_route_ids);
 }
 
+MediaRouterUI::UIMediaRouteControllerObserver::UIMediaRouteControllerObserver(
+    MediaRouterUI* ui,
+    scoped_refptr<MediaRouteController> controller)
+    : MediaRouteController::Observer(std::move(controller)), ui_(ui) {
+  if (controller_->current_media_status())
+    OnMediaStatusUpdated(controller_->current_media_status().value());
+}
+
+MediaRouterUI::UIMediaRouteControllerObserver::
+    ~UIMediaRouteControllerObserver() {}
+
+void MediaRouterUI::UIMediaRouteControllerObserver::OnMediaStatusUpdated(
+    const MediaStatus& status) {
+  ui_->UpdateMediaRouteStatus(status);
+}
+
+void MediaRouterUI::UIMediaRouteControllerObserver::OnControllerInvalidated() {
+  ui_->OnRouteControllerInvalidated();
+}
+
 MediaRouterUI::MediaRouterUI(content::WebUI* web_ui)
     : ConstrainedWebDialogUI(web_ui),
       ui_initialized_(false),
@@ -203,7 +224,7 @@ MediaRouterUI::~MediaRouterUI() {
         });
     if (presentation_sinks_available) {
       create_session_request_->InvokeErrorCallback(content::PresentationError(
-          content::PRESENTATION_ERROR_SESSION_REQUEST_CANCELLED,
+          content::PRESENTATION_ERROR_PRESENTATION_REQUEST_CANCELLED,
           "Dialog closed."));
     } else {
       create_session_request_->InvokeErrorCallback(content::PresentationError(
@@ -277,7 +298,7 @@ void MediaRouterUI::InitCommon(content::WebContents* initiator) {
   query_result_manager_->AddObserver(this);
 
   // Use a placeholder URL as origin for mirroring.
-  GURL origin(chrome::kChromeUIMediaRouterURL);
+  url::Origin origin{GURL(chrome::kChromeUIMediaRouterURL)};
 
   // Desktop mirror mode is always available.
   query_result_manager_->SetSourcesForCastMode(
@@ -318,8 +339,7 @@ void MediaRouterUI::OnDefaultPresentationChanged(
   std::vector<MediaSource> sources = presentation_request.GetMediaSources();
   presentation_request_.reset(new PresentationRequest(presentation_request));
   query_result_manager_->SetSourcesForCastMode(
-      MediaCastMode::DEFAULT, sources,
-      presentation_request_->frame_url().GetOrigin());
+      MediaCastMode::DEFAULT, sources, presentation_request_->frame_origin());
   // Register for MediaRoute updates.  NOTE(mfoltz): If there are multiple
   // sources that can be connected to via the dialog, this will break.  We will
   // need to observe multiple sources (keyed by sinks) in that case.  As this is
@@ -391,7 +411,7 @@ void MediaRouterUI::UIInitialized() {
 bool MediaRouterUI::CreateRoute(const MediaSink::Id& sink_id,
                                 MediaCastMode cast_mode) {
   MediaSource::Id source_id;
-  GURL origin;
+  url::Origin origin;
   std::vector<MediaRouteResponseCallback> route_response_callbacks;
   base::TimeDelta timeout;
   bool incognito;
@@ -409,7 +429,7 @@ bool MediaRouterUI::SetRouteParameters(
     const MediaSink::Id& sink_id,
     MediaCastMode cast_mode,
     MediaSource::Id* source_id,
-    GURL* origin,
+    url::Origin* origin,
     std::vector<MediaRouteResponseCallback>* route_response_callbacks,
     base::TimeDelta* timeout,
     bool* incognito) {
@@ -439,8 +459,9 @@ bool MediaRouterUI::SetRouteParameters(
   }
 
   current_route_request_id_ = ++route_request_counter_;
-  *origin = for_default_source ? presentation_request_->frame_url().GetOrigin()
-                               : GURL(chrome::kChromeUIMediaRouterURL);
+  *origin = for_default_source
+                ? presentation_request_->frame_origin()
+                : url::Origin(GURL(chrome::kChromeUIMediaRouterURL));
   DVLOG(1) << "DoCreateRoute: origin: " << *origin;
 
   // There are 3 cases. In cases (1) and (3) the MediaRouterUI will need to be
@@ -486,7 +507,7 @@ bool MediaRouterUI::SetRouteParameters(
 bool MediaRouterUI::ConnectRoute(const MediaSink::Id& sink_id,
                                  const MediaRoute::Id& route_id) {
   MediaSource::Id source_id;
-  GURL origin;
+  url::Origin origin;
   std::vector<MediaRouteResponseCallback> route_response_callbacks;
   base::TimeDelta timeout;
   bool incognito;
@@ -533,7 +554,7 @@ bool MediaRouterUI::UserSelectedTabMirroringForCurrentOrigin() const {
   const base::ListValue* origins =
       Profile::FromWebUI(web_ui())->GetPrefs()->GetList(
           prefs::kMediaRouterTabMirroringSources);
-  return origins->Find(base::StringValue(GetSerializedInitiatorOrigin())) !=
+  return origins->Find(base::Value(GetSerializedInitiatorOrigin())) !=
          origins->end();
 }
 
@@ -543,12 +564,11 @@ void MediaRouterUI::RecordCastModeSelection(MediaCastMode cast_mode) {
 
   switch (cast_mode) {
     case MediaCastMode::DEFAULT:
-      update->Remove(base::StringValue(GetSerializedInitiatorOrigin()),
-                     nullptr);
+      update->Remove(base::Value(GetSerializedInitiatorOrigin()), nullptr);
       break;
     case MediaCastMode::TAB_MIRROR:
       update->AppendIfNotPresent(
-          base::MakeUnique<base::StringValue>(GetSerializedInitiatorOrigin()));
+          base::MakeUnique<base::Value>(GetSerializedInitiatorOrigin()));
       break;
     case MediaCastMode::DESKTOP_MIRROR:
       // Desktop mirroring isn't domain-specific, so we don't record the
@@ -652,7 +672,7 @@ void MediaRouterUI::OnSearchSinkResponseReceived(
   handler_->ReturnSearchResult(found_sink_id);
 
   MediaSource::Id source_id;
-  GURL origin;
+  url::Origin origin;
   std::vector<MediaRouteResponseCallback> route_response_callbacks;
   base::TimeDelta timeout;
   bool incognito;
@@ -707,7 +727,8 @@ void MediaRouterUI::SendIssueForUnableToCast(MediaCastMode cast_mode) {
 }
 
 GURL MediaRouterUI::GetFrameURL() const {
-  return presentation_request_ ? presentation_request_->frame_url() : GURL();
+  return presentation_request_ ? presentation_request_->frame_origin().GetURL()
+                               : GURL();
 }
 
 std::string MediaRouterUI::GetPresentationRequestSourceName() const {
@@ -758,6 +779,39 @@ void MediaRouterUI::OnUIInitialDataReceived() {
 
 void MediaRouterUI::UpdateMaxDialogHeight(int height) {
   handler_->UpdateMaxDialogHeight(height);
+}
+
+const MediaRouteController* MediaRouterUI::GetMediaRouteController() const {
+  return route_controller_observer_
+             ? route_controller_observer_->controller().get()
+             : nullptr;
+}
+
+void MediaRouterUI::OnMediaControllerUIAvailable(
+    const MediaRoute::Id& route_id) {
+  scoped_refptr<MediaRouteController> controller =
+      router_->GetRouteController(route_id);
+  if (!controller) {
+    DVLOG(1) << "Requested a route controller with an invalid route ID.";
+    return;
+  }
+  DVLOG_IF(1, route_controller_observer_)
+      << "Route controller observer unexpectedly exists.";
+  route_controller_observer_ =
+      base::MakeUnique<UIMediaRouteControllerObserver>(this, controller);
+}
+
+void MediaRouterUI::OnMediaControllerUIClosed() {
+  route_controller_observer_.reset();
+}
+
+void MediaRouterUI::OnRouteControllerInvalidated() {
+  route_controller_observer_.reset();
+  handler_->OnRouteControllerInvalidated();
+}
+
+void MediaRouterUI::UpdateMediaRouteStatus(const MediaStatus& status) {
+  handler_->UpdateMediaRouteStatus(status);
 }
 
 std::string MediaRouterUI::GetSerializedInitiatorOrigin() const {

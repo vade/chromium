@@ -10,6 +10,7 @@
 #include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/single_thread_task_runner.h"
 #include "media/base/media_log.h"
 #include "media/blink/buffered_data_source_host_impl.h"
@@ -121,7 +122,6 @@ MultibufferDataSource::MultibufferDataSource(
       frame_(frame),
       stop_signal_received_(false),
       media_has_played_(false),
-      buffering_strategy_(BUFFERING_STRATEGY_NORMAL),
       single_origin_(true),
       cancel_on_defer_(false),
       preload_(AUTO),
@@ -248,13 +248,6 @@ void MultibufferDataSource::SetPreload(Preload preload) {
   UpdateBufferSizes();
 }
 
-void MultibufferDataSource::SetBufferingStrategy(
-    BufferingStrategy buffering_strategy) {
-  DCHECK(render_task_runner_->BelongsToCurrentThread());
-  buffering_strategy_ = buffering_strategy;
-  UpdateBufferSizes();
-}
-
 bool MultibufferDataSource::HasSingleOrigin() {
   DCHECK(render_task_runner_->BelongsToCurrentThread());
   // Before initialization completes there is no risk of leaking data. Callers
@@ -335,7 +328,7 @@ void MultibufferDataSource::OnBufferingHaveEnough(bool always_cancel) {
 
 int64_t MultibufferDataSource::GetMemoryUsage() const {
   // TODO(hubbe): Make more accurate when url_data_ is shared.
-  return url_data_->CachedSize()
+  return base::checked_cast<int64_t>(url_data_->CachedSize())
          << url_data_->multibuffer()->block_size_shift();
 }
 
@@ -410,7 +403,7 @@ void MultibufferDataSource::ReadTask() {
     bytes_read =
         static_cast<int>(std::min<int64_t>(available, read_op_->size()));
     bytes_read = reader_->TryRead(read_op_->data(), bytes_read);
-
+    url_data_->AddBytesRead(bytes_read);
     if (bytes_read == 0 && total_bytes_ == kPositionNotSpecified) {
       // We've reached the end of the file and we didn't know the total size
       // before. Update the total size so Read()s past the end of the file will
@@ -578,18 +571,6 @@ void MultibufferDataSource::UpdateBufferSizes() {
   DVLOG(1) << __func__;
   if (!reader_)
     return;
-
-  if (!assume_fully_buffered()) {
-    // If the playback has started and the strategy is aggressive, then try to
-    // load as much as possible, assuming that the file is cacheable. (If not,
-    // why bother?)
-    bool aggressive = (buffering_strategy_ == BUFFERING_STRATEGY_AGGRESSIVE);
-    if (media_has_played_ && aggressive && url_data_ &&
-        url_data_->range_supported() && url_data_->cacheable()) {
-      reader_->SetPreload(1LL << 40, 1LL << 40);  // 1 Tb
-      return;
-    }
-  }
 
   // Use a default bit rate if unknown and clamp to prevent overflow.
   int64_t bitrate = clamp<int64_t>(bitrate_, 0, kMaxBitrate);

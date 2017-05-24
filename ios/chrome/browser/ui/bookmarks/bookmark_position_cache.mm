@@ -7,7 +7,6 @@
 #include <stdint.h>
 
 #include "base/logging.h"
-#include "base/mac/objc_property_releaser.h"
 
 namespace {
 // The current version of the cached position. This number should be incremented
@@ -43,19 +42,12 @@ NSString* kVersionKey = @"VersionKey";
 
 #pragma mark - Public Constructors
 
-+ (BookmarkPositionCache*)cacheForMenuItemAllWithPosition:(CGFloat)position {
-  return [[[BookmarkPositionCache alloc]
-      initWithFolderId:0
-              position:position
-                  type:bookmarks::MenuItemAll] autorelease];
-}
-
 + (BookmarkPositionCache*)cacheForMenuItemFolderWithPosition:(CGFloat)position
                                                     folderId:(int64_t)folderId {
-  return [[[BookmarkPositionCache alloc]
+  return [[BookmarkPositionCache alloc]
       initWithFolderId:folderId
               position:position
-                  type:bookmarks::MenuItemFolder] autorelease];
+                  type:bookmarks::MenuItemFolder];
 }
 
 #pragma mark - Designated Initializer
@@ -91,7 +83,6 @@ NSString* kVersionKey = @"VersionKey";
     return NO;
   switch (self.type) {
     case bookmarks::MenuItemDivider:
-    case bookmarks::MenuItemAll:
     case bookmarks::MenuItemSectionHeader:
       return YES;
     case bookmarks::MenuItemFolder:
@@ -111,17 +102,14 @@ NSString* kVersionKey = @"VersionKey";
   int typeInt = [coder decodeIntForKey:kTypeKey];
 
   if (version != kVersion) {
-    [self release];
     return nil;
   }
 
   if (!bookmarks::NumberIsValidMenuItemType(typeInt)) {
-    [self release];
     return nil;
   }
 
   if (typeInt == kMenuItemManaged) {
-    [self release];
     return nil;
   }
 

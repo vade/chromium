@@ -8,6 +8,7 @@
 #include "base/mac/scoped_nsobject.h"
 #include "device/bluetooth/test/bluetooth_test_mac.h"
 #include "device/bluetooth/test/mock_bluetooth_cbcharacteristic_mac.h"
+#include "device/bluetooth/test/mock_bluetooth_cbdescriptor_mac.h"
 #include "device/bluetooth/test/mock_bluetooth_cbservice_mac.h"
 
 using base::mac::ObjCCast;
@@ -83,17 +84,16 @@ using base::scoped_nsobject;
   if (_bluetoothTestMac) {
     _bluetoothTestMac->OnFakeBluetoothServiceDiscovery();
   }
-  [_delegate peripheral:self.peripheral didDiscoverServices:nil];
 }
 
 - (void)discoverCharacteristics:(NSArray*)characteristics
                      forService:(CBService*)service {
+  if (_bluetoothTestMac) {
+    _bluetoothTestMac->OnFakeBluetoothCharacteristicDiscovery();
+  }
 }
 
 - (void)discoverDescriptorsForCharacteristic:(CBCharacteristic*)characteristic {
-  MockCBCharacteristic* mock_characteristic =
-      ObjCCast<MockCBCharacteristic>(characteristic);
-  [mock_characteristic discoverDescriptors];
 }
 
 - (void)readValueForCharacteristic:(CBCharacteristic*)characteristic {
@@ -108,6 +108,18 @@ using base::scoped_nsobject;
   const uint8_t* buffer = static_cast<const uint8_t*>(data.bytes);
   std::vector<uint8_t> value(buffer, buffer + data.length);
   _bluetoothTestMac->OnFakeBluetoothCharacteristicWriteValue(value);
+}
+
+- (void)readValueForDescriptor:(CBDescriptor*)descriptor {
+  DCHECK(_bluetoothTestMac);
+  _bluetoothTestMac->OnFakeBluetoothDescriptorReadValue();
+}
+
+- (void)writeValue:(NSData*)data forDescriptor:(CBDescriptor*)descriptor {
+  DCHECK(_bluetoothTestMac);
+  const uint8_t* buffer = static_cast<const uint8_t*>(data.bytes);
+  std::vector<uint8_t> value(buffer, buffer + data.length);
+  _bluetoothTestMac->OnFakeBluetoothDescriptorWriteValue(value);
 }
 
 - (void)removeAllServices {
@@ -139,16 +151,31 @@ using base::scoped_nsobject;
   [self didModifyServices:@[ serviceToRemove ]];
 }
 
-- (void)mockDidDiscoverEvents {
+- (void)mockDidDiscoverServices {
   [_delegate peripheral:self.peripheral didDiscoverServices:nil];
+}
+
+- (void)mockDidDiscoverCharacteristicsForService:(CBService*)service {
+  [_delegate peripheral:self.peripheral
+      didDiscoverCharacteristicsForService:service
+                                     error:nil];
+}
+
+- (void)mockDidDiscoverDescriptorsForCharacteristic:
+    (CBCharacteristic*)characteristic {
+  [_delegate peripheral:self.peripheral
+      didDiscoverDescriptorsForCharacteristic:characteristic
+                                        error:nil];
+}
+
+- (void)mockDidDiscoverEvents {
+  [self mockDidDiscoverServices];
   // BluetoothLowEnergyDeviceMac is expected to call
   // -[CBPeripheral discoverCharacteristics:forService:] for each services,
   // so -[<CBPeripheralDelegate peripheral:didDiscoverCharacteristicsForService:
   // error:] needs to be called for all services.
   for (CBService* service in _services.get()) {
-    [_delegate peripheral:self.peripheral
-        didDiscoverCharacteristicsForService:service
-                                       error:nil];
+    [self mockDidDiscoverCharacteristicsForService:service];
     for (CBCharacteristic* characteristic in service.characteristics) {
       // After discovering services, BluetoothLowEnergyDeviceMac is expected to
       // discover characteristics for all services.
@@ -190,7 +217,8 @@ using base::scoped_nsobject;
 
 - (void)setNotifyValue:(BOOL)notification
      forCharacteristic:(CBCharacteristic*)characteristic {
-  _bluetoothTestMac->OnFakeBluetoothGattSetCharacteristicNotification();
+  _bluetoothTestMac->OnFakeBluetoothGattSetCharacteristicNotification(
+      notification == YES);
 }
 
 @end

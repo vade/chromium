@@ -25,7 +25,6 @@
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
-#import "ios/testing/earl_grey/disabled_test_macros.h"
 #import "ios/testing/wait_util.h"
 #import "ios/web/public/test/earl_grey/web_view_actions.h"
 #import "ios/web/public/test/earl_grey/web_view_matchers.h"
@@ -35,6 +34,10 @@
 #include "net/http/http_response_headers.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 using chrome_test_util::OmniboxText;
 using chrome_test_util::WebViewContainingText;
@@ -279,7 +282,9 @@ id<GREYMatcher> GoButtonMatcher() {
 // Tests that clicking a link with URL changed by onclick uses the href of the
 // anchor tag instead of the one specified in JavaScript. Also verifies a new
 // tab is opened by target '_blank'.
-- (void)testBrowsingPreventDefaultWithLinkOpenedByJavascript {
+// TODO(crbug.com/688223): WKWebView does not open a new window as expected by
+// this test.
+- (void)DISABLED_testBrowsingPreventDefaultWithLinkOpenedByJavascript {
   // Create map of canned responses and set up the test HTML server.
   std::map<GURL, std::string> responses;
   const GURL URL = web::test::HttpServer::MakeUrl(
@@ -353,34 +358,6 @@ id<GREYMatcher> GoButtonMatcher() {
       assertWithMatcher:grey_notNil()];
 }
 
-// Tests that pressing the button on a POST-based form changes the page and that
-// the back button works as expected afterwards.
-- (void)testBrowsingPostEntryWithButton {
-  // Create map of canned responses and set up the test HTML server.
-  std::map<GURL, std::string> responses;
-  const GURL URL = web::test::HttpServer::MakeUrl("http://postEntryWithButton");
-  const GURL destinationURL = web::test::HttpServer::MakeUrl("http://foo");
-  // This is a page with a button that posts to the destination.
-  responses[URL] = base::StringPrintf(
-      "<form action='%s' method='post'>"
-      "<input value='button' type='submit' id='button'></form>",
-      destinationURL.spec().c_str());
-  // This is the page that should be showing at the end of the test.
-  responses[destinationURL] = "bar!";
-  web::test::SetUpSimpleHttpServer(responses);
-
-  [ChromeEarlGrey loadURL:URL];
-  chrome_test_util::TapWebViewElementWithId("button");
-
-  [[EarlGrey selectElementWithMatcher:OmniboxText(destinationURL.GetContent())]
-      assertWithMatcher:grey_notNil()];
-
-  // Go back and verify the browser navigates to the original URL.
-  [self goBack];
-  [[EarlGrey selectElementWithMatcher:OmniboxText(URL.GetContent())]
-      assertWithMatcher:grey_notNil()];
-}
-
 // Tests that a link with a JavaScript-based navigation changes the page and
 // that the back button works as expected afterwards.
 - (void)testBrowsingJavaScriptBasedNavigation {
@@ -410,8 +387,8 @@ id<GREYMatcher> GoButtonMatcher() {
 // TODO(crbug.com/638674): Evaluate if this can move to shared code
 // Navigates back to the previous webpage.
 - (void)goBack {
-  base::scoped_nsobject<GenericChromeCommand> backCommand(
-      [[GenericChromeCommand alloc] initWithTag:IDC_BACK]);
+  GenericChromeCommand* backCommand =
+      [[GenericChromeCommand alloc] initWithTag:IDC_BACK];
   chrome_test_util::RunCommandWithActiveViewController(backCommand);
 
   [ChromeEarlGrey waitForPageToFinishLoading];
@@ -420,8 +397,8 @@ id<GREYMatcher> GoButtonMatcher() {
 // Navigates forward to a previous webpage.
 // TODO(crbug.com/638674): Evaluate if this can move to shared code
 - (void)goForward {
-  base::scoped_nsobject<GenericChromeCommand> forwardCommand(
-      [[GenericChromeCommand alloc] initWithTag:IDC_FORWARD]);
+  GenericChromeCommand* forwardCommand =
+      [[GenericChromeCommand alloc] initWithTag:IDC_FORWARD];
   chrome_test_util::RunCommandWithActiveViewController(forwardCommand);
 
   [ChromeEarlGrey waitForPageToFinishLoading];
@@ -468,6 +445,11 @@ id<GREYMatcher> GoButtonMatcher() {
 // does not change the page and that the back button works as expected
 // afterwards.
 - (void)testBrowsingPostToSamePage {
+// TODO(crbug.com/714303): Re-enable this test on devices.
+#if !TARGET_IPHONE_SIMULATOR
+  EARL_GREY_TEST_DISABLED(@"Test disabled on device.");
+#endif
+
   // Create map of canned responses and set up the test HTML server.
   std::map<GURL, std::string> responses;
   const GURL firstURL = web::test::HttpServer::MakeUrl("http://first");
@@ -578,8 +560,8 @@ id<GREYMatcher> GoButtonMatcher() {
 }
 
 // Tap the text field indicated by |ID| to open the keyboard, and then
-// press the keyboard's "Go" button.
-- (void)openKeyboardAndTapGoButtonWithTextFieldID:(const std::string&)ID {
+// press the keyboard's "Go" button to submit the form.
+- (void)submitFormUsingKeyboardGoButtonWithInputID:(const std::string&)ID {
   // Disable EarlGrey's synchronization since it is blocked by opening the
   // keyboard from a web view.
   [[GREYConfiguration sharedInstance]
@@ -604,7 +586,7 @@ id<GREYMatcher> GoButtonMatcher() {
 
   web::WebState* currentWebState = chrome_test_util::GetCurrentWebState();
   [[EarlGrey selectElementWithMatcher:web::WebViewInWebState(currentWebState)]
-      performAction:web::webViewTapElement(currentWebState, ID)];
+      performAction:web::WebViewTapElement(currentWebState, ID)];
 
   // Wait until the keyboard shows up before tapping.
   GREYCondition* condition = [GREYCondition
@@ -631,7 +613,13 @@ id<GREYMatcher> GoButtonMatcher() {
 // Tests that submitting a POST-based form by tapping the 'Go' button on the
 // keyboard navigates to the correct URL and the back button works as expected
 // afterwards.
+// TODO(crbug.com/711108): Move test to forms_egtest.mm.
 - (void)testBrowsingPostEntryWithKeyboard {
+// TODO(crbug.com/704618): Re-enable this test on devices.
+#if !TARGET_IPHONE_SIMULATOR
+  EARL_GREY_TEST_DISABLED(@"Test disabled on device.");
+#endif
+
   // Create map of canned responses and set up the test HTML server.
   std::map<GURL, std::string> responses;
   const GURL URL =
@@ -654,14 +642,18 @@ id<GREYMatcher> GoButtonMatcher() {
   [[EarlGrey selectElementWithMatcher:WebViewContainingText("hello!")]
       assertWithMatcher:grey_notNil()];
 
-  [self openKeyboardAndTapGoButtonWithTextFieldID:"textfield"];
+  [self submitFormUsingKeyboardGoButtonWithInputID:"textfield"];
 
   // Verify that the browser navigates to the expected URL.
+  [[EarlGrey selectElementWithMatcher:WebViewContainingText("baz!")]
+      assertWithMatcher:grey_notNil()];
   [[EarlGrey selectElementWithMatcher:OmniboxText(destinationURL.GetContent())]
       assertWithMatcher:grey_notNil()];
 
   // Go back and verify that the browser navigates to the original URL.
   [self goBack];
+  [[EarlGrey selectElementWithMatcher:WebViewContainingText("hello!")]
+      assertWithMatcher:grey_notNil()];
   [[EarlGrey selectElementWithMatcher:OmniboxText(URL.GetContent())]
       assertWithMatcher:grey_notNil()];
 }

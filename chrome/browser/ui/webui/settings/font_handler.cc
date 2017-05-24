@@ -104,8 +104,8 @@ const extensions::Extension* FontHandler::GetAdvancedFontSettingsExtension() {
 void FontHandler::NotifyAdvancedFontSettingsAvailability() {
   CallJavascriptFunction(
       "cr.webUIListenerCallback",
-      base::StringValue("advanced-font-settings-installed"),
-      base::FundamentalValue(GetAdvancedFontSettingsExtension() != nullptr));
+      base::Value("advanced-font-settings-installed"),
+      base::Value(GetAdvancedFontSettingsExtension() != nullptr));
 }
 
 void FontHandler::OnExtensionLoaded(content::BrowserContext*,
@@ -113,10 +113,9 @@ void FontHandler::OnExtensionLoaded(content::BrowserContext*,
   NotifyAdvancedFontSettingsAvailability();
 }
 
-void FontHandler::OnExtensionUnloaded(
-    content::BrowserContext*,
-    const extensions::Extension*,
-    extensions::UnloadedExtensionInfo::Reason) {
+void FontHandler::OnExtensionUnloaded(content::BrowserContext*,
+                                      const extensions::Extension*,
+                                      extensions::UnloadedExtensionReason) {
   NotifyAdvancedFontSettingsAvailability();
 }
 
@@ -144,7 +143,7 @@ void FontHandler::FontListHasLoaded(std::string callback_id,
       "extensionUrl",
       extension_url.Resolve(kAdvancedFontSettingsExtensionId).spec());
 
-  ResolveJavascriptCallback(base::StringValue(callback_id), response);
+  ResolveJavascriptCallback(base::Value(callback_id), response);
 }
 
 }  // namespace settings

@@ -80,12 +80,6 @@ const FindInPageEntry kFindInPageEntryZero = {{0.0, 0.0}, 0};
 @implementation JsFindinpageManager
 @synthesize findInPageModel = _findInPageModel;
 
-- (FindInPageModel*)findInPageModel {
-  if (!_findInPageModel)
-    _findInPageModel = [[FindInPageModel alloc] init];
-  return _findInPageModel;
-}
-
 - (void)setWidth:(CGFloat)width height:(CGFloat)height {
   NSString* javaScript =
       [NSString stringWithFormat:kFindInPageInit, width, height];
@@ -173,7 +167,7 @@ const FindInPageEntry kFindInPageEntryZero = {{0.0, 0.0}, 0};
     return NO;
 
   // Parse JSONs.
-  std::string json([result UTF8String]);
+  std::string json = base::SysNSStringToUTF8(result);
   std::unique_ptr<base::Value> root(base::JSONReader::Read(json, false));
   if (!root.get())
     return YES;
@@ -221,7 +215,7 @@ const FindInPageEntry kFindInPageEntryZero = {{0.0, 0.0}, 0};
 }
 
 - (FindInPageEntry)findInPageEntryForJson:(NSString*)jsonStr {
-  std::string json([jsonStr UTF8String]);
+  std::string json = base::SysNSStringToUTF8(jsonStr);
   std::unique_ptr<base::Value> root(base::JSONReader::Read(json, false));
   if (!root.get())
     return kFindInPageEntryZero;

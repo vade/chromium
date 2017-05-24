@@ -13,10 +13,11 @@
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_base_observer.h"
+#include "content/browser/renderer_host/render_widget_host_view_frame_subscriber.h"
 #include "content/browser/renderer_host/text_input_manager.h"
 #include "content/common/content_switches_internal.h"
-#include "content/public/browser/render_widget_host_view_frame_subscriber.h"
-#include "ui/display/display.h"
+#include "media/base/video_frame.h"
+#include "ui/base/layout.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/geometry/size_conversions.h"
@@ -26,27 +27,18 @@ namespace content {
 
 namespace {
 
-// How many microseconds apart input events should be flushed.
-const int kFlushInputRateInUs = 16666;
-
 }
 
 RenderWidgetHostViewBase::RenderWidgetHostViewBase()
     : is_fullscreen_(false),
-      popup_type_(blink::WebPopupTypeNone),
-      background_color_(SK_ColorWHITE),
+      popup_type_(blink::kWebPopupTypeNone),
       mouse_locked_(false),
       showing_context_menu_(false),
-#if !defined(USE_AURA)
-      selection_text_offset_(0),
-      selection_range_(gfx::Range::InvalidRange()),
-#endif
       current_device_scale_factor_(0),
       current_display_rotation_(display::Display::ROTATE_0),
       text_input_manager_(nullptr),
       renderer_frame_number_(0),
-      weak_factory_(this) {
-}
+      weak_factory_(this) {}
 
 RenderWidgetHostViewBase::~RenderWidgetHostViewBase() {
   DCHECK(!mouse_locked_);
@@ -90,27 +82,14 @@ bool RenderWidgetHostViewBase::OnMessageReceived(const IPC::Message& msg){
   return false;
 }
 
-void RenderWidgetHostViewBase::SetBackgroundColor(SkColor color) {
-  background_color_ = color;
-}
-
-SkColor RenderWidgetHostViewBase::background_color() {
-  return background_color_;
-}
-
 void RenderWidgetHostViewBase::SetBackgroundColorToDefault() {
   SetBackgroundColor(SK_ColorWHITE);
 }
 
-bool RenderWidgetHostViewBase::GetBackgroundOpaque() {
-  return SkColorGetA(background_color_) == SK_AlphaOPAQUE;
-}
-
 gfx::Size RenderWidgetHostViewBase::GetPhysicalBackingSize() const {
-  display::Display display =
-      display::Screen::GetScreen()->GetDisplayNearestWindow(GetNativeView());
-  return gfx::ScaleToCeiledSize(GetRequestedRendererSize(),
-                                display.device_scale_factor());
+  return gfx::ScaleToCeiledSize(
+      GetRequestedRendererSize(),
+      ui::GetScaleFactorForNativeView(GetNativeView()));
 }
 
 bool RenderWidgetHostViewBase::DoBrowserControlsShrinkBlinkSize() const {
@@ -138,18 +117,8 @@ float RenderWidgetHostViewBase::GetBottomControlsHeight() const {
 void RenderWidgetHostViewBase::SelectionChanged(const base::string16& text,
                                                 size_t offset,
                                                 const gfx::Range& range) {
-// TODO(ekaramad): Use TextInputManager code paths for IME on other platforms.
-// Also, remove the following local variables when that happens
-// (https://crbug.com/578168 and https://crbug.com/602427).
-#if !defined(OS_ANDROID)
   if (GetTextInputManager())
     GetTextInputManager()->SelectionChanged(this, text, offset, range);
-#else
-  selection_text_ = text;
-  selection_text_offset_ = offset;
-  selection_range_.set_start(range.start());
-  selection_range_.set_end(range.end());
-#endif
 }
 
 gfx::Size RenderWidgetHostViewBase::GetRequestedRendererSize() const {
@@ -166,8 +135,28 @@ void RenderWidgetHostViewBase::SetIsInVR(bool is_in_vr) {
 }
 
 bool RenderWidgetHostViewBase::IsInVR() const {
-  NOTIMPLEMENTED();
   return false;
+}
+
+bool RenderWidgetHostViewBase::IsSurfaceAvailableForCopy() const {
+  return false;
+}
+
+void RenderWidgetHostViewBase::CopyFromSurface(
+    const gfx::Rect& src_rect,
+    const gfx::Size& output_size,
+    const ReadbackRequestCallback& callback,
+    const SkColorType color_type) {
+  NOTIMPLEMENTED();
+  callback.Run(SkBitmap(), READBACK_SURFACE_UNAVAILABLE);
+}
+
+void RenderWidgetHostViewBase::CopyFromSurfaceToVideoFrame(
+    const gfx::Rect& src_rect,
+    scoped_refptr<media::VideoFrame> target,
+    const base::Callback<void(const gfx::Rect&, bool)>& callback) {
+  NOTIMPLEMENTED();
+  callback.Run(gfx::Rect(), false);
 }
 
 bool RenderWidgetHostViewBase::IsShowingContextMenu() const {
@@ -180,28 +169,9 @@ void RenderWidgetHostViewBase::SetShowingContextMenu(bool showing) {
 }
 
 base::string16 RenderWidgetHostViewBase::GetSelectedText() {
-// TODO(ekaramad): Use TextInputManager code paths for IME on other platforms.
-// Also, remove the following local variables when that happens
-// (https://crbug.com/578168 and https://crbug.com/602427).
-#if !defined(OS_ANDROID)
   if (!GetTextInputManager())
     return base::string16();
-
-  const TextInputManager::TextSelection* selection =
-      GetTextInputManager()->GetTextSelection(this);
-
-  if (!selection || !selection->range.IsValid())
-    return base::string16();
-
-  return selection->text.substr(selection->range.GetMin() - selection->offset,
-                                selection->range.length());
-#else
-  if (!selection_range_.IsValid())
-    return base::string16();
-  return selection_text_.substr(
-      selection_range_.GetMin() - selection_text_offset_,
-      selection_range_.length());
-#endif
+  return GetTextInputManager()->GetTextSelection(this)->selected_text();
 }
 
 bool RenderWidgetHostViewBase::IsMouseLocked() {
@@ -212,17 +182,6 @@ InputEventAckState RenderWidgetHostViewBase::FilterInputEvent(
     const blink::WebInputEvent& input_event) {
   // By default, input events are simply forwarded to the renderer.
   return INPUT_EVENT_ACK_STATE_NOT_CONSUMED;
-}
-
-void RenderWidgetHostViewBase::OnSetNeedsFlushInput() {
-  if (flush_input_timer_.IsRunning())
-    return;
-
-  flush_input_timer_.Start(
-      FROM_HERE,
-      base::TimeDelta::FromMicroseconds(kFlushInputRateInUs),
-      this,
-      &RenderWidgetHostViewBase::FlushInput);
 }
 
 void RenderWidgetHostViewBase::WheelEventAck(
@@ -288,7 +247,7 @@ void RenderWidgetHostViewBase::UpdateScreenInfo(gfx::NativeView view) {
 
 bool RenderWidgetHostViewBase::HasDisplayPropertyChanged(gfx::NativeView view) {
   display::Display display =
-      display::Screen::GetScreen()->GetDisplayNearestWindow(view);
+      display::Screen::GetScreen()->GetDisplayNearestView(view);
   if (current_display_area_ == display.work_area() &&
       current_device_scale_factor_ == display.device_scale_factor() &&
       current_display_rotation_ == display.rotation()) {
@@ -342,15 +301,6 @@ uint32_t RenderWidgetHostViewBase::RendererFrameNumber() {
 
 void RenderWidgetHostViewBase::DidReceiveRendererFrame() {
   ++renderer_frame_number_;
-}
-
-void RenderWidgetHostViewBase::FlushInput() {
-  RenderWidgetHostImpl* impl = NULL;
-  if (GetRenderWidgetHost())
-    impl = RenderWidgetHostImpl::From(GetRenderWidgetHost());
-  if (!impl)
-    return;
-  impl->FlushInput();
 }
 
 void RenderWidgetHostViewBase::ShowDisambiguationPopup(
@@ -431,6 +381,10 @@ void RenderWidgetHostViewBase::OnDidNavigateMainFrameToNewPage() {
 
 cc::FrameSinkId RenderWidgetHostViewBase::GetFrameSinkId() {
   return cc::FrameSinkId();
+}
+
+cc::LocalSurfaceId RenderWidgetHostViewBase::GetLocalSurfaceId() const {
+  return cc::LocalSurfaceId();
 }
 
 cc::FrameSinkId RenderWidgetHostViewBase::FrameSinkIdAtPoint(

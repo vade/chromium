@@ -17,7 +17,11 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "mojo/edk/embedder/embedder_internal.h"
 #include "mojo/edk/embedder/entrypoints.h"
+#include "mojo/edk/embedder/incoming_broker_client_invitation.h"
+#include "mojo/edk/embedder/outgoing_broker_client_invitation.h"
 #include "mojo/edk/embedder/platform_channel_pair.h"
+#include "mojo/edk/embedder/transport_protocol.h"
+#include "mojo/edk/system/configuration.h"
 #include "mojo/edk/system/core.h"
 #include "mojo/edk/system/node_controller.h"
 
@@ -39,69 +43,37 @@ Core* GetCore() { return g_core; }
 
 }  // namespace internal
 
-void SetMaxMessageSize(size_t bytes) {
-}
+// Basic configuration/initialization ------------------------------------------
 
-void ChildProcessLaunched(base::ProcessHandle child_process,
-                          ScopedPlatformHandle server_pipe,
-                          const std::string& child_token) {
-  ChildProcessLaunched(child_process, std::move(server_pipe),
-                       child_token, ProcessErrorCallback());
-}
-
-void ChildProcessLaunched(base::ProcessHandle child_process,
-                          ScopedPlatformHandle server_pipe,
-                          const std::string& child_token,
-                          const ProcessErrorCallback& process_error_callback) {
-  CHECK(internal::g_core);
-  internal::g_core->AddChild(child_process, std::move(server_pipe),
-                             child_token, process_error_callback);
-}
-
-void ChildProcessLaunchFailed(const std::string& child_token) {
-  CHECK(internal::g_core);
-  internal::g_core->ChildLaunchFailed(child_token);
-}
-
-void SetParentPipeHandle(ScopedPlatformHandle pipe) {
-  CHECK(internal::g_core);
-  internal::g_core->InitChild(std::move(pipe));
-}
-
-void SetParentPipeHandleFromCommandLine() {
-  ScopedPlatformHandle platform_channel =
-      PlatformChannelPair::PassClientHandleFromParentProcess(
-          *base::CommandLine::ForCurrentProcess());
-  CHECK(platform_channel.is_valid());
-  SetParentPipeHandle(std::move(platform_channel));
-}
-
-ScopedMessagePipeHandle ConnectToPeerProcess(ScopedPlatformHandle pipe) {
-  return ConnectToPeerProcess(std::move(pipe), GenerateRandomToken());
-}
-
-ScopedMessagePipeHandle ConnectToPeerProcess(ScopedPlatformHandle pipe,
-                                             const std::string& peer_token) {
-  DCHECK(pipe.is_valid());
-  DCHECK(!peer_token.empty());
-  return internal::g_core->ConnectToPeerProcess(std::move(pipe), peer_token);
-}
-
-void ClosePeerConnection(const std::string& peer_token) {
-  return internal::g_core->ClosePeerConnection(peer_token);
-}
-
-void Init() {
+void Init(const Configuration& configuration) {
   MojoSystemThunks thunks = MakeSystemThunks();
   size_t expected_size = MojoEmbedderSetSystemThunks(&thunks);
   DCHECK_EQ(expected_size, sizeof(thunks));
 
-  internal::g_core = new Core();
+  internal::g_configuration = configuration;
+  internal::g_core = new Core;
+}
+
+void Init() {
+  Init(Configuration());
 }
 
 void SetDefaultProcessErrorCallback(const ProcessErrorCallback& callback) {
   internal::g_core->SetDefaultProcessErrorCallback(callback);
 }
+
+std::string GenerateRandomToken() {
+  char random_bytes[16];
+#if defined(OS_NACL)
+  // Not secure. For NaCl only!
+  base::RandBytes(random_bytes, 16);
+#else
+  crypto::RandBytes(random_bytes, 16);
+#endif
+  return base::HexEncode(random_bytes, 16);
+}
+
+// Basic functions -------------------------------------------------------------
 
 MojoResult CreatePlatformHandleWrapper(
     ScopedPlatformHandle platform_handle,
@@ -134,6 +106,13 @@ MojoResult PassSharedMemoryHandle(
       mojo_handle, shared_memory_handle, num_bytes, read_only);
 }
 
+MojoResult SetProperty(MojoPropertyType type, const void* value) {
+  CHECK(internal::g_core);
+  return internal::g_core->SetProperty(type, value);
+}
+
+// Initialialization/shutdown for interprocess communication (IPC) -------------
+
 void InitIPCSupport(scoped_refptr<base::TaskRunner> io_thread_task_runner) {
   CHECK(internal::g_core);
   internal::g_core->SetIOTaskRunner(io_thread_task_runner);
@@ -155,29 +134,21 @@ void SetMachPortProvider(base::PortProvider* port_provider) {
 }
 #endif
 
-ScopedMessagePipeHandle CreateParentMessagePipe(
-    const std::string& token, const std::string& child_token) {
-  return internal::g_core->CreateParentMessagePipe(token, child_token);
+// Legacy IPC Helpers ----------------------------------------------------------
+
+ScopedMessagePipeHandle ConnectToPeerProcess(ScopedPlatformHandle pipe) {
+  return ConnectToPeerProcess(std::move(pipe), GenerateRandomToken());
 }
 
-ScopedMessagePipeHandle CreateChildMessagePipe(const std::string& token) {
-  return internal::g_core->CreateChildMessagePipe(token);
+ScopedMessagePipeHandle ConnectToPeerProcess(ScopedPlatformHandle pipe,
+                                             const std::string& peer_token) {
+  DCHECK(pipe.is_valid());
+  DCHECK(!peer_token.empty());
+  return internal::g_core->ConnectToPeerProcess(std::move(pipe), peer_token);
 }
 
-std::string GenerateRandomToken() {
-  char random_bytes[16];
-#if defined(OS_NACL)
-  // Not secure. For NaCl only!
-  base::RandBytes(random_bytes, 16);
-#else
-  crypto::RandBytes(random_bytes, 16);
-#endif
-  return base::HexEncode(random_bytes, 16);
-}
-
-MojoResult SetProperty(MojoPropertyType type, const void* value) {
-  CHECK(internal::g_core);
-  return internal::g_core->SetProperty(type, value);
+void ClosePeerConnection(const std::string& peer_token) {
+  return internal::g_core->ClosePeerConnection(peer_token);
 }
 
 }  // namespace edk

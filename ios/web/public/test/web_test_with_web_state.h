@@ -8,6 +8,7 @@
 #import "base/ios/block_types.h"
 #include "base/message_loop/message_loop.h"
 #include "ios/web/public/test/web_test.h"
+#include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
 
 namespace web {
@@ -25,6 +26,9 @@ class WebTestWithWebState : public WebTest,
   void SetUp() override;
   void TearDown() override;
 
+  // Adds a pending item to the NavigationManager associated with the WebState.
+  void AddPendingItem(const GURL& url, ui::PageTransition transition);
+
   // Loads the specified HTML content with URL into the WebState.
   void LoadHtml(NSString* html, const GURL& url);
   // Loads the specified HTML content into the WebState, using test url name.
@@ -39,6 +43,8 @@ class WebTestWithWebState : public WebTest,
   void WaitForCondition(ConditionBlock condition);
   // Synchronously executes JavaScript and returns result as id.
   id ExecuteJavaScript(NSString* script);
+  // Destroys underlying WebState. web_state() will return null after this call.
+  void DestroyWebState();
 
   // Returns the base URL of the loaded page.
   std::string BaseUrl() const;

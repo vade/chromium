@@ -5,58 +5,45 @@
 #ifndef CHROME_BROWSER_ANDROID_VR_SHELL_UI_INTERFACE_H_
 #define CHROME_BROWSER_ANDROID_VR_SHELL_UI_INTERFACE_H_
 
-#include "base/macros.h"
-#include "base/values.h"
-
 class GURL;
 
 namespace vr_shell {
-
-class UiCommandHandler {
- public:
-  virtual void SendCommandToUi(const base::Value& value) = 0;
-};
 
 // This class manages the communication of browser state from VR shell to the
 // HTML UI. State information is asynchronous and unidirectional.
 class UiInterface {
  public:
-  enum Mode {
-    STANDARD,
-    WEB_VR
+  enum Direction {
+    NONE = 0,
+    LEFT,
+    RIGHT,
+    UP,
+    DOWN,
   };
 
-  explicit UiInterface(Mode initial_mode, bool fullscreen);
-  virtual ~UiInterface();
+  virtual ~UiInterface() {}
 
-  void SetMode(Mode mode);
-  Mode GetMode() { return mode_; }
-  void SetMenuMode(bool enabled);
-  bool GetMenuMode() { return menu_mode_; }
-  void SetFullscreen(bool enabled);
-  bool GetFullscreen() { return fullscreen_; }
-  void SetSecurityLevel(int level);
-  void SetWebVRSecureOrigin(bool secure);
-  void SetLoading(bool loading);
-  void SetLoadProgress(double progress);
-  void SetURL(const GURL& url);
+  virtual void SetWebVrMode(bool enabled) = 0;
+  virtual void SetURL(const GURL& url) = 0;
+  virtual void SetFullscreen(bool enabled) = 0;
+  virtual void SetSecurityLevel(int level) = 0;
+  virtual void SetWebVrSecureOrigin(bool secure) = 0;
+  virtual void SetLoading(bool loading) = 0;
+  virtual void SetLoadProgress(float progress) = 0;
+  virtual void SetHistoryButtonsEnabled(bool can_go_back,
+                                        bool can_go_forward) = 0;
+  virtual void SetVideoCapturingIndicator(bool enabled) = 0;
+  virtual void SetScreenCapturingIndicator(bool enabled) = 0;
+  virtual void SetAudioCapturingIndicator(bool enabled) = 0;
 
-  // Called by WebUI when starting VR.
-  void OnDomContentsLoaded();
-  void SetUiCommandHandler(UiCommandHandler* handler);
-
- private:
-  void FlushUpdates();
-  void FlushModeState();
-
-  Mode mode_;
-  bool menu_mode_ = false;
-  bool fullscreen_ = false;
-  UiCommandHandler* handler_;
-  bool loaded_ = false;
-  base::DictionaryValue updates_;
-
-  DISALLOW_COPY_AND_ASSIGN(UiInterface);
+  // Tab handling.
+  virtual void InitTabList() {}
+  virtual void AppendToTabList(bool incognito,
+                               int id,
+                               const base::string16& title) {}
+  virtual void FlushTabList() {}
+  virtual void UpdateTab(bool incognito, int id, const std::string& title) {}
+  virtual void RemoveTab(bool incognito, int id) {}
 };
 
 }  // namespace vr_shell

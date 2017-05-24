@@ -70,9 +70,9 @@ PerfUI.TimelineGrid = class {
     if (gridSliceTime * pixelsPerTime >= 2 * minGridSlicePx)
       gridSliceTime = gridSliceTime / 2;
 
-    var leftBoundaryTime = calculator.minimumBoundary() - calculator.paddingLeft() / pixelsPerTime;
     var firstDividerTime =
-        Math.ceil((leftBoundaryTime - calculator.zeroTime()) / gridSliceTime) * gridSliceTime + calculator.zeroTime();
+        Math.ceil((calculator.minimumBoundary() - calculator.zeroTime()) / gridSliceTime) * gridSliceTime +
+        calculator.zeroTime();
     var lastDividerTime = calculator.maximumBoundary();
     // Add some extra space past the right boundary as the rightmost divider label text
     // may be partially shown rather than just pop up when a new rightmost divider gets into the view.
@@ -111,12 +111,13 @@ PerfUI.TimelineGrid = class {
     var precision = dividersData.precision;
 
     if (headerHeight) {
-      context.fillStyle = UI.themeSupport.patchColor('rgba(255, 255, 255, 0.5)', UI.ThemeSupport.ColorUsage.Background);
+      context.fillStyle =
+          UI.themeSupport.patchColorText('rgba(255, 255, 255, 0.5)', UI.ThemeSupport.ColorUsage.Background);
       context.fillRect(0, 0, width, headerHeight);
     }
 
-    context.fillStyle = UI.themeSupport.patchColor('#333', UI.ThemeSupport.ColorUsage.Foreground);
-    context.strokeStyle = UI.themeSupport.patchColor('rgba(0, 0, 0, 0.1)', UI.ThemeSupport.ColorUsage.Foreground);
+    context.fillStyle = UI.themeSupport.patchColorText('#333', UI.ThemeSupport.ColorUsage.Foreground);
+    context.strokeStyle = UI.themeSupport.patchColorText('rgba(0, 0, 0, 0.1)', UI.ThemeSupport.ColorUsage.Foreground);
     context.textBaseline = 'hanging';
     context.font = '11px ' + Host.fontFamily();
     context.lineWidth = 1;
@@ -263,11 +264,6 @@ PerfUI.TimelineGrid = class {
 PerfUI.TimelineGrid.Calculator = function() {};
 
 PerfUI.TimelineGrid.Calculator.prototype = {
-  /**
-   * @return {number}
-   */
-  paddingLeft() {},
-
   /**
    * @param {number} time
    * @return {number}

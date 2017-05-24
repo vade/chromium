@@ -32,6 +32,7 @@
 #include "ipc/ipc_logging.h"
 #include "ipc/message_filter.h"
 #include "mojo/edk/embedder/embedder.h"
+#include "services/resource_coordinator/public/interfaces/memory/constants.mojom.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 
 #if defined(OS_LINUX)
@@ -50,9 +51,6 @@ base::StaticAtomicSequenceNumber g_unique_id;
 namespace content {
 
 int ChildProcessHost::kInvalidUniqueID = -1;
-
-uint64_t ChildProcessHost::kBrowserTracingProcessId =
-    std::numeric_limits<uint64_t>::max();
 
 // static
 ChildProcessHost* ChildProcessHost::Create(ChildProcessHostDelegate* delegate) {
@@ -111,9 +109,10 @@ void ChildProcessHostImpl::AddFilter(IPC::MessageFilter* filter) {
     filter->OnFilterAdded(channel_.get());
 }
 
-service_manager::InterfaceProvider*
-ChildProcessHostImpl::GetRemoteInterfaces() {
-  return delegate_->GetRemoteInterfaces();
+void ChildProcessHostImpl::BindInterface(
+    const std::string& interface_name,
+    mojo::ScopedMessagePipeHandle interface_pipe) {
+  return delegate_->BindInterface(interface_name, std::move(interface_pipe));
 }
 
 void ChildProcessHostImpl::ForceShutdown() {
@@ -121,16 +120,14 @@ void ChildProcessHostImpl::ForceShutdown() {
 }
 
 std::string ChildProcessHostImpl::CreateChannelMojo(
-    const std::string& child_token) {
+    mojo::edk::OutgoingBrokerClientInvitation* invitation) {
   DCHECK(channel_id_.empty());
   channel_id_ = mojo::edk::GenerateRandomToken();
-  mojo::ScopedMessagePipeHandle host_handle =
-      mojo::edk::CreateParentMessagePipe(channel_id_, child_token);
-  channel_ = IPC::ChannelMojo::Create(std::move(host_handle),
-                                      IPC::Channel::MODE_SERVER, this);
+  channel_ =
+      IPC::ChannelMojo::Create(invitation->AttachMessagePipe(channel_id_),
+                               IPC::Channel::MODE_SERVER, this);
   if (!channel_ || !InitChannel())
     return std::string();
-
   return channel_id_;
 }
 
@@ -141,12 +138,9 @@ void ChildProcessHostImpl::CreateChannelMojo() {
   DCHECK(channel_id_.empty());
   channel_id_ = "ChannelMojo";
 
-  service_manager::InterfaceProvider* remote_interfaces = GetRemoteInterfaces();
-  DCHECK(remote_interfaces);
-
-  IPC::mojom::ChannelBootstrapPtr bootstrap;
-  remote_interfaces->GetInterface(&bootstrap);
-  channel_ = IPC::ChannelMojo::Create(bootstrap.PassInterface().PassHandle(),
+  mojo::MessagePipe pipe;
+  BindInterface(IPC::mojom::ChannelBootstrap::Name_, std::move(pipe.handle1));
+  channel_ = IPC::ChannelMojo::Create(std::move(pipe.handle0),
                                       IPC::Channel::MODE_SERVER, this);
   DCHECK(channel_);
 
@@ -163,7 +157,7 @@ bool ChildProcessHostImpl::InitChannel() {
   delegate_->OnChannelInitialized(channel_.get());
 
   // Make sure these messages get sent first.
-#if defined(IPC_MESSAGE_LOG_ENABLED)
+#if BUILDFLAG(IPC_MESSAGE_LOG_ENABLED)
   bool enabled = IPC::Logging::GetInstance()->Enabled();
   Send(new ChildProcessMsg_SetIPCLoggingEnabled(enabled));
 #endif
@@ -208,7 +202,7 @@ uint64_t ChildProcessHostImpl::ChildProcessUniqueIdToTracingProcessId(
   // tracing process ids.
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kSingleProcess))
-    return ChildProcessHost::kBrowserTracingProcessId;
+    return memory_instrumentation::mojom::kServiceTracingProcessId;
 
   // The hash value is incremented so that the tracing id is never equal to
   // MemoryDumpManager::kInvalidTracingProcessId.
@@ -219,7 +213,7 @@ uint64_t ChildProcessHostImpl::ChildProcessUniqueIdToTracingProcessId(
 }
 
 bool ChildProcessHostImpl::OnMessageReceived(const IPC::Message& msg) {
-#ifdef IPC_MESSAGE_LOG_ENABLED
+#if BUILDFLAG(IPC_MESSAGE_LOG_ENABLED)
   IPC::Logging* logger = IPC::Logging::GetInstance();
   if (msg.type() == IPC_LOGGING_ID) {
     logger->OnReceivedLoggingMessage(msg);
@@ -250,7 +244,7 @@ bool ChildProcessHostImpl::OnMessageReceived(const IPC::Message& msg) {
       handled = delegate_->OnMessageReceived(msg);
   }
 
-#ifdef IPC_MESSAGE_LOG_ENABLED
+#if BUILDFLAG(IPC_MESSAGE_LOG_ENABLED)
   if (logger->Enabled())
     logger->OnPostDispatchMessage(msg);
 #endif

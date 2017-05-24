@@ -8,10 +8,14 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/trace_event/trace_event.h"
 #include "chrome/browser/android/mojo/chrome_interface_registrar_android.h"
+#include "chrome/browser/android/preferences/clipboard_android.h"
 #include "chrome/browser/android/seccomp_support_detector.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/descriptors_android.h"
@@ -76,11 +80,6 @@ int ChromeBrowserMainPartsAndroid::PreCreateThreads() {
             crash_dump_dir, kAndroidMinidumpDescriptor));
   }
 
-  // Auto-detect based on en-US whether locale .pak files are store uncompressed
-  // (monochrome) vs extracted (non-monochrome).
-  ui::SetLocalePaksStoredInApk(
-      !ui::GetPathForAndroidLocalePakWithinApk("en-US").empty());
-
   return ChromeBrowserMainParts::PreCreateThreads();
 }
 
@@ -96,6 +95,13 @@ void ChromeBrowserMainPartsAndroid::PostProfileInit() {
       content::BrowserThread::FILE, FROM_HERE,
       base::Bind(&DeleteFileTask, bookmark_image_file_path),
       base::TimeDelta::FromMinutes(1));
+
+  // Idempotent.  Needs to be called once on startup.  If
+  // InitializeClipboardAndroidFromLocalState() is called multiple times (e.g.,
+  // once per profile load), that's okay; the additional calls don't change
+  // anything.
+  android::InitClipboardAndroidFromLocalState(g_browser_process->local_state());
+
   // Start watching the preferences that need to be backed up backup using
   // Android backup, so that we create a new backup if they change.
   backup_watcher_.reset(new chrome::android::ChromeBackupWatcher(profile()));
@@ -133,9 +139,9 @@ void ChromeBrowserMainPartsAndroid::PreEarlyInitialization() {
 void ChromeBrowserMainPartsAndroid::PostBrowserStart() {
   ChromeBrowserMainParts::PostBrowserStart();
 
-  content::BrowserThread::GetBlockingPool()->PostDelayedTask(FROM_HERE,
-      base::Bind(&SeccompSupportDetector::StartDetection),
-      base::TimeDelta::FromMinutes(1));
+  base::PostDelayedTaskWithTraits(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      base::Bind(&ReportSeccompSupport), base::TimeDelta::FromMinutes(1));
 
   RegisterChromeJavaMojoInterfaces();
 }

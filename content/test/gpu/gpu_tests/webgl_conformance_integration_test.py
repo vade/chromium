@@ -4,6 +4,7 @@
 
 import logging
 import os
+import sys
 
 from gpu_tests import gpu_integration_test
 from gpu_tests import path_util
@@ -207,7 +208,7 @@ class WebGLConformanceIntegrationTest(gpu_integration_test.GpuIntegrationTest):
 
   def _CheckTestCompletion(self):
     self.tab.action_runner.WaitForJavaScriptCondition(
-        'webglTestHarness._finished', timeout_in_seconds=300)
+        'webglTestHarness._finished', timeout=300)
     if not self._DidWebGLTestSucceed(self.tab):
       self.fail(self._WebGLTestMessages(self.tab))
 
@@ -222,7 +223,7 @@ class WebGLConformanceIntegrationTest(gpu_integration_test.GpuIntegrationTest):
   def _RunExtensionCoverageTest(self, test_path, *args):
     self._NavigateTo(test_path, self._GetExtensionHarnessScript())
     self.tab.action_runner.WaitForJavaScriptCondition(
-        'window._loaded', timeout_in_seconds=300)
+        'window._loaded', timeout=300)
     extension_list = args[0]
     webgl_version = args[1]
     context_type = "webgl2" if webgl_version == 2 else "webgl"
@@ -231,19 +232,20 @@ class WebGLConformanceIntegrationTest(gpu_integration_test.GpuIntegrationTest):
       extension_list_string = extension_list_string + extension + ", "
     extension_list_string = extension_list_string + "]"
     self.tab.action_runner.EvaluateJavaScript(
-      'checkSupportedExtensions("%s", "%s")' % (
-        extension_list_string, context_type))
+        'checkSupportedExtensions({{ extensions_string }}, {{context_type}})',
+        extensions_string=extension_list_string, context_type=context_type)
     self._CheckTestCompletion()
 
   def _RunExtensionTest(self, test_path, *args):
     self._NavigateTo(test_path, self._GetExtensionHarnessScript())
     self.tab.action_runner.WaitForJavaScriptCondition(
-        'window._loaded', timeout_in_seconds=300)
+        'window._loaded', timeout=300)
     extension = args[0]
     webgl_version = args[1]
     context_type = "webgl2" if webgl_version == 2 else "webgl"
     self.tab.action_runner.EvaluateJavaScript(
-      'checkExtension("%s", "%s")' % (extension, context_type))
+      'checkExtension({{ extension }}, {{ context_type }})',
+      extension=extension, context_type=context_type)
     self._CheckTestCompletion()
 
   @classmethod
@@ -253,15 +255,14 @@ class WebGLConformanceIntegrationTest(gpu_integration_test.GpuIntegrationTest):
     # --test-type=gpu is used only to suppress the "Google API Keys are missing"
     # infobar, which causes flakiness in tests.
     browser_options.AppendExtraBrowserArgs([
-        '--disable-gesture-requirement-for-media-playback',
+        '--ignore-autoplay-restrictions',
         '--disable-domain-blocking-for-3d-apis',
         '--disable-gpu-process-crash-limit',
         '--test-type=gpu',
-        '--enable-experimental-canvas-features',
-        # Try disabling the GPU watchdog to see if this affects the
-        # intermittent GPU process hangs that have been seen on the
-        # waterfall. crbug.com/596622 crbug.com/609252
-        '--disable-gpu-watchdog'
+        '--enable-experimental-canvas-features'
+        # If intermittent GPU process hangs are seen on the waterfall,
+        # try re-adding the --disable-gpu-watchdog flag here.
+        # crbug.com/596622 crbug.com/609252
     ])
 
     builtin_js_flags = '--js-flags=--expose-gc'
@@ -286,7 +287,7 @@ class WebGLConformanceIntegrationTest(gpu_integration_test.GpuIntegrationTest):
       ])
     browser = browser_finder.FindBrowser(browser_options.finder_options)
     if (browser.target_os.startswith('android') and
-      browser.browser_type == 'android-webview-shell'):
+      browser.browser_type == 'android-webview-instrumentation'):
       # TODO(kbr): this is overly broad. We'd like to do this only on
       # Nexus 9. It'll go away shortly anyway. crbug.com/499928
       #
@@ -311,8 +312,8 @@ class WebGLConformanceIntegrationTest(gpu_integration_test.GpuIntegrationTest):
         is_asan=cls._is_asan)
 
   @classmethod
-  def setUpClass(cls):
-    super(WebGLConformanceIntegrationTest, cls).setUpClass()
+  def SetUpProcess(cls):
+    super(WebGLConformanceIntegrationTest, cls).SetUpProcess()
     cls.CustomizeOptions()
     cls.SetBrowserOptions(cls._finder_options)
     cls.StartBrowser()
@@ -396,3 +397,8 @@ class WebGLConformanceIntegrationTest(gpu_integration_test.GpuIntegrationTest):
           test_paths.append(test)
 
     return test_paths
+
+
+def load_tests(loader, tests, pattern):
+  del loader, tests, pattern  # Unused.
+  return gpu_integration_test.LoadAllTestsInModule(sys.modules[__name__])

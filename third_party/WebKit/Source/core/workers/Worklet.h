@@ -6,19 +6,22 @@
 #define Worklet_h
 
 #include "bindings/core/v8/ScriptPromise.h"
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/CoreExport.h"
 #include "core/dom/ContextLifecycleObserver.h"
-#include "core/loader/resource/ScriptResource.h"
+#include "core/workers/WorkletOptions.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
 class LocalFrame;
-class ResourceFetcher;
+class ScriptPromiseResolver;
 class WorkletGlobalScopeProxy;
-class WorkletScriptLoader;
 
+// This is the base implementation of Worklet interface defined in the spec:
+// https://drafts.css-houdini.org/worklets/#worklet
+// Although some worklets run off the main thread, this must be created and
+// destroyed on the main thread.
 class CORE_EXPORT Worklet : public GarbageCollectedFinalized<Worklet>,
                             public ScriptWrappable,
                             public ContextLifecycleObserver {
@@ -27,20 +30,16 @@ class CORE_EXPORT Worklet : public GarbageCollectedFinalized<Worklet>,
   WTF_MAKE_NONCOPYABLE(Worklet);
 
  public:
-  virtual ~Worklet() {}
+  virtual ~Worklet() = default;
 
-  virtual void initialize() {}
-  virtual bool isInitialized() const { return true; }
+  // Worklet.idl
+  // addModule() imports ES6 module scripts.
+  virtual ScriptPromise addModule(ScriptState*,
+                                  const String& module_url,
+                                  const WorkletOptions&);
 
-  virtual WorkletGlobalScopeProxy* workletGlobalScopeProxy() const = 0;
-
-  // Worklet
-  ScriptPromise import(ScriptState*, const String& url);
-
-  void notifyFinished(WorkletScriptLoader*);
-
-  // ContextLifecycleObserver
-  void contextDestroyed(ExecutionContext*) final;
+  // Returns a proxy to WorkletGlobalScope on the context thread.
+  virtual WorkletGlobalScopeProxy* GetWorkletGlobalScopeProxy() const = 0;
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -49,10 +48,9 @@ class CORE_EXPORT Worklet : public GarbageCollectedFinalized<Worklet>,
   explicit Worklet(LocalFrame*);
 
  private:
-  ResourceFetcher* fetcher() const { return m_fetcher.get(); }
-
-  Member<ResourceFetcher> m_fetcher;
-  HeapHashSet<Member<WorkletScriptLoader>> m_scriptLoaders;
+  virtual void FetchAndInvokeScript(const KURL& module_url_record,
+                                    const WorkletOptions&,
+                                    ScriptPromiseResolver*) = 0;
 };
 
 }  // namespace blink

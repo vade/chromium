@@ -3,6 +3,11 @@ var initialize_ResourceTest = function() {
 InspectorTest.preloadPanel("sources");
 InspectorTest.preloadPanel("resources");
 
+InspectorTest.createWebSQLDatabase = function(name)
+{
+    return InspectorTest.evaluateInPageAsync(`_openWebSQLDatabase("${name}")`);
+}
+
 InspectorTest.requestURLComparer = function(r1, r2)
 {
     return r1.request.url.localeCompare(r2.request.url);
@@ -79,17 +84,22 @@ InspectorTest.resourceMatchingURL = function(resourceURL)
 
 InspectorTest.databaseModel = function()
 {
-    return Resources.DatabaseModel.fromTarget(InspectorTest.mainTarget);
+    return InspectorTest.mainTarget.model(Resources.DatabaseModel);
 }
 
 InspectorTest.domStorageModel = function()
 {
-    return Resources.DOMStorageModel.fromTarget(InspectorTest.mainTarget);
+    return InspectorTest.mainTarget.model(Resources.DOMStorageModel);
 }
 
 InspectorTest.indexedDBModel = function()
 {
-    return Resources.IndexedDBModel.fromTarget(InspectorTest.mainTarget);
+    return InspectorTest.mainTarget.model(Resources.IndexedDBModel);
 }
 
+}
+
+function _openWebSQLDatabase(name)
+{
+    return new Promise(resolve => openDatabase(name, "1.0", "", 1024 * 1024, resolve));
 }

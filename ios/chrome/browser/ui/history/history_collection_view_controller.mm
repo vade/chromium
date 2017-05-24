@@ -36,6 +36,7 @@
 #include "ios/chrome/browser/ui/history/history_service_facade_delegate.h"
 #include "ios/chrome/browser/ui/history/history_util.h"
 #import "ios/chrome/browser/ui/url_loader.h"
+#import "ios/chrome/browser/ui/util/pasteboard_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/third_party/material_components_ios/src/components/ActivityIndicator/src/MDCActivityIndicator.h"
 #import "ios/third_party/material_components_ios/src/components/Collections/src/MaterialCollections.h"
@@ -127,8 +128,6 @@ const CGFloat kSeparatorInset = 10;
 - (void)openURLInNewTab:(const GURL&)URL;
 // Opens URL in a new incognito tab and dismisses the history view.
 - (void)openURLInNewIncognitoTab:(const GURL&)URL;
-// Copies URL to the clipboard.
-- (void)copyURL:(const GURL&)URL;
 @end
 
 @implementation HistoryCollectionViewController
@@ -280,9 +279,7 @@ const CGFloat kSeparatorInset = 10;
           hasSectionForSectionIdentifier:sectionIdentifier] &&
       [self.collectionViewModel hasItem:item
                 inSectionWithIdentifier:sectionIdentifier]) {
-    NSIndexPath* indexPath =
-        [self.collectionViewModel indexPathForItem:item
-                           inSectionWithIdentifier:sectionIdentifier];
+    NSIndexPath* indexPath = [self.collectionViewModel indexPathForItem:item];
     [self.collectionView
         selectItemAtIndexPath:indexPath
                      animated:NO
@@ -292,7 +289,7 @@ const CGFloat kSeparatorInset = 10;
 }
 
 - (void)historyEntryItemDidRequestCopy:(HistoryEntryItem*)item {
-  [self copyURL:item.URL];
+  StoreURLInPasteboard(item.URL);
 }
 
 - (void)historyEntryItemDidRequestOpenInNewTab:(HistoryEntryItem*)item {
@@ -312,10 +309,7 @@ const CGFloat kSeparatorInset = 10;
           hasSectionForSectionIdentifier:sectionIdentifier] &&
       [self.collectionViewModel hasItem:item
                 inSectionWithIdentifier:sectionIdentifier]) {
-    [self
-        reconfigureCellsForItems:@[ item ]
-         inSectionWithIdentifier:
-             [self.entryInserter sectionIdentifierForTimestamp:item.timestamp]];
+    [self reconfigureCellsForItems:@[ item ]];
   }
 }
 
@@ -637,6 +631,7 @@ const CGFloat kSeparatorInset = 10;
           self.entriesType = NO_ENTRIES;
         }
         [self updateEntriesStatusMessage];
+        [self.delegate historyCollectionViewControllerDidChangeEntries:self];
       }];
 }
 
@@ -655,8 +650,7 @@ const CGFloat kSeparatorInset = 10;
             base::mac::ObjCCastStrict<HistoryEntryItem>(item);
         if (![entries containsObject:historyItem]) {
           NSIndexPath* indexPath =
-              [self.collectionViewModel indexPathForItem:historyItem
-                                 inSectionWithIdentifier:sectionIdentifier];
+              [self.collectionViewModel indexPathForItem:historyItem];
           [self.collectionView
               selectItemAtIndexPath:indexPath
                            animated:NO
@@ -759,7 +753,7 @@ const CGFloat kSeparatorInset = 10;
   NSString* copyURLTitle =
       l10n_util::GetNSStringWithFixup(IDS_IOS_CONTENT_CONTEXT_COPY);
   ProceduralBlock copyURLAction = ^{
-    [weakSelf copyURL:entry.URL];
+    StoreURLInPasteboard(entry.URL);
   };
   [self.contextMenuCoordinator addItemWithTitle:copyURLTitle
                                          action:copyURLAction];
@@ -785,7 +779,6 @@ const CGFloat kSeparatorInset = 10;
                        shouldCloseWithCompletion:^{
                          [self.URLLoader webPageOrderedOpen:copiedURL
                                                    referrer:web::Referrer()
-                                                 windowName:nil
                                                 inIncognito:NO
                                                inBackground:NO
                                                    appendTo:kLastTab];
@@ -798,22 +791,10 @@ const CGFloat kSeparatorInset = 10;
                        shouldCloseWithCompletion:^{
                          [self.URLLoader webPageOrderedOpen:copiedURL
                                                    referrer:web::Referrer()
-                                                 windowName:nil
                                                 inIncognito:YES
                                                inBackground:NO
                                                    appendTo:kLastTab];
                        }];
-}
-
-- (void)copyURL:(const GURL&)URL {
-  DCHECK(URL.is_valid());
-  NSData* plainText = [base::SysUTF8ToNSString(URL.spec())
-      dataUsingEncoding:NSUTF8StringEncoding];
-  NSDictionary* copiedItem = @{
-    (NSString*)kUTTypeURL : net::NSURLWithGURL(URL),
-    (NSString*)kUTTypeUTF8PlainText : plainText,
-  };
-  [[UIPasteboard generalPasteboard] setItems:@[ copiedItem ]];
 }
 
 @end

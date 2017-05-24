@@ -3,20 +3,24 @@
 # found in the LICENSE file.
 
 import argparse
+import base64
+import gzip
+import io
 import json
 import logging
 import os
 import platform
 import subprocess
 import tempfile
+import urllib
 import urllib2
 
 
+from core import benchmark_finders
 from core import path_util
 
 from telemetry import benchmark
 from telemetry import decorators
-from telemetry.core import discover
 from telemetry.util import command_line
 from telemetry.util import matching
 
@@ -39,11 +43,6 @@ EXCLUDED_BOTS = {
     'mac_fyi_perf_bisect',
     'win_fyi_perf_bisect',
     'winx64_fyi_perf_bisect',
-    # CQ bots on tryserver.chromium.perf
-    'android_s5_perf_cq',
-    'winx64_10_perf_cq',
-    'mac_retina_perf_cq',
-    'linux_perf_cq',
 }
 
 INCLUDE_BOTS = [
@@ -91,6 +90,12 @@ REPO_INFO_MAP = {
     }
 }
 
+_MILO_MASTER_ENDPOINT = ('https://luci-milo.appspot.com/prpc/milo.Buildbot/'
+                        'GetCompressedMasterJSON')
+
+_MILO_RESPONSE_PREFIX = ')]}\'\n'
+
+
 assert not set(DEFAULT_TRYBOTS) & set(EXCLUDED_BOTS), (
     'A trybot cannot present in both Default as well as Excluded bots lists.')
 
@@ -99,6 +104,31 @@ class TrybotError(Exception):
 
   def __str__(self):
     return '(ERROR) Perf Try Job: %s' % self.args[0]
+
+
+def _ProcessMiloData(data):
+  if not data.startswith(_MILO_RESPONSE_PREFIX):
+    return None
+  data = data[len(_MILO_RESPONSE_PREFIX):]
+
+  try:
+    response_data = json.loads(data)
+  except Exception:
+    return None
+
+  try:
+    decoded_data = base64.b64decode(response_data.get('data'))
+  except Exception:
+    return None
+
+  try:
+    with io.BytesIO(decoded_data) as compressed_file:
+      with gzip.GzipFile(fileobj=compressed_file) as decompressed_file:
+        data_json = decompressed_file.read()
+  except Exception:
+    return None
+
+  return json.loads(data_json)
 
 
 def _GetTrybotList(builders):
@@ -182,7 +212,7 @@ def RunGit(cmd, msg_on_error='', ignore_return_code=False):
   if returncode:
     if ignore_return_code:
       return None
-    raise TrybotError('%s. \n%s' % (msg_on_error, err))
+    raise TrybotError('%s. \n%s \n%s' % (msg_on_error, err, output))
 
   return output.strip()
 
@@ -200,10 +230,14 @@ class Trybot(command_line.ArgParseCommand):
   def _GetBuilderList(cls):
     if not cls._builders:
       try:
-        f = urllib2.urlopen(
-            ('https://build.chromium.org/p/tryserver.chromium.perf/json/'
-             'builders'),
-            timeout=5)
+        headers = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+        }
+        values = {'name': 'tryserver.chromium.perf'}
+        data = urllib.urlencode(values)
+        req = urllib2.Request(_MILO_MASTER_ENDPOINT, None, headers)
+        f = urllib2.urlopen(req, json.dumps(values), timeout=10)
       # In case of any kind of exception, allow tryjobs to use default trybots.
       # Possible exception are ssl.SSLError, urllib2.URLError,
       # socket.timeout, socket.error.
@@ -213,7 +247,8 @@ class Trybot(command_line.ArgParseCommand):
                'information, tryjob will use default trybots.')
         cls._builders = DEFAULT_TRYBOTS
       else:
-        builders = json.loads(f.read()).keys()
+        data = _ProcessMiloData(f.read())
+        builders = data.get('builders', {}).keys()
         # Exclude unsupported bots like win xp and some dummy bots.
         cls._builders = [bot for bot in builders if bot not in EXCLUDED_BOTS]
 
@@ -236,10 +271,8 @@ class Trybot(command_line.ArgParseCommand):
     for arg in extra_args:
       if arg == '--browser' or arg.startswith('--browser='):
         parser.error('--browser=... is not allowed when running trybot.')
-    all_benchmarks = discover.DiscoverClasses(
-        start_dir=path_util.GetPerfBenchmarksDir(),
-        top_level_dir=path_util.GetPerfDir(),
-        base_class=benchmark.Benchmark).values()
+    all_benchmarks = benchmark_finders.GetAllPerfBenchmarks()
+    all_benchmarks.extend(benchmark_finders.GetAllContribBenchmarks())
     all_benchmark_names = [b.Name() for b in all_benchmarks]
     all_benchmarks_by_names = {b.Name(): b for b in all_benchmarks}
     benchmark_class = all_benchmarks_by_names.get(options.benchmark_name, None)

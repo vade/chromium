@@ -12,12 +12,11 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "components/policy/core/common/external_data_fetcher.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_types.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "extensions/browser/api/storage/settings_observer.h"
 #include "extensions/browser/value_store/leveldb_value_store.h"
 #include "extensions/browser/value_store/value_store_unittest.h"
@@ -93,8 +92,7 @@ INSTANTIATE_TEST_CASE_P(
 
 class PolicyValueStoreTest : public testing::Test {
  public:
-  PolicyValueStoreTest()
-      : file_thread_(content::BrowserThread::FILE, &loop_) {}
+  PolicyValueStoreTest() = default;
   ~PolicyValueStoreTest() override {}
 
   void SetUp() override {
@@ -114,8 +112,7 @@ class PolicyValueStoreTest : public testing::Test {
 
  protected:
   base::ScopedTempDir scoped_temp_dir_;
-  base::MessageLoop loop_;
-  content::TestBrowserThread file_thread_;
+  content::TestBrowserThreadBundle test_browser_thread_bundle_;
   std::unique_ptr<PolicyValueStore> store_;
   MockSettingsObserver observer_;
   scoped_refptr<SettingsObserverList> observers_;
@@ -123,13 +120,13 @@ class PolicyValueStoreTest : public testing::Test {
 
 TEST_F(PolicyValueStoreTest, DontProvideRecommendedPolicies) {
   policy::PolicyMap policies;
-  base::FundamentalValue expected(123);
+  base::Value expected(123);
   policies.Set("must", policy::POLICY_LEVEL_MANDATORY,
                policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
                expected.CreateDeepCopy(), nullptr);
   policies.Set("may", policy::POLICY_LEVEL_RECOMMENDED,
                policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
-               base::MakeUnique<base::FundamentalValue>(456), nullptr);
+               base::MakeUnique<base::Value>(456), nullptr);
   store_->SetCurrentPolicy(policies);
   ValueStore::ReadResult result = store_->Get();
   ASSERT_TRUE(result->status().ok());
@@ -143,7 +140,7 @@ TEST_F(PolicyValueStoreTest, DontProvideRecommendedPolicies) {
 TEST_F(PolicyValueStoreTest, ReadOnly) {
   ValueStore::WriteOptions options = ValueStore::DEFAULTS;
 
-  base::StringValue string_value("value");
+  base::Value string_value("value");
   EXPECT_FALSE(store_->Set(options, "key", string_value)->status().ok());
 
   base::DictionaryValue dict;
@@ -159,7 +156,7 @@ TEST_F(PolicyValueStoreTest, ReadOnly) {
 
 TEST_F(PolicyValueStoreTest, NotifyOnChanges) {
   // Notify when setting the initial policy.
-  const base::StringValue value("111");
+  const base::Value value("111");
   {
     ValueStoreChangeList changes;
     changes.push_back(ValueStoreChange("aaa", nullptr, value.CreateDeepCopy()));
@@ -193,7 +190,7 @@ TEST_F(PolicyValueStoreTest, NotifyOnChanges) {
   Mock::VerifyAndClearExpectations(&observer_);
 
   // Notify when policies change.
-  const base::StringValue new_value("222");
+  const base::Value new_value("222");
   {
     ValueStoreChangeList changes;
     changes.push_back(ValueStoreChange("bbb", value.CreateDeepCopy(),

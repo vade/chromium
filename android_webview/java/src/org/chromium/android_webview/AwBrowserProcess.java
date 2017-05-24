@@ -25,9 +25,9 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.ProcessInitException;
+import org.chromium.base.process_launcher.ChildProcessCreationParams;
 import org.chromium.components.minidump_uploader.CrashFileManager;
 import org.chromium.content.browser.BrowserStartupController;
-import org.chromium.content.browser.ChildProcessCreationParams;
 import org.chromium.content.browser.ChildProcessLauncher;
 import org.chromium.policy.CombinedPolicyProvider;
 
@@ -75,9 +75,9 @@ public abstract class AwBrowserProcess {
      */
     public static void configureChildProcessLauncher(String packageName,
             boolean isExternalService) {
-        ChildProcessCreationParams.set(
-                new ChildProcessCreationParams(packageName, isExternalService,
-                        LibraryProcessType.PROCESS_WEBVIEW_CHILD));
+        final boolean bindToCaller = true;
+        ChildProcessCreationParams.registerDefault(new ChildProcessCreationParams(packageName,
+                isExternalService, LibraryProcessType.PROCESS_WEBVIEW_CHILD, bindToCaller));
     }
 
     /**
@@ -97,14 +97,7 @@ public abstract class AwBrowserProcess {
                 boolean multiProcess = CommandLine.getInstance().hasSwitch(
                         AwSwitches.WEBVIEW_SANDBOXED_RENDERER);
                 if (multiProcess) {
-                    // Have a background thread warm up a renderer process now, so that this can
-                    // proceed in parallel to the browser process initialisation.
-                    AsyncTask.THREAD_POOL_EXECUTOR.execute(new Runnable() {
-                        @Override
-                        public void run() {
-                            ChildProcessLauncher.warmUp(appContext);
-                        }
-                    });
+                    ChildProcessLauncher.warmUp(appContext);
                 }
                 // The policies are used by browser startup, so we need to register the policy
                 // providers before starting the browser process. This only registers java objects
@@ -160,8 +153,11 @@ public abstract class AwBrowserProcess {
      * Pass Minidumps to a separate Service declared in the WebView provider package.
      * That Service will copy the Minidumps to its own data directory - at which point we can delete
      * our copies in the app directory.
+     * @param userApproved whether we have user consent to upload crash data - if we do, copy the
+     * minidumps, if we don't, delete them.
      */
-    public static void handleMinidumps(final String webViewPackageName) {
+    public static void handleMinidumps(
+            final String webViewPackageName, final boolean userApproved) {
         new AsyncTask<Void, Void, Void>() {
             @Override
             protected Void doInBackground(Void... params) {
@@ -172,6 +168,16 @@ public abstract class AwBrowserProcess {
                 final File[] minidumpFiles =
                         crashFileManager.getAllMinidumpFiles(MAX_MINIDUMP_UPLOAD_TRIES);
                 if (minidumpFiles.length == 0) return null;
+
+                // Delete the minidumps if the user doesn't allow crash data uploading.
+                if (!userApproved) {
+                    for (File minidump : minidumpFiles) {
+                        if (!minidump.delete()) {
+                            Log.w(TAG, "Couldn't delete file " + minidump.getAbsolutePath());
+                        }
+                    }
+                    return null;
+                }
 
                 final Intent intent = new Intent();
                 intent.setClassName(webViewPackageName, CrashReceiverService.class.getName());

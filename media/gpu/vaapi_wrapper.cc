@@ -16,7 +16,7 @@
 #include "build/build_config.h"
 
 // Auto-generated for dlopen libva libraries
-#include "media/gpu/va_stubs.h"
+#include "media/gpu/vaapi/va_stubs.h"
 
 #include "media/gpu/vaapi_picture.h"
 #include "third_party/libyuv/include/libyuv.h"
@@ -32,14 +32,14 @@
 #include "ui/ozone/public/surface_factory_ozone.h"
 #endif  // USE_X11
 
-using media_gpu::kModuleVa;
+using media_gpu_vaapi::kModuleVa;
 #if defined(USE_X11)
-using media_gpu::kModuleVa_x11;
+using media_gpu_vaapi::kModuleVa_x11;
 #elif defined(USE_OZONE)
-using media_gpu::kModuleVa_drm;
+using media_gpu_vaapi::kModuleVa_drm;
 #endif  // USE_X11
-using media_gpu::InitializeStubs;
-using media_gpu::StubPathMap;
+using media_gpu_vaapi::InitializeStubs;
+using media_gpu_vaapi::StubPathMap;
 
 #define LOG_VA_ERROR_AND_REPORT(va_error, err_msg)                  \
   do {                                                              \
@@ -104,12 +104,6 @@ namespace media {
 // and not taken from HW documentation.
 const int kMaxEncoderFramerate = 30;
 
-base::LazyInstance<VaapiWrapper::VADisplayState>
-    VaapiWrapper::va_display_state_ = LAZY_INSTANCE_INITIALIZER;
-
-base::LazyInstance<VaapiWrapper::LazyProfileInfos>
-    VaapiWrapper::profile_infos_ = LAZY_INSTANCE_INITIALIZER;
-
 // Config attributes common for both encode and decode.
 static const VAConfigAttrib kCommonVAConfigAttribs[] = {
     {VAConfigAttribRTFormat, VA_RT_FORMAT_YUV420},
@@ -135,9 +129,10 @@ static const ProfileMap kProfileMap[] = {
     // H264PROFILE_HIGH*.
     {H264PROFILE_HIGH, VAProfileH264High},
     {VP8PROFILE_ANY, VAProfileVP8Version0_3},
-    // TODO(servolk): Need to add VP9 profiles 1,2,3 here after rolling
-    // third_party/libva to 1.7. crbug.com/598118
     {VP9PROFILE_PROFILE0, VAProfileVP9Profile0},
+    {VP9PROFILE_PROFILE1, VAProfileVP9Profile1},
+    {VP9PROFILE_PROFILE2, VAProfileVP9Profile2},
+    {VP9PROFILE_PROFILE3, VAProfileVP9Profile3},
 };
 
 static std::vector<VAConfigAttrib> GetRequiredAttribs(
@@ -177,7 +172,7 @@ VaapiWrapper::VaapiWrapper()
       va_vpp_config_id_(VA_INVALID_ID),
       va_vpp_context_id_(VA_INVALID_ID),
       va_vpp_buffer_id_(VA_INVALID_ID) {
-  va_lock_ = va_display_state_.Get().va_lock();
+  va_lock_ = GetDisplayState()->va_lock();
 }
 
 VaapiWrapper::~VaapiWrapper() {
@@ -193,7 +188,7 @@ scoped_refptr<VaapiWrapper> VaapiWrapper::Create(
     CodecMode mode,
     VAProfile va_profile,
     const base::Closure& report_error_to_uma_cb) {
-  if (!profile_infos_.Get().IsProfileSupported(mode, va_profile)) {
+  if (!GetProfileInfos()->IsProfileSupported(mode, va_profile)) {
     DVLOG(1) << "Unsupported va_profile: " << va_profile;
     return nullptr;
   }
@@ -223,7 +218,7 @@ VideoEncodeAccelerator::SupportedProfiles
 VaapiWrapper::GetSupportedEncodeProfiles() {
   VideoEncodeAccelerator::SupportedProfiles profiles;
   std::vector<ProfileInfo> encode_profile_infos =
-      profile_infos_.Get().GetSupportedProfileInfosForCodecMode(kEncode);
+      GetProfileInfos()->GetSupportedProfileInfosForCodecMode(kEncode);
 
   for (size_t i = 0; i < arraysize(kProfileMap); ++i) {
     VAProfile va_profile = ProfileToVAProfile(kProfileMap[i].profile, kEncode);
@@ -249,7 +244,7 @@ VideoDecodeAccelerator::SupportedProfiles
 VaapiWrapper::GetSupportedDecodeProfiles() {
   VideoDecodeAccelerator::SupportedProfiles profiles;
   std::vector<ProfileInfo> decode_profile_infos =
-      profile_infos_.Get().GetSupportedProfileInfosForCodecMode(kDecode);
+      GetProfileInfos()->GetSupportedProfileInfosForCodecMode(kDecode);
 
   for (size_t i = 0; i < arraysize(kProfileMap); ++i) {
     VAProfile va_profile = ProfileToVAProfile(kProfileMap[i].profile, kDecode);
@@ -271,8 +266,7 @@ VaapiWrapper::GetSupportedDecodeProfiles() {
 
 // static
 bool VaapiWrapper::IsJpegDecodeSupported() {
-  return profile_infos_.Get().IsProfileSupported(kDecode,
-                                                 VAProfileJPEGBaseline);
+  return GetProfileInfos()->IsProfileSupported(kDecode, VAProfileJPEGBaseline);
 }
 
 void VaapiWrapper::TryToSetVADisplayAttributeToLocalGPU() {
@@ -298,14 +292,14 @@ VAProfile VaapiWrapper::ProfileToVAProfile(VideoCodecProfile profile,
       break;
     }
   }
-  if (!profile_infos_.Get().IsProfileSupported(mode, va_profile) &&
+  if (!GetProfileInfos()->IsProfileSupported(mode, va_profile) &&
       va_profile == VAProfileH264Baseline) {
     // crbug.com/345569: ProfileIDToVideoCodecProfile() currently strips
     // the information whether the profile is constrained or not, so we have no
     // way to know here. Try for baseline first, but if it is not supported,
     // try constrained baseline and hope this is what it actually is
     // (which in practice is true for a great majority of cases).
-    if (profile_infos_.Get().IsProfileSupported(
+    if (GetProfileInfos()->IsProfileSupported(
             mode, VAProfileH264ConstrainedBaseline)) {
       va_profile = VAProfileH264ConstrainedBaseline;
       DVLOG(1) << "Fall back to constrained baseline profile.";
@@ -364,17 +358,10 @@ bool VaapiWrapper::VaInitialize(const base::Closure& report_error_to_uma_cb) {
   report_error_to_uma_cb_ = report_error_to_uma_cb;
 
   base::AutoLock auto_lock(*va_lock_);
-
-  VADisplayState* va_display_state = &va_display_state_.Get();
-  if (!va_display_state) {
-    LOG(ERROR) << "Failed to allocate VA display state";
-    return false;
-  }
-
-  if (!va_display_state->Initialize())
+  if (!GetDisplayState()->Initialize())
     return false;
 
-  va_display_ = va_display_state->va_display();
+  va_display_ = GetDisplayState()->va_display();
   return true;
 }
 
@@ -520,12 +507,9 @@ void VaapiWrapper::Deinitialize() {
     VA_LOG_ON_ERROR(va_res, "vaDestroyConfig failed");
   }
 
-  VADisplayState* va_display_state = &va_display_state_.Get();
-  if (va_display_state) {
-    VAStatus va_res = VA_STATUS_SUCCESS;
-    va_display_state->Deinitialize(&va_res);
-    VA_LOG_ON_ERROR(va_res, "vaTerminate failed");
-  }
+  VAStatus va_res = VA_STATUS_SUCCESS;
+  GetDisplayState()->Deinitialize(&va_res);
+  VA_LOG_ON_ERROR(va_res, "vaTerminate failed");
 
   va_config_id_ = VA_INVALID_ID;
   va_display_ = NULL;
@@ -618,7 +602,7 @@ scoped_refptr<VASurface> VaapiWrapper::CreateUnownedSurface(
 
 #if defined(USE_OZONE)
 scoped_refptr<VASurface> VaapiWrapper::CreateVASurfaceForPixmap(
-    const scoped_refptr<ui::NativePixmap>& pixmap) {
+    const scoped_refptr<gfx::NativePixmap>& pixmap) {
   // Create a VASurface for a NativePixmap by importing the underlying dmabufs.
   VASurfaceAttribExternalBuffers va_attrib_extbuf;
   memset(&va_attrib_extbuf, 0, sizeof(va_attrib_extbuf));
@@ -684,8 +668,8 @@ scoped_refptr<VASurface> VaapiWrapper::CreateVASurfaceForPixmap(
 }
 
 bool VaapiWrapper::ProcessPixmap(
-    const scoped_refptr<ui::NativePixmap>& source_pixmap,
-    scoped_refptr<ui::NativePixmap> target_pixmap) {
+    const scoped_refptr<gfx::NativePixmap>& source_pixmap,
+    scoped_refptr<gfx::NativePixmap> target_pixmap) {
   scoped_refptr<VASurface> va_surface = CreateVASurfaceForPixmap(source_pixmap);
   if (!va_surface) {
     LOG(ERROR) << "Failed creating VA Surface for source_pixmap";
@@ -1079,7 +1063,7 @@ bool VaapiWrapper::BlitSurface(
   pipeline_param->output_region = &output_region;
   pipeline_param->output_background_color = 0xff000000;
   pipeline_param->output_color_standard = VAProcColorStandardNone;
-  pipeline_param->filter_flags = VA_FILTER_SCALING_HQ;
+  pipeline_param->filter_flags = VA_FILTER_SCALING_DEFAULT;
 
   VA_SUCCESS_OR_RETURN(vaUnmapBuffer(va_display_, va_vpp_buffer_id_),
                        "Couldn't unmap vpp buffer", false);
@@ -1146,7 +1130,7 @@ void VaapiWrapper::PreSandboxInitialization() {
       base::FilePath::FromUTF8Unsafe(kDriRenderNode0Path),
       base::File::FLAG_OPEN | base::File::FLAG_READ | base::File::FLAG_WRITE);
   if (drm_file.IsValid())
-    va_display_state_.Get().SetDrmFd(drm_file.GetPlatformFile());
+    GetDisplayState()->SetDrmFd(drm_file.GetPlatformFile());
 #endif
 }
 
@@ -1163,6 +1147,18 @@ bool VaapiWrapper::PostSandboxInitialization() {
 #endif
 
   return InitializeStubs(paths);
+}
+
+// static
+VaapiWrapper::VADisplayState* VaapiWrapper::GetDisplayState() {
+  static VADisplayState* display_state = new VADisplayState();
+  return display_state;
+}
+
+// static
+VaapiWrapper::LazyProfileInfos* VaapiWrapper::GetProfileInfos() {
+  static LazyProfileInfos* profile_infos = new LazyProfileInfos();
+  return profile_infos;
 }
 
 VaapiWrapper::LazyProfileInfos::LazyProfileInfos() {
@@ -1229,8 +1225,8 @@ bool VaapiWrapper::VADisplayState::Initialize() {
     DVLOG(1) << "VAAPI version: " << major_version_ << "." << minor_version_;
   }
 
-  if (VAAPIVersionLessThan(0, 34)) {
-    LOG(ERROR) << "VAAPI version < 0.34 is not supported.";
+  if (VAAPIVersionLessThan(0, 39)) {
+    LOG(ERROR) << "VAAPI version < 0.39 is not supported.";
     return false;
   }
   return true;

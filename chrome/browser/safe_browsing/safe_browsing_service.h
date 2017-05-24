@@ -20,7 +20,9 @@
 #include "base/observer_list.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "chrome/browser/safe_browsing/services_delegate.h"
+#include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "components/safe_browsing_db/util.h"
+#include "components/safe_browsing_db/v4_feature_list.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -32,7 +34,6 @@
 class PrefChangeRegistrar;
 class PrefService;
 class Profile;
-class TrackedPreferenceValidationDelegate;
 
 namespace content {
 class DownloadManager;
@@ -43,9 +44,17 @@ class URLRequest;
 class URLRequestContextGetter;
 }
 
+namespace prefs {
+namespace mojom {
+class TrackedPreferenceValidationDelegate;
+}
+}
+
 namespace safe_browsing {
 class ClientSideDetectionService;
 class DownloadProtectionService;
+class PasswordProtectionService;
+class ChromePasswordProtectionService;
 struct ResourceRequestInfo;
 struct SafeBrowsingProtocolConfig;
 class SafeBrowsingDatabaseManager;
@@ -56,6 +65,7 @@ class SafeBrowsingProtocolManagerDelegate;
 class SafeBrowsingServiceFactory;
 class SafeBrowsingUIManager;
 class SafeBrowsingURLRequestContextGetter;
+class TriggerManager;
 struct V4ProtocolConfig;
 
 // Construction needs to happen on the main thread.
@@ -99,6 +109,15 @@ class SafeBrowsingService : public base::RefCountedThreadSafe<
 
   // Returns the client_name field for both V3 and V4 protocol manager configs.
   std::string GetProtocolConfigClientName() const;
+
+  // NOTE(vakh): This is not the most reliable way to find out if extended
+  // reporting has been enabled. That's why it starts with estimated_. It
+  // returns true if any of the profiles have extended reporting enabled. It may
+  // be called on any thread. That can lead to a race condition, but that's
+  // acceptable.
+  ExtendedReportingLevel estimated_extended_reporting_by_prefs() const {
+    return estimated_extended_reporting_by_prefs_;
+  }
 
   // Get current enabled status. Must be called on IO thread.
   bool enabled() const {
@@ -146,18 +165,22 @@ class SafeBrowsingService : public base::RefCountedThreadSafe<
   const scoped_refptr<SafeBrowsingDatabaseManager>& v4_local_database_manager()
       const;
 
+  TriggerManager* trigger_manager() const;
+
+  // Gets PasswordProtectionService by profile.
+  PasswordProtectionService* GetPasswordProtectionService(
+      Profile* profile) const;
+
   // Returns a preference validation delegate that adds incidents to the
   // incident reporting service for validation failures. Returns NULL if the
   // service is not applicable for the given profile.
-  std::unique_ptr<TrackedPreferenceValidationDelegate>
+  std::unique_ptr<prefs::mojom::TrackedPreferenceValidationDelegate>
   CreatePreferenceValidationDelegate(Profile* profile) const;
 
   // Registers |callback| to be run after some delay following process launch.
   // |callback| will be dropped if the service is not applicable for the
   // process.
   void RegisterDelayedAnalysisCallback(const DelayedAnalysisCallback& callback);
-  void RegisterExtendedReportingOnlyDelayedAnalysisCallback(
-      const DelayedAnalysisCallback& callback);
 
   // Adds |download_manager| to the set monitored by safe browsing.
   void AddDownloadManager(content::DownloadManager* download_manager);
@@ -187,7 +210,8 @@ class SafeBrowsingService : public base::RefCountedThreadSafe<
 
  protected:
   // Creates the safe browsing service.  Need to initialize before using.
-  SafeBrowsingService();
+  SafeBrowsingService(V4FeatureList::V4UsageStatus v4_usage_status =
+                          V4FeatureList::V4UsageStatus::V4_DISABLED);
 
   ~SafeBrowsingService() override;
 
@@ -209,6 +233,7 @@ class SafeBrowsingService : public base::RefCountedThreadSafe<
   friend struct content::BrowserThread::DeleteOnThread<
       content::BrowserThread::UI>;
   friend class base::DeleteHelper<SafeBrowsingService>;
+  friend class SafeBrowsingBlockingPageTest;
   friend class SafeBrowsingServerTest;
   friend class SafeBrowsingServiceTest;
   friend class SafeBrowsingURLRequestContextGetter;
@@ -256,6 +281,12 @@ class SafeBrowsingService : public base::RefCountedThreadSafe<
   // Process the observed resource requests on the UI thread.
   void ProcessResourceRequest(const ResourceRequestInfo& request);
 
+  void CreatePasswordProtectionService(Profile* profile);
+
+  void RemovePasswordProtectionService(Profile* profile);
+
+  void CreateTriggerManager();
+
   // The factory used to instantiate a SafeBrowsingService object.
   // Useful for tests, so they can provide their own implementation of
   // SafeBrowsingService.
@@ -274,6 +305,10 @@ class SafeBrowsingService : public base::RefCountedThreadSafe<
   // Provides phishing and malware statistics. Accessed on IO thread.
   std::unique_ptr<SafeBrowsingPingManager> ping_manager_;
 
+  // Whether SafeBrowsing Extended Reporting is enabled by the current set of
+  // profiles. Updated on the UI thread.
+  ExtendedReportingLevel estimated_extended_reporting_by_prefs_;
+
   // Whether the service is running. 'enabled_' is used by SafeBrowsingService
   // on the IO thread during normal operations.
   bool enabled_;
@@ -284,7 +319,12 @@ class SafeBrowsingService : public base::RefCountedThreadSafe<
 
   // Whether SafeBrowsing needs to be enabled in V4Only mode. In this mode, all
   // SafeBrowsing decisions are made using the PVer4 implementation.
-  bool enabled_v4_only_;
+  bool use_v4_only_;
+
+  // Whether the PVer4 implementation needs to be instantiated. Note that even
+  // if the PVer4 implementation has been instantiated, it is used only if
+  // |use_v4_only_| is true.
+  bool v4_enabled_;
 
   // Tracks existing PrefServices, and the safe browsing preference on each.
   // This is used to determine if any profile is currently using the safe
@@ -293,7 +333,7 @@ class SafeBrowsingService : public base::RefCountedThreadSafe<
   std::map<PrefService*, std::unique_ptr<PrefChangeRegistrar>> prefs_map_;
 
   // Used to track creation and destruction of profiles on the UI thread.
-  content::NotificationRegistrar prefs_registrar_;
+  content::NotificationRegistrar profiles_registrar_;
 
   // Callbacks when SafeBrowsing state might have changed.
   // Should only be accessed on the UI thread.
@@ -311,9 +351,18 @@ class SafeBrowsingService : public base::RefCountedThreadSafe<
   // both UI and IO thread.
   scoped_refptr<SafeBrowsingDatabaseManager> database_manager_;
 
-  // The navigation observer manager handles download attribution.
+  // The navigation observer manager handles attribution of safe browsing
+  // events.
   scoped_refptr<SafeBrowsingNavigationObserverManager>
-  navigation_observer_manager_;
+      navigation_observer_manager_;
+
+  // Tracks existing Profiles, and their corresponding
+  // ChromePasswordProtectionService instances.
+  // Accessed on UI thread.
+  std::map<Profile*, std::unique_ptr<ChromePasswordProtectionService>>
+      password_protection_service_map_;
+
+  std::unique_ptr<TriggerManager> trigger_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(SafeBrowsingService);
 };

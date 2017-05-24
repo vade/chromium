@@ -6,7 +6,7 @@
 #define CC_RESOURCES_RESOURCE_FORMAT_H_
 
 #include "base/logging.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "ui/gfx/buffer_types.h"
 
 // TODO(prashant.n): Including third_party/khronos/GLES2/gl2.h causes
@@ -27,7 +27,8 @@ enum ResourceFormat {
   ETC1,
   RED_8,
   LUMINANCE_F16,
-  RESOURCE_FORMAT_MAX = LUMINANCE_F16,
+  RGBA_F16,
+  RESOURCE_FORMAT_MAX = RGBA_F16,
 };
 
 CC_EXPORT int BitsPerPixel(ResourceFormat format);

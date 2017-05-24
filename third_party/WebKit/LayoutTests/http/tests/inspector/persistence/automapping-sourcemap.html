@@ -10,6 +10,7 @@
 
 function test()
 {
+    InspectorTest.initializeTestMapping();
     InspectorTest.overrideNetworkModificationTime({
         "http://127.0.0.1:8000/inspector/persistence/resources/s.css": null
     });
@@ -38,7 +39,7 @@ function test()
     function onFileSystemCreated()
     {
         var automappingTest = new InspectorTest.AutomappingTest(Workspace.workspace);
-        automappingTest.waitUntilMappingIsStabilized(InspectorTest.completeTest.bind(InspectorTest));
+        automappingTest.waitUntilMappingIsStabilized().then(InspectorTest.completeTest.bind(InspectorTest));
     }
 
     function getResourceContent(name)

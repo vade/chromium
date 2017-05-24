@@ -13,6 +13,7 @@
 #include "base/i18n/number_formatting.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -59,15 +60,17 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
-#include "extensions/common/feature_switch.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/models/button_menu_item_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
+
+#if defined(GOOGLE_CHROME_BUILD)
+#include "base/feature_list.h"
+#endif
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/chromeos_switches.h"
@@ -130,6 +133,9 @@ void ZoomMenuModel::Build() {
 
 #if defined(GOOGLE_CHROME_BUILD)
 
+const base::Feature kIncludeBetaForumMenuItem{
+    "IncludeBetaForumMenuItem", base::FEATURE_DISABLED_BY_DEFAULT};
+
 class AppMenuModel::HelpMenuModel : public ui::SimpleMenuModel {
  public:
   HelpMenuModel(ui::SimpleMenuModel::Delegate* delegate,
@@ -147,6 +153,8 @@ class AppMenuModel::HelpMenuModel : public ui::SimpleMenuModel {
 #endif
     AddItem(IDC_ABOUT, l10n_util::GetStringUTF16(IDS_ABOUT));
     AddItemWithStringId(IDC_HELP_PAGE_VIA_MENU, help_string_id);
+    if (base::FeatureList::IsEnabled(kIncludeBetaForumMenuItem))
+      AddItem(IDC_SHOW_BETA_FORUM, l10n_util::GetStringUTF16(IDS_BETA_FORUM));
     if (browser_defaults::kShowHelpMenuItemIcon) {
       ui::ResourceBundle& rb = ResourceBundle::GetSharedInstance();
       SetIcon(GetIndexOfCommandId(IDC_HELP_PAGE_VIA_MENU),
@@ -177,17 +185,7 @@ ToolsMenuModel::~ToolsMenuModel() {}
 // - Developer tools.
 // - Option to enable profiling.
 void ToolsMenuModel::Build(Browser* browser) {
-  bool show_create_shortcuts = true;
-#if defined(OS_CHROMEOS) || defined(OS_MACOSX) || defined(USE_ASH)
-  show_create_shortcuts = false;
-#endif
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableSaveAsMenuLabelExperiment) ||
-      base::FieldTrialList::FindFullName("SaveAsMenuText") == "download") {
-    AddItemWithStringId(IDC_SAVE_PAGE, IDS_DOWNLOAD_PAGE);
-  } else {
-    AddItemWithStringId(IDC_SAVE_PAGE, IDS_SAVE_PAGE);
-  }
+  AddItemWithStringId(IDC_SAVE_PAGE, IDS_SAVE_PAGE);
 
   if (extensions::util::IsNewBookmarkAppsEnabled()) {
     int string_id = IDS_ADD_TO_DESKTOP;
@@ -198,8 +196,6 @@ void ToolsMenuModel::Build(Browser* browser) {
     string_id = IDS_ADD_TO_SHELF;
 #endif  // defined(USE_ASH)
     AddItemWithStringId(IDC_CREATE_HOSTED_APP, string_id);
-  } else if (show_create_shortcuts) {
-    AddItemWithStringId(IDC_CREATE_SHORTCUTS, IDS_CREATE_SHORTCUTS);
   }
 
   AddSeparator(ui::NORMAL_SEPARATOR);
@@ -438,12 +434,6 @@ void AppMenuModel::LogMenuMetrics(int command_id) {
       }
       LogMenuAction(MENU_ACTION_CREATE_HOSTED_APP);
       break;
-    case IDC_CREATE_SHORTCUTS:
-      if (!uma_action_recorded_)
-        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.CreateShortcuts",
-                                   delta);
-      LogMenuAction(MENU_ACTION_CREATE_SHORTCUTS);
-      break;
     case IDC_MANAGE_EXTENSIONS:
       if (!uma_action_recorded_) {
         UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.ManageExtensions",
@@ -511,7 +501,7 @@ void AppMenuModel::LogMenuMetrics(int command_id) {
       }
       break;
     case IDC_FULLSCREEN:
-      content::RecordAction(UserMetricsAction("EnterFullScreenWithWrenchMenu"));
+      base::RecordAction(UserMetricsAction("EnterFullScreenWithWrenchMenu"));
 
       if (!uma_action_recorded_) {
         UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.EnterFullScreen",
@@ -554,13 +544,18 @@ void AppMenuModel::LogMenuMetrics(int command_id) {
 
     // Help menu.
     case IDC_HELP_PAGE_VIA_MENU:
-      content::RecordAction(UserMetricsAction("ShowHelpTabViaWrenchMenu"));
+      base::RecordAction(UserMetricsAction("ShowHelpTabViaWrenchMenu"));
 
       if (!uma_action_recorded_)
         UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.HelpPage", delta);
       LogMenuAction(MENU_ACTION_HELP_PAGE_VIA_MENU);
       break;
   #if defined(GOOGLE_CHROME_BUILD)
+    case IDC_SHOW_BETA_FORUM:
+      if (!uma_action_recorded_)
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.BetaForum", delta);
+      LogMenuAction(MENU_ACTION_BETA_FORUM);
+      break;
     case IDC_FEEDBACK:
       if (!uma_action_recorded_)
         UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.Feedback", delta);
@@ -697,8 +692,7 @@ bool AppMenuModel::ShouldShowNewIncognitoWindowMenuItem() {
 // - Learn about the browser and global customisation e.g. settings, help.
 // - Browser relaunch, quit.
 void AppMenuModel::Build() {
-  if (extensions::FeatureSwitch::extension_action_redesign()->IsEnabled())
-    CreateActionToolbarOverflowMenu();
+  CreateActionToolbarOverflowMenu();
 
   AddItem(IDC_VIEW_INCOMPATIBILITIES,
       l10n_util::GetStringUTF16(IDS_VIEW_INCOMPATIBILITIES));
@@ -719,9 +713,8 @@ void AppMenuModel::Build() {
   AddSeparator(ui::NORMAL_SEPARATOR);
 
   if (!browser_->profile()->IsOffTheRecord()) {
-    recent_tabs_sub_menu_model_.reset(new RecentTabsSubMenuModel(provider_,
-                                                                 browser_,
-                                                                 NULL));
+    recent_tabs_sub_menu_model_ =
+        base::MakeUnique<RecentTabsSubMenuModel>(provider_, browser_);
     AddSubMenuWithStringId(IDC_RECENT_TABS_MENU, IDS_HISTORY_MENU,
                            recent_tabs_sub_menu_model_.get());
   }
@@ -734,6 +727,7 @@ void AppMenuModel::Build() {
 
   CreateZoomMenu();
   AddItemWithStringId(IDC_PRINT, IDS_PRINT);
+
   if (media_router::MediaRouterEnabled(browser()->profile()))
     AddItemWithStringId(IDC_ROUTE_MEDIA, IDS_MEDIA_ROUTER_MENU_ITEM_TITLE);
 
@@ -791,7 +785,7 @@ bool AppMenuModel::AddGlobalErrorMenuItems() {
               error->MenuItemIcon());
       menu_items_added = true;
       if (IDC_SHOW_SIGNIN_ERROR == error->MenuItemCommandID()) {
-        content::RecordAction(
+        base::RecordAction(
             base::UserMetricsAction("Signin_Impression_FromMenu"));
       }
     }

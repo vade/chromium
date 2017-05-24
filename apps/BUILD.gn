@@ -17,10 +17,6 @@ static_library("apps") {
       "app_lifetime_monitor.h",
       "app_lifetime_monitor_factory.cc",
       "app_lifetime_monitor_factory.h",
-      "app_load_service.cc",
-      "app_load_service.h",
-      "app_load_service_factory.cc",
-      "app_load_service_factory.h",
       "app_restore_service.cc",
       "app_restore_service.h",
       "app_restore_service_factory.cc",
@@ -41,28 +37,16 @@ static_library("apps") {
     configs += [ "//build/config/compiler:wexit_time_destructors" ]
 
     deps = [
-      "//chrome/app/theme:theme_resources",
-      "//chrome/browser/extensions",
-      "//chrome/common/extensions/api",
-      "//components/web_modal",
-      "//skia",
+      "//components/keyed_service/content",
+      "//content/public/browser",
+      "//content/public/common",
+      "//extensions/browser",
+      "//extensions/common",
+      "//extensions/common/api",
     ]
 
-    # TODO: This top level directory should not have an include cycle.
-    allow_circular_includes_from = [ "//chrome/browser/extensions" ]
-  }
-
-  if (toolkit_views) {
-    sources += [
-      "ui/views/app_window_frame_view.cc",
-      "ui/views/app_window_frame_view.h",
-    ]
-    deps += [
-      "//ui/strings",
-      "//ui/views",
-    ]
-    if (enable_extensions) {
-      deps += [ "//extensions/browser" ]
+    if (is_chromeos) {
+      deps += [ "//components/user_manager" ]
     }
   }
 

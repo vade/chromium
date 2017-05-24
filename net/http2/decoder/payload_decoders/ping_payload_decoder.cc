@@ -21,7 +21,7 @@ DecodeStatus PingPayloadDecoder::StartDecodingPayload(FrameDecoderState* state,
   DVLOG(2) << "PingPayloadDecoder::StartDecodingPayload: " << frame_header;
   DCHECK_EQ(Http2FrameType::PING, frame_header.type);
   DCHECK_LE(db->Remaining(), total_length);
-  DCHECK_EQ(0, frame_header.flags & ~(Http2FrameFlag::FLAG_ACK));
+  DCHECK_EQ(0, frame_header.flags & ~(Http2FrameFlag::ACK));
 
   // Is the payload entirely in the decode buffer and is it the correct size?
   // Given the size of the header and payload (17 bytes total), this is most
@@ -34,7 +34,7 @@ DecodeStatus PingPayloadDecoder::StartDecodingPayload(FrameDecoderState* state,
     // This supports the claim that this decoder is (mostly) non-buffering.
     static_assert(sizeof(Http2PingFields) == kOpaqueSize,
                   "If not, then can't enter this block!");
-    auto ping = reinterpret_cast<const Http2PingFields*>(db->cursor());
+    auto* ping = reinterpret_cast<const Http2PingFields*>(db->cursor());
     if (frame_header.IsAck()) {
       state->listener()->OnPingAck(frame_header, *ping);
     } else {

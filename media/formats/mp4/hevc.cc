@@ -48,7 +48,9 @@ bool HEVCDecoderConfigurationRecord::Parse(BoxReader* reader) {
 
 bool HEVCDecoderConfigurationRecord::Parse(const uint8_t* data, int data_size) {
   BufferReader reader(data, data_size);
-  return ParseInternal(&reader, new MediaLog());
+  // TODO(wolenetz): Questionable MediaLog usage, http://crbug.com/712310
+  MediaLog media_log;
+  return ParseInternal(&reader, &media_log);
 }
 
 HEVCDecoderConfigurationRecord::HVCCNALArray::HVCCNALArray()
@@ -59,9 +61,8 @@ HEVCDecoderConfigurationRecord::HVCCNALArray::HVCCNALArray(
 
 HEVCDecoderConfigurationRecord::HVCCNALArray::~HVCCNALArray() {}
 
-bool HEVCDecoderConfigurationRecord::ParseInternal(
-    BufferReader* reader,
-    const scoped_refptr<MediaLog>& media_log) {
+bool HEVCDecoderConfigurationRecord::ParseInternal(BufferReader* reader,
+                                                   MediaLog* media_log) {
   uint8_t profile_indication = 0;
   uint32_t general_constraint_indicator_flags_hi = 0;
   uint16_t general_constraint_indicator_flags_lo = 0;
@@ -114,10 +115,6 @@ bool HEVCDecoderConfigurationRecord::ParseInternal(
       DVLOG(4) << __func__ << " naluType=" << (int)(arrays[j].first_byte & 0x3f)
                << " size=" << arrays[j].units[i].size();
     }
-  }
-
-  if (media_log.get()) {
-    MEDIA_LOG(INFO, media_log) << "Video codec: hevc";
   }
 
   return true;

@@ -4,18 +4,17 @@
 
 #import "ios/chrome/browser/tabs/tab_model.h"
 
-#include <list>
+#include <cstdint>
 #include <utility>
 #include <vector>
 
 #include "base/bind.h"
-#import "base/ios/crb_protocol_observers.h"
 #include "base/logging.h"
-#import "base/mac/scoped_nsobject.h"
-#include "base/metrics/histogram.h"
-#include "base/metrics/user_metrics.h"
+#import "base/mac/foundation_util.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/task/cancelable_task_tracker.h"
 #include "components/sessions/core/serialized_navigation_entry.h"
 #include "components/sessions/core/session_id.h"
 #include "components/sessions/core/tab_restore_service.h"
@@ -24,31 +23,48 @@
 #include "ios/chrome/browser/chrome_url_constants.h"
 #import "ios/chrome/browser/chrome_url_util.h"
 #import "ios/chrome/browser/metrics/tab_usage_recorder.h"
+#import "ios/chrome/browser/metrics/tab_usage_recorder_web_state_list_observer.h"
 #include "ios/chrome/browser/sessions/ios_chrome_tab_restore_service_factory.h"
-#import "ios/chrome/browser/sessions/session_service.h"
-#import "ios/chrome/browser/sessions/session_window.h"
+#import "ios/chrome/browser/sessions/session_ios.h"
+#import "ios/chrome/browser/sessions/session_service_ios.h"
+#import "ios/chrome/browser/sessions/session_window_ios.h"
 #import "ios/chrome/browser/snapshots/snapshot_cache.h"
+#import "ios/chrome/browser/snapshots/snapshot_cache_web_state_list_observer.h"
 #include "ios/chrome/browser/tab_parenting_global_observer.h"
+#import "ios/chrome/browser/tabs/legacy_tab_helper.h"
 #import "ios/chrome/browser/tabs/tab.h"
+#import "ios/chrome/browser/tabs/tab_model_closing_web_state_observer.h"
 #import "ios/chrome/browser/tabs/tab_model_list.h"
-#import "ios/chrome/browser/tabs/tab_model_observer.h"
-#import "ios/chrome/browser/tabs/tab_model_order_controller.h"
+#import "ios/chrome/browser/tabs/tab_model_observers.h"
+#import "ios/chrome/browser/tabs/tab_model_observers_bridge.h"
+#import "ios/chrome/browser/tabs/tab_model_selected_tab_observer.h"
 #import "ios/chrome/browser/tabs/tab_model_synced_window_delegate.h"
+#import "ios/chrome/browser/tabs/tab_model_web_state_list_delegate.h"
+#import "ios/chrome/browser/tabs/tab_parenting_observer.h"
+#import "ios/chrome/browser/web_state_list/web_state_list.h"
+#import "ios/chrome/browser/web_state_list/web_state_list_fast_enumeration_helper.h"
+#import "ios/chrome/browser/web_state_list/web_state_list_metrics_observer.h"
+#import "ios/chrome/browser/web_state_list/web_state_list_observer.h"
+#import "ios/chrome/browser/web_state_list/web_state_list_serialization.h"
+#import "ios/chrome/browser/web_state_list/web_state_opener.h"
 #import "ios/chrome/browser/xcallback_parameters.h"
-#import "ios/web/navigation/crw_session_certificate_policy_manager.h"
-#import "ios/web/navigation/crw_session_controller.h"
 #include "ios/web/public/browser_state.h"
 #include "ios/web/public/certificate_policy_cache.h"
 #include "ios/web/public/navigation_item.h"
 #import "ios/web/public/navigation_manager.h"
+#import "ios/web/public/serializable_user_data_manager.h"
+#include "ios/web/public/web_state/session_certificate_policy_cache.h"
 #include "ios/web/public/web_thread.h"
 #import "ios/web/web_state/ui/crw_web_controller.h"
 #import "ios/web/web_state/web_state_impl.h"
 #include "url/gurl.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 NSString* const kTabModelTabWillStartLoadingNotification =
     @"kTabModelTabWillStartLoadingNotification";
-NSString* const kTabModelUserNavigatedNotification = @"kTabModelUserNavigation";
 NSString* const kTabModelTabDidStartLoadingNotification =
     @"kTabModelTabDidStartLoadingNotification";
 NSString* const kTabModelTabDidFinishLoadingNotification =
@@ -66,106 +82,104 @@ NSString* const kTabModelOpenInBackgroundKey = @"shouldOpenInBackground";
 namespace {
 
 // Updates CRWSessionCertificatePolicyManager's certificate policy cache.
-void UpdateCertificatePolicyCacheFromWebState(web::WebStateImpl* webState) {
-  DCHECK([NSThread isMainThread]);
-  DCHECK(webState);
-  scoped_refptr<web::CertificatePolicyCache> policy_cache =
-      web::BrowserState::GetCertificatePolicyCache(webState->GetBrowserState());
-  CRWSessionController* controller =
-      webState->GetNavigationManagerImpl().GetSessionController();
-  [[controller sessionCertificatePolicyManager]
-      updateCertificatePolicyCache:policy_cache];
+void UpdateCertificatePolicyCacheFromWebState(
+    const scoped_refptr<web::CertificatePolicyCache>& policy_cache,
+    const web::WebState* web_state) {
+  DCHECK(web_state);
+  DCHECK_CURRENTLY_ON(web::WebThread::UI);
+  web_state->GetSessionCertificatePolicyCache()->UpdateCertificatePolicyCache(
+      policy_cache);
 }
 
-// Populates the certificate policy cache based on the current entries of the
-// given tabs.
-void RestoreCertificatePolicyCacheFromTabs(NSArray* tabs) {
-  DCHECK([NSThread isMainThread]);
-  for (Tab* tab in tabs) {
-    UpdateCertificatePolicyCacheFromWebState(tab.webStateImpl);
+// Populates the certificate policy cache based on the WebStates of
+// |web_state_list|.
+void RestoreCertificatePolicyCacheFromModel(
+    const scoped_refptr<web::CertificatePolicyCache>& policy_cache,
+    WebStateList* web_state_list) {
+  DCHECK_CURRENTLY_ON(web::WebThread::UI);
+  for (int index = 0; index < web_state_list->count(); ++index) {
+    UpdateCertificatePolicyCacheFromWebState(
+        policy_cache, web_state_list->GetWebStateAt(index));
   }
 }
 
-// Scrubs the certificate policy cache of all the certificate policies except
-// those for the current entries of the given tabs.
+// Scrubs the certificate policy cache of all certificates policies except
+// those for the current entries in |web_state_list|.
 void CleanCertificatePolicyCache(
-    scoped_refptr<web::CertificatePolicyCache> policy_cache,
-    NSArray* tabs) {
-  DCHECK_CURRENTLY_ON(web::WebThread::IO);
+    base::CancelableTaskTracker* task_tracker,
+    const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
+    const scoped_refptr<web::CertificatePolicyCache>& policy_cache,
+    WebStateList* web_state_list) {
   DCHECK(policy_cache);
-  policy_cache->ClearCertificatePolicies();
-  web::WebThread::PostTask(
-      web::WebThread::UI, FROM_HERE,
-      base::Bind(&RestoreCertificatePolicyCacheFromTabs, tabs));
+  DCHECK(web_state_list);
+  DCHECK_CURRENTLY_ON(web::WebThread::UI);
+  task_tracker->PostTaskAndReply(
+      task_runner.get(), FROM_HERE,
+      base::Bind(&web::CertificatePolicyCache::ClearCertificatePolicies,
+                 policy_cache),
+      base::Bind(&RestoreCertificatePolicyCacheFromModel, policy_cache,
+                 base::Unretained(web_state_list)));
 }
 
 }  // anonymous namespace
 
-@interface TabModelObservers : CRBProtocolObservers<TabModelObserver>
+@interface TabModelWebStateProxyFactory : NSObject<WebStateProxyFactory>
 @end
-@implementation TabModelObservers
+
+@implementation TabModelWebStateProxyFactory
+
+- (id)proxyForWebState:(web::WebState*)webState {
+  return LegacyTabHelper::GetTabForWebState(webState);
+}
+
 @end
 
 @interface TabModel ()<TabUsageRecorderDelegate> {
-  // Array of |Tab| objects.
-  base::scoped_nsobject<NSMutableArray> _tabs;
-  // Maintains policy for where new tabs go and the selection when a tab
-  // is removed.
-  base::scoped_nsobject<TabModelOrderController> _orderController;
+  // Delegate for the WebStateList.
+  std::unique_ptr<WebStateListDelegate> _webStateListDelegate;
+
+  // Underlying shared model implementation.
+  std::unique_ptr<WebStateList> _webStateList;
+
+  // Helper providing NSFastEnumeration implementation over the WebStateList.
+  std::unique_ptr<WebStateListFastEnumerationHelper> _fastEnumerationHelper;
+
+  // WebStateListObservers reacting to modifications of the model (may send
+  // notification, translate and forward events, update metrics, ...).
+  std::vector<std::unique_ptr<WebStateListObserver>> _webStateListObservers;
+
+  // Strong references to id<WebStateListObserving> wrapped by non-owning
+  // WebStateListObserverBridges.
+  NSArray<id<WebStateListObserving>>* _retainedWebStateListObservers;
+
   // The delegate for sync.
   std::unique_ptr<TabModelSyncedWindowDelegate> _syncedWindowDelegate;
-  // Currently selected tab. May be nil.
-  base::WeakNSObject<Tab> _currentTab;
 
   // Counters for metrics.
-  int _openedTabCount;
-  int _closedTabCount;
-  int _newTabCount;
+  WebStateListMetricsObserver* _webStateListMetricsObserver;
 
   // Backs up property with the same name.
   std::unique_ptr<TabUsageRecorder> _tabUsageRecorder;
   // Backs up property with the same name.
   const SessionID _sessionID;
   // Saves session's state.
-  base::scoped_nsobject<SessionServiceIOS> _sessionService;
+  SessionServiceIOS* _sessionService;
   // List of TabModelObservers.
-  base::scoped_nsobject<TabModelObservers> _observers;
+  TabModelObservers* _observers;
+
+  // Used to ensure thread-safety of the certificate policy management code.
+  base::CancelableTaskTracker _clearPoliciesTaskTracker;
 }
 
 // Session window for the contents of the tab model.
-@property(nonatomic, readonly) SessionWindowIOS* windowForSavingSession;
+@property(nonatomic, readonly) SessionIOS* sessionForSaving;
 
-// Returns YES if tab URL host indicates that tab is an NTP tab.
-- (BOOL)isNTPTab:(Tab*)tab;
+// Helper method to restore a saved session and control if the state should
+// be persisted or not. Used to implement the public -restoreSessionWindow:
+// method and restoring session in the initialiser.
+- (BOOL)restoreSessionWindow:(SessionWindowIOS*)window
+                persistState:(BOOL)persistState;
 
-// Opens a tab at the specified URL and registers its JS-supplied window name if
-// appropriate. For certain transition types, will consult the order controller
-// and thus may only use |index| as a hint. |parentTab| may be nil if there
-// is no parent associated with this new tab, as may |windowName| if not
-// applicable. |openedByDOM| is YES if the page was opened by DOM.
-// The |index| parameter can be set to
-// TabModelConstants::kTabPositionAutomatically if the caller doesn't have a
-// preference for the position of the tab.
-- (Tab*)insertTabWithLoadParams:
-            (const web::NavigationManager::WebLoadParams&)params
-                     windowName:(NSString*)windowName
-                         opener:(Tab*)parentTab
-                    openedByDOM:(BOOL)openedByDOM
-                        atIndex:(NSUInteger)index
-                   inBackground:(BOOL)inBackground;
-// Call to switch the selected tab. Broadcasts about the change in selection.
-// It's ok for |newTab| to be nil in case the last tab is going away. In that
-// case, the "tab deselected" notification gets sent, but no corresponding
-// "tab selected" notification is sent. |persist| indicates whether or not
-// the tab's state should be persisted in history upon switching.
-- (void)changeSelectedTabFrom:(Tab*)oldTab
-                           to:(Tab*)newTab
-                 persistState:(BOOL)persist;
-// Tells the snapshot cache the adjacent tab session ids.
-- (void)updateSnapshotCache:(Tab*)tab;
-// Helper method that posts a notification with the given name with |tab|
-// in the userInfo dictionary under the kTabModelTabKey.
-- (void)postNotificationName:(NSString*)notificationName withTab:(Tab*)tab;
 @end
 
 @implementation TabModel
@@ -177,35 +191,49 @@ void CleanCertificatePolicyCache(
 #pragma mark - Overriden
 
 - (void)dealloc {
+  // Make sure the tabs do clean after themselves. It is important for
+  // removeObserver: to be called first otherwise a lot of unecessary work will
+  // happen on -closeAllTabs.
   DCHECK([_observers empty]);
+
   // browserStateDestroyed should always have been called before destruction.
   DCHECK(!_browserState);
 
   [[NSNotificationCenter defaultCenter] removeObserver:self];
-  // Make sure the tabs do clean after themselves. It is important for
-  // removeObserver: to be called first otherwise a lot of unecessary work will
-  // happen on -closeAllTabs.
-  [self closeAllTabs];
 
-  [super dealloc];
+  // Clear weak pointer to WebStateListMetricsObserver before destroying it.
+  _webStateListMetricsObserver = nullptr;
+
+  // Close all tabs. Do this in an @autoreleasepool as WebStateList observers
+  // will be notified (they are unregistered later). As some of them may be
+  // implemented in Objective-C and unregister themselves in their -dealloc
+  // method, ensure they -autorelease introduced by ARC are processed before
+  // the WebStateList destructor is called.
+  @autoreleasepool {
+    [self closeAllTabs];
+  }
+
+  // Unregister all observers after closing all the tabs as some of them are
+  // required to properly clean up the Tabs.
+  for (const auto& webStateListObserver : _webStateListObservers)
+    _webStateList->RemoveObserver(webStateListObserver.get());
+  _webStateListObservers.clear();
+  _retainedWebStateListObservers = nil;
+
+  _clearPoliciesTaskTracker.TryCancelAll();
 }
 
 #pragma mark - Public methods
 
 - (Tab*)currentTab {
-  return _currentTab.get();
+  web::WebState* webState = _webStateList->GetActiveWebState();
+  return webState ? LegacyTabHelper::GetTabForWebState(webState) : nil;
 }
 
 - (void)setCurrentTab:(Tab*)newTab {
-  DCHECK([_tabs containsObject:newTab]);
-  if (_currentTab != newTab) {
-    base::RecordAction(base::UserMetricsAction("MobileTabSwitched"));
-    [self updateSnapshotCache:newTab];
-  }
-  if (_tabUsageRecorder) {
-    _tabUsageRecorder->RecordTabSwitched(_currentTab, newTab);
-  }
-  [self changeSelectedTabFrom:_currentTab to:newTab persistState:YES];
+  int indexOfTab = _webStateList->GetIndexOfWebState(newTab.webState);
+  DCHECK_NE(indexOfTab, WebStateList::kInvalidIndex);
+  _webStateList->ActivateWebStateAt(indexOfTab);
 }
 
 - (TabModelSyncedWindowDelegate*)syncedWindowDelegate {
@@ -221,85 +249,122 @@ void CleanCertificatePolicyCache(
 }
 
 - (BOOL)isEmpty {
-  return self.count == 0;
+  return _webStateList->empty();
 }
 
 - (NSUInteger)count {
-  return [_tabs count];
+  DCHECK_GE(_webStateList->count(), 0);
+  return static_cast<NSUInteger>(_webStateList->count());
+}
+
+- (WebStateList*)webStateList {
+  return _webStateList.get();
 }
 
 - (instancetype)initWithSessionWindow:(SessionWindowIOS*)window
                        sessionService:(SessionServiceIOS*)service
                          browserState:(ios::ChromeBrowserState*)browserState {
   if ((self = [super init])) {
-    _observers.reset([[TabModelObservers
-        observersWithProtocol:@protocol(TabModelObserver)] retain]);
+    _observers = [TabModelObservers observers];
+
+    _webStateListDelegate =
+        base::MakeUnique<TabModelWebStateListDelegate>(self);
+    _webStateList = base::MakeUnique<WebStateList>(_webStateListDelegate.get());
+
+    _fastEnumerationHelper =
+        base::MakeUnique<WebStateListFastEnumerationHelper>(
+            _webStateList.get(), [[TabModelWebStateProxyFactory alloc] init]);
 
     _browserState = browserState;
     DCHECK(_browserState);
-
-    // There must be a valid session service defined to consume session windows.
-    DCHECK(service);
-    _sessionService.reset([service retain]);
 
     // Normal browser states are the only ones to get tab restore. Tab sync
     // handles incognito browser states by filtering on profile, so it's
     // important to the backend code to always have a sync window delegate.
     if (!_browserState->IsOffTheRecord()) {
       // Set up the usage recorder before tabs are created.
-      _tabUsageRecorder.reset(new TabUsageRecorder(self));
+      _tabUsageRecorder = base::MakeUnique<TabUsageRecorder>(self);
     }
-    _syncedWindowDelegate.reset(new TabModelSyncedWindowDelegate(self));
+    _syncedWindowDelegate = base::MakeUnique<TabModelSyncedWindowDelegate>(
+        _webStateList.get(), _sessionID);
 
-    _tabs.reset([[NSMutableArray alloc] init]);
-    NSNotificationCenter* defaultCenter = [NSNotificationCenter defaultCenter];
+    // There must be a valid session service defined to consume session windows.
+    DCHECK(service);
+    _sessionService = service;
+
+    NSMutableArray<id<WebStateListObserving>>* retainedWebStateListObservers =
+        [[NSMutableArray alloc] init];
+
+    TabModelClosingWebStateObserver* tabModelClosingWebStateObserver = [
+        [TabModelClosingWebStateObserver alloc]
+        initWithTabModel:self
+          restoreService:IOSChromeTabRestoreServiceFactory::GetForBrowserState(
+                             _browserState)];
+    [retainedWebStateListObservers addObject:tabModelClosingWebStateObserver];
+
+    _webStateListObservers.push_back(
+        base::MakeUnique<WebStateListObserverBridge>(
+            tabModelClosingWebStateObserver));
+
+    _webStateListObservers.push_back(
+        base::MakeUnique<SnapshotCacheWebStateListObserver>(
+            [SnapshotCache sharedInstance]));
+    if (_tabUsageRecorder) {
+      _webStateListObservers.push_back(
+          base::MakeUnique<TabUsageRecorderWebStateListObserver>(
+              _tabUsageRecorder.get()));
+    }
+    _webStateListObservers.push_back(base::MakeUnique<TabParentingObserver>());
+
+    TabModelSelectedTabObserver* tabModelSelectedTabObserver =
+        [[TabModelSelectedTabObserver alloc] initWithTabModel:self];
+    [retainedWebStateListObservers addObject:tabModelSelectedTabObserver];
+    _webStateListObservers.push_back(
+        base::MakeUnique<WebStateListObserverBridge>(
+            tabModelSelectedTabObserver));
+
+    TabModelObserversBridge* tabModelObserversBridge =
+        [[TabModelObserversBridge alloc] initWithTabModel:self
+                                        tabModelObservers:_observers];
+    [retainedWebStateListObservers addObject:tabModelObserversBridge];
+    _webStateListObservers.push_back(
+        base::MakeUnique<WebStateListObserverBridge>(tabModelObserversBridge));
+
+    auto webStateListMetricsObserver =
+        base::MakeUnique<WebStateListMetricsObserver>();
+    _webStateListMetricsObserver = webStateListMetricsObserver.get();
+    _webStateListObservers.push_back(std::move(webStateListMetricsObserver));
+
+    for (const auto& webStateListObserver : _webStateListObservers)
+      _webStateList->AddObserver(webStateListObserver.get());
+    _retainedWebStateListObservers = [retainedWebStateListObservers copy];
+
     if (window) {
-      while (window.unclaimedSessions) {
-        std::unique_ptr<web::WebStateImpl> webState = [window nextSession];
-        DCHECK_EQ(webState->GetBrowserState(), _browserState);
-        // Restore the CertificatePolicyCache.
-        UpdateCertificatePolicyCacheFromWebState(webState.get());
-        // Create a new tab for each entry in the window. Don't send delegate
-        // notifications for each restored tab, only when all done.
-        base::scoped_nsobject<Tab> tab(
-            [[Tab alloc] initWithWebState:std::move(webState) model:self]);
-        [tab webController].usePlaceholderOverlay = YES;
-        [tab fetchFavicon];
-        [_tabs addObject:tab];
-
-        TabParentingGlobalObserver::GetInstance()->OnTabParented(
-            [tab webStateImpl]);
-      }
-      if ([_tabs count]) {
-        DCHECK(window.selectedIndex < [_tabs count]);
-        _currentTab.reset([self tabAtIndex:window.selectedIndex]);
-        DCHECK(_currentTab);
-        if (_tabUsageRecorder)
-          _tabUsageRecorder->InitialRestoredTabs(_currentTab, _tabs);
-        // Perform initializations for affiliated objects which update the
-        // session information related to the current tab.
-        [_currentTab updateLastVisitedTimestamp];
-        [self saveSessionImmediately:NO];
-      }
+      DCHECK([_observers empty]);
+      // Restore the session and reset the session metrics (as the event have
+      // not been generated by the user but by a cold start cycle).
+      [self restoreSessionWindow:window persistState:NO];
+      [self resetSessionMetrics];
     }
 
-    _orderController.reset(
-        [[TabModelOrderController alloc] initWithTabModel:self]);
     // Register for resign active notification.
-    [defaultCenter addObserver:self
-                      selector:@selector(willResignActive:)
-                          name:UIApplicationWillResignActiveNotification
-                        object:nil];
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(willResignActive:)
+               name:UIApplicationWillResignActiveNotification
+             object:nil];
     // Register for background notification.
-    [defaultCenter addObserver:self
-                      selector:@selector(applicationDidEnterBackground:)
-                          name:UIApplicationDidEnterBackgroundNotification
-                        object:nil];
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(applicationDidEnterBackground:)
+               name:UIApplicationDidEnterBackgroundNotification
+             object:nil];
     // Register for foregrounding notification.
-    [defaultCenter addObserver:self
-                      selector:@selector(applicationWillEnterForeground:)
-                          name:UIApplicationWillEnterForegroundNotification
-                        object:nil];
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(applicationWillEnterForeground:)
+               name:UIApplicationWillEnterForegroundNotification
+             object:nil];
 
     // Associate with ios::ChromeBrowserState.
     RegisterTabModelWithChromeBrowserState(_browserState, self);
@@ -313,341 +378,175 @@ void CleanCertificatePolicyCache(
 }
 
 - (BOOL)restoreSessionWindow:(SessionWindowIOS*)window {
-  DCHECK(_browserState);
-  DCHECK(window);
-  if (!window.unclaimedSessions)
-    return NO;
-  size_t oldCount = [_tabs count];
-  size_t index = oldCount;
-  while (window.unclaimedSessions) {
-    std::unique_ptr<web::WebStateImpl> webState = [window nextSession];
-    DCHECK_EQ(webState->GetBrowserState(), _browserState);
-    Tab* tab = [self insertTabWithWebState:std::move(webState) atIndex:index++];
-    tab.webController.usePlaceholderOverlay = YES;
-    // Restore the CertificatePolicyCache. Note that after calling Pass()
-    // |webState| is invalid, so we need to get the webstate from |tab|.
-    UpdateCertificatePolicyCacheFromWebState(tab.webStateImpl);
-  }
-  DCHECK([_tabs count] > oldCount);
-  // If any tab was restored, the saved selected tab must be selected.
-  if ([_tabs count] > oldCount) {
-    NSUInteger selectedIndex = window.selectedIndex;
-    if (selectedIndex == NSNotFound)
-      selectedIndex = oldCount;
-    else
-      selectedIndex += oldCount;
-    DCHECK(selectedIndex < [_tabs count]);
-    Tab* newTab = [self tabAtIndex:selectedIndex];
-    DCHECK(newTab);
-    [self changeSelectedTabFrom:_currentTab to:newTab persistState:YES];
-
-    // If there was only one tab and it was the new tab page, clobber it.
-    if (oldCount == 1) {
-      Tab* tab = [_tabs objectAtIndex:0];
-      if (tab.url == GURL(kChromeUINewTabURL)) {
-        [self closeTab:tab];
-        if (_tabUsageRecorder)
-          _tabUsageRecorder->InitialRestoredTabs(_currentTab, _tabs);
-        return YES;
-      }
-    }
-    if (_tabUsageRecorder) {
-      _tabUsageRecorder->InitialRestoredTabs(
-          _currentTab,
-          [_tabs subarrayWithRange:NSMakeRange(oldCount,
-                                               [_tabs count] - oldCount)]);
-    }
-  }
-  return NO;
+  return [self restoreSessionWindow:window persistState:YES];
 }
 
 - (void)saveSessionImmediately:(BOOL)immediately {
   // Do nothing if there are tabs in the model but no selected tab. This is
   // a transitional state.
-  if ((!_currentTab && [_tabs count]) || !_browserState)
+  if ((!self.currentTab && _webStateList->count()) || !_browserState)
     return;
-  [_sessionService saveWindow:self.windowForSavingSession
-              forBrowserState:_browserState
-                  immediately:immediately];
+  NSString* statePath =
+      base::SysUTF8ToNSString(_browserState->GetStatePath().AsUTF8Unsafe());
+  [_sessionService saveSession:self.sessionForSaving
+                     directory:statePath
+                   immediately:immediately];
 }
 
 - (Tab*)tabAtIndex:(NSUInteger)index {
-  return [_tabs objectAtIndex:index];
+  DCHECK_LE(index, static_cast<NSUInteger>(INT_MAX));
+  return LegacyTabHelper::GetTabForWebState(
+      _webStateList->GetWebStateAt(static_cast<int>(index)));
 }
 
 - (NSUInteger)indexOfTab:(Tab*)tab {
-  return [_tabs indexOfObject:tab];
-}
+  int index = _webStateList->GetIndexOfWebState(tab.webState);
+  if (index == WebStateList::kInvalidIndex)
+    return NSNotFound;
 
-- (Tab*)tabWithWindowName:(NSString*)windowName {
-  if (!windowName)
-    return nil;
-  for (Tab* tab in _tabs.get()) {
-    if ([windowName isEqualToString:tab.windowName]) {
-      return tab;
-    }
-  }
-  return nil;
+  DCHECK_GE(index, 0);
+  return static_cast<NSUInteger>(index);
 }
 
 - (Tab*)nextTabWithOpener:(Tab*)tab afterTab:(Tab*)afterTab {
-  NSUInteger startIndex = NSNotFound;
-  // Start looking after |afterTab|. If it's not found, start looking after
-  // |tab|. If it's not found either, bail.
+  int startIndex = WebStateList::kInvalidIndex;
   if (afterTab)
-    startIndex = [self indexOfTab:afterTab];
-  if (startIndex == NSNotFound)
-    startIndex = [self indexOfTab:tab];
-  if (startIndex == NSNotFound)
-    return nil;
-  NSString* parentID = tab.tabId;
-  for (NSUInteger i = startIndex + 1; i < [_tabs count]; ++i) {
-    Tab* current = [_tabs objectAtIndex:i];
-    DCHECK([current navigationManager]);
-    CRWSessionController* sessionController =
-        [current navigationManager]->GetSessionController();
-    if ([sessionController.openerId isEqualToString:parentID])
-      return current;
-  }
-  return nil;
-}
+    startIndex = _webStateList->GetIndexOfWebState(afterTab.webState);
 
-- (Tab*)firstTabWithOpener:(Tab*)tab {
-  if (!tab)
+  if (startIndex == WebStateList::kInvalidIndex)
+    startIndex = _webStateList->GetIndexOfWebState(tab.webState);
+
+  const int index = _webStateList->GetIndexOfNextWebStateOpenedBy(
+      tab.webState, startIndex, false);
+  if (index == WebStateList::kInvalidIndex)
     return nil;
-  NSUInteger stopIndex = [self indexOfTab:tab];
-  if (stopIndex == NSNotFound)
-    return nil;
-  NSString* parentID = tab.tabId;
-  // Match the navigation index as well as the session id, to better match the
-  // state of the tab. I.e. two tabs are opened via a link from tab A, and then
-  // a new url is loaded into tab A, and more tabs opened from that url, the
-  // latter two tabs should not be grouped with the former two. The navigation
-  // index is the simplest way to detect navigation changes.
-  DCHECK([tab navigationManager]);
-  NSInteger parentNavIndex = [tab navigationManager]->GetCurrentItemIndex();
-  for (NSUInteger i = 0; i < stopIndex; ++i) {
-    Tab* tabToCheck = [_tabs objectAtIndex:i];
-    DCHECK([tabToCheck navigationManager]);
-    CRWSessionController* sessionController =
-        [tabToCheck navigationManager]->GetSessionController();
-    if ([sessionController.openerId isEqualToString:parentID] &&
-        sessionController.openerNavigationIndex == parentNavIndex) {
-      return tabToCheck;
-    }
-  }
-  return nil;
+
+  DCHECK_GE(index, 0);
+  return [self tabAtIndex:static_cast<NSUInteger>(index)];
 }
 
 - (Tab*)lastTabWithOpener:(Tab*)tab {
-  NSUInteger startIndex = [self indexOfTab:tab];
-  if (startIndex == NSNotFound)
+  int startIndex = _webStateList->GetIndexOfWebState(tab.webState);
+  if (startIndex == WebStateList::kInvalidIndex)
     return nil;
-  // There is at least one tab in the model, because otherwise the above check
-  // would have returned.
-  NSString* parentID = tab.tabId;
-  DCHECK([tab navigationManager]);
-  NSInteger parentNavIndex = [tab navigationManager]->GetCurrentItemIndex();
 
-  Tab* match = nil;
-  // Find the last tab in the first matching 'group'.  A 'group' is a set of
-  // tabs whose opener's id and opener's navigation index match. The navigation
-  // index is used in addition to the session id to detect navigations changes
-  // within the same session.
-  for (NSUInteger i = startIndex + 1; i < [_tabs count]; ++i) {
-    Tab* tabToCheck = [_tabs objectAtIndex:i];
-    DCHECK([tabToCheck navigationManager]);
-    CRWSessionController* sessionController =
-        [tabToCheck navigationManager]->GetSessionController();
-    if ([sessionController.openerId isEqualToString:parentID] &&
-        sessionController.openerNavigationIndex == parentNavIndex) {
-      match = tabToCheck;
-    } else if (match) {
-      break;
-    }
-  }
-  return match;
+  const int index = _webStateList->GetIndexOfLastWebStateOpenedBy(
+      tab.webState, startIndex, true);
+  if (index == WebStateList::kInvalidIndex)
+    return nil;
+
+  DCHECK_GE(index, 0);
+  return [self tabAtIndex:static_cast<NSUInteger>(index)];
 }
 
 - (Tab*)openerOfTab:(Tab*)tab {
-  if (![tab navigationManager])
+  int index = _webStateList->GetIndexOfWebState(tab.webState);
+  if (index == WebStateList::kInvalidIndex)
     return nil;
-  NSString* openerId = [tab navigationManager]->GetSessionController().openerId;
-  if (!openerId.length)  // Short-circuit if opener is empty.
-    return nil;
-  for (Tab* iteratedTab in _tabs.get()) {
-    if ([iteratedTab.tabId isEqualToString:openerId])
-      return iteratedTab;
-  }
-  return nil;
+
+  WebStateOpener opener = _webStateList->GetOpenerOfWebStateAt(index);
+  return opener.opener ? LegacyTabHelper::GetTabForWebState(opener.opener)
+                       : nil;
 }
 
-- (Tab*)insertOrUpdateTabWithURL:(const GURL&)URL
-                        referrer:(const web::Referrer&)referrer
-                      transition:(ui::PageTransition)transition
-                      windowName:(NSString*)windowName
-                          opener:(Tab*)parentTab
-                     openedByDOM:(BOOL)openedByDOM
-                         atIndex:(NSUInteger)index
-                    inBackground:(BOOL)inBackground {
+- (Tab*)insertTabWithURL:(const GURL&)URL
+                referrer:(const web::Referrer&)referrer
+              transition:(ui::PageTransition)transition
+                  opener:(Tab*)parentTab
+             openedByDOM:(BOOL)openedByDOM
+                 atIndex:(NSUInteger)index
+            inBackground:(BOOL)inBackground {
   web::NavigationManager::WebLoadParams params(URL);
   params.referrer = referrer;
   params.transition_type = transition;
-  return [self insertOrUpdateTabWithLoadParams:params
-                                    windowName:windowName
-                                        opener:parentTab
-                                   openedByDOM:openedByDOM
-                                       atIndex:index
-                                  inBackground:inBackground];
-}
-
-- (Tab*)insertOrUpdateTabWithLoadParams:
-            (const web::NavigationManager::WebLoadParams&)loadParams
-                             windowName:(NSString*)windowName
-                                 opener:(Tab*)parentTab
-                            openedByDOM:(BOOL)openedByDOM
-                                atIndex:(NSUInteger)index
-                           inBackground:(BOOL)inBackground {
-  // Find the tab for the given window name. If found, load with
-  // |originalParams| in it, otherwise create a new tab for it.
-  Tab* tab = [self tabWithWindowName:windowName];
-  if (tab) {
-    // Updating a tab shouldn't be possible with web usage suspended, since
-    // whatever page would be driving it should also be suspended.
-    DCHECK(webUsageEnabled_);
-
-    web::NavigationManager::WebLoadParams updatedParams(loadParams);
-    updatedParams.is_renderer_initiated = (parentTab != nil);
-    [tab.webController loadWithParams:updatedParams];
-
-    // Force the page to start loading even if it's in the background.
-    [tab.webController triggerPendingLoad];
-
-    if (!inBackground)
-      [self setCurrentTab:tab];
-  } else {
-    tab = [self insertTabWithLoadParams:loadParams
-                             windowName:windowName
-                                 opener:parentTab
-                            openedByDOM:openedByDOM
-                                atIndex:index
-                           inBackground:inBackground];
-  }
-
-  return tab;
-}
-
-- (Tab*)insertBlankTabWithTransition:(ui::PageTransition)transition
-                              opener:(Tab*)parentTab
-                         openedByDOM:(BOOL)openedByDOM
-                             atIndex:(NSUInteger)index
-                        inBackground:(BOOL)inBackground {
-  GURL emptyURL;
-  web::NavigationManager::WebLoadParams params(emptyURL);
-  params.transition_type = transition;
-  // Tabs open by DOM are always renderer initiated.
-  params.is_renderer_initiated = openedByDOM;
   return [self insertTabWithLoadParams:params
-                            windowName:nil
                                 opener:parentTab
                            openedByDOM:openedByDOM
                                atIndex:index
                           inBackground:inBackground];
 }
 
-- (Tab*)insertTabWithWebState:(std::unique_ptr<web::WebState>)webState
-                      atIndex:(NSUInteger)index {
+- (Tab*)insertTabWithLoadParams:
+            (const web::NavigationManager::WebLoadParams&)loadParams
+                         opener:(Tab*)parentTab
+                    openedByDOM:(BOOL)openedByDOM
+                        atIndex:(NSUInteger)index
+                   inBackground:(BOOL)inBackground {
   DCHECK(_browserState);
-  DCHECK_EQ(webState->GetBrowserState(), _browserState);
-  base::scoped_nsobject<Tab> tab(
-      [[Tab alloc] initWithWebState:std::move(webState) model:self]);
-  [tab webController].webUsageEnabled = webUsageEnabled_;
-  [self insertTab:tab atIndex:index];
+
+  web::WebState::CreateParams createParams(self.browserState);
+  createParams.created_with_opener = openedByDOM;
+  std::unique_ptr<web::WebState> webState = web::WebState::Create(createParams);
+
+  web::WebState* webStatePtr = webState.get();
+  if (index == TabModelConstants::kTabPositionAutomatically) {
+    _webStateList->AppendWebState(loadParams.transition_type,
+                                  std::move(webState),
+                                  WebStateOpener(parentTab.webState));
+  } else {
+    DCHECK_LE(index, static_cast<NSUInteger>(INT_MAX));
+    const int insertion_index = static_cast<int>(index);
+    _webStateList->InsertWebState(insertion_index, std::move(webState));
+    if (parentTab.webState) {
+      _webStateList->SetOpenerOfWebStateAt(insertion_index,
+                                           WebStateOpener(parentTab.webState));
+    }
+  }
+
+  Tab* tab = LegacyTabHelper::GetTabForWebState(webStatePtr);
+  DCHECK(tab);
+
+  webStatePtr->SetWebUsageEnabled(webUsageEnabled_ ? true : false);
+
+  if (!inBackground && _tabUsageRecorder)
+    _tabUsageRecorder->TabCreatedForSelection(tab);
+
+  webStatePtr->GetNavigationManager()->LoadURLWithParams(loadParams);
+
+  // Force the page to start loading even if it's in the background.
+  // TODO(crbug.com/705819): Remove this call.
+  if (webUsageEnabled_)
+    webStatePtr->GetView();
+
+  NSDictionary* userInfo = @{
+    kTabModelTabKey : tab,
+    kTabModelOpenInBackgroundKey : @(inBackground),
+  };
+  [[NSNotificationCenter defaultCenter]
+      postNotificationName:kTabModelNewTabWillOpenNotification
+                    object:self
+                  userInfo:userInfo];
+
+  if (!inBackground)
+    [self setCurrentTab:tab];
+
   return tab;
 }
 
-- (void)insertTab:(Tab*)tab atIndex:(NSUInteger)index {
-  DCHECK(tab);
-  DCHECK(index <= [_tabs count]);
-  [tab fetchFavicon];
-  [_tabs insertObject:tab atIndex:index];
-
-  [_observers tabModel:self didInsertTab:tab atIndex:index inForeground:NO];
-  [_observers tabModelDidChangeTabCount:self];
-
-  base::RecordAction(base::UserMetricsAction("MobileNewTabOpened"));
-  // Persist the session due to a new tab being inserted. If this is a
-  // background tab (will not become active), saving now will capture the
-  // state properly. If it does eventually become active, another save will
-  // be triggered to properly capture the end result.
-  [self saveSessionImmediately:NO];
-  ++_newTabCount;
-}
-
 - (void)moveTab:(Tab*)tab toIndex:(NSUInteger)toIndex {
-  NSUInteger fromIndex = [self indexOfTab:tab];
-  DCHECK_NE(NSNotFound, static_cast<NSInteger>(fromIndex));
-  DCHECK_LT(toIndex, self.count);
-  if (fromIndex == NSNotFound || toIndex >= self.count ||
-      fromIndex == toIndex) {
-    return;
-  }
-
-  base::scoped_nsobject<Tab> tabSaver([tab retain]);
-  [_tabs removeObject:tab];
-  [_tabs insertObject:tab atIndex:toIndex];
-
-  [_observers tabModel:self didMoveTab:tab fromIndex:fromIndex toIndex:toIndex];
-}
-
-- (void)replaceTab:(Tab*)oldTab
-           withTab:(Tab*)newTab
-    keepOldTabOpen:(BOOL)keepOldTabOpen {
-  NSUInteger index = [self indexOfTab:oldTab];
-  DCHECK_NE(NSNotFound, static_cast<NSInteger>(index));
-
-  base::scoped_nsobject<Tab> tabSaver([oldTab retain]);
-  [newTab fetchFavicon];
-  [_tabs replaceObjectAtIndex:index withObject:newTab];
-  [newTab setParentTabModel:self];
-
-  [_observers tabModel:self didReplaceTab:oldTab withTab:newTab atIndex:index];
-
-  if (self.currentTab == oldTab)
-    [self changeSelectedTabFrom:nil to:newTab persistState:NO];
-
-  [oldTab setParentTabModel:nil];
-  if (!keepOldTabOpen)
-    [oldTab close];
-
-  // Record a tab clobber, since swapping tabs bypasses the tab code that would
-  // normally log clobbers.
-  base::RecordAction(base::UserMetricsAction("MobileTabClobbered"));
+  DCHECK_LE(toIndex, static_cast<NSUInteger>(INT_MAX));
+  int fromIndex = _webStateList->GetIndexOfWebState(tab.webState);
+  _webStateList->MoveWebStateAt(fromIndex, static_cast<int>(toIndex));
 }
 
 - (void)closeTabAtIndex:(NSUInteger)index {
-  DCHECK(index < [_tabs count]);
-  [self closeTab:[_tabs objectAtIndex:index]];
+  DCHECK_LE(index, static_cast<NSUInteger>(INT_MAX));
+  _webStateList->CloseWebStateAt(static_cast<int>(index));
 }
 
 - (void)closeTab:(Tab*)tab {
-  // Ensure the tab stays alive long enough for us to send out the
-  // notice of its destruction to the delegate.
-  [_observers tabModel:self willRemoveTab:tab];
-  [tab close];  // Note it is not safe to access the tab after 'close'.
+  [self closeTabAtIndex:[self indexOfTab:tab]];
 }
 
 - (void)closeAllTabs {
-  // If this changes, _closedTabCount metrics need to be adjusted.
-  for (NSInteger i = self.count - 1; i >= 0; --i)
-    [self closeTabAtIndex:i];
+  _webStateList->CloseAllWebStates();
   [[NSNotificationCenter defaultCenter]
       postNotificationName:kTabModelAllTabsDidCloseNotification
                     object:self];
 }
 
 - (void)haltAllTabs {
-  for (Tab* tab in _tabs.get()) {
+  for (Tab* tab in self) {
     [tab terminateNetworkActivity];
   }
 }
@@ -665,17 +564,13 @@ void CleanCertificatePolicyCache(
 }
 
 - (void)resetSessionMetrics {
-  _closedTabCount = 0;
-  _openedTabCount = 0;
-  _newTabCount = 0;
+  if (_webStateListMetricsObserver)
+    _webStateListMetricsObserver->ResetSessionMetrics();
 }
 
 - (void)recordSessionMetrics {
-  UMA_HISTOGRAM_CUSTOM_COUNTS("Session.ClosedTabCounts", _closedTabCount, 1,
-                              200, 50);
-  UMA_HISTOGRAM_CUSTOM_COUNTS("Session.OpenedTabCounts", _openedTabCount, 1,
-                              200, 50);
-  UMA_HISTOGRAM_CUSTOM_COUNTS("Session.NewTabCounts", _newTabCount, 1, 200, 50);
+  if (_webStateListMetricsObserver)
+    _webStateListMetricsObserver->RecordSessionMetrics();
 }
 
 - (void)notifyTabSnapshotChanged:(Tab*)tab withImage:(UIImage*)image {
@@ -684,8 +579,8 @@ void CleanCertificatePolicyCache(
 }
 
 - (void)resetAllWebViews {
-  for (Tab* tab in _tabs.get()) {
-    [tab.webController reinitializeWebViewAndReload:(tab == _currentTab)];
+  for (Tab* tab in self) {
+    [tab.webController reinitializeWebViewAndReload:(tab == self.currentTab)];
   }
 }
 
@@ -693,14 +588,15 @@ void CleanCertificatePolicyCache(
   if (webUsageEnabled_ == webUsageEnabled)
     return;
   webUsageEnabled_ = webUsageEnabled;
-  for (Tab* tab in _tabs.get()) {
-    tab.webUsageEnabled = webUsageEnabled;
+  for (int index = 0; index < _webStateList->count(); ++index) {
+    web::WebState* webState = _webStateList->GetWebStateAt(index);
+    webState->SetWebUsageEnabled(webUsageEnabled_ ? true : false);
   }
 }
 
 - (void)setPrimary:(BOOL)primary {
   if (_tabUsageRecorder)
-    _tabUsageRecorder->RecordPrimaryTabModelChange(primary, _currentTab);
+    _tabUsageRecorder->RecordPrimaryTabModelChange(primary, self.currentTab);
 }
 
 - (NSSet*)currentlyReferencedExternalFiles {
@@ -708,7 +604,7 @@ void CleanCertificatePolicyCache(
   if (!_browserState)
     return referencedFiles;
   // Check the currently open tabs for external files.
-  for (Tab* tab in _tabs.get()) {
+  for (Tab* tab in self) {
     if (UrlIsExternalFileReference(tab.url)) {
       NSString* fileName = base::SysUTF8ToNSString(tab.url.ExtractFileName());
       [referencedFiles addObject:fileName];
@@ -742,64 +638,14 @@ void CleanCertificatePolicyCache(
   _browserState = nullptr;
 }
 
-// Called when a tab is closing, but before its CRWWebController is destroyed.
-// Equivalent to DetachTabContentsAt() in Chrome's TabStripModel.
-- (void)didCloseTab:(Tab*)closedTab {
-  NSUInteger closedTabIndex = [_tabs indexOfObject:closedTab];
-  DCHECK(closedTab);
-  DCHECK(closedTabIndex != NSNotFound);
-  // Let the sessions::TabRestoreService know about that new tab.
-  sessions::TabRestoreService* restoreService =
-      _browserState
-          ? IOSChromeTabRestoreServiceFactory::GetForBrowserState(_browserState)
-          : nullptr;
-  web::NavigationManagerImpl* navigationManager = [closedTab navigationManager];
-  DCHECK(navigationManager);
-  int itemCount = navigationManager->GetItemCount();
-  if (restoreService && (![self isNTPTab:closedTab] || itemCount > 1)) {
-    restoreService->CreateHistoricalTab(
-        sessions::IOSLiveTab::GetForWebState(closedTab.webStateImpl),
-        static_cast<int>(closedTabIndex));
-  }
-  // This needs to be called before the tab is removed from the list.
-  Tab* newSelection =
-      [_orderController determineNewSelectedTabFromRemovedTab:closedTab];
-  base::scoped_nsobject<Tab> kungFuDeathGrip([closedTab retain]);
-  [_tabs removeObject:closedTab];
-
-  // If closing the current tab, clear |_currentTab| before sending any
-  // notification. This avoids various parts of the code getting confused
-  // when the current tab isn't in the tab model.
-  Tab* savedCurrentTab = _currentTab;
-  if (closedTab == _currentTab)
-    _currentTab.reset(nil);
-
-  [_observers tabModel:self didRemoveTab:closedTab atIndex:closedTabIndex];
-  [_observers tabModelDidChangeTabCount:self];
-
-  // Current tab has closed, update the selected tab and swap in its
-  // contents. There is nothing to do if a non-selected tab is closed as
-  // the selection isn't index-based, therefore it hasn't changed.
-  // -changeSelectedTabFrom: will persist the state change, so only do it
-  // if the selection isn't changing.
-  if (closedTab == savedCurrentTab) {
-    [self changeSelectedTabFrom:closedTab to:newSelection persistState:NO];
-  } else {
-    [self saveSessionImmediately:NO];
-  }
-  base::RecordAction(base::UserMetricsAction("MobileTabClosed"));
-  ++_closedTabCount;
-}
-
-- (void)navigationCommittedInTab:(Tab*)tab {
+- (void)navigationCommittedInTab:(Tab*)tab
+                    previousItem:(web::NavigationItem*)previousItem {
   if (self.offTheRecord)
     return;
   if (![tab navigationManager])
     return;
 
   // See if the navigation was within a page; if so ignore it.
-  web::NavigationItem* previousItem =
-      [tab navigationManager]->GetPreviousItem();
   if (previousItem) {
     GURL previousURL = previousItem->GetURL();
     GURL currentURL = [tab navigationManager]->GetVisibleItem()->GetURL();
@@ -819,17 +665,19 @@ void CleanCertificatePolicyCache(
 #pragma mark - NSFastEnumeration
 
 - (NSUInteger)countByEnumeratingWithState:(NSFastEnumerationState*)state
-                                  objects:(id*)objects
+                                  objects:(id __unsafe_unretained*)objects
                                     count:(NSUInteger)count {
-  return [_tabs countByEnumeratingWithState:state objects:objects count:count];
+  return [_fastEnumerationHelper->GetFastEnumeration()
+      countByEnumeratingWithState:state
+                          objects:objects
+                            count:count];
 }
 
 #pragma mark - TabUsageRecorderDelegate
 
 - (NSUInteger)liveTabsCount {
   NSUInteger count = 0;
-  NSArray* tabs = _tabs.get();
-  for (Tab* tab in tabs) {
+  for (Tab* tab in self) {
     if ([tab.webController isViewAlive])
       count++;
   }
@@ -838,167 +686,77 @@ void CleanCertificatePolicyCache(
 
 #pragma mark - Private methods
 
-- (SessionWindowIOS*)windowForSavingSession {
-  // Background tabs will already have their state preserved, but not the
-  // fg tab. Do it now.
-  [_currentTab recordStateInHistory];
-
+- (SessionIOS*)sessionForSaving {
   // Build the array of sessions. Copy the session objects as the saving will
   // be done on a separate thread.
   // TODO(crbug.com/661986): This could get expensive especially since this
   // window may never be saved (if another call comes in before the delay).
-  SessionWindowIOS* window = [[[SessionWindowIOS alloc] init] autorelease];
-  for (Tab* tab in _tabs.get()) {
-    DCHECK(tab.webStateImpl);
-    std::unique_ptr<web::WebStateImpl> webStateCopy(
-        tab.webStateImpl->CopyForSessionWindow());
-    [window addSession:std::move(webStateCopy)];
-  }
-  window.selectedIndex = [self indexOfTab:_currentTab];
-  return window;
+  return [[SessionIOS alloc]
+      initWithWindows:@[ SerializeWebStateList(_webStateList.get()) ]];
 }
 
-- (BOOL)isNTPTab:(Tab*)tab {
-  std::string host = tab.url.host();
-  return host == kChromeUINewTabHost || host == kChromeUIBookmarksHost;
-}
-
-- (Tab*)insertTabWithLoadParams:
-            (const web::NavigationManager::WebLoadParams&)params
-                     windowName:(NSString*)windowName
-                         opener:(Tab*)parentTab
-                    openedByDOM:(BOOL)openedByDOM
-                        atIndex:(NSUInteger)index
-                   inBackground:(BOOL)inBackground {
+- (BOOL)restoreSessionWindow:(SessionWindowIOS*)window
+                persistState:(BOOL)persistState {
   DCHECK(_browserState);
-  base::scoped_nsobject<Tab> tab([[Tab alloc]
-      initWithWindowName:windowName
-                  opener:parentTab
-             openedByDOM:openedByDOM
-                   model:self
-            browserState:_browserState]);
-  [tab webController].webUsageEnabled = webUsageEnabled_;
+  DCHECK(window);
 
-  if ((PageTransitionCoreTypeIs(params.transition_type,
-                                ui::PAGE_TRANSITION_LINK)) &&
-      (index == TabModelConstants::kTabPositionAutomatically)) {
-    DCHECK(!parentTab || [self indexOfTab:parentTab] != NSNotFound);
-    // Assume tabs opened via link clicks are part of the same "task" as their
-    // parent and are grouped together.
-    TabModelOrderConstants::InsertionAdjacency adjacency =
-        inBackground ? TabModelOrderConstants::kAdjacentAfter
-                     : TabModelOrderConstants::kAdjacentBefore;
-    index = [_orderController insertionIndexForTab:tab
-                                        transition:params.transition_type
-                                            opener:parentTab
-                                         adjacency:adjacency];
-  } else {
-    // For all other types, respect what was passed to us, normalizing values
-    // that are too large.
-    if (index >= self.count)
-      index = [_orderController insertionIndexForAppending];
+  if (!window.sessions.count)
+    return NO;
+
+  int oldCount = _webStateList->count();
+  DCHECK_GE(oldCount, 0);
+
+  web::WebState::CreateParams createParams(_browserState);
+  DeserializeWebStateList(
+      _webStateList.get(), window,
+      base::BindRepeating(&web::WebState::CreateWithStorageSession,
+                          createParams));
+
+  DCHECK_GT(_webStateList->count(), oldCount);
+  int restoredCount = _webStateList->count() - oldCount;
+  DCHECK_EQ(window.sessions.count, static_cast<NSUInteger>(restoredCount));
+
+  scoped_refptr<web::CertificatePolicyCache> policyCache =
+      web::BrowserState::GetCertificatePolicyCache(_browserState);
+
+  NSMutableArray<Tab*>* restoredTabs =
+      [[NSMutableArray alloc] initWithCapacity:window.sessions.count];
+
+  for (int index = oldCount; index < _webStateList->count(); ++index) {
+    web::WebState* webState = _webStateList->GetWebStateAt(index);
+    Tab* tab = LegacyTabHelper::GetTabForWebState(webState);
+
+    webState->SetWebUsageEnabled(webUsageEnabled_ ? true : false);
+    tab.webController.usePlaceholderOverlay = YES;
+
+    // Restore the CertificatePolicyCache (note that webState is invalid after
+    // passing it via move semantic to -initWithWebState:model:).
+    UpdateCertificatePolicyCacheFromWebState(policyCache, [tab webState]);
+    [restoredTabs addObject:tab];
   }
 
-  if (PageTransitionCoreTypeIs(params.transition_type,
-                               ui::PAGE_TRANSITION_TYPED) &&
-      index == self.count) {
-    // Also, any tab opened at the end of the TabStrip with a "TYPED"
-    // transition inherit group as well. This covers the cases where the user
-    // creates a New Tab (e.g. Ctrl+T, or clicks the New Tab button), or types
-    // in the address bar and presses Alt+Enter. This allows for opening a new
-    // Tab to quickly look up something. When this Tab is closed, the old one
-    // is re-selected, not the next-adjacent.
-    // TODO(crbug.com/661988): Make this work.
+  // If there was only one tab and it was the new tab page, clobber it.
+  BOOL closedNTPTab = NO;
+  if (oldCount == 1) {
+    Tab* tab = [self tabAtIndex:0];
+    if (tab.url == GURL(kChromeUINewTabURL)) {
+      [self closeTab:tab];
+      closedNTPTab = YES;
+      oldCount = 0;
+    }
   }
-
-  [self insertTab:tab atIndex:index];
-
-  if (!inBackground && _tabUsageRecorder)
-    _tabUsageRecorder->TabCreatedForSelection(tab);
-
-  [[tab webController] loadWithParams:params];
-  // Force the page to start loading even if it's in the background.
-  if (webUsageEnabled_)
-    [[tab webController] triggerPendingLoad];
-  NSDictionary* userInfo = @{
-    kTabModelTabKey : tab,
-    kTabModelOpenInBackgroundKey : @(inBackground),
-  };
-  [[NSNotificationCenter defaultCenter]
-      postNotificationName:kTabModelNewTabWillOpenNotification
-                    object:self
-                  userInfo:userInfo];
-
-  if (!inBackground)
-    [self setCurrentTab:tab];
-
-  return tab;
-}
-
-- (void)changeSelectedTabFrom:(Tab*)oldTab
-                           to:(Tab*)newTab
-                 persistState:(BOOL)persist {
-  if (oldTab) {
-    // Save state, such as scroll position, before switching tabs.
-    if (oldTab != newTab && persist)
-      [oldTab recordStateInHistory];
-    [self postNotificationName:kTabModelTabDeselectedNotification
-                       withTab:oldTab];
-  }
-
-  // No Tab to select (e.g. the last Tab has been closed).
-  if ([self indexOfTab:newTab] == NSNotFound)
-    return;
-
-  _currentTab.reset(newTab);
-  if (newTab) {
-    [_observers tabModel:self
-        didChangeActiveTab:newTab
-               previousTab:oldTab
-                   atIndex:[self indexOfTab:newTab]];
-    [newTab updateLastVisitedTimestamp];
-    ++_openedTabCount;
-  }
-  BOOL loadingFinished = [newTab.webController loadPhase] == web::PAGE_LOADED;
-  if (loadingFinished) {
-    // Persist the session state.
-    [self saveSessionImmediately:NO];
-  }
-}
-
-- (void)updateSnapshotCache:(Tab*)tab {
-  NSMutableSet* set = [NSMutableSet set];
-  NSUInteger index = [self indexOfTab:tab];
-  if (index > 0) {
-    Tab* previousTab = [self tabAtIndex:(index - 1)];
-    [set addObject:previousTab.tabId];
-  }
-  if (index < self.count - 1) {
-    Tab* nextTab = [self tabAtIndex:(index + 1)];
-    [set addObject:nextTab.tabId];
-  }
-  [SnapshotCache sharedInstance].pinnedIDs = set;
-}
-
-- (void)postNotificationName:(NSString*)notificationName withTab:(Tab*)tab {
-  // A scoped_nsobject is used rather than an NSDictionary with static
-  // initializer dictionaryWithObject, because that approach adds the dictionary
-  // to the autorelease pool, which in turn holds Tab alive longer than
-  // necessary.
-  base::scoped_nsobject<NSDictionary> userInfo(
-      [[NSDictionary alloc] initWithObjectsAndKeys:tab, kTabModelTabKey, nil]);
-  [[NSNotificationCenter defaultCenter] postNotificationName:notificationName
-                                                      object:self
-                                                    userInfo:userInfo];
+  if (_tabUsageRecorder)
+    _tabUsageRecorder->InitialRestoredTabs(self.currentTab, restoredTabs);
+  return closedNTPTab;
 }
 
 #pragma mark - Notification Handlers
 
 // Called when UIApplicationWillResignActiveNotification is received.
 - (void)willResignActive:(NSNotification*)notify {
-  if (webUsageEnabled_ && _currentTab) {
+  if (webUsageEnabled_ && self.currentTab) {
     [[SnapshotCache sharedInstance]
-        willBeSavedGreyWhenBackgrounding:_currentTab.get().tabId];
+        willBeSavedGreyWhenBackgrounding:self.currentTab.tabId];
   }
 }
 
@@ -1006,14 +764,14 @@ void CleanCertificatePolicyCache(
 - (void)applicationDidEnterBackground:(NSNotification*)notify {
   if (!_browserState)
     return;
+
   // Evict all the certificate policies except for the current entries of the
   // active sessions.
-  scoped_refptr<web::CertificatePolicyCache> policy_cache =
-      web::BrowserState::GetCertificatePolicyCache(_browserState);
-  DCHECK(policy_cache);
-  web::WebThread::PostTask(
-      web::WebThread::IO, FROM_HERE,
-      base::Bind(&CleanCertificatePolicyCache, policy_cache, _tabs));
+  CleanCertificatePolicyCache(
+      &_clearPoliciesTaskTracker,
+      web::WebThread::GetTaskRunnerForThread(web::WebThread::IO),
+      web::BrowserState::GetCertificatePolicyCache(_browserState),
+      _webStateList.get());
 
   if (_tabUsageRecorder)
     _tabUsageRecorder->AppDidEnterBackground();
@@ -1023,9 +781,9 @@ void CleanCertificatePolicyCache(
   [self saveSessionImmediately:YES];
 
   // Write out a grey version of the current website to disk.
-  if (webUsageEnabled_ && _currentTab) {
+  if (webUsageEnabled_ && self.currentTab) {
     [[SnapshotCache sharedInstance]
-        saveGreyInBackgroundForSessionID:_currentTab.get().tabId];
+        saveGreyInBackgroundForSessionID:self.currentTab.tabId];
   }
 }
 
@@ -1034,41 +792,6 @@ void CleanCertificatePolicyCache(
   if (_tabUsageRecorder) {
     _tabUsageRecorder->AppWillEnterForeground();
   }
-}
-
-@end
-
-@implementation TabModel (PrivateForTestingOnly)
-
-- (Tab*)addTabWithURL:(const GURL&)URL
-             referrer:(const web::Referrer&)referrer
-           windowName:(NSString*)windowName {
-  return [self insertTabWithURL:URL
-                       referrer:referrer
-                     windowName:windowName
-                         opener:nil
-                        atIndex:[_orderController insertionIndexForAppending]];
-}
-
-- (Tab*)insertTabWithURL:(const GURL&)URL
-                referrer:(const web::Referrer&)referrer
-              windowName:(NSString*)windowName
-                  opener:(Tab*)parentTab
-                 atIndex:(NSUInteger)index {
-  DCHECK(_browserState);
-  base::scoped_nsobject<Tab> tab([[Tab alloc]
-      initWithWindowName:windowName
-                  opener:parentTab
-             openedByDOM:NO
-                   model:self
-            browserState:_browserState]);
-  web::NavigationManager::WebLoadParams params(URL);
-  params.referrer = referrer;
-  params.transition_type = ui::PAGE_TRANSITION_TYPED;
-  [[tab webController] loadWithParams:params];
-  [tab webController].webUsageEnabled = webUsageEnabled_;
-  [self insertTab:tab atIndex:index];
-  return tab;
 }
 
 @end

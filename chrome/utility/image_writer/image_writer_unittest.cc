@@ -9,6 +9,7 @@
 
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "chrome/utility/image_writer/error_messages.h"
 #include "chrome/utility/image_writer/image_writer.h"
@@ -44,7 +45,8 @@ class ImageWriterUtilityTest : public testing::Test {
     std::unique_ptr<char[]> buffer(new char[kTestFileSize]);
     memset(buffer.get(), pattern, kTestFileSize);
 
-    ASSERT_TRUE(base::WriteFile(path, buffer.get(), kTestFileSize));
+    ASSERT_EQ(static_cast<int>(kTestFileSize),
+              base::WriteFile(path, buffer.get(), kTestFileSize));
   }
 
   void FillDefault(const base::FilePath& path) { FillFile(path, kTestPattern); }
@@ -62,7 +64,6 @@ class MockHandler : public ImageWriterHandler {
   MOCK_METHOD1(SendProgress, void(int64_t));
   MOCK_METHOD1(SendFailed, void(const std::string& message));
   MOCK_METHOD0(SendSucceeded, void());
-  MOCK_METHOD1(OnMessageReceived, bool(const IPC::Message& message));
 };
 
 // This Mock has the additional feature that it will start verification when

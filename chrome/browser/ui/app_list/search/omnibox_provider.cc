@@ -27,7 +27,7 @@ OmniboxProvider::OmniboxProvider(Profile* profile,
       controller_(new AutocompleteController(
           base::WrapUnique(new ChromeAutocompleteProviderClient(profile)),
           this,
-          AutocompleteClassifier::kDefaultOmniboxProviders &
+          AutocompleteClassifier::DefaultOmniboxProviders() &
               ~AutocompleteProvider::TYPE_ZERO_SUGGEST)),
       is_voice_query_(false) {}
 
@@ -36,7 +36,7 @@ OmniboxProvider::~OmniboxProvider() {}
 void OmniboxProvider::Start(bool is_voice_query, const base::string16& query) {
   is_voice_query_ = is_voice_query;
   controller_->Start(AutocompleteInput(
-      query, base::string16::npos, std::string(), GURL(),
+      query, base::string16::npos, std::string(), GURL(), base::string16(),
       metrics::OmniboxEventProto::INVALID_SPEC, false, false, true, true, false,
       ChromeAutocompleteSchemeClassifier(profile_)));
 }
@@ -47,21 +47,20 @@ void OmniboxProvider::Stop() {
 }
 
 void OmniboxProvider::PopulateFromACResult(const AutocompleteResult& result) {
-  ClearResults();
-  for (ACMatches::const_iterator it = result.begin();
-       it != result.end();
-       ++it) {
-    if (!it->destination_url.is_valid())
+  SearchProvider::Results new_results;
+  new_results.reserve(result.size());
+  for (const AutocompleteMatch& match : result) {
+    if (!match.destination_url.is_valid())
       continue;
 
-    Add(std::unique_ptr<SearchResult>(new OmniboxResult(
-        profile_, list_controller_, controller_.get(), is_voice_query_, *it)));
+    new_results.emplace_back(base::MakeUnique<OmniboxResult>(
+        profile_, list_controller_, controller_.get(), is_voice_query_, match));
   }
+  SwapResults(&new_results);
 }
 
 void OmniboxProvider::OnResultChanged(bool default_match_changed) {
-  const AutocompleteResult& result = controller_->result();
-  PopulateFromACResult(result);
+  PopulateFromACResult(controller_->result());
 }
 
 }  // namespace app_list

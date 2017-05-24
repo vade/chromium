@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.infobar;
 
+import android.app.Activity;
 import android.content.Context;
 import android.view.Gravity;
 import android.view.View;
@@ -14,7 +15,10 @@ import org.chromium.base.ObserverList;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.banners.SwipableOverlayView;
+import org.chromium.chrome.browser.infobar.InfoBarContainerLayout.Item;
+import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
@@ -57,6 +61,12 @@ public class InfoBarContainer extends SwipableOverlayView {
          * Notifies the subscriber when an animation is completed.
          */
         void notifyAnimationFinished(int animationType);
+
+        /**
+         * Notifies the subscriber when all animations are finished.
+         * @param frontInfoBar The frontmost infobar or {@code null} if none are showing.
+         */
+        void notifyAllAnimationsFinished(Item frontInfoBar);
     }
 
     /**
@@ -89,10 +99,13 @@ public class InfoBarContainer extends SwipableOverlayView {
     /** Resets the state of the InfoBarContainer when the user navigates. */
     private final TabObserver mTabObserver = new EmptyTabObserver() {
         @Override
-        public void onDidNavigateMainFrame(Tab tab, String url, String baseUrl,
-                boolean isNavigationToDifferentPage, boolean isFragmentNavigation,
-                int statusCode) {
-            setIsObscuredByOtherView(false);
+        public void onDidFinishNavigation(Tab tab, String url, boolean isInMainFrame,
+                boolean isErrorPage, boolean hasCommitted, boolean isSameDocument,
+                boolean isFragmentNavigation, Integer pageTransition, int errorCode,
+                int httpStatusCode) {
+            if (hasCommitted && isInMainFrame) {
+                setIsObscuredByOtherView(false);
+            }
         }
 
         @Override
@@ -105,8 +118,18 @@ public class InfoBarContainer extends SwipableOverlayView {
         @Override
         public void onReparentingFinished(Tab tab) {
             setParentView((ViewGroup) tab.getActivity().findViewById(R.id.bottom_container));
+            setSnackbarManagerFromTab(tab);
         }
     };
+
+    private void setSnackbarManagerFromTab(Tab tab) {
+        Activity activity = tab.getActivity();
+        if (activity != null) {
+            mSnackbarManager = ((ChromeActivity) activity).getSnackbarManager();
+        } else {
+            mSnackbarManager = null;
+        }
+    }
 
     /**
      * Adds/removes the {@link InfoBarContainer} when the tab's view is attached/detached. This is
@@ -126,6 +149,9 @@ public class InfoBarContainer extends SwipableOverlayView {
     };
 
     private final InfoBarContainerLayout mLayout;
+
+    /** Helper class to manage showing in-product help bubbles over specific info bars. */
+    private final IPHInfoBarSupport mIPHSupport;
 
     /** Native InfoBarContainer pointer which will be set by nativeInit(). */
     private final long mNativeInfoBarContainer;
@@ -148,10 +174,14 @@ public class InfoBarContainer extends SwipableOverlayView {
     private final ObserverList<InfoBarContainerObserver> mObservers =
             new ObserverList<InfoBarContainerObserver>();
 
+    /** The snackbar manager instance used by the activity that hosts this infobar. */
+    private SnackbarManager mSnackbarManager;
+
     public InfoBarContainer(Context context, final ViewGroup parentView, Tab tab) {
         super(context, null);
         tab.addObserver(mTabObserver);
         mTabView = tab.getView();
+        setSnackbarManagerFromTab(tab);
 
         // TODO(newt): move this workaround into the infobar views if/when they're scrollable.
         // Workaround for http://crbug.com/407149. See explanation in onMeasure() below.
@@ -159,8 +189,7 @@ public class InfoBarContainer extends SwipableOverlayView {
 
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
-        int topMarginDp = DeviceFormFactor.isTablet(context)
-                ? TOP_MARGIN_TABLET_DP : TOP_MARGIN_PHONE_DP;
+        int topMarginDp = DeviceFormFactor.isTablet() ? TOP_MARGIN_TABLET_DP : TOP_MARGIN_PHONE_DP;
         lp.topMargin = Math.round(topMarginDp * getResources().getDisplayMetrics().density);
         setLayoutParams(lp);
 
@@ -170,9 +199,17 @@ public class InfoBarContainer extends SwipableOverlayView {
         addView(mLayout, new FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT,
                 LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
 
+        mIPHSupport = new IPHInfoBarSupport(context);
+        mLayout.addAnimationListener(mIPHSupport);
+        addObserver(mIPHSupport);
+
         // Chromium's InfoBarContainer may add an InfoBar immediately during this initialization
         // call, so make sure everything in the InfoBarContainer is completely ready beforehand.
         mNativeInfoBarContainer = nativeInit();
+    }
+
+    public SnackbarManager getSnackbarManager() {
+        return mSnackbarManager;
     }
 
     /**
@@ -209,8 +246,8 @@ public class InfoBarContainer extends SwipableOverlayView {
     }
 
     @VisibleForTesting
-    public void setAnimationListener(InfoBarAnimationListener listener) {
-        mLayout.setAnimationListener(listener);
+    public void addAnimationListener(InfoBarAnimationListener listener) {
+        mLayout.addAnimationListener(listener);
     }
 
     /**
@@ -295,6 +332,8 @@ public class InfoBarContainer extends SwipableOverlayView {
     }
 
     public void destroy() {
+        mLayout.removeAnimationListener(mIPHSupport);
+        removeObserver(mIPHSupport);
         mDestroyed = true;
         if (mNativeInfoBarContainer != 0) {
             nativeDestroy(mNativeInfoBarContainer);

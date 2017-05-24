@@ -10,7 +10,6 @@ import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
-import android.os.Message;
 import android.view.DragEvent;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -22,8 +21,8 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.widget.FrameLayout;
 
-import org.chromium.base.Log;
 import org.chromium.base.TraceEvent;
+import org.chromium.ui.base.EventForwarder;
 
 /**
  * The containing view for {@link ContentViewCore} that exists in the Android UI hierarchy and
@@ -39,6 +38,7 @@ public class ContentView extends FrameLayout
             MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
 
     protected final ContentViewCore mContentViewCore;
+    private EventForwarder mEventForwarder;
 
     /**
      * The desired size of this view in {@link MeasureSpec}. Set by the host
@@ -153,7 +153,7 @@ public class ContentView extends FrameLayout
         try {
             TraceEvent.begin("ContentView.onFocusChanged");
             super.onFocusChanged(gainFocus, direction, previouslyFocusedRect);
-            mContentViewCore.onFocusChanged(gainFocus);
+            mContentViewCore.onFocusChanged(gainFocus, true /* hideKeyboardOnBlur */);
         } finally {
             TraceEvent.end("ContentView.onFocusChanged");
         }
@@ -186,7 +186,7 @@ public class ContentView extends FrameLayout
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        return mContentViewCore.onTouchEvent(event);
+        return getEventForwarder().onTouchEvent(event);
     }
 
     /**
@@ -204,6 +204,13 @@ public class ContentView extends FrameLayout
     @Override
     public boolean onGenericMotionEvent(MotionEvent event) {
         return mContentViewCore.onGenericMotionEvent(event);
+    }
+
+    private EventForwarder getEventForwarder() {
+        if (mEventForwarder == null) {
+            mEventForwarder = mContentViewCore.getWebContents().getEventForwarder();
+        }
+        return mEventForwarder;
     }
 
     @Override
@@ -291,34 +298,14 @@ public class ContentView extends FrameLayout
     // Implements SmartClipProvider
     @Override
     public void extractSmartClipData(int x, int y, int width, int height) {
-        mContentViewCore.extractSmartClipData(x, y, width, height);
+        mContentViewCore.getWebContents().requestSmartClipExtract(
+                x, y, width, height, mContentViewCore.getRenderCoordinates());
     }
 
     // Implements SmartClipProvider
     @Override
     public void setSmartClipResultHandler(final Handler resultHandler) {
-        if (resultHandler == null) {
-            mContentViewCore.setSmartClipDataListener(null);
-            return;
-        }
-        mContentViewCore.setSmartClipDataListener(new ContentViewCore.SmartClipDataListener() {
-            @Override
-            public void onSmartClipDataExtracted(String text, String html, Rect clipRect) {
-                Bundle bundle = new Bundle();
-                bundle.putString("url", mContentViewCore.getWebContents().getVisibleUrl());
-                bundle.putString("title", mContentViewCore.getWebContents().getTitle());
-                bundle.putParcelable("rect", clipRect);
-                bundle.putString("text", text);
-                bundle.putString("html", html);
-                try {
-                    Message msg = Message.obtain(resultHandler, 0);
-                    msg.setData(bundle);
-                    msg.sendToTarget();
-                } catch (Exception e) {
-                    Log.e(TAG, "Error calling handler for smart clip data: ", e);
-                }
-            }
-        });
+        mContentViewCore.getWebContents().setSmartClipResultHandler(resultHandler);
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////

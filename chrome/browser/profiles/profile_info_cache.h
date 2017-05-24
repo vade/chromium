@@ -7,6 +7,7 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -18,6 +19,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/strings/string16.h"
+#include "base/values.h"
 #include "chrome/browser/profiles/profile_attributes_entry.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_info_cache_observer.h"
@@ -152,6 +154,9 @@ class ProfileInfoCache : public ProfileInfoInterface,
   void SetStatsBookmarksOfProfileAtIndex(size_t index, int value);
   void SetStatsSettingsOfProfileAtIndex(size_t index, int value);
 
+  // Notify IsSignedInRequired to all observer
+  void NotifyIsSigninRequiredChanged(const base::FilePath& profile_path);
+
   const base::FilePath& GetUserDataDir() const;
 
   // Register cache related preferences in Local State.
@@ -198,8 +203,9 @@ class ProfileInfoCache : public ProfileInfoInterface,
                            NothingToDownloadHighResAvatarTest);
 
   const base::DictionaryValue* GetInfoForProfileAtIndex(size_t index) const;
-  // Saves the profile info to a cache and takes ownership of |info|.
-  void SetInfoForProfileAtIndex(size_t index, base::DictionaryValue* info);
+  // Saves the profile info to a cache.
+  void SetInfoForProfileAtIndex(size_t index,
+                                std::unique_ptr<base::DictionaryValue> info);
   std::string CacheKeyFromProfilePath(const base::FilePath& profile_path) const;
   std::vector<std::string>::iterator FindPositionForProfile(
       const std::string& search_key,

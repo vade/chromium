@@ -27,7 +27,6 @@ const char kChromeUIBrowserCrashHost[] = "inducebrowsercrashforrealz";
 const char kChromeUIDinoHost[] = "dino";
 const char kChromeUIGpuHost[] = "gpu";
 const char kChromeUIHistogramHost[] = "histograms";
-const char kChromeUIHistoryHost[] = "history";
 const char kChromeUIMediaInternalsHost[] = "media-internals";
 const char kChromeUIMemoryExhaustHost[] = "memory-exhaust";
 const char kChromeUINetworkViewCacheHost[] = "view-http-cache";
@@ -36,10 +35,10 @@ const char kChromeUINetworkErrorsListingHost[] = "network-errors";
 const char kChromeUIResourcesHost[] = "resources";
 const char kChromeUIServiceWorkerInternalsHost[] = "serviceworker-internals";
 const char kChromeUITracingHost[] = "tracing";
-const char kChromeUIUberHost[] = "chrome";
 const char kChromeUIWebRTCInternalsHost[] = "webrtc-internals";
 
 const char kChromeUIBadCastCrashURL[] = "chrome://badcastcrash/";
+const char kChromeUICheckCrashURL[] = "chrome://checkcrash/";
 const char kChromeUIBrowserCrashURL[] = "chrome://inducebrowsercrashforrealz/";
 const char kChromeUIBrowserUIHang[] = "chrome://uithreadhang/";
 const char kChromeUICrashURL[] = "chrome://crash/";
@@ -55,6 +54,9 @@ const char kChromeUINetworkErrorURL[] = "chrome://network-error/";
 const char kChromeUINetworkErrorsListingURL[] = "chrome://network-errors/";
 const char kChromeUIPpapiFlashCrashURL[] = "chrome://ppapiflashcrash/";
 const char kChromeUIPpapiFlashHangURL[] = "chrome://ppapiflashhang/";
+#if defined(OS_ANDROID)
+const char kChromeUIGpuJavaCrashURL[] = "chrome://gpu-java-crash/";
+#endif
 
 // This error URL is loaded in normal web renderer processes, so it should not
 // have a chrome:// scheme that might let it be confused with a WebUI page.

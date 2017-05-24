@@ -4,23 +4,26 @@
 
 #include "ash/mus/top_level_window_factory.h"
 
-#include "ash/common/wm/container_finder.h"
-#include "ash/common/wm/window_state.h"
-#include "ash/common/wm_shell.h"
-#include "ash/common/wm_window.h"
 #include "ash/mus/disconnected_app_handler.h"
+#include "ash/mus/frame/detached_title_area_renderer.h"
 #include "ash/mus/non_client_frame_controller.h"
 #include "ash/mus/property_util.h"
 #include "ash/mus/window_manager.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/root_window_settings.h"
+#include "ash/shell.h"
+#include "ash/wm/container_finder.h"
+#include "ash/wm/window_state.h"
+#include "ash/wm_window.h"
 #include "mojo/public/cpp/bindings/type_converter.h"
 #include "services/ui/public/cpp/property_type_converters.h"
 #include "services/ui/public/interfaces/window_manager.mojom.h"
 #include "services/ui/public/interfaces/window_manager_constants.mojom.h"
+#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/mus/property_converter.h"
 #include "ui/aura/mus/property_utils.h"
+#include "ui/aura/mus/window_tree_client.h"
 #include "ui/aura/window.h"
 #include "ui/display/display.h"
 
@@ -39,6 +42,21 @@ bool IsFullscreen(aura::PropertyConverter* property_converter,
           ui::SHOW_STATE_FULLSCREEN);
 }
 
+bool ShouldRenderTitleArea(
+    aura::PropertyConverter* property_converter,
+    const std::map<std::string, std::vector<uint8_t>>& properties) {
+  auto iter = properties.find(
+      ui::mojom::WindowManager::kRenderParentTitleArea_Property);
+  if (iter == properties.end())
+    return false;
+
+  aura::PropertyConverter::PrimitiveType value = 0;
+  return property_converter->GetPropertyValueFromTransportValue(
+             ui::mojom::WindowManager::kRenderParentTitleArea_Property,
+             iter->second, &value) &&
+         value == 1;
+}
+
 // Returns the RootWindowController where new top levels are created.
 // |properties| is the properties supplied during window creation.
 RootWindowController* GetRootWindowControllerForNewTopLevelWindow(
@@ -54,8 +72,7 @@ RootWindowController* GetRootWindowControllerForNewTopLevelWindow(
       }
     }
   }
-  return RootWindowController::ForWindow(
-      WmShell::Get()->GetRootWindowForNewWindows()->aura_window());
+  return GetRootWindowController(Shell::GetRootWindowForNewWindows());
 }
 
 // Returns the bounds for the new window.
@@ -113,9 +130,8 @@ aura::Window* CreateAndParentTopLevelWindowInRoot(
   aura::Window* context = nullptr;
   aura::Window* container_window = nullptr;
   if (GetInitialContainerId(*properties, &container_id)) {
-    container_window = root_window_controller->GetWindow()
-                           ->GetChildByShellWindowId(container_id)
-                           ->aura_window();
+    container_window =
+        root_window_controller->GetRootWindow()->GetChildById(container_id);
   } else {
     context = root_window_controller->GetRootWindow();
   }
@@ -134,16 +150,28 @@ aura::Window* CreateAndParentTopLevelWindowInRoot(
     return non_client_frame_controller->window();
   }
 
-  aura::Window* window = new aura::Window(nullptr);
-  aura::SetWindowType(window, window_type);
-  // Apply properties before Init(), that way they are sent to the server at
-  // the time the window is created.
   aura::PropertyConverter* property_converter =
       window_manager->property_converter();
-  for (auto& property_pair : *properties) {
-    property_converter->SetPropertyFromTransportValue(
-        window, property_pair.first, &property_pair.second);
+
+  if (window_type == ui::mojom::WindowType::POPUP &&
+      ShouldRenderTitleArea(property_converter, *properties)) {
+    // Pick a parent so display information is obtained. Will pick the real one
+    // once transient parent found.
+    aura::Window* unparented_control_container =
+        root_window_controller->GetRootWindow()->GetChildById(
+            kShellWindowId_UnparentedControlContainer);
+    // DetachedTitleAreaRendererForClient is owned by the client.
+    DetachedTitleAreaRendererForClient* renderer =
+        new DetachedTitleAreaRendererForClient(unparented_control_container,
+                                               properties, window_manager);
+    return renderer->widget()->GetNativeView();
   }
+
+  aura::Window* window = new aura::Window(nullptr);
+  aura::SetWindowType(window, window_type);
+  window->SetProperty(aura::client::kEmbedType,
+                      aura::client::WindowEmbedType::TOP_LEVEL_IN_WM);
+  ApplyProperties(window, property_converter, *properties);
   window->Init(ui::LAYER_TEXTURED);
   window->SetBounds(bounds);
 
@@ -158,10 +186,7 @@ aura::Window* CreateAndParentTopLevelWindowInRoot(
                   .bounds()
                   .OffsetFromOrigin();
     gfx::Rect bounds_in_screen(origin, bounds.size());
-    ash::wm::GetDefaultParent(WmWindow::Get(context), WmWindow::Get(window),
-                              bounds_in_screen)
-        ->aura_window()
-        ->AddChild(window);
+    ash::wm::GetDefaultParent(window, bounds_in_screen)->AddChild(window);
   }
   return window;
 }
@@ -177,14 +202,28 @@ aura::Window* CreateAndParentTopLevelWindow(
   aura::Window* window = CreateAndParentTopLevelWindowInRoot(
       window_manager, root_window_controller, window_type, properties);
   DisconnectedAppHandler::Create(window);
-  if (properties->count(
-          ui::mojom::WindowManager::kWindowIgnoredByShelf_Property)) {
+
+  auto ignored_by_shelf_iter = properties->find(
+      ui::mojom::WindowManager::kWindowIgnoredByShelf_InitProperty);
+  if (ignored_by_shelf_iter != properties->end()) {
     wm::WindowState* window_state = WmWindow::Get(window)->GetWindowState();
-    window_state->set_ignored_by_shelf(mojo::ConvertTo<bool>(
-        (*properties)
-            [ui::mojom::WindowManager::kWindowIgnoredByShelf_Property]));
+    window_state->set_ignored_by_shelf(
+        mojo::ConvertTo<bool>(ignored_by_shelf_iter->second));
     // No need to persist this value.
-    properties->erase(ui::mojom::WindowManager::kWindowIgnoredByShelf_Property);
+    properties->erase(ignored_by_shelf_iter);
+  }
+
+  auto focusable_iter =
+      properties->find(ui::mojom::WindowManager::kFocusable_InitProperty);
+  if (focusable_iter != properties->end()) {
+    bool can_focus = mojo::ConvertTo<bool>(focusable_iter->second);
+    window_manager->window_tree_client()->SetCanFocus(window, can_focus);
+    NonClientFrameController* non_client_frame_controller =
+        NonClientFrameController::Get(window);
+    if (non_client_frame_controller)
+      non_client_frame_controller->set_can_activate(can_focus);
+    // No need to persist this value.
+    properties->erase(focusable_iter);
   }
   return window;
 }

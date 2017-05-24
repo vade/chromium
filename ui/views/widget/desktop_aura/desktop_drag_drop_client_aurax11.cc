@@ -24,6 +24,7 @@
 #include "ui/base/dragdrop/drop_target_event.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/dragdrop/os_exchange_data_provider_aurax11.h"
+#include "ui/base/layout.h"
 #include "ui/base/x/selection_utils.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/base/x/x11_window_event_manager.h"
@@ -679,19 +680,19 @@ void DesktopDragDropClientAuraX11::OnXdndStatus(
     return;
   }
 
-  int cursor_type = ui::kCursorNull;
+  ui::CursorType cursor_type = ui::CursorType::kNull;
   switch (negotiated_operation_) {
     case ui::DragDropTypes::DRAG_NONE:
-      cursor_type = ui::kCursorDndNone;
+      cursor_type = ui::CursorType::kDndNone;
       break;
     case ui::DragDropTypes::DRAG_MOVE:
-      cursor_type = ui::kCursorDndMove;
+      cursor_type = ui::CursorType::kDndMove;
       break;
     case ui::DragDropTypes::DRAG_COPY:
-      cursor_type = ui::kCursorDndCopy;
+      cursor_type = ui::CursorType::kDndCopy;
       break;
     case ui::DragDropTypes::DRAG_LINK:
-      cursor_type = ui::kCursorDndLink;
+      cursor_type = ui::CursorType::kDndLink;
       break;
   }
   move_loop_->UpdateCursor(cursor_manager_->GetInitializedCursor(cursor_type));
@@ -848,9 +849,8 @@ int DesktopDragDropClientAuraX11::StartDragAndDrop(
   // Windows has a specific method, DoDragDrop(), which performs the entire
   // drag. We have to emulate this, so we spin off a nested runloop which will
   // track all cursor movement and reroute events to a specific handler.
-  move_loop_->RunMoveLoop(
-      source_window,
-      cursor_manager_->GetInitializedCursor(ui::kCursorGrabbing));
+  move_loop_->RunMoveLoop(source_window, cursor_manager_->GetInitializedCursor(
+                                             ui::CursorType::kGrabbing));
 
   if (alive) {
     if (negotiated_operation_ == ui::DragDropTypes::DRAG_NONE) {
@@ -893,11 +893,10 @@ void DesktopDragDropClientAuraX11::OnMouseMovement(
     int flags,
     base::TimeTicks event_time) {
   if (drag_widget_.get()) {
-    display::Display display =
-        display::Screen::GetScreen()->GetDisplayNearestWindow(
-            drag_widget_->GetNativeWindow());
-    gfx::Point scaled_point = gfx::ScaleToRoundedPoint(
-        screen_point, 1.f / display.device_scale_factor());
+    float scale_factor =
+        ui::GetScaleFactorForNativeView(drag_widget_->GetNativeWindow());
+    gfx::Point scaled_point =
+        gfx::ScaleToRoundedPoint(screen_point, 1.f / scale_factor);
     drag_widget_->SetBounds(
         gfx::Rect(scaled_point - drag_widget_offset_, drag_image_size_));
     drag_widget_->StackAtTop();
@@ -1319,7 +1318,10 @@ void DesktopDragDropClientAuraX11::CreateDragWidget(
     const gfx::ImageSkia& image) {
   Widget* widget = new Widget;
   Widget::InitParams params(Widget::InitParams::TYPE_DRAG);
-  params.opacity = Widget::InitParams::TRANSLUCENT_WINDOW;
+  if (ui::IsCompositingManagerPresent())
+    params.opacity = Widget::InitParams::TRANSLUCENT_WINDOW;
+  else
+    params.opacity = Widget::InitParams::OPAQUE_WINDOW;
   params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.accept_events = false;
 
@@ -1329,7 +1331,8 @@ void DesktopDragDropClientAuraX11::CreateDragWidget(
   widget->set_focus_on_creation(false);
   widget->set_frame_type(Widget::FRAME_TYPE_FORCE_NATIVE);
   widget->Init(params);
-  widget->SetOpacity(kDragWidgetOpacity);
+  if (params.opacity == Widget::InitParams::TRANSLUCENT_WINDOW)
+    widget->SetOpacity(kDragWidgetOpacity);
   widget->GetNativeWindow()->SetName("DragWindow");
 
   drag_image_size_ = image.size();
@@ -1352,7 +1355,6 @@ bool DesktopDragDropClientAuraX11::IsValidDragImage(
   // don't make another context if the window would just be displaying a mostly
   // transparent image.
   const SkBitmap* in_bitmap = image.bitmap();
-  SkAutoLockPixels in_lock(*in_bitmap);
   for (int y = 0; y < in_bitmap->height(); ++y) {
     uint32_t* in_row = in_bitmap->getAddr32(0, y);
 

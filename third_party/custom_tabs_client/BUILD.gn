@@ -43,6 +43,8 @@ android_library("custom_tabs_client_shared_java") {
 
 android_library("custom_tabs_support_java") {
   java_files = [
+    "src/customtabs/src/android/support/customtabs/browseractions/BrowserActionsIntent.java",
+    "src/customtabs/src/android/support/customtabs/browseractions/BrowserActionItem.java",
     "src/customtabs/src/android/support/customtabs/CustomTabsCallback.java",
     "src/customtabs/src/android/support/customtabs/CustomTabsClient.java",
     "src/customtabs/src/android/support/customtabs/CustomTabsIntent.java",
@@ -50,6 +52,8 @@ android_library("custom_tabs_support_java") {
     "src/customtabs/src/android/support/customtabs/CustomTabsServiceConnection.java",
     "src/customtabs/src/android/support/customtabs/CustomTabsSession.java",
     "src/customtabs/src/android/support/customtabs/CustomTabsSessionToken.java",
+    "src/customtabs/src/android/support/customtabs/PostMessageService.java",
+    "src/customtabs/src/android/support/customtabs/PostMessageServiceConnection.java",
   ]
   deps = [
     "//third_party/android_tools:android_support_annotations_java",
@@ -67,5 +71,6 @@ android_aidl("chrome_custom_tabs_service_aidl") {
   sources = [
     "$java_in_dir/ICustomTabsCallback.aidl",
     "$java_in_dir/ICustomTabsService.aidl",
+    "$java_in_dir/IPostMessageService.aidl",
   ]
 }

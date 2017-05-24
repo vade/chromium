@@ -24,7 +24,7 @@
 #if defined(USE_OZONE)
 #include <GLES2/gl2extchromium.h>
 #include "components/exo/buffer.h"
-#include "gpu/ipc/client/gpu_memory_buffer_impl_ozone_native_pixmap.h"
+#include "gpu/ipc/client/gpu_memory_buffer_impl_native_pixmap.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
 #include "ui/ozone/public/ozone_switches.h"
@@ -45,7 +45,7 @@ const gfx::BufferFormat kOverlayFormats[] = {
 
 const gfx::BufferFormat kOverlayFormatsForDrmAtomic[] = {
     gfx::BufferFormat::RGBX_8888, gfx::BufferFormat::RGBA_8888,
-    gfx::BufferFormat::BGR_565};
+    gfx::BufferFormat::BGR_565, gfx::BufferFormat::YUV_420_BIPLANAR};
 #endif
 
 }  // namespace
@@ -101,7 +101,7 @@ std::unique_ptr<Buffer> Display::CreateLinuxDMABufBuffer(
                size.ToString());
 
   gfx::GpuMemoryBufferHandle handle;
-  handle.type = gfx::OZONE_NATIVE_PIXMAP;
+  handle.type = gfx::NATIVE_PIXMAP;
   for (auto& fd : fds)
     handle.native_pixmap_handle.fds.emplace_back(std::move(fd));
 
@@ -109,7 +109,7 @@ std::unique_ptr<Buffer> Display::CreateLinuxDMABufBuffer(
     handle.native_pixmap_handle.planes.push_back(plane);
 
   std::unique_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer =
-      gpu::GpuMemoryBufferImplOzoneNativePixmap::CreateFromHandle(
+      gpu::GpuMemoryBufferImplNativePixmap::CreateFromHandle(
           handle, size, format, gfx::BufferUsage::GPU_READ,
           gpu::GpuMemoryBufferImpl::DestructionCallback());
   if (!gpu_memory_buffer) {
@@ -141,8 +141,9 @@ std::unique_ptr<ShellSurface> Display::CreateShellSurface(Surface* surface) {
   }
 
   return base::MakeUnique<ShellSurface>(
-      surface, nullptr, gfx::Rect(), true /* activatable */,
-      false /* can_minimize */, ash::kShellWindowId_DefaultContainer);
+      surface, nullptr, ShellSurface::BoundsMode::SHELL, gfx::Point(),
+      true /* activatable */, false /* can_minimize */,
+      ash::kShellWindowId_DefaultContainer);
 }
 
 std::unique_ptr<ShellSurface> Display::CreatePopupShellSurface(
@@ -162,18 +163,18 @@ std::unique_ptr<ShellSurface> Display::CreatePopupShellSurface(
     return nullptr;
   }
 
-  // Determine the initial bounds for popup. |position| is relative to the
-  // parent's main surface origin and initial bounds are in screen coordinates.
+  // |position| is relative to the parent's main surface origin, and |origin| is
+  // in screen coordinates.
   gfx::Point origin = position;
   wm::ConvertPointToScreen(
       ShellSurface::GetMainSurface(parent->GetWidget()->GetNativeWindow())
           ->window(),
       &origin);
-  gfx::Rect initial_bounds(origin, gfx::Size(1, 1));
 
   return base::MakeUnique<ShellSurface>(
-      surface, parent, initial_bounds, false /* activatable */,
-      false /* can_minimize */, ash::kShellWindowId_DefaultContainer);
+      surface, parent, ShellSurface::BoundsMode::FIXED, origin,
+      false /* activatable */, false /* can_minimize */,
+      ash::kShellWindowId_DefaultContainer);
 }
 
 std::unique_ptr<ShellSurface> Display::CreateRemoteShellSurface(
@@ -190,9 +191,9 @@ std::unique_ptr<ShellSurface> Display::CreateRemoteShellSurface(
   // Remote shell surfaces in system modal container cannot be minimized.
   bool can_minimize = container != ash::kShellWindowId_SystemModalContainer;
 
-  return base::MakeUnique<ShellSurface>(surface, nullptr, gfx::Rect(1, 1),
-                                        true /* activatable */, can_minimize,
-                                        container);
+  return base::MakeUnique<ShellSurface>(
+      surface, nullptr, ShellSurface::BoundsMode::CLIENT, gfx::Point(),
+      true /* activatable */, can_minimize, container);
 }
 
 std::unique_ptr<SubSurface> Display::CreateSubSurface(Surface* surface,

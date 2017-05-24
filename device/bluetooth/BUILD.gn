@@ -23,6 +23,7 @@ config("bluetooth_config") {
 source_set("mojo") {
   sources = [
     "//device/bluetooth/public/interfaces/connect_result_type_converter.h",
+    "//device/bluetooth/public/interfaces/gatt_result_type_converter.h",
     "adapter.cc",
     "adapter.h",
     "adapter_factory.cc",
@@ -36,6 +37,23 @@ source_set("mojo") {
   public_deps = [
     ":bluetooth",
     "//device/bluetooth/public/interfaces:experimental_interfaces",
+    "//mojo/public/cpp/bindings",
+  ]
+}
+
+source_set("fake_bluetooth") {
+  sources = [
+    "test/fake_bluetooth.cc",
+    "test/fake_bluetooth.h",
+    "test/fake_central.cc",
+    "test/fake_central.h",
+    "test/fake_peripheral.cc",
+    "test/fake_peripheral.h",
+  ]
+
+  deps = [
+    ":bluetooth",
+    "//device/bluetooth/public/interfaces:fake_bluetooth_interfaces",
     "//mojo/public/cpp/bindings",
   ]
 }
@@ -82,6 +100,7 @@ component("bluetooth") {
     "bluetooth_discovery_session.cc",
     "bluetooth_discovery_session.h",
     "bluetooth_discovery_session_outcome.h",
+    "bluetooth_export.h",
     "bluetooth_gatt_characteristic.cc",
     "bluetooth_gatt_characteristic.h",
     "bluetooth_gatt_connection.cc",
@@ -166,6 +185,7 @@ component("bluetooth") {
 
   deps = [
     "//base",
+    "//components/device_event_log",
     "//crypto",
     "//device/bluetooth/strings",
     "//device/bluetooth/uribeacon",

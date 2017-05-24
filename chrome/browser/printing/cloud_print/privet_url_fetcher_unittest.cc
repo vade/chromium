@@ -7,9 +7,11 @@
 #include <memory>
 
 #include "base/location.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -96,10 +98,8 @@ class PrivetURLFetcherTest : public ::testing::Test {
     request_context_ = new net::TestURLRequestContextGetter(
         base::ThreadTaskRunnerHandle::Get());
     privet_urlfetcher_.reset(new PrivetURLFetcher(
-        GURL(kSamplePrivetURL),
-        net::URLFetcher::POST,
-        request_context_.get(),
-        &delegate_));
+        GURL(kSamplePrivetURL), net::URLFetcher::POST, request_context_.get(),
+        TRAFFIC_ANNOTATION_FOR_TESTS, &delegate_));
 
     PrivetURLFetcher::SetTokenForHost(GURL(kSamplePrivetURL).GetOrigin().spec(),
                                       kSamplePrivetToken);

@@ -153,9 +153,8 @@ ContentSettingsContentSettingGetFunction::Run() {
 
   ContentSetting setting;
   if (content_type == CONTENT_SETTINGS_TYPE_COOKIES) {
-    // TODO(jochen): Do we return the value for setting or for reading cookies?
     cookie_settings->GetCookieSetting(primary_url, secondary_url, nullptr,
-                                      nullptr /* reading_setting */, &setting);
+                                      &setting);
   } else {
     setting = map->GetContentSetting(primary_url, secondary_url, content_type,
                                      resource_identifier);
@@ -217,8 +216,9 @@ ContentSettingsContentSettingSetFunction::Run() {
   // [ask, block] for the default setting.
   if (primary_pattern == ContentSettingsPattern::Wildcard() &&
       secondary_pattern == ContentSettingsPattern::Wildcard() &&
-      !HostContentSettingsMap::IsDefaultSettingAllowedForType(setting,
-                                                              content_type)) {
+      !content_settings::ContentSettingsRegistry::GetInstance()
+           ->Get(content_type)
+           ->IsDefaultSettingValid(setting)) {
     static const char kUnsupportedDefaultSettingError[] =
         "'%s' is not supported as the default setting of %s.";
 
@@ -308,11 +308,11 @@ void ContentSettingsContentSettingGetResourceIdentifiersFunction::OnGotPlugins(
   }
   SetResult(std::move(list));
   BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE, base::Bind(
+      BrowserThread::UI, FROM_HERE,
+      base::BindOnce(
           &ContentSettingsContentSettingGetResourceIdentifiersFunction::
-          SendResponse,
-          this,
-          true));
+              SendResponse,
+          this, true));
 }
 
 }  // namespace extensions

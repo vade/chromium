@@ -63,16 +63,22 @@ _NEGATIVE_FILTER = [
     'ChromeDriverAndroidTest.testMultipleScreenOrientationChanges',
     'ChromeDriverAndroidTest.testDeleteScreenOrientationManual',
     'ChromeDriverAndroidTest.testScreenOrientationAcrossMultipleTabs',
-]
-
-_VERSION_SPECIFIC_FILTER = {}
-_VERSION_SPECIFIC_FILTER['HEAD'] = [
-    # https://code.google.com/p/chromedriver/issues/detail?id=992
-    'ChromeDownloadDirTest.testDownloadDirectoryOverridesExistingPreferences',
     # https://bugs.chromium.org/p/chromedriver/issues/detail?id=1503
     'ChromeDriverTest.testShadowDomHover',
     'ChromeDriverTest.testMouseMoveTo',
     'ChromeDriverTest.testHoverOverElement',
+    # https://bugs.chromium.org/p/chromedriver/issues/detail?id=833
+    'ChromeDriverTest.testAlertOnNewWindow',
+]
+
+_VERSION_SPECIFIC_FILTER = {}
+_VERSION_SPECIFIC_FILTER['HEAD'] = [
+]
+_VERSION_SPECIFIC_FILTER['58'] = [
+    # https://bugs.chromium.org/p/chromedriver/issues/detail?id=1673
+    'ChromeDriverPageLoadTimeoutTest.testPageLoadTimeoutCrossDomain',
+]
+_VERSION_SPECIFIC_FILTER['57'] = [
     # https://bugs.chromium.org/p/chromedriver/issues/detail?id=1625
     'ChromeDriverTest.testWindowMaximize',
     'ChromeDriverTest.testWindowPosition',
@@ -81,23 +87,13 @@ _VERSION_SPECIFIC_FILTER['HEAD'] = [
     'ChromeExtensionsCapabilityTest.testCanLaunchApp',
     'MobileEmulationCapabilityTest.testDeviceMetricsWithStandardWidth',
 ]
-_VERSION_SPECIFIC_FILTER['55'] = [
-    # https://bugs.chromium.org/p/chromedriver/issues/detail?id=1503
-    'ChromeDriverTest.testShadowDomHover',
-    'ChromeDriverTest.testMouseMoveTo',
-    'ChromeDriverTest.testHoverOverElement',
-]
-_VERSION_SPECIFIC_FILTER['56'] = [
-    # https://bugs.chromium.org/p/chromedriver/issues/detail?id=1503
-    'ChromeDriverTest.testShadowDomHover',
-    'ChromeDriverTest.testMouseMoveTo',
-    'ChromeDriverTest.testHoverOverElement',
-]
 
 _OS_SPECIFIC_FILTER = {}
 _OS_SPECIFIC_FILTER['win'] = [
-    # https://code.google.com/p/chromedriver/issues/detail?id=299
+    # https://bugs.chromium.org/p/chromedriver/issues/detail?id=299
     'ChromeLogPathCapabilityTest.testChromeLogPath',
+    # https://bugs.chromium.org/p/chromedriver/issues/detail?id=992
+    'ChromeDownloadDirTest.testDownloadDirectoryOverridesExistingPreferences',
 ]
 _OS_SPECIFIC_FILTER['linux'] = [
     # Xvfb doesn't support maximization.
@@ -139,7 +135,7 @@ _ANDROID_NEGATIVE_FILTER['chrome'] = (
         'ChromeDownloadDirTest.*',
         # https://crbug.com/274650
         'ChromeDriverTest.testCloseWindow',
-        # https://code.google.com/p/chromedriver/issues/detail?id=298
+        # https://bugs.chromium.org/p/chromedriver/issues/detail?id=298
         'ChromeDriverTest.testWindowPosition',
         'ChromeDriverTest.testWindowSize',
         'ChromeDriverTest.testWindowMaximize',
@@ -153,7 +149,7 @@ _ANDROID_NEGATIVE_FILTER['chrome'] = (
         'SessionHandlingTest.testGetSessions',
         # Android doesn't use the chrome://print dialog.
         'ChromeDriverTest.testCanSwitchToPrintPreviewDialog',
-        # https://code.google.com/p/chromedriver/issues/detail?id=1175
+        # https://bugs.chromium.org/p/chromedriver/issues/detail?id=1175
         'ChromeDriverTest.testChromeDriverSendLargeData',
         # Chrome 44+ for Android doesn't dispatch the dblclick event
         'ChromeDriverTest.testMouseDoubleClick',
@@ -179,7 +175,7 @@ _ANDROID_NEGATIVE_FILTER['chromium'] = (
 )
 _ANDROID_NEGATIVE_FILTER['chromedriver_webview_shell'] = (
     _ANDROID_NEGATIVE_FILTER['chrome'] + [
-        'PerformanceLoggerTest.testPerformanceLogger',
+        'ChromeLoggingCapabilityTest.testPerformanceLogger',
         'ChromeDriverTest.testShadowDom*',
         # WebView doesn't support emulating network conditions.
         'ChromeDriverTest.testEmulateNetworkConditions',
@@ -215,7 +211,12 @@ _ANDROID_NEGATIVE_FILTER['chromedriver_webview_shell'] = (
             'testHistoryNavigationWithPageLoadTimeout',
         # Webview shell doesn't support Alerts.
         'ChromeDriverTest.testAlert',
+        'ChromeDriverTest.testAlertOnNewWindow',
         'ChromeDesiredCapabilityTest.testUnexpectedAlertBehaviour',
+        'ChromeDriverTest.testAlertHandlingOnPageUnload',
+        'ChromeDriverTest.testClickElementAfterNavigation',
+        'ChromeDriverTest.testGetLogOnWindowWithAlert',
+        'ChromeDriverTest.testUnexpectedAlertOpenExceptionMessage',
     ]
 )
 
@@ -673,6 +674,15 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self.assertEquals(self.GetHttpUrlForFile('/chromedriver/link_nav.html'),
                       self._driver.GetCurrentUrl())
 
+  def testAlertHandlingOnPageUnload(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    self._driver.ExecuteScript('window.onbeforeunload=function(){return true}')
+    self._driver.FindElement('tag name', 'body').Click()
+    self._driver.GoBack()
+    self.assertTrue(self._driver.IsAlertOpen())
+    self._driver.HandleAlert(True)
+    self.assertFalse(self._driver.IsAlertOpen())
+
   def testRefresh(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
     self._driver.Refresh()
@@ -782,6 +792,18 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self.assertEquals(False,
                       self._driver.ExecuteScript('return window.confirmed'))
 
+  def testAlertOnNewWindow(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    old_windows = self._driver.GetWindowHandles()
+    self._driver.ExecuteScript("window.open('%s')" %
+        self.GetHttpUrlForFile('/chromedriver/alert_onload.html'))
+    new_window = self.WaitForNewWindow(self._driver, old_windows)
+    self.assertNotEqual(None, new_window)
+    self._driver.SwitchToWindow(new_window)
+    self.assertTrue(self._driver.IsAlertOpen())
+    self._driver.HandleAlert(False)
+    self.assertFalse(self._driver.IsAlertOpen())
+
   def testShouldHandleNewWindowLoadingProperly(self):
     """Tests that ChromeDriver determines loading correctly for new windows."""
     self._http_server.SetDataForPath(
@@ -824,7 +846,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self.assertEquals(position, self._driver.GetWindowPosition())
 
     # Resize so the window isn't moved offscreen.
-    # See https://code.google.com/p/chromedriver/issues/detail?id=297.
+    # See https://bugs.chromium.org/p/chromedriver/issues/detail?id=297.
     self._driver.SetWindowSize(300, 300)
 
     self._driver.SetWindowPosition(100, 200)
@@ -840,13 +862,13 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
 
   def testWindowMaximize(self):
     self._driver.SetWindowPosition(100, 200)
-    self._driver.SetWindowSize(600, 400)
+    self._driver.SetWindowSize(500, 300)
     self._driver.MaximizeWindow()
 
     self.assertNotEqual([100, 200], self._driver.GetWindowPosition())
-    self.assertNotEqual([600, 400], self._driver.GetWindowSize())
+    self.assertNotEqual([500, 300], self._driver.GetWindowSize())
     # Set size first so that the window isn't moved offscreen.
-    # See https://code.google.com/p/chromedriver/issues/detail?id=297.
+    # See https://bugs.chromium.org/p/chromedriver/issues/detail?id=297.
     self._driver.SetWindowSize(600, 400)
     self._driver.SetWindowPosition(100, 200)
     self.assertEquals([100, 200], self._driver.GetWindowPosition())
@@ -931,7 +953,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
   def testTabCrash(self):
     # If a tab is crashed, the session will be deleted.
     # When 31 is released, will reload the tab instead.
-    # https://code.google.com/p/chromedriver/issues/detail?id=547
+    # https://bugs.chromium.org/p/chromedriver/issues/detail?id=547
     self.assertRaises(chromedriver.UnknownError,
                       self._driver.Load, 'chrome://crash')
     self.assertRaises(chromedriver.NoSuchSession,
@@ -1040,6 +1062,25 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     # we have to explicitly wait for this to change. We can't rely on the
     # navigation tracker to block the call to Load() above.
     self.WaitForCondition(lambda: 'is not available' in self._driver.GetTitle())
+
+  def testSendCommand(self):
+    """Sends a custom command to the DevTools debugger"""
+    params = {}
+    res = self._driver.SendCommandAndGetResult('CSS.enable', params)
+    self.assertEqual({}, res)
+
+  def testSendCommandNoParams(self):
+    """Sends a custom command to the DevTools debugger without params"""
+    self.assertRaisesRegexp(
+            chromedriver.UnknownError, "params not passed",
+            self._driver.SendCommandAndGetResult, 'CSS.enable', None)
+
+  def testSendCommandAndGetResult(self):
+    """Sends a custom command to the DevTools debugger and gets the result"""
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/page_test.html'))
+    params = {}
+    document = self._driver.SendCommandAndGetResult('DOM.getDocument', params)
+    self.assertTrue('root' in document)
 
   def testShadowDomFindElementWithSlashDeep(self):
     """Checks that chromedriver can find elements in a shadow DOM using /deep/
@@ -1173,7 +1214,7 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self.assertEquals(0, self._driver.ExecuteScript(scroll_top))
     target = self._driver.FindElement('id', 'target')
     self._driver.TouchScroll(target, 47, 53)
-    # https://code.google.com/p/chromedriver/issues/detail?id=1179
+    # https://bugs.chromium.org/p/chromedriver/issues/detail?id=1179
     self.assertAlmostEqual(47, self._driver.ExecuteScript(scroll_left), delta=1)
     self.assertAlmostEqual(53, self._driver.ExecuteScript(scroll_top), delta=1)
 
@@ -1384,6 +1425,13 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
         'document.body.appendChild(document.createElement("a"));')
     self._driver.ExecuteScript('window.Element = {}')
     self.assertEquals(1, len(self._driver.FindElements('tag name', 'a')))
+
+  def testExecuteScriptWhenObjectPrototypeIsModified(self):
+    # Some JavaScript libraries (e.g. MooTools) do things like this. For context
+    # see https://bugs.chromium.org/p/chromedriver/issues/detail?id=1521
+    self._driver.Load('about:blank')
+    self._driver.ExecuteScript('Object.prototype.$family = undefined;')
+    self.assertEquals(1, self._driver.ExecuteScript('return 1;'))
 
 
 class ChromeDriverPageLoadTimeoutTest(ChromeDriverBaseTestWithWebServer):
@@ -1806,6 +1854,13 @@ class ChromeExtensionsCapabilityTest(ChromeDriverBaseTest):
     driver.SwitchToFrame('iframe')
     self.assertEqual('two', driver.ExecuteScript("return window['iframe_var']"))
 
+  def testDontUseAutomationExtension(self):
+    driver = self.CreateDriver(
+        experimental_options={'useAutomationExtension': False})
+    driver.Load('chrome:version')
+    command_line = driver.FindElement('id', 'command_line').GetText()
+    self.assertNotIn('load-extension', command_line)
+
 
 class ChromeLogPathCapabilityTest(ChromeDriverBaseTest):
   """Tests that chromedriver properly processes chromeOptions.logPath."""
@@ -2120,20 +2175,21 @@ class MobileEmulationCapabilityTest(ChromeDriverBaseTest):
     self.assertEquals(network, connection_type)
 
   def testW3cCompliantResponses(self):
-    # Asserts that chromedriver has received the correct response.
-    # W3C compliant responses should only be received when the capability has
-    # been set and the request was sent in the correct format.
-    driver = self.CreateDriver(send_w3c_request=True)
-    self.assertFalse(driver.w3c_compliant)
+    # It's an error to send W3C format request without W3C capability flag.
+    with self.assertRaises(chromedriver.SessionNotCreatedException):
+      self.CreateDriver(send_w3c_request=True)
 
+    # W3C capability flag is ignored in a legacy format request.
     driver = self.CreateDriver(send_w3c_capability=True)
     self.assertFalse(driver.w3c_compliant)
 
+    # W3C compliant responses should only be received when the capability has
+    # been set and the request was sent in the correct format.
     driver = self.CreateDriver(send_w3c_capability=True, send_w3c_request=True)
     self.assertTrue(driver.w3c_compliant)
 
     # Asserts that errors are being raised correctly in the test client
-    # with a w3c compliant driver.
+    # with a W3C compliant driver.
     self.assertRaises(chromedriver.UnknownError,
                       driver.GetNetworkConnection)
 
@@ -2181,13 +2237,13 @@ class ChromeDriverLogTest(ChromeDriverBaseTest):
       self.assertNotIn('bosco', f.read())
 
 
-class PerformanceLoggerTest(ChromeDriverBaseTest):
+class ChromeLoggingCapabilityTest(ChromeDriverBaseTest):
   """Tests chromedriver tracing support and Inspector event collection."""
 
   def testPerformanceLogger(self):
     driver = self.CreateDriver(
         experimental_options={'perfLoggingPrefs': {
-            'traceCategories': 'webkit.console,blink.console'
+            'traceCategories': 'blink.console'
           }}, logging_prefs={'performance':'ALL'})
     driver.Load(
         ChromeDriverTest._http_server.GetUrl() + '/chromedriver/empty.html')
@@ -2209,15 +2265,25 @@ class PerformanceLoggerTest(ChromeDriverBaseTest):
       self.assertTrue('params' in devtools_message)
       self.assertTrue(isinstance(devtools_message['params'], dict))
       cat = devtools_message['params'].get('cat', '')
-      # Depending on Chrome version, the events may occur for the webkit.console
-      # or blink.console category. They will only occur for one of them.
-      if (cat == 'blink.console' or cat == 'webkit.console'):
+      if cat == 'blink.console':
         self.assertTrue(devtools_message['params']['name'] == 'foobar')
         marked_timeline_events.append(devtools_message)
     self.assertEquals(2, len(marked_timeline_events))
     self.assertEquals({'Network', 'Page', 'Tracing'},
                       set(seen_log_domains.keys()))
 
+  def testDevToolsEventsLogger(self):
+    """Tests that the correct event type (and no other) is logged"""
+    event = 'Page.loadEventFired'
+    driver = self.CreateDriver(
+        devtools_events_to_log=[event], logging_prefs={'devtools':'ALL'})
+    driver.Load('about:blank')
+    logs = driver.GetLog('devtools')
+    for entry in logs:
+      devtools_message = json.loads(entry['message'])
+      method = devtools_message['method']
+      self.assertTrue('params' in devtools_message)
+      self.assertEquals(event, method)
 
 class SessionHandlingTest(ChromeDriverBaseTest):
   """Tests for session operations."""
@@ -2253,6 +2319,8 @@ class RemoteBrowserTest(ChromeDriverBaseTest):
     if util.IsLinux() and not util.Is64Bit():
       # Workaround for crbug.com/611886.
       cmd.append('--no-sandbox')
+      # https://bugs.chromium.org/p/chromedriver/issues/detail?id=1695
+      cmd.append('--disable-gpu')
     process = subprocess.Popen(cmd)
     if process is None:
       raise RuntimeError('Chrome could not be started with debugging port')

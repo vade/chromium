@@ -37,8 +37,8 @@ const char kJsScreenPath[] = "login.SupervisedUserCreationScreen";
 namespace chromeos {
 
 SupervisedUserCreationScreenHandler::SupervisedUserCreationScreenHandler()
-    : BaseScreenHandler(kJsScreenPath),
-      delegate_(NULL) {
+    : BaseScreenHandler(OobeScreen::SCREEN_CREATE_SUPERVISED_USER_FLOW) {
+  set_call_js_prefix(kJsScreenPath);
   ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
   media::SoundsManager* manager = media::SoundsManager::Get();
   manager->Initialize(SOUND_OBJECT_DELETE,
@@ -49,7 +49,7 @@ SupervisedUserCreationScreenHandler::SupervisedUserCreationScreenHandler()
 
 SupervisedUserCreationScreenHandler::~SupervisedUserCreationScreenHandler() {
   if (delegate_) {
-    delegate_->OnActorDestroyed(this);
+    delegate_->OnViewDestroyed(this);
   }
 }
 
@@ -239,7 +239,7 @@ void SupervisedUserCreationScreenHandler::Show() {
         user_dict.get());
     users_list->Append(std::move(user_dict));
   }
-  data->Set("managers", users_list.release());
+  data->Set("managers", std::move(users_list));
   ShowScreenWithData(OobeScreen::SCREEN_CREATE_SUPERVISED_USER_FLOW,
                      data.get());
 

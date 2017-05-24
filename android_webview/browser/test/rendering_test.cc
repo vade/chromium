@@ -13,6 +13,7 @@
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "cc/output/compositor_frame.h"
 #include "content/public/browser/android/synchronous_compositor.h"
@@ -118,6 +119,7 @@ content::SynchronousCompositor* RenderingTest::ActiveCompositor() const {
 std::unique_ptr<cc::CompositorFrame> RenderingTest::ConstructEmptyFrame() {
   std::unique_ptr<cc::CompositorFrame> compositor_frame(
       new cc::CompositorFrame);
+  compositor_frame->metadata.begin_frame_ack = cc::BeginFrameAck(0, 1, 1, true);
   std::unique_ptr<cc::RenderPass> root_pass(cc::RenderPass::Create());
   gfx::Rect viewport(browser_view_renderer_->size());
   root_pass->SetNew(1, viewport, viewport, gfx::Transform());

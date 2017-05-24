@@ -34,9 +34,11 @@ PointerProperties GetPointerPropertiesFromTouchEvent(const TouchEvent& touch) {
   pointer_properties.y = touch.y();
   pointer_properties.raw_x = touch.root_location_f().x();
   pointer_properties.raw_y = touch.root_location_f().y();
-  pointer_properties.id = touch.touch_id();
+  pointer_properties.id = touch.pointer_details().id;
   pointer_properties.pressure = touch.pointer_details().force;
   pointer_properties.source_device_id = touch.source_device_id();
+  pointer_properties.tilt_x = touch.pointer_details().tilt_x;
+  pointer_properties.tilt_y = touch.pointer_details().tilt_y;
 
   pointer_properties.SetAxesAndOrientation(touch.pointer_details().radius_x,
                                            touch.pointer_details().radius_y,
@@ -62,7 +64,7 @@ MotionEventAura::MotionEventAura() {}
 MotionEventAura::~MotionEventAura() {}
 
 bool MotionEventAura::OnTouch(const TouchEvent& touch) {
-  int index = FindPointerIndexOfId(touch.touch_id());
+  int index = FindPointerIndexOfId(touch.pointer_details().id);
   bool pointer_id_is_active = index != -1;
 
   if (touch.type() == ET_TOUCH_PRESSED && pointer_id_is_active) {
@@ -113,7 +115,7 @@ void MotionEventAura::CleanupRemovedTouchPoints(const TouchEvent& event) {
   }
 
   DCHECK(GetPointerCount());
-  int index_to_delete = GetIndexFromId(event.touch_id());
+  int index_to_delete = GetIndexFromId(event.pointer_details().id);
   set_action_index(-1);
   set_action(MotionEvent::ACTION_NONE);
   pointer(index_to_delete) = pointer(GetPointerCount() - 1);
@@ -134,7 +136,7 @@ bool MotionEventAura::AddTouch(const TouchEvent& touch) {
 }
 
 void MotionEventAura::UpdateTouch(const TouchEvent& touch) {
-  pointer(GetIndexFromId(touch.touch_id())) =
+  pointer(GetIndexFromId(touch.pointer_details().id)) =
       GetPointerPropertiesFromTouchEvent(touch);
 }
 
@@ -146,7 +148,7 @@ void MotionEventAura::UpdateCachedAction(const TouchEvent& touch) {
         set_action(ACTION_DOWN);
       } else {
         set_action(ACTION_POINTER_DOWN);
-        set_action_index(GetIndexFromId(touch.touch_id()));
+        set_action_index(GetIndexFromId(touch.pointer_details().id));
       }
       break;
     case ET_TOUCH_RELEASED:
@@ -154,7 +156,7 @@ void MotionEventAura::UpdateCachedAction(const TouchEvent& touch) {
         set_action(ACTION_UP);
       } else {
         set_action(ACTION_POINTER_UP);
-        set_action_index(GetIndexFromId(touch.touch_id()));
+        set_action_index(GetIndexFromId(touch.pointer_details().id));
       }
       break;
     case ET_TOUCH_CANCELLED:

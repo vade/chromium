@@ -21,11 +21,6 @@ namespace base {
 
 // TimeDelta ------------------------------------------------------------------
 
-// static
-TimeDelta TimeDelta::Max() {
-  return TimeDelta(std::numeric_limits<int64_t>::max());
-}
-
 int TimeDelta::InDays() const {
   if (is_max()) {
     // Preserve max to prevent overflow.
@@ -191,6 +186,10 @@ Time Time::FromJsTime(double ms_since_epoch) {
 }
 
 double Time::ToJsTime() const {
+  if (is_null()) {
+    // Preserve 0 so the invalid result doesn't depend on the platform.
+    return 0;
+  }
   if (is_max()) {
     // Preserve max without offset to prevent overflow.
     return std::numeric_limits<double>::infinity();

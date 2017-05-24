@@ -10,14 +10,17 @@
 #include "chrome/browser/extensions/api/chrome_device_permissions_prompt.h"
 #include "chrome/browser/extensions/chrome_extension_chooser_dialog.h"
 #include "chrome/browser/extensions/device_permissions_dialog_controller.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/views/device_chooser_content_view.h"
+#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/gfx/geometry/insets.h"
+#include "ui/views/background.h"
 #include "ui/views/controls/link.h"
 #include "ui/views/controls/styled_label.h"
-#include "ui/views/layout/layout_constants.h"
+#include "ui/views/layout/fill_layout.h"
 #include "ui/views/window/dialog_client_view.h"
 
 ChooserDialogView::ChooserDialogView(
@@ -40,6 +43,7 @@ ChooserDialogView::ChooserDialogView(
   DCHECK(chooser_controller);
   device_chooser_content_view_ =
       new DeviceChooserContentView(this, std::move(chooser_controller));
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::CHOOSER);
 }
 
 ChooserDialogView::~ChooserDialogView() {}
@@ -72,7 +76,10 @@ views::View* ChooserDialogView::CreateFootnoteView() {
 views::ClientView* ChooserDialogView::CreateClientView(views::Widget* widget) {
   views::DialogClientView* client =
       new views::DialogClientView(widget, GetContentsView());
-  client->set_button_row_insets(gfx::Insets());
+  ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
+  client->SetButtonRowInsets(gfx::Insets(
+      provider->GetDistanceMetric(DISTANCE_UNRELATED_CONTROL_VERTICAL), 0, 0,
+      0));
   return client;
 }
 
@@ -82,8 +89,8 @@ views::NonClientFrameView* ChooserDialogView::CreateNonClientFrameView(
   // always be true.
   DCHECK(ShouldUseCustomFrame());
   return views::DialogDelegate::CreateDialogFrameView(
-      widget, gfx::Insets(views::kPanelVertMargin, views::kPanelHorizMargin,
-                          views::kPanelVertMargin, views::kPanelHorizMargin));
+      widget, gfx::Insets(ChromeLayoutProvider::Get()->GetDistanceMetric(
+                  DISTANCE_PANEL_CONTENT_MARGIN)));
 }
 
 bool ChooserDialogView::Accept() {

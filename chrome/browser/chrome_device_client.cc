@@ -22,8 +22,6 @@ ChromeDeviceClient::~ChromeDeviceClient() {
 void ChromeDeviceClient::Shutdown() {
   if (usb_service_)
     usb_service_->Shutdown();
-  if (hid_service_)
-    hid_service_->Shutdown();
 #if DCHECK_IS_ON()
   did_shutdown_ = true;
 #endif
@@ -31,20 +29,16 @@ void ChromeDeviceClient::Shutdown() {
 
 device::UsbService* ChromeDeviceClient::GetUsbService() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if (!usb_service_) {
-    usb_service_ = device::UsbService::Create(
-        BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE));
-  }
+  if (!usb_service_)
+    usb_service_ = device::UsbService::Create();
   return usb_service_.get();
 }
 
 device::HidService* ChromeDeviceClient::GetHidService() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 #if !defined(OS_ANDROID)
-  if (!hid_service_) {
-    hid_service_ = device::HidService::Create(
-        BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE));
-  }
+  if (!hid_service_)
+    hid_service_ = device::HidService::Create();
 #endif
   return hid_service_.get();
 }

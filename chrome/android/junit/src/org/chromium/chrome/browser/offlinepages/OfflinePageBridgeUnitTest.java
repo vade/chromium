@@ -7,7 +7,6 @@ package org.chromium.chrome.browser.offlinepages;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyListOf;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.spy;
@@ -17,7 +16,6 @@ import static org.mockito.Mockito.verify;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.MockitoAnnotations;
@@ -70,6 +68,9 @@ public class OfflinePageBridgeUnitTest {
 
     @Captor
     ArgumentCaptor<String[]> mIdsArgument;
+
+    @Captor
+    ArgumentCaptor<long[]> mOfflineIdsArgument;
 
     @Captor
     ArgumentCaptor<Callback<Integer>> mDeleteCallbackArgument;
@@ -126,9 +127,10 @@ public class OfflinePageBridgeUnitTest {
 
         answerNativeGetAllPages(itemCount);
         Callback<List<OfflinePageItem>> callback = createMultipleItemCallback(itemCount);
-
         mBridge.getAllPages(callback);
-        verify(callback, times(1)).onResult(anyListOf(OfflinePageItem.class));
+
+        List<OfflinePageItem> itemList = new ArrayList<OfflinePageItem>();
+        verify(callback, times(1)).onResult(itemList);
     }
 
     /**
@@ -141,9 +143,12 @@ public class OfflinePageBridgeUnitTest {
 
         answerNativeGetAllPages(itemCount);
         Callback<List<OfflinePageItem>> callback = createMultipleItemCallback(itemCount);
-
         mBridge.getAllPages(callback);
-        verify(callback, times(1)).onResult(anyListOf(OfflinePageItem.class));
+
+        List<OfflinePageItem> itemList = new ArrayList<OfflinePageItem>();
+        itemList.add(TEST_OFFLINE_PAGE_ITEM);
+        itemList.add(TEST_OFFLINE_PAGE_ITEM);
+        verify(callback, times(1)).onResult(itemList);
     }
 
     /**
@@ -153,14 +158,15 @@ public class OfflinePageBridgeUnitTest {
     @Feature({"OfflinePages"})
     public void testGetPagesByClientIds_listOfClientIdsEmpty() {
         final int itemCount = 0;
-        answerGetPagesByClientIds(itemCount);
 
+        answerGetPagesByClientIds(itemCount);
         Callback<List<OfflinePageItem>> callback = createMultipleItemCallback(itemCount);
         ClientId secondClientId = new ClientId(TEST_NAMESPACE, "id number two");
         List<ClientId> list = new ArrayList<>();
         mBridge.getPagesByClientIds(list, callback);
 
-        verify(callback, times(1)).onResult(anyListOf(OfflinePageItem.class));
+        List<OfflinePageItem> itemList = new ArrayList<OfflinePageItem>();
+        verify(callback, times(1)).onResult(itemList);
     }
 
     /**
@@ -170,8 +176,8 @@ public class OfflinePageBridgeUnitTest {
     @Feature({"OfflinePages"})
     public void testGetPagesByClientIds() {
         final int itemCount = 2;
-        answerGetPagesByClientIds(itemCount);
 
+        answerGetPagesByClientIds(itemCount);
         Callback<List<OfflinePageItem>> callback = createMultipleItemCallback(itemCount);
         ClientId secondClientId = new ClientId(TEST_NAMESPACE, "id number two");
         List<ClientId> list = new ArrayList<>();
@@ -179,7 +185,10 @@ public class OfflinePageBridgeUnitTest {
         list.add(secondClientId);
         mBridge.getPagesByClientIds(list, callback);
 
-        verify(callback, times(1)).onResult(anyListOf(OfflinePageItem.class));
+        List<OfflinePageItem> itemList = new ArrayList<OfflinePageItem>();
+        itemList.add(TEST_OFFLINE_PAGE_ITEM);
+        itemList.add(TEST_OFFLINE_PAGE_ITEM);
+        verify(callback, times(1)).onResult(itemList);
     }
 
     /**
@@ -189,8 +198,8 @@ public class OfflinePageBridgeUnitTest {
     @Feature({"OfflinePages"})
     public void testDeletePagesByClientIds_listOfClientIdsEmpty() {
         final int itemCount = 0;
-        answerDeletePagesByClientIds(itemCount);
 
+        answerDeletePagesByClientIds(itemCount);
         Callback<Integer> callback = createDeletePageCallback();
         ClientId secondClientId = new ClientId(TEST_NAMESPACE, "id number two");
         List<ClientId> list = new ArrayList<>();
@@ -206,14 +215,59 @@ public class OfflinePageBridgeUnitTest {
     @Feature({"OfflinePages"})
     public void testDeletePagesByClientIds() {
         final int itemCount = 2;
-        answerDeletePagesByClientIds(itemCount);
 
+        answerDeletePagesByClientIds(itemCount);
         Callback<Integer> callback = createDeletePageCallback();
         ClientId secondClientId = new ClientId(TEST_NAMESPACE, "id number two");
         List<ClientId> list = new ArrayList<>();
         list.add(TEST_CLIENT_ID);
         list.add(secondClientId);
         mBridge.deletePagesByClientId(list, callback);
+
+        verify(callback, times(1)).onResult(any(Integer.class));
+    }
+
+    @Test
+    @Feature({"OfflinePages"})
+    public void testDeletePagesByOfflineIds_listOfOfflineIdsNull() {
+        // -1 means to check for null in the Answer.
+        final int itemCount = -1;
+
+        answerDeletePagesByOfflineIds(itemCount);
+        Callback<Integer> callback = createDeletePageCallback();
+        List<Long> list = null;
+
+        mBridge.deletePagesByOfflineId(list, callback);
+
+        verify(callback, times(1)).onResult(any(Integer.class));
+    }
+
+    @Test
+    @Feature({"OfflinePages"})
+    public void testDeletePagesByOfflineIds_listOfOfflineIdsEmpty() {
+        final int itemCount = 0;
+
+        answerDeletePagesByOfflineIds(itemCount);
+        Callback<Integer> callback = createDeletePageCallback();
+        List<Long> list = new ArrayList<>();
+
+        mBridge.deletePagesByOfflineId(list, callback);
+
+        verify(callback, times(1)).onResult(any(Integer.class));
+    }
+
+    @Test
+    @Feature({"OfflinePages"})
+    public void testDeletePagesByOfflineIds() {
+        final int itemCount = 2;
+
+        answerDeletePagesByOfflineIds(itemCount);
+        Callback<Integer> callback = createDeletePageCallback();
+        List<Long> list = new ArrayList<>();
+        list.add(Long.valueOf(1));
+        list.add(Long.valueOf(2));
+
+        mBridge.deletePagesByOfflineId(list, callback);
 
         verify(callback, times(1)).onResult(any(Integer.class));
     }
@@ -284,6 +338,27 @@ public class OfflinePageBridgeUnitTest {
         doAnswer(answer).when(mBridge).nativeGetPagesByClientId(anyLong(),
                 mResultArgument.capture(), mNamespacesArgument.capture(), mIdsArgument.capture(),
                 mCallbackArgument.capture());
+    }
+
+    private void answerDeletePagesByOfflineIds(final int itemCount) {
+        Answer<Void> answer = new Answer<Void>() {
+            @Override
+            public Void answer(InvocationOnMock invocation) {
+                long[] offlineIds = mOfflineIdsArgument.getValue();
+
+                if (itemCount < 0) {
+                    assertEquals(offlineIds, null);
+                } else {
+                    assertEquals(offlineIds.length, itemCount);
+                }
+                mDeleteCallbackArgument.getValue().onResult(Integer.valueOf(0));
+
+                return null;
+            }
+        };
+
+        doAnswer(answer).when(mBridge).nativeDeletePagesByOfflineId(
+                anyLong(), mOfflineIdsArgument.capture(), mDeleteCallbackArgument.capture());
     }
 
     private void answerDeletePagesByClientIds(final int itemCount) {

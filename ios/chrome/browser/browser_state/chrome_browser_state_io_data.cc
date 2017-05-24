@@ -19,10 +19,11 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/path_service.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/about_handler/about_protocol_handler.h"
 #include "components/content_settings/core/browser/content_settings_provider.h"
@@ -56,6 +57,7 @@
 #include "net/proxy/proxy_script_fetcher_impl.h"
 #include "net/proxy/proxy_service.h"
 #include "net/ssl/channel_id_service.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/data_protocol_handler.h"
 #include "net/url_request/file_protocol_handler.h"
 #include "net/url_request/report_sender.h"
@@ -356,15 +358,43 @@ void ChromeBrowserStateIOData::Init(
       std::move(profile_params_->proxy_config_service),
       true /* quick_check_enabled */);
   transport_security_state_.reset(new net::TransportSecurityState());
-  base::SequencedWorkerPool* pool = web::WebThread::GetBlockingPool();
   transport_security_persister_.reset(new net::TransportSecurityPersister(
       transport_security_state_.get(), profile_params_->path,
-      pool->GetSequencedTaskRunnerWithShutdownBehavior(
-          pool->GetSequenceToken(), base::SequencedWorkerPool::BLOCK_SHUTDOWN),
+      base::CreateSequencedTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+           base::TaskShutdownBehavior::BLOCK_SHUTDOWN}),
       IsOffTheRecord()));
 
-  certificate_report_sender_.reset(new net::ReportSender(
-      main_request_context_.get(), net::ReportSender::DO_NOT_SEND_COOKIES));
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("domain_security_policy", R"(
+        semantics {
+          sender: "Domain Security Policy"
+          description:
+            "Websites can opt in to have Chrome send reports to them when "
+            "Chrome observes connections to that website that do not meet "
+            "stricter security policies, such as with HTTP Public Key Pinning. "
+            "Websites can use this feature to discover misconfigurations that "
+            "prevent them from complying with stricter security policies that "
+            "they've opted in to."
+          trigger:
+            "Chrome observes that a user is loading a resource from a website "
+            "that has opted in for security policy reports, and the connection "
+            "does not meet the required security policies."
+          data:
+            "The time of the request, the hostname and port being requested, "
+            "the certificate chain, and sometimes certificate revocation "
+            "information included on the connection."
+          destination: OTHER
+        }
+        policy {
+          cookies_allowed: false
+          setting: "This feature cannot be disabled by settings."
+          policy_exception_justification:
+            "Not implemented, this is a feature that websites can opt into and "
+            "thus there is no Chrome-wide policy to disable it."
+        })");
+  certificate_report_sender_ = base::MakeUnique<net::ReportSender>(
+      main_request_context_.get(), traffic_annotation);
   transport_security_state_->SetReportSender(certificate_report_sender_.get());
 
   // Take ownership over these parameters.
@@ -394,15 +424,15 @@ void ChromeBrowserStateIOData::ApplyProfileParamsToContext(
 std::unique_ptr<net::URLRequestJobFactory>
 ChromeBrowserStateIOData::SetUpJobFactoryDefaults(
     std::unique_ptr<net::URLRequestJobFactoryImpl> job_factory,
-    URLRequestInterceptorScopedVector request_interceptors,
     net::NetworkDelegate* network_delegate) const {
   // NOTE(willchan): Keep these protocol handlers in sync with
   // ChromeBrowserStateIOData::IsHandledProtocol().
   bool set_protocol = job_factory->SetProtocolHandler(
       url::kFileScheme,
       base::MakeUnique<net::FileProtocolHandler>(
-          web::WebThread::GetBlockingPool()->GetTaskRunnerWithShutdownBehavior(
-              base::SequencedWorkerPool::SKIP_ON_SHUTDOWN)));
+          base::CreateTaskRunnerWithTraits(
+              {base::MayBlock(), base::TaskPriority::BACKGROUND,
+               base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})));
   DCHECK(set_protocol);
 
   set_protocol = job_factory->SetProtocolHandler(
@@ -413,16 +443,8 @@ ChromeBrowserStateIOData::SetUpJobFactoryDefaults(
       url::kAboutScheme,
       base::MakeUnique<about_handler::AboutProtocolHandler>());
 
-  // Set up interceptors in the reverse order.
-  std::unique_ptr<net::URLRequestJobFactory> top_job_factory =
-      std::move(job_factory);
-  for (auto i = request_interceptors.rbegin(); i != request_interceptors.rend();
-       ++i) {
-    top_job_factory.reset(new net::URLRequestInterceptingJobFactory(
-        std::move(top_job_factory), std::move(*i)));
-  }
-  request_interceptors.clear();
-  return top_job_factory;
+  // TODO(crbug.com/703565): remove std::move() once Xcode 9.0+ is required.
+  return std::move(job_factory);
 }
 
 void ChromeBrowserStateIOData::ShutdownOnUIThread(

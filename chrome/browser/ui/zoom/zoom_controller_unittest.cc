@@ -12,8 +12,7 @@
 #include "components/zoom/zoom_controller.h"
 #include "components/zoom/zoom_observer.h"
 #include "content/public/browser/host_zoom_map.h"
-#include "content/public/browser/navigation_details.h"
-#include "content/public/common/frame_navigate_params.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/test/test_renderer_host.h"
 #include "content/public/test/test_utils.h"
 #include "ipc/ipc_message.h"
@@ -54,8 +53,10 @@ TEST_F(ZoomControllerTest, DidNavigateMainFrame) {
       false);
   ZoomChangedWatcher zoom_change_watcher(zoom_controller_.get(),
                                          zoom_change_data);
-  zoom_controller_->DidNavigateMainFrame(content::LoadCommittedDetails(),
-                                         content::FrameNavigateParams());
+  std::unique_ptr<content::NavigationHandle> navigation_handle =
+      content::NavigationHandle::CreateNavigationHandleForTesting(
+          GURL(), rvh()->GetMainFrame(), true);
+  zoom_controller_->DidFinishNavigation(navigation_handle.get());
   zoom_change_watcher.Wait();
 }
 
@@ -65,12 +66,10 @@ TEST_F(ZoomControllerTest, Observe_ZoomController) {
 
   NavigateAndCommit(GURL("about:blank"));
 
+  // Changing from default to default so the bubble should not be shown.
   ZoomController::ZoomChangedEventData zoom_change_data1(
-      web_contents(),
-      old_zoom_level,
-      old_zoom_level,
-      ZoomController::ZOOM_MODE_ISOLATED,
-      true /* can_show_bubble */);
+      web_contents(), old_zoom_level, old_zoom_level,
+      ZoomController::ZOOM_MODE_ISOLATED, false /* can_show_bubble */);
 
   {
     ZoomChangedWatcher zoom_change_watcher1(zoom_controller_.get(),

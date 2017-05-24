@@ -16,6 +16,7 @@
 #include "base/process/process_handle.h"
 #include "base/supports_user_data.h"
 #include "content/common/content_export.h"
+#include "content/public/common/bind_interface_helpers.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_sender.h"
 #include "media/media_features.h"
@@ -28,18 +29,15 @@ class SharedPersistentMemoryAllocator;
 class TimeDelta;
 }
 
-namespace media {
-class AudioOutputController;
-}
-
 namespace service_manager {
-class InterfaceProvider;
+class Identity;
 }
 
 namespace content {
 class BrowserContext;
 class BrowserMessageFilter;
 class RenderProcessHostObserver;
+class RenderWidgetHost;
 class StoragePartition;
 struct GlobalRequestID;
 
@@ -120,8 +118,10 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   virtual void WidgetHidden() = 0;
   virtual int VisibleWidgetCount() const = 0;
 
-  // Called when the audio state changes for this render process host.
-  virtual void AudioStateChanged() = 0;
+  // Called when an audio stream is added or removed and used to determine if
+  // the process should be backgrounded or not.
+  virtual void OnAudioStreamAdded() = 0;
+  virtual void OnAudioStreamRemoved() = 0;
 
   // Indicates whether the current RenderProcessHost is exclusively hosting
   // guest RenderFrames. Not all guest RenderFrames are created equal.  A guest,
@@ -195,12 +195,10 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // Adds a message filter to the IPC channel.
   virtual void AddFilter(BrowserMessageFilter* filter) = 0;
 
-  // Try to shutdown the associated render process as fast as possible
+  // Try to shutdown the associated render process as fast as possible.
   virtual bool FastShutdownForPageCount(size_t count) = 0;
 
-  // TODO(ananta)
-  // Revisit whether the virtual functions declared from here on need to be
-  // part of the interface.
+  // Sets whether input events should be ignored for this process.
   virtual void SetIgnoreInputEvents(bool ignore_input_events) = 0;
   virtual bool IgnoreInputEvents() const = 0;
 
@@ -212,6 +210,10 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // process from exiting.
   virtual void AddPendingView() = 0;
   virtual void RemovePendingView() = 0;
+
+  // Adds and removes the widgets owned by this process.
+  virtual void AddWidget(RenderWidgetHost* widget) = 0;
+  virtual void RemoveWidget(RenderWidgetHost* widget) = 0;
 
   // Sets a flag indicating that the process can be abnormally terminated.
   virtual void SetSuddenTerminationAllowed(bool allowed) = 0;
@@ -243,6 +245,12 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // process. If no recording was in progress, this call will return false.
   virtual bool StopWebRTCEventLog() = 0;
 
+  // Enables or disables WebRTC's echo canceller AEC3. Disabled implies
+  // selecting the older AEC2.
+  // Note: This will be removed once the AEC3 is fully rolled out and the old
+  // AEC is deprecated.
+  virtual void SetEchoCanceller3(bool enable) = 0;
+
   // When set, |callback| receives log messages regarding, for example, media
   // devices (webcams, mics, etc) that were initially requested in the render
   // process associated with this RenderProcessHost.
@@ -271,10 +279,11 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // transferring it to a new renderer process.
   virtual void ResumeDeferredNavigation(const GlobalRequestID& request_id) = 0;
 
-  // Returns the service_manager::InterfaceProvider the browser process can use
-  // to bind
-  // interfaces exposed to it from the renderer.
-  virtual service_manager::InterfaceProvider* GetRemoteInterfaces() = 0;
+  // Binds interfaces exposed to the browser process from the renderer.
+  virtual void BindInterface(const std::string& interface_name,
+                             mojo::ScopedMessagePipeHandle interface_pipe) = 0;
+
+  virtual const service_manager::Identity& GetChildIdentity() const = 0;
 
   // Extracts any persistent-memory-allocator used for renderer metrics.
   // Ownership is passed to the caller. To support sharing of histogram data
@@ -290,16 +299,6 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // value.
   // Note: Do not use! Will disappear after PlzNavitate is completed.
   virtual const base::TimeTicks& GetInitTimeForNavigationMetrics() const = 0;
-
-  // Retrieves the list of AudioOutputController objects associated
-  // with this object and passes it to the callback you specify, on
-  // the same thread on which you called the method.
-  typedef std::list<scoped_refptr<media::AudioOutputController>>
-      AudioOutputControllerList;
-  typedef base::Callback<void(const AudioOutputControllerList&)>
-      GetAudioOutputControllersCallback;
-  virtual void GetAudioOutputControllers(
-      const GetAudioOutputControllersCallback& callback) const = 0;
 
   // Returns true if this process currently has backgrounded priority.
   virtual bool IsProcessBackgrounded() const = 0;
@@ -356,6 +355,13 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // Returns the current number of active views in this process.  Excludes
   // any RenderViewHosts that are swapped out.
   size_t GetActiveViewCount();
+
+  // Posts |task|, if this RenderProcessHost is ready or when it becomes ready
+  // (see RenderProcessHost::IsReady method).  The |task| might not run at all
+  // (e.g. if |render_process_host| is destroyed before becoming ready).  This
+  // function can only be called on the browser's UI thread (and the |task| will
+  // be posted back on the UI thread).
+  void PostTaskWhenProcessIsReady(base::OnceClosure task);
 
   // Static management functions -----------------------------------------------
 

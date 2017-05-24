@@ -28,14 +28,62 @@
     background-color: rgb(255, 255, 194);
 }
 
+.CodeMirror .source-frame-eval-expression-start {
+    border-left-width: 1px;
+    margin-left: -1px;
+}
+
 .CodeMirror .source-frame-eval-expression-end {
     border-right-width: 1px;
     margin-right: -1px;
 }
 
-.CodeMirror .source-frame-eval-expression-start {
+.CodeMirror .source-frame-continue-to-location {
+    outline: 0;
+    border: 1px solid transparent;
+    border-left-width: 0;
+    border-right-width: 0;
+    background-color: rgb(230, 236, 255);
+    cursor: pointer;
+}
+
+.CodeMirror .source-frame-continue-to-location:hover {
+    border: 1px solid rgb(121, 141, 254);
+    background-color: rgb(171, 191, 254);
+}
+
+.CodeMirror .source-frame-continue-to-location-start {
     border-left-width: 1px;
     margin-left: -1px;
+}
+
+.CodeMirror .source-frame-continue-to-location-end {
+    border-right-width: 1px;
+    margin-right: -1px;
+}
+
+.CodeMirror .source-frame-async-step-in {
+    outline: 0;
+    background-color: hsla(100, 46%, 80%, 1);
+    cursor: pointer;
+    border: 1px solid transparent;
+    border-left-width: 0;
+    border-right-width: 0;
+}
+
+.source-frame-async-step-in-hovered .source-frame-async-step-in {
+    background-color: hsl(96, 53%, 65%);
+    border-color: rgb(100, 154, 100);
+}
+
+.source-frame-async-step-in-hovered .source-frame-async-step-in-start {
+    border-left-width: 1px;
+    margin-left: -1px;
+}
+
+.source-frame-async-step-in-hovered .source-frame-async-step-in-end {
+    border-right-width: 1px;
+    margin-right: -1px;
 }
 
 .CodeMirror-readonly .CodeMirror-cursor {
@@ -160,6 +208,17 @@
     opacity: 0.5;
 }
 
+.cm-continue-to-location {
+    cursor: pointer;
+    opacity: 0.8;
+    position: relative;
+    top: 2px;
+}
+
+.cm-continue-to-location:hover {
+    opacity: 1;
+}
+
 div.CodeMirror span.CodeMirror-matchingbracket {
     background-color: rgba(0, 0, 0, 0.07);
     border-bottom: 1px solid rgba(0, 0, 0, 0.5);
@@ -210,6 +269,10 @@ div.CodeMirror span.CodeMirror-nonmatchingbracket {
 .cm-execution-line,
 .-theme-selection-color {
     background-color: rgb(230, 236, 255);
+}
+
+.cm-execution-line-outline,
+.-theme-selection-color {
     outline: 1px solid rgb(64, 115, 244);
 }
 
@@ -315,23 +378,23 @@ div.CodeMirror span.CodeMirror-nonmatchingbracket {
     padding-right: 3px;
 }
 
-.CodeMirror .text-editor-css-rule-unused-marker {
+.CodeMirror .text-editor-coverage-unused-marker {
     text-align: right;
     padding-right: 2px;
-    background-color: red;
+    background-color: #E57373;
 }
 
-.CodeMirror .text-editor-css-rule-unused-marker::after {
+.CodeMirror .text-editor-coverage-unused-marker::after {
     content: " ";
 }
 
-.CodeMirror .text-editor-css-rule-used-marker {
+.CodeMirror .text-editor-coverage-used-marker {
     text-align: right;
     padding-right: 2px;
-    background-color: green;
+    background-color: #81C784;
 }
 
-.CodeMirror .text-editor-css-rule-used-marker::after {
+.CodeMirror .text-editor-coverage-used-marker::after {
     content: " ";
 }
 
@@ -366,27 +429,6 @@ div.CodeMirror span.CodeMirror-nonmatchingbracket {
 .CodeMirror .cm-execution-line .text-editor-value-decoration {
     background-color: transparent;
     opacity: 0.5;
-}
-
-.text-editor-messages-description-container {
-    display: inline-block;
-}
-
-.text-editor-row-message:first-child {
-    border-top-width: 0;
-}
-
-.text-editor-row-message {
-    border-top: 1px solid rgb(215, 215, 215);
-    line-height: 1.2;
-    white-space: nowrap;
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-}
-
-.text-editor-row-message .message-repeat-count {
-    margin-right: 0.5em;
 }
 
 .CodeMirror .text-editor-line-decoration-icon {

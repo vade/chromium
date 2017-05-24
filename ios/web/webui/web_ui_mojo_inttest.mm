@@ -7,7 +7,9 @@
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #import "base/test/ios/wait_util.h"
+#include "base/threading/thread_task_runner_handle.h"
 #import "ios/web/public/navigation_manager.h"
+#include "ios/web/public/web_state/web_state_interface_provider.h"
 #include "ios/web/public/web_ui_ios_data_source.h"
 #include "ios/web/public/webui/web_ui_ios_controller.h"
 #include "ios/web/public/webui/web_ui_ios_controller_factory.h"
@@ -18,8 +20,7 @@
 #import "ios/web/web_state/ui/crw_web_controller.h"
 #import "ios/web/web_state/web_state_impl.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
-#include "services/service_manager/public/cpp/identity.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/bind_source_info.h"
 #include "url/gurl.h"
 #include "url/scheme_host_port.h"
 
@@ -38,9 +39,7 @@ const char kTestWebUIURLHost[] = "testwebui";
 // Once "fin" is received |IsFinReceived()| call will return true, indicating
 // that communication was successful. See test WebUI page code here:
 // ios/web/test/data/mojo_test.js
-class TestUIHandler
-    : public TestUIHandlerMojo,
-      public service_manager::InterfaceFactory<TestUIHandlerMojo> {
+class TestUIHandler : public TestUIHandlerMojo {
  public:
   TestUIHandler() {}
   ~TestUIHandler() override {}
@@ -69,13 +68,13 @@ class TestUIHandler
     }
   }
 
- private:
-  // service_manager::InterfaceFactory overrides.
-  void Create(const service_manager::Identity& remote_identity,
-              mojo::InterfaceRequest<TestUIHandlerMojo> request) override {
+  void BindTestUIHandlerMojoRequest(
+      const service_manager::BindSourceInfo& souce_info,
+      TestUIHandlerMojoRequest request) {
     bindings_.AddBinding(this, std::move(request));
   }
 
+ private:
   mojo::BindingSet<TestUIHandlerMojo> bindings_;
   TestPagePtr page_ = nullptr;
   // |true| if "syn" has been received.
@@ -102,7 +101,9 @@ class TestUI : public WebUIIOSController {
     web::WebState* web_state = web_ui->GetWebState();
     web::WebUIIOSDataSource::Add(web_state->GetBrowserState(), source);
 
-    web_state->GetMojoInterfaceRegistry()->AddInterface(ui_handler);
+    web_state->GetWebStateInterfaceProvider()->registry()->AddInterface(
+        base::Bind(&TestUIHandler::BindTestUIHandlerMojoRequest,
+                   base::Unretained(ui_handler)));
   }
 };
 
@@ -131,10 +132,10 @@ class TestWebUIControllerFactory : public WebUIIOSControllerFactory {
 // A test fixture for verifying mojo comminication for WebUI.
 class WebUIMojoTest : public WebIntTest {
  protected:
-  WebUIMojoTest()
-      : web_state_(new WebStateImpl(GetBrowserState())),
-        ui_handler_(new TestUIHandler()) {
-    web_state_->GetNavigationManagerImpl().InitializeSession(nil, nil, NO, 0);
+  WebUIMojoTest() : ui_handler_(new TestUIHandler()) {
+    web::WebState::CreateParams params(GetBrowserState());
+    web_state_ = base::MakeUnique<web::WebStateImpl>(params);
+    web_state_->GetNavigationManagerImpl().InitializeSession();
     WebUIIOSControllerFactory::RegisterFactory(
         new TestWebUIControllerFactory(ui_handler_.get()));
   }
@@ -152,7 +153,13 @@ class WebUIMojoTest : public WebIntTest {
 // Tests that JS can send messages to the native code and vice versa.
 // TestUIHandler is used for communication and test suceeds only when
 // |TestUIHandler| sucessfully receives "ack" message from WebUI page.
-TEST_F(WebUIMojoTest, MessageExchange) {
+#if TARGET_IPHONE_SIMULATOR
+#define MAYBE_MessageExchange MessageExchange
+#else
+#define MAYBE_MessageExchange DISABLED_MessageExchange
+#endif
+// TODO(crbug.com/720098): Enable this test on device.
+TEST_F(WebUIMojoTest, MAYBE_MessageExchange) {
   web_state()->SetWebUsageEnabled(true);
   web_state()->GetView();  // WebState won't load URL without view.
   NavigationManager::WebLoadParams load_params(GURL(
@@ -161,7 +168,16 @@ TEST_F(WebUIMojoTest, MessageExchange) {
 
   // Wait until |TestUIHandler| receives "ack" message from WebUI page.
   base::test::ios::WaitUntilCondition(^{
-    base::RunLoop().RunUntilIdle();
+    // Flush any pending tasks. Don't RunUntilIdle() because
+    // RunUntilIdle() is incompatible with mojo::SimpleWatcher's
+    // automatic arming behavior, which Mojo JS still depends upon.
+    //
+    // TODO(crbug.com/701875): Introduce the full watcher API to JS and get rid
+    // of this hack.
+    base::RunLoop loop;
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                  loop.QuitClosure());
+    loop.Run();
     return test_ui_handler()->IsFinReceived();
   });
 }

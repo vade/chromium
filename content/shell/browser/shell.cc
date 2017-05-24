@@ -10,6 +10,7 @@
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
@@ -30,13 +31,14 @@
 #include "content/public/common/webrtc_ip_handling_policy.h"
 #include "content/shell/browser/layout_test/blink_test_controller.h"
 #include "content/shell/browser/layout_test/layout_test_bluetooth_chooser_factory.h"
-#include "content/shell/browser/layout_test/layout_test_devtools_frontend.h"
+#include "content/shell/browser/layout_test/layout_test_devtools_bindings.h"
 #include "content/shell/browser/layout_test/layout_test_javascript_dialog_manager.h"
 #include "content/shell/browser/layout_test/secondary_test_window_observer.h"
 #include "content/shell/browser/shell_browser_main_parts.h"
 #include "content/shell/browser/shell_content_browser_client.h"
 #include "content/shell/browser/shell_devtools_frontend.h"
 #include "content/shell/browser/shell_javascript_dialog_manager.h"
+#include "content/shell/common/layout_test/layout_test_switches.h"
 #include "content/shell/common/shell_messages.h"
 #include "content/shell/common/shell_switches.h"
 #include "media/media_features.h"
@@ -325,7 +327,12 @@ WebContents* Shell::OpenURLFromTab(WebContents* source,
     // content shell and layout tests, popups don't get special treatment below
     // (i.e. they will have a toolbar and other things described here).
     case WindowOpenDisposition::NEW_POPUP:
-    case WindowOpenDisposition::NEW_WINDOW: {
+    case WindowOpenDisposition::NEW_WINDOW:
+    // content_shell doesn't really support tabs, but some layout tests use
+    // middle click (which translates into kNavigationPolicyNewBackgroundTab),
+    // so we treat the cases below just like a NEW_WINDOW disposition.
+    case WindowOpenDisposition::NEW_BACKGROUND_TAB:
+    case WindowOpenDisposition::NEW_FOREGROUND_TAB: {
       Shell* new_window =
           Shell::CreateNewWindow(source->GetBrowserContext(),
                                  GURL(),  // Don't load anything just yet.
@@ -339,8 +346,6 @@ WebContents* Shell::OpenURLFromTab(WebContents* source,
 
     // No tabs in content_shell:
     case WindowOpenDisposition::SINGLETON_TAB:
-    case WindowOpenDisposition::NEW_FOREGROUND_TAB:
-    case WindowOpenDisposition::NEW_BACKGROUND_TAB:
     // No incognito mode in content_shell:
     case WindowOpenDisposition::OFF_THE_RECORD:
     // TODO(lukasza): Investigate if some layout tests might need support for
@@ -415,8 +420,9 @@ blink::WebDisplayMode Shell::GetDisplayMode(
  // TODO : should return blink::WebDisplayModeFullscreen wherever user puts
  // a browser window into fullscreen (not only in case of renderer-initiated
  // fullscreen mode): crbug.com/476874.
- return IsFullscreenForTabOrPending(web_contents) ?
-     blink::WebDisplayModeFullscreen : blink::WebDisplayModeBrowser;
+ return IsFullscreenForTabOrPending(web_contents)
+            ? blink::kWebDisplayModeFullscreen
+            : blink::kWebDisplayModeBrowser;
 }
 
 void Shell::RequestToLockMouse(WebContents* web_contents,
@@ -478,6 +484,23 @@ void Shell::RendererUnresponsive(
 
 void Shell::ActivateContents(WebContents* contents) {
   contents->GetRenderViewHost()->GetWidget()->Focus();
+}
+
+bool Shell::ShouldAllowRunningInsecureContent(
+    content::WebContents* web_contents,
+    bool allowed_per_prefs,
+    const url::Origin& origin,
+    const GURL& resource_url) {
+  bool allowed_by_test = false;
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kRunLayoutTest)) {
+    const base::DictionaryValue& test_flags =
+        BlinkTestController::Get()
+            ->accumulated_layout_test_runtime_flags_changes();
+    test_flags.GetBoolean("running_insecure_content_allowed", &allowed_by_test);
+  }
+
+  return allowed_per_prefs || allowed_by_test;
 }
 
 gfx::Size Shell::GetShellDefaultSize() {

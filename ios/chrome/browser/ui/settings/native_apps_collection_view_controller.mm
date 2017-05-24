@@ -7,14 +7,15 @@
 
 #import <StoreKit/StoreKit.h>
 
-#import "base/ios/weak_nsobject.h"
 #include "base/logging.h"
 #import "base/mac/foundation_util.h"
-#import "base/mac/scoped_nsobject.h"
-#include "base/metrics/histogram.h"
+#include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/threading/sequenced_worker_pool.h"
+#include "components/image_fetcher/ios/ios_image_data_fetcher_wrapper.h"
 #import "ios/chrome/browser/installation_notifier.h"
 #import "ios/chrome/browser/ui/collection_view/cells/MDCCollectionViewCell+Chrome.h"
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_footer_item.h"
@@ -28,9 +29,13 @@
 #import "ios/public/provider/chrome/browser/native_app_launcher/native_app_metadata.h"
 #import "ios/public/provider/chrome/browser/native_app_launcher/native_app_whitelist_manager.h"
 #import "ios/third_party/material_components_ios/src/components/Buttons/src/MaterialButtons.h"
-#include "net/url_request/url_request_context_getter.h"
+#include "ios/web/public/web_thread.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 const NSInteger kTagShift = 1000;
 
@@ -50,8 +55,8 @@ typedef NS_ENUM(NSInteger, ItemType) {
 
 @interface NativeAppsCollectionViewController ()<
     SKStoreProductViewControllerDelegate> {
-  net::URLRequestContextGetter* _requestContextGetter;  // weak
-  base::scoped_nsobject<NSArray> _nativeAppsInSettings;
+  std::unique_ptr<image_fetcher::IOSImageDataFetcherWrapper> _imageFetcher;
+  NSArray* _nativeAppsInSettings;
   BOOL _userDidSomething;
 }
 
@@ -59,7 +64,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
 @property(nonatomic, copy) NSArray* appsInSettings;
 
 // Delegate for App-Store-related operations.
-@property(nonatomic, assign) id<StoreKitLauncher> storeKitLauncher;
+@property(nonatomic, weak) id<StoreKitLauncher> storeKitLauncher;
 
 // Sets up the list of visible apps based on |nativeAppWhitelistManager|, which
 // serves as datasource for this controller. Apps from
@@ -100,13 +105,20 @@ typedef NS_ENUM(NSInteger, ItemType) {
     (net::URLRequestContextGetter*)requestContextGetter {
   self = [super initWithStyle:CollectionViewControllerStyleAppBar];
   if (self) {
-    _requestContextGetter = requestContextGetter;
+    _imageFetcher = base::MakeUnique<image_fetcher::IOSImageDataFetcherWrapper>(
+        requestContextGetter, web::WebThread::GetBlockingPool());
     base::RecordAction(base::UserMetricsAction("MobileGALOpenSettings"));
     _storeKitLauncher = self;
 
     [self loadModel];
   }
   return self;
+}
+
+- (void)dealloc {
+  [[InstallationNotifier sharedInstance] unregisterForNotifications:self];
+  if (!_userDidSomething)
+    [self recordUserAction:settings::kNativeAppsActionDidNothing];
 }
 
 #pragma mark - View lifecycle
@@ -135,12 +147,6 @@ typedef NS_ENUM(NSInteger, ItemType) {
       removeObserver:self
                 name:UIApplicationDidBecomeActiveNotification
               object:nil];
-  if ([self isMovingFromParentViewController]) {
-    // The view controller is popped.
-    [[InstallationNotifier sharedInstance] unregisterForNotifications:self];
-    if (!_userDidSomething)
-      [self recordUserAction:settings::kNativeAppsActionDidNothing];
-  }
 }
 
 #pragma mark - CollectionViewController
@@ -208,27 +214,27 @@ typedef NS_ENUM(NSInteger, ItemType) {
   NativeAppItem* appItem = base::mac::ObjCCastStrict<NativeAppItem>(item);
   if (!appItem.icon) {
     // Fetch the real icon.
-    base::WeakNSObject<NativeAppsCollectionViewController> weakSelf(self);
+    __weak NativeAppsCollectionViewController* weakSelf = self;
     id<NativeAppMetadata> metadata = [self nativeAppAtIndex:indexPath.item];
-    [metadata
-        fetchSmallIconWithContext:_requestContextGetter
-                  completionBlock:^(UIImage* image) {
-                    base::scoped_nsobject<NativeAppsCollectionViewController>
-                        strongSelf([weakSelf retain]);
-                    if (!image || !strongSelf)
-                      return;
-                    appItem.icon = image;
-                    [strongSelf.get().collectionView
-                        reloadItemsAtIndexPaths:@[ indexPath ]];
-                  }];
+    [metadata fetchSmallIconWithImageFetcher:_imageFetcher.get()
+                             completionBlock:^(UIImage* image) {
+
+                               NativeAppsCollectionViewController* strongSelf =
+                                   weakSelf;
+                               if (!image || !strongSelf)
+                                 return;
+                               appItem.icon = image;
+                               [strongSelf.collectionView
+                                   reloadItemsAtIndexPaths:@[ indexPath ]];
+                             }];
   }
 }
 
 - (CollectionViewItem*)learnMoreItem {
   NSString* learnMoreText =
       l10n_util::GetNSString(IDS_IOS_GOOGLE_APPS_SM_SECTION_HEADER);
-  CollectionViewFooterItem* learnMoreItem = [[[CollectionViewFooterItem alloc]
-      initWithType:ItemTypeLearnMore] autorelease];
+  CollectionViewFooterItem* learnMoreItem =
+      [[CollectionViewFooterItem alloc] initWithType:ItemTypeLearnMore];
   learnMoreItem.text = learnMoreText;
   return learnMoreItem;
 }
@@ -250,8 +256,8 @@ typedef NS_ENUM(NSInteger, ItemType) {
     return;
   NSDictionary* product =
       @{SKStoreProductParameterITunesItemIdentifier : appId};
-  base::scoped_nsobject<SKStoreProductViewController> storeViewController(
-      [[SKStoreProductViewController alloc] init]);
+  SKStoreProductViewController* storeViewController =
+      [[SKStoreProductViewController alloc] init];
   [storeViewController setDelegate:self];
   [storeViewController loadProductWithParameters:product completionBlock:nil];
   [self presentViewController:storeViewController animated:YES completion:nil];
@@ -367,19 +373,18 @@ typedef NS_ENUM(NSInteger, ItemType) {
   } else {
     state = NativeAppItemInstall;
   }
-  NativeAppItem* appItem =
-      [[[NativeAppItem alloc] initWithType:ItemTypeApp] autorelease];
+  NativeAppItem* appItem = [[NativeAppItem alloc] initWithType:ItemTypeApp];
   appItem.name = [metadata appName];
   appItem.state = state;
   return appItem;
 }
 
 - (NSArray*)appsInSettings {
-  return _nativeAppsInSettings.get();
+  return _nativeAppsInSettings;
 }
 
 - (void)setAppsInSettings:(NSArray*)apps {
-  _nativeAppsInSettings.reset([apps copy]);
+  _nativeAppsInSettings = [apps copy];
 }
 
 - (NSInteger)tagForIndexPath:(NSIndexPath*)indexPath {

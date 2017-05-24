@@ -16,14 +16,14 @@
 #include "base/memory/ptr_util.h"
 #include "base/process/process_metrics.h"
 #include "base/run_loop.h"
+#include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/test/test_file_util.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_main_delegate.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/install_static/install_details.h"
-#include "chrome/install_static/install_modes.h"
+#include "chrome/install_static/test/scoped_install_details.h"
 #include "chrome/test/base/chrome_test_suite.h"
 #include "components/crash/content/app/crashpad.h"
 #include "content/public/app/content_main.h"
@@ -53,7 +53,10 @@
 #endif
 
 #if defined(OS_WIN)
+#include <shellapi.h>
+#include "base/win/registry.h"
 #include "chrome/app/chrome_crash_reporter_client_win.h"
+#include "chrome/install_static/install_util.h"
 #endif
 
 ChromeTestSuiteRunner::ChromeTestSuiteRunner() {}
@@ -88,9 +91,6 @@ bool ChromeTestLauncherDelegate::AdjustChildProcessCommandLine(
 
   new_command_line.AppendSwitchPath(switches::kUserDataDir, temp_data_dir);
 
-  // file:// access for ChromeOS.
-  new_command_line.AppendSwitch(switches::kAllowFileAccess);
-
   *command_line = new_command_line;
   return true;
 }
@@ -98,6 +98,42 @@ bool ChromeTestLauncherDelegate::AdjustChildProcessCommandLine(
 content::ContentMainDelegate*
 ChromeTestLauncherDelegate::CreateContentMainDelegate() {
   return new ChromeMainDelegate();
+}
+
+void ChromeTestLauncherDelegate::PreSharding() {
+#if defined(OS_WIN)
+  // Construct the distribution specific equivalent of
+  // "delete HKCU\\SOFTWARE\\Chromium\\PreferenceMACs /f".
+  base::string16 operation(L"delete HKCU\\");
+  operation.append(install_static::GetRegistryPath());
+  operation.append(L"\\PreferenceMACs /f");
+  // TODO(gab): This is a nuclear option while the cleanup below doesn't work as
+  // the bots are in such bad shape per https://crbug.com/721245 that doing any
+  // registry operations from C++ results in fatal error 1450 (insufficient
+  // resources). Hopefully ShellExecute works...
+  ::ShellExecute(NULL, NULL, L"reg.exe", operation.c_str(), NULL, 0);
+
+// // Pre-test cleanup for registry state keyed off the profile dir (which can
+// // proliferate with the use of uniquely named scoped_dirs):
+// // https://crbug.com/721245. This needs to be here in order not to be racy
+// // with any tests that will access that state.
+// base::win::RegKey distrubution_key;
+// LONG result = distrubution_key.Open(
+//     HKEY_CURRENT_USER, install_static::GetRegistryPath().c_str(),
+//     KEY_SET_VALUE);
+
+// if (result != ERROR_SUCCESS && result != ERROR_FILE_NOT_FOUND) {
+//   LOG(ERROR) << "Failed to open distribution key for cleanup: " << result;
+//   return;
+// }
+
+// result = distrubution_key.DeleteKey(L"PreferenceMACs");
+
+// if (result != ERROR_SUCCESS && result != ERROR_FILE_NOT_FOUND) {
+//   LOG(ERROR) << "Failed to cleanup PreferenceMACs: " << result;
+//   return;
+// }
+#endif
 }
 
 int LaunchChromeTests(int default_jobs,
@@ -110,12 +146,7 @@ int LaunchChromeTests(int default_jobs,
 
 #if defined(OS_WIN)
   // Create a primordial InstallDetails instance for the test.
-  std::unique_ptr<install_static::PrimaryInstallDetails> install_details =
-      base::MakeUnique<install_static::PrimaryInstallDetails>();
-  install_details->set_mode(&install_static::kInstallModes[0]);
-  install_details->set_channel(
-      install_static::kInstallModes[0].default_channel_name);
-  install_static::InstallDetails::SetForProcess(std::move(install_details));
+  install_static::ScopedInstallDetails install_details;
 #endif
 
 #if defined(OS_LINUX) || defined(OS_ANDROID) || defined(OS_WIN)

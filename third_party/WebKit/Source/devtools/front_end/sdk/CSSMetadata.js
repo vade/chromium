@@ -226,7 +226,8 @@ SDK.cssMetadata = function() {
 
 SDK.CSSMetadata._distanceProperties = new Set([
   'background-position', 'border-spacing', 'bottom', 'font-size', 'height', 'left', 'letter-spacing', 'max-height',
-  'max-width', 'min-height', 'min-width', 'right', 'text-indent', 'top', 'width', 'word-spacing'
+  'max-width', 'min-height', 'min-width', 'right', 'text-indent', 'top', 'width', 'word-spacing', 'grid-row-gap',
+  'grid-column-gap'
 ]);
 
 SDK.CSSMetadata._bezierAwareProperties = new Set([
@@ -252,6 +253,7 @@ SDK.CSSMetadata._colorAwareProperties = new Set([
   'border-top',
   'border-top-color',
   'box-shadow',
+  'caret-color',
   'color',
   'column-rule',
   'column-rule-color',
@@ -589,7 +591,7 @@ SDK.CSSMetadata._propertyDataMap = {
   'page-break-before': {values: ['left', 'right', 'auto', 'always', 'avoid']},
   'border-image': {values: ['repeat', 'stretch']},
   'text-decoration': {values: ['none', 'blink', 'line-through', 'overline', 'underline']},
-  'position': {values: ['absolute', 'fixed', 'relative', 'static']},
+  'position': {values: ['absolute', 'fixed', 'relative', 'static', 'sticky']},
   'font-family':
       {values: ['serif', 'sans-serif', 'cursive', 'fantasy', 'monospace', '-webkit-body', '-webkit-pictograph']},
   'text-overflow-mode': {values: ['clip', 'ellipsis']},
@@ -643,23 +645,77 @@ SDK.CSSMetadata._propertyDataMap = {
   'box-sizing': {values: ['content-box', 'border-box']},
   'clip': {values: ['auto']},
   'resize': {values: ['none', 'both', 'horizontal', 'vertical']},
-  'align-content': {values: ['flex-start', 'flex-end', 'center', 'space-between', 'space-around', 'stretch']},
-  'align-items': {values: ['flex-start', 'flex-end', 'center', 'baseline', 'stretch']},
-  'align-self': {values: ['auto', 'flex-start', 'flex-end', 'center', 'baseline', 'stretch']},
+  'align-content': {
+    values: [
+      'normal', 'baseline', 'space-between', 'space-around', 'space-evenly', 'stretch', 'unsafe', 'safe', 'center',
+      'start', 'end', 'flex-start', 'flex-end', 'left', 'right'
+    ]
+  },
+  'justify-content': {
+    values: [
+      'normal', 'space-between', 'space-around', 'space-evenly', 'stretch', 'unsafe', 'safe', 'center', 'start', 'end',
+      'flex-start', 'flex-end', 'left', 'right'
+    ]
+  },
+  'place-content': {
+    values: [
+      'normal', 'space-between', 'space-around', 'space-evenly', 'stretch', 'unsafe', 'safe', 'center', 'start', 'end',
+      'flex-start', 'flex-end', 'left', 'right'
+    ]
+  },
+  'align-items': {
+    values: [
+      'normal', 'stretch', 'basline', 'unsafe', 'safe', 'center', 'start', 'end', 'self-start', 'self-end',
+      'flex-start', 'flex-end', 'left', 'right'
+    ]
+  },
+  'justify-items': {
+    values: [
+      'normal', 'stretch', 'basline', 'unsafe', 'safe', 'center', 'start', 'end', 'self-start', 'self-end',
+      'flex-start', 'flex-end', 'left', 'right', 'legacy'
+    ]
+  },
+  'place-items': {
+    values: [
+      'auto', 'normal', 'stretch', 'basline', 'unsafe', 'safe', 'center', 'start', 'end', 'self-start', 'self-end',
+      'flex-start', 'flex-end', 'left', 'right'
+    ]
+  },
+  'align-self': {
+    values: [
+      'auto', 'normal', 'stretch', 'basline', 'unsafe', 'safe', 'center', 'start', 'end', 'self-start', 'self-end',
+      'flex-start', 'flex-end', 'left', 'right'
+    ]
+  },
+  'justify-self': {
+    values: [
+      'auto', 'normal', 'stretch', 'basline', 'unsafe', 'safe', 'center', 'start', 'end', 'self-start', 'self-end',
+      'flex-start', 'flex-end', 'left', 'right'
+    ]
+  },
+  'place-self': {
+    values: [
+      'auto', 'normal', 'stretch', 'basline', 'unsafe', 'safe', 'center', 'start', 'end', 'self-start', 'self-end',
+      'flex-start', 'flex-end', 'left', 'right'
+    ]
+  },
   'flex-direction': {values: ['row', 'row-reverse', 'column', 'column-reverse']},
-  'justify-content': {values: ['flex-start', 'flex-end', 'center', 'space-between', 'space-around']},
   'flex-wrap': {values: ['nowrap', 'wrap', 'wrap-reverse']},
   'perspective': {values: ['none']},
   'perspective-origin': {values: ['left', 'center', 'right', 'top', 'bottom']},
   'transform-origin': {values: ['left', 'center', 'right', 'top', 'bottom']},
   'transform-style': {values: ['flat', 'preserve-3d']},
   'transition-timing-function': {
-    values:
-        ['ease', 'linear', 'ease-in', 'ease-out', 'ease-in-out', 'step-start', 'step-end', 'steps', 'cubic-bezier']
+    values: [
+      'ease', 'linear', 'ease-in', 'ease-out', 'ease-in-out', 'step-start', 'step-end', 'steps', 'frames',
+      'cubic-bezier'
+    ]
   },
   'animation-timing-function': {
-    values:
-        ['ease', 'linear', 'ease-in', 'ease-out', 'ease-in-out', 'step-start', 'step-end', 'steps', 'cubic-bezier']
+    values: [
+      'ease', 'linear', 'ease-in', 'ease-out', 'ease-in-out', 'step-start', 'step-end', 'steps', 'frames',
+      'cubic-bezier'
+    ]
   },
   'animation-direction': {values: ['normal', 'reverse', 'alternate', 'alternate-reverse']},
   'animation-play-state': {values: ['running', 'paused']},
@@ -699,6 +755,22 @@ SDK.CSSMetadata._propertyDataMap = {
       'soft-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity', 'unset'
     ]
   },
+  'caret-color': {values: ['auto']},
+  'grid-template-columns': {values: ['none']},
+  'grid-template-rows': {values: ['none']},
+  'grid-template-areas': {values: ['none']},
+  'grid-template': {values: ['none']},
+  'grid-auto-columns': {values: ['auto']},
+  'grid-auto-rows': {values: ['auto']},
+  'grid-auto-flow': {values: ['row', 'column', 'dense']},
+  'grid': {values: ['none']},
+  'grid-row-start': {values: ['auto']},
+  'grid-column-start': {values: ['auto']},
+  'grid-row-end': {values: ['auto']},
+  'grid-column-end': {values: ['auto']},
+  'grid-row': {values: ['auto']},
+  'grid-column': {values: ['auto']},
+  'grid-area': {values: ['auto']},
 };
 
 // Weight of CSS properties based on their usage from https://www.chromestatus.com/metrics/css/popularity

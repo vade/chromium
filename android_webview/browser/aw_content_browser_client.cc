@@ -8,14 +8,14 @@
 
 #include "android_webview/browser/aw_browser_context.h"
 #include "android_webview/browser/aw_browser_main_parts.h"
-#include "android_webview/browser/aw_contents_client_bridge_base.h"
+#include "android_webview/browser/aw_contents.h"
+#include "android_webview/browser/aw_contents_client_bridge.h"
 #include "android_webview/browser/aw_contents_io_thread_client.h"
 #include "android_webview/browser/aw_cookie_access_policy.h"
 #include "android_webview/browser/aw_devtools_manager_delegate.h"
-#include "android_webview/browser/aw_locale_manager.h"
 #include "android_webview/browser/aw_printing_message_filter.h"
 #include "android_webview/browser/aw_quota_permission_context.h"
-#include "android_webview/browser/aw_web_preferences_populater.h"
+#include "android_webview/browser/aw_settings.h"
 #include "android_webview/browser/jni_dependency_factory.h"
 #include "android_webview/browser/net/aw_url_request_context_getter.h"
 #include "android_webview/browser/net_disk_cache_remover.h"
@@ -49,6 +49,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/service_names.mojom.h"
@@ -59,7 +60,8 @@
 #include "net/android/network_library.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_info.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
+#include "storage/browser/quota/quota_settings.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/resource/resource_bundle_android.h"
 #include "ui/resources/grit/ui_resources.h"
@@ -71,6 +73,10 @@
 
 using content::BrowserThread;
 using content::ResourceType;
+
+namespace service_manager {
+struct BindSourceInfo;
+}
 
 namespace android_webview {
 namespace {
@@ -139,8 +145,8 @@ void AwContentsMessageFilter::OnShouldOverrideUrlLoading(
     bool* ignore_navigation) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   *ignore_navigation = false;
-  AwContentsClientBridgeBase* client =
-      AwContentsClientBridgeBase::FromID(process_id_, render_frame_id);
+  AwContentsClientBridge* client =
+      AwContentsClientBridge::FromID(process_id_, render_frame_id);
   if (client) {
     *ignore_navigation = client->ShouldOverrideUrlLoading(
         url, has_user_gesture, is_redirect, is_main_frame);
@@ -158,10 +164,9 @@ void AwContentsMessageFilter::OnSubFrameCreated(int parent_render_frame_id,
       process_id_, parent_render_frame_id, child_render_frame_id);
 }
 
-AwLocaleManager* g_locale_manager = NULL;
-
 // A dummy binder for mojo interface autofill::mojom::PasswordManagerDriver.
 void DummyBindPasswordManagerDriver(
+    const service_manager::BindSourceInfo& source_info,
     autofill::mojom::PasswordManagerDriverRequest request) {}
 
 }  // anonymous namespace
@@ -171,7 +176,7 @@ void DummyBindPasswordManagerDriver(
 // static
 std::string AwContentBrowserClient::GetAcceptLangsImpl() {
   // Start with the current locale(s) in BCP47 format.
-  std::string locales_string = g_locale_manager->GetLocaleList();
+  std::string locales_string = AwContents::GetLocaleList();
 
   // If accept languages do not contain en-US, add in en-US which will be
   // used with a lower q-value.
@@ -188,13 +193,9 @@ AwBrowserContext* AwContentBrowserClient::GetAwBrowserContext() {
 AwContentBrowserClient::AwContentBrowserClient(
     JniDependencyFactory* native_factory)
     : native_factory_(native_factory) {
-  g_locale_manager = native_factory->CreateAwLocaleManager();
 }
 
-AwContentBrowserClient::~AwContentBrowserClient() {
-  delete g_locale_manager;
-  g_locale_manager = NULL;
-}
+AwContentBrowserClient::~AwContentBrowserClient() {}
 
 AwBrowserContext* AwContentBrowserClient::InitBrowserContext() {
   base::FilePath user_data_dir;
@@ -268,9 +269,7 @@ bool AwContentBrowserClient::IsHandledURL(const GURL& url) {
 void AwContentBrowserClient::AppendExtraCommandLineSwitches(
     base::CommandLine* command_line,
     int child_process_id) {
-  if (command_line->HasSwitch(switches::kSingleProcess)) {
-    NOTREACHED() << "Android WebView does not support multi-process yet";
-  } else {
+  if (!command_line->HasSwitch(switches::kSingleProcess)) {
     // The only kind of a child process WebView can have is renderer.
     DCHECK_EQ(switches::kRendererProcess,
               command_line->GetSwitchValueASCII(switches::kProcessType));
@@ -358,6 +357,17 @@ AwContentBrowserClient::CreateQuotaPermissionContext() {
   return new AwQuotaPermissionContext;
 }
 
+void AwContentBrowserClient::GetQuotaSettings(
+    content::BrowserContext* context,
+    content::StoragePartition* partition,
+    const storage::OptionalQuotaSettingsCallback& callback) {
+  content::BrowserThread::PostTaskAndReplyWithResult(
+      content::BrowserThread::FILE, FROM_HERE,
+      base::Bind(&storage::CalculateNominalDynamicSettings,
+                 partition->GetPath(), context->IsOffTheRecord()),
+      callback);
+}
+
 void AwContentBrowserClient::AllowCertificateError(
     content::WebContents* web_contents,
     int cert_error,
@@ -369,8 +379,8 @@ void AwContentBrowserClient::AllowCertificateError(
     bool expired_previous_decision,
     const base::Callback<void(content::CertificateRequestResultType)>&
         callback) {
-  AwContentsClientBridgeBase* client =
-      AwContentsClientBridgeBase::FromWebContents(web_contents);
+  AwContentsClientBridge* client =
+      AwContentsClientBridge::FromWebContents(web_contents);
   bool cancel_request = true;
   if (client)
     client->AllowCertificateError(cert_error,
@@ -385,28 +395,27 @@ void AwContentBrowserClient::AllowCertificateError(
 void AwContentBrowserClient::SelectClientCertificate(
     content::WebContents* web_contents,
     net::SSLCertRequestInfo* cert_request_info,
+    net::CertificateList client_certs,
     std::unique_ptr<content::ClientCertificateDelegate> delegate) {
-  AwContentsClientBridgeBase* client =
-      AwContentsClientBridgeBase::FromWebContents(web_contents);
+  AwContentsClientBridge* client =
+      AwContentsClientBridge::FromWebContents(web_contents);
   if (client)
     client->SelectClientCertificate(cert_request_info, std::move(delegate));
 }
 
 bool AwContentBrowserClient::CanCreateWindow(
-    int opener_render_process_id,
-    int opener_render_frame_id,
+    content::RenderFrameHost* opener,
     const GURL& opener_url,
     const GURL& opener_top_level_frame_url,
     const GURL& source_origin,
-    WindowContainerType container_type,
+    content::mojom::WindowContainerType container_type,
     const GURL& target_url,
     const content::Referrer& referrer,
     const std::string& frame_name,
     WindowOpenDisposition disposition,
-    const blink::WebWindowFeatures& features,
+    const blink::mojom::WindowFeatures& features,
     bool user_gesture,
     bool opener_suppressed,
-    content::ResourceContext* context,
     bool* no_javascript_access) {
   // We unconditionally allow popup windows at this stage and will give
   // the embedder the opporunity to handle displaying of the popup in
@@ -498,12 +507,11 @@ void AwContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
 void AwContentBrowserClient::OverrideWebkitPrefs(
     content::RenderViewHost* rvh,
     content::WebPreferences* web_prefs) {
-  if (!preferences_populater_.get()) {
-    preferences_populater_ =
-        base::WrapUnique(native_factory_->CreateWebPreferencesPopulater());
+  AwSettings* aw_settings = AwSettings::FromWebContents(
+      content::WebContents::FromRenderViewHost(rvh));
+  if (aw_settings) {
+    aw_settings->PopulateWebPreferences(web_prefs);
   }
-  preferences_populater_->PopulateFor(
-      content::WebContents::FromRenderViewHost(rvh), web_prefs);
 }
 
 std::vector<std::unique_ptr<content::NavigationThrottle>>
@@ -542,8 +550,8 @@ std::unique_ptr<base::Value> AwContentBrowserClient::GetServiceManifestOverlay(
   return base::JSONReader::Read(manifest_contents);
 }
 
-void AwContentBrowserClient::RegisterRenderFrameMojoInterfaces(
-    service_manager::InterfaceRegistry* registry,
+void AwContentBrowserClient::ExposeInterfacesToFrame(
+    service_manager::BinderRegistry* registry,
     content::RenderFrameHost* render_frame_host) {
   registry->AddInterface(
       base::Bind(&autofill::ContentAutofillDriverFactory::BindAutofillDriver,

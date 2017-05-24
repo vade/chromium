@@ -68,6 +68,12 @@ class CompositorView : public content::CompositorClient,
                       jint width,
                       jint height,
                       const base::android::JavaParamRef<jobject>& surface);
+  void OnPhysicalBackingSizeChanged(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jobject>& jweb_contents,
+      jint width,
+      jint height);
 
   void SetOverlayVideoMode(JNIEnv* env,
                            const base::android::JavaParamRef<jobject>& object,
@@ -78,7 +84,8 @@ class CompositorView : public content::CompositorClient,
 
   // CompositorClient implementation:
   void UpdateLayerTreeHost() override;
-  void OnSwapBuffersCompleted(int pending_swap_buffers) override;
+  void DidSwapFrame(int pending_frames) override;
+  void DidSwapBuffers() override;
   ui::UIResourceProvider* GetUIResourceProvider();
 
  private:

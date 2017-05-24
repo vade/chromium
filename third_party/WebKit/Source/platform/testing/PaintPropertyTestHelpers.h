@@ -5,31 +5,28 @@
 #include "platform/graphics/paint/ClipPaintPropertyNode.h"
 #include "platform/graphics/paint/EffectPaintPropertyNode.h"
 #include "platform/graphics/paint/PaintChunkProperties.h"
-#include "platform/graphics/paint/ScrollPaintPropertyNode.h"
 #include "platform/graphics/paint/TransformPaintPropertyNode.h"
 
 namespace blink {
 namespace testing {
 
-static inline PassRefPtr<EffectPaintPropertyNode> createOpacityOnlyEffect(
+static inline PassRefPtr<EffectPaintPropertyNode> CreateOpacityOnlyEffect(
     PassRefPtr<const EffectPaintPropertyNode> parent,
     float opacity) {
-  RefPtr<TransformPaintPropertyNode> localTransformSpace =
-      const_cast<TransformPaintPropertyNode*>(parent->localTransformSpace());
-  RefPtr<ClipPaintPropertyNode> outputClip =
-      const_cast<ClipPaintPropertyNode*>(parent->outputClip());
-  return EffectPaintPropertyNode::create(
-      std::move(parent), std::move(localTransformSpace), std::move(outputClip),
-      CompositorFilterOperations(), opacity, SkBlendMode::kSrcOver);
+  RefPtr<TransformPaintPropertyNode> local_transform_space =
+      const_cast<TransformPaintPropertyNode*>(parent->LocalTransformSpace());
+  RefPtr<ClipPaintPropertyNode> output_clip =
+      const_cast<ClipPaintPropertyNode*>(parent->OutputClip());
+  return EffectPaintPropertyNode::Create(
+      std::move(parent), std::move(local_transform_space),
+      std::move(output_clip), kColorFilterNone, CompositorFilterOperations(),
+      opacity, SkBlendMode::kSrcOver);
 }
 
-static inline PaintChunkProperties defaultPaintChunkProperties() {
-  PropertyTreeState propertyTreeState(
-      TransformPaintPropertyNode::root(), ClipPaintPropertyNode::root(),
-      EffectPaintPropertyNode::root(), ScrollPaintPropertyNode::root());
-  PaintChunkProperties defaultProperties(propertyTreeState);
+static inline PaintChunkProperties DefaultPaintChunkProperties() {
+  PaintChunkProperties default_properties(PropertyTreeState::Root());
 
-  return defaultProperties;
+  return default_properties;
 }
 
 }  // namespace testing

@@ -19,7 +19,6 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/optional.h"
@@ -119,7 +118,7 @@ class OfflinePageModelImpl : public OfflinePageModel, public KeyedService {
  private:
   FRIEND_TEST_ALL_PREFIXES(OfflinePageModelImplTest, MarkPageForDeletion);
 
-  typedef ScopedVector<OfflinePageArchiver> PendingArchivers;
+  typedef std::vector<std::unique_ptr<OfflinePageArchiver>> PendingArchivers;
 
   // Callback for ensuring archive directory is created.
   void OnEnsureArchivesDirCreatedDone(const base::TimeTicks& start_time);
@@ -164,7 +163,7 @@ class OfflinePageModelImpl : public OfflinePageModel, public KeyedService {
                            const SavePageCallback& callback,
                            OfflinePageArchiver* archiver,
                            OfflinePageArchiver::ArchiverResult result,
-                           const GURL& url,
+                           const GURL& saved_url,
                            const base::FilePath& file_path,
                            const base::string16& title,
                            int64_t file_size);

@@ -5,9 +5,9 @@
 #ifndef CC_IPC_CC_PARAM_TRAITS_MACROS_H_
 #define CC_IPC_CC_PARAM_TRAITS_MACROS_H_
 
+#include "cc/base/filter_operation.h"
 #include "cc/output/begin_frame_args.h"
 #include "cc/output/compositor_frame.h"
-#include "cc/output/filter_operation.h"
 #include "cc/quads/debug_border_draw_quad.h"
 #include "cc/quads/draw_quad.h"
 #include "cc/quads/render_pass.h"
@@ -24,10 +24,10 @@
 #include "cc/surfaces/surface_id.h"
 #include "cc/surfaces/surface_info.h"
 #include "cc/surfaces/surface_sequence.h"
-#include "ui/events/ipc/latency_info_param_traits.h"
 #include "ui/gfx/ipc/color/gfx_param_traits.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
 #include "ui/gfx/ipc/skia/gfx_skia_param_traits.h"
+#include "ui/latency/ipc/latency_info_param_traits.h"
 
 #undef IPC_MESSAGE_EXPORT
 #define IPC_MESSAGE_EXPORT CC_IPC_EXPORT
@@ -41,6 +41,8 @@ IPC_ENUM_TRAITS_MAX_VALUE(cc::ResourceFormat, cc::RESOURCE_FORMAT_MAX)
 IPC_ENUM_TRAITS_MAX_VALUE(SkBlendMode, SkBlendMode::kLastMode)
 IPC_ENUM_TRAITS_MAX_VALUE(cc::YUVVideoDrawQuad::ColorSpace,
                           cc::YUVVideoDrawQuad::COLOR_SPACE_LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(cc::SurfaceDrawQuadType,
+                          cc::SurfaceDrawQuadType::LAST)
 
 IPC_STRUCT_TRAITS_BEGIN(cc::SurfaceSequence)
   IPC_STRUCT_TRAITS_MEMBER(frame_sink_id)
@@ -65,10 +67,11 @@ IPC_STRUCT_TRAITS_END()
 IPC_STRUCT_TRAITS_BEGIN(cc::RenderPassDrawQuad)
   IPC_STRUCT_TRAITS_PARENT(cc::DrawQuad)
   IPC_STRUCT_TRAITS_MEMBER(render_pass_id)
-  IPC_STRUCT_TRAITS_MEMBER(mask_uv_scale)
+  IPC_STRUCT_TRAITS_MEMBER(mask_uv_rect)
   IPC_STRUCT_TRAITS_MEMBER(mask_texture_size)
   IPC_STRUCT_TRAITS_MEMBER(filters_scale)
   IPC_STRUCT_TRAITS_MEMBER(filters_origin)
+  IPC_STRUCT_TRAITS_MEMBER(tex_coord_rect)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(cc::SolidColorDrawQuad)
@@ -83,9 +86,14 @@ IPC_STRUCT_TRAITS_BEGIN(cc::StreamVideoDrawQuad)
   IPC_STRUCT_TRAITS_MEMBER(matrix)
 IPC_STRUCT_TRAITS_END()
 
+IPC_STRUCT_TRAITS_BEGIN(cc::StreamVideoDrawQuad::OverlayResources)
+  IPC_STRUCT_TRAITS_MEMBER(size_in_pixels)
+IPC_STRUCT_TRAITS_END()
+
 IPC_STRUCT_TRAITS_BEGIN(cc::SurfaceDrawQuad)
   IPC_STRUCT_TRAITS_PARENT(cc::DrawQuad)
   IPC_STRUCT_TRAITS_MEMBER(surface_id)
+  IPC_STRUCT_TRAITS_MEMBER(surface_draw_quad_type)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(cc::TextureDrawQuad)
@@ -104,6 +112,10 @@ IPC_STRUCT_TRAITS_BEGIN(cc::TextureDrawQuad)
   IPC_STRUCT_TRAITS_MEMBER(secure_output_only)
 IPC_STRUCT_TRAITS_END()
 
+IPC_STRUCT_TRAITS_BEGIN(cc::TextureDrawQuad::OverlayResources)
+  IPC_STRUCT_TRAITS_MEMBER(size_in_pixels)
+IPC_STRUCT_TRAITS_END()
+
 IPC_STRUCT_TRAITS_BEGIN(cc::TileDrawQuad)
   IPC_STRUCT_TRAITS_PARENT(cc::DrawQuad)
   IPC_STRUCT_TRAITS_MEMBER(tex_coord_rect)
@@ -114,7 +126,7 @@ IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(cc::SharedQuadState)
   IPC_STRUCT_TRAITS_MEMBER(quad_to_target_transform)
-  IPC_STRUCT_TRAITS_MEMBER(quad_layer_bounds)
+  IPC_STRUCT_TRAITS_MEMBER(quad_layer_rect)
   IPC_STRUCT_TRAITS_MEMBER(visible_quad_layer_rect)
   IPC_STRUCT_TRAITS_MEMBER(clip_rect)
   IPC_STRUCT_TRAITS_MEMBER(is_clipped)
@@ -126,6 +138,7 @@ IPC_STRUCT_TRAITS_END()
 IPC_STRUCT_TRAITS_BEGIN(cc::TransferableResource)
   IPC_STRUCT_TRAITS_MEMBER(id)
   IPC_STRUCT_TRAITS_MEMBER(format)
+  IPC_STRUCT_TRAITS_MEMBER(buffer_format)
   IPC_STRUCT_TRAITS_MEMBER(filter)
   IPC_STRUCT_TRAITS_MEMBER(size)
   IPC_STRUCT_TRAITS_MEMBER(mailbox_holder)
@@ -149,8 +162,6 @@ IPC_STRUCT_TRAITS_END()
 IPC_STRUCT_TRAITS_BEGIN(cc::Selection<gfx::SelectionBound>)
   IPC_STRUCT_TRAITS_MEMBER(start)
   IPC_STRUCT_TRAITS_MEMBER(end)
-  IPC_STRUCT_TRAITS_MEMBER(is_editable)
-  IPC_STRUCT_TRAITS_MEMBER(is_empty_text_form_control)
 IPC_STRUCT_TRAITS_END()
 
 IPC_ENUM_TRAITS_MAX_VALUE(cc::BeginFrameArgs::BeginFrameArgsType,
@@ -187,12 +198,10 @@ IPC_STRUCT_TRAITS_BEGIN(cc::CompositorFrameMetadata)
   IPC_STRUCT_TRAITS_MEMBER(selection)
   IPC_STRUCT_TRAITS_MEMBER(latency_info)
   IPC_STRUCT_TRAITS_MEMBER(referenced_surfaces)
-IPC_STRUCT_TRAITS_END()
-
-IPC_STRUCT_TRAITS_BEGIN(cc::SurfaceInfo)
-  IPC_STRUCT_TRAITS_MEMBER(id_)
-  IPC_STRUCT_TRAITS_MEMBER(device_scale_factor_)
-  IPC_STRUCT_TRAITS_MEMBER(size_in_pixels_)
+  IPC_STRUCT_TRAITS_MEMBER(activation_dependencies)
+  IPC_STRUCT_TRAITS_MEMBER(content_source_id)
+  IPC_STRUCT_TRAITS_MEMBER(begin_frame_ack)
+  IPC_STRUCT_TRAITS_MEMBER(frame_token)
 IPC_STRUCT_TRAITS_END()
 
 #endif  // CC_IPC_CC_PARAM_TRAITS_MACROS_H_

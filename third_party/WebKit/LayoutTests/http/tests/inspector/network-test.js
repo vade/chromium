@@ -56,6 +56,56 @@ var initialize_NetworkTest = function() {
 
 InspectorTest.preloadPanel("network");
 
+/**
+ * @param {!SDK.NetworkRequest} request
+ * @return {!Promise<!SDK.NetworkRequest>}
+ */
+InspectorTest.waitForRequestResponse = function(request)
+{
+    if (request.responseReceivedTime !== -1)
+        return Promise.resolve(request);
+    return InspectorTest.waitForEvent(SDK.NetworkManager.Events.RequestUpdated, InspectorTest.networkManager,
+        updateRequest => updateRequest === request && request.responseReceivedTime !== -1);
+}
+
+/**
+ * @param {!SDK.NetworkRequest} request
+ * @return {!Promise<!Network.NetworkRequestNode>}
+ */
+InspectorTest.waitForNetworkLogViewNodeForRequest = function(request)
+{
+    var networkLogView = UI.panels.network._networkLogView;
+    var node = networkLogView._nodesByRequestId.get(request.requestId());
+    if (node)
+        return Promise.resolve(node);
+
+    var promise = InspectorTest.waitForEvent(Network.NetworkLogView.Events.UpdateRequest, networkLogView,
+        updateRequest => updateRequest === request);
+    return promise.then(() => {
+        var node = networkLogView._nodesByRequestId.get(request.requestId());
+        console.assert(node);
+        return node;
+    });
+}
+
+/**
+ * @param {!SDK.NetworkRequest} wsRequest
+ * @param {string} message
+ * @return {!Promise<!SDK.NetworkRequest.WebSocketFrame>}
+ */
+InspectorTest.waitForWebsocketFrameReceived = function(wsRequest, message)
+{
+    for (var frame of wsRequest.frames()) {
+        if (checkFrame(frame))
+            return Promise.resolve(frame);
+    }
+    return InspectorTest.waitForEvent(SDK.NetworkRequest.Events.WebsocketFrameAdded, wsRequest, checkFrame);
+
+    function checkFrame(frame) {
+        return frame.type === SDK.NetworkRequest.WebSocketFrameType.Receive && frame.text === message;
+    }
+}
+
 InspectorTest.recordNetwork = function()
 {
     UI.panels.network._networkLogView.setRecording(true);
@@ -63,7 +113,7 @@ InspectorTest.recordNetwork = function()
 
 InspectorTest.networkRequests = function()
 {
-    return SDK.NetworkLog.requests();
+    return NetworkLog.networkLog.requests().slice();
 }
 
 InspectorTest.dumpNetworkRequests = function()
@@ -124,13 +174,15 @@ InspectorTest.makeFetch = function(url, requestInitializer, callback)
     InspectorTest.callFunctionInPageAsync("makeFetch", [url, requestInitializer]).then(callback);
 }
 
-InspectorTest.clearNetworkCache = function(finishedCallback)
+/**
+ * @return {!Promise}
+ */
+InspectorTest.clearNetworkCache = function()
 {
-  // This turns cache off and then on, effectively clearning the cache.
-  var networkAgent = InspectorTest.NetworkAgent;
-  var promise = networkAgent.setCacheDisabled(true);
-  promise.then(networkAgent.setCacheDisabled.bind(networkAgent, false));
-  promise.then(finishedCallback);
+    // This turns cache off and then on, effectively clearning the cache.
+    var networkAgent = InspectorTest.NetworkAgent;
+    var promise = networkAgent.setCacheDisabled(true);
+    return promise.then(() => networkAgent.setCacheDisabled(false));
 }
 
 InspectorTest.HARPropertyFormatters = {

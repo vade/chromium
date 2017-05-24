@@ -17,18 +17,21 @@ class SequencedWorkerPool;
 
 namespace ui {
 class ContextFactory;
+class ContextFactoryPrivate;
 }
 
 namespace ash {
 
 class ShellDelegate;
+class ShellPort;
 
 struct ASH_EXPORT ShellInitParams {
-  // Shell takes ownership of |wm_shell|, if null WmShellAura is created.
-  // TODO(sky): temporary, will eventually go away.
-  WmShell* wm_shell = nullptr;
+  // Shell takes ownership of |shell_port|, if null ShellPortClassic is created.
+  ShellPort* shell_port = nullptr;
   // Shell takes ownership of |primary_window_tree_host|. This is only used
   // by mash.
+  // TODO(sky): once simplified display management is enabled for mash this
+  // should no longer be necessary. http://crbug.com/708287.
   aura::WindowTreeHostMus* primary_window_tree_host = nullptr;
   ShellDelegate* delegate = nullptr;
   ui::ContextFactory* context_factory = nullptr;

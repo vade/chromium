@@ -4,39 +4,32 @@
 
 import base64
 import unittest
+
 from webkitpy.common.host_mock import MockHost
-from webkitpy.w3c.wpt_github import WPTGitHub
-
-
-class WPTGitHubEnvTest(unittest.TestCase):
-
-    def setUp(self):
-        self.host = MockHost()
-
-    def test_requires_env_vars(self):
-        self.assertRaises(AssertionError, lambda: WPTGitHub(self.host))
-
-    def test_requires_gh_user_env_var(self):
-        self.host.environ['GH_USER'] = 'rutabaga'
-        self.assertRaises(AssertionError, lambda: WPTGitHub(self.host))
-
-    def test_requires_gh_token_env_var(self):
-        self.host.environ['GH_TOKEN'] = 'deadbeefcafe'
-        self.assertRaises(AssertionError, lambda: WPTGitHub(self.host))
+from webkitpy.w3c.wpt_github import WPTGitHub, MergeError
 
 
 class WPTGitHubTest(unittest.TestCase):
 
     def setUp(self):
-        self.host = MockHost()
-        self.host.environ['GH_USER'] = 'rutabaga'
-        self.host.environ['GH_TOKEN'] = 'deadbeefcafe'
-        self.wpt_github = WPTGitHub(self.host)
+        self.wpt_github = WPTGitHub(MockHost(), user='rutabaga', token='decafbad')
 
-    def test_properties(self):
+    def test_init(self):
         self.assertEqual(self.wpt_github.user, 'rutabaga')
-        self.assertEqual(self.wpt_github.token, 'deadbeefcafe')
+        self.assertEqual(self.wpt_github.token, 'decafbad')
 
     def test_auth_token(self):
-        expected = base64.encodestring('rutabaga:deadbeefcafe').strip()
-        self.assertEqual(self.wpt_github.auth_token(), expected)
+        self.assertEqual(
+            self.wpt_github.auth_token(),
+            base64.encodestring('rutabaga:decafbad').strip())
+
+    def test_merge_pull_request_throws_merge_error_on_405(self):
+        self.wpt_github.host.web.responses = [
+            {'status_code': 200},
+            {'status_code': 405},
+        ]
+
+        self.wpt_github.merge_pull_request(1234)
+
+        with self.assertRaises(MergeError):
+            self.wpt_github.merge_pull_request(5678)

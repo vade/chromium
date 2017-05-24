@@ -2146,12 +2146,6 @@ _NAMED_TYPE_INFO = {
       'GL_RGBA',
     ],
   },
-  'ImageUsage': {
-    'type': 'GLenum',
-    'valid': [
-      'GL_READ_WRITE_CHROMIUM',
-    ],
-  },
   'UniformParameter': {
     'type': 'GLenum',
     'is_complete': True,
@@ -2670,14 +2664,6 @@ _FUNCTION_INFO = {
     'extension': "CHROMIUM_image",
     'trace_level': 1,
   },
-  'CreateGpuMemoryBufferImageCHROMIUM': {
-    'type': 'NoCommand',
-    'cmd_args':
-        'GLsizei width, GLsizei height, GLenum internalformat, GLenum usage',
-    'result': ['GLuint'],
-    'extension': "CHROMIUM_gpu_memory_buffer_image",
-    'trace_level': 1,
-  },
   'DescheduleUntilFinishedCHROMIUM': {
     'type': 'Custom',
     'decoder_func': 'DoDescheduleUntilFinishedCHROMIUM',
@@ -2931,6 +2917,7 @@ _FUNCTION_INFO = {
     'gl_test_func': 'glGenFramebuffersEXT',
     'resource_type': 'Framebuffer',
     'resource_types': 'Framebuffers',
+    'not_shared': 'True',
   },
   'GenRenderbuffers': {
     'type': 'GENn', 'gl_test_func': 'glGenRenderbuffersEXT',
@@ -2956,6 +2943,7 @@ _FUNCTION_INFO = {
     'resource_type': 'TransformFeedback',
     'resource_types': 'TransformFeedbacks',
     'es3': True,
+    'not_shared': 'True',
   },
   'GetActiveAttrib': {
     'type': 'Custom',
@@ -3373,7 +3361,6 @@ _FUNCTION_INFO = {
     'type': 'PUTn',
     'count': 1,
     'decoder_func': 'DoInvalidateFramebuffer',
-    'client_test': False,
     'unit_test': False,
     'es3': True,
   },
@@ -3381,7 +3368,6 @@ _FUNCTION_INFO = {
     'type': 'PUTn',
     'count': 1,
     'decoder_func': 'DoInvalidateSubFramebuffer',
-    'client_test': False,
     'unit_test': False,
     'es3': True,
   },
@@ -3654,8 +3640,10 @@ _FUNCTION_INFO = {
     'extension': True,
     'trace_level': 1,
   },
-  'SwapBuffersWithDamageCHROMIUM': {
-    'type': 'Custom',
+  'SwapBuffersWithBoundsCHROMIUM': {
+    'type': 'PUTn',
+    'count': 4,
+    'decoder_func': 'DoSwapBuffersWithBoundsCHROMIUM',
     'impl_func': False,
     'client_test': False,
     'extension': True,
@@ -4019,6 +4007,7 @@ _FUNCTION_INFO = {
   'Scissor': {
     'type': 'StateSet',
     'state': 'Scissor',
+    'decoder_func': 'DoScissor',
   },
   'Viewport': {
     'impl_func': False,
@@ -4081,7 +4070,6 @@ _FUNCTION_INFO = {
     'type': 'PUTn',
     'decoder_func': 'DoDrawBuffersEXT',
     'count': 1,
-    'client_test': False,
     'unit_test': False,
     # could use 'extension_flag': 'ext_draw_buffers' but currently expected to
     # work without.
@@ -4259,6 +4247,7 @@ _FUNCTION_INFO = {
     'resource_types': 'VertexArrays',
     'unit_test': False,
     'pepper_interface': 'VertexArrayObject',
+    'not_shared': 'True',
   },
   'BindVertexArrayOES': {
     'type': 'Bind',
@@ -4289,6 +4278,11 @@ _FUNCTION_INFO = {
   },
   'BindTexImage2DCHROMIUM': {
     'decoder_func': 'DoBindTexImage2DCHROMIUM',
+    'unit_test': False,
+    'extension': "CHROMIUM_image",
+  },
+  'BindTexImage2DWithInternalformatCHROMIUM': {
+    'decoder_func': 'DoBindTexImage2DWithInternalformatCHROMIUM',
     'unit_test': False,
     'extension': "CHROMIUM_image",
   },
@@ -4328,7 +4322,6 @@ _FUNCTION_INFO = {
     'count': 1,
     'decoder_func': 'DoDiscardFramebufferEXT',
     'unit_test': False,
-    'client_test': False,
     'extension': 'EXT_discard_framebuffer',
     'extension_flag': 'ext_discard_framebuffer',
     'trace_level': 2,
@@ -4401,6 +4394,23 @@ _FUNCTION_INFO = {
     'cmd_args': 'GLsizei count, const GLuint* textures',
     'extension': 'CHROMIUM_schedule_ca_layer',
     'unit_test': False,
+  },
+  'ScheduleDCLayerSharedStateCHROMIUM': {
+    'type': 'Custom',
+    'impl_func': False,
+    'client_test': False,
+    'cmd_args': 'GLfloat opacity, GLboolean is_clipped, '
+                'GLint z_order, GLuint shm_id, GLuint shm_offset',
+    'extension': 'CHROMIUM_schedule_ca_layer',
+  },
+  'ScheduleDCLayerCHROMIUM': {
+    'type': 'Custom',
+    'impl_func': False,
+    'client_test': False,
+    'cmd_args': 'GLsizei num_textures, GLuint background_color, '
+                'GLuint edge_aa_mask, GLuint filter, GLuint shm_id, '
+                'GLuint shm_offset',
+    'extension': 'CHROMIUM_schedule_ca_layer',
   },
   'CommitOverlayPlanesCHROMIUM': {
     'impl_func': False,
@@ -4542,6 +4552,14 @@ _FUNCTION_INFO = {
     'extension': 'CHROMIUM_path_rendering',
     'extension_flag': 'chromium_path_rendering',
   },
+  'SetDrawRectangleCHROMIUM': {
+    'decoder_func': 'DoSetDrawRectangleCHROMIUM',
+    'extension': 'CHROMIUM_set_draw_rectangle',
+  },
+  'SetEnableDCLayersCHROMIUM': {
+    'decoder_func': 'DoSetEnableDCLayersCHROMIUM',
+    'extension': 'CHROMIUM_dc_layers',
+  },
 }
 
 
@@ -4622,6 +4640,27 @@ def ToGLExtensionString(extension_flag):
 def ToCamelCase(input_string):
   """converts ABC_underscore_case to ABCUnderscoreCase."""
   return ''.join(w[0].upper() + w[1:] for w in input_string.split('_'))
+
+def EnumsConflict(a, b):
+  """Returns true if the enums have different names (ignoring suffixes) and one
+  of them is a Chromium enum."""
+  if a == b:
+    return False
+
+  if b.endswith('_CHROMIUM'):
+    a, b = b, a
+
+  if not a.endswith('_CHROMIUM'):
+    return False
+
+  def removesuffix(string, suffix):
+    if not string.endswith(suffix):
+      return string
+    return string[:-len(suffix)]
+  b = removesuffix(b, "_NV")
+  b = removesuffix(b, "_EXT")
+  b = removesuffix(b, "_OES")
+  return removesuffix(a, "_CHROMIUM") != b
 
 def GetGLGetTypeConversion(result_type, value_type, value):
   """Makes a gl compatible type conversion string for accessing state variables.
@@ -5012,6 +5051,7 @@ static_assert(offsetof(%(cmd_name)s::Result, %(field_name)s) == %(offset)d,
     """Writes the service implementation for a command."""
     self.WritePassthroughServiceFunctionHeader(func, f)
     self.WriteServiceHandlerArgGetCode(func, f)
+    func.WritePassthroughHandlerValidation(f)
     self.WritePassthroughServiceFunctionDoerCall(func, f)
     f.write("  return error::kNoError;\n")
     f.write("}\n")
@@ -5021,6 +5061,7 @@ static_assert(offsetof(%(cmd_name)s::Result, %(field_name)s) == %(offset)d,
     """Writes the service implementation for a command."""
     self.WritePassthroughServiceFunctionHeader(func, f)
     self.WriteImmediateServiceHandlerArgGetCode(func, f)
+    func.WritePassthroughHandlerValidation(f)
     self.WritePassthroughServiceFunctionDoerCall(func, f)
     f.write("  return error::kNoError;\n")
     f.write("}\n")
@@ -5030,6 +5071,7 @@ static_assert(offsetof(%(cmd_name)s::Result, %(field_name)s) == %(offset)d,
     """Writes the service implementation for a command."""
     self.WritePassthroughServiceFunctionHeader(func, f)
     self.WriteBucketServiceHandlerArgGetCode(func, f)
+    func.WritePassthroughHandlerValidation(f)
     self.WritePassthroughServiceFunctionDoerCall(func, f)
     f.write("  return error::kNoError;\n")
     f.write("}\n")
@@ -5806,7 +5848,7 @@ TEST_P(%(test_name)s, %(name)sValidArgs) {
 TEST_P(%(test_name)s, %(name)sValidArgsNewId) {
   EXPECT_CALL(*gl_, %(gl_func_name)s(kNewServiceId));
   EXPECT_CALL(*gl_, %(gl_gen_func_name)s(1, _))
-     .WillOnce(SetArgumentPointee<1>(kNewServiceId));
+     .WillOnce(SetArgPointee<1>(kNewServiceId));
   SpecializedSetup<cmds::%(name)s, 0>(true);
   cmds::%(name)s cmd;
   cmd.Init(kNewClientId);
@@ -5836,7 +5878,7 @@ TEST_P(%(test_name)s, %(name)sValidArgsNewId) {
   EXPECT_CALL(*gl_,
               %(gl_func_name)s(%(gl_args_with_new_id)s));
   EXPECT_CALL(*gl_, %(gl_gen_func_name)s(1, _))
-     .WillOnce(SetArgumentPointee<1>(kNewServiceId));
+     .WillOnce(SetArgPointee<1>(kNewServiceId));
   SpecializedSetup<cmds::%(name)s, 0>(true);
   cmds::%(name)s cmd;
   cmd.Init(%(args_with_new_id)s);
@@ -5998,28 +6040,34 @@ class GENnHandler(TypeHandler):
       arg.WriteClientSideValidationCode(f, func)
     not_shared = func.GetInfo('not_shared')
     if not_shared:
-      alloc_code = (
-
-"""  IdAllocator* id_allocator = GetIdAllocator(id_namespaces::k%s);
-  for (GLsizei ii = 0; ii < n; ++ii)
-    %s[ii] = id_allocator->AllocateID();""" %
-  (func.GetInfo('resource_types'), func.GetOriginalArgs()[1].name))
+      alloc_code = ("""\
+      IdAllocator* id_allocator = GetIdAllocator(IdNamespaces::k%s);
+      for (GLsizei ii = 0; ii < n; ++ii)
+      %s[ii] = id_allocator->AllocateID();""" %
+      (func.GetInfo('resource_types'), func.GetOriginalArgs()[1].name))
     else:
-      alloc_code = ("""  GetIdHandler(id_namespaces::k%(resource_types)s)->
+      alloc_code = ("""\
+      GetIdHandler(SharedIdNamespaces::k%(resource_types)s)->
       MakeIds(this, 0, %(args)s);""" % args)
     args['alloc_code'] = alloc_code
 
-    code = """ GPU_CLIENT_SINGLE_THREAD_CHECK();
-%(alloc_code)s
-  %(name)sHelper(%(args)s);
-  helper_->%(name)sImmediate(%(args)s);
-  if (share_group_->bind_generates_resource())
-    helper_->CommandBufferHelper::Flush();
-%(log_code)s
-  CheckGLError();
-}
+    code = """\
+    GPU_CLIENT_SINGLE_THREAD_CHECK();
+    %(alloc_code)s
+    %(name)sHelper(%(args)s);
+    helper_->%(name)sImmediate(%(args)s);
+    """
+    if not not_shared:
+      code += """\
+      if (share_group_->bind_generates_resource())
+      helper_->CommandBufferHelper::Flush();
+      """
+    code += """\
+    %(log_code)s
+    CheckGLError();
+    }
 
-"""
+    """
     f.write(code % args)
 
   def WriteGLES2ImplementationUnitTest(self, func, f):
@@ -6055,7 +6103,7 @@ TEST_F(GLES2ImplementationTest, %(name)s) {
     valid_test = """
 TEST_P(%(test_name)s, %(name)sValidArgs) {
   EXPECT_CALL(*gl_, %(gl_func_name)s(1, _))
-      .WillOnce(SetArgumentPointee<1>(kNewServiceId));
+      .WillOnce(SetArgPointee<1>(kNewServiceId));
   cmds::%(name)s* cmd = GetImmediateAs<cmds::%(name)s>();
   GLuint temp = kNewClientId;
   SpecializedSetup<cmds::%(name)s, 0>(true);
@@ -6309,10 +6357,10 @@ TEST_P(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
     f.write("  GLuint client_id;\n")
     if func.return_type == "GLsync":
       f.write(
-          "  GetIdHandler(id_namespaces::kSyncs)->\n")
+          "  GetIdHandler(SharedIdNamespaces::kSyncs)->\n")
     else:
       f.write(
-          "  GetIdHandler(id_namespaces::kProgramsAndShaders)->\n")
+          "  GetIdHandler(SharedIdNamespaces::kProgramsAndShaders)->\n")
     f.write("      MakeIds(this, 0, 1, &client_id);\n")
     f.write("  helper_->%s(%s);\n" %
                (func.name, func.MakeCmdArgString("")))
@@ -6690,7 +6738,7 @@ class GETnHandler(TypeHandler):
   typedef cmds::%(func_name)s::Result Result;
   Result* result = GetSharedMemoryAndSizeAs<Result*>(
       c.%(last_arg_name)s_shm_id, c.%(last_arg_name)s_shm_offset,
-      &buffer_size);
+      sizeof(Result), &buffer_size);
   %(last_arg_type)s %(last_arg_name)s = result ? result->GetData() : NULL;
   if (%(last_arg_name)s == NULL) {
     return error::kOutOfBounds;
@@ -7335,6 +7383,9 @@ TEST_P(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
 
   def WriteGLES2Implementation(self, func, f):
     """Overrriden from TypeHandler."""
+    impl_func = func.GetInfo('impl_func')
+    if (impl_func != None and impl_func != True):
+      return;
     f.write("%s GLES2Implementation::%s(%s) {\n" %
                (func.return_type, func.original_name,
                 func.MakeTypedOriginalArgString("")))
@@ -7361,6 +7412,10 @@ TEST_P(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
 
   def WriteGLES2ImplementationUnitTest(self, func, f):
     """Writes the GLES2 Implemention unit test."""
+    client_test = func.GetInfo('client_test', True)
+    if not client_test:
+      return;
+
     code = """
 TEST_F(GLES2ImplementationTest, %(name)s) {
   %(type)s data[%(count_param)d][%(count)d] = {{0}};
@@ -8329,7 +8384,7 @@ TEST_P(%(test_name)s, %(name)sValidArgs) {
   SpecializedSetup<cmds::%(name)s, 0>(true);
 %(expect_len_code)s
   EXPECT_CALL(*gl_, %(gl_func_name)s(%(gl_args)s))
-      .WillOnce(DoAll(SetArgumentPointee<2>(strlen(kInfo)),
+      .WillOnce(DoAll(SetArgPointee<2>(strlen(kInfo)),
                       SetArrayArgument<3>(kInfo, kInfo + strlen(kInfo) + 1)));
   cmds::%(name)s cmd;
   cmd.Init(%(args)s);
@@ -8358,7 +8413,7 @@ TEST_P(%(test_name)s, %(name)sValidArgs) {
     if get_len_func and get_len_func[0:2] == 'gl':
       sub['expect_len_code'] = (
         "  EXPECT_CALL(*gl_, %s(%s, %s, _))\n"
-        "      .WillOnce(SetArgumentPointee<2>(strlen(kInfo) + 1));") % (
+        "      .WillOnce(SetArgPointee<2>(strlen(kInfo) + 1));") % (
             get_len_func[2:], id_name, get_len_enum)
     self.WriteValidUnitTest(func, f, valid_test, sub, *extras)
 
@@ -8593,6 +8648,10 @@ class Argument(object):
 
   def WriteValidationCode(self, f, func):
     """Writes the validation code for an argument."""
+    pass
+
+  def WritePassthroughValidationCode(self, f, func):
+    """Writes the passthrough validation code for an argument."""
     pass
 
   def WriteClientSideValidationCode(self, f, func):
@@ -8879,6 +8938,14 @@ class ImmediatePointerArgument(Argument):
     if self.optional:
       return
     f.write("  if (%s == NULL) {\n" % self.name)
+    f.write("    return error::kOutOfBounds;\n")
+    f.write("  }\n")
+
+  def WritePassthroughValidationCode(self, f, func):
+    """Overridden from Argument."""
+    if self.optional:
+      return
+    f.write("  if (%s == nullptr) {\n" % self.name)
     f.write("    return error::kOutOfBounds;\n")
     f.write("  }\n")
 
@@ -9510,6 +9577,11 @@ class Function(object):
     for arg in self.GetOriginalArgs():
       arg.WriteValidationCode(f, self)
     self.WriteValidationCode(f)
+
+  def WritePassthroughHandlerValidation(self, f):
+    """Writes validation code for the function."""
+    for arg in self.GetOriginalArgs():
+      arg.WritePassthroughValidationCode(f, self)
 
   def WriteHandlerImplementation(self, f):
     """Writes the handler implementation for this command."""
@@ -10869,8 +10941,7 @@ extern const NameToFunc g_gles2_function_table[] = {
             if not value in dict:
               dict[value] = name
             # check our own _CHROMIUM macro conflicts with khronos GL headers.
-            elif dict[value] != name and (name.endswith('_CHROMIUM') or
-                dict[value].endswith('_CHROMIUM')):
+            elif EnumsConflict(dict[value], name):
               self.Error("code collision: %s and %s have the same code %s" %
                          (dict[value], name, value))
 

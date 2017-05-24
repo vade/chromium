@@ -6,23 +6,25 @@
 
 #include "base/hash.h"
 #include "base/logging.h"
-#include "base/mac/objc_property_releaser.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/bookmarks/browser/bookmark_node.h"
 #import "ios/chrome/browser/ui/bookmarks/bookmark_utils_ios.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 using bookmarks::BookmarkNode;
 
 namespace bookmarks {
 BOOL NumberIsValidMenuItemType(int number) {
   // Invalid and deprecated numbers.
-  if (number < 0 || number > MenuItemLast)
+  if (number < 1 || number > MenuItemLast)
     return NO;
   MenuItemType type = static_cast<MenuItemType>(number);
   switch (type) {
-    case MenuItemAll:
     case MenuItemFolder:
       return YES;
 
@@ -33,9 +35,7 @@ BOOL NumberIsValidMenuItemType(int number) {
 }
 }  // namespace bookmarks
 
-@interface BookmarkMenuItem () {
-  base::mac::ObjCPropertyReleaser _propertyReleaser_BookmarkMenuItem;
-}
+@interface BookmarkMenuItem ()
 // Redefined to be read-write.
 @property(nonatomic, assign) const BookmarkNode* folder;
 @property(nonatomic, assign) const BookmarkNode* rootAncestor;
@@ -51,17 +51,8 @@ BOOL NumberIsValidMenuItemType(int number) {
 @synthesize sectionTitle = _sectionTitle;
 @synthesize type = _type;
 
-- (instancetype)init {
-  self = [super init];
-  if (self) {
-    _propertyReleaser_BookmarkMenuItem.Init(self, [BookmarkMenuItem class]);
-  }
-  return self;
-}
-
 - (UIAccessibilityTraits)accessibilityTraits {
   switch (self.type) {
-    case bookmarks::MenuItemAll:
     case bookmarks::MenuItemFolder:
       return super.accessibilityTraits |= UIAccessibilityTraitButton;
     case bookmarks::MenuItemSectionHeader:
@@ -73,8 +64,6 @@ BOOL NumberIsValidMenuItemType(int number) {
 
 - (NSString*)title {
   switch (self.type) {
-    case bookmarks::MenuItemAll:
-      return l10n_util::GetNSString(IDS_IOS_BOOKMARK_NEW_ALL_BOOKMARKS_LABEL);
     case bookmarks::MenuItemDivider:
       return nil;
     case bookmarks::MenuItemFolder:
@@ -86,8 +75,6 @@ BOOL NumberIsValidMenuItemType(int number) {
 
 - (NSString*)titleForMenu {
   switch (self.type) {
-    case bookmarks::MenuItemAll:
-      return l10n_util::GetNSString(IDS_IOS_BOOKMARK_NEW_ALL_BOOKMARKS_LABEL);
     case bookmarks::MenuItemDivider:
     case bookmarks::MenuItemFolder:
     case bookmarks::MenuItemSectionHeader:
@@ -97,8 +84,6 @@ BOOL NumberIsValidMenuItemType(int number) {
 
 - (NSString*)titleForNavigationBar {
   switch (self.type) {
-    case bookmarks::MenuItemAll:
-      return l10n_util::GetNSString(IDS_IOS_BOOKMARK_NEW_BOOKMARKS_LABEL);
     case bookmarks::MenuItemDivider:
     case bookmarks::MenuItemFolder:
     case bookmarks::MenuItemSectionHeader:
@@ -108,8 +93,6 @@ BOOL NumberIsValidMenuItemType(int number) {
 
 - (NSString*)accessibilityIdentifier {
   switch (self.type) {
-    case bookmarks::MenuItemAll:
-      return @"MenuItemAll";
     case bookmarks::MenuItemDivider:
       return nil;
     case bookmarks::MenuItemFolder:
@@ -121,11 +104,6 @@ BOOL NumberIsValidMenuItemType(int number) {
 
 - (UIImage*)imagePrimary:(BOOL)primary {
   switch (self.type) {
-    case bookmarks::MenuItemAll:
-      if (primary)
-        return [UIImage imageNamed:@"bookmark_blue_star"];
-      else
-        return [UIImage imageNamed:@"bookmark_gray_star"];
     case bookmarks::MenuItemFolder:
       if (self.folder->type() == BookmarkNode::BOOKMARK_BAR ||
           self.folder->type() == BookmarkNode::MOBILE ||
@@ -152,7 +130,6 @@ BOOL NumberIsValidMenuItemType(int number) {
     case bookmarks::MenuItemDivider:
     case bookmarks::MenuItemSectionHeader:
       return NO;
-    case bookmarks::MenuItemAll:
     case bookmarks::MenuItemFolder:
       return YES;
   }
@@ -160,7 +137,6 @@ BOOL NumberIsValidMenuItemType(int number) {
 
 - (BOOL)supportsEditing {
   switch (self.type) {
-    case bookmarks::MenuItemAll:
     case bookmarks::MenuItemFolder:
       return YES;
     case bookmarks::MenuItemDivider:
@@ -181,7 +157,6 @@ BOOL NumberIsValidMenuItemType(int number) {
 
   switch (self.type) {
     case bookmarks::MenuItemDivider:
-    case bookmarks::MenuItemAll:
       return YES;
     case bookmarks::MenuItemFolder:
       return self.folder == otherMenuItem.folder;
@@ -193,7 +168,7 @@ BOOL NumberIsValidMenuItemType(int number) {
 - (BookmarkMenuItem*)parentItem {
   if (self.type != bookmarks::MenuItemFolder)
     return self;
-  BookmarkMenuItem* item = [[[BookmarkMenuItem alloc] init] autorelease];
+  BookmarkMenuItem* item = [[BookmarkMenuItem alloc] init];
   item.type = self.type;
   item.folder = self.rootAncestor;
   item.rootAncestor = self.rootAncestor;
@@ -203,7 +178,6 @@ BOOL NumberIsValidMenuItemType(int number) {
 - (NSUInteger)hash {
   switch (self.type) {
     case bookmarks::MenuItemDivider:
-    case bookmarks::MenuItemAll:
       return self.type;
     case bookmarks::MenuItemFolder:
       return self.type + reinterpret_cast<NSUInteger>(self.folder);
@@ -212,21 +186,15 @@ BOOL NumberIsValidMenuItemType(int number) {
   }
 }
 
-+ (BookmarkMenuItem*)allMenuItem {
-  BookmarkMenuItem* item = [[[BookmarkMenuItem alloc] init] autorelease];
-  item.type = bookmarks::MenuItemAll;
-  return item;
-}
-
 + (BookmarkMenuItem*)dividerMenuItem {
-  BookmarkMenuItem* item = [[[BookmarkMenuItem alloc] init] autorelease];
+  BookmarkMenuItem* item = [[BookmarkMenuItem alloc] init];
   item.type = bookmarks::MenuItemDivider;
   return item;
 }
 
 + (BookmarkMenuItem*)folderMenuItemForNode:(const BookmarkNode*)node
                               rootAncestor:(const BookmarkNode*)ancestor {
-  BookmarkMenuItem* item = [[[BookmarkMenuItem alloc] init] autorelease];
+  BookmarkMenuItem* item = [[BookmarkMenuItem alloc] init];
   item.type = bookmarks::MenuItemFolder;
   item.folder = node;
   item.rootAncestor = ancestor;
@@ -234,7 +202,7 @@ BOOL NumberIsValidMenuItemType(int number) {
 }
 
 + (BookmarkMenuItem*)sectionMenuItemWithTitle:(NSString*)title {
-  BookmarkMenuItem* item = [[[BookmarkMenuItem alloc] init] autorelease];
+  BookmarkMenuItem* item = [[BookmarkMenuItem alloc] init];
   item.type = bookmarks::MenuItemSectionHeader;
   item.sectionTitle = title;
   return item;

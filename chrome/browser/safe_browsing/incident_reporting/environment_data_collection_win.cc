@@ -25,8 +25,8 @@
 #include "chrome/browser/safe_browsing/incident_reporting/module_integrity_verifier_win.h"
 #include "chrome/browser/safe_browsing/path_sanitizer.h"
 #include "chrome/common/safe_browsing/binary_feature_extractor.h"
-#include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome_elf/chrome_elf_constants.h"
+#include "components/safe_browsing/csd.pb.h"
 #include "components/variations/variations_associated_data.h"
 
 namespace safe_browsing {
@@ -259,7 +259,7 @@ void CollectModuleVerificationData(
     }
 
     if (!scan_complete) {
-      UMA_HISTOGRAM_ENUMERATION(
+      UMA_HISTOGRAM_EXACT_LINEAR(
           "ModuleIntegrityVerification.RelocationsUnordered", i,
           num_modules_to_verify);
     }
@@ -292,7 +292,7 @@ void CollectRegistryData(
 
 void CollectDomainEnrollmentData(
     ClientIncidentReport_EnvironmentData_OS* os_data) {
-  os_data->set_is_enrolled_to_domain(base::win::IsEnrolledToDomain());
+  os_data->set_is_enrolled_to_domain(base::win::IsEnterpriseManaged());
 }
 
 void CollectPlatformProcessData(
@@ -304,12 +304,8 @@ void CollectPlatformProcessData(
 }
 
 void CollectPlatformOSData(ClientIncidentReport_EnvironmentData_OS* os_data) {
-  const std::string reg_data_param_value = variations::GetVariationParamValue(
-      "SafeBrowsingIncidentReportingService", "collect_reg_data");
-  if (reg_data_param_value == "true") {
-    CollectRegistryData(kRegKeysToCollect, arraysize(kRegKeysToCollect),
-                        os_data->mutable_registry_key());
-  }
+  CollectRegistryData(kRegKeysToCollect, arraysize(kRegKeysToCollect),
+                      os_data->mutable_registry_key());
   CollectDomainEnrollmentData(os_data);
 }
 }  // namespace safe_browsing

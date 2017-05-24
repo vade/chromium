@@ -8,6 +8,9 @@
 #include "base/json/json_reader.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
+#include "base/sequenced_task_runner.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
@@ -18,6 +21,7 @@
 #include "chrome/browser/sync_file_system/sync_file_system_service.h"
 #include "chrome/browser/sync_file_system/sync_file_system_service_factory.h"
 #include "components/drive/service/fake_drive_service.h"
+#include "content/public/browser/storage_partition.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
 #include "storage/browser/quota/quota_manager.h"
@@ -61,26 +65,9 @@ class SyncFileSystemTest : public extensions::PlatformAppBrowserTest,
       : remote_service_(NULL) {
   }
 
-  void SetUpInProcessBrowserTestFixture() override {
-    ExtensionApiTest::SetUpInProcessBrowserTestFixture();
-    real_minimum_preserved_space_ =
-        storage::QuotaManager::kMinimumPreserveForSystem;
-    storage::QuotaManager::kMinimumPreserveForSystem = 0;
-  }
-
-  void TearDownInProcessBrowserTestFixture() override {
-    storage::QuotaManager::kMinimumPreserveForSystem =
-        real_minimum_preserved_space_;
-    ExtensionApiTest::TearDownInProcessBrowserTestFixture();
-  }
-
   scoped_refptr<base::SequencedTaskRunner> MakeSequencedTaskRunner() {
-    scoped_refptr<base::SequencedWorkerPool> worker_pool =
-        content::BrowserThread::GetBlockingPool();
-
-    return worker_pool->GetSequencedTaskRunnerWithShutdownBehavior(
-        worker_pool->GetSequenceToken(),
-        base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
+    return base::CreateSequencedTaskRunnerWithTraits(
+        {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
   }
 
   void SetUpOnMainThread() override {
@@ -156,8 +143,6 @@ class SyncFileSystemTest : public extensions::PlatformAppBrowserTest,
   std::unique_ptr<FakeSigninManagerForTesting> fake_signin_manager_;
 
   drive_backend::SyncEngine* remote_service_;
-
-  int64_t real_minimum_preserved_space_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncFileSystemTest);
 };

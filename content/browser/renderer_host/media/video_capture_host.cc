@@ -12,6 +12,7 @@
 #include "content/browser/browser_main_loop.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/media/video_capture_manager.h"
+#include "mojo/common/values_struct_traits.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace content {
@@ -24,8 +25,10 @@ VideoCaptureHost::VideoCaptureHost(MediaStreamManager* media_stream_manager)
 }
 
 // static
-void VideoCaptureHost::Create(MediaStreamManager* media_stream_manager,
-                              mojom::VideoCaptureHostRequest request) {
+void VideoCaptureHost::Create(
+    MediaStreamManager* media_stream_manager,
+    const service_manager::BindSourceInfo& source_info,
+    mojom::VideoCaptureHostRequest request) {
   DVLOG(1) << __func__;
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   mojo::MakeStrongBinding(
@@ -38,7 +41,7 @@ VideoCaptureHost::~VideoCaptureHost() {
     const base::WeakPtr<VideoCaptureController>& controller = it->second;
     if (controller) {
       const VideoCaptureControllerID controller_id(it->first);
-      media_stream_manager_->video_capture_manager()->StopCaptureForClient(
+      media_stream_manager_->video_capture_manager()->DisconnectClient(
           controller.get(), controller_id, this, false);
       ++it;
     } else {
@@ -86,7 +89,7 @@ void VideoCaptureHost::OnBufferDestroyed(VideoCaptureControllerID controller_id,
 void VideoCaptureHost::OnBufferReady(
     VideoCaptureControllerID controller_id,
     int buffer_id,
-    const scoped_refptr<media::VideoFrame>& video_frame) {
+    const media::mojom::VideoFrameInfoPtr& frame_info) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (controllers_.find(controller_id) == controllers_.end())
     return;
@@ -94,19 +97,8 @@ void VideoCaptureHost::OnBufferReady(
   if (!base::ContainsKey(device_id_to_observer_map_, controller_id))
     return;
 
-  media::mojom::VideoFrameInfoPtr info = media::mojom::VideoFrameInfo::New();
-  info->timestamp = video_frame->timestamp();
-  info->metadata = video_frame->metadata()->CopyInternalValues();
-
-  DCHECK(media::PIXEL_FORMAT_I420 == video_frame->format() ||
-         media::PIXEL_FORMAT_Y16 == video_frame->format());
-  info->pixel_format = video_frame->format();
-  info->storage_type = media::PIXEL_STORAGE_CPU;
-  info->coded_size = video_frame->coded_size();
-  info->visible_rect = video_frame->visible_rect();
-
   device_id_to_observer_map_[controller_id]->OnBufferReady(buffer_id,
-                                                           std::move(info));
+                                                           frame_info.Clone());
 }
 
 void VideoCaptureHost::OnEnded(VideoCaptureControllerID controller_id) {
@@ -117,6 +109,20 @@ void VideoCaptureHost::OnEnded(VideoCaptureControllerID controller_id) {
       base::Bind(&VideoCaptureHost::DoEnded, weak_factory_.GetWeakPtr(),
                  controller_id));
 }
+
+void VideoCaptureHost::OnStarted(VideoCaptureControllerID controller_id) {
+  DVLOG(1) << __func__;
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (controllers_.find(controller_id) == controllers_.end())
+    return;
+
+  if (base::ContainsKey(device_id_to_observer_map_, controller_id)) {
+    device_id_to_observer_map_[controller_id]->OnStateChanged(
+        mojom::VideoCaptureState::STARTED);
+  }
+}
+
+void VideoCaptureHost::OnStartedUsingGpuDecode(VideoCaptureControllerID id) {}
 
 void VideoCaptureHost::Start(int32_t device_id,
                              int32_t session_id,
@@ -138,7 +144,7 @@ void VideoCaptureHost::Start(int32_t device_id,
   }
 
   controllers_[controller_id] = base::WeakPtr<VideoCaptureController>();
-  media_stream_manager_->video_capture_manager()->StartCaptureForClient(
+  media_stream_manager_->video_capture_manager()->ConnectClient(
       session_id, params, controller_id, this,
       base::Bind(&VideoCaptureHost::OnControllerAdded,
                  weak_factory_.GetWeakPtr(), device_id));
@@ -230,7 +236,7 @@ void VideoCaptureHost::ReleaseBuffer(int32_t device_id,
 void VideoCaptureHost::GetDeviceSupportedFormats(
     int32_t device_id,
     int32_t session_id,
-    const GetDeviceSupportedFormatsCallback& callback) {
+    GetDeviceSupportedFormatsCallback callback) {
   DVLOG(1) << __func__ << " " << device_id;
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   media::VideoCaptureFormats supported_formats;
@@ -238,13 +244,13 @@ void VideoCaptureHost::GetDeviceSupportedFormats(
            ->GetDeviceSupportedFormats(session_id, &supported_formats)) {
     DLOG(WARNING) << "Could not retrieve device supported formats";
   }
-  callback.Run(supported_formats);
+  std::move(callback).Run(supported_formats);
 }
 
 void VideoCaptureHost::GetDeviceFormatsInUse(
     int32_t device_id,
     int32_t session_id,
-    const GetDeviceFormatsInUseCallback& callback) {
+    GetDeviceFormatsInUseCallback callback) {
   DVLOG(1) << __func__ << " " << device_id;
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   media::VideoCaptureFormats formats_in_use;
@@ -252,7 +258,7 @@ void VideoCaptureHost::GetDeviceFormatsInUse(
            session_id, &formats_in_use)) {
     DLOG(WARNING) << "Could not retrieve device format(s) in use";
   }
-  callback.Run(formats_in_use);
+  std::move(callback).Run(formats_in_use);
 }
 
 void VideoCaptureHost::DoError(VideoCaptureControllerID controller_id) {
@@ -291,7 +297,7 @@ void VideoCaptureHost::OnControllerAdded(
   auto it = controllers_.find(controller_id);
   if (it == controllers_.end()) {
     if (controller) {
-      media_stream_manager_->video_capture_manager()->StopCaptureForClient(
+      media_stream_manager_->video_capture_manager()->DisconnectClient(
           controller.get(), controller_id, this, false);
     }
     return;
@@ -304,11 +310,6 @@ void VideoCaptureHost::OnControllerAdded(
     }
     controllers_.erase(controller_id);
     return;
-  }
-
-  if (base::ContainsKey(device_id_to_observer_map_, controller_id)) {
-    device_id_to_observer_map_[device_id]->OnStateChanged(
-        mojom::VideoCaptureState::STARTED);
   }
 
   DCHECK(!it->second);
@@ -328,7 +329,7 @@ void VideoCaptureHost::DeleteVideoCaptureController(
   if (!controller)
     return;
 
-  media_stream_manager_->video_capture_manager()->StopCaptureForClient(
+  media_stream_manager_->video_capture_manager()->DisconnectClient(
       controller.get(), controller_id, this, on_error);
 }
 

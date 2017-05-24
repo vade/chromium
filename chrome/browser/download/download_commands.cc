@@ -11,6 +11,7 @@
 #include "base/macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_crx_util.h"
@@ -22,11 +23,11 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
-#include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/common/safe_browsing/file_type_policies.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/theme_resources.h"
 #include "components/google/core/browser/google_util.h"
+#include "components/safe_browsing/csd.pb.h"
 #include "net/base/url_util.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -59,14 +60,13 @@ class ImageClipboardCopyManager : public ImageDecoder::ImageRequest {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
     content::BrowserThread::GetBlockingPool()->PostTask(
-        FROM_HERE,
-        base::Bind(&ImageClipboardCopyManager::StartDecoding,
-                   base::Unretained(this)));
+        FROM_HERE, base::BindOnce(&ImageClipboardCopyManager::StartDecoding,
+                                  base::Unretained(this)));
   }
 
   void StartDecoding() {
     DCHECK(content::BrowserThread::GetBlockingPool()->
-        RunsTasksOnCurrentThread());
+        RunsTasksInCurrentSequence());
 
     // Re-check the filesize since the file may be modified after downloaded.
     int64_t filesize;

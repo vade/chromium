@@ -8,6 +8,7 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -15,19 +16,7 @@
 #include "net/base/network_change_notifier.h"
 #include "ui/gfx/geometry/size.h"
 
-namespace {
-// Whether to report DomContentLoaded event to the snapshot controller.
-bool kConsiderDclForSnapshot = false;
-// The delay to wait for snapshotting after DomContentLoaded event if
-// kConsiderDclForSnapshot is true.
-long kOfflinePageDclDelayMs = 25000;
-// The delay to wait for snapshotting after OnLoad event.
-long kOfflinePageOnloadDelayMs = 2000;
-}  // namespace
-
-
 namespace offline_pages {
-
 
 // Classifies the appropriate RequestStatus for for the given prerender
 // FinalStatus.
@@ -79,7 +68,8 @@ Offliner::RequestStatus ClassifyFinalStatus(
 PrerenderingLoader::PrerenderingLoader(content::BrowserContext* browser_context)
     : state_(State::IDLE),
       snapshot_controller_(nullptr),
-      browser_context_(browser_context) {
+      browser_context_(browser_context),
+      is_lowbar_met_(false) {
   adapter_.reset(new PrerenderAdapter(this));
 }
 
@@ -87,14 +77,29 @@ PrerenderingLoader::~PrerenderingLoader() {
   CancelPrerender();
 }
 
+void PrerenderingLoader::MarkLoadStartTime() {
+  load_start_time_ = base::TimeTicks::Now();
+}
+
+void PrerenderingLoader::AddLoadingSignal(const char* signal_name) {
+  base::TimeTicks current_time = base::TimeTicks::Now();
+  base::TimeDelta delay_so_far = current_time - load_start_time_;
+  double delay = delay_so_far.InMilliseconds();
+  signal_data_.SetDouble(signal_name, delay);
+}
+
 bool PrerenderingLoader::LoadPage(const GURL& url,
-                                  const LoadPageCallback& callback) {
+                                  const LoadPageCallback& load_done_callback,
+                                  const ProgressCallback& progress_callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (!IsIdle()) {
     DVLOG(1)
         << "WARNING: Existing request in progress or waiting for StopLoading()";
     return false;
   }
+
+  // Add this signal to signal_data_.
+  MarkLoadStartTime();
 
   // Create a WebContents instance to define and hold a SessionStorageNamespace
   // for this load request.
@@ -111,11 +116,10 @@ bool PrerenderingLoader::LoadPage(const GURL& url,
     return false;
 
   DCHECK(adapter_->IsActive());
-  snapshot_controller_.reset(
-      new SnapshotController(base::ThreadTaskRunnerHandle::Get(), this,
-                             kOfflinePageDclDelayMs,
-                             kOfflinePageOnloadDelayMs));
-  callback_ = callback;
+  snapshot_controller_ = SnapshotController::CreateForBackgroundOfflining(
+      base::ThreadTaskRunnerHandle::Get(), this);
+  load_done_callback_ = load_done_callback;
+  progress_callback_ = progress_callback;
   session_contents_.swap(new_web_contents);
   state_ = State::LOADING;
   return true;
@@ -149,6 +153,9 @@ void PrerenderingLoader::OnPrerenderStopLoading() {
   // Inform SnapshotController of OnLoad event so it can determine
   // when to consider it really LOADED.
   snapshot_controller_->DocumentOnLoadCompletedInMainFrame();
+
+  // Add this signal to signal_data_.
+  AddLoadingSignal("OnLoad");
 }
 
 void PrerenderingLoader::OnPrerenderDomContentLoaded() {
@@ -157,11 +164,15 @@ void PrerenderingLoader::OnPrerenderDomContentLoaded() {
   if (!adapter_->GetWebContents()) {
     // Without a WebContents object at this point, we are done.
     HandleLoadingStopped();
-  } else if (kConsiderDclForSnapshot) {
+  } else {
+    is_lowbar_met_ = true;
     // Inform SnapshotController of DomContentLoaded event so it can
     // determine when to consider it really LOADED (e.g., some multiple
     // second delay from this event).
     snapshot_controller_->DocumentAvailableInMainFrame();
+
+    // Add this signal to signal_data_.
+    AddLoadingSignal("OnDomContentLoaded");
   }
 }
 
@@ -170,9 +181,22 @@ void PrerenderingLoader::OnPrerenderStop() {
   HandleLoadingStopped();
 }
 
+void PrerenderingLoader::OnPrerenderNetworkBytesChanged(int64_t bytes) {
+  if (state_ == State::LOADING)
+    progress_callback_.Run(bytes);
+}
+
 void PrerenderingLoader::StartSnapshot() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  // Add this signal to signal_data_.
+  AddLoadingSignal("Snapshotting");
+
   HandleLoadEvent();
+}
+
+bool PrerenderingLoader::IsLowbarMet() {
+  return is_lowbar_met_;
 }
 
 void PrerenderingLoader::HandleLoadEvent() {
@@ -190,8 +214,8 @@ void PrerenderingLoader::HandleLoadEvent() {
   if (web_contents) {
     state_ = State::LOADED;
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::Bind(callback_, Offliner::RequestStatus::LOADED, web_contents));
+        FROM_HERE, base::Bind(load_done_callback_,
+                              Offliner::RequestStatus::LOADED, web_contents));
   } else {
     // No WebContents means that the load failed (and it stopped).
     HandleLoadingStopped();
@@ -244,8 +268,9 @@ void PrerenderingLoader::HandleLoadingStopped() {
   snapshot_controller_.reset(nullptr);
   session_contents_.reset(nullptr);
   state_ = State::IDLE;
+  is_lowbar_met_ = false;
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(callback_, request_status, nullptr));
+      FROM_HERE, base::Bind(load_done_callback_, request_status, nullptr));
 }
 
 void PrerenderingLoader::CancelPrerender() {
@@ -255,6 +280,7 @@ void PrerenderingLoader::CancelPrerender() {
   snapshot_controller_.reset(nullptr);
   session_contents_.reset(nullptr);
   state_ = State::IDLE;
+  is_lowbar_met_ = false;
 }
 
 }  // namespace offline_pages

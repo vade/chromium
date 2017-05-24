@@ -6,20 +6,20 @@
 
 #include <utility>
 
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/confirm_bubble.h"
 #include "chrome/browser/ui/confirm_bubble_model.h"
 #include "components/constrained_window/constrained_window_views.h"
+#include "ui/base/ui_features.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/link.h"
 #include "ui/views/layout/grid_layout.h"
-#include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
 
 ConfirmBubbleViews::ConfirmBubbleViews(
     std::unique_ptr<ConfirmBubbleModel> model)
     : model_(std::move(model)), link_(NULL) {
   views::GridLayout* layout = views::GridLayout::CreatePanel(this);
-  SetLayoutManager(layout);
 
   // Use a fixed maximum message width, so longer messages will wrap.
   const int kMaxMessageWidth = 400;
@@ -40,6 +40,8 @@ ConfirmBubbleViews::ConfirmBubbleViews(
   link_ = new views::Link(model_->GetLinkText());
   link_->set_listener(this);
   link_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::CONFIRM_BUBBLE);
 }
 
 ConfirmBubbleViews::~ConfirmBubbleViews() {
@@ -101,6 +103,7 @@ void ConfirmBubbleViews::LinkClicked(views::Link* source, int event_flags) {
 
 namespace chrome {
 
+#if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
 void ShowConfirmBubble(gfx::NativeWindow window,
                        gfx::NativeView anchor_view,
                        const gfx::Point& origin,
@@ -109,5 +112,6 @@ void ShowConfirmBubble(gfx::NativeWindow window,
       new ConfirmBubbleViews(std::move(model)), window)
       ->Show();
 }
+#endif  // !OS_MACOSX || MAC_VIEWS_BROWSER
 
 }  // namespace chrome

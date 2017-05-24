@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_NTP_TILES_POPULAR_SITES_H_
 #define COMPONENTS_NTP_TILES_POPULAR_SITES_H_
 
+#include <string>
 #include <vector>
 
 #include "base/callback.h"
@@ -36,6 +37,7 @@ class PopularSites {
     GURL favicon_url;
     GURL large_icon_url;
     GURL thumbnail_url;
+    int default_icon_resource;  // < 0 if there is none. Used for popular sites.
   };
 
   using SitesVector = std::vector<Site>;
@@ -43,18 +45,20 @@ class PopularSites {
 
   virtual ~PopularSites() = default;
 
-  // Starts the process of retrieving popular sites. When they are available,
-  // invokes |callback| with the result, on the same thread as the caller. Never
-  // invokes |callback| before returning control to the caller, even if the
-  // result is immediately known.
+  // May start the process of retrieving popular sites. If an actual download
+  // gets triggered, returns true and invokes |callback| with the result, on the
+  // same thread as the caller. Never invokes |callback| before returning
+  // control to the caller.
+  //
+  // If the result is immediately known and hence no download is triggered, the
+  // function returns false and the callback will never be executed.
   //
   // Set |force_download| to enforce re-downloading the popular sites JSON, even
   // if it already exists in cache.
   //
   // Must be called at most once on a given PopularSites object.
-  // TODO(mastiz): Remove this restriction?
-  virtual void StartFetch(bool force_download,
-                          const FinishedCallback& callback) = 0;
+  virtual bool MaybeStartFetch(bool force_download,
+                               const FinishedCallback& callback) = 0;
 
   // Returns the list of available sites.
   virtual const SitesVector& sites() const = 0;
@@ -62,6 +66,7 @@ class PopularSites {
   // Various internals exposed publicly for diagnostic pages only.
   virtual GURL GetLastURLFetched() const = 0;
   virtual GURL GetURLToFetch() = 0;
+  virtual std::string GetDirectoryToFetch() = 0;
   virtual std::string GetCountryToFetch() = 0;
   virtual std::string GetVersionToFetch() = 0;
   virtual const base::ListValue* GetCachedJson() = 0;

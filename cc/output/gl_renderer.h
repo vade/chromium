@@ -6,11 +6,12 @@
 #define CC_OUTPUT_GL_RENDERER_H_
 
 #include <deque>
+#include <unordered_map>
 #include <vector>
 
 #include "base/cancelable_callback.h"
 #include "base/macros.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/output/color_lut_cache.h"
 #include "cc/output/context_cache_controller.h"
 #include "cc/output/direct_renderer.h"
@@ -21,8 +22,8 @@
 #include "cc/quads/solid_color_draw_quad.h"
 #include "cc/quads/tile_draw_quad.h"
 #include "cc/quads/yuv_video_draw_quad.h"
-#include "ui/events/latency_info.h"
 #include "ui/gfx/geometry/quad_f.h"
+#include "ui/latency/latency_info.h"
 
 namespace gpu {
 namespace gles2 {
@@ -51,9 +52,10 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   GLRenderer(const RendererSettings* settings,
              OutputSurface* output_surface,
              ResourceProvider* resource_provider,
-             TextureMailboxDeleter* texture_mailbox_deleter,
-             int highp_threshold_min);
+             TextureMailboxDeleter* texture_mailbox_deleter);
   ~GLRenderer() override;
+
+  bool use_swap_with_bounds() const { return use_swap_with_bounds_; }
 
   void SwapBuffers(std::vector<ui::LatencyInfo> latency_info) override;
   void SwapBuffersComplete() override;
@@ -71,8 +73,7 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
     return shared_geometry_.get();
   }
 
-  void GetFramebufferPixelsAsync(const DrawingFrame* frame,
-                                 const gfx::Rect& rect,
+  void GetFramebufferPixelsAsync(const gfx::Rect& rect,
                                  std::unique_ptr<CopyOutputRequest> request);
   void GetFramebufferTexture(unsigned texture_id,
                              const gfx::Rect& device_rect);
@@ -85,25 +86,23 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   bool blend_enabled() const { return blend_shadow_; }
 
   bool CanPartialSwap() override;
-  void BindFramebufferToOutputSurface(DrawingFrame* frame) override;
-  bool BindFramebufferToTexture(DrawingFrame* frame,
-                                const ScopedResource* resource) override;
+  ResourceFormat BackbufferFormat() const override;
+  void BindFramebufferToOutputSurface() override;
+  bool BindFramebufferToTexture(const ScopedResource* resource) override;
   void SetScissorTestRect(const gfx::Rect& scissor_rect) override;
-  void PrepareSurfaceForPass(DrawingFrame* frame,
-                             SurfaceInitializationMode initialization_mode,
+  void PrepareSurfaceForPass(SurfaceInitializationMode initialization_mode,
                              const gfx::Rect& render_pass_scissor) override;
-  void DoDrawQuad(DrawingFrame* frame,
-                  const class DrawQuad*,
+  void DoDrawQuad(const class DrawQuad*,
                   const gfx::QuadF* draw_region) override;
-  void BeginDrawingFrame(DrawingFrame* frame) override;
-  void FinishDrawingFrame(DrawingFrame* frame) override;
-  bool FlippedFramebuffer(const DrawingFrame* frame) const override;
+  void BeginDrawingFrame() override;
+  void FinishDrawingFrame() override;
+  bool FlippedFramebuffer() const override;
   bool FlippedRootFramebuffer() const;
   void EnsureScissorTestEnabled() override;
   void EnsureScissorTestDisabled() override;
   void CopyCurrentRenderPassToBitmap(
-      DrawingFrame* frame,
       std::unique_ptr<CopyOutputRequest> request) override;
+  void SetEnableDCLayers(bool enable) override;
   void FinishDrawingQuadList() override;
 
   // Returns true if quad requires antialiasing and false otherwise.
@@ -147,11 +146,10 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   static void ToGLMatrix(float* gl_matrix, const gfx::Transform& transform);
 
   void DiscardPixels();
-  void ClearFramebuffer(DrawingFrame* frame);
+  void ClearFramebuffer();
   void SetViewport();
 
-  void DrawDebugBorderQuad(const DrawingFrame* frame,
-                           const DebugBorderDrawQuad* quad);
+  void DrawDebugBorderQuad(const DebugBorderDrawQuad* quad);
   static bool IsDefaultBlendMode(SkBlendMode blend_mode) {
     return blend_mode == SkBlendMode::kSrcOver;
   }
@@ -160,7 +158,6 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   void RestoreBlendFuncToDefault(SkBlendMode blend_mode);
 
   gfx::Rect GetBackdropBoundingBoxForRenderPassQuad(
-      DrawingFrame* frame,
       const RenderPassDrawQuad* quad,
       const gfx::Transform& contents_device_transform,
       const FilterOperations* filters,
@@ -169,7 +166,6 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
       bool use_aa,
       gfx::Rect* unclipped_rect);
   std::unique_ptr<ScopedResource> GetBackdropTexture(
-      DrawingFrame* frame,
       const gfx::Rect& bounding_rect);
 
   static bool ShouldApplyBackgroundFilters(
@@ -184,57 +180,56 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
 
   const TileDrawQuad* CanPassBeDrawnDirectly(const RenderPass* pass) override;
 
-  void DrawRenderPassQuad(DrawingFrame* frame,
-                          const RenderPassDrawQuad* quadi,
+  void DrawRenderPassQuad(const RenderPassDrawQuad* quadi,
                           const gfx::QuadF* clip_region);
   void DrawRenderPassQuadInternal(DrawRenderPassDrawQuadParams* params);
-  void DrawSolidColorQuad(const DrawingFrame* frame,
-                          const SolidColorDrawQuad* quad,
+  void DrawSolidColorQuad(const SolidColorDrawQuad* quad,
                           const gfx::QuadF* clip_region);
-  void DrawStreamVideoQuad(const DrawingFrame* frame,
-                           const StreamVideoDrawQuad* quad,
+  void DrawStreamVideoQuad(const StreamVideoDrawQuad* quad,
                            const gfx::QuadF* clip_region);
-  void DrawTextureQuad(const DrawingFrame* frame,
-                       const TextureDrawQuad* quad,
+  void DrawTextureQuad(const TextureDrawQuad* quad,
                        const gfx::QuadF* clip_region);
-  void EnqueueTextureQuad(const DrawingFrame* frame,
-                          const TextureDrawQuad* quad,
+  void EnqueueTextureQuad(const TextureDrawQuad* quad,
                           const gfx::QuadF* clip_region);
   void FlushTextureQuadCache(BoundGeometry flush_binding);
-  void DrawTileQuad(const DrawingFrame* frame,
-                    const TileDrawQuad* quad,
-                    const gfx::QuadF* clip_region);
-  void DrawContentQuad(const DrawingFrame* frame,
-                       const ContentDrawQuadBase* quad,
+  void DrawTileQuad(const TileDrawQuad* quad, const gfx::QuadF* clip_region);
+  void DrawContentQuad(const ContentDrawQuadBase* quad,
                        ResourceId resource_id,
                        const gfx::QuadF* clip_region);
-  void DrawContentQuadAA(const DrawingFrame* frame,
-                         const ContentDrawQuadBase* quad,
+  void DrawContentQuadAA(const ContentDrawQuadBase* quad,
                          ResourceId resource_id,
                          const gfx::Transform& device_transform,
                          const gfx::QuadF& aa_quad,
                          const gfx::QuadF* clip_region);
-  void DrawContentQuadNoAA(const DrawingFrame* frame,
-                           const ContentDrawQuadBase* quad,
+  void DrawContentQuadNoAA(const ContentDrawQuadBase* quad,
                            ResourceId resource_id,
                            const gfx::QuadF* clip_region);
-  void DrawYUVVideoQuad(const DrawingFrame* frame,
-                        const YUVVideoDrawQuad* quad,
+  void DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
                         const gfx::QuadF* clip_region);
 
-  void SetShaderOpacity(float opacity, int alpha_location);
-  void SetShaderQuadF(const gfx::QuadF& quad, int quad_location);
-  void DrawQuadGeometryClippedByQuadF(const DrawingFrame* frame,
-                                      const gfx::Transform& draw_transform,
+  void SetShaderOpacity(const DrawQuad* quad);
+  void SetShaderQuadF(const gfx::QuadF& quad);
+  void SetShaderMatrix(const gfx::Transform& transform);
+  void SetShaderColor(SkColor color, float opacity);
+  void DrawQuadGeometryClippedByQuadF(const gfx::Transform& draw_transform,
                                       const gfx::RectF& quad_rect,
                                       const gfx::QuadF& clipping_region_quad,
-                                      int matrix_location,
                                       const float uv[8]);
   void DrawQuadGeometry(const gfx::Transform& projection_matrix,
                         const gfx::Transform& draw_transform,
-                        const gfx::RectF& quad_rect,
-                        int matrix_location);
-  void SetUseProgram(unsigned program);
+                        const gfx::RectF& quad_rect);
+
+  // If |dst_color_space| is invalid, then no color conversion (apart from
+  // YUV to RGB conversion) is performed. This explicit argument is available
+  // so that video color conversion can be enabled separately from general color
+  // conversion.
+  // TODO(ccameron): Remove the version with an explicit |dst_color_space|,
+  // since that will always be the device color space.
+  void SetUseProgram(const ProgramKey& program_key,
+                     const gfx::ColorSpace& src_color_space,
+                     const gfx::ColorSpace& dst_color_space);
+  void SetUseProgram(const ProgramKey& program_key,
+                     const gfx::ColorSpace& src_color_space);
 
   bool MakeContextCurrent();
 
@@ -251,8 +246,9 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   void ReinitializeGLState();
   void RestoreGLState();
 
-  void ScheduleCALayers(DrawingFrame* frame);
-  void ScheduleOverlays(DrawingFrame* frame);
+  void ScheduleCALayers();
+  void ScheduleDCLayers();
+  void ScheduleOverlays();
 
   // Copies the contents of the render pass draw quad, including filter effects,
   // to an overlay resource, returned in |resource|. The resource is allocated
@@ -262,18 +258,15 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   void CopyRenderPassDrawQuadToOverlayResource(
       const CALayerOverlay* ca_layer_overlay,
       Resource** resource,
-      DrawingFrame* frame,
       gfx::RectF* new_bounds);
 
   // Schedules the |ca_layer_overlay|, which is guaranteed to have a non-null
   // |rpdq| parameter.
-  void ScheduleRenderPassDrawQuad(const CALayerOverlay* ca_layer_overlay,
-                                  DrawingFrame* external_frame);
+  void ScheduleRenderPassDrawQuad(const CALayerOverlay* ca_layer_overlay);
 
   // Setup/flush all pending overdraw feedback to framebuffer.
   void SetupOverdrawFeedback();
-  void FlushOverdrawFeedback(const DrawingFrame* frame,
-                             const gfx::Rect& output_rect);
+  void FlushOverdrawFeedback(const gfx::Rect& output_rect);
   // Process overdraw feedback from query.
   using OverdrawFeedbackCallback = base::Callback<void(unsigned, int)>;
   void ProcessOverdrawFeedback(std::vector<int>* overdraw,
@@ -296,15 +289,11 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   // texture id of the resource.
   std::map<unsigned, OverlayResourceLock> swapped_and_acked_overlay_resources_;
 
-  unsigned offscreen_framebuffer_id_;
+  unsigned offscreen_framebuffer_id_ = 0u;
 
   std::unique_ptr<StaticGeometryBinding> shared_geometry_;
   std::unique_ptr<DynamicGeometryBinding> clipped_geometry_;
   gfx::QuadF shared_geometry_quad_;
-
-  // If the requested program has not yet been initialized, this will initialize
-  // the program before returning it.
-  const Program* GetProgram(const ProgramKey& key);
 
   // This will return nullptr if the requested program has not yet been
   // initialized.
@@ -313,6 +302,12 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   std::unordered_map<ProgramKey, std::unique_ptr<Program>, ProgramKeyHash>
       program_cache_;
 
+  const gfx::ColorTransform* GetColorTransform(const gfx::ColorSpace& src,
+                                               const gfx::ColorSpace& dst);
+  std::map<gfx::ColorSpace,
+           std::map<gfx::ColorSpace, std::unique_ptr<gfx::ColorTransform>>>
+      color_transform_cache_;
+
   gpu::gles2::GLES2Interface* gl_;
   gpu::ContextSupport* context_support_;
   std::unique_ptr<ContextCacheController::ScopedVisibility> context_visibility_;
@@ -320,15 +315,14 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   TextureMailboxDeleter* texture_mailbox_deleter_;
 
   gfx::Rect swap_buffer_rect_;
+  std::vector<gfx::Rect> swap_content_bounds_;
   gfx::Rect scissor_rect_;
-  bool is_using_bind_uniform_;
-  bool is_scissor_enabled_;
-  bool stencil_shadow_;
-  bool blend_shadow_;
-  unsigned program_shadow_;
+  bool is_scissor_enabled_ = false;
+  bool stencil_shadow_ = false;
+  bool blend_shadow_ = false;
+  const Program* current_program_ = nullptr;
   TexturedQuadDrawCache draw_cache_;
-  int highp_threshold_min_;
-  int highp_threshold_cache_;
+  int highp_threshold_cache_ = 0;
 
   struct PendingAsyncReadPixels;
   std::vector<std::unique_ptr<PendingAsyncReadPixels>>
@@ -343,10 +337,12 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   std::deque<std::unique_ptr<SyncQuery>> pending_sync_queries_;
   std::deque<std::unique_ptr<SyncQuery>> available_sync_queries_;
   std::unique_ptr<SyncQuery> current_sync_query_;
-  bool use_discard_framebuffer_;
-  bool use_sync_query_;
-  bool use_blend_equation_advanced_;
-  bool use_blend_equation_advanced_coherent_;
+  bool use_discard_framebuffer_ = false;
+  bool use_sync_query_ = false;
+  bool use_blend_equation_advanced_ = false;
+  bool use_blend_equation_advanced_coherent_ = false;
+  bool use_occlusion_query_ = false;
+  bool use_swap_with_bounds_ = false;
 
   // Some overlays require that content is copied from a render pass into an
   // overlay resource. This means the GLRenderer needs its own ResourcePool.
@@ -365,7 +361,6 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   BoundGeometry bound_geometry_;
   ColorLUTCache color_lut_cache_;
 
-  bool use_occlusion_query_;
   unsigned offscreen_stencil_renderbuffer_id_ = 0;
   gfx::Size offscreen_stencil_renderbuffer_size_;
 

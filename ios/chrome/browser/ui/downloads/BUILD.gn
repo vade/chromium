@@ -34,6 +34,7 @@ bundle_data_ib_file("download_manager_controller_xib") {
 }
 
 source_set("downloads") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   sources = [
     "download_manager_controller.h",
     "download_manager_controller.mm",
@@ -47,6 +48,7 @@ source_set("downloads") {
     "//ios/chrome/browser",
     "//ios/chrome/browser/native_app_launcher",
     "//ios/chrome/browser/native_app_launcher:native_app_launcher_internal",
+    "//ios/chrome/browser/store_kit",
     "//ios/chrome/browser/ui",
     "//ios/chrome/browser/ui/alert_coordinator",
     "//ios/chrome/browser/ui/colors",
@@ -65,6 +67,7 @@ source_set("downloads") {
 }
 
 source_set("unit_tests") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
     "download_manager_controller_unittest.mm",
@@ -73,8 +76,11 @@ source_set("unit_tests") {
     ":downloads",
     "//base",
     "//ios/chrome/browser",
+    "//ios/chrome/browser/store_kit",
+    "//ios/chrome/browser/web:test_support",
     "//ios/web:test_support",
     "//net:test_support",
     "//testing/gtest",
+    "//third_party/ocmock:ocmock",
   ]
 }

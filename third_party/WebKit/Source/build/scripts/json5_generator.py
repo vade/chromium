@@ -99,7 +99,7 @@ class Json5File(object):
         self._process(doc)
 
     @classmethod
-    def load_from_files(cls, file_paths, default_metadata, default_parameters=None):
+    def load_from_files(cls, file_paths, default_metadata=None, default_parameters=None):
         merged_doc = dict()
         for path in file_paths:
             assert path.endswith(".json5")
@@ -152,26 +152,41 @@ class Json5File(object):
             return entry
         if "name" not in item:
             raise Exception("Missing name in item: %s" % item)
+        if not self.parameters:
+            entry.update(item)
+            return entry
+        assert "name" not in self.parameters, "The parameter 'name' is reserved, use a different name."
         entry["name"] = item.pop("name")
+        # Validate parameters if it's specified.
         for key, value in item.items():
             if key not in self.parameters:
                 raise Exception(
                     "Unknown parameter: '%s'\nKnown params: %s" %
                     (key, self.parameters.keys()))
-            if self.parameters[key]:
-                self._validate_parameter(self.parameters[key], value)
+            assert self.parameters[key] is not None, \
+                "Specification for parameter 'key' cannot be None. Use {} instead."
+            self._validate_parameter(self.parameters[key], value)
             entry[key] = value
         return entry
 
     def _validate_parameter(self, parameter, value):
-        valid_values = parameter.get("valid_values")
-        if valid_values and value not in valid_values:
-            raise Exception("Unknown value: '%s'\nKnown values: %s" %
-                            (value, valid_values))
         valid_type = parameter.get("valid_type")
         if valid_type and type(value).__name__ != valid_type:
             raise Exception("Incorrect type: '%s'\nExpected type: %s" %
                             (type(value).__name__, valid_type))
+        valid_values = parameter.get("valid_values")
+        if not valid_values:
+            return
+        # If valid_values is a list of simple items and not list of list, then
+        # validate each item in the value list against valid_values.
+        if valid_type == "list" and type(valid_values[0]) is not list:
+            for item in value:
+                if item not in valid_values:
+                    raise Exception("Unknown value: '%s'\nKnown values: %s" %
+                                    (item, valid_values))
+        elif value not in valid_values:
+            raise Exception("Unknown value: '%s'\nKnown values: %s" %
+                            (value, valid_values))
 
 
 class Writer(object):
@@ -183,8 +198,6 @@ class Writer(object):
     def __init__(self, json5_files):
         self._outputs = {}  # file_name -> generator
         self.gperf_path = None
-        if isinstance(json5_files, basestring):
-            json5_files = [json5_files]
         if json5_files:
             self.json5_file = Json5File.load_from_files(json5_files,
                                                         self.default_metadata,

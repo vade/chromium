@@ -4,17 +4,20 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/arc/intent_helper/arc_settings_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/shill_profile_client.h"
@@ -174,19 +177,35 @@ constexpr char kWifi1Guid[] = "{wifi1_guid}";
 
 constexpr char kONCPacUrl[] = "http://domain.com/x";
 
-// Returns an amount of |broadcasts| matched with |proxy_settings|.
-int CountProxyBroadcasts(
+constexpr char kBackupBroadcastAction[] =
+    "org.chromium.arc.intent_helper.SET_BACKUP_ENABLED";
+constexpr char kLocationServiceBroadcastAction[] =
+    "org.chromium.arc.intent_helper.SET_LOCATION_SERVICE_ENABLED";
+constexpr char kSetProxyBroadcastAction[] =
+    "org.chromium.arc.intent_helper.SET_PROXY";
+
+// Returns the number of |broadcasts| having the |action| action, and checks
+// that all their extras match with |extras|.
+int CountBroadcasts(
     const std::vector<FakeIntentHelperInstance::Broadcast>& broadcasts,
-    const base::DictionaryValue* proxy_settings) {
-  size_t count = 0;
+    const std::string& action,
+    const base::DictionaryValue* extras) {
+  int count = 0;
   for (const FakeIntentHelperInstance::Broadcast& broadcast : broadcasts) {
-    if (broadcast.action == "org.chromium.arc.intent_helper.SET_PROXY") {
-      EXPECT_TRUE(
-          base::JSONReader::Read(broadcast.extras)->Equals(proxy_settings));
+    if (broadcast.action == action) {
+      EXPECT_TRUE(base::JSONReader::Read(broadcast.extras)->Equals(extras));
       count++;
     }
   }
   return count;
+}
+
+// Returns the number of |broadcasts| having the proxy action, and checks that
+// all their extras match with |extras|.
+int CountProxyBroadcasts(
+    const std::vector<FakeIntentHelperInstance::Broadcast>& broadcasts,
+    const base::DictionaryValue* proxy_settings) {
+  return CountBroadcasts(broadcasts, kSetProxyBroadcastAction, proxy_settings);
 }
 
 void RunUntilIdle() {
@@ -239,7 +258,7 @@ class ArcSettingsServiceTest : public InProcessBrowserTest {
         chromeos::DBusThreadManager::Get()
             ->GetShillServiceClient()
             ->GetTestInterface();
-    base::StringValue value(shill::kStateIdle);
+    base::Value value(shill::kStateIdle);
     service_test->SetServiceProperty(service_path, shill::kStateProperty,
                                      value);
     RunUntilIdle();
@@ -257,14 +276,14 @@ class ArcSettingsServiceTest : public InProcessBrowserTest {
                              shill::kStateOnline, true /* add_to_visible */);
 
     service_test->SetServiceProperty(service_path, shill::kProfileProperty,
-                                     base::StringValue(kUserProfilePath));
+                                     base::Value(kUserProfilePath));
     RunUntilIdle();
   }
 
   void SetProxyConfigForNetworkService(
       const std::string& service_path,
       const base::DictionaryValue* proxy_config) {
-    ProxyConfigDictionary proxy_config_dict(proxy_config);
+    ProxyConfigDictionary proxy_config_dict(proxy_config->CreateDeepCopy());
     const chromeos::NetworkState* network = chromeos::NetworkHandler::Get()
                                                 ->network_state_handler()
                                                 ->GetNetworkState(service_path);
@@ -295,13 +314,142 @@ class ArcSettingsServiceTest : public InProcessBrowserTest {
                              true /* add_to_visible */);
     service_test->SetServiceProperty(kDefaultServicePath,
                                      shill::kProfileProperty,
-                                     base::StringValue(kUserProfilePath));
+                                     base::Value(kUserProfilePath));
   }
 
   policy::MockConfigurationPolicyProvider provider_;
 
   DISALLOW_COPY_AND_ASSIGN(ArcSettingsServiceTest);
 };
+
+IN_PROC_BROWSER_TEST_F(ArcSettingsServiceTest, BackupRestorePolicyTest) {
+  PrefService* const prefs = browser()->profile()->GetPrefs();
+
+  // Set the user pref as initially enabled.
+  prefs->SetBoolean(prefs::kArcBackupRestoreEnabled, true);
+  EXPECT_TRUE(prefs->GetBoolean(prefs::kArcBackupRestoreEnabled));
+
+  fake_intent_helper_instance_->clear_broadcasts();
+
+  // The policy is set to false.
+  policy::PolicyMap policy;
+  policy.Set(policy::key::kArcBackupRestoreEnabled,
+             policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
+             policy::POLICY_SOURCE_CLOUD, base::MakeUnique<base::Value>(false),
+             nullptr);
+  UpdatePolicy(policy);
+
+  // The pref is disabled and managed, and the corresponding broadcast is sent
+  // at least once.
+  EXPECT_FALSE(prefs->GetBoolean(prefs::kArcBackupRestoreEnabled));
+  EXPECT_TRUE(prefs->IsManagedPreference(prefs::kArcBackupRestoreEnabled));
+  base::DictionaryValue expected_broadcast_extras;
+  expected_broadcast_extras.SetBoolean("enabled", false);
+  expected_broadcast_extras.SetBoolean("managed", true);
+  EXPECT_GE(CountBroadcasts(fake_intent_helper_instance_->broadcasts(),
+                            kBackupBroadcastAction, &expected_broadcast_extras),
+            1);
+
+  fake_intent_helper_instance_->clear_broadcasts();
+
+  // The policy is set to true.
+  policy.Set(policy::key::kArcBackupRestoreEnabled,
+             policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
+             policy::POLICY_SOURCE_CLOUD, base::MakeUnique<base::Value>(true),
+             nullptr);
+  UpdatePolicy(policy);
+
+  // The pref is enabled and managed, and the corresponding broadcast is sent at
+  // least once.
+  EXPECT_TRUE(prefs->GetBoolean(prefs::kArcBackupRestoreEnabled));
+  EXPECT_TRUE(prefs->IsManagedPreference(prefs::kArcBackupRestoreEnabled));
+  expected_broadcast_extras.SetBoolean("enabled", true);
+  EXPECT_GE(CountBroadcasts(fake_intent_helper_instance_->broadcasts(),
+                            kBackupBroadcastAction, &expected_broadcast_extras),
+            1);
+
+  fake_intent_helper_instance_->clear_broadcasts();
+
+  // The policy is unset.
+  policy.Erase(policy::key::kArcBackupRestoreEnabled);
+  UpdatePolicy(policy);
+
+  // The pref is disabled and unmanaged, and the corresponding broadcast is
+  // sent.
+  EXPECT_FALSE(prefs->GetBoolean(prefs::kArcBackupRestoreEnabled));
+  EXPECT_FALSE(prefs->IsManagedPreference(prefs::kArcBackupRestoreEnabled));
+  expected_broadcast_extras.SetBoolean("enabled", false);
+  expected_broadcast_extras.SetBoolean("managed", false);
+  EXPECT_EQ(CountBroadcasts(fake_intent_helper_instance_->broadcasts(),
+                            kBackupBroadcastAction, &expected_broadcast_extras),
+            1);
+}
+
+IN_PROC_BROWSER_TEST_F(ArcSettingsServiceTest, LocationServicePolicyTest) {
+  PrefService* const prefs = browser()->profile()->GetPrefs();
+
+  // Set the user pref as initially enabled.
+  prefs->SetBoolean(prefs::kArcLocationServiceEnabled, true);
+  EXPECT_TRUE(prefs->GetBoolean(prefs::kArcLocationServiceEnabled));
+
+  fake_intent_helper_instance_->clear_broadcasts();
+
+  // The policy is set to false.
+  policy::PolicyMap policy;
+  policy.Set(policy::key::kArcLocationServiceEnabled,
+             policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
+             policy::POLICY_SOURCE_CLOUD, base::MakeUnique<base::Value>(false),
+             nullptr);
+  UpdatePolicy(policy);
+
+  // The pref is disabled and managed, and the corresponding broadcast is sent
+  // at least once.
+  EXPECT_FALSE(prefs->GetBoolean(prefs::kArcLocationServiceEnabled));
+  EXPECT_TRUE(prefs->IsManagedPreference(prefs::kArcLocationServiceEnabled));
+  base::DictionaryValue expected_broadcast_extras;
+  expected_broadcast_extras.SetBoolean("enabled", false);
+  expected_broadcast_extras.SetBoolean("managed", true);
+  EXPECT_GE(CountBroadcasts(fake_intent_helper_instance_->broadcasts(),
+                            kLocationServiceBroadcastAction,
+                            &expected_broadcast_extras),
+            1);
+
+  fake_intent_helper_instance_->clear_broadcasts();
+
+  // The policy is set to true.
+  policy.Set(policy::key::kArcLocationServiceEnabled,
+             policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
+             policy::POLICY_SOURCE_CLOUD, base::MakeUnique<base::Value>(true),
+             nullptr);
+  UpdatePolicy(policy);
+
+  // The pref is enabled and managed, and the corresponding broadcast is sent at
+  // least once.
+  EXPECT_TRUE(prefs->GetBoolean(prefs::kArcLocationServiceEnabled));
+  EXPECT_TRUE(prefs->IsManagedPreference(prefs::kArcLocationServiceEnabled));
+  expected_broadcast_extras.SetBoolean("enabled", true);
+  EXPECT_GE(CountBroadcasts(fake_intent_helper_instance_->broadcasts(),
+                            kLocationServiceBroadcastAction,
+                            &expected_broadcast_extras),
+            1);
+
+  fake_intent_helper_instance_->clear_broadcasts();
+
+  // The policy is unset.
+  policy.Erase(policy::key::kArcLocationServiceEnabled);
+  UpdatePolicy(policy);
+
+  // The pref is disabled and unmanaged, and the corresponding broadcast is
+  // sent.
+  EXPECT_FALSE(prefs->GetBoolean(prefs::kArcLocationServiceEnabled));
+  EXPECT_FALSE(prefs->IsManagedPreference(prefs::kArcLocationServiceEnabled));
+  expected_broadcast_extras.SetBoolean("enabled", false);
+  expected_broadcast_extras.SetBoolean("managed", false);
+  EXPECT_EQ(CountBroadcasts(fake_intent_helper_instance_->broadcasts(),
+                            kLocationServiceBroadcastAction,
+                            &expected_broadcast_extras),
+            1);
+}
 
 IN_PROC_BROWSER_TEST_F(ArcSettingsServiceTest, ProxyModePolicyTest) {
   fake_intent_helper_instance_->clear_broadcasts();
@@ -310,7 +458,7 @@ IN_PROC_BROWSER_TEST_F(ArcSettingsServiceTest, ProxyModePolicyTest) {
   policy.Set(
       policy::key::kProxyMode, policy::POLICY_LEVEL_MANDATORY,
       policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
-      base::MakeUnique<base::StringValue>(ProxyPrefs::kAutoDetectProxyModeName),
+      base::MakeUnique<base::Value>(ProxyPrefs::kAutoDetectProxyModeName),
       nullptr);
   UpdatePolicy(policy);
 
@@ -331,7 +479,7 @@ IN_PROC_BROWSER_TEST_F(ArcSettingsServiceTest, ONCProxyPolicyTest) {
   policy.Set(policy::key::kOpenNetworkConfiguration,
              policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
              policy::POLICY_SOURCE_CLOUD,
-             base::MakeUnique<base::StringValue>(kONCPolicy), nullptr);
+             base::MakeUnique<base::Value>(kONCPolicy), nullptr);
   UpdatePolicy(policy);
 
   std::unique_ptr<base::DictionaryValue> expected_proxy_config(
@@ -350,20 +498,20 @@ IN_PROC_BROWSER_TEST_F(ArcSettingsServiceTest, TwoSourcesTest) {
 
   policy::PolicyMap policy;
   // Proxy policy.
-  policy.Set(policy::key::kProxyMode, policy::POLICY_LEVEL_MANDATORY,
-             policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
-             base::MakeUnique<base::StringValue>(
-                 ProxyPrefs::kFixedServersProxyModeName),
-             nullptr);
+  policy.Set(
+      policy::key::kProxyMode, policy::POLICY_LEVEL_MANDATORY,
+      policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
+      base::MakeUnique<base::Value>(ProxyPrefs::kFixedServersProxyModeName),
+      nullptr);
   policy.Set(policy::key::kProxyServer, policy::POLICY_LEVEL_MANDATORY,
              policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
-             base::MakeUnique<base::StringValue>("proxy:8888"), nullptr);
+             base::MakeUnique<base::Value>("proxy:8888"), nullptr);
   UpdatePolicy(policy);
 
   std::unique_ptr<base::DictionaryValue> proxy_config(
       base::MakeUnique<base::DictionaryValue>());
   proxy_config->SetString("mode", ProxyPrefs::kAutoDetectProxyModeName);
-  ProxyConfigDictionary proxy_config_dict(proxy_config.get());
+  ProxyConfigDictionary proxy_config_dict(std::move(proxy_config));
   const chromeos::NetworkState* network = chromeos::NetworkHandler::Get()
                                               ->network_state_handler()
                                               ->DefaultNetwork();
@@ -495,11 +643,11 @@ IN_PROC_BROWSER_TEST_F(ArcSettingsServiceTest, TwoONCProxyPolicyTest) {
   policy.Set(policy::key::kOpenNetworkConfiguration,
              policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
              policy::POLICY_SOURCE_CLOUD,
-             base::MakeUnique<base::StringValue>(kUserONCPolicy), nullptr);
+             base::MakeUnique<base::Value>(kUserONCPolicy), nullptr);
   policy.Set(policy::key::kDeviceOpenNetworkConfiguration,
              policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_MACHINE,
              policy::POLICY_SOURCE_CLOUD,
-             base::MakeUnique<base::StringValue>(kDeviceONCPolicy), nullptr);
+             base::MakeUnique<base::Value>(kDeviceONCPolicy), nullptr);
   UpdatePolicy(policy);
 
   std::unique_ptr<base::DictionaryValue> expected_proxy_config(

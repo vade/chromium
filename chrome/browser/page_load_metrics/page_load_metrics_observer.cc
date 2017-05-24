@@ -4,46 +4,84 @@
 
 #include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
 
+#include <utility>
+
 namespace page_load_metrics {
 
 PageLoadExtraInfo::PageLoadExtraInfo(
+    base::TimeTicks navigation_start,
     const base::Optional<base::TimeDelta>& first_background_time,
     const base::Optional<base::TimeDelta>& first_foreground_time,
     bool started_in_foreground,
     UserInitiatedInfo user_initiated_info,
-    const GURL& committed_url,
+    const GURL& url,
     const GURL& start_url,
-    UserAbortType abort_type,
-    UserInitiatedInfo abort_user_initiated_info,
-    const base::Optional<base::TimeDelta>& time_to_abort,
-    const PageLoadMetadata& metadata)
-    : first_background_time(first_background_time),
+    bool did_commit,
+    PageEndReason page_end_reason,
+    UserInitiatedInfo page_end_user_initiated_info,
+    const base::Optional<base::TimeDelta>& page_end_time,
+    const mojom::PageLoadMetadata& main_frame_metadata,
+    const mojom::PageLoadMetadata& subframe_metadata)
+    : navigation_start(navigation_start),
+      first_background_time(first_background_time),
       first_foreground_time(first_foreground_time),
       started_in_foreground(started_in_foreground),
       user_initiated_info(user_initiated_info),
-      committed_url(committed_url),
+      url(url),
       start_url(start_url),
-      abort_type(abort_type),
-      abort_user_initiated_info(abort_user_initiated_info),
-      time_to_abort(time_to_abort),
-      metadata(metadata) {}
+      did_commit(did_commit),
+      page_end_reason(page_end_reason),
+      page_end_user_initiated_info(page_end_user_initiated_info),
+      page_end_time(page_end_time),
+      main_frame_metadata(main_frame_metadata),
+      subframe_metadata(subframe_metadata) {}
 
 PageLoadExtraInfo::PageLoadExtraInfo(const PageLoadExtraInfo& other) = default;
 
 PageLoadExtraInfo::~PageLoadExtraInfo() {}
 
-ExtraRequestInfo::ExtraRequestInfo(bool was_cached,
-                                   int64_t raw_body_bytes,
-                                   bool data_reduction_proxy_used,
-                                   int64_t original_network_content_length)
-    : was_cached(was_cached),
+// static
+PageLoadExtraInfo PageLoadExtraInfo::CreateForTesting(
+    const GURL& url,
+    bool started_in_foreground) {
+  return PageLoadExtraInfo(
+      base::TimeTicks::Now() /* navigation_start */,
+      base::Optional<base::TimeDelta>() /* first_background_time */,
+      base::Optional<base::TimeDelta>() /* first_foreground_time */,
+      started_in_foreground /* started_in_foreground */,
+      UserInitiatedInfo::BrowserInitiated(), url, url, true /* did_commit */,
+      page_load_metrics::END_NONE,
+      page_load_metrics::UserInitiatedInfo::NotUserInitiated(),
+      base::TimeDelta(), page_load_metrics::mojom::PageLoadMetadata(),
+      page_load_metrics::mojom::PageLoadMetadata());
+}
+
+ExtraRequestCompleteInfo::ExtraRequestCompleteInfo(
+    const GURL& url,
+    int frame_tree_node_id,
+    bool was_cached,
+    int64_t raw_body_bytes,
+    int64_t original_network_content_length,
+    std::unique_ptr<data_reduction_proxy::DataReductionProxyData>
+        data_reduction_proxy_data,
+    content::ResourceType detected_resource_type)
+    : url(url),
+      frame_tree_node_id(frame_tree_node_id),
+      was_cached(was_cached),
       raw_body_bytes(raw_body_bytes),
-      data_reduction_proxy_used(data_reduction_proxy_used),
-      original_network_content_length(original_network_content_length) {}
+      original_network_content_length(original_network_content_length),
+      data_reduction_proxy_data(std::move(data_reduction_proxy_data)),
+      resource_type(detected_resource_type) {}
 
-ExtraRequestInfo::ExtraRequestInfo(const ExtraRequestInfo& other) = default;
+ExtraRequestCompleteInfo::~ExtraRequestCompleteInfo() {}
 
-ExtraRequestInfo::~ExtraRequestInfo() {}
+ExtraRequestStartInfo::ExtraRequestStartInfo(content::ResourceType found_type)
+    : resource_type(found_type) {}
+
+ExtraRequestStartInfo::ExtraRequestStartInfo(
+    const ExtraRequestStartInfo& other) = default;
+
+ExtraRequestStartInfo::~ExtraRequestStartInfo() {}
 
 FailedProvisionalLoadInfo::FailedProvisionalLoadInfo(base::TimeDelta interval,
                                                      net::Error error)
@@ -69,7 +107,7 @@ PageLoadMetricsObserver::ObservePolicy PageLoadMetricsObserver::OnCommit(
 }
 
 PageLoadMetricsObserver::ObservePolicy PageLoadMetricsObserver::OnHidden(
-    const PageLoadTiming& timing,
+    const mojom::PageLoadTiming& timing,
     const PageLoadExtraInfo& extra_info) {
   return CONTINUE_OBSERVING;
 }
@@ -80,9 +118,17 @@ PageLoadMetricsObserver::ObservePolicy PageLoadMetricsObserver::OnShown() {
 
 PageLoadMetricsObserver::ObservePolicy
 PageLoadMetricsObserver::FlushMetricsOnAppEnterBackground(
-    const PageLoadTiming& timing,
+    const mojom::PageLoadTiming& timing,
     const PageLoadExtraInfo& extra_info) {
   return CONTINUE_OBSERVING;
+}
+
+PageLoadMetricsObserver::ObservePolicy
+PageLoadMetricsObserver::ShouldObserveMimeType(
+    const std::string& mime_type) const {
+  return mime_type == "text/html" || mime_type == "application/xhtml+xml"
+             ? CONTINUE_OBSERVING
+             : STOP_OBSERVING;
 }
 
 }  // namespace page_load_metrics

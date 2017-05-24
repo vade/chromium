@@ -20,11 +20,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "components/url_formatter/url_fixer.h"
+#include "content/public/common/content_features.h"
 #include "extensions/features/features.h"
-
-#if !defined(OS_ANDROID)
-#include "chrome/browser/ui/webui/md_history_ui.h"
-#endif
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/android/chrome_feature_list.h"
@@ -56,9 +53,15 @@ bool WillHandleBrowserAboutURL(GURL* url,
 
   std::string host(url->host());
   std::string path;
+
   // Replace about with chrome-urls.
   if (host == chrome::kChromeUIAboutHost)
     host = chrome::kChromeUIChromeURLsHost;
+
+  // Legacy redirect from chrome://history-frame to chrome://history.
+  if (host == chrome::kDeprecatedChromeUIHistoryFrameHost)
+    host = chrome::kChromeUIHistoryHost;
+
   // Replace cache with view-http-cache.
   if (host == chrome::kChromeUICacheHost) {
     host = content::kChromeUINetworkViewCacheHost;
@@ -79,37 +82,19 @@ bool WillHandleBrowserAboutURL(GURL* url,
     }
   // Redirect chrome://settings/extensions (legacy URL).
   } else if (host == chrome::kChromeUISettingsHost &&
-      url->path() == std::string("/") + chrome::kExtensionsSubPage) {
+             url->path() ==
+                 std::string("/") + chrome::kDeprecatedExtensionsSubPage) {
     host = chrome::kChromeUIUberHost;
     path = chrome::kChromeUIExtensionsHost;
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
   // Redirect chrome://history.
   } else if (host == chrome::kChromeUIHistoryHost) {
-#if defined(OS_ANDROID)
-    // TODO(twellington): remove this after native Android history launches.
-    // See http://crbug.com/654071.
-    if (!base::FeatureList::IsEnabled(
-            chrome::android::kNativeAndroidHistoryManager)) {
-      // On Android, redirect directly to chrome://history-frame since
-      // uber page is unsupported.
-      host = chrome::kChromeUIHistoryFrameHost;
-    }
-#else
-    // Material design history is handled on the top-level chrome://history
-    // host.
-    if (MdHistoryUI::IsEnabled(Profile::FromBrowserContext(browser_context))) {
-      host = chrome::kChromeUIHistoryHost;
-      path = url->path();
-    } else {
-      host = chrome::kChromeUIUberHost;
-      path = chrome::kChromeUIHistoryHost + url->path();
-    }
-#endif
+    path = url->path();
   // Redirect chrome://settings, unless MD settings is enabled.
   } else if (host == chrome::kChromeUISettingsHost) {
     if (base::FeatureList::IsEnabled(features::kMaterialDesignSettings)) {
       return true;  // Prevent further rewriting - this is a valid URL.
-    } else if (::switches::AboutInSettingsEnabled()) {
+    } else if (::switches::SettingsWindowEnabled()) {
       host = chrome::kChromeUISettingsFrameHost;
     } else {
       host = chrome::kChromeUIUberHost;
@@ -118,9 +103,8 @@ bool WillHandleBrowserAboutURL(GURL* url,
   // Redirect chrome://help, unless MD settings is enabled.
   } else if (host == chrome::kChromeUIHelpHost) {
     if (base::FeatureList::IsEnabled(features::kMaterialDesignSettings)) {
-      host = chrome::kChromeUISettingsHost;
-      path = chrome::kChromeUIHelpHost;
-    } else if (::switches::AboutInSettingsEnabled()) {
+      return false;  // Handled in the HandleWebUI handler.
+    } else if (::switches::SettingsWindowEnabled()) {
       host = chrome::kChromeUISettingsFrameHost;
       if (url->path().empty() || url->path() == "/")
         path = chrome::kChromeUIHelpHost;
@@ -147,11 +131,11 @@ bool HandleNonNavigationAboutURL(const GURL& url) {
     // Call AttemptRestart after chrome::Navigate() completes to avoid access of
     // gtk objects after they are destroyed by BrowserWindowGtk::Close().
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(&chrome::AttemptRestart));
+        FROM_HERE, base::BindOnce(&chrome::AttemptRestart));
     return true;
   } else if (base::LowerCaseEqualsASCII(spec, chrome::kChromeUIQuitURL)) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(&chrome::AttemptExit));
+        FROM_HERE, base::BindOnce(&chrome::AttemptExit));
     return true;
   }
 

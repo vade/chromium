@@ -1,8 +1,10 @@
 include_rules = [
+    "+base/callback.h",
     "+base/callback_forward.h",
     "+base/location.h",
     "+base/logging.h",
     "+base/metrics",
+    "+base/optional.h",
     "+base/strings",
     "+base/trace_event",
     "-bindings",
@@ -21,6 +23,7 @@ include_rules = [
     "-public/web",
     "+services/service_manager/public/interfaces",
     "+third_party/skia",
+    "+ui/gfx",
     "+url",
     "-web",
 ]

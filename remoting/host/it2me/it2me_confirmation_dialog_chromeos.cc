@@ -47,7 +47,7 @@ void It2MeConfirmationDialogChromeOS::Show(const std::string& remote_user_email,
   DCHECK(!remote_user_email.empty());
   callback_ = callback;
 
-  message_box_.reset(new MessageBox(
+  message_box_ = base::MakeUnique<MessageBox>(
       l10n_util::GetStringUTF16(IDS_MODE_IT2ME),
       base::i18n::MessageFormatter::FormatWithNumberedArgs(
           l10n_util::GetStringUTF16(
@@ -56,20 +56,17 @@ void It2MeConfirmationDialogChromeOS::Show(const std::string& remote_user_email,
       l10n_util::GetStringUTF16(IDS_SHARE_CONFIRM_DIALOG_CONFIRM),
       l10n_util::GetStringUTF16(IDS_SHARE_CONFIRM_DIALOG_DECLINE),
       base::Bind(&It2MeConfirmationDialogChromeOS::OnMessageBoxResult,
-                 base::Unretained(this))));
-
-  message_box_->Show();
+                 base::Unretained(this)));
 }
 
 void It2MeConfirmationDialogChromeOS::OnMessageBoxResult(
     MessageBox::Result result) {
-  message_box_->Hide();
   base::ResetAndReturn(&callback_).Run(result == MessageBox::OK ?
                                        Result::OK : Result::CANCEL);
 }
 
-// static
-std::unique_ptr<It2MeConfirmationDialog> It2MeConfirmationDialog::Create() {
+std::unique_ptr<It2MeConfirmationDialog>
+It2MeConfirmationDialogFactory::Create() {
   return base::MakeUnique<It2MeConfirmationDialogChromeOS>();
 }
 

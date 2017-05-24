@@ -7,28 +7,29 @@
 #include <memory>
 
 #include "android_webview/browser/aw_content_browser_client.h"
+#include "android_webview/browser/aw_media_url_interceptor.h"
+#include "android_webview/browser/aw_quota_manager_bridge_impl.h"
 #include "android_webview/browser/aw_safe_browsing_config_helper.h"
+#include "android_webview/browser/aw_web_contents_view_delegate.h"
 #include "android_webview/browser/browser_view_renderer.h"
 #include "android_webview/browser/command_line_helper.h"
 #include "android_webview/browser/deferred_gpu_command_service.h"
-#include "android_webview/browser/scoped_allow_wait_for_legacy_web_view_api.h"
 #include "android_webview/common/aw_descriptors.h"
 #include "android_webview/common/aw_paths.h"
 #include "android_webview/common/aw_switches.h"
 #include "android_webview/common/crash_reporter/aw_microdump_crash_reporter.h"
+#include "android_webview/common/crash_reporter/crash_keys.h"
 #include "android_webview/gpu/aw_content_gpu_client.h"
-#include "android_webview/native/aw_locale_manager_impl.h"
-#include "android_webview/native/aw_media_url_interceptor.h"
-#include "android_webview/native/aw_quota_manager_bridge_impl.h"
-#include "android_webview/native/aw_web_contents_view_delegate.h"
-#include "android_webview/native/aw_web_preferences_populater_impl.h"
 #include "android_webview/renderer/aw_content_renderer_client.h"
 #include "base/android/apk_assets.h"
+#include "base/android/build_info.h"
 #include "base/command_line.h"
 #include "base/cpu.h"
+#include "base/debug/crash_logging.h"
 #include "base/i18n/icu_util.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "cc/base/switches.h"
 #include "components/crash/content/app/breakpad_linux.h"
@@ -37,7 +38,7 @@
 #include "content/public/browser/android/browser_media_player_manager_register.h"
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/common/content_descriptors.h"
+#include "content/public/common/content_descriptor_keys.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "gin/public/isolate_holder.h"
@@ -50,14 +51,6 @@
 #include "ui/events/gesture_detection/gesture_configuration.h"
 
 namespace android_webview {
-
-namespace {
-
-// TODO(boliu): Remove this global Allow once the underlying issues are
-// resolved - http://crbug.com/240453. See AwMainDelegate::RunProcess below.
-base::LazyInstance<std::unique_ptr<ScopedAllowWaitForLegacyWebViewApi>>
-    g_allow_wait_in_ui_thread = LAZY_INSTANCE_INITIALIZER;
-}
 
 AwMainDelegate::AwMainDelegate() {
 }
@@ -132,22 +125,22 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
     ui::GestureConfiguration::GetInstance()
         ->set_fling_touchscreen_tap_suppression_enabled(false);
 
-    base::android::RegisterApkAssetWithGlobalDescriptors(
-        kV8NativesDataDescriptor,
-        gin::V8Initializer::GetNativesFilePath().AsUTF8Unsafe());
-    base::android::RegisterApkAssetWithGlobalDescriptors(
-        kV8SnapshotDataDescriptor32,
-        gin::V8Initializer::GetSnapshotFilePath(true).AsUTF8Unsafe());
-    base::android::RegisterApkAssetWithGlobalDescriptors(
-        kV8SnapshotDataDescriptor64,
-        gin::V8Initializer::GetSnapshotFilePath(false).AsUTF8Unsafe());
+    base::android::RegisterApkAssetWithFileDescriptorStore(
+        content::kV8NativesDataDescriptor,
+        gin::V8Initializer::GetNativesFilePath());
+    base::android::RegisterApkAssetWithFileDescriptorStore(
+        content::kV8Snapshot32DataDescriptor,
+        gin::V8Initializer::GetSnapshotFilePath(true));
+    base::android::RegisterApkAssetWithFileDescriptorStore(
+        content::kV8Snapshot64DataDescriptor,
+        gin::V8Initializer::GetSnapshotFilePath(false));
   }
 #endif  // V8_USE_EXTERNAL_STARTUP_DATA
 
   if (cl->HasSwitch(switches::kWebViewSandboxedRenderer)) {
     cl->AppendSwitch(switches::kInProcessGPU);
     cl->AppendSwitchASCII(switches::kRendererProcessLimit, "1");
-    cl->AppendSwitch(switches::kDisableRendererBackgrounding);
+    cl->AppendSwitch(switches::kDisableRendererPriorityManagement);
   }
 
   CommandLineHelper::AddEnabledFeature(
@@ -157,12 +150,10 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
 
   android_webview::RegisterPathProvider();
 
-  if (AwSafeBrowsingConfigHelper::GetSafeBrowsingEnabled()) {
-    safe_browsing_api_handler_.reset(
-        new safe_browsing::SafeBrowsingApiHandlerBridge());
-    safe_browsing::SafeBrowsingApiHandler::SetInstance(
-        safe_browsing_api_handler_.get());
-  }
+  safe_browsing_api_handler_.reset(
+      new safe_browsing::SafeBrowsingApiHandlerBridge());
+  safe_browsing::SafeBrowsingApiHandler::SetInstance(
+      safe_browsing_api_handler_.get());
 
   return false;
 }
@@ -202,14 +193,24 @@ void AwMainDelegate::PreSandboxStartup() {
         global_descriptors->Get(kAndroidWebViewCrashSignalDescriptor);
   }
   if (process_type.empty()) {
-    if (command_line.HasSwitch(switches::kSingleProcess)) {
-      process_type = breakpad::kWebViewSingleProcessType;
-    } else {
+    if (command_line.HasSwitch(switches::kWebViewSandboxedRenderer)) {
       process_type = breakpad::kBrowserProcessType;
+    } else {
+      process_type = breakpad::kWebViewSingleProcessType;
     }
   }
 
   crash_reporter::EnableCrashReporter(process_type, crash_signal_fd);
+
+  base::android::BuildInfo* android_build_info =
+      base::android::BuildInfo::GetInstance();
+  base::debug::SetCrashKeyValue(crash_keys::kAppPackageName,
+                                android_build_info->package_name());
+  base::debug::SetCrashKeyValue(crash_keys::kAppPackageVersionCode,
+                                android_build_info->package_version_code());
+  base::debug::SetCrashKeyValue(
+      crash_keys::kAndroidSdkInt,
+      base::IntToString(android_build_info->sdk_int()));
 }
 
 int AwMainDelegate::RunProcess(
@@ -225,9 +226,6 @@ int AwMainDelegate::RunProcess(
     // crash handler on the same thread as the crash handler was initialized.
     crash_reporter::AddGpuFingerprintToMicrodumpCrashHandler(
         content_client_.gpu_fingerprint());
-
-    g_allow_wait_in_ui_thread.Get().reset(
-        new ScopedAllowWaitForLegacyWebViewApi);
 
     // Return 0 so that we do NOT trigger the default behavior. On Android, the
     // UI message loop is managed by the Java application.
@@ -276,14 +274,6 @@ scoped_refptr<AwQuotaManagerBridge> AwMainDelegate::CreateAwQuotaManagerBridge(
 content::WebContentsViewDelegate* AwMainDelegate::CreateViewDelegate(
     content::WebContents* web_contents) {
   return AwWebContentsViewDelegate::Create(web_contents);
-}
-
-AwWebPreferencesPopulater* AwMainDelegate::CreateWebPreferencesPopulater() {
-  return new AwWebPreferencesPopulaterImpl();
-}
-
-AwLocaleManager* AwMainDelegate::CreateAwLocaleManager() {
-  return new AwLocaleManagerImpl();
 }
 
 }  // namespace android_webview

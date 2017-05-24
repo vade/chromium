@@ -1,16 +1,10 @@
 <link rel="import" href="chrome://resources/cr_elements/shared_style_css.html">
-<link rel="import" href="/settings_vars_css.html">
+<link rel="import" href="settings_vars_css.html">
 
 <!-- Common styles for Material Design settings. -->
 <dom-module id="settings-shared">
   <template>
     <style include="cr-shared-style">
-      /* Included here so we don't have to include "iron-positioning" in every
-       * stylesheet. See crbug.com/498405. */
-      [hidden] {
-        display: none !important;
-      }
-
       :host-context([dir=rtl]) button[is='paper-icon-button-light'] {
         transform: scaleX(-1);  /* Flip on the X axis (aka mirror). */
       }
@@ -28,8 +22,12 @@
         font-size: inherit;
         font-weight: 500;
         margin: 0;
-        padding-top: 24px;
         padding-bottom: 12px;
+        padding-top: 24px;
+      }
+
+      iron-icon {
+        flex-shrink: 0;  /* Prevent distortion of icons in cramped UI. */
       }
 
       iron-icon[icon='cr:check'],
@@ -37,84 +35,12 @@
        --iron-icon-fill-color: var(--google-green-500);
       }
 
+      /* See notes in .primary-button.
+       * TODO(dschuyler): Remove unnecessary .secondary-button references. */
       paper-button {
-        height: 32px;
-        margin: 0;
-      }
-
-      paper-button[toggles][active] {
-        background-color: var(--paper-grey-300);
-      }
-
-      paper-toggle-button {
-        @apply(--settings-actionable);
-        height: var(--settings-row-min-height);
-        width: 31px;
-      }
-
-      iron-dropdown .dropdown-content {
-        min-width: 128px;
-        padding: 8px 0;
-      }
-
-      iron-dropdown .dropdown-item:focus {
-        @apply(--cr-selectable-focus);
-      }
-
-      iron-dropdown .dropdown-content {
-        background-color: white;
-        box-shadow: 0 2px 6px var(--paper-grey-500);
-      }
-
-      iron-dropdown .dropdown-content paper-item {
-        @apply(--settings-actionable);
-      }
-
-      iron-dropdown .dropdown-content .dropdown-item[disabled] {
-        opacity: var(--settings-disabled-opacity);
-      }
-
-      span ~ a {
-        -webkit-margin-start: 4px;
-      }
-
-      [is='action-link'],
-      [is='action-link']:active,
-      [is='action-link']:hover,
-      [is='action-link']:visited,
-      .primary-button,
-      .tertiary-button,
-      a[href] {
-        color: var(--google-blue-700);
-      }
-
-      .primary-button,
-      .tertiary-button {
-        --paper-button-flat-keyboard-focus: {
-          background: rgba(51, 103, 214, .12);  /* --google-blue-700 */
-        };
-      }
-
-      a[href],
-      [is='action-link']:hover {
-        text-decoration: none;
-      }
-
-      /* There are three main button styles, .primary-button, .secondary-button,
-       * and .tertiary-button. The primary is the action button (e.g. "edit",
-       * "delete") while the secondary is often a "Cancel" button. A tertiary
-       * button may be used to get more information or similar, that we expect
-       * most users will not need. */
-      .primary-button {
         --paper-button: {
-          font-weight: 500;
-          text-align: start;
-        };
-      }
-
-      /* See notes in .primary-button. */
-      .secondary-button {
-        --paper-button: {
+          -webkit-padding-end: var(--settings-button-edge-spacing);
+          -webkit-padding-start: var(--settings-button-edge-spacing);
           color: var(--paper-grey-600);
           font-weight: 500;
           min-width: 1em;  /* A tighter fit than 5.14em for short buttons. */
@@ -123,36 +49,88 @@
         --paper-button-flat-keyboard-focus: {
           background: rgba(0, 0, 0, .12);
         };
+        flex-shrink: 0;
+        height: 36px;
+        margin: 0;
       }
 
-      /* See notes in .primary-button. */
-      .tertiary-button {
+      paper-button[toggles][active] {
+        background-color: var(--paper-grey-300);
+      }
+
+      .settings-box paper-button {
+        -webkit-margin-end: calc(var(--settings-button-edge-spacing) * -1);
+        -webkit-margin-start: calc(var(--settings-button-edge-spacing) * -1);
+      }
+
+      /* There are two settings button styles, .primary-button and normal
+       * buttons. The primary is the action button (e.g. "edit", "delete")
+       * while the normal (secondary-button) is often a "Cancel" button. */
+      .primary-button {
         --paper-button: {
-          font-weight: 400;
-          text-decoration: none;
+          -webkit-padding-end: var(--settings-button-edge-spacing);
+          -webkit-padding-start: var(--settings-button-edge-spacing);
+          font-weight: 500;
+          text-align: start;
         };
+        --paper-button-flat-keyboard-focus: {
+          background: rgba(51, 103, 214, .12);  /* --google-blue-700 */
+        };
+        color: var(--google-blue-500);
       }
 
-      .settings-box .primary-button,
-      .settings-box .secondary-button,
-      .settings-box .secondary-button {
-        margin-left: -12px;
-        margin-right: -12px;
-        padding-left: 12px;
-        padding-right: 12px;
+      paper-toggle-button {
+        @apply(--settings-actionable);
+        height: var(--settings-row-min-height);
+        width: 36px;
+      }
+
+      span ~ a {
+        -webkit-margin-start: 4px;
+      }
+
+      a[href] {
+        color: var(--google-blue-700);
+      }
+
+      a[href] {
+        text-decoration: none;
+      }
+
+      /* For elements that are simple out-links but don't look like anchors. */
+      .inherit-color {
+        color: inherit !important;
+      }
+
+      .primary-toggle {
+        color: var(--paper-grey-600);
+        font-weight: 500;
+      }
+
+      .primary-toggle[checked] {
+        color: var(--google-blue-500);
       }
 
       paper-checkbox {
         --paper-checkbox-checked-color: var(--google-blue-500);
-        --paper-checkbox-label-spacing: var(--checkbox-spacing);
+        --paper-checkbox-label-spacing: var(--settings-control-label-spacing);
         --paper-checkbox-size: var(--checkbox-size);
         --paper-checkbox-unchecked-color: var(--paper-grey-600);
         -webkit-margin-start: var(--checkbox-margin-start);
       }
 
+      paper-input {
+        /* Fix issue with focus animation making labels wiggle. */
+        transform: translate3d(0, 0, 0);
+      }
+
+      controlled-radio-button,
       paper-radio-button {
         --paper-radio-button-checked-color: var(--google-blue-500);
-        --paper-radio-button-label-spacing: 18px;
+        --paper-radio-button-label-spacing: 22px;
+        --paper-radio-button-radio-container: {
+          flex-shrink: 0;
+        };
         --paper-radio-button-unchecked-color: var(--paper-grey-600);
         -webkit-margin-start: 2px;
         align-items: center;
@@ -164,25 +142,26 @@
         width: 100%;
       }
 
+      /* See also: .no-min-width below. */
       .text-elide {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        @apply(--settings-text-elide);
       }
 
-      /**
-       * By default, flexbox children have min-width calculated to be the width
+      /* By default, flexbox children have min-width calculated to be the width
        * of the content. However, in some cases we might want to allow the
        * width to be smaller than the content (i.e. for long text to ellipsis).
        * In such cases this class should be applied.
-       * (See: https://bugzilla.mozilla.org/show_bug.cgi?id=1108514#c5)
-       */
+       * (See: https://bugzilla.mozilla.org/show_bug.cgi?id=1108514#c5) */
       .no-min-width {
         min-width: 0;
       }
 
       .button-strip {
         text-align: end;
+      }
+
+      .header-aligned-button {
+        margin-top: 12px;  /* Align paper-button with <h2>. */
       }
 
       /* A list-frame is an outer container for list-items. It is intended to be
@@ -195,7 +174,7 @@
       }
 
       /* A list-item is intended to be contained within a list-frame. The list
-       * frame will setup the initial start margin. */
+       * frame will set up the initial start margin. */
       .list-item {
         align-items: center;
         display: flex;
@@ -232,11 +211,12 @@
       }
 
       /* This button has no ink ripple. */
-      .list-item.list-button {
-        @apply(--settings-actionable);
+      .list-button[is='action-link'] {
         align-items: center;
-        color: var(--google-blue-500);
+        display: flex;
+        flex: 1;
         font-weight: 500;
+        min-height: inherit;
       }
 
       /* A row with two lines of text. Often the lower line will be .secondary.
@@ -257,6 +237,10 @@
 
       .settings-box.two-line {
         min-height: var(--settings-box-two-line-min-height);
+      }
+
+      .settings-box.three-line {
+        min-height: var(--settings-box-three-line-min-height);
       }
 
       /* We use an explicit tag to remove the top border, rather than a
@@ -315,27 +299,24 @@
         flex: auto;
       }
 
-      /* The secondary-action wraps a clickable sub-area of a .settings-box.
-       * An example is the |sign out| button on the People settings.
-       * Here is an example with and without a secondary action box:
-       *
-       *  +-------------------------------------------------------+
-       *  | Main action area .settings-box    | .secondary-action |
-       *  +-------------------------------------------------------+
-       *  | Another setting-box without a secondary-action        |
-       *  +-------------------------------------------------------+ */
-      .settings-box .secondary-action {
-        -webkit-border-start: var(--settings-separator-line);
-        -webkit-margin-start: 20px;
-        -webkit-padding-start: 20px;
+      /* For grouping elements with common flex options. */
+      .settings-row {
         align-items: center;
         display: flex;
-        flex-shrink: 0;
-        height: var(--settings-row-min-height);
+        flex-direction: row;
+        max-width: 100%;
+        min-width: 0;  /* Workaround for text elision in sub-elements. */
       }
 
-      .settings-box paper-item iron-icon {
-        padding: var(--cr-icon-padding);
+      /* Expand to fill-up available space. */
+      .settings-row.wide {
+        flex: 1;
+      }
+
+      .no-outline,
+      [scrollable] .no-outline {
+        background: none;
+        outline: none;
       }
 
       /* Helper for a list frame to automatically avoid the separator line. */
@@ -343,11 +324,29 @@
         border-top: var(--settings-separator-line);
       }
 
+      /* The separator a vertical line like a horizontal rule <hr> tag, but goes
+       * the other way. An example is near the |sign out| button on the People
+       * settings. */
+      :-webkit-any(.settings-box, .list-item) .separator {
+        -webkit-border-start: var(--settings-separator-line);
+        -webkit-margin-end: var(--settings-box-row-padding);
+        -webkit-margin-start: var(--settings-box-row-padding);
+        flex-shrink: 0;
+        --settings-separator-gaps: 9px;
+        height: calc(var(--settings-row-min-height) -
+            var(--settings-separator-gaps));
+      }
+
+      :-webkit-any(.settings-box, .list-item).two-line .separator {
+        height: calc(var(--settings-row-two-line-min-height) -
+            2 * var(--settings-separator-gaps));
+      }
+
       .settings-checkbox-spacer {
         -webkit-margin-start: calc(
             var(--checkbox-margin-start) +
             var(--checkbox-size) +
-            var(--checkbox-spacing));
+            var(--settings-control-label-spacing));
       }
 
       .favicon-image {
@@ -373,13 +372,13 @@
 
       /* Provides the arrow which points at the anchor element. */
       .search-bubble-innards::after {
-        -webkit-transform: rotate(-45deg);
         background-color: var(--paper-yellow-500);
         content: '';
         height: 10px;
         left: 55px;
         position: absolute;
         top: -5px;
+        transform: rotate(-45deg);
         width: 10px;
         z-index: -1;
       }
@@ -387,9 +386,14 @@
       /* Turns the arrow direction downwards, when the bubble is placed above
        * the anchor element */
       .search-bubble-innards.above::after {
-        -webkit-transform: rotate(-135deg);
         bottom: -5px;
         top: auto;
+        transform: rotate(-135deg);
+      }
+
+      .column-header {
+        color: var(--paper-grey-600);
+        font-weight: 500;
       }
     </style>
   </template>

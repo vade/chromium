@@ -26,6 +26,7 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/referrer.h"
 #include "mojo/public/cpp/bindings/binding.h"
+#include "services/service_manager/public/cpp/bind_source_info.h"
 #include "ui/gfx/geometry/rect.h"
 
 class Profile;
@@ -88,6 +89,10 @@ class PrerenderContents : public content::NotificationObserver,
     // an unset final status will always call OnPrerenderStop before being
     // destroyed.
     virtual void OnPrerenderStop(PrerenderContents* contents) {}
+
+    // Signals that a resource finished loading and altered the running byte
+    // count.
+    virtual void OnPrerenderNetworkBytesChanged(PrerenderContents* contents) {}
 
    protected:
     Observer() {}
@@ -170,15 +175,12 @@ class PrerenderContents : public content::NotificationObserver,
   void DidStopLoading() override;
   void DocumentLoadedInFrame(
       content::RenderFrameHost* render_frame_host) override;
-  void DidStartProvisionalLoadForFrame(
-      content::RenderFrameHost* render_frame_host,
-      const GURL& validated_url,
-      bool is_error_page) override;
+  void DidStartNavigation(
+      content::NavigationHandle* navigation_handle) override;
   void DidFinishLoad(content::RenderFrameHost* render_frame_host,
                      const GURL& validated_url) override;
-  void DidNavigateMainFrame(
-      const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) override;
+  void DidFinishNavigation(
+      content::NavigationHandle* navigation_handle) override;
   void DidGetRedirectForResourceRequest(
       const content::ResourceRedirectDetails& details) override;
 
@@ -234,12 +236,21 @@ class PrerenderContents : public content::NotificationObserver,
   void AddResourceThrottle(
       const base::WeakPtr<PrerenderResourceThrottle>& throttle);
 
+  // Called when a PrerenderResourceThrottle changes a resource priority to
+  // net::IDLE. The resources are reset back to their original priorities when
+  // the prerender contents is swapped in.
+  void AddIdleResource(
+      const base::WeakPtr<PrerenderResourceThrottle>& throttle);
+
   // Increments the number of bytes fetched over the network for this prerender.
   void AddNetworkBytes(int64_t bytes);
 
   bool prerendering_has_been_cancelled() const {
     return prerendering_has_been_cancelled_;
   }
+
+  // Running byte count. Increased when each resource completes loading.
+  int64_t network_bytes() { return network_bytes_; }
 
  protected:
   PrerenderContents(PrerenderManager* prerender_manager,
@@ -301,6 +312,7 @@ class PrerenderContents : public content::NotificationObserver,
   void CancelPrerenderForPrinting() override;
 
   void OnPrerenderCancelerRequest(
+      const service_manager::BindSourceInfo& source_info,
       chrome::mojom::PrerenderCancelerRequest request);
 
   mojo::Binding<chrome::mojom::PrerenderCanceler> prerender_canceler_binding_;
@@ -368,6 +380,8 @@ class PrerenderContents : public content::NotificationObserver,
   // Resources that are throttled, pending a prerender use. Can only access a
   // throttle on the IO thread.
   std::vector<base::WeakPtr<PrerenderResourceThrottle> > resource_throttles_;
+  // Resources for which the priority was lowered to net::IDLE.
+  std::vector<base::WeakPtr<PrerenderResourceThrottle>> idle_resources_;
 
   // A running tally of the number of bytes this prerender has caused to be
   // transferred over the network for resources.  Updated with AddNetworkBytes.

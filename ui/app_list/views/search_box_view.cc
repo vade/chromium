@@ -58,10 +58,10 @@ class SearchBoxBackground : public views::Background {
   void Paint(gfx::Canvas* canvas, views::View* view) const override {
     gfx::Rect bounds = view->GetContentsBounds();
 
-    SkPaint paint;
-    paint.setFlags(SkPaint::kAntiAlias_Flag);
-    paint.setColor(kSearchBoxBackground);
-    canvas->DrawRoundRect(bounds, kBackgroundBorderCornerRadius, paint);
+    cc::PaintFlags flags;
+    flags.setAntiAlias(true);
+    flags.setColor(kSearchBoxBackground);
+    canvas->DrawRoundRect(bounds, kBackgroundBorderCornerRadius, flags);
   }
 
   DISALLOW_COPY_AND_ASSIGN(SearchBoxBackground);
@@ -104,6 +104,8 @@ class SearchBoxImageButton : public views::ImageButton {
     if (state() == STATE_HOVERED || state() == STATE_PRESSED || selected_)
       canvas->FillRect(gfx::Rect(size()), kSelectedColor);
   }
+
+  const char* GetClassName() const override { return "SearchBoxImageButton"; }
 
   bool selected_;
 
@@ -301,10 +303,14 @@ void SearchBoxView::OnEnabledChanged() {
     speech_button_->SetEnabled(enabled());
 }
 
+const char* SearchBoxView::GetClassName() const {
+  return "SearchBoxView";
+}
+
 void SearchBoxView::UpdateModel() {
   // Temporarily remove from observer to ignore notifications caused by us.
   model_->search_box()->RemoveObserver(this);
-  model_->search_box()->SetText(search_box_->text());
+  model_->search_box()->Update(search_box_->text(), false);
   model_->search_box()->SetSelectionModel(search_box_->GetSelectionModel());
   model_->search_box()->AddObserver(this);
 }
@@ -422,7 +428,7 @@ void SearchBoxView::SelectionModelChanged() {
   search_box_->SelectSelectionModel(model_->search_box()->selection_model());
 }
 
-void SearchBoxView::TextChanged() {
+void SearchBoxView::Update() {
   search_box_->SetText(model_->search_box()->text());
   NotifyQueryChanged();
 }

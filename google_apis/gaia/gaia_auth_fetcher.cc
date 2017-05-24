@@ -25,6 +25,7 @@
 #include "net/base/load_flags.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
+#include "net/http/http_util.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
@@ -498,7 +499,7 @@ bool GaiaAuthFetcher::ParseListIdpSessionsResponse(const std::string& data,
        iter != sessionsList->end();
        iter++) {
     base::DictionaryValue* sessionDictionary;
-    if (!(*iter)->GetAsDictionary(&sessionDictionary))
+    if (!iter->GetAsDictionary(&sessionDictionary))
       continue;
 
     if (sessionDictionary->GetString("login_hint", login_hint))
@@ -627,15 +628,18 @@ void GaiaAuthFetcher::StartMergeSession(const std::string& uber_token,
 }
 
 void GaiaAuthFetcher::StartTokenFetchForUberAuthExchange(
-    const std::string& access_token) {
+    const std::string& access_token,
+    bool is_bound_to_channel_id) {
   DCHECK(!fetch_pending_) << "Tried to fetch two things at once!";
 
   VLOG(1) << "Starting StartTokenFetchForUberAuthExchange with access_token="
            << access_token;
   std::string authentication_header =
       base::StringPrintf(kOAuthHeaderFormat, access_token.c_str());
+  int load_flags =
+      is_bound_to_channel_id ? net::LOAD_NORMAL : kLoadFlagsIgnoreCookies;
   CreateAndStartGaiaFetcher(std::string(), authentication_header,
-                            uberauth_token_gurl_, net::LOAD_NORMAL);
+                            uberauth_token_gurl_, load_flags);
 }
 
 void GaiaAuthFetcher::StartOAuthLogin(const std::string& access_token,
@@ -953,7 +957,8 @@ void GaiaAuthFetcher::OnURLFetchComplete(const net::URLFetcher* source) {
 #ifndef NDEBUG
   std::string headers;
   if (source->GetResponseHeaders())
-    source->GetResponseHeaders()->GetNormalizedHeaders(&headers);
+    headers = net::HttpUtil::ConvertHeadersBackToHTTPResponse(
+        source->GetResponseHeaders()->raw_headers());
   DVLOG(2) << "Response " << url.spec() << ", code = " << response_code << "\n"
            << headers << "\n";
   DVLOG(2) << "data: " << data << "\n";

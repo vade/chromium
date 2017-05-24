@@ -87,10 +87,28 @@ def _CheckIdenticalFiles(input_api, output_api):
     return errors
 
 
+def _CheckFilesUsingEventSender(input_api, output_api):
+    """Check if any new layout tests still use eventSender. If they do, we encourage replacing them with
+       chrome.gpuBenchmarking.pointerActionSequence.
+    """
+    results = []
+    actions = ["eventSender.touch", "eventSender.mouse", "eventSender.gesture"]
+    for f in input_api.AffectedFiles():
+        if f.Action() == 'A':
+            for line_num, line in f.ChangedContents():
+                if any(action in line for action in actions):
+                    results.append(output_api.PresubmitPromptWarning(
+                        'eventSender is deprecated, please use chrome.gpuBenchmarking.pointerActionSequence instead ' +
+                        '(see https://crbug.com/711340 and http://goo.gl/BND75q).\n' +
+                        'Files: %s:%d %s ' % (f.LocalPath(), line_num, line)))
+    return results
+
+
 def CheckChangeOnUpload(input_api, output_api):
     results = []
     results.extend(_CheckTestharnessResults(input_api, output_api))
     results.extend(_CheckIdenticalFiles(input_api, output_api))
+    results.extend(_CheckFilesUsingEventSender(input_api, output_api))
     return results
 
 
@@ -98,4 +116,5 @@ def CheckChangeOnCommit(input_api, output_api):
     results = []
     results.extend(_CheckTestharnessResults(input_api, output_api))
     results.extend(_CheckIdenticalFiles(input_api, output_api))
+    results.extend(_CheckFilesUsingEventSender(input_api, output_api))
     return results

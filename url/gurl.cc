@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
+#include "base/trace_event/memory_usage_estimator.h"
 #include "url/url_canon_stdstring.h"
 #include "url/url_util.h"
 
@@ -76,6 +77,15 @@ GURL::GURL(const GURL& other)
     inner_url_.reset(new GURL(*other.inner_url_));
   // Valid filesystem urls should always have an inner_url_.
   DCHECK(!is_valid_ || !SchemeIsFileSystem() || inner_url_);
+}
+
+GURL::GURL(GURL&& other) noexcept
+    : spec_(std::move(other.spec_)),
+      is_valid_(other.is_valid_),
+      parsed_(other.parsed_),
+      inner_url_(std::move(other.inner_url_)) {
+  other.is_valid_ = false;
+  other.parsed_ = url::Parsed();
 }
 
 GURL::GURL(base::StringPiece url_string) {
@@ -167,8 +177,29 @@ void GURL::InitializeFromCanonicalSpec() {
 GURL::~GURL() {
 }
 
-GURL& GURL::operator=(GURL other) {
-  Swap(&other);
+GURL& GURL::operator=(const GURL& other) {
+  spec_ = other.spec_;
+  is_valid_ = other.is_valid_;
+  parsed_ = other.parsed_;
+
+  if (!other.inner_url_)
+    inner_url_.reset();
+  else if (inner_url_)
+    *inner_url_ = *other.inner_url_;
+  else
+    inner_url_.reset(new GURL(*other.inner_url_));
+
+  return *this;
+}
+
+GURL& GURL::operator=(GURL&& other) {
+  spec_ = std::move(other.spec_);
+  is_valid_ = other.is_valid_;
+  parsed_ = other.parsed_;
+  inner_url_ = std::move(other.inner_url_);
+
+  other.is_valid_ = false;
+  other.parsed_ = url::Parsed();
   return *this;
 }
 
@@ -347,6 +378,19 @@ bool GURL::IsStandard() const {
   return url::IsStandard(spec_.data(), parsed_.scheme);
 }
 
+bool GURL::IsAboutBlank() const {
+  if (!SchemeIs(url::kAboutScheme))
+    return false;
+
+  if (has_host() || has_username() || has_password() || has_port())
+    return false;
+
+  if (path() != url::kAboutBlankPath && path() != url::kAboutBlankWithHashPath)
+    return false;
+
+  return true;
+}
+
 bool GURL::SchemeIs(base::StringPiece lower_ascii_scheme) const {
   DCHECK(base::IsStringASCII(lower_ascii_scheme));
   DCHECK(base::ToLowerASCII(lower_ascii_scheme) == lower_ascii_scheme);
@@ -467,11 +511,25 @@ bool GURL::DomainIs(base::StringPiece lower_ascii_domain) const {
   return url::DomainIs(host_piece(), lower_ascii_domain);
 }
 
+bool GURL::EqualsIgnoringRef(const GURL& other) const {
+  int ref_position = parsed_.CountCharactersBefore(url::Parsed::REF, true);
+  int ref_position_other =
+      other.parsed_.CountCharactersBefore(url::Parsed::REF, true);
+  return base::StringPiece(spec_).substr(0, ref_position) ==
+         base::StringPiece(other.spec_).substr(0, ref_position_other);
+}
+
 void GURL::Swap(GURL* other) {
   spec_.swap(other->spec_);
   std::swap(is_valid_, other->is_valid_);
   std::swap(parsed_, other->parsed_);
   inner_url_.swap(other->inner_url_);
+}
+
+size_t GURL::EstimateMemoryUsage() const {
+  return base::trace_event::EstimateMemoryUsage(spec_) +
+         base::trace_event::EstimateMemoryUsage(inner_url_) +
+         (parsed_.inner_parsed() ? sizeof(url::Parsed) : 0);
 }
 
 std::ostream& operator<<(std::ostream& out, const GURL& url) {

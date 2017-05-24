@@ -57,15 +57,11 @@ class CONTENT_EXPORT UtilityProcessHostImpl
   void SetEnv(const base::EnvironmentMap& env) override;
 #endif
   bool Start() override;
-  service_manager::InterfaceProvider* GetRemoteInterfaces() override;
+  void BindInterface(const std::string& interface_name,
+                     mojo::ScopedMessagePipeHandle interface_pipe) override;
   void SetName(const base::string16& name) override;
 
   void set_child_flags(int flags) { child_flags_ = flags; }
-
-#if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
-  // Launch the zygote early in the browser startup.
-  static void EarlyZygoteLaunch();
-#endif  // defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
 
  private:
   // Starts a process if necessary.  Returns true if it succeeded or a process

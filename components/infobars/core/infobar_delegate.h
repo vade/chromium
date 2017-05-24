@@ -23,7 +23,6 @@ class ThreeDAPIInfoBarDelegate;
 
 #if defined(OS_ANDROID)
 class MediaStreamInfoBarDelegateAndroid;
-class MediaThrottleInfoBarDelegate;
 
 namespace offline_pages {
 class OfflinePageInfoBarDelegate;
@@ -36,7 +35,7 @@ class TranslateInfoBarDelegate;
 
 namespace gfx {
 class Image;
-enum class VectorIconId;
+struct VectorIcon;
 }
 
 namespace infobars {
@@ -119,7 +118,7 @@ class InfoBarDelegate {
     GOOGLE_API_KEYS_INFOBAR_DELEGATE = 45,
     OBSOLETE_SYSTEM_INFOBAR_DELEGATE = 46,
     SESSION_CRASHED_INFOBAR_DELEGATE = 47,
-    WEBSITE_SETTINGS_INFOBAR_DELEGATE = 48,
+    PAGE_INFO_INFOBAR_DELEGATE = 48,
     AUTOFILL_CC_INFOBAR_DELEGATE = 49,
     TRANSLATE_INFOBAR_DELEGATE = 50,
     IOS_CHROME_SAVE_PASSWORD_INFOBAR_DELEGATE = 51,
@@ -144,6 +143,9 @@ class InfoBarDelegate {
     GROUPED_PERMISSION_INFOBAR_DELEGATE_ANDROID = 70,
     OFFLINE_PAGE_INFOBAR_DELEGATE = 71,
     SEARCH_GEOLOCATION_DISCLOSURE_INFOBAR_DELEGATE = 72,
+    AUTOMATION_INFOBAR_DELEGATE = 73,
+    VR_SERVICES_UPGRADE_ANDROID = 74,
+    READER_MODE_INFOBAR_ANDROID = 75,
   };
 
   // Describes navigation events, used to decide whether infobars should be
@@ -184,7 +186,7 @@ class InfoBarDelegate {
   // Returns the vector icon identifier to be shown for this InfoBar. This will
   // take precedence over GetIconId() (although typically only one of the two
   // should be defined for any given infobar).
-  virtual gfx::VectorIconId GetVectorIconId() const;
+  virtual const gfx::VectorIcon& GetVectorIcon() const;
 
   // Returns the icon to be shown for this InfoBar. If the returned Image is
   // empty, no icon is shown.
@@ -227,7 +229,6 @@ class InfoBarDelegate {
 #if defined(OS_ANDROID)
   virtual MediaStreamInfoBarDelegateAndroid*
   AsMediaStreamInfoBarDelegateAndroid();
-  virtual MediaThrottleInfoBarDelegate* AsMediaThrottleInfoBarDelegate();
   virtual offline_pages::OfflinePageInfoBarDelegate*
   AsOfflinePageInfoBarDelegate();
 #endif

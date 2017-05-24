@@ -292,7 +292,7 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
     bookmarks::test::WaitForBookmarkModelToLoad(model_);
     profile_->GetPrefs()->SetBoolean(bookmarks::prefs::kShowBookmarkBar, true);
 
-    Browser::CreateParams native_params(profile_.get());
+    Browser::CreateParams native_params(profile_.get(), true);
     browser_ = chrome::CreateBrowserWithTestWindowForParams(&native_params);
 
     local_state_.reset(new ScopedTestingLocalState(
@@ -301,6 +301,10 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
 
     bb_view_.reset(new BookmarkBarView(browser_.get(), NULL));
     bb_view_->set_owned_by_client();
+    // Real bookmark bars get a BookmarkBarViewBackground. Set an opaque
+    // background here just to avoid triggering subpixel rendering issues.
+    bb_view_->set_background(
+        views::Background::CreateSolidBackground(SK_ColorWHITE));
     bb_view_->SetPageNavigator(&navigator_);
 
     AddTestData(CreateBigMenu());
@@ -1052,7 +1056,7 @@ class BookmarkBarViewTest9 : public BookmarkBarViewEventTestBase {
 
   void Step3() {
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE, base::Bind(&BookmarkBarViewTest9::Step4, this),
+        FROM_HERE, base::BindOnce(&BookmarkBarViewTest9::Step4, this),
         base::TimeDelta::FromMilliseconds(200));
   }
 
@@ -1068,7 +1072,7 @@ class BookmarkBarViewTest9 : public BookmarkBarViewEventTestBase {
     // which can interfere with Done. We need to run Done in the
     // next execution loop.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(&ViewEventTestBase::Done, this));
+        FROM_HERE, base::BindOnce(&ViewEventTestBase::Done, this));
   }
 
   int start_y_;
@@ -1306,11 +1310,11 @@ class BookmarkBarViewTest12 : public BookmarkBarViewEventTestBase {
     ui_test_utils::MoveMouseToCenterAndPress(button, ui_controls::LEFT,
         ui_controls::DOWN | ui_controls::UP,
         CreateEventTask(this, &BookmarkBarViewTest12::Step2));
-    chrome::num_bookmark_urls_before_prompting = 1;
+    chrome::kNumBookmarkUrlsBeforePrompting = 1;
   }
 
   ~BookmarkBarViewTest12() override {
-    chrome::num_bookmark_urls_before_prompting = 15;
+    chrome::kNumBookmarkUrlsBeforePrompting = 15;
   }
 
  private:
@@ -1363,8 +1367,9 @@ class BookmarkBarViewTest12 : public BookmarkBarViewEventTestBase {
 
     // For some reason return isn't processed correctly unless we delay.
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE, base::Bind(&BookmarkBarViewTest12::Step5, this,
-                              base::Unretained(dialog)),
+        FROM_HERE,
+        base::BindOnce(&BookmarkBarViewTest12::Step5, this,
+                       base::Unretained(dialog)),
         base::TimeDelta::FromSeconds(1));
   }
 

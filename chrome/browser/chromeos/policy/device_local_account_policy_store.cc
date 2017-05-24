@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/memory/ptr_util.h"
-#include "chromeos/dbus/session_manager_client.h"
+#include "base/sequenced_task_runner.h"
 #include "components/ownership/owner_key_util.h"
 #include "components/policy/core/common/cloud/device_management_service.h"
 #include "components/policy/core/common/external_data_fetcher.h"
@@ -17,6 +17,9 @@
 #include "components/policy/core/common/policy_types.h"
 #include "components/policy/proto/cloud_policy.pb.h"
 #include "components/policy/proto/device_management_backend.pb.h"
+
+using RetrievePolicyResponseType =
+    chromeos::SessionManagerClient::RetrievePolicyResponseType;
 
 namespace em = enterprise_management;
 
@@ -40,7 +43,28 @@ void DeviceLocalAccountPolicyStore::Load() {
   session_manager_client_->RetrieveDeviceLocalAccountPolicy(
       account_id_,
       base::Bind(&DeviceLocalAccountPolicyStore::ValidateLoadedPolicyBlob,
-                 weak_factory_.GetWeakPtr()));
+                 weak_factory_.GetWeakPtr(), true /*validate_in_background*/));
+}
+
+void DeviceLocalAccountPolicyStore::LoadImmediately() {
+  // This blocking D-Bus call is in the startup path and will block the UI
+  // thread. This only happens when the Profile is created synchronously, which
+  // on Chrome OS happens whenever the browser is restarted into the same
+  // session, that is when the browser crashes, or right after signin if
+  // the user has flags configured in about:flags.
+  // However, on those paths we must load policy synchronously so that the
+  // Profile initialization never sees unmanaged prefs, which would lead to
+  // data loss. http://crbug.com/263061
+
+  // Cancel all running async loads.
+  weak_factory_.InvalidateWeakPtrs();
+
+  std::string policy_blob;
+  RetrievePolicyResponseType response =
+      session_manager_client_->BlockingRetrieveDeviceLocalAccountPolicy(
+          account_id_, &policy_blob);
+  ValidateLoadedPolicyBlob(false /*validate_in_background*/, policy_blob,
+                           response);
 }
 
 void DeviceLocalAccountPolicyStore::Store(
@@ -48,13 +72,17 @@ void DeviceLocalAccountPolicyStore::Store(
   weak_factory_.InvalidateWeakPtrs();
   CheckKeyAndValidate(
       true, base::MakeUnique<em::PolicyFetchResponse>(policy),
+      true /*validate_in_background*/,
       base::Bind(&DeviceLocalAccountPolicyStore::StoreValidatedPolicy,
                  weak_factory_.GetWeakPtr()));
 }
 
 void DeviceLocalAccountPolicyStore::ValidateLoadedPolicyBlob(
-    const std::string& policy_blob) {
-  if (policy_blob.empty()) {
+    bool validate_in_background,
+    const std::string& policy_blob,
+    RetrievePolicyResponseType response_type) {
+  if (response_type != RetrievePolicyResponseType::SUCCESS ||
+      policy_blob.empty()) {
     status_ = CloudPolicyStore::STATUS_LOAD_ERROR;
     NotifyStoreError();
   } else {
@@ -62,7 +90,7 @@ void DeviceLocalAccountPolicyStore::ValidateLoadedPolicyBlob(
         new em::PolicyFetchResponse());
     if (policy->ParseFromString(policy_blob)) {
       CheckKeyAndValidate(
-          false, std::move(policy),
+          false, std::move(policy), validate_in_background,
           base::Bind(&DeviceLocalAccountPolicyStore::UpdatePolicy,
                      weak_factory_.GetWeakPtr()));
     } else {
@@ -127,19 +155,26 @@ void DeviceLocalAccountPolicyStore::HandleStoreResult(bool success) {
 void DeviceLocalAccountPolicyStore::CheckKeyAndValidate(
     bool valid_timestamp_required,
     std::unique_ptr<em::PolicyFetchResponse> policy,
+    bool validate_in_background,
     const ValidateCompletionCallback& callback) {
-  device_settings_service_->GetOwnershipStatusAsync(
-      base::Bind(&DeviceLocalAccountPolicyStore::Validate,
-                 weak_factory_.GetWeakPtr(),
-                 valid_timestamp_required,
-                 base::Passed(&policy),
-                 callback));
+  if (validate_in_background) {
+    device_settings_service_->GetOwnershipStatusAsync(
+        base::Bind(&DeviceLocalAccountPolicyStore::Validate,
+                   weak_factory_.GetWeakPtr(), valid_timestamp_required,
+                   base::Passed(&policy), callback, validate_in_background));
+  } else {
+    chromeos::DeviceSettingsService::OwnershipStatus ownership_status =
+        device_settings_service_->GetOwnershipStatus();
+    Validate(valid_timestamp_required, std::move(policy), callback,
+             validate_in_background, ownership_status);
+  }
 }
 
 void DeviceLocalAccountPolicyStore::Validate(
     bool valid_timestamp_required,
     std::unique_ptr<em::PolicyFetchResponse> policy_response,
     const ValidateCompletionCallback& callback,
+    bool validate_in_background,
     chromeos::DeviceSettingsService::OwnershipStatus ownership_status) {
   DCHECK_NE(chromeos::DeviceSettingsService::OWNERSHIP_UNKNOWN,
             ownership_status);
@@ -167,7 +202,7 @@ void DeviceLocalAccountPolicyStore::Validate(
   validator->ValidateAgainstCurrentPolicy(
       policy(),
       valid_timestamp_required
-          ? CloudPolicyValidatorBase::TIMESTAMP_FULLY_VALIDATED
+          ? CloudPolicyValidatorBase::TIMESTAMP_VALIDATED
           : CloudPolicyValidatorBase::TIMESTAMP_NOT_VALIDATED,
       CloudPolicyValidatorBase::DM_TOKEN_NOT_REQUIRED,
       CloudPolicyValidatorBase::DEVICE_ID_NOT_REQUIRED);
@@ -182,7 +217,15 @@ void DeviceLocalAccountPolicyStore::Validate(
 
   validator->ValidatePayload();
   validator->ValidateSignature(key->as_string());
-  validator.release()->StartValidation(base::Bind(callback, key->as_string()));
+
+  if (validate_in_background) {
+    UserCloudPolicyValidator::StartValidation(
+        std::move(validator), base::Bind(callback, key->as_string()));
+  } else {
+    validator->RunValidation();
+
+    UpdatePolicy(key->as_string(), validator.get());
+  }
 }
 
 }  // namespace policy

@@ -22,8 +22,6 @@
 #include "build/build_config.h"
 #include "content/child/child_process.h"
 #include "content/common/content_constants_internal.h"
-#include "content/common/gpu_host_messages.h"
-#include "content/common/sandbox_linux/sandbox_linux.h"
 #include "content/gpu/gpu_child_thread.h"
 #include "content/gpu/gpu_process.h"
 #include "content/public/common/content_client.h"
@@ -38,7 +36,6 @@
 #include "gpu/ipc/common/gpu_memory_buffer_support.h"
 #include "gpu/ipc/service/gpu_config.h"
 #include "gpu/ipc/service/gpu_init.h"
-#include "gpu/ipc/service/gpu_memory_buffer_factory.h"
 #include "gpu/ipc/service/gpu_watchdog_thread.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/gfx/switches.h"
@@ -73,12 +70,17 @@
 #endif
 
 #if defined(OS_LINUX)
+#include "content/common/sandbox_linux/sandbox_linux.h"
 #include "content/public/common/sandbox_init.h"
 #endif
 
 #if defined(OS_MACOSX)
 #include "base/message_loop/message_pump_mac.h"
 #include "content/common/sandbox_mac.h"
+#endif
+
+#if defined(USE_OZONE)
+#include "ui/ozone/public/ozone_platform.h"
 #endif
 
 #if defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
@@ -100,8 +102,8 @@ bool StartSandboxLinux(gpu::GpuWatchdogThread*);
 bool StartSandboxWindows(const sandbox::SandboxInterfaceInfo*);
 #endif
 
-base::LazyInstance<GpuChildThread::DeferredMessages> deferred_messages =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<GpuChildThread::DeferredMessages>::DestructorAtExit
+    deferred_messages = LAZY_INSTANCE_INITIALIZER;
 
 bool GpuProcessLogMessageHandler(int severity,
                                  const char* file, int line,
@@ -111,7 +113,7 @@ bool GpuProcessLogMessageHandler(int severity,
   log.severity = severity;
   log.header = str.substr(0, message_start);
   log.message = str.substr(message_start);
-  deferred_messages.Get().push(std::move(log));
+  deferred_messages.Get().push_back(std::move(log));
   return false;
 }
 
@@ -189,9 +191,6 @@ int GpuMain(const MainFunctionParams& parameters) {
       SEM_FAILCRITICALERRORS |
       SEM_NOGPFAULTERRORBOX |
       SEM_NOOPENFILEERRORBOX);
-#elif defined(USE_X11)
-  ui::SetDefaultX11ErrorHandlers();
-
 #endif
 
   logging::SetLogMessageHandler(GpuProcessLogMessageHandler);
@@ -216,15 +215,16 @@ int GpuMain(const MainFunctionParams& parameters) {
 #elif defined(USE_X11)
     // We need a UI loop so that we can grab the Expose events. See GLSurfaceGLX
     // and https://crbug.com/326995.
+    ui::SetDefaultX11ErrorHandlers();
+    if (!gfx::GetXDisplay())
+      return RESULT_CODE_GPU_DEAD_ON_ARRIVAL;
     main_message_loop.reset(new base::MessageLoop(base::MessageLoop::TYPE_UI));
     event_source = ui::PlatformEventSource::CreateDefault();
-#elif defined(USE_OZONE) && defined(OZONE_X11)
-    // If we might be running Ozone X11 we need a UI loop to grab Expose events.
-    // See GLSurfaceGLX and https://crbug.com/326995.
-    main_message_loop.reset(new base::MessageLoop(base::MessageLoop::TYPE_UI));
 #elif defined(USE_OZONE)
-    main_message_loop.reset(
-        new base::MessageLoop(base::MessageLoop::TYPE_DEFAULT));
+    // The MessageLoop type required depends on the Ozone platform selected at
+    // runtime.
+    main_message_loop.reset(new base::MessageLoop(
+        ui::OzonePlatform::EnsureInstance()->GetMessageLoopTypeForGpu()));
 #elif defined(OS_LINUX)
 #error "Unsupported Linux platform."
 #elif defined(OS_MACOSX)
@@ -270,11 +270,6 @@ int GpuMain(const MainFunctionParams& parameters) {
   logging::SetLogMessageHandler(NULL);
   GetContentClient()->SetGpuInfo(gpu_init.gpu_info());
 
-  std::unique_ptr<gpu::GpuMemoryBufferFactory> gpu_memory_buffer_factory;
-  if (init_success &&
-      gpu::GetNativeGpuMemoryBufferType() != gfx::EMPTY_BUFFER)
-    gpu_memory_buffer_factory = gpu::GpuMemoryBufferFactory::CreateNativeType();
-
   base::ThreadPriority io_thread_priority = base::ThreadPriority::NORMAL;
 #if defined(OS_ANDROID) || defined(OS_CHROMEOS)
   io_thread_priority = base::ThreadPriority::DISPLAY;
@@ -283,16 +278,12 @@ int GpuMain(const MainFunctionParams& parameters) {
   GpuProcess gpu_process(io_thread_priority);
   GpuChildThread* child_thread = new GpuChildThread(
       gpu_init.TakeWatchdogThread(), dead_on_arrival, gpu_init.gpu_info(),
-      deferred_messages.Get(), gpu_memory_buffer_factory.get());
-  while (!deferred_messages.Get().empty())
-    deferred_messages.Get().pop();
+      gpu_init.gpu_feature_info(), std::move(deferred_messages.Get()));
+  deferred_messages.Get().clear();
 
   child_thread->Init(start_time);
 
   gpu_process.set_main_thread(child_thread);
-
-  if (child_thread->watchdog_thread())
-    child_thread->watchdog_thread()->AddPowerObserver();
 
 #if defined(OS_ANDROID)
   base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(

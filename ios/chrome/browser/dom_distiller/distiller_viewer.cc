@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "components/dom_distiller/core/distilled_page_prefs.h"
+#include "components/dom_distiller/core/distiller.h"
 #include "components/dom_distiller/core/dom_distiller_request_view_base.h"
 #include "components/dom_distiller/core/dom_distiller_service.h"
 #include "components/dom_distiller/core/proto/distilled_article.pb.h"
@@ -21,24 +22,44 @@ DistillerViewer::DistillerViewer(
     dom_distiller::DomDistillerService* distillerService,
     PrefService* prefs,
     const GURL& url,
-    const DistillationFinishedCallback& callback,
-    std::unique_ptr<dom_distiller::DistillerPage> page)
-    : DistillerViewerInterface(distillerService, prefs),
-      url_(url),
-      callback_(callback) {
+    const DistillationFinishedCallback& callback)
+    : DistillerViewerInterface(prefs), url_(url), callback_(callback) {
   DCHECK(distillerService);
   DCHECK(url.is_valid());
-  if (!page) {
-    page = distillerService->CreateDefaultDistillerPage(gfx::Size());
-  }
-
+  std::unique_ptr<dom_distiller::DistillerPage> page =
+      distillerService->CreateDefaultDistillerPage(gfx::Size());
   std::unique_ptr<ViewerHandle> viewer_handle =
       distillerService->ViewUrl(this, std::move(page), url);
 
   TakeViewerHandle(std::move(viewer_handle));
 }
 
+DistillerViewer::DistillerViewer(
+    dom_distiller::DistillerFactory* distiller_factory,
+    std::unique_ptr<dom_distiller::DistillerPage> page,
+    PrefService* prefs,
+    const GURL& url,
+    const DistillationFinishedCallback& callback)
+    : DistillerViewerInterface(prefs), url_(url), callback_(callback) {
+  DCHECK(url.is_valid());
+  SendCommonJavaScript();
+  distiller_ = distiller_factory->CreateDistillerForUrl(url);
+  distiller_->DistillPage(
+      url, std::move(page),
+      base::Bind(&DistillerViewer::OnDistillerFinished, base::Unretained(this)),
+      base::Bind(&DistillerViewer::OnArticleDistillationUpdated,
+                 base::Unretained(this)));
+}
+
 DistillerViewer::~DistillerViewer() {}
+
+void DistillerViewer::OnArticleDistillationUpdated(
+    const dom_distiller::ArticleDistillationUpdate& article_update) {}
+
+void DistillerViewer::OnDistillerFinished(
+    std::unique_ptr<dom_distiller::DistilledArticleProto> distilled_article) {
+  OnArticleReady(distilled_article.get());
+}
 
 void DistillerViewer::OnArticleReady(
     const dom_distiller::DistilledArticleProto* article_proto) {
@@ -47,9 +68,11 @@ void DistillerViewer::OnArticleReady(
                   article_proto->pages(0).html().empty();
   if (!is_empty) {
     std::vector<ImageInfo> images;
-    for (int i = 0; i < article_proto->pages(0).image_size(); i++) {
-      auto image = article_proto->pages(0).image(i);
-      images.push_back(ImageInfo{GURL(image.url()), image.data()});
+    for (int p = 0; p < article_proto->pages_size(); p++) {
+      for (int i = 0; i < article_proto->pages(p).image_size(); i++) {
+        auto image = article_proto->pages(p).image(i);
+        images.push_back(ImageInfo{GURL(image.url()), image.data()});
+      }
     }
     const std::string html = viewer::GetUnsafeArticleTemplateHtml(
         url_.spec(), distilled_page_prefs_->GetTheme(),

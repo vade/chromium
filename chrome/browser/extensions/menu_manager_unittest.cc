@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/menu_manager.h"
 
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "base/files/scoped_temp_dir.h"
@@ -13,6 +14,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
@@ -25,7 +27,7 @@
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/context_menu_params.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/event_router_factory.h"
 #include "extensions/browser/extension_registry.h"
@@ -34,7 +36,6 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using content::BrowserThread;
 using testing::_;
 using testing::AtLeast;
 using testing::DeleteArg;
@@ -50,12 +51,10 @@ namespace context_menus = api::context_menus;
 class MenuManagerTest : public testing::Test {
  public:
   MenuManagerTest()
-      : ui_thread_(BrowserThread::UI, &message_loop_),
-        file_thread_(BrowserThread::FILE, &message_loop_),
-        profile_(new TestingProfile()),
+      : profile_(new TestingProfile()),
         manager_(profile_.get(),
                  ExtensionSystem::Get(profile_.get())->state_store()),
-        prefs_(message_loop_.task_runner().get()),
+        prefs_(base::ThreadTaskRunnerHandle::Get()),
         next_id_(1) {}
 
   void TearDown() override {
@@ -94,9 +93,7 @@ class MenuManagerTest : public testing::Test {
   }
 
  protected:
-  base::MessageLoopForUI message_loop_;
-  content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread file_thread_;
+  content::TestBrowserThreadBundle test_browser_thread_bundle_;
   std::unique_ptr<TestingProfile> profile_;
 
   MenuManager manager_;
@@ -235,11 +232,11 @@ TEST_F(MenuManagerTest, PopulateFromValue) {
   int contexts_value = 0;
   ASSERT_TRUE(contexts.ToValue()->GetAsInteger(&contexts_value));
 
-  base::ListValue* document_url_patterns(new base::ListValue());
+  auto document_url_patterns = base::MakeUnique<base::ListValue>();
   document_url_patterns->AppendString("http://www.google.com/*");
   document_url_patterns->AppendString("http://www.reddit.com/*");
 
-  base::ListValue* target_url_patterns(new base::ListValue());
+  auto target_url_patterns = base::MakeUnique<base::ListValue>();
   target_url_patterns->AppendString("http://www.yahoo.com/*");
   target_url_patterns->AppendString("http://www.facebook.com/*");
 
@@ -251,10 +248,16 @@ TEST_F(MenuManagerTest, PopulateFromValue) {
   value.SetBoolean("checked", checked);
   value.SetBoolean("enabled", enabled);
   value.SetInteger("contexts", contexts_value);
-  value.Set("document_url_patterns", document_url_patterns);
-  value.Set("target_url_patterns", target_url_patterns);
-
   std::string error;
+  URLPatternSet document_url_pattern_set;
+  document_url_pattern_set.Populate(*document_url_patterns,
+                                    URLPattern::SCHEME_ALL, true, &error);
+  value.Set("document_url_patterns", std::move(document_url_patterns));
+  URLPatternSet target_url_pattern_set;
+  target_url_pattern_set.Populate(*target_url_patterns, URLPattern::SCHEME_ALL,
+                                  true, &error);
+  value.Set("target_url_patterns", std::move(target_url_patterns));
+
   std::unique_ptr<MenuItem> item(
       MenuItem::Populate(extension->id(), value, &error));
   ASSERT_TRUE(item.get());
@@ -267,18 +270,8 @@ TEST_F(MenuManagerTest, PopulateFromValue) {
   EXPECT_EQ(enabled, item->enabled());
   EXPECT_EQ(contexts, item->contexts());
 
-  URLPatternSet document_url_pattern_set;
-  document_url_pattern_set.Populate(*document_url_patterns,
-                                    URLPattern::SCHEME_ALL,
-                                    true,
-                                    &error);
   EXPECT_EQ(document_url_pattern_set, item->document_url_patterns());
 
-  URLPatternSet target_url_pattern_set;
-  target_url_pattern_set.Populate(*target_url_patterns,
-                                   URLPattern::SCHEME_ALL,
-                                   true,
-                                   &error);
   EXPECT_EQ(target_url_pattern_set, item->target_url_patterns());
 }
 
@@ -466,8 +459,7 @@ TEST_F(MenuManagerTest, ExtensionUnloadRemovesMenuItems) {
   // Notify that the extension was unloaded, and make sure the right item is
   // gone.
   ExtensionRegistry* registry = ExtensionRegistry::Get(profile_.get());
-  registry->TriggerOnUnloaded(extension1,
-                              UnloadedExtensionInfo::REASON_DISABLE);
+  registry->TriggerOnUnloaded(extension1, UnloadedExtensionReason::DISABLE);
 
   ASSERT_EQ(NULL, manager_.MenuItems(MenuItem::ExtensionKey(extension1->id())));
   ASSERT_EQ(
@@ -578,7 +570,7 @@ TEST_F(MenuManagerTest, ExecuteCommand) {
           &profile, &MockEventRouterFactoryFunction));
 
   content::ContextMenuParams params;
-  params.media_type = blink::WebContextMenuData::MediaTypeImage;
+  params.media_type = blink::WebContextMenuData::kMediaTypeImage;
   params.src_url = GURL("http://foo.bar/image.png");
   params.page_url = GURL("http://foo.bar");
   params.selection_text = base::ASCIIToUTF16("Hello World");

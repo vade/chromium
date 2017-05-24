@@ -49,6 +49,7 @@ public class ChromeFullscreenManager
     private final Window mWindow;
     private final BrowserStateBrowserControlsVisibilityDelegate mBrowserVisibilityDelegate;
     private final boolean mIsBottomControls;
+    private final boolean mExitFullscreenOnStop;
 
     private ControlContainer mControlContainer;
     private int mTopControlContainerHeight;
@@ -70,7 +71,7 @@ public class ChromeFullscreenManager
     private boolean mBrowserControlsPermanentlyHidden;
     private boolean mBrowserControlsAndroidViewHidden;
 
-    private final ArrayList<FullscreenListener> mListeners = new ArrayList<FullscreenListener>();
+    private final ArrayList<FullscreenListener> mListeners = new ArrayList<>();
 
     /**
      * A listener that gets notified of changes to the fullscreen state.
@@ -96,6 +97,11 @@ public class ChromeFullscreenManager
          * @param enabled Whether to enter or leave overlay video mode.
          */
         public void onToggleOverlayVideoMode(boolean enabled);
+
+        /**
+         * Called when the height of the controls are changed.
+         */
+        public void onBottomControlsHeightChanged(int bottomControlsHeight);
     }
 
     private final Runnable mUpdateVisibilityRunnable = new Runnable() {
@@ -118,11 +124,24 @@ public class ChromeFullscreenManager
      * @param isBottomControls Whether or not the browser controls are at the bottom of the screen.
      */
     public ChromeFullscreenManager(Activity activity, boolean isBottomControls) {
+        this(activity, isBottomControls, true);
+    }
+
+    /**
+     * Creates an instance of the fullscreen mode manager.
+     * @param activity The activity that supports fullscreen.
+     * @param isBottomControls Whether or not the browser controls are at the bottom of the screen.
+     * @param exitFullscreenOnStop Whether fullscreen mode should exit on stop - should be
+     *                             true for Activities that are not always fullscreen.
+     */
+    public ChromeFullscreenManager(
+            Activity activity, boolean isBottomControls, boolean exitFullscreenOnStop) {
         super(activity.getWindow());
 
         mActivity = activity;
         mWindow = activity.getWindow();
         mIsBottomControls = isBottomControls;
+        mExitFullscreenOnStop = exitFullscreenOnStop;
         mBrowserVisibilityDelegate = new BrowserStateBrowserControlsVisibilityDelegate(
                 new Runnable() {
                     @Override
@@ -223,7 +242,7 @@ public class ChromeFullscreenManager
 
     @Override
     public void onActivityStateChange(Activity activity, int newState) {
-        if (newState == ActivityState.STOPPED) {
+        if (newState == ActivityState.STOPPED && mExitFullscreenOnStop) {
             // Exit fullscreen in onStop to ensure the system UI flags are set correctly when
             // showing again (on JB MR2+ builds, the omnibox would be covered by the
             // notification bar when this was done in onStart()).
@@ -335,7 +354,11 @@ public class ChromeFullscreenManager
      * Sets the height of the bottom controls.
      */
     public void setBottomControlsHeight(int bottomControlsHeight) {
+        if (mBottomControlContainerHeight == bottomControlsHeight) return;
         mBottomControlContainerHeight = bottomControlsHeight;
+        for (int i = 0; i < mListeners.size(); i++) {
+            mListeners.get(i).onBottomControlsHeightChanged(mBottomControlContainerHeight);
+        }
     }
 
     @Override
@@ -440,9 +463,16 @@ public class ChromeFullscreenManager
         if (mInGesture || mContentViewScrolling) return;
 
         // Update content viewport size only when the browser controls are not animating.
-        int contentOffset = (int) mRendererTopContentOffset;
-        if (contentOffset != 0 && contentOffset != getTopControlsHeight()) return;
-        viewCore.setTopControlsHeight(getTopControlsHeight(), contentOffset > 0);
+        int topContentOffset = (int) mRendererTopContentOffset;
+        int bottomControlOffset = (int) mRendererBottomControlOffset;
+        if ((topContentOffset != 0 && topContentOffset != getTopControlsHeight())
+                && bottomControlOffset != 0 && bottomControlOffset != getBottomControlsHeight()) {
+            return;
+        }
+        boolean controlsResizeView =
+                topContentOffset > 0 || bottomControlOffset < getBottomControlsHeight();
+        viewCore.setTopControlsHeight(getTopControlsHeight(), controlsResizeView);
+        viewCore.setBottomControlsHeight(getBottomControlsHeight());
     }
 
     @Override

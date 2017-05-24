@@ -101,9 +101,8 @@ void ErrorConsole::SetReportingForExtension(const std::string& extension_id,
   else
     mask &= ~(1 << type);
 
-  prefs_->UpdateExtensionPref(extension_id,
-                              kStoreExtensionErrorsPref,
-                              new base::FundamentalValue(mask));
+  prefs_->UpdateExtensionPref(extension_id, kStoreExtensionErrorsPref,
+                              base::MakeUnique<base::Value>(mask));
 }
 
 void ErrorConsole::SetReportingAllForExtension(
@@ -114,9 +113,8 @@ void ErrorConsole::SetReportingAllForExtension(
 
   int mask = enabled ? (1 << ExtensionError::NUM_ERROR_TYPES) - 1 : 0;
 
-  prefs_->UpdateExtensionPref(extension_id,
-                              kStoreExtensionErrorsPref,
-                              new base::FundamentalValue(mask));
+  prefs_->UpdateExtensionPref(extension_id, kStoreExtensionErrorsPref,
+                              base::MakeUnique<base::Value>(mask));
 }
 
 bool ErrorConsole::IsReportingEnabledForExtension(
@@ -134,7 +132,7 @@ void ErrorConsole::UseDefaultReportingForExtension(
   if (!enabled_ || !crx_file::id_util::IdIsValid(extension_id))
     return;
 
-  prefs_->UpdateExtensionPref(extension_id, kStoreExtensionErrorsPref, NULL);
+  prefs_->UpdateExtensionPref(extension_id, kStoreExtensionErrorsPref, nullptr);
 }
 
 void ErrorConsole::ReportError(std::unique_ptr<ExtensionError> error) {
@@ -231,7 +229,7 @@ void ErrorConsole::OnPrefChanged() {
 
 void ErrorConsole::OnExtensionUnloaded(content::BrowserContext* browser_context,
                                        const Extension* extension,
-                                       UnloadedExtensionInfo::Reason reason) {
+                                       UnloadedExtensionReason reason) {
   CheckEnabled();
 }
 

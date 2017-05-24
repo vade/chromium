@@ -8,12 +8,15 @@ component("base") {
   output_name = "device_base"
 
   sources = [
+    "device_base_export.h",
     "device_client.cc",
     "device_client.h",
     "device_info_query_win.cc",
     "device_info_query_win.h",
     "device_monitor_win.cc",
     "device_monitor_win.h",
+    "features.cc",
+    "features.h",
   ]
 
   defines = [ "DEVICE_BASE_IMPLEMENTATION" ]

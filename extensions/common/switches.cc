@@ -35,11 +35,6 @@ const char kEnableEmbeddedExtensionOptions[] =
 const char kEnableExperimentalExtensionApis[] =
     "enable-experimental-extension-apis";
 
-// Hack so that feature switch can work with about_flags. See
-// kEnableScriptsRequireAction.
-const char kEnableExtensionActionRedesign[] =
-    "enable-extension-action-redesign";
-
 // Enables extensions to hide bookmarks UI elements.
 const char kEnableOverrideBookmarksUI[] = "enable-override-bookmarks-ui";
 
@@ -49,9 +44,6 @@ const char kDisableTabForDesktopShare[] = "disable-tab-for-desktop-share";
 // Allows the ErrorConsole to collect runtime and manifest errors, and display
 // them in the chrome:extensions page.
 const char kErrorConsole[] = "error-console";
-
-// Whether to switch to extension action redesign mode (experimental).
-const char kExtensionActionRedesign[] = "extension-action-redesign";
 
 // Marks a renderer as extension process.
 const char kExtensionProcess[] = "extension-process";
@@ -63,9 +55,6 @@ const char kExtensionsOnChromeURLs[] = "extensions-on-chrome-urls";
 
 // Whether to force developer mode extensions highlighting.
 const char kForceDevModeHighlighting[] = "force-dev-mode-highlighting";
-
-// Enables site isolation for all chrome-extension:// urls.
-const char kIsolateExtensions[] = "isolate-extensions";
 
 // Path to a comma-separated list of apps to load at startup.  The first app in
 // the list will be launched.
@@ -104,6 +93,10 @@ const char kNativeCrxBindings[] = "native-crx-bindings";
 // Enable package hash check: the .crx file sha256 hash sum should be equal to
 // the one received from update manifest.
 const char kEnableCrxHashCheck[] = "enable-crx-hash-check";
+
+// Whether to split content script injections into multiple tasks.
+const char kYieldBetweenContentScriptRuns[] =
+    "yield-between-content-script-runs";
 
 }  // namespace switches
 

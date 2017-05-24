@@ -5,6 +5,7 @@
 #include "base/command_line.h"
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
+#include "base/threading/thread_restrictions.h"
 #include "components/guest_view/browser/guest_view_manager.h"
 #include "components/guest_view/browser/guest_view_manager_factory.h"
 #include "components/guest_view/browser/test_guest_view_manager.h"
@@ -112,6 +113,7 @@ class AppViewTest : public AppShellTest,
   }
 
   const Extension* LoadApp(const std::string& app_location) {
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
     base::FilePath test_data_dir;
     PathService::Get(DIR_TEST_DATA, &test_data_dir);
     test_data_dir = test_data_dir.AppendASCII(app_location.c_str());
@@ -146,6 +148,10 @@ class AppViewTest : public AppShellTest,
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     AppShellTest::SetUpCommandLine(command_line);
+    // This switch ensures that there will always be at least one media device,
+    // even on machines without physical devices. This is required by tests that
+    // request permission to use media devices.
+    command_line->AppendSwitch("use-fake-device-for-media-stream");
 
     bool use_cross_process_frames_for_guests = GetParam();
     if (use_cross_process_frames_for_guests) {

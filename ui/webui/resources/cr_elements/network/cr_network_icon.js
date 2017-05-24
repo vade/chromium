@@ -43,7 +43,9 @@ Polymer({
     if (type == CrOnc.Type.VPN)
       return 'vpn';
 
-    var prefix = type == CrOnc.Type.CELLULAR ? 'cellular-' : 'wifi-';
+    var prefix = (type == CrOnc.Type.CELLULAR || type == CrOnc.Type.TETHER) ?
+        'cellular-' :
+        'wifi-';
     var connectionState = this.networkState.ConnectionState;
     if (connectionState == CrOnc.ConnectionState.CONNECTING)
       return prefix + 'connecting';
@@ -51,7 +53,7 @@ Polymer({
     if (!this.isListItem &&
         (!connectionState ||
          connectionState == CrOnc.ConnectionState.NOT_CONNECTED)) {
-      if (type != CrOnc.Type.CELLULAR)
+      if (type != CrOnc.Type.CELLULAR && type != CrOnc.Type.TETHER)
         return prefix + 'off';
       strength = 0;
     } else {
@@ -137,10 +139,13 @@ Polymer({
     var networkState = this.networkState;
     if (!this.networkState)
       return false;
-    if (networkState.Type == CrOnc.Type.WI_FI && networkState.WiFi) {
-      var security = networkState.WiFi.Security;
-      return !!security && security != 'None';
+    if (networkState.Type != CrOnc.Type.WI_FI || !networkState.WiFi)
+      return false;
+    if (!this.isListItem &&
+        networkState.ConnectionState == CrOnc.ConnectionState.NOT_CONNECTED) {
+      return false;
     }
-    return false;
+    var security = networkState.WiFi.Security;
+    return !!security && security != 'None';
   },
 });

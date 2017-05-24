@@ -13,11 +13,11 @@
 #include "chrome/browser/plugins/plugins_field_trial.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_features.h"
+#include "components/content_settings/core/common/content_settings_types.h"
 #include "components/navigation_interception/intercept_navigation_throttle.h"
 #include "components/navigation_interception/navigation_params.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_handle.h"
-#include "content/public/browser/permission_type.h"
 #include "content/public/browser/web_contents.h"
 #include "third_party/WebKit/public/platform/modules/permissions/permission_status.mojom.h"
 #include "third_party/re2/src/re2/re2.h"
@@ -30,13 +30,19 @@ using content::NavigationThrottle;
 namespace {
 
 // Regexes matching
-const char kGetFlashURLCanonicalRegex[] = "(?i)get\\.adobe\\.com/.*flash.*";
-const char kGetFlashURLSecondaryRegex[] =
-    "(?i)(www\\.)?(adobe|macromedia)\\.com/go.*"
-    "(get[-_]?flash|fl(ash)?.?pl(ayer)?|flash_completion|flashpm|flashdownload|"
-    "fp|h-m-a-?2|chrome|download_player|gnav_fl|pdcredirect).*";
+const char kGetFlashURLCanonicalRegex[] = "(?i)get2?\\.adobe\\.com/.*flash.*";
+const char kGetFlashURLSecondaryGoRegex[] =
+    "(?i)(www\\.)?(adobe|macromedia)\\.com/go/"
+    "((?i).*get[-_]?flash|getfp10android|.*fl(ash)player|.*flashpl|"
+    ".*flash_player|flash_completion|flashpm|.*flashdownload|d65_flplayer|"
+    "fp_jp|runtimes_fp|[a-z_-]{3,6}h-m-a-?2|chrome|download_player|"
+    "gnav_fl|pdcredirect).*";
+const char kGetFlashURLSecondaryDownloadRegex[] =
+    "(?i)(www\\.)?(adobe|macromedia)\\.com/shockwave/download/download.cgi";
+const char kGetFlashURLSecondaryDownloadQuery[] =
+    "P1_Prod_Version=ShockwaveFlash";
 
-void DoNothing(blink::mojom::PermissionStatus result) {}
+void DoNothing(ContentSetting result) {}
 
 bool InterceptNavigation(
     const GURL& source_url,
@@ -67,7 +73,7 @@ void FlashDownloadInterception::InterceptFlashDownloadNavigation(
   if (flash_setting == CONTENT_SETTING_DETECT_IMPORTANT_CONTENT) {
     PermissionManager* manager = PermissionManager::Get(profile);
     manager->RequestPermission(
-        content::PermissionType::FLASH, web_contents->GetMainFrame(),
+        CONTENT_SETTINGS_TYPE_PLUGINS, web_contents->GetMainFrame(),
         web_contents->GetLastCommittedURL(), true, base::Bind(&DoNothing));
   } else if (flash_setting == CONTENT_SETTING_BLOCK) {
     TabSpecificContentSettings::FromWebContents(web_contents)
@@ -89,14 +95,25 @@ bool FlashDownloadInterception::ShouldStopFlashDownloadAction(
   if (!has_user_gesture)
     return false;
 
+  url::Replacements<char> replacements;
+  replacements.ClearQuery();
+  replacements.ClearRef();
+  replacements.ClearUsername();
+  replacements.ClearPassword();
+
   // If the navigation source is already the Flash download page, don't
   // intercept the download. The user may be trying to download Flash.
-  if (RE2::PartialMatch(source_url.GetContent(), kGetFlashURLCanonicalRegex))
+  std::string source_url_str =
+      source_url.ReplaceComponents(replacements).GetContent();
+  if (RE2::PartialMatch(source_url_str, kGetFlashURLCanonicalRegex))
     return false;
 
-  std::string target_url_str = target_url.GetContent();
+  std::string target_url_str =
+      target_url.ReplaceComponents(replacements).GetContent();
   if (RE2::FullMatch(target_url_str, kGetFlashURLCanonicalRegex) ||
-      RE2::FullMatch(target_url_str, kGetFlashURLSecondaryRegex)) {
+      RE2::FullMatch(target_url_str, kGetFlashURLSecondaryGoRegex) ||
+      (RE2::FullMatch(target_url_str, kGetFlashURLSecondaryDownloadRegex) &&
+       target_url.query() == kGetFlashURLSecondaryDownloadQuery)) {
     ContentSetting flash_setting = PluginUtils::GetFlashPluginContentSetting(
         host_content_settings_map, url::Origin(source_url), source_url,
         nullptr);

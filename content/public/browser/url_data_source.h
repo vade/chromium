@@ -13,16 +13,14 @@
 #include "content/common/content_export.h"
 #include "content/public/browser/resource_request_info.h"
 
+class GURL;
 namespace base {
 class RefCountedMemory;
 }
 
-namespace net {
-class URLRequest;
-}
-
 namespace content {
 class BrowserContext;
+class ResourceContext;
 
 // A URLDataSource is an object that can answer requests for WebUI data
 // asynchronously. An implementation of URLDataSource should handle calls to
@@ -50,6 +48,9 @@ class CONTENT_EXPORT URLDataSource {
   typedef base::Callback<void(scoped_refptr<base::RefCountedMemory>)>
       GotDataCallback;
 
+  // Must be called on the task runner specified by TaskRunnerForRequestPath,
+  // or the IO thread if TaskRunnerForRequestPath returns nullptr.
+  //
   // Called by URLDataSource to request data at |path|. The string parameter is
   // the path of the request. The child class should run |callback| when the
   // data is available or if the request could not be satisfied. This can be
@@ -62,11 +63,11 @@ class CONTENT_EXPORT URLDataSource {
       const ResourceRequestInfo::WebContentsGetter& wc_getter,
       const GotDataCallback& callback) = 0;
 
+  // The following methods are all called on the IO thread.
+
   // Return the mimetype that should be sent with this response, or empty
   // string to specify no mime type.
   virtual std::string GetMimeType(const std::string& path) const = 0;
-
-  // The following methods are all called on the IO thread.
 
   // Returns the TaskRunner on which the delegate wishes to have
   // StartDataRequest called to handle the request for |path|. The default
@@ -127,7 +128,9 @@ class CONTENT_EXPORT URLDataSource {
   // to implement fancier access control.  Typically used in concert with
   // ContentBrowserClient::GetAdditionalWebUISchemes() to permit additional
   // WebUI scheme support for an embedder.
-  virtual bool ShouldServiceRequest(const net::URLRequest* request) const;
+  virtual bool ShouldServiceRequest(const GURL& url,
+                                    ResourceContext* resource_context,
+                                    int render_process_id) const;
 
   // By default, Content-Type: header is not sent along with the response.
   // To start sending mime type returned by GetMimeType in HTTP headers,
@@ -144,13 +147,6 @@ class CONTENT_EXPORT URLDataSource {
   // Default implementation returns an empty string.
   virtual std::string GetAccessControlAllowOriginForOrigin(
       const std::string& origin) const;
-
-  // Called to inform the source that StartDataRequest() will be called soon.
-  // Gives the source an opportunity to rewrite |path| to incorporate extra
-  // information from the URLRequest prior to serving.
-  virtual void WillServiceRequest(
-      const net::URLRequest* request,
-      std::string* path) const {}
 
   // Whether |path| is gzipped (and should be transmitted gzipped).
   virtual bool IsGzipped(const std::string& path) const;

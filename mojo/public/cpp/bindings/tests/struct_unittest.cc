@@ -9,6 +9,7 @@
 
 #include "mojo/public/cpp/bindings/lib/fixed_buffer.h"
 #include "mojo/public/cpp/system/message_pipe.h"
+#include "mojo/public/interfaces/bindings/tests/test_export2.mojom.h"
 #include "mojo/public/interfaces/bindings/tests/test_structs.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -17,12 +18,7 @@ namespace test {
 namespace {
 
 RectPtr MakeRect(int32_t factor = 1) {
-  RectPtr rect(Rect::New());
-  rect->x = 1 * factor;
-  rect->y = 2 * factor;
-  rect->width = 10 * factor;
-  rect->height = 20 * factor;
-  return rect;
+  return Rect::New(1 * factor, 2 * factor, 10 * factor, 20 * factor);
 }
 
 void CheckRect(const Rect& rect, int32_t factor = 1) {
@@ -33,19 +29,10 @@ void CheckRect(const Rect& rect, int32_t factor = 1) {
 }
 
 MultiVersionStructPtr MakeMultiVersionStruct() {
-  MultiVersionStructPtr output(MultiVersionStruct::New());
-  output->f_int32 = 123;
-  output->f_rect = MakeRect(5);
-  output->f_string.emplace("hello");
-  output->f_array.emplace(3);
-  (*output->f_array)[0] = 10;
-  (*output->f_array)[1] = 9;
-  (*output->f_array)[2] = 8;
   MessagePipe pipe;
-  output->f_message_pipe = std::move(pipe.handle0);
-  output->f_int16 = 42;
-
-  return output;
+  return MultiVersionStruct::New(123, MakeRect(5), std::string("hello"),
+                                 std::vector<int8_t>{10, 9, 8},
+                                 std::move(pipe.handle0), false, 42);
 }
 
 template <typename U, typename T>
@@ -166,9 +153,7 @@ TEST_F(StructTest, Construction_StructPointers) {
 
 // Serialization test of a struct with struct pointers.
 TEST_F(StructTest, Serialization_StructPointers) {
-  RectPairPtr pair(RectPair::New());
-  pair->first = MakeRect();
-  pair->second = MakeRect();
+  RectPairPtr pair(RectPair::New(MakeRect(), MakeRect()));
 
   size_t size =
       mojo::internal::PrepareToSerialize<RectPairDataView>(pair, nullptr);
@@ -187,11 +172,12 @@ TEST_F(StructTest, Serialization_StructPointers) {
 
 // Serialization test of a struct with an array member.
 TEST_F(StructTest, Serialization_ArrayPointers) {
-  NamedRegionPtr region(NamedRegion::New());
-  region->name.emplace("region");
-  region->rects.emplace(4);
-  for (size_t i = 0; i < region->rects->size(); ++i)
-    (*region->rects)[i] = MakeRect(static_cast<int32_t>(i) + 1);
+  std::vector<RectPtr> rects;
+  for (size_t i = 0; i < 4; ++i)
+    rects.push_back(MakeRect(static_cast<int32_t>(i) + 1));
+
+  NamedRegionPtr region(
+      NamedRegion::New(std::string("region"), std::move(rects)));
 
   size_t size =
       mojo::internal::PrepareToSerialize<NamedRegionDataView>(region, nullptr);
@@ -247,10 +233,8 @@ TEST_F(StructTest, Serialization_NullArrayPointers) {
 // Tests deserializing structs as a newer version.
 TEST_F(StructTest, Versioning_OldToNew) {
   {
-    MultiVersionStructV0Ptr input(MultiVersionStructV0::New());
-    input->f_int32 = 123;
-    MultiVersionStructPtr expected_output(MultiVersionStruct::New());
-    expected_output->f_int32 = 123;
+    MultiVersionStructV0Ptr input(MultiVersionStructV0::New(123));
+    MultiVersionStructPtr expected_output(MultiVersionStruct::New(123));
 
     MultiVersionStructPtr output =
         SerializeAndDeserialize<MultiVersionStructPtr>(std::move(input));
@@ -259,12 +243,9 @@ TEST_F(StructTest, Versioning_OldToNew) {
   }
 
   {
-    MultiVersionStructV1Ptr input(MultiVersionStructV1::New());
-    input->f_int32 = 123;
-    input->f_rect = MakeRect(5);
-    MultiVersionStructPtr expected_output(MultiVersionStruct::New());
-    expected_output->f_int32 = 123;
-    expected_output->f_rect = MakeRect(5);
+    MultiVersionStructV1Ptr input(MultiVersionStructV1::New(123, MakeRect(5)));
+    MultiVersionStructPtr expected_output(
+        MultiVersionStruct::New(123, MakeRect(5)));
 
     MultiVersionStructPtr output =
         SerializeAndDeserialize<MultiVersionStructPtr>(std::move(input));
@@ -273,14 +254,10 @@ TEST_F(StructTest, Versioning_OldToNew) {
   }
 
   {
-    MultiVersionStructV3Ptr input(MultiVersionStructV3::New());
-    input->f_int32 = 123;
-    input->f_rect = MakeRect(5);
-    input->f_string.emplace("hello");
-    MultiVersionStructPtr expected_output(MultiVersionStruct::New());
-    expected_output->f_int32 = 123;
-    expected_output->f_rect = MakeRect(5);
-    expected_output->f_string.emplace("hello");
+    MultiVersionStructV3Ptr input(
+        MultiVersionStructV3::New(123, MakeRect(5), std::string("hello")));
+    MultiVersionStructPtr expected_output(
+        MultiVersionStruct::New(123, MakeRect(5), std::string("hello")));
 
     MultiVersionStructPtr output =
         SerializeAndDeserialize<MultiVersionStructPtr>(std::move(input));
@@ -289,22 +266,10 @@ TEST_F(StructTest, Versioning_OldToNew) {
   }
 
   {
-    MultiVersionStructV5Ptr input(MultiVersionStructV5::New());
-    input->f_int32 = 123;
-    input->f_rect = MakeRect(5);
-    input->f_string.emplace("hello");
-    input->f_array.emplace(3);
-    (*input->f_array)[0] = 10;
-    (*input->f_array)[1] = 9;
-    (*input->f_array)[2] = 8;
-    MultiVersionStructPtr expected_output(MultiVersionStruct::New());
-    expected_output->f_int32 = 123;
-    expected_output->f_rect = MakeRect(5);
-    expected_output->f_string.emplace("hello");
-    expected_output->f_array.emplace(3);
-    (*expected_output->f_array)[0] = 10;
-    (*expected_output->f_array)[1] = 9;
-    (*expected_output->f_array)[2] = 8;
+    MultiVersionStructV5Ptr input(MultiVersionStructV5::New(
+        123, MakeRect(5), std::string("hello"), std::vector<int8_t>{10, 9, 8}));
+    MultiVersionStructPtr expected_output(MultiVersionStruct::New(
+        123, MakeRect(5), std::string("hello"), std::vector<int8_t>{10, 9, 8}));
 
     MultiVersionStructPtr output =
         SerializeAndDeserialize<MultiVersionStructPtr>(std::move(input));
@@ -313,25 +278,13 @@ TEST_F(StructTest, Versioning_OldToNew) {
   }
 
   {
-    MultiVersionStructV7Ptr input(MultiVersionStructV7::New());
-    input->f_int32 = 123;
-    input->f_rect = MakeRect(5);
-    input->f_string.emplace("hello");
-    input->f_array.emplace(3);
-    (*input->f_array)[0] = 10;
-    (*input->f_array)[1] = 9;
-    (*input->f_array)[2] = 8;
     MessagePipe pipe;
-    input->f_message_pipe = std::move(pipe.handle0);
+    MultiVersionStructV7Ptr input(MultiVersionStructV7::New(
+        123, MakeRect(5), std::string("hello"), std::vector<int8_t>{10, 9, 8},
+        std::move(pipe.handle0), false));
 
-    MultiVersionStructPtr expected_output(MultiVersionStruct::New());
-    expected_output->f_int32 = 123;
-    expected_output->f_rect = MakeRect(5);
-    expected_output->f_string.emplace("hello");
-    expected_output->f_array.emplace(3);
-    (*expected_output->f_array)[0] = 10;
-    (*expected_output->f_array)[1] = 9;
-    (*expected_output->f_array)[2] = 8;
+    MultiVersionStructPtr expected_output(MultiVersionStruct::New(
+        123, MakeRect(5), std::string("hello"), std::vector<int8_t>{10, 9, 8}));
     // Save the raw handle value separately so that we can compare later.
     MojoHandle expected_handle = input->f_message_pipe.get().value();
 
@@ -348,14 +301,8 @@ TEST_F(StructTest, Versioning_OldToNew) {
 TEST_F(StructTest, Versioning_NewToOld) {
   {
     MultiVersionStructPtr input = MakeMultiVersionStruct();
-    MultiVersionStructV7Ptr expected_output(MultiVersionStructV7::New());
-    expected_output->f_int32 = 123;
-    expected_output->f_rect = MakeRect(5);
-    expected_output->f_string.emplace("hello");
-    expected_output->f_array.emplace(3);
-    (*expected_output->f_array)[0] = 10;
-    (*expected_output->f_array)[1] = 9;
-    (*expected_output->f_array)[2] = 8;
+    MultiVersionStructV7Ptr expected_output(MultiVersionStructV7::New(
+        123, MakeRect(5), std::string("hello"), std::vector<int8_t>{10, 9, 8}));
     // Save the raw handle value separately so that we can compare later.
     MojoHandle expected_handle = input->f_message_pipe.get().value();
 
@@ -369,14 +316,8 @@ TEST_F(StructTest, Versioning_NewToOld) {
 
   {
     MultiVersionStructPtr input = MakeMultiVersionStruct();
-    MultiVersionStructV5Ptr expected_output(MultiVersionStructV5::New());
-    expected_output->f_int32 = 123;
-    expected_output->f_rect = MakeRect(5);
-    expected_output->f_string.emplace("hello");
-    expected_output->f_array.emplace(3);
-    (*expected_output->f_array)[0] = 10;
-    (*expected_output->f_array)[1] = 9;
-    (*expected_output->f_array)[2] = 8;
+    MultiVersionStructV5Ptr expected_output(MultiVersionStructV5::New(
+        123, MakeRect(5), std::string("hello"), std::vector<int8_t>{10, 9, 8}));
 
     MultiVersionStructV5Ptr output =
         SerializeAndDeserialize<MultiVersionStructV5Ptr>(std::move(input));
@@ -386,10 +327,8 @@ TEST_F(StructTest, Versioning_NewToOld) {
 
   {
     MultiVersionStructPtr input = MakeMultiVersionStruct();
-    MultiVersionStructV3Ptr expected_output(MultiVersionStructV3::New());
-    expected_output->f_int32 = 123;
-    expected_output->f_rect = MakeRect(5);
-    expected_output->f_string.emplace("hello");
+    MultiVersionStructV3Ptr expected_output(
+        MultiVersionStructV3::New(123, MakeRect(5), std::string("hello")));
 
     MultiVersionStructV3Ptr output =
         SerializeAndDeserialize<MultiVersionStructV3Ptr>(std::move(input));
@@ -399,9 +338,8 @@ TEST_F(StructTest, Versioning_NewToOld) {
 
   {
     MultiVersionStructPtr input = MakeMultiVersionStruct();
-    MultiVersionStructV1Ptr expected_output(MultiVersionStructV1::New());
-    expected_output->f_int32 = 123;
-    expected_output->f_rect = MakeRect(5);
+    MultiVersionStructV1Ptr expected_output(
+        MultiVersionStructV1::New(123, MakeRect(5)));
 
     MultiVersionStructV1Ptr output =
         SerializeAndDeserialize<MultiVersionStructV1Ptr>(std::move(input));
@@ -411,8 +349,7 @@ TEST_F(StructTest, Versioning_NewToOld) {
 
   {
     MultiVersionStructPtr input = MakeMultiVersionStruct();
-    MultiVersionStructV0Ptr expected_output(MultiVersionStructV0::New());
-    expected_output->f_int32 = 123;
+    MultiVersionStructV0Ptr expected_output(MultiVersionStructV0::New(123));
 
     MultiVersionStructV0Ptr output =
         SerializeAndDeserialize<MultiVersionStructV0Ptr>(std::move(input));
@@ -499,7 +436,7 @@ TEST_F(StructTest, Serialization_PublicAPI) {
 
     // Initialize it to non-null.
     RectPtr output(Rect::New());
-    ASSERT_TRUE(Rect::Deserialize(std::move(data), &output));
+    ASSERT_TRUE(Rect::Deserialize(data, &output));
     EXPECT_TRUE(output.is_null());
   }
 
@@ -510,7 +447,7 @@ TEST_F(StructTest, Serialization_PublicAPI) {
     EXPECT_FALSE(data.empty());
 
     EmptyStructPtr output;
-    ASSERT_TRUE(EmptyStruct::Deserialize(std::move(data), &output));
+    ASSERT_TRUE(EmptyStruct::Deserialize(data, &output));
     EXPECT_FALSE(output.is_null());
   }
 
@@ -521,17 +458,17 @@ TEST_F(StructTest, Serialization_PublicAPI) {
     auto data = Rect::Serialize(&rect);
 
     RectPtr output;
-    ASSERT_TRUE(Rect::Deserialize(std::move(data), &output));
+    ASSERT_TRUE(Rect::Deserialize(data, &output));
     EXPECT_TRUE(output.Equals(cloned_rect));
   }
 
   {
     // A struct containing other objects.
-    NamedRegionPtr region(NamedRegion::New());
-    region->name.emplace("region");
-    region->rects.emplace(3);
-    for (size_t i = 0; i < region->rects->size(); ++i)
-      (*region->rects)[i] = MakeRect(static_cast<int32_t>(i) + 1);
+    std::vector<RectPtr> rects;
+    for (size_t i = 0; i < 3; ++i)
+      rects.push_back(MakeRect(static_cast<int32_t>(i) + 1));
+    NamedRegionPtr region(
+        NamedRegion::New(std::string("region"), std::move(rects)));
 
     NamedRegionPtr cloned_region = region.Clone();
     auto data = NamedRegion::Serialize(&region);
@@ -539,7 +476,7 @@ TEST_F(StructTest, Serialization_PublicAPI) {
     // Make sure that the serialized result gets pointers encoded properly.
     auto cloned_data = data;
     NamedRegionPtr output;
-    ASSERT_TRUE(NamedRegion::Deserialize(std::move(cloned_data), &output));
+    ASSERT_TRUE(NamedRegion::Deserialize(cloned_data, &output));
     EXPECT_TRUE(output.Equals(cloned_region));
   }
 
@@ -549,8 +486,40 @@ TEST_F(StructTest, Serialization_PublicAPI) {
     auto data = Rect::Serialize(&rect);
 
     NamedRegionPtr output;
-    EXPECT_FALSE(NamedRegion::Deserialize(std::move(data), &output));
+    EXPECT_FALSE(NamedRegion::Deserialize(data, &output));
   }
+
+  {
+    // A struct from another component.
+    auto pair = test_export2::StringPair::New("hello", "world");
+    auto data = test_export2::StringPair::Serialize(&pair);
+
+    test_export2::StringPairPtr output;
+    ASSERT_TRUE(test_export2::StringPair::Deserialize(data, &output));
+    EXPECT_TRUE(output.Equals(pair));
+  }
+}
+
+TEST_F(StructTest, VersionedStructConstructor) {
+  auto reordered = ReorderedStruct::New(123, 456, 789);
+  EXPECT_EQ(123, reordered->a);
+  EXPECT_EQ(456, reordered->b);
+  EXPECT_EQ(789, reordered->c);
+
+  reordered = ReorderedStruct::New(123, 456);
+  EXPECT_EQ(123, reordered->a);
+  EXPECT_EQ(6, reordered->b);
+  EXPECT_EQ(456, reordered->c);
+
+  reordered = ReorderedStruct::New(123);
+  EXPECT_EQ(3, reordered->a);
+  EXPECT_EQ(6, reordered->b);
+  EXPECT_EQ(123, reordered->c);
+
+  reordered = ReorderedStruct::New();
+  EXPECT_EQ(3, reordered->a);
+  EXPECT_EQ(6, reordered->b);
+  EXPECT_EQ(1, reordered->c);
 }
 
 }  // namespace test

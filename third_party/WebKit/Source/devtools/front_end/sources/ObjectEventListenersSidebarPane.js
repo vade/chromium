@@ -14,7 +14,7 @@ Sources.ObjectEventListenersSidebarPane = class extends UI.VBox {
     this._refreshButton.addEventListener(UI.ToolbarButton.Events.Click, this._refreshClick, this);
     this._refreshButton.setEnabled(false);
 
-    this._eventListenersView = new Components.EventListenersView(this.element, this.update.bind(this));
+    this._eventListenersView = new EventListeners.EventListenersView(this.element, this.update.bind(this));
   }
 
   /**
@@ -27,7 +27,7 @@ Sources.ObjectEventListenersSidebarPane = class extends UI.VBox {
 
   update() {
     if (this._lastRequestedContext) {
-      this._lastRequestedContext.target().runtimeAgent().releaseObjectGroup(
+      this._lastRequestedContext.runtimeModel.releaseObjectGroup(
           Sources.ObjectEventListenersSidebarPane._objectGroupName);
       delete this._lastRequestedContext;
     }

@@ -30,24 +30,20 @@
   #
   # chrome/ and ios/chrome/ must start at the same id.
   # App only use one file depending on whether it is iOS or other platform.
-  "chrome/app/address_input_strings.grd": {
-    "messages": [400],
-  },
-
   # Chromium strings and Google Chrome strings must start at the same id.
   # We only use one file depending on whether we're building Chromium or
   # Google Chrome.
   "chrome/app/chromium_strings.grd": {
-    "messages": [500],
+    "messages": [400],
   },
   "chrome/app/google_chrome_strings.grd": {
-    "messages": [500],
+    "messages": [400],
   },
 
   # Leave lots of space for generated_resources since it has most of our
   # strings.
   "chrome/app/generated_resources.grd": {
-    "messages": [900],
+    "messages": [800],
   },
 
   "chrome/app/resources/locale_settings.grd": {
@@ -85,58 +81,64 @@
   # START chrome/browser section.
   "chrome/browser/browser_resources.grd": {
     "includes": [11000],
-    "structures": [11450],
+    "structures": [11480],
   },
   "chrome/browser/resources/component_extension_resources.grd": {
-    "includes": [11550],
-    "structures": [11800],
+    "includes": [11580],
+    "structures": [11830],
   },
   "chrome/browser/resources/invalidations_resources.grd": {
-    "includes": [11850],
+    "includes": [11880],
   },
   "chrome/browser/resources/md_policy/policy_resources.grd": {
-    "structures": [11860],
+    "structures": [11890],
   },
   "chrome/browser/resources/net_internals_resources.grd": {
-    "includes": [11900],
+    "includes": [11930],
   },
   "chrome/browser/resources/options_resources.grd": {
-    "includes": [11910],
-    "structures": [11920],
-  },
-  "chrome/browser/resources/options_test_resources.grd": {
+    "includes": [11940],
     "structures": [11950],
   },
-  "chrome/browser/resources/password_manager_internals_resources.grd": {
-    "includes": [11960],
-  },
-  "chrome/browser/resources/quota_internals_resources.grd": {
-    "includes": [11970],
-  },
-  "chrome/browser/resources/settings/settings_resources.grd": {
+  "chrome/browser/resources/options_test_resources.grd": {
     "structures": [12000],
   },
+  "chrome/browser/resources/password_manager_internals_resources.grd": {
+    "includes": [12010],
+  },
+  "chrome/browser/resources/quota_internals_resources.grd": {
+    "includes": [12020],
+  },
+  "chrome/browser/resources/settings/settings_resources_vulcanized.grd": {
+    "includes": [12040],
+  },
+  "chrome/browser/resources/settings/settings_resources.grd": {
+    "structures": [12050],
+  },
   "chrome/browser/resources/sync_file_system_internals_resources.grd": {
-    "includes": [12500],
+    "includes": [12550],
   },
   "chrome/browser/resources/task_scheduler_internals/resources.grd": {
-    "includes": [12530],
+    "includes": [12580],
   },
   "chrome/browser/resources/translate_internals_resources.grd": {
-    "includes": [12540],
+    "includes": [12590],
+  },
+  "chrome/browser/resources/webapks_ui_resources.grd": {
+    "includes": [12600],
   },
   # END chrome/browser section.
 
   # START chrome/ miscellaneous section.
   "chrome/common/common_resources.grd": {
-    "includes": [12700],
+    "includes": [12720],
   },
   "chrome/renderer/resources/renderer_resources.grd": {
-    "includes": [12710],
-    "structures": [12790],
+    "includes": [12730],
+    "structures": [12810],
   },
   "chrome/test/data/webui_test_resources.grd": {
-    "includes": [12800],
+    "includes": [12820],
   },
   # END chrome/ miscellaneous section.
 
@@ -166,10 +168,10 @@
     "structures": [15920],
   },
   "components/resources/components_resources.grd": {
-    "includes": [15930],
+    "includes": [16030],
   },
   "components/resources/components_scaled_resources.grd": {
-    "structures": [16050],
+    "structures": [16150],
   },
   # END components/ section.
 
@@ -225,6 +227,15 @@
   },
   "ios/chrome/today_extension/strings/ios_today_extension_strings.grd": {
     "messages": [3010],
+  },
+  "ios/chrome/search_widget_extension/strings/ios_search_widget_extension_strings.grd": {
+    "messages": [3050],
+  },
+  "ios/chrome/search_widget_extension/strings/ios_search_widget_extension_chromium_strings.grd": {
+    "messages": [3070],
+  },
+  "ios/chrome/search_widget_extension/strings/ios_search_widget_extension_google_chrome_strings.grd": {
+    "messages": [3070],
   },
 
   # content/ and ios/web/ must start at the same id.
@@ -348,6 +359,11 @@
   "cloud_print/virtual_driver/win/install/virtual_driver_setup_resources.grd": {
     "includes": [28600],
 	"messages": [28650],
+  },
+
+  # TODO(crbug.com/672458): Move this out of src/chrome/.
+  "chrome/app/address_input_strings.grd": {
+    "messages": [28700],
   },
   # END "everything else" section.
   # Everything but chrome/, components/, content/, and ios/

@@ -9,6 +9,8 @@ static_library("arc") {
   sources = [
     "arc_service_manager.cc",
     "arc_service_manager.h",
+    "arc_util.cc",
+    "arc_util.h",
     "audio/arc_audio_bridge.cc",
     "audio/arc_audio_bridge.h",
     "bluetooth/arc_bluetooth_bridge.cc",
@@ -21,8 +23,8 @@ static_library("arc") {
     "clipboard/arc_clipboard_bridge.h",
     "crash_collector/arc_crash_collector_bridge.cc",
     "crash_collector/arc_crash_collector_bridge.h",
-    "file_system/arc_file_system_operation_runner.cc",
-    "file_system/arc_file_system_operation_runner.h",
+    "file_system/file_system_struct_traits.cc",
+    "file_system/file_system_struct_traits.h",
     "ime/arc_ime_bridge.h",
     "ime/arc_ime_bridge_impl.cc",
     "ime/arc_ime_bridge_impl.h",
@@ -32,6 +34,7 @@ static_library("arc") {
     "intent_helper/activity_icon_loader.h",
     "intent_helper/arc_intent_helper_bridge.cc",
     "intent_helper/arc_intent_helper_bridge.h",
+    "intent_helper/arc_intent_helper_observer.h",
     "intent_helper/font_size_util.cc",
     "intent_helper/font_size_util.h",
     "intent_helper/intent_constants.cc",
@@ -66,7 +69,8 @@ static_library("arc") {
 
   deps = [
     "//ash:ash",
-    "//ash/public/interfaces",
+    "//ash/public/cpp:ash_public_cpp",
+    "//ash/shared:app_types",
     "//base",
     "//chromeos",
     "//chromeos:power_manager_proto",
@@ -105,10 +109,10 @@ static_library("arc_base") {
     "arc_service.h",
     "arc_session.cc",
     "arc_session.h",
-    "arc_session_observer.cc",
-    "arc_session_observer.h",
     "arc_session_runner.cc",
     "arc_session_runner.h",
+    "arc_stop_reason.cc",
+    "arc_stop_reason.h",
     "instance_holder.h",
   ]
 
@@ -152,9 +156,12 @@ mojom("arc_bindings") {
     "common/scale_factor.mojom",
     "common/screen_rect.mojom",
     "common/storage_manager.mojom",
+    "common/tracing.mojom",
     "common/tts.mojom",
     "common/video.mojom",
     "common/video_accelerator.mojom",
+    "common/voice_interaction_arc_home.mojom",
+    "common/voice_interaction_framework.mojom",
     "common/wallpaper.mojom",
   ]
 
@@ -162,13 +169,14 @@ mojom("arc_bindings") {
     "//mojo/common:common_custom_types",
     "//ui/gfx/geometry/mojo",
   ]
+
+  # TODO(crbug.com/714018): Convert the implementation to use OnceCallback.
+  use_once_callback = false
 }
 
 static_library("arc_test_support") {
   testonly = true
   sources = [
-    "file_system/test/fake_arc_file_system_operation_runner.cc",
-    "file_system/test/fake_arc_file_system_operation_runner.h",
     "test/fake_app_instance.cc",
     "test/fake_app_instance.h",
     "test/fake_arc_session.cc",
@@ -192,6 +200,7 @@ static_library("arc_test_support") {
   deps = [
     "//base",
     "//mojo/common:common_base",
+    "//mojo/edk/embedder:headers",
   ]
 }
 
@@ -200,6 +209,7 @@ source_set("unit_tests") {
   sources = [
     "arc_service_manager_unittest.cc",
     "arc_session_runner_unittest.cc",
+    "arc_util_unittest.cc",
     "bluetooth/arc_bluetooth_bridge_unittest.cc",
     "bluetooth/bluetooth_struct_traits_unittest.cc",
     "bluetooth/bluetooth_type_converters_unittest.cc",
@@ -211,14 +221,18 @@ source_set("unit_tests") {
     "intent_helper/link_handler_model_impl_unittest.cc",
     "intent_helper/local_activity_resolver_unittest.cc",
     "intent_helper/page_transition_util_unittest.cc",
+    "kiosk/arc_kiosk_bridge_unittest.cc",
   ]
 
   deps = [
     ":arc_test_support",
+    "//ash/shared:app_types",
     "//base",
+    "//base/test:test_support",
     "//chromeos",
     "//device/bluetooth",
     "//mojo/public/cpp/system:system",
+    "//testing/gmock",
     "//testing/gtest",
     "//ui/aura",
     "//ui/aura:test_support",

@@ -12,13 +12,13 @@
 
 #include "base/callback.h"
 #include "base/callback_list.h"
-#include "base/memory/scoped_vector.h"
 #include "base/time/time.h"
-#include "chrome/browser/media/router/issue.h"
-#include "chrome/browser/media/router/media_route.h"
-#include "chrome/browser/media/router/media_sink.h"
-#include "chrome/browser/media/router/media_source.h"
 #include "chrome/browser/media/router/route_message_observer.h"
+#include "chrome/common/media_router/discovery/media_sink_internal.h"
+#include "chrome/common/media_router/issue.h"
+#include "chrome/common/media_router/media_route.h"
+#include "chrome/common/media_router/media_sink.h"
+#include "chrome/common/media_router/media_source.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/presentation_service_delegate.h"
 
@@ -26,9 +26,14 @@ namespace content {
 class WebContents;
 }
 
+namespace url {
+class Origin;
+}  // namespace url
+
 namespace media_router {
 
 class IssuesObserver;
+class MediaRouteController;
 class MediaRoutesObserver;
 class MediaSinksObserver;
 class PresentationConnectionStateObserver;
@@ -78,7 +83,7 @@ class MediaRouter : public KeyedService {
   virtual void CreateRoute(
       const MediaSource::Id& source_id,
       const MediaSink::Id& sink_id,
-      const GURL& origin,
+      const url::Origin& origin,
       content::WebContents* web_contents,
       const std::vector<MediaRouteResponseCallback>& callbacks,
       base::TimeDelta timeout,
@@ -100,7 +105,7 @@ class MediaRouter : public KeyedService {
   virtual void ConnectRouteByRouteId(
       const MediaSource::Id& source_id,
       const MediaRoute::Id& route_id,
-      const GURL& origin,
+      const url::Origin& origin,
       content::WebContents* web_contents,
       const std::vector<MediaRouteResponseCallback>& callbacks,
       base::TimeDelta timeout,
@@ -120,7 +125,7 @@ class MediaRouter : public KeyedService {
   virtual void JoinRoute(
       const MediaSource::Id& source,
       const std::string& presentation_id,
-      const GURL& origin,
+      const url::Origin& origin,
       content::WebContents* web_contents,
       const std::vector<MediaRouteResponseCallback>& callbacks,
       base::TimeDelta timeout,
@@ -168,6 +173,13 @@ class MediaRouter : public KeyedService {
       const std::string& domain,
       const MediaSinkSearchResponseCallback& sink_callback) = 0;
 
+  // Notifies the Media Router that the list of MediaSinks discovered by a
+  // MediaSinkService has been updated.
+  // |provider_name|: Name of the MediaSinkService providing the sinks.
+  // |sinks|: sinks discovered by MediaSinkService.
+  virtual void ProvideSinks(const std::string& provider_name,
+                            const std::vector<MediaSinkInternal>& sinks) = 0;
+
   // Adds |callback| to listen for state changes for presentation connected to
   // |route_id|. The returned Subscription object is owned by the caller.
   // |callback| will be invoked whenever there are state changes, until the
@@ -185,9 +197,15 @@ class MediaRouter : public KeyedService {
   // there is a change to the media routes, subclass MediaRoutesObserver.
   virtual std::vector<MediaRoute> GetCurrentRoutes() const = 0;
 
+  // Returns a controller for sending media commands to a route. Returns a
+  // nullptr if no MediaRoute exists for the given |route_id|.
+  virtual scoped_refptr<MediaRouteController> GetRouteController(
+      const MediaRoute::Id& route_id) = 0;
+
  private:
   friend class IssuesObserver;
   friend class MediaSinksObserver;
+  friend class MediaRouteController;
   friend class MediaRoutesObserver;
   friend class PresentationConnectionStateObserver;
   friend class RouteMessageObserver;
@@ -243,6 +261,12 @@ class MediaRouter : public KeyedService {
   // stop receiving further updates.
   virtual void UnregisterRouteMessageObserver(
       RouteMessageObserver* observer) = 0;
+
+  // Removes the MediaRouteController for |route_id| from the list of
+  // controllers held by |this|. Called by MediaRouteController when it is
+  // invalidated.
+  virtual void DetachRouteController(const MediaRoute::Id& route_id,
+                                     MediaRouteController* controller) = 0;
 };
 
 }  // namespace media_router

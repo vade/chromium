@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "base/memory/memory_pressure_listener.h"
 #include "base/memory/ref_counted.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/media_export.h"
@@ -57,11 +58,10 @@ class MEDIA_EXPORT SourceBufferStream {
   };
 
   SourceBufferStream(const AudioDecoderConfig& audio_config,
-                     const scoped_refptr<MediaLog>& media_log);
+                     MediaLog* media_log);
   SourceBufferStream(const VideoDecoderConfig& video_config,
-                     const scoped_refptr<MediaLog>& media_log);
-  SourceBufferStream(const TextTrackConfig& text_config,
-                     const scoped_refptr<MediaLog>& media_log);
+                     MediaLog* media_log);
+  SourceBufferStream(const TextTrackConfig& text_config, MediaLog* media_log);
 
   ~SourceBufferStream();
 
@@ -92,6 +92,17 @@ class MEDIA_EXPORT SourceBufferStream {
   // |media_time| is current playback position.
   bool GarbageCollectIfNeeded(DecodeTimestamp media_time,
                               size_t newDataSize);
+
+  // Gets invoked when the system is experiencing memory pressure, i.e. there's
+  // not enough free memory. The |media_time| is the media playback position at
+  // the time of memory pressure notification (needed for accurate GC). The
+  // |memory_pressure_listener| indicates memory pressure severity. The
+  // |force_instant_gc| is used to force the MSE garbage collection algorithm to
+  // be run right away, without waiting for the next append.
+  void OnMemoryPressure(
+      DecodeTimestamp media_time,
+      base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level,
+      bool force_instant_gc);
 
   // Changes the SourceBufferStream's state so that it will start returning
   // buffers starting from the closest keyframe before |timestamp|.
@@ -358,7 +369,7 @@ class MEDIA_EXPORT SourceBufferStream {
 
   // Used to report log messages that can help the web developer figure out what
   // is wrong with the content.
-  scoped_refptr<MediaLog> media_log_;
+  MediaLog* media_log_;
 
   // List of disjoint buffered ranges, ordered by start time.
   RangeList ranges_;
@@ -429,6 +440,9 @@ class MEDIA_EXPORT SourceBufferStream {
 
   // Stores the largest distance between two adjacent buffers in this stream.
   base::TimeDelta max_interbuffer_distance_;
+
+  base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level_ =
+      base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_NONE;
 
   // The maximum amount of data in bytes the stream will keep in memory.
   size_t memory_limit_;

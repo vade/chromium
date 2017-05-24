@@ -6,6 +6,7 @@
 #define NET_HTTP_HTTP_STREAM_FACTORY_H_
 
 #include <list>
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
@@ -30,7 +31,6 @@ class ProcessMemoryDump;
 
 namespace net {
 
-class AuthCredentials;
 class BidirectionalStreamImpl;
 class HostMappingRules;
 class HttpAuthController;
@@ -155,7 +155,7 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
         const HttpResponseInfo& response_info,
         const SSLConfig& used_ssl_config,
         const ProxyInfo& used_proxy_info,
-        HttpStream* stream) = 0;
+        std::unique_ptr<HttpStream> stream) = 0;
 
     // Called when finding all QUIC alternative services are marked broken for
     // the origin in this request which advertises supporting QUIC.
@@ -169,8 +169,7 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
   // will have been called.  It now becomes the delegate's responsibility
   // to collect the necessary credentials, and then call this method to
   // resume the HttpStream creation process.
-  virtual int RestartTunnelWithProxyAuth(
-      const AuthCredentials& credentials) = 0;
+  virtual int RestartTunnelWithProxyAuth() = 0;
 
   // Called when the priority of the parent transaction changes.
   virtual void SetPriority(RequestPriority priority) = 0;
@@ -210,6 +209,8 @@ class NET_EXPORT HttpStreamFactory {
       const SSLConfig& server_ssl_config,
       const SSLConfig& proxy_ssl_config,
       HttpStreamRequest::Delegate* delegate,
+      bool enable_ip_based_pooling,
+      bool enable_alternative_services,
       const NetLogWithSource& net_log) = 0;
 
   // Request a WebSocket handshake stream.
@@ -222,6 +223,8 @@ class NET_EXPORT HttpStreamFactory {
       const SSLConfig& proxy_ssl_config,
       HttpStreamRequest::Delegate* delegate,
       WebSocketHandshakeStreamBase::CreateHelper* create_helper,
+      bool enable_ip_based_pooling,
+      bool enable_alternative_services,
       const NetLogWithSource& net_log) = 0;
 
   // Request a BidirectionalStreamImpl.
@@ -233,6 +236,8 @@ class NET_EXPORT HttpStreamFactory {
       const SSLConfig& server_ssl_config,
       const SSLConfig& proxy_ssl_config,
       HttpStreamRequest::Delegate* delegate,
+      bool enable_ip_based_pooling,
+      bool enable_alternative_services,
       const NetLogWithSource& net_log) = 0;
 
   // Requests that enough connections for |num_streams| be opened.

@@ -4,8 +4,8 @@
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-media-query/iron-media-query.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-pages/iron-pages.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-scroll-target-behavior/iron-scroll-target-behavior.html">
+<link rel="import" href="chrome://history/history_list.html">
 <link rel="import" href="chrome://history/history_toolbar.html">
-<link rel="import" href="chrome://history/list_container.html">
 <link rel="import" href="chrome://history/query_manager.html">
 <link rel="import" href="chrome://history/router.html">
 <link rel="import" href="chrome://history/shared_style.html">
@@ -33,10 +33,6 @@
       #main-container {
         height: calc(100% - var(--toolbar-height));
         position: relative;
-      }
-
-      :host([grouped_]) #main-container {
-        height: calc(100% - var(--toolbar-grouped-height));
       }
 
       #content-side-bar {
@@ -69,17 +65,16 @@
       }
     </style>
     <history-query-manager query-state="{{queryState_}}"
-        query-result="[[queryResult_]]">
+        query-result="[[queryResult_]]"
+        router="[[$$('#router')]]">
     </history-query-manager>
-    <history-router selected-page="{{selectedPage_}}"
+    <history-router id="router"
+        selected-page="{{selectedPage_}}"
         query-state="[[queryState_]]">
     </history-router>
     <history-toolbar id="toolbar"
-        grouped-offset="[[queryState_.groupedOffset]]"
-        grouped-range="[[queryState_.range]]"
         has-drawer="[[hasDrawer_]]"
         has-more-results="[[!queryResult_.info.finished]]"
-        is-grouped-mode="[[grouped_]]"
         query-info="[[queryResult_.info]]"
         querying="[[queryState_.querying]]"
         search-term="[[queryState_.searchTerm]]"
@@ -98,11 +93,13 @@
       <iron-pages id="content" attr-for-selected="path"
           fallback-selection="history"
           selected="[[getSelectedPage_(selectedPage_, items)]]"
+          selected-item="{{scrollTarget}}"
           items="{{items}}">
-        <history-list-container id="history" query-state="[[queryState_]]"
-            query-result="[[queryResult_]]" grouped="[[grouped_]]"
+        <history-list id="history" query-state="[[queryState_]]"
+            searched-term="[[queryResult_.info.term]]"
+            query-result="[[queryResult_]]"
             path="history">
-        </history-list-container>
+        </history-list>
         <template is="dom-if" if="[[syncedTabsSelected_(selectedPage_)]]">
           <history-synced-device-manager id="synced-devices"
               session-list="[[queryResult_.sessionList]]"

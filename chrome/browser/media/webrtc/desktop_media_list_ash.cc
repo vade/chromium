@@ -6,6 +6,7 @@
 
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "media/base/video_util.h"
@@ -104,8 +105,6 @@ void DesktopMediaListAsh::EnumerateSources(
           sources, root_windows[i], ash::kShellWindowId_DefaultContainer);
       EnumerateWindowsForRoot(
           sources, root_windows[i], ash::kShellWindowId_AlwaysOnTopContainer);
-      EnumerateWindowsForRoot(
-          sources, root_windows[i], ash::kShellWindowId_DockedContainer);
     }
   }
 }

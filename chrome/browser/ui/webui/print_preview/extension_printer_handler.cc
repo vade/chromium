@@ -33,7 +33,6 @@
 #include "extensions/common/permissions/usb_device_permission.h"
 #include "extensions/common/permissions/usb_device_permission_data.h"
 #include "extensions/common/value_builder.h"
-#include "printing/pdf_render_settings.h"
 #include "printing/pwg_raster_settings.h"
 
 using device::UsbDevice;
@@ -81,10 +80,8 @@ void UpdateJobFileInfo(
   }
 
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, base::TaskTraits()
-                     .WithShutdownBehavior(
-                         base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN)
-                     .MayBlock(),
+      FROM_HERE,
+      {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::Bind(&UpdateJobFileInfoOnWorkerThread, pwg_file_path,
                  base::Passed(&job)),
       callback);

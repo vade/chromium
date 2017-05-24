@@ -4,8 +4,6 @@
 
 #include "chrome/browser/installable/installable_manager.h"
 
-#include <algorithm>
-
 #include "base/bind.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
@@ -63,6 +61,11 @@ bool DoesManifestContainRequiredIcon(const content::Manifest& manifest) {
   return false;
 }
 
+// Returns true if |params| specifies a full PWA check.
+bool IsParamsForPwaCheck(const InstallableParams& params) {
+  return params.check_installable && params.fetch_valid_primary_icon;
+}
+
 }  // namespace
 
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(InstallableManager);
@@ -96,13 +99,16 @@ struct InstallableManager::IconProperty {
   DISALLOW_COPY_AND_ASSIGN(IconProperty);
 };
 
-
 InstallableManager::InstallableManager(content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
       manifest_(new ManifestProperty()),
       installable_(new InstallableProperty()),
+      page_status_(InstallabilityCheckStatus::NOT_STARTED),
+      menu_open_count_(0),
+      menu_item_add_to_homescreen_count_(0),
       is_active_(false),
-      weak_factory_(this) { }
+      is_pwa_check_complete_(false),
+      weak_factory_(this) {}
 
 InstallableManager::~InstallableManager() = default;
 
@@ -139,23 +145,83 @@ void InstallableManager::GetData(const InstallableParams& params,
     return;
 
   is_active_ = true;
+  if (page_status_ == InstallabilityCheckStatus::NOT_STARTED)
+    page_status_ = InstallabilityCheckStatus::NOT_COMPLETED;
   StartNextTask();
 }
 
-InstallableManager::IconProperty& InstallableManager::GetIcon(
-    const InstallableParams& params) {
-  return icons_[{params.ideal_primary_icon_size_in_px,
-                 params.minimum_primary_icon_size_in_px}];
+void InstallableManager::RecordMenuOpenHistogram() {
+  if (is_pwa_check_complete_)
+    InstallableMetrics::RecordMenuOpenHistogram(page_status_);
+  else
+    ++menu_open_count_;
 }
 
-bool InstallableManager::IsIconFetched(const InstallableParams& params) const {
-  const auto it = icons_.find({params.ideal_primary_icon_size_in_px,
-                               params.minimum_primary_icon_size_in_px});
+void InstallableManager::RecordMenuItemAddToHomescreenHistogram() {
+  if (is_pwa_check_complete_)
+    InstallableMetrics::RecordMenuItemAddToHomescreenHistogram(page_status_);
+  else
+    ++menu_item_add_to_homescreen_count_;
+}
+
+void InstallableManager::RecordQueuedMetricsOnTaskCompletion(
+    const InstallableParams& params,
+    bool check_passed) {
+  // Don't do anything if we've:
+  //  - already finished the PWA check, or
+  //  - we passed the check AND it was not for the full PWA params.
+  // In the latter case (i.e. the check passed but we weren't checking
+  // everything), we don't yet know if the site is installable. However, if the
+  // check didn't pass, we know for sure the site isn't installable, regardless
+  // of how much we checked.
+  //
+  // Once a full check is completed, metrics will be directly recorded in
+  // Record*Histogram since |is_pwa_check_complete_| will be true.
+  if (is_pwa_check_complete_ || (check_passed && !IsParamsForPwaCheck(params)))
+    return;
+
+  is_pwa_check_complete_ = true;
+  page_status_ =
+      check_passed
+          ? InstallabilityCheckStatus::COMPLETE_PROGRESSIVE_WEB_APP
+          : InstallabilityCheckStatus::COMPLETE_NON_PROGRESSIVE_WEB_APP;
+
+  // Compute what the status would have been for any queued calls to
+  // Record*Histogram, and record appropriately.
+  InstallabilityCheckStatus prev_status =
+      check_passed
+          ? InstallabilityCheckStatus::IN_PROGRESS_PROGRESSIVE_WEB_APP
+          : InstallabilityCheckStatus::IN_PROGRESS_NON_PROGRESSIVE_WEB_APP;
+  for (; menu_open_count_ > 0; --menu_open_count_)
+    InstallableMetrics::RecordMenuOpenHistogram(prev_status);
+
+  for (; menu_item_add_to_homescreen_count_ > 0;
+       --menu_item_add_to_homescreen_count_) {
+    InstallableMetrics::RecordMenuItemAddToHomescreenHistogram(prev_status);
+  }
+}
+
+InstallableManager::IconParams InstallableManager::ParamsForPrimaryIcon(
+    const InstallableParams& params) const {
+  return std::make_tuple(params.ideal_primary_icon_size_in_px,
+                         params.minimum_primary_icon_size_in_px,
+                         IconPurpose::ANY);
+}
+
+InstallableManager::IconParams InstallableManager::ParamsForBadgeIcon(
+    const InstallableParams& params) const {
+  return std::make_tuple(params.ideal_badge_icon_size_in_px,
+                         params.minimum_badge_icon_size_in_px,
+                         IconPurpose::BADGE);
+}
+
+bool InstallableManager::IsIconFetched(const IconParams& params) const {
+  const auto it = icons_.find(params);
   return it != icons_.end() && it->second.fetched;
 }
 
-void InstallableManager::SetIconFetched(const InstallableParams& params) {
-  GetIcon(params).fetched = true;
+void InstallableManager::SetIconFetched(const IconParams& params) {
+  icons_[params].fetched = true;
 }
 
 InstallableStatusCode InstallableManager::GetErrorCode(
@@ -167,8 +233,18 @@ InstallableStatusCode InstallableManager::GetErrorCode(
     return installable_->error;
 
   if (params.fetch_valid_primary_icon) {
-    IconProperty& icon = GetIcon(params);
+    IconProperty& icon = icons_[ParamsForPrimaryIcon(params)];
     if (icon.error != NO_ERROR_DETECTED)
+      return icon.error;
+  }
+
+  if (params.fetch_valid_badge_icon) {
+    IconProperty& icon = icons_[ParamsForBadgeIcon(params)];
+
+    // If the error is NO_ACCEPTABLE_ICON, there is no icon suitable as a badge
+    // in the manifest. Ignore this case since we only want to fail the check if
+    // there was a suitable badge icon specified and we couldn't fetch it.
+    if (icon.error != NO_ERROR_DETECTED && icon.error != NO_ACCEPTABLE_ICON)
       return icon.error;
   }
 
@@ -189,17 +265,15 @@ void InstallableManager::set_installable_error(
 }
 
 InstallableStatusCode InstallableManager::icon_error(
-    const InstallableManager::IconParams& icon_params) {
+    const IconParams& icon_params) {
   return icons_[icon_params].error;
 }
 
-GURL& InstallableManager::icon_url(
-    const InstallableManager::IconParams& icon_params) {
+GURL& InstallableManager::icon_url(const IconParams& icon_params) {
   return icons_[icon_params].url;
 }
 
-const SkBitmap* InstallableManager::icon(
-    const InstallableManager::IconParams& icon_params) {
+const SkBitmap* InstallableManager::icon(const IconParams& icon_params) {
   return icons_[icon_params].icon.get();
 }
 
@@ -216,7 +290,10 @@ bool InstallableManager::IsComplete(const InstallableParams& params) const {
   //  b. the resource has been fetched/checked.
   return manifest_->fetched &&
          (!params.check_installable || installable_->fetched) &&
-         (!params.fetch_valid_primary_icon || IsIconFetched(params));
+         (!params.fetch_valid_primary_icon ||
+             IsIconFetched(ParamsForPrimaryIcon(params))) &&
+         (!params.fetch_valid_badge_icon ||
+             IsIconFetched(ParamsForBadgeIcon(params)));
 }
 
 void InstallableManager::Reset() {
@@ -225,6 +302,21 @@ void InstallableManager::Reset() {
   tasks_.clear();
   icons_.clear();
 
+  // We may have reset prior to completion, in which case |menu_open_count_| or
+  // |menu_item_add_to_homescreen_count_| might be nonzero and |page_status_| is
+  // one of NOT_STARTED or NOT_COMPLETED. If we completed, then these values
+  // cannot be anything except 0.
+  is_pwa_check_complete_ = false;
+
+  for (; menu_open_count_ > 0; --menu_open_count_)
+    InstallableMetrics::RecordMenuOpenHistogram(page_status_);
+
+  for (; menu_item_add_to_homescreen_count_ > 0;
+       --menu_item_add_to_homescreen_count_) {
+    InstallableMetrics::RecordMenuItemAddToHomescreenHistogram(page_status_);
+  }
+
+  page_status_ = InstallabilityCheckStatus::NOT_STARTED;
   manifest_.reset(new ManifestProperty());
   installable_.reset(new InstallableProperty());
 
@@ -236,19 +328,32 @@ void InstallableManager::SetManifestDependentTasksComplete() {
   const InstallableParams& params = tasks_[0].first;
 
   installable_->fetched = true;
-  SetIconFetched(params);
+  SetIconFetched(ParamsForPrimaryIcon(params));
+  SetIconFetched(ParamsForBadgeIcon(params));
 }
 
 void InstallableManager::RunCallback(const Task& task,
                                      InstallableStatusCode code) {
   const InstallableParams& params = task.first;
-  IconProperty& icon = GetIcon(params);
+  IconProperty null_icon;
+  IconProperty* primary_icon = &null_icon;
+  IconProperty* badge_icon = &null_icon;
+
+  if (params.fetch_valid_primary_icon &&
+      base::ContainsKey(icons_, ParamsForPrimaryIcon(params)))
+    primary_icon = &icons_[ParamsForPrimaryIcon(params)];
+  if (params.fetch_valid_badge_icon &&
+      base::ContainsKey(icons_, ParamsForBadgeIcon(params)))
+    badge_icon = &icons_[ParamsForBadgeIcon(params)];
+
   InstallableData data = {
       code,
       manifest_url(),
       manifest(),
-      params.fetch_valid_primary_icon ? icon.url : GURL::EmptyGURL(),
-      params.fetch_valid_primary_icon ? icon.icon.get() : nullptr,
+      primary_icon->url,
+      primary_icon->icon.get(),
+      badge_icon->url,
+      badge_icon->icon.get(),
       params.check_installable ? is_installable() : false};
 
   task.second.Run(data);
@@ -272,21 +377,28 @@ void InstallableManager::WorkOnTask() {
   const InstallableParams& params = task.first;
 
   InstallableStatusCode code = GetErrorCode(params);
-  if (code != NO_ERROR_DETECTED || IsComplete(params)) {
+  bool check_passed = (code == NO_ERROR_DETECTED);
+  if (!check_passed || IsComplete(params)) {
+    RecordQueuedMetricsOnTaskCompletion(params, check_passed);
     RunCallback(task, code);
     tasks_.erase(tasks_.begin());
     StartNextTask();
     return;
   }
 
-  if (!manifest_->fetched)
+  if (!manifest_->fetched) {
     FetchManifest();
-  else if (params.check_installable && !installable_->fetched)
+  } else if (params.fetch_valid_primary_icon &&
+             !IsIconFetched(ParamsForPrimaryIcon(params))) {
+    CheckAndFetchBestIcon(ParamsForPrimaryIcon(params));
+  } else if (params.check_installable && !installable_->fetched) {
     CheckInstallable();
-  else if (params.fetch_valid_primary_icon && !IsIconFetched(params))
-    CheckAndFetchBestIcon();
-  else
+  } else if (params.fetch_valid_badge_icon &&
+             !IsIconFetched(ParamsForBadgeIcon(params))) {
+    CheckAndFetchBestIcon(ParamsForBadgeIcon(params));
+  } else {
     NOTREACHED();
+  }
 }
 
 void InstallableManager::FetchManifest() {
@@ -352,8 +464,8 @@ bool InstallableManager::IsManifestValidForWebApp(
   // TODO(dominickn,mlamouri): when Chrome supports "minimal-ui", it should be
   // accepted. If we accept it today, it would fallback to "browser" and make
   // this check moot. See https://crbug.com/604390.
-  if (manifest.display != blink::WebDisplayModeStandalone &&
-      manifest.display != blink::WebDisplayModeFullscreen) {
+  if (manifest.display != blink::kWebDisplayModeStandalone &&
+      manifest.display != blink::kWebDisplayModeFullscreen) {
     installable_->error = MANIFEST_DISPLAY_NOT_SUPPORTED;
     return false;
   }
@@ -387,41 +499,51 @@ void InstallableManager::CheckServiceWorker() {
                  weak_factory_.GetWeakPtr()));
 }
 
-void InstallableManager::OnDidCheckHasServiceWorker(bool has_service_worker) {
+void InstallableManager::OnDidCheckHasServiceWorker(
+    content::ServiceWorkerCapability capability) {
   if (!GetWebContents())
     return;
 
-  if (has_service_worker) {
-    installable_->installable = true;
-  } else {
-    installable_->installable = false;
-    installable_->error = NO_MATCHING_SERVICE_WORKER;
+  switch (capability) {
+    case content::ServiceWorkerCapability::SERVICE_WORKER_WITH_FETCH_HANDLER:
+      installable_->installable = true;
+      break;
+    case content::ServiceWorkerCapability::SERVICE_WORKER_NO_FETCH_HANDLER:
+      installable_->installable = false;
+      installable_->error = NOT_OFFLINE_CAPABLE;
+      break;
+    case content::ServiceWorkerCapability::NO_SERVICE_WORKER:
+      installable_->installable = false;
+      installable_->error = NO_MATCHING_SERVICE_WORKER;
+      break;
   }
 
   installable_->fetched = true;
   WorkOnTask();
 }
 
-void InstallableManager::CheckAndFetchBestIcon() {
+void InstallableManager::CheckAndFetchBestIcon(const IconParams& params) {
   DCHECK(!manifest().IsEmpty());
-  DCHECK(!tasks_.empty());
 
-  const InstallableParams& params = tasks_[0].first;
-  IconProperty& icon = GetIcon(params);
+  int ideal_icon_size_in_px = std::get<0>(params);
+  int minimum_icon_size_in_px = std::get<1>(params);
+  IconPurpose icon_purpose = std::get<2>(params);
+
+  IconProperty& icon = icons_[params];
   icon.fetched = true;
 
   GURL icon_url = ManifestIconSelector::FindBestMatchingIcon(
-      manifest().icons, params.ideal_primary_icon_size_in_px,
-      params.minimum_primary_icon_size_in_px);
+      manifest().icons, ideal_icon_size_in_px, minimum_icon_size_in_px,
+      icon_purpose);
 
   if (icon_url.is_empty()) {
     icon.error = NO_ACCEPTABLE_ICON;
   } else {
     bool can_download_icon = ManifestIconDownloader::Download(
-        GetWebContents(), icon_url, params.ideal_primary_icon_size_in_px,
-        params.minimum_primary_icon_size_in_px,
-        base::Bind(&InstallableManager::OnAppIconFetched,
-                   weak_factory_.GetWeakPtr(), icon_url));
+        GetWebContents(), icon_url, ideal_icon_size_in_px,
+        minimum_icon_size_in_px,
+        base::Bind(&InstallableManager::OnIconFetched,
+                   weak_factory_.GetWeakPtr(), icon_url, params));
     if (can_download_icon)
       return;
     icon.error = CANNOT_DOWNLOAD_ICON;
@@ -430,11 +552,9 @@ void InstallableManager::CheckAndFetchBestIcon() {
   WorkOnTask();
 }
 
-void InstallableManager::OnAppIconFetched(const GURL icon_url,
-                                          const SkBitmap& bitmap) {
-  DCHECK(!tasks_.empty());
-  const InstallableParams& params = tasks_[0].first;
-  IconProperty& icon = GetIcon(params);
+void InstallableManager::OnIconFetched(
+    const GURL icon_url, const IconParams& params, const SkBitmap& bitmap) {
+  IconProperty& icon = icons_[params];
 
   if (!GetWebContents())
     return;
@@ -452,7 +572,7 @@ void InstallableManager::OnAppIconFetched(const GURL icon_url,
 void InstallableManager::DidFinishNavigation(
     content::NavigationHandle* handle) {
   if (handle->IsInMainFrame() && handle->HasCommitted() &&
-      !handle->IsSamePage()) {
+      !handle->IsSameDocument()) {
     Reset();
   }
 }

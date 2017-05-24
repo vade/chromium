@@ -7,19 +7,29 @@ package org.chromium.chrome.browser.locale;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.support.annotation.IntDef;
+import android.support.annotation.Nullable;
 
+import org.chromium.base.Callback;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeApplication;
+import org.chromium.chrome.browser.AppHooks;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
 import org.chromium.chrome.browser.preferences.SearchEnginePreference;
+import org.chromium.chrome.browser.search_engines.TemplateUrlService;
+import org.chromium.chrome.browser.search_engines.TemplateUrlService.TemplateUrl;
 import org.chromium.chrome.browser.snackbar.Snackbar;
 import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarController;
 
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 import java.lang.ref.WeakReference;
+import java.util.List;
 
 /**
  * Manager for some locale specific logics.
@@ -29,6 +39,29 @@ public class LocaleManager {
     public static final String PREF_PROMO_SHOWN = "LocaleManager_PREF_PROMO_SHOWN";
     public static final String PREF_WAS_IN_SPECIAL_LOCALE = "LocaleManager_WAS_IN_SPECIAL_LOCALE";
     public static final String SPECIAL_LOCALE_ID = "US";
+
+    /** The current state regarding search engine promo dialogs. */
+    @IntDef({SEARCH_ENGINE_PROMO_SHOULD_CHECK, SEARCH_ENGINE_PROMO_CHECKED_NOT_SHOWN,
+            SEARCH_ENGINE_PROMO_CHECKED_AND_SHOWN})
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface SearchEnginePromoState {}
+    public static final int SEARCH_ENGINE_PROMO_SHOULD_CHECK = -1;
+    public static final int SEARCH_ENGINE_PROMO_CHECKED_NOT_SHOWN = 0;
+    public static final int SEARCH_ENGINE_PROMO_CHECKED_AND_SHOWN = 1;
+
+    /** The different types of search engine promo dialogs. */
+    @IntDef({SEARCH_ENGINE_PROMO_DONT_SHOW, SEARCH_ENGINE_PROMO_SHOW_SOGOU,
+            SEARCH_ENGINE_PROMO_SHOW_EXISTING, SEARCH_ENGINE_PROMO_SHOW_NEW})
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface SearchEnginePromoType {}
+
+    public static final int SEARCH_ENGINE_PROMO_DONT_SHOW = -1;
+    public static final int SEARCH_ENGINE_PROMO_SHOW_SOGOU = 0;
+    public static final int SEARCH_ENGINE_PROMO_SHOW_EXISTING = 1;
+    public static final int SEARCH_ENGINE_PROMO_SHOW_NEW = 2;
+
+    protected static final String KEY_SEARCH_ENGINE_PROMO_SHOW_STATE =
+            "com.android.chrome.SEARCH_ENGINE_PROMO_SHOWN";
 
     private static final int SNACKBAR_DURATION_MS = 6000;
 
@@ -53,6 +86,18 @@ public class LocaleManager {
     };
 
     /**
+     * @return An instance of the {@link LocaleManager}. This should only be called on UI thread.
+     */
+    @CalledByNative
+    public static LocaleManager getInstance() {
+        assert ThreadUtils.runningOnUiThread();
+        if (sInstance == null) {
+            sInstance = AppHooks.get().createLocaleManager();
+        }
+        return sInstance;
+    }
+
+    /**
      * Starts listening to state changes of the phone.
      */
     public void startObservingPhoneChanges() {
@@ -63,18 +108,6 @@ public class LocaleManager {
      * Stops listening to state changes of the phone.
      */
     public void stopObservingPhoneChanges() {}
-
-    /**
-     * @return An instance of the {@link LocaleManager}. This should only be called on UI thread.
-     */
-    public static LocaleManager getInstance() {
-        assert ThreadUtils.runningOnUiThread();
-        if (sInstance == null) {
-            sInstance = ((ChromeApplication) ContextUtils.getApplicationContext())
-                    .createLocaleManager();
-        }
-        return sInstance;
-    }
 
     /**
      * Starts recording metrics in deferred startup.
@@ -160,20 +193,30 @@ public class LocaleManager {
     }
 
     /**
-     * Shows a promotion dialog saying the default search engine will be set to Sogou. No-op if
-     * device is not in special locale.
+     * Shows a promotion dialog about search engines depending on Locale and other conditions.
+     * See {@link LocaleManager#getSearchEnginePromoShowType()} for possible types and logic.
      *
+     * @param context     Context showing the dialog.
+     * @param onDismissed Notified when the dialog is dismissed and whether the user acted on it.
      * @return Whether such dialog is needed.
      */
-    public boolean showSearchEnginePromoIfNeeded(Context context) {
-        if (!isSpecialLocaleEnabled()) return false;
-        SharedPreferences preferences = ContextUtils.getAppSharedPreferences();
-        if (preferences.getBoolean(PREF_PROMO_SHOWN, false)) {
-            return false;
+    public boolean showSearchEnginePromoIfNeeded(
+            Context context, @Nullable Callback<Boolean> onDismissed) {
+        int shouldShow = getSearchEnginePromoShowType();
+        switch (shouldShow) {
+            case SEARCH_ENGINE_PROMO_DONT_SHOW:
+                return false;
+            case SEARCH_ENGINE_PROMO_SHOW_SOGOU:
+                new SogouPromoDialog(context, this, onDismissed).show();
+                return true;
+            case SEARCH_ENGINE_PROMO_SHOW_EXISTING:
+            case SEARCH_ENGINE_PROMO_SHOW_NEW:
+                DefaultSearchEnginePromoDialog.show(context, shouldShow, onDismissed);
+                return true;
+            default:
+                assert false;
+                return false;
         }
-
-        new SearchEnginePromoDialog(context, this).show();
-        return true;
     }
 
     /**
@@ -219,8 +262,61 @@ public class LocaleManager {
         return inSpecialLocale;
     }
 
+    /**
+     * @return Whether and which search engine promo should be shown.
+     */
+    @SearchEnginePromoType
+    public int getSearchEnginePromoShowType() {
+        if (!isSpecialLocaleEnabled()) return SEARCH_ENGINE_PROMO_DONT_SHOW;
+        SharedPreferences preferences = ContextUtils.getAppSharedPreferences();
+        if (preferences.getBoolean(PREF_PROMO_SHOWN, false)) {
+            return SEARCH_ENGINE_PROMO_DONT_SHOW;
+        }
+        return SEARCH_ENGINE_PROMO_SHOW_SOGOU;
+    }
+
+    /**
+     * @return The referral ID to be passed when searching with Yandex as the DSE.
+     */
+    @CalledByNative
+    protected String getYandexReferralId() {
+        return "";
+    }
+
+    /**
+     * To be called after the user has made a selection from a search engine promo dialog.
+     * @param type The type of search engine promo dialog that was shown.
+     * @param keyword The keyword for the search engine chosen.
+     */
+    protected void onUserSearchEngineChoiceFromPromoDialog(
+            @SearchEnginePromoType int type, String keyword) {
+        TemplateUrlService.getInstance().setSearchEngine(keyword);
+        ContextUtils.getAppSharedPreferences()
+                .edit()
+                .putInt(KEY_SEARCH_ENGINE_PROMO_SHOW_STATE, SEARCH_ENGINE_PROMO_CHECKED_AND_SHOWN)
+                .apply();
+    }
+
     private SpecialLocaleHandler getSpecialLocaleHandler() {
         if (mLocaleHandler == null) mLocaleHandler = new SpecialLocaleHandler(getSpecialLocaleId());
         return mLocaleHandler;
+    }
+
+    /**
+     * Get the list of search engines that a user may choose between.
+     * @param promoType Which search engine list to show.
+     * @return List of engines to show.
+     */
+    public List<TemplateUrl> getSearchEnginesForPromoDialog(@SearchEnginePromoType int promoType) {
+        TemplateUrlService instance = TemplateUrlService.getInstance();
+        assert instance.isLoaded();
+        return instance.getSearchEngines();
+    }
+
+    /** Set a LocaleManager to be used for testing. */
+    @VisibleForTesting
+    public static void setInstanceForTest(LocaleManager instance) {
+        assert sInstance == null;
+        sInstance = instance;
     }
 }

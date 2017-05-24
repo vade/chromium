@@ -128,6 +128,9 @@ class DISPLAY_MANAGER_EXPORT DisplayManager
   // Returns the display layout used for current displays.
   const DisplayLayout& GetCurrentDisplayLayout() const;
 
+  // Returns the actual display layout after it has been resolved and applied.
+  const DisplayLayout& GetCurrentResolvedDisplayLayout() const;
+
   // Returns the current display list.
   DisplayIdList GetCurrentDisplayIdList() const;
 
@@ -135,8 +138,11 @@ class DISPLAY_MANAGER_EXPORT DisplayManager
   // locaion of the displays relative to their parents.
   void SetLayoutForCurrentDisplays(std::unique_ptr<DisplayLayout> layout);
 
-  // Returns display for given |id|;
-  const Display& GetDisplayForId(int64_t id) const;
+  // Returns display for given |display_id|.
+  const Display& GetDisplayForId(int64_t display_id) const;
+
+  // Checks the validity of given |display_id|.
+  bool IsDisplayIdValid(int64_t display_id) const;
 
   // Finds the display that contains |point| in screeen coordinates.  Returns
   // invalid display if there is no display that can satisfy the condition.
@@ -202,10 +208,17 @@ class DISPLAY_MANAGER_EXPORT DisplayManager
   scoped_refptr<ManagedDisplayMode> GetActiveModeForDisplayId(
       int64_t display_id) const;
 
-  // Returns the display's selected mode. This returns false and doesn't set
-  // |mode_out| if the display mode is in default.
+  // Returns the display's selected mode.
   scoped_refptr<ManagedDisplayMode> GetSelectedModeForDisplayId(
       int64_t display_id) const;
+
+  // Sets the selected mode of |display_id| to |display_mode| if it's a
+  // supported mode. This doesn't trigger reconfiguration or observers
+  // notifications. This is suitable to be used from within an observer
+  // notification to prevent reentrance to UpdateDisplaysWith().
+  void SetSelectedModeForDisplayId(
+      int64_t display_id,
+      const scoped_refptr<ManagedDisplayMode>& display_mode);
 
   // Tells if the virtual resolution feature is enabled.
   bool IsDisplayUIScalingEnabled() const;
@@ -412,7 +425,7 @@ class DISPLAY_MANAGER_EXPORT DisplayManager
 
   // Applies the |layout| and updates the bounds of displays in |display_list|.
   // |updated_ids| contains the ids for displays whose bounds have changed.
-  void ApplyDisplayLayout(const DisplayLayout& layout,
+  void ApplyDisplayLayout(DisplayLayout* layout,
                           Displays* display_list,
                           std::vector<int64_t>* updated_ids);
 
@@ -426,6 +439,8 @@ class DISPLAY_MANAGER_EXPORT DisplayManager
   std::unique_ptr<Screen> screen_;
 
   std::unique_ptr<DisplayLayoutStore> layout_store_;
+
+  std::unique_ptr<DisplayLayout> current_resolved_layout_;
 
   int64_t first_display_id_ = kInvalidDisplayId;
 
@@ -462,6 +477,9 @@ class DISPLAY_MANAGER_EXPORT DisplayManager
 
   int64_t mirroring_display_id_ = kInvalidDisplayId;
   Displays software_mirroring_display_list_;
+
+  // Cached mirror mode for metrics changed notification.
+  bool mirror_mode_for_metrics_ = false;
 
   // User preference for rotation lock of the internal display.
   bool registered_internal_display_rotation_lock_ = false;

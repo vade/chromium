@@ -139,14 +139,15 @@ DrmDisplayHostManager::DrmDisplayHostManager(
   proxy_->RegisterHandlerForDrmDisplayHostManager(this);
   proxy_->AddGpuThreadObserver(this);
 
-  ScopedVector<HardwareDisplayControllerInfo> display_infos =
+  auto display_infos =
       GetAvailableDisplayControllerInfos(primary_drm_device_handle_->fd());
   has_dummy_display_ = !display_infos.empty();
-  for (size_t i = 0; i < display_infos.size(); ++i) {
+  for (const auto& display_info : display_infos) {
     displays_.push_back(base::MakeUnique<DrmDisplayHost>(
-        proxy_, CreateDisplaySnapshotParams(
-                    display_infos[i], primary_drm_device_handle_->fd(),
-                    primary_drm_device_handle_->sys_path(), 0, gfx::Point()),
+        proxy_,
+        CreateDisplaySnapshotParams(
+            display_info.get(), primary_drm_device_handle_->fd(),
+            primary_drm_device_handle_->sys_path(), 0, gfx::Point()),
         true /* is_dummy */));
   }
 }
@@ -154,6 +155,7 @@ DrmDisplayHostManager::DrmDisplayHostManager(
 DrmDisplayHostManager::~DrmDisplayHostManager() {
   device_manager_->RemoveObserver(this);
   proxy_->UnRegisterHandlerForDrmDisplayHostManager();
+  proxy_->RemoveGpuThreadObserver(this);
 }
 
 DrmDisplayHost* DrmDisplayHostManager::GetDisplay(int64_t display_id) {
@@ -246,10 +248,8 @@ void DrmDisplayHostManager::ProcessEvent() {
         if (drm_devices_.find(event.path) == drm_devices_.end()) {
           base::PostTaskWithTraits(
               FROM_HERE,
-              base::TaskTraits()
-                  .WithShutdownBehavior(
-                      base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN)
-                  .MayBlock(),
+              {base::MayBlock(),
+               base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
               base::Bind(&OpenDeviceAsync, event.path,
                          base::ThreadTaskRunnerHandle::Get(),
                          base::Bind(&DrmDisplayHostManager::OnAddGraphicsDevice,

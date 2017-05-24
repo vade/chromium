@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 from page_sets.system_health import platforms
+from page_sets.system_health import story_tags
 
 from telemetry import decorators
 from telemetry.page import page
@@ -38,6 +39,8 @@ class _SystemHealthSharedState(shared_page_state.SharedPageState):
   """
 
   def CanRunStory(self, story):
+    if self._finder_options.run_disabled_tests:
+      return True
     return story.CanRun(self.possible_browser)
 
 
@@ -65,14 +68,22 @@ class SystemHealthStory(page.Page):
   URL = NotImplemented
   ABSTRACT_STORY = True
   SUPPORTED_PLATFORMS = platforms.ALL_PLATFORMS
+  TAGS = None
+  PLATFORM_SPECIFIC = False
 
   def __init__(self, story_set, take_memory_measurement):
     case, group, _ = self.NAME.split(':')
+    tags = []
+    if self.TAGS:
+      for t in self.TAGS:
+        assert t in story_tags.ALL_TAGS
+        tags.append(t.name)
     super(SystemHealthStory, self).__init__(
         shared_page_state_class=_SystemHealthSharedState, page_set=story_set,
-        name=self.NAME, url=self.URL,
+        name=self.NAME, url=self.URL, tags=tags,
         credentials_path='../data/credentials.json',
-        grouping_keys={'case': case, 'group': group})
+        grouping_keys={'case': case, 'group': group},
+        platform_specific=self.PLATFORM_SPECIFIC)
     self._take_memory_measurement = take_memory_measurement
 
   @classmethod

@@ -4,6 +4,7 @@
 
 #include "ui/views/widget/widget.h"
 
+#include "base/auto_reset.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
@@ -140,6 +141,14 @@ Widget::InitParams::InitParams(Type type)
 Widget::InitParams::InitParams(const InitParams& other) = default;
 
 Widget::InitParams::~InitParams() {
+}
+
+bool Widget::InitParams::CanActivate() const {
+  if (activatable != InitParams::ACTIVATABLE_DEFAULT)
+    return activatable == InitParams::ACTIVATABLE_YES;
+  return type != InitParams::TYPE_CONTROL && type != InitParams::TYPE_POPUP &&
+         type != InitParams::TYPE_MENU && type != InitParams::TYPE_TOOLTIP &&
+         type != InitParams::TYPE_DRAG;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -309,20 +318,9 @@ void Widget::Init(const InitParams& in_params) {
   if (params.opacity == views::Widget::InitParams::INFER_OPACITY)
     params.opacity = views::Widget::InitParams::OPAQUE_WINDOW;
 
-  bool can_activate = false;
-  if (params.activatable != InitParams::ACTIVATABLE_DEFAULT) {
-    can_activate = (params.activatable == InitParams::ACTIVATABLE_YES);
-  } else if (params.type != InitParams::TYPE_CONTROL &&
-             params.type != InitParams::TYPE_POPUP &&
-             params.type != InitParams::TYPE_MENU &&
-             params.type != InitParams::TYPE_TOOLTIP &&
-             params.type != InitParams::TYPE_DRAG) {
-    can_activate = true;
-    params.activatable = InitParams::ACTIVATABLE_YES;
-  } else {
-    can_activate = false;
-    params.activatable = InitParams::ACTIVATABLE_NO;
-  }
+  bool can_activate = params.CanActivate();
+  params.activatable =
+      can_activate ? InitParams::ACTIVATABLE_YES : InitParams::ACTIVATABLE_NO;
 
   widget_delegate_ = params.delegate ?
       params.delegate : new DefaultWidgetDelegate(this);
@@ -344,7 +342,12 @@ void Widget::Init(const InitParams& in_params) {
     // NonClientView to the RootView. This will cause everything to be parented.
     non_client_view_->set_client_view(widget_delegate_->CreateClientView(this));
     non_client_view_->SetOverlayView(widget_delegate_->CreateOverlayView());
-    SetContentsView(non_client_view_);
+
+    // Bypass the Layout() that happens in Widget::SetContentsView(). Layout()
+    // will occur after setting the initial bounds below. The RootView's size is
+    // not valid until that happens.
+    root_view_->SetContentsView(non_client_view_);
+
     // Initialize the window's icon and title before setting the window's
     // initial bounds; the frame view's preferred height may depend on the
     // presence of an icon or a title.
@@ -352,6 +355,12 @@ void Widget::Init(const InitParams& in_params) {
     UpdateWindowTitle();
     non_client_view_->ResetWindowControls();
     SetInitialBounds(params.bounds);
+
+    // Perform the initial layout. This handles the case where the size might
+    // not actually change when setting the initial bounds. If it did, child
+    // views won't have a dirty Layout state, so won't do any work.
+    root_view_->Layout();
+
     if (params.show_state == ui::SHOW_STATE_MAXIMIZED) {
       Maximize();
     } else if (params.show_state == ui::SHOW_STATE_MINIMIZED) {
@@ -458,7 +467,15 @@ void Widget::SetContentsView(View* view) {
   // Do not SetContentsView() again if it is already set to the same view.
   if (view == GetContentsView())
     return;
+
   root_view_->SetContentsView(view);
+
+  // Force a layout now, since the attached hierarchy won't be ready for the
+  // containing window's bounds. Note that we call Layout directly rather than
+  // calling the widget's size changed handler, since the RootView's bounds may
+  // not have changed, which will cause the Layout not to be done otherwise.
+  root_view_->Layout();
+
   if (non_client_view_ != view) {
     // |non_client_view_| can only be non-NULL here if RequiresNonClientView()
     // was true when the widget was initialized. Creating widgets with non
@@ -564,26 +581,26 @@ void Widget::Close() {
     return;
   }
 
-  bool can_close = true;
-  if (non_client_view_)
-    can_close = non_client_view_->CanClose();
-  if (can_close) {
-    SaveWindowPlacement();
+  if (non_client_view_ && !non_client_view_->CanClose())
+    return;
 
-    // During tear-down the top-level focus manager becomes unavailable to
-    // GTK tabbed panes and their children, so normal deregistration via
-    // |FormManager::ViewRemoved()| calls are fouled.  We clear focus here
-    // to avoid these redundant steps and to avoid accessing deleted views
-    // that may have been in focus.
-    if (is_top_level() && focus_manager_.get())
-      focus_manager_->SetFocusedView(NULL);
+  // The actions below can cause this function to be called again, so mark
+  // |this| as closed early. See crbug.com/714334
+  widget_closed_ = true;
+  SaveWindowPlacement();
 
-    for (WidgetObserver& observer : observers_)
-      observer.OnWidgetClosing(this);
+  // During tear-down the top-level focus manager becomes unavailable to
+  // GTK tabbed panes and their children, so normal deregistration via
+  // |FocusManager::ViewRemoved()| calls are fouled.  We clear focus here
+  // to avoid these redundant steps and to avoid accessing deleted views
+  // that may have been in focus.
+  if (is_top_level() && focus_manager_.get())
+    focus_manager_->SetFocusedView(nullptr);
 
-    native_widget_->Close();
-    widget_closed_ = true;
-  }
+  for (WidgetObserver& observer : observers_)
+    observer.OnWidgetClosing(this);
+
+  native_widget_->Close();
 }
 
 void Widget::CloseNow() {
@@ -703,6 +720,8 @@ bool Widget::IsFullscreen() const {
 }
 
 void Widget::SetOpacity(float opacity) {
+  DCHECK(opacity >= 0.0f);
+  DCHECK(opacity <= 1.0f);
   native_widget_->SetOpacity(opacity);
 }
 
@@ -1131,7 +1150,7 @@ void Widget::OnNativeWidgetPaint(const ui::PaintContext& context) {
   // SetInitialBounds call.
   if (!native_widget_initialized_)
     return;
-  GetRootView()->Paint(context);
+  GetRootView()->PaintFromPaintRoot(context);
 }
 
 int Widget::GetNonClientComponent(const gfx::Point& point) {
@@ -1146,7 +1165,7 @@ int Widget::GetNonClientComponent(const gfx::Point& point) {
 }
 
 void Widget::OnKeyEvent(ui::KeyEvent* event) {
-  SendEventToProcessor(event);
+  SendEventToSink(event);
   if (!event->handled() && GetFocusManager() &&
       !GetFocusManager()->OnKeyEvent(*event)) {
     event->StopPropagation();
@@ -1155,7 +1174,7 @@ void Widget::OnKeyEvent(ui::KeyEvent* event) {
 
 // TODO(tdanderson): We should not be calling the OnMouse*() functions on
 //                   RootView from anywhere in Widget. Use
-//                   SendEventToProcessor() instead. See crbug.com/348087.
+//                   SendEventToSink() instead. See crbug.com/348087.
 void Widget::OnMouseEvent(ui::MouseEvent* event) {
   View* root_view = GetRootView();
   switch (event->type()) {
@@ -1256,7 +1275,7 @@ void Widget::OnMouseCaptureLost() {
 
 void Widget::OnScrollEvent(ui::ScrollEvent* event) {
   ui::ScrollEvent event_copy(*event);
-  SendEventToProcessor(&event_copy);
+  SendEventToSink(&event_copy);
 
   // Convert unhandled ui::ET_SCROLL events into ui::ET_MOUSEWHEEL events.
   if (!event_copy.handled() && event_copy.type() == ui::ET_SCROLL) {
@@ -1269,7 +1288,7 @@ void Widget::OnGestureEvent(ui::GestureEvent* event) {
   // We explicitly do not capture here. Not capturing enables multiple widgets
   // to get tap events at the same time. Views (such as tab dragging) may
   // explicitly capture.
-  SendEventToProcessor(event);
+  SendEventToSink(event);
 }
 
 bool Widget::ExecuteCommand(int command_id) {
@@ -1306,10 +1325,13 @@ bool Widget::SetInitialFocus(ui::WindowShowState show_state) {
   }
   if (v) {
     v->RequestFocus();
-    // If the request for focus was unsuccessful, fall back to using the first
+    // If the Widget is active (thus allowing its child Views to receive focus),
+    // but the request for focus was unsuccessful, fall back to using the first
     // focusable View instead.
-    if (focus_manager && focus_manager->GetFocusedView() == nullptr)
+    if (focus_manager && focus_manager->GetFocusedView() == nullptr &&
+        IsActive()) {
       focus_manager->AdvanceFocus(false);
+    }
   }
   return !!focus_manager->GetFocusedView();
 }
@@ -1365,7 +1387,7 @@ bool Widget::ShouldDescendIntoChildForEventHandling(
 
 ////////////////////////////////////////////////////////////////////////////////
 // Widget, ui::EventSource implementation:
-ui::EventProcessor* Widget::GetEventProcessor() {
+ui::EventSink* Widget::GetEventSink() {
   return root_view_.get();
 }
 

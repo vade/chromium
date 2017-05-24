@@ -56,13 +56,13 @@ class MockLayoutHost implements LayoutManagerHost, LayoutRenderHost {
     public void onCompositorLayout() { }
 
     @Override
-    public void onSwapBuffersCompleted(int pendingSwapBuffersCount) { }
+    public void didSwapFrame(int pendingFrameCount) {}
 
     @Override
     public void onSurfaceCreated() { }
 
     @Override
-    public void onPhysicalBackingSizeChanged(int width, int height) { }
+    public void onSurfaceResized(int width, int height) {}
 
     @Override
     public Context getContext() {

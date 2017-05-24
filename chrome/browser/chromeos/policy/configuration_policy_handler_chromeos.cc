@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-#include "ash/common/accessibility_types.h"
+#include "ash/accessibility_types.h"
 #include "base/callback.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
@@ -103,20 +103,20 @@ std::unique_ptr<base::Value> GetAction(const base::DictionaryValue* dict,
   if (!value || !value->GetAsString(&action))
     return std::unique_ptr<base::Value>();
   if (action == kActionSuspend) {
-    return std::unique_ptr<base::Value>(new base::FundamentalValue(
-        chromeos::PowerPolicyController::ACTION_SUSPEND));
+    return std::unique_ptr<base::Value>(
+        new base::Value(chromeos::PowerPolicyController::ACTION_SUSPEND));
   }
   if (action == kActionLogout) {
-    return std::unique_ptr<base::Value>(new base::FundamentalValue(
-        chromeos::PowerPolicyController::ACTION_STOP_SESSION));
+    return std::unique_ptr<base::Value>(
+        new base::Value(chromeos::PowerPolicyController::ACTION_STOP_SESSION));
   }
   if (action == kActionShutdown) {
-    return std::unique_ptr<base::Value>(new base::FundamentalValue(
-        chromeos::PowerPolicyController::ACTION_SHUT_DOWN));
+    return std::unique_ptr<base::Value>(
+        new base::Value(chromeos::PowerPolicyController::ACTION_SHUT_DOWN));
   }
   if (action == kActionDoNothing) {
-    return std::unique_ptr<base::Value>(new base::FundamentalValue(
-        chromeos::PowerPolicyController::ACTION_DO_NOTHING));
+    return std::unique_ptr<base::Value>(
+        new base::Value(chromeos::PowerPolicyController::ACTION_DO_NOTHING));
   }
   return std::unique_ptr<base::Value>();
 }
@@ -266,7 +266,7 @@ void NetworkConfigurationPolicyHandler::PrepareForDisplaying(
   std::unique_ptr<base::Value> sanitized_config =
       SanitizeNetworkConfig(entry->value.get());
   if (!sanitized_config)
-    sanitized_config = base::Value::CreateNullValue();
+    sanitized_config = base::MakeUnique<base::Value>();
 
   policies->Set(policy_name(), entry->level, entry->scope, entry->source,
                 std::move(sanitized_config), nullptr);
@@ -303,7 +303,7 @@ NetworkConfigurationPolicyHandler::SanitizeNetworkConfig(
 
   base::JSONWriter::WriteWithOptions(
       *toplevel_dict, base::JSONWriter::OPTIONS_PRETTY_PRINT, &json_string);
-  return base::MakeUnique<base::StringValue>(json_string);
+  return base::MakeUnique<base::Value>(json_string);
 }
 
 PinnedLauncherAppsPolicyHandler::PinnedLauncherAppsPolicyHandler()
@@ -324,9 +324,9 @@ void PinnedLauncherAppsPolicyHandler::ApplyPolicySettings(
     for (base::ListValue::const_iterator entry(policy_list->begin());
          entry != policy_list->end(); ++entry) {
       std::string id;
-      if ((*entry)->GetAsString(&id)) {
+      if (entry->GetAsString(&id)) {
         auto app_dict = base::MakeUnique<base::DictionaryValue>();
-        app_dict->SetString(ash::launcher::kPinnedAppsPrefAppIDPath, id);
+        app_dict->SetString(kPinnedAppsPrefAppIDPath, id);
         pinned_apps_list->Append(std::move(app_dict));
       }
     }

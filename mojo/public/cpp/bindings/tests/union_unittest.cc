@@ -53,8 +53,8 @@ TEST(UnionTest, PlainOldDataGetterSetter) {
   EXPECT_TRUE(pod->is_f_int32());
   EXPECT_EQ(pod->which(), PodUnion::Tag::F_INT32);
 
-  pod->set_f_uint32(static_cast<uint32_t>(15));
-  EXPECT_EQ(static_cast<uint32_t>(15), pod->get_f_uint32());
+  pod->set_f_uint32(uint32_t{15});
+  EXPECT_EQ(uint32_t{15}, pod->get_f_uint32());
   EXPECT_TRUE(pod->is_f_uint32());
   EXPECT_EQ(pod->which(), PodUnion::Tag::F_UINT32);
 
@@ -63,8 +63,8 @@ TEST(UnionTest, PlainOldDataGetterSetter) {
   EXPECT_TRUE(pod->is_f_int64());
   EXPECT_EQ(pod->which(), PodUnion::Tag::F_INT64);
 
-  pod->set_f_uint64(static_cast<uint64_t>(17));
-  EXPECT_EQ(static_cast<uint64_t>(17), pod->get_f_uint64());
+  pod->set_f_uint64(uint64_t{17});
+  EXPECT_EQ(uint64_t{17}, pod->get_f_uint64());
   EXPECT_TRUE(pod->is_f_uint64());
   EXPECT_EQ(pod->which(), PodUnion::Tag::F_UINT64);
 
@@ -87,6 +87,70 @@ TEST(UnionTest, PlainOldDataGetterSetter) {
 
   pod->set_f_enum(AnEnum::SECOND);
   EXPECT_EQ(AnEnum::SECOND, pod->get_f_enum());
+  EXPECT_TRUE(pod->is_f_enum());
+  EXPECT_EQ(pod->which(), PodUnion::Tag::F_ENUM);
+}
+
+TEST(UnionTest, PlainOldDataFactoryFunction) {
+  PodUnionPtr pod = PodUnion::NewFInt8(11);
+  EXPECT_EQ(11, pod->get_f_int8());
+  EXPECT_TRUE(pod->is_f_int8());
+  EXPECT_EQ(pod->which(), PodUnion::Tag::F_INT8);
+
+  pod = PodUnion::NewFInt16(12);
+  EXPECT_EQ(12, pod->get_f_int16());
+  EXPECT_TRUE(pod->is_f_int16());
+  EXPECT_EQ(pod->which(), PodUnion::Tag::F_INT16);
+
+  pod = PodUnion::NewFUint16(13);
+  EXPECT_EQ(13, pod->get_f_uint16());
+  EXPECT_TRUE(pod->is_f_uint16());
+  EXPECT_EQ(pod->which(), PodUnion::Tag::F_UINT16);
+
+  pod = PodUnion::NewFInt32(14);
+  EXPECT_EQ(14, pod->get_f_int32());
+  EXPECT_TRUE(pod->is_f_int32());
+  EXPECT_EQ(pod->which(), PodUnion::Tag::F_INT32);
+
+  pod = PodUnion::NewFUint32(15);
+  EXPECT_EQ(uint32_t{15}, pod->get_f_uint32());
+  EXPECT_TRUE(pod->is_f_uint32());
+  EXPECT_EQ(pod->which(), PodUnion::Tag::F_UINT32);
+
+  pod = PodUnion::NewFInt64(16);
+  EXPECT_EQ(16, pod->get_f_int64());
+  EXPECT_TRUE(pod->is_f_int64());
+  EXPECT_EQ(pod->which(), PodUnion::Tag::F_INT64);
+
+  pod = PodUnion::NewFUint64(17);
+  EXPECT_EQ(uint64_t{17}, pod->get_f_uint64());
+  EXPECT_TRUE(pod->is_f_uint64());
+  EXPECT_EQ(pod->which(), PodUnion::Tag::F_UINT64);
+
+  pod = PodUnion::NewFFloat(1.5);
+  EXPECT_EQ(1.5, pod->get_f_float());
+  EXPECT_TRUE(pod->is_f_float());
+  EXPECT_EQ(pod->which(), PodUnion::Tag::F_FLOAT);
+
+  pod = PodUnion::NewFDouble(1.9);
+  EXPECT_EQ(1.9, pod->get_f_double());
+  EXPECT_TRUE(pod->is_f_double());
+  EXPECT_EQ(pod->which(), PodUnion::Tag::F_DOUBLE);
+
+  pod = PodUnion::NewFBool(true);
+  EXPECT_TRUE(pod->get_f_bool());
+  pod = PodUnion::NewFBool(false);
+  EXPECT_FALSE(pod->get_f_bool());
+  EXPECT_TRUE(pod->is_f_bool());
+  EXPECT_EQ(pod->which(), PodUnion::Tag::F_BOOL);
+
+  pod = PodUnion::NewFEnum(AnEnum::SECOND);
+  EXPECT_EQ(AnEnum::SECOND, pod->get_f_enum());
+  EXPECT_TRUE(pod->is_f_enum());
+  EXPECT_EQ(pod->which(), PodUnion::Tag::F_ENUM);
+
+  pod = PodUnion::NewFEnum(AnEnum::FIRST);
+  EXPECT_EQ(AnEnum::FIRST, pod->get_f_enum());
   EXPECT_TRUE(pod->is_f_enum());
   EXPECT_EQ(pod->which(), PodUnion::Tag::F_ENUM);
 }
@@ -139,8 +203,7 @@ TEST(UnionTest, PodSerialization) {
 }
 
 TEST(UnionTest, EnumSerialization) {
-  PodUnionPtr pod1(PodUnion::New());
-  pod1->set_f_enum(AnEnum::SECOND);
+  PodUnionPtr pod1(PodUnion::NewFEnum(AnEnum::SECOND));
 
   size_t size = mojo::internal::PrepareToSerialize<PodUnionDataView>(
       pod1, false, nullptr);
@@ -173,7 +236,7 @@ TEST(UnionTest, PodValidation) {
 
   void* raw_buf = buf.Leak();
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 0);
+      data, static_cast<uint32_t>(size), 0, 0);
   EXPECT_TRUE(
       internal::PodUnion_Data::Validate(raw_buf, &validation_context, false));
   free(raw_buf);
@@ -224,7 +287,7 @@ TEST(UnionTest, SerializeIsNullNotInlined) {
 
 TEST(UnionTest, NullValidation) {
   void* buf = nullptr;
-  mojo::internal::ValidationContext validation_context(buf, 0, 0);
+  mojo::internal::ValidationContext validation_context(buf, 0, 0, 0);
   EXPECT_TRUE(internal::PodUnion_Data::Validate(
       buf, &validation_context, false));
 }
@@ -239,7 +302,7 @@ TEST(UnionTest, OutOfAlignmentValidation) {
   internal::PodUnion_Data* data =
       reinterpret_cast<internal::PodUnion_Data*>(buf);
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 0);
+      data, static_cast<uint32_t>(size), 0, 0);
   EXPECT_FALSE(internal::PodUnion_Data::Validate(
       buf, &validation_context, false));
   free(raw_buf);
@@ -250,7 +313,7 @@ TEST(UnionTest, OOBValidation) {
   mojo::internal::FixedBufferForTesting buf(size);
   internal::PodUnion_Data* data = internal::PodUnion_Data::New(&buf);
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 0);
+      data, static_cast<uint32_t>(size), 0, 0);
   void* raw_buf = buf.Leak();
   EXPECT_FALSE(
       internal::PodUnion_Data::Validate(raw_buf, &validation_context, false));
@@ -263,7 +326,7 @@ TEST(UnionTest, UnknownTagValidation) {
   internal::PodUnion_Data* data = internal::PodUnion_Data::New(&buf);
   data->tag = static_cast<internal::PodUnion_Data::PodUnion_Tag>(0xFFFFFF);
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 0);
+      data, static_cast<uint32_t>(size), 0, 0);
   void* raw_buf = buf.Leak();
   EXPECT_FALSE(
       internal::PodUnion_Data::Validate(raw_buf, &validation_context, false));
@@ -271,8 +334,7 @@ TEST(UnionTest, UnknownTagValidation) {
 }
 
 TEST(UnionTest, UnknownEnumValueValidation) {
-  PodUnionPtr pod(PodUnion::New());
-  pod->set_f_enum(static_cast<AnEnum>(0xFFFF));
+  PodUnionPtr pod(PodUnion::NewFEnum(static_cast<AnEnum>(0xFFFF)));
 
   size_t size =
       mojo::internal::PrepareToSerialize<PodUnionDataView>(pod, false, nullptr);
@@ -284,15 +346,15 @@ TEST(UnionTest, UnknownEnumValueValidation) {
 
   void* raw_buf = buf.Leak();
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 0);
+      data, static_cast<uint32_t>(size), 0, 0);
   EXPECT_FALSE(
       internal::PodUnion_Data::Validate(raw_buf, &validation_context, false));
   free(raw_buf);
 }
 
 TEST(UnionTest, UnknownExtensibleEnumValueValidation) {
-  PodUnionPtr pod(PodUnion::New());
-  pod->set_f_extensible_enum(static_cast<AnExtensibleEnum>(0xFFFF));
+  PodUnionPtr pod(
+      PodUnion::NewFExtensibleEnum(static_cast<AnExtensibleEnum>(0xFFFF)));
 
   size_t size =
       mojo::internal::PrepareToSerialize<PodUnionDataView>(pod, false, nullptr);
@@ -304,7 +366,7 @@ TEST(UnionTest, UnknownExtensibleEnumValueValidation) {
 
   void* raw_buf = buf.Leak();
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 0);
+      data, static_cast<uint32_t>(size), 0, 0);
   EXPECT_TRUE(
       internal::PodUnion_Data::Validate(raw_buf, &validation_context, false));
   free(raw_buf);
@@ -320,12 +382,19 @@ TEST(UnionTest, StringGetterSetter) {
   EXPECT_EQ(pod->which(), ObjectUnion::Tag::F_STRING);
 }
 
-TEST(UnionTest, StringEquals) {
-  ObjectUnionPtr pod1(ObjectUnion::New());
-  ObjectUnionPtr pod2(ObjectUnion::New());
+TEST(UnionTest, StringFactoryFunction) {
+  std::string hello("hello world");
+  ObjectUnionPtr pod(ObjectUnion::NewFString(hello));
 
-  pod1->set_f_string("hello world");
-  pod2->set_f_string("hello world");
+  EXPECT_EQ(hello, pod->get_f_string());
+  EXPECT_TRUE(pod->is_f_string());
+  EXPECT_EQ(pod->which(), ObjectUnion::Tag::F_STRING);
+}
+
+TEST(UnionTest, StringEquals) {
+  ObjectUnionPtr pod1(ObjectUnion::NewFString("hello world"));
+  ObjectUnionPtr pod2(ObjectUnion::NewFString("hello world"));
+
   EXPECT_TRUE(pod1.Equals(pod2));
 
   pod2->set_f_string("hello universe");
@@ -333,10 +402,9 @@ TEST(UnionTest, StringEquals) {
 }
 
 TEST(UnionTest, StringClone) {
-  ObjectUnionPtr pod(ObjectUnion::New());
-
   std::string hello("hello world");
-  pod->set_f_string(hello);
+  ObjectUnionPtr pod(ObjectUnion::NewFString(hello));
+
   ObjectUnionPtr pod_clone = pod.Clone();
   EXPECT_EQ(hello, pod_clone->get_f_string());
   EXPECT_TRUE(pod_clone->is_f_string());
@@ -344,10 +412,8 @@ TEST(UnionTest, StringClone) {
 }
 
 TEST(UnionTest, StringSerialization) {
-  ObjectUnionPtr pod1(ObjectUnion::New());
-
   std::string hello("hello world");
-  pod1->set_f_string(hello);
+  ObjectUnionPtr pod1(ObjectUnion::NewFString(hello));
 
   size_t size = mojo::internal::PrepareToSerialize<ObjectUnionDataView>(
       pod1, false, nullptr);
@@ -370,7 +436,7 @@ TEST(UnionTest, NullStringValidation) {
   data->tag = internal::ObjectUnion_Data::ObjectUnion_Tag::F_STRING;
   data->data.unknown = 0x0;
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 0);
+      data, static_cast<uint32_t>(size), 0, 0);
   void* raw_buf = buf.Leak();
   EXPECT_FALSE(internal::ObjectUnion_Data::Validate(
       raw_buf, &validation_context, false));
@@ -384,7 +450,7 @@ TEST(UnionTest, StringPointerOverflowValidation) {
   data->tag = internal::ObjectUnion_Data::ObjectUnion_Tag::F_STRING;
   data->data.unknown = 0xFFFFFFFFFFFFFFFF;
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 0);
+      data, static_cast<uint32_t>(size), 0, 0);
   void* raw_buf = buf.Leak();
   EXPECT_FALSE(internal::ObjectUnion_Data::Validate(
       raw_buf, &validation_context, false));
@@ -403,7 +469,7 @@ TEST(UnionTest, StringValidateOOB) {
       reinterpret_cast<mojo::internal::ArrayHeader*>(ptr + *ptr);
   array_header->num_bytes = 20;  // This should go out of bounds.
   array_header->num_elements = 20;
-  mojo::internal::ValidationContext validation_context(data, 32, 0);
+  mojo::internal::ValidationContext validation_context(data, 32, 0, 0);
   void* raw_buf = buf.Leak();
   EXPECT_FALSE(internal::ObjectUnion_Data::Validate(
       raw_buf, &validation_context, false));
@@ -515,7 +581,7 @@ TEST(UnionTest, ObjectUnionInArraySerialization) {
       reinterpret_cast<mojo::internal::Array_Data<internal::ObjectUnion_Data>*>(
           new_buf.data());
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 0);
+      data, static_cast<uint32_t>(size), 0, 0);
   ASSERT_TRUE(mojo::internal::Array_Data<internal::ObjectUnion_Data>::Validate(
       data, &validation_context, &validate_params));
 
@@ -601,7 +667,7 @@ TEST(UnionTest, Validation_UnionsInStruct) {
 
   void* raw_buf = buf.Leak();
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 0);
+      data, static_cast<uint32_t>(size), 0, 0);
   EXPECT_TRUE(internal::SmallStruct_Data::Validate(
       raw_buf, &validation_context));
   free(raw_buf);
@@ -625,7 +691,7 @@ TEST(UnionTest, Validation_PodUnionInStruct_Failure) {
 
   void* raw_buf = buf.Leak();
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 0);
+      data, static_cast<uint32_t>(size), 0, 0);
   EXPECT_FALSE(internal::SmallStruct_Data::Validate(
       raw_buf, &validation_context));
   free(raw_buf);
@@ -646,7 +712,7 @@ TEST(UnionTest, Validation_NullUnion_Failure) {
 
   void* raw_buf = buf.Leak();
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 0);
+      data, static_cast<uint32_t>(size), 0, 0);
   EXPECT_FALSE(internal::SmallStructNonNullableUnion_Data::Validate(
       raw_buf, &validation_context));
   free(raw_buf);
@@ -667,7 +733,7 @@ TEST(UnionTest, Validation_NullableUnion) {
 
   void* raw_buf = buf.Leak();
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 0);
+      data, static_cast<uint32_t>(size), 0, 0);
   EXPECT_TRUE(internal::SmallStruct_Data::Validate(
       raw_buf, &validation_context));
   free(raw_buf);
@@ -794,7 +860,7 @@ TEST(UnionTest, StructInUnionValidation) {
 
   void* raw_buf = buf.Leak();
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 0);
+      data, static_cast<uint32_t>(size), 0, 0);
   EXPECT_TRUE(internal::ObjectUnion_Data::Validate(
       raw_buf, &validation_context, false));
   free(raw_buf);
@@ -818,7 +884,7 @@ TEST(UnionTest, StructInUnionValidationNonNullable) {
 
   void* raw_buf = buf.Leak();
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 0);
+      data, static_cast<uint32_t>(size), 0, 0);
   EXPECT_FALSE(internal::ObjectUnion_Data::Validate(
       raw_buf, &validation_context, false));
   free(raw_buf);
@@ -840,7 +906,7 @@ TEST(UnionTest, StructInUnionValidationNullable) {
 
   void* raw_buf = buf.Leak();
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 0);
+      data, static_cast<uint32_t>(size), 0, 0);
   EXPECT_TRUE(internal::ObjectUnion_Data::Validate(
       raw_buf, &validation_context, false));
   free(raw_buf);
@@ -899,7 +965,7 @@ TEST(UnionTest, ArrayInUnionValidation) {
 
   void* raw_buf = buf.Leak();
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 0);
+      data, static_cast<uint32_t>(size), 0, 0);
 
   EXPECT_TRUE(internal::ObjectUnion_Data::Validate(
       raw_buf, &validation_context, false));
@@ -963,7 +1029,7 @@ TEST(UnionTest, MapInUnionValidation) {
 
   void* raw_buf = buf.Leak();
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 0);
+      data, static_cast<uint32_t>(size), 0, 0);
 
   EXPECT_TRUE(internal::ObjectUnion_Data::Validate(
       raw_buf, &validation_context, false));
@@ -976,6 +1042,15 @@ TEST(UnionTest, UnionInUnionGetterSetter) {
 
   ObjectUnionPtr obj(ObjectUnion::New());
   obj->set_f_pod_union(std::move(pod));
+
+  EXPECT_EQ(10, obj->get_f_pod_union()->get_f_int8());
+}
+
+TEST(UnionTest, UnionInUnionFactoryFunction) {
+  PodUnionPtr pod(PodUnion::New());
+  pod->set_f_int8(10);
+
+  ObjectUnionPtr obj(ObjectUnion::NewFPodUnion(std::move(pod)));
 
   EXPECT_EQ(10, obj->get_f_pod_union()->get_f_int8());
 }
@@ -1019,7 +1094,7 @@ TEST(UnionTest, UnionInUnionValidation) {
 
   void* raw_buf = buf.Leak();
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 0);
+      data, static_cast<uint32_t>(size), 0, 0);
   EXPECT_TRUE(internal::ObjectUnion_Data::Validate(
       raw_buf, &validation_context, false));
   free(raw_buf);
@@ -1043,7 +1118,7 @@ TEST(UnionTest, UnionInUnionValidationNonNullable) {
 
   void* raw_buf = buf.Leak();
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 0);
+      data, static_cast<uint32_t>(size), 0, 0);
   EXPECT_FALSE(internal::ObjectUnion_Data::Validate(
       raw_buf, &validation_context, false));
   free(raw_buf);
@@ -1057,6 +1132,23 @@ TEST(UnionTest, HandleInUnionGetterSetter) {
 
   HandleUnionPtr handle(HandleUnion::New());
   handle->set_f_message_pipe(std::move(pipe1));
+
+  std::string golden("hello world");
+  WriteTextMessage(pipe0.get(), golden);
+
+  std::string actual;
+  ReadTextMessage(handle->get_f_message_pipe().get(), &actual);
+
+  EXPECT_EQ(golden, actual);
+}
+
+TEST(UnionTest, HandleInUnionGetterFactoryFunction) {
+  ScopedMessagePipeHandle pipe0;
+  ScopedMessagePipeHandle pipe1;
+
+  CreateMessagePipe(nullptr, &pipe0, &pipe1);
+
+  HandleUnionPtr handle(HandleUnion::NewFMessagePipe(std::move(pipe1)));
 
   std::string golden("hello world");
   WriteTextMessage(pipe0.get(), golden);
@@ -1120,7 +1212,7 @@ TEST(UnionTest, HandleInUnionValidation) {
 
   void* raw_buf = buf.Leak();
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 1);
+      data, static_cast<uint32_t>(size), 1, 0);
   EXPECT_TRUE(internal::HandleUnion_Data::Validate(
       raw_buf, &validation_context, false));
   free(raw_buf);
@@ -1145,7 +1237,7 @@ TEST(UnionTest, HandleInUnionValidationNull) {
 
   void* raw_buf = buf.Leak();
   mojo::internal::ValidationContext validation_context(
-      data, static_cast<uint32_t>(size), 1);
+      data, static_cast<uint32_t>(size), 1, 0);
   EXPECT_FALSE(internal::HandleUnion_Data::Validate(
       raw_buf, &validation_context, false));
   free(raw_buf);
@@ -1180,6 +1272,20 @@ TEST(UnionTest, InterfaceInUnion) {
 
   HandleUnionPtr handle(HandleUnion::New());
   handle->set_f_small_cache(std::move(ptr));
+
+  handle->get_f_small_cache()->SetIntValue(10);
+  run_loop.Run();
+  EXPECT_EQ(10, impl.int_value());
+}
+
+TEST(UnionTest, InterfaceInUnionFactoryFunction) {
+  base::MessageLoop message_loop;
+  base::RunLoop run_loop;
+  SmallCacheImpl impl(run_loop.QuitClosure());
+  SmallCachePtr ptr;
+  Binding<SmallCache> bindings(&impl, MakeRequest(&ptr));
+
+  HandleUnionPtr handle(HandleUnion::NewFSmallCache(std::move(ptr)));
 
   handle->get_f_small_cache()->SetIntValue(10);
   run_loop.Run();

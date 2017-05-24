@@ -86,9 +86,7 @@ const SkBitmap GdkPixbufToImageSkia(GdkPixbuf* pixbuf) {
 
 GdkPixbuf* GdkPixbufFromSkBitmap(const SkBitmap& bitmap) {
   if (bitmap.isNull())
-    return NULL;
-
-  SkAutoLockPixels lock_pixels(bitmap);
+    return nullptr;
 
   int width = bitmap.width();
   int height = bitmap.height();

@@ -23,14 +23,15 @@ PageTimingMetricsSender::PageTimingMetricsSender(
     IPC::Sender* ipc_sender,
     int routing_id,
     std::unique_ptr<base::Timer> timer,
-    const PageLoadTiming& initial_timing)
+    mojom::PageLoadTimingPtr initial_timing)
     : ipc_sender_(ipc_sender),
       routing_id_(routing_id),
       timer_(std::move(timer)),
-      last_timing_(initial_timing),
-      metadata_(PageLoadMetadata()) {
-  // Send an initial IPC relatively early to help track aborts.
-  EnsureSendTimer(kInitialTimerDelayMillis);
+      last_timing_(std::move(initial_timing)),
+      metadata_(mojom::PageLoadMetadata()) {
+  if (!IsEmpty(*last_timing_)) {
+    EnsureSendTimer();
+  }
 }
 
 // On destruction, we want to send any data we have if we have a timer
@@ -47,35 +48,41 @@ void PageTimingMetricsSender::DidObserveLoadingBehavior(
   if (behavior & metadata_.behavior_flags)
     return;
   metadata_.behavior_flags |= behavior;
-  EnsureSendTimer(kTimerDelayMillis);
+  EnsureSendTimer();
 }
 
-void PageTimingMetricsSender::Send(const PageLoadTiming& timing) {
-  if (timing == last_timing_)
+void PageTimingMetricsSender::Send(mojom::PageLoadTimingPtr timing) {
+  if (last_timing_->Equals(*timing))
     return;
 
   // We want to make sure that each PageTimingMetricsSender is associated
   // with a distinct page navigation. Because we reset the object on commit,
   // we can trash last_timing_ on a provisional load before SendNow() fires.
-  if (!last_timing_.navigation_start.is_null() &&
-      last_timing_.navigation_start != timing.navigation_start) {
+  if (!last_timing_->navigation_start.is_null() &&
+      last_timing_->navigation_start != timing->navigation_start) {
     return;
   }
 
-  last_timing_ = timing;
-  EnsureSendTimer(kTimerDelayMillis);
+  last_timing_ = std::move(timing);
+  EnsureSendTimer();
 }
 
-void PageTimingMetricsSender::EnsureSendTimer(int delay) {
-  if (!timer_->IsRunning())
+void PageTimingMetricsSender::EnsureSendTimer() {
+  if (!timer_->IsRunning()) {
+    // Send the first IPC eagerly to make sure the receiving side knows we're
+    // sending metrics as soon as possible.
+    int delay_ms =
+        have_sent_ipc_ ? kTimerDelayMillis : kInitialTimerDelayMillis;
     timer_->Start(
-        FROM_HERE, base::TimeDelta::FromMilliseconds(delay),
+        FROM_HERE, base::TimeDelta::FromMilliseconds(delay_ms),
         base::Bind(&PageTimingMetricsSender::SendNow, base::Unretained(this)));
+  }
 }
 
 void PageTimingMetricsSender::SendNow() {
+  have_sent_ipc_ = true;
   ipc_sender_->Send(new PageLoadMetricsMsg_TimingUpdated(
-      routing_id_, last_timing_, metadata_));
+      routing_id_, *last_timing_, metadata_));
 }
 
 }  // namespace page_load_metrics

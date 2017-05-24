@@ -6,18 +6,20 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <set>
+#include <utility>
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
-#include "chrome/browser/chromeos/arc/arc_support_host.h"
 #include "chrome/browser/prefs/pref_service_syncable_util.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
+#include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/browser/ui/ash/launcher/launcher_controller_helper.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
@@ -30,22 +32,26 @@
 #include "ui/display/screen.h"
 #include "ui/display/types/display_constants.h"
 
-namespace ash {
-namespace launcher {
-
 namespace {
+
+std::unique_ptr<base::DictionaryValue> CreateAppDict(
+    const std::string& app_id) {
+  auto app_value = base::MakeUnique<base::DictionaryValue>();
+  app_value->SetString(kPinnedAppsPrefAppIDPath, app_id);
+  return app_value;
+}
 
 // App ID of default pinned apps.
 const char* kDefaultPinnedApps[] = {
     extension_misc::kGmailAppId, extension_misc::kGoogleDocAppId,
-    extension_misc::kYoutubeAppId, ArcSupportHost::kHostAppId};
+    extension_misc::kYoutubeAppId, arc::kPlayStoreAppId};
 
-base::ListValue* CreateDefaultPinnedAppsList() {
+std::unique_ptr<base::ListValue> CreateDefaultPinnedAppsList() {
   std::unique_ptr<base::ListValue> apps(new base::ListValue);
   for (size_t i = 0; i < arraysize(kDefaultPinnedApps); ++i)
-    apps->Append(CreateAppDict(AppLauncherId(kDefaultPinnedApps[i])));
+    apps->Append(CreateAppDict(kDefaultPinnedApps[i]));
 
-  return apps.release();
+  return apps;
 }
 
 // Returns the preference value for the display with the given |display_id|.
@@ -114,35 +120,48 @@ void SetPerDisplayPref(PrefService* prefs,
   if (display_id < 0)
     return;
 
+  // Avoid DictionaryPrefUpdate's notifications for read but unmodified prefs.
+  const base::DictionaryValue* current_shelf_prefs =
+      prefs->GetDictionary(prefs::kShelfPreferences);
+  DCHECK(current_shelf_prefs);
+  std::string display_key = base::Int64ToString(display_id);
+  const base::DictionaryValue* current_display_prefs = nullptr;
+  std::string current_value;
+  if (current_shelf_prefs->GetDictionary(display_key, &current_display_prefs) &&
+      current_display_prefs->GetString(pref_key, &current_value) &&
+      current_value == value) {
+    return;
+  }
+
   DictionaryPrefUpdate update(prefs, prefs::kShelfPreferences);
   base::DictionaryValue* shelf_prefs = update.Get();
-  base::DictionaryValue* pref_dictionary = nullptr;
-  std::string key = base::Int64ToString(display_id);
-  if (!shelf_prefs->GetDictionary(key, &pref_dictionary)) {
-    pref_dictionary = new base::DictionaryValue();
-    shelf_prefs->Set(key, pref_dictionary);
+  base::DictionaryValue* display_prefs_weak = nullptr;
+  if (!shelf_prefs->GetDictionary(display_key, &display_prefs_weak)) {
+    auto display_prefs = base::MakeUnique<base::DictionaryValue>();
+    display_prefs_weak = display_prefs.get();
+    shelf_prefs->Set(display_key, std::move(display_prefs));
   }
-  pref_dictionary->SetStringWithoutPathExpansion(pref_key, value);
+  display_prefs_weak->SetStringWithoutPathExpansion(pref_key, value);
 }
 
-ShelfAlignment AlignmentFromPref(const std::string& value) {
+ash::ShelfAlignment AlignmentFromPref(const std::string& value) {
   if (value == kShelfAlignmentLeft)
-    return SHELF_ALIGNMENT_LEFT;
+    return ash::SHELF_ALIGNMENT_LEFT;
   else if (value == kShelfAlignmentRight)
-    return SHELF_ALIGNMENT_RIGHT;
+    return ash::SHELF_ALIGNMENT_RIGHT;
   // Default to bottom.
-  return SHELF_ALIGNMENT_BOTTOM;
+  return ash::SHELF_ALIGNMENT_BOTTOM;
 }
 
-const char* AlignmentToPref(ShelfAlignment alignment) {
+const char* AlignmentToPref(ash::ShelfAlignment alignment) {
   switch (alignment) {
-    case SHELF_ALIGNMENT_BOTTOM:
+    case ash::SHELF_ALIGNMENT_BOTTOM:
       return kShelfAlignmentBottom;
-    case SHELF_ALIGNMENT_LEFT:
+    case ash::SHELF_ALIGNMENT_LEFT:
       return kShelfAlignmentLeft;
-    case SHELF_ALIGNMENT_RIGHT:
+    case ash::SHELF_ALIGNMENT_RIGHT:
       return kShelfAlignmentRight;
-    case SHELF_ALIGNMENT_BOTTOM_LOCKED:
+    case ash::SHELF_ALIGNMENT_BOTTOM_LOCKED:
       // This should not be a valid preference option for now. We only want to
       // lock the shelf during login or when adding a user.
       return nullptr;
@@ -151,23 +170,23 @@ const char* AlignmentToPref(ShelfAlignment alignment) {
   return nullptr;
 }
 
-ShelfAutoHideBehavior AutoHideBehaviorFromPref(const std::string& value) {
+ash::ShelfAutoHideBehavior AutoHideBehaviorFromPref(const std::string& value) {
   // Note: To maintain sync compatibility with old images of chrome/chromeos
   // the set of values that may be encountered includes the now-extinct
   // "Default" as well as "Never" and "Always", "Default" should now
   // be treated as "Never" (http://crbug.com/146773).
   if (value == kShelfAutoHideBehaviorAlways)
-    return SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS;
-  return SHELF_AUTO_HIDE_BEHAVIOR_NEVER;
+    return ash::SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS;
+  return ash::SHELF_AUTO_HIDE_BEHAVIOR_NEVER;
 }
 
-const char* AutoHideBehaviorToPref(ShelfAutoHideBehavior behavior) {
+const char* AutoHideBehaviorToPref(ash::ShelfAutoHideBehavior behavior) {
   switch (behavior) {
-    case SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS:
+    case ash::SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS:
       return kShelfAutoHideBehaviorAlways;
-    case SHELF_AUTO_HIDE_BEHAVIOR_NEVER:
+    case ash::SHELF_AUTO_HIDE_BEHAVIOR_NEVER:
       return kShelfAutoHideBehaviorNever;
-    case SHELF_AUTO_HIDE_ALWAYS_HIDDEN:
+    case ash::SHELF_AUTO_HIDE_ALWAYS_HIDDEN:
       // This should not be a valid preference option for now. We only want to
       // completely hide it when we run in app mode - or while we temporarily
       // hide the shelf as part of an animation (e.g. the multi user change).
@@ -206,12 +225,19 @@ void PropagatePrefToLocalIfNotSet(
     pref_service->SetString(local_path, pref_service->GetString(synced_path));
 }
 
-struct PinInfo {
-  PinInfo(const AppLauncherId& app_launcher_id,
-          const syncer::StringOrdinal& item_ordinal)
-      : app_launcher_id(app_launcher_id), item_ordinal(item_ordinal) {}
+std::vector<ash::ShelfID> AppIdsToShelfIDs(
+    const std::vector<std::string> app_ids) {
+  std::vector<ash::ShelfID> shelf_ids(app_ids.size());
+  for (size_t i = 0; i < app_ids.size(); ++i)
+    shelf_ids[i] = ash::ShelfID(app_ids[i]);
+  return shelf_ids;
+}
 
-  AppLauncherId app_launcher_id;
+struct PinInfo {
+  PinInfo(const std::string& app_id, const syncer::StringOrdinal& item_ordinal)
+      : app_id(app_id), item_ordinal(item_ordinal) {}
+
+  std::string app_id;
   syncer::StringOrdinal item_ordinal;
 };
 
@@ -225,26 +251,25 @@ struct ComparePinInfo {
 // to check if app exists in the list.
 class AppTracker {
  public:
-  bool HasApp(const AppLauncherId& app_launcher_id) const {
-    return app_set_.find(app_launcher_id) != app_set_.end();
+  bool HasApp(const std::string& app_id) const {
+    return app_set_.find(app_id) != app_set_.end();
   }
 
-  void AddApp(const AppLauncherId& app_launcher_id) {
-    if (HasApp(app_launcher_id))
+  void AddApp(const std::string& app_id) {
+    if (HasApp(app_id))
       return;
-    app_list_.push_back(app_launcher_id);
-    app_set_.insert(app_launcher_id);
+    app_list_.push_back(app_id);
+    app_set_.insert(app_id);
   }
 
-  void MaybeAddApp(const AppLauncherId& app_launcher_id,
+  void MaybeAddApp(const std::string& app_id,
                    const LauncherControllerHelper* helper,
                    bool check_for_valid_app) {
-    DCHECK_NE(kPinnedAppsPlaceholder, app_launcher_id.ToString());
-    if (check_for_valid_app &&
-        !helper->IsValidIDForCurrentUser(app_launcher_id.ToString())) {
+    DCHECK_NE(kPinnedAppsPlaceholder, app_id);
+    if (check_for_valid_app && !helper->IsValidIDForCurrentUser(app_id)) {
       return;
     }
-    AddApp(app_launcher_id);
+    AddApp(app_id);
   }
 
   void MaybeAddAppFromPref(const base::DictionaryValue* app_pref,
@@ -266,14 +291,14 @@ class AppTracker {
       return;
     }
 
-    MaybeAddApp(AppLauncherId(app_id), helper, check_for_valid_app);
+    MaybeAddApp(app_id, helper, check_for_valid_app);
   }
 
-  const std::vector<AppLauncherId>& app_list() const { return app_list_; }
+  const std::vector<std::string>& app_list() const { return app_list_; }
 
  private:
-  std::vector<AppLauncherId> app_list_;
-  std::set<AppLauncherId> app_set_;
+  std::vector<std::string> app_list_;
+  std::set<std::string> app_set_;
 };
 
 }  // namespace
@@ -288,28 +313,6 @@ const char kShelfAutoHideBehaviorNever[] = "Never";
 const char kShelfAlignmentBottom[] = "Bottom";
 const char kShelfAlignmentLeft[] = "Left";
 const char kShelfAlignmentRight[] = "Right";
-
-AppLauncherId::AppLauncherId(const std::string& app_id,
-                             const std::string& launch_id)
-    : app_id_(app_id), launch_id_(launch_id) {
-  DCHECK(!app_id.empty());
-}
-
-AppLauncherId::AppLauncherId(const std::string& app_id) : app_id_(app_id) {
-  DCHECK(!app_id.empty());
-}
-
-AppLauncherId::AppLauncherId() {}
-
-AppLauncherId::~AppLauncherId() {}
-
-std::string AppLauncherId::ToString() const {
-  return app_id_ + launch_id_;
-}
-
-bool AppLauncherId::operator<(const AppLauncherId& other) const {
-  return ToString() < other.ToString();
-}
 
 void RegisterChromeLauncherUserPrefs(
     user_prefs::PrefRegistrySyncable* registry) {
@@ -337,20 +340,13 @@ void RegisterChromeLauncherUserPrefs(
   registry->RegisterBooleanPref(prefs::kShowLogoutButtonInTray, false);
 }
 
-std::unique_ptr<base::DictionaryValue> CreateAppDict(
-    const AppLauncherId& app_launcher_id) {
-  auto app_value = base::MakeUnique<base::DictionaryValue>();
-  app_value->SetString(kPinnedAppsPrefAppIDPath, app_launcher_id.ToString());
-  return app_value;
-}
-
-ShelfAutoHideBehavior GetShelfAutoHideBehaviorPref(PrefService* prefs,
-                                                   int64_t display_id) {
+ash::ShelfAutoHideBehavior GetShelfAutoHideBehaviorPref(PrefService* prefs,
+                                                        int64_t display_id) {
   DCHECK_NE(display_id, display::kInvalidDisplayId);
 
   // Don't show the shelf in app mode.
   if (chrome::IsRunningInAppMode())
-    return SHELF_AUTO_HIDE_ALWAYS_HIDDEN;
+    return ash::SHELF_AUTO_HIDE_ALWAYS_HIDDEN;
 
   // See comment in |kShelfAlignment| as to why we consider two prefs.
   return AutoHideBehaviorFromPref(
@@ -360,7 +356,7 @@ ShelfAutoHideBehavior GetShelfAutoHideBehaviorPref(PrefService* prefs,
 
 void SetShelfAutoHideBehaviorPref(PrefService* prefs,
                                   int64_t display_id,
-                                  ShelfAutoHideBehavior behavior) {
+                                  ash::ShelfAutoHideBehavior behavior) {
   DCHECK_NE(display_id, display::kInvalidDisplayId);
 
   const char* value = AutoHideBehaviorToPref(behavior);
@@ -375,7 +371,8 @@ void SetShelfAutoHideBehaviorPref(PrefService* prefs,
   }
 }
 
-ShelfAlignment GetShelfAlignmentPref(PrefService* prefs, int64_t display_id) {
+ash::ShelfAlignment GetShelfAlignmentPref(PrefService* prefs,
+                                          int64_t display_id) {
   DCHECK_NE(display_id, display::kInvalidDisplayId);
 
   // See comment in |kShelfAlignment| as to why we consider two prefs.
@@ -385,7 +382,7 @@ ShelfAlignment GetShelfAlignmentPref(PrefService* prefs, int64_t display_id) {
 
 void SetShelfAlignmentPref(PrefService* prefs,
                            int64_t display_id,
-                           ShelfAlignment alignment) {
+                           ash::ShelfAlignment alignment) {
   DCHECK_NE(display_id, display::kInvalidDisplayId);
 
   const char* value = AlignmentToPref(alignment);
@@ -438,16 +435,15 @@ void GetAppsPinnedByPolicy(const PrefService* prefs,
       for (const auto& activity : activities) {
         const std::string arc_app_id =
             ArcAppListPrefs::GetAppId(arc_package, activity);
-        apps->MaybeAddApp(AppLauncherId(arc_app_id), helper,
-                          check_for_valid_app);
+        apps->MaybeAddApp(arc_app_id, helper, check_for_valid_app);
       }
     } else {
-      apps->MaybeAddApp(AppLauncherId(app_id), helper, check_for_valid_app);
+      apps->MaybeAddApp(app_id, helper, check_for_valid_app);
     }
   }
 }
 
-std::vector<AppLauncherId> GetPinnedAppsFromPrefsLegacy(
+std::vector<std::string> GetPinnedAppsFromPrefsLegacy(
     const PrefService* prefs,
     const LauncherControllerHelper* helper,
     bool check_for_valid_app) {
@@ -465,7 +461,7 @@ std::vector<AppLauncherId> GetPinnedAppsFromPrefsLegacy(
 
   // Check if Chrome is in either of the the preferences lists.
   std::unique_ptr<base::Value> chrome_app(
-      CreateAppDict(AppLauncherId(extension_misc::kChromeAppId)));
+      CreateAppDict(extension_misc::kChromeAppId));
 
   AppTracker apps;
   GetAppsPinnedByPolicy(prefs, helper, check_for_valid_app, &apps);
@@ -475,7 +471,7 @@ std::vector<AppLauncherId> GetPinnedAppsFromPrefsLegacy(
     // We need to position the chrome icon relative to its place in the pinned
     // preference list - even if an item of that list isn't shown yet.
     if (i == chrome_icon_index)
-      apps.AddApp(AppLauncherId(extension_misc::kChromeAppId));
+      apps.AddApp(extension_misc::kChromeAppId);
     const base::DictionaryValue* app_pref = nullptr;
     if (!pinned_apps->GetDictionary(i, &app_pref)) {
       LOG(ERROR) << "There is no dictionary for app entry.";
@@ -485,7 +481,7 @@ std::vector<AppLauncherId> GetPinnedAppsFromPrefsLegacy(
   }
 
   // If not added yet, the chrome item will be the last item in the list.
-  apps.AddApp(AppLauncherId(extension_misc::kChromeAppId));
+  apps.AddApp(extension_misc::kChromeAppId);
   return apps.app_list();
 }
 
@@ -564,26 +560,26 @@ syncer::StringOrdinal GetLastPinPosition(Profile* profile) {
                             : syncer::StringOrdinal::CreateInitialOrdinal();
 }
 
-std::vector<AppLauncherId> ImportLegacyPinnedApps(
+std::vector<std::string> ImportLegacyPinnedApps(
     const PrefService* prefs,
     LauncherControllerHelper* helper) {
-  std::vector<AppLauncherId> legacy_pins_all =
+  const std::vector<std::string> legacy_pins_all =
       GetPinnedAppsFromPrefsLegacy(prefs, helper, false);
   DCHECK(!legacy_pins_all.empty());
 
   app_list::AppListSyncableService* app_service =
       app_list::AppListSyncableServiceFactory::GetForProfile(helper->profile());
 
-  std::vector<AppLauncherId> legacy_pins_valid;
+  std::vector<std::string> legacy_pins_valid;
   syncer::StringOrdinal last_position =
       syncer::StringOrdinal::CreateInitialOrdinal();
   // Convert to sync item record.
-  for (const auto& app_launcher_id : legacy_pins_all) {
-    DCHECK_NE(kPinnedAppsPlaceholder, app_launcher_id.ToString());
-    app_service->SetPinPosition(app_launcher_id.ToString(), last_position);
+  for (const auto& app_id : legacy_pins_all) {
+    DCHECK_NE(kPinnedAppsPlaceholder, app_id);
+    app_service->SetPinPosition(app_id, last_position);
     last_position = last_position.CreateAfter();
-    if (helper->IsValidIDForCurrentUser(app_launcher_id.ToString()))
-      legacy_pins_valid.push_back(app_launcher_id);
+    if (helper->IsValidIDForCurrentUser(app_id))
+      legacy_pins_valid.push_back(app_id);
   }
 
   // Now process default apps.
@@ -602,14 +598,14 @@ std::vector<AppLauncherId> ImportLegacyPinnedApps(
   return legacy_pins_valid;
 }
 
-std::vector<AppLauncherId> GetPinnedAppsFromPrefs(
+std::vector<ash::ShelfID> GetPinnedAppsFromPrefs(
     const PrefService* prefs,
     LauncherControllerHelper* helper) {
   app_list::AppListSyncableService* app_service =
       app_list::AppListSyncableServiceFactory::GetForProfile(helper->profile());
   // Some unit tests may not have it or service may not be initialized.
   if (!app_service || !app_service->IsInitialized())
-    return std::vector<AppLauncherId>();
+    return std::vector<ash::ShelfID>();
 
   std::vector<PinInfo> pin_infos;
 
@@ -628,8 +624,8 @@ std::vector<AppLauncherId> GetPinnedAppsFromPrefs(
       continue;
     }
 
-    pin_infos.push_back(PinInfo(AppLauncherId(sync_peer.first),
-                                sync_peer.second->item_pin_ordinal));
+    pin_infos.push_back(
+        PinInfo(sync_peer.first, sync_peer.second->item_pin_ordinal));
   }
 
   if (first_run) {
@@ -637,11 +633,12 @@ std::vector<AppLauncherId> GetPinnedAppsFromPrefs(
     sync_preferences::PrefServiceSyncable* const pref_service_syncable =
         PrefServiceSyncableFromProfile(helper->profile());
     if (!pref_service_syncable->IsSyncing())
-      return GetPinnedAppsFromPrefsLegacy(prefs, helper, true);
+      return AppIdsToShelfIDs(
+          GetPinnedAppsFromPrefsLegacy(prefs, helper, true));
 
     // We need to import legacy pins model and convert it to sync based
     // model.
-    return ImportLegacyPinnedApps(prefs, helper);
+    return AppIdsToShelfIDs(ImportLegacyPinnedApps(prefs, helper));
   }
 
   // Sort pins according their ordinals.
@@ -652,70 +649,82 @@ std::vector<AppLauncherId> GetPinnedAppsFromPrefs(
 
   // Pinned by policy apps appear first, if they were not shown before.
   syncer::StringOrdinal front_position = GetFirstPinPosition(helper->profile());
-  std::vector<AppLauncherId>::const_reverse_iterator it;
+  std::vector<std::string>::const_reverse_iterator it;
   for (it = policy_apps.app_list().rbegin();
        it != policy_apps.app_list().rend(); ++it) {
-    const std::string& app_launcher_id_str = (*it).ToString();
-    if (app_launcher_id_str == kPinnedAppsPlaceholder)
+    const std::string& app_id = *it;
+    if (app_id == kPinnedAppsPlaceholder)
       continue;
 
     // Check if we already processed current app.
-    if (app_service->GetPinPosition(app_launcher_id_str).IsValid())
+    if (app_service->GetPinPosition(app_id).IsValid())
       continue;
 
     // Now move it to the front.
-    pin_infos.insert(pin_infos.begin(),
-                     PinInfo(AppLauncherId((*it).app_id(), (*it).launch_id()),
-                             front_position));
-    app_service->SetPinPosition(app_launcher_id_str, front_position);
+    pin_infos.insert(pin_infos.begin(), PinInfo(*it, front_position));
+    app_service->SetPinPosition(app_id, front_position);
     front_position = front_position.CreateBefore();
   }
 
   // Now insert Chrome browser app if needed.
   if (!app_service->GetPinPosition(extension_misc::kChromeAppId).IsValid()) {
-    pin_infos.insert(
-        pin_infos.begin(),
-        PinInfo(AppLauncherId(extension_misc::kChromeAppId), front_position));
+    pin_infos.insert(pin_infos.begin(),
+                     PinInfo(extension_misc::kChromeAppId, front_position));
     app_service->SetPinPosition(extension_misc::kChromeAppId, front_position);
   }
 
-  if (helper->IsValidIDForCurrentUser(ArcSupportHost::kHostAppId)) {
-    if (!app_service->GetSyncItem(ArcSupportHost::kHostAppId)) {
-      const syncer::StringOrdinal arc_host_position =
-          GetLastPinPosition(helper->profile());
-      pin_infos.insert(pin_infos.begin(),
-                       PinInfo(AppLauncherId(ArcSupportHost::kHostAppId),
-                               arc_host_position));
-      app_service->SetPinPosition(ArcSupportHost::kHostAppId,
-                                  arc_host_position);
-    }
+  if (helper->IsValidIDForCurrentUser(arc::kPlayStoreAppId) &&
+      !app_service->GetSyncItem(arc::kPlayStoreAppId)) {
+    const syncer::StringOrdinal arc_host_position =
+        GetLastPinPosition(helper->profile());
+    pin_infos.insert(pin_infos.begin(),
+                     PinInfo(arc::kPlayStoreAppId, arc_host_position));
+    app_service->SetPinPosition(arc::kPlayStoreAppId, arc_host_position);
   }
 
-  // Convert to AppLauncherId array.
-  std::vector<AppLauncherId> pins(pin_infos.size(), AppLauncherId());
+  // Convert to ShelfID array.
+  std::vector<std::string> pins(pin_infos.size());
   for (size_t i = 0; i < pin_infos.size(); ++i)
-    pins[i] = pin_infos[i].app_launcher_id;
+    pins[i] = pin_infos[i].app_id;
 
-  return pins;
+  return AppIdsToShelfIDs(pins);
 }
 
-void RemovePinPosition(Profile* profile, const AppLauncherId& app_launcher_id) {
+void RemovePinPosition(Profile* profile, const ash::ShelfID& shelf_id) {
   DCHECK(profile);
+
+  const std::string& app_id = shelf_id.app_id;
+  if (!shelf_id.launch_id.empty()) {
+    VLOG(2) << "Syncing remove pin for '" << app_id
+            << "' with non-empty launch id '" << shelf_id.launch_id
+            << "' is not supported.";
+    return;
+  }
+  DCHECK(!app_id.empty());
+
   app_list::AppListSyncableService* app_service =
       app_list::AppListSyncableServiceFactory::GetForProfile(profile);
-  app_service->SetPinPosition(app_launcher_id.ToString(),
-                              syncer::StringOrdinal());
+  app_service->SetPinPosition(app_id, syncer::StringOrdinal());
 }
 
 void SetPinPosition(Profile* profile,
-                    const AppLauncherId& app_launcher_id,
-                    const AppLauncherId& app_launcher_id_before,
-                    const std::vector<AppLauncherId>& app_launcher_ids_after) {
+                    const ash::ShelfID& shelf_id,
+                    const ash::ShelfID& shelf_id_before,
+                    const std::vector<ash::ShelfID>& shelf_ids_after) {
   DCHECK(profile);
-  const std::string app_launcher_id_str = app_launcher_id.ToString();
-  const std::string app_launcher_id_before_str =
-      app_launcher_id_before.ToString();
-  DCHECK_NE(app_launcher_id_str, app_launcher_id_before_str);
+
+  const std::string& app_id = shelf_id.app_id;
+  if (!shelf_id.launch_id.empty()) {
+    VLOG(2) << "Syncing set pin for '" << app_id
+            << "' with non-empty launch id '" << shelf_id.launch_id
+            << "' is not supported.";
+    return;
+  }
+
+  const std::string& app_id_before = shelf_id_before.app_id;
+
+  DCHECK(!app_id.empty());
+  DCHECK_NE(app_id, app_id_before);
 
   app_list::AppListSyncableService* app_service =
       app_list::AppListSyncableServiceFactory::GetForProfile(profile);
@@ -724,21 +733,17 @@ void SetPinPosition(Profile* profile,
     return;
 
   syncer::StringOrdinal position_before =
-      app_launcher_id_before_str.empty()
-          ? syncer::StringOrdinal()
-          : app_service->GetPinPosition(app_launcher_id_before_str);
+      app_id_before.empty() ? syncer::StringOrdinal()
+                            : app_service->GetPinPosition(app_id_before);
   syncer::StringOrdinal position_after;
-  for (const auto& app_launcher_id_after : app_launcher_ids_after) {
-    const std::string app_launcher_id_after_str =
-        app_launcher_id_after.ToString();
-    DCHECK_NE(app_launcher_id_after_str, app_launcher_id_str);
-    DCHECK_NE(app_launcher_id_after_str, app_launcher_id_before_str);
-    syncer::StringOrdinal position =
-        app_service->GetPinPosition(app_launcher_id_after_str);
+  for (const auto& shelf_id_after : shelf_ids_after) {
+    const std::string& app_id_after = shelf_id_after.app_id;
+    DCHECK_NE(app_id_after, app_id);
+    DCHECK_NE(app_id_after, app_id_before);
+    syncer::StringOrdinal position = app_service->GetPinPosition(app_id_after);
     DCHECK(position.IsValid());
     if (!position.IsValid()) {
-      LOG(ERROR) << "Sync pin position was not found for "
-                 << app_launcher_id_after_str;
+      LOG(ERROR) << "Sync pin position was not found for " << app_id_after;
       continue;
     }
     if (!position_before.IsValid() || !position.Equals(position_before)) {
@@ -756,8 +761,5 @@ void SetPinPosition(Profile* profile,
     pin_position = position_after.CreateBefore();
   else
     pin_position = syncer::StringOrdinal::CreateInitialOrdinal();
-  app_service->SetPinPosition(app_launcher_id_str, pin_position);
+  app_service->SetPinPosition(app_id, pin_position);
 }
-
-}  // namespace launcher
-}  // namespace ash

@@ -21,11 +21,13 @@
 #include "gpu/ipc/service/gpu_command_buffer_stub.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
+#include "media/base/android_overlay_mojo_factory.h"
 #include "media/gpu/gpu_video_decode_accelerator_helpers.h"
 #include "media/video/video_decode_accelerator.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace gpu {
+class GpuDriverBugWorkarounds;
 struct GpuPreferences;
 }  // namespace gpu
 
@@ -43,13 +45,15 @@ class GpuVideoDecodeAccelerator
   GpuVideoDecodeAccelerator(
       int32_t host_route_id,
       gpu::GpuCommandBufferStub* stub,
-      const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner);
+      const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner,
+      const AndroidOverlayMojoFactoryCB& factory);
 
   // Static query for the capabilities, which includes the supported profiles.
   // This query calls the appropriate platform-specific version.  The returned
   // capabilities will not contain duplicate supported profile entries.
   static gpu::VideoDecodeAcceleratorCapabilities GetCapabilities(
-      const gpu::GpuPreferences& gpu_preferences);
+      const gpu::GpuPreferences& gpu_preferences,
+      const gpu::GpuDriverBugWorkarounds& workarounds);
 
   // IPC::Listener implementation.
   bool OnMessageReceived(const IPC::Message& message) override;
@@ -94,7 +98,9 @@ class GpuVideoDecodeAccelerator
   void OnReusePictureBuffer(int32_t picture_buffer_id);
   void OnFlush();
   void OnReset();
-  void OnSetSurface(int32_t surface_id);
+  void OnSetSurface(
+      int32_t surface_id,
+      const base::Optional<base::UnguessableToken>& routing_token);
   void OnDestroy();
 
   // Called on IO thread when |filter_| has been removed.
@@ -148,6 +154,9 @@ class GpuVideoDecodeAccelerator
 
   // GPU IO thread task runner.
   const scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
+
+  // Optional factory for mojo-based android overlays.
+  AndroidOverlayMojoFactoryCB overlay_factory_cb_;
 
   // Weak pointers will be invalidated on IO thread.
   base::WeakPtrFactory<Client> weak_factory_for_io_;

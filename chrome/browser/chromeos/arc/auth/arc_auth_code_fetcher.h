@@ -8,20 +8,23 @@
 #include <string>
 
 #include "base/callback.h"
+#include "chrome/browser/chromeos/arc/auth/arc_fetcher_base.h"
 
 namespace arc {
 
-// Interface to implement auth_code fetching.
-class ArcAuthCodeFetcher {
+// Interface to implement auth code token fetching.
+class ArcAuthCodeFetcher : public ArcFetcherBase {
  public:
-  virtual ~ArcAuthCodeFetcher() = default;
+  ~ArcAuthCodeFetcher() override = default;
 
-  // Fetches the |auth_code|. On success, |callback| is called with the
-  // fetched |auth_code|. Otherwise, |callback| is called with empty string.
-  // Fetch() should be called once par instance, and it is expected that
+  // Fetches the auth code in the background and calls |callback| when done.
+  // |success| indicates whether the operation was successful. In case of
+  // success, |auth_code| contains the auth code.
+  // Fetch() should be called once per instance, and it is expected that
   // the inflight operation is cancelled without calling the |callback|
   // when the instance is deleted.
-  using FetchCallback = base::Callback<void(const std::string& auth_code)>;
+  using FetchCallback =
+      base::Callback<void(bool success, const std::string& auth_code)>;
   virtual void Fetch(const FetchCallback& callback) = 0;
 };
 

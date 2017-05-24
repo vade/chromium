@@ -12,7 +12,6 @@
 
 #include "base/macros.h"
 #include "base/memory/aligned_memory.h"
-#include "base/memory/ref_counted.h"
 #include "media/base/media_export.h"
 
 namespace media {
@@ -25,8 +24,6 @@ class AudioParameters;
 // methods. AudioBus guarantees that it allocates memory such that float array
 // for each channel is aligned by AudioBus::kChannelAlignment bytes and it
 // requires the same for memory passed to its Wrap...() factory methods.
-// TODO(chfremer): There are currently no unit tests involving CreateWrapper and
-// SetChannelData, so we need to add them.
 class MEDIA_EXPORT AudioBus {
  public:
   // Guaranteed alignment of each channel's data; use 16-byte alignment for easy
@@ -305,24 +302,6 @@ void AudioBus::CopyConvertFromAudioBusToInterleavedTarget(
     }
   }
 }
-
-// RefCounted version of AudioBus. This is not meant for general use. Only use
-// this when your lifetime requirements make it impossible to use an
-// AudioBus scoped_ptr.
-class MEDIA_EXPORT AudioBusRefCounted
-    : public media::AudioBus,
-      public base::RefCountedThreadSafe<AudioBusRefCounted> {
- public:
-  static scoped_refptr<AudioBusRefCounted> Create(int channels, int frames);
-
- private:
-  friend class base::RefCountedThreadSafe<AudioBusRefCounted>;
-
-  AudioBusRefCounted(int channels, int frames);
-  ~AudioBusRefCounted() override;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioBusRefCounted);
-};
 
 }  // namespace media
 

@@ -12,7 +12,7 @@
   <release seq="1">
     <includes>
       <include name="IDR_FILEMANAGER_MANIFEST" file="file_manager/manifest.json" type="BINDATA" />
-      <!-- Files.app pages and scripts. -->
+      <!-- The Files app pages and scripts. -->
       <include name="IDR_FILE_MANAGER_MAIN" file="file_manager/main.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
       <include name="IDR_FILE_MANAGER_MAIN_JS" file="file_manager/foreground/js/main_scripts.js" flattenhtml="true" type="BINDATA" />
       <include name="IDR_FILE_MANAGER_ELEMENTS_IMPORTER_JS" file="file_manager/foreground/js/elements_importer.js" type="BINDATA" />
@@ -130,7 +130,7 @@
       <include name="IDR_FILE_MANAGER_IMG_UI_DRIVE_WELCOME_PEOPLE" file="file_manager/foreground/images/files/ui/drive_banner_people.png" type="BINDATA" />
       <include name="IDR_FILE_MANAGER_IMG_UI_2X_DRIVE_WELCOME_PEOPLE" file="file_manager/foreground/images/files/ui/2x/drive_banner_people.png" type="BINDATA" />
 
-      <!-- VideoPlayer.app pages and scripts. -->
+      <!-- The VideoPlayer app pages and scripts. -->
       <include name="IDR_VIDEO_PLAYER_MANIFEST" file="video_player/manifest.json" type="BINDATA" />
       <include name="IDR_VIDEO_PLAYER" file="video_player/video_player.html" allowexternalscript="true" flattenhtml="true" type="BINDATA" />
       <include name="IDR_VIDEO_PLAYER_JS" file="video_player/js/video_player_scripts.js" flattenhtml="true" type="BINDATA" />
@@ -144,7 +144,7 @@
       <include name="IDR_VIDEO_PLAYER_ICON_256" file="video_player/images/icon/video-player-256.png" type="BINDATA" />
       <include name="IDR_VIDEO_PLAYER_ICON_FAVICON_32" file="video_player/images/icon/video-player-favicon-32.png" type="BINDATA" />
 
-      <!-- AudioPlayer.app pages and scripts. -->
+      <!-- The AudioPlayer app pages and scripts. -->
       <include name="IDR_AUDIO_PLAYER_MANIFEST" file="audio_player/manifest.json" type="BINDATA" />
       <include name="IDR_AUDIO_PLAYER_BACKGROUND_JS" file="audio_player/js/background_scripts.js" flattenhtml="true" type="BINDATA" />
       <include name="IDR_AUDIO_PLAYER_ELEMENTS_AUDIO_PLAYER_CSS" file="audio_player/elements/audio_player.css" flattenhtml="true" type="BINDATA" />
@@ -174,12 +174,42 @@
       <include name="IDR_AUDIO_PLAYER_ICON_128" file="audio_player/icons/audio-player-128.png" type="BINDATA" />
       <include name="IDR_AUDIO_PLAYER_ICON_256" file="audio_player/icons/audio-player-256.png" type="BINDATA" />
 
-      <!-- Gallery.app pages and scripts. -->
+      <!-- The Gallery app pages and scripts. -->
       <include name="IDR_GALLERY_MANIFEST" file="gallery/manifest.json" type="BINDATA" />
       <include name="IDR_GALLERY" file="gallery/gallery.html" allowexternalscript="true" flattenhtml="true" type="BINDATA" />
       <include name="IDR_GALLERY_JS" file="gallery/js/gallery_scripts.js" flattenhtml="true" type="BINDATA" />
       <include name="IDR_GALLERY_BACKGROUND_JS" file="gallery/js/background_scripts.js" flattenhtml="true" type="BINDATA" />
       <include name="IDR_GALLERY_METADATA_WORKER_JS" file="gallery/js/metadata_worker.js" flattenhtml="true" type="BINDATA" />
+
+      <!-- Zip Archiver. -->
+      <include name="IDR_ZIP_ARCHIVER_MANIFEST" file="zip_archiver/manifest.json" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_COMPRESSOR_HTML" file="zip_archiver/html/compressor.html" allowexternalscript="true" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_PASSPHRASE_DIALOG_HTML" file="zip_archiver/html/passphrase-dialog.html" allowexternalscript="true" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_PASSPHRASE_HTML" file="zip_archiver/html/passphrase.html" allowexternalscript="true" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_POLYMER_HTML" flattenhtml="true" file="zip_archiver/third-party/polymer.html" allowexternalscript="true" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_APP_JS" file="zip_archiver/js/app.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_BACKGROUND_JS" file="zip_archiver/js/background.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_BUILD_CONFIG_JS" file="zip_archiver/js/build-config.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_COMPRESSOR_FOREGROUND_JS" file="zip_archiver/js/compressor-foreground.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_COMPRESSOR_JS" file="zip_archiver/js/compressor.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_DECOMPRESSOR_JS" file="zip_archiver/js/decompressor.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_PASSPHRASE_DIALOG_JS" file="zip_archiver/js/passphrase-dialog.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_PASSPHRASE_MANAGER_JS" file="zip_archiver/js/passphrase-manager.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_REQUEST_JS" file="zip_archiver/js/request.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_TYPES_JS" file="zip_archiver/js/types.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_UNPACKER_JS" file="zip_archiver/js/unpacker.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_VOLUME_JS" file="zip_archiver/js/volume.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_PASSPHRASE_CSS" file="zip_archiver/css/passphrase.css" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_PASSPHRASE_DIALOG_CSS" file="zip_archiver/css/passphrase-dialog.css" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_ICON_16" file="zip_archiver/icons/icon16.png" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_ICON_32" file="zip_archiver/icons/icon32.png" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_ICON_64" file="zip_archiver/icons/icon64.png" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_ICON_96" file="zip_archiver/icons/icon96.png" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_ICON_128" file="zip_archiver/icons/icon128.png" type="BINDATA" />
+      <include name="IDR_ZIP_ARCHIVER_MODULE_NMF" file="zip_archiver/module.nmf.txt" type="BINDATA" />
+      <if expr="enable_nacl">
+        <include name="IDR_ZIP_ARCHIVER_PEXE" file="${zip_archiver_pexe}" use_base_dir="false" type="BINDATA" />
+      </if>
 
       <!-- Custom cursors (which grit cannot inline). -->
       <include name="IDR_FILE_MANAGER_IMG_GALLERY_CURSOR_CROP" file="gallery/images/100/cursor_crop.png" type="BINDATA" />

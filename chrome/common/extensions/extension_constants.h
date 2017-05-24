@@ -100,10 +100,8 @@ extern const char kYoutubeAppId[];
 // The extension id of the in-app payments support application.
 extern const char kInAppPaymentsSupportAppId[];
 
-#if defined(ENABLE_MEDIA_ROUTER)
 // The extension id of the stable media router extension.
 extern const char kMediaRouterStableExtensionId[];
-#endif  // defined(ENABLE_MEDIA_ROUTER)
 
 // The buckets used for app launches.
 enum AppLaunchBucket {
@@ -203,6 +201,11 @@ extern const char kSelectToSpeakExtensionId[];
 // Path to preinstalled Select-to-speak extension (relative to
 // |chrome::DIR_RESOURCES|).
 extern const char kSelectToSpeakExtensionPath[];
+// The extension id of the Switch access extension.
+extern const char kSwitchAccessExtensionId[];
+// Path to preinstalled Switch access extension (relative to
+// |chrome::DIR_RESOURCES|).
+extern const char kSwitchAccessExtensionPath[];
 // Name of the manifest file in an extension when a special manifest is used
 // for guest mode.
 extern const char kGuestManifestFilename[];

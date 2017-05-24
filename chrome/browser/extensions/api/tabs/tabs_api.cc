@@ -17,6 +17,7 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/pattern.h"
@@ -93,11 +94,6 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/models/list_selection_model.h"
 #include "ui/base/ui_base_types.h"
-
-#if defined(USE_ASH)
-#include "chrome/browser/extensions/api/tabs/ash_panel_contents.h"  // nogncheck
-#include "extensions/browser/app_window/app_window_registry.h"  // nogncheck
-#endif
 
 using content::BrowserThread;
 using content::NavigationController;
@@ -197,6 +193,11 @@ void AssignOptionalValue(const std::unique_ptr<T>& source,
   if (source.get()) {
     destination.reset(new T(*source));
   }
+}
+
+void ReportRequestedWindowState(windows::WindowState state) {
+  UMA_HISTOGRAM_ENUMERATION("TabsApi.RequestedWindowState", state,
+                            windows::WINDOW_STATE_LAST + 1);
 }
 
 ui::WindowShowState ConvertToWindowShowState(windows::WindowState state) {
@@ -479,16 +480,15 @@ ExtensionFunction::ResponseAction WindowsCreateFunction::Run() {
 
   Browser::Type window_type = Browser::TYPE_TABBED;
 
-#if defined(USE_ASH)
-  bool create_ash_panel = false;
-  bool saw_focus_key = false;
-#endif  // defined(USE_ASH)
-
   gfx::Rect window_bounds;
   bool focused = true;
   std::string extension_id;
 
   if (create_data) {
+    // Report UMA stats to decide when to remove the deprecated "docked" windows
+    // state (crbug.com/703733).
+    ReportRequestedWindowState(create_data->state);
+
     // Figure out window type before figuring out bounds so that default
     // bounds can be set according to the window type.
     switch (create_data->type) {
@@ -499,18 +499,6 @@ ExtensionFunction::ResponseAction WindowsCreateFunction::Run() {
 
       case windows::CREATE_TYPE_PANEL: {
         extension_id = extension()->id();
-#if defined(USE_ASH)
-      // Only ChromeOS' version of chrome.windows.create would create a panel
-      // window. It is whitelisted to Hangouts extension for limited time until
-      // it transitioned to other types of windows.
-        for (const char* id : extension_misc::kHangoutsExtensionIds) {
-          if (extension_id == id) {
-            create_ash_panel = true;
-            break;
-          }
-        }
-#endif  // defined(USE_ASH)
-        // Everything else gets POPUP instead of PANEL.
         // TODO(dimich): Eventually, remove the 'panel' values form valid
         // window.create parameters. However, this is a more breaking change, so
         // for now simply treat it as a POPUP.
@@ -555,47 +543,20 @@ ExtensionFunction::ResponseAction WindowsCreateFunction::Run() {
     if (create_data->height)
       window_bounds.set_height(*create_data->height);
 
-    if (create_data->focused) {
+    if (create_data->focused)
       focused = *create_data->focused;
-#if defined(USE_ASH)
-      saw_focus_key = true;
-#endif
-    }
   }
-
-#if defined(USE_ASH)
-  if (create_ash_panel) {
-    if (urls.empty())
-      urls.push_back(GURL(chrome::kChromeUINewTabURL));
-
-    AppWindow::CreateParams create_params;
-    create_params.window_type = AppWindow::WINDOW_TYPE_V1_PANEL;
-    create_params.window_key = extension_id;
-    create_params.window_spec.bounds = window_bounds;
-    create_params.focused = saw_focus_key && focused;
-    AppWindow* app_window =
-        new AppWindow(window_profile, new ChromeAppDelegate(true), extension());
-    AshPanelContents* ash_panel_contents = new AshPanelContents(app_window);
-    app_window->Init(urls[0], ash_panel_contents, render_frame_host(),
-                     create_params);
-    WindowController* window_controller =
-        WindowControllerList::GetInstance()->FindWindowById(
-            app_window->session_id().id());
-    if (!window_controller)
-      return RespondNow(Error(kUnknownErrorDoNotUse));
-    return RespondNow(
-        OneArgument(window_controller->CreateWindowValueWithTabs(extension())));
-  }
-#endif  // defined(USE_ASH)
 
   // Create a new BrowserWindow.
-  Browser::CreateParams create_params(window_type, window_profile);
+  Browser::CreateParams create_params(window_type, window_profile,
+                                      user_gesture());
   if (extension_id.empty()) {
     create_params.initial_bounds = window_bounds;
   } else {
     create_params = Browser::CreateParams::CreateForApp(
         web_app::GenerateApplicationNameFromExtensionId(extension_id),
-        false /* trusted_source */, window_bounds, window_profile);
+        false /* trusted_source */, window_bounds, window_profile,
+        user_gesture());
   }
   create_params.initial_show_state = ui::SHOW_STATE_NORMAL;
   if (create_data && create_data->state) {
@@ -609,8 +570,17 @@ ExtensionFunction::ResponseAction WindowsCreateFunction::Run() {
     chrome::NavigateParams navigate_params(new_window, url,
                                            ui::PAGE_TRANSITION_LINK);
     navigate_params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
+
+    // The next 2 statements put the new contents in the same BrowsingInstance
+    // as their opener.  Note that |force_new_process_for_new_contents = false|
+    // means that new contents might still end up in a new renderer
+    // (if they open a web URL and are transferred out of an extension
+    // renderer), but even in this case the flags below ensure findability via
+    // window.open.
+    navigate_params.force_new_process_for_new_contents = false;
     navigate_params.source_site_instance =
         render_frame_host()->GetSiteInstance();
+
     chrome::Navigate(&navigate_params);
   }
 
@@ -646,7 +616,7 @@ ExtensionFunction::ResponseAction WindowsCreateFunction::Run() {
       !browser_context()->IsOffTheRecord() && !include_incognito()) {
     // Don't expose incognito windows if extension itself works in non-incognito
     // profile and CanCrossIncognito isn't allowed.
-    result = base::Value::CreateNullValue();
+    result = base::MakeUnique<base::Value>();
   } else {
     result = controller->CreateWindowValueWithTabs(extension());
   }
@@ -666,6 +636,10 @@ ExtensionFunction::ResponseAction WindowsUpdateFunction::Run() {
           &controller, &error)) {
     return RespondNow(Error(error));
   }
+
+  // Report UMA stats to decide when to remove the deprecated "docked" windows
+  // state (crbug.com/703733).
+  ReportRequestedWindowState(params->update_info.state);
 
   ui::WindowShowState show_state =
       ConvertToWindowShowState(params->update_info.state);
@@ -914,6 +888,10 @@ ExtensionFunction::ResponseAction TabsQueryFunction::Run() {
       if (index > -1 && i != index)
         continue;
 
+      if (!web_contents) {
+        continue;
+      }
+
       if (!MatchesBool(params->query_info.highlighted.get(),
                        tab_strip->IsTabSelected(i))) {
         continue;
@@ -1004,7 +982,7 @@ ExtensionFunction::ResponseAction TabsCreateFunction::Run() {
 
   std::string error;
   std::unique_ptr<base::DictionaryValue> result(
-      ExtensionTabUtil::OpenTab(this, options, &error));
+      ExtensionTabUtil::OpenTab(this, options, user_gesture(), &error));
   if (!result)
     return RespondNow(Error(error));
 
@@ -1260,6 +1238,11 @@ bool TabsUpdateFunction::RunAsync() {
                                       &opener_contents, nullptr))
       return false;
 
+    if (tab_strip->GetIndexOfWebContents(opener_contents) ==
+        TabStripModel::kNoTab) {
+      error_ = "Tab opener must be in the same window as the updated tab.";
+      return false;
+    }
     tab_strip->SetOpenerOfWebContentsAt(tab_index, opener_contents);
   }
 
@@ -1661,7 +1644,7 @@ bool TabsCaptureVisibleTabFunction::RunAsync() {
 
   return CaptureAsync(
       contents, image_details.get(),
-      base::Bind(&TabsCaptureVisibleTabFunction::CopyFromBackingStoreComplete,
+      base::Bind(&TabsCaptureVisibleTabFunction::CopyFromSurfaceComplete,
                  this));
 }
 
@@ -1672,7 +1655,7 @@ void TabsCaptureVisibleTabFunction::OnCaptureSuccess(const SkBitmap& bitmap) {
     return;
   }
 
-  SetResult(base::MakeUnique<base::StringValue>(base64_result));
+  SetResult(base::MakeUnique<base::Value>(base64_result));
   SendResponse(true);
 }
 
@@ -1744,7 +1727,7 @@ bool TabsDetectLanguageFunction::RunAsync() {
     // returned.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
-        base::Bind(
+        base::BindOnce(
             &TabsDetectLanguageFunction::GotLanguage, this,
             chrome_translate_client->GetLanguageState().original_language()));
     return true;
@@ -1782,7 +1765,7 @@ void TabsDetectLanguageFunction::Observe(
 }
 
 void TabsDetectLanguageFunction::GotLanguage(const std::string& language) {
-  SetResult(base::MakeUnique<base::StringValue>(language.c_str()));
+  SetResult(base::MakeUnique<base::Value>(language));
   SendResponse(true);
 
   Release();  // Balanced in Run()

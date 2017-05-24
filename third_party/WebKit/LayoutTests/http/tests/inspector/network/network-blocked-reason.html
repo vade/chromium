@@ -22,7 +22,7 @@ function test()
 {
     var requestName;
     var nextStep;
-    var blockedSetting = Common.settingForTest("blockedURLs");
+    SDK.multitargetNetworkManager.setBlockingEnabled(true);
 
     function onRequest(event)
     {
@@ -40,7 +40,8 @@ function test()
     {
         InspectorTest.addResult("Blocked patterns: " + patterns.join(";"));
         InspectorTest.addResult("Request: " + url);
-        blockedSetting.set(patterns);
+        var blockedPatterns = patterns.map(p => ({url: p, enabled: true}));
+        SDK.multitargetNetworkManager.setBlockedPatterns(blockedPatterns);
         nextStep = next;
         InspectorTest.deprecatedRunAfterPendingDispatches(addScript);
 

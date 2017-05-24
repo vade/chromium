@@ -22,9 +22,11 @@
 namespace service_manager {
 
 // Encapsulates a connection to the Service Manager in two parts:
+//
 // - a bound InterfacePtr to mojom::Connector, the primary mechanism
 //   by which the instantiating service connects to other services,
 //   brokered by the Service Manager.
+//
 // - a bound InterfaceRequest of mojom::Service, an interface used by the
 //   Service Manager to inform this service of lifecycle events and
 //   inbound connections brokered by it.
@@ -59,15 +61,16 @@ class ServiceContext : public mojom::Service {
   ~ServiceContext() override;
 
   Connector* connector() { return connector_.get(); }
-  const ServiceInfo& local_info() const { return local_info_; }
-  const Identity& identity() const { return local_info_.identity; }
+  const Identity& identity() const { return identity_; }
 
-  // Specify a function to be called when the connection to the service manager
-  // is lost. Note that if connection has already been lost, then |closure| is
-  // called immediately.
+  // Specify a closure to be run when the Service calls QuitNow(), typically
+  // in response to Service::OnServiceManagerConnectionLost().
   //
-  // It is acceptable for |closure| to delete this ServiceContext.
-  void SetConnectionLostClosure(const base::Closure& closure);
+  // Note that if the Service has already called QuitNow(), |closure| is run
+  // immediately from this method.
+  //
+  // NOTE: It is acceptable for |closure| to delete this ServiceContext.
+  void SetQuitClosure(const base::Closure& closure);
 
   // Informs the Service Manager that this instance is ready to terminate. If
   // the Service Manager has any outstanding connection requests for this
@@ -75,63 +78,43 @@ class ServiceContext : public mojom::Service {
   // the pending request(s) and can then appropriately decide whether or not
   // it still wants to quit.
   //
-  // If the request is granted, the Service Manager will service the connection
-  // to this ServiceContext and Service::OnStop() will eventually be invoked.
+  // If the request is granted, the Service Manager will soon sever the
+  // connection to this ServiceContext, and
+  // Service::OnServiceManagerConnectionLost() will be invoked at that time.
   void RequestQuit();
 
   // Immediately severs the connection to the Service Manager.
   //
-  // Note that calling this before the Service receives OnStop() can lead to
-  // unpredictable behavior, specifically because clients may have inbound
-  // connections in transit which may have already been brokered by the Service
-  // Manager and thus will be irreparably broken on the client side.
+  // Note that calling this before the Service receives
+  // OnServiceManagerConnectionLost() can lead to unpredictable behavior, as the
+  // Service Manager may have already brokered new inbound connections from
+  // other services to this Service instance, and those connections will be
+  // abruptly terminated as they can no longer result in OnConnect() or
+  // OnBindInterface() calls on the Service.
   //
-  // Use of this call before OnStop() should be reserved for exceptional cases.
+  // To put it another way: unless you want flaky connections to be a normal
+  // experience for consumers of your service, avoid calling this before
+  // receiving Service::OnServiceManagerConnectionLost().
   void DisconnectFromServiceManager();
 
-  // Immediately severs the connection to the Service Manager.
-  //
-  // If a connection-lost closure was set, it is immediately invoked. Note that
-  // it is never necessary or meaningful to call this after the Service
-  // has received OnStop().
+  // Immediately severs the connection to the Service Manager and invokes the
+  // quit closure (see SetQuitClosure() above) if one has been set.
   //
   // See comments on DisconnectFromServiceManager() regarding abrupt
   // disconnection from the Service Manager.
   void QuitNow();
 
-  // Simliar to QuitNow() above but also destroys the Service instance.
-  void DestroyService();
-
  private:
   friend class service_manager::Service;
 
-  using InterfaceRegistryMap =
-      std::map<InterfaceRegistry*, std::unique_ptr<InterfaceRegistry>>;
-
   // mojom::Service:
-  void OnStart(const ServiceInfo& info,
-               const OnStartCallback& callback) override;
-  void OnConnect(const ServiceInfo& source_info,
-                 mojom::InterfaceProviderRequest interfaces,
-                 const OnConnectCallback& callback) override;
-  void OnBindInterface(
-      const ServiceInfo& source_info,
-      const std::string& interface_name,
-      mojo::ScopedMessagePipeHandle interface_pipe,
-      const OnBindInterfaceCallback& callback) override;
-
-  void CallOnConnect(const ServiceInfo& source_info,
-                     const InterfaceProviderSpec& source_spec,
-                     const InterfaceProviderSpec& target_spec,
-                     mojom::InterfaceProviderRequest request);
+  void OnStart(const Identity& info, const OnStartCallback& callback) override;
+  void OnBindInterface(const BindSourceInfo& source_info,
+                       const std::string& interface_name,
+                       mojo::ScopedMessagePipeHandle interface_pipe,
+                       const OnBindInterfaceCallback& callback) override;
 
   void OnConnectionError();
-  void OnRegistryConnectionError(InterfaceRegistry* registry);
-  void DestroyConnectionInterfaceRegistry(InterfaceRegistry* registry);
-
-  // We track the lifetime of incoming connection registries as a convenience
-  // for the client.
-  InterfaceRegistryMap connection_interface_registries_;
 
   // A pending Connector request which will eventually be passed to the Service
   // Manager.
@@ -140,15 +123,14 @@ class ServiceContext : public mojom::Service {
   std::unique_ptr<service_manager::Service> service_;
   mojo::Binding<mojom::Service> binding_;
   std::unique_ptr<Connector> connector_;
-  service_manager::ServiceInfo local_info_;
+  service_manager::Identity identity_;
 
   // This instance's control interface to the service manager. Note that this
   // is unbound and therefore invalid until OnStart() is called.
   mojom::ServiceControlAssociatedPtr service_control_;
 
-  bool service_quit_ = false;
-
-  base::Closure connection_lost_closure_;
+  // The closure to run when QuitNow() is invoked. May delete |this|.
+  base::Closure quit_closure_;
 
   base::WeakPtrFactory<ServiceContext> weak_factory_;
 

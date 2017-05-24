@@ -8,6 +8,7 @@
 #include <map>
 
 #include "base/macros.h"
+#include "chromeos/dbus/power_manager_client.h"
 #include "components/arc/arc_service.h"
 #include "components/arc/common/power.mojom.h"
 #include "components/arc/instance_holder.h"
@@ -22,6 +23,7 @@ class ArcBridgeService;
 // ARC instances.
 class ArcPowerBridge : public ArcService,
                        public InstanceHolder<mojom::PowerInstance>::Observer,
+                       public chromeos::PowerManagerClient::Observer,
                        public display::DisplayConfigurator::Observer,
                        public mojom::PowerHost {
  public:
@@ -32,23 +34,37 @@ class ArcPowerBridge : public ArcService,
   void OnInstanceReady() override;
   void OnInstanceClosed() override;
 
+  // chromeos::PowerManagerClient::Observer overrides.
+  void SuspendImminent() override;
+  void SuspendDone(const base::TimeDelta& sleep_duration) override;
+  void BrightnessChanged(int level, bool user_initiated) override;
+
   // DisplayConfigurator::Observer overrides.
   void OnPowerStateChanged(chromeos::DisplayPowerState power_state) override;
 
   // mojom::PowerHost overrides.
   void OnAcquireDisplayWakeLock(mojom::DisplayWakeLockType type) override;
   void OnReleaseDisplayWakeLock(mojom::DisplayWakeLockType type) override;
-
   void IsDisplayOn(const IsDisplayOnCallback& callback) override;
+  void OnScreenBrightnessUpdateRequest(double percent) override;
 
  private:
   void ReleaseAllDisplayWakeLocks();
+  void UpdateAndroidScreenBrightness(double percent);
 
   mojo::Binding<mojom::PowerHost> binding_;
 
   // Stores a mapping of type -> wake lock ID for all wake locks
   // held by ARC.
   std::multimap<mojom::DisplayWakeLockType, int> wake_locks_;
+
+  // Last time that the power manager notified about a brightness change.
+  base::TimeTicks last_brightness_changed_time_;
+  // Timer used to run UpdateAndroidScreenBrightness() to notify Android
+  // about brightness changes.
+  base::OneShotTimer notify_brightness_timer_;
+
+  base::WeakPtrFactory<ArcPowerBridge> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ArcPowerBridge);
 };

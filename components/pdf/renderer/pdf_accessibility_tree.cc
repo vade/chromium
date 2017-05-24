@@ -8,11 +8,11 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversion_utils.h"
 #include "components/pdf/renderer/pdf_accessibility_tree.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/renderer/render_accessibility.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/renderer_ppapi_host.h"
-#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/transform.h"
@@ -275,7 +275,7 @@ ui::AXNodeData* PdfAccessibilityTree::CreateNode(ui::AXRole role) {
   ui::AXNodeData* node = new ui::AXNodeData();
   node->id = render_accessibility->GenerateAXID();
   node->role = role;
-  node->state = 1 << ui::AX_STATE_READ_ONLY;
+  node->AddState(ui::AX_STATE_READ_ONLY);
 
   // All nodes other than the first one have coordinates relative to
   // the first node.

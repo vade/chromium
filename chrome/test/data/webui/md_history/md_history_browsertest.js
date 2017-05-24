@@ -20,9 +20,6 @@ MaterialHistoryBrowserTest.prototype = {
 
   browsePreload: 'chrome://history',
 
-  commandLineSwitches: [{switchName: 'enable-features',
-                         switchValue: 'MaterialDesignHistory'}],
-
   /** @override */
   runAccessibilityChecks: false,
 
@@ -83,20 +80,6 @@ TEST_F('MaterialHistoryDrawerTest', 'All', function() {
   mocha.run();
 });
 
-function MaterialHistoryGroupedListTest() {}
-
-MaterialHistoryGroupedListTest.prototype = {
-  __proto__: MaterialHistoryBrowserTest.prototype,
-
-  extraLibraries: MaterialHistoryBrowserTest.prototype.extraLibraries.concat([
-    'history_grouped_list_test.js',
-  ]),
-};
-
-TEST_F('MaterialHistoryGroupedListTest', 'All', function() {
-  mocha.run();
-});
-
 function MaterialHistoryItemTest() {}
 
 MaterialHistoryItemTest.prototype = {
@@ -121,7 +104,15 @@ MaterialHistoryListTest.prototype = {
   ]),
 };
 
-TEST_F('MaterialHistoryListTest', 'All', function() {
+// Times out on debug builders because the History page can take several seconds
+// to load in a Debug build. See https://crbug.com/669227.
+GEN('#if !defined(NDEBUG)');
+GEN('#define MAYBE_All DISABLED_All');
+GEN('#else');
+GEN('#define MAYBE_All All');
+GEN('#endif');
+
+TEST_F('MaterialHistoryListTest', 'MAYBE_All', function() {
   mocha.run();
 });
 
@@ -173,7 +164,7 @@ function MaterialHistoryRoutingWithQueryParamTest() {}
 MaterialHistoryRoutingWithQueryParamTest.prototype = {
   __proto__: MaterialHistoryRoutingTest.prototype,
 
-  browsePreload: 'chrome://history?q=query',
+  browsePreload: 'chrome://history/?q=query',
 
   /** @override */
   setUp: function() {

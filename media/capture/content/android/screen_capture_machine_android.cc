@@ -4,7 +4,6 @@
 
 #include "media/capture/content/android/screen_capture_machine_android.h"
 
-#include "base/android/context_utils.h"
 #include "base/android/jni_android.h"
 #include "base/android/scoped_java_ref.h"
 #include "jni/ScreenCapture_jni.h"
@@ -30,8 +29,7 @@ ScopedJavaLocalRef<jobject>
 ScreenCaptureMachineAndroid::createScreenCaptureMachineAndroid(
     jlong nativeScreenCaptureMachineAndroid) {
   return (Java_ScreenCapture_createScreenCaptureMachine(
-      AttachCurrentThread(), base::android::GetApplicationContext(),
-      nativeScreenCaptureMachineAndroid));
+      AttachCurrentThread(), nativeScreenCaptureMachineAndroid));
 }
 
 void ScreenCaptureMachineAndroid::OnRGBAFrameAvailable(JNIEnv* env,
@@ -196,7 +194,10 @@ void ScreenCaptureMachineAndroid::OnActivityResult(JNIEnv* env,
     return;
   }
 
-  Java_ScreenCapture_startCapture(env, obj);
+  if (Java_ScreenCapture_startCapture(env, obj))
+    oracle_proxy_->ReportStarted();
+  else
+    oracle_proxy_->ReportError(FROM_HERE, "Failed to start Screen Capture");
 }
 
 void ScreenCaptureMachineAndroid::OnOrientationChange(JNIEnv* env,
@@ -258,8 +259,11 @@ void ScreenCaptureMachineAndroid::Start(
   }
 
   ret = Java_ScreenCapture_startPrompt(AttachCurrentThread(), j_capture_);
-
-  callback.Run(ret);
+  // Must wait for user input to start capturing before we can report back
+  // device started state. However, if the user-prompt failed to show, report
+  // a failed start immediately.
+  if (!ret)
+    callback.Run(ret);
 }
 
 void ScreenCaptureMachineAndroid::Stop(const base::Closure& callback) {

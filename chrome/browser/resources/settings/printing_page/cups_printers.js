@@ -118,4 +118,9 @@ Polymer({
     this.$.addPrinterDialog.open();
     this.$.addPrinterErrorMessage.hidden = true;
   },
+
+  /** @private */
+  onAddPrinterDialogClose_: function() {
+    cr.ui.focusWithoutInk(assert(this.$$('#addPrinter')));
+  },
 });

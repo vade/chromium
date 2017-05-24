@@ -14,6 +14,7 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/geometry/size.h"
+#include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/overlay_transform.h"
 #include "ui/gfx/swap_result.h"
@@ -28,6 +29,7 @@ class VSyncProvider;
 
 namespace ui {
 struct CARendererLayerParams;
+struct DCRendererLayerParams;
 }
 
 namespace gl {
@@ -80,8 +82,8 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
   // Get the underlying platform specific surface "handle".
   virtual void* GetHandle() = 0;
 
-  // Returns whether or not the surface supports SwapBuffersWithDamage
-  virtual bool SupportsSwapBuffersWithDamage();
+  // Returns whether or not the surface supports SwapBuffersWithBounds
+  virtual bool SupportsSwapBuffersWithBounds();
 
   // Returns whether or not the surface supports PostSubBuffer.
   virtual bool SupportsPostSubBuffer();
@@ -104,11 +106,9 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
   // the calling thread (i.e. same thread SwapBuffersAsync is called)
   virtual void SwapBuffersAsync(const SwapCompletionCallback& callback);
 
-  // Swap buffers with damage rect.
-  virtual gfx::SwapResult SwapBuffersWithDamage(int x,
-                                                int y,
-                                                int width,
-                                                int height);
+  // Swap buffers with content bounds.
+  virtual gfx::SwapResult SwapBuffersWithBounds(
+      const std::vector<gfx::Rect>& rects);
 
   // Copy part of the backbuffer to the frontbuffer.
   virtual gfx::SwapResult PostSubBuffer(int x, int y, int width, int height);
@@ -159,8 +159,10 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
   // with this GLSurface.
   virtual unsigned long GetCompatibilityKey();
 
-  // Get the GL pixel format of the surface, if available.
-  virtual GLSurfaceFormat GetFormat();
+  // Get the GL pixel format of the surface. Must be implemented in a
+  // subclass, though it's ok to just "return GLSurfaceFormat()" if
+  // the default is appropriate.
+  virtual GLSurfaceFormat GetFormat() = 0;
 
   // Get access to a helper providing time of recent refresh and period
   // of screen refresh. If unavailable, returns NULL.
@@ -197,6 +199,10 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
   virtual void ScheduleCALayerInUseQuery(
       std::vector<CALayerInUseQuery> queries);
 
+  virtual bool ScheduleDCLayer(const ui::DCRendererLayerParams& params);
+
+  virtual bool SetEnableDCLayers(bool enable);
+
   virtual bool IsSurfaceless() const;
 
   virtual bool FlipsVertically() const;
@@ -205,10 +211,21 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
   // the next buffer may be 2 frames old.
   virtual bool BuffersFlipped() const;
 
-  static GLSurface* GetCurrent();
+  virtual bool SupportsDCLayers() const;
 
-  // Called when the swap interval for the associated context changes.
-  virtual void OnSetSwapInterval(int interval);
+  // Set the rectangle that will be drawn into on the surface.
+  virtual bool SetDrawRectangle(const gfx::Rect& rect);
+
+  // This is the amount by which the scissor and viewport rectangles should be
+  // offset.
+  virtual gfx::Vector2d GetDrawOffset() const;
+
+  // This waits until rendering work is complete enough that an OS snapshot
+  // will capture the last swapped contents. A GL context must be current when
+  // calling this.
+  virtual void WaitForSnapshotRendering();
+
+  static GLSurface* GetCurrent();
 
  protected:
   virtual ~GLSurface();
@@ -240,10 +257,8 @@ class GL_EXPORT GLSurfaceAdapter : public GLSurface {
   bool IsOffscreen() override;
   gfx::SwapResult SwapBuffers() override;
   void SwapBuffersAsync(const SwapCompletionCallback& callback) override;
-  gfx::SwapResult SwapBuffersWithDamage(int x,
-                                        int y,
-                                        int width,
-                                        int height) override;
+  gfx::SwapResult SwapBuffersWithBounds(
+      const std::vector<gfx::Rect>& rects) override;
   gfx::SwapResult PostSubBuffer(int x, int y, int width, int height) override;
   void PostSubBufferAsync(int x,
                           int y,
@@ -253,7 +268,7 @@ class GL_EXPORT GLSurfaceAdapter : public GLSurface {
   gfx::SwapResult CommitOverlayPlanes() override;
   void CommitOverlayPlanesAsync(
       const SwapCompletionCallback& callback) override;
-  bool SupportsSwapBuffersWithDamage() override;
+  bool SupportsSwapBuffersWithBounds() override;
   bool SupportsPostSubBuffer() override;
   bool SupportsCommitOverlayPlanes() override;
   bool SupportsAsyncSwap() override;
@@ -274,9 +289,15 @@ class GL_EXPORT GLSurfaceAdapter : public GLSurface {
                             GLImage* image,
                             const gfx::Rect& bounds_rect,
                             const gfx::RectF& crop_rect) override;
+  bool ScheduleDCLayer(const ui::DCRendererLayerParams& params) override;
+  bool SetEnableDCLayers(bool enable) override;
   bool IsSurfaceless() const override;
   bool FlipsVertically() const override;
   bool BuffersFlipped() const override;
+  bool SupportsDCLayers() const override;
+  bool SetDrawRectangle(const gfx::Rect& rect) override;
+  gfx::Vector2d GetDrawOffset() const override;
+  void WaitForSnapshotRendering() override;
 
   GLSurface* surface() const { return surface_.get(); }
 

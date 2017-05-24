@@ -18,11 +18,13 @@
 #include "base/threading/thread_checker.h"
 #include "build/build_config.h"
 #include "chrome/browser/metrics/metrics_memory_details.h"
+#include "components/metrics/metrics_log_uploader.h"
 #include "components/metrics/metrics_service_client.h"
 #include "components/metrics/profiler/tracking_synchronizer_observer.h"
 #include "components/metrics/proto/system_profile.pb.h"
 #include "components/omnibox/browser/omnibox_event_global_tracker.h"
 #include "components/ukm/observers/history_delete_observer.h"
+#include "components/ukm/observers/sync_disable_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ppapi/features/features.h"
@@ -50,7 +52,8 @@ class ProfilerMetricsProvider;
 class ChromeMetricsServiceClient : public metrics::MetricsServiceClient,
                                    public metrics::TrackingSynchronizerObserver,
                                    public content::NotificationObserver,
-                                   public ukm::HistoryDeleteObserver {
+                                   public ukm::HistoryDeleteObserver,
+                                   public ukm::SyncDisableObserver {
  public:
   ~ChromeMetricsServiceClient() override;
 
@@ -60,6 +63,9 @@ class ChromeMetricsServiceClient : public metrics::MetricsServiceClient,
 
   // Registers local state prefs used by this class.
   static void RegisterPrefs(PrefRegistrySimple* registry);
+
+  // Checks if the user has forced metrics collection on via the override flag.
+  static bool IsMetricsReportingForceEnabled();
 
   // metrics::MetricsServiceClient:
   metrics::MetricsService* GetMetricsService() override;
@@ -76,18 +82,24 @@ class ChromeMetricsServiceClient : public metrics::MetricsServiceClient,
       const base::Closure& done_callback) override;
   void CollectFinalMetricsForLog(const base::Closure& done_callback) override;
   std::unique_ptr<metrics::MetricsLogUploader> CreateUploader(
-      const std::string& server_url,
-      const std::string& mime_type,
-      const base::Callback<void(int)>& on_upload_complete) override;
+      base::StringPiece server_url,
+      base::StringPiece mime_type,
+      metrics::MetricsLogUploader::MetricServiceType service_type,
+      const metrics::MetricsLogUploader::UploadCallback& on_upload_complete)
+      override;
   base::TimeDelta GetStandardUploadInterval() override;
   base::string16 GetRegistryBackupKey() override;
   void OnPluginLoadingError(const base::FilePath& plugin_path) override;
   bool IsReportingPolicyManaged() override;
   metrics::EnableMetricsDefault GetMetricsReportingDefaultState() override;
   bool IsUMACellularUploadLogicEnabled() override;
+  bool IsHistorySyncEnabledOnAllProfiles() override;
 
-  // ukm::HistoryDeleteObserver
+  // ukm::HistoryDeleteObserver:
   void OnHistoryDeleted() override;
+
+  // ukm::SyncDisableObserver:
+  void OnSyncPrefsChanged(bool must_purge) override;
 
   // Persistent browser metrics need to be persisted somewhere. This constant
   // provides a known string to be used for both the allocator's internal name
@@ -101,6 +113,14 @@ class ChromeMetricsServiceClient : public metrics::MetricsServiceClient,
 
   // Completes the two-phase initialization of ChromeMetricsServiceClient.
   void Initialize();
+
+  // Registers providers to the MetricsService. These provide data from
+  // alternate sources.
+  void RegisterMetricsServiceProviders();
+
+  // Registers providers to the UkmService. These provide data from alternate
+  // sources.
+  void RegisterUKMProviders();
 
   // Callback to chain init tasks: Pops and executes the next init task from
   // |initialize_task_queue_|, then passes itself as callback for each init task
@@ -122,7 +142,6 @@ class ChromeMetricsServiceClient : public metrics::MetricsServiceClient,
   // Callbacks for various stages of final log info collection. Do not call
   // these directly.
   void CollectFinalHistograms();
-  void MergeHistogramDeltas();
   void OnMemoryDetailCollectionDone();
   void OnHistogramSynchronizationDone();
 
@@ -135,8 +154,8 @@ class ChromeMetricsServiceClient : public metrics::MetricsServiceClient,
   // there was recent activity.
   void RegisterForNotifications();
 
-  // Call to listen for history deletions by the selected profile.
-  void RegisterForHistoryDeletions(Profile* profile);
+  // Call to listen for events on the selected profile's services.
+  void RegisterForProfileEvents(Profile* profile);
 
   // content::NotificationObserver:
   void Observe(int type,

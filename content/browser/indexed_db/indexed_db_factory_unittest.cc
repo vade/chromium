@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <utility>
 
+#include "base/auto_reset.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
@@ -13,13 +14,15 @@
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_simple_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/indexed_db/indexed_db_connection.h"
 #include "content/browser/indexed_db/indexed_db_context_impl.h"
+#include "content/browser/indexed_db/indexed_db_data_format_version.h"
 #include "content/browser/indexed_db/indexed_db_factory_impl.h"
 #include "content/browser/indexed_db/mock_indexed_db_callbacks.h"
 #include "content/browser/indexed_db/mock_indexed_db_database_callbacks.h"
-#include "content/browser/quota/mock_quota_manager_proxy.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "storage/browser/test/mock_quota_manager_proxy.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/platform/modules/indexeddb/WebIDBDatabaseException.h"
 #include "third_party/WebKit/public/platform/modules/indexeddb/WebIDBTypes.h"
@@ -46,7 +49,7 @@ class MockIDBFactory : public IndexedDBFactoryImpl {
     scoped_refptr<IndexedDBBackingStore> backing_store =
         OpenBackingStore(origin, data_directory, nullptr /* request_context */,
                          &data_loss_info, &disk_full, &s);
-    EXPECT_EQ(blink::WebIDBDataLossNone, data_loss_info.status);
+    EXPECT_EQ(blink::kWebIDBDataLossNone, data_loss_info.status);
     return backing_store;
   }
 
@@ -69,24 +72,28 @@ class MockIDBFactory : public IndexedDBFactoryImpl {
 
 class IndexedDBFactoryTest : public testing::Test {
  public:
-  IndexedDBFactoryTest() {
+  void SetUp() override {
+    ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     task_runner_ = new base::TestSimpleTaskRunner();
     quota_manager_proxy_ = new MockQuotaManagerProxy(nullptr, nullptr);
     context_ = new IndexedDBContextImpl(
-        base::FilePath(), nullptr /* special_storage_policy */,
+        temp_dir_.GetPath(), nullptr /* special_storage_policy */,
         quota_manager_proxy_.get(), task_runner_.get());
     idb_factory_ = new MockIDBFactory(context_.get());
   }
-  ~IndexedDBFactoryTest() override {
+
+  void TearDown() override {
     quota_manager_proxy_->SimulateQuotaManagerDestroyed();
   }
 
  protected:
+  IndexedDBFactoryTest() {}
   MockIDBFactory* factory() const { return idb_factory_.get(); }
   void clear_factory() { idb_factory_ = nullptr; }
   IndexedDBContextImpl* context() const { return context_.get(); }
 
  private:
+  base::ScopedTempDir temp_dir_;
   scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
   scoped_refptr<IndexedDBContextImpl> context_;
   scoped_refptr<MockIDBFactory> idb_factory_;
@@ -228,11 +235,14 @@ class DiskFullFactory : public IndexedDBFactoryImpl {
 class LookingForQuotaErrorMockCallbacks : public IndexedDBCallbacks {
  public:
   LookingForQuotaErrorMockCallbacks()
-      : IndexedDBCallbacks(nullptr, url::Origin(), nullptr),
+      : IndexedDBCallbacks(nullptr,
+                           url::Origin(),
+                           nullptr,
+                           base::ThreadTaskRunnerHandle::Get()),
         error_called_(false) {}
   void OnError(const IndexedDBDatabaseError& error) override {
     error_called_ = true;
-    EXPECT_EQ(blink::WebIDBDatabaseExceptionQuotaError, error.code());
+    EXPECT_EQ(blink::kWebIDBDatabaseExceptionQuotaError, error.code());
   }
   bool error_called() const { return error_called_; }
 
@@ -510,5 +520,82 @@ TEST_F(IndexedDBFactoryTest, DatabaseFailedOpen) {
   // Terminate all pending-close timers.
   factory()->ForceClose(origin);
 }
+
+namespace {
+
+class DataLossCallbacks final : public MockIndexedDBCallbacks {
+ public:
+  blink::WebIDBDataLoss data_loss() const { return data_loss_; }
+  void OnSuccess(std::unique_ptr<IndexedDBConnection> connection,
+                 const IndexedDBDatabaseMetadata& metadata) override {
+    if (!connection_)
+      connection_ = std::move(connection);
+  }
+  void OnError(const IndexedDBDatabaseError& error) final {
+    ADD_FAILURE() << "Unexpected IDB error: " << error.message();
+  }
+  void OnUpgradeNeeded(int64_t old_version,
+                       std::unique_ptr<IndexedDBConnection> connection,
+                       const content::IndexedDBDatabaseMetadata& metadata,
+                       const IndexedDBDataLossInfo& data_loss) final {
+    connection_ = std::move(connection);
+    data_loss_ = data_loss.status;
+  }
+
+ private:
+  ~DataLossCallbacks() final {}
+  blink::WebIDBDataLoss data_loss_ = blink::kWebIDBDataLossNone;
+};
+
+TEST_F(IndexedDBFactoryTest, DataFormatVersion) {
+  auto try_open = [this](const Origin& origin,
+                         const IndexedDBDataFormatVersion& version) {
+    base::AutoReset<IndexedDBDataFormatVersion> override_version(
+        &IndexedDBDataFormatVersion::GetMutableCurrentForTesting(), version);
+    auto db_callbacks = base::MakeRefCounted<MockIndexedDBDatabaseCallbacks>();
+    auto callbacks = base::MakeRefCounted<DataLossCallbacks>();
+    const int64_t transaction_id = 1;
+    factory()->Open(ASCIIToUTF16("test_db"),
+                    base::MakeUnique<IndexedDBPendingConnection>(
+                        callbacks, db_callbacks, 0 /* child_process_id */,
+                        transaction_id, 1 /* version */),
+                    nullptr /* request_context */, origin,
+                    context()->data_path());
+    base::RunLoop().RunUntilIdle();
+    auto* connection = callbacks->connection();
+    EXPECT_TRUE(connection);
+    connection->database()->Commit(connection->GetTransaction(transaction_id));
+    connection->Close();
+    factory()->ForceClose(origin);
+    return callbacks->data_loss();
+  };
+
+  using blink::kWebIDBDataLossNone;
+  using blink::kWebIDBDataLossTotal;
+  static const struct {
+    const char* origin;
+    IndexedDBDataFormatVersion open_version_1;
+    IndexedDBDataFormatVersion open_version_2;
+    blink::WebIDBDataLoss expected_data_loss;
+  } kTestCases[] = {
+      {"http://same-version.com/", {3, 4}, {3, 4}, kWebIDBDataLossNone},
+      {"http://blink-upgrade.com/", {3, 4}, {3, 5}, kWebIDBDataLossNone},
+      {"http://v8-upgrade.com/", {3, 4}, {4, 4}, kWebIDBDataLossNone},
+      {"http://both-upgrade.com/", {3, 4}, {4, 5}, kWebIDBDataLossNone},
+      {"http://blink-downgrade.com/", {3, 4}, {3, 3}, kWebIDBDataLossTotal},
+      {"http://v8-downgrade.com/", {3, 4}, {2, 4}, kWebIDBDataLossTotal},
+      {"http://both-downgrade.com/", {3, 4}, {2, 3}, kWebIDBDataLossTotal},
+      {"http://v8-up-blink-down.com/", {3, 4}, {4, 2}, kWebIDBDataLossTotal},
+      {"http://v8-down-blink-up.com/", {3, 4}, {2, 5}, kWebIDBDataLossTotal},
+  };
+  for (const auto& test : kTestCases) {
+    SCOPED_TRACE(test.origin);
+    const Origin origin(GURL(test.origin));
+    ASSERT_EQ(kWebIDBDataLossNone, try_open(origin, test.open_version_1));
+    EXPECT_EQ(test.expected_data_loss, try_open(origin, test.open_version_2));
+  }
+}
+
+}  // namespace
 
 }  // namespace content

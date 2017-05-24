@@ -37,9 +37,9 @@ test(function() {
 
 test(function() {
   for (var i = 0; i < values.length; ++i) {
-    assert_equals(values[i].input.cssText, values[i].cssText);
+    assert_equals(values[i].input.toString(), values[i].cssText);
   }
-}, "Test that the cssText for CSSScale is correct.");
+}, "Test that the toString for CSSScale is correct.");
 
 test(function() {
   assert_throws(null, () => { new CSSScale(); });
@@ -79,8 +79,8 @@ test(function() {
     var inputAsMatrix = input.asMatrix();
     assert_equals(inputAsMatrix.is2D(), input.is2D());
 
-    var expectedMatrix = input.is2D() ? new CSSMatrixTransformComponent(input.x, 0, 0, input.y, 0, 0) :
-        new CSSMatrixTransformComponent(input.x, 0, 0, 0, 0, input.y, 0, 0, 0, 0, input.z, 0, 0, 0, 0, 1);
+    var expectedMatrix = input.is2D() ? new CSSMatrixComponent(input.x, 0, 0, input.y, 0, 0) :
+        new CSSMatrixComponent(input.x, 0, 0, 0, 0, input.y, 0, 0, 0, 0, input.z, 0, 0, 0, 0, 1);
     for (var attribute in expectedMatrix) {
       if (typeof expectedMatrix[attribute] === "number") {
         assert_approx_equals(inputAsMatrix[attribute], expectedMatrix[attribute], EPSILON);
@@ -91,4 +91,13 @@ test(function() {
   }
 }, "Test that asMatrix is constructed correctly for CSSScale.");
 
+test(function() {
+  var actual = new CSSScale(0, 0, 0);
+  actual.x = 1;
+  actual.y = 2;
+  actual.z = 3;
+  assert_equals(actual.x, 1);
+  assert_equals(actual.y, 2);
+  assert_equals(actual.z, 3);
+}, "Test that x, y, z are mutable attributes.");
 </script>

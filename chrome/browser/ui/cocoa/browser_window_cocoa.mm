@@ -16,6 +16,7 @@
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/tab_helper.h"
+#include "chrome/browser/metrics/browser_window_histogram_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/shell_integration.h"
@@ -24,6 +25,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window_state.h"
 #import "chrome/browser/ui/cocoa/autofill/save_card_bubble_view_bridge.h"
@@ -39,12 +41,12 @@
 #include "chrome/browser/ui/cocoa/key_equivalent_constants.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #import "chrome/browser/ui/cocoa/nsmenuitem_additions.h"
+#import "chrome/browser/ui/cocoa/page_info/page_info_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/profiles/avatar_base_controller.h"
 #include "chrome/browser/ui/cocoa/restart_browser.h"
 #include "chrome/browser/ui/cocoa/status_bubble_mac.h"
 #include "chrome/browser/ui/cocoa/task_manager_mac.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
-#import "chrome/browser/ui/cocoa/website_settings/website_settings_bubble_controller.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
 #include "chrome/browser/ui/profile_chooser_constants.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -57,6 +59,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/translate/core/browser/language_state.h"
+#include "content/public/browser/keyboard_event_processing_result.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
@@ -66,6 +69,7 @@
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -172,6 +176,12 @@ void BrowserWindowCocoa::Show() {
     // substantial part of startup time when any CALayers are part of the
     // window's NSView heirarchy.
     [window() makeKeyAndOrderFront:controller_];
+
+    // At this point all the Browser's UI is painted on the screen. There's no
+    // need to wait for the compositor, so pass the nullptr instead and don't
+    // store the returned instance.
+    BrowserWindowHistogramHelper::
+        MaybeRecordValueAndCreateInstanceOnBrowserPaint(nullptr);
   }
 
   // When creating windows from nibs it is necessary to |makeKeyAndOrderFront:|
@@ -319,6 +329,13 @@ NSString* BrowserWindowCocoa::WindowTitle() {
       browser_->GetWindowTitleForCurrentTab(include_app_name));
 }
 
+bool BrowserWindowCocoa::IsToolbarShowing() const {
+  if (!IsFullscreen())
+    return true;
+
+  return [cocoa_controller() isToolbarShowing] == YES;
+}
+
 void BrowserWindowCocoa::BookmarkBarStateChanged(
     BookmarkBar::AnimateChangeType change_type) {
   [[controller_ bookmarkBarController]
@@ -433,7 +450,7 @@ bool BrowserWindowCocoa::IsFullscreen() const {
 }
 
 bool BrowserWindowCocoa::IsFullscreenBubbleVisible() const {
-  return false;  // Currently only called from toolkit-views website_settings.
+  return false;  // Currently only called from toolkit-views page_info.
 }
 
 void BrowserWindowCocoa::MaybeShowNewBackShortcutBubble(bool forward) {
@@ -525,7 +542,11 @@ void BrowserWindowCocoa::UpdateAlertState(TabAlertState alert_state) {
 }
 
 void BrowserWindowCocoa::ShowUpdateChromeDialog() {
-  restart_browser::RequestRestart(window());
+  if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
+    chrome::ShowUpdateChromeDialogViews(GetNativeWindow());
+  } else {
+    restart_browser::RequestRestart(window());
+  }
 }
 
 void BrowserWindowCocoa::ShowBookmarkBubble(const GURL& url,
@@ -675,47 +696,49 @@ void BrowserWindowCocoa::UserChangedTheme() {
   }
 }
 
-void BrowserWindowCocoa::ShowWebsiteSettings(
+void BrowserWindowCocoa::ShowPageInfo(
     Profile* profile,
     content::WebContents* web_contents,
     const GURL& virtual_url,
     const security_state::SecurityInfo& security_info) {
-  WebsiteSettingsUIBridge::Show(window(), profile, web_contents, virtual_url,
-                                security_info);
+  PageInfoUIBridge::Show(window(), profile, web_contents, virtual_url,
+                         security_info);
 }
 
 void BrowserWindowCocoa::ShowAppMenu() {
   // No-op. Mac doesn't support showing the menus via alt keys.
 }
 
-bool BrowserWindowCocoa::PreHandleKeyboardEvent(
-    const NativeWebKeyboardEvent& event, bool* is_keyboard_shortcut) {
+content::KeyboardEventProcessingResult
+BrowserWindowCocoa::PreHandleKeyboardEvent(
+    const NativeWebKeyboardEvent& event) {
   // Handle ESC to dismiss permission bubbles, but still forward it
   // to the window afterwards.
-  if (event.windowsKeyCode == ui::VKEY_ESCAPE)
+  if (event.windows_key_code == ui::VKEY_ESCAPE)
     [controller_ dismissPermissionBubble];
 
   if (![BrowserWindowUtils shouldHandleKeyboardEvent:event])
-    return false;
+    return content::KeyboardEventProcessingResult::NOT_HANDLED;
 
-  if (event.type() == blink::WebInputEvent::RawKeyDown &&
+  if (event.GetType() == blink::WebInputEvent::kRawKeyDown &&
       [controller_
           handledByExtensionCommand:event.os_event
                            priority:ui::AcceleratorManager::kHighPriority])
-    return true;
+    return content::KeyboardEventProcessingResult::HANDLED;
 
   int id = [BrowserWindowUtils getCommandId:event];
   if (id == -1)
-    return false;
+    return content::KeyboardEventProcessingResult::NOT_HANDLED;
 
   if (browser_->command_controller()->IsReservedCommandOrKey(id, event)) {
-      return [BrowserWindowUtils handleKeyboardEvent:event.os_event
-                                            inWindow:window()];
+    using Result = content::KeyboardEventProcessingResult;
+    return [BrowserWindowUtils handleKeyboardEvent:event.os_event
+                                          inWindow:window()]
+               ? Result::HANDLED
+               : Result::NOT_HANDLED;
   }
 
-  DCHECK(is_keyboard_shortcut);
-  *is_keyboard_shortcut = true;
-  return false;
+  return content::KeyboardEventProcessingResult::NOT_HANDLED_IS_SHORTCUT;
 }
 
 void BrowserWindowCocoa::HandleKeyboardEvent(
@@ -727,7 +750,7 @@ void BrowserWindowCocoa::HandleKeyboardEvent(
       // TODO(spqchan): This is a temporary fix for exit extension fullscreen.
       // A priority system for exiting extension fullscreen when there is a
       // conflict is being experimented. See Issue 536047.
-      if (event.windowsKeyCode == ui::VKEY_ESCAPE)
+      if (event.windows_key_code == ui::VKEY_ESCAPE)
         [controller_ exitExtensionFullscreenIfPossible];
     }
   }
@@ -795,14 +818,16 @@ NSWindow* BrowserWindowCocoa::window() const {
 void BrowserWindowCocoa::ShowAvatarBubbleFromAvatarButton(
     AvatarBubbleMode mode,
     const signin::ManageAccountsParams& manage_accounts_params,
-    signin_metrics::AccessPoint access_point) {
+    signin_metrics::AccessPoint access_point,
+    bool is_source_keyboard) {
   profiles::BubbleViewMode bubble_view_mode;
   profiles::TutorialMode tutorial_mode;
   profiles::BubbleViewModeFromAvatarBubbleMode(mode, &bubble_view_mode,
                                                &tutorial_mode);
 
   if (SigninViewController::ShouldShowModalSigninForMode(bubble_view_mode)) {
-    browser_->ShowModalSigninWindow(bubble_view_mode, access_point);
+    browser_->signin_view_controller()->ShowModalSignin(bubble_view_mode,
+                                                        browser_, access_point);
   } else {
     AvatarBaseController* controller = [controller_ avatarButtonController];
     NSView* anchor = [controller buttonView];

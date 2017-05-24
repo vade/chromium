@@ -23,6 +23,7 @@ import android.webkit.WebSettings.LayoutAlgorithm;
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.AwWebResourceResponse;
+import org.chromium.android_webview.test.TestAwContentsClient.DoUpdateVisitedHistoryHelper;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.android_webview.test.util.ImagePageGenerator;
 import org.chromium.android_webview.test.util.JSUtils;
@@ -36,8 +37,8 @@ import org.chromium.base.test.util.TestFileUtil;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.test.util.DOMUtils;
 import org.chromium.content.browser.test.util.HistoryUtils;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.common.ContentUrlConstants;
 import org.chromium.net.test.EmbeddedTestServer;
 import org.chromium.net.test.util.TestWebServer;
 import org.chromium.ui.display.DisplayAndroid;
@@ -56,6 +57,8 @@ import java.util.regex.Pattern;
 public class AwSettingsTest extends AwTestBase {
     private static final boolean ENABLED = true;
     private static final boolean DISABLED = false;
+
+    private int mTitleIdx;
 
     /**
      * A helper class for testing a particular preference from AwSettings.
@@ -1182,10 +1185,14 @@ public class AwSettingsTest extends AwTestBase {
             return "<html><head>"
                     + "<script>"
                     + "    function tryOpenWindow() {"
-                    + "        var newWindow = window.open("
-                    + "           'data:text/html;charset=utf-8,"
-                    + "           <html><head><title>" + POPUP_ENABLED + "</title></head></html>');"
-                    + "        if (!newWindow) document.title = '" + POPUP_BLOCKED + "';"
+                    + "        var newWindow = window.open('about:blank');"
+                    + "        if (newWindow) {"
+                    + "          newWindow.document.write("
+                    + "             '<html><head><title>" + POPUP_ENABLED
+                    + "</title></head></html>');"
+                    + "        } else {"
+                    + "          document.title = '" + POPUP_BLOCKED + "';"
+                    + "        }"
                     + "    }"
                     + "</script></head>"
                     + "<body onload='tryOpenWindow()'></body></html>";
@@ -1879,6 +1886,7 @@ public class AwSettingsTest extends AwTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
+    @RetryOnFailure
     public void testFileUrlAccessWithTwoViews() throws Throwable {
         ViewPair views = createViews();
         runPerViewSettingsTest(
@@ -2111,7 +2119,7 @@ public class AwSettingsTest extends AwTestBase {
             int count = callback.getCallCount();
             loadDataSync(awContents, contentClient.getOnPageFinishedHelper(), pageHtml,
                     "text/html", false);
-            DOMUtils.clickNode(this, testContainer.getContentViewCore(), "play");
+            DOMUtils.clickNode(testContainer.getContentViewCore(), "play");
             callback.waitForCallback(count, 1);
             assertEquals(0, webServer.getRequestCount(httpPath));
 
@@ -2872,14 +2880,13 @@ public class AwSettingsTest extends AwTestBase {
                     }
             );
 
-            TestCallbackHelperContainer.OnPageFinishedHelper onPageFinishedHelper =
-                    contentClient.getOnPageFinishedHelper();
-            int initialCallCount = onPageFinishedHelper.getCallCount();
-            loadUrlSync(awContents, onPageFinishedHelper, url);
-            // loadUrlSync only waits for a single onPageFinished, now wait for another one.
-            onPageFinishedHelper.waitForCallback(initialCallCount + 1, 1, WAIT_TIMEOUT_MS,
-                    TimeUnit.MILLISECONDS);
-            assertEquals(url, onPageFinishedHelper.getUrl());
+            DoUpdateVisitedHistoryHelper doUpdateVisitedHistoryHelper =
+                    contentClient.getDoUpdateVisitedHistoryHelper();
+            int callCount = doUpdateVisitedHistoryHelper.getCallCount();
+            loadUrlAsync(awContents, url);
+            doUpdateVisitedHistoryHelper.waitForCallback(callCount);
+            assertEquals(url, doUpdateVisitedHistoryHelper.getUrl());
+            assertEquals(true, doUpdateVisitedHistoryHelper.getIsReload());
         } finally {
             if (httpServer != null) {
                 httpServer.shutdown();
@@ -2914,7 +2921,8 @@ public class AwSettingsTest extends AwTestBase {
         @Override
         public AwSettings createAwSettings(Context context, boolean supportsLegacyQuirks) {
             return new AwSettings(context, false /* isAccessFromFileURLsGrantedByDefault */,
-                    supportsLegacyQuirks, mAllow, true /* allowGeolocationOnInsecureOrigins */);
+                    supportsLegacyQuirks, mAllow, true /* allowGeolocationOnInsecureOrigins */,
+                    false /* doNotUpdateSelectionOnMutatingSelectionRange */);
         }
     }
 
@@ -2928,7 +2936,8 @@ public class AwSettingsTest extends AwTestBase {
         JSUtils.executeJavaScriptAndWaitForResult(this, awContents,
                 client.getOnEvaluateJavaScriptResultHelper(),
                 "window.emptyDocumentPersistenceTest = true;");
-        loadUrlSync(awContents, client.getOnPageFinishedHelper(), "about:blank");
+        loadUrlSync(awContents, client.getOnPageFinishedHelper(),
+                ContentUrlConstants.ABOUT_BLANK_DISPLAY_URL);
         String result = JSUtils.executeJavaScriptAndWaitForResult(this, awContents,
                 client.getOnEvaluateJavaScriptResultHelper(),
                 "window.emptyDocumentPersistenceTest ? 'set' : 'not set';");
@@ -2945,6 +2954,103 @@ public class AwSettingsTest extends AwTestBase {
     @Feature({"AndroidWebView", "Preferences"})
     public void testDisallowEmptyDocumentPersistence() throws Throwable {
         doAllowEmptyDocumentPersistenceTest(false);
+    }
+
+    private static class SelectionRangeTestDependencyFactory extends TestDependencyFactory {
+        private boolean mDoNotUpdate;
+        public SelectionRangeTestDependencyFactory(boolean doNotUpdate) {
+            mDoNotUpdate = doNotUpdate;
+        }
+
+        @Override
+        public AwSettings createAwSettings(Context context, boolean supportsLegacyQuirks) {
+            return new AwSettings(context, false /* isAccessFromFileURLsGrantedByDefault */,
+                    supportsLegacyQuirks, false /* allowEmptyDocumentPersistence */,
+                    true /* allowGeolocationOnInsecureOrigins */,
+                    mDoNotUpdate /* doNotUpdateSelectionOnMutatingSelectionRange */);
+        }
+    }
+
+    private void selectionUpdateOnMutatingSelectionRangeTest(boolean doNotUpdate) throws Throwable {
+        mOverridenFactory = new SelectionRangeTestDependencyFactory(doNotUpdate);
+
+        final TestAwContentsClient client = new TestAwContentsClient();
+        final AwTestContainerView mContainerView = createAwTestContainerViewOnMainSync(client);
+        final AwContents awContents = mContainerView.getAwContents();
+        enableJavaScriptOnUiThread(awContents);
+        final String testPageHtml =
+                "<html><head></head><body><div id='a' contenteditable></div><script>"
+                + "var cnt = 0;"
+                + "var a = document.getElementById('a');"
+                + "document.addEventListener('selectionchange', onSelectionChange, false);"
+                + "function onSelectionChange(event) {"
+                + "  cnt++;"
+                + "}"
+                + "</script></body></html>";
+        loadDataSync(
+                awContents, client.getOnPageFinishedHelper(), testPageHtml, "text/html", false);
+
+        // Focus on an empty DIV.
+        JSUtils.executeJavaScriptAndWaitForResult(this, awContents,
+                client.getOnEvaluateJavaScriptResultHelper(), "window.a.focus();");
+        assertEquals(1, getSelectionChangeCountForSelectionUpdateTest(awContents, client));
+
+        // Create and delete a zero-width space. See crbug.com/698752 for details.
+        JSUtils.executeJavaScriptAndWaitForResult(this, awContents,
+                client.getOnEvaluateJavaScriptResultHelper(),
+                "(function() {"
+                        + "var sel = window.getSelection();"
+                        + "var range = sel.getRangeAt(0);"
+                        + "var span = document.createElement('span');"
+                        + "var textNodeForZWSP = document.createTextNode('\u200B');"
+                        + "span.appendChild(textNodeForZWSP);"
+                        + "range.insertNode(span);"
+                        + "range.selectNode(span);"
+                        + "range.deleteContents();"
+                        + "}) ();");
+        int expectedResult = doNotUpdate ? 0 : 1;
+        assertEquals(
+                expectedResult, getSelectionChangeCountForSelectionUpdateTest(awContents, client));
+    }
+
+    private void pollTitleAs(final String title, final AwContents awContents) throws Exception {
+        pollInstrumentationThread(new Callable<Boolean>() {
+            @Override
+            public Boolean call() throws Exception {
+                return title.equals(getTitleOnUiThread(awContents));
+            }
+        });
+    }
+
+    private int getSelectionChangeCountForSelectionUpdateTest(
+            AwContents awContents, TestAwContentsClient client) throws Exception {
+        mTitleIdx++;
+        String expectedTitle = Integer.toString(mTitleIdx);
+        // Since selectionchange event is posted on a message loop, we run another message loop
+        // before we get the result. On Chromium both run on the same message loop.
+        JSUtils.executeJavaScriptAndWaitForResult(this, awContents,
+                client.getOnEvaluateJavaScriptResultHelper(),
+                "setTimeout(function() { document.title = '" + expectedTitle + "'; });");
+        pollTitleAs(expectedTitle, awContents);
+
+        String result = JSUtils.executeJavaScriptAndWaitForResult(
+                this, awContents, client.getOnEvaluateJavaScriptResultHelper(), "window.cnt");
+        // Clean up
+        JSUtils.executeJavaScriptAndWaitForResult(
+                this, awContents, client.getOnEvaluateJavaScriptResultHelper(), "window.cnt = 0;");
+        return Integer.parseInt(result);
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Selection"})
+    public void testDoNotUpdateSelectionOnMutatingSelectionRange() throws Throwable {
+        selectionUpdateOnMutatingSelectionRangeTest(true);
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Selection"})
+    public void testUpdateSelectionOnMutatingSelectionRange() throws Throwable {
+        selectionUpdateOnMutatingSelectionRangeTest(false);
     }
 
     static class ViewPair {

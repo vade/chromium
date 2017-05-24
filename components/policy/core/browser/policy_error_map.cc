@@ -9,9 +9,10 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "grit/components_strings.h"
+#include "components/strings/grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -191,7 +192,7 @@ void PolicyErrorMap::AddError(const std::string& policy,
 base::string16 PolicyErrorMap::GetErrors(const std::string& policy) {
   CheckReadyAndConvert();
   std::pair<const_iterator, const_iterator> range = map_.equal_range(policy);
-  std::vector<base::string16> list;
+  std::vector<base::StringPiece16> list;
   for (const_iterator it = range.first; it != range.second; ++it)
     list.push_back(it->second);
   return base::JoinString(list, base::ASCIIToUTF16("\n"));

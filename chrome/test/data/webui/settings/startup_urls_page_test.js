@@ -183,6 +183,22 @@ cr.define('settings_startup_urls_page', function() {
       document.body.appendChild(dialog);
       return testProxyCalled('editStartupPage');
     });
+
+    test('Enter key submits', function() {
+      document.body.appendChild(dialog);
+
+      // Input a URL and force validation.
+      var inputElement = dialog.$.url;
+      inputElement.value = 'foo.com';
+      pressSpace(inputElement);
+
+      return browserProxy.whenCalled('validateStartupPage').then(function() {
+        MockInteractions.keyEventOn(
+            inputElement, 'keypress', 13, undefined, 'Enter');
+
+        return browserProxy.whenCalled('addStartupPage');
+      });
+    });
   });
 
   suite('StartupUrlsPage', function() {
@@ -216,14 +232,14 @@ cr.define('settings_startup_urls_page', function() {
     });
 
     test('UseCurrentPages', function() {
-      var useCurrentPagesButton = page.$$('#useCurrentPages');
+      var useCurrentPagesButton = page.$$('#useCurrentPages > a');
       assertTrue(!!useCurrentPagesButton);
       MockInteractions.tap(useCurrentPagesButton);
       return browserProxy.whenCalled('useCurrentPages');
     });
 
     test('AddPage_OpensDialog', function() {
-      var addPageButton = page.$$('#addPage');
+      var addPageButton = page.$$('#addPage > a');
       assertTrue(!!addPageButton);
       assertFalse(!!page.$$('settings-startup-url-dialog'));
 
@@ -234,7 +250,9 @@ cr.define('settings_startup_urls_page', function() {
 
     test('EditPage_OpensDialog', function() {
       assertFalse(!!page.$$('settings-startup-url-dialog'));
-      page.fire(settings.EDIT_STARTUP_URL_EVENT, createSampleUrlEntry());
+      page.fire(
+          settings.EDIT_STARTUP_URL_EVENT,
+          {model: createSampleUrlEntry(), anchor: null});
       Polymer.dom.flush();
       assertTrue(!!page.$$('settings-startup-url-dialog'));
     });
@@ -255,7 +273,8 @@ cr.define('settings_startup_urls_page', function() {
       };
 
       cr.webUIListenerCallback('update-startup-pages', [entry1, entry2]);
-      page.fire(settings.EDIT_STARTUP_URL_EVENT, entry2);
+      page.fire(
+          settings.EDIT_STARTUP_URL_EVENT, {model: entry2, anchor: null});
       Polymer.dom.flush();
 
       assertTrue(!!page.$$('settings-startup-url-dialog'));

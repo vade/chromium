@@ -14,12 +14,7 @@
         {
           "object": "LayoutBlockFlow DIV",
           "rect": [8, 308, 100, 100],
-          "reason": "became visible"
-        },
-        {
-          "object": "LayoutBlockFlow DIV id='target3'",
-          "rect": [8, 388, 100, 20],
-          "reason": "layoutObject insertion"
+          "reason": "appeared"
         },
         {
           "object": "LayoutBlockFlow (positioned) DIV",
@@ -40,11 +35,11 @@
     },
     {
       "object": "LayoutBlockFlow DIV",
-      "reason": "became visible"
+      "reason": "appeared"
     },
     {
       "object": "LayoutBlockFlow DIV id='target3'",
-      "reason": "layoutObject insertion"
+      "reason": "appeared"
     }
   ]
 }

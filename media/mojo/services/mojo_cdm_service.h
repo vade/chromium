@@ -82,10 +82,9 @@ class MEDIA_MOJO_EXPORT MojoCdmService
                     const std::string& error_message);
 
   // Callbacks for firing session events.
-  void OnSessionMessage(
-      const std::string& session_id,
-      ::media::ContentDecryptionModule::MessageType message_type,
-      const std::vector<uint8_t>& message);
+  void OnSessionMessage(const std::string& session_id,
+                        ::media::CdmMessageType message_type,
+                        const std::vector<uint8_t>& message);
   void OnSessionKeysChange(const std::string& session_id,
                            bool has_additional_usable_key,
                            CdmKeysInfo keys_info);
@@ -106,6 +105,8 @@ class MEDIA_MOJO_EXPORT MojoCdmService
   CdmFactory* cdm_factory_;
   scoped_refptr<::media::ContentDecryptionModule> cdm_;
 
+  // MojoDecryptorService is passed the Decryptor from |cdm_|, so
+  // |decryptor_| must not outlive |cdm_|.
   std::unique_ptr<MojoDecryptorService> decryptor_;
 
   // Set to a valid CDM ID if the |cdm_| is successfully created.

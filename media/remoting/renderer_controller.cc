@@ -32,8 +32,8 @@ void RendererController::OnStarted(bool success) {
     VLOG(1) << "Remoting started successively.";
     if (remote_rendering_started_) {
       metrics_recorder_.DidStartSession();
-      DCHECK(!switch_renderer_cb_.is_null());
-      switch_renderer_cb_.Run();
+      DCHECK(client_);
+      client_->SwitchRenderer(true);
     } else {
       session_->StopRemoting(this);
     }
@@ -52,10 +52,9 @@ void RendererController::OnSessionStateChanged() {
 void RendererController::UpdateFromSessionState(StartTrigger start_trigger,
                                                 StopTrigger stop_trigger) {
   VLOG(1) << "UpdateFromSessionState: " << session_->state();
-  if (!sink_available_changed_cb_.is_null())
-    sink_available_changed_cb_.Run(IsRemoteSinkAvailable());
+  if (client_)
+    client_->ActivateViewportIntersectionMonitoring(IsRemoteSinkAvailable());
 
-  UpdateInterstitial(base::nullopt);
   UpdateAndMaybeSwitch(start_trigger, stop_trigger);
 }
 
@@ -139,38 +138,6 @@ void RendererController::OnRemotePlaybackDisabled(bool disabled) {
   UpdateAndMaybeSwitch(ENABLED_BY_PAGE, DISABLED_BY_PAGE);
 }
 
-void RendererController::OnSetPoster(const GURL& poster_url) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  if (poster_url != poster_url_) {
-    poster_url_ = poster_url;
-    if (poster_url_.is_empty())
-      UpdateInterstitial(SkBitmap());
-    else
-      DownloadPosterImage();
-  }
-}
-
-void RendererController::SetSwitchRendererCallback(const base::Closure& cb) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!cb.is_null());
-
-  switch_renderer_cb_ = cb;
-  // Note: Not calling UpdateAndMaybeSwitch() here since this method should be
-  // called during the initialization phase of this RendererController;
-  // and definitely before a whole lot of other things that are needed to
-  // trigger a switch.
-}
-
-void RendererController::SetRemoteSinkAvailableChangedCallback(
-    const base::Callback<void(bool)>& cb) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  sink_available_changed_cb_ = cb;
-  if (!sink_available_changed_cb_.is_null())
-    sink_available_changed_cb_.Run(IsRemoteSinkAvailable());
-}
-
 base::WeakPtr<RpcBroker> RendererController::GetRpcBroker() const {
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -190,7 +157,6 @@ void RendererController::StartDataPipe(
 void RendererController::OnMetadataChanged(const PipelineMetadata& metadata) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  const gfx::Size old_size = pipeline_metadata_.natural_size;
   const bool was_audio_codec_supported = has_audio() && IsAudioCodecSupported();
   const bool was_video_codec_supported = has_video() && IsVideoCodecSupported();
   pipeline_metadata_ = metadata;
@@ -203,9 +169,6 @@ void RendererController::OnMetadataChanged(const PipelineMetadata& metadata) {
     is_encrypted_ |= metadata.video_decoder_config.is_encrypted();
   if (has_audio())
     is_encrypted_ |= metadata.audio_decoder_config.is_encrypted();
-
-  if (pipeline_metadata_.natural_size != old_size)
-    UpdateInterstitial(base::nullopt);
 
   StartTrigger start_trigger = UNKNOWN_START_TRIGGER;
   if (!was_audio_codec_supported && is_audio_codec_supported)
@@ -286,7 +249,7 @@ void RendererController::OnPaused() {
 bool RendererController::ShouldBeRemoting() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  if (switch_renderer_cb_.is_null()) {
+  if (!client_) {
     DCHECK(!remote_rendering_started_);
     return false;  // No way to switch to the remoting renderer.
   }
@@ -294,10 +257,9 @@ bool RendererController::ShouldBeRemoting() {
   const SharedSession::SessionState state = session_->state();
   if (is_encrypted_) {
     // Due to technical limitations when playing encrypted content, once a
-    // remoting session has been started, always return true here to indicate
-    // that the CourierRenderer should continue to be used. In the stopped
-    // states, CourierRenderer will display an interstitial to notify the user
-    // that local rendering cannot be resumed.
+    // remoting session has been started, playback cannot be resumed locally
+    // without reloading the page, so leave the CourierRenderer in-place to
+    // avoid having the default renderer attempt and fail to play the content.
     //
     // TODO(miu): Revisit this once more of the encrypted-remoting impl is
     // in-place. For example, this will prevent metrics from recording session
@@ -365,16 +327,16 @@ void RendererController::UpdateAndMaybeSwitch(StartTrigger start_trigger,
   // Switch between local renderer and remoting renderer.
   remote_rendering_started_ = should_be_remoting;
 
+  DCHECK(client_);
   if (remote_rendering_started_) {
-    DCHECK(!switch_renderer_cb_.is_null());
     if (session_->state() == SharedSession::SESSION_PERMANENTLY_STOPPED) {
-      switch_renderer_cb_.Run();
+      client_->SwitchRenderer(true);
       return;
     }
     DCHECK_NE(start_trigger, UNKNOWN_START_TRIGGER);
     metrics_recorder_.WillStartSession(start_trigger);
-    // |switch_renderer_cb_.Run()| will be called after remoting is started
-    // successfully.
+    // |MediaObserverClient::SwitchRenderer()| will be called after remoting is
+    // started successfully.
     session_->StartRemoting(this);
   } else {
     // For encrypted content, it's only valid to switch to remoting renderer,
@@ -384,77 +346,9 @@ void RendererController::UpdateAndMaybeSwitch(StartTrigger start_trigger,
     DCHECK(!is_encrypted_);
     DCHECK_NE(stop_trigger, UNKNOWN_STOP_TRIGGER);
     metrics_recorder_.WillStopSession(stop_trigger);
-    switch_renderer_cb_.Run();
+    client_->SwitchRenderer(false);
     session_->StopRemoting(this);
   }
-}
-
-void RendererController::SetShowInterstitialCallback(
-    const ShowInterstitialCallback& cb) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  show_interstitial_cb_ = cb;
-  UpdateInterstitial(SkBitmap());
-  if (!poster_url_.is_empty())
-    DownloadPosterImage();
-}
-
-void RendererController::SetDownloadPosterCallback(
-    const DownloadPosterCallback& cb) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(download_poster_cb_.is_null());
-  download_poster_cb_ = cb;
-  if (!poster_url_.is_empty())
-    DownloadPosterImage();
-}
-
-void RendererController::UpdateInterstitial(
-    const base::Optional<SkBitmap>& image) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (show_interstitial_cb_.is_null() ||
-      pipeline_metadata_.natural_size.IsEmpty())
-    return;
-
-  InterstitialType type = InterstitialType::BETWEEN_SESSIONS;
-  switch (session_->state()) {
-    case SharedSession::SESSION_STARTED:
-      type = InterstitialType::IN_SESSION;
-      break;
-    case SharedSession::SESSION_PERMANENTLY_STOPPED:
-      type = InterstitialType::ENCRYPTED_MEDIA_FATAL_ERROR;
-      break;
-    case SharedSession::SESSION_UNAVAILABLE:
-    case SharedSession::SESSION_CAN_START:
-    case SharedSession::SESSION_STARTING:
-    case SharedSession::SESSION_STOPPING:
-      break;
-  }
-
-  show_interstitial_cb_.Run(image, pipeline_metadata_.natural_size, type);
-}
-
-void RendererController::DownloadPosterImage() {
-  if (download_poster_cb_.is_null() || show_interstitial_cb_.is_null())
-    return;
-  DCHECK(!poster_url_.is_empty());
-
-  const base::TimeTicks download_start_time = base::TimeTicks::Now();
-  download_poster_cb_.Run(
-      poster_url_,
-      base::Bind(&RendererController::OnPosterImageDownloaded,
-                 weak_factory_.GetWeakPtr(), poster_url_, download_start_time));
-}
-
-void RendererController::OnPosterImageDownloaded(
-    const GURL& download_url,
-    base::TimeTicks download_start_time,
-    const SkBitmap& image) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  metrics_recorder_.OnPosterImageDownloaded(
-      base::TimeTicks::Now() - download_start_time, !image.drawsNothing());
-  if (download_url != poster_url_)
-    return;  // The poster image URL has changed during the download.
-  UpdateInterstitial(image);
 }
 
 void RendererController::OnRendererFatalError(StopTrigger stop_trigger) {
@@ -467,6 +361,15 @@ void RendererController::OnRendererFatalError(StopTrigger stop_trigger) {
 
   encountered_renderer_fatal_error_ = true;
   UpdateAndMaybeSwitch(UNKNOWN_START_TRIGGER, stop_trigger);
+}
+
+void RendererController::SetClient(MediaObserverClient* client) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(client);
+  DCHECK(!client_);
+
+  client_ = client;
+  client_->ActivateViewportIntersectionMonitoring(IsRemoteSinkAvailable());
 }
 
 }  // namespace remoting

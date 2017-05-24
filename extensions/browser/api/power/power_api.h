@@ -11,6 +11,7 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
+#include "base/single_thread_task_runner.h"
 #include "device/power_save_blocker/power_save_blocker.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/extension_function.h"
@@ -66,6 +67,13 @@ class PowerAPI : public BrowserContextKeyedAPI,
   // BrowserContextKeyedAPI implementation.
   static BrowserContextKeyedAPIFactory<PowerAPI>* GetFactoryInstance();
 
+  // Map from extension ID to the corresponding level for each extension
+  // that has an outstanding request.
+  using ExtensionLevelMap = std::map<std::string, api::power::Level>;
+  const ExtensionLevelMap& extension_levels() const {
+    return extension_levels_;
+  }
+
   // Adds an extension lock at |level| for |extension_id|, replacing the
   // extension's existing lock, if any.
   void AddRequest(const std::string& extension_id, api::power::Level level);
@@ -82,7 +90,7 @@ class PowerAPI : public BrowserContextKeyedAPI,
   // Overridden from extensions::ExtensionRegistryObserver.
   void OnExtensionUnloaded(content::BrowserContext* browser_context,
                            const Extension* extension,
-                           UnloadedExtensionInfo::Reason reason) override;
+                           UnloadedExtensionReason reason) override;
 
  private:
   friend class BrowserContextKeyedAPIFactory<PowerAPI>;
@@ -113,9 +121,7 @@ class PowerAPI : public BrowserContextKeyedAPI,
   // |power_save_blocker_| is NULL.
   api::power::Level current_level_;
 
-  // Map from extension ID to the corresponding level for each extension
-  // that has an outstanding request.
-  typedef std::map<std::string, api::power::Level> ExtensionLevelMap;
+  // Outstanding requests.
   ExtensionLevelMap extension_levels_;
 
   DISALLOW_COPY_AND_ASSIGN(PowerAPI);

@@ -10,6 +10,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/callback.h"
@@ -26,6 +27,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringize_macros.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task_scheduler/task_scheduler.h"
 #include "build/build_config.h"
 #include "components/policy/policy_constants.h"
 #include "ipc/ipc_channel.h"
@@ -33,6 +35,7 @@
 #include "ipc/ipc_listener.h"
 #include "jingle/glue/thread_wrapper.h"
 #include "mojo/edk/embedder/embedder.h"
+#include "mojo/edk/embedder/incoming_broker_client_invitation.h"
 #include "mojo/edk/embedder/platform_channel_pair.h"
 #include "mojo/edk/embedder/scoped_ipc_support.h"
 #include "net/base/network_change_notifier.h"
@@ -40,11 +43,12 @@
 #include "net/socket/client_socket_factory.h"
 #include "net/url_request/url_fetcher.h"
 #include "remoting/base/auto_thread_task_runner.h"
-#include "remoting/base/breakpad.h"
 #include "remoting/base/chromium_url_request.h"
 #include "remoting/base/constants.h"
 #include "remoting/base/logging.h"
+#include "remoting/base/oauth_token_getter_impl.h"
 #include "remoting/base/rsa_key_pair.h"
+#include "remoting/base/service_urls.h"
 #include "remoting/base/util.h"
 #include "remoting/host/branding.h"
 #include "remoting/host/chromoting_host.h"
@@ -71,13 +75,11 @@
 #include "remoting/host/ipc_host_event_logger.h"
 #include "remoting/host/logging.h"
 #include "remoting/host/me2me_desktop_environment.h"
-#include "remoting/host/oauth_token_getter_impl.h"
 #include "remoting/host/pairing_registry_delegate.h"
 #include "remoting/host/pin_hash.h"
 #include "remoting/host/policy_watcher.h"
 #include "remoting/host/security_key/security_key_auth_handler.h"
 #include "remoting/host/security_key/security_key_extension.h"
-#include "remoting/host/service_urls.h"
 #include "remoting/host/shutdown_watchdog.h"
 #include "remoting/host/signaling_connector.h"
 #include "remoting/host/single_window_desktop_environment.h"
@@ -133,9 +135,16 @@
 using remoting::protocol::PairingRegistry;
 using remoting::protocol::NetworkSettings;
 
-#if defined(USE_REMOTING_MACOSX_INTERNAL)
-#include "remoting/tools/internal/internal_mac-inl.h"
-#endif
+#if defined(OS_MACOSX)
+
+// The following creates a section that tells Mac OS X that it is OK to let us
+// inject input in the login screen. Just the name of the section is important,
+// not its contents.
+__attribute__((used))
+__attribute__((section ("__CGPreLoginApp,__cgpreloginapp")))
+static const char magic_section[] = "";
+
+#endif  // defined(OS_MACOSX)
 
 namespace {
 
@@ -287,10 +296,10 @@ class HostProcess : public ConfigWatcher::Delegate,
   void OnPolicyUpdate(std::unique_ptr<base::DictionaryValue> policies);
   void OnPolicyError();
   void ReportPolicyErrorAndRestartHost();
-  void ApplyHostDomainPolicy();
+  void ApplyHostDomainListPolicy();
   void ApplyUsernamePolicy();
-  bool OnClientDomainPolicyUpdate(base::DictionaryValue* policies);
-  bool OnHostDomainPolicyUpdate(base::DictionaryValue* policies);
+  bool OnClientDomainListPolicyUpdate(base::DictionaryValue* policies);
+  bool OnHostDomainListPolicyUpdate(base::DictionaryValue* policies);
   bool OnUsernamePolicyUpdate(base::DictionaryValue* policies);
   bool OnNatPolicyUpdate(base::DictionaryValue* policies);
   bool OnRelayPolicyUpdate(base::DictionaryValue* policies);
@@ -368,8 +377,8 @@ class HostProcess : public ConfigWatcher::Delegate,
 
   std::unique_ptr<PolicyWatcher> policy_watcher_;
   PolicyState policy_state_ = POLICY_INITIALIZING;
-  std::string client_domain_;
-  std::string host_domain_;
+  std::vector<std::string> client_domain_list_;
+  std::vector<std::string> host_domain_list_;
   bool host_username_match_required_ = false;
   bool allow_nat_traversal_ = true;
   bool allow_relay_ = true;
@@ -472,14 +481,15 @@ bool HostProcess::InitWithCommandLine(const base::CommandLine* cmd_line) {
   ipc_support_ = base::MakeUnique<mojo::edk::ScopedIPCSupport>(
       context_->network_task_runner()->task_runner(),
       mojo::edk::ScopedIPCSupport::ShutdownPolicy::FAST);
-  mojo::edk::SetParentPipeHandle(
-      mojo::edk::PlatformChannelPair::PassClientHandleFromParentProcess(
-          *cmd_line));
+
+  auto invitation =
+      mojo::edk::IncomingBrokerClientInvitation::AcceptFromCommandLine(
+          mojo::edk::TransportProtocol::kLegacy);
 
   // Connect to the daemon process.
   daemon_channel_ = IPC::ChannelProxy::Create(
-      mojo::edk::CreateChildMessagePipe(
-          cmd_line->GetSwitchValueASCII(kMojoPipeToken))
+      invitation
+          ->ExtractMessagePipe(cmd_line->GetSwitchValueASCII(kMojoPipeToken))
           .release(),
       IPC::Channel::MODE_CLIENT, this, context_->network_task_runner());
 
@@ -584,7 +594,7 @@ void HostProcess::OnConfigUpdated(
   } else if (state_ == HOST_STARTED) {
     // Reapply policies that could be affected by a new config.
     DCHECK_EQ(policy_state_, POLICY_LOADED);
-    ApplyHostDomainPolicy();
+    ApplyHostDomainListPolicy();
     ApplyUsernamePolicy();
 
     // TODO(sergeyu): Here we assume that PIN is the only part of the config
@@ -717,7 +727,7 @@ void HostProcess::CreateAuthenticatorFactory() {
 
     factory = protocol::Me2MeHostAuthenticatorFactory::CreateWithPin(
         use_service_account_, host_owner_, local_certificate, key_pair_,
-        client_domain_, pin_hash_, pairing_registry);
+        client_domain_list_, pin_hash_, pairing_registry);
 
     host_->set_pairing_registry(pairing_registry);
   } else {
@@ -741,7 +751,7 @@ void HostProcess::CreateAuthenticatorFactory() {
                                       context_->url_request_context_getter());
     factory = protocol::Me2MeHostAuthenticatorFactory::CreateWithThirdPartyAuth(
         use_service_account_, host_owner_, local_certificate, key_pair_,
-        client_domain_, token_validator_factory);
+        client_domain_list_, token_validator_factory);
   }
 
 #if defined(OS_POSIX)
@@ -1012,8 +1022,8 @@ void HostProcess::OnPolicyUpdate(
   }
 
   bool restart_required = false;
-  restart_required |= OnClientDomainPolicyUpdate(policies.get());
-  restart_required |= OnHostDomainPolicyUpdate(policies.get());
+  restart_required |= OnClientDomainListPolicyUpdate(policies.get());
+  restart_required |= OnHostDomainListPolicyUpdate(policies.get());
   restart_required |= OnCurtainPolicyUpdate(policies.get());
   // Note: UsernamePolicyUpdate must run after OnCurtainPolicyUpdate.
   restart_required |= OnUsernamePolicyUpdate(policies.get());
@@ -1062,13 +1072,14 @@ void HostProcess::ReportPolicyErrorAndRestartHost() {
   RestartHost(kHostOfflineReasonPolicyReadError);
 }
 
-void HostProcess::ApplyHostDomainPolicy() {
+void HostProcess::ApplyHostDomainListPolicy() {
   if (state_ != HOST_STARTED)
     return;
 
-  HOST_LOG << "Policy sets host domain: " << host_domain_;
+  HOST_LOG << "Policy sets host domains: "
+           << base::JoinString(host_domain_list_, ", ");
 
-  if (!host_domain_.empty()) {
+  if (!host_domain_list_.empty()) {
     // If the user does not have a Google email, their client JID will not be
     // based on their email. In that case, the username/host domain policies
     // would be meaningless, since there is no way to check that the JID
@@ -1079,32 +1090,55 @@ void HostProcess::ApplyHostDomainPolicy() {
       ShutdownHost(kInvalidHostDomainExitCode);
     }
 
-    if (!base::EndsWith(host_owner_, std::string("@") + host_domain_,
-                        base::CompareCase::INSENSITIVE_ASCII)) {
+    bool matched = false;
+    for (const std::string& domain : host_domain_list_) {
+      if (base::EndsWith(host_owner_, std::string("@") + domain,
+                         base::CompareCase::INSENSITIVE_ASCII)) {
+        matched = true;
+      }
+    }
+    if (!matched) {
       LOG(ERROR) << "The host domain does not match the policy.";
       ShutdownHost(kInvalidHostDomainExitCode);
     }
   }
 }
 
-bool HostProcess::OnHostDomainPolicyUpdate(base::DictionaryValue* policies) {
+bool HostProcess::OnHostDomainListPolicyUpdate(
+    base::DictionaryValue* policies) {
   // Returns true if the host has to be restarted after this policy update.
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
-  if (!policies->GetString(policy::key::kRemoteAccessHostDomain,
-                           &host_domain_)) {
+  const base::ListValue* list;
+  if (!policies->GetList(policy::key::kRemoteAccessHostDomainList, &list)) {
     return false;
   }
 
-  ApplyHostDomainPolicy();
+  host_domain_list_.clear();
+  for (const auto& value : *list) {
+    host_domain_list_.push_back(value.GetString());
+  }
+
+  ApplyHostDomainListPolicy();
   return false;
 }
 
-bool HostProcess::OnClientDomainPolicyUpdate(base::DictionaryValue* policies) {
+bool HostProcess::OnClientDomainListPolicyUpdate(
+    base::DictionaryValue* policies) {
   // Returns true if the host has to be restarted after this policy update.
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
-  return policies->GetString(policy::key::kRemoteAccessHostClientDomain,
-                             &client_domain_);
+  const base::ListValue* list;
+  if (!policies->GetList(policy::key::kRemoteAccessHostClientDomainList,
+                         &list)) {
+    return false;
+  }
+
+  client_domain_list_.clear();
+  for (const auto& value : *list) {
+    client_domain_list_.push_back(value.GetString());
+  }
+
+  return true;
 }
 
 void HostProcess::ApplyUsernamePolicy() {
@@ -1114,7 +1148,7 @@ void HostProcess::ApplyUsernamePolicy() {
   if (host_username_match_required_) {
     HOST_LOG << "Policy requires host username match.";
 
-    // See comment in ApplyHostDomainPolicy.
+    // See comment in ApplyHostDomainListPolicy.
     if (host_owner_ != host_owner_email_) {
       LOG(ERROR) << "The username and host domain policies cannot be enabled "
                  << "for accounts with a non-Google email.";
@@ -1347,10 +1381,10 @@ void HostProcess::InitializeSignaling() {
   std::unique_ptr<DnsBlackholeChecker> dns_blackhole_checker(
       new DnsBlackholeChecker(context_->url_request_context_getter(),
                               talkgadget_prefix_));
-  std::unique_ptr<OAuthTokenGetter::OAuthCredentials> oauth_credentials(
-      new OAuthTokenGetter::OAuthCredentials(xmpp_server_config_.username,
-                                             oauth_refresh_token_,
-                                             use_service_account_));
+  std::unique_ptr<OAuthTokenGetter::OAuthAuthorizationCredentials>
+      oauth_credentials(new OAuthTokenGetter::OAuthAuthorizationCredentials(
+          xmpp_server_config_.username, oauth_refresh_token_,
+          use_service_account_));
   oauth_token_getter_.reset(
       new OAuthTokenGetterImpl(std::move(oauth_credentials),
                                context_->url_request_context_getter(), false));
@@ -1489,7 +1523,7 @@ void HostProcess::StartHost() {
 
   CreateAuthenticatorFactory();
 
-  ApplyHostDomainPolicy();
+  ApplyHostDomainListPolicy();
   ApplyUsernamePolicy();
 }
 
@@ -1634,6 +1668,8 @@ int HostProcessMain() {
   base::GetLinuxDistro();
 #endif
 
+  base::TaskScheduler::CreateAndStartWithDefaultParams("Me2Me");
+
   // Create the main message loop and start helper threads.
   base::MessageLoopForUI message_loop;
   std::unique_ptr<ChromotingHostContext> context =
@@ -1657,6 +1693,9 @@ int HostProcessMain() {
 
   // Run the main (also UI) message loop until the host no longer needs it.
   base::RunLoop().Run();
+
+  // Block until tasks blocking shutdown have completed their execution.
+  base::TaskScheduler::GetInstance()->Shutdown();
 
   return exit_code;
 }

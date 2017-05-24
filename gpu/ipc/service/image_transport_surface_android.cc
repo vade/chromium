@@ -17,7 +17,8 @@ scoped_refptr<gl::GLSurface> ImageTransportSurface::CreateNativeSurface(
     base::WeakPtr<ImageTransportSurfaceDelegate> delegate,
     SurfaceHandle surface_handle,
     gl::GLSurfaceFormat format) {
-  if (gl::GetGLImplementation() == gl::kGLImplementationMockGL)
+  if (gl::GetGLImplementation() == gl::kGLImplementationMockGL ||
+      gl::GetGLImplementation() == gl::kGLImplementationStubGL)
     return new gl::GLSurfaceStub;
   DCHECK(GpuSurfaceLookup::GetInstance());
   DCHECK_NE(surface_handle, kNullSurfaceHandle);
@@ -29,14 +30,15 @@ scoped_refptr<gl::GLSurface> ImageTransportSurface::CreateNativeSurface(
     LOG(WARNING) << "Failed to acquire native widget.";
     return nullptr;
   }
-  scoped_refptr<gl::GLSurface> surface = new gl::NativeViewGLSurfaceEGL(window);
+  scoped_refptr<gl::GLSurface> surface =
+      new gl::NativeViewGLSurfaceEGL(window, nullptr);
   bool initialize_success = surface->Initialize(format);
   ANativeWindow_release(window);
   if (!initialize_success)
     return scoped_refptr<gl::GLSurface>();
 
-  return scoped_refptr<gl::GLSurface>(
-      new PassThroughImageTransportSurface(delegate, surface.get()));
+  return scoped_refptr<gl::GLSurface>(new PassThroughImageTransportSurface(
+      delegate, surface.get(), kMultiWindowSwapIntervalDefault));
 }
 
 }  // namespace gpu

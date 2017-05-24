@@ -21,7 +21,6 @@
 namespace net {
 
 namespace test {
-class CryptoTestUtils;
 class QuicChromiumClientSessionPeer;
 }  // namespace test
 
@@ -31,8 +30,9 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientStreamBase : public QuicCryptoStream {
 
   ~QuicCryptoClientStreamBase() override{};
 
-  // Performs a crypto handshake with the server.
-  virtual void CryptoConnect() = 0;
+  // Performs a crypto handshake with the server. Returns true if the connection
+  // is still connected.
+  virtual bool CryptoConnect() = 0;
 
   // num_sent_client_hellos returns the number of client hello messages that
   // have been sent. If the handshake has completed then this is one greater
@@ -84,7 +84,7 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientStream
   ~QuicCryptoClientStream() override;
 
   // From QuicCryptoClientStreamBase
-  void CryptoConnect() override;
+  bool CryptoConnect() override;
   int num_sent_client_hellos() const override;
 
   int num_scup_messages_received() const override;
@@ -142,7 +142,6 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientStream
     QuicCryptoClientStream* stream_;
   };
 
-  friend class test::CryptoTestUtils;
   friend class test::QuicChromiumClientSessionPeer;
 
   enum State {
@@ -267,6 +266,7 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientStream
   // STATE_VERIFY_PROOF*, and subsequent STATE_SEND_CHLO state.
   bool stateless_reject_received_;
 
+  // Only used in chromium, not internally.
   base::TimeTicks proof_verify_start_time_;
 
   int num_scup_messages_received_;

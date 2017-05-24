@@ -3,6 +3,10 @@
 <script src="../http/tests/inspector/inspector-test.js"></script>
 <script>
 
+function initialize_TestObject() {
+    InspectorTest.preloadModule("object_ui");
+}
+
 function test()
 {
     var d = [];
@@ -11,7 +15,7 @@ function test()
     var object = {a: "b", c: d};
     var localObject = SDK.RemoteObject.fromLocalObject(object);
 
-    var propertiesSection = new Components.ObjectPropertiesSection(localObject, "local object");
+    var propertiesSection = new ObjectUI.ObjectPropertiesSection(localObject, "local object");
     propertiesSection.expand();
     propertiesSection.objectTreeElement().childAt(1).expand();
 

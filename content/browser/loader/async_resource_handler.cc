@@ -10,7 +10,6 @@
 #include "base/command_line.h"
 #include "base/containers/hash_tables.h"
 #include "base/debug/alias.h"
-#include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
@@ -28,8 +27,6 @@
 #include "content/common/resource_messages.h"
 #include "content/common/resource_request_completion_status.h"
 #include "content/common/view_messages.h"
-#include "content/public/browser/resource_dispatcher_host_delegate.h"
-#include "content/public/common/content_features.h"
 #include "content/public/common/resource_response.h"
 #include "ipc/ipc_message_macros.h"
 #include "net/base/io_buffer.h"
@@ -46,14 +43,6 @@ namespace {
 static int kBufferSize = 1024 * 512;
 static int kMinAllocationSize = 1024 * 4;
 static int kMaxAllocationSize = 1024 * 32;
-
-// Used when kOptimizeLoadingIPCForSmallResources is enabled.
-// Small resource typically issues two Read call: one for the content itself
-// and another for getting zero response to detect EOF.
-// Inline these two into the IPC message to avoid allocating an expensive
-// SharedMemory for small resources.
-const int kNumLeadingChunk = 2;
-const int kInlinedLeadingChunkSize = 2048;
 
 void GetNumericArg(const std::string& name, int* result) {
   const std::string& value =
@@ -86,112 +75,6 @@ enum ExpectedContentSizeResult {
 
 }  // namespace
 
-// Used when kOptimizeLoadingIPCForSmallResources is enabled.
-// The instance hooks the buffer allocation of AsyncResourceHandler, and
-// determine if we should use SharedMemory or should inline the data into
-// the IPC message.
-class AsyncResourceHandler::InliningHelper {
- public:
-
-  InliningHelper() {}
-  ~InliningHelper() {}
-
-  void OnResponseReceived(const ResourceResponse& response) {
-    InliningStatus status = IsInliningApplicable(response);
-    UMA_HISTOGRAM_ENUMERATION(
-        "Net.ResourceLoader.InliningStatus",
-        static_cast<int>(status),
-        static_cast<int>(InliningStatus::INLINING_STATUS_COUNT));
-    inlining_applicable_ = status == InliningStatus::APPLICABLE;
-  }
-
-  // Returns true if InliningHelper allocates the buffer for inlining.
-  bool PrepareInlineBufferIfApplicable(scoped_refptr<net::IOBuffer>* buf,
-                                      int* buf_size) {
-    ++num_allocation_;
-
-    // If the server sends the resource in multiple small chunks,
-    // |num_allocation_| may exceed |kNumLeadingChunk|. Disable inlining and
-    // fall back to the regular resource loading path in that case.
-    if (!inlining_applicable_ ||
-        num_allocation_ > kNumLeadingChunk ||
-        !base::FeatureList::IsEnabled(
-            features::kOptimizeLoadingIPCForSmallResources)) {
-      return false;
-    }
-
-    leading_chunk_buffer_ = new net::IOBuffer(kInlinedLeadingChunkSize);
-    *buf = leading_chunk_buffer_;
-    *buf_size = kInlinedLeadingChunkSize;
-    return true;
-  }
-
-  // Returns true if the received data is sent to the consumer.
-  bool SendInlinedDataIfApplicable(int bytes_read,
-                                   int encoded_data_length,
-                                   IPC::Sender* sender,
-                                   int request_id) {
-    DCHECK(sender);
-    if (!leading_chunk_buffer_)
-      return false;
-
-    std::vector<char> data(
-        leading_chunk_buffer_->data(),
-        leading_chunk_buffer_->data() + bytes_read);
-    leading_chunk_buffer_ = nullptr;
-
-    sender->Send(new ResourceMsg_InlinedDataChunkReceived(
-        request_id, data, encoded_data_length));
-    return true;
-  }
-
-  void RecordHistogram(int64_t elapsed_time) {
-    if (inlining_applicable_) {
-      UMA_HISTOGRAM_CUSTOM_COUNTS(
-          "Net.ResourceLoader.ResponseStartToEnd.InliningApplicable",
-          elapsed_time, 1, 100000, 100);
-    }
-  }
-
- private:
-  enum class InliningStatus : int {
-    APPLICABLE = 0,
-    EARLY_ALLOCATION = 1,
-    UNKNOWN_CONTENT_LENGTH = 2,
-    LARGE_CONTENT = 3,
-    HAS_TRANSFER_ENCODING = 4,
-    HAS_CONTENT_ENCODING = 5,
-    INLINING_STATUS_COUNT,
-  };
-
-  InliningStatus IsInliningApplicable(const ResourceResponse& response) {
-    // Disable if the leading chunk is already arrived.
-    if (num_allocation_)
-      return InliningStatus::EARLY_ALLOCATION;
-
-    // Disable if the content is known to be large.
-    if (response.head.content_length > kInlinedLeadingChunkSize)
-      return InliningStatus::LARGE_CONTENT;
-
-    // Disable if the length of the content is unknown.
-    if (response.head.content_length < 0)
-      return InliningStatus::UNKNOWN_CONTENT_LENGTH;
-
-    if (response.head.headers) {
-      if (response.head.headers->HasHeader("Transfer-Encoding"))
-        return InliningStatus::HAS_TRANSFER_ENCODING;
-      if (response.head.headers->HasHeader("Content-Encoding"))
-        return InliningStatus::HAS_CONTENT_ENCODING;
-    }
-
-    return InliningStatus::APPLICABLE;
-  }
-
-  int num_allocation_ = 0;
-  bool inlining_applicable_ = false;
-  scoped_refptr<net::IOBuffer> leading_chunk_buffer_;
-};
-
 class DependentIOBuffer : public net::WrappedIOBuffer {
  public:
   DependentIOBuffer(ResourceBuffer* backing, char* memory)
@@ -211,11 +94,9 @@ AsyncResourceHandler::AsyncResourceHandler(net::URLRequest* request,
       pending_data_count_(0),
       allocation_size_(0),
       total_read_body_bytes_(0),
-      did_defer_(false),
       has_checked_for_sufficient_resources_(false),
       sent_received_response_msg_(false),
       sent_data_buffer_msg_(false),
-      inlining_helper_(new InliningHelper),
       reported_transfer_size_(0) {
   DCHECK(GetRequestInfo()->requester_info()->IsRenderer());
   InitializeResourceBufferConstants();
@@ -261,16 +142,15 @@ void AsyncResourceHandler::OnUploadProgressACK(int request_id) {
     upload_progress_tracker_->OnAckReceived();
 }
 
-bool AsyncResourceHandler::OnRequestRedirected(
+void AsyncResourceHandler::OnRequestRedirected(
     const net::RedirectInfo& redirect_info,
     ResourceResponse* response,
-    bool* defer) {
+    std::unique_ptr<ResourceController> controller) {
   ResourceMessageFilter* filter = GetFilter();
-  if (!filter)
-    return false;
-
-  *defer = did_defer_ = true;
-  OnDefer();
+  if (!filter) {
+    controller->Cancel();
+    return;
+  }
 
   NetLogObserver::PopulateResponseInfo(request(), response);
   response->head.encoded_data_length = request()->GetTotalReceivedBytes();
@@ -281,17 +161,23 @@ bool AsyncResourceHandler::OnRequestRedirected(
   // cookies? The only case where it can change is top-level navigation requests
   // and hopefully those will eventually all be owned by the browser. It's
   // possible this is still needed while renderer-owned ones exist.
-  return filter->Send(new ResourceMsg_ReceivedRedirect(
-      GetRequestID(), redirect_info, response->head));
+  if (filter->Send(new ResourceMsg_ReceivedRedirect(
+          GetRequestID(), redirect_info, response->head))) {
+    OnDefer(std::move(controller));
+  } else {
+    controller->Cancel();
+  }
 }
 
-bool AsyncResourceHandler::OnResponseStarted(ResourceResponse* response,
-                                             bool* defer) {
+void AsyncResourceHandler::OnResponseStarted(
+    ResourceResponse* response,
+    std::unique_ptr<ResourceController> controller) {
   // For changes to the main frame, inform the renderer of the new URL's
   // per-host settings before the request actually commits.  This way the
   // renderer will be able to set these precisely at the time the
   // request commits, avoiding the possibility of e.g. zooming the old content
   // or of having to layout the new content twice.
+  DCHECK(!has_controller());
 
   response_started_ticks_ = base::TimeTicks::Now();
 
@@ -304,14 +190,11 @@ bool AsyncResourceHandler::OnResponseStarted(ResourceResponse* response,
   }
 
   const ResourceRequestInfoImpl* info = GetRequestInfo();
-  if (rdh_->delegate()) {
-    rdh_->delegate()->OnResponseStarted(request(), info->GetContext(),
-                                        response);
-  }
-
   ResourceMessageFilter* filter = GetFilter();
-  if (!filter)
-    return false;
+  if (!filter) {
+    controller->Cancel();
+    return;
+  }
 
   NetLogObserver::PopulateResponseInfo(request(), response);
   response->head.encoded_data_length = request()->raw_header_size();
@@ -331,20 +214,23 @@ bool AsyncResourceHandler::OnResponseStarted(ResourceResponse* response,
   sent_received_response_msg_ = true;
 
   if (request()->response_info().metadata.get()) {
-    std::vector<char> copy(request()->response_info().metadata->data(),
-                           request()->response_info().metadata->data() +
-                               request()->response_info().metadata->size());
+    std::vector<uint8_t> copy(request()->response_info().metadata->data(),
+                              request()->response_info().metadata->data() +
+                                  request()->response_info().metadata->size());
     filter->Send(new ResourceMsg_ReceivedCachedMetadata(GetRequestID(), copy));
   }
 
-  inlining_helper_->OnResponseReceived(*response);
-  return true;
+  controller->Resume();
 }
 
-bool AsyncResourceHandler::OnWillStart(const GURL& url, bool* defer) {
+void AsyncResourceHandler::OnWillStart(
+    const GURL& url,
+    std::unique_ptr<ResourceController> controller) {
   ResourceMessageFilter* filter = GetFilter();
-  if (!filter)
-    return false;
+  if (!filter) {
+    controller->Cancel();
+    return;
+  }
 
   if (GetRequestInfo()->is_upload_progress_enabled() &&
       request()->has_upload()) {
@@ -354,24 +240,24 @@ bool AsyncResourceHandler::OnWillStart(const GURL& url, bool* defer) {
                             base::Unretained(this)),
         request());
   }
-  return true;
+  controller->Resume();
 }
 
-bool AsyncResourceHandler::OnWillRead(scoped_refptr<net::IOBuffer>* buf,
-                                      int* buf_size,
-                                      int min_size) {
-  DCHECK_EQ(-1, min_size);
+void AsyncResourceHandler::OnWillRead(
+    scoped_refptr<net::IOBuffer>* buf,
+    int* buf_size,
+    std::unique_ptr<ResourceController> controller) {
+  DCHECK(!has_controller());
 
-  if (!CheckForSufficientResource())
-    return false;
+  if (!CheckForSufficientResource()) {
+    controller->CancelWithError(net::ERR_INSUFFICIENT_RESOURCES);
+    return;
+  }
 
-  // Return early if InliningHelper allocates the buffer, so that we should
-  // inline the data into the IPC message without allocating SharedMemory.
-  if (inlining_helper_->PrepareInlineBufferIfApplicable(buf, buf_size))
-    return true;
-
-  if (!EnsureResourceBufferIsInitialized())
-    return false;
+  if (!EnsureResourceBufferIsInitialized()) {
+    controller->CancelWithError(net::ERR_INSUFFICIENT_RESOURCES);
+    return;
+  }
 
   DCHECK(buffer_->CanAllocate());
   char* memory = buffer_->Allocate(&allocation_size_);
@@ -380,30 +266,31 @@ bool AsyncResourceHandler::OnWillRead(scoped_refptr<net::IOBuffer>* buf,
   *buf = new DependentIOBuffer(buffer_.get(), memory);
   *buf_size = allocation_size_;
 
-  return true;
+  controller->Resume();
 }
 
-bool AsyncResourceHandler::OnReadCompleted(int bytes_read, bool* defer) {
+void AsyncResourceHandler::OnReadCompleted(
+    int bytes_read,
+    std::unique_ptr<ResourceController> controller) {
+  DCHECK(!has_controller());
   DCHECK_GE(bytes_read, 0);
 
-  if (!bytes_read)
-    return true;
+  if (!bytes_read) {
+    controller->Resume();
+    return;
+  }
 
   ResourceMessageFilter* filter = GetFilter();
-  if (!filter)
-    return false;
+  if (!filter) {
+    controller->Cancel();
+    return;
+  }
 
   int encoded_data_length = CalculateEncodedDataLengthToReport();
   if (!first_chunk_read_)
     encoded_data_length -= request()->raw_header_size();
 
   first_chunk_read_ = true;
-
-  // Return early if InliningHelper handled the received data.
-  if (inlining_helper_->SendInlinedDataIfApplicable(
-          bytes_read, encoded_data_length, filter,
-          GetRequestID()))
-    return true;
 
   buffer_->ShrinkLastAllocation(bytes_read);
 
@@ -412,8 +299,10 @@ bool AsyncResourceHandler::OnReadCompleted(int bytes_read, bool* defer) {
   if (!sent_data_buffer_msg_) {
     base::SharedMemoryHandle handle = base::SharedMemory::DuplicateHandle(
         buffer_->GetSharedMemory().handle());
-    if (!base::SharedMemory::IsHandleValid(handle))
-      return false;
+    if (!base::SharedMemory::IsHandleValid(handle)) {
+      controller->Cancel();
+      return;
+    }
     filter->Send(new ResourceMsg_SetDataBuffer(
         GetRequestID(), handle, buffer_->GetSharedMemory().mapped_size(),
         filter->peer_pid()));
@@ -427,11 +316,10 @@ bool AsyncResourceHandler::OnReadCompleted(int bytes_read, bool* defer) {
   ++pending_data_count_;
 
   if (!buffer_->CanAllocate()) {
-    *defer = did_defer_ = true;
-    OnDefer();
+    OnDefer(std::move(controller));
+  } else {
+    controller->Resume();
   }
-
-  return true;
 }
 
 void AsyncResourceHandler::OnDataDownloaded(int bytes_downloaded) {
@@ -446,10 +334,12 @@ void AsyncResourceHandler::OnDataDownloaded(int bytes_downloaded) {
 
 void AsyncResourceHandler::OnResponseCompleted(
     const net::URLRequestStatus& status,
-    bool* defer) {
+    std::unique_ptr<ResourceController> controller) {
   ResourceMessageFilter* filter = GetFilter();
-  if (!filter)
+  if (!filter) {
+    controller->Resume();
     return;
+  }
 
   // Ensure sending the final upload progress message here, since
   // OnResponseCompleted can be called without OnResponseStarted on cancellation
@@ -491,11 +381,13 @@ void AsyncResourceHandler::OnResponseCompleted(
   request_complete_data.encoded_data_length =
       request()->GetTotalReceivedBytes();
   request_complete_data.encoded_body_length = request()->GetRawBodyBytes();
+  request_complete_data.decoded_body_length = total_read_body_bytes_;
   filter->Send(
       new ResourceMsg_RequestComplete(GetRequestID(), request_complete_data));
 
   if (status.is_success())
     RecordHistogram();
+  controller->Resume();
 }
 
 bool AsyncResourceHandler::EnsureResourceBufferIsInitialized() {
@@ -511,14 +403,15 @@ bool AsyncResourceHandler::EnsureResourceBufferIsInitialized() {
 }
 
 void AsyncResourceHandler::ResumeIfDeferred() {
-  if (did_defer_) {
-    did_defer_ = false;
+  if (has_controller()) {
     request()->LogUnblocked();
-    controller()->Resume();
+    Resume();
   }
 }
 
-void AsyncResourceHandler::OnDefer() {
+void AsyncResourceHandler::OnDefer(
+    std::unique_ptr<ResourceController> controller) {
+  HoldController(std::move(controller));
   request()->LogBlockedBy("AsyncResourceHandler");
 }
 
@@ -530,7 +423,6 @@ bool AsyncResourceHandler::CheckForSufficientResource() {
   if (rdh_->HasSufficientResourcesForRequest(request()))
     return true;
 
-  controller()->CancelWithError(net::ERR_INSUFFICIENT_RESOURCES);
   return false;
 }
 
@@ -563,8 +455,6 @@ void AsyncResourceHandler::RecordHistogram() {
         "Net.ResourceLoader.ResponseStartToEnd.Over_512kB",
         elapsed_time, 1, 100000, 100);
   }
-
-  inlining_helper_->RecordHistogram(elapsed_time);
 
   // Record if content size was known in advance.
   int64_t expected_content_size = request()->GetExpectedContentSize();

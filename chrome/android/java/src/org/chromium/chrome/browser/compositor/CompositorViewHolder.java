@@ -20,7 +20,6 @@ import android.util.AttributeSet;
 import android.util.Pair;
 import android.view.DragEvent;
 import android.view.MotionEvent;
-import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityEvent;
@@ -55,9 +54,9 @@ import org.chromium.chrome.browser.widget.ClipDrawableProgressBar.DrawingInfo;
 import org.chromium.chrome.browser.widget.ControlContainer;
 import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.ContentViewCore;
-import org.chromium.content.browser.SPenSupport;
 import org.chromium.ui.UiUtils;
 import org.chromium.ui.base.DeviceFormFactor;
+import org.chromium.ui.base.SPenSupport;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.resources.ResourceManager;
 import org.chromium.ui.resources.dynamics.DynamicResourceLoader;
@@ -85,7 +84,7 @@ public class CompositorViewHolder extends FrameLayout
 
     private boolean mContentOverlayVisiblity = true;
 
-    private int mPendingSwapBuffersCount;
+    private int mPendingFrameCount;
 
     private final ArrayList<Invalidator.Client> mPendingInvalidations =
             new ArrayList<>();
@@ -100,7 +99,6 @@ public class CompositorViewHolder extends FrameLayout
     private ChromeFullscreenManager mFullscreenManager;
     private View mAccessibilityView;
     private CompositorAccessibilityProvider mNodeProvider;
-    private float mLastContentOffset;
 
     /** The toolbar control container. **/
     private ControlContainer mControlContainer;
@@ -216,7 +214,7 @@ public class CompositorViewHolder extends FrameLayout
             }
         };
 
-        mEnableCompositorTabStrip = DeviceFormFactor.isTablet(getContext());
+        mEnableCompositorTabStrip = DeviceFormFactor.isTablet();
 
         addOnLayoutChangeListener(new OnLayoutChangeListener() {
             @Override
@@ -285,14 +283,6 @@ public class CompositorViewHolder extends FrameLayout
             loader.registerResource(
                     R.id.control_container, mControlContainer.getToolbarResourceAdapter());
         }
-    }
-
-    /**
-     * Reset command line flags. This gets called after the native library finishes
-     * loading.
-     */
-    public void resetFlags() {
-        mCompositorView.resetFlags();
     }
 
     /**
@@ -419,9 +409,9 @@ public class CompositorViewHolder extends FrameLayout
     }
 
     /**
-     * @return The SurfaceView used by the Compositor.
+     * @return The SurfaceView proxy used by the Compositor.
      */
-    public SurfaceView getSurfaceView() {
+    public View getCompositorView() {
         return mCompositorView;
     }
 
@@ -445,7 +435,7 @@ public class CompositorViewHolder extends FrameLayout
     }
 
     @Override
-    public void onPhysicalBackingSizeChanged(int width, int height) {
+    public void onSurfaceResized(int width, int height) {
         ContentViewCore content = getActiveContent();
         if (content != null) adjustPhysicalBackingSize(content, width, height);
     }
@@ -455,7 +445,6 @@ public class CompositorViewHolder extends FrameLayout
      */
     public void onStart() {
         if (mFullscreenManager != null) {
-            mLastContentOffset = mFullscreenManager.getContentOffset();
             mFullscreenManager.addListener(this);
         }
         requestRender();
@@ -470,7 +459,6 @@ public class CompositorViewHolder extends FrameLayout
 
     @Override
     public void onContentOffsetChanged(float offset) {
-        mLastContentOffset = offset;
         onViewportChanged();
     }
 
@@ -478,6 +466,12 @@ public class CompositorViewHolder extends FrameLayout
     public void onControlsOffsetChanged(float topOffset, float bottomOffset, boolean needsAnimate) {
         onViewportChanged();
         if (needsAnimate) requestRender();
+    }
+
+    @Override
+    public void onBottomControlsHeightChanged(int bottomControlsHeight) {
+        if (mTabVisible == null || mTabVisible.getContentViewCore() == null) return;
+        mTabVisible.getContentViewCore().setBottomControlsHeight(bottomControlsHeight);
     }
 
     @Override
@@ -494,11 +488,7 @@ public class CompositorViewHolder extends FrameLayout
         ContentViewCore contentViewCore = mTabVisible.getContentViewCore();
         if (contentViewCore == null) return;
 
-        int actionMasked = e.getActionMasked();
-
-        if (SPenSupport.isSPenSupported(getContext())) {
-            actionMasked = SPenSupport.convertSPenEventAction(actionMasked);
-        }
+        int actionMasked = SPenSupport.convertSPenEventAction(e.getActionMasked());
 
         if (actionMasked == MotionEvent.ACTION_DOWN
                 || actionMasked == MotionEvent.ACTION_HOVER_ENTER) {
@@ -512,10 +502,6 @@ public class CompositorViewHolder extends FrameLayout
     }
 
     private void onViewportChanged() {
-        // TODO(changwan): check if this can be merged with setContentMotionEventOffsets.
-        if (mTabVisible != null && mTabVisible.getContentViewCore() != null) {
-            mTabVisible.getContentViewCore().setSmartClipOffsets(0, (int) -mLastContentOffset);
-        }
         if (mLayoutManager != null) mLayoutManager.onViewportChanged();
     }
 
@@ -528,7 +514,7 @@ public class CompositorViewHolder extends FrameLayout
         if (mLayoutManager != null) {
             mLayoutManager.onUpdate();
 
-            if (!DeviceFormFactor.isTablet(getContext()) && mControlContainer != null) {
+            if (!DeviceFormFactor.isTablet() && mControlContainer != null) {
                 if (mProgressBarDrawingInfo == null) mProgressBarDrawingInfo = new DrawingInfo();
                 mControlContainer.getProgressBarDrawingInfo(mProgressBarDrawingInfo);
             } else {
@@ -584,13 +570,13 @@ public class CompositorViewHolder extends FrameLayout
 
     @Override
     public void onSurfaceCreated() {
-        mPendingSwapBuffersCount = 0;
+        mPendingFrameCount = 0;
         flushInvalidation();
     }
 
     @Override
-    public void onSwapBuffersCompleted(int pendingSwapBuffersCount) {
-        TraceEvent.instant("onSwapBuffersCompleted");
+    public void didSwapFrame(int pendingFrameCount) {
+        TraceEvent.instant("didSwapFrame");
 
         // Wait until the second frame to turn off the placeholder background on
         // tablets so the tab strip has time to start drawing.
@@ -606,9 +592,9 @@ public class CompositorViewHolder extends FrameLayout
 
         mHasDrawnOnce = true;
 
-        mPendingSwapBuffersCount = pendingSwapBuffersCount;
+        mPendingFrameCount = pendingFrameCount;
 
-        if (!mSkipInvalidation || pendingSwapBuffersCount == 0) flushInvalidation();
+        if (!mSkipInvalidation || pendingFrameCount == 0) flushInvalidation();
         mSkipInvalidation = !mSkipInvalidation;
     }
 
@@ -672,7 +658,6 @@ public class CompositorViewHolder extends FrameLayout
     public void setFullscreenHandler(ChromeFullscreenManager fullscreen) {
         mFullscreenManager = fullscreen;
         if (mFullscreenManager != null) {
-            mLastContentOffset = mFullscreenManager.getContentOffset();
             mFullscreenManager.addListener(this);
         }
         onViewportChanged();
@@ -924,7 +909,8 @@ public class CompositorViewHolder extends FrameLayout
             width = MeasureSpec.getSize(mOverlayContentWidthMeasureSpec);
             height = MeasureSpec.getSize(mOverlayContentHeightMeasureSpec);
         }
-        contentViewCore.onPhysicalBackingSizeChanged(width, height);
+        mCompositorView.onPhysicalBackingSizeChanged(
+                contentViewCore.getWebContents(), width, height);
     }
 
     /**
@@ -955,7 +941,7 @@ public class CompositorViewHolder extends FrameLayout
 
     @Override
     public void deferInvalidate(Client client) {
-        if (mPendingSwapBuffersCount <= 0) {
+        if (mPendingFrameCount <= 0) {
             client.doInvalidate();
         } else if (!mPendingInvalidations.contains(client)) {
             mPendingInvalidations.add(client);
@@ -976,12 +962,13 @@ public class CompositorViewHolder extends FrameLayout
      * {@link CompositorViewHolder} so that VR can take ownership of Chrome's rendering.
      * @return The detached {@link TabModelSelector}.
      */
-    public TabModelSelector detachForVR() {
-        mTabModelSelector.removeObserver(mTabModelSelectorObserver);
+    public TabModelSelector detachForVr() {
+        if (mTabModelSelector != null) mTabModelSelector.removeObserver(mTabModelSelectorObserver);
         TabModelSelector selector = mTabModelSelector;
         mTabModelSelector = null;
         mLayerTitleCache.setTabModelSelector(null);
         setTab(null);
+        getCompositorView().setVisibility(View.INVISIBLE);
         return selector;
     }
 
@@ -990,7 +977,8 @@ public class CompositorViewHolder extends FrameLayout
      * so that it can take back ownership of Chrome's rendering.
      * @param tabModelSelector
      */
-    public void onExitVR(TabModelSelector tabModelSelector) {
+    public void onExitVr(TabModelSelector tabModelSelector) {
+        getCompositorView().setVisibility(View.VISIBLE);
         attachToTabModelSelector(tabModelSelector);
     }
 
@@ -1077,6 +1065,7 @@ public class CompositorViewHolder extends FrameLayout
                 int virtualViewId, int action, Bundle arguments) {
             switch (action) {
                 case AccessibilityNodeInfoCompat.ACTION_CLICK:
+                    mVirtualViews.get(virtualViewId).handleClick(LayoutManager.time());
                     return true;
             }
 

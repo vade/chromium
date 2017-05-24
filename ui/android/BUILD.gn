@@ -11,8 +11,6 @@ component("android") {
   output_name = "ui_android"
   sources = [
     "animation_utils.h",
-    "context_provider_factory.cc",
-    "context_provider_factory.h",
     "delegated_frame_host_android.cc",
     "delegated_frame_host_android.h",
     "display_android_manager.cc",
@@ -23,15 +21,20 @@ component("android") {
     "edge_effect_base.h",
     "edge_effect_l.cc",
     "edge_effect_l.h",
+    "event_forwarder.cc",
+    "event_forwarder.h",
     "overscroll_glow.cc",
     "overscroll_glow.h",
     "overscroll_refresh.cc",
     "overscroll_refresh.h",
     "overscroll_refresh_handler.cc",
     "overscroll_refresh_handler.h",
-    "resources/crushed_sprite_resource.cc",
-    "resources/crushed_sprite_resource.h",
-    "resources/resource_manager.cc",
+    "resources/nine_patch_resource.cc",
+    "resources/nine_patch_resource.h",
+    "resources/resource.cc",
+    "resources/resource.h",
+    "resources/resource_factory.cc",
+    "resources/resource_factory.h",
     "resources/resource_manager.h",
     "resources/resource_manager_impl.cc",
     "resources/resource_manager_impl.h",
@@ -42,6 +45,8 @@ component("android") {
     "ui_android_jni_registrar.h",
     "view_android.cc",
     "view_android.h",
+    "view_client.cc",
+    "view_client.h",
     "window_android.cc",
     "window_android.h",
     "window_android_compositor.h",
@@ -58,9 +63,12 @@ component("android") {
     "//cc/surfaces",
     "//cc/surfaces:surface_id",
     "//skia",
+    "//ui/base",
     "//ui/display",
+    "//ui/events",
     "//ui/gfx",
     "//ui/gfx/geometry",
+    "//url",
   ]
 }
 
@@ -80,9 +88,11 @@ static_library("test_support") {
 generate_jni("ui_android_jni_headers") {
   sources = [
     "java/src/org/chromium/ui/OverscrollRefreshHandler.java",
+    "java/src/org/chromium/ui/base/EventForwarder.java",
     "java/src/org/chromium/ui/base/ViewAndroidDelegate.java",
     "java/src/org/chromium/ui/base/WindowAndroid.java",
     "java/src/org/chromium/ui/display/DisplayAndroidManager.java",
+    "java/src/org/chromium/ui/resources/ResourceFactory.java",
     "java/src/org/chromium/ui/resources/ResourceManager.java",
   ]
   jni_package = "ui_android"
@@ -164,16 +174,20 @@ android_library("ui_java") {
     "java/src/org/chromium/ui/DropdownItem.java",
     "java/src/org/chromium/ui/DropdownItemBase.java",
     "java/src/org/chromium/ui/DropdownPopupWindow.java",
+    "java/src/org/chromium/ui/HorizontalListDividerDrawable.java",
     "java/src/org/chromium/ui/OverscrollRefreshHandler.java",
+    "java/src/org/chromium/ui/PhotoPickerListener.java",
     "java/src/org/chromium/ui/UiUtils.java",
     "java/src/org/chromium/ui/VSyncMonitor.java",
     "java/src/org/chromium/ui/base/ActivityWindowAndroid.java",
     "java/src/org/chromium/ui/base/AndroidPermissionDelegate.java",
     "java/src/org/chromium/ui/base/Clipboard.java",
     "java/src/org/chromium/ui/base/DeviceFormFactor.java",
+    "java/src/org/chromium/ui/base/EventForwarder.java",
     "java/src/org/chromium/ui/base/LocalizationUtils.java",
     "java/src/org/chromium/ui/base/ResourceBundle.java",
     "java/src/org/chromium/ui/base/SelectFileDialog.java",
+    "java/src/org/chromium/ui/base/SPenSupport.java",
     "java/src/org/chromium/ui/base/TouchDevice.java",
     "java/src/org/chromium/ui/base/ViewAndroidDelegate.java",
     "java/src/org/chromium/ui/base/WindowAndroid.java",
@@ -189,6 +203,7 @@ android_library("ui_java") {
     "java/src/org/chromium/ui/interpolators/BakedBezierInterpolator.java",
     "java/src/org/chromium/ui/resources/LayoutResource.java",
     "java/src/org/chromium/ui/resources/Resource.java",
+    "java/src/org/chromium/ui/resources/ResourceFactory.java",
     "java/src/org/chromium/ui/resources/ResourceLoader.java",
     "java/src/org/chromium/ui/resources/ResourceManager.java",
     "java/src/org/chromium/ui/resources/async/AsyncPreloadResourceLoader.java",
@@ -197,8 +212,6 @@ android_library("ui_java") {
     "java/src/org/chromium/ui/resources/dynamics/DynamicResourceLoader.java",
     "java/src/org/chromium/ui/resources/dynamics/ViewResourceAdapter.java",
     "java/src/org/chromium/ui/resources/dynamics/ViewResourceInflater.java",
-    "java/src/org/chromium/ui/resources/sprites/CrushedSpriteResource.java",
-    "java/src/org/chromium/ui/resources/sprites/CrushedSpriteResourceLoader.java",
     "java/src/org/chromium/ui/resources/statics/NinePatchData.java",
     "java/src/org/chromium/ui/resources/statics/StaticResource.java",
     "java/src/org/chromium/ui/resources/statics/StaticResourceLoader.java",
@@ -219,22 +232,16 @@ android_library("ui_java") {
   srcjar_deps = [ ":java_enums_srcjar" ]
 }
 
-android_library("ui_javatests") {
-  java_files = [ "javatests/src/org/chromium/ui/resources/sprites/CrushedSpriteResourceTest.java" ]
-  testonly = true
+junit_binary("ui_junit_tests") {
+  java_files = [
+    "junit/src/org/chromium/ui/base/ClipboardTest.java",
+    "junit/src/org/chromium/ui/base/SelectFileDialogTest.java",
+    "junit/src/org/chromium/ui/text/SpanApplierTest.java",
+  ]
   deps = [
     ":ui_java",
     "//base:base_java",
     "//base:base_java_test_support",
-    "//third_party/android_support_test_runner:runner_java",
-  ]
-}
-
-junit_binary("ui_junit_tests") {
-  java_files = [ "junit/src/org/chromium/ui/text/SpanApplierTest.java" ]
-  deps = [
-    "//base:base_java",
-    "//ui/android:ui_java",
   ]
 }
 
@@ -243,6 +250,7 @@ test("ui_android_unittests") {
     "overscroll_refresh_unittest.cc",
     "resources/resource_manager_impl_unittest.cc",
     "run_all_unittests.cc",
+    "view_android_unittests.cc",
   ]
   deps = [
     ":android",
@@ -256,6 +264,7 @@ test("ui_android_unittests") {
     "//testing/gmock",
     "//testing/gtest",
     "//ui/base",
+    "//ui/events",
     "//ui/gfx",
     "//ui/resources:ui_test_pak",
   ]

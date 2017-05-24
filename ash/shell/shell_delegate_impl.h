@@ -8,7 +8,7 @@
 #include <memory>
 #include <string>
 
-#include "ash/common/shell_delegate.h"
+#include "ash/shell_delegate.h"
 #include "base/macros.h"
 
 namespace keyboard {
@@ -35,7 +35,8 @@ class ShellDelegateImpl : public ShellDelegate {
   void Exit() override;
   keyboard::KeyboardUI* CreateKeyboardUI() override;
   void OpenUrlFromArc(const GURL& url) override;
-  ShelfDelegate* CreateShelfDelegate(ShelfModel* model) override;
+  void ShelfInit() override;
+  void ShelfShutdown() override;
   SystemTrayDelegate* CreateSystemTrayDelegate() override;
   std::unique_ptr<WallpaperDelegate> CreateWallpaperDelegate() override;
   SessionStateDelegate* CreateSessionStateDelegate() override;
@@ -46,14 +47,13 @@ class ShellDelegateImpl : public ShellDelegate {
   GPUSupport* CreateGPUSupport() override;
   base::string16 GetProductName() const override;
   gfx::Image GetDeprecatedAcceleratorImage() const override;
+  PrefService* GetActiveUserPrefService() const override;
   bool IsTouchscreenEnabledInPrefs(bool use_local_state) const override;
   void SetTouchscreenEnabledInPrefs(bool enabled,
                                     bool use_local_state) override;
   void UpdateTouchscreenStatusFromPrefs() override;
 
  private:
-  ShelfDelegate* shelf_delegate_ = nullptr;
-
   DISALLOW_COPY_AND_ASSIGN(ShellDelegateImpl);
 };
 

@@ -22,8 +22,8 @@
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/dom_distiller/profile_utils.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
-#include "chrome/browser/download/download_service.h"
-#include "chrome/browser/download/download_service_factory.h"
+#include "chrome/browser/download/download_core_service.h"
+#include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/chrome_url_request_context_getter.h"
 #include "chrome/browser/net/proxy_service_factory.h"
@@ -163,7 +163,7 @@ void OffTheRecordProfileImpl::Init() {
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&NotifyOTRProfileCreatedOnIOThread, profile_, this));
+      base::BindOnce(&NotifyOTRProfileCreatedOnIOThread, profile_, this));
 #endif
 
   // The DomDistillerViewerSource is not a normal WebUI so it must be registered
@@ -185,7 +185,7 @@ OffTheRecordProfileImpl::~OffTheRecordProfileImpl() {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&NotifyOTRProfileDestroyedOnIOThread, profile_, this));
+      base::BindOnce(&NotifyOTRProfileDestroyedOnIOThread, profile_, this));
 #endif
 
   if (pref_proxy_config_tracker_)
@@ -311,8 +311,8 @@ PrefService* OffTheRecordProfileImpl::GetOffTheRecordPrefs() {
 }
 
 DownloadManagerDelegate* OffTheRecordProfileImpl::GetDownloadManagerDelegate() {
-  return DownloadServiceFactory::GetForBrowserContext(this)->
-      GetDownloadManagerDelegate();
+  return DownloadCoreServiceFactory::GetForBrowserContext(this)
+      ->GetDownloadManagerDelegate();
 }
 
 net::URLRequestContextGetter* OffTheRecordProfileImpl::CreateRequestContext(

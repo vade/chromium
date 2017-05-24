@@ -10,7 +10,7 @@
 #include <set>
 #include <utility>
 
-#include "ash/common/multi_profile_uma.h"
+#include "ash/multi_profile_uma.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
@@ -26,11 +26,16 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_info.h"
 #include "base/task_runner.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
+#include "chrome/browser/chromeos/extensions/extension_tab_util_delegate_chromeos.h"
+#include "chrome/browser/chromeos/extensions/permissions_updater_delegate_chromeos.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_app_launcher.h"
+#include "chrome/browser/chromeos/login/enterprise_user_session_metrics.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/signin/auth_sync_observer.h"
 #include "chrome/browser/chromeos/login/signin/auth_sync_observer_factory.h"
@@ -48,6 +53,8 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/system/timezone_resolver_manager.h"
 #include "chrome/browser/chromeos/system/timezone_util.h"
+#include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/extensions/permissions_updater.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
 #include "chrome/browser/supervised_user/chromeos/manager_password_service_factory.h"
@@ -62,6 +69,7 @@
 #include "chromeos/login/login_state.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "chromeos/timezone/timezone_resolver.h"
+#include "components/arc/arc_util.h"
 #include "components/policy/policy_constants.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
@@ -160,6 +168,7 @@ void ChromeUserManagerImpl::RegisterPrefs(PrefRegistrySimple* registry) {
   SupervisedUserManager::RegisterPrefs(registry);
   SessionLengthLimiter::RegisterPrefs(registry);
   BootstrapManager::RegisterPrefs(registry);
+  enterprise_user_session_metrics::RegisterPrefs(registry);
 }
 
 // static
@@ -222,6 +231,10 @@ ChromeUserManagerImpl::ChromeUserManagerImpl()
           cros_settings_, device_local_account_policy_service,
           policy::key::kWallpaperImage, this);
   wallpaper_policy_observer_->Init();
+
+  // Record the stored session length for enrolled device.
+  if (IsEnterpriseManaged())
+    enterprise_user_session_metrics::RecordStoredSessionLength();
 }
 
 ChromeUserManagerImpl::~ChromeUserManagerImpl() {
@@ -232,6 +245,17 @@ void ChromeUserManagerImpl::Shutdown() {
   ChromeUserManager::Shutdown();
 
   local_accounts_subscription_.reset();
+
+  if (session_length_limiter_ && IsEnterpriseManaged()) {
+    // Store session length before tearing down |session_length_limiter_| for
+    // enrolled devices so that it can be reported on the next run.
+    const base::TimeDelta session_length =
+        session_length_limiter_->GetSessionDuration();
+    if (!session_length.is_zero()) {
+      enterprise_user_session_metrics::StoreSessionLength(
+          GetActiveUser()->GetType(), session_length);
+    }
+  }
 
   // Stop the session length limiter.
   session_length_limiter_.reset();
@@ -438,7 +462,6 @@ void ChromeUserManagerImpl::Observe(
           device_local_account_policy_service_->AddObserver(this);
       }
       RetrieveTrustedDevicePolicies();
-      UpdateOwnership();
       break;
     case chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED: {
       Profile* profile = content::Details<Profile>(details).ptr();
@@ -782,7 +805,7 @@ void ChromeUserManagerImpl::SupervisedUserLoggedIn(
   // Add the user to the front of the user list.
   ListPrefUpdate prefs_users_update(GetLocalState(), kRegularUsers);
   prefs_users_update->Insert(
-      0, base::MakeUnique<base::StringValue>(account_id.GetUserEmail()));
+      0, base::MakeUnique<base::Value>(account_id.GetUserEmail()));
   users_.insert(users_.begin(), active_user_);
 
   // Now that user is in the list, save display name.
@@ -813,6 +836,20 @@ void ChromeUserManagerImpl::PublicAccountUserLoggedIn(
   // prevent the avatar from getting changed.
   GetUserImageManager(user->GetAccountId())->UserLoggedIn(false, true);
   WallpaperManager::Get()->EnsureLoggedInUserWallpaperLoaded();
+
+  // In Public Sessions set the PS delegate on PermissionsUpdater (used to
+  // remove clipboard read permission from extensions in PS). This delegate will
+  // be active for the whole user-session and it will go away together with the
+  // browser process during logout (the browser process is destroyed during
+  // logout), ie. it's not freed and it leaks but that is fine.
+  extensions::PermissionsUpdater::SetPlatformDelegate(
+      new extensions::PermissionsUpdaterDelegateChromeOS);
+
+  // In Public Sessions set the PS delegate on ExtensionTabUtil (used to scrub
+  // URL down to origin for security reasons). See comment above about
+  // PermissionsUpdaterDelegateChromeOS for more info.
+  extensions::ExtensionTabUtil::SetPlatformDelegate(
+      new extensions::ExtensionTabUtilDelegateChromeOS);
 }
 
 void ChromeUserManagerImpl::KioskAppLoggedIn(user_manager::User* user) {
@@ -859,10 +896,18 @@ void ChromeUserManagerImpl::KioskAppLoggedIn(user_manager::User* user) {
   // Disable window animation since kiosk app runs in a single full screen
   // window and window animation causes start-up janks.
   command_line->AppendSwitch(wm::switches::kWindowAnimationsDisabled);
+
+  // If restoring auto-launched kiosk session, make sure the app is marked
+  // as auto-launched.
+  if (command_line->HasSwitch(switches::kLoginUser) &&
+      command_line->HasSwitch(switches::kAppAutoLaunched)) {
+    KioskAppManager::Get()->SetAppWasAutoLaunchedWithZeroDelay(kiosk_app_id);
+  }
 }
 
 void ChromeUserManagerImpl::ArcKioskAppLoggedIn(user_manager::User* user) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(arc::IsArcKioskAvailable());
 
   active_user_ = user;
   active_user_->SetStubImage(
@@ -872,7 +917,6 @@ void ChromeUserManagerImpl::ArcKioskAppLoggedIn(user_manager::User* user) {
       user_manager::User::USER_IMAGE_INVALID, false);
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  command_line->AppendSwitch(chromeos::switches::kEnableArc);
   command_line->AppendSwitch(::switches::kForceAndroidAppMode);
   command_line->AppendSwitch(::switches::kSilentLaunch);
 
@@ -919,14 +963,6 @@ void ChromeUserManagerImpl::NotifyOnLogin() {
       content::Details<const user_manager::User>(GetActiveUser()));
 
   UserSessionManager::GetInstance()->PerformPostUserLoggedInActions();
-}
-
-void ChromeUserManagerImpl::UpdateOwnership() {
-  bool is_owner =
-      FakeOwnership() || DeviceSettingsService::Get()->HasPrivateOwnerKey();
-  VLOG(1) << "Current user " << (is_owner ? "is owner" : "is not owner");
-
-  SetCurrentUserIsOwner(is_owner);
 }
 
 void ChromeUserManagerImpl::RemoveNonCryptohomeData(
@@ -1233,20 +1269,20 @@ void ChromeUserManagerImpl::SetUserAffiliation(
 bool ChromeUserManagerImpl::ShouldReportUser(const std::string& user_id) const {
   const base::ListValue& reporting_users =
       *(GetLocalState()->GetList(kReportingUsers));
-  base::StringValue user_id_value(FullyCanonicalize(user_id));
+  base::Value user_id_value(FullyCanonicalize(user_id));
   return !(reporting_users.Find(user_id_value) == reporting_users.end());
 }
 
 void ChromeUserManagerImpl::AddReportingUser(const AccountId& account_id) {
   ListPrefUpdate users_update(GetLocalState(), kReportingUsers);
   users_update->AppendIfNotPresent(
-      base::MakeUnique<base::StringValue>(account_id.GetUserEmail()));
+      base::MakeUnique<base::Value>(account_id.GetUserEmail()));
 }
 
 void ChromeUserManagerImpl::RemoveReportingUser(const AccountId& account_id) {
   ListPrefUpdate users_update(GetLocalState(), kReportingUsers);
   users_update->Remove(
-      base::StringValue(FullyCanonicalize(account_id.GetUserEmail())), NULL);
+      base::Value(FullyCanonicalize(account_id.GetUserEmail())), NULL);
 }
 
 void ChromeUserManagerImpl::UpdateLoginState(
@@ -1316,8 +1352,8 @@ void ChromeUserManagerImpl::ScheduleResolveLocale(
     const std::string& locale,
     const base::Closure& on_resolved_callback,
     std::string* out_resolved_locale) const {
-  BrowserThread::GetBlockingPool()->PostTaskAndReply(
-      FROM_HERE,
+  base::PostTaskWithTraitsAndReply(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::Bind(ResolveLocale, locale, base::Unretained(out_resolved_locale)),
       on_resolved_callback);
 }

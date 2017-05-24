@@ -6,8 +6,10 @@ from core import perf_benchmark
 
 from telemetry import benchmark
 from telemetry.page import legacy_page_test
+from telemetry.timeline import chrome_trace_category_filter
 from telemetry.value import list_of_scalar_values
 from telemetry.value import scalar
+from telemetry.web_perf import timeline_based_measurement
 
 from measurements import media
 import page_sets
@@ -38,10 +40,10 @@ class _MSEMeasurement(legacy_page_test.LegacyPageTest):
 
 
 # android: See media.android.tough_video_cases below
-# win8: crbug.com/531618
-# crbug.com/565180: Only include cases that report time_to_play
-@benchmark.Disabled('android', 'win8')
-class Media(perf_benchmark.PerfBenchmark):
+@benchmark.Owner(emails=['crouleau@chromium.org'],
+                 component='Internals>Media')
+@benchmark.Disabled('android')
+class MediaToughVideoCases(perf_benchmark.PerfBenchmark):
   """Obtains media metrics for key user scenarios."""
   test = media.Media
   page_set = page_sets.ToughVideoCasesPageSet
@@ -51,19 +53,94 @@ class Media(perf_benchmark.PerfBenchmark):
     return 'media.tough_video_cases'
 
 
-# crbug.com/565180: Only include cases that don't report time_to_play
-@benchmark.Disabled('android', 'win8')
-class MediaExtra(perf_benchmark.PerfBenchmark):
-  """Obtains extra media metrics for key user scenarios."""
+@benchmark.Enabled('android')
+@benchmark.Disabled('l', 'android-webview')  # WebView: crbug.com/419689.
+@benchmark.Owner(emails=['crouleau@chromium.org', 'videostack-eng@google.com'],
+                 component='Internals>Media')
+class MediaAndroidToughVideoCases(perf_benchmark.PerfBenchmark):
+  """Obtains media metrics for key user scenarios on Android."""
   test = media.Media
-  page_set = page_sets.ToughVideoCasesExtraPageSet
+  tag = 'android'
+  page_set = page_sets.ToughVideoCasesPageSet
+  options = {'story_tag_filter_exclude': 'is_4k,is_50fps'}
+
+  @classmethod
+  def ShouldDisable(cls, possible_browser):
+    return cls.IsSvelte(possible_browser)
 
   @classmethod
   def Name(cls):
-    return 'media.tough_video_cases_extra'
+    return 'media.android.tough_video_cases'
 
 
-@benchmark.Disabled('android', 'mac')
+class _MediaTBMv2Benchmark(perf_benchmark.PerfBenchmark):
+  page_set = page_sets.ToughVideoCasesPageSet
+
+  def CreateTimelineBasedMeasurementOptions(self):
+    category_filter = chrome_trace_category_filter.ChromeTraceCategoryFilter()
+
+    # 'toplevel' category provides CPU time slices used by # cpuTimeMetric.
+    category_filter.AddIncludedCategory('toplevel')
+
+    # 'rail' category is used by powerMetric to attribute different period of
+    # time to different activities, such as video_animation, etc.
+    category_filter.AddIncludedCategory('rail')
+
+    options = timeline_based_measurement.Options(category_filter)
+    options.config.enable_battor_trace = True
+    options.SetTimelineBasedMetrics(['powerMetric', 'cpuTimeMetric'])
+    return options
+
+
+# android: See media.android.tough_video_cases below
+@benchmark.Owner(emails=['johnchen@chromium.org', 'crouleau@chromium.org'],
+                 component='Internals>Media')
+@benchmark.Disabled('android')
+class MediaToughVideoCasesTBMv2(_MediaTBMv2Benchmark):
+  """Obtains media metrics using TBMv2.
+  Will eventually replace MediaToughVideoCases class."""
+
+  @classmethod
+  def Name(cls):
+    return 'media.tough_video_cases_tbmv2'
+
+
+@benchmark.Owner(emails=['johnchen@chromium.org', 'crouleau@chromium.org'],
+                 component='Internals>Media')
+@benchmark.Enabled('android')
+@benchmark.Disabled('l', 'android-webview')  # WebView: crbug.com/419689.
+class MediaAndroidToughVideoCasesTBMv2(_MediaTBMv2Benchmark):
+  """Obtains media metrics for key user scenarios on Android using TBMv2.
+  Will eventually replace MediaAndroidToughVideoCases class."""
+
+  tag = 'android'
+  options = {'story_tag_filter_exclude': 'is_4k,is_50fps'}
+
+  @classmethod
+  def ShouldDisable(cls, possible_browser):
+    return cls.IsSvelte(possible_browser)
+
+  @classmethod
+  def Name(cls):
+    return 'media.android.tough_video_cases_tbmv2'
+
+  def SetExtraBrowserOptions(self, options):
+    # By default, Chrome on Android does not allow autoplay
+    # of media: it requires a user gesture event to start a video.
+    # The following option works around that.
+    # Note that both of these flags should be used until every build from
+    # ToT to Stable switches over to one flag or another. This is to support
+    # reference builds.
+    # --disable-gesture-requirement-for-media-playback is the old one and can be
+    # removed after M60 goes to stable.
+    options.AppendExtraBrowserArgs(
+        ['--ignore-autoplay-restrictions',
+         '--disable-gesture-requirement-for-media-playback'])
+
+
+@benchmark.Disabled('all')  # crbug/676345
+@benchmark.Owner(emails=['crouleau@chromium.org', 'videostack-eng@google.com'],
+                 component='Internals>Media')
 class MediaNetworkSimulation(perf_benchmark.PerfBenchmark):
   """Obtains media metrics under different network simulations."""
   test = media.Media
@@ -74,72 +151,9 @@ class MediaNetworkSimulation(perf_benchmark.PerfBenchmark):
     return 'media.media_cns_cases'
 
 
-@benchmark.Disabled('android')  # crbug.com/671628, WebView: crbug.com/419689.
-class MediaAndroid(perf_benchmark.PerfBenchmark):
-  """Obtains media metrics for key user scenarios on Android."""
-  test = media.Media
-  tag = 'android'
-  page_set = page_sets.ToughVideoCasesPageSet
-  # Exclude is_4k and 50 fps media files (garden* & crowd*).
-  options = {'story_tag_filter_exclude': 'is_4k,is_50fps'}
-
-  @classmethod
-  def ShouldDisable(cls, possible_browser):
-    # crbug.com/672059
-    if possible_browser.platform.GetOSName() != "android":
-      return True
-    # crbug.com/448092
-    if cls.IsSvelte(possible_browser):
-        return True
-
-    # crbug.com/647372
-    if possible_browser.platform.GetDeviceTypeName() == 'Nexus 5X':
-      return True
-
-    return False
-
-  @classmethod
-  def Name(cls):
-    return 'media.android.tough_video_cases'
-
-
-@benchmark.Enabled('chromeos')
-class MediaChromeOS4kOnly(perf_benchmark.PerfBenchmark):
-  """Benchmark for media performance on ChromeOS using only is_4k test content.
-  """
-  test = media.Media
-  tag = 'chromeOS4kOnly'
-  page_set = page_sets.ToughVideoCasesPageSet
-  options = {
-      'story_tag_filter': 'is_4k',
-      # Exclude is_50fps test files: crbug/331816
-      'story_tag_filter_exclude': 'is_50fps'
-  }
-
-  @classmethod
-  def Name(cls):
-    return 'media.chromeOS4kOnly.tough_video_cases'
-
-
-@benchmark.Enabled('chromeos')
-class MediaChromeOS(perf_benchmark.PerfBenchmark):
-  """Benchmark for media performance on all ChromeOS platforms.
-
-  This benchmark does not run is_4k content, there's a separate benchmark for
-  that.
-  """
-  test = media.Media
-  tag = 'chromeOS'
-  page_set = page_sets.ToughVideoCasesPageSet
-  # Exclude is_50fps test files: crbug/331816
-  options = {'story_tag_filter_exclude': 'is_4k,is_50fps'}
-
-  @classmethod
-  def Name(cls):
-    return 'media.chromeOS.tough_video_cases'
-
-
 @benchmark.Disabled('android-webview')  # crbug.com/419689
+@benchmark.Owner(emails=['crouleau@chromium.org', 'videostack-eng@google.com'],
+                 component='Internals>Media>Source')
 class MediaSourceExtensions(perf_benchmark.PerfBenchmark):
   """Obtains media metrics for key media source extensions functions."""
   test = _MSEMeasurement
@@ -153,4 +167,4 @@ class MediaSourceExtensions(perf_benchmark.PerfBenchmark):
     # Needed to allow XHR requests to return stream objects.
     options.AppendExtraBrowserArgs(
         ['--enable-experimental-web-platform-features',
-         '--disable-gesture-requirement-for-media-playback'])
+         '--ignore-autoplay-restrictions'])

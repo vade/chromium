@@ -67,9 +67,8 @@ class WindowAdoptionAgent : protected aura::WindowObserver {
     // avoid clashing with the currently-in-progress window tree hierarchy
     // changes.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::Bind(&WindowAdoptionAgent::FindNewParent,
-                   weak_ptr_factory_.GetWeakPtr()));
+        FROM_HERE, base::BindOnce(&WindowAdoptionAgent::FindNewParent,
+                                  weak_ptr_factory_.GetWeakPtr()));
   }
 
   // aura::WindowObserver:
@@ -106,8 +105,8 @@ class WindowAdoptionAgent : protected aura::WindowObserver {
                << " adopts the content window " << content_window_ << '.';
       root_window->AddChild(content_window_);
     } else {
-      LOG(DFATAL) << "Unable to find an aura root window.  "
-                     "Compositing of the content may be halted!";
+      LOG(WARNING) << "Unable to find an aura root window.  "
+                      "Compositing of the content may be halted!";
     }
   }
 
@@ -258,8 +257,8 @@ TabCaptureRegistry* TabCaptureRegistry::Get(content::BrowserContext* context) {
   return BrowserContextKeyedAPIFactory<TabCaptureRegistry>::Get(context);
 }
 
-static base::LazyInstance<BrowserContextKeyedAPIFactory<TabCaptureRegistry> >
-    g_factory = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<BrowserContextKeyedAPIFactory<TabCaptureRegistry>>::
+    DestructorAtExit g_factory = LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<TabCaptureRegistry>*
@@ -286,7 +285,7 @@ void TabCaptureRegistry::GetCapturedTabs(
 void TabCaptureRegistry::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const Extension* extension,
-    UnloadedExtensionInfo::Reason reason) {
+    UnloadedExtensionReason reason) {
   // Cleanup all the requested media streams for this extension.
   for (std::vector<std::unique_ptr<LiveRequest>>::iterator it =
            requests_.begin();

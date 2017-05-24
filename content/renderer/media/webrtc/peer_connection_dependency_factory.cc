@@ -62,6 +62,8 @@
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/webrtc/api/audio_codecs/builtin_audio_decoder_factory.h"
+#include "third_party/webrtc/api/audio_codecs/builtin_audio_encoder_factory.h"
 #include "third_party/webrtc/api/mediaconstraintsinterface.h"
 #include "third_party/webrtc/api/videosourceproxy.h"
 #include "third_party/webrtc/base/ssladapter.h"
@@ -116,7 +118,7 @@ PeerConnectionDependencyFactory::~PeerConnectionDependencyFactory() {
   DCHECK(!pc_factory_);
 }
 
-blink::WebRTCPeerConnectionHandler*
+std::unique_ptr<blink::WebRTCPeerConnectionHandler>
 PeerConnectionDependencyFactory::CreateRTCPeerConnectionHandler(
     blink::WebRTCPeerConnectionHandlerClient* client) {
   // Save histogram data so we can see how much PeerConnetion is used.
@@ -124,7 +126,7 @@ PeerConnectionDependencyFactory::CreateRTCPeerConnectionHandler(
   // webKitRTCPeerConnection.
   UpdateWebRTCMethodCount(WEBKIT_RTC_PEER_CONNECTION);
 
-  return new RTCPeerConnectionHandler(client, this);
+  return base::MakeUnique<RTCPeerConnectionHandler>(client, this);
 }
 
 const scoped_refptr<webrtc::PeerConnectionFactoryInterface>&
@@ -251,14 +253,17 @@ void PeerConnectionDependencyFactory::InitializeSignalingThread(
 
   pc_factory_ = webrtc::CreatePeerConnectionFactory(
       worker_thread_, signaling_thread_, audio_device_.get(),
-      encoder_factory.release(), decoder_factory.release());
+      webrtc::CreateBuiltinAudioEncoderFactory(),
+      webrtc::CreateBuiltinAudioDecoderFactory(), encoder_factory.release(),
+      decoder_factory.release());
   CHECK(pc_factory_.get());
 
   webrtc::PeerConnectionFactoryInterface::Options factory_options;
   factory_options.disable_sctp_data_channels = false;
   factory_options.disable_encryption =
       cmd_line->HasSwitch(switches::kDisableWebRtcEncryption);
-
+  factory_options.crypto_options.enable_gcm_crypto_suites =
+      cmd_line->HasSwitch(switches::kEnableWebRtcSrtpAesGcm);
   pc_factory_->SetOptions(factory_options);
 
   event->Signal();
@@ -307,9 +312,9 @@ PeerConnectionDependencyFactory::CreatePeerConnection(
     port_config.enable_nonproxied_udp = true;
     VLOG(3) << "WebRTC routing preferences will not be enforced";
   } else {
-    if (web_frame && web_frame->view()) {
+    if (web_frame && web_frame->View()) {
       RenderViewImpl* renderer_view_impl =
-          RenderViewImpl::FromWebView(web_frame->view());
+          RenderViewImpl::FromWebView(web_frame->View());
       if (renderer_view_impl) {
         // TODO(guoweis): |enable_multiple_routes| should be renamed to
         // |request_multiple_routes|. Whether local IP addresses could be
@@ -371,7 +376,7 @@ PeerConnectionDependencyFactory::CreatePeerConnection(
   }
 
   const GURL& requesting_origin =
-      GURL(web_frame->document().url()).GetOrigin();
+      GURL(web_frame->GetDocument().Url()).GetOrigin();
 
   std::unique_ptr<rtc::NetworkManager> network_manager;
   if (port_config.enable_multiple_routes) {

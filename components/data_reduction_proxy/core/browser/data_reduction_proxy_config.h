@@ -18,6 +18,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_server.h"
 #include "net/base/net_errors.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/network_interfaces.h"
@@ -39,6 +40,10 @@ class ProxyServer;
 class URLRequest;
 class URLRequestContextGetter;
 class URLRequestStatus;
+}
+
+namespace previews {
+class PreviewsDecider;
 }
 
 namespace data_reduction_proxy {
@@ -86,7 +91,8 @@ enum SecureProxyCheckFetchResult {
 // This object lives on the IO thread and all of its methods are expected to be
 // called from there.
 class DataReductionProxyConfig
-    : public net::NetworkChangeNotifier::IPAddressObserver {
+    : public net::NetworkChangeNotifier::IPAddressObserver,
+      public net::NetworkChangeNotifier::ConnectionTypeObserver {
  public:
   // The caller must ensure that all parameters remain alive for the lifetime
   // of the |DataReductionProxyConfig| instance, with the exception of
@@ -189,10 +195,19 @@ class DataReductionProxyConfig
   // Returns |lofi_off_|.
   bool lofi_off() const { return lofi_off_; }
 
-  // Returns true when Lo-Fi mode should be activated. Records metrics for Lo-Fi
-  // state changes. |request| is used to get the network quality estimator from
-  // the URLRequestContext.
-  bool ShouldEnableLoFiMode(const net::URLRequest& request);
+  // Returns true when Lo-Fi Previews should be activated. Records metrics for
+  // Lo-Fi state changes. |request| is used to get the network quality estimator
+  // from the URLRequestContext. |previews_decider| is a non-null object that
+  // determines eligibility of showing the preview based on past opt outs.
+  bool ShouldEnableLoFi(const net::URLRequest& request,
+                        previews::PreviewsDecider* previews_decider);
+
+  // Returns true when Lite Page Previews should be activated. |request| is used
+  // to get the network quality estimator from the URLRequestContext.
+  // |previews_decider| is a non-null object that determines eligibility of
+  // showing the preview based on past opt outs.
+  bool ShouldEnableLitePages(const net::URLRequest& request,
+                             previews::PreviewsDecider* previews_decider);
 
   // Returns true if the data saver has been enabled by the user, and the data
   // saver proxy is reachable.
@@ -201,6 +216,10 @@ class DataReductionProxyConfig
   // Gets the ProxyConfig that would be used ignoring the holdback experiment.
   // This should only be used for logging purposes.
   net::ProxyConfig ProxyConfigIgnoringHoldback() const;
+
+  bool secure_proxy_allowed() const;
+
+  std::vector<DataReductionProxyServer> GetProxiesForHttp() const;
 
  protected:
   // Virtualized for mocking. Returns the list of network interfaces in use.
@@ -217,10 +236,6 @@ class DataReductionProxyConfig
 
   // Updates the Data Reduction Proxy configurator with the current config.
   void UpdateConfigForTesting(bool enabled, bool restricted);
-
-  // Updates the callback that is called when the warmup URL has been fetched.
-  void SetWarmupURLFetcherCallbackForTesting(
-      base::Callback<void()> warmup_url_fetched_callback);
 
  private:
   friend class MockDataReductionProxyConfig;
@@ -250,6 +265,8 @@ class DataReductionProxyConfig
 
   // NetworkChangeNotifier::IPAddressObserver:
   void OnIPAddressChanged() override;
+  void OnConnectionTypeChanged(
+      net::NetworkChangeNotifier::ConnectionType type) override;
 
   // Populates the parameters for the Lo-Fi field trial if the session is part
   // of either Lo-Fi enabled or Lo-Fi control field trial group.
@@ -283,11 +300,23 @@ class DataReductionProxyConfig
       bool is_https,
       base::TimeDelta* min_retry_delay) const;
 
-  // Returns true when Lo-Fi mode should be activated. Determines if Lo-Fi mode
-  // should be activated by checking the Lo-Fi flags and if the network quality
-  // is prohibitively slow. |network_quality_estimator| may be NULL.
-  bool ShouldEnableLoFiModeInternal(
-      const net::NetworkQualityEstimator* network_quality_estimator);
+  // Returns true when Lo-Fi Previews should be activated. Determines if Lo-Fi
+  // Previews should be activated by checking the Lo-Fi flags and if the network
+  // quality is prohibitively slow. |network_quality_estimator| may be NULL.
+  // |previews_decider| is a non-null object that determines eligibility of the
+  // showing the preview based on past opt outs.
+  bool ShouldEnableLoFiInternal(const net::URLRequest& request,
+                                previews::PreviewsDecider* previews_decider);
+
+  // Returns true when Lite Page Previews should be activated. Determines if
+  // Lite Page Previewsmode should be activated by checking the Lite Page
+  // Previews flags and if the network quality is prohibitively slow.
+  // |network_quality_estimator| may be NULL. |previews_decider| is a non-null
+  // object that determines eligibility of showing the preview based on past opt
+  // outs.
+  bool ShouldEnableLitePagesInternal(
+      const net::URLRequest& request,
+      previews::PreviewsDecider* previews_decider);
 
   // Returns true if the network quality is at least as poor as the one
   // specified in the Auto Lo-Fi field trial parameters.
@@ -372,9 +401,13 @@ class DataReductionProxyConfig
   // than |auto_lofi_hysteresis_|.
   bool network_prohibitively_slow_;
 
-  // Set to the connection type reported by NetworkChangeNotifier when the
-  // network quality was last checked.
+  // The current connection type.
   net::NetworkChangeNotifier::ConnectionType connection_type_;
+
+  // True if the connection type changed since the last call to
+  // IsNetworkQualityProhibitivelySlow(). This call happens only on main frame
+  // requests.
+  bool connection_type_changed_;
 
   // If true, Lo-Fi is turned off for the rest of the session. This is set to
   // true if Lo-Fi is disabled via flags or if the user implicitly opts out.

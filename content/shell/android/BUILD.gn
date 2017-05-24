@@ -23,7 +23,7 @@ shared_library("libcontent_shell_content_view") {
     "//components/crash/content/browser",
     "//content/shell:content_shell_lib",
     "//content/shell:pak",
-    "//media/base/android",
+    "//media",
     "//skia",
   ]
   sources = [
@@ -55,6 +55,7 @@ android_library("content_shell_java") {
     "java/src/org/chromium/content_shell/Shell.java",
     "java/src/org/chromium/content_shell/ShellLayoutTestUtils.java",
     "java/src/org/chromium/content_shell/ShellManager.java",
+    "java/src/org/chromium/content_shell/ShellViewAndroidDelegate.java",
   ]
 }
 
@@ -95,6 +96,7 @@ android_library("content_shell_apk_java") {
 
   java_files = [
     "shell_apk/src/org/chromium/content_shell_apk/ChildProcessLauncherTestHelperService.java",
+    "shell_apk/src/org/chromium/content_shell_apk/ChildProcessLauncherTestUtils.java",
     "shell_apk/src/org/chromium/content_shell_apk/ContentShellActivity.java",
     "shell_apk/src/org/chromium/content_shell_apk/ContentShellApplication.java",
   ]
@@ -143,13 +145,17 @@ android_library("content_shell_test_java") {
     "//content/public/android:content_java",
     "//content/public/test/android:content_java_test_support",
     "//content/shell/android:content_shell_java",
+    "//third_party/android_support_test_runner:rules_java",
     "//third_party/android_support_test_runner:runner_java",
+    "//third_party/junit:junit",
     "//ui/android:ui_java",
   ]
   java_files = [
     "javatests/src/org/chromium/content_shell_apk/ContentShellPreconditionsTest.java",
     "javatests/src/org/chromium/content_shell_apk/ContentShellShellManagementTest.java",
     "javatests/src/org/chromium/content_shell_apk/ContentShellTestBase.java",
+    "javatests/src/org/chromium/content_shell_apk/ContentShellTestCommon.java",
+    "javatests/src/org/chromium/content_shell_apk/ContentShellActivityTestRule.java",
     "javatests/src/org/chromium/content_shell_apk/ContentShellUrlTest.java",
   ]
 }
@@ -158,6 +164,7 @@ instrumentation_test_apk("content_shell_test_apk") {
   deps = [
     "//base:base_javatests",
     "//content/public/android:content_javatests",
+    "//device/sensors:javatests",
     "//net/android:net_javatests",
     "//third_party/android_support_test_runner:runner_java",
   ]
@@ -230,6 +237,7 @@ if (current_cpu != "x64") {
     sources = [
       "linker_test_apk/chromium_linker_test_android.cc",
       "linker_test_apk/chromium_linker_test_linker_tests.cc",
+      "linker_test_apk/chromium_linker_test_linker_tests.h",
     ]
 
     deps = [

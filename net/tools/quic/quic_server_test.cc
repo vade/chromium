@@ -6,15 +6,16 @@
 
 #include "net/quic/core/crypto/quic_random.h"
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_logging.h"
 #include "net/quic/platform/api/quic_socket_address.h"
+#include "net/quic/platform/api/quic_test.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
 #include "net/quic/test_tools/mock_quic_dispatcher.h"
 #include "net/tools/quic/quic_epoll_alarm_factory.h"
 #include "net/tools/quic/quic_epoll_connection_helper.h"
 #include "net/tools/quic/quic_simple_crypto_server_stream_helper.h"
 #include "net/tools/quic/test_tools/quic_server_peer.h"
-#include "testing/gtest/include/gtest/gtest.h"
 
 using ::testing::_;
 
@@ -51,8 +52,8 @@ class MockQuicSimpleDispatcher : public QuicSimpleDispatcher {
 class TestQuicServer : public QuicServer {
  public:
   TestQuicServer()
-      : QuicServer(CryptoTestUtils::ProofSourceForTesting(), &response_cache_) {
-  }
+      : QuicServer(crypto_test_utils::ProofSourceForTesting(),
+                   &response_cache_) {}
 
   ~TestQuicServer() override {}
 
@@ -77,7 +78,7 @@ class TestQuicServer : public QuicServer {
   QuicHttpResponseCache response_cache_;
 };
 
-class QuicServerEpollInTest : public ::testing::Test {
+class QuicServerEpollInTest : public QuicTest {
  public:
   QuicServerEpollInTest()
       : port_(net::test::kTestPort),
@@ -94,7 +95,6 @@ class QuicServerEpollInTest : public ::testing::Test {
   }
 
  protected:
-  QuicFlagSaver saver_;
   int port_;
   QuicSocketAddress server_address_;
   TestQuicServer server_;
@@ -130,9 +130,8 @@ TEST_F(QuicServerEpollInTest, ProcessBufferedCHLOsOnEpollin) {
   char buf[1024];
   memset(buf, 0, arraysize(buf));
   sockaddr_storage storage = server_address_.generic_address();
-  socklen_t storage_size = sizeof(storage);
   int rc = sendto(fd, buf, arraysize(buf), 0,
-                  reinterpret_cast<sockaddr*>(&storage), storage_size);
+                  reinterpret_cast<sockaddr*>(&storage), sizeof(storage));
   if (rc < 0) {
     QUIC_DLOG(INFO) << errno << " " << strerror(errno);
   }
@@ -142,12 +141,12 @@ TEST_F(QuicServerEpollInTest, ProcessBufferedCHLOsOnEpollin) {
   }
 }
 
-class QuicServerDispatchPacketTest : public ::testing::Test {
+class QuicServerDispatchPacketTest : public QuicTest {
  public:
   QuicServerDispatchPacketTest()
       : crypto_config_("blah",
                        QuicRandom::GetInstance(),
-                       CryptoTestUtils::ProofSourceForTesting()),
+                       crypto_test_utils::ProofSourceForTesting()),
         version_manager_(AllSupportedVersions()),
         dispatcher_(
             config_,

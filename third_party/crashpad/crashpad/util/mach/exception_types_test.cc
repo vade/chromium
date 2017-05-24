@@ -57,7 +57,13 @@ TEST(ExceptionTypes, ExcCrashRecoverOriginalException) {
       {0x0700080, EXC_SYSCALL, 128, 0},
       {0x0706000, EXC_SYSCALL, 0x6000, 0},
       {0x3000000, 0, 0, SIGQUIT},
+      {0x4000000, 0, 0, SIGILL},
+      {0x5000000, 0, 0, SIGTRAP},
       {0x6000000, 0, 0, SIGABRT},
+      {0x7000000, 0, 0, SIGEMT},
+      {0x8000000, 0, 0, SIGFPE},
+      {0xa000000, 0, 0, SIGBUS},
+      {0xb000000, 0, 0, SIGSEGV},
       {0xc000000, 0, 0, SIGSYS},
       {0, 0, 0, 0},
   };
@@ -72,9 +78,9 @@ TEST(ExceptionTypes, ExcCrashRecoverOriginalException) {
     exception_type_t exception = ExcCrashRecoverOriginalException(
         test_data.code_0, &original_code_0, &signal);
 
-    EXPECT_EQ(test_data.exception, exception);
-    EXPECT_EQ(test_data.original_code_0, original_code_0);
-    EXPECT_EQ(test_data.signal, signal);
+    EXPECT_EQ(exception, test_data.exception);
+    EXPECT_EQ(original_code_0, test_data.original_code_0);
+    EXPECT_EQ(signal, test_data.signal);
   }
 
   // Now make sure that ExcCrashRecoverOriginalException() properly ignores
@@ -82,20 +88,20 @@ TEST(ExceptionTypes, ExcCrashRecoverOriginalException) {
   static_assert(arraysize(kTestData) >= 1, "must have something to test");
   const TestData& test_data = kTestData[0];
   EXPECT_EQ(
-      test_data.exception,
-      ExcCrashRecoverOriginalException(test_data.code_0, nullptr, nullptr));
+      ExcCrashRecoverOriginalException(test_data.code_0, nullptr, nullptr),
+      test_data.exception);
 
   mach_exception_code_t original_code_0;
-  EXPECT_EQ(test_data.exception,
-            ExcCrashRecoverOriginalException(
-                test_data.code_0, &original_code_0, nullptr));
-  EXPECT_EQ(test_data.original_code_0, original_code_0);
+  EXPECT_EQ(ExcCrashRecoverOriginalException(
+                test_data.code_0, &original_code_0, nullptr),
+            test_data.exception);
+  EXPECT_EQ(original_code_0, test_data.original_code_0);
 
   int signal;
   EXPECT_EQ(
-      test_data.exception,
-      ExcCrashRecoverOriginalException(test_data.code_0, nullptr, &signal));
-  EXPECT_EQ(test_data.signal, signal);
+      ExcCrashRecoverOriginalException(test_data.code_0, nullptr, &signal),
+      test_data.exception);
+  EXPECT_EQ(signal, test_data.signal);
 }
 
 TEST(ExceptionTypes, ExcCrashCouldContainException) {
@@ -181,7 +187,13 @@ TEST(ExceptionTypes, ExceptionCodeForMetrics) {
 #define ENCODE_EXC_CRASH_SIGNAL(signal) \
   { EXC_CRASH, (((signal) & 0xff) << 24), (EXC_CRASH << 16) | (signal) }
       ENCODE_EXC_CRASH_SIGNAL(SIGQUIT),
+      ENCODE_EXC_CRASH_SIGNAL(SIGILL),
+      ENCODE_EXC_CRASH_SIGNAL(SIGTRAP),
       ENCODE_EXC_CRASH_SIGNAL(SIGABRT),
+      ENCODE_EXC_CRASH_SIGNAL(SIGEMT),
+      ENCODE_EXC_CRASH_SIGNAL(SIGFPE),
+      ENCODE_EXC_CRASH_SIGNAL(SIGBUS),
+      ENCODE_EXC_CRASH_SIGNAL(SIGSEGV),
       ENCODE_EXC_CRASH_SIGNAL(SIGSYS),
 #undef ENCODE_EXC_CRASH_SIGNAL
 
@@ -238,7 +250,7 @@ TEST(ExceptionTypes, ExceptionCodeForMetrics) {
     int32_t metrics_code =
         ExceptionCodeForMetrics(test_data.exception, test_data.code_0);
 
-    EXPECT_EQ(test_data.metrics_code, metrics_code);
+    EXPECT_EQ(metrics_code, test_data.metrics_code);
   }
 }
 

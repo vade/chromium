@@ -21,8 +21,9 @@ from diff_util import PromptUserToAcceptDiff
 import path_util
 
 import print_style
+import histogram_paths
 
-HISTOGRAMS_PATH = path_util.GetHistogramsFile()
+ENUMS_PATH = histogram_paths.ENUMS_XML
 POLICY_TEMPLATES_PATH = 'components/policy/resources/policy_templates.json'
 ENUM_NAME = 'EnterprisePolicies'
 
@@ -49,24 +50,6 @@ def FlattenPolicies(policy_definitions, policy_list):
       FlattenPolicies(policy['policies'], policy_list)
     else:
       policy_list.append(policy)
-
-
-def ParsePlaceholders(text):
-  """Parse placeholders in |text|, making it more human-readable. The format of
-  |text| is exactly the same as in captions in policy_templates.json: it can
-  contain XML tags (ph, ex) and $1-like substitutions. Note that this function
-  does only a very simple parsing that is not fully correct, but should be
-  enough for all practical situations.
-
-  Args:
-    text: A string containing placeholders.
-
-  Returns:
-    |text| with placeholders removed or replaced by readable text.
-  """
-  text = re.sub(r'\$\d+', '', text)    # Remove $1-like substitutions.
-  text = re.sub(r'<[^>]+>', '', text)  # Remove XML tags.
-  return text
 
 
 def UpdateHistogramDefinitions(policy_templates, doc):
@@ -103,7 +86,7 @@ def UpdateHistogramDefinitions(policy_templates, doc):
   for policy in ordered_policies:
     node = doc.createElement('int')
     node.attributes['value'] = str(policy['id'])
-    node.attributes['label'] = ParsePlaceholders(policy['caption'])
+    node.attributes['label'] = policy['name']
     policy_enum_node.appendChild(node)
 
 
@@ -115,7 +98,7 @@ def main():
 
   with open(path_util.GetInputFile(POLICY_TEMPLATES_PATH), 'rb') as f:
     policy_templates = literal_eval(f.read())
-  with open(HISTOGRAMS_PATH, 'rb') as f:
+  with open(ENUMS_PATH, 'rb') as f:
     histograms_doc = minidom.parse(f)
     f.seek(0)
     xml = f.read()
@@ -123,7 +106,7 @@ def main():
   UpdateHistogramDefinitions(policy_templates, histograms_doc)
   new_xml = print_style.GetPrintStyle().PrettyPrintNode(histograms_doc)
   if PromptUserToAcceptDiff(xml, new_xml, 'Is the updated version acceptable?'):
-    with open(HISTOGRAMS_PATH, 'wb') as f:
+    with open(ENUMS_PATH, 'wb') as f:
       f.write(new_xml)
 
 

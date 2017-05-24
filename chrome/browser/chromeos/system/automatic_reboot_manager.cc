@@ -26,6 +26,7 @@
 #include "base/posix/eintr_wrapper.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -235,8 +236,10 @@ void AutomaticRebootManager::UpdateStatusChanged(
     return;
   }
 
-  content::BrowserThread::PostBlockingPoolTask(
-      FROM_HERE, base::Bind(&SaveUpdateRebootNeededUptime));
+  base::PostTaskWithTraits(FROM_HERE,
+                           {base::MayBlock(), base::TaskPriority::BACKGROUND,
+                            base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
+                           base::Bind(&SaveUpdateRebootNeededUptime));
 
   update_reboot_needed_time_ = clock_->NowTicks();
   have_update_reboot_needed_time_ = true;
@@ -405,7 +408,8 @@ void AutomaticRebootManager::MaybeReboot(bool ignore_session) {
 void AutomaticRebootManager::Reboot() {
   // If a non-kiosk-app session is in progress, do not reboot.
   if (user_manager::UserManager::Get()->IsUserLoggedIn() &&
-      !user_manager::UserManager::Get()->IsLoggedInAsKioskApp()) {
+      !user_manager::UserManager::Get()->IsLoggedInAsKioskApp() &&
+      !user_manager::UserManager::Get()->IsLoggedInAsArcKioskApp()) {
     return;
   }
 

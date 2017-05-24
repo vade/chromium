@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "ash/common/system/chromeos/network/network_icon_animation_observer.h"
+#include "ash/system/network/network_icon_animation_observer.h"
 #include "base/macros.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/chromeos/status/network_menu.h"
@@ -28,13 +28,13 @@ class NetworkDropdown : public NetworkMenu::Delegate,
                         public NetworkStateHandlerObserver,
                         public ash::network_icon::AnimationObserver {
  public:
-  class Actor {
+  class View {
    public:
-    virtual ~Actor() {}
+    virtual ~View() {}
     virtual void OnConnectToNetworkRequested() = 0;
   };
 
-  NetworkDropdown(Actor* actor, content::WebUI* web_ui, bool oobe);
+  NetworkDropdown(View* view, content::WebUI* web_ui, bool oobe);
   ~NetworkDropdown() override;
 
   // This method should be called, when item with the given id is chosen.
@@ -69,7 +69,7 @@ class NetworkDropdown : public NetworkMenu::Delegate,
   // The Network menu.
   std::unique_ptr<NetworkMenuWebUI> network_menu_;
 
-  Actor* actor_;
+  View* view_;
 
   content::WebUI* web_ui_;
 

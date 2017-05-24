@@ -4,11 +4,13 @@
 
 #include "remoting/host/setup/win/auth_code_getter.h"
 
+#include <objbase.h>
+
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_variant.h"
-#include "remoting/host/setup/oauth_helper.h"
+#include "remoting/base/oauth_helper.h"
 
 namespace {
 const int kUrlPollIntervalMs = 100;
@@ -27,13 +29,13 @@ AuthCodeGetter::~AuthCodeGetter() {
 
 void AuthCodeGetter::GetAuthCode(
     base::Callback<void(const std::string&)> on_auth_code) {
-  if (browser_.get()) {
+  if (browser_.Get()) {
     on_auth_code.Run("");
     return;
   }
   on_auth_code_ = on_auth_code;
-  HRESULT hr = browser_.CreateInstance(CLSID_InternetExplorer, nullptr,
-                                       CLSCTX_LOCAL_SERVER);
+  HRESULT hr = ::CoCreateInstance(CLSID_InternetExplorer, nullptr,
+                                  CLSCTX_LOCAL_SERVER, IID_PPV_ARGS(&browser_));
   if (FAILED(hr)) {
     on_auth_code_.Run("");
     return;
@@ -67,7 +69,7 @@ void AuthCodeGetter::OnTimer() {
 
 bool AuthCodeGetter::TestBrowserUrl(std::string* auth_code) {
   *auth_code = "";
-  if (!browser_.get()) {
+  if (!browser_.Get()) {
     return true;
   }
   base::win::ScopedBstr url;
@@ -86,9 +88,9 @@ bool AuthCodeGetter::TestBrowserUrl(std::string* auth_code) {
 }
 
 void AuthCodeGetter::KillBrowser() {
-  if (browser_.get()) {
+  if (browser_.Get()) {
     browser_->Quit();
-    browser_.Release();
+    browser_.Reset();
   }
 }
 

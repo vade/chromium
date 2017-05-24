@@ -17,7 +17,9 @@ extern const base::Feature kOfflinePagesCTFeature;
 extern const base::Feature kOfflinePagesSharingFeature;
 extern const base::Feature kBackgroundLoaderForDownloadsFeature;
 extern const base::Feature kOfflinePagesAsyncDownloadFeature;
+extern const base::Feature kPrefetchingOfflinePagesFeature;
 extern const base::Feature kNewBackgroundLoaderFeature;
+extern const base::Feature kOfflinePagesLoadSignalCollectingFeature;
 
 // Returns true if saving bookmarked pages for offline viewing is enabled.
 bool IsOfflineBookmarksEnabled();
@@ -41,9 +43,19 @@ bool IsOfflinePagesSvelteConcurrentLoadingEnabled();
 // Returns true if downloading a page asynchonously is enabled.
 bool IsOfflinePagesAsyncDownloadEnabled();
 
+// Returns true if prefetching offline pages is enabled.
+bool IsPrefetchingOfflinePagesEnabled();
+
+// Returns true if we enable load timing signals to be collected.
+bool IsOfflinePagesLoadSignalCollectingEnabled();
+
 // Returns true if we should use background loader rather than prerenderer
 // to offline pages.
 bool ShouldUseNewBackgroundLoader();
+
+// Returns true if a command line for test has been set that shortens the
+// snapshot delay.
+bool ShouldUseTestingSnapshotDelay();
 
 }  // namespace offline_pages
 

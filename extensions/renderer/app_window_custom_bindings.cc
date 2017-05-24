@@ -11,8 +11,8 @@
 #include "content/public/renderer/render_view.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/switches.h"
+#include "extensions/grit/extensions_renderer_resources.h"
 #include "extensions/renderer/script_context.h"
-#include "grit/extensions_renderer_resources.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -53,7 +53,7 @@ void AppWindowCustomBindings::GetFrame(
   }
 
   v8::Local<v8::Value> window =
-      app_frame->GetWebFrame()->mainWorldScriptContext()->Global();
+      app_frame->GetWebFrame()->MainWorldScriptContext()->Global();
   args.GetReturnValue().Set(window);
 }
 

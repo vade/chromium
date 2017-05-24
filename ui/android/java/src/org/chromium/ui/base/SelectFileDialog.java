@@ -5,6 +5,7 @@
 package org.chromium.ui.base;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.Activity;
 import android.content.ClipData;
@@ -17,16 +18,18 @@ import android.os.AsyncTask;
 import android.os.Build;
 import android.provider.MediaStore;
 import android.text.TextUtils;
-import android.util.Log;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ContentUriUtils;
 import org.chromium.base.ContextUtils;
+import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.MainDex;
+import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.ui.PhotoPickerListener;
 import org.chromium.ui.R;
 import org.chromium.ui.UiUtils;
 
@@ -35,6 +38,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * A dialog that is triggered from a file input field that allows a user to select a file based on
@@ -42,8 +47,8 @@ import java.util.List;
  */
 @JNINamespace("ui")
 @MainDex
-public class SelectFileDialog
-        implements WindowAndroid.IntentCallback, WindowAndroid.PermissionCallback {
+public class SelectFileDialog implements WindowAndroid.IntentCallback,
+                                         WindowAndroid.PermissionCallback, PhotoPickerListener {
     private static final String TAG = "SelectFileDialog";
     private static final String IMAGE_TYPE = "image/";
     private static final String VIDEO_TYPE = "video/";
@@ -53,9 +58,38 @@ public class SelectFileDialog
     private static final String ALL_AUDIO_TYPES = AUDIO_TYPE + "*";
     private static final String ANY_TYPES = "*/*";
 
+    // Duration before temporary camera file is cleaned up, in milliseconds.
+    private static final long DURATION_BEFORE_FILE_CLEAN_UP_IN_MILLIS = TimeUnit.HOURS.toMillis(1);
+
+    // A list of some of the more popular image extensions. Not meant to be
+    // exhaustive, but should cover the vast majority of image types.
+    private static final String[] POPULAR_IMAGE_EXTENSIONS = new String[] {".apng", ".bmp", ".gif",
+            ".jpeg", ".jpg", ".pdf", ".png", ".tif", ".tiff", ".xcf", ".webp"};
+
+    // A list of some of the more popular video extensions. Not meant to be
+    // exhaustive, but should cover the vast majority of video types.
+    private static final String[] POPULAR_VIDEO_EXTENSIONS = new String[] {".asf", ".avhcd", ".avi",
+            ".divx", ".flv", ".mov", ".mp4", ".mpeg", ".mpg", ".swf", ".wmv", ".webm", ".mkv"};
+
+    /**
+     * The SELECT_FILE_DIALOG_SCOPE_* enumerations are used to measure the sort of content that
+     * developers are requesting to be shown in the select file dialog. Values must be kept in sync
+     * with their definition in //tools/metrics/histograms/histograms.xml, and both the numbering
+     * and meaning of the values must remain constant as they're recorded by UMA.
+     *
+     * Values are package visible because they're tested in the SelectFileDialogTest junit test.
+     */
+    static final int SELECT_FILE_DIALOG_SCOPE_GENERIC = 0;
+    static final int SELECT_FILE_DIALOG_SCOPE_IMAGES = 1;
+    static final int SELECT_FILE_DIALOG_SCOPE_VIDEOS = 2;
+    static final int SELECT_FILE_DIALOG_SCOPE_IMAGES_AND_VIDEOS = 3;
+    static final int SELECT_FILE_DIALOG_SCOPE_COUNT =
+            SELECT_FILE_DIALOG_SCOPE_IMAGES_AND_VIDEOS + 1;
+
     /**
      * If set, overrides the WindowAndroid passed in {@link selectFile()}.
      */
+    @SuppressLint("StaticFieldLeak")
     private static WindowAndroid sOverrideWindowAndroid;
 
     private final long mNativeSelectFileDialog;
@@ -79,6 +113,14 @@ public class SelectFileDialog
     @VisibleForTesting
     public static void setWindowAndroidForTests(WindowAndroid window) {
         sOverrideWindowAndroid = window;
+    }
+
+    /**
+     * Overrides the list of accepted file types for testing purposes.
+     */
+    @VisibleForTesting
+    public void setFileTypesForTests(List<String> fileTypes) {
+        mFileTypes = fileTypes;
     }
 
     /**
@@ -131,7 +173,8 @@ public class SelectFileDialog
         boolean hasCameraPermission = mWindowAndroid.hasPermission(Manifest.permission.CAMERA);
         if (mSupportsImageCapture && hasCameraPermission) {
             // GetCameraIntentTask will call LaunchSelectFileWithCameraIntent later.
-            new GetCameraIntentTask().executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+            new GetCameraIntentTask(false, mWindowAndroid, this)
+                    .executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
         } else {
             launchSelectFileWithCameraIntent(hasCameraPermission, null);
         }
@@ -174,6 +217,9 @@ public class SelectFileDialog
             getContentIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
         }
 
+        RecordHistogram.recordEnumeratedHistogram("Android.SelectFileDialogScope",
+                determineSelectFileDialogScope(), SELECT_FILE_DIALOG_SCOPE_COUNT);
+
         ArrayList<Intent> extraIntents = new ArrayList<Intent>();
         if (!noSpecificType()) {
             // Create a chooser based on the accept type that was specified in the webpage. Note
@@ -203,6 +249,12 @@ public class SelectFileDialog
             if (soundRecorder != null) extraIntents.add(soundRecorder);
         }
 
+        // Use new photo picker, if available.
+        Activity activity = mWindowAndroid.getActivity().get();
+        if (activity != null && UiUtils.showPhotoPicker(activity, this, mAllowMultiple)) {
+            return;
+        }
+
         Intent chooser = new Intent(Intent.ACTION_CHOOSER);
         if (!extraIntents.isEmpty()) {
             chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS,
@@ -215,12 +267,80 @@ public class SelectFileDialog
         }
     }
 
+    @Override
+    public void onPickerUserAction(Action action, String[] photos) {
+        UiUtils.dismissPhotoPicker();
+
+        switch (action) {
+            case CANCEL:
+                onFileNotSelected();
+                break;
+
+            case PHOTOS_SELECTED:
+                if (photos.length == 0) {
+                    onFileNotSelected();
+                    return;
+                }
+
+                if (photos.length == 1) {
+                    GetDisplayNameTask task =
+                            new GetDisplayNameTask(ContextUtils.getApplicationContext(), false);
+                    task.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, Uri.parse(photos[0]));
+                    return;
+                } else {
+                    Uri[] filePathArray = new Uri[photos.length];
+                    for (int i = 0; i < photos.length; ++i) {
+                        filePathArray[i] = Uri.parse(photos[i]);
+                    }
+                    GetDisplayNameTask task =
+                            new GetDisplayNameTask(ContextUtils.getApplicationContext(), true);
+                    task.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, filePathArray);
+                }
+                break;
+
+            case LAUNCH_GALLERY:
+                Intent intent = new Intent();
+                intent.setType("image/*");
+                if (mAllowMultiple) intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                intent.setAction(Intent.ACTION_GET_CONTENT);
+                Activity activity = mWindowAndroid.getActivity().get();
+                if (activity != null) {
+                    String label =
+                            activity.getResources().getString(R.string.photo_picker_select_images);
+                    activity.startActivityForResult(
+                            Intent.createChooser(intent, label), PhotoPickerListener.SHOW_GALLERY);
+                }
+                break;
+
+            case LAUNCH_CAMERA:
+                new GetCameraIntentTask(true, mWindowAndroid, this)
+                        .executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+                break;
+        }
+    }
+
+    @Override
+    public Map<String, Long> getFilesForTesting() {
+        return null;
+    }
+
     private class GetCameraIntentTask extends AsyncTask<Void, Void, Uri> {
+        private Boolean mDirectToCamera;
+        private WindowAndroid mWindow;
+        private WindowAndroid.IntentCallback mCallback;
+
+        public GetCameraIntentTask(Boolean directToCamera, WindowAndroid window,
+                WindowAndroid.IntentCallback callback) {
+            mDirectToCamera = directToCamera;
+            mWindow = window;
+            mCallback = callback;
+        }
+
         @Override
         public Uri doInBackground(Void...voids) {
             try {
                 Context context = mWindowAndroid.getApplicationContext();
-                return ApiCompatibilityUtils.getUriForImageCaptureFile(context,
+                return ApiCompatibilityUtils.getUriForImageCaptureFile(
                         getFileForImageCapture(context));
             } catch (IOException e) {
                 Log.e(TAG, "Cannot retrieve content uri from file", e);
@@ -245,7 +365,11 @@ public class SelectFileDialog
                         mWindowAndroid.getApplicationContext().getContentResolver(),
                         UiUtils.IMAGE_FILE_PATH, mCameraOutputUri));
             }
-            launchSelectFileWithCameraIntent(true, camera);
+            if (mDirectToCamera) {
+                mWindow.showIntent(camera, mCallback, R.string.low_memory_error);
+            } else {
+                launchSelectFileWithCameraIntent(true, camera);
+            }
         }
     }
 
@@ -355,6 +479,49 @@ public class SelectFileDialog
         nativeOnFileNotSelected(mNativeSelectFileDialog);
     }
 
+    // Determines the scope of the requested select file dialog for use in a UMA histogram. Right
+    // now we want to distinguish between generic, photo and visual media pickers.
+    @VisibleForTesting
+    int determineSelectFileDialogScope() {
+        if (mFileTypes.size() == 0) return SELECT_FILE_DIALOG_SCOPE_GENERIC;
+
+        // Capture the MIME types:
+        int acceptsImages = countAcceptTypesFor(IMAGE_TYPE);
+        int acceptsVideos = countAcceptTypesFor(VIDEO_TYPE);
+
+        // Capture the most common image and video extensions:
+        if (mFileTypes.size() > acceptsImages + acceptsVideos) {
+            for (String left : mFileTypes) {
+                boolean found = false;
+                for (String right : POPULAR_IMAGE_EXTENSIONS) {
+                    if (left.equalsIgnoreCase(right)) {
+                        found = true;
+                        acceptsImages++;
+                        break;
+                    }
+                }
+
+                if (found) continue;
+
+                for (String right : POPULAR_VIDEO_EXTENSIONS) {
+                    if (left.equalsIgnoreCase(right)) {
+                        acceptsVideos++;
+                        break;
+                    }
+                }
+            }
+        }
+
+        int acceptsOthers = mFileTypes.size() - acceptsImages - acceptsVideos;
+
+        if (acceptsOthers > 0) return SELECT_FILE_DIALOG_SCOPE_GENERIC;
+        if (acceptsVideos > 0) {
+            return (acceptsImages == 0) ? SELECT_FILE_DIALOG_SCOPE_VIDEOS
+                                        : SELECT_FILE_DIALOG_SCOPE_IMAGES_AND_VIDEOS;
+        }
+        return SELECT_FILE_DIALOG_SCOPE_IMAGES;
+    }
+
     private boolean noSpecificType() {
         // We use a single Intent to decide the type of the file chooser we display to the user,
         // which means we can only give it a single type. If there are multiple accept types
@@ -365,7 +532,7 @@ public class SelectFileDialog
 
     private boolean shouldShowTypes(String allTypes, String specificType) {
         if (noSpecificType() || mFileTypes.contains(allTypes)) return true;
-        return acceptSpecificType(specificType);
+        return countAcceptTypesFor(specificType) > 0;
     }
 
     private boolean shouldShowImageTypes() {
@@ -396,13 +563,14 @@ public class SelectFileDialog
         return mCapture && acceptsSpecificType(ALL_AUDIO_TYPES);
     }
 
-    private boolean acceptSpecificType(String accept) {
+    private int countAcceptTypesFor(String accept) {
+        int count = 0;
         for (String type : mFileTypes) {
             if (type.startsWith(accept)) {
-                return true;
+                count++;
             }
         }
-        return false;
+        return count;
     }
 
     private class GetDisplayNameTask extends AsyncTask<Uri, Void, String[]> {
@@ -453,8 +621,35 @@ public class SelectFileDialog
         }
     }
 
+    /**
+     * Clears all captured camera files.
+     */
+    public static void clearCapturedCameraFiles() {
+        AsyncTask.THREAD_POOL_EXECUTOR.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    File path = UiUtils.getDirectoryForImageCapture(
+                            ContextUtils.getApplicationContext());
+                    if (!path.isDirectory()) return;
+                    File[] files = path.listFiles();
+                    if (files == null) return;
+                    long now = System.currentTimeMillis();
+                    for (File file : files) {
+                        if (now - file.lastModified() > DURATION_BEFORE_FILE_CLEAN_UP_IN_MILLIS) {
+                            if (!file.delete()) Log.e(TAG, "Failed to delete: " + file);
+                        }
+                    }
+                } catch (IOException e) {
+                    Log.w(TAG, "Failed to delete captured camera files.", e);
+                }
+            }
+        });
+    }
+
+    @VisibleForTesting
     @CalledByNative
-    private static SelectFileDialog create(long nativeSelectFileDialog) {
+    static SelectFileDialog create(long nativeSelectFileDialog) {
         return new SelectFileDialog(nativeSelectFileDialog);
     }
 

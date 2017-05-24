@@ -8,12 +8,7 @@
       "paintInvalidations": [
         {
           "object": "LayoutBlockFlow (positioned) A id='link' class='updated'",
-          "rect": [48, 102, 92, 23],
-          "reason": "subtree"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [48, 102, 87, 17],
+          "rect": [48, 108, 86, 25],
           "reason": "subtree"
         }
       ]

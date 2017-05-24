@@ -14,27 +14,17 @@
         {
           "object": "LayoutSVGRect rect id='rect'",
           "rect": [50, 10, 30, 30],
-          "reason": "layoutObject insertion"
-        },
-        {
-          "object": "LayoutSVGRect rect id='rect'",
-          "rect": [50, 10, 30, 30],
-          "reason": "layoutObject removal"
+          "reason": "disappeared"
         },
         {
           "object": "LayoutSVGRect rect id='rect'",
           "rect": [10, 10, 30, 30],
-          "reason": "layoutObject insertion"
+          "reason": "appeared"
         },
         {
           "object": "LayoutSVGRect rect id='rect'",
           "rect": [10, 10, 30, 30],
-          "reason": "layoutObject removal"
-        },
-        {
-          "object": "LayoutSVGRect rect id='rect'",
-          "rect": [0, 10, 30, 30],
-          "reason": "style change"
+          "reason": "disappeared"
         }
       ]
     }
@@ -42,11 +32,11 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutSVGRect rect id='rect'",
-      "reason": "layoutObject removal"
+      "reason": "disappeared"
     },
     {
       "object": "LayoutSVGRect rect id='rect'",
-      "reason": "layoutObject removal"
+      "reason": "disappeared"
     },
     {
       "object": "LayoutSVGRect rect id='rect'",
@@ -54,7 +44,7 @@
     },
     {
       "object": "LayoutSVGRect rect id='rect'",
-      "reason": "layoutObject insertion"
+      "reason": "appeared"
     },
     {
       "object": "LayoutSVGContainer use",
@@ -62,7 +52,7 @@
     },
     {
       "object": "LayoutSVGRect rect id='rect'",
-      "reason": "layoutObject insertion"
+      "reason": "appeared"
     }
   ]
 }

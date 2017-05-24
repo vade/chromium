@@ -94,6 +94,10 @@ class TestWindowTree : public ui::mojom::WindowTree {
     return last_hit_test_mask_;
   }
 
+  const base::Optional<cc::LocalSurfaceId>& last_local_surface_id() const {
+    return last_local_surface_id_;
+  }
+
  private:
   struct Change {
     WindowTreeChangeType type;
@@ -116,9 +120,11 @@ class TestWindowTree : public ui::mojom::WindowTree {
       const std::unordered_map<std::string, std::vector<uint8_t>>& properties)
       override;
   void DeleteWindow(uint32_t change_id, uint32_t window_id) override;
-  void SetWindowBounds(uint32_t change_id,
-                       uint32_t window_id,
-                       const gfx::Rect& bounds) override;
+  void SetWindowBounds(
+      uint32_t change_id,
+      uint32_t window_id,
+      const gfx::Rect& bounds,
+      const base::Optional<cc::LocalSurfaceId>& local_surface_id) override;
   void SetClientArea(uint32_t window_id,
                      const gfx::Insets& insets,
                      const base::Optional<std::vector<gfx::Rect>>&
@@ -148,7 +154,9 @@ class TestWindowTree : public ui::mojom::WindowTree {
                           uint32_t transient_window_id) override;
   void RemoveTransientWindowFromParent(uint32_t change_id,
                                        uint32_t window_id) override;
-  void SetModal(uint32_t change_id, uint32_t window_id) override;
+  void SetModalType(uint32_t change_id,
+                    uint32_t window_id,
+                    ui::ModalType modal_type) override;
   void ReorderWindow(uint32_t change_id,
                      uint32_t window_id,
                      uint32_t relative_window_id,
@@ -165,10 +173,11 @@ class TestWindowTree : public ui::mojom::WindowTree {
              const EmbedCallback& callback) override;
   void SetFocus(uint32_t change_id, uint32_t window_id) override;
   void SetCanFocus(uint32_t window_id, bool can_focus) override;
-  void SetCanAcceptEvents(uint32_t window_id, bool can_accept_events) override;
-  void SetPredefinedCursor(uint32_t change_id,
-                           uint32_t window_id,
-                           ui::mojom::Cursor cursor_id) override;
+  void SetEventTargetingPolicy(uint32_t window_id,
+                               ui::mojom::EventTargetingPolicy policy) override;
+  void SetCursor(uint32_t change_id,
+                 Id transport_window_id,
+                 ui::CursorData cursor_data) override;
   void SetWindowTextInputState(uint32_t window_id,
                                mojo::TextInputStatePtr state) override;
   void SetImeVisibility(uint32_t window_id,
@@ -177,6 +186,8 @@ class TestWindowTree : public ui::mojom::WindowTree {
   void OnWindowInputEventAck(uint32_t event_id,
                              ui::mojom::EventResult result) override;
   void DeactivateWindow(uint32_t window_id) override;
+  void StackAbove(uint32_t change_id, uint32_t above_id,
+                  uint32_t below_id) override;
   void StackAtTop(uint32_t change_id, uint32_t window_id) override;
   void GetWindowManagerClient(
       mojo::AssociatedInterfaceRequest<ui::mojom::WindowManagerClient> internal)
@@ -186,8 +197,12 @@ class TestWindowTree : public ui::mojom::WindowTree {
   void PerformDragDrop(
       uint32_t change_id,
       uint32_t source_window_id,
+      const gfx::Point& screen_location,
       const std::unordered_map<std::string, std::vector<uint8_t>>& drag_data,
-      uint32_t drag_operation) override;
+      const SkBitmap& drag_image,
+      const gfx::Vector2d& drag_image_offset,
+      uint32_t drag_operation,
+      ui::mojom::PointerKind source) override;
   void CancelDragDrop(uint32_t window_id) override;
   void PerformWindowMove(uint32_t change_id,
                          uint32_t window_id,
@@ -216,6 +231,8 @@ class TestWindowTree : public ui::mojom::WindowTree {
   gfx::Insets last_client_area_;
 
   base::Optional<gfx::Rect> last_hit_test_mask_;
+
+  base::Optional<cc::LocalSurfaceId> last_local_surface_id_;
 
   DISALLOW_COPY_AND_ASSIGN(TestWindowTree);
 };

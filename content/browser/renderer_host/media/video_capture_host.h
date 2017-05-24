@@ -16,6 +16,10 @@
 #include "content/common/content_export.h"
 #include "content/common/video_capture.mojom.h"
 
+namespace service_manager {
+struct BindSourceInfo;
+}
+
 namespace content {
 class MediaStreamManager;
 
@@ -31,6 +35,7 @@ class CONTENT_EXPORT VideoCaptureHost
   explicit VideoCaptureHost(MediaStreamManager* media_stream_manager);
 
   static void Create(MediaStreamManager* media_stream_manager,
+                     const service_manager::BindSourceInfo& source_info,
                      mojom::VideoCaptureHostRequest request);
 
   ~VideoCaptureHost() override;
@@ -46,10 +51,13 @@ class CONTENT_EXPORT VideoCaptureHost
                        int buffer_id) override;
   void OnBufferDestroyed(VideoCaptureControllerID id,
                          int buffer_id) override;
-  void OnBufferReady(VideoCaptureControllerID id,
-                     int buffer_id,
-                     const scoped_refptr<media::VideoFrame>& frame) override;
+  void OnBufferReady(
+      VideoCaptureControllerID id,
+      int buffer_id,
+      const media::mojom::VideoFrameInfoPtr& frame_info) override;
   void OnEnded(VideoCaptureControllerID id) override;
+  void OnStarted(VideoCaptureControllerID id) override;
+  void OnStartedUsingGpuDecode(VideoCaptureControllerID id) override;
 
   // mojom::VideoCaptureHost implementation
   void Start(int32_t device_id,
@@ -68,11 +76,10 @@ class CONTENT_EXPORT VideoCaptureHost
   void GetDeviceSupportedFormats(
       int32_t device_id,
       int32_t session_id,
-      const GetDeviceSupportedFormatsCallback& callback) override;
-  void GetDeviceFormatsInUse(
-      int32_t device_id,
-      int32_t session_id,
-      const GetDeviceFormatsInUseCallback& callback) override;
+      GetDeviceSupportedFormatsCallback callback) override;
+  void GetDeviceFormatsInUse(int32_t device_id,
+                             int32_t session_id,
+                             GetDeviceFormatsInUseCallback callback) override;
 
   void DoError(VideoCaptureControllerID id);
   void DoEnded(VideoCaptureControllerID id);

@@ -9,6 +9,7 @@
 #include <atlcom.h>
 #include <oleacc.h>
 
+#include "base/compiler_specific.h"
 #include "base/observer_list.h"
 #include "third_party/iaccessible2/ia2_api_all.h"
 #include "ui/accessibility/ax_export.h"
@@ -32,14 +33,15 @@ class AX_EXPORT IAccessible2UsageObserver {
 extern AX_EXPORT base::ObserverList<IAccessible2UsageObserver>&
     GetIAccessible2UsageObserverList();
 
-class __declspec(uuid("26f5641a-246d-457b-a96d-07f3fae6acf2"))
-AXPlatformNodeWin
-: public CComObjectRootEx<CComMultiThreadModel>,
-    public IDispatchImpl<IAccessible2_2, &IID_IAccessible2,
-                         &LIBID_IAccessible2Lib>,
-    public IAccessibleText,
-    public IServiceProvider,
-    public AXPlatformNodeBase {
+class AX_EXPORT __declspec(uuid("26f5641a-246d-457b-a96d-07f3fae6acf2"))
+    AXPlatformNodeWin
+    : public NON_EXPORTED_BASE(CComObjectRootEx<CComMultiThreadModel>),
+      public IDispatchImpl<IAccessible2_2,
+                           &IID_IAccessible2,
+                           &LIBID_IAccessible2Lib>,
+      public IAccessibleText,
+      public IServiceProvider,
+      public AXPlatformNodeBase {
  public:
   BEGIN_COM_MAP(AXPlatformNodeWin)
     COM_INTERFACE_ENTRY2(IDispatch, IAccessible2_2)
@@ -271,7 +273,6 @@ AXPlatformNodeWin
   void Dispose() override;
 
  private:
-  bool IsValidId(const VARIANT& child) const;
   int MSAARole();
   int MSAAState();
   int MSAAEvent(ui::AXEvent event);
@@ -288,7 +289,7 @@ AXPlatformNodeWin
 
   // If offset is a member of IA2TextSpecialOffsets this function updates the
   // value of offset and returns, otherwise offset remains unchanged.
-  void HandleSpecialTextOffset(const base::string16& text, LONG* offset);
+  void HandleSpecialTextOffset(LONG* offset);
 
   // Convert from a IA2TextBoundaryType to a ui::TextBoundaryType.
   ui::TextBoundaryType IA2TextBoundaryToTextBoundary(IA2TextBoundaryType type);
@@ -300,6 +301,13 @@ AXPlatformNodeWin
                     IA2TextBoundaryType ia2_boundary,
                     LONG start_offset,
                     ui::TextBoundaryDirection direction);
+
+  // Many MSAA methods take a var_id parameter indicating that the operation
+  // should be performed on a particular child ID, rather than this object.
+  // This method tries to figure out the target object from |var_id| and
+  // returns a pointer to the target object if it exists, otherwise nullptr.
+  // Does not return a new reference.
+  AXPlatformNodeWin* GetTargetFromChildID(const VARIANT& var_id);
 };
 
 }  // namespace ui

@@ -8,9 +8,9 @@
 #include <string>
 #include <vector>
 
-#include "ash/common/wallpaper/wallpaper_controller.h"
-#include "ash/common/wallpaper/wallpaper_controller_observer.h"
-#include "ash/common/wm_shell.h"
+#include "ash/shell.h"
+#include "ash/wallpaper/wallpaper_controller.h"
+#include "ash/wallpaper/wallpaper_controller_observer.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
@@ -25,8 +25,10 @@
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
+#include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos_factory.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/cloud_external_data_manager_base_test_util.h"
+#include "chrome/browser/chromeos/policy/device_policy_builder.h"
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/policy/user_policy_manager_factory_chromeos.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
@@ -41,6 +43,7 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_session_manager_client.h"
 #include "chromeos/dbus/session_manager_client.h"
+#include "components/ownership/mock_owner_key_util.h"
 #include "components/policy/core/common/cloud/cloud_policy_core.h"
 #include "components/policy/core/common/cloud/cloud_policy_store.h"
 #include "components/policy/core/common/cloud/cloud_policy_validator.h"
@@ -99,7 +102,6 @@ SkColor ComputeAverageColor(const SkBitmap& bitmap) {
     return SkColorSetARGB(0, 0, 0, 0);
   }
   uint64_t a = 0, r = 0, g = 0, b = 0;
-  bitmap.lockPixels();
   for (int x = 0; x < bitmap.width(); ++x) {
     for (int y = 0; y < bitmap.height(); ++y) {
       const SkColor color = bitmap.getColor(x, y);
@@ -109,7 +111,6 @@ SkColor ComputeAverageColor(const SkBitmap& bitmap) {
       b += SkColorGetB(color);
     }
   }
-  bitmap.unlockPixels();
   uint64_t pixel_number = bitmap.width() * bitmap.height();
   return SkColorSetARGB((a + pixel_number / 2) / pixel_number,
                         (r + pixel_number / 2) / pixel_number,
@@ -120,7 +121,7 @@ SkColor ComputeAverageColor(const SkBitmap& bitmap) {
 // Obtain wallpaper image and return its average ARGB color.
 SkColor GetAverageWallpaperColor() {
   const gfx::ImageSkia image =
-      ash::WmShell::Get()->wallpaper_controller()->GetWallpaper();
+      ash::Shell::Get()->wallpaper_controller()->GetWallpaper();
 
   const gfx::ImageSkiaRep& representation = image.GetRepresentation(1.);
   if (representation.is_null()) {
@@ -146,6 +147,7 @@ class WallpaperManagerPolicyTest : public LoginManagerTest,
   WallpaperManagerPolicyTest()
       : LoginManagerTest(true),
         wallpaper_change_count_(0),
+        owner_key_util_(new ownership::MockOwnerKeyUtil()),
         fake_session_manager_client_(new FakeSessionManagerClient) {
     testUsers_.push_back(
         AccountId::FromUserEmail(LoginManagerTest::kEnterpriseUser1));
@@ -178,15 +180,21 @@ class WallpaperManagerPolicyTest : public LoginManagerTest,
 
   // LoginManagerTest:
   void SetUpInProcessBrowserTestFixture() override {
+    device_policy_.Build();
+    OwnerSettingsServiceChromeOSFactory::GetInstance()
+        ->SetOwnerKeyUtilForTesting(owner_key_util_);
+    owner_key_util_->SetPublicKeyFromPrivateKey(
+        *device_policy_.GetSigningKey());
+    fake_session_manager_client_->set_device_policy(device_policy_.GetBlob());
+    DBusThreadManager::GetSetterForTesting()->SetSessionManagerClient(
+        std::unique_ptr<SessionManagerClient>(fake_session_manager_client_));
+
     // Set up fake install attributes.
     std::unique_ptr<chromeos::StubInstallAttributes> attributes =
         base::MakeUnique<chromeos::StubInstallAttributes>();
-    attributes->SetEnterprise("fake-domain", "fake-id");
+    attributes->SetCloudManaged("fake-domain", "fake-id");
     policy::BrowserPolicyConnectorChromeOS::SetInstallAttributesForTesting(
         attributes.release());
-
-    DBusThreadManager::GetSetterForTesting()->SetSessionManagerClient(
-        std::unique_ptr<SessionManagerClient>(fake_session_manager_client_));
 
     LoginManagerTest::SetUpInProcessBrowserTestFixture();
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir_));
@@ -209,7 +217,7 @@ class WallpaperManagerPolicyTest : public LoginManagerTest,
 
   void SetUpOnMainThread() override {
     LoginManagerTest::SetUpOnMainThread();
-    ash::WmShell::Get()->wallpaper_controller()->AddObserver(this);
+    ash::Shell::Get()->wallpaper_controller()->AddObserver(this);
 
     // Set up policy signing.
     user_policy_builders_[0] = GetUserPolicyBuilder(testUsers_[0]);
@@ -217,7 +225,7 @@ class WallpaperManagerPolicyTest : public LoginManagerTest,
   }
 
   void TearDownOnMainThread() override {
-    ash::WmShell::Get()->wallpaper_controller()->RemoveObserver(this);
+    ash::Shell::Get()->wallpaper_controller()->RemoveObserver(this);
     LoginManagerTest::TearDownOnMainThread();
   }
 
@@ -290,6 +298,8 @@ class WallpaperManagerPolicyTest : public LoginManagerTest,
   std::unique_ptr<base::RunLoop> run_loop_;
   int wallpaper_change_count_;
   std::unique_ptr<policy::UserPolicyBuilder> user_policy_builders_[2];
+  policy::DevicePolicyBuilder device_policy_;
+  scoped_refptr<ownership::MockOwnerKeyUtil> owner_key_util_;
   FakeSessionManagerClient* fake_session_manager_client_;
   std::vector<AccountId> testUsers_;
 

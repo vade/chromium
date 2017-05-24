@@ -14,15 +14,13 @@ source_set("lib") {
   ]
 
   deps = [
-    "//ash/public/cpp",
-    "//ash/public/interfaces",
+    "//ash/public/cpp:ash_public_cpp",
     "//ash/touch_hud",
     "//base",
     "//mash/public/interfaces",
     "//mojo/common",
     "//mojo/public/cpp/bindings",
     "//services/service_manager/public/cpp",
-    "//services/service_manager/public/cpp:sources",
     "//services/ui/public/cpp",
     "//services/ui/public/interfaces",
     "//ui/views",
@@ -44,7 +42,6 @@ service("touch_hud") {
     "//base",
     "//mojo/public/cpp/bindings",
     "//services/service_manager/public/cpp",
-    "//services/service_manager/public/cpp:sources",
     "//ui/views/mus:for_mojo_application",
   ]
 

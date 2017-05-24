@@ -6,6 +6,8 @@
 
 #include <stddef.h>
 
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "apps/metrics_names.h"
@@ -14,6 +16,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
@@ -335,8 +338,8 @@ void AppLauncherHandler::OnExtensionLoaded(
 
   visible_apps_.insert(extension->id());
   ExtensionPrefs* prefs = ExtensionPrefs::Get(extension_service_->profile());
-  base::FundamentalValue highlight(prefs->IsFromBookmark(extension->id()) &&
-                                   attempted_bookmark_app_install_);
+  base::Value highlight(prefs->IsFromBookmark(extension->id()) &&
+                        attempted_bookmark_app_install_);
   attempted_bookmark_app_install_ = false;
   web_ui()->CallJavascriptFunctionUnsafe("ntp.appAdded", *app_info, highlight);
 }
@@ -344,7 +347,7 @@ void AppLauncherHandler::OnExtensionLoaded(
 void AppLauncherHandler::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const Extension* extension,
-    extensions::UnloadedExtensionInfo::Reason reason) {
+    extensions::UnloadedExtensionReason reason) {
   AppRemoved(extension, false);
 }
 
@@ -359,7 +362,7 @@ void AppLauncherHandler::FillAppDictionary(base::DictionaryValue* dictionary) {
   // CreateAppInfo and ClearOrdinals can change the extension prefs.
   base::AutoReset<bool> auto_reset(&ignore_changes_, true);
 
-  base::ListValue* list = new base::ListValue();
+  auto installed_extensions = base::MakeUnique<base::ListValue>();
   Profile* profile = Profile::FromWebUI(web_ui());
   PrefService* prefs = profile->GetPrefs();
 
@@ -368,24 +371,23 @@ void AppLauncherHandler::FillAppDictionary(base::DictionaryValue* dictionary) {
     const Extension* extension = extension_service_->GetInstalledExtension(*it);
     if (extension && extensions::ui_util::ShouldDisplayInNewTabPage(
             extension, profile)) {
-      list->Append(GetAppInfo(extension));
+      installed_extensions->Append(GetAppInfo(extension));
     }
   }
 
-  dictionary->Set("apps", list);
+  dictionary->Set("apps", std::move(installed_extensions));
 
   const base::ListValue* app_page_names =
       prefs->GetList(prefs::kNtpAppPageNames);
   if (!app_page_names || !app_page_names->GetSize()) {
     ListPrefUpdate update(prefs, prefs::kNtpAppPageNames);
     base::ListValue* list = update.Get();
-    list->Set(0, new base::StringValue(
-        l10n_util::GetStringUTF16(IDS_APP_DEFAULT_PAGE_NAME)));
-    dictionary->Set("appPageNames",
-                    static_cast<base::ListValue*>(list->DeepCopy()));
+    list->Set(0, base::MakeUnique<base::Value>(
+                     l10n_util::GetStringUTF16(IDS_APP_DEFAULT_PAGE_NAME)));
+    dictionary->Set("appPageNames", base::MakeUnique<base::Value>(*list));
   } else {
     dictionary->Set("appPageNames",
-                    static_cast<base::ListValue*>(app_page_names->DeepCopy()));
+                    base::MakeUnique<base::Value>(*app_page_names));
   }
 }
 
@@ -681,7 +683,7 @@ void AppLauncherHandler::HandleSetPageIndex(const base::ListValue* args) {
 }
 
 void AppLauncherHandler::HandleSaveAppPageName(const base::ListValue* args) {
-  base::string16 name;
+  std::string name;
   CHECK(args->GetString(0, &name));
 
   double page_index;
@@ -691,7 +693,8 @@ void AppLauncherHandler::HandleSaveAppPageName(const base::ListValue* args) {
   PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
   ListPrefUpdate update(prefs, prefs::kNtpAppPageNames);
   base::ListValue* list = update.Get();
-  list->Set(static_cast<size_t>(page_index), new base::StringValue(name));
+  list->Set(static_cast<size_t>(page_index),
+            base::MakeUnique<base::Value>(name));
 }
 
 void AppLauncherHandler::HandleGenerateAppForLink(const base::ListValue* args) {
@@ -781,7 +784,7 @@ void AppLauncherHandler::SetAppToBeHighlighted() {
   if (highlight_app_id_.empty())
     return;
 
-  base::StringValue app_id(highlight_app_id_);
+  base::Value app_id(highlight_app_id_);
   web_ui()->CallJavascriptFunctionUnsafe("ntp.setAppToBeHighlighted", app_id);
   highlight_app_id_.clear();
 }
@@ -797,7 +800,7 @@ void AppLauncherHandler::OnLocalStatePreferenceChanged() {
 #if BUILDFLAG(ENABLE_APP_LIST)
   web_ui()->CallJavascriptFunctionUnsafe(
       "ntp.appLauncherPromoPrefChangeCallback",
-      base::FundamentalValue(g_browser_process->local_state()->GetBoolean(
+      base::Value(g_browser_process->local_state()->GetBoolean(
           prefs::kShowAppLauncherPromo)));
 #endif
 }
@@ -829,7 +832,7 @@ void AppLauncherHandler::ExtensionEnableFlowFinished() {
   // If we don't launch the app asynchronously, then the app's disabled
   // icon disappears but isn't replaced by the enabled icon, making a poor
   // visual experience.
-  base::StringValue app_id(extension_id_prompting_);
+  base::Value app_id(extension_id_prompting_);
   web_ui()->CallJavascriptFunctionUnsafe("ntp.launchAppAfterEnable", app_id);
 
   extension_enable_flow_.reset();
@@ -876,8 +879,8 @@ void AppLauncherHandler::AppRemoved(const Extension* extension,
     return;
 
   web_ui()->CallJavascriptFunctionUnsafe(
-      "ntp.appRemoved", *app_info, base::FundamentalValue(is_uninstall),
-      base::FundamentalValue(!extension_id_prompting_.empty()));
+      "ntp.appRemoved", *app_info, base::Value(is_uninstall),
+      base::Value(!extension_id_prompting_.empty()));
 }
 
 bool AppLauncherHandler::ShouldShow(const Extension* extension) const {

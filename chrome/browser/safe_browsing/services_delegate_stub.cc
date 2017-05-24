@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "components/safe_browsing_db/v4_local_database_manager.h"
+#include "services/preferences/public/interfaces/tracked_preference_validation_delegate.mojom.h"
 
 namespace safe_browsing {
 
@@ -36,7 +37,7 @@ ServicesDelegateStub::v4_local_database_manager() const {
   return v4_local_database_manager_;
 }
 
-void ServicesDelegateStub::Initialize() {}
+void ServicesDelegateStub::Initialize(bool v4_enabled) {}
 
 void ServicesDelegateStub::ShutdownServices() {}
 
@@ -45,15 +46,12 @@ void ServicesDelegateStub::RefreshState(bool enable) {}
 void ServicesDelegateStub::ProcessResourceRequest(
     const ResourceRequestInfo* request) {}
 
-std::unique_ptr<TrackedPreferenceValidationDelegate>
+std::unique_ptr<prefs::mojom::TrackedPreferenceValidationDelegate>
 ServicesDelegateStub::CreatePreferenceValidationDelegate(Profile* profile) {
-  return std::unique_ptr<TrackedPreferenceValidationDelegate>();
+  return nullptr;
 }
 
 void ServicesDelegateStub::RegisterDelayedAnalysisCallback(
-    const DelayedAnalysisCallback& callback) {}
-
-void ServicesDelegateStub::RegisterExtendedReportingOnlyDelayedAnalysisCallback(
     const DelayedAnalysisCallback& callback) {}
 
 void ServicesDelegateStub::AddDownloadManager(

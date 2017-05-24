@@ -14,6 +14,12 @@
 #include "base/macros.h"
 #include "chromeos/chromeos_export.h"
 
+namespace ash {
+namespace network_icon {
+class NetworkIconTest;
+}  // namespace network_icon
+}  // namesapce ash
+
 namespace base {
 class Value;
 class DictionaryValue;
@@ -108,9 +114,12 @@ class CHROMEOS_EXPORT ManagedState {
                       uint32_t* out_value);
 
   void set_name(const std::string& name) { name_ = name; }
+  void set_type(const std::string& type) { type_ = type; }
 
  private:
   friend class NetworkChangeNotifierChromeosUpdateTest;
+  friend class NetworkStateHandler;
+  friend class ash::network_icon::NetworkIconTest;
 
   ManagedType managed_type_;
 

@@ -6,6 +6,8 @@ source_set("toolbar") {
   sources = [
     "toolbar_coordinator.h",
     "toolbar_coordinator.mm",
+    "toolbar_mediator.h",
+    "toolbar_mediator.mm",
   ]
 
   configs += [ "//build/config/compiler:enable_arc" ]
@@ -13,28 +15,71 @@ source_set("toolbar") {
   deps = [
     ":toolbar_ui",
     "//base",
-    "//ios/clean/chrome/browser",
     "//ios/clean/chrome/browser/ui/commands",
+    "//ios/clean/chrome/browser/ui/omnibox",
     "//ios/clean/chrome/browser/ui/tools",
-    "//ios/shared/chrome/browser/coordinator_context",
+    "//ios/shared/chrome/browser/ui/browser_list",
+    "//ios/shared/chrome/browser/ui/commands",
+    "//ios/shared/chrome/browser/ui/coordinators",
+    "//ios/shared/chrome/browser/ui/tools_menu",
     "//ios/web",
   ]
 }
 
 source_set("toolbar_ui") {
   sources = [
+    "toolbar_constants.h",
+    "toolbar_constants.mm",
+    "toolbar_consumer.h",
     "toolbar_view_controller.h",
     "toolbar_view_controller.mm",
+  ]
+  deps = [
+    ":toolbar_components_ui",
+    "//base",
+    "//ios/clean/chrome/browser/ui/actions",
+    "//ios/clean/chrome/browser/ui/animators",
+    "//ios/clean/chrome/browser/ui/commands",
+    "//ios/clean/chrome/browser/ui/tools",
+    "//ios/third_party/material_components_ios",
+  ]
+  libs = [ "UIKit.framework" ]
+  configs += [ "//build/config/compiler:enable_arc" ]
+}
+
+source_set("toolbar_components_ui") {
+  sources = [
+    "toolbar_button+factory.h",
+    "toolbar_button+factory.mm",
+    "toolbar_button.h",
+    "toolbar_button.mm",
+    "toolbar_component_options.h",
   ]
   deps = [
     "//base",
     "//ios/chrome/app/theme",
     "//ios/chrome/browser/ui",
-    "//ios/clean/chrome/browser/ui/actions",
-    "//ios/clean/chrome/browser/ui/animators",
-    "//ios/clean/chrome/browser/ui/commands",
-    "//ios/clean/chrome/browser/ui/tools",
   ]
   libs = [ "UIKit.framework" ]
+  configs += [ "//build/config/compiler:enable_arc" ]
+}
+
+source_set("unit_tests") {
+  testonly = true
+
+  sources = [
+    "toolbar_mediator_unittest.mm",
+  ]
+  deps = [
+    ":toolbar",
+    ":toolbar_ui",
+    "//base",
+    "//base/test:test_support",
+    "//ios/shared/chrome/browser/ui/toolbar:test_support",
+    "//ios/web",
+    "//ios/web:test_support",
+    "//testing/gtest",
+    "//third_party/ocmock",
+  ]
   configs += [ "//build/config/compiler:enable_arc" ]
 }

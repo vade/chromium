@@ -60,23 +60,25 @@ void SigninErrorHandler::HandleConfirm(const base::ListValue* args) {
 void SigninErrorHandler::HandleLearnMore(const base::ListValue* args) {
   Browser* browser = signin::GetDesktopBrowser(web_ui());
   DCHECK(browser);
-  browser->CloseModalSigninWindow();
+  browser->signin_view_controller()->CloseModalSignin();
   signin_ui_util::ShowSigninErrorLearnMorePage(browser->profile());
 }
 
 void SigninErrorHandler::HandleInitializedWithSize(
     const base::ListValue* args) {
+  AllowJavascript();
   if (duplicate_profile_path_.empty())
-    web_ui()->CallJavascriptFunctionUnsafe("signin.error.removeSwitchButton");
+    CallJavascriptFunction("signin.error.removeSwitchButton");
 
-  signin::SetInitializedModalHeight(web_ui(), args);
+  signin::SetInitializedModalHeight(signin::GetDesktopBrowser(web_ui()),
+                                    web_ui(), args);
 
   // After the dialog is shown, some platforms might have an element focused.
   // To be consistent, clear the focused element on all platforms.
   // TODO(anthonyvd): Figure out why this is needed on Mac and not other
   // platforms and if there's a way to start unfocused while avoiding this
   // workaround.
-  web_ui()->CallJavascriptFunctionUnsafe("signin.error.clearFocus");
+  CallJavascriptFunction("signin.error.clearFocus");
 }
 
 void SigninErrorHandler::CloseDialog() {
@@ -87,6 +89,6 @@ void SigninErrorHandler::CloseDialog() {
   } else {
     Browser* browser = signin::GetDesktopBrowser(web_ui());
     DCHECK(browser);
-    browser->CloseModalSigninWindow();
+    browser->signin_view_controller()->CloseModalSignin();
   }
 }

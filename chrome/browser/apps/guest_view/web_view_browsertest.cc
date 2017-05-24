@@ -19,6 +19,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -26,10 +27,10 @@
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
+#include "chrome/browser/download/download_core_service.h"
+#include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/download/download_history.h"
 #include "chrome/browser/download/download_prefs.h"
-#include "chrome/browser/download/download_service.h"
-#include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/pdf/pdf_extension_test_util.h"
 #include "chrome/browser/prerender/prerender_link_manager.h"
@@ -51,7 +52,6 @@
 #include "content/public/browser/ax_event_notification_details.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/interstitial_page.h"
-#include "content/public/browser/interstitial_page_delegate.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_widget_host.h"
@@ -63,7 +63,9 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
 #include "content/public/test/fake_speech_recognition_manager.h"
+#include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_renderer_host.h"
+#include "content/public/test/test_utils.h"
 #include "extensions/browser/api/declarative/rules_registry.h"
 #include "extensions/browser/api/declarative/rules_registry_service.h"
 #include "extensions/browser/api/declarative/test_rules_registry.h"
@@ -79,6 +81,7 @@
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "ppapi/features/features.h"
+#include "third_party/WebKit/public/platform/WebMouseEvent.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
 #include "ui/compositor/compositor.h"
@@ -122,14 +125,6 @@ const char kCacheResponsePath[] = "/cache-control-response";
 const char kRedirectResponseFullPath[] =
     "/extensions/platform_apps/web_view/shim/guest_redirect.html";
 
-class TestInterstitialPageDelegate : public content::InterstitialPageDelegate {
- public:
-  TestInterstitialPageDelegate() {
-  }
-  ~TestInterstitialPageDelegate() override {}
-  std::string GetHTMLContents() override { return std::string(); }
-};
-
 class WebContentsHiddenObserver : public content::WebContentsObserver {
  public:
   WebContentsHiddenObserver(content::WebContents* web_contents,
@@ -171,8 +166,8 @@ class ContextMenuCallCountObserver {
     ++num_times_shown_;
     auto* context_menu = content::Source<RenderViewContextMenu>(source).ptr();
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(&RenderViewContextMenuBase::Cancel,
-                              base::Unretained(context_menu)));
+        FROM_HERE, base::BindOnce(&RenderViewContextMenuBase::Cancel,
+                                  base::Unretained(context_menu)));
     return true;
   }
 
@@ -293,10 +288,10 @@ class LeftMouseClick {
  public:
   explicit LeftMouseClick(content::WebContents* web_contents)
       : web_contents_(web_contents),
-        mouse_event_(blink::WebInputEvent::MouseDown,
-                     blink::WebInputEvent::NoModifiers,
-                     blink::WebInputEvent::TimeStampForTesting) {
-    mouse_event_.button = blink::WebMouseEvent::Button::Left;
+        mouse_event_(blink::WebInputEvent::kMouseDown,
+                     blink::WebInputEvent::kNoModifiers,
+                     blink::WebInputEvent::kTimeStampForTesting) {
+    mouse_event_.button = blink::WebMouseEvent::Button::kLeft;
   }
 
   ~LeftMouseClick() {
@@ -306,19 +301,18 @@ class LeftMouseClick {
   void Click(const gfx::Point& point, int duration_ms) {
     DCHECK(click_completed_);
     click_completed_ = false;
-    mouse_event_.setType(blink::WebInputEvent::MouseDown);
-    mouse_event_.x = point.x();
-    mouse_event_.y = point.y();
+    mouse_event_.SetType(blink::WebInputEvent::kMouseDown);
+    mouse_event_.SetPositionInWidget(point.x(), point.y());
     const gfx::Rect offset = web_contents_->GetContainerBounds();
-    mouse_event_.globalX = point.x() + offset.x();
-    mouse_event_.globalY = point.y() + offset.y();
-    mouse_event_.clickCount = 1;
+    mouse_event_.SetPositionInScreen(point.x() + offset.x(),
+                                     point.y() + offset.y());
+    mouse_event_.click_count = 1;
     web_contents_->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
         mouse_event_);
 
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE, base::Bind(&LeftMouseClick::SendMouseUp,
-                              base::Unretained(this)),
+        FROM_HERE,
+        base::BindOnce(&LeftMouseClick::SendMouseUp, base::Unretained(this)),
         base::TimeDelta::FromMilliseconds(duration_ms));
   }
 
@@ -333,7 +327,7 @@ class LeftMouseClick {
 
  private:
   void SendMouseUp() {
-    mouse_event_.setType(blink::WebInputEvent::MouseUp);
+    mouse_event_.SetType(blink::WebInputEvent::kMouseUp);
     web_contents_->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
         mouse_event_);
     click_completed_ = true;
@@ -690,7 +684,7 @@ class WebViewTestBase : public extensions::PlatformAppBrowserTest {
   }
 
   // Helper to load interstitial page in a <webview>.
-  void InterstitialTeardownTestHelper() {
+  void InterstitialTestHelper() {
     // Start a HTTPS server so we can load an interstitial page inside guest.
     net::EmbeddedTestServer https_server(net::EmbeddedTestServer::TYPE_HTTPS);
     https_server.SetSSLConfig(net::EmbeddedTestServer::CERT_MISMATCHED_NAME);
@@ -775,15 +769,14 @@ class WebViewTestBase : public extensions::PlatformAppBrowserTest {
   }
 
   void OpenContextMenu(content::WebContents* web_contents) {
-    blink::WebMouseEvent mouse_event(blink::WebInputEvent::MouseDown,
-                                     blink::WebInputEvent::NoModifiers,
-                                     blink::WebInputEvent::TimeStampForTesting);
-    mouse_event.button = blink::WebMouseEvent::Button::Right;
-    mouse_event.x = 1;
-    mouse_event.y = 1;
+    blink::WebMouseEvent mouse_event(
+        blink::WebInputEvent::kMouseDown, blink::WebInputEvent::kNoModifiers,
+        blink::WebInputEvent::kTimeStampForTesting);
+    mouse_event.button = blink::WebMouseEvent::Button::kRight;
+    mouse_event.SetPositionInWidget(1, 1);
     web_contents->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
         mouse_event);
-    mouse_event.setType(blink::WebInputEvent::MouseUp);
+    mouse_event.SetType(blink::WebInputEvent::kMouseUp);
     web_contents->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
         mouse_event);
   }
@@ -819,9 +812,6 @@ class WebViewTestBase : public extensions::PlatformAppBrowserTest {
   }
 
   ~WebViewTestBase() override {}
-
- protected:
-  scoped_refptr<content::FrameWatcher> frame_watcher_;
 
  private:
   bool UsesFakeSpeech() {
@@ -1309,6 +1299,12 @@ IN_PROC_BROWSER_TEST_P(WebViewTest,
              NO_TEST_SERVER);
 }
 
+IN_PROC_BROWSER_TEST_P(WebViewTest,
+                       Shim_TestContentInitiatedNavigationToDataUrlBlocked) {
+  TestHelper("testContentInitiatedNavigationToDataUrlBlocked", "web_view/shim",
+             NO_TEST_SERVER);
+}
+
 IN_PROC_BROWSER_TEST_P(WebViewTest, Shim_TestDisplayNoneWebviewLoad) {
   TestHelper("testDisplayNoneWebviewLoad", "web_view/shim", NO_TEST_SERVER);
 }
@@ -1436,9 +1432,10 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, Shim_TestExecuteScript) {
   TestHelper("testExecuteScript", "web_view/shim", NO_TEST_SERVER);
 }
 
+// Flaky and likely not testing the right assertion. https://crbug.com/703727
 IN_PROC_BROWSER_TEST_P(
     WebViewTest,
-    Shim_TestExecuteScriptIsAbortedWhenWebViewSourceIsChanged) {
+    DISABLED_Shim_TestExecuteScriptIsAbortedWhenWebViewSourceIsChanged) {
   TestHelper("testExecuteScriptIsAbortedWhenWebViewSourceIsChanged",
              "web_view/shim",
              NO_TEST_SERVER);
@@ -1521,7 +1518,6 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, Shim_TestContentLoadEvent) {
   TestHelper("testContentLoadEvent", "web_view/shim", NO_TEST_SERVER);
 }
 
-// TODO(fsamuel): Enable this test once <webview> can run in a detached state.
 IN_PROC_BROWSER_TEST_P(WebViewTest, Shim_TestContentLoadEventWithDisplayNone) {
   TestHelper("testContentLoadEventWithDisplayNone",
              "web_view/shim",
@@ -1699,10 +1695,109 @@ IN_PROC_BROWSER_TEST_P(WebViewSizeTest, Shim_TestResizeWebviewResizesContent) {
              NO_TEST_SERVER);
 }
 
+// Test makes sure that interstitial pages renders in <webview>.
+IN_PROC_BROWSER_TEST_P(WebViewTest, InterstitialPage) {
+  // This test tests that a inner WebContents' InterstitialPage is properly
+  // connected to an outer WebContents through a CrossProcessFrameConnector, it
+  // doesn't make sense for BrowserPlugin based guests.
+  if (!base::FeatureList::IsEnabled(::features::kGuestViewCrossProcessFrames))
+    return;
+
+  InterstitialTestHelper();
+
+  content::WebContents* guest_web_contents =
+      GetGuestViewManager()->WaitForSingleGuestCreated();
+
+  EXPECT_TRUE(guest_web_contents->ShowingInterstitialPage());
+  EXPECT_TRUE(guest_web_contents->GetInterstitialPage()
+                  ->GetMainFrame()
+                  ->GetView()
+                  ->IsShowing());
+  EXPECT_TRUE(content::IsInnerInterstitialPageConnected(
+      guest_web_contents->GetInterstitialPage()));
+}
+
+// Test makes sure that interstitial pages are registered in the
+// RenderWidgetHostInputEventRouter when inside a <webview>.
+IN_PROC_BROWSER_TEST_P(WebViewTest, InterstitialPageRouteEvents) {
+  // This test tests that a inner WebContents' InterstitialPage is properly
+  // connected to an outer WebContents through a CrossProcessFrameConnector, it
+  // doesn't make sense for BrowserPlugin based guests.
+  if (!base::FeatureList::IsEnabled(::features::kGuestViewCrossProcessFrames))
+    return;
+
+  InterstitialTestHelper();
+
+  content::WebContents* outer_web_contents = GetFirstAppWindowWebContents();
+  content::WebContents* guest_web_contents =
+      GetGuestViewManager()->WaitForSingleGuestCreated();
+  content::InterstitialPage* interstitial_page =
+      guest_web_contents->GetInterstitialPage();
+
+  std::vector<content::RenderWidgetHostView*> hosts =
+      content::GetInputEventRouterRenderWidgetHostViews(outer_web_contents);
+  EXPECT_TRUE(std::find(hosts.begin(), hosts.end(),
+                        interstitial_page->GetMainFrame()->GetView()) !=
+              hosts.end());
+}
+
+// Test makes sure that interstitial pages will receive input events and can be
+// focused.
+IN_PROC_BROWSER_TEST_P(WebViewTest, InterstitialPageFocusedWidget) {
+  // This test tests that a inner WebContents' InterstitialPage is properly
+  // connected to an outer WebContents through a CrossProcessFrameConnector, it
+  // doesn't make sense for BrowserPlugin based guests.
+  if (!base::FeatureList::IsEnabled(::features::kGuestViewCrossProcessFrames))
+    return;
+
+  InterstitialTestHelper();
+
+  content::WebContents* outer_web_contents = GetFirstAppWindowWebContents();
+  content::WebContents* guest_web_contents =
+      GetGuestViewManager()->WaitForSingleGuestCreated();
+  content::InterstitialPage* interstitial_page =
+      guest_web_contents->GetInterstitialPage();
+  content::RenderFrameHost* interstitial_main_frame =
+      interstitial_page->GetMainFrame();
+  content::RenderWidgetHost* interstitial_widget =
+      interstitial_main_frame->GetRenderViewHost()->GetWidget();
+
+  content::WaitForChildFrameSurfaceReady(interstitial_main_frame);
+
+  EXPECT_NE(interstitial_widget,
+            content::GetFocusedRenderWidgetHost(guest_web_contents));
+  EXPECT_NE(interstitial_widget,
+            content::GetFocusedRenderWidgetHost(outer_web_contents));
+
+  // Send mouse down.
+  blink::WebMouseEvent event;
+  event.button = blink::WebPointerProperties::Button::kLeft;
+  event.SetType(blink::WebInputEvent::kMouseDown);
+  event.SetPositionInWidget(10, 10);
+  content::RouteMouseEvent(outer_web_contents, &event);
+
+  // Wait a frame.
+  content::MainThreadFrameObserver observer(interstitial_widget);
+  observer.Wait();
+
+  // Send mouse up.
+  event.SetType(blink::WebInputEvent::kMouseUp);
+  event.SetPositionInWidget(10, 10);
+  content::RouteMouseEvent(outer_web_contents, &event);
+
+  // Wait another frame.
+  observer.Wait();
+
+  EXPECT_EQ(interstitial_widget,
+            content::GetFocusedRenderWidgetHost(guest_web_contents));
+  EXPECT_EQ(interstitial_widget,
+            content::GetFocusedRenderWidgetHost(outer_web_contents));
+}
+
 // This test makes sure the browser process does not crash if app is closed
 // while an interstitial page is being shown in guest.
 IN_PROC_BROWSER_TEST_P(WebViewTest, InterstitialTeardown) {
-  InterstitialTeardownTestHelper();
+  InterstitialTestHelper();
 
   // Now close the app while interstitial page being shown in guest.
   extensions::AppWindow* window = GetFirstAppWindow();
@@ -1714,7 +1809,7 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, InterstitialTeardown) {
 // Flaky. http://crbug.com/627962.
 IN_PROC_BROWSER_TEST_P(WebViewTest,
                        DISABLED_InterstitialTeardownOnBrowserShutdown) {
-  InterstitialTeardownTestHelper();
+  InterstitialTestHelper();
 
   // Now close the app while interstitial page being shown in guest.
   extensions::AppWindow* window = GetFirstAppWindow();
@@ -2120,8 +2215,8 @@ static bool ContextMenuNotificationCallback(
     const content::NotificationDetails& details) {
   auto* context_menu = content::Source<RenderViewContextMenu>(source).ptr();
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&RenderViewContextMenuBase::Cancel,
-                            base::Unretained(context_menu)));
+      FROM_HERE, base::BindOnce(&RenderViewContextMenuBase::Cancel,
+                                base::Unretained(context_menu)));
   return true;
 }
 
@@ -2234,6 +2329,13 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, MAYBE_TearDownTest) {
 
   // Load the app again.
   LoadAndLaunchPlatformApp("web_view/simple", "WebViewTest.LAUNCHED");
+}
+
+// Tests that an app can inject a content script into a webview, and that it can
+// send cross-origin requests with CORS headers.
+IN_PROC_BROWSER_TEST_P(WebViewTest, ContentScriptFetch) {
+  TestHelper("testContentScriptFetch", "web_view/content_script_fetch",
+             NEEDS_TEST_SERVER);
 }
 
 // In following GeolocationAPIEmbedderHasNoAccess* tests, embedder (i.e. the
@@ -2405,9 +2507,23 @@ IN_PROC_BROWSER_TEST_P(
 
 IN_PROC_BROWSER_TEST_P(WebViewTest, ClearData) {
   ASSERT_TRUE(StartEmbeddedTestServer());  // For serving guest pages.
-  ASSERT_TRUE(RunPlatformAppTestWithArg(
-      "platform_apps/web_view/common", "cleardata"))
-          << message_;
+  ASSERT_TRUE(
+      RunPlatformAppTestWithArg("platform_apps/web_view/common", "cleardata"))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_P(WebViewTest, ClearSessionCookies) {
+  ASSERT_TRUE(StartEmbeddedTestServer());  // For serving guest pages.
+  ASSERT_TRUE(RunPlatformAppTestWithArg("platform_apps/web_view/common",
+                                        "cleardata_session"))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_P(WebViewTest, ClearPersistentCookies) {
+  ASSERT_TRUE(StartEmbeddedTestServer());  // For serving guest pages.
+  ASSERT_TRUE(RunPlatformAppTestWithArg("platform_apps/web_view/common",
+                                        "cleardata_persistent"))
+      << message_;
 }
 
 // Regression test for https://crbug.com/615429.
@@ -2442,6 +2558,7 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, DownloadPermission) {
                 "web_view/download");
   ASSERT_TRUE(guest_web_contents);
 
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::ScopedTempDir temporary_download_dir;
   ASSERT_TRUE(temporary_download_dir.CreateUniqueTempDir());
   DownloadPrefs::FromBrowserContext(guest_web_contents->GetBrowserContext())
@@ -2525,8 +2642,8 @@ std::unique_ptr<net::test_server::HttpResponse> HandleDownloadRequestWithCookie(
 class DownloadHistoryWaiter : public DownloadHistory::Observer {
  public:
   explicit DownloadHistoryWaiter(content::BrowserContext* browser_context) {
-    DownloadService* service =
-        DownloadServiceFactory::GetForBrowserContext(browser_context);
+    DownloadCoreService* service =
+        DownloadCoreServiceFactory::GetForBrowserContext(browser_context);
     download_history_ = service->GetDownloadHistory();
     download_history_->AddObserver(this);
   }
@@ -2599,6 +2716,7 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, DownloadCookieIsolation) {
   content::WebContents* web_contents = GetFirstAppWindowWebContents();
   ASSERT_TRUE(web_contents);
 
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::ScopedTempDir temporary_download_dir;
   ASSERT_TRUE(temporary_download_dir.CreateUniqueTempDir());
   DownloadPrefs::FromBrowserContext(web_contents->GetBrowserContext())
@@ -2684,6 +2802,7 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, PRE_DownloadCookieIsolation_CrossSession) {
   content::WebContents* web_contents = GetFirstAppWindowWebContents();
   ASSERT_TRUE(web_contents);
 
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::ScopedTempDir temporary_download_dir;
   ASSERT_TRUE(temporary_download_dir.CreateUniqueTempDir());
   DownloadPrefs::FromBrowserContext(web_contents->GetBrowserContext())
@@ -2742,6 +2861,7 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, DownloadCookieIsolation_CrossSession) {
   DownloadHistoryWaiter history_waiter(browser_context);
   history_waiter.WaitForHistoryLoad();
 
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::ScopedTempDir temporary_download_dir;
   ASSERT_TRUE(temporary_download_dir.Set(
       DownloadPrefs::FromBrowserContext(browser_context)->DownloadPath()));
@@ -2774,7 +2894,8 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, DownloadCookieIsolation_CrossSession) {
         download->GetLastModifiedTime(), download->GetReceivedBytes(),
         download->GetTotalBytes(), download->GetHash(), download->GetState(),
         download->GetDangerType(), download->GetLastReason(),
-        download->GetOpened()));
+        download->GetOpened(), download->GetLastAccessTime(),
+        download->IsTransient(), download->GetReceivedSlices()));
   }
 
   std::unique_ptr<content::DownloadTestObserver> completion_observer(
@@ -3017,8 +3138,18 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, Shim_TestFindAPI) {
   TestHelper("testFindAPI", "web_view/shim", NO_TEST_SERVER);
 }
 
-IN_PROC_BROWSER_TEST_P(WebViewTest, Shim_TestFindAPI_findupdate) {
+// crbug.com/710486
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_Shim_TestFindAPI_findupdate DISABLED_Shim_TestFindAPI_findupdate
+#else
+#define MAYBE_Shim_TestFindAPI_findupdate Shim_TestFindAPI_findupdate
+#endif
+IN_PROC_BROWSER_TEST_P(WebViewTest, MAYBE_Shim_TestFindAPI_findupdate) {
   TestHelper("testFindAPI_findupdate", "web_view/shim", NO_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_P(WebViewTest, Shim_testFindInMultipleWebViews) {
+  TestHelper("testFindInMultipleWebViews", "web_view/shim", NO_TEST_SERVER);
 }
 
 IN_PROC_BROWSER_TEST_P(WebViewTest, Shim_TestLoadDataAPI) {
@@ -3190,10 +3321,6 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, Shim_TestFocusWhileFocused) {
 }
 
 IN_PROC_BROWSER_TEST_P(WebViewTest, NestedGuestContainerBounds) {
-  // TODO(lfg): https://crbug.com/581898
-  if (base::FeatureList::IsEnabled(::features::kGuestViewCrossProcessFrames))
-    return;
-
   TestHelper("testPDFInWebview", "web_view/shim", NO_TEST_SERVER);
 
   std::vector<content::WebContents*> guest_web_contents_list;
@@ -3214,6 +3341,40 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, NestedGuestContainerBounds) {
       mime_handler_view_contents->GetContainerBounds();
   EXPECT_EQ(web_view_container_bounds.origin(),
             mime_handler_view_container_bounds.origin());
+}
+
+// Test that context menu Back/Forward items in a MimeHandlerViewGuest affect
+// the embedder WebContents. See crbug.com/587355.
+IN_PROC_BROWSER_TEST_P(WebViewTest, ContextMenuNavigationInMimeHandlerView) {
+  TestHelper("testNavigateToPDFInWebview", "web_view/shim", NO_TEST_SERVER);
+
+  std::vector<content::WebContents*> guest_web_contents_list;
+  GetGuestViewManager()->WaitForNumGuestsCreated(2u);
+  GetGuestViewManager()->GetGuestWebContentsList(&guest_web_contents_list);
+  ASSERT_EQ(2u, guest_web_contents_list.size());
+
+  content::WebContents* web_view_contents = guest_web_contents_list[0];
+  content::WebContents* mime_handler_view_contents = guest_web_contents_list[1];
+  ASSERT_TRUE(pdf_extension_test_util::EnsurePDFHasLoaded(web_view_contents));
+
+  // Ensure the <webview> has a previous entry, so we can navigate back to it.
+  ASSERT_TRUE(web_view_contents->GetController().CanGoBack());
+
+  // Open a context menu for the MimeHandlerViewGuest. Since the <webview> can
+  // navigate back, the Back item should be enabled.
+  content::ContextMenuParams params;
+  TestRenderViewContextMenu menu(mime_handler_view_contents->GetMainFrame(),
+                                 params);
+  menu.Init();
+  ASSERT_TRUE(menu.IsCommandIdEnabled(IDC_BACK));
+
+  // Verify that the Back item causes the <webview> to navigate back to the
+  // previous entry.
+  content::TestNavigationObserver observer(web_view_contents);
+  menu.ExecuteCommand(IDC_BACK, 0);
+  observer.Wait();
+  EXPECT_EQ(GURL(url::kAboutBlankURL),
+            web_view_contents->GetLastCommittedURL());
 }
 
 IN_PROC_BROWSER_TEST_P(WebViewTest, Shim_TestMailtoLink) {
@@ -3239,6 +3400,94 @@ IN_PROC_BROWSER_TEST_P(WebViewTest, Shim_TestBlobURL) {
 IN_PROC_BROWSER_TEST_P(WebViewTest, LoadWebviewAccessibleResource) {
   TestHelper("testLoadWebviewAccessibleResource",
              "web_view/load_webview_accessible_resource", NEEDS_TEST_SERVER);
+}
+
+// Tests that a WebView can reload a WebView accessible resource. See
+// https://crbug.com/691941.
+IN_PROC_BROWSER_TEST_P(WebViewTest, ReloadWebviewAccessibleResource) {
+  TestHelper("testReloadWebviewAccessibleResource",
+             "web_view/load_webview_accessible_resource", NEEDS_TEST_SERVER);
+
+  content::WebContents* embedder_contents = GetEmbedderWebContents();
+  content::WebContents* web_view_contents =
+      GetGuestViewManager()->GetLastGuestCreated();
+  ASSERT_TRUE(embedder_contents);
+  ASSERT_TRUE(web_view_contents);
+
+  GURL embedder_url(embedder_contents->GetLastCommittedURL());
+  GURL webview_url(embedder_url.GetOrigin().spec() + "assets/foo.html");
+
+  EXPECT_EQ(webview_url, web_view_contents->GetLastCommittedURL());
+}
+
+// Tests that a WebView can navigate an iframe to a blob URL that it creates
+// while its main frame is at a WebView accessible resource.
+IN_PROC_BROWSER_TEST_P(WebViewTest, BlobInWebviewAccessibleResource) {
+  TestHelper("testBlobInWebviewAccessibleResource",
+             "web_view/load_webview_accessible_resource", NEEDS_TEST_SERVER);
+
+  content::WebContents* embedder_contents = GetEmbedderWebContents();
+  content::WebContents* web_view_contents =
+      GetGuestViewManager()->GetLastGuestCreated();
+  ASSERT_TRUE(embedder_contents);
+  ASSERT_TRUE(web_view_contents);
+
+  GURL embedder_url(embedder_contents->GetLastCommittedURL());
+  GURL webview_url(embedder_url.GetOrigin().spec() + "assets/foo.html");
+
+  EXPECT_EQ(webview_url, web_view_contents->GetLastCommittedURL());
+
+  content::RenderFrameHost* main_frame = web_view_contents->GetMainFrame();
+  content::RenderFrameHost* blob_frame = ChildFrameAt(main_frame, 0);
+  EXPECT_TRUE(blob_frame->GetLastCommittedURL().SchemeIsBlob());
+
+  std::string result;
+  EXPECT_TRUE(ExecuteScriptAndExtractString(
+      blob_frame,
+      "window.domAutomationController.send(document.body.innerText);",
+      &result));
+  EXPECT_EQ("Blob content", result);
+}
+
+// Tests that a WebView cannot load a webview-inaccessible resource. See
+// https://crbug.com/640072.
+IN_PROC_BROWSER_TEST_P(WebViewTest, LoadWebviewInaccessibleResource) {
+  TestHelper("testLoadWebviewInaccessibleResource",
+             "web_view/load_webview_accessible_resource", NEEDS_TEST_SERVER);
+
+  content::WebContents* embedder_contents = GetEmbedderWebContents();
+  content::WebContents* web_view_contents =
+      GetGuestViewManager()->GetLastGuestCreated();
+  ASSERT_TRUE(embedder_contents);
+  ASSERT_TRUE(web_view_contents);
+
+  // Check that the webview stays at the first page that it loaded (foo.html),
+  // and does not commit inaccessible.html.
+  GURL embedder_url(embedder_contents->GetLastCommittedURL());
+  GURL foo_url(embedder_url.GetOrigin().spec() + "assets/foo.html");
+
+  EXPECT_EQ(foo_url, web_view_contents->GetLastCommittedURL());
+}
+
+// Tests that a webview inside an iframe can load and that it is destroyed when
+// the iframe is detached.
+IN_PROC_BROWSER_TEST_P(WebViewTest, LoadWebviewInsideIframe) {
+  TestHelper("testLoadWebviewInsideIframe",
+             "web_view/load_webview_inside_iframe", NEEDS_TEST_SERVER);
+
+  // WebContents is leaked when using BrowserPlugin.
+  if (!base::FeatureList::IsEnabled(::features::kGuestViewCrossProcessFrames))
+    return;
+
+  content::WebContentsDestroyedWatcher watcher(
+      GetGuestViewManager()->GetLastGuestCreated());
+
+  // Remove the iframe.
+  EXPECT_TRUE(content::ExecuteScript(
+      GetEmbedderWebContents(), "document.querySelector('iframe').remove()"));
+
+  // Wait for guest to be destroyed.
+  watcher.Wait();
 }
 
 IN_PROC_BROWSER_TEST_P(WebViewAccessibilityTest, LoadWebViewAccessibility) {
@@ -3338,11 +3587,10 @@ IN_PROC_BROWSER_TEST_P(WebViewAccessibilityTest, DISABLED_TouchAccessibility) {
   // Send an accessibility touch event to the main WebContents, but
   // positioned on top of the button inside the inner WebView.
   blink::WebMouseEvent accessibility_touch_event(
-      blink::WebInputEvent::MouseMove,
-      blink::WebInputEvent::IsTouchAccessibility,
-      blink::WebInputEvent::TimeStampForTesting);
-  accessibility_touch_event.x = 95;
-  accessibility_touch_event.y = 55;
+      blink::WebInputEvent::kMouseMove,
+      blink::WebInputEvent::kIsTouchAccessibility,
+      blink::WebInputEvent::kTimeStampForTesting);
+  accessibility_touch_event.SetPositionInWidget(95, 55);
   web_contents->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
       accessibility_touch_event);
 
@@ -3464,7 +3712,7 @@ IN_PROC_BROWSER_TEST_P(WebViewGuestScrollTest,
     ScrollWaiter waiter(embedder_host_view);
 
     content::SimulateMouseEvent(embedder_contents,
-                                blink::WebInputEvent::MouseMove,
+                                blink::WebInputEvent::kMouseMove,
                                 embedder_scroll_location);
     content::SimulateMouseWheelEvent(embedder_contents,
                                      embedder_scroll_location,
@@ -3489,7 +3737,7 @@ IN_PROC_BROWSER_TEST_P(WebViewGuestScrollTest,
     ScrollWaiter waiter(embedder_host_view);
 
     content::SimulateMouseEvent(embedder_contents,
-                                blink::WebInputEvent::MouseMove,
+                                blink::WebInputEvent::kMouseMove,
                                 guest_scroll_location);
     content::SimulateMouseWheelEvent(embedder_contents, guest_scroll_location,
                                      gfx::Vector2d(0, scroll_magnitude));
@@ -3761,10 +4009,7 @@ class WebViewFocusTest : public WebViewTest {
   }
 
   void ForceCompositorFrame() {
-    if (!frame_watcher_) {
-      frame_watcher_ = new content::FrameWatcher();
-      frame_watcher_->AttachTo(GetEmbedderWebContents());
-    }
+    frame_watcher_.Observe(GetEmbedderWebContents());
 
     while (!RequestFrame(GetEmbedderWebContents())) {
       // RequestFrame failed because we were waiting on an ack ... wait a short
@@ -3775,11 +4020,11 @@ class WebViewFocusTest : public WebViewTest {
           base::TimeDelta::FromMilliseconds(10));
       run_loop.Run();
     }
-    frame_watcher_->WaitFrames(1);
+    frame_watcher_.WaitFrames(1);
   }
 
  private:
-  scoped_refptr<content::FrameWatcher> frame_watcher_;
+  content::FrameWatcher frame_watcher_;
 };
 INSTANTIATE_TEST_CASE_P(WebViewTests, WebViewFocusTest, testing::Values(false));
 

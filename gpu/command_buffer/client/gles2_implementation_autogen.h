@@ -924,11 +924,6 @@ GLuint CreateImageCHROMIUM(ClientBuffer buffer,
 
 void DestroyImageCHROMIUM(GLuint image_id) override;
 
-GLuint CreateGpuMemoryBufferImageCHROMIUM(GLsizei width,
-                                          GLsizei height,
-                                          GLenum internalformat,
-                                          GLenum usage) override;
-
 void DescheduleUntilFinishedCHROMIUM() override;
 
 void GetTranslatedShaderSourceANGLE(GLuint shader,
@@ -941,10 +936,10 @@ void PostSubBufferCHROMIUM(GLint x,
                            GLint width,
                            GLint height) override;
 
-void CopyTextureCHROMIUM(GLenum source_id,
+void CopyTextureCHROMIUM(GLuint source_id,
                          GLint source_level,
                          GLenum dest_target,
-                         GLenum dest_id,
+                         GLuint dest_id,
                          GLint dest_level,
                          GLint internalformat,
                          GLenum dest_type,
@@ -952,10 +947,10 @@ void CopyTextureCHROMIUM(GLenum source_id,
                          GLboolean unpack_premultiply_alpha,
                          GLboolean unpack_unmultiply_alpha) override;
 
-void CopySubTextureCHROMIUM(GLenum source_id,
+void CopySubTextureCHROMIUM(GLuint source_id,
                             GLint source_level,
                             GLenum dest_target,
-                            GLenum dest_id,
+                            GLuint dest_id,
                             GLint dest_level,
                             GLint xoffset,
                             GLint yoffset,
@@ -967,7 +962,7 @@ void CopySubTextureCHROMIUM(GLenum source_id,
                             GLboolean unpack_premultiply_alpha,
                             GLboolean unpack_unmultiply_alpha) override;
 
-void CompressedCopyTextureCHROMIUM(GLenum source_id, GLenum dest_id) override;
+void CompressedCopyTextureCHROMIUM(GLuint source_id, GLuint dest_id) override;
 
 void DrawArraysInstancedANGLE(GLenum mode,
                               GLint first,
@@ -1000,6 +995,10 @@ void BindUniformLocationCHROMIUM(GLuint program,
                                  const char* name) override;
 
 void BindTexImage2DCHROMIUM(GLenum target, GLint imageId) override;
+
+void BindTexImage2DWithInternalformatCHROMIUM(GLenum target,
+                                              GLenum internalformat,
+                                              GLint imageId) override;
 
 void ReleaseTexImage2DCHROMIUM(GLenum target, GLint imageId) override;
 
@@ -1064,6 +1063,20 @@ void SwapInterval(GLint interval) override;
 void FlushDriverCachesCHROMIUM() override;
 
 GLuint GetLastFlushIdCHROMIUM() override;
+
+void ScheduleDCLayerSharedStateCHROMIUM(GLfloat opacity,
+                                        GLboolean is_clipped,
+                                        const GLfloat* clip_rect,
+                                        GLint z_order,
+                                        const GLfloat* transform) override;
+
+void ScheduleDCLayerCHROMIUM(GLsizei num_textures,
+                             const GLuint* contents_texture_ids,
+                             const GLfloat* contents_rect,
+                             GLuint background_color,
+                             GLuint edge_aa_mask,
+                             const GLfloat* bounds_rect,
+                             GLuint filter) override;
 
 void MatrixLoadfCHROMIUM(GLenum matrixMode, const GLfloat* m) override;
 
@@ -1210,9 +1223,13 @@ void OverlayPromotionHintCHROMIUM(GLuint texture,
                                   GLint display_x,
                                   GLint display_y) override;
 
-void SwapBuffersWithDamageCHROMIUM(GLint x,
-                                   GLint y,
-                                   GLint width,
-                                   GLint height) override;
+void SwapBuffersWithBoundsCHROMIUM(GLsizei count, const GLint* rects) override;
+
+void SetDrawRectangleCHROMIUM(GLint x,
+                              GLint y,
+                              GLint width,
+                              GLint height) override;
+
+void SetEnableDCLayersCHROMIUM(GLboolean enabled) override;
 
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_IMPLEMENTATION_AUTOGEN_H_

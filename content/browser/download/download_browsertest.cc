@@ -18,10 +18,16 @@
 #include "base/format_macros.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/message_loop/message_loop.h"
+#include "base/metrics/field_trial.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/mock_entropy_provider.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/threading/platform_thread.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -31,6 +37,7 @@
 #include "content/browser/download/download_item_impl.h"
 #include "content/browser/download/download_manager_impl.h"
 #include "content/browser/download/download_resource_handler.h"
+#include "content/browser/download/parallel_download_utils.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/download_danger_type.h"
@@ -49,7 +56,7 @@
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/shell/browser/shell_download_manager_delegate.h"
 #include "content/shell/browser/shell_network_delegate.h"
-#include "device/power_save_blocker/power_save_blocker.h"
+#include "content/test/content_browser_test_utils_internal.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
@@ -80,6 +87,12 @@ class NetLogWithSource;
 namespace content {
 
 namespace {
+
+// Default request count for parallel download tests.
+constexpr int kTestRequestCount = 3;
+
+const std::string kOriginOne = "one.example";
+const std::string kOriginTwo = "two.example";
 
 class MockDownloadItemObserver : public DownloadItem::Observer {
  public:
@@ -135,7 +148,6 @@ class DownloadFileWithDelay : public DownloadFileImpl {
       const base::FilePath& default_download_directory,
       std::unique_ptr<ByteStreamReader> stream,
       const net::NetLogWithSource& net_log,
-      std::unique_ptr<device::PowerSaveBlocker> power_save_blocker,
       base::WeakPtr<DownloadDestinationObserver> observer,
       base::WeakPtr<DownloadFileWithDelayFactory> owner);
 
@@ -202,7 +214,6 @@ DownloadFileWithDelay::DownloadFileWithDelay(
     const base::FilePath& default_download_directory,
     std::unique_ptr<ByteStreamReader> stream,
     const net::NetLogWithSource& net_log,
-    std::unique_ptr<device::PowerSaveBlocker> power_save_blocker,
     base::WeakPtr<DownloadDestinationObserver> observer,
     base::WeakPtr<DownloadFileWithDelayFactory> owner)
     : DownloadFileImpl(std::move(save_info),
@@ -263,16 +274,10 @@ DownloadFile* DownloadFileWithDelayFactory::CreateFile(
     std::unique_ptr<ByteStreamReader> stream,
     const net::NetLogWithSource& net_log,
     base::WeakPtr<DownloadDestinationObserver> observer) {
-  std::unique_ptr<device::PowerSaveBlocker> psb(new device::PowerSaveBlocker(
-      device::PowerSaveBlocker::kPowerSaveBlockPreventAppSuspension,
-      device::PowerSaveBlocker::kReasonOther, "Download in progress",
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::UI),
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE)));
   return new DownloadFileWithDelay(std::move(save_info),
                                    default_download_directory,
                                    std::move(stream),
                                    net_log,
-                                   std::move(psb),
                                    observer,
                                    weak_ptr_factory_.GetWeakPtr());
 }
@@ -307,7 +312,6 @@ class CountingDownloadFile : public DownloadFileImpl {
       const base::FilePath& default_downloads_directory,
       std::unique_ptr<ByteStreamReader> stream,
       const net::NetLogWithSource& net_log,
-      std::unique_ptr<device::PowerSaveBlocker> power_save_blocker,
       base::WeakPtr<DownloadDestinationObserver> observer)
       : DownloadFileImpl(std::move(save_info),
                          default_downloads_directory,
@@ -320,10 +324,15 @@ class CountingDownloadFile : public DownloadFileImpl {
     active_files_--;
   }
 
-  void Initialize(const InitializeCallback& callback) override {
+  void Initialize(
+      const InitializeCallback& callback,
+      const CancelRequestCallback& cancel_request_callback,
+      const DownloadItem::ReceivedSlices& received_slices,
+      bool is_parallelizable) override {
     DCHECK_CURRENTLY_ON(BrowserThread::FILE);
     active_files_++;
-    return DownloadFileImpl::Initialize(callback);
+    DownloadFileImpl::Initialize(callback, cancel_request_callback,
+                                 received_slices, is_parallelizable);
   }
 
   static void GetNumberActiveFiles(int* result) {
@@ -362,16 +371,10 @@ class CountingDownloadFileFactory : public DownloadFileFactory {
       std::unique_ptr<ByteStreamReader> stream,
       const net::NetLogWithSource& net_log,
       base::WeakPtr<DownloadDestinationObserver> observer) override {
-    std::unique_ptr<device::PowerSaveBlocker> psb(new device::PowerSaveBlocker(
-        device::PowerSaveBlocker::kPowerSaveBlockPreventAppSuspension,
-        device::PowerSaveBlocker::kReasonOther, "Download in progress",
-        BrowserThread::GetTaskRunnerForThread(BrowserThread::UI),
-        BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE)));
     return new CountingDownloadFile(std::move(save_info),
                                     default_downloads_directory,
                                     std::move(stream),
                                     net_log,
-                                    std::move(psb),
                                     observer);
   }
 };
@@ -581,10 +584,15 @@ class DownloadContentTest : public ContentBrowserTest {
         base::Bind(
             &net::URLRequestMockHTTPJob::AddUrlHandlers, mock_base,
             make_scoped_refptr(content::BrowserThread::GetBlockingPool())));
+    ASSERT_TRUE(embedded_test_server()->Start());
+    const std::string real_host =
+        embedded_test_server()->host_port_pair().host();
+    host_resolver()->AddRule(kOriginOne, real_host);
+    host_resolver()->AddRule(kOriginTwo, real_host);
   }
 
-  void SetUpCommandLine(base::CommandLine* commnad_line) override {
-    IsolateAllSitesForTesting(commnad_line);
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    IsolateAllSitesForTesting(command_line);
   }
 
   TestShellDownloadManagerDelegate* GetDownloadManagerDelegate() {
@@ -739,6 +747,45 @@ class DownloadContentTest : public ContentBrowserTest {
   // Location of the downloads directory for these tests
   base::ScopedTempDir downloads_directory_;
   std::unique_ptr<TestShellDownloadManagerDelegate> test_delegate_;
+};
+
+// Test fixture for parallel downloading.
+class ParallelDownloadTest : public DownloadContentTest {
+ protected:
+  void SetUp() override {
+    field_trial_list_ = base::MakeUnique<base::FieldTrialList>(
+        base::MakeUnique<base::MockEntropyProvider>());
+    SetupConfig();
+    DownloadContentTest::SetUp();
+  }
+
+ private:
+  // TODO(xingliu): Use this technique in parallel download unit tests to load
+  // the finch configuration.
+  void SetupConfig() {
+    const std::string kTrialName = "trial_name";
+    const std::string kGroupName = "group_name";
+
+    std::map<std::string, std::string> params;
+    params[content::kMinSliceSizeFinchKey] = "1";
+    params[content::kParallelRequestCountFinchKey] =
+        base::IntToString(kTestRequestCount);
+    params[content::kParallelRequestDelayFinchKey] = "0";
+    params[content::kParallelRequestRemainingTimeFinchKey] = "0";
+
+    scoped_refptr<base::FieldTrial> trial =
+        base::FieldTrialList::CreateFieldTrial(kTrialName, kGroupName);
+    base::AssociateFieldTrialParams(kTrialName, kGroupName, params);
+    std::unique_ptr<base::FeatureList> feature_list =
+        base::MakeUnique<base::FeatureList>();
+    feature_list->RegisterFieldTrialOverride(
+        features::kParallelDownloading.name,
+        base::FeatureList::OVERRIDE_ENABLE_FEATURE, trial.get());
+    scoped_feature_list_.InitWithFeatureList(std::move(feature_list));
+  }
+
+  std::unique_ptr<base::FieldTrialList> field_trial_list_;
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 }  // namespace
@@ -1846,7 +1893,8 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, ResumeRestoredDownload_NoFile) {
       base::Time(), parameters.etag, std::string(), kIntermediateSize,
       parameters.size, std::string(), DownloadItem::INTERRUPTED,
       DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
-      DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED, false);
+      DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED, false, base::Time(), false,
+      std::vector<DownloadItem::ReceivedSlice>());
 
   download->Resume();
   WaitForCompletion(download);
@@ -1908,7 +1956,8 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, ResumeRestoredDownload_NoHash) {
       base::Time(), parameters.etag, std::string(), kIntermediateSize,
       parameters.size, std::string(), DownloadItem::INTERRUPTED,
       DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
-      DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED, false);
+      DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED, false, base::Time(), false,
+      std::vector<DownloadItem::ReceivedSlice>());
 
   download->Resume();
   WaitForCompletion(download);
@@ -1957,7 +2006,8 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest,
       base::Time(), "fake-etag", std::string(), kIntermediateSize,
       parameters.size, std::string(), DownloadItem::INTERRUPTED,
       DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
-      DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED, false);
+      DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED, false, base::Time(), false,
+      std::vector<DownloadItem::ReceivedSlice>());
 
   download->Resume();
   WaitForCompletion(download);
@@ -2012,7 +2062,8 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest,
       parameters.size,
       std::string(std::begin(kPartialHash), std::end(kPartialHash)),
       DownloadItem::INTERRUPTED, DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
-      DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED, false);
+      DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED, false, base::Time(), false,
+      std::vector<DownloadItem::ReceivedSlice>());
 
   download->Resume();
   WaitForCompletion(download);
@@ -2073,7 +2124,8 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, ResumeRestoredDownload_WrongHash) {
       parameters.size,
       std::string(std::begin(kPartialHash), std::end(kPartialHash)),
       DownloadItem::INTERRUPTED, DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
-      DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED, false);
+      DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED, false, base::Time(), false,
+      std::vector<DownloadItem::ReceivedSlice>());
 
   download->Resume();
   WaitForCompletion(download);
@@ -2143,7 +2195,8 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, ResumeRestoredDownload_ShortFile) {
       base::Time(), parameters.etag, std::string(), kIntermediateSize,
       parameters.size, std::string(), DownloadItem::INTERRUPTED,
       DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
-      DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED, false);
+      DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED, false, base::Time(), false,
+      std::vector<DownloadItem::ReceivedSlice>());
 
   download->Resume();
   WaitForCompletion(download);
@@ -2211,7 +2264,8 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, ResumeRestoredDownload_LongFile) {
       base::Time(), parameters.etag, std::string(), kIntermediateSize,
       parameters.size, std::string(), DownloadItem::INTERRUPTED,
       DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
-      DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED, false);
+      DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED, false, base::Time(), false,
+      std::vector<DownloadItem::ReceivedSlice>());
 
   download->Resume();
   WaitForCompletion(download);
@@ -2242,7 +2296,6 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, ReferrerForPartialResumption) {
       TestDownloadRequestHandler::Parameters::WithSingleInterruption();
   request_handler.StartServing(parameters);
 
-  ASSERT_TRUE(embedded_test_server()->Start());
   GURL document_url = embedded_test_server()->GetURL(
       std::string("/download/download-link.html?dl=")
           .append(request_handler.url().spec()));
@@ -2412,8 +2465,6 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest,
 // A request for a non-existent resource should still result in a DownloadItem
 // that's created in an interrupted state.
 IN_PROC_BROWSER_TEST_F(DownloadContentTest, DownloadAttributeServerError) {
-  ASSERT_TRUE(embedded_test_server()->Start());
-
   GURL download_url =
       embedded_test_server()->GetURL("/download/does-not-exist");
   GURL document_url = embedded_test_server()->GetURL(
@@ -2440,7 +2491,6 @@ void ErrorReturningRequestHandler(
 // A request that fails before it gets a response from the server should also
 // result in a DownloadItem that's created in an interrupted state.
 IN_PROC_BROWSER_TEST_F(DownloadContentTest, DownloadAttributeNetworkError) {
-  ASSERT_TRUE(embedded_test_server()->Start());
   TestDownloadRequestHandler request_handler;
   TestDownloadRequestHandler::Parameters parameters;
 
@@ -2460,8 +2510,6 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, DownloadAttributeNetworkError) {
 // A request that fails due to it being rejected by policy should result in a
 // DownloadItem that's marked as interrupted.
 IN_PROC_BROWSER_TEST_F(DownloadContentTest, DownloadAttributeInvalidURL) {
-  ASSERT_TRUE(embedded_test_server()->Start());
-
   GURL document_url = embedded_test_server()->GetURL(
       "/download/download-attribute.html?target=about:version");
   DownloadItem* download = StartDownloadAndReturnItem(shell(), document_url);
@@ -2473,8 +2521,6 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, DownloadAttributeInvalidURL) {
 }
 
 IN_PROC_BROWSER_TEST_F(DownloadContentTest, DownloadAttributeBlobURL) {
-  ASSERT_TRUE(embedded_test_server()->Start());
-
   GURL document_url =
       embedded_test_server()->GetURL("/download/download-attribute-blob.html");
   DownloadItem* download = StartDownloadAndReturnItem(shell(), document_url);
@@ -2486,15 +2532,6 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, DownloadAttributeBlobURL) {
 
 IN_PROC_BROWSER_TEST_F(DownloadContentTest, DownloadAttributeSameSiteCookie) {
   base::ThreadRestrictions::ScopedAllowIO allow_io_during_test;
-
-  const std::string kOriginOne = "one.example";
-  const std::string kOriginTwo = "two.example";
-
-  ASSERT_TRUE(embedded_test_server()->Start());
-
-  const std::string real_host = embedded_test_server()->host_port_pair().host();
-  host_resolver()->AddRule(kOriginOne, real_host);
-  host_resolver()->AddRule(kOriginTwo, real_host);
 
   GURL echo_cookie_url =
       embedded_test_server()->GetURL(kOriginOne, "/echoheader?cookie");
@@ -2584,8 +2621,6 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, SniffedMimeType) {
 }
 
 IN_PROC_BROWSER_TEST_F(DownloadContentTest, DuplicateContentDisposition) {
-  ASSERT_TRUE(embedded_test_server()->Start());
-
   // double-content-disposition.txt is served with two Content-Disposition
   // headers, both of which are identical.
   NavigateToURLAndWaitForDownload(
@@ -2603,8 +2638,6 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, DuplicateContentDisposition) {
 }
 
 IN_PROC_BROWSER_TEST_F(DownloadContentTest, DownloadAttributeSameOriginIFrame) {
-  ASSERT_TRUE(embedded_test_server()->Start());
-
   GURL frame_url = embedded_test_server()->GetURL(
       "/download/download-attribute.html?target=/download/download-test.lib");
   GURL document_url = embedded_test_server()->GetURL(
@@ -2640,6 +2673,60 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest,
 
   EXPECT_STREQ(FILE_PATH_LITERAL("download-test.lib"),
                download->GetTargetFilePath().BaseName().value().c_str());
+}
+
+IN_PROC_BROWSER_TEST_F(ParallelDownloadTest, ParallelDownloadComplete) {
+  EXPECT_TRUE(base::FeatureList::IsEnabled(features::kParallelDownloading));
+
+  TestDownloadRequestHandler request_handler;
+  TestDownloadRequestHandler::Parameters parameters;
+  parameters.etag = "ABC";
+  parameters.size = 5097152;
+  // Only parallel download needs to specify the connection type to http 1.1,
+  // other tests will automatically fall back to non-parallel download even if
+  // the ParallelDownloading feature is enabled based on
+  // fieldtrial_testing_config.json.
+  parameters.connection_type = net::HttpResponseInfo::CONNECTION_INFO_HTTP1_1;
+  request_handler.StartServing(parameters);
+
+  DownloadItem* download =
+      StartDownloadAndReturnItem(shell(), request_handler.url());
+  WaitForCompletion(download);
+
+  TestDownloadRequestHandler::CompletedRequests completed_requests;
+  request_handler.GetCompletedRequestInfo(&completed_requests);
+  EXPECT_EQ(kTestRequestCount, static_cast<int>(completed_requests.size()));
+
+  ReadAndVerifyFileContents(parameters.pattern_generator_seed, parameters.size,
+                            download->GetTargetFilePath());
+}
+
+// Test to verify that the browser-side enforcement of X-Frame-Options does
+// not impact downloads. Since XFO is only checked for subframes, this test
+// initiates a download in an iframe and expects it to succeed.
+// See https://crbug.com/717971.
+IN_PROC_BROWSER_TEST_F(DownloadContentTest, DownloadIgnoresXFO) {
+  GURL main_url(
+      embedded_test_server()->GetURL("/cross_site_iframe_factory.html?a(b)"));
+  GURL download_url(
+      embedded_test_server()->GetURL("/download/download-with-xfo-deny.html"));
+  WebContentsImpl* web_contents =
+      static_cast<WebContentsImpl*>(shell()->web_contents());
+
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  std::unique_ptr<DownloadTestObserver> observer(CreateWaiter(shell(), 1));
+  NavigateFrameToURL(web_contents->GetFrameTree()->root()->child_at(0),
+                     download_url);
+  observer->WaitForFinished();
+  EXPECT_EQ(1u, observer->NumDownloadsSeenInState(DownloadItem::COMPLETE));
+
+  std::vector<DownloadItem*> downloads;
+  DownloadManagerForShell(shell())->GetAllDownloads(&downloads);
+  ASSERT_EQ(1u, downloads.size());
+
+  EXPECT_EQ(FILE_PATH_LITERAL("foo"),
+            downloads[0]->GetTargetFilePath().BaseName().value());
 }
 
 }  // namespace content

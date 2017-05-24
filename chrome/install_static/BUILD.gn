@@ -11,6 +11,7 @@ assert(is_win)
 # Please don't add dependencies on other system libraries.
 static_library("install_static_util") {
   deps = [
+    "//components/version_info:channel",
     "//components/version_info:generate_version_info",
   ]
 
@@ -19,6 +20,8 @@ static_library("install_static_util") {
   ]
 
   sources = [
+    "../app/chrome_dll_resource.h",
+    "../chrome/common/chrome_icon_resources_win.h",
     "install_constants.h",
     "install_details.cc",
     "install_details.h",
@@ -91,6 +94,7 @@ test("install_static_unittests") {
     "//base/test:run_all_unittests",
     "//base/test:test_support",
     "//chrome/install_static:install_static_util",
+    "//chrome/install_static/test:test_support",
     "//testing/gmock",
     "//testing/gtest",
   ]

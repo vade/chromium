@@ -13,31 +13,30 @@ class CSSOffsetRotateInterpolationType : public CSSInterpolationType {
  public:
   CSSOffsetRotateInterpolationType(PropertyHandle property)
       : CSSInterpolationType(property) {
-    DCHECK(cssProperty() == CSSPropertyOffsetRotate ||
-           cssProperty() == CSSPropertyOffsetRotation);
+    DCHECK(CssProperty() == CSSPropertyOffsetRotate);
   }
 
-  InterpolationValue maybeConvertStandardPropertyUnderlyingValue(
-      const StyleResolverState&) const final;
-  void composite(UnderlyingValueOwner&,
-                 double underlyingFraction,
+  InterpolationValue MaybeConvertStandardPropertyUnderlyingValue(
+      const ComputedStyle&) const final;
+  void Composite(UnderlyingValueOwner&,
+                 double underlying_fraction,
                  const InterpolationValue&,
-                 double interpolationFraction) const final;
-  void applyStandardPropertyValue(const InterpolableValue&,
+                 double interpolation_fraction) const final;
+  void ApplyStandardPropertyValue(const InterpolableValue&,
                                   const NonInterpolableValue*,
                                   StyleResolverState&) const final;
 
  private:
-  InterpolationValue maybeConvertNeutral(const InterpolationValue& underlying,
+  InterpolationValue MaybeConvertNeutral(const InterpolationValue& underlying,
                                          ConversionCheckers&) const final;
-  InterpolationValue maybeConvertInitial(const StyleResolverState&,
+  InterpolationValue MaybeConvertInitial(const StyleResolverState&,
                                          ConversionCheckers&) const final;
-  InterpolationValue maybeConvertInherit(const StyleResolverState&,
+  InterpolationValue MaybeConvertInherit(const StyleResolverState&,
                                          ConversionCheckers&) const final;
-  InterpolationValue maybeConvertValue(const CSSValue&,
-                                       const StyleResolverState&,
+  InterpolationValue MaybeConvertValue(const CSSValue&,
+                                       const StyleResolverState*,
                                        ConversionCheckers&) const final;
-  PairwiseInterpolationValue maybeMergeSingles(
+  PairwiseInterpolationValue MaybeMergeSingles(
       InterpolationValue&& start,
       InterpolationValue&& end) const final;
 };

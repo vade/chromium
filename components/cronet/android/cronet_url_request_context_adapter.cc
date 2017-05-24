@@ -10,6 +10,7 @@
 
 #include <limits>
 #include <map>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -36,6 +37,7 @@
 #include "base/values.h"
 #include "components/cronet/android/cert/cert_verifier_cache_serializer.h"
 #include "components/cronet/android/cert/proto/cert_verification.pb.h"
+#include "components/cronet/android/cronet_library_loader.h"
 #include "components/cronet/histogram_manager.h"
 #include "components/cronet/url_request_context_config.h"
 #include "components/prefs/pref_change_registrar.h"
@@ -56,7 +58,7 @@
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_server_properties_manager.h"
 #include "net/log/file_net_log_observer.h"
-#include "net/log/write_to_file_net_log_observer.h"
+#include "net/log/net_log_util.h"
 #include "net/nqe/external_estimate_provider.h"
 #include "net/nqe/network_qualities_prefs_manager.h"
 #include "net/proxy/proxy_config_service_android.h"
@@ -66,10 +68,6 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_interceptor.h"
-
-#if defined(DATA_REDUCTION_PROXY_SUPPORT)
-#include "components/cronet/android/cronet_data_reduction_proxy.h"
-#endif
 
 using base::android::JavaParamRef;
 using base::android::ScopedJavaLocalRef;
@@ -87,16 +85,16 @@ class NetLogWithNetworkChangeEvents {
   net::NetLog* net_log() { return &net_log_; }
   // This function registers with the NetworkChangeNotifier and so must be
   // called *after* the NetworkChangeNotifier is created. Should only be
-  // called on the UI thread as it is not thread-safe and the UI thread is
+  // called on the init thread as it is not thread-safe and the init thread is
   // the thread the NetworkChangeNotifier is created on. This function is
   // not thread-safe because accesses to |net_change_logger_| are not atomic.
   // There might be multiple CronetEngines each with a network thread so
-  // so the UI thread is used. |g_net_log_| also outlives the network threads
+  // so the init thread is used. |g_net_log_| also outlives the network threads
   // so it would be unsafe to receive callbacks on the network threads without
   // a complicated thread-safe reference-counting system to control callback
   // registration.
-  void EnsureInitializedOnMainThread() {
-    DCHECK(base::MessageLoopForUI::IsCurrent());
+  void EnsureInitializedOnInitThread() {
+    DCHECK(cronet::OnInitThread());
     if (net_change_logger_)
       return;
     net_change_logger_.reset(new net::LoggingNetworkChangeObserver(&net_log_));
@@ -204,15 +202,15 @@ class NetworkQualitiesPrefDelegateImpl
   }
   std::unique_ptr<base::DictionaryValue> GetDictionaryValue() override {
     DCHECK(thread_checker_.CalledOnValidThread());
-    // TODO(tbansal): Add logic to read prefs if the embedder has enabled cached
-    // estimates.
-    return base::WrapUnique(new base::DictionaryValue());
+    UMA_HISTOGRAM_EXACT_LINEAR("NQE.Prefs.ReadCount", 1, 2);
+    return pref_service_->GetDictionary(kNetworkQualities)->CreateDeepCopy();
   }
 
  private:
   // Schedules the writing of the lossy prefs.
   void SchedulePendingLossyWrites() {
     DCHECK(thread_checker_.CalledOnValidThread());
+    UMA_HISTOGRAM_EXACT_LINEAR("NQE.Prefs.WriteCount", 1, 2);
     pref_service_->SchedulePendingLossyWrites();
     lossy_prefs_writing_task_posted_ = false;
   }
@@ -504,10 +502,10 @@ CronetURLRequestContextAdapter::~CronetURLRequestContextAdapter() {
   }
 
   // Stop NetLog observer if there is one.
-  StopNetLogHelper();
+  StopNetLogOnNetworkThread();
 }
 
-void CronetURLRequestContextAdapter::InitRequestContextOnMainThread(
+void CronetURLRequestContextAdapter::InitRequestContextOnInitThread(
     JNIEnv* env,
     const JavaParamRef<jobject>& jcaller) {
   base::android::ScopedJavaGlobalRef<jobject> jcaller_ref;
@@ -521,7 +519,7 @@ void CronetURLRequestContextAdapter::InitRequestContextOnMainThread(
   // TODO(csharrison) Architect the wrapper better so we don't need to cast for
   // android ProxyConfigServices.
   android_proxy_config_service->set_exclude_pac_url(true);
-  g_net_log.Get().EnsureInitializedOnMainThread();
+  g_net_log.Get().EnsureInitializedOnInitThread();
   GetNetworkTaskRunner()->PostTask(
       FROM_HERE,
       base::Bind(&CronetURLRequestContextAdapter::InitializeOnNetworkThread,
@@ -608,30 +606,12 @@ void CronetURLRequestContextAdapter::InitializeOnNetworkThread(
   DCHECK(GetNetworkTaskRunner()->BelongsToCurrentThread());
   DCHECK(!is_context_initialized_);
   DCHECK(proxy_config_service_);
+
   // TODO(mmenke):  Add method to have the builder enable SPDY.
   net::URLRequestContextBuilder context_builder;
 
   std::unique_ptr<net::NetworkDelegate> network_delegate(
       new BasicNetworkDelegate());
-#if defined(DATA_REDUCTION_PROXY_SUPPORT)
-  DCHECK(!data_reduction_proxy_);
-  // For now, the choice to enable the data reduction proxy happens once,
-  // at initialization. It cannot be disabled thereafter.
-  if (!config->data_reduction_proxy_key.empty()) {
-    data_reduction_proxy_.reset(new CronetDataReductionProxy(
-        config->data_reduction_proxy_key, config->data_reduction_primary_proxy,
-        config->data_reduction_fallback_proxy,
-        config->data_reduction_secure_proxy_check_url, config->user_agent,
-        GetNetworkTaskRunner(), g_net_log.Get().net_log()));
-    network_delegate = data_reduction_proxy_->CreateNetworkDelegate(
-        std::move(network_delegate));
-    context_builder.set_proxy_delegate(
-        data_reduction_proxy_->CreateProxyDelegate());
-    std::vector<std::unique_ptr<net::URLRequestInterceptor>> interceptors;
-    interceptors.push_back(data_reduction_proxy_->CreateInterceptor());
-    context_builder.SetInterceptors(std::move(interceptors));
-  }
-#endif  // defined(DATA_REDUCTION_PROXY_SUPPORT)
   context_builder.set_network_delegate(std::move(network_delegate));
   context_builder.set_net_log(g_net_log.Get().net_log());
 
@@ -645,6 +625,9 @@ void CronetURLRequestContextAdapter::InitializeOnNetworkThread(
   config->ConfigureURLRequestContextBuilder(&context_builder,
                                             g_net_log.Get().net_log(),
                                             GetFileThread()->task_runner());
+
+  effective_experimental_options_ =
+      std::move(config->effective_experimental_options);
 
   // Set up pref file if storage path is specified.
   if (!config->storage_path.empty()) {
@@ -664,7 +647,7 @@ void CronetURLRequestContextAdapter::InitializeOnNetworkThread(
     factory.set_user_prefs(json_pref_store_);
     scoped_refptr<PrefRegistrySimple> registry(new PrefRegistrySimple());
     registry->RegisterDictionaryPref(kHttpServerProperties,
-                                     new base::DictionaryValue());
+                                     base::MakeUnique<base::DictionaryValue>());
     if (config->enable_network_quality_estimator) {
       // Use lossy prefs to limit the overhead of reading/writing the prefs.
       registry->RegisterDictionaryPref(kNetworkQualities,
@@ -726,6 +709,7 @@ void CronetURLRequestContextAdapter::InitializeOnNetworkThread(
   context_ = context_builder.Build();
 
   context_->set_check_cleartext_permitted(true);
+  context_->set_enable_brotli(config->enable_brotli);
 
   if (network_quality_estimator_)
     context_->set_network_quality_estimator(network_quality_estimator_.get());
@@ -797,7 +781,7 @@ void CronetURLRequestContextAdapter::InitializeOnNetworkThread(
   }
 
   // Iterate through PKP configuration for every host.
-  for (const auto& pkp : config->pkp_list) {
+  for (auto* const pkp : config->pkp_list) {
     // Add the host pinning.
     context_->transport_security_state()->AddHPKP(
         pkp->host, pkp->expiration_date, pkp->include_subdomains,
@@ -813,10 +797,6 @@ void CronetURLRequestContextAdapter::InitializeOnNetworkThread(
   Java_CronetUrlRequestContext_initNetworkThread(env,
                                                  jcronet_url_request_context);
 
-#if defined(DATA_REDUCTION_PROXY_SUPPORT)
-  if (data_reduction_proxy_)
-    data_reduction_proxy_->Init(true, GetURLRequestContext());
-#endif
   is_context_initialized_ = true;
   while (!tasks_waiting_for_context_.empty()) {
     tasks_waiting_for_context_.front().Run();
@@ -877,28 +857,17 @@ bool CronetURLRequestContextAdapter::StartNetLogToFile(
     const JavaParamRef<jobject>& jcaller,
     const JavaParamRef<jstring>& jfile_name,
     jboolean jlog_all) {
-  base::AutoLock lock(write_to_file_observer_lock_);
-  // Do nothing if already logging to a file.
-  if (write_to_file_observer_)
-    return true;
-  std::string file_name =
-      base::android::ConvertJavaStringToUTF8(env, jfile_name);
-  base::FilePath file_path(file_name);
+  base::FilePath file_path(
+      base::android::ConvertJavaStringToUTF8(env, jfile_name));
   base::ScopedFILE file(base::OpenFile(file_path, "w"));
   if (!file) {
     LOG(ERROR) << "Failed to open NetLog file for writing.";
     return false;
   }
-
-  write_to_file_observer_.reset(new net::WriteToFileNetLogObserver());
-  if (jlog_all == JNI_TRUE) {
-    write_to_file_observer_->set_capture_mode(
-        net::NetLogCaptureMode::IncludeSocketBytes());
-  }
-  write_to_file_observer_->StartObserving(
-      g_net_log.Get().net_log(), std::move(file),
-      /*constants=*/nullptr, /*url_request_context=*/nullptr);
-
+  PostTaskToNetworkThread(
+      FROM_HERE,
+      base::Bind(&CronetURLRequestContextAdapter::StartNetLogOnNetworkThread,
+                 base::Unretained(this), file_path, jlog_all == JNI_TRUE));
   return true;
 }
 
@@ -920,7 +889,11 @@ void CronetURLRequestContextAdapter::StartNetLogToDisk(
 void CronetURLRequestContextAdapter::StopNetLog(
     JNIEnv* env,
     const JavaParamRef<jobject>& jcaller) {
-  StopNetLogHelper();
+  DCHECK(!GetNetworkTaskRunner()->BelongsToCurrentThread());
+  PostTaskToNetworkThread(
+      FROM_HERE,
+      base::Bind(&CronetURLRequestContextAdapter::StopNetLogOnNetworkThread,
+                 base::Unretained(this)));
 }
 
 void CronetURLRequestContextAdapter::GetCertVerifierData(
@@ -1007,6 +980,25 @@ void CronetURLRequestContextAdapter::OnThroughputObservation(
       (timestamp - base::TimeTicks::UnixEpoch()).InMilliseconds(), source);
 }
 
+void CronetURLRequestContextAdapter::StartNetLogOnNetworkThread(
+    const base::FilePath& file_path,
+    bool include_socket_bytes) {
+  DCHECK(GetNetworkTaskRunner()->BelongsToCurrentThread());
+
+  // Do nothing if already logging to a file.
+  if (net_log_file_observer_)
+    return;
+  net_log_file_observer_ = net::FileNetLogObserver::CreateUnbounded(
+      GetFileThread()->task_runner(), file_path, /*constants=*/nullptr);
+  CreateNetLogEntriesForActiveObjects({context_.get()},
+                                      net_log_file_observer_.get());
+  net::NetLogCaptureMode capture_mode =
+      include_socket_bytes ? net::NetLogCaptureMode::IncludeSocketBytes()
+                           : net::NetLogCaptureMode::Default();
+  net_log_file_observer_->StartObserving(g_net_log.Get().net_log(),
+                                         capture_mode);
+}
+
 void CronetURLRequestContextAdapter::StartNetLogToBoundedFileOnNetworkThread(
     const std::string& dir_path,
     bool include_socket_bytes,
@@ -1014,32 +1006,37 @@ void CronetURLRequestContextAdapter::StartNetLogToBoundedFileOnNetworkThread(
   DCHECK(GetNetworkTaskRunner()->BelongsToCurrentThread());
 
   // Do nothing if already logging to a directory.
-  if (bounded_file_observer_)
+  if (net_log_file_observer_)
     return;
 
   // Filepath for NetLog files must exist and be writable.
   base::FilePath file_path(dir_path);
   DCHECK(base::PathIsWritable(file_path));
 
-  bounded_file_observer_.reset(
-      new net::FileNetLogObserver(GetFileThread()->task_runner()));
+  net_log_file_observer_ = net::FileNetLogObserver::CreateBounded(
+      GetFileThread()->task_runner(), file_path, size, kNumNetLogEventFiles,
+      /*constants=*/nullptr);
+
+  CreateNetLogEntriesForActiveObjects({context_.get()},
+                                      net_log_file_observer_.get());
 
   net::NetLogCaptureMode capture_mode =
       include_socket_bytes ? net::NetLogCaptureMode::IncludeSocketBytes()
                            : net::NetLogCaptureMode::Default();
-
-  bounded_file_observer_->StartObservingBounded(
-      g_net_log.Get().net_log(), capture_mode, file_path,
-      /*constants=*/nullptr, context_.get(), size, kNumNetLogEventFiles);
+  net_log_file_observer_->StartObserving(g_net_log.Get().net_log(),
+                                         capture_mode);
 }
 
-void CronetURLRequestContextAdapter::StopBoundedFileNetLogOnNetworkThread() {
+void CronetURLRequestContextAdapter::StopNetLogOnNetworkThread() {
   DCHECK(GetNetworkTaskRunner()->BelongsToCurrentThread());
-  bounded_file_observer_->StopObserving(
-      context_.get(),
+
+  if (!net_log_file_observer_)
+    return;
+  net_log_file_observer_->StopObserving(
+      GetNetLogInfo(),
       base::Bind(&CronetURLRequestContextAdapter::StopNetLogCompleted,
                  base::Unretained(this)));
-  bounded_file_observer_.reset();
+  net_log_file_observer_.reset();
 }
 
 void CronetURLRequestContextAdapter::StopNetLogCompleted() {
@@ -1047,18 +1044,15 @@ void CronetURLRequestContextAdapter::StopNetLogCompleted() {
       base::android::AttachCurrentThread(), jcronet_url_request_context_.obj());
 }
 
-void CronetURLRequestContextAdapter::StopNetLogHelper() {
-  base::AutoLock lock(write_to_file_observer_lock_);
-  DCHECK(!(write_to_file_observer_ && bounded_file_observer_));
-  if (write_to_file_observer_) {
-    write_to_file_observer_->StopObserving(/*url_request_context=*/nullptr);
-    write_to_file_observer_.reset();
-  } else if (bounded_file_observer_) {
-    PostTaskToNetworkThread(FROM_HERE,
-                            base::Bind(&CronetURLRequestContextAdapter::
-                                           StopBoundedFileNetLogOnNetworkThread,
-                                       base::Unretained(this)));
+std::unique_ptr<base::DictionaryValue>
+CronetURLRequestContextAdapter::GetNetLogInfo() const {
+  std::unique_ptr<base::DictionaryValue> net_info =
+      net::GetNetInfo(context_.get(), net::NET_INFO_ALL_SOURCES);
+  if (effective_experimental_options_) {
+    net_info->Set("cronetExperimentalParams",
+                  effective_experimental_options_->CreateDeepCopy());
   }
+  return net_info;
 }
 
 // Create a URLRequestContextConfig from the given parameters.
@@ -1071,10 +1065,7 @@ static jlong CreateRequestContextConfig(
     const JavaParamRef<jstring>& jquic_default_user_agent_id,
     jboolean jhttp2_enabled,
     jboolean jsdch_enabled,
-    const JavaParamRef<jstring>& jdata_reduction_proxy_key,
-    const JavaParamRef<jstring>& jdata_reduction_proxy_primary_proxy,
-    const JavaParamRef<jstring>& jdata_reduction_proxy_fallback_proxy,
-    const JavaParamRef<jstring>& jdata_reduction_proxy_secure_proxy_check_url,
+    jboolean jbrotli_enabled,
     jboolean jdisable_cache,
     jint jhttp_cache_mode,
     jlong jhttp_cache_max_size,
@@ -1086,19 +1077,13 @@ static jlong CreateRequestContextConfig(
   return reinterpret_cast<jlong>(new URLRequestContextConfig(
       jquic_enabled,
       ConvertNullableJavaStringToUTF8(env, jquic_default_user_agent_id),
-      jhttp2_enabled, jsdch_enabled,
+      jhttp2_enabled, jsdch_enabled, jbrotli_enabled,
       static_cast<URLRequestContextConfig::HttpCacheType>(jhttp_cache_mode),
       jhttp_cache_max_size, jdisable_cache,
       ConvertNullableJavaStringToUTF8(env, jstorage_path),
       ConvertNullableJavaStringToUTF8(env, juser_agent),
       ConvertNullableJavaStringToUTF8(env,
                                       jexperimental_quic_connection_options),
-      ConvertNullableJavaStringToUTF8(env, jdata_reduction_proxy_key),
-      ConvertNullableJavaStringToUTF8(env, jdata_reduction_proxy_primary_proxy),
-      ConvertNullableJavaStringToUTF8(env,
-                                      jdata_reduction_proxy_fallback_proxy),
-      ConvertNullableJavaStringToUTF8(
-          env, jdata_reduction_proxy_secure_proxy_check_url),
       base::WrapUnique(
           reinterpret_cast<net::CertVerifier*>(jmock_cert_verifier)),
       jenable_network_quality_estimator,
@@ -1188,7 +1173,7 @@ static jint SetMinLogLevel(JNIEnv* env,
 static ScopedJavaLocalRef<jbyteArray> GetHistogramDeltas(
     JNIEnv* env,
     const JavaParamRef<jclass>& jcaller) {
-  base::StatisticsRecorder::Initialize();
+  DCHECK(base::StatisticsRecorder::IsActive());
   std::vector<uint8_t> data;
   if (!HistogramManager::GetInstance()->GetDeltas(&data))
     return ScopedJavaLocalRef<jbyteArray>();

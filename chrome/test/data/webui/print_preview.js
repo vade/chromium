@@ -15,6 +15,7 @@ function PrintPreviewWebUITest() {
   this.nativeLayer_ = null;
   this.initialSettings_ = null;
   this.localDestinationInfos_ = null;
+  this.previewArea_ = null;
 }
 
 /**
@@ -61,19 +62,15 @@ PrintPreviewWebUITest.prototype = {
    * @override
    */
   testGenPreamble: function() {
-    // Enable print scaling and print as image for tests.
+    // Enable print as image for tests on non Windows/Mac.
+    GEN('#if !defined(OS_WINDOWS) && !defined(OS_MACOSX)');
     GEN('  base::FeatureList::ClearInstanceForTesting();');
     GEN('  std::unique_ptr<base::FeatureList>');
     GEN('      feature_list(new base::FeatureList);');
-    GEN('  char enabled_features[128] = {0};');
-    GEN('  strcpy(enabled_features, features::kPrintScaling.name);');
-    GEN('#if !defined(OS_WINDOWS) && !defined(OS_MACOSX)');
-    GEN('  strcat(strcat(enabled_features, ","), ');
-    GEN('      features::kPrintPdfAsImage.name);');
-    GEN('#endif');
     GEN('  feature_list->InitializeFromCommandLine(');
-    GEN('      enabled_features, std::string());');
+    GEN('      features::kPrintPdfAsImage.name, std::string());');
     GEN('  base::FeatureList::SetInstance(std::move(feature_list));');
+    GEN('#endif');
   },
 
   /**
@@ -86,15 +83,25 @@ PrintPreviewWebUITest.prototype = {
     window.addEventListener('DOMContentLoaded', function() {
       function NativeLayerStub() {
         cr.EventTarget.call(this);
+        this.printStarted_ = false;
+        this.generateDraft_ = false;
       }
       NativeLayerStub.prototype = {
         __proto__: cr.EventTarget.prototype,
+        isPrintStarted: function() { return this.printStarted_; },
+        generateDraft: function() { return this.generateDraft_; },
+        previewReadyForTest: function() {},
         startGetInitialSettings: function() {},
         startGetLocalDestinations: function() {},
         startGetPrivetDestinations: function() {},
         startGetExtensionDestinations: function() {},
         startGetLocalDestinationCapabilities: function(destinationId) {},
-        startGetPreview: function() {},
+        startGetPreview: function(destination, printTicketStore, documentInfo,
+                                  generateDraft, requestId) {
+          this.generateDraft_ = generateDraft;
+        },
+        startHideDialog: function () {},
+        startPrint: function () { this.printStarted_ = true; }
       };
       var oldNativeLayerEventType = print_preview.NativeLayer.EventType;
       var oldDuplexMode = print_preview.NativeLayer.DuplexMode;
@@ -109,9 +116,9 @@ PrintPreviewWebUITest.prototype = {
         __proto__: cr.EventTarget.prototype,
         search: function(isRecent) {}
       };
-      var oldCpInterfaceEventType = cloudprint.CloudPrintInterface.EventType;
+      var oldCpInterfaceEventType = cloudprint.CloudPrintInterfaceEventType;
       cloudprint.CloudPrintInterface = CloudPrintInterfaceStub;
-      cloudprint.CloudPrintInterface.EventType = oldCpInterfaceEventType;
+      cloudprint.CloudPrintInterfaceEventType = oldCpInterfaceEventType;
 
       print_preview.PreviewArea.prototype.checkPluginCompatibility_ =
           function() {
@@ -155,14 +162,51 @@ PrintPreviewWebUITest.prototype = {
   },
 
   /**
+   * Dispatch the PREVIEW_GENERATION_DONE event. This call is NOT async and
+   * will happen in the same thread.
+   */
+  dispatchPreviewDone: function() {
+    var previewDoneEvent =
+        new Event(print_preview.PreviewArea.EventType.PREVIEW_GENERATION_DONE);
+    this.previewArea_.dispatchEvent(previewDoneEvent);
+  },
+
+  /**
+   * Dispatch the SETTINGS_INVALID event. This call is NOT async and will
+   * happen in the same thread.
+   */
+  dispatchInvalidSettings: function() {
+    var invalidSettingsEvent =
+        new Event(print_preview.NativeLayer.EventType.SETTINGS_INVALID);
+    this.nativeLayer_.dispatchEvent(invalidSettingsEvent);
+  },
+
+  /**
+   * @return {boolean} Whether the UI has "printed" or not. (called startPrint
+   *     on the native layer)
+   */
+  hasPrinted: function() {
+    return this.nativeLayer_.isPrintStarted();
+  },
+
+  /**
+   * @return {boolean} Whether the UI is "generating draft" in the most recent
+   *     preview. (checking the result of the startGetPreview call in the native
+   *     layer)
+   */
+  generateDraft: function() {
+    return this.nativeLayer_.generateDraft();
+  },
+
+  /**
    * Even though animation duration and delay is set to zero, it is necessary to
    * wait until the animation has finished.
    */
   waitForAnimationToEnd: function(elementId) {
     // add a listener for the animation end event
-    document.addEventListener('webkitAnimationEnd', function f(e) {
+    document.addEventListener('animationend', function f(e) {
       if (e.target.id == elementId) {
-        document.removeEventListener(f, 'webkitAnimationEnd');
+        document.removeEventListener(f, 'animationend');
         testDone();
       }
     });
@@ -227,6 +271,7 @@ PrintPreviewWebUITest.prototype = {
       { printerName: 'BarName', deviceName: 'BarDevice' }
     ];
     this.nativeLayer_ = printPreview.nativeLayer_;
+    this.previewArea_ = printPreview.previewArea_;
 
     testing.Test.disableAnimationsAndTransitions();
 
@@ -280,7 +325,7 @@ TEST_F('PrintPreviewWebUITest', 'TestPrinterListCloudEmpty', function() {
   this.nativeLayer_.dispatchEvent(cloudPrintEnableEvent);
 
   var searchDoneEvent =
-      new Event(cloudprint.CloudPrintInterface.EventType.SEARCH_DONE);
+      new Event(cloudprint.CloudPrintInterfaceEventType.SEARCH_DONE);
   searchDoneEvent.printers = [];
   searchDoneEvent.isRecent = true;
   searchDoneEvent.email = 'foo@chromium.org';
@@ -375,6 +420,10 @@ function getCddTemplate(printerId) {
   };
 }
 
+function isPrintAsImageEnabled() {
+  return !cr.isWindows && !cr.isMac;
+}
+
 // Test restore settings with one destination.
 TEST_F('PrintPreviewWebUITest', 'TestPrintPreviewRestoreLocalDestination',
     function() {
@@ -387,7 +436,7 @@ TEST_F('PrintPreviewWebUITest', 'TestPrintPreviewRestoreLocalDestination',
   testDone();
 });
 
-//Test with multiple destinations
+// Test with multiple destinations
 TEST_F('PrintPreviewWebUITest', 'TestPrintPreviewRestoreMultipleDestinations',
     function() {
   var origin = cr.isChromeOS ? "chrome_os" : "local";
@@ -555,8 +604,8 @@ TEST_F('PrintPreviewWebUITest', 'PrintToPDFSelectedCapabilities', function() {
   var otherOptions = $('other-options-settings');
   // If rasterization is an option, other options should be visible. If not,
   // there should be no available other options.
-  checkSectionVisible(otherOptions, !cr.isWindows && !cr.isMac);
-  if (!cr.isWindows && !cr.isMac) {
+  checkSectionVisible(otherOptions, isPrintAsImageEnabled());
+  if (isPrintAsImageEnabled()) {
     checkElementDisplayed(
         otherOptions.querySelector('#fit-to-page-container'), false);
     checkElementDisplayed(
@@ -578,8 +627,7 @@ TEST_F('PrintPreviewWebUITest', 'SourceIsHTMLCapabilities', function() {
   var otherOptions = $('other-options-settings');
   var fitToPage = otherOptions.querySelector('#fit-to-page-container');
   var rasterize;
-  var rasterizeEnabled = !cr.isWindows && !cr.isMac;
-  if (rasterizeEnabled)
+  if (isPrintAsImageEnabled())
     rasterize = otherOptions.querySelector('#rasterize-container');
   var mediaSize = $('media-size-settings');
   var scalingSettings = $('scaling-settings');
@@ -588,7 +636,7 @@ TEST_F('PrintPreviewWebUITest', 'SourceIsHTMLCapabilities', function() {
   // available).
   checkSectionVisible(otherOptions, true);
   checkElementDisplayed(fitToPage, false);
-  if (rasterizeEnabled)
+  if (isPrintAsImageEnabled())
     checkElementDisplayed(rasterize, false);
   checkSectionVisible(mediaSize, false);
   checkSectionVisible(scalingSettings, false);
@@ -596,7 +644,7 @@ TEST_F('PrintPreviewWebUITest', 'SourceIsHTMLCapabilities', function() {
   this.expandMoreSettings();
 
   checkElementDisplayed(fitToPage, false);
-  if (rasterizeEnabled)
+  if (isPrintAsImageEnabled())
     checkElementDisplayed(rasterize, false);
   checkSectionVisible(mediaSize, true);
   checkSectionVisible(scalingSettings, true);
@@ -616,21 +664,20 @@ TEST_F('PrintPreviewWebUITest', 'SourceIsPDFCapabilities', function() {
   var scalingSettings = $('scaling-settings');
   var fitToPageContainer =
       otherOptions.querySelector('#fit-to-page-container');
-  var rasterizeEnabled = !cr.isWindows && !cr.isMac;
   var rasterizeContainer;
-  if (rasterizeEnabled) {
+  if (isPrintAsImageEnabled()) {
     rasterizeContainer =
       otherOptions.querySelector('#rasterize-container');
   }
 
   checkSectionVisible(otherOptions, true);
   checkElementDisplayed(fitToPageContainer, true);
-  if (rasterizeEnabled)
+  if (isPrintAsImageEnabled())
     checkElementDisplayed(rasterizeContainer, false);
   expectTrue(
       fitToPageContainer.querySelector('.checkbox').checked);
   this.expandMoreSettings();
-  if (rasterizeEnabled) {
+  if (isPrintAsImageEnabled()) {
     checkElementDisplayed(rasterizeContainer, true);
     expectFalse(
         rasterizeContainer.querySelector('.checkbox').checked);
@@ -662,17 +709,17 @@ TEST_F('PrintPreviewWebUITest', 'ScalingUnchecksFitToPage', function() {
   checkSectionVisible($('media-size-settings'), true);
   checkSectionVisible(scalingSettings, true);
 
-  //Change scaling input
+  // Change scaling input
   var scalingInput = scalingSettings.querySelector('.user-value');
-  expectEquals(scalingInput.value, '100');
+  expectEquals('100', scalingInput.value);
   scalingInput.stepUp(5);
-  expectEquals(scalingInput.value, '105');
+  expectEquals('105', scalingInput.value);
 
   // Trigger the event
-  var enter = document.createEvent('Event');
-  enter.initEvent('keydown');
-  enter.keyCode = 'Enter';
-  scalingInput.dispatchEvent(enter);
+  var enterEvent = document.createEvent('Event');
+  enterEvent.initEvent('keydown');
+  enterEvent.keyCode = 'Enter';
+  scalingInput.dispatchEvent(enterEvent);
   expectFalse(
       fitToPageContainer.querySelector('.checkbox').checked);
 
@@ -738,7 +785,7 @@ TEST_F('PrintPreviewWebUITest', 'CustomMarginsControlsCheck', function() {
   this.setCapabilities(getCddTemplate("FooDevice"));
 
   printPreview.printTicketStore_.marginsType.updateValue(
-      print_preview.ticket_items.MarginsType.Value.CUSTOM);
+      print_preview.ticket_items.MarginsTypeValue.CUSTOM);
 
   ['left', 'top', 'right', 'bottom'].forEach(function(margin) {
     var control = $('preview-area').querySelector('.margin-control-' + margin);
@@ -770,7 +817,7 @@ TEST_F('PrintPreviewWebUITest', 'PageLayoutHasNoMarginsHideHeaderFooter',
   checkElementDisplayed(headerFooter, true);
 
   printPreview.printTicketStore_.marginsType.updateValue(
-      print_preview.ticket_items.MarginsType.Value.CUSTOM);
+      print_preview.ticket_items.MarginsTypeValue.CUSTOM);
   printPreview.printTicketStore_.customMargins.updateValue(
       new print_preview.Margins(0, 0, 0, 0));
 
@@ -799,7 +846,7 @@ TEST_F('PrintPreviewWebUITest', 'PageLayoutHasMarginsShowHeaderFooter',
   checkElementDisplayed(headerFooter, true);
 
   printPreview.printTicketStore_.marginsType.updateValue(
-      print_preview.ticket_items.MarginsType.Value.CUSTOM);
+      print_preview.ticket_items.MarginsTypeValue.CUSTOM);
   printPreview.printTicketStore_.customMargins.updateValue(
       new print_preview.Margins(36, 36, 36, 36));
 
@@ -829,7 +876,7 @@ TEST_F('PrintPreviewWebUITest',
   checkElementDisplayed(headerFooter, true);
 
   printPreview.printTicketStore_.marginsType.updateValue(
-      print_preview.ticket_items.MarginsType.Value.CUSTOM);
+      print_preview.ticket_items.MarginsTypeValue.CUSTOM);
   printPreview.printTicketStore_.customMargins.updateValue(
       new print_preview.Margins(0, 36, 0, 36));
 
@@ -860,10 +907,50 @@ TEST_F('PrintPreviewWebUITest',
   checkElementDisplayed(headerFooter, true);
 
   printPreview.printTicketStore_.marginsType.updateValue(
-      print_preview.ticket_items.MarginsType.Value.CUSTOM);
+      print_preview.ticket_items.MarginsTypeValue.CUSTOM);
   printPreview.printTicketStore_.customMargins.updateValue(
       new print_preview.Margins(0, 36, 36, 36));
 
+  checkElementDisplayed(headerFooter, true);
+
+  this.waitForAnimationToEnd('more-settings');
+});
+
+// Check header footer availability with small (label) page size.
+TEST_F('PrintPreviewWebUITest', 'SmallPaperSizeHeaderFooter', function() {
+  this.setInitialSettings();
+  this.setLocalDestinations();
+  var device = getCddTemplate("FooDevice");
+  device.capabilities.printer.media_size = {
+    "option": [
+      {"name": "SmallLabel", "width_microns": 38100, "height_microns": 12700,
+        "is_default": false},
+      {"name": "BigLabel", "width_microns": 50800, "height_microns": 76200,
+        "is_default": true}
+    ]
+  };
+  this.setCapabilities(device);
+
+  var otherOptions = $('other-options-settings');
+  var headerFooter = otherOptions.querySelector('#header-footer-container');
+
+  // Check that options are collapsed (section is visible, because duplex is
+  // available).
+  checkSectionVisible(otherOptions, true);
+  checkElementDisplayed(headerFooter, false);
+
+  this.expandMoreSettings();
+
+  // Big label should have header/footer
+  checkElementDisplayed(headerFooter, true);
+
+  // Small label should not
+  printPreview.printTicketStore_.mediaSize.updateValue(
+      device.capabilities.printer.media_size.option[0]);
+  checkElementDisplayed(headerFooter, false);
+
+  // Oriented in landscape, there should be enough space for header/footer.
+  printPreview.printTicketStore_.landscape.updateValue(true);
   checkElementDisplayed(headerFooter, true);
 
   this.waitForAnimationToEnd('more-settings');
@@ -1062,16 +1149,12 @@ TEST_F('PrintPreviewWebUITest', 'TestPrinterChangeUpdatesPreview', function() {
 
   // The number of settings that can change due to a change in the destination
   // that will therefore dispatch ticket item change events.
-  previewGenerator.expects(exactly(7)).requestPreview();
+  previewGenerator.expects(exactly(9)).requestPreview();
 
-  var barDestination;
-  var destinations = printPreview.destinationStore_.destinations();
-  for (var destination, i = 0; destination = destinations[i]; i++) {
-    if (destination.id == 'BarDevice') {
-      barDestination = destination;
-      break;
-    }
-  }
+  var barDestination =
+      printPreview.destinationStore_.destinations().find(function(d) {
+        return d.id == 'BarDevice';
+      });
 
   printPreview.destinationStore_.selectDestination(barDestination);
 
@@ -1092,19 +1175,19 @@ TEST_F('PrintPreviewWebUITest', 'TestNoPDFPluginErrorMessage', function() {
 
   var loadingMessageEl =
       previewAreaEl.getElementsByClassName('preview-area-loading-message')[0];
-  expectEquals(true, loadingMessageEl.hidden);
+  expectTrue(loadingMessageEl.hidden);
 
   var previewFailedMessageEl = previewAreaEl.getElementsByClassName(
       'preview-area-preview-failed-message')[0];
-  expectEquals(true, previewFailedMessageEl.hidden);
+  expectTrue(previewFailedMessageEl.hidden);
 
   var printFailedMessageEl =
       previewAreaEl.getElementsByClassName('preview-area-print-failed')[0];
-  expectEquals(true, printFailedMessageEl.hidden);
+  expectTrue(printFailedMessageEl.hidden);
 
   var customMessageEl =
       previewAreaEl.getElementsByClassName('preview-area-custom-message')[0];
-  expectEquals(false, customMessageEl.hidden);
+  expectFalse(customMessageEl.hidden);
 
   testDone();
 });
@@ -1311,10 +1394,101 @@ TEST_F('PrintPreviewWebUITest', 'TestInitIssuesOneRequest', function() {
   // increments by 1 for each startGetPreview call it makes. It should only
   // make one such call during initialization or there will be a race; see
   // crbug.com/666595
-  expectEquals(printPreview.previewArea_.previewGenerator_.inFlightRequestId_,
-    -1);
+  expectEquals(
+      -1,
+      printPreview.previewArea_.previewGenerator_.inFlightRequestId_);
   this.setInitialSettings();
-  expectEquals(printPreview.previewArea_.previewGenerator_.inFlightRequestId_,
-    0);
+  expectEquals(
+      0,
+      printPreview.previewArea_.previewGenerator_.inFlightRequestId_);
+  testDone();
+});
+
+// Test that invalid settings errors disable the print preview and display
+// an error and that the preview dialog can be recovered by selecting a
+// new destination.
+TEST_F('PrintPreviewWebUITest', 'TestInvalidSettingsError', function() {
+  // Setup
+  this.setInitialSettings();
+  this.setLocalDestinations();
+  this.setCapabilities(getCddTemplate("FooDevice"));
+
+  // Manually enable the print header. This is needed since there is no
+  // plugin during test, so it will be set as disabled normally.
+  printPreview.printHeader_.isEnabled = true;
+
+  // There will be an error message in the preview area since the plugin is
+  // not running. However, it should not be the invalid settings error.
+  var previewAreaEl = $('preview-area');
+  var customMessageEl =
+      previewAreaEl.getElementsByClassName('preview-area-custom-message')[0];
+  expectFalse(customMessageEl.hidden);
+  var expectedMessageStart = 'The selected printer is not available or not ' +
+      'installed correctly.'
+  expectFalse(customMessageEl.textContent.includes(expectedMessageStart));
+
+  // Verify that the print button is enabled.
+  var printHeader = $('print-header');
+  var printButton = printHeader.querySelector('button.print');
+  checkElementDisplayed(printButton, true);
+  expectFalse(printButton.disabled);
+
+  // Report invalid settings error.
+  this.dispatchInvalidSettings();
+
+  // Should be in an error state, print button disabled, invalid custom error
+  // message shown.
+  expectFalse(customMessageEl.hidden);
+  expectTrue(customMessageEl.textContent.includes(expectedMessageStart));
+  expectTrue(printButton.disabled);
+
+  // Select a new destination
+  var barDestination =
+      printPreview.destinationStore_.destinations().find(function(d) {
+        return d.id == 'BarDevice';
+      });
+
+  printPreview.destinationStore_.selectDestination(barDestination);
+
+  // Dispatch events indicating capabilities were fetched and new preview has
+  // loaded.
+  this.setCapabilities(getCddTemplate("BarDevice"));
+  this.dispatchPreviewDone();
+
+  // Has active print button and successfully "prints", indicating recovery
+  // from error state.
+  expectFalse(printButton.disabled);
+  expectFalse(this.hasPrinted());
+  printButton.click();
+  expectTrue(this.hasPrinted());
+  testDone();
+});
+
+// Test the preview generator to make sure the generate draft parameter is set
+// correctly. It should be false if the only change is the page range.
+TEST_F('PrintPreviewWebUITest', 'TestGenerateDraft', function() {
+  // Use a real preview generator.
+  printPreview.previewArea_.previewGenerator_ =
+      new print_preview.PreviewGenerator(printPreview.destinationStore_,
+        printPreview.printTicketStore_, this.nativeLayer_,
+        printPreview.documentInfo_);
+
+  this.setInitialSettings();
+  this.setLocalDestinations();
+  this.setCapabilities(getCddTemplate("FooDevice"));
+
+  // The first request should generate draft because there was no previous print
+  // preview draft.
+  expectTrue(this.generateDraft());
+
+  // Change the page range - no new draft needed.
+  printPreview.printTicketStore_.pageRange.updateValue("2");
+  expectFalse(this.generateDraft());
+
+  // Change the margin type - need to regenerate again.
+  printPreview.printTicketStore_.marginsType.updateValue(
+      print_preview.ticket_items.MarginsTypeValue.NO_MARGINS);
+  expectTrue(this.generateDraft());
+
   testDone();
 });

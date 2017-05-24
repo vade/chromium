@@ -7,9 +7,9 @@
 #include <algorithm>
 
 #include "base/macros.h"
+#include "cc/paint/paint_flags.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/effects/SkBlurImageFilter.h"
 #include "ui/accessibility/ax_node_data.h"
@@ -48,6 +48,10 @@ BubbleBorder::Arrow GetArrowAlignment(
     return BubbleBorder::LEFT_BOTTOM;
   return BubbleBorder::RIGHT_BOTTOM;
 }
+
+// Only one TrayBubbleView is visible at a time, but there are cases where the
+// lifetimes of two different bubbles can overlap briefly.
+int g_current_tray_bubble_showing_count_ = 0;
 
 }  // namespace
 
@@ -113,11 +117,11 @@ TrayBubbleContentMask::~TrayBubbleContentMask() {
 
 void TrayBubbleContentMask::OnPaintLayer(const ui::PaintContext& context) {
   ui::PaintRecorder recorder(context, layer()->size());
-  SkPaint paint;
-  paint.setAlpha(255);
-  paint.setStyle(SkPaint::kFill_Style);
+  cc::PaintFlags flags;
+  flags.setAlpha(255);
+  flags.setStyle(cc::PaintFlags::kFill_Style);
   gfx::Rect rect(layer()->bounds().size());
-  recorder.canvas()->DrawRoundRect(rect, corner_radius_, paint);
+  recorder.canvas()->DrawRoundRect(rect, corner_radius_, flags);
 }
 
 void TrayBubbleContentMask::OnDeviceScaleFactorChanged(
@@ -175,8 +179,7 @@ TrayBubbleView::InitParams::InitParams(AnchorAlignment anchor_alignment,
       max_width(max_width),
       max_height(0),
       can_activate(false),
-      close_on_deactivate(true),
-      bg_color(gfx::kPlaceholderColor) {}
+      close_on_deactivate(true) {}
 
 TrayBubbleView::InitParams::InitParams(const InitParams& other) = default;
 
@@ -196,12 +199,14 @@ TrayBubbleView::TrayBubbleView(View* anchor,
       layout_(new BottomAlignedBoxLayout(this)),
       delegate_(delegate),
       preferred_width_(init_params.min_width),
-      bubble_border_(new BubbleBorder(arrow(),
-                                      BubbleBorder::NO_ASSETS,
-                                      init_params.bg_color)),
+      bubble_border_(new BubbleBorder(
+          arrow(),
+          BubbleBorder::NO_ASSETS,
+          init_params.bg_color.value_or(gfx::kPlaceholderColor))),
       owned_bubble_border_(bubble_border_),
       is_gesture_dragging_(false),
       mouse_actively_entered_(false) {
+  bubble_border_->set_use_theme_background_color(!init_params.bg_color);
   bubble_border_->set_alignment(BubbleBorder::ALIGN_EDGE_TO_ANCHOR_EDGE);
   bubble_border_->set_paint_arrow(BubbleBorder::PAINT_NONE);
   set_can_activate(params_.can_activate);
@@ -225,6 +230,11 @@ TrayBubbleView::~TrayBubbleView() {
     delegate_->BubbleViewDestroyed();
 }
 
+// static
+bool TrayBubbleView::IsATrayBubbleOpen() {
+  return g_current_tray_bubble_showing_count_ > 0;
+}
+
 void TrayBubbleView::InitializeAndShowBubble() {
   layer()->parent()->SetMaskLayer(bubble_content_mask_->layer());
 
@@ -232,6 +242,8 @@ void TrayBubbleView::InitializeAndShowBubble() {
   GetWidget()->GetNativeWindow()->SetEventTargeter(
       std::unique_ptr<ui::EventTargeter>(new BubbleWindowTargeter(this)));
   UpdateBubble();
+
+  ++g_current_tray_bubble_showing_count_;
 }
 
 void TrayBubbleView::UpdateBubble() {
@@ -276,6 +288,12 @@ void TrayBubbleView::OnBeforeBubbleWidgetInit(Widget::InitParams* params,
   // Apply a WM-provided shadow (see ui/wm/core/).
   params->shadow_type = Widget::InitParams::SHADOW_TYPE_DROP;
   params->shadow_elevation = wm::ShadowElevation::LARGE;
+}
+
+void TrayBubbleView::OnWidgetClosing(Widget* widget) {
+  BubbleDialogDelegateView::OnWidgetClosing(widget);
+  --g_current_tray_bubble_showing_count_;
+  DCHECK_GE(g_current_tray_bubble_showing_count_, 0);
 }
 
 NonClientFrameView* TrayBubbleView::CreateNonClientFrameView(Widget* widget) {

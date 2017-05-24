@@ -6,10 +6,37 @@ import("//build/config/features.gni")
 import("//media/media_options.gni")
 import("//testing/test.gni")
 
-component("capture") {
+group("capture") {
+  public_deps = [
+    ":capture_lib",
+    "//media/capture/mojo:capture_types",
+    "//services/service_manager/public/cpp",
+  ]
+}
+
+# Things needed by //media/capture/mojo:capture_types.
+component("capture_base") {
   defines = [ "CAPTURE_IMPLEMENTATION" ]
   sources = [
     "capture_export.h",
+    "video/video_capture_device_descriptor.cc",
+    "video/video_capture_device_descriptor.h",
+    "video/video_capture_device_info.cc",
+    "video/video_capture_device_info.h",
+    "video_capture_types.cc",
+    "video_capture_types.h",
+  ]
+  deps = [
+    "//base",
+    "//base:i18n",
+    "//media",
+    "//ui/gfx",
+  ]
+}
+
+component("capture_lib") {
+  defines = [ "CAPTURE_IMPLEMENTATION" ]
+  sources = [
     "content/animated_content_sampler.cc",
     "content/animated_content_sampler.h",
     "content/capture_resolution_chooser.cc",
@@ -30,8 +57,8 @@ component("capture") {
     "video/file_video_capture_device.h",
     "video/file_video_capture_device_factory.cc",
     "video/file_video_capture_device_factory.h",
-    "video/linux/camera_facing_chromeos.cc",
-    "video/linux/camera_facing_chromeos.h",
+    "video/linux/camera_config_chromeos.cc",
+    "video/linux/camera_config_chromeos.h",
     "video/linux/v4l2_capture_delegate.cc",
     "video/linux/v4l2_capture_delegate.h",
     "video/linux/video_capture_device_chromeos.cc",
@@ -49,6 +76,8 @@ component("capture") {
     "video/mac/video_capture_device_mac.h",
     "video/mac/video_capture_device_mac.mm",
     "video/scoped_result_callback.h",
+    "video/shared_memory_buffer_handle.cc",
+    "video/shared_memory_buffer_handle.h",
     "video/shared_memory_buffer_tracker.cc",
     "video/shared_memory_buffer_tracker.h",
     "video/video_capture_buffer_handle.h",
@@ -63,12 +92,15 @@ component("capture") {
     "video/video_capture_device.h",
     "video/video_capture_device_client.cc",
     "video/video_capture_device_client.h",
-    "video/video_capture_device_descriptor.cc",
-    "video/video_capture_device_descriptor.h",
     "video/video_capture_device_factory.cc",
     "video/video_capture_device_factory.h",
     "video/video_capture_jpeg_decoder.h",
+    "video/video_capture_system.h",
+    "video/video_capture_system_impl.cc",
+    "video/video_capture_system_impl.h",
     "video/video_frame_receiver.h",
+    "video/video_frame_receiver_on_task_runner.cc",
+    "video/video_frame_receiver_on_task_runner.h",
     "video/win/capability_list_win.cc",
     "video/win/capability_list_win.h",
     "video/win/filter_base_win.cc",
@@ -86,30 +118,25 @@ component("capture") {
     "video/win/video_capture_device_mf_win.h",
     "video/win/video_capture_device_win.cc",
     "video/win/video_capture_device_win.h",
-    "video_capture_types.cc",
-    "video_capture_types.h",
     "video_capturer_source.cc",
     "video_capturer_source.h",
   ]
 
-  public_deps = []
+  public_deps = [
+    ":capture_base",
+  ]
+
   deps = [
     "//base",
     "//base:i18n",
     "//media",
+    "//media/capture/mojo:capture_types",
     "//media/capture/mojo:image_capture",
-    "//skia",
+    "//media/mojo/interfaces:interfaces",
+    "//services/service_manager/public/cpp",
     "//third_party/libyuv",
     "//ui/display",
     "//ui/gfx",
-  ]
-
-  configs += [
-    # TODO(mcasas): media/base should be a component and not a source_set, but
-    # it depends on parts of media/filters, media/ffmpeg etc. Until then, we
-    # pretend to be inside media.dll and duplicate the few symbols needed, see
-    # https://crbug.com/590017.
-    "//media:media_implementation",
   ]
 
   if (is_android) {
@@ -136,10 +163,7 @@ component("capture") {
   }
 
   if (is_win) {
-    deps += [
-      "//media/base",  # For media_switches.
-      "//media/base/win",
-    ]
+    deps += [ "//media/base/win" ]
     libs = [
       "mf.lib",
       "mfplat.lib",
@@ -171,9 +195,10 @@ test("capture_unittests") {
     "content/smooth_event_sampler_unittest.cc",
     "content/video_capture_oracle_unittest.cc",
     "video/fake_video_capture_device_unittest.cc",
-    "video/linux/camera_facing_chromeos_unittest.cc",
+    "video/linux/camera_config_chromeos_unittest.cc",
     "video/linux/v4l2_capture_delegate_unittest.cc",
     "video/mac/video_capture_device_factory_mac_unittest.mm",
+    "video/video_capture_device_client_unittest.cc",
     "video/video_capture_device_unittest.cc",
   ]
 
@@ -181,6 +206,7 @@ test("capture_unittests") {
     ":capture",
     "//base/test:run_all_unittests",
     "//base/test:test_support",
+    "//media",
     "//media/base:test_support",
     "//media/capture/mojo:image_capture",
     "//testing/gmock",

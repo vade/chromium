@@ -17,7 +17,6 @@ StubPasswordManagerClient::~StubPasswordManagerClient() {}
 
 bool StubPasswordManagerClient::PromptUserToSaveOrUpdatePassword(
     std::unique_ptr<PasswordFormManager> form_to_save,
-    password_manager::CredentialSourceType type,
     bool update_password) {
   return false;
 }
@@ -64,5 +63,19 @@ const CredentialsFilter* StubPasswordManagerClient::GetStoreResultFilter()
 const LogManager* StubPasswordManagerClient::GetLogManager() const {
   return &log_manager_;
 }
+
+#if defined(SAFE_BROWSING_DB_LOCAL)
+safe_browsing::PasswordProtectionService*
+StubPasswordManagerClient::GetPasswordProtectionService() const {
+  return nullptr;
+}
+
+void StubPasswordManagerClient::CheckSafeBrowsingReputation(
+    const GURL& form_action,
+    const GURL& frame_url) {}
+
+void StubPasswordManagerClient::CheckProtectedPasswordEntry(
+    const std::string& password_saved_domain) {}
+#endif
 
 }  // namespace password_manager

@@ -11,30 +11,52 @@ CssScanningMetricsObserver::CssScanningMetricsObserver() {}
 
 CssScanningMetricsObserver::~CssScanningMetricsObserver() {}
 
-void CssScanningMetricsObserver::OnFirstContentfulPaint(
-    const page_load_metrics::PageLoadTiming& timing,
+void CssScanningMetricsObserver::OnLoadingBehaviorObserved(
     const page_load_metrics::PageLoadExtraInfo& info) {
-  if (info.metadata.behavior_flags &
-          blink::WebLoadingBehaviorFlag::WebLoadingBehaviorCSSPreloadFound &&
-      WasStartedInForegroundOptionalEventInForeground(
-          timing.first_contentful_paint, info)) {
-    PAGE_LOAD_HISTOGRAM(
-        "PageLoad.Clients.CssScanner.PaintTiming."
-        "ParseStartToFirstContentfulPaint",
-        timing.first_contentful_paint.value() - timing.parse_start.value());
-  }
+  if (css_preload_found_)
+    return;
+
+  css_preload_found_ = page_load_metrics::DidObserveLoadingBehaviorInAnyFrame(
+      info, blink::WebLoadingBehaviorFlag::kWebLoadingBehaviorCSSPreloadFound);
 }
 
-void CssScanningMetricsObserver::OnFirstMeaningfulPaint(
-    const page_load_metrics::PageLoadTiming& timing,
+page_load_metrics::PageLoadMetricsObserver::ObservePolicy
+CssScanningMetricsObserver::OnStart(
+    content::NavigationHandle* navigation_handle,
+    const GURL& currently_committed_url,
+    bool started_in_foreground) {
+  return started_in_foreground ? CONTINUE_OBSERVING : STOP_OBSERVING;
+}
+
+page_load_metrics::PageLoadMetricsObserver::ObservePolicy
+CssScanningMetricsObserver::OnHidden(
+    const page_load_metrics::mojom::PageLoadTiming&,
+    const page_load_metrics::PageLoadExtraInfo&) {
+  return STOP_OBSERVING;
+}
+
+void CssScanningMetricsObserver::OnFirstContentfulPaintInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
-  if (info.metadata.behavior_flags &
-          blink::WebLoadingBehaviorFlag::WebLoadingBehaviorCSSPreloadFound &&
-      WasStartedInForegroundOptionalEventInForeground(
-          timing.first_meaningful_paint, info)) {
-    PAGE_LOAD_HISTOGRAM(
-        "PageLoad.Clients.CssScanner.Experimental.PaintTiming."
-        "ParseStartToFirstMeaningfulPaint",
-        timing.first_meaningful_paint.value() - timing.parse_start.value());
-  }
+  if (!css_preload_found_)
+    return;
+
+  PAGE_LOAD_HISTOGRAM(
+      "PageLoad.Clients.CssScanner.PaintTiming."
+      "ParseStartToFirstContentfulPaint",
+      timing.paint_timing->first_contentful_paint.value() -
+          timing.parse_timing->parse_start.value());
+}
+
+void CssScanningMetricsObserver::OnFirstMeaningfulPaintInMainFrameDocument(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
+    const page_load_metrics::PageLoadExtraInfo& info) {
+  if (!css_preload_found_)
+    return;
+
+  PAGE_LOAD_HISTOGRAM(
+      "PageLoad.Clients.CssScanner.Experimental.PaintTiming."
+      "ParseStartToFirstMeaningfulPaint",
+      timing.paint_timing->first_meaningful_paint.value() -
+          timing.parse_timing->parse_start.value());
 }

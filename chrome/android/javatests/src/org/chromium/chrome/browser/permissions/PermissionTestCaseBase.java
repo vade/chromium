@@ -52,6 +52,7 @@ public class PermissionTestCaseBase extends ChromeActivityTestCaseBase<ChromeAct
     protected static final String FORCE_FIELDTRIAL = "force-fieldtrials=ModalPrompts/Group1";
     protected static final String FORCE_FIELDTRIAL_PARAMS =
             "force-fieldtrial-params=ModalPrompts.Group1:require_gesture/false";
+    protected static final String PERMISSION_REQUEST_MANAGER_FLAG = "UseGroupedPermissionInfobars";
 
     private InfoBarTestAnimationListener mListener;
     private EmbeddedTestServer mTestServer;
@@ -125,7 +126,7 @@ public class PermissionTestCaseBase extends ChromeActivityTestCaseBase<ChromeAct
         InfoBarContainer container =
                 getActivity().getTabModelSelector().getCurrentTab().getInfoBarContainer();
         mListener = new InfoBarTestAnimationListener();
-        container.setAnimationListener(mListener);
+        container.addAnimationListener(mListener);
         mTestServer = EmbeddedTestServer.createAndStartServer(getInstrumentation().getContext());
     }
 

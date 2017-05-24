@@ -31,6 +31,8 @@
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/cursor/cursor.h"
+#include "ui/base/layout.h"
+#include "ui/base/platform_window_defaults.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/view_prop.h"
 #include "ui/base/x/x11_util.h"
@@ -109,8 +111,6 @@ void SelectXInput2EventsForRootWindow(XDisplay* display, ::Window root_window) {
 #endif
 }
 
-bool default_override_redirect = false;
-
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -120,7 +120,7 @@ WindowTreeHostX11::WindowTreeHostX11(const gfx::Rect& bounds)
     : xdisplay_(gfx::GetXDisplay()),
       xwindow_(0),
       x_root_window_(DefaultRootWindow(xdisplay_)),
-      current_cursor_(ui::kCursorNull),
+      current_cursor_(ui::CursorType::kNull),
       window_mapped_(false),
       bounds_(bounds),
       atom_cache_(xdisplay_, kAtomsToCache) {
@@ -128,7 +128,7 @@ WindowTreeHostX11::WindowTreeHostX11(const gfx::Rect& bounds)
   memset(&swa, 0, sizeof(swa));
   swa.background_pixmap = None;
   swa.bit_gravity = NorthWestGravity;
-  swa.override_redirect = default_override_redirect;
+  swa.override_redirect = ui::UseTestConfigForPlatformWindows();
   xwindow_ = XCreateWindow(
       xdisplay_, x_root_window_,
       bounds.x(), bounds.y(), bounds.width(), bounds.height(),
@@ -246,7 +246,7 @@ uint32_t WindowTreeHostX11::DispatchEvent(const ui::PlatformEvent& event) {
       case ui::ET_KEY_PRESSED:
       case ui::ET_KEY_RELEASED: {
         ui::KeyEvent keydown_event(xev);
-        SendEventToProcessor(&keydown_event);
+        SendEventToSink(&keydown_event);
         break;
       }
       case ui::ET_MOUSE_MOVED:
@@ -404,9 +404,7 @@ void WindowTreeHostX11::SetBoundsInPixels(const gfx::Rect& bounds) {
   // Even if the host window's size doesn't change, aura's root window
   // size, which is in DIP, changes when the scale changes.
   float current_scale = compositor()->device_scale_factor();
-  float new_scale = display::Screen::GetScreen()
-                        ->GetDisplayNearestWindow(window())
-                        .device_scale_factor();
+  float new_scale = ui::GetScaleFactorForNativeView(window());
   bool origin_changed = bounds_.origin() != bounds.origin();
   bool size_changed = bounds_.size() != bounds.size();
   XWindowChanges changes = {0};
@@ -537,13 +535,13 @@ void WindowTreeHostX11::DispatchXI2Event(const base::NativeEvent& event) {
     case ui::ET_SCROLL_FLING_CANCEL:
     case ui::ET_SCROLL: {
       ui::ScrollEvent scrollev(xev);
-      SendEventToProcessor(&scrollev);
+      SendEventToSink(&scrollev);
       break;
     }
     case ui::ET_KEY_PRESSED:
     case ui::ET_KEY_RELEASED: {
       ui::KeyEvent key_event(xev);
-      SendEventToProcessor(&key_event);
+      SendEventToSink(&key_event);
       break;
     }
     case ui::ET_UMA_DATA:
@@ -567,7 +565,7 @@ void WindowTreeHostX11::OnConfigureNotify() {}
 
 void WindowTreeHostX11::TranslateAndDispatchLocatedEvent(
     ui::LocatedEvent* event) {
-  SendEventToProcessor(event);
+  SendEventToSink(event);
 }
 
 // static
@@ -575,11 +573,4 @@ WindowTreeHost* WindowTreeHost::Create(const gfx::Rect& bounds_in_pixels) {
   return new WindowTreeHostX11(bounds_in_pixels);
 }
 
-namespace test {
-
-void SetUseOverrideRedirectWindowByDefault(bool override_redirect) {
-  default_override_redirect = override_redirect;
-}
-
-}  // namespace test
 }  // namespace aura

@@ -5,11 +5,13 @@
 #include "chrome/browser/ntp_tiles/chrome_most_visited_sites_factory.h"
 
 #include <utility>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/memory/ptr_util.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
+#include "chrome/browser/favicon/large_icon_service_factory.h"
 #include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/ntp_tiles/chrome_popular_sites_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -21,8 +23,8 @@
 #include "chrome/browser/supervised_user/supervised_user_url_filter.h"
 #include "chrome/browser/thumbnails/thumbnail_list_source.h"
 #include "components/history/core/browser/top_sites.h"
-#include "components/image_fetcher/image_fetcher_impl.h"
-#include "components/ntp_tiles/icon_cacher.h"
+#include "components/image_fetcher/core/image_fetcher_impl.h"
+#include "components/ntp_tiles/icon_cacher_impl.h"
 #include "components/ntp_tiles/metrics.h"
 #include "components/ntp_tiles/most_visited_sites.h"
 
@@ -73,7 +75,7 @@ void SupervisorBridge::SetObserver(Observer* new_observer) {
 bool SupervisorBridge::IsBlocked(const GURL& url) {
   SupervisedUserService* supervised_user_service =
       SupervisedUserServiceFactory::GetForProfile(profile_);
-  auto* url_filter = supervised_user_service->GetURLFilterForUIThread();
+  auto* url_filter = supervised_user_service->GetURLFilter();
   return url_filter->GetFilteringBehaviorForURL(url) ==
          SupervisedUserURLFilter::FilteringBehavior::BLOCK;
 }
@@ -107,6 +109,11 @@ void SupervisorBridge::OnURLFilterChanged() {
 // static
 std::unique_ptr<ntp_tiles::MostVisitedSites>
 ChromeMostVisitedSitesFactory::NewForProfile(Profile* profile) {
+  // MostVisitedSites doesn't exist in incognito profiles.
+  if (profile->IsOffTheRecord()) {
+    return nullptr;
+  }
+
   return base::MakeUnique<ntp_tiles::MostVisitedSites>(
       profile->GetPrefs(), TopSitesFactory::GetForProfile(profile),
       SuggestionsServiceFactory::GetForProfile(profile),
@@ -115,9 +122,10 @@ ChromeMostVisitedSitesFactory::NewForProfile(Profile* profile) {
 #else
       nullptr,
 #endif
-      base::MakeUnique<ntp_tiles::IconCacher>(
+      base::MakeUnique<ntp_tiles::IconCacherImpl>(
           FaviconServiceFactory::GetForProfile(
               profile, ServiceAccessType::IMPLICIT_ACCESS),
+          LargeIconServiceFactory::GetForBrowserContext(profile),
           base::MakeUnique<image_fetcher::ImageFetcherImpl>(
               base::MakeUnique<suggestions::ImageDecoderImpl>(),
               profile->GetRequestContext())),

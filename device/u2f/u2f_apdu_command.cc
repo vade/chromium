@@ -2,15 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/memory/ptr_util.h"
+
 #include "u2f_apdu_command.h"
 
 namespace device {
 
-scoped_refptr<U2fApduCommand> U2fApduCommand::CreateFromMessage(
+std::unique_ptr<U2fApduCommand> U2fApduCommand::CreateFromMessage(
     const std::vector<uint8_t>& message) {
   uint16_t data_length = 0;
-  size_t index = 0, response_length = 0;
+  size_t index = 0;
+  size_t response_length = 0;
   std::vector<uint8_t> data;
+  std::vector<uint8_t> suffix;
 
   if (message.size() < kApduMinHeader || message.size() > kApduMaxLength)
     return nullptr;
@@ -59,19 +63,18 @@ scoped_refptr<U2fApduCommand> U2fApduCommand::CreateFromMessage(
         // Defined in ISO7816-4
         if (response_length == 0)
           response_length = kApduMaxResponseLength;
+        // Non-ISO7816-4 special legacy case where 2 suffix bytes are passed
+        // along with a version message
+        if (data_length == 0 && ins == kInsU2fVersion)
+          suffix = {0x0, 0x0};
       } else {
         return nullptr;
       }
       break;
   }
 
-  return make_scoped_refptr(
-      new U2fApduCommand(cla, ins, p1, p2, response_length, std::move(data)));
-}
-
-// static
-scoped_refptr<U2fApduCommand> U2fApduCommand::Create() {
-  return make_scoped_refptr(new U2fApduCommand());
+  return base::MakeUnique<U2fApduCommand>(cla, ins, p1, p2, response_length,
+                                          std::move(data), std::move(suffix));
 }
 
 std::vector<uint8_t> U2fApduCommand::GetEncodedCommand() const {
@@ -98,6 +101,8 @@ std::vector<uint8_t> U2fApduCommand::GetEncodedCommand() const {
     encoded.push_back((response_length_ >> 8) & 0xff);
     encoded.push_back(response_length_ & 0xff);
   }
+  // Add suffix, if required, for legacy compatibility
+  encoded.insert(encoded.end(), suffix_.begin(), suffix_.end());
   return encoded;
 }
 
@@ -109,14 +114,76 @@ U2fApduCommand::U2fApduCommand(uint8_t cla,
                                uint8_t p1,
                                uint8_t p2,
                                size_t response_length,
-                               std::vector<uint8_t> data)
+                               std::vector<uint8_t> data,
+                               std::vector<uint8_t> suffix)
     : cla_(cla),
       ins_(ins),
       p1_(p1),
       p2_(p2),
       response_length_(response_length),
-      data_(std::move(data)) {}
+      data_(std::move(data)),
+      suffix_(std::move(suffix)) {}
 
 U2fApduCommand::~U2fApduCommand() {}
+
+// static
+std::unique_ptr<U2fApduCommand> U2fApduCommand::CreateRegister(
+    const std::vector<uint8_t>& appid_digest,
+    const std::vector<uint8_t>& challenge_digest) {
+  if (appid_digest.size() != kAppIdDigestLen ||
+      challenge_digest.size() != kChallengeDigestLen) {
+    return nullptr;
+  }
+
+  auto command = base::MakeUnique<U2fApduCommand>();
+  std::vector<uint8_t> data(challenge_digest.begin(), challenge_digest.end());
+  data.insert(data.end(), appid_digest.begin(), appid_digest.end());
+  command->set_ins(kInsU2fEnroll);
+  command->set_p1(kP1TupRequiredConsumed);
+  command->set_data(data);
+  return command;
+}
+
+// static
+std::unique_ptr<U2fApduCommand> U2fApduCommand::CreateVersion() {
+  auto command = base::MakeUnique<U2fApduCommand>();
+  command->set_ins(kInsU2fVersion);
+  command->set_response_length(kApduMaxResponseLength);
+  return command;
+}
+
+// static
+std::unique_ptr<U2fApduCommand> U2fApduCommand::CreateLegacyVersion() {
+  auto command = base::MakeUnique<U2fApduCommand>();
+  command->set_ins(kInsU2fVersion);
+  command->set_response_length(kApduMaxResponseLength);
+  // Early U2F drafts defined the U2F version command in extended
+  // length ISO 7816-4 format so 2 additional 0x0 bytes are necessary.
+  // https://fidoalliance.org/specs/fido-u2f-v1.1-id-20160915/fido-u2f-raw-message-formats-v1.1-id-20160915.html#implementation-considerations
+  command->set_suffix(std::vector<uint8_t>(2, 0));
+  return command;
+}
+
+// static
+std::unique_ptr<U2fApduCommand> U2fApduCommand::CreateSign(
+    const std::vector<uint8_t>& appid_digest,
+    const std::vector<uint8_t>& challenge_digest,
+    const std::vector<uint8_t>& key_handle) {
+  if (appid_digest.size() != kAppIdDigestLen ||
+      challenge_digest.size() != kChallengeDigestLen ||
+      key_handle.size() > kMaxKeyHandleLength) {
+    return nullptr;
+  }
+
+  auto command = base::MakeUnique<U2fApduCommand>();
+  std::vector<uint8_t> data(challenge_digest.begin(), challenge_digest.end());
+  data.insert(data.end(), appid_digest.begin(), appid_digest.end());
+  data.push_back(static_cast<uint8_t>(key_handle.size()));
+  data.insert(data.end(), key_handle.begin(), key_handle.end());
+  command->set_ins(kInsU2fSign);
+  command->set_p1(kP1TupRequiredConsumed);
+  command->set_data(data);
+  return command;
+}
 
 }  // namespace device

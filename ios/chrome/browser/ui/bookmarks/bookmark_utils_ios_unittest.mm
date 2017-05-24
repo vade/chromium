@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#import "ios/chrome/browser/ui/bookmarks/bookmark_utils_ios.h"
+
 #include <memory>
 #include <vector>
 
@@ -12,8 +14,11 @@
 #include "ios/chrome/browser/experimental_flags.h"
 #include "ios/chrome/browser/ui/bookmarks/bookmark_ios_unittest.h"
 #import "ios/chrome/browser/ui/bookmarks/bookmark_menu_item.h"
-#import "ios/chrome/browser/ui/bookmarks/bookmark_utils_ios.h"
 #include "testing/gtest_mac.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 using bookmarks::BookmarkNode;
 
@@ -178,29 +183,17 @@ TEST_F(BookmarkIOSUtilsUnitTest, TestDefaultMoveFolder) {
 }
 
 TEST_F(BookmarkIOSUtilsUnitTest, TestPositionCache) {
-  // Try to store and retrieve a cache for the allMenuItem.
-  BookmarkMenuItem* item = [BookmarkMenuItem allMenuItem];
-  CGFloat position = 23;
-  bookmark_utils_ios::CachePosition(position, item);
-  CGFloat outPosition;
-  BookmarkMenuItem* outItem;
-  BOOL result = bookmark_utils_ios::GetPositionCache(_bookmarkModel, &outItem,
-                                                     &outPosition);
-  if (experimental_flags::IsAllBookmarksEnabled()) {
-    ASSERT_TRUE(result);
-    EXPECT_NSEQ(item, outItem);
-    EXPECT_NEAR(position, outPosition, 0.01);
-  } else {
-    ASSERT_FALSE(result);
-  }
-
   // Try to store and retrieve a cache for the folderMenuItem.
   const BookmarkNode* mobileNode = _bookmarkModel->mobile_node();
   const BookmarkNode* f1 = AddFolder(mobileNode, @"f1");
-  item = [BookmarkMenuItem folderMenuItemForNode:f1 rootAncestor:NULL];
+  BookmarkMenuItem* item =
+      [BookmarkMenuItem folderMenuItemForNode:f1 rootAncestor:NULL];
+  CGFloat position = 23;
   bookmark_utils_ios::CachePosition(position, item);
-  result = bookmark_utils_ios::GetPositionCache(_bookmarkModel, &outItem,
-                                                &outPosition);
+  BookmarkMenuItem* outItem = nil;
+  CGFloat outPosition;
+  BOOL result = bookmark_utils_ios::GetPositionCache(_bookmarkModel, &outItem,
+                                                     &outPosition);
   ASSERT_TRUE(result);
   EXPECT_NSEQ(item, outItem);
   EXPECT_NEAR(position, outPosition, 0.01);

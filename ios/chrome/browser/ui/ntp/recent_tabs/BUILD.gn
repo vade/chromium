@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 source_set("recent_tabs") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   sources = [
     "recent_tabs_bridges.h",
     "recent_tabs_bridges.mm",
@@ -26,12 +27,15 @@ source_set("recent_tabs") {
     "//components/sync",
     "//ios/chrome/app/strings",
     "//ios/chrome/app/theme",
+    "//ios/chrome/browser",
     "//ios/chrome/browser/browser_state",
     "//ios/chrome/browser/metrics:metrics_internal",
     "//ios/chrome/browser/sessions",
     "//ios/chrome/browser/signin",
     "//ios/chrome/browser/sync",
     "//ios/chrome/browser/ui",
+    "//ios/chrome/browser/ui/authentication:authentication_arc",
+    "//ios/chrome/browser/ui/authentication:authentication_ui",
     "//ios/chrome/browser/ui/commands",
     "//ios/chrome/browser/ui/context_menu",
     "//ios/chrome/browser/ui/ntp",
@@ -49,6 +53,7 @@ source_set("recent_tabs") {
 }
 
 source_set("unit_tests") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
     "recent_tabs_panel_controller_unittest.mm",
@@ -73,6 +78,7 @@ source_set("unit_tests") {
 }
 
 source_set("eg_tests") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
     "recent_tabs_panel_controller_egtest.mm",

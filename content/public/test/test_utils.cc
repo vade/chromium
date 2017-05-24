@@ -10,9 +10,12 @@
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task_scheduler/task_scheduler.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "build/build_config.h"
@@ -32,6 +35,7 @@
 
 #if defined(OS_ANDROID)
 #include "content/browser/android/browser_jni_registrar.h"
+#include "mojo/android/system/mojo_jni_registrar.h"
 #endif
 
 namespace content {
@@ -158,8 +162,16 @@ void RunAllBlockingPoolTasksUntilIdle() {
   while (true) {
     content::BrowserThread::GetBlockingPool()->FlushForTesting();
 
+    // Setup a task observer to determine if MessageLoop tasks run in the
+    // current loop iteration. This must be done before
+    // TaskScheduler::FlushForTesting() since this may spin the MessageLoop.
     TaskObserver task_observer;
     base::MessageLoop::current()->AddTaskObserver(&task_observer);
+
+    // Since all blocking pool call sites are being migrated to TaskScheduler,
+    // flush TaskScheduler in addition to the blocking pool.
+    base::TaskScheduler::GetInstance()->FlushForTesting();
+
     base::RunLoop().RunUntilIdle();
     base::MessageLoop::current()->RemoveTaskObserver(&task_observer);
 
@@ -201,9 +213,11 @@ void ResetSchemesAndOriginsWhitelist() {
 }
 
 #if defined(OS_ANDROID)
-// Registers content/browser JNI bindings necessary for some types of tests.
+// Registers content/browser and mojo JNI bindings necessary for some types of
+// tests.
 bool RegisterJniForTesting(JNIEnv* env) {
-  return content::android::RegisterBrowserJni(env);
+  return mojo::android::RegisterSystemJni(env) &&
+         content::android::RegisterBrowserJni(env);
 }
 #endif
 

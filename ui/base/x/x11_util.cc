@@ -288,7 +288,9 @@ void UnrefCustomXCursor(::Cursor cursor) {
 
 XcursorImage* SkBitmapToXcursorImage(const SkBitmap* cursor_image,
                                      const gfx::Point& hotspot) {
-  DCHECK(cursor_image->colorType() == kN32_SkColorType);
+  // TODO(crbug.com/596782): It is possible for cursor_image to be zeroed out
+  // at this point, which leads to benign debug errors. Once this is fixed, we
+  // should  DCHECK_EQ(cursor_image->colorType(), kN32_SkColorType).
   gfx::Point hotspot_point = hotspot;
   SkBitmap scaled;
 
@@ -317,12 +319,10 @@ XcursorImage* SkBitmapToXcursorImage(const SkBitmap* cursor_image,
   image->yhot = std::min(bitmap->height() - 1, hotspot_point.y());
 
   if (bitmap->width() && bitmap->height()) {
-    bitmap->lockPixels();
     // The |bitmap| contains ARGB image, so just copy it.
     memcpy(image->pixels,
            bitmap->getPixels(),
            bitmap->width() * bitmap->height() * 4);
-    bitmap->unlockPixels();
   }
 
   return image;
@@ -1183,6 +1183,12 @@ std::string GuessWindowManagerName() {
   return "Unknown";
 }
 
+bool IsCompositingManagerPresent() {
+  static bool is_compositing_manager_present =
+      XGetSelectionOwner(gfx::GetXDisplay(), GetAtom("_NET_WM_CM_S0")) != None;
+  return is_compositing_manager_present;
+}
+
 void SetDefaultX11ErrorHandlers() {
   SetX11ErrorHandlers(NULL, NULL);
 }
@@ -1365,8 +1371,6 @@ void LogErrorEventDescription(XDisplay* dpy,
       << " (" << request_str << ")";
 }
 
-#if !defined(OS_CHROMEOS)
-
 // static
 XVisualManager* XVisualManager::GetInstance() {
   return base::Singleton<XVisualManager>::get();
@@ -1421,8 +1425,7 @@ void XVisualManager::ChooseVisualForWindow(bool want_argb_visual,
                                            int* depth,
                                            Colormap* colormap,
                                            bool* using_argb_visual) {
-  bool use_argb = want_argb_visual && using_compositing_wm_ &&
-                  (using_software_rendering_ || have_gpu_argb_visual_);
+  bool use_argb = want_argb_visual && ArgbVisualAvailable();
   VisualID visual_id = use_argb && transparent_visual_id_
                            ? transparent_visual_id_
                            : system_visual_id_;
@@ -1458,6 +1461,11 @@ bool XVisualManager::OnGPUInfoChanged(bool software_rendering,
   return true;
 }
 
+bool XVisualManager::ArgbVisualAvailable() const {
+  return using_compositing_wm_ &&
+         (using_software_rendering_ || have_gpu_argb_visual_);
+}
+
 XVisualManager::XVisualData::XVisualData(XVisualInfo visual_info)
     : visual_info(visual_info), colormap_(CopyFromParent) {}
 
@@ -1474,8 +1482,6 @@ Colormap XVisualManager::XVisualData::GetColormap() {
   }
   return colormap_;
 }
-
-#endif
 
 // ----------------------------------------------------------------------------
 // End of x11_util_internal.h

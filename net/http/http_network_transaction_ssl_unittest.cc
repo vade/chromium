@@ -11,7 +11,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/threading/thread.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "net/base/request_priority.h"
 #include "net/cert/ct_policy_enforcer.h"
 #include "net/cert/mock_cert_verifier.h"
@@ -56,6 +55,8 @@ class TokenBindingSSLConfigService : public SSLConfigService {
 
 class HttpNetworkTransactionSSLTest : public testing::Test {
  protected:
+  HttpNetworkTransactionSSLTest() = default;
+
   void SetUp() override {
     ssl_config_service_ = new TokenBindingSSLConfigService;
     session_params_.ssl_config_service = ssl_config_service_.get();
@@ -100,8 +101,7 @@ class HttpNetworkTransactionSSLTest : public testing::Test {
 
 #if !defined(OS_IOS)
 TEST_F(HttpNetworkTransactionSSLTest, TokenBinding) {
-  ChannelIDService channel_id_service(new DefaultChannelIDStore(NULL),
-                                      base::ThreadTaskRunnerHandle::Get());
+  ChannelIDService channel_id_service(new DefaultChannelIDStore(NULL));
   session_params_.channel_id_service = &channel_id_service;
 
   SSLSocketDataProvider ssl_data(ASYNC, OK);
@@ -150,8 +150,7 @@ TEST_F(HttpNetworkTransactionSSLTest, TokenBinding) {
 }
 
 TEST_F(HttpNetworkTransactionSSLTest, NoTokenBindingOverHttp) {
-  ChannelIDService channel_id_service(new DefaultChannelIDStore(NULL),
-                                      base::ThreadTaskRunnerHandle::Get());
+  ChannelIDService channel_id_service(new DefaultChannelIDStore(NULL));
   session_params_.channel_id_service = &channel_id_service;
 
   SSLSocketDataProvider ssl_data(ASYNC, OK);
@@ -187,8 +186,8 @@ TEST_F(HttpNetworkTransactionSSLTest, TokenBindingAsync) {
   channel_id_thread.Start();
   scoped_refptr<base::DeferredSequencedTaskRunner> channel_id_runner =
       new base::DeferredSequencedTaskRunner(channel_id_thread.task_runner());
-  ChannelIDService channel_id_service(new DefaultChannelIDStore(nullptr),
-                                      channel_id_runner);
+  ChannelIDService channel_id_service(new DefaultChannelIDStore(nullptr));
+  channel_id_service.set_task_runner_for_testing(channel_id_runner);
   session_params_.channel_id_service = &channel_id_service;
 
   SSLSocketDataProvider ssl_data(ASYNC, OK);

@@ -17,11 +17,13 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/chromeos/login/screens/network_error_model.h"
+#include "base/scoped_observer.h"
+#include "chrome/browser/chromeos/lock_screen_apps/state_observer.h"
+#include "chrome/browser/chromeos/login/screens/error_screen.h"
 #include "chrome/browser/chromeos/login/signin_specifics.h"
 #include "chrome/browser/chromeos/login/ui/login_display.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
+#include "chrome/browser/ui/webui/chromeos/login/base_webui_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chromeos/dbus/power_manager_client.h"
@@ -39,14 +41,24 @@
 
 class AccountId;
 
+namespace ash {
+namespace mojom {
+enum class TrayActionState;
+}
+}
+
 namespace base {
 class DictionaryValue;
 class ListValue;
 }
 
+namespace lock_screen_apps {
+class StateController;
+}
+
 namespace chromeos {
 
-class CoreOobeActor;
+class CoreOobeView;
 class ErrorScreensHistogramHelper;
 class GaiaScreenHandler;
 class LoginFeedback;
@@ -161,6 +173,12 @@ class SigninScreenHandlerDelegate {
   // user's displayed email value will be updated to |email|.
   virtual void SetDisplayEmail(const std::string& email) = 0;
 
+  // Sets the displayed name and given name for the next login attempt. If it
+  // succeeds, user's displayed name and give name values will be updated to
+  // |display_name| and |given_name|.
+  virtual void SetDisplayAndGivenName(const std::string& display_name,
+                                      const std::string& given_name) = 0;
+
   // --------------- Rest of the methods.
   // Cancels user adding.
   virtual void CancelUserAdding() = 0;
@@ -212,26 +230,28 @@ class SigninScreenHandlerDelegate {
 // A class that handles the WebUI hooks in sign-in screen in OobeUI and
 // LoginDisplay.
 class SigninScreenHandler
-    : public BaseScreenHandler,
+    : public BaseWebUIHandler,
       public LoginDisplayWebUIHandler,
       public content::NotificationObserver,
       public NetworkStateInformer::NetworkStateInformerObserver,
       public PowerManagerClient::Observer,
       public input_method::ImeKeyboard::Observer,
       public ash::mojom::TouchViewObserver,
+      public lock_screen_apps::StateObserver,
       public OobeUI::Observer {
  public:
   SigninScreenHandler(
       const scoped_refptr<NetworkStateInformer>& network_state_informer,
-      NetworkErrorModel* network_error_model,
-      CoreOobeActor* core_oobe_actor,
-      GaiaScreenHandler* gaia_screen_handler);
+      ErrorScreen* error_screen,
+      CoreOobeView* core_oobe_view,
+      GaiaScreenHandler* gaia_screen_handler,
+      JSCallsContainer* js_calls_container);
   ~SigninScreenHandler() override;
 
-  static std::string GetUserLRUInputMethod(const std::string& username);
+  static std::string GetUserLastInputMethod(const std::string& username);
 
   // Update current input method (namely keyboard layout) in the given IME state
-  // to LRU by this user.
+  // to last input method used by this user.
   static void SetUserInputMethod(
       const std::string& username,
       input_method::InputMethodManager::State* ime_state);
@@ -263,6 +283,10 @@ class SigninScreenHandler
   // This method reduces the threshold to zero, allowing the offline message to
   // show instantaneously in tests.
   void ZeroOfflineTimeoutForTesting();
+
+  // Gets the keyboard remapped pref value for |pref_name| key. Returns true if
+  // successful, otherwise returns false.
+  bool GetKeyboardRemappedPrefValue(const std::string& pref_name, int* value);
 
  private:
   enum UIState {
@@ -331,13 +355,16 @@ class SigninScreenHandler
   // ash::mojom::TouchView:
   void OnTouchViewToggled(bool enabled) override;
 
+  // lock_screen_apps::StateObserver:
+  void OnLockScreenNoteStateChanged(ash::mojom::TrayActionState state) override;
+
   void UpdateAddButtonStatus();
 
   // Restore input focus to current user pod.
   void RefocusCurrentPod();
 
-  // Hides the PIN keyboard if it is no longer available.
-  void HidePinKeyboardIfNeeded(const AccountId& account_id);
+  // Enable or disable the pin keyboard for the given account.
+  void UpdatePinKeyboardState(const AccountId& account_id);
 
   // WebUI message handlers.
   void HandleGetUsers();
@@ -376,6 +403,7 @@ class SigninScreenHandler
   void HandleShowLoadingTimeoutError();
   void HandleShowSupervisedUserCreationScreen();
   void HandleFocusPod(const AccountId& account_id);
+  void HandleNoPodFocused();
   void HandleHardlockPod(const std::string& user_id);
   void HandleLaunchKioskApp(const AccountId& app_account_id,
                             bool diagnostic_mode);
@@ -387,6 +415,7 @@ class SigninScreenHandler
   void HandleFirstIncorrectPasswordAttempt(const AccountId& account_id);
   void HandleMaxIncorrectPasswordAttempts(const AccountId& account_id);
   void HandleSendFeedbackAndResyncUserData();
+  void HandleSetLockScreenAppsState(const std::string& state);
 
   // Sends the list of |keyboard_layouts| available for the |locale| that is
   // currently selected for the public session identified by |user_id|.
@@ -431,6 +460,12 @@ class SigninScreenHandler
   // Callback invoked after the feedback is finished.
   void OnFeedbackFinished();
 
+  // Called when the cros property controlling allowed input methods changes.
+  void OnAllowedInputMethodsChanged();
+
+  // Update the keyboard settings for |account_id|.
+  void SetKeyboardSettings(const AccountId& account_id);
+
   // Current UI state of the signin screen.
   UIState ui_state_ = UI_STATE_UNKNOWN;
 
@@ -456,8 +491,8 @@ class SigninScreenHandler
   bool webui_visible_ = false;
   bool preferences_changed_delayed_ = false;
 
-  NetworkErrorModel* network_error_model_;
-  CoreOobeActor* core_oobe_actor_;
+  ErrorScreen* error_screen_ = nullptr;
+  CoreOobeView* core_oobe_view_ = nullptr;
 
   NetworkStateInformer::State last_network_state_ =
       NetworkStateInformer::UNKNOWN;
@@ -466,6 +501,9 @@ class SigninScreenHandler
   base::CancelableClosure connecting_closure_;
 
   content::NotificationRegistrar registrar_;
+
+  std::unique_ptr<CrosSettings::ObserverSubscription>
+      allowed_input_methods_subscription_;
 
   // Whether there is an auth UI pending. This flag is set on receiving
   // NOTIFICATION_AUTH_NEEDED and reset on either NOTIFICATION_AUTH_SUPPLIED or
@@ -510,6 +548,12 @@ class SigninScreenHandler
   std::unique_ptr<ErrorScreensHistogramHelper> histogram_helper_;
 
   std::unique_ptr<LoginFeedback> login_feedback_;
+
+  std::unique_ptr<AccountId> focused_pod_account_id_;
+
+  ScopedObserver<lock_screen_apps::StateController,
+                 lock_screen_apps::StateObserver>
+      lock_screen_apps_observer_;
 
   base::WeakPtrFactory<SigninScreenHandler> weak_factory_;
 

@@ -1,19 +1,19 @@
 <link rel="import" href="chrome://resources/html/i18n_behavior.html">
 <link rel="import" href="chrome://resources/html/polymer.html">
 <link rel="import" href="chrome://resources/html/web_ui_listener_behavior.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/iron-a11y-keys/iron-a11y-keys.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/iron-flex-layout/iron-flex-layout-classes.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-button/paper-button.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-toggle-button/paper-toggle-button.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-input/paper-input.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-radio-button/paper-radio-button.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-radio-group/paper-radio-group.html">
-<link rel="import" href="/people_page/sync_browser_proxy.html">
-<link rel="import" href="/route.html">
-<link rel="import" href="/settings_shared_css.html">
+<link rel="import" href="sync_browser_proxy.html">
+<link rel="import" href="../route.html">
+<link rel="import" href="../settings_shared_css.html">
 
 <dom-module id="settings-sync-page">
   <template>
-    <style include="settings-shared">
+    <style include="settings-shared iron-flex">
       #create-password-box,
       #reset-sync-message-box {
         /* In order to line up with the encryption radio box text. */
@@ -32,9 +32,15 @@
         margin-top: 20px;
       }
 
+      #existingPassphrase {
+        /* This particular list frame is not indented. */
+        -webkit-padding-start: var(--settings-box-row-padding);
+        border-bottom: var(--settings-separator-line);
+      }
+
       #existingPassphraseContainer,
       #passphraseRecoverHint {
-        align-items: flex-end;
+        align-items: center;
       }
 
       #existingPassphraseInput {
@@ -43,6 +49,8 @@
         display: inline-block;
         --paper-input-container: {
           padding: 0;
+          /* TODO(scottchen): remove margin once large font properly padded. */
+          margin-bottom: 1rem;
         };
       }
 
@@ -50,114 +58,171 @@
         border-top: var(--settings-separator-line);
       }
     </style>
-    <div id="[[pages.SPINNER]]" class="settings-box first"
-        hidden$="[[!isStatus_(pages.SPINNER, pageStatus_)]]">
+    <div id="[[pages_.SPINNER]]" class="settings-box first"
+        hidden$="[[!isStatus_(pages_.SPINNER, pageStatus_)]]">
       $i18n{syncLoading}
     </div>
-    <div id="[[pages.TIMEOUT]]" class="settings-box first"
-        hidden$="[[!isStatus_(pages.TIMEOUT, pageStatus_)]]">
+    <div id="[[pages_.TIMEOUT]]" class="settings-box first"
+        hidden$="[[!isStatus_(pages_.TIMEOUT, pageStatus_)]]">
       $i18n{syncTimeout}
     </div>
-    <div id="[[pages.CONFIGURE]]"
-        hidden$="[[!isStatus_(pages.CONFIGURE, pageStatus_)]]">
+    <div id="[[pages_.CONFIGURE]]"
+        hidden$="[[!isStatus_(pages_.CONFIGURE, pageStatus_)]]">
+      <template is="dom-if" if="[[syncPrefs.passphraseRequired]]">
+        <div id="existingPassphrase" class="list-frame">
+          <div class="list-item">
+            <span>
+              [[enterPassphrasePrompt_(syncPrefs.passphraseTypeIsCustom)]]
+              <a href="$i18nRaw{syncErrorHelpUrl}" target="_blank">
+                $i18n{learnMore}
+              </a>
+            </span>
+          </div>
+          <div id="existingPassphraseContainer" class="list-item">
+            <paper-input id="existingPassphraseInput" type="password"
+                value="{{existingPassphrase_}}"
+                placeholder="$i18n{passphrasePlaceholder}"
+                error-message="$i18n{incorrectPassphraseError}"
+                on-keypress="onSubmitExistingPassphraseTap_">
+            </paper-input>
+            <paper-button id="submitExistingPassphrase"
+                on-tap="onSubmitExistingPassphraseTap_" class="action-button"
+                disabled="[[!existingPassphrase_]]">
+              $i18n{submitPassphraseButton}
+            </paper-button>
+          </div>
+          <div id="passphraseRecoverHint" class="list-item">
+            <span>$i18nRaw{passphraseRecover}</span>
+          </div>
+        </div>
+      </template>
+
       <div class="settings-box first">
-        <div class="start">$i18n{syncEverythingCheckboxLabel}</div>
+        <div id="syncEverythingCheckboxLabel" class="start">
+          $i18n{syncEverythingCheckboxLabel}
+        </div>
         <paper-toggle-button id="syncAllDataTypesControl"
             checked="{{syncPrefs.syncAllDataTypes}}"
-            on-change="onSyncAllDataTypesChanged_">
+            on-change="onSyncAllDataTypesChanged_"
+            aria-labelledby="syncEverythingCheckboxLabel">
         </paper-toggle-button>
       </div>
 
       <div class="list-frame" id="sync-data-types">
         <div class="layout horizontal list-item"
             hidden="[[!syncPrefs.appsRegistered]]">
-          <div class="flex">$i18n{appCheckboxLabel}</div>
+          <div id="appCheckboxLabel" class="flex">$i18n{appCheckboxLabel}</div>
           <paper-toggle-button checked="{{syncPrefs.appsSynced}}"
               on-change="onSingleSyncDataTypeChanged_"
               disabled="[[shouldSyncCheckboxBeDisabled_(
-                  syncPrefs.syncAllDataTypes, syncPrefs.appsEnforced)]]">
+                  syncPrefs.syncAllDataTypes, syncPrefs.appsEnforced)]]"
+              aria-labelledby="appCheckboxLabel">
           </paper-toggle-button>
         </div>
 
         <div class="layout horizontal list-item"
             hidden="[[!syncPrefs.autofillRegistered]]">
-          <div class="flex">$i18n{autofillCheckboxLabel}</div>
+          <div id="autofillCheckboxLabel" class="flex">
+            $i18n{autofillCheckboxLabel}
+          </div>
           <!-- Autofill has a special on-change handler to deal with
                Payments integriation. -->
           <paper-toggle-button checked="{{syncPrefs.autofillSynced}}"
               on-change="onAutofillDataTypeChanged_"
               disabled="[[shouldSyncCheckboxBeDisabled_(
-                  syncPrefs.syncAllDataTypes, syncPrefs.autofillEnforced)]]">
+                  syncPrefs.syncAllDataTypes, syncPrefs.autofillEnforced)]]"
+              aria-labelledby="autofillCheckboxLabel">
           </paper-toggle-button>
         </div>
 
         <div class="layout horizontal list-item"
             hidden="[[!syncPrefs.bookmarksRegistered]]">
-          <div class="flex">$i18n{bookmarksCheckboxLabel}</div>
+          <div id="bookmarksCheckboxLabel" class="flex">
+            $i18n{bookmarksCheckboxLabel}
+          </div>
           <paper-toggle-button checked="{{syncPrefs.bookmarksSynced}}"
               on-change="onSingleSyncDataTypeChanged_"
               disabled="[[shouldSyncCheckboxBeDisabled_(
-                  syncPrefs.syncAllDataTypes, syncPrefs.bookmarksEnforced)]]">
+                  syncPrefs.syncAllDataTypes, syncPrefs.bookmarksEnforced)]]"
+              aria-labelledby="bookmarksCheckboxLabel">
           </paper-toggle-button>
         </div>
 
         <div class="layout horizontal list-item"
             hidden="[[!syncPrefs.extensionsRegistered]]">
-          <div class="flex">$i18n{extensionsCheckboxLabel}</div>
+          <div id="extensionsCheckboxLabel" class="flex">
+            $i18n{extensionsCheckboxLabel}
+          </div>
           <paper-toggle-button checked="{{syncPrefs.extensionsSynced}}"
               on-change="onSingleSyncDataTypeChanged_"
               disabled="[[shouldSyncCheckboxBeDisabled_(
-                  syncPrefs.syncAllDataTypes, syncPrefs.extensionsEnforced)]]">
+                  syncPrefs.syncAllDataTypes, syncPrefs.extensionsEnforced)]]"
+              aria-labelledby="extensionsCheckboxLabel">
           </paper-toggle-button>
         </div>
 
         <div class="layout horizontal list-item"
             hidden="[[!syncPrefs.typedUrlsRegistered]]">
-          <div class="flex">$i18n{historyCheckboxLabel}</div>
+          <div id="historyCheckboxLabel" class="flex">
+            $i18n{historyCheckboxLabel}
+          </div>
           <paper-toggle-button checked="{{syncPrefs.typedUrlsSynced}}"
               on-change="onSingleSyncDataTypeChanged_"
               disabled="[[shouldSyncCheckboxBeDisabled_(
-                  syncPrefs.syncAllDataTypes, syncPrefs.typedUrlsEnforced)]]">
+                  syncPrefs.syncAllDataTypes, syncPrefs.typedUrlsEnforced)]]"
+              aria-labelledby="historyCheckboxLabel">
           </paper-toggle-button>
         </div>
 
         <div class="layout horizontal list-item"
             hidden="[[!syncPrefs.passwordsRegistered]]">
-          <div class="flex">$i18n{passwordsCheckboxLabel}</div>
+          <div id="passwordsCheckboxLabel" class="flex">
+            $i18n{passwordsCheckboxLabel}
+          </div>
           <paper-toggle-button checked="{{syncPrefs.passwordsSynced}}"
               on-change="onSingleSyncDataTypeChanged_"
               disabled="[[shouldSyncCheckboxBeDisabled_(
-                  syncPrefs.syncAllDataTypes, syncPrefs.passwordsEnforced)]]">
+                  syncPrefs.syncAllDataTypes, syncPrefs.passwordsEnforced)]]"
+              aria-labelledby="passwordsCheckboxLabel">
           </paper-toggle-button>
         </div>
 
         <div class="layout horizontal list-item"
             hidden="[[!syncPrefs.preferencesRegistered]]">
-          <div class="flex">$i18n{settingsCheckboxLabel}</div>
+          <div id="settingsCheckboxLabel" class="flex">
+            $i18n{settingsCheckboxLabel}
+          </div>
           <paper-toggle-button checked="{{syncPrefs.preferencesSynced}}"
               on-change="onSingleSyncDataTypeChanged_"
               disabled="[[shouldSyncCheckboxBeDisabled_(
-                  syncPrefs.syncAllDataTypes, syncPrefs.preferencesEnforced)]]">
+                  syncPrefs.syncAllDataTypes, syncPrefs.preferencesEnforced)]]"
+              aria-labelledby="settingsCheckboxLabel">
           </paper-toggle-button>
         </div>
 
         <div class="layout horizontal list-item"
             hidden="[[!syncPrefs.themesRegistered]]">
-          <div class="flex">$i18n{themesAndWallpapersCheckboxLabel}</div>
+          <div id="themesAndWallpapersCheckboxLabel" class="flex">
+            $i18n{themesAndWallpapersCheckboxLabel}
+          </div>
           <paper-toggle-button checked="{{syncPrefs.themesSynced}}"
               on-change="onSingleSyncDataTypeChanged_"
               disabled="[[shouldSyncCheckboxBeDisabled_(
-                  syncPrefs.syncAllDataTypes, syncPrefs.themesEnforced)]]">
+                  syncPrefs.syncAllDataTypes, syncPrefs.themesEnforced)]]"
+              aria-labelledby="themesAndWallpapersCheckboxLabel">
           </paper-toggle-button>
         </div>
 
         <div class="layout horizontal list-item"
             hidden="[[!syncPrefs.tabsRegistered]]">
-          <div class="flex">$i18n{openTabsCheckboxLabel}</div>
+          <div id="openTabsCheckboxLabel" class="flex">
+            $i18n{openTabsCheckboxLabel}
+          </div>
           <paper-toggle-button checked="{{syncPrefs.tabsSynced}}"
               on-change="onSingleSyncDataTypeChanged_"
               disabled="[[shouldSyncCheckboxBeDisabled_(
-                  syncPrefs.syncAllDataTypes, syncPrefs.tabsEnforced)]]">
+                  syncPrefs.syncAllDataTypes, syncPrefs.tabsEnforced)]]"
+              aria-labelledby="openTabsCheckboxLabel">
           </paper-toggle-button>
         </div>
 
@@ -176,28 +241,44 @@
               checked="{{syncPrefs.paymentsIntegrationEnabled}}"
               on-change="onSingleSyncDataTypeChanged_"
               disabled="[[shouldPaymentsCheckboxBeDisabled_(
-                  syncPrefs.syncAllDataTypes, syncPrefs.autofillSynced)]]">
+                  syncPrefs.syncAllDataTypes, syncPrefs.autofillSynced)]]"
+              aria-label="$i18n{enablePaymentsIntegrationCheckboxLabel}">
           </paper-toggle-button>
         </div>
       </div>
 
-      <div class="settings-box two-line" actionable
-          on-tap="onManageSyncedDataTap_">
+      <a class="settings-box two-line inherit-color no-outline" tabindex="-1"
+          target="_blank" href="$i18n{activityControlsUrl}"
+          on-tap="onActivityControlsTap_">
+        <div class="start">
+          $i18n{personalizeGoogleServicesTitle}
+          <div class="secondary" id="activityControlsSecondary">
+            $i18n{personalizeGoogleServicesText}
+          </div>
+        </div>
+        <button class="icon-external" is="paper-icon-button-light"
+            actionable aria-label="$i18n{personalizeGoogleServicesTitle}"
+            aria-describedby="activityControlsSecondary"></button>
+      </a>
+
+      <a class="settings-box inherit-color no-outline" tabindex="-1"
+          target="_blank" href="$i18n{syncDashboardUrl}">
         <div class="start">
           $i18n{manageSyncedDataTitle}
-          <div class="secondary">$i18n{manageSyncedDataDescription}</div>
         </div>
-        <button class="icon-external" is="paper-icon-button-light"></button>
-      </div>
+        <button class="icon-external" is="paper-icon-button-light" actionable
+            aria-label="$i18n{manageSyncedDataTitle}"></button>
+      </a>
 
-      <div class="settings-box two-line single-column">
+      <div id="encryptionDescription" hidden="[[syncPrefs.passphraseRequired]]"
+          class="settings-box two-line single-column">
         <div>$i18n{encryptionOptionsTitle}</div>
         <div class="secondary">$i18n{syncDataEncryptedText}</div>
       </div>
 
       <div id="encryptionRadioGroupContainer" class="list-frame"
           hidden="[[syncPrefs.passphraseRequired]]">
-        <paper-radio-group
+        <paper-radio-group disabled$="[[syncPrefs.encryptAllData]]"
             selected="[[selectedEncryptionRadio_(
                 syncPrefs.passphraseTypeIsCustom)]]"
             on-paper-radio-group-changed="onEncryptionRadioSelectionChanged_">
@@ -225,13 +306,10 @@
 
       <template is="dom-if" if="[[creatingNewPassphrase_]]">
         <div class="list-frame">
-          <div id="create-password-box">
+          <div id="create-password-box" on-keypress="onSaveNewPassphraseTap_">
             <div class="list-item">
               <span>$i18nRaw{passphraseExplanationText}</span>
             </div>
-            <iron-a11y-keys id="keys" keys="enter"
-                on-keys-pressed="onSaveNewPassphraseTap_">
-            </iron-a11y-keys>
             <paper-input id="passphraseInput" type="password"
                 value="{{passphrase_}}"
                 placeholder="$i18n{passphrasePlaceholder}"
@@ -248,37 +326,6 @@
                                                          confirmation_)]]">
               $i18n{save}
             </paper-button>
-          </div>
-        </div>
-      </template>
-
-      <template is="dom-if" if="[[syncPrefs.passphraseRequired]]">
-        <div class="list-frame">
-          <div class="list-item">
-            <span>
-              [[enterPassphrasePrompt_(syncPrefs.passphraseTypeIsCustom)]]
-              <a href="$i18nRaw{syncErrorHelpUrl}" target="_blank">
-                $i18n{learnMore}
-              </a>
-            </span>
-          </div>
-          <div id="existingPassphraseContainer" class="list-item">
-            <paper-input id="existingPassphraseInput" type="password"
-                value="{{existingPassphrase_}}"
-                placeholder="$i18n{passphrasePlaceholder}"
-                error-message="$i18n{incorrectPassphraseError}">
-              <iron-a11y-keys id="keys" keys="enter"
-                  on-keys-pressed="onSubmitExistingPassphraseTap_">
-              </iron-a11y-keys>
-            </paper-input>
-            <paper-button id="submitExistingPassphrase"
-                on-tap="onSubmitExistingPassphraseTap_" class="action-button"
-                disabled="[[!existingPassphrase_]]">
-              $i18n{submitPassphraseButton}
-            </paper-button>
-          </div>
-          <div id="passphraseRecoverHint" class="list-item">
-            <span>$i18nRaw{passphraseRecover}</span>
           </div>
         </div>
       </template>

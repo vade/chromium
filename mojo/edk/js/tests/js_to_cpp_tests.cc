@@ -12,9 +12,9 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "gin/array_buffer.h"
 #include "gin/public/isolate_holder.h"
@@ -25,6 +25,7 @@
 #include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/cpp/bindings/lib/validation_errors.h"
 #include "mojo/public/cpp/system/core.h"
+#include "mojo/public/cpp/system/wait.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace mojo {
@@ -76,9 +77,7 @@ void CheckDataPipe(ScopedDataPipeConsumerHandle data_pipe_handle) {
 void CheckMessagePipe(MessagePipeHandle message_pipe_handle) {
   unsigned char buffer[100];
   uint32_t buffer_size = static_cast<uint32_t>(sizeof(buffer));
-  MojoResult result = Wait(
-      message_pipe_handle, MOJO_HANDLE_SIGNAL_READABLE,
-      MOJO_DEADLINE_INDEFINITE, nullptr);
+  MojoResult result = Wait(message_pipe_handle, MOJO_HANDLE_SIGNAL_READABLE);
   EXPECT_EQ(MOJO_RESULT_OK, result);
   result = ReadMessageRaw(
       message_pipe_handle, buffer, &buffer_size, 0, 0, 0);
@@ -240,7 +239,9 @@ class CppSideConnection : public js_to_cpp::CppSide {
     mishandled_messages_ += 1;
   }
 
-  void BitFlipResponse(js_to_cpp::EchoArgsListPtr list) override {
+  void BitFlipResponse(
+      js_to_cpp::EchoArgsListPtr list,
+      js_to_cpp::ForTestingAssociatedPtrInfo not_used) override {
     mishandled_messages_ += 1;
   }
 
@@ -333,7 +334,9 @@ class BitFlipCppSideConnection : public CppSideConnection {
   // js_to_cpp::CppSide:
   void StartTest() override { js_side_->BitFlip(BuildSampleEchoArgs()); }
 
-  void BitFlipResponse(js_to_cpp::EchoArgsListPtr list) override {
+  void BitFlipResponse(
+      js_to_cpp::EchoArgsListPtr list,
+      js_to_cpp::ForTestingAssociatedPtrInfo not_used) override {
     CheckCorruptedEchoArgsList(list);
   }
 
@@ -415,7 +418,7 @@ class JsToCppTest : public testing::Test {
 
  private:
   base::ShadowingAtExitManager at_exit_;
-  base::MessageLoop loop;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   base::RunLoop run_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(JsToCppTest);

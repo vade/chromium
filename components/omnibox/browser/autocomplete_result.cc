@@ -9,6 +9,7 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/metrics/proto/omnibox_input_type.pb.h"
@@ -21,7 +22,14 @@
 #include "components/url_formatter/url_fixer.h"
 
 // static
-const size_t AutocompleteResult::kMaxMatches = 6;
+size_t AutocompleteResult::GetMaxMatches() {
+  constexpr size_t kDefaultMaxAutocompleteMatches = 6;
+
+  return base::GetFieldTrialParamByFeatureAsInt(
+      omnibox::kUIExperimentMaxAutocompleteMatches,
+      OmniboxFieldTrial::kUIMaxAutocompleteMatchesParam,
+      kDefaultMaxAutocompleteMatches);
+}
 
 void AutocompleteResult::Selection::Clear() {
   destination_url = GURL();
@@ -31,7 +39,7 @@ void AutocompleteResult::Selection::Clear() {
 
 AutocompleteResult::AutocompleteResult() {
   // Reserve space for the max number of matches we'll show.
-  matches_.reserve(kMaxMatches);
+  matches_.reserve(GetMaxMatches());
 
   // It's probably safe to do this in the initializer list, but there's little
   // penalty to doing it here and it ensures our object is fully constructed
@@ -94,7 +102,7 @@ void AutocompleteResult::AppendMatches(const AutocompleteInput& input,
     matches_.push_back(i);
     if (!AutocompleteMatch::IsSearchType(i.type)) {
       const OmniboxFieldTrial::EmphasizeTitlesCondition condition(
-          OmniboxFieldTrial::GetEmphasizeTitlesConditionForInput(input.type()));
+          OmniboxFieldTrial::GetEmphasizeTitlesConditionForInput(input));
       bool emphasize = false;
       switch (condition) {
         case OmniboxFieldTrial::EMPHASIZE_WHEN_NONEMPTY:
@@ -129,22 +137,16 @@ void AutocompleteResult::SortAndCull(
 
   SortAndDedupMatches(input.current_page_classification(), &matches_);
 
-  // Sort and trim to the most relevant kMaxMatches matches.
-  size_t max_num_matches = std::min(kMaxMatches, matches_.size());
+  // Sort and trim to the most relevant GetMaxMatches() matches.
+  size_t max_num_matches = std::min(GetMaxMatches(), matches_.size());
   CompareWithDemoteByType<AutocompleteMatch> comparing_object(
       input.current_page_classification());
   std::sort(matches_.begin(), matches_.end(), comparing_object);
-  if (!matches_.empty() && !matches_.begin()->allowed_to_be_default_match) {
-    // Top match is not allowed to be the default match.  Find the most
-    // relevant legal match and shift it to the front.
-    for (AutocompleteResult::iterator it = matches_.begin() + 1;
-         it != matches_.end(); ++it) {
-      if (it->allowed_to_be_default_match) {
-        std::rotate(matches_.begin(), it, it + 1);
-        break;
-      }
-    }
-  }
+  // Top match is not allowed to be the default match.  Find the most
+  // relevant legal match and shift it to the front.
+  ACMatches::iterator it = FindTopMatch(&matches_);
+  if (it != matches_.end())
+    std::rotate(matches_.begin(), it, it + 1);
   // In the process of trimming, drop all matches with a demoted relevance
   // score of 0.
   size_t num_matches;
@@ -257,6 +259,23 @@ bool AutocompleteResult::TopMatchIsStandaloneVerbatimMatch() const {
       return !i->IsVerbatimType();
   }
   return true;
+}
+
+// static
+ACMatches::const_iterator AutocompleteResult::FindTopMatch(
+    const ACMatches& matches) {
+  ACMatches::const_iterator it = matches.begin();
+  while ((it != matches.end()) && !it->allowed_to_be_default_match)
+    ++it;
+  return it;
+}
+
+// static
+ACMatches::iterator AutocompleteResult::FindTopMatch(ACMatches* matches) {
+  ACMatches::iterator it = matches->begin();
+  while ((it != matches->end()) && !it->allowed_to_be_default_match)
+    ++it;
+  return it;
 }
 
 void AutocompleteResult::Reset() {

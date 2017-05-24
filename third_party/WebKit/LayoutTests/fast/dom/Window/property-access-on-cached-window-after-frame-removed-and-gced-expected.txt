@@ -1,4 +1,4 @@
-CONSOLE WARNING: line 101: 'window.webkitStorageInfo' is deprecated. Please use 'navigator.webkitTemporaryStorage' or 'navigator.webkitPersistentStorage' instead.
+CONSOLE WARNING: line 107: 'window.webkitStorageInfo' is deprecated. Please use 'navigator.webkitTemporaryStorage' or 'navigator.webkitPersistentStorage' instead.
 Tests property access on a cached DOMWindow after the associated frame is removed from a web page and garbage collected. Test should not crash and properties should be set to sane defaults.
 
 On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -52,7 +52,6 @@ PASS childWindow.onclose is null
 PASS childWindow.oncontextmenu is null
 PASS childWindow.oncuechange is null
 PASS childWindow.ondblclick is null
-PASS childWindow.ondevicelight is null
 PASS childWindow.ondevicemotion is null
 PASS childWindow.ondeviceorientation is null
 PASS childWindow.ondeviceorientationabsolute is null
@@ -82,6 +81,7 @@ PASS childWindow.onloadedmetadata is null
 PASS childWindow.onloadstart is null
 PASS childWindow.onlostpointercapture is null
 PASS childWindow.onmessage is null
+PASS childWindow.onmessageerror is null
 PASS childWindow.onmousedown is null
 PASS childWindow.onmouseenter is null
 PASS childWindow.onmouseleave is null
@@ -138,6 +138,7 @@ PASS childWindow.onwebkitanimationstart is null
 PASS childWindow.onwebkittransitionend is null
 PASS childWindow.onwheel is null
 PASS childWindow.opener is null
+PASS childWindow.origin is 'file://'
 PASS childWindow.outerHeight is 0
 PASS childWindow.outerWidth is 0
 PASS childWindow.pageXOffset is 0

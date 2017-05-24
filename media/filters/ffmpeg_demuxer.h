@@ -32,7 +32,9 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/threading/thread.h"
+#include "base/memory/weak_ptr.h"
+#include "base/sequenced_task_runner.h"
+#include "base/single_thread_task_runner.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/decoder_buffer_queue.h"
@@ -59,17 +61,16 @@ class FFmpegGlue;
 
 typedef std::unique_ptr<AVPacket, ScopedPtrAVFreePacket> ScopedAVPacket;
 
-class FFmpegDemuxerStream : public DemuxerStream {
+class MEDIA_EXPORT FFmpegDemuxerStream : public DemuxerStream {
  public:
   // Attempts to create FFmpegDemuxerStream form the given AVStream. Will return
   // null if the AVStream cannot be translated into a valid decoder config.
   //
   // FFmpegDemuxerStream keeps a copy of |demuxer| and initializes itself using
   // information inside |stream|. Both parameters must outlive |this|.
-  static std::unique_ptr<FFmpegDemuxerStream> Create(
-      FFmpegDemuxer* demuxer,
-      AVStream* stream,
-      const scoped_refptr<MediaLog>& media_log);
+  static std::unique_ptr<FFmpegDemuxerStream> Create(FFmpegDemuxer* demuxer,
+                                                     AVStream* stream,
+                                                     MediaLog* media_log);
 
   ~FFmpegDemuxerStream() override;
 
@@ -114,18 +115,16 @@ class FFmpegDemuxerStream : public DemuxerStream {
   AudioDecoderConfig audio_decoder_config() override;
   VideoDecoderConfig video_decoder_config() override;
   VideoRotation video_rotation() override;
-  bool enabled() const override;
-  void set_enabled(bool enabled, base::TimeDelta timestamp) override;
-  void SetStreamStatusChangeCB(const StreamStatusChangeCB& cb) override;
+
+  bool IsEnabled() const;
+  void SetEnabled(bool enabled, base::TimeDelta timestamp);
+
+  void SetStreamStatusChangeCB(const StreamStatusChangeCB& cb);
 
   void SetLiveness(Liveness liveness);
 
   // Returns the range of buffered data in this stream.
   Ranges<base::TimeDelta> GetBufferedRanges() const;
-
-  // Returns elapsed time based on the already queued packets.
-  // Used to determine stream duration when it's not known ahead of time.
-  base::TimeDelta GetElapsedTime() const;
 
   // Returns true if this stream has capacity for additional data.
   bool HasAvailableCapacity();
@@ -154,7 +153,8 @@ class FFmpegDemuxerStream : public DemuxerStream {
   FFmpegDemuxerStream(FFmpegDemuxer* demuxer,
                       AVStream* stream,
                       std::unique_ptr<AudioDecoderConfig> audio_config,
-                      std::unique_ptr<VideoDecoderConfig> video_config);
+                      std::unique_ptr<VideoDecoderConfig> video_config,
+                      MediaLog* media_log);
 
   // Runs |read_cb_| if present with the front of |buffer_queue_|, calling
   // NotifyCapacityAvailable() if capacity is still available.
@@ -176,6 +176,7 @@ class FFmpegDemuxerStream : public DemuxerStream {
   base::TimeDelta start_time_;
   std::unique_ptr<AudioDecoderConfig> audio_config_;
   std::unique_ptr<VideoDecoderConfig> video_config_;
+  MediaLog* media_log_;
   Type type_;
   Liveness liveness_;
   base::TimeDelta duration_;
@@ -208,7 +209,7 @@ class MEDIA_EXPORT FFmpegDemuxer : public Demuxer {
                 DataSource* data_source,
                 const EncryptedMediaInitDataCB& encrypted_media_init_data_cb,
                 const MediaTracksUpdatedCB& media_tracks_updated_cb,
-                const scoped_refptr<MediaLog>& media_log);
+                MediaLog* media_log);
   ~FFmpegDemuxer() override;
 
   // Demuxer implementation.
@@ -222,7 +223,8 @@ class MEDIA_EXPORT FFmpegDemuxer : public Demuxer {
   void CancelPendingSeek(base::TimeDelta seek_time) override;
   void Seek(base::TimeDelta time, const PipelineStatusCB& cb) override;
   base::Time GetTimelineOffset() const override;
-  DemuxerStream* GetStream(DemuxerStream::Type type) override;
+  std::vector<DemuxerStream*> GetAllStreams() override;
+  void SetStreamStatusChangeCB(const StreamStatusChangeCB& cb) override;
   base::TimeDelta GetStartTime() const override;
   int64_t GetMemoryUsage() const override;
 
@@ -240,15 +242,21 @@ class MEDIA_EXPORT FFmpegDemuxer : public Demuxer {
   void NotifyDemuxerError(PipelineStatus error);
 
   void OnEnabledAudioTracksChanged(const std::vector<MediaTrack::Id>& track_ids,
-                                   base::TimeDelta currTime) override;
-  // |track_ids| is either empty or contains a single video track id.
-  void OnSelectedVideoTrackChanged(const std::vector<MediaTrack::Id>& track_ids,
-                                   base::TimeDelta currTime) override;
+                                   base::TimeDelta curr_time) override;
+  // |track_id| either contains the selected video track id or is null,
+  // indicating that all video tracks are deselected/disabled.
+  void OnSelectedVideoTrackChanged(base::Optional<MediaTrack::Id> track_id,
+                                   base::TimeDelta curr_time) override;
 
   // The lowest demuxed timestamp.  If negative, DemuxerStreams must use this to
   // adjust packet timestamps such that external clients see a zero-based
   // timeline.
   base::TimeDelta start_time() const { return start_time_; }
+
+  // Task runner used to execute blocking FFmpeg operations.
+  scoped_refptr<base::SequencedTaskRunner> ffmpeg_task_runner() {
+    return blocking_task_runner_;
+  }
 
  private:
   // To allow tests access to privates.
@@ -280,9 +288,10 @@ class MEDIA_EXPORT FFmpegDemuxer : public Demuxer {
   // Called by |url_protocol_| whenever |data_source_| returns a read error.
   void OnDataSourceError();
 
-  // Returns the stream from |streams_| that matches |type| as an
-  // FFmpegDemuxerStream.
-  FFmpegDemuxerStream* GetFFmpegStream(DemuxerStream::Type type) const;
+  // Returns the first stream from |streams_| that matches |type| as an
+  // FFmpegDemuxerStream and is enabled.
+  FFmpegDemuxerStream* GetFirstEnabledFFmpegStream(
+      DemuxerStream::Type type) const;
 
   // Called after the streams have been collected from the media, to allow
   // the text renderer to bind each text stream to the cue rendering engine.
@@ -294,8 +303,12 @@ class MEDIA_EXPORT FFmpegDemuxer : public Demuxer {
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
-  // Thread on which all blocking FFmpeg operations are executed.
-  base::Thread blocking_thread_;
+  // Task runner on which all blocking FFmpeg operations are executed; retrieved
+  // from base::TaskScheduler.
+  scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
+
+  // Indicates if Stop() has been called.
+  bool stopped_;
 
   // Tracks if there's an outstanding av_read_frame() operation.
   //
@@ -323,7 +336,7 @@ class MEDIA_EXPORT FFmpegDemuxer : public Demuxer {
   // integrate with libavformat.
   DataSource* data_source_;
 
-  scoped_refptr<MediaLog> media_log_;
+  MediaLog* media_log_;
 
   // Derived bitrate after initialization has completed.
   int bitrate_;
@@ -354,6 +367,7 @@ class MEDIA_EXPORT FFmpegDemuxer : public Demuxer {
   // Set if we know duration of the audio stream. Used when processing end of
   // stream -- at this moment we definitely know duration.
   bool duration_known_;
+  base::TimeDelta duration_;
 
   // FFmpegURLProtocol implementation and corresponding glue bits.
   std::unique_ptr<BlockingUrlProtocol> url_protocol_;
@@ -363,7 +377,7 @@ class MEDIA_EXPORT FFmpegDemuxer : public Demuxer {
 
   const MediaTracksUpdatedCB media_tracks_updated_cb_;
 
-  std::map<MediaTrack::Id, DemuxerStream*> track_id_to_demux_stream_map_;
+  std::map<MediaTrack::Id, FFmpegDemuxerStream*> track_id_to_demux_stream_map_;
 
   // NOTE: Weak pointers must be invalidated before all other member variables.
   base::WeakPtr<FFmpegDemuxer> weak_this_;

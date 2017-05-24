@@ -20,24 +20,49 @@ namespace content {
 bool ShouldMakeNetworkRequestForURL(const GURL& url) {
   CHECK(IsBrowserSideNavigationEnabled());
 
-  // Javascript URLs, about:blank, srcdoc should not send a request
-  // to the network stack.
-  // TODO(clamy): same document navigations should not send requests to the
-  // network stack. Neither should pushState/popState.
-  return !url::IsAboutBlank(url) && !url.SchemeIs(url::kJavaScriptScheme) &&
-         !url.is_empty() && !url.SchemeIs(url::kContentIDScheme) &&
-         url != content::kAboutSrcDocURL;
+  // Javascript URLs, srcdoc, schemes that don't load data should not send a
+  // request to the network stack.
+  if (url.SchemeIs(url::kJavaScriptScheme) || url.is_empty() ||
+      url.SchemeIs(url::kContentIDScheme) || url == content::kAboutSrcDocURL) {
+    return false;
+  }
+
+  for (const auto& scheme : url::GetEmptyDocumentSchemes()) {
+    if (url.SchemeIs(scheme))
+      return false;
+  }
+
+  // For you information, even though a "data:" url doesn't generate actual
+  // network requests, it is handled by the network stack and so must return
+  // true. The reason is that a few "data:" urls can't be handled locally. For
+  // instance:
+  // - the ones that result in downloads.
+  // - the ones that are invalid. An error page must be served instead.
+  // - the ones that have an unsupported MIME type.
+  // - the ones that target the top-level frame on Android.
+
+  return true;
 }
+
+SourceLocation::SourceLocation() : line_number(0), column_number(0) {}
+
+SourceLocation::SourceLocation(const std::string& url,
+                               unsigned int line_number,
+                               unsigned int column_number)
+    : url(url), line_number(line_number), column_number(column_number) {}
+
+SourceLocation::~SourceLocation() {}
 
 CommonNavigationParams::CommonNavigationParams()
     : transition(ui::PAGE_TRANSITION_LINK),
-      navigation_type(FrameMsg_Navigate_Type::NORMAL),
+      navigation_type(FrameMsg_Navigate_Type::DIFFERENT_DOCUMENT),
       allow_download(true),
       should_replace_current_entry(false),
       report_type(FrameMsg_UILoadMetricsReportType::NO_REPORT),
       previews_state(PREVIEWS_UNSPECIFIED),
       navigation_start(base::TimeTicks::Now()),
-      method("GET") {}
+      method("GET"),
+      should_check_main_world_csp(CSPDisposition::CHECK) {}
 
 CommonNavigationParams::CommonNavigationParams(
     const GURL& url,
@@ -53,7 +78,9 @@ CommonNavigationParams::CommonNavigationParams(
     PreviewsState previews_state,
     const base::TimeTicks& navigation_start,
     std::string method,
-    const scoped_refptr<ResourceRequestBodyImpl>& post_data)
+    const scoped_refptr<ResourceRequestBodyImpl>& post_data,
+    base::Optional<SourceLocation> source_location,
+    CSPDisposition should_check_main_world_csp)
     : url(url),
       referrer(referrer),
       transition(transition),
@@ -67,7 +94,9 @@ CommonNavigationParams::CommonNavigationParams(
       previews_state(previews_state),
       navigation_start(navigation_start),
       method(method),
-      post_data(post_data) {
+      post_data(post_data),
+      source_location(source_location),
+      should_check_main_world_csp(should_check_main_world_csp) {
   // |method != "POST"| should imply absence of |post_data|.
   if (method != "POST" && post_data) {
     NOTREACHED();
@@ -86,8 +115,8 @@ BeginNavigationParams::BeginNavigationParams()
       has_user_gesture(false),
       skip_service_worker(false),
       request_context_type(REQUEST_CONTEXT_TYPE_LOCATION),
-      mixed_content_context_type(blink::WebMixedContentContextType::Blockable) {
-}
+      mixed_content_context_type(blink::WebMixedContentContextType::kBlockable),
+      is_form_submission(false) {}
 
 BeginNavigationParams::BeginNavigationParams(
     std::string headers,
@@ -96,6 +125,7 @@ BeginNavigationParams::BeginNavigationParams(
     bool skip_service_worker,
     RequestContextType request_context_type,
     blink::WebMixedContentContextType mixed_content_context_type,
+    bool is_form_submission,
     const base::Optional<url::Origin>& initiator_origin)
     : headers(headers),
       load_flags(load_flags),
@@ -103,6 +133,7 @@ BeginNavigationParams::BeginNavigationParams(
       skip_service_worker(skip_service_worker),
       request_context_type(request_context_type),
       mixed_content_context_type(mixed_content_context_type),
+      is_form_submission(is_form_submission),
       initiator_origin(initiator_origin) {}
 
 BeginNavigationParams::BeginNavigationParams(
@@ -134,7 +165,6 @@ RequestNavigationParams::RequestNavigationParams()
     : is_overriding_user_agent(false),
       can_load_local_resources(false),
       nav_entry_id(0),
-      is_same_document_history_load(false),
       is_history_navigation_in_new_child(false),
       has_committed_real_load(false),
       intended_as_new_entry(false),
@@ -152,10 +182,11 @@ RequestNavigationParams::RequestNavigationParams()
 RequestNavigationParams::RequestNavigationParams(
     bool is_overriding_user_agent,
     const std::vector<GURL>& redirects,
+    const GURL& original_url,
+    const std::string& original_method,
     bool can_load_local_resources,
     const PageState& page_state,
     int nav_entry_id,
-    bool is_same_document_history_load,
     bool is_history_navigation_in_new_child,
     std::map<std::string, bool> subframe_unique_names,
     bool has_committed_real_load,
@@ -168,10 +199,11 @@ RequestNavigationParams::RequestNavigationParams(
     bool has_user_gesture)
     : is_overriding_user_agent(is_overriding_user_agent),
       redirects(redirects),
+      original_url(original_url),
+      original_method(original_method),
       can_load_local_resources(can_load_local_resources),
       page_state(page_state),
       nav_entry_id(nav_entry_id),
-      is_same_document_history_load(is_same_document_history_load),
       is_history_navigation_in_new_child(is_history_navigation_in_new_child),
       subframe_unique_names(subframe_unique_names),
       has_committed_real_load(has_committed_real_load),
@@ -184,8 +216,7 @@ RequestNavigationParams::RequestNavigationParams(
       should_create_service_worker(false),
       service_worker_provider_id(kInvalidServiceWorkerProviderId),
       appcache_host_id(kAppCacheNoHostId),
-      has_user_gesture(has_user_gesture) {
-}
+      has_user_gesture(has_user_gesture) {}
 
 RequestNavigationParams::RequestNavigationParams(
     const RequestNavigationParams& other) = default;

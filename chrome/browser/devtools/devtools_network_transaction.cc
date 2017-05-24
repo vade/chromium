@@ -17,7 +17,7 @@
 #include "net/socket/connection_attempts.h"
 
 // Keep in sync with X_DevTools_Emulate_Network_Conditions_Client_Id defined in
-// HTTPNames.in.
+// HTTPNames.json5.
 const char
     DevToolsNetworkTransaction::kDevToolsEmulateNetworkConditionsClientId[] =
         "X-DevTools-Emulate-Network-Conditions-Client-Id";
@@ -56,8 +56,11 @@ int DevToolsNetworkTransaction::Throttle(
   if (start) {
     throttled_byte_count_ += network_transaction_->GetTotalReceivedBytes();
     net::LoadTimingInfo load_timing_info;
-    if (GetLoadTimingInfo(&load_timing_info))
+    if (GetLoadTimingInfo(&load_timing_info)) {
       send_end = load_timing_info.send_end;
+      if (!load_timing_info.push_start.is_null())
+        start = false;
+    }
     if (send_end.is_null())
       send_end = base::TimeTicks::Now();
   }

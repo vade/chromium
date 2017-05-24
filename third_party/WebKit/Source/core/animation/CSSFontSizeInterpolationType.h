@@ -13,24 +13,24 @@ class CSSFontSizeInterpolationType : public CSSInterpolationType {
  public:
   CSSFontSizeInterpolationType(PropertyHandle property)
       : CSSInterpolationType(property) {
-    DCHECK_EQ(cssProperty(), CSSPropertyFontSize);
+    DCHECK_EQ(CssProperty(), CSSPropertyFontSize);
   }
 
-  InterpolationValue maybeConvertStandardPropertyUnderlyingValue(
-      const StyleResolverState&) const final;
-  void applyStandardPropertyValue(const InterpolableValue&,
+  InterpolationValue MaybeConvertStandardPropertyUnderlyingValue(
+      const ComputedStyle&) const final;
+  void ApplyStandardPropertyValue(const InterpolableValue&,
                                   const NonInterpolableValue*,
                                   StyleResolverState&) const final;
 
  private:
-  InterpolationValue maybeConvertNeutral(const InterpolationValue& underlying,
+  InterpolationValue MaybeConvertNeutral(const InterpolationValue& underlying,
                                          ConversionCheckers&) const final;
-  InterpolationValue maybeConvertInitial(const StyleResolverState&,
+  InterpolationValue MaybeConvertInitial(const StyleResolverState&,
                                          ConversionCheckers&) const final;
-  InterpolationValue maybeConvertInherit(const StyleResolverState&,
+  InterpolationValue MaybeConvertInherit(const StyleResolverState&,
                                          ConversionCheckers&) const final;
-  InterpolationValue maybeConvertValue(const CSSValue&,
-                                       const StyleResolverState&,
+  InterpolationValue MaybeConvertValue(const CSSValue&,
+                                       const StyleResolverState*,
                                        ConversionCheckers&) const final;
 };
 

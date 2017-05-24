@@ -38,13 +38,10 @@ PasswordStore::GetLoginsRequest::~GetLoginsRequest() {
 void PasswordStore::GetLoginsRequest::NotifyConsumerWithResults(
     std::vector<std::unique_ptr<PasswordForm>> results) {
   if (!ignore_logins_cutoff_.is_null()) {
-    results.erase(
-        std::remove_if(results.begin(), results.end(),
-                       [this](const std::unique_ptr<PasswordForm>& credential) {
-                         return (credential->date_created <
-                                 ignore_logins_cutoff_);
-                       }),
-        results.end());
+    base::EraseIf(results,
+                  [this](const std::unique_ptr<PasswordForm>& credential) {
+                    return (credential->date_created < ignore_logins_cutoff_);
+                  });
   }
 
   origin_task_runner_->PostTask(
@@ -59,6 +56,8 @@ void PasswordStore::GetLoginsRequest::NotifyWithSiteStatistics(
                             consumer_weak_, base::Passed(&stats)));
 }
 
+// TODO(crbug.com/706392): Fix password reuse detection for Android.
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
 PasswordStore::CheckReuseRequest::CheckReuseRequest(
     PasswordReuseDetectorConsumer* consumer)
     : origin_task_runner_(base::ThreadTaskRunnerHandle::Get()),
@@ -68,14 +67,15 @@ PasswordStore::CheckReuseRequest::~CheckReuseRequest() {}
 
 void PasswordStore::CheckReuseRequest::OnReuseFound(
     const base::string16& password,
-    const std::string& saved_domain,
+    const std::string& legitimate_domain,
     int saved_passwords,
     int number_matches) {
   origin_task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&PasswordReuseDetectorConsumer::OnReuseFound, consumer_weak_,
-                 password, saved_domain, saved_passwords, number_matches));
+                 password, legitimate_domain, saved_passwords, number_matches));
 }
+#endif
 
 PasswordStore::FormDigest::FormDigest(autofill::PasswordForm::Scheme new_scheme,
                                       const std::string& new_signon_realm,
@@ -111,8 +111,10 @@ PasswordStore::PasswordStore(
       is_propagating_password_changes_to_web_credentials_enabled_(false),
       shutdown_called_(false) {}
 
-bool PasswordStore::Init(const syncer::SyncableService::StartSyncFlare& flare) {
-  ScheduleTask(base::Bind(&PasswordStore::InitOnBackgroundThread, this, flare));
+bool PasswordStore::Init(const syncer::SyncableService::StartSyncFlare& flare,
+                         PrefService* prefs) {
+  ScheduleTask(
+      base::Bind(&PasswordStore::InitOnBackgroundThread, this, flare, prefs));
   return true;
 }
 
@@ -265,6 +267,12 @@ void PasswordStore::RemoveSiteStats(const GURL& origin_domain) {
       base::Bind(&PasswordStore::RemoveSiteStatsImpl, this, origin_domain));
 }
 
+void PasswordStore::GetAllSiteStats(PasswordStoreConsumer* consumer) {
+  std::unique_ptr<GetLoginsRequest> request(new GetLoginsRequest(consumer));
+  ScheduleTask(base::Bind(&PasswordStore::NotifyAllSiteStats, this,
+                          base::Passed(&request)));
+}
+
 void PasswordStore::GetSiteStats(const GURL& origin_domain,
                                  PasswordStoreConsumer* consumer) {
   std::unique_ptr<GetLoginsRequest> request(new GetLoginsRequest(consumer));
@@ -302,6 +310,8 @@ PasswordStore::GetPasswordSyncableService() {
   return syncable_service_->AsWeakPtr();
 }
 
+// TODO(crbug.com/706392): Fix password reuse detection for Android.
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
 void PasswordStore::CheckReuse(const base::string16& input,
                                const std::string& domain,
                                PasswordReuseDetectorConsumer* consumer) {
@@ -309,6 +319,12 @@ void PasswordStore::CheckReuse(const base::string16& input,
   ScheduleTask(base::Bind(&PasswordStore::CheckReuseImpl, this,
                           base::Passed(&check_reuse_request), input, domain));
 }
+
+void PasswordStore::SaveSyncPasswordHash(const base::string16& password) {
+  ScheduleTask(
+      base::Bind(&PasswordStore::SaveSyncPasswordHashImpl, this, password));
+}
+#endif
 
 PasswordStore::~PasswordStore() {
   DCHECK(shutdown_called_);
@@ -374,17 +390,28 @@ void PasswordStore::NotifyLoginsChanged(
     observers_->Notify(FROM_HERE, &Observer::OnLoginsChanged, changes);
     if (syncable_service_)
       syncable_service_->ActOnPasswordStoreChanges(changes);
+// TODO(crbug.com/706392): Fix password reuse detection for Android.
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
     if (reuse_detector_)
       reuse_detector_->OnLoginsChanged(changes);
+#endif
   }
 }
 
+// TODO(crbug.com/706392): Fix password reuse detection for Android.
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
 void PasswordStore::CheckReuseImpl(std::unique_ptr<CheckReuseRequest> request,
                                    const base::string16& input,
                                    const std::string& domain) {
   if (reuse_detector_)
     reuse_detector_->CheckReuse(input, domain, request.get());
 }
+
+void PasswordStore::SaveSyncPasswordHashImpl(const base::string16& password) {
+  if (reuse_detector_)
+    reuse_detector_->SaveSyncPasswordHash(password);
+}
+#endif
 
 void PasswordStore::Schedule(
     void (PasswordStore::*func)(std::unique_ptr<GetLoginsRequest>),
@@ -518,6 +545,11 @@ void PasswordStore::GetBlacklistLoginsWithAffiliatedRealmsImpl(
       FROM_HERE,
       base::Bind(&PasswordStore::InjectAffiliatedWebRealms, this,
                  base::Passed(&obtained_forms), base::Passed(&request)));
+}
+
+void PasswordStore::NotifyAllSiteStats(
+    std::unique_ptr<GetLoginsRequest> request) {
+  request->NotifyWithSiteStatistics(GetAllSiteStatsImpl());
 }
 
 void PasswordStore::NotifySiteStats(const GURL& origin_domain,
@@ -688,15 +720,15 @@ void PasswordStore::ScheduleUpdateAffiliatedWebLoginsImpl(
 }
 
 void PasswordStore::InitOnBackgroundThread(
-    const syncer::SyncableService::StartSyncFlare& flare) {
+    const syncer::SyncableService::StartSyncFlare& flare,
+    PrefService* prefs) {
   DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   DCHECK(!syncable_service_);
   syncable_service_.reset(new PasswordSyncableService(this));
   syncable_service_->InjectStartSyncFlare(flare);
-  reuse_detector_.reset(new PasswordReuseDetector);
-#if !defined(OS_MACOSX)
-  // TODO(crbug.com/668155): For non-migrated keychain users it can lead to
-  // hundreds of requests to unlock keychain.
+// TODO(crbug.com/706392): Fix password reuse detection for Android.
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+  reuse_detector_ = base::MakeUnique<PasswordReuseDetector>(prefs);
   GetAutofillableLoginsImpl(
       base::MakeUnique<GetLoginsRequest>(reuse_detector_.get()));
 #endif
@@ -705,7 +737,10 @@ void PasswordStore::InitOnBackgroundThread(
 void PasswordStore::DestroyOnBackgroundThread() {
   DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   syncable_service_.reset();
+// TODO(crbug.com/706392): Fix password reuse detection for Android.
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
   reuse_detector_.reset();
+#endif
 }
 
 std::ostream& operator<<(std::ostream& os,

@@ -59,7 +59,7 @@ class AutocompleteResult {
   };
 
   // Max number of matches we'll show from the various providers.
-  static const size_t kMaxMatches;
+  static size_t GetMaxMatches();
 
   AutocompleteResult();
   ~AutocompleteResult();
@@ -77,7 +77,7 @@ class AutocompleteResult {
                      const ACMatches& matches);
 
   // Removes duplicates, puts the list in sorted order and culls to leave only
-  // the best kMaxMatches matches.  Sets the default match to the best match
+  // the best GetMaxMatches() matches.  Sets the default match to the best match
   // and updates the alternate nav URL.
   void SortAndCull(const AutocompleteInput& input,
                    TemplateURLService* template_url_service);
@@ -105,6 +105,10 @@ class AutocompleteResult {
   // IsVerbatimType() in autocomplete_match.h), and the next match is not also
   // some kind of verbatim match.
   bool TopMatchIsStandaloneVerbatimMatch() const;
+
+  // Returns the first match in |matches| which might be chosen as default.
+  static ACMatches::const_iterator FindTopMatch(const ACMatches& matches);
+  static ACMatches::iterator FindTopMatch(ACMatches* matches);
 
   const GURL& alternate_nav_url() const { return alternate_nav_url_; }
 

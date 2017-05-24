@@ -6,6 +6,7 @@
 #define HEADLESS_LIB_BROWSER_HEADLESS_CONTENT_BROWSER_CLIENT_H_
 
 #include "content/public/browser/content_browser_client.h"
+#include "headless/lib/browser/headless_resource_dispatcher_host_delegate.h"
 
 namespace headless {
 
@@ -24,9 +25,38 @@ class HeadlessContentBrowserClient : public content::ContentBrowserClient {
   content::DevToolsManagerDelegate* GetDevToolsManagerDelegate() override;
   std::unique_ptr<base::Value> GetServiceManifestOverlay(
       base::StringPiece name) override;
+  void GetQuotaSettings(
+      content::BrowserContext* context,
+      content::StoragePartition* partition,
+      const storage::OptionalQuotaSettingsCallback& callback) override;
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+  void GetAdditionalMappedFilesForChildProcess(
+      const base::CommandLine& command_line,
+      int child_process_id,
+      content::FileDescriptorInfo* mappings) override;
+#endif
+  void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
+                                      int child_process_id) override;
+
+  void AllowCertificateError(
+      content::WebContents* web_contents,
+      int cert_error,
+      const net::SSLInfo& ssl_info,
+      const GURL& request_url,
+      content::ResourceType resource_type,
+      bool overridable,
+      bool strict_enforcement,
+      bool expired_previous_decision,
+      const base::Callback<void(content::CertificateRequestResultType)>&
+          callback) override;
+
+  void ResourceDispatcherHostCreated() override;
 
  private:
   HeadlessBrowserImpl* browser_;  // Not owned.
+
+  std::unique_ptr<HeadlessResourceDispatcherHostDelegate>
+      resource_dispatcher_host_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(HeadlessContentBrowserClient);
 };

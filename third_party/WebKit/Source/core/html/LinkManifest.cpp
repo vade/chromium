@@ -6,12 +6,12 @@
 
 #include "core/dom/Document.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/LocalFrameClient.h"
 #include "core/html/HTMLLinkElement.h"
-#include "core/loader/FrameLoaderClient.h"
 
 namespace blink {
 
-LinkManifest* LinkManifest::create(HTMLLinkElement* owner) {
+LinkManifest* LinkManifest::Create(HTMLLinkElement* owner) {
   return new LinkManifest(owner);
 }
 
@@ -19,19 +19,23 @@ LinkManifest::LinkManifest(HTMLLinkElement* owner) : LinkResource(owner) {}
 
 LinkManifest::~LinkManifest() {}
 
-void LinkManifest::process() {
-  if (!m_owner || !m_owner->document().frame())
+void LinkManifest::Process() {
+  if (!owner_ || !owner_->GetDocument().GetFrame())
     return;
 
-  m_owner->document().frame()->loader().client()->dispatchDidChangeManifest();
+  owner_->GetDocument()
+      .GetFrame()
+      ->Loader()
+      .Client()
+      ->DispatchDidChangeManifest();
 }
 
-bool LinkManifest::hasLoaded() const {
+bool LinkManifest::HasLoaded() const {
   return false;
 }
 
-void LinkManifest::ownerRemoved() {
-  process();
+void LinkManifest::OwnerRemoved() {
+  Process();
 }
 
 }  // namespace blink

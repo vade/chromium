@@ -9,6 +9,14 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
 
+namespace net {
+
+const char kForceEffectiveConnectionType[] = "force_effective_connection_type";
+
+namespace nqe {
+
+namespace internal {
+
 namespace {
 
 // Minimum valid value of the variation parameter that holds RTT (in
@@ -19,16 +27,15 @@ static const int kMinimumRTTVariationParameterMsec = 1;
 // kilobits per second) values.
 static const int kMinimumThroughputVariationParameterKbps = 1;
 
-// Returns the value of |parameter_name| read from |variation_params|. If the
-// value is unavailable from |variation_params|, then |default_value| is
-// returned.
+// Returns the value of |parameter_name| read from |params|. If the
+// value is unavailable from |params|, then |default_value| is returned.
 int64_t GetValueForVariationParam(
-    const std::map<std::string, std::string>& variation_params,
+    const std::map<std::string, std::string>& params,
     const std::string& parameter_name,
     int64_t default_value) {
-  const auto it = variation_params.find(parameter_name);
+  const auto it = params.find(parameter_name);
   int64_t variations_value = default_value;
-  if (it != variation_params.end() &&
+  if (it != params.end() &&
       base::StringToInt64(it->second, &variations_value)) {
     return variations_value;
   }
@@ -38,11 +45,11 @@ int64_t GetValueForVariationParam(
 // Returns the variation value for |parameter_name|. If the value is
 // unavailable, |default_value| is returned.
 double GetDoubleValueForVariationParamWithDefaultValue(
-    const std::map<std::string, std::string>& variation_params,
+    const std::map<std::string, std::string>& params,
     const std::string& parameter_name,
     double default_value) {
-  const auto it = variation_params.find(parameter_name);
-  if (it == variation_params.end())
+  const auto it = params.find(parameter_name);
+  if (it == params.end())
     return default_value;
 
   double variations_value = default_value;
@@ -54,42 +61,25 @@ double GetDoubleValueForVariationParamWithDefaultValue(
 // Returns the variation value for |parameter_name|. If the value is
 // unavailable, |default_value| is returned.
 std::string GetStringValueForVariationParamWithDefaultValue(
-    const std::map<std::string, std::string>& variation_params,
+    const std::map<std::string, std::string>& params,
     const std::string& parameter_name,
     const std::string& default_value) {
-  const auto it = variation_params.find(parameter_name);
-  if (it == variation_params.end())
+  const auto it = params.find(parameter_name);
+  if (it == params.end())
     return default_value;
   return it->second;
 }
 
-}  // namespace
-
-namespace net {
-
-namespace nqe {
-
-namespace internal {
-
-std::string GetEffectiveConnectionTypeAlgorithm(
-    const std::map<std::string, std::string>& variation_params) {
-  const auto it = variation_params.find("effective_connection_type_algorithm");
-  if (it == variation_params.end())
-    return std::string();
-  return it->second;
-}
-
 double GetWeightMultiplierPerSecond(
-    const std::map<std::string, std::string>& variation_params) {
+    const std::map<std::string, std::string>& params) {
   // Default value of the half life (in seconds) for computing time weighted
   // percentiles. Every half life, the weight of all observations reduces by
   // half. Lowering the half life would reduce the weight of older values
   // faster.
   int half_life_seconds = 60;
   int32_t variations_value = 0;
-  auto it = variation_params.find("HalfLifeSeconds");
-  if (it != variation_params.end() &&
-      base::StringToInt(it->second, &variations_value) &&
+  auto it = params.find("HalfLifeSeconds");
+  if (it != params.end() && base::StringToInt(it->second, &variations_value) &&
       variations_value >= 1) {
     half_life_seconds = variations_value;
   }
@@ -97,32 +87,41 @@ double GetWeightMultiplierPerSecond(
   return pow(0.5, 1.0 / half_life_seconds);
 }
 
-double GetWeightMultiplierPerDbm(
-    const std::map<std::string, std::string>& variation_params) {
-  // The default weight is set to 1.0, so by default, RSSI has no effect on the
-  // observation's weight.
-  return GetDoubleValueForVariationParamWithDefaultValue(
-      variation_params, "rssi_weight_per_dbm", 1.0);
+bool GetPersistentCacheReadingEnabled(
+    const std::map<std::string, std::string>& params) {
+  if (GetStringValueForVariationParamWithDefaultValue(
+          params, "persistent_cache_reading_enabled", "false") != "true") {
+    return false;
+  }
+  return true;
 }
 
-const char* GetNameForConnectionType(
-    net::NetworkChangeNotifier::ConnectionType connection_type) {
+base::TimeDelta GetMinSocketWatcherNotificationInterval(
+    const std::map<std::string, std::string>& params) {
+  // Use 1000 milliseconds as the default value.
+  return base::TimeDelta::FromMilliseconds(GetValueForVariationParam(
+      params, "min_socket_watcher_notification_interval_msec", 1000));
+}
+
+// static
+const char* GetNameForConnectionTypeInternal(
+    NetworkChangeNotifier::ConnectionType connection_type) {
   switch (connection_type) {
-    case net::NetworkChangeNotifier::CONNECTION_UNKNOWN:
+    case NetworkChangeNotifier::CONNECTION_UNKNOWN:
       return "Unknown";
-    case net::NetworkChangeNotifier::CONNECTION_ETHERNET:
+    case NetworkChangeNotifier::CONNECTION_ETHERNET:
       return "Ethernet";
-    case net::NetworkChangeNotifier::CONNECTION_WIFI:
+    case NetworkChangeNotifier::CONNECTION_WIFI:
       return "WiFi";
-    case net::NetworkChangeNotifier::CONNECTION_2G:
+    case NetworkChangeNotifier::CONNECTION_2G:
       return "2G";
-    case net::NetworkChangeNotifier::CONNECTION_3G:
+    case NetworkChangeNotifier::CONNECTION_3G:
       return "3G";
-    case net::NetworkChangeNotifier::CONNECTION_4G:
+    case NetworkChangeNotifier::CONNECTION_4G:
       return "4G";
-    case net::NetworkChangeNotifier::CONNECTION_NONE:
+    case NetworkChangeNotifier::CONNECTION_NONE:
       return "None";
-    case net::NetworkChangeNotifier::CONNECTION_BLUETOOTH:
+    case NetworkChangeNotifier::CONNECTION_BLUETOOTH:
       return "Bluetooth";
     default:
       NOTREACHED();
@@ -131,9 +130,13 @@ const char* GetNameForConnectionType(
   return "";
 }
 
-void ObtainDefaultObservations(
-    const std::map<std::string, std::string>& variation_params,
-    NetworkQuality default_observations[]) {
+// Sets the default observation for different connection types in
+// |default_observations|. The default observations are different for
+// different connection types (e.g., 2G, 3G, 4G, WiFi). The default
+// observations may be used to determine the network quality in absence of any
+// other information.
+void ObtainDefaultObservations(const std::map<std::string, std::string>& params,
+                               NetworkQuality default_observations[]) {
   for (size_t i = 0; i < NetworkChangeNotifier::CONNECTION_LAST; ++i) {
     DCHECK_EQ(InvalidRTT(), default_observations[i].http_rtt());
     DCHECK_EQ(InvalidRTT(), default_observations[i].transport_rtt());
@@ -183,10 +186,11 @@ void ObtainDefaultObservations(
         static_cast<NetworkChangeNotifier::ConnectionType>(i);
 
     int32_t variations_value = kMinimumRTTVariationParameterMsec - 1;
-    std::string parameter_name = std::string(GetNameForConnectionType(type))
-                                     .append(".DefaultMedianRTTMsec");
-    auto it = variation_params.find(parameter_name);
-    if (it != variation_params.end() &&
+    std::string parameter_name =
+        std::string(GetNameForConnectionTypeInternal(type))
+            .append(".DefaultMedianRTTMsec");
+    auto it = params.find(parameter_name);
+    if (it != params.end() &&
         base::StringToInt(it->second, &variations_value) &&
         variations_value >= kMinimumRTTVariationParameterMsec) {
       default_observations[i] =
@@ -196,10 +200,10 @@ void ObtainDefaultObservations(
     }
 
     variations_value = kMinimumRTTVariationParameterMsec - 1;
-    parameter_name = std::string(GetNameForConnectionType(type))
+    parameter_name = std::string(GetNameForConnectionTypeInternal(type))
                          .append(".DefaultMedianTransportRTTMsec");
-    it = variation_params.find(parameter_name);
-    if (it != variation_params.end() &&
+    it = params.find(parameter_name);
+    if (it != params.end() &&
         base::StringToInt(it->second, &variations_value) &&
         variations_value >= kMinimumRTTVariationParameterMsec) {
       default_observations[i] =
@@ -209,11 +213,11 @@ void ObtainDefaultObservations(
     }
 
     variations_value = kMinimumThroughputVariationParameterKbps - 1;
-    parameter_name = std::string(GetNameForConnectionType(type))
+    parameter_name = std::string(GetNameForConnectionTypeInternal(type))
                          .append(".DefaultMedianKbps");
-    it = variation_params.find(parameter_name);
+    it = params.find(parameter_name);
 
-    if (it != variation_params.end() &&
+    if (it != params.end() &&
         base::StringToInt(it->second, &variations_value) &&
         variations_value >= kMinimumThroughputVariationParameterKbps) {
       default_observations[i] = NetworkQuality(
@@ -223,7 +227,11 @@ void ObtainDefaultObservations(
   }
 }
 
-void ObtainTypicalNetworkQuality(NetworkQuality typical_network_quality[]) {
+// Sets |typical_network_quality| to typical network quality for different
+// effective connection types.
+void ObtainTypicalNetworkQualities(
+    const std::map<std::string, std::string>& params,
+    NetworkQuality typical_network_quality[]) {
   for (size_t i = 0; i < EFFECTIVE_CONNECTION_TYPE_LAST; ++i) {
     DCHECK_EQ(InvalidRTT(), typical_network_quality[i].http_rtt());
     DCHECK_EQ(InvalidRTT(), typical_network_quality[i].transport_rtt());
@@ -232,38 +240,40 @@ void ObtainTypicalNetworkQuality(NetworkQuality typical_network_quality[]) {
   }
 
   typical_network_quality[EFFECTIVE_CONNECTION_TYPE_SLOW_2G] = NetworkQuality(
-      // Set to the 83rd percentile of 2G RTT observations on Android. This
-      // corresponds to the median RTT observation when effective connection
-      // type is Slow 2G.
+      // Set to the 77.5th percentile of 2G RTT observations on Android.
+      // This corresponds to the median RTT observation when effective
+      // connection type is Slow 2G.
       base::TimeDelta::FromMilliseconds(3600),
-      base::TimeDelta::FromMilliseconds(3000), kInvalidThroughput);
+      base::TimeDelta::FromMilliseconds(3000), 40);
 
   typical_network_quality[EFFECTIVE_CONNECTION_TYPE_2G] = NetworkQuality(
       // Set to the 58th percentile of 2G RTT observations on Android. This
       // corresponds to the median RTT observation when effective connection
       // type is 2G.
       base::TimeDelta::FromMilliseconds(1800),
-      base::TimeDelta::FromMilliseconds(1500), kInvalidThroughput);
+      base::TimeDelta::FromMilliseconds(1500), 75);
 
   typical_network_quality[EFFECTIVE_CONNECTION_TYPE_3G] = NetworkQuality(
       // Set to the 75th percentile of 3G RTT observations on Android. This
       // corresponds to the median RTT observation when effective connection
       // type is 3G.
       base::TimeDelta::FromMilliseconds(450),
-      base::TimeDelta::FromMilliseconds(400), kInvalidThroughput);
+      base::TimeDelta::FromMilliseconds(400), 400);
 
   // Set to the 25th percentile of 3G RTT observations on Android.
-  typical_network_quality[EFFECTIVE_CONNECTION_TYPE_4G] = NetworkQuality(
-      base::TimeDelta::FromMilliseconds(175),
-      base::TimeDelta::FromMilliseconds(125), kInvalidThroughput);
+  typical_network_quality[EFFECTIVE_CONNECTION_TYPE_4G] =
+      NetworkQuality(base::TimeDelta::FromMilliseconds(175),
+                     base::TimeDelta::FromMilliseconds(125), 1600);
 
   static_assert(
       EFFECTIVE_CONNECTION_TYPE_4G + 1 == EFFECTIVE_CONNECTION_TYPE_LAST,
       "Missing effective connection type");
 }
 
-void ObtainEffectiveConnectionTypeModelParams(
-    const std::map<std::string, std::string>& variation_params,
+// Sets the thresholds for different effective connection types in
+// |connection_thresholds|.
+void ObtainConnectionThresholds(
+    const std::map<std::string, std::string>& params,
     NetworkQuality connection_thresholds[]) {
   // First set the default thresholds.
   NetworkQuality default_effective_connection_type_thresholds
@@ -306,27 +316,25 @@ void ObtainEffectiveConnectionTypeModelParams(
       continue;
 
     std::string connection_type_name = std::string(
-        GetNameForEffectiveConnectionType(effective_connection_type));
+        DeprecatedGetNameForEffectiveConnectionType(effective_connection_type));
 
     connection_thresholds[i].set_http_rtt(
         base::TimeDelta::FromMilliseconds(GetValueForVariationParam(
-            variation_params,
-            connection_type_name + ".ThresholdMedianHttpRTTMsec",
+            params, connection_type_name + ".ThresholdMedianHttpRTTMsec",
             default_effective_connection_type_thresholds[i]
                 .http_rtt()
                 .InMilliseconds())));
 
     connection_thresholds[i].set_transport_rtt(
         base::TimeDelta::FromMilliseconds(GetValueForVariationParam(
-            variation_params,
-            connection_type_name + ".ThresholdMedianTransportRTTMsec",
+            params, connection_type_name + ".ThresholdMedianTransportRTTMsec",
             default_effective_connection_type_thresholds[i]
                 .transport_rtt()
                 .InMilliseconds())));
 
     connection_thresholds[i].set_downstream_throughput_kbps(
         GetValueForVariationParam(
-            variation_params, connection_type_name + ".ThresholdMedianKbps",
+            params, connection_type_name + ".ThresholdMedianKbps",
             default_effective_connection_type_thresholds[i]
                 .downstream_throughput_kbps()));
     DCHECK(i == 0 ||
@@ -334,39 +342,92 @@ void ObtainEffectiveConnectionTypeModelParams(
   }
 }
 
-double correlation_uma_logging_probability(
-    const std::map<std::string, std::string>& variation_params) {
-  double correlation_uma_logging_probability =
-      GetDoubleValueForVariationParamWithDefaultValue(
-          variation_params, "correlation_logging_probability", 0.01);
-  DCHECK_LE(0.0, correlation_uma_logging_probability);
-  DCHECK_GE(1.0, correlation_uma_logging_probability);
-  return correlation_uma_logging_probability;
-}
+base::Optional<EffectiveConnectionType> GetForcedEffectiveConnectionType(
+    const std::map<std::string, std::string>& params) {
+  std::string forced_value = GetStringValueForVariationParamWithDefaultValue(
+      params, kForceEffectiveConnectionType, "");
+  if (forced_value.empty())
+    return base::Optional<EffectiveConnectionType>();
 
-bool forced_effective_connection_type_set(
-    const std::map<std::string, std::string>& variation_params) {
-  return !GetStringValueForVariationParamWithDefaultValue(
-              variation_params, "force_effective_connection_type", "")
-              .empty();
-}
-
-EffectiveConnectionType forced_effective_connection_type(
-    const std::map<std::string, std::string>& variation_params) {
   EffectiveConnectionType forced_effective_connection_type =
       EFFECTIVE_CONNECTION_TYPE_UNKNOWN;
-  std::string forced_value = GetStringValueForVariationParamWithDefaultValue(
-      variation_params, "force_effective_connection_type",
-      GetNameForEffectiveConnectionType(EFFECTIVE_CONNECTION_TYPE_UNKNOWN));
-  DCHECK(!forced_value.empty());
+
   bool effective_connection_type_available = GetEffectiveConnectionTypeForName(
       forced_value, &forced_effective_connection_type);
+
   DCHECK(effective_connection_type_available);
 
   // Silence unused variable warning in release builds.
   (void)effective_connection_type_available;
 
   return forced_effective_connection_type;
+}
+
+}  // namespace
+
+NetworkQualityEstimatorParams::NetworkQualityEstimatorParams(
+    const std::map<std::string, std::string>& params)
+    : params_(params),
+      weight_multiplier_per_second_(GetWeightMultiplierPerSecond(params_)),
+      weight_multiplier_per_dbm_(
+          GetDoubleValueForVariationParamWithDefaultValue(params_,
+                                                          "rssi_weight_per_dbm",
+                                                          1.0)),
+      correlation_uma_logging_probability_(
+          GetDoubleValueForVariationParamWithDefaultValue(
+              params_,
+              "correlation_logging_probability",
+              0.01)),
+      forced_effective_connection_type_(
+          GetForcedEffectiveConnectionType(params_)),
+      persistent_cache_reading_enabled_(
+          GetPersistentCacheReadingEnabled(params_)),
+      min_socket_watcher_notification_interval_(
+          GetMinSocketWatcherNotificationInterval(params_)) {
+  DCHECK_LE(0.0, correlation_uma_logging_probability_);
+  DCHECK_GE(1.0, correlation_uma_logging_probability_);
+
+  ObtainDefaultObservations(params_, default_observations_);
+  ObtainTypicalNetworkQualities(params_, typical_network_quality_);
+  ObtainConnectionThresholds(params_, connection_thresholds_);
+}
+
+NetworkQualityEstimatorParams::~NetworkQualityEstimatorParams() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+}
+
+std::string NetworkQualityEstimatorParams::GetEffectiveConnectionTypeAlgorithm()
+    const {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  const auto it = params_.find("effective_connection_type_algorithm");
+  if (it == params_.end())
+    return std::string();
+  return it->second;
+}
+
+// static
+const char* NetworkQualityEstimatorParams::GetNameForConnectionType(
+    NetworkChangeNotifier::ConnectionType connection_type) {
+  return GetNameForConnectionTypeInternal(connection_type);
+}
+
+const NetworkQuality& NetworkQualityEstimatorParams::DefaultObservation(
+    NetworkChangeNotifier::ConnectionType type) const {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  return default_observations_[type];
+}
+
+const NetworkQuality& NetworkQualityEstimatorParams::TypicalNetworkQuality(
+    EffectiveConnectionType type) const {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  return typical_network_quality_[type];
+}
+
+const NetworkQuality& NetworkQualityEstimatorParams::ConnectionThreshold(
+    EffectiveConnectionType type) const {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  return connection_thresholds_[type];
 }
 
 }  // namespace internal

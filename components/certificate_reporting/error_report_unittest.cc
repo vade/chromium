@@ -10,6 +10,7 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/threading/thread.h"
 #include "base/time/default_clock.h"
@@ -24,6 +25,11 @@
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if defined(OS_ANDROID)
+#include "base/test/scoped_feature_list.h"
+#include "net/cert/cert_verify_proc_android.h"
+#endif
 
 using net::SSLInfo;
 using testing::UnorderedElementsAre;
@@ -190,9 +196,9 @@ TEST(ErrorReportTest, CertificateTransparencyError) {
       VerifyErrorReportSerialization(report_known, ssl_info, cert_errors));
 }
 
-// Tests that information about relevant features are included in the
+// Tests that information about network time querying is included in the
 // report.
-TEST(ErrorReportTest, FeatureInfo) {
+TEST(ErrorReportTest, NetworkTimeQueryingFeatureInfo) {
   base::Thread io_thread("IO thread");
   base::Thread::Options thread_options;
   thread_options.message_loop_type = base::MessageLoop::TYPE_IO;
@@ -233,6 +239,23 @@ TEST(ErrorReportTest, FeatureInfo) {
                 .network_time_querying_info()
                 .network_time_query_behavior());
 }
+
+#if defined(OS_ANDROID)
+// Tests that information about the Android AIA fetching feature is included in
+// the report.
+TEST(ErrorReportTest, AndroidAIAFetchingFeatureEnabled) {
+  SSLInfo ssl_info;
+  ASSERT_NO_FATAL_FAILURE(
+      GetTestSSLInfo(INCLUDE_UNVERIFIED_CERT_CHAIN, &ssl_info, kCertStatus));
+  ErrorReport report(kDummyHostname, ssl_info);
+  std::string serialized_report;
+  ASSERT_TRUE(report.Serialize(&serialized_report));
+  CertLoggerRequest parsed;
+  ASSERT_TRUE(parsed.ParseFromString(serialized_report));
+  EXPECT_EQ(CertLoggerFeaturesInfo::ANDROID_AIA_FETCHING_ENABLED,
+            parsed.features_info().android_aia_fetching_status());
+}
+#endif
 
 }  // namespace
 

@@ -9,6 +9,10 @@
 #import "ios/chrome/browser/ui/browser_view_controller.h"
 #import "ios/chrome/browser/ui/browser_view_controller_dependency_factory.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace {
 
 const NSTimeInterval kMaxUICatchupDelay = 2.0;  // seconds
@@ -46,7 +50,8 @@ class NewTabPagePerfTest : public PerfTestWithBVC {
 // [*]RESULT NTP - Create: NTP Gentle Create First Tab= number ms
 // Output format subsequent average:
 // [*]RESULT NTP - Create: NTP Gentle Create= number ms
-TEST_F(NewTabPagePerfTest, OpenNTP_Gentle) {
+// TODO(crbug.com/717314): Failed DCHECK in PerfTestWithBVC::SetUp().
+TEST_F(NewTabPagePerfTest, DISABLED_OpenNTP_Gentle) {
   RepeatTimedRuns("NTP Gentle Create",
                   ^(int index) {
                     return TimedNewTab();
@@ -60,7 +65,8 @@ TEST_F(NewTabPagePerfTest, OpenNTP_Gentle) {
 // [*]RESULT NTP - Create: NTP Hammer Create First Tab= number ms
 // Output format subsequent average:
 // [*]RESULT NTP - Create: NTP Hammer Create= number ms
-TEST_F(NewTabPagePerfTest, OpenNTP_Hammer) {
+// TODO(crbug.com/717314): Failed DCHECK in PerfTestWithBVC::SetUp().
+TEST_F(NewTabPagePerfTest, DISABLED_OpenNTP_Hammer) {
   RepeatTimedRuns("NTP Hammer Create",
                   ^(int index) {
                     return TimedNewTab();

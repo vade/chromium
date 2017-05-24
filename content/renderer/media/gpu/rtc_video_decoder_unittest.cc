@@ -141,6 +141,29 @@ class RTCVideoDecoderTest
     idle_waiter_.Wait();
   }
 
+  bool CreateMockTextures(int32_t count,
+                          const gfx::Size& size,
+                          std::vector<uint32_t>* texture_ids,
+                          std::vector<gpu::Mailbox>* texture_mailboxes,
+                          uint32_t texture_target) {
+    texture_ids->resize(count, 0);
+    texture_mailboxes->resize(count, gpu::Mailbox());
+    return true;
+  }
+
+  void ProvidePictureBuffers(uint32_t buffer_count,
+                             media::VideoPixelFormat format,
+                             uint32_t textures_per_buffer,
+                             const gfx::Size& size,
+                             uint32_t texture_target) {
+    vda_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&RTCVideoDecoder::ProvidePictureBuffers,
+                   base::Unretained(rtc_decoder_.get()), buffer_count, format,
+                   textures_per_buffer, size, texture_target));
+    RunUntilIdle();
+  }
+
   void SetUpResetVDA() {
     mock_vda_after_reset_ = new media::MockVideoDecodeAccelerator;
     EXPECT_CALL(*mock_gpu_factories_.get(), DoCreateVideoDecodeAccelerator())
@@ -178,12 +201,6 @@ TEST_P(RTCVideoDecoderTest, CreateAndInitSucceeds) {
   const webrtc::VideoCodecType codec_type = GetParam();
   CreateDecoder(codec_type);
   EXPECT_EQ(WEBRTC_VIDEO_CODEC_OK, rtc_decoder_->InitDecode(&codec_, 1));
-}
-
-TEST_F(RTCVideoDecoderTest, InitDecodeReturnsErrorOnFeedbackMode) {
-  CreateDecoder(webrtc::kVideoCodecVP8);
-  codec_.VP8()->feedbackModeOn = true;
-  EXPECT_EQ(WEBRTC_VIDEO_CODEC_ERROR, rtc_decoder_->InitDecode(&codec_, 1));
 }
 
 TEST_F(RTCVideoDecoderTest, DecodeReturnsErrorWithoutInitDecode) {
@@ -282,6 +299,28 @@ TEST_F(RTCVideoDecoderTest, IsFirstBufferAfterReset) {
       rtc_decoder_->IsFirstBufferAfterReset(1, RTCVideoDecoder::ID_LAST));
 }
 
+TEST_F(RTCVideoDecoderTest, MultipleTexturesPerBuffer) {
+  CreateDecoder(webrtc::kVideoCodecVP8);
+  const uint32_t kBufferCount = 5;
+  const uint32_t kTexturesPerBuffer = 3;
+  const gfx::Size kSize(48, 48);
+
+  EXPECT_CALL(*mock_gpu_factories_.get(), CreateTextures(_, _, _, _, _))
+      .WillRepeatedly(Invoke(this, &RTCVideoDecoderTest::CreateMockTextures));
+  EXPECT_CALL(*mock_gpu_factories_.get(), DeleteTexture(_))
+      .Times(kBufferCount * kTexturesPerBuffer);
+
+  std::vector<media::PictureBuffer> pbs;
+  EXPECT_CALL(*mock_vda_, AssignPictureBuffers(_)).WillOnce(SaveArg<0>(&pbs));
+  ProvidePictureBuffers(kBufferCount, media::PIXEL_FORMAT_UNKNOWN,
+                        kTexturesPerBuffer, kSize, 0);
+  EXPECT_EQ(kBufferCount, pbs.size());
+  for (const auto pb : pbs) {
+    EXPECT_EQ(kSize, pb.size());
+    EXPECT_EQ(kTexturesPerBuffer, pb.client_texture_ids().size());
+  }
+}
+
 // Tests/Verifies that |rtc_encoder_| drops incoming frames and its error
 // counter is increased when in an error condition.
 TEST_P(RTCVideoDecoderTest, GetVDAErrorCounterForTesting) {
@@ -315,6 +354,30 @@ TEST_P(RTCVideoDecoderTest, GetVDAErrorCounterForTesting) {
   EXPECT_EQ(WEBRTC_VIDEO_CODEC_ERROR,
             rtc_decoder_->Decode(input_image, false, nullptr, nullptr, 0));
   EXPECT_EQ(2, rtc_decoder_->GetVDAErrorCounterForTesting());
+}
+
+TEST_P(RTCVideoDecoderTest, Reinitialize) {
+  const webrtc::VideoCodecType codec_type = GetParam();
+  CreateDecoder(codec_type);
+  Initialize();
+
+  webrtc::EncodedImage input_image;
+  uint8_t buffer[1];
+  input_image._buffer = buffer;
+  input_image._completeFrame = true;
+  input_image._encodedWidth = 640;
+  input_image._encodedHeight = 480;
+  input_image._frameType = webrtc::kVideoFrameKey;
+  input_image._length = sizeof(buffer);
+  EXPECT_EQ(WEBRTC_VIDEO_CODEC_OK,
+            rtc_decoder_->Decode(input_image, false, nullptr, nullptr, 0));
+  RunUntilIdle();
+
+  // InitDecode and Decode after Release should succeed.
+  rtc_decoder_->Release();
+  Initialize();
+  EXPECT_EQ(WEBRTC_VIDEO_CODEC_OK,
+            rtc_decoder_->Decode(input_image, false, nullptr, nullptr, 0));
 }
 
 INSTANTIATE_TEST_CASE_P(CodecProfiles,

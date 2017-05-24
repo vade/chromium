@@ -37,25 +37,36 @@ Polymer({
 
   /**
    * Gets the password input's type. Should be 'text' when password is visible
-   * and 'password' when it's not.
-   * @param {string} password
+   * or when there's federated text otherwise 'password'.
    * @private
    */
-  getPasswordInputType_: function(password) {
-    return password ? 'text' : 'password';
+  getPasswordInputType_: function() {
+    return this.password || this.item.federationText ? 'text' : 'password';
+  },
+
+  /**
+   * Gets the title text for the show/hide icon.
+   * @param {string} password
+   * @param {string} hide The i18n text to use for 'Hide'
+   * @param {string} show The i18n text to use for 'Show'
+   * @private
+   */
+  showPasswordTitle_: function(password, hide, show) {
+    return password ? hide : show;
   },
 
   /**
    * Gets the text of the password. Will use the value of |password| unless it
-   * cannot be shown, in which case it will be spaces.
-   * @param {!chrome.passwordsPrivate.PasswordUiEntry} item
-   * @param {string} password
+   * cannot be shown, in which case it will be spaces. It can also be the
+   * federated text.
    * @private
    */
-  getPassword_: function(item, password) {
-    if (password)
-      return password;
-    return item ? ' '.repeat(item.numCharactersInPassword) : '';
+  getPassword_: function() {
+    if (!this.item)
+      return '';
+
+    return this.item.federationText || this.password ||
+        ' '.repeat(this.item.numCharactersInPassword);
   },
 
   /**
@@ -71,20 +82,20 @@ Polymer({
   },
 
   /**
-   * Handler for tapping the 'cancel' button. Should just dismiss the dialog.
+   * Handler for tapping the 'done' button. Should just dismiss the dialog.
    * @private
    */
-  onCancelButtonTap_: function() {
+  onActionButtonTap_: function() {
     this.close();
   },
 
   /**
-   * Handler for tapping the save button.
+   * @param {!Event} event
    * @private
    */
-  onSaveButtonTap_: function() {
-    // TODO(hcarmona): what to save?
-    this.close();
-  },
+  onReadonlyInputTap_: function(event) {
+    /** @type {!PaperInputElement} */ (Polymer.dom(event).localTarget)
+        .inputElement.select();
+  }
 });
 })();

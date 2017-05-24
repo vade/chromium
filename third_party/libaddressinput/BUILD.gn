@@ -6,14 +6,24 @@ import("//testing/test.gni")
 import("//build/config/locales.gni")
 import("//tools/grit/grit_rule.gni")
 
-config("no-newline-eof-warning") {
+config("internal_config") {
   if (is_clang) {
-    cflags = [ "-Wno-newline-eof" ]
+    cflags = [
+      "-Wno-newline-eof",
+
+      # md5.cc uses "register". TODO(thakis): Fix.
+      "-Wno-deprecated-register",
+    ]
   }
+
+  # libaddressinput just says `#include "messages.h"` for grit-generated
+  # headers.
+  include_dirs = [ target_gen_dir ]
 }
 
 grit("strings") {
   source = "//chrome/app/address_input_strings.grd"
+
   outputs = [
     "messages.h",
     "en_messages.cc",
@@ -22,7 +32,7 @@ grit("strings") {
     outputs += [ "address_input_strings_$locale.pak" ]
   }
 
-  configs = [ ":no-newline-eof-warning" ]
+  configs = [ ":internal_config" ]
 }
 
 config("libaddressinput_config") {
@@ -60,7 +70,7 @@ static_library("util") {
 
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [
-    ":no-newline-eof-warning",
+    ":internal_config",
     "//build/config/compiler:no_chromium_code",
   ]
 
@@ -82,12 +92,18 @@ static_library("util") {
 static_library("libaddressinput") {
   sources = [
     "chromium/chrome_address_validator.cc",
+    "chromium/chrome_address_validator.h",
     "chromium/chrome_metadata_source.cc",
+    "chromium/chrome_metadata_source.h",
     "chromium/chrome_storage_impl.cc",
+    "chromium/chrome_storage_impl.h",
     "chromium/fallback_data_store.cc",
+    "chromium/fallback_data_store.h",
     "chromium/input_suggester.cc",
+    "chromium/input_suggester.h",
     "chromium/string_compare.cc",
     "chromium/trie.cc",
+    "chromium/trie.h",
     "src/cpp/src/address_input_helper.cc",
     "src/cpp/src/address_normalizer.cc",
     "src/cpp/src/address_problem.cc",
@@ -108,7 +124,10 @@ static_library("libaddressinput") {
   ]
 
   configs -= [ "//build/config/compiler:chromium_code" ]
-  configs += [ "//build/config/compiler:no_chromium_code" ]
+  configs += [
+    ":internal_config",
+    "//build/config/compiler:no_chromium_code",
+  ]
 
   public_configs = [ ":libaddressinput_config" ]
 
@@ -124,6 +143,30 @@ static_library("libaddressinput") {
   ]
 }
 
+# This target provides utilities for tests of libaddressinput.
+source_set("test_support") {
+  testonly = true
+  sources = [
+    "src/cpp/test/fake_storage.cc",
+    "src/cpp/test/mock_source.cc",
+    "src/cpp/test/testdata_source.cc",
+  ]
+
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [
+    ":internal_config",
+    "//build/config/compiler:no_chromium_code",
+  ]
+
+  defines = [ "TEST_DATA_DIR=\"src/third_party/libaddressinput/src/testdata\"" ]
+
+  include_dirs = [ "src/cpp/src" ]
+
+  deps = [
+    ":libaddressinput",
+  ]
+}
+
 test("libaddressinput_unittests") {
   sources = [
     "chromium/addressinput_util_unittest.cc",
@@ -132,6 +175,7 @@ test("libaddressinput_unittests") {
     "chromium/chrome_storage_impl_unittest.cc",
     "chromium/fallback_data_store_unittest.cc",
     "chromium/storage_test_runner.cc",
+    "chromium/storage_test_runner.h",
     "chromium/string_compare_unittest.cc",
     "chromium/trie_unittest.cc",
     "src/cpp/test/address_data_test.cc",
@@ -144,13 +188,11 @@ test("libaddressinput_unittests") {
     "src/cpp/test/address_problem_test.cc",
     "src/cpp/test/address_ui_test.cc",
     "src/cpp/test/address_validator_test.cc",
-    "src/cpp/test/fake_storage.cc",
     "src/cpp/test/fake_storage_test.cc",
     "src/cpp/test/format_element_test.cc",
     "src/cpp/test/language_test.cc",
     "src/cpp/test/localization_test.cc",
     "src/cpp/test/lookup_key_test.cc",
-    "src/cpp/test/mock_source.cc",
     "src/cpp/test/null_storage_test.cc",
     "src/cpp/test/ondemand_supply_task_test.cc",
     "src/cpp/test/post_box_matchers_test.cc",
@@ -162,7 +204,6 @@ test("libaddressinput_unittests") {
     "src/cpp/test/rule_retriever_test.cc",
     "src/cpp/test/rule_test.cc",
     "src/cpp/test/supplier_test.cc",
-    "src/cpp/test/testdata_source.cc",
     "src/cpp/test/testdata_source_test.cc",
     "src/cpp/test/util/json_test.cc",
     "src/cpp/test/util/md5_unittest.cc",
@@ -175,22 +216,18 @@ test("libaddressinput_unittests") {
     "src/cpp/test/validation_task_test.cc",
   ]
 
-  if (is_ios) {
-    # TODO(rouslan): This tests uses ASSERT_DEATH which is not supported on
-    # iOS. Re-enable once http://crbug.com/595645 is fixed.
-    sources -= [ "src/cpp/test/address_data_test.cc" ]
-  }
-
   configs -= [ "//build/config/compiler:chromium_code" ]
-  configs += [ "//build/config/compiler:no_chromium_code" ]
-
-  defines = [ "TEST_DATA_DIR=\"src/third_party/libaddressinput/src/testdata\"" ]
+  configs += [
+    ":internal_config",
+    "//build/config/compiler:no_chromium_code",
+  ]
 
   include_dirs = [ "src/cpp/src" ]
 
   deps = [
     ":libaddressinput",
     ":strings",
+    ":test_support",
     "//base/test:run_all_unittests",
     "//components/prefs",
     "//net:test_support",

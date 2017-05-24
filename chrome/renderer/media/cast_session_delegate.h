@@ -20,9 +20,9 @@
 #include "media/cast/logging/logging_defines.h"
 
 namespace base {
-class BinaryValue;
 class DictionaryValue;
 class SingleThreadTaskRunner;
+class Value;
 }  // namespace base
 
 namespace media {
@@ -82,8 +82,7 @@ class CastSessionDelegate : public CastSessionDelegateBase {
       media::cast::AudioFrameInput>&)> AudioFrameInputAvailableCallback;
   typedef base::Callback<void(const scoped_refptr<
       media::cast::VideoFrameInput>&)> VideoFrameInputAvailableCallback;
-  typedef base::Callback<void(std::unique_ptr<base::BinaryValue>)>
-      EventLogsCallback;
+  typedef base::Callback<void(std::unique_ptr<base::Value>)> EventLogsCallback;
   typedef base::Callback<void(std::unique_ptr<base::DictionaryValue>)>
       StatsCallback;
 

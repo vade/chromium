@@ -19,6 +19,7 @@
 #include "google_apis/drive/auth_service_interface.h"
 #include "google_apis/drive/auth_service_observer.h"
 #include "google_apis/drive/drive_api_url_generator.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 
 class GURL;
 class OAuth2TokenService;
@@ -98,13 +99,15 @@ class DriveAPIService : public DriveServiceInterface,
   // from image server.
   // |custom_user_agent| will be used for the User-Agent header in HTTP
   // requests issues through the service if the value is not empty.
-  DriveAPIService(
-      OAuth2TokenService* oauth2_token_service,
-      net::URLRequestContextGetter* url_request_context_getter,
-      base::SequencedTaskRunner* blocking_task_runner,
-      const GURL& base_url,
-      const GURL& base_thumbnail_url,
-      const std::string& custom_user_agent);
+  // |traffic_annotation| will be used to annotate the network request that will
+  // be created to perform this service.
+  DriveAPIService(OAuth2TokenService* oauth2_token_service,
+                  net::URLRequestContextGetter* url_request_context_getter,
+                  base::SequencedTaskRunner* blocking_task_runner,
+                  const GURL& base_url,
+                  const GURL& base_thumbnail_url,
+                  const std::string& custom_user_agent,
+                  const net::NetworkTrafficAnnotationTag& traffic_annotation);
   ~DriveAPIService() override;
 
   // DriveServiceInterface Overrides
@@ -119,6 +122,8 @@ class DriveAPIService : public DriveServiceInterface,
   void ClearAccessToken() override;
   void ClearRefreshToken() override;
   std::string GetRootResourceId() const override;
+  google_apis::CancelCallback GetAllTeamDriveList(
+      const google_apis::TeamDriveListCallback& callback) override;
   google_apis::CancelCallback GetAllFileList(
       const google_apis::FileListCallback& callback) override;
   google_apis::CancelCallback GetFileListInDirectory(
@@ -134,6 +139,9 @@ class DriveAPIService : public DriveServiceInterface,
   google_apis::CancelCallback GetChangeList(
       int64_t start_changestamp,
       const google_apis::ChangeListCallback& callback) override;
+  google_apis::CancelCallback GetRemainingTeamDriveList(
+      const std::string& page_token,
+      const google_apis::TeamDriveListCallback& callback) override;
   google_apis::CancelCallback GetRemainingChangeList(
       const GURL& next_link,
       const google_apis::ChangeListCallback& callback) override;
@@ -265,6 +273,7 @@ class DriveAPIService : public DriveServiceInterface,
   base::ObserverList<DriveServiceObserver> observers_;
   google_apis::DriveApiUrlGenerator url_generator_;
   const std::string custom_user_agent_;
+  const net::NetworkTrafficAnnotationTag traffic_annotation_;
 
   DISALLOW_COPY_AND_ASSIGN(DriveAPIService);
 };

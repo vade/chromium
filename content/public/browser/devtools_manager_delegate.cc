@@ -23,9 +23,8 @@ std::string DevToolsManagerDelegate::GetTargetDescription(
   return std::string();
 }
 
-bool DevToolsManagerDelegate::DiscoverTargets(
-    const DevToolsAgentHost::DiscoveryCallback& callback) {
-  return false;
+DevToolsAgentHost::List DevToolsManagerDelegate::RemoteDebuggingTargets() {
+  return DevToolsAgentHost::GetOrCreateAll();
 }
 
 scoped_refptr<DevToolsAgentHost> DevToolsManagerDelegate::CreateNewTarget(
@@ -37,6 +36,13 @@ base::DictionaryValue* DevToolsManagerDelegate::HandleCommand(
       DevToolsAgentHost* agent_host,
       base::DictionaryValue* command) {
   return nullptr;
+}
+
+bool DevToolsManagerDelegate::HandleAsyncCommand(
+    DevToolsAgentHost* agent_host,
+    base::DictionaryValue* command,
+    const CommandCallback& callback) {
+  return false;
 }
 
 std::string DevToolsManagerDelegate::GetDiscoveryPageHTML() {

@@ -39,6 +39,7 @@
 namespace offline_pages {
 
 namespace {
+const char kOriginalTabNamespace[] = "original_tab_testing_namespace";
 const char kTestClientNamespace[] = "default";
 const char kUserRequestedNamespace[] = "download";
 const GURL kTestUrl("http://example.com");
@@ -224,6 +225,14 @@ OfflinePageModelImplTest::~OfflinePageModelImplTest() {}
 void OfflinePageModelImplTest::SetUp() {
   ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
   model_ = BuildModel(BuildStore());
+  model_->GetPolicyController()->AddPolicyForTest(
+      kOriginalTabNamespace,
+      OfflinePageClientPolicyBuilder(
+          kOriginalTabNamespace,
+          offline_pages::LifetimePolicy::LifetimeType::TEMPORARY,
+          kUnlimitedPages, kUnlimitedPages)
+          .SetIsOnlyShownInOriginalTab(true));
+
   model_->AddObserver(this);
   PumpLoop();
 }
@@ -661,6 +670,7 @@ TEST_F(OfflinePageModelImplTest, SavePageOnBackground) {
   save_page_params.url = kTestUrl;
   save_page_params.client_id = kTestClientId1;
   save_page_params.is_background = true;
+  save_page_params.use_page_problem_detectors = false;
   SavePageWithParamsAsync(save_page_params, std::move(archiver));
   EXPECT_TRUE(archiver_ptr->create_archive_called());
   // |remove_popup_overlay| should be turned on on background mode.
@@ -1033,9 +1043,7 @@ TEST_F(OfflinePageModelImplTest, CheckPagesExistOffline) {
   SavePage(kTestUrl, kTestClientId1);
   SavePage(kTestUrl2, kTestClientId2);
 
-  // TODO(dewittj): Remove the "Last N" restriction in favor of a better query
-  // interface.  See https://crbug.com/622763 for information.
-  const ClientId last_n_client_id(kLastNNamespace, "1234");
+  const ClientId last_n_client_id(kOriginalTabNamespace, "1234");
   SavePage(kTestUrl3, last_n_client_id);
 
   std::set<GURL> input;
@@ -1345,6 +1353,17 @@ TEST(CommandLineFlagsTest, OfflinePagesSvelteConcurrentLoading) {
   scoped_feature_list.InitAndEnableFeature(
       kOfflinePagesSvelteConcurrentLoadingFeature);
   EXPECT_TRUE(offline_pages::IsOfflinePagesSvelteConcurrentLoadingEnabled());
+}
+
+TEST(CommandLineFlagsTest, OfflinePagesLoadSignalCollecting) {
+  // This feature is disabled by default.
+  EXPECT_FALSE(offline_pages::IsOfflinePagesLoadSignalCollectingEnabled());
+
+  // Check if feature is correctly enabled by command-line flag.
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      kOfflinePagesLoadSignalCollectingFeature);
+  EXPECT_TRUE(offline_pages::IsOfflinePagesLoadSignalCollectingEnabled());
 }
 
 }  // namespace offline_pages

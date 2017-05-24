@@ -2,26 +2,35 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "gpu/ipc/service/gpu_vsync_provider.h"
+#include "gpu/ipc/service/gpu_vsync_provider_win.h"
+
+#include <dwmapi.h>
+#include <windows.h>
 
 #include <string>
 
 #include "base/atomicops.h"
+#include "base/debug/alias.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread.h"
 #include "base/trace_event/trace_event.h"
-
-#include <windows.h>
+#include "gpu/ipc/common/gpu_messages.h"
+#include "ipc/ipc_message_macros.h"
+#include "ipc/message_filter.h"
 
 namespace gpu {
 
 namespace {
+// Default v-sync interval used when there is no history of v-sync timestamps.
+const int kDefaultInterval = 16666;
+
 // from <D3dkmthk.h>
 typedef LONG NTSTATUS;
 typedef UINT D3DKMT_HANDLE;
 typedef UINT D3DDDI_VIDEO_PRESENT_SOURCE_ID;
 
 #define STATUS_SUCCESS ((NTSTATUS)0x00000000L)
+#define STATUS_GRAPHICS_PRESENT_OCCLUDED ((NTSTATUS)0xC01E0006L)
 
 typedef struct _D3DKMT_OPENADAPTERFROMHDC {
   HDC hDc;
@@ -49,22 +58,41 @@ typedef NTSTATUS(APIENTRY* PFND3DKMTWAITFORVERTICALBLANKEVENT)(
 
 // The actual implementation of background tasks plus any state that might be
 // needed on the worker thread.
-class GpuVSyncWorker : public base::Thread {
+class GpuVSyncWorker : public base::Thread,
+                       public base::RefCountedThreadSafe<GpuVSyncWorker> {
  public:
-  GpuVSyncWorker(const GpuVSyncProvider::VSyncCallback& callback,
+  GpuVSyncWorker(const gfx::VSyncProvider::UpdateVSyncCallback& callback,
                  SurfaceHandle surface_handle);
-  ~GpuVSyncWorker() override;
 
+  void CleanupAndStop();
   void Enable(bool enabled);
   void StartRunningVSyncOnThread();
   void WaitForVSyncOnThread();
-  void SendVSyncUpdate(base::TimeTicks timestamp);
+  bool BelongsToWorkerThread();
 
  private:
+  friend class base::RefCountedThreadSafe<GpuVSyncWorker>;
+  ~GpuVSyncWorker() override;
+
   void Reschedule();
-  void OpenAdapter(const wchar_t* device_name);
+  bool OpenAdapter(const wchar_t* device_name);
   void CloseAdapter();
-  bool WaitForVBlankEvent();
+  NTSTATUS WaitForVBlankEvent();
+
+  void AddTimestamp(base::TimeTicks timestamp);
+  void AddInterval(base::TimeDelta interval);
+  base::TimeDelta GetAverageInterval() const;
+  void ClearIntervalHistory();
+
+  bool GetDisplayFrequency(const wchar_t* device_name, DWORD* frequency);
+  void UpdateCurrentDisplayFrequency();
+  bool GetDwmVBlankTimestamp(base::TimeTicks* timestamp);
+
+  void SendGpuVSyncUpdate(base::TimeTicks now, bool use_dwm);
+
+  void InvokeCallbackAndReschedule(base::TimeTicks timestamp,
+                                   base::TimeDelta interval);
+  void UseDelayBasedVSyncOnError();
 
   // Specifies whether background tasks are running.
   // This can be set on background thread only.
@@ -74,7 +102,7 @@ class GpuVSyncWorker : public base::Thread {
   // threads but can be changed on the main thread only.
   base::subtle::AtomicWord enabled_ = false;
 
-  const GpuVSyncProvider::VSyncCallback callback_;
+  const gfx::VSyncProvider::UpdateVSyncCallback callback_;
   const SurfaceHandle surface_handle_;
 
   PFND3DKMTOPENADAPTERFROMHDC open_adapter_from_hdc_ptr_;
@@ -84,10 +112,35 @@ class GpuVSyncWorker : public base::Thread {
   std::wstring current_device_name_;
   D3DKMT_HANDLE current_adapter_handle_ = 0;
   D3DDDI_VIDEO_PRESENT_SOURCE_ID current_source_id_ = 0;
+
+  // Last known v-sync timestamp.
+  base::TimeTicks last_timestamp_;
+
+  // Current display refresh frequency in Hz which is used to detect
+  // when the frequency changes and and to update the accepted interval
+  // range below.
+  DWORD current_display_frequency_ = 0;
+
+  // Range of intervals accepted for the average calculation which is
+  // +/-20% from the interval corresponding to the display frequency above.
+  // This is used to filter out outliers.
+  base::TimeDelta min_accepted_interval_;
+  base::TimeDelta max_accepted_interval_;
+
+  // History of recent deltas between timestamps which is used to calculate the
+  // average v-sync interval and organized as a circular buffer.
+  static const size_t kIntervalHistorySize = 60;
+  base::TimeDelta interval_history_[kIntervalHistorySize];
+  size_t history_index_ = 0;
+  size_t history_size_ = 0;
+
+  // Rolling sum of intervals in the circular buffer above.
+  base::TimeDelta rolling_interval_sum_;
 };
 
-GpuVSyncWorker::GpuVSyncWorker(const GpuVSyncProvider::VSyncCallback& callback,
-                               SurfaceHandle surface_handle)
+GpuVSyncWorker::GpuVSyncWorker(
+    const gfx::VSyncProvider::UpdateVSyncCallback& callback,
+    SurfaceHandle surface_handle)
     : base::Thread(base::StringPrintf("VSync-%d", surface_handle)),
       callback_(callback),
       surface_handle_(surface_handle) {
@@ -120,7 +173,10 @@ GpuVSyncWorker::GpuVSyncWorker(const GpuVSyncProvider::VSyncCallback& callback,
   }
 }
 
-GpuVSyncWorker::~GpuVSyncWorker() {
+GpuVSyncWorker::~GpuVSyncWorker() = default;
+
+void GpuVSyncWorker::CleanupAndStop() {
+  Enable(false);
   // Thread::Close() call below will block until this task has finished running
   // so it is safe to post it here and pass unretained pointer.
   task_runner()->PostTask(FROM_HERE, base::Bind(&GpuVSyncWorker::CloseAdapter,
@@ -140,8 +196,12 @@ void GpuVSyncWorker::Enable(bool enabled) {
                               base::Unretained(this)));
 }
 
+bool GpuVSyncWorker::BelongsToWorkerThread() {
+  return base::PlatformThread::CurrentId() == GetThreadId();
+}
+
 void GpuVSyncWorker::StartRunningVSyncOnThread() {
-  DCHECK(base::PlatformThread::CurrentId() == GetThreadId());
+  DCHECK(BelongsToWorkerThread());
 
   if (!running_) {
     running_ = true;
@@ -150,51 +210,202 @@ void GpuVSyncWorker::StartRunningVSyncOnThread() {
 }
 
 void GpuVSyncWorker::WaitForVSyncOnThread() {
-  DCHECK(base::PlatformThread::CurrentId() == GetThreadId());
+  DCHECK(BelongsToWorkerThread());
 
   TRACE_EVENT0("gpu", "GpuVSyncWorker::WaitForVSyncOnThread");
 
   HMONITOR monitor =
       MonitorFromWindow(surface_handle_, MONITOR_DEFAULTTONEAREST);
-  MONITORINFOEX monitor_info;
+  MONITORINFOEX monitor_info = {};
   monitor_info.cbSize = sizeof(MONITORINFOEX);
   BOOL success = GetMonitorInfo(monitor, &monitor_info);
-  CHECK(success);
+  if (!success) {
+    // This is possible when a monitor is switched off or disconnected.
+    CloseAdapter();
+    UseDelayBasedVSyncOnError();
+    return;
+  }
 
   if (current_device_name_.compare(monitor_info.szDevice) != 0) {
     // Monitor changed. Close the current adapter handle and open a new one.
     CloseAdapter();
-    OpenAdapter(monitor_info.szDevice);
+    if (!OpenAdapter(monitor_info.szDevice)) {
+      UseDelayBasedVSyncOnError();
+      return;
+    }
   }
 
-  if (WaitForVBlankEvent()) {
-    // Note: this sends update on background thread which the callback is
-    // expected to handle.
-    SendVSyncUpdate(base::TimeTicks::Now());
+  UpdateCurrentDisplayFrequency();
+
+  // Use DWM timing only when running on the primary monitor which DWM
+  // is synchronized with and only if we can get accurate high resulution
+  // timestamps.
+  bool use_dwm = (monitor_info.dwFlags & MONITORINFOF_PRIMARY) != 0 &&
+                 base::TimeTicks::IsHighResolution();
+
+  NTSTATUS wait_result = WaitForVBlankEvent();
+  if (wait_result != STATUS_SUCCESS) {
+    if (wait_result == STATUS_GRAPHICS_PRESENT_OCCLUDED) {
+      // This may be triggered by the monitor going into sleep.
+      UseDelayBasedVSyncOnError();
+      return;
+    } else {
+      base::debug::Alias(&wait_result);
+      CHECK(false);
+    }
   }
 
-  Reschedule();
+  SendGpuVSyncUpdate(base::TimeTicks::Now(), use_dwm);
 }
 
-void GpuVSyncWorker::SendVSyncUpdate(base::TimeTicks timestamp) {
-  if (base::subtle::NoBarrier_Load(&enabled_)) {
-    TRACE_EVENT0("gpu", "GpuVSyncWorker::SendVSyncUpdate");
-    callback_.Run(timestamp);
+void GpuVSyncWorker::AddTimestamp(base::TimeTicks timestamp) {
+  if (!last_timestamp_.is_null()) {
+    AddInterval(timestamp - last_timestamp_);
+  }
+
+  last_timestamp_ = timestamp;
+}
+
+void GpuVSyncWorker::AddInterval(base::TimeDelta interval) {
+  if (interval < min_accepted_interval_ || interval > max_accepted_interval_)
+    return;
+
+  if (history_size_ == kIntervalHistorySize) {
+    rolling_interval_sum_ -= interval_history_[history_index_];
+  } else {
+    history_size_++;
+  }
+
+  interval_history_[history_index_] = interval;
+  rolling_interval_sum_ += interval;
+  history_index_ = (history_index_ + 1) % kIntervalHistorySize;
+}
+
+void GpuVSyncWorker::ClearIntervalHistory() {
+  last_timestamp_ = base::TimeTicks();
+  rolling_interval_sum_ = base::TimeDelta();
+  history_index_ = 0;
+  history_size_ = 0;
+}
+
+base::TimeDelta GpuVSyncWorker::GetAverageInterval() const {
+  return !rolling_interval_sum_.is_zero()
+             ? rolling_interval_sum_ / history_size_
+             : base::TimeDelta::FromMicroseconds(kDefaultInterval);
+}
+
+bool GpuVSyncWorker::GetDisplayFrequency(const wchar_t* device_name,
+                                         DWORD* frequency) {
+  DEVMODE display_info;
+  display_info.dmSize = sizeof(DEVMODE);
+  display_info.dmDriverExtra = 0;
+
+  BOOL result =
+      EnumDisplaySettings(device_name, ENUM_CURRENT_SETTINGS, &display_info);
+  if (result && display_info.dmDisplayFrequency > 1) {
+    *frequency = display_info.dmDisplayFrequency;
+    return true;
+  }
+
+  return false;
+}
+
+void GpuVSyncWorker::UpdateCurrentDisplayFrequency() {
+  DWORD frequency;
+  DCHECK(!current_device_name_.empty());
+  if (!GetDisplayFrequency(current_device_name_.c_str(), &frequency)) {
+    current_display_frequency_ = 0;
+    return;
+  }
+
+  if (frequency != current_display_frequency_) {
+    current_display_frequency_ = frequency;
+    base::TimeDelta interval = base::TimeDelta::FromMicroseconds(
+        base::Time::kMicrosecondsPerSecond / static_cast<double>(frequency));
+    ClearIntervalHistory();
+
+    min_accepted_interval_ = interval * 0.8;
+    max_accepted_interval_ = interval * 1.2;
+    AddInterval(interval);
   }
 }
 
-void GpuVSyncWorker::Reschedule() {
-  // Restart the task if still enabled.
+bool GpuVSyncWorker::GetDwmVBlankTimestamp(base::TimeTicks* timestamp) {
+  DWM_TIMING_INFO timing_info;
+  timing_info.cbSize = sizeof(timing_info);
+  HRESULT result = DwmGetCompositionTimingInfo(nullptr, &timing_info);
+  if (result != S_OK)
+    return false;
+
+  *timestamp = base::TimeTicks::FromQPCValue(
+      static_cast<LONGLONG>(timing_info.qpcVBlank));
+  return true;
+}
+
+void GpuVSyncWorker::SendGpuVSyncUpdate(base::TimeTicks now, bool use_dwm) {
+  base::TimeTicks timestamp;
+  base::TimeDelta adjustment;
+
+  if (use_dwm && GetDwmVBlankTimestamp(&timestamp)) {
+    // Timestamp comes from DwmGetCompositionTimingInfo and apparently it might
+    // be up to 2-3 vsync cycles in the past or in the future.
+    // The adjustment formula was suggested here:
+    // http://www.vsynctester.com/firefoxisbroken.html
+    base::TimeDelta interval = GetAverageInterval();
+    adjustment =
+        ((now - timestamp + interval / 8) % interval + interval) % interval -
+        interval / 8;
+    timestamp = now - adjustment;
+  } else {
+    // Not using DWM.
+    timestamp = now;
+  }
+
+  AddTimestamp(timestamp);
+
+  TRACE_EVENT1("gpu", "GpuVSyncWorker::SendGpuVSyncUpdate", "adjustment",
+               adjustment.ToInternalValue());
+
+  DCHECK_GT(GetAverageInterval().InMillisecondsF(), 0);
+  InvokeCallbackAndReschedule(timestamp, GetAverageInterval());
+}
+
+void GpuVSyncWorker::InvokeCallbackAndReschedule(base::TimeTicks timestamp,
+                                                 base::TimeDelta interval) {
+  // Send update and restart the task if still enabled.
   if (base::subtle::NoBarrier_Load(&enabled_)) {
+    callback_.Run(timestamp, interval);
     task_runner()->PostTask(FROM_HERE,
                             base::Bind(&GpuVSyncWorker::WaitForVSyncOnThread,
                                        base::Unretained(this)));
   } else {
     running_ = false;
+    // Clear last_timestamp_ to avoid a long interval when the worker restarts.
+    last_timestamp_ = base::TimeTicks();
   }
 }
 
-void GpuVSyncWorker::OpenAdapter(const wchar_t* device_name) {
+void GpuVSyncWorker::UseDelayBasedVSyncOnError() {
+  // This is called in a case of an error.
+  // Use timer based mechanism as a backup for one v-sync cycle, start with
+  // getting VSync parameters to determine timebase and interval.
+  // TODO(stanisc): Consider a slower v-sync rate in this particular case.
+
+  base::TimeTicks timebase;
+  GetDwmVBlankTimestamp(&timebase);
+
+  base::TimeDelta interval = GetAverageInterval();
+  base::TimeTicks now = base::TimeTicks::Now();
+  base::TimeTicks next_vsync = now.SnappedToNextTick(timebase, interval);
+
+  task_runner()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&GpuVSyncWorker::InvokeCallbackAndReschedule,
+                 base::Unretained(this), next_vsync, interval),
+      next_vsync - now);
+}
+
+bool GpuVSyncWorker::OpenAdapter(const wchar_t* device_name) {
   DCHECK_EQ(0u, current_adapter_handle_);
 
   HDC hdc = CreateDC(NULL, device_name, NULL, NULL);
@@ -205,11 +416,19 @@ void GpuVSyncWorker::OpenAdapter(const wchar_t* device_name) {
   NTSTATUS result = open_adapter_from_hdc_ptr_(&open_adapter_data);
   DeleteDC(hdc);
 
+  if (result == (NTSTATUS)STATUS_INVALID_PARAMETER) {
+    // The most likely reason for this is invalid |open_adapter_data.hDc| field
+    // as a result of race condition between this code and the monitor going to
+    // sleep or being locked out.
+    return false;
+  }
+
   CHECK(result == STATUS_SUCCESS);
 
   current_device_name_ = device_name;
   current_adapter_handle_ = open_adapter_data.hAdapter;
   current_source_id_ = open_adapter_data.VidPnSourceId;
+  return true;
 }
 
 void GpuVSyncWorker::CloseAdapter() {
@@ -222,32 +441,103 @@ void GpuVSyncWorker::CloseAdapter() {
 
     current_adapter_handle_ = 0;
     current_device_name_.clear();
+
+    ClearIntervalHistory();
   }
 }
 
-bool GpuVSyncWorker::WaitForVBlankEvent() {
+NTSTATUS GpuVSyncWorker::WaitForVBlankEvent() {
   D3DKMT_WAITFORVERTICALBLANKEVENT wait_for_vertical_blank_event_data;
   wait_for_vertical_blank_event_data.hAdapter = current_adapter_handle_;
   wait_for_vertical_blank_event_data.hDevice = 0;
   wait_for_vertical_blank_event_data.VidPnSourceId = current_source_id_;
 
-  NTSTATUS result =
-      wait_for_vertical_blank_event_ptr_(&wait_for_vertical_blank_event_data);
-
-  return result == STATUS_SUCCESS;
+  return wait_for_vertical_blank_event_ptr_(
+      &wait_for_vertical_blank_event_data);
 }
 
-/* static */
-std::unique_ptr<GpuVSyncProvider> GpuVSyncProvider::Create(
-    const VSyncCallback& callback,
+// MessageFilter class for sending and receiving IPC messages
+// directly, avoiding routing them through the main GPU thread.
+class GpuVSyncMessageFilter : public IPC::MessageFilter {
+ public:
+  explicit GpuVSyncMessageFilter(
+      const scoped_refptr<GpuVSyncWorker>& vsync_worker,
+      int32_t route_id)
+      : vsync_worker_(vsync_worker), route_id_(route_id) {}
+
+  // IPC::MessageFilter overrides.
+  void OnChannelError() override { Reset(); }
+  void OnChannelClosing() override { Reset(); }
+  void OnFilterAdded(IPC::Channel* channel) override;
+  void OnFilterRemoved() override { Reset(); }
+  bool OnMessageReceived(const IPC::Message& msg) override;
+
+  // Send can be called from GpuVSyncWorker thread.
+  void Send(std::unique_ptr<IPC::Message> message);
+
+  int32_t route_id() const { return route_id_; }
+
+ private:
+  ~GpuVSyncMessageFilter() override = default;
+  void SendOnIOThread(std::unique_ptr<IPC::Message> message);
+  void Reset();
+
+  scoped_refptr<GpuVSyncWorker> vsync_worker_;
+  // The sender to which this filter was added.
+  IPC::Sender* sender_ = nullptr;
+  // The sender must be invoked on IO thread.
+  scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
+  const int32_t route_id_;
+};
+
+void GpuVSyncMessageFilter::OnFilterAdded(IPC::Channel* channel) {
+  io_task_runner_ = base::ThreadTaskRunnerHandle::Get();
+  sender_ = channel;
+}
+
+void GpuVSyncMessageFilter::Reset() {
+  sender_ = nullptr;
+  vsync_worker_->Enable(false);
+}
+
+bool GpuVSyncMessageFilter::OnMessageReceived(const IPC::Message& msg) {
+  if (msg.routing_id() != route_id_)
+    return false;
+
+  IPC_BEGIN_MESSAGE_MAP(GpuVSyncMessageFilter, msg)
+    IPC_MESSAGE_FORWARD(GpuCommandBufferMsg_SetNeedsVSync, vsync_worker_.get(),
+                        GpuVSyncWorker::Enable);
+    IPC_MESSAGE_UNHANDLED(return false)
+  IPC_END_MESSAGE_MAP()
+  return true;
+}
+
+void GpuVSyncMessageFilter::Send(std::unique_ptr<IPC::Message> message) {
+  io_task_runner_->PostTask(
+      FROM_HERE, base::Bind(&GpuVSyncMessageFilter::SendOnIOThread, this,
+                            base::Passed(&message)));
+}
+
+void GpuVSyncMessageFilter::SendOnIOThread(
+    std::unique_ptr<IPC::Message> message) {
+  DCHECK(io_task_runner_->BelongsToCurrentThread());
+  DCHECK(!message->is_sync());
+  if (!sender_)
+    return;
+
+  sender_->Send(message.release());
+}
+
+GpuVSyncProviderWin::GpuVSyncProviderWin(
+    base::WeakPtr<ImageTransportSurfaceDelegate> delegate,
     SurfaceHandle surface_handle) {
-  return std::unique_ptr<GpuVSyncProvider>(
-      new GpuVSyncProvider(callback, surface_handle));
-}
+  vsync_worker_ = new GpuVSyncWorker(
+      base::Bind(&GpuVSyncProviderWin::OnVSync, base::Unretained(this)),
+      surface_handle);
+  message_filter_ =
+      new GpuVSyncMessageFilter(vsync_worker_, delegate->GetRouteID());
+  delegate->AddFilter(message_filter_.get());
 
-GpuVSyncProvider::GpuVSyncProvider(const VSyncCallback& callback,
-                                   SurfaceHandle surface_handle)
-    : vsync_worker_(new GpuVSyncWorker(callback, surface_handle)) {
   // Start the thread.
   base::Thread::Options options;
   // TODO(stanisc): might consider even higher priority - REALTIME_AUDIO.
@@ -255,10 +545,25 @@ GpuVSyncProvider::GpuVSyncProvider(const VSyncCallback& callback,
   vsync_worker_->StartWithOptions(options);
 }
 
-GpuVSyncProvider::~GpuVSyncProvider() = default;
+GpuVSyncProviderWin::~GpuVSyncProviderWin() {
+  vsync_worker_->CleanupAndStop();
+}
 
-void GpuVSyncProvider::EnableVSync(bool enabled) {
-  vsync_worker_->Enable(enabled);
+void GpuVSyncProviderWin::GetVSyncParameters(
+    const UpdateVSyncCallback& callback) {
+  // This is ignored and the |callback| is never called back.  The timestamp
+  // and interval are posted directly via
+  // GpuCommandBufferMsg_UpdateVSyncParameters message sent from the worker
+  // thread.
+}
+
+void GpuVSyncProviderWin::OnVSync(base::TimeTicks timestamp,
+                                  base::TimeDelta interval) {
+  DCHECK(vsync_worker_->BelongsToWorkerThread());
+
+  message_filter_->Send(
+      base::MakeUnique<GpuCommandBufferMsg_UpdateVSyncParameters>(
+          message_filter_->route_id(), timestamp, interval));
 }
 
 }  // namespace gpu

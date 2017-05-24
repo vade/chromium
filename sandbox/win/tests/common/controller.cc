@@ -11,6 +11,7 @@
 #include "base/process/process_handle.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/unguessable_token.h"
 #include "base/win/windows_version.h"
 #include "sandbox/win/src/sandbox_factory.h"
 
@@ -136,15 +137,12 @@ void TestRunner::Init(JobLevel job_level,
 }
 
 TargetPolicy* TestRunner::GetPolicy() {
-  return policy_;
+  return policy_.get();
 }
 
 TestRunner::~TestRunner() {
   if (target_process_.IsValid() && kill_on_destruction_)
     ::TerminateProcess(target_process_.Get(), 0);
-
-  if (policy_)
-    policy_->Release();
 }
 
 bool TestRunner::AddRule(TargetPolicy::SubSystem subsystem,
@@ -242,10 +240,8 @@ int TestRunner::InternalRunTest(const wchar_t* command) {
     result = broker_->SpawnTarget(prog_name, arguments.c_str(), policy_,
                                   &warning_result, &last_error, &target);
   }
-  if (release_policy_in_run_) {
-    policy_->Release();
+  if (release_policy_in_run_)
     policy_ = nullptr;
-  }
 
   if (SBOX_ALL_OK != result)
     return SBOX_TEST_FAILED_TO_RUN_TEST;
@@ -320,8 +316,8 @@ int DispatchCall(int argc, wchar_t **argv) {
     base::StringToUint(argv[4], reinterpret_cast<unsigned int*>(&raw_handle));
     if (raw_handle == nullptr)
       return SBOX_TEST_INVALID_PARAMETER;
-    base::SharedMemoryHandle shared_handle(raw_handle,
-                                           base::GetCurrentProcId());
+    base::SharedMemoryHandle shared_handle(raw_handle, 0u,
+                                           base::UnguessableToken::Create());
     base::SharedMemory read_only_view(shared_handle, true);
     if (!read_only_view.Map(0))
       return SBOX_TEST_INVALID_PARAMETER;

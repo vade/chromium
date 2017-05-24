@@ -5,7 +5,7 @@
     <script src="../../resources/testharness.js"></script>
     <script src="../../resources/testharnessreport.js"></script>
     <script src="../resources/audit-util.js"></script>
-    <script src="../resources/audio-testing.js"></script>
+    <script src="../resources/audit.js"></script>
     <script src="audionodeoptions.js"></script>
   </head>
 
@@ -15,140 +15,110 @@
 
       var audit = Audit.createTaskRunner();
 
-      audit.defineTask("initialize", function (taskDone) {
-        Should("context = new OfflineAudioContext(...)", function () {
-          context = new OfflineAudioContext(1, 1, 48000);
-        }).notThrow();
-        taskDone();
+      audit.define('initialize', (task, should) => {
+        context = initializeContext(should);
+        task.done();
       });
 
-      audit.defineTask("invalid constructor", function (taskDone) {
+      audit.define('invalid constructor', (task, should) => {
+        testInvalidConstructor(should, 'ConvolverNode', context);
+        task.done();
+      });
+
+      audit.define('default constructor', (task, should) => {
+        let prefix = 'node0';
+        let node = testDefaultConstructor(should, 'ConvolverNode', context, {
+          prefix: prefix,
+          numberOfInputs: 1,
+          numberOfOutputs: 1,
+          channelCount: 2,
+          channelCountMode: 'clamped-max',
+          channelInterpretation: 'speakers'
+        });
+
+        testDefaultAttributes(
+            should, node, prefix,
+            [{name: 'normalize', value: true}, {name: 'buffer', value: null}]);
+
+        task.done();
+      });
+
+      audit.define('test AudioNodeOptions', (task, should) => {
+        testAudioNodeOptions(should, context, 'ConvolverNode', {
+          channelCount:
+              {value: 2, isFixed: true, errorType: 'NotSupportedError'},
+          channelCountMode: {
+            value: 'clamped-max',
+            isFixed: true,
+            errorType: 'NotSupportedError'
+          },
+        });
+        task.done();
+      });
+
+      audit.define('nullable buffer', (task, should) => {
         var node;
-        var success = true;
+        var options = {buffer: null};
 
-        succes = Should("new ConvolverNode()", function () {
-          node = new ConvolverNode();
-        }).throw("TypeError");
-        success = Should("new ConvolverNode(1)", function () {
-          node = new ConvolverNode(1);
-        }).throw("TypeError") && success;
-        success = Should("new ConvolverNode(context, 42)", function () {
-          node = new ConvolverNode(context, 42);
-        }).throw("TypeError") && success;
+        should(
+            () => {
+              node = new ConvolverNode(context, options);
+            },
+            'node1 = new ConvolverNode(c, ' + JSON.stringify(options))
+            .notThrow();
 
-        Should("Invalid constructors", success)
-          .summarize(
-            "correctly threw errors",
-            "did not throw errors in all cases");
-        taskDone();
+        should(node.buffer, 'node1.buffer').beEqualTo(null);
+
+        task.done();
       });
 
-      audit.defineTask("default constructor", function (taskDone) {
-        var node;
-        var success = true;
-
-        success = Should("node = new ConvolverNode(context)", function () {
-          node = new ConvolverNode(context);
-        }).notThrow();
-        success = Should("node instanceOf ConvolverNode", node instanceof ConvolverNode)
-          .beEqualTo(true) && success;
-        success = Should("node.normalize", node.normalize)
-          .beEqualTo(true) && success;
-
-        success = Should("node.channelCount", node.channelCount)
-          .beEqualTo(2) && success;
-        success = Should("node.channelCountMode", node.channelCountMode)
-          .beEqualTo("clamped-max") && success;
-        success = Should("node.channelInterpretation", node.channelInterpretation)
-          .beEqualTo("speakers") && success;
-
-        success = Should("new AnalyserNode(context)", success)
-            .summarize(
-                "constructed node with correct attributes",
-                "did not construct correct node correctly")
-
-        taskDone();
-      });
-
-      audit.defineTask("test AudioNodeOptions", function (taskDone) {
-        testAudioNodeOptions(context, "ConvolverNode");
-        taskDone();
-      });
-
-      audit.defineTask("nullable buffer", function (taskDone) {
-        var node;
-        var success = true;
-
-        var options = { buffer: null };
-      
-        success = Should("node = new ConvolverNode(c, " + JSON.stringify(options), function () {
-          node = new ConvolverNode(context, options);
-        }).notThrow();
-
-        success = Should("node.buffer", node.buffer)
-          .beEqualTo(null);
-
-        Should("Null buffer in constructor handled", success)
-          .summarize(
-            "correctly",
-            "incorrectly");
-
-        taskDone();
-      });
-
-      audit.defineTask("construct with options", function (taskDone) {
+      audit.define('construct with options', (task, should) => {
         var buf = context.createBuffer(1, 1, context.sampleRate);
-        var options = {
-          buffer: buf,
-          disableNormalization: false
-        };
+        var options = {buffer: buf, disableNormalization: false};
 
-        var message = "node = new ConvolverNode(c, " + JSON.stringify(options) + ")";
+        var message =
+            'node = new ConvolverNode(c, ' + JSON.stringify(options) + ')';
 
         var node;
-        success = Should(message, function () {
+        should(() => {
           node = new ConvolverNode(context, options);
-        }).notThrow();
+        }, message).notThrow();
 
-        success = Should("node instanceOf ConvolverNode", node instanceof ConvolverNode)
-          .beEqualTo(true) && success;
-        success = Should("node.buffer === <buf>", node.buffer ===
-        options.buffer)
-          .beEqualTo(true) && success;
-        success = Should("node.normalize", node.normalize)
-          .beEqualTo(!options.disableNormalization) && success;
+        should(node instanceof ConvolverNode, 'node1 instanceOf ConvolverNode')
+            .beEqualTo(true);
+        should(node.buffer === options.buffer, 'node1.buffer === <buf>')
+            .beEqualTo(true);
+        should(node.normalize, 'node1.normalize')
+            .beEqualTo(!options.disableNormalization);
 
         options.buffer = null;
         options.disableNormalization = true;
 
-        message = "node = new ConvolverNode(, " + JSON.stringify(options) + ")";
+        message =
+            'node2 = new ConvolverNode(, ' + JSON.stringify(options) + ')';
 
-        success = Should(message, function () {
+        should(() => {
           node = new ConvolverNode(context, options);
-        }).notThrow() && success;
-        success = Should("node.buffer", node.buffer).beEqualTo(null) && success;
-        success = Should("node.normalize", node.normalize)
-          .beEqualTo(!options.disableNormalization) && success;
+        }, message).notThrow();
+        should(node.buffer, 'node2.buffer').beEqualTo(null);
+        should(node.normalize, 'node2.normalize')
+            .beEqualTo(!options.disableNormalization);
 
         options.disableNormalization = false;
-        message = "node = new ConvolverNode(context, " + JSON.stringify(options) + ")";
+        message = 'node3 = new ConvolverNode(context, ' +
+            JSON.stringify(options) + ')';
 
-        success = Should(message, function () {
+        should(() => {
           node = new ConvolverNode(context, options);
-        }).notThrow() && success;
-        success = Should("node.buffer", node.buffer).beEqualTo(null) && success;
-        success = Should("node.normalize", node.normalize)
-          .beEqualTo(!options.disableNormalization) && success;
+        }, message).notThrow();
+        should(node.buffer, 'node3.buffer').beEqualTo(null);
+        should(node.normalize, 'node3.normalize')
+            .beEqualTo(!options.disableNormalization);
 
-        Should("new ConvolverNode() with options", success)
-            .summarize(
-                "constructed with correct attributes",
-                "was not constructed correctly");
-          
-        taskDone();
+        task.done();
       });
 
-      audit.runTasks();
+      audit.run();
     </script>
   </body>
 </html>

@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/debug/leak_annotations.h"
 #include "base/files/scoped_temp_dir.h"
@@ -44,17 +46,18 @@ class FakeV4Store : public V4Store {
 // |GetStoresMatchingFullHash()| method in |V4Database|.
 class FakeV4StoreFactory : public V4StoreFactory {
  public:
-  FakeV4StoreFactory(bool hash_prefix_matches)
+  explicit FakeV4StoreFactory(bool hash_prefix_matches)
       : hash_prefix_should_match_(hash_prefix_matches) {}
 
-  V4Store* CreateV4Store(
+  std::unique_ptr<V4Store> CreateV4Store(
       const scoped_refptr<base::SequencedTaskRunner>& task_runner,
       const base::FilePath& store_path) override {
-    return new FakeV4Store(task_runner, store_path, hash_prefix_should_match_);
+    return base::MakeUnique<FakeV4Store>(task_runner, store_path,
+                                         hash_prefix_should_match_);
   }
 
  private:
-  bool hash_prefix_should_match_;
+  const bool hash_prefix_should_match_;
 };
 
 class V4DatabaseTest : public PlatformTest {
@@ -91,8 +94,8 @@ class V4DatabaseTest : public PlatformTest {
   }
 
   void RegisterFactory(bool hash_prefix_matches = true) {
-    factory_.reset(new FakeV4StoreFactory(hash_prefix_matches));
-    V4Database::RegisterStoreFactoryForTest(factory_.get());
+    V4Database::RegisterStoreFactoryForTest(
+        base::MakeUnique<FakeV4StoreFactory>(hash_prefix_matches));
   }
 
   void SetupInfoMapAndExpectedState() {
@@ -138,11 +141,10 @@ class V4DatabaseTest : public PlatformTest {
   std::unique_ptr<ParsedServerResponse> CreateFakeServerResponse(
       StoreStateMap store_state_map,
       bool use_valid_response_type) {
-    std::unique_ptr<ParsedServerResponse> parsed_server_response(
-        new ParsedServerResponse);
+    auto parsed_server_response = base::MakeUnique<ParsedServerResponse>();
     for (const auto& store_state_iter : store_state_map) {
       ListIdentifier identifier = store_state_iter.first;
-      ListUpdateResponse* lur = new ListUpdateResponse;
+      auto lur = base::MakeUnique<ListUpdateResponse>();
       lur->set_platform_type(identifier.platform_type());
       lur->set_threat_entry_type(identifier.threat_entry_type());
       lur->set_threat_type(identifier.threat_type());
@@ -152,7 +154,7 @@ class V4DatabaseTest : public PlatformTest {
       } else {
         lur->set_response_type(ListUpdateResponse::RESPONSE_TYPE_UNSPECIFIED);
       }
-      parsed_server_response->push_back(base::WrapUnique(lur));
+      parsed_server_response->push_back(std::move(lur));
     }
     return parsed_server_response;
   }
@@ -206,7 +208,6 @@ class V4DatabaseTest : public PlatformTest {
   ListInfos list_infos_;
   std::vector<ListIdentifier> expected_identifiers_;
   std::vector<base::FilePath> expected_store_paths_;
-  std::unique_ptr<FakeV4StoreFactory> factory_;
   DatabaseUpdatedCallback callback_db_updated_;
   NewDatabaseReadyCallback callback_db_ready_;
   StoreStateMap expected_store_state_map_;
@@ -304,8 +305,7 @@ TEST_F(V4DatabaseTest, TestApplyUpdateWithEmptyUpdate) {
     old_stores_map_[store_iter.first] = store;
   }
 
-  std::unique_ptr<ParsedServerResponse> parsed_server_response(
-      new ParsedServerResponse);
+  auto parsed_server_response = base::MakeUnique<ParsedServerResponse>();
   v4_database_->ApplyUpdate(std::move(parsed_server_response),
                             callback_db_updated_);
 
@@ -468,13 +468,22 @@ TEST_F(V4DatabaseTest, TestStoresAvailable) {
   const ListIdentifier bogus_id(LINUX_PLATFORM, CHROME_EXTENSION,
                                 CSD_WHITELIST);
 
-  EXPECT_TRUE(v4_database_->AreStoresAvailable(
+  EXPECT_TRUE(v4_database_->AreAllStoresAvailable(
+      StoresToCheck({linux_malware_id_, win_malware_id_})));
+  EXPECT_TRUE(v4_database_->AreAnyStoresAvailable(
       StoresToCheck({linux_malware_id_, win_malware_id_})));
 
-  EXPECT_FALSE(v4_database_->AreStoresAvailable(
+  EXPECT_TRUE(
+      v4_database_->AreAllStoresAvailable(StoresToCheck({linux_malware_id_})));
+  EXPECT_TRUE(
+      v4_database_->AreAnyStoresAvailable(StoresToCheck({linux_malware_id_})));
+
+  EXPECT_FALSE(v4_database_->AreAllStoresAvailable(
+      StoresToCheck({linux_malware_id_, bogus_id})));
+  EXPECT_TRUE(v4_database_->AreAnyStoresAvailable(
       StoresToCheck({linux_malware_id_, bogus_id})));
 
-  EXPECT_FALSE(v4_database_->AreStoresAvailable(StoresToCheck({bogus_id})));
+  EXPECT_FALSE(v4_database_->AreAllStoresAvailable(StoresToCheck({bogus_id})));
 }
 
 // Test to ensure that the callback to the database is dropped when the database
@@ -490,8 +499,7 @@ TEST_F(V4DatabaseTest, UsingWeakPtrDropsCallback) {
 
   // Step 2: Try to update the database. This posts V4Store::ApplyUpdate on the
   // task runner.
-  std::unique_ptr<ParsedServerResponse> parsed_server_response(
-      new ParsedServerResponse);
+  auto parsed_server_response = base::MakeUnique<ParsedServerResponse>();
   auto lur = base::MakeUnique<ListUpdateResponse>();
   lur->set_platform_type(linux_malware_id_.platform_type());
   lur->set_threat_entry_type(linux_malware_id_.threat_entry_type());

@@ -164,6 +164,12 @@ String.prototype.trimMiddle = function(maxLength) {
     return String(this);
   var leftHalf = maxLength >> 1;
   var rightHalf = maxLength - leftHalf - 1;
+  if (this.codePointAt(this.length - rightHalf - 1) >= 0x10000) {
+    --rightHalf;
+    ++leftHalf;
+  }
+  if (leftHalf > 0 && this.codePointAt(leftHalf - 1) >= 0x10000)
+    --leftHalf;
   return this.substr(0, leftHalf) + '\u2026' + this.substr(this.length - rightHalf, rightHalf);
 };
 
@@ -402,31 +408,6 @@ Date.prototype.toISO8601Compact = function() {
   }
   return this.getFullYear() + leadZero(this.getMonth() + 1) + leadZero(this.getDate()) + 'T' +
       leadZero(this.getHours()) + leadZero(this.getMinutes()) + leadZero(this.getSeconds());
-};
-
-/**
- * @return {string}
- */
-Date.prototype.toConsoleTime = function() {
-  /**
-   * @param {number} x
-   * @return {string}
-   */
-  function leadZero2(x) {
-    return (x > 9 ? '' : '0') + x;
-  }
-
-  /**
-   * @param {number} x
-   * @return {string}
-   */
-  function leadZero3(x) {
-    return '0'.repeat(3 - x.toString().length) + x;
-  }
-
-  return this.getFullYear() + '-' + leadZero2(this.getMonth() + 1) + '-' + leadZero2(this.getDate()) + ' ' +
-      leadZero2(this.getHours()) + ':' + leadZero2(this.getMinutes()) + ':' + leadZero2(this.getSeconds()) + '.' +
-      leadZero3(this.getMilliseconds());
 };
 
 Object.defineProperty(Array.prototype, 'remove', {
@@ -1111,6 +1092,16 @@ Set.prototype.valuesArray = function() {
 };
 
 /**
+ * @return {?T}
+ * @template T
+ */
+Set.prototype.firstValue = function() {
+  if (!this.size)
+    return null;
+  return this.values().next().value;
+};
+
+/**
  * @param {!Iterable<T>|!Array<!T>} iterable
  * @template T
  */
@@ -1232,12 +1223,14 @@ Multimap.prototype = {
   /**
    * @param {K} key
    * @param {V} value
+   * @return {boolean}
    */
   remove: function(key, value) {
     var values = this.get(key);
-    values.delete(value);
+    var result = values.delete(value);
     if (!values.size)
       this._map.delete(key);
+    return result;
   },
 
   /**
@@ -1460,4 +1453,19 @@ function runOnWindowLoad(callback) {
     callback();
   else
     self.addEventListener('DOMContentLoaded', windowLoaded, false);
+}
+
+var _singletonSymbol = Symbol('singleton');
+
+/**
+ * @template T
+ * @param {function(new:T, ...)} constructorFunction
+ * @return {!T}
+ */
+function singleton(constructorFunction) {
+  if (_singletonSymbol in constructorFunction)
+    return constructorFunction[_singletonSymbol];
+  var instance = new constructorFunction();
+  constructorFunction[_singletonSymbol] = instance;
+  return instance;
 }

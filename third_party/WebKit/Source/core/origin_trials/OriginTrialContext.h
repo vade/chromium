@@ -8,10 +8,10 @@
 #include "core/CoreExport.h"
 #include "core/dom/ExecutionContext.h"
 #include "platform/Supplementable.h"
-#include "wtf/HashSet.h"
-#include "wtf/Vector.h"
-#include "wtf/text/StringHash.h"
-#include "wtf/text/WTFString.h"
+#include "platform/wtf/HashSet.h"
+#include "platform/wtf/Vector.h"
+#include "platform/wtf/text/StringHash.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -25,7 +25,7 @@ class WebTrialTokenValidator;
 // context.  This class is not for direct use by feature implementers.
 // Instead, the OriginTrials generated namespace provides a method for each
 // trial to check if it is enabled. Experimental features must be defined in
-// RuntimeEnabledFeatures.in, which is used to generate OriginTrials.h/cpp.
+// RuntimeEnabledFeatures.json5, which is used to generate OriginTrials.h/cpp.
 //
 // Origin trials are defined by string names, provided by the implementers. The
 // framework does not maintain an enum or constant list for trial names.
@@ -38,55 +38,63 @@ class CORE_EXPORT OriginTrialContext final
       public Supplement<ExecutionContext> {
   USING_GARBAGE_COLLECTED_MIXIN(OriginTrialContext)
  public:
-  enum CreateMode { CreateIfNotExists, DontCreateIfNotExists };
+  enum CreateMode { kCreateIfNotExists, kDontCreateIfNotExists };
 
   OriginTrialContext(ExecutionContext&, WebTrialTokenValidator*);
 
-  static const char* supplementName();
+  static const char* SupplementName();
 
   // Returns the OriginTrialContext for a specific ExecutionContext. If
   // |create| is false, this returns null if no OriginTrialContext exists
   // yet for the ExecutionContext.
-  static OriginTrialContext* from(ExecutionContext*,
-                                  CreateMode = CreateIfNotExists);
+  static OriginTrialContext* From(ExecutionContext*,
+                                  CreateMode = kCreateIfNotExists);
 
   // Parses an Origin-Trial header as specified in
   // https://jpchase.github.io/OriginTrials/#header into individual tokens.
   // Returns null if the header value was malformed and could not be parsed.
   // If the header does not contain any tokens, this returns an empty vector.
-  static std::unique_ptr<Vector<String>> parseHeaderValue(
-      const String& headerValue);
+  static std::unique_ptr<Vector<String>> ParseHeaderValue(
+      const String& header_value);
 
-  static void addTokensFromHeader(ExecutionContext*, const String& headerValue);
-  static void addTokens(ExecutionContext*, const Vector<String>* tokens);
+  static void AddTokensFromHeader(ExecutionContext*,
+                                  const String& header_value);
+  static void AddTokens(ExecutionContext*, const Vector<String>* tokens);
 
   // Returns the trial tokens that are active in a specific ExecutionContext.
   // Returns null if no tokens were added to the ExecutionContext.
-  static std::unique_ptr<Vector<String>> getTokens(ExecutionContext*);
+  static std::unique_ptr<Vector<String>> GetTokens(ExecutionContext*);
 
-  void addToken(const String& token);
-  void addTokens(const Vector<String>& tokens);
+  void AddToken(const String& token);
+  void AddTokens(const Vector<String>& tokens);
 
   // Returns true if the trial (and therefore the feature or features it
   // controls) should be considered enabled for the current execution context.
-  bool isTrialEnabled(const String& trialName);
+  bool IsTrialEnabled(const String& trial_name);
 
-  // Installs JavaScript bindings on the Window object for any features which
+  // Installs JavaScript bindings on the relevant objects for any features which
   // should be enabled by the current set of trial tokens. This method is called
-  // every time a token is added to the document, so that global interfaces will
-  // be properly visible, even if the V8 context is being reused (i.e., after
-  // navigation). If the V8 context is not initialized, this method will return
-  // without doing anything.
-  void initializePendingFeatures();
+  // every time a token is added to the document (including when tokens are
+  // added via script). JavaScript-exposed members will be properly visible, for
+  // existing objects in the V8 context. If the V8 context is not initialized,
+  // or there are no enabled features, or all enabled features are already
+  // initialized, this method returns without doing anything. That is, it is
+  // safe to call this method multiple times, even if no trials are newly
+  // enabled.
+  void InitializePendingFeatures();
 
   DECLARE_VIRTUAL_TRACE();
 
  private:
-  void validateToken(const String& token);
+  // Validate the trial token. If valid, the trial named in the token is
+  // added to the list of enabled trials. Returns true or false to indicate if
+  // the token is valid.
+  bool EnableTrialFromToken(const String& token);
 
-  Vector<String> m_tokens;
-  HashSet<String> m_enabledTrials;
-  WebTrialTokenValidator* m_trialTokenValidator;
+  Vector<String> tokens_;
+  HashSet<String> enabled_trials_;
+  HashSet<String> installed_trials_;
+  WebTrialTokenValidator* trial_token_validator_;
 };
 
 }  // namespace blink

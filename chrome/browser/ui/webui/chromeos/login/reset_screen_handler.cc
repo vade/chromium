@@ -10,7 +10,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/oobe_screen.h"
-#include "chrome/browser/chromeos/login/screens/reset_model.h"
+#include "chrome/browser/chromeos/login/screens/reset_screen.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
@@ -27,15 +27,13 @@ const char kJsScreenPath[] = "login.ResetScreen";
 
 namespace chromeos {
 
-ResetScreenHandler::ResetScreenHandler()
-    : BaseScreenHandler(kJsScreenPath),
-      model_(nullptr),
-      show_on_init_(false) {
+ResetScreenHandler::ResetScreenHandler() : BaseScreenHandler(kScreenId) {
+  set_call_js_prefix(kJsScreenPath);
 }
 
 ResetScreenHandler::~ResetScreenHandler() {
-  if (model_)
-    model_->OnViewDestroyed(this);
+  if (screen_)
+    screen_->OnViewDestroyed(this);
 }
 
 void ResetScreenHandler::Show() {
@@ -43,7 +41,7 @@ void ResetScreenHandler::Show() {
     show_on_init_ = true;
     return;
   }
-  ShowScreen(OobeScreen::SCREEN_OOBE_RESET);
+  ShowScreen(kScreenId);
 }
 
 void ResetScreenHandler::Hide() {
@@ -54,6 +52,8 @@ void ResetScreenHandler::DeclareLocalizedValues(
   builder->Add("resetScreenTitle", IDS_RESET_SCREEN_TITLE);
   builder->Add("resetScreenAccessibleTitle", IDS_RESET_SCREEN_TITLE);
   builder->Add("resetScreenIconTitle", IDS_RESET_SCREEN_ICON_TITLE);
+  builder->Add("resetScreenIllustrationTitle",
+               IDS_RESET_SCREEN_ILLUSTRATION_TITLE);
   builder->Add("cancelButton", IDS_CANCEL);
 
   builder->Add("resetButtonRestart", IDS_RELAUNCH_BUTTON);
@@ -107,13 +107,13 @@ void ResetScreenHandler::Initialize() {
   }
 }
 
-void ResetScreenHandler::Bind(ResetModel& model) {
-  model_ = &model;
-  BaseScreenHandler::SetBaseScreen(model_);
+void ResetScreenHandler::Bind(ResetScreen* screen) {
+  screen_ = screen;
+  BaseScreenHandler::SetBaseScreen(screen_);
 }
 
 void ResetScreenHandler::Unbind() {
-  model_ = nullptr;
+  screen_ = nullptr;
   BaseScreenHandler::SetBaseScreen(nullptr);
 }
 

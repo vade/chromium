@@ -5,6 +5,7 @@
 #include "base/containers/hash_tables.h"
 #include "ui/accessibility/ax_action_data.h"
 #include "ui/accessibility/platform/test_ax_node_wrapper.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 
 namespace ui {
 
@@ -48,9 +49,7 @@ TestAXTreeDelegate g_ax_tree_delegate;
 
 // static
 TestAXNodeWrapper* TestAXNodeWrapper::GetOrCreate(AXTree* tree, AXNode* node) {
-  // Just return NULL if |node| is NULL; this makes test code simpler because
-  // now we don't have to null-check AXNode* every time we call GetOrCreate.
-  if (!node)
+  if (!tree || !node)
     return nullptr;
 
   tree->SetDelegate(&g_ax_tree_delegate);
@@ -71,7 +70,7 @@ TestAXNodeWrapper::~TestAXNodeWrapper() {
   platform_node_->Destroy();
 }
 
-const AXNodeData& TestAXNodeWrapper::GetData() {
+const AXNodeData& TestAXNodeWrapper::GetData() const {
   return node_->data();
 }
 
@@ -100,8 +99,10 @@ gfx::NativeViewAccessible TestAXNodeWrapper::ChildAtIndex(int index) {
       nullptr;
 }
 
-gfx::Vector2d TestAXNodeWrapper::GetGlobalCoordinateOffset() {
-  return g_offset;
+gfx::Rect TestAXNodeWrapper::GetScreenBoundsRect() const {
+  gfx::RectF bounds = GetData().location;
+  bounds.Offset(g_offset);
+  return gfx::ToEnclosingRect(bounds);
 }
 
 gfx::NativeViewAccessible TestAXNodeWrapper::HitTestSync(int x, int y) {
@@ -119,10 +120,8 @@ TestAXNodeWrapper::GetTargetForNativeAccessibilityEvent() {
 
 bool TestAXNodeWrapper::AccessibilityPerformAction(
     const ui::AXActionData& data) {
-  return false;
+  return true;
 }
-
-void TestAXNodeWrapper::DoDefaultAction() {}
 
 TestAXNodeWrapper::TestAXNodeWrapper(AXTree* tree, AXNode* node)
     : tree_(tree),

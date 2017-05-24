@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/ash/launcher/arc_app_deferred_launcher_item_controller.h"
 
 #include <memory>
+#include <utility>
 
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
@@ -15,10 +16,9 @@
 
 ArcAppDeferredLauncherItemController::ArcAppDeferredLauncherItemController(
     const std::string& arc_app_id,
-    ChromeLauncherController* controller,
     int event_flags,
     const base::WeakPtr<ArcAppDeferredLauncherController>& host)
-    : LauncherItemController(arc_app_id, "", controller),
+    : ash::ShelfItemDelegate(ash::ShelfID(arc_app_id)),
       event_flags_(event_flags),
       host_(host),
       start_time_(base::Time::Now()) {}
@@ -32,30 +32,21 @@ base::TimeDelta ArcAppDeferredLauncherItemController::GetActiveTime() const {
   return base::Time::Now() - start_time_;
 }
 
-ash::ShelfItemDelegate::PerformedAction
-ArcAppDeferredLauncherItemController::ItemSelected(const ui::Event& event) {
-  return ash::ShelfItemDelegate::kNoAction;
+void ArcAppDeferredLauncherItemController::ItemSelected(
+    std::unique_ptr<ui::Event> event,
+    int64_t display_id,
+    ash::ShelfLaunchSource source,
+    ItemSelectedCallback callback) {
+  std::move(callback).Run(ash::SHELF_ACTION_NONE, base::nullopt);
 }
 
-ash::ShelfMenuModel*
-ArcAppDeferredLauncherItemController::CreateApplicationMenu(int event_flags) {
-  return nullptr;
+void ArcAppDeferredLauncherItemController::ExecuteCommand(uint32_t command_id,
+                                                          int32_t event_flags) {
+  // This delegate does not support showing an application menu.
+  NOTIMPLEMENTED();
 }
 
 void ArcAppDeferredLauncherItemController::Close() {
   if (host_)
     host_->Close(app_id());
-}
-
-void ArcAppDeferredLauncherItemController::Launch(ash::LaunchSource source,
-                                                  int event_flags) {}
-
-ash::ShelfItemDelegate::PerformedAction
-ArcAppDeferredLauncherItemController::Activate(ash::LaunchSource source) {
-  return ash::ShelfItemDelegate::kNoAction;
-}
-
-ChromeLauncherAppMenuItems
-ArcAppDeferredLauncherItemController::GetApplicationList(int event_flags) {
-  return ChromeLauncherAppMenuItems();
 }

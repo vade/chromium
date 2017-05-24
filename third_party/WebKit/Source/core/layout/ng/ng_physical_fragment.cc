@@ -4,53 +4,59 @@
 
 #include "core/layout/ng/ng_physical_fragment.h"
 
+#include "core/layout/ng/inline/ng_physical_line_box_fragment.h"
+#include "core/layout/ng/inline/ng_physical_text_fragment.h"
 #include "core/layout/ng/ng_break_token.h"
 #include "core/layout/ng/ng_physical_box_fragment.h"
-#include "core/layout/ng/ng_physical_text_fragment.h"
 
 namespace blink {
 
-NGPhysicalFragment::NGPhysicalFragment(
-    LayoutObject* layout_object,
-    NGPhysicalSize size,
-    NGPhysicalSize overflow,
-    NGFragmentType type,
-    HeapLinkedHashSet<WeakMember<NGBlockNode>>& out_of_flow_descendants,
-    Vector<NGStaticPosition> out_of_flow_positions,
-    HeapVector<Member<NGFloatingObject>>& unpositioned_floats,
-    HeapVector<Member<NGFloatingObject>>& positioned_floats,
-    NGBreakToken* break_token)
+NGPhysicalFragment::NGPhysicalFragment(LayoutObject* layout_object,
+                                       NGPhysicalSize size,
+                                       NGFragmentType type,
+                                       RefPtr<NGBreakToken> break_token)
     : layout_object_(layout_object),
       size_(size),
-      overflow_(overflow),
-      break_token_(break_token),
+      break_token_(std::move(break_token)),
       type_(type),
-      is_placed_(false) {
-  out_of_flow_descendants_.swap(out_of_flow_descendants);
-  out_of_flow_positions_.swap(out_of_flow_positions);
-  unpositioned_floats_.swap(unpositioned_floats);
-  positioned_floats_.swap(positioned_floats);
+      is_placed_(false) {}
+
+void NGPhysicalFragment::Destroy() const {
+  switch (Type()) {
+    case kFragmentBox:
+      delete static_cast<const NGPhysicalBoxFragment*>(this);
+      break;
+    case kFragmentText:
+      delete static_cast<const NGPhysicalTextFragment*>(this);
+      break;
+    case kFragmentLineBox:
+      delete static_cast<const NGPhysicalLineBoxFragment*>(this);
+      break;
+    default:
+      NOTREACHED();
+      break;
+  }
 }
 
-DEFINE_TRACE(NGPhysicalFragment) {
-  if (Type() == kFragmentText)
-    static_cast<NGPhysicalTextFragment*>(this)->traceAfterDispatch(visitor);
-  else
-    static_cast<NGPhysicalBoxFragment*>(this)->traceAfterDispatch(visitor);
+const ComputedStyle& NGPhysicalFragment::Style() const {
+  DCHECK(layout_object_);
+  return layout_object_->StyleRef();
 }
 
-void NGPhysicalFragment::finalizeGarbageCollectedObject() {
-  if (Type() == kFragmentText)
-    static_cast<NGPhysicalTextFragment*>(this)->~NGPhysicalTextFragment();
-  else
-    static_cast<NGPhysicalBoxFragment*>(this)->~NGPhysicalBoxFragment();
+NGPixelSnappedPhysicalBoxStrut NGPhysicalFragment::BorderWidths() const {
+  unsigned edges = BorderEdges();
+  NGPhysicalBoxStrut box_strut(
+      LayoutUnit((edges & kTopBorder) ? Style().BorderTopWidth() : .0f),
+      LayoutUnit((edges & kRightBorder) ? Style().BorderRightWidth() : .0f),
+      LayoutUnit((edges & kBottomBorder) ? Style().BorderBottomWidth() : .0f),
+      LayoutUnit((edges & kLeftBorder) ? Style().BorderLeftWidth() : .0f));
+  return box_strut.SnapToDevicePixels();
 }
 
-DEFINE_TRACE_AFTER_DISPATCH(NGPhysicalFragment) {
-  visitor->trace(out_of_flow_descendants_);
-  visitor->trace(break_token_);
-  visitor->trace(unpositioned_floats_);
-  visitor->trace(positioned_floats_);
+String NGPhysicalFragment::ToString() const {
+  return String::Format("Type: '%d' Size: '%s' Offset: '%s' Placed: '%d'",
+                        Type(), Size().ToString().Ascii().data(),
+                        Offset().ToString().Ascii().data(), IsPlaced());
 }
 
 }  // namespace blink

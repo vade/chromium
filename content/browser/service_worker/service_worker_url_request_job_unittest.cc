@@ -19,7 +19,6 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "content/browser/blob_storage/chrome_blob_storage_context.h"
-#include "content/browser/fileapi/mock_url_request_delegate.h"
 #include "content/browser/resource_context_impl.h"
 #include "content/browser/service_worker/embedded_worker_registry.h"
 #include "content/browser/service_worker/embedded_worker_test_helper.h"
@@ -29,9 +28,6 @@
 #include "content/browser/service_worker/service_worker_response_info.h"
 #include "content/browser/service_worker/service_worker_test_utils.h"
 #include "content/browser/service_worker/service_worker_version.h"
-#include "content/browser/streams/stream.h"
-#include "content/browser/streams/stream_context.h"
-#include "content/browser/streams/stream_registry.h"
 #include "content/common/resource_request_body_impl.h"
 #include "content/common/service_worker/service_worker_messages.h"
 #include "content/common/service_worker/service_worker_status_code.h"
@@ -49,10 +45,12 @@
 #include "net/ssl/ssl_info.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/test_data_directory.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job_factory_impl.h"
 #include "net/url_request/url_request_test_job.h"
+#include "net/url_request/url_request_test_util.h"
 #include "storage/browser/blob/blob_data_builder.h"
 #include "storage/browser/blob/blob_storage_context.h"
 #include "storage/browser/blob/blob_url_request_job.h"
@@ -131,6 +129,14 @@ std::unique_ptr<storage::BlobProtocolHandler> CreateMockBlobProtocolHandler(
       blob_storage_context, nullptr, base::ThreadTaskRunnerHandle::Get().get());
 }
 
+std::unique_ptr<ServiceWorkerHeaderMap> MakeHeaders() {
+  auto headers = base::MakeUnique<ServiceWorkerHeaderMap>();
+  (*headers)["Pineapple"] = "Pen";
+  (*headers)["Foo"] = "Bar";
+  (*headers)["Set-Cookie"] = "CookieCookieCookie";
+  return headers;
+}
+
 }  // namespace
 
 class ServiceWorkerURLRequestJobTest
@@ -187,12 +193,10 @@ class ServiceWorkerURLRequestJobTest
       version_->SetMainScriptHttpResponseInfo(http_info);
     }
 
-    std::unique_ptr<ServiceWorkerProviderHost> provider_host(
-        new ServiceWorkerProviderHost(
-            helper_->mock_render_process_id(), MSG_ROUTING_NONE, kProviderID,
-            SERVICE_WORKER_PROVIDER_FOR_WINDOW,
-            ServiceWorkerProviderHost::FrameSecurityLevel::SECURE,
-            helper_->context()->AsWeakPtr(), nullptr));
+    std::unique_ptr<ServiceWorkerProviderHost> provider_host =
+        CreateProviderHostForWindow(
+            helper_->mock_render_process_id(), kProviderID,
+            true /* is_parent_frame_secure */, helper_->context()->AsWeakPtr());
     provider_host_ = provider_host->AsWeakPtr();
     provider_host->SetDocumentUrl(GURL("https://example.com/"));
     registration_->SetActiveVersion(version_);
@@ -235,7 +239,7 @@ class ServiceWorkerURLRequestJobTest
               request_->response_headers()->response_code());
     EXPECT_EQ(expected_status_text,
               request_->response_headers()->GetStatusText());
-    EXPECT_EQ(expected_response, url_request_delegate_.response_data());
+    EXPECT_EQ(expected_response, url_request_delegate_.data_received());
     const net::SSLInfo& ssl_info = request_->response_info().ssl_info;
     if (expect_valid_ssl) {
       EXPECT_TRUE(ssl_info.is_valid());
@@ -246,13 +250,29 @@ class ServiceWorkerURLRequestJobTest
     }
   }
 
+  void CheckHeaders(const net::HttpResponseHeaders* headers) {
+    size_t iter = 0;
+    std::string name;
+    std::string value;
+    EXPECT_TRUE(headers->EnumerateHeaderLines(&iter, &name, &value));
+    EXPECT_EQ("Foo", name);
+    EXPECT_EQ("Bar", value);
+    EXPECT_TRUE(headers->EnumerateHeaderLines(&iter, &name, &value));
+    EXPECT_EQ("Pineapple", name);
+    EXPECT_EQ("Pen", value);
+    EXPECT_TRUE(headers->EnumerateHeaderLines(&iter, &name, &value));
+    EXPECT_EQ("Set-Cookie", name);
+    EXPECT_EQ("CookieCookieCookie", value);
+    EXPECT_FALSE(headers->EnumerateHeaderLines(&iter, &name, &value));
+  }
+
   void TestRequest(int expected_status_code,
                    const std::string& expected_status_text,
                    const std::string& expected_response,
                    bool expect_valid_ssl) {
     request_ = url_request_context_.CreateRequest(
         GURL("https://example.com/foo.html"), net::DEFAULT_PRIORITY,
-        &url_request_delegate_);
+        &url_request_delegate_, TRAFFIC_ANNOTATION_FOR_TESTS);
 
     request_->set_method("GET");
     request_->Start();
@@ -303,7 +323,7 @@ class ServiceWorkerURLRequestJobTest
     version_->SetStatus(ServiceWorkerVersion::ACTIVATING);
     request_ = url_request_context_.CreateRequest(
         GURL("https://example.com/foo.html"), net::DEFAULT_PRIORITY,
-        &url_request_delegate_);
+        &url_request_delegate_, TRAFFIC_ANNOTATION_FOR_TESTS);
     request_->set_method("GET");
     request_->Start();
 
@@ -311,8 +331,8 @@ class ServiceWorkerURLRequestJobTest
     base::RunLoop().RunUntilIdle();
 
     // Simulate another worker kicking out the incumbent worker.  PostTask since
-    // it might respond synchronously, and the MockURLRequestDelegate would
-    // complain that the message loop isn't being run.
+    // it might respond synchronously, and the TestDelegate would complain that
+    // the message loop isn't being run.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::Bind(&ServiceWorkerVersion::SetStatus, version_,
                               ServiceWorkerVersion::REDUNDANT));
@@ -328,7 +348,7 @@ class ServiceWorkerURLRequestJobTest
 
   std::unique_ptr<net::URLRequestJobFactoryImpl> url_request_job_factory_;
   net::URLRequestContext url_request_context_;
-  MockURLRequestDelegate url_request_delegate_;
+  net::TestDelegate url_request_delegate_;
   std::unique_ptr<net::URLRequest> request_;
 
   std::unique_ptr<storage::BlobDataBuilder> blob_data_;
@@ -353,7 +373,7 @@ TEST_F(ServiceWorkerURLRequestJobTest, Simple) {
   EXPECT_TRUE(info->was_fetched_via_service_worker());
   EXPECT_FALSE(info->was_fallback_required());
   EXPECT_EQ(0u, info->url_list_via_service_worker().size());
-  EXPECT_EQ(blink::WebServiceWorkerResponseTypeDefault,
+  EXPECT_EQ(blink::kWebServiceWorkerResponseTypeDefault,
             info->response_type_via_service_worker());
   EXPECT_FALSE(info->service_worker_start_time().is_null());
   EXPECT_FALSE(info->service_worker_ready_time().is_null());
@@ -380,26 +400,26 @@ class ProviderDeleteHelper : public EmbeddedWorkerTestHelper {
   ~ProviderDeleteHelper() override {}
 
  protected:
-  void OnFetchEvent(int embedded_worker_id,
-                    int fetch_event_id,
-                    const ServiceWorkerFetchRequest& request,
-                    mojom::FetchEventPreloadHandlePtr preload_handle,
-                    const FetchCallback& callback) override {
+  void OnFetchEvent(
+      int /* embedded_worker_id */,
+      int /* fetch_event_id */,
+      const ServiceWorkerFetchRequest& /* request */,
+      mojom::FetchEventPreloadHandlePtr /* preload_handle */,
+      mojom::ServiceWorkerFetchResponseCallbackPtr response_callback,
+      FetchCallback finish_callback) override {
     context()->RemoveProviderHost(mock_render_process_id(), kProviderID);
-    SimulateSend(new ServiceWorkerHostMsg_FetchEventResponse(
-        embedded_worker_id, fetch_event_id,
-        SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE,
+    response_callback->OnResponse(
         ServiceWorkerResponse(
             base::MakeUnique<std::vector<GURL>>(), 200, "OK",
-            blink::WebServiceWorkerResponseTypeDefault,
+            blink::kWebServiceWorkerResponseTypeDefault,
             base::MakeUnique<ServiceWorkerHeaderMap>(), std::string(), 0,
-            GURL(), blink::WebServiceWorkerResponseErrorUnknown, base::Time(),
+            blink::kWebServiceWorkerResponseErrorUnknown, base::Time(),
             false /* response_is_in_cache_storage */,
             std::string() /* response_cache_storage_cache_name */,
             base::MakeUnique<
                 ServiceWorkerHeaderList>() /* cors_exposed_header_names */),
-        base::Time::Now()));
-    callback.Run(SERVICE_WORKER_OK, base::Time::Now());
+        base::Time::Now());
+    std::move(finish_callback).Run(SERVICE_WORKER_OK, base::Time::Now());
   }
 
  private:
@@ -423,7 +443,7 @@ TEST_F(ServiceWorkerURLRequestJobTest, DeletedProviderHostOnFetchEvent) {
   EXPECT_TRUE(info->was_fetched_via_service_worker());
   EXPECT_FALSE(info->was_fallback_required());
   EXPECT_EQ(0u, info->url_list_via_service_worker().size());
-  EXPECT_EQ(blink::WebServiceWorkerResponseTypeDefault,
+  EXPECT_EQ(blink::kWebServiceWorkerResponseTypeDefault,
             info->response_type_via_service_worker());
   EXPECT_FALSE(info->service_worker_start_time().is_null());
   EXPECT_FALSE(info->service_worker_ready_time().is_null());
@@ -433,7 +453,7 @@ TEST_F(ServiceWorkerURLRequestJobTest, DeletedProviderHostBeforeFetchEvent) {
   version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
   request_ = url_request_context_.CreateRequest(
       GURL("https://example.com/foo.html"), net::DEFAULT_PRIORITY,
-      &url_request_delegate_);
+      &url_request_delegate_, TRAFFIC_ANNOTATION_FOR_TESTS);
 
   request_->set_method("GET");
   request_->Start();
@@ -450,7 +470,7 @@ TEST_F(ServiceWorkerURLRequestJobTest, DeletedProviderHostBeforeFetchEvent) {
   EXPECT_TRUE(info->was_fetched_via_service_worker());
   EXPECT_FALSE(info->was_fallback_required());
   EXPECT_EQ(0u, info->url_list_via_service_worker().size());
-  EXPECT_EQ(blink::WebServiceWorkerResponseTypeDefault,
+  EXPECT_EQ(blink::kWebServiceWorkerResponseTypeDefault,
             info->response_type_via_service_worker());
   EXPECT_TRUE(info->service_worker_start_time().is_null());
   EXPECT_TRUE(info->service_worker_ready_time().is_null());
@@ -466,25 +486,25 @@ class BlobResponder : public EmbeddedWorkerTestHelper {
   ~BlobResponder() override {}
 
  protected:
-  void OnFetchEvent(int embedded_worker_id,
-                    int fetch_event_id,
-                    const ServiceWorkerFetchRequest& request,
-                    mojom::FetchEventPreloadHandlePtr preload_handle,
-                    const FetchCallback& callback) override {
-    SimulateSend(new ServiceWorkerHostMsg_FetchEventResponse(
-        embedded_worker_id, fetch_event_id,
-        SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE,
+  void OnFetchEvent(
+      int /* embedded_worker_id */,
+      int /* fetch_event_id */,
+      const ServiceWorkerFetchRequest& /* request */,
+      mojom::FetchEventPreloadHandlePtr /* preload_handle */,
+      mojom::ServiceWorkerFetchResponseCallbackPtr response_callback,
+      FetchCallback finish_callback) override {
+    response_callback->OnResponse(
         ServiceWorkerResponse(
             base::MakeUnique<std::vector<GURL>>(), 200, "OK",
-            blink::WebServiceWorkerResponseTypeDefault,
-            base::MakeUnique<ServiceWorkerHeaderMap>(), blob_uuid_, blob_size_,
-            GURL(), blink::WebServiceWorkerResponseErrorUnknown, base::Time(),
+            blink::kWebServiceWorkerResponseTypeDefault, MakeHeaders(),
+            blob_uuid_, blob_size_,
+            blink::kWebServiceWorkerResponseErrorUnknown, base::Time(),
             false /* response_is_in_cache_storage */,
             std::string() /* response_cache_storage_cache_name */,
             base::MakeUnique<
                 ServiceWorkerHeaderList>() /* cors_exposed_header_names */),
-        base::Time::Now()));
-    callback.Run(SERVICE_WORKER_OK, base::Time::Now());
+        base::Time::Now());
+    std::move(finish_callback).Run(SERVICE_WORKER_OK, base::Time::Now());
   }
 
   std::string blob_uuid_;
@@ -510,6 +530,7 @@ TEST_F(ServiceWorkerURLRequestJobTest, BlobResponse) {
 
   version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
   TestRequest(200, "OK", expected_response, true /* expect_valid_ssl */);
+  CheckHeaders(request_->response_headers());
 
   EXPECT_EQ(0, times_prepare_to_restart_invoked_);
   ServiceWorkerResponseInfo* info =
@@ -518,7 +539,7 @@ TEST_F(ServiceWorkerURLRequestJobTest, BlobResponse) {
   EXPECT_TRUE(info->was_fetched_via_service_worker());
   EXPECT_FALSE(info->was_fallback_required());
   EXPECT_EQ(0u, info->url_list_via_service_worker().size());
-  EXPECT_EQ(blink::WebServiceWorkerResponseTypeDefault,
+  EXPECT_EQ(blink::kWebServiceWorkerResponseTypeDefault,
             info->response_type_via_service_worker());
   EXPECT_FALSE(info->service_worker_start_time().is_null());
   EXPECT_FALSE(info->service_worker_ready_time().is_null());
@@ -537,7 +558,7 @@ TEST_F(ServiceWorkerURLRequestJobTest, NonExistentBlobUUIDResponse) {
   EXPECT_TRUE(info->was_fetched_via_service_worker());
   EXPECT_FALSE(info->was_fallback_required());
   EXPECT_EQ(0u, info->url_list_via_service_worker().size());
-  EXPECT_EQ(blink::WebServiceWorkerResponseTypeDefault,
+  EXPECT_EQ(blink::kWebServiceWorkerResponseTypeDefault,
             info->response_type_via_service_worker());
   EXPECT_FALSE(info->service_worker_start_time().is_null());
   EXPECT_FALSE(info->service_worker_ready_time().is_null());
@@ -546,50 +567,55 @@ TEST_F(ServiceWorkerURLRequestJobTest, NonExistentBlobUUIDResponse) {
 // Responds to fetch events with a stream.
 class StreamResponder : public EmbeddedWorkerTestHelper {
  public:
-  explicit StreamResponder(const GURL& stream_url)
-      : EmbeddedWorkerTestHelper(base::FilePath()), stream_url_(stream_url) {}
+  explicit StreamResponder(
+      blink::mojom::ServiceWorkerStreamCallbackRequest callback_request,
+      mojo::ScopedDataPipeConsumerHandle consumer_handle)
+      : EmbeddedWorkerTestHelper(base::FilePath()) {
+    EXPECT_TRUE(stream_handle_.is_null());
+    stream_handle_ = blink::mojom::ServiceWorkerStreamHandle::New();
+    stream_handle_->callback_request = std::move(callback_request);
+    stream_handle_->stream = std::move(consumer_handle);
+  }
   ~StreamResponder() override {}
 
  protected:
-  void OnFetchEvent(int embedded_worker_id,
-                    int fetch_event_id,
-                    const ServiceWorkerFetchRequest& request,
-                    mojom::FetchEventPreloadHandlePtr preload_handle,
-                    const FetchCallback& callback) override {
-    SimulateSend(new ServiceWorkerHostMsg_FetchEventResponse(
-        embedded_worker_id, fetch_event_id,
-        SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE,
+  void OnFetchEvent(
+      int /* embedded_worker_id */,
+      int /* fetch_event_id */,
+      const ServiceWorkerFetchRequest& /* request */,
+      mojom::FetchEventPreloadHandlePtr /* preload_handle */,
+      mojom::ServiceWorkerFetchResponseCallbackPtr response_callback,
+      FetchCallback finish_callback) override {
+    ASSERT_FALSE(stream_handle_.is_null());
+    response_callback->OnResponseStream(
         ServiceWorkerResponse(
             base::MakeUnique<std::vector<GURL>>(), 200, "OK",
-            blink::WebServiceWorkerResponseTypeDefault,
-            base::MakeUnique<ServiceWorkerHeaderMap>(), "", 0, stream_url_,
-            blink::WebServiceWorkerResponseErrorUnknown, base::Time(),
+            blink::kWebServiceWorkerResponseTypeDefault, MakeHeaders(), "", 0,
+            blink::kWebServiceWorkerResponseErrorUnknown, base::Time(),
             false /* response_is_in_cache_storage */,
             std::string() /* response_cache_storage_cache_name */,
             base::MakeUnique<
                 ServiceWorkerHeaderList>() /* cors_exposed_header_names */),
-        base::Time::Now()));
-    callback.Run(SERVICE_WORKER_OK, base::Time::Now());
+        std::move(stream_handle_), base::Time::Now());
+    std::move(finish_callback).Run(SERVICE_WORKER_OK, base::Time::Now());
   }
 
-  const GURL stream_url_;
+  blink::mojom::ServiceWorkerStreamHandlePtr stream_handle_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(StreamResponder);
 };
 
 TEST_F(ServiceWorkerURLRequestJobTest, StreamResponse) {
-  const GURL stream_url("blob://stream");
-  StreamContext* stream_context =
-      GetStreamContextForResourceContext(
-          browser_context_->GetResourceContext());
-  scoped_refptr<Stream> stream =
-      new Stream(stream_context->registry(), nullptr, stream_url);
-  SetUpWithHelper(new StreamResponder(stream_url));
+  blink::mojom::ServiceWorkerStreamCallbackPtr stream_callback;
+  mojo::DataPipe data_pipe;
+  SetUpWithHelper(new StreamResponder(mojo::MakeRequest(&stream_callback),
+                                      std::move(data_pipe.consumer_handle)));
+
   version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
   request_ = url_request_context_.CreateRequest(
       GURL("https://example.com/foo.html"), net::DEFAULT_PRIORITY,
-      &url_request_delegate_);
+      &url_request_delegate_, TRAFFIC_ANNOTATION_FOR_TESTS);
   request_->set_method("GET");
   request_->Start();
 
@@ -597,19 +623,25 @@ TEST_F(ServiceWorkerURLRequestJobTest, StreamResponse) {
   expected_response.reserve((sizeof(kTestData) - 1) * 1024);
   for (int i = 0; i < 1024; ++i) {
     expected_response += kTestData;
-    stream->AddData(kTestData, sizeof(kTestData) - 1);
+    uint32_t written_bytes = sizeof(kTestData) - 1;
+    MojoResult result =
+        mojo::WriteDataRaw(data_pipe.producer_handle.get(), kTestData,
+                           &written_bytes, MOJO_WRITE_DATA_FLAG_NONE);
+    ASSERT_EQ(MOJO_RESULT_OK, result);
+    EXPECT_EQ(sizeof(kTestData) - 1, written_bytes);
   }
-  stream->Finalize(net::OK);
+  stream_callback->OnCompleted();
+  data_pipe.producer_handle.reset();
 
   EXPECT_FALSE(HasWork());
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(HasWork());
   EXPECT_TRUE(request_->status().is_success());
-  EXPECT_EQ(200,
-            request_->response_headers()->response_code());
-  EXPECT_EQ("OK",
-            request_->response_headers()->GetStatusText());
-  EXPECT_EQ(expected_response, url_request_delegate_.response_data());
+  net::HttpResponseHeaders* headers = request_->response_headers();
+  EXPECT_EQ(200, headers->response_code());
+  EXPECT_EQ("OK", headers->GetStatusText());
+  CheckHeaders(headers);
+  EXPECT_EQ(expected_response, url_request_delegate_.data_received());
 
   EXPECT_EQ(0, times_prepare_to_restart_invoked_);
   ServiceWorkerResponseInfo* info =
@@ -618,7 +650,7 @@ TEST_F(ServiceWorkerURLRequestJobTest, StreamResponse) {
   EXPECT_TRUE(info->was_fetched_via_service_worker());
   EXPECT_FALSE(info->was_fallback_required());
   EXPECT_EQ(0u, info->url_list_via_service_worker().size());
-  EXPECT_EQ(blink::WebServiceWorkerResponseTypeDefault,
+  EXPECT_EQ(blink::kWebServiceWorkerResponseTypeDefault,
             info->response_type_via_service_worker());
   EXPECT_FALSE(info->service_worker_start_time().is_null());
   EXPECT_FALSE(info->service_worker_ready_time().is_null());
@@ -627,136 +659,39 @@ TEST_F(ServiceWorkerURLRequestJobTest, StreamResponse) {
   EXPECT_FALSE(HasWork());
 }
 
-TEST_F(ServiceWorkerURLRequestJobTest, StreamResponse_DelayedRegistration) {
-  const GURL stream_url("blob://stream");
-  StreamContext* stream_context =
-      GetStreamContextForResourceContext(
-          browser_context_->GetResourceContext());
-  SetUpWithHelper(new StreamResponder(stream_url));
+TEST_F(ServiceWorkerURLRequestJobTest, StreamResponse_ConsecutiveRead) {
+  blink::mojom::ServiceWorkerStreamCallbackPtr stream_callback;
+  mojo::DataPipe data_pipe;
+  SetUpWithHelper(new StreamResponder(mojo::MakeRequest(&stream_callback),
+                                      std::move(data_pipe.consumer_handle)));
 
   version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
   request_ = url_request_context_.CreateRequest(
       GURL("https://example.com/foo.html"), net::DEFAULT_PRIORITY,
-      &url_request_delegate_);
-  request_->set_method("GET");
-  request_->Start();
-
-  scoped_refptr<Stream> stream =
-      new Stream(stream_context->registry(), nullptr, stream_url);
-  std::string expected_response;
-  expected_response.reserve((sizeof(kTestData) - 1) * 1024);
-  for (int i = 0; i < 1024; ++i) {
-    expected_response += kTestData;
-    stream->AddData(kTestData, sizeof(kTestData) - 1);
-  }
-  stream->Finalize(net::OK);
-
-  EXPECT_FALSE(HasWork());
-  base::RunLoop().RunUntilIdle();
-  EXPECT_TRUE(HasWork());
-  EXPECT_TRUE(request_->status().is_success());
-  EXPECT_EQ(200,
-            request_->response_headers()->response_code());
-  EXPECT_EQ("OK",
-            request_->response_headers()->GetStatusText());
-  EXPECT_EQ(expected_response, url_request_delegate_.response_data());
-
-  EXPECT_EQ(0, times_prepare_to_restart_invoked_);
-  ServiceWorkerResponseInfo* info =
-      ServiceWorkerResponseInfo::ForRequest(request_.get());
-  ASSERT_TRUE(info);
-  EXPECT_TRUE(info->was_fetched_via_service_worker());
-  EXPECT_FALSE(info->was_fallback_required());
-  EXPECT_EQ(0u, info->url_list_via_service_worker().size());
-  EXPECT_EQ(blink::WebServiceWorkerResponseTypeDefault,
-            info->response_type_via_service_worker());
-  EXPECT_FALSE(info->service_worker_start_time().is_null());
-  EXPECT_FALSE(info->service_worker_ready_time().is_null());
-
-  request_.reset();
-  EXPECT_FALSE(HasWork());
-}
-
-TEST_F(ServiceWorkerURLRequestJobTest, StreamResponse_QuickFinalize) {
-  const GURL stream_url("blob://stream");
-  StreamContext* stream_context =
-      GetStreamContextForResourceContext(
-          browser_context_->GetResourceContext());
-  scoped_refptr<Stream> stream =
-      new Stream(stream_context->registry(), nullptr, stream_url);
-  std::string expected_response;
-  expected_response.reserve((sizeof(kTestData) - 1) * 1024);
-  for (int i = 0; i < 1024; ++i) {
-    expected_response += kTestData;
-    stream->AddData(kTestData, sizeof(kTestData) - 1);
-  }
-  stream->Finalize(net::OK);
-  SetUpWithHelper(new StreamResponder(stream_url));
-
-  version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
-  request_ = url_request_context_.CreateRequest(
-      GURL("https://example.com/foo.html"), net::DEFAULT_PRIORITY,
-      &url_request_delegate_);
-  request_->set_method("GET");
-  request_->Start();
-  EXPECT_FALSE(HasWork());
-  base::RunLoop().RunUntilIdle();
-  EXPECT_TRUE(HasWork());
-  EXPECT_TRUE(request_->status().is_success());
-  EXPECT_EQ(200,
-            request_->response_headers()->response_code());
-  EXPECT_EQ("OK",
-            request_->response_headers()->GetStatusText());
-  EXPECT_EQ(expected_response, url_request_delegate_.response_data());
-
-  EXPECT_EQ(0, times_prepare_to_restart_invoked_);
-  ServiceWorkerResponseInfo* info =
-      ServiceWorkerResponseInfo::ForRequest(request_.get());
-  ASSERT_TRUE(info);
-  EXPECT_TRUE(info->was_fetched_via_service_worker());
-  EXPECT_FALSE(info->was_fallback_required());
-  EXPECT_EQ(0u, info->url_list_via_service_worker().size());
-  EXPECT_EQ(blink::WebServiceWorkerResponseTypeDefault,
-            info->response_type_via_service_worker());
-  EXPECT_FALSE(info->service_worker_start_time().is_null());
-  EXPECT_FALSE(info->service_worker_ready_time().is_null());
-
-  request_.reset();
-  EXPECT_FALSE(HasWork());
-}
-
-TEST_F(ServiceWorkerURLRequestJobTest, StreamResponse_Flush) {
-  const GURL stream_url("blob://stream");
-  StreamContext* stream_context =
-      GetStreamContextForResourceContext(
-          browser_context_->GetResourceContext());
-  scoped_refptr<Stream> stream =
-      new Stream(stream_context->registry(), nullptr, stream_url);
-  SetUpWithHelper(new StreamResponder(stream_url));
-
-  version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
-  request_ = url_request_context_.CreateRequest(
-      GURL("https://example.com/foo.html"), net::DEFAULT_PRIORITY,
-      &url_request_delegate_);
+      &url_request_delegate_, TRAFFIC_ANNOTATION_FOR_TESTS);
   request_->set_method("GET");
   request_->Start();
   std::string expected_response;
   expected_response.reserve((sizeof(kTestData) - 1) * 1024);
   for (int i = 0; i < 1024; ++i) {
     expected_response += kTestData;
-    stream->AddData(kTestData, sizeof(kTestData) - 1);
-    stream->Flush();
+    uint32_t written_bytes = sizeof(kTestData) - 1;
+    MojoResult result =
+        mojo::WriteDataRaw(data_pipe.producer_handle.get(), kTestData,
+                           &written_bytes, MOJO_WRITE_DATA_FLAG_NONE);
+    ASSERT_EQ(MOJO_RESULT_OK, result);
+    EXPECT_EQ(sizeof(kTestData) - 1, written_bytes);
     base::RunLoop().RunUntilIdle();
-    EXPECT_EQ(expected_response, url_request_delegate_.response_data());
+    EXPECT_EQ(expected_response, url_request_delegate_.data_received());
   }
-  stream->Finalize(net::OK);
+  stream_callback->OnCompleted();
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(request_->status().is_success());
   EXPECT_EQ(200,
             request_->response_headers()->response_code());
   EXPECT_EQ("OK",
             request_->response_headers()->GetStatusText());
-  EXPECT_EQ(expected_response, url_request_delegate_.response_data());
+  EXPECT_EQ(expected_response, url_request_delegate_.data_received());
 
   EXPECT_EQ(0, times_prepare_to_restart_invoked_);
   ServiceWorkerResponseInfo* info =
@@ -765,22 +700,17 @@ TEST_F(ServiceWorkerURLRequestJobTest, StreamResponse_Flush) {
   EXPECT_TRUE(info->was_fetched_via_service_worker());
   EXPECT_FALSE(info->was_fallback_required());
   EXPECT_EQ(0u, info->url_list_via_service_worker().size());
-  EXPECT_EQ(blink::WebServiceWorkerResponseTypeDefault,
+  EXPECT_EQ(blink::kWebServiceWorkerResponseTypeDefault,
             info->response_type_via_service_worker());
   EXPECT_FALSE(info->service_worker_start_time().is_null());
   EXPECT_FALSE(info->service_worker_ready_time().is_null());
 }
 
 TEST_F(ServiceWorkerURLRequestJobTest, StreamResponseAndCancel) {
-  const GURL stream_url("blob://stream");
-  StreamContext* stream_context =
-      GetStreamContextForResourceContext(
-          browser_context_->GetResourceContext());
-  scoped_refptr<Stream> stream =
-      new Stream(stream_context->registry(), nullptr, stream_url);
-  ASSERT_EQ(stream.get(),
-            stream_context->registry()->GetStream(stream_url).get());
-  SetUpWithHelper(new StreamResponder(stream_url));
+  blink::mojom::ServiceWorkerStreamCallbackPtr stream_callback;
+  mojo::DataPipe data_pipe;
+  SetUpWithHelper(new StreamResponder(mojo::MakeRequest(&stream_callback),
+                                      std::move(data_pipe.consumer_handle)));
 
   version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
   request_ = url_request_context_.CreateRequest(
@@ -792,23 +722,29 @@ TEST_F(ServiceWorkerURLRequestJobTest, StreamResponseAndCancel) {
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(HasWork());
 
-  std::string expected_response;
-  expected_response.reserve((sizeof(kTestData) - 1) * 1024);
   for (int i = 0; i < 512; ++i) {
-    expected_response += kTestData;
-    stream->AddData(kTestData, sizeof(kTestData) - 1);
+    uint32_t written_bytes = sizeof(kTestData) - 1;
+    MojoResult result =
+        mojo::WriteDataRaw(data_pipe.producer_handle.get(), kTestData,
+                           &written_bytes, MOJO_WRITE_DATA_FLAG_NONE);
+    ASSERT_EQ(MOJO_RESULT_OK, result);
+    EXPECT_EQ(sizeof(kTestData) - 1, written_bytes);
   }
-  ASSERT_TRUE(stream_context->registry()->GetStream(stream_url).get());
+  EXPECT_TRUE(data_pipe.producer_handle.is_valid());
   request_->Cancel();
   EXPECT_FALSE(HasWork());
-  ASSERT_FALSE(stream_context->registry()->GetStream(stream_url).get());
-  for (int i = 0; i < 512; ++i) {
-    expected_response += kTestData;
-    stream->AddData(kTestData, sizeof(kTestData) - 1);
-  }
-  stream->Finalize(net::OK);
+
+  // Fail to write the data pipe because it's already canceled.
+  uint32_t written_bytes = sizeof(kTestData) - 1;
+  MojoResult result =
+      mojo::WriteDataRaw(data_pipe.producer_handle.get(), kTestData,
+                         &written_bytes, MOJO_WRITE_DATA_FLAG_NONE);
+  ASSERT_EQ(MOJO_RESULT_FAILED_PRECONDITION, result);
+
+  stream_callback->OnAborted();
 
   base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(data_pipe.consumer_handle.is_valid());
   EXPECT_FALSE(request_->status().is_success());
 
   EXPECT_EQ(0, times_prepare_to_restart_invoked_);
@@ -818,45 +754,214 @@ TEST_F(ServiceWorkerURLRequestJobTest, StreamResponseAndCancel) {
   EXPECT_TRUE(info->was_fetched_via_service_worker());
   EXPECT_FALSE(info->was_fallback_required());
   EXPECT_EQ(0u, info->url_list_via_service_worker().size());
-  EXPECT_EQ(blink::WebServiceWorkerResponseTypeDefault,
+  EXPECT_EQ(blink::kWebServiceWorkerResponseTypeDefault,
             info->response_type_via_service_worker());
   EXPECT_FALSE(info->service_worker_start_time().is_null());
   EXPECT_FALSE(info->service_worker_ready_time().is_null());
 }
 
-TEST_F(ServiceWorkerURLRequestJobTest,
-       StreamResponse_DelayedRegistrationAndCancel) {
-  const GURL stream_url("blob://stream");
-  StreamContext* stream_context =
-      GetStreamContextForResourceContext(
-          browser_context_->GetResourceContext());
-  SetUpWithHelper(new StreamResponder(stream_url));
+TEST_F(ServiceWorkerURLRequestJobTest, StreamResponse_Abort) {
+  blink::mojom::ServiceWorkerStreamCallbackPtr stream_callback;
+  mojo::DataPipe data_pipe;
+  SetUpWithHelper(new StreamResponder(mojo::MakeRequest(&stream_callback),
+                                      std::move(data_pipe.consumer_handle)));
 
   version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
   request_ = url_request_context_.CreateRequest(
       GURL("https://example.com/foo.html"), net::DEFAULT_PRIORITY,
-      &url_request_delegate_);
+      &url_request_delegate_, TRAFFIC_ANNOTATION_FOR_TESTS);
   request_->set_method("GET");
   request_->Start();
+
+  std::string expected_response;
+  expected_response.reserve((sizeof(kTestData) - 1) * 1024);
+  for (int i = 0; i < 1024; ++i) {
+    expected_response += kTestData;
+    uint32_t written_bytes = sizeof(kTestData) - 1;
+    MojoResult result =
+        mojo::WriteDataRaw(data_pipe.producer_handle.get(), kTestData,
+                           &written_bytes, MOJO_WRITE_DATA_FLAG_NONE);
+    ASSERT_EQ(MOJO_RESULT_OK, result);
+    EXPECT_EQ(sizeof(kTestData) - 1, written_bytes);
+  }
+  stream_callback->OnAborted();
+  data_pipe.producer_handle.reset();
+
   EXPECT_FALSE(HasWork());
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(HasWork());
-  request_->Cancel();
-  EXPECT_FALSE(HasWork());
-
-  scoped_refptr<Stream> stream =
-      new Stream(stream_context->registry(), nullptr, stream_url);
-  // The stream should not be registered to the stream registry.
-  ASSERT_FALSE(stream_context->registry()->GetStream(stream_url).get());
-  for (int i = 0; i < 1024; ++i)
-    stream->AddData(kTestData, sizeof(kTestData) - 1);
-  stream->Finalize(net::OK);
-
-  base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(request_->status().is_success());
+  net::HttpResponseHeaders* headers = request_->response_headers();
+  EXPECT_EQ(200, headers->response_code());
+  EXPECT_EQ("OK", headers->GetStatusText());
+  CheckHeaders(headers);
+  EXPECT_EQ(expected_response, url_request_delegate_.data_received());
 
   EXPECT_EQ(0, times_prepare_to_restart_invoked_);
-  EXPECT_FALSE(ServiceWorkerResponseInfo::ForRequest(request_.get()));
+  ServiceWorkerResponseInfo* info =
+      ServiceWorkerResponseInfo::ForRequest(request_.get());
+  ASSERT_TRUE(info);
+  EXPECT_TRUE(info->was_fetched_via_service_worker());
+  EXPECT_FALSE(info->was_fallback_required());
+  EXPECT_EQ(0u, info->url_list_via_service_worker().size());
+  EXPECT_EQ(blink::kWebServiceWorkerResponseTypeDefault,
+            info->response_type_via_service_worker());
+  EXPECT_FALSE(info->service_worker_start_time().is_null());
+  EXPECT_FALSE(info->service_worker_ready_time().is_null());
+
+  request_.reset();
+  EXPECT_FALSE(HasWork());
+}
+
+TEST_F(ServiceWorkerURLRequestJobTest, StreamResponse_AbortBeforeData) {
+  blink::mojom::ServiceWorkerStreamCallbackPtr stream_callback;
+  mojo::DataPipe data_pipe;
+  SetUpWithHelper(new StreamResponder(mojo::MakeRequest(&stream_callback),
+                                      std::move(data_pipe.consumer_handle)));
+
+  version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
+
+  request_ = url_request_context_.CreateRequest(
+      GURL("https://example.com/foo.html"), net::DEFAULT_PRIORITY,
+      &url_request_delegate_, TRAFFIC_ANNOTATION_FOR_TESTS);
+  request_->set_method("GET");
+  request_->Start();
+  base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(request_->status().is_io_pending());
+
+  stream_callback->OnAborted();
+  base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(request_->status().is_io_pending());
+
+  std::string expected_response;
+  expected_response.reserve((sizeof(kTestData) - 1) * 1024);
+  for (int i = 0; i < 1024; ++i) {
+    expected_response += kTestData;
+    uint32_t written_bytes = sizeof(kTestData) - 1;
+    MojoResult result =
+        mojo::WriteDataRaw(data_pipe.producer_handle.get(), kTestData,
+                           &written_bytes, MOJO_WRITE_DATA_FLAG_NONE);
+    ASSERT_EQ(MOJO_RESULT_OK, result);
+    EXPECT_EQ(sizeof(kTestData) - 1, written_bytes);
+    base::RunLoop().RunUntilIdle();
+    EXPECT_EQ(expected_response, url_request_delegate_.data_received());
+  }
+
+  data_pipe.producer_handle.reset();
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(net::ERR_CONNECTION_RESET, request_->status().ToNetError());
+  EXPECT_EQ(net::ERR_CONNECTION_RESET, url_request_delegate_.request_status());
+  EXPECT_EQ(200,
+            request_->response_headers()->response_code());
+  EXPECT_EQ("OK",
+            request_->response_headers()->GetStatusText());
+  EXPECT_EQ(expected_response, url_request_delegate_.data_received());
+
+  EXPECT_EQ(0, times_prepare_to_restart_invoked_);
+  ServiceWorkerResponseInfo* info =
+      ServiceWorkerResponseInfo::ForRequest(request_.get());
+  ASSERT_TRUE(info);
+  EXPECT_TRUE(info->was_fetched_via_service_worker());
+  EXPECT_FALSE(info->was_fallback_required());
+  EXPECT_EQ(0u, info->url_list_via_service_worker().size());
+  EXPECT_EQ(blink::kWebServiceWorkerResponseTypeDefault,
+            info->response_type_via_service_worker());
+  EXPECT_FALSE(info->service_worker_start_time().is_null());
+  EXPECT_FALSE(info->service_worker_ready_time().is_null());
+}
+
+TEST_F(ServiceWorkerURLRequestJobTest, StreamResponse_AbortAfterData) {
+  blink::mojom::ServiceWorkerStreamCallbackPtr stream_callback;
+  mojo::DataPipe data_pipe;
+  SetUpWithHelper(new StreamResponder(mojo::MakeRequest(&stream_callback),
+                                      std::move(data_pipe.consumer_handle)));
+
+  version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
+
+  request_ = url_request_context_.CreateRequest(
+      GURL("https://example.com/foo.html"), net::DEFAULT_PRIORITY,
+      &url_request_delegate_, TRAFFIC_ANNOTATION_FOR_TESTS);
+  request_->set_method("GET");
+  request_->Start();
+  base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(request_->status().is_io_pending());
+
+  data_pipe.producer_handle.reset();
+  base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(request_->status().is_io_pending());
+
+  stream_callback->OnAborted();
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_FALSE(request_->status().is_io_pending());
+  EXPECT_FALSE(request_->status().is_success());
+  EXPECT_EQ(net::ERR_CONNECTION_RESET, request_->status().ToNetError());
+  EXPECT_EQ(net::ERR_CONNECTION_RESET, url_request_delegate_.request_status());
+  EXPECT_EQ(200, request_->response_headers()->response_code());
+  EXPECT_EQ("OK", request_->response_headers()->GetStatusText());
+  EXPECT_EQ("", url_request_delegate_.data_received());
+
+  EXPECT_EQ(0, times_prepare_to_restart_invoked_);
+  ServiceWorkerResponseInfo* info =
+      ServiceWorkerResponseInfo::ForRequest(request_.get());
+  ASSERT_TRUE(info);
+  EXPECT_TRUE(info->was_fetched_via_service_worker());
+  EXPECT_FALSE(info->was_fallback_required());
+  EXPECT_EQ(0u, info->url_list_via_service_worker().size());
+  EXPECT_EQ(blink::kWebServiceWorkerResponseTypeDefault,
+            info->response_type_via_service_worker());
+  EXPECT_FALSE(info->service_worker_start_time().is_null());
+  EXPECT_FALSE(info->service_worker_ready_time().is_null());
+}
+
+TEST_F(ServiceWorkerURLRequestJobTest, StreamResponse_ConsecutiveReadAndAbort) {
+  blink::mojom::ServiceWorkerStreamCallbackPtr stream_callback;
+  mojo::DataPipe data_pipe;
+  SetUpWithHelper(new StreamResponder(mojo::MakeRequest(&stream_callback),
+                                      std::move(data_pipe.consumer_handle)));
+
+  version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
+  request_ = url_request_context_.CreateRequest(
+      GURL("https://example.com/foo.html"), net::DEFAULT_PRIORITY,
+      &url_request_delegate_, TRAFFIC_ANNOTATION_FOR_TESTS);
+  request_->set_method("GET");
+  request_->Start();
+  std::string expected_response;
+  expected_response.reserve((sizeof(kTestData) - 1) * 1024);
+  for (int i = 0; i < 512; ++i) {
+    expected_response += kTestData;
+    uint32_t written_bytes = sizeof(kTestData) - 1;
+    MojoResult result =
+        mojo::WriteDataRaw(data_pipe.producer_handle.get(), kTestData,
+                           &written_bytes, MOJO_WRITE_DATA_FLAG_NONE);
+    ASSERT_EQ(MOJO_RESULT_OK, result);
+    EXPECT_EQ(sizeof(kTestData) - 1, written_bytes);
+
+    base::RunLoop().RunUntilIdle();
+
+    EXPECT_EQ(expected_response, url_request_delegate_.data_received());
+  }
+  stream_callback->OnAborted();
+
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_TRUE(request_->status().is_success());
+  EXPECT_EQ(200, request_->response_headers()->response_code());
+  EXPECT_EQ("OK", request_->response_headers()->GetStatusText());
+  EXPECT_EQ(expected_response, url_request_delegate_.data_received());
+
+  EXPECT_EQ(0, times_prepare_to_restart_invoked_);
+  ServiceWorkerResponseInfo* info =
+      ServiceWorkerResponseInfo::ForRequest(request_.get());
+  ASSERT_TRUE(info);
+  EXPECT_TRUE(info->was_fetched_via_service_worker());
+  EXPECT_FALSE(info->was_fallback_required());
+  EXPECT_EQ(0u, info->url_list_via_service_worker().size());
+  EXPECT_EQ(blink::kWebServiceWorkerResponseTypeDefault,
+            info->response_type_via_service_worker());
+  EXPECT_FALSE(info->service_worker_start_time().is_null());
+  EXPECT_FALSE(info->service_worker_ready_time().is_null());
 }
 
 // Helper to simulate failing to dispatch a fetch event to a worker.
@@ -866,13 +971,16 @@ class FailFetchHelper : public EmbeddedWorkerTestHelper {
   ~FailFetchHelper() override {}
 
  protected:
-  void OnFetchEvent(int embedded_worker_id,
-                    int fetch_event_id,
-                    const ServiceWorkerFetchRequest& request,
-                    mojom::FetchEventPreloadHandlePtr preload_handle,
-                    const FetchCallback& callback) override {
+  void OnFetchEvent(
+      int embedded_worker_id,
+      int /* fetch_event_id */,
+      const ServiceWorkerFetchRequest& /* request */,
+      mojom::FetchEventPreloadHandlePtr /* preload_handle */,
+      mojom::ServiceWorkerFetchResponseCallbackPtr /* response_callback */,
+      FetchCallback finish_callback) override {
     SimulateWorkerStopped(embedded_worker_id);
-    callback.Run(SERVICE_WORKER_ERROR_ABORT, base::Time::Now());
+    std::move(finish_callback)
+        .Run(SERVICE_WORKER_ERROR_ABORT, base::Time::Now());
   }
 
  private:
@@ -885,7 +993,7 @@ TEST_F(ServiceWorkerURLRequestJobTest, FailFetchDispatch) {
   version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
   request_ = url_request_context_.CreateRequest(
       GURL("https://example.com/foo.html"), net::DEFAULT_PRIORITY,
-      &url_request_delegate_);
+      &url_request_delegate_, TRAFFIC_ANNOTATION_FOR_TESTS);
   request_->set_method("GET");
   request_->Start();
 
@@ -893,7 +1001,7 @@ TEST_F(ServiceWorkerURLRequestJobTest, FailFetchDispatch) {
   EXPECT_TRUE(request_->status().is_success());
   // We should have fallen back to network.
   EXPECT_EQ(200, request_->GetResponseCode());
-  EXPECT_EQ("PASS", url_request_delegate_.response_data());
+  EXPECT_EQ("PASS", url_request_delegate_.data_received());
   EXPECT_FALSE(HasWork());
   ServiceWorkerProviderHost* host = helper_->context()->GetProviderHost(
       helper_->mock_render_process_id(), kProviderID);
@@ -915,7 +1023,7 @@ TEST_F(ServiceWorkerURLRequestJobTest, FailToActivate_MainResource) {
   // this is a main resource request.
   EXPECT_TRUE(request_->status().is_success());
   EXPECT_EQ(200, request_->GetResponseCode());
-  EXPECT_EQ("PASS", url_request_delegate_.response_data());
+  EXPECT_EQ("PASS", url_request_delegate_.data_received());
 
   // The controller should be reset since the main resource request failed.
   ServiceWorkerProviderHost* host = helper_->context()->GetProviderHost(
@@ -947,33 +1055,33 @@ class EarlyResponseHelper : public EmbeddedWorkerTestHelper {
   ~EarlyResponseHelper() override {}
 
   void FinishWaitUntil() {
-    callback_.Run(SERVICE_WORKER_OK, base::Time::Now());
+    std::move(finish_callback_).Run(SERVICE_WORKER_OK, base::Time::Now());
   }
 
  protected:
-  void OnFetchEvent(int embedded_worker_id,
-                    int fetch_event_id,
-                    const ServiceWorkerFetchRequest& request,
-                    mojom::FetchEventPreloadHandlePtr preload_handle,
-                    const FetchCallback& callback) override {
-    callback_ = callback;
-    SimulateSend(new ServiceWorkerHostMsg_FetchEventResponse(
-        embedded_worker_id, fetch_event_id,
-        SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE,
+  void OnFetchEvent(
+      int /* embedded_worker_id */,
+      int /* fetch_event_id */,
+      const ServiceWorkerFetchRequest& /* request */,
+      mojom::FetchEventPreloadHandlePtr /* preload_handle */,
+      mojom::ServiceWorkerFetchResponseCallbackPtr response_callback,
+      FetchCallback finish_callback) override {
+    finish_callback_ = std::move(finish_callback);
+    response_callback->OnResponse(
         ServiceWorkerResponse(
             base::MakeUnique<std::vector<GURL>>(), 200, "OK",
-            blink::WebServiceWorkerResponseTypeDefault,
+            blink::kWebServiceWorkerResponseTypeDefault,
             base::MakeUnique<ServiceWorkerHeaderMap>(), std::string(), 0,
-            GURL(), blink::WebServiceWorkerResponseErrorUnknown, base::Time(),
+            blink::kWebServiceWorkerResponseErrorUnknown, base::Time(),
             false /* response_is_in_cache_storage */,
             std::string() /* response_cache_storage_cache_name */,
             base::MakeUnique<
                 ServiceWorkerHeaderList>() /* cors_exposed_header_names */),
-        base::Time::Now()));
+        base::Time::Now());
   }
 
  private:
-  FetchCallback callback_;
+  FetchCallback finish_callback_;
   DISALLOW_COPY_AND_ASSIGN(EarlyResponseHelper);
 };
 
@@ -993,7 +1101,7 @@ TEST_F(ServiceWorkerURLRequestJobTest, EarlyResponse) {
   EXPECT_TRUE(info->was_fetched_via_service_worker());
   EXPECT_FALSE(info->was_fallback_required());
   EXPECT_EQ(0u, info->url_list_via_service_worker().size());
-  EXPECT_EQ(blink::WebServiceWorkerResponseTypeDefault,
+  EXPECT_EQ(blink::kWebServiceWorkerResponseTypeDefault,
             info->response_type_via_service_worker());
   EXPECT_FALSE(info->service_worker_start_time().is_null());
   EXPECT_FALSE(info->service_worker_ready_time().is_null());
@@ -1013,37 +1121,39 @@ class DelayedResponseHelper : public EmbeddedWorkerTestHelper {
   ~DelayedResponseHelper() override {}
 
   void Respond() {
-    SimulateSend(new ServiceWorkerHostMsg_FetchEventResponse(
-        embedded_worker_id_, fetch_event_id_,
-        SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE,
+    response_callback_->OnResponse(
         ServiceWorkerResponse(
             base::MakeUnique<std::vector<GURL>>(), 200, "OK",
-            blink::WebServiceWorkerResponseTypeDefault,
+            blink::kWebServiceWorkerResponseTypeDefault,
             base::MakeUnique<ServiceWorkerHeaderMap>(), std::string(), 0,
-            GURL(), blink::WebServiceWorkerResponseErrorUnknown, base::Time(),
+            blink::kWebServiceWorkerResponseErrorUnknown, base::Time(),
             false /* response_is_in_cache_storage */,
             std::string() /* response_cache_storage_cache_name */,
             base::MakeUnique<
                 ServiceWorkerHeaderList>() /* cors_exposed_header_names */),
-        base::Time::Now()));
-    callback_.Run(SERVICE_WORKER_OK, base::Time::Now());
+        base::Time::Now());
+    std::move(finish_callback_).Run(SERVICE_WORKER_OK, base::Time::Now());
   }
 
  protected:
-  void OnFetchEvent(int embedded_worker_id,
-                    int fetch_event_id,
-                    const ServiceWorkerFetchRequest& request,
-                    mojom::FetchEventPreloadHandlePtr preload_handle,
-                    const FetchCallback& callback) override {
+  void OnFetchEvent(
+      int embedded_worker_id,
+      int fetch_event_id,
+      const ServiceWorkerFetchRequest& /* request */,
+      mojom::FetchEventPreloadHandlePtr /* preload_handle */,
+      mojom::ServiceWorkerFetchResponseCallbackPtr response_callback,
+      FetchCallback finish_callback) override {
     embedded_worker_id_ = embedded_worker_id;
     fetch_event_id_ = fetch_event_id;
-    callback_ = callback;
+    response_callback_ = std::move(response_callback);
+    finish_callback_ = std::move(finish_callback);
   }
 
  private:
   int embedded_worker_id_ = 0;
   int fetch_event_id_ = 0;
-  FetchCallback callback_;
+  mojom::ServiceWorkerFetchResponseCallbackPtr response_callback_;
+  FetchCallback finish_callback_;
   DISALLOW_COPY_AND_ASSIGN(DelayedResponseHelper);
 };
 
@@ -1057,7 +1167,7 @@ TEST_F(ServiceWorkerURLRequestJobTest, CancelRequest) {
   version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
   request_ = url_request_context_.CreateRequest(
       GURL("https://example.com/foo.html"), net::DEFAULT_PRIORITY,
-      &url_request_delegate_);
+      &url_request_delegate_, TRAFFIC_ANNOTATION_FOR_TESTS);
   request_->set_method("GET");
   request_->Start();
   base::RunLoop().RunUntilIdle();

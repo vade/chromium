@@ -474,7 +474,6 @@ IPC_STRUCT_TRAITS_END()
 IPC_STRUCT_TRAITS_BEGIN(ppapi::PpapiNaClPluginArgs)
   IPC_STRUCT_TRAITS_MEMBER(off_the_record)
   IPC_STRUCT_TRAITS_MEMBER(permissions)
-  IPC_STRUCT_TRAITS_MEMBER(keepalive_throttle_interval_milliseconds)
   IPC_STRUCT_TRAITS_MEMBER(switch_names)
   IPC_STRUCT_TRAITS_MEMBER(switch_values)
 IPC_STRUCT_TRAITS_END()
@@ -502,6 +501,10 @@ IPC_STRUCT_TRAITS_BEGIN(ppapi::proxy::PPB_AudioEncodeParameters)
   IPC_STRUCT_TRAITS_MEMBER(output_profile)
   IPC_STRUCT_TRAITS_MEMBER(initial_bitrate)
   IPC_STRUCT_TRAITS_MEMBER(acceleration)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(ppapi::CompositorLayerData::Transform)
+  IPC_STRUCT_TRAITS_MEMBER(matrix)
 IPC_STRUCT_TRAITS_END()
 
 #if !defined(OS_NACL) && !defined(NACL_WIN64)
@@ -959,10 +962,7 @@ IPC_SYNC_MESSAGE_CONTROL2_1(PpapiMsg_PnaclTranslatorLink,
                             /* success status result */
                             bool)
 
-// Reports to the browser that a plugin has been active.
-IPC_MESSAGE_CONTROL0(PpapiHostMsg_Keepalive)
 
-// -----------------------------------------------------------------------------
 // These are from the plugin to the renderer.
 
 // Reply to PpapiMsg_CreateChannel. The handle will be NULL if the channel
@@ -1063,8 +1063,9 @@ IPC_SYNC_MESSAGE_ROUTED3_2(PpapiHostMsg_PPBGraphics3D_WaitForTokenInRange,
                            int32_t /* end */,
                            gpu::CommandBuffer::State /* state */,
                            bool /* success */)
-IPC_SYNC_MESSAGE_ROUTED3_2(PpapiHostMsg_PPBGraphics3D_WaitForGetOffsetInRange,
+IPC_SYNC_MESSAGE_ROUTED4_2(PpapiHostMsg_PPBGraphics3D_WaitForGetOffsetInRange,
                            ppapi::HostResource /* context */,
+                           uint32_t /* set_get_buffer_count */,
                            int32_t /* start */,
                            int32_t /* end */,
                            gpu::CommandBuffer::State /* state */,
@@ -2245,6 +2246,18 @@ IPC_MESSAGE_CONTROL3(PpapiHostMsg_AudioInput_Open,
 IPC_MESSAGE_CONTROL0(PpapiPluginMsg_AudioInput_OpenReply)
 IPC_MESSAGE_CONTROL1(PpapiHostMsg_AudioInput_StartOrStop, bool /* capture */)
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_AudioInput_Close)
+
+// Audio output.
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_AudioOutput_Create)
+IPC_MESSAGE_CONTROL3(PpapiHostMsg_AudioOutput_Open,
+                     std::string /* device_id */,
+                     PP_AudioSampleRate /* sample_rate */,
+                     uint32_t /* sample_frame_count */)
+// Reply to an Open call. This supplies a socket handle and a shared memory
+// handle. Both handles are passed in the ReplyParams struct.
+IPC_MESSAGE_CONTROL0(PpapiPluginMsg_AudioOutput_OpenReply)
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_AudioOutput_StartOrStop, bool /* playback */)
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_AudioOutput_Close)
 
 // BrowserFont -----------------------------------------------------------------
 

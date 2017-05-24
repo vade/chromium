@@ -322,14 +322,14 @@ public class RemoteMediaPlayerBridge {
         Log.d(TAG, "onRouteAvailabilityChange: " + mRouteIsAvailable + ", " + mIsPlayable);
         if (mNativeRemoteMediaPlayerBridge == 0) return;
 
-        int availability = WebRemotePlaybackAvailability.DeviceNotAvailable;
+        int availability = WebRemotePlaybackAvailability.DEVICE_NOT_AVAILABLE;
         if (!mRouteIsAvailable && !mIsPlayable) {
-            availability = WebRemotePlaybackAvailability.SourceNotSupported;
+            availability = WebRemotePlaybackAvailability.SOURCE_NOT_SUPPORTED;
         } else if (mRouteIsAvailable && mIsPlayable) {
-            availability = WebRemotePlaybackAvailability.DeviceAvailable;
+            availability = WebRemotePlaybackAvailability.DEVICE_AVAILABLE;
         } else if (mRouteIsAvailable) {
             // mIsPlayable is false here.
-            availability = WebRemotePlaybackAvailability.SourceNotCompatible;
+            availability = WebRemotePlaybackAvailability.SOURCE_NOT_COMPATIBLE;
         }
         nativeOnRouteAvailabilityChanged(mNativeRemoteMediaPlayerBridge, availability);
     }

@@ -64,9 +64,17 @@ EVENT_TYPE(HOST_RESOLVER_IMPL_REQUEST)
 EVENT_TYPE(HOST_RESOLVER_IMPL_IPV6_REACHABILITY_CHECK)
 
 // This event is logged when a request is handled by a cache entry.
+// It contains the following parameter:
+//   {
+//     "address_list": <The resolved addresses>,
+//   }
 EVENT_TYPE(HOST_RESOLVER_IMPL_CACHE_HIT)
 
 // This event is logged when a request is handled by a HOSTS entry.
+// It contains the following parameter:
+//   {
+//     "address_list": <The resolved addresses>,
+//   }
 EVENT_TYPE(HOST_RESOLVER_IMPL_HOSTS_HIT)
 
 // This event is created when a new HostResolverImpl::Job is about to be created
@@ -472,20 +480,9 @@ EVENT_TYPE(SSL_CLIENT_CERT_REQUESTED)
 // The SSL stack blocked on a private key operation. The following parameters
 // are attached to the event.
 //   {
-//     "type": <type of the key>,
 //     "hash": <hash function used>,
 //   }
 EVENT_TYPE(SSL_PRIVATE_KEY_OP)
-
-// The start/end of getting a domain-bound certificate and private key.
-//
-// The END event will contain the following parameters on failure:
-//
-//   {
-//     "net_error": <Net integer error code>,
-//   }
-// TODO(nharper): remove this event.
-EVENT_TYPE(SSL_GET_DOMAIN_BOUND_CERT)
 
 // The start/end of getting a Channel ID key.
 //
@@ -502,14 +499,6 @@ EVENT_TYPE(SSL_GET_DOMAIN_BOUND_CERT)
 //     "key": <Hex-encoded EC point of public key (uncompressed point format)>,
 //   }
 EVENT_TYPE(SSL_GET_CHANNEL_ID)
-
-// The SSL server requested a channel id.
-// TODO(nharper): Remove this event.
-EVENT_TYPE(SSL_CHANNEL_ID_REQUESTED)
-
-// A channel ID was provided to the SSL library to be sent to the SSL server.
-// TODO(nharper): Remove this event.
-EVENT_TYPE(SSL_CHANNEL_ID_PROVIDED)
 
 // A client certificate (or none) was provided to the SSL library to be sent
 // to the SSL server.
@@ -532,42 +521,36 @@ EVENT_TYPE(SSL_HANDSHAKE_ERROR)
 EVENT_TYPE(SSL_READ_ERROR)
 EVENT_TYPE(SSL_WRITE_ERROR)
 
-// An SSL connection needs to be retried with a lower protocol version because
-// the server may be intolerant of the protocol version we offered.
+// An SSL connection needs to be retried with a lower protocol version to detect
+// if the error was due to a middlebox interfering with the protocol version we
+// offered.
 // The following parameters are attached to the event:
 //   {
-//     "host_and_port": <String encoding the host and port>,
-//     "net_error": <Net integer error code>,
-//     "version_before": <SSL version before the fallback>,
-//     "version_after": <SSL version after the fallback>,
+//     "net_error": <Net integer error code which triggered the probe>,
 //   }
-//
-// TODO(davidben): Remove this event and the corresponding log_view_painter.js
-// logic in M56.
-EVENT_TYPE(SSL_VERSION_FALLBACK)
-
-// An SSL connection needs to be retried with more cipher suites because the
-// server may require a deprecated cipher suite. The following parameters are
-// attached to the event:
-//   {
-//     "host_and_port": <String encoding the host and port>,
-//     "net_error": <Net integer error code>,
-//   }
-EVENT_TYPE(SSL_CIPHER_FALLBACK)
+EVENT_TYPE(SSL_VERSION_INTERFERENCE_PROBE)
 
 // We found that our prediction of the server's certificates was correct and
 // we merged the verification with the SSLHostInfo. (Note: now obsolete.)
 EVENT_TYPE(SSL_VERIFICATION_MERGED)
 
-// An SSL error occurred while calling an NSS function not directly related to
-// one of the above activities.  Can also be used when more information than
-// is provided by just an error code is needed:
+// An SSL connection sent or received an alert.
+// The following parameters are attached:
 //   {
-//     "function": <Name of the NSS function, as a string>,
-//     "param": <Most relevant parameter, if any>,
-//     "ssl_lib_error": <NSS library's integer code for the specific error type>
+//     "hex_encoded_bytes": <The exact bytes sent, as a hexadecimal string>
 //   }
-EVENT_TYPE(SSL_NSS_ERROR)
+EVENT_TYPE(SSL_ALERT_RECEIVED)
+EVENT_TYPE(SSL_ALERT_SENT)
+
+// An SSL connection sent or received a handshake message.
+// The following parameters are attached:
+//   {
+//     "type": <The type of the handshake message, as an integer>
+//     "hex_encoded_bytes": <The exact bytes sent, as a hexadecimal string. May
+//                           be elided in some cases>
+//   }
+EVENT_TYPE(SSL_HANDSHAKE_MESSAGE_RECEIVED)
+EVENT_TYPE(SSL_HANDSHAKE_MESSAGE_SENT)
 
 // The specified number of bytes were sent on the socket.  Depending on the
 // source of the event, may be logged either once the data is sent, or when it
@@ -669,6 +652,18 @@ EVENT_TYPE(CERT_CT_COMPLIANCE_CHECKED)
 //    "ev_whitelist_version": <optional; string representing whitelist version>
 // }
 EVENT_TYPE(EV_CERT_CT_COMPLIANCE_CHECKED)
+
+// A Certificate Transparency log entry was audited for inclusion in the
+// log.
+//
+// The following parameters are attached to the event:
+// {
+//  "log_entry": <hex-encoded hash of the log entry>
+//  "log_id": <hex-encoded hash of the CT log>
+//  "success": <boolean>
+// }
+
+EVENT_TYPE(CT_LOG_ENTRY_AUDITED)
 
 // ------------------------------------------------------------------------
 // DatagramSocket
@@ -1043,6 +1038,14 @@ EVENT_TYPE(HTTP_STREAM_REQUEST)
 //   }
 EVENT_TYPE(HTTP_STREAM_JOB)
 
+// Measures the time and HttpStreamFactoryImpl::Job spends waiting for
+// another job.
+// The event parameters are:
+//   {
+//      "should_wait": <True if the job needs to wait>,
+//   }
+EVENT_TYPE(HTTP_STREAM_JOB_WAITING)
+
 // Identifies the NetLogSource() for a Job started by the Request.
 // The event parameters are:
 //   {
@@ -1056,12 +1059,24 @@ EVENT_TYPE(HTTP_STREAM_REQUEST_STARTED_JOB)
 //   }
 EVENT_TYPE(HTTP_STREAM_JOB_PROXY_SERVER_RESOLVED)
 
+// Emitted when a job is asked to initialize a connection.
+EVENT_TYPE(HTTP_STREAM_JOB_INIT_CONNECTION)
+
 // Identifies the NetLogSource() for the Job that fulfilled the Request.
 // The event parameters are:
 //   {
 //      "source_dependency": <Source identifier for Job we acquired>,
 //   }
 EVENT_TYPE(HTTP_STREAM_REQUEST_BOUND_TO_JOB)
+
+// Identifies the NetLogSource() for the QuicStreamFactory::Job that the
+// HttpStreamFactoryImpl::Job was attached to.
+// The event parameters are:
+//  {
+//      "source_dependency": <Source identifier for the QuicStreamFactory::Job
+//                            to which we were attached>,
+//  }
+EVENT_TYPE(HTTP_STREAM_JOB_BOUND_TO_QUIC_STREAM_FACTORY_JOB)
 
 // Identifies the NetLogSource() for the Request that the Job was attached to.
 // The event parameters are:
@@ -1083,11 +1098,34 @@ EVENT_TYPE(HTTP_STREAM_REQUEST_PROTO)
 // Job. The orphaned Job will continue to run to completion.
 EVENT_TYPE(HTTP_STREAM_JOB_ORPHANED)
 
-// Emitted when a job is asked to resume after non-zero microseconds.
+// Emitted when a job is delayed.
 //   {
-//     "resume_after_ms": <Number of milliseconds until job will be unblocked>
+//     "delay_ms": <Number of milliseconds until job will be resumed>
 //   }
 EVENT_TYPE(HTTP_STREAM_JOB_DELAYED)
+
+// Emitted when a job is asked to resume after non-zero microseconds.
+//   {
+//     "delay_ms": <Number of milliseconds the job was delayed before resuming>
+//   }
+EVENT_TYPE(HTTP_STREAM_JOB_RESUMED)
+
+// Marks the start/end of a HttpStreamFactoryImpl::JobController.
+// The following parameters are attached:
+//   {
+//      "url": <String of request URL>,
+//      "is_preconnect": <True if controller is created for a preconnect.>,
+//   }
+EVENT_TYPE(HTTP_STREAM_JOB_CONTROLLER)
+
+// Links a JobController with its user (a URL_REQUEST).
+// The event parameters are:
+//   {
+//      "source_dependency": <The source identifier for JobController if the
+//          event is logged in URL_REQUEST or the source identifier for the
+//          URL_REQUEST if the event is logged in HTTP_STREAM_JOB_CONTROLLER>,
+//   }
+EVENT_TYPE(HTTP_STREAM_JOB_CONTROLLER_BOUND)
 
 // ------------------------------------------------------------------------
 // HttpNetworkTransaction
@@ -1187,6 +1225,10 @@ EVENT_TYPE(HTTP_TRANSACTION_SET_PRIORITY)
 //   }
 EVENT_TYPE(HTTP_TRANSACTION_RESTART_AFTER_ERROR)
 
+// This event is sent when we try to restart a transaction after the initial
+// attempt failed with HTTP 421 Misdirected Requested.
+EVENT_TYPE(HTTP_TRANSACTION_RESTART_MISDIRECTED_REQUEST)
+
 // ------------------------------------------------------------------------
 // BidirectionalStream
 // ------------------------------------------------------------------------
@@ -1274,6 +1316,26 @@ EVENT_TYPE(BIDIRECTIONAL_STREAM_READY)
 EVENT_TYPE(BIDIRECTIONAL_STREAM_FAILED)
 
 // ------------------------------------------------------------------------
+// SERVER_PUSH_LOOKUP_TRANSACTION
+// ------------------------------------------------------------------------
+
+// The start/end of a push lookup transaction for server push.
+//
+// The START event has the parameters:
+//   {
+//     "source_dependency": <Source identifier for the server push lookp.
+//                           It can be a QUIC_SESSION or a HTTP2_SESSION>,
+//     "pushed_url": <The url that has been pushed and looked up>,
+//   }
+//
+// If the transaction doesn't find the resource in cache, then the END phase
+// has these parameters:
+//   {
+//     "net_error": <Net error code integer>,
+//   }
+EVENT_TYPE(SERVER_PUSH_LOOKUP_TRANSACTION)
+
+// ------------------------------------------------------------------------
 // SpdySession
 // ------------------------------------------------------------------------
 
@@ -1323,8 +1385,6 @@ EVENT_TYPE(HTTP2_SESSION_SEND_SETTINGS)
 // The following parameters are attached:
 //   {
 //     "host": <The host-port string>,
-//     "clear_persisted": <Boolean indicating whether to clear all persisted
-//                         settings data for the given host>,
 //   }
 EVENT_TYPE(HTTP2_SESSION_RECV_SETTINGS)
 
@@ -1332,7 +1392,6 @@ EVENT_TYPE(HTTP2_SESSION_RECV_SETTINGS)
 // The following parameters are attached:
 //   {
 //     "id":    <The setting id>,
-//     "flags": <The setting flags>,
 //     "value": <The setting value>,
 //   }
 EVENT_TYPE(HTTP2_SESSION_RECV_SETTING)
@@ -1340,17 +1399,16 @@ EVENT_TYPE(HTTP2_SESSION_RECV_SETTING)
 // The receipt of a RST_STREAM frame.
 // The following parameters are attached:
 //   {
-//     "stream_id": <The stream ID for the window update>,
-//     "status": <The reason for the RST_STREAM>,
+//     "stream_id":  <The stream ID for the RST_STREAM>,
+//     "error_code": <Error code>,
 //   }
-EVENT_TYPE(HTTP2_SESSION_RST_STREAM)
+EVENT_TYPE(HTTP2_SESSION_RECV_RST_STREAM)
 
 // Sending of a RST_STREAM
 // The following parameters are attached:
 //   {
-//     "stream_id": <The stream ID for the window update>,
-//     "status": <The reason for the RST_STREAM>,
-//     "description": <The textual description for the RST_STREAM>,
+//     "stream_id":  <The stream ID for the RST_STREAM>,
+//     "error_code": <Error code>,
 //   }
 EVENT_TYPE(HTTP2_SESSION_SEND_RST_STREAM)
 
@@ -1368,16 +1426,17 @@ EVENT_TYPE(HTTP2_SESSION_PING)
 //     "last_accepted_stream_id": <Last stream id accepted by the server, duh>,
 //     "active_streams":          <Number of active streams>,
 //     "unclaimed_streams":       <Number of unclaimed push streams>,
-//     "status":                  <The reason for the GOAWAY>,
+//     "error_code":              <Error code>,
+//     "debug_data":              <Additional debug data>,
 //   }
-EVENT_TYPE(HTTP2_SESSION_GOAWAY)
+EVENT_TYPE(HTTP2_SESSION_RECV_GOAWAY)
 
 // Receipt of an HTTP/2 WINDOW_UPDATE frame (which controls the send window).
 //   {
 //     "stream_id": <The stream ID for the window update>,
 //     "delta"    : <The delta window size>,
 //   }
-EVENT_TYPE(HTTP2_SESSION_RECEIVED_WINDOW_UPDATE_FRAME)
+EVENT_TYPE(HTTP2_SESSION_RECV_WINDOW_UPDATE)
 
 // Sending of an HTTP/2 WINDOW_UPDATE frame (which controls the
 // receive window).
@@ -1385,7 +1444,7 @@ EVENT_TYPE(HTTP2_SESSION_RECEIVED_WINDOW_UPDATE_FRAME)
 //     "stream_id": <The stream ID for the window update>,
 //     "delta"    : <The delta window size>,
 //   }
-EVENT_TYPE(HTTP2_SESSION_SENT_WINDOW_UPDATE_FRAME)
+EVENT_TYPE(HTTP2_SESSION_SEND_WINDOW_UPDATE)
 
 // This event indicates that the send window has been updated for a session.
 //   {
@@ -1400,6 +1459,13 @@ EVENT_TYPE(HTTP2_SESSION_UPDATE_SEND_WINDOW)
 //     "new_window": <The new window size>,
 //   }
 EVENT_TYPE(HTTP2_SESSION_UPDATE_RECV_WINDOW)
+
+// This event indicates that an invalid response header has been received.
+//   {
+//     "header_name": <The header name>,
+//     "header_value": <The header value>,
+//   }
+EVENT_TYPE(HTTP2_SESSION_RECV_INVALID_HEADER)
 
 // Sending a data frame
 //   {
@@ -1559,6 +1625,35 @@ EVENT_TYPE(HTTP2_PROXY_CLIENT_SESSION)
 //   {
 //     "source_dependency":  <Source identifier for the underlying session>,
 //   }
+
+// ------------------------------------------------------------------------
+// QuicStreamFactory::Job
+// ------------------------------------------------------------------------
+
+// Measures the time taken to execute the QuicStreamFactory::Job.
+// The event parameters are:
+//   {
+//     "server_id": <The QuicServerId that the Job serves>,
+//   }
+EVENT_TYPE(QUIC_STREAM_FACTORY_JOB)
+
+// Identifies the NetLogSource() for the HttpStreamFactoryImpl::Job that the
+// Job was attached to.
+// The event parameters are:
+//  {
+//     "source_dependency": <Source identifier for the
+//                           HttpStreamFactoryImpl::Job to which we were
+//                           attached>,
+//  }
+EVENT_TYPE(QUIC_STREAM_FACTORY_JOB_BOUND_TO_HTTP_STREAM_JOB)
+
+// Measures the time taken to establish a QUIC connection.
+// The event parameters are:
+//  {
+//     "require_confirmation": <True if we require handshake confirmation
+//                              in the connection>
+//  }
+EVENT_TYPE(QUIC_STREAM_FACTORY_JOB_CONNECT)
 
 // ------------------------------------------------------------------------
 // QuicSession
@@ -2110,6 +2205,9 @@ EVENT_TYPE(SERVICE_WORKER_FETCH_EVENT)
 //   "error": The error reason as a string.
 // }
 EVENT_TYPE(SERVICE_WORKER_SCRIPT_LOAD_UNHANDLED_REQUEST_ERROR)
+
+// This event is emitted when a navigation preload request is created.
+EVENT_TYPE(SERVICE_WORKER_NAVIGATION_PRELOAD_REQUEST)
 
 // ------------------------------------------------------------------------
 // Global events

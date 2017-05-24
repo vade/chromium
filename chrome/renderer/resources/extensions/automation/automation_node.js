@@ -135,6 +135,13 @@ var GetState = requireNative('automationInternal').GetState;
 /**
  * @param {number} axTreeID The id of the accessibility tree.
  * @param {number} nodeID The id of a node.
+ * @return {string} The checked state, as undefined, "true", "false" or "mixed".
+ */
+var GetChecked = requireNative('automationInternal').GetChecked;
+
+/**
+ * @param {number} axTreeID The id of the accessibility tree.
+ * @param {number} nodeID The id of a node.
  * @return {string} The role of the node, or undefined if the tree or
  *     node wasn't found.
  */
@@ -224,9 +231,15 @@ var GetIntListAttribute =
  */
 var GetHtmlAttribute = requireNative('automationInternal').GetHtmlAttribute;
 
+/**
+ * @param {number} axTreeID The id of the accessibility tree.
+ * @param {number} nodeID The id of a node.
+ * @return {automation.NameFromType} The source of the node's name.
+ */
+var GetNameFrom = requireNative('automationInternal').GetNameFrom;
+
 var lastError = require('lastError');
 var logging = requireNative('logging');
-var schema = requireNative('automationInternal').GetSchemaAdditions();
 var utils = require('utils');
 
 /**
@@ -275,6 +288,10 @@ AutomationNodeImpl.prototype = {
 
   get role() {
     return GetRole(this.treeID, this.id);
+  },
+
+  get checked() {
+    return GetChecked(this.treeID, this.id);
   },
 
   get location() {
@@ -359,6 +376,10 @@ AutomationNodeImpl.prototype = {
         GetChildIDAtIndex(parent.treeID, parent.id, indexInParent + 1));
   },
 
+  get nameFrom() {
+    return GetNameFrom(this.treeID, this.id);
+  },
+
   doDefault: function() {
     this.performAction_('doDefault');
   },
@@ -373,11 +394,20 @@ AutomationNodeImpl.prototype = {
                           maxHeight: maxHeight });
   },
 
+  hitTest: function(x, y, eventToFire) {
+    // Convert from global to tree-relative coordinates.
+    var location = GetLocation(this.treeID, GetRootID(this.treeID));
+    this.performAction_('hitTest',
+                        { x: x - location.left,
+                          y: y - location.top,
+                          eventToFire: eventToFire });
+  },
+
   makeVisible: function() {
     this.performAction_('makeVisible');
   },
 
-    resumeMedia: function() {
+  resumeMedia: function() {
     this.performAction_('resumeMedia');
   },
 
@@ -669,15 +699,11 @@ AutomationNodeImpl.prototype = {
 
 var stringAttributes = [
     'accessKey',
-    'action',
     'ariaInvalidValue',
-    'autoComplete',
     'containerLiveRelevant',
     'containerLiveStatus',
     'description',
     'display',
-    'dropeffect',
-    'help',
     'htmlTag',
     'imageDataUrl',
     'language',
@@ -685,32 +711,22 @@ var stringAttributes = [
     'liveStatus',
     'name',
     'placeholder',
-    'shortcut',
     'textInputType',
     'url',
     'value'];
 
 var boolAttributes = [
     'ariaReadonly',
-    'buttonMixed',
-    'canSetValue',
-    'canvasHasFallback',
     'containerLiveAtomic',
     'containerLiveBusy',
-    'grabbed',
-    'isAxTreeHost',
     'liveAtomic',
-    'liveBusy',
-    'updateLocationOnly'];
+    'liveBusy'];
 
 var intAttributes = [
     'backgroundColor',
     'color',
     'colorValue',
-    'descriptionFrom',
     'hierarchicalLevel',
-    'invalidState',
-    'nameFrom',
     'posInSet',
     'scrollX',
     'scrollXMax',
@@ -719,31 +735,31 @@ var intAttributes = [
     'scrollYMax',
     'scrollYMin',
     'setSize',
-    'sortDirection',
     'tableCellColumnIndex',
+    'ariaCellColumnIndex',
     'tableCellColumnSpan',
     'tableCellRowIndex',
+    'ariaCellRowIndex',
     'tableCellRowSpan',
     'tableColumnCount',
+    'ariaColumnCount',
     'tableColumnIndex',
     'tableRowCount',
+    'ariaRowCount',
     'tableRowIndex',
-    'textDirection',
     'textSelEnd',
-    'textSelStart',
-    'textStyle'];
+    'textSelStart'];
 
 var nodeRefAttributes = [
     ['activedescendantId', 'activeDescendant'],
+    ['inPageLinkTargetId', 'inPageLinkTarget'],
     ['nextOnLineId', 'nextOnLine'],
     ['previousOnLineId', 'previousOnLine'],
     ['tableColumnHeaderId', 'tableColumnHeader'],
     ['tableHeaderId', 'tableHeader'],
-    ['tableRowHeaderId', 'tableRowHeader'],
-    ['titleUiElement', 'titleUIElement']];
+    ['tableRowHeaderId', 'tableRowHeader']];
 
 var intListAttributes = [
-    'characterOffsets',
     'lineBreaks',
     'markerEnds',
     'markerStarts',
@@ -752,18 +768,15 @@ var intListAttributes = [
     'wordStarts'];
 
 var nodeRefListAttributes = [
-    ['cellIds', 'cells'],
     ['controlsIds', 'controls'],
     ['describedbyIds', 'describedBy'],
     ['flowtoIds', 'flowTo'],
-    ['labelledbyIds', 'labelledBy'],
-    ['uniqueCellIds', 'uniqueCells']];
+    ['labelledbyIds', 'labelledBy']];
 
 var floatAttributes = [
     'valueForRange',
     'minValueForRange',
-    'maxValueForRange',
-    'fontSize'];
+    'maxValueForRange'];
 
 var htmlAttributes = [
     ['type', 'inputType']];
@@ -1036,7 +1049,7 @@ AutomationRootNodeImpl.prototype = {
   },
 
   destroy: function() {
-    this.dispatchEvent(schema.EventType.destroyed, 'none');
+    this.dispatchEvent('destroyed', 'none');
     for (var id in this.axNodeDataCache_)
       this.remove(id);
     this.detach();
@@ -1090,6 +1103,7 @@ utils.expose(AutomationNode, AutomationNodeImpl, {
     'findAll',
     'focus',
     'getImageData',
+    'hitTest',
     'makeVisible',
     'matches',
     'resumeMedia',
@@ -1114,12 +1128,14 @@ utils.expose(AutomationNode, AutomationNodeImpl, {
       'nextSibling',
       'isRootNode',
       'role',
+      'checked',
       'state',
       'location',
       'indexInParent',
       'lineStartOffsets',
       'root',
       'htmlAttributes',
+      'nameFrom',
   ]),
 });
 

@@ -9,6 +9,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/test_timeouts.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -36,15 +37,18 @@
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/text_input_test_utils.h"
 #include "extensions/browser/api/extensions_api_client.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "ui/base/ime/composition_text.h"
+#include "ui/base/ime/composition_underline.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/test/ui_controls.h"
 #include "ui/events/keycodes/keyboard_codes.h"
+#include "ui/gfx/range/range.h"
 
 using extensions::AppWindow;
 using extensions::ExtensionsAPIClient;
@@ -52,6 +56,51 @@ using guest_view::GuestViewBase;
 using guest_view::GuestViewManager;
 using guest_view::TestGuestViewManager;
 using guest_view::TestGuestViewManagerFactory;
+
+#if defined(OS_MACOSX)
+// The original TextInputClientMessageFilter is added during the initialization
+// phase of RenderProcessHost. The only chance we have to add the test filter
+// (so that it can receive the TextInputClientMac incoming IPC messages) is
+// during the call to RenderProcessWillLaunch() on ContentBrowserClient. This
+// class provides that for testing. The class also replaces the current client
+// and will reset the client back to the original one upon destruction.
+class BrowserClientForTextInputClientMac : public ChromeContentBrowserClient {
+ public:
+  BrowserClientForTextInputClientMac()
+      : old_client_(content::SetBrowserClientForTesting(this)) {}
+  ~BrowserClientForTextInputClientMac() override {
+    content::SetBrowserClientForTesting(old_client_);
+  }
+
+  // ContentBrowserClient overrides.
+  void RenderProcessWillLaunch(
+      content::RenderProcessHost* process_host) override {
+    ChromeContentBrowserClient::RenderProcessWillLaunch(process_host);
+    filters_.push_back(
+        new content::TestTextInputClientMessageFilter(process_host));
+  }
+
+  // Retrieves the registered filter for the given RenderProcessHost. It will
+  // return false if the RenderProcessHost was initialized while a different
+  // instance of ContentBrowserClient was in action.
+  scoped_refptr<content::TestTextInputClientMessageFilter>
+  GetTextInputClientMessageFilterForProcess(
+      content::RenderProcessHost* process_host) const {
+    for (auto filter : filters_) {
+      if (filter->process() == process_host)
+        return filter;
+    }
+    return nullptr;
+  }
+
+ private:
+  content::ContentBrowserClient* old_client_;
+  std::vector<scoped_refptr<content::TestTextInputClientMessageFilter>>
+      filters_;
+
+  DISALLOW_COPY_AND_ASSIGN(BrowserClientForTextInputClientMac);
+};
+#endif  // OS_MACOSX
 
 class WebViewInteractiveTestBase : public extensions::PlatformAppBrowserTest {
  public:
@@ -294,18 +343,16 @@ class WebViewInteractiveTestBase : public extensions::PlatformAppBrowserTest {
                              blink::WebMouseEvent::Button button,
                              int x,
                              int y) {
-    blink::WebMouseEvent mouse_event(blink::WebInputEvent::MouseDown,
-                                     blink::WebInputEvent::NoModifiers,
-                                     blink::WebInputEvent::TimeStampForTesting);
+    blink::WebMouseEvent mouse_event(
+        blink::WebInputEvent::kMouseDown, blink::WebInputEvent::kNoModifiers,
+        blink::WebInputEvent::kTimeStampForTesting);
     mouse_event.button = button;
-    mouse_event.x = mouse_event.windowX = x;
-    mouse_event.y = mouse_event.windowY = y;
+    mouse_event.SetPositionInWidget(x, y);
     // Needed for the WebViewTest.ContextMenuPositionAfterCSSTransforms
     gfx::Rect rect = rwh->GetView()->GetViewBounds();
-    mouse_event.globalX = x + rect.x();
-    mouse_event.globalY = y + rect.y();
+    mouse_event.SetPositionInScreen(x + rect.x(), y + rect.y());
     rwh->ForwardMouseEvent(mouse_event);
-    mouse_event.setType(blink::WebInputEvent::MouseUp);
+    mouse_event.SetType(blink::WebInputEvent::kMouseUp);
     rwh->ForwardMouseEvent(mouse_event);
   }
 
@@ -350,7 +397,7 @@ class WebViewInteractiveTestBase : public extensions::PlatformAppBrowserTest {
     void ScheduleWait() {
       base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
           FROM_HERE,
-          base::Bind(&PopupCreatedObserver::Wait, base::Unretained(this)),
+          base::BindOnce(&PopupCreatedObserver::Wait, base::Unretained(this)),
           base::TimeDelta::FromMilliseconds(200));
     }
 
@@ -423,8 +470,9 @@ class WebViewInteractiveTestBase : public extensions::PlatformAppBrowserTest {
 
     // Now wait a bit before moving mouse to initiate drag/drop.
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE, base::Bind(&WebViewInteractiveTestBase::DragTestStep2,
-                              base::Unretained(this)),
+        FROM_HERE,
+        base::BindOnce(&WebViewInteractiveTestBase::DragTestStep2,
+                       base::Unretained(this)),
         base::TimeDelta::FromMilliseconds(200));
   }
 
@@ -474,9 +522,8 @@ class WebViewInteractiveTestBase : public extensions::PlatformAppBrowserTest {
     ExtensionTestMessageListener passed_listener(
         "FULLSCREEN_STEP_PASSED", false);
     passed_listener.set_failure_message("TEST_FAILED");
-    content::SimulateMouseClickAt(guest_web_contents(),
-                                  0,
-                                  blink::WebMouseEvent::Button::Left,
+    content::SimulateMouseClickAt(guest_web_contents(), 0,
+                                  blink::WebMouseEvent::Button::kLeft,
                                   gfx::Point(20, 20));
     ASSERT_TRUE(passed_listener.WaitUntilSatisfied());
   }
@@ -517,6 +564,7 @@ class WebViewDragDropInteractiveTest : public WebViewInteractiveTest {};
 class WebViewNewWindowInteractiveTest : public WebViewInteractiveTest {};
 class WebViewFocusInteractiveTest : public WebViewInteractiveTest {};
 class WebViewPointerLockInteractiveTest : public WebViewInteractiveTest {};
+class WebViewImeInteractiveTest : public WebViewInteractiveTest {};
 
 // The tests below aren't needed in --use-cross-process-frames-for-guests.
 class WebViewContextMenuInteractiveTest : public WebViewInteractiveTestBase {};
@@ -544,6 +592,10 @@ INSTANTIATE_TEST_CASE_P(WebViewInteractiveTests,
 
 INSTANTIATE_TEST_CASE_P(WebViewInteractiveTests,
                         WebViewPointerLockInteractiveTest,
+                        testing::Bool());
+
+INSTANTIATE_TEST_CASE_P(WebViewInteractiveTests,
+                        WebViewImeInteractiveTest,
                         testing::Bool());
 
 // ui_test_utils::SendMouseMoveSync doesn't seem to work on OS_MACOSX, and
@@ -658,10 +710,6 @@ IN_PROC_BROWSER_TEST_P(WebViewPointerLockInteractiveTest,
 // off focused.
 IN_PROC_BROWSER_TEST_P(WebViewFocusInteractiveTest,
                        Focus_FocusBeforeNavigation) {
-  // TODO(avallee): Determine if test is relevant with OOPIF or fix the bug.
-  // http://crbug.com/672947
-  if (GetParam())
-    return;
   TestHelper("testFocusBeforeNavigation", "web_view/focus", NO_TEST_SERVER);
 }
 
@@ -670,7 +718,42 @@ IN_PROC_BROWSER_TEST_P(WebViewFocusInteractiveTest, Focus_FocusEvent) {
   TestHelper("testFocusEvent", "web_view/focus", NO_TEST_SERVER);
 }
 
-IN_PROC_BROWSER_TEST_P(WebViewFocusInteractiveTest, Focus_FocusTracksEmbedder) {
+IN_PROC_BROWSER_TEST_P(WebViewFocusInteractiveTest, Focus_FocusTakeFocus) {
+  TestHelper("testFocusTakeFocus", "web_view/focus", NO_TEST_SERVER);
+
+  // Compute where to click in the window to focus the guest input box.
+  int clickX, clickY;
+  EXPECT_TRUE(content::ExecuteScriptAndExtractInt(
+      embedder_web_contents(),
+      "domAutomationController.send(Math.floor(window.clickX));", &clickX));
+  EXPECT_TRUE(content::ExecuteScriptAndExtractInt(
+      embedder_web_contents(),
+      "domAutomationController.send(Math.floor(window.clickY));", &clickY));
+
+  ExtensionTestMessageListener next_step_listener("TEST_STEP_PASSED", false);
+  next_step_listener.set_failure_message("TEST_STEP_FAILED");
+  content::SimulateMouseClickAt(
+      (GetParam() ? guest_web_contents() : embedder_web_contents()), 0,
+      blink::WebMouseEvent::Button::kLeft, gfx::Point(clickX, clickY));
+  ASSERT_TRUE(next_step_listener.WaitUntilSatisfied());
+
+  // TAB back out to the embedder's input.
+  next_step_listener.Reset();
+  content::SimulateKeyPress(embedder_web_contents(), ui::DomKey::TAB,
+                            ui::DomCode::TAB, ui::VKEY_TAB, false, false, false,
+                            false);
+  ASSERT_TRUE(next_step_listener.WaitUntilSatisfied());
+}
+
+// Flaky on Mac and Linux - https://crbug.com/707648
+#if defined(OS_MACOSX) || defined(OS_LINUX)
+#define MAYBE_Focus_FocusTracksEmbedder DISABLED_Focus_FocusTracksEmbedder
+#else
+#define MAYBE_Focus_FocusTracksEmbedder Focus_FocusTracksEmbedder
+#endif
+
+IN_PROC_BROWSER_TEST_P(WebViewFocusInteractiveTest,
+                       MAYBE_Focus_FocusTracksEmbedder) {
   content::WebContents* embedder_web_contents = NULL;
 
   std::unique_ptr<ExtensionTestMessageListener> done_listener(
@@ -712,7 +795,7 @@ IN_PROC_BROWSER_TEST_P(WebViewFocusInteractiveTest, Focus_AdvanceFocus) {
     SimulateRWHMouseClick((guest ? guest : embedder_web_contents)
                               ->GetRenderViewHost()
                               ->GetWidget(),
-                          blink::WebMouseEvent::Button::Left, 200, 20);
+                          blink::WebMouseEvent::Button::kLeft, 200, 20);
     content::SimulateKeyPress(embedder_web_contents, ui::DomKey::TAB,
                               ui::DomCode::TAB, ui::VKEY_TAB, false, false,
                               false, false);
@@ -749,11 +832,6 @@ IN_PROC_BROWSER_TEST_P(WebViewFocusInteractiveTest, Focus_BlurEvent) {
 
 // Tests that guests receive edit commands and respond appropriately.
 IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, EditCommands) {
-#if defined(OS_MACOSX)
-  // TODO(ekaramad): This test is failing under OOPIF in MAC.
-  if (GetParam())
-    return;
-#endif
   LoadAndLaunchPlatformApp("web_view/edit_commands", "connected");
 
   ASSERT_TRUE(ui_test_utils::ShowAndFocusNativeWindow(
@@ -770,8 +848,7 @@ IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, EditCommands) {
 }
 
 // Tests that guests receive edit commands and respond appropriately.
-// http://crbug.com/417892
-IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, DISABLED_EditCommandsNoMenu) {
+IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, EditCommandsNoMenu) {
   SetupTest("web_view/edit_commands_no_menu",
       "/extensions/platform_apps/web_view/edit_commands_no_menu/"
       "guest.html");
@@ -861,14 +938,7 @@ IN_PROC_BROWSER_TEST_P(WebViewNewWindowInteractiveTest,
              NEEDS_TEST_SERVER);
 }
 
-// Causes problems on windows: http://crbug.com/544037
-#if defined(OS_WIN)
-#define MAYBE_NewWindow_WebRequest DISABLED_NewWindow_WebRequest
-#else
-#define MAYBE_NewWindow_WebRequest NewWindow_WebRequest
-#endif
-IN_PROC_BROWSER_TEST_P(WebViewNewWindowInteractiveTest,
-                       MAYBE_NewWindow_WebRequest) {
+IN_PROC_BROWSER_TEST_P(WebViewNewWindowInteractiveTest, NewWindow_WebRequest) {
   TestHelper("testNewWindowWebRequest",
              "web_view/newwindow",
              NEEDS_TEST_SERVER);
@@ -951,7 +1021,7 @@ IN_PROC_BROWSER_TEST_F(WebViewContextMenuInteractiveTest,
 
   ContextMenuWaiter menu_observer(content::NotificationService::AllSources());
   SimulateRWHMouseClick(guest_web_contents()->GetRenderViewHost()->GetWidget(),
-                        blink::WebMouseEvent::Button::Right, 10, 20);
+                        blink::WebMouseEvent::Button::kRight, 10, 20);
   // Wait until the context menu is opened and closed.
   menu_observer.WaitForMenuOpenAndClose();
   ASSERT_EQ(10, menu_observer.params().x);
@@ -1005,7 +1075,7 @@ IN_PROC_BROWSER_TEST_F(WebViewContextMenuInteractiveTest,
     embedder_window_point -= embedder_view_bounds.OffsetFromOrigin();
     SimulateRWHMouseClick(
         embedder_web_contents()->GetRenderViewHost()->GetWidget(),
-        blink::WebMouseEvent::Button::Right,
+        blink::WebMouseEvent::Button::kRight,
         /* Using window coordinates for the embedder */
         embedder_window_point.x(), embedder_window_point.y());
 
@@ -1055,8 +1125,11 @@ IN_PROC_BROWSER_TEST_F(WebViewPopupInteractiveTest,
 // Drag and drop inside a webview is currently only enabled for linux and mac,
 // but the tests don't work on anything except chromeos for now. This is because
 // of simulating mouse drag code's dependency on platforms.
+
+// Flaky: https://crbug.com/700483
 #if defined(OS_CHROMEOS) && !defined(USE_OZONE)
-IN_PROC_BROWSER_TEST_P(WebViewDragDropInteractiveTest, DragDropWithinWebView) {
+IN_PROC_BROWSER_TEST_P(WebViewDragDropInteractiveTest,
+                       DISABLED_DragDropWithinWebView) {
   LoadAndLaunchPlatformApp("web_view/dnd_within_webview", "connected");
   ASSERT_TRUE(ui_test_utils::ShowAndFocusNativeWindow(GetPlatformAppWindow()));
 
@@ -1129,16 +1202,8 @@ IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, Navigation_BackForwardKeys) {
   ASSERT_TRUE(done_listener.WaitUntilSatisfied());
 }
 
-// Flaky on Linux: crbug.com/678267
-#if defined(OS_LINUX)
-#define MAYBE_PointerLock_PointerLockLostWithFocus \
-  DISABLED_PointerLock_PointerLockLostWithFocus
-#else
-#define MAYBE_PointerLock_PointerLockLostWithFocus \
-  PointerLock_PointerLockLostWithFocus
-#endif
 IN_PROC_BROWSER_TEST_P(WebViewPointerLockInteractiveTest,
-                       MAYBE_PointerLock_PointerLockLostWithFocus) {
+                       PointerLock_PointerLockLostWithFocus) {
   TestHelper("testPointerLockLostWithFocus",
              "web_view/pointerlock",
              NO_TEST_SERVER);
@@ -1186,7 +1251,15 @@ IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest,
 // Now we need to make sure TextInputTypeChanged fires properly for the guest's
 // view upon step #3. We simply read the input type's state after #3 to
 // make sure it's not TEXT_INPUT_TYPE_NONE.
-IN_PROC_BROWSER_TEST_P(WebViewFocusInteractiveTest, Focus_FocusRestored) {
+
+// Flaky on Linux - https://crbug.com/702572
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#define MAYBE_Focus_FocusRestored DISABLED_Focus_FocusRestored
+#else
+#define MAYBE_Focus_FocusRestored Focus_FocusRestored
+#endif
+
+IN_PROC_BROWSER_TEST_P(WebViewFocusInteractiveTest, MAYBE_Focus_FocusRestored) {
   TestHelper("testFocusRestored", "web_view/focus", NO_TEST_SERVER);
   content::WebContents* embedder_web_contents = GetFirstAppWindowWebContents();
   ASSERT_TRUE(embedder_web_contents);
@@ -1196,9 +1269,8 @@ IN_PROC_BROWSER_TEST_P(WebViewFocusInteractiveTest, Focus_FocusRestored) {
   ExtensionTestMessageListener next_step_listener("TEST_STEP_PASSED", false);
   next_step_listener.set_failure_message("TEST_STEP_FAILED");
   {
-    content::SimulateMouseClickAt(guest_web_contents(),
-                                  0,
-                                  blink::WebMouseEvent::Button::Left,
+    content::SimulateMouseClickAt(guest_web_contents(), 0,
+                                  blink::WebMouseEvent::Button::kLeft,
                                   gfx::Point(10, 10));
     EXPECT_TRUE(content::ExecuteScript(
                     embedder_web_contents,
@@ -1211,9 +1283,8 @@ IN_PROC_BROWSER_TEST_P(WebViewFocusInteractiveTest, Focus_FocusRestored) {
   // a blur event.
   next_step_listener.Reset();
   {
-    content::SimulateMouseClickAt(embedder_web_contents,
-                                  0,
-                                  blink::WebMouseEvent::Button::Left,
+    content::SimulateMouseClickAt(embedder_web_contents, 0,
+                                  blink::WebMouseEvent::Button::kLeft,
                                   gfx::Point(200, 20));
     EXPECT_TRUE(content::ExecuteScript(
                     embedder_web_contents,
@@ -1226,9 +1297,8 @@ IN_PROC_BROWSER_TEST_P(WebViewFocusInteractiveTest, Focus_FocusRestored) {
   // input element, then we ensure text_input_type is properly set.
   next_step_listener.Reset();
   {
-    content::SimulateMouseClickAt(guest_web_contents(),
-                                  0,
-                                  blink::WebMouseEvent::Button::Left,
+    content::SimulateMouseClickAt(guest_web_contents(), 0,
+                                  blink::WebMouseEvent::Button::kLeft,
                                   gfx::Point(10, 10));
     EXPECT_TRUE(content::ExecuteScript(
                     embedder_web_contents,
@@ -1328,11 +1398,6 @@ IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, DISABLED_Focus_InputMethod) {
 
 #if defined(OS_MACOSX)
 IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, TextSelection) {
-#if defined(OS_MACOSX)
-  // TODO(ekaramad): This test is failing under OOPIF for MAC.
-  if (GetParam())
-    return;
-#endif
   SetupTest("web_view/text_selection",
             "/extensions/platform_apps/web_view/text_selection/guest.html");
   ASSERT_TRUE(guest_web_contents());
@@ -1343,7 +1408,7 @@ IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, TextSelection) {
   ExtensionTestMessageListener ctx_listener("MSG_CONTEXTMENU", false);
   ContextMenuNotificationObserver menu_observer(IDC_CONTENT_CONTEXT_COPY);
   SimulateRWHMouseClick(guest_web_contents()->GetRenderViewHost()->GetWidget(),
-                        blink::WebMouseEvent::Button::Right, 20, 20);
+                        blink::WebMouseEvent::Button::kRight, 20, 20);
   ASSERT_TRUE(ctx_listener.WaitUntilSatisfied());
 
   // Now verify that the selection text propagates properly to RWHV.
@@ -1354,49 +1419,73 @@ IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, TextSelection) {
   ASSERT_TRUE(selected_text.size() >= 10u);
   ASSERT_EQ("AAAAAAAAAA", selected_text.substr(0, 10));
 }
+
+// Verifies that asking for a word lookup from a guest will lead to a returned
+// IPC from the renderer containing the right selected word.
+IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, WordLookup) {
+  // BrowserClientForTextInputClientMac needs to replace the
+  // ChromeContentBrowserClient after most things are initialized but before the
+  // WebContents is created.
+  BrowserClientForTextInputClientMac browser_client;
+
+  SetupTest("web_view/text_selection",
+            "/extensions/platform_apps/web_view/text_selection/guest.html");
+  ASSERT_TRUE(guest_web_contents());
+  ASSERT_TRUE(ui_test_utils::ShowAndFocusNativeWindow(GetPlatformAppWindow()));
+
+  auto guest_message_filter =
+      browser_client.GetTextInputClientMessageFilterForProcess(
+          guest_web_contents()->GetRenderProcessHost());
+  ASSERT_TRUE(guest_message_filter);
+
+  // Lookup some string through context menu.
+  ContextMenuNotificationObserver menu_observer(IDC_CONTENT_CONTEXT_LOOK_UP);
+  // Simulating a mouse click at a position to highlight text in guest and
+  // showing the context menu.
+  SimulateRWHMouseClick(guest_web_contents()->GetRenderViewHost()->GetWidget(),
+                        blink::WebMouseEvent::Button::kRight, 20, 20);
+  // Wait for the response form the guest renderer.
+  guest_message_filter->WaitForStringFromRange();
+
+  // Sanity check.
+  ASSERT_EQ("AAAA", guest_message_filter->string_from_range().substr(0, 4));
+}
 #endif
 
-// Flaky on MacOS builders. https://crbug.com/670008
-#if defined(OS_MACOSX)
-#define MAYBE_FocusAndVisibility DISABLED_FocusAndVisibility
-#else
-#define MAYBE_FocusAndVisibility FocusAndVisibility
-#endif
-
-IN_PROC_BROWSER_TEST_P(WebViewFocusInteractiveTest, MAYBE_FocusAndVisibility) {
+IN_PROC_BROWSER_TEST_P(WebViewFocusInteractiveTest, FocusAndVisibility) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   LoadAndLaunchPlatformApp("web_view/focus_visibility",
                            "WebViewInteractiveTest.LOADED");
   ExtensionTestMessageListener test_init_listener(
       "WebViewInteractiveTest.WebViewInitialized", false);
-  SendMessageToEmbedder("init");
+  SendMessageToEmbedder(GetParam() ? "init-oopif" : "init");
   test_init_listener.WaitUntilSatisfied();
-
-  // In oopif-webview, wait until the tab key triggers a focus change.
-  std::unique_ptr<content::FrameFocusedObserver> frame_focus_observer =
-      GetParam() ? base::MakeUnique<content::FrameFocusedObserver>(
-                       GetGuestViewManager()
-                           ->WaitForSingleGuestCreated()
-                           ->GetMainFrame())
-                 : nullptr;
 
   // Send several tab-keys. The button inside webview should receive focus at
   // least once.
-  for (size_t i = 0; i < 2; ++i)
+  ExtensionTestMessageListener key_processed_listener(
+      "WebViewInteractiveTest.KeyUp", false);
+#if defined(OS_MACOSX)
+  // On mac, the event listener seems one key event behind and deadlocks. Send
+  // an extra tab to get things unblocked. See http://crbug.com/685281 when
+  // fixed, this can be removed.
+  SendKeyPressToPlatformApp(ui::VKEY_TAB);
+#endif
+  for (size_t i = 0; i < 4; ++i) {
+    key_processed_listener.Reset();
     SendKeyPressToPlatformApp(ui::VKEY_TAB);
-  if (frame_focus_observer) {
-    frame_focus_observer->Wait();
-    frame_focus_observer.reset();
+    EXPECT_TRUE(key_processed_listener.WaitUntilSatisfied());
   }
-  for (size_t i = 0; i < 2; ++i)
-    SendKeyPressToPlatformApp(ui::VKEY_TAB);
+
+  // Verify that the button in the guest receives focus.
   ExtensionTestMessageListener webview_button_focused_listener(
       "WebViewInteractiveTest.WebViewButtonWasFocused", false);
   webview_button_focused_listener.set_failure_message(
       "WebViewInteractiveTest.WebViewButtonWasNotFocused");
   SendMessageToEmbedder("verify");
   EXPECT_TRUE(webview_button_focused_listener.WaitUntilSatisfied());
-  // Now make the <webview> invisible.
+
+  // Reset the test and now make the <webview> invisible.
   ExtensionTestMessageListener reset_listener("WebViewInteractiveTest.DidReset",
                                               false);
   SendMessageToEmbedder("reset");
@@ -1405,10 +1494,15 @@ IN_PROC_BROWSER_TEST_P(WebViewFocusInteractiveTest, MAYBE_FocusAndVisibility) {
       "WebViewInteractiveTest.DidHideWebView", false);
   SendMessageToEmbedder("hide-webview");
   did_hide_webview_listener.WaitUntilSatisfied();
+
+
   // Send the same number of keys and verify that the webview button was not
   // this time.
-  for (size_t i = 0; i < 4; ++i)
+  for (size_t i = 0; i < 4; ++i) {
+    key_processed_listener.Reset();
     SendKeyPressToPlatformApp(ui::VKEY_TAB);
+    EXPECT_TRUE(key_processed_listener.WaitUntilSatisfied());
+  }
   ExtensionTestMessageListener webview_button_not_focused_listener(
       "WebViewInteractiveTest.WebViewButtonWasNotFocused", false);
   webview_button_not_focused_listener.set_failure_message(
@@ -1418,6 +1512,11 @@ IN_PROC_BROWSER_TEST_P(WebViewFocusInteractiveTest, MAYBE_FocusAndVisibility) {
 }
 
 IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, KeyboardFocusSimple) {
+#if defined(OS_LINUX)
+  // Flaky timeouts on Linux. https://crbug.com/709202
+  if (GetParam())
+    return;
+#endif  // defined(OS_LINUX)
   TestHelper("testKeyboardFocusSimple", "web_view/focus", NO_TEST_SERVER);
 
   EXPECT_EQ(embedder_web_contents()->GetFocusedFrame(),
@@ -1455,6 +1554,11 @@ IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, KeyboardFocusSimple) {
 // while another window is focused.
 // http://crbug.com/660044.
 IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, KeyboardFocusWindowCycle) {
+#if defined(OS_LINUX)
+  // Flaky on linux, crbug.com/706830.
+  if (GetParam())
+    return;
+#endif  // defined(OS_LINUX)
   TestHelper("testKeyboardFocusWindowFocusCycle", "web_view/focus",
              NO_TEST_SERVER);
 
@@ -1517,3 +1621,66 @@ IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, KeyboardFocusWindowCycle) {
 
   ASSERT_TRUE(next_step_listener.WaitUntilSatisfied());
 }
+
+#if defined(OS_MACOSX)
+// This test verifies that replacement range for IME works with <webview>s. To
+// verify this, a <webview> with an <input> inside is loaded. Then the <input>
+// is focused and  populated with some text. The test then sends an IPC to
+// commit some text which will replace part of the previous text some new text.
+IN_PROC_BROWSER_TEST_P(WebViewImeInteractiveTest,
+                       CommitTextWithReplacementRange) {
+  ASSERT_TRUE(StartEmbeddedTestServer());  // For serving guest pages.
+  LoadAndLaunchPlatformApp("web_view/ime", "WebViewImeTest.Launched");
+  ASSERT_TRUE(ui_test_utils::ShowAndFocusNativeWindow(GetPlatformAppWindow()));
+
+  // Flush any pending events to make sure we start with a clean slate.
+  content::RunAllPendingInMessageLoop();
+
+  content::WebContents* guest_web_contents =
+      GetGuestViewManager()->GetLastGuestCreated();
+
+  // Click the <input> element inside the <webview>. In its focus handle, the
+  // <input> inside the <webview> initializes its value to "A B X D".
+  ExtensionTestMessageListener focus_listener("WebViewImeTest.InputFocused",
+                                              false);
+  content::WebContents* target_web_contents =
+      GetParam()
+          ? guest_web_contents
+          : guest_view::GuestViewBase::FromWebContents(guest_web_contents)
+                ->embedder_web_contents();
+  content::SimulateMouseClickAt(target_web_contents, 0,
+                                blink::WebMouseEvent::Button::kLeft,
+                                gfx::Point(50, 50));
+  focus_listener.WaitUntilSatisfied();
+
+  // Verify the text inside the <input> is "A B X D".
+  std::string value;
+  ASSERT_TRUE(ExecuteScriptAndExtractString(guest_web_contents,
+                                            "window.domAutomationController."
+                                            "send(document.querySelector('"
+                                            "input').value)",
+                                            &value));
+  EXPECT_EQ("A B X D", value);
+
+  // Now commit "C" to to replace the range (4, 5).
+  // For OOPIF guests, the target for IME is the RWH for the guest's main frame.
+  // For BrowserPlugin-based guests, input always goes to the embedder.
+  ExtensionTestMessageListener input_listener("WebViewImetest.InputReceived",
+                                              false);
+  content::RenderWidgetHost* target_rwh_for_input =
+      target_web_contents->GetRenderWidgetHostView()->GetRenderWidgetHost();
+  content::SendImeCommitTextToWidget(
+      target_rwh_for_input, base::UTF8ToUTF16("C"),
+      std::vector<ui::CompositionUnderline>(), gfx::Range(4, 5), 0);
+  input_listener.WaitUntilSatisfied();
+
+  // Get the input value from the guest.
+  value.clear();
+  ASSERT_TRUE(ExecuteScriptAndExtractString(guest_web_contents,
+                                            "window.domAutomationController."
+                                            "send(document.querySelector('"
+                                            "input').value)",
+                                            &value));
+  EXPECT_EQ("A B C D", value);
+}
+#endif  //  OS_MACOSX

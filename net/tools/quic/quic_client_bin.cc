@@ -46,29 +46,33 @@
 #include "net/base/net_errors.h"
 #include "net/base/privacy_mode.h"
 #include "net/cert/cert_verifier.h"
+#include "net/cert/ct_known_logs.h"
+#include "net/cert/ct_log_verifier.h"
 #include "net/cert/multi_log_ct_verifier.h"
 #include "net/http/transport_security_state.h"
 #include "net/quic/chromium/crypto/proof_verifier_chromium.h"
-#include "net/quic/core/quic_flags.h"
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_server_id.h"
+#include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_socket_address.h"
 #include "net/quic/platform/api/quic_str_cat.h"
+#include "net/quic/platform/api/quic_string_piece.h"
 #include "net/quic/platform/api/quic_text_utils.h"
-#include "net/spdy/spdy_header_block.h"
+#include "net/quic/platform/api/quic_url.h"
+#include "net/spdy/core/spdy_header_block.h"
 #include "net/tools/epoll_server/epoll_server.h"
 #include "net/tools/quic/quic_client.h"
 #include "net/tools/quic/synchronous_host_resolver.h"
-#include "url/gurl.h"
 
-using base::StringPiece;
 using net::CertVerifier;
 using net::CTPolicyEnforcer;
 using net::CTVerifier;
 using net::MultiLogCTVerifier;
 using net::ProofVerifier;
 using net::ProofVerifierChromium;
+using net::QuicStringPiece;
 using net::QuicTextUtils;
+using net::QuicUrl;
 using net::SpdyHeaderBlock;
 using net::TransportSecurityState;
 using std::cout;
@@ -104,28 +108,28 @@ int32_t FLAGS_initial_mtu = 0;
 class FakeProofVerifier : public ProofVerifier {
  public:
   net::QuicAsyncStatus VerifyProof(
-      const string& hostname,
-      const uint16_t port,
-      const string& server_config,
-      net::QuicVersion quic_version,
-      StringPiece chlo_hash,
-      const std::vector<string>& certs,
-      const string& cert_sct,
-      const string& signature,
-      const net::ProofVerifyContext* context,
-      string* error_details,
-      std::unique_ptr<net::ProofVerifyDetails>* details,
-      std::unique_ptr<net::ProofVerifierCallback> callback) override {
+      const string& /*hostname*/,
+      const uint16_t /*port*/,
+      const string& /*server_config*/,
+      net::QuicVersion /*quic_version*/,
+      QuicStringPiece /*chlo_hash*/,
+      const std::vector<string>& /*certs*/,
+      const string& /*cert_sct*/,
+      const string& /*signature*/,
+      const net::ProofVerifyContext* /*context*/,
+      string* /*error_details*/,
+      std::unique_ptr<net::ProofVerifyDetails>* /*details*/,
+      std::unique_ptr<net::ProofVerifierCallback> /*callback*/) override {
     return net::QUIC_SUCCESS;
   }
 
   net::QuicAsyncStatus VerifyCertChain(
-      const std::string& hostname,
-      const std::vector<std::string>& certs,
-      const net::ProofVerifyContext* verify_context,
-      std::string* error_details,
-      std::unique_ptr<net::ProofVerifyDetails>* verify_details,
-      std::unique_ptr<net::ProofVerifierCallback> callback) override {
+      const std::string& /*hostname*/,
+      const std::vector<std::string>& /*certs*/,
+      const net::ProofVerifyContext* /*verify_context*/,
+      std::string* /*error_details*/,
+      std::unique_ptr<net::ProofVerifyDetails>* /*verify_details*/,
+      std::unique_ptr<net::ProofVerifierCallback> /*callback*/) override {
     return net::QUIC_SUCCESS;
   }
 };
@@ -221,14 +225,14 @@ int main(int argc, char* argv[]) {
   // Determine IP address to connect to from supplied hostname.
   net::QuicIpAddress ip_addr;
 
-  GURL url(urls[0]);
+  QuicUrl url(urls[0], "https");
   string host = FLAGS_host;
   if (host.empty()) {
     host = url.host();
   }
   int port = FLAGS_port;
   if (port == 0) {
-    port = url.EffectiveIntPort();
+    port = url.port();
   }
   if (!ip_addr.FromString(host)) {
     net::AddressList addresses;
@@ -247,7 +251,7 @@ int main(int argc, char* argv[]) {
 
   // Build the client, and try to connect.
   net::EpollServer epoll_server;
-  net::QuicServerId server_id(url.host(), url.EffectiveIntPort(),
+  net::QuicServerId server_id(url.host(), url.port(),
                               net::PRIVACY_MODE_DISABLED);
   net::QuicVersionVector versions = net::AllSupportedVersions();
   if (FLAGS_quic_version != -1) {
@@ -258,7 +262,8 @@ int main(int argc, char* argv[]) {
   std::unique_ptr<CertVerifier> cert_verifier(CertVerifier::CreateDefault());
   std::unique_ptr<TransportSecurityState> transport_security_state(
       new TransportSecurityState);
-  std::unique_ptr<CTVerifier> ct_verifier(new MultiLogCTVerifier());
+  std::unique_ptr<MultiLogCTVerifier> ct_verifier(new MultiLogCTVerifier());
+  ct_verifier->AddLogs(net::ct::CreateLogVerifiersForKnownLogs());
   std::unique_ptr<CTPolicyEnforcer> ct_policy_enforcer(new CTPolicyEnforcer());
   std::unique_ptr<ProofVerifier> proof_verifier;
   if (line->HasSwitch("disable-certificate-verification")) {
@@ -301,16 +306,16 @@ int main(int argc, char* argv[]) {
   SpdyHeaderBlock header_block;
   header_block[":method"] = body.empty() ? "GET" : "POST";
   header_block[":scheme"] = url.scheme();
-  header_block[":authority"] = url.host();
-  header_block[":path"] = url.path();
+  header_block[":authority"] = url.HostPort();
+  header_block[":path"] = url.PathParamsQuery();
 
   // Append any additional headers supplied on the command line.
-  for (StringPiece sp : QuicTextUtils::Split(FLAGS_headers, ';')) {
+  for (QuicStringPiece sp : QuicTextUtils::Split(FLAGS_headers, ';')) {
     QuicTextUtils::RemoveLeadingAndTrailingWhitespace(&sp);
     if (sp.empty()) {
       continue;
     }
-    std::vector<StringPiece> kv = QuicTextUtils::Split(sp, ':');
+    std::vector<QuicStringPiece> kv = QuicTextUtils::Split(sp, ':');
     QuicTextUtils::RemoveLeadingAndTrailingWhitespace(&kv[0]);
     QuicTextUtils::RemoveLeadingAndTrailingWhitespace(&kv[1]);
     header_block[kv[0]] = kv[1];
@@ -335,6 +340,13 @@ int main(int argc, char* argv[]) {
       cout << "body: " << body << endl;
     }
     cout << endl;
+
+    if (!client.preliminary_response_headers().empty()) {
+      cout << "Preliminary response headers: "
+           << client.preliminary_response_headers() << endl;
+      cout << endl;
+    }
+
     cout << "Response:" << endl;
     cout << "headers: " << client.latest_response_headers() << endl;
     string response_body = client.latest_response_body();

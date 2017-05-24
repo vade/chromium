@@ -11,7 +11,6 @@ import android.media.AudioManager;
 import android.os.Handler;
 import android.text.TextUtils;
 
-import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.blink.mojom.MediaSessionAction;
@@ -42,15 +41,16 @@ public class MediaSessionTabHelper implements MediaImageCallback {
     private static final String TAG = "MediaSession";
 
     private static final String UNICODE_PLAY_CHARACTER = "\u25B6";
-    private static final int MINIMAL_FAVICON_SIZE = 114;
-    private static final int HIDE_NOTIFICATION_DELAY_MILLIS = 1000;
+    @VisibleForTesting
+    static final int HIDE_NOTIFICATION_DELAY_MILLIS = 1000;
 
     private Tab mTab;
     private Bitmap mPageMediaImage;
     private Bitmap mFavicon;
     private Bitmap mCurrentMediaImage;
     private String mOrigin;
-    private MediaSessionObserver mMediaSessionObserver;
+    @VisibleForTesting
+    MediaSessionObserver mMediaSessionObserver;
     private int mPreviousVolumeControlStream = AudioManager.USE_DEFAULT_STREAM_TYPE;
     private MediaNotificationInfo.Builder mNotificationInfoBuilder;
     // The fallback title if |mPageMetadata| is null or its title is empty.
@@ -66,6 +66,11 @@ public class MediaSessionTabHelper implements MediaImageCallback {
     // Delayed hiding will schedule this delayed task to |mHandler|. The task will be canceled when
     // showing or immediate hiding.
     private Runnable mHideNotificationDelayedTask;
+
+    // Used to override the MediaSession object get from WebContents. This is to work around the
+    // static getter {@link MediaSession#fromWebContents()}.
+    @VisibleForTesting
+    static MediaSession sOverriddenMediaSession;
 
     @VisibleForTesting
     @Nullable
@@ -176,8 +181,7 @@ public class MediaSessionTabHelper implements MediaImageCallback {
             mHandler.removeCallbacks(mHideNotificationDelayedTask);
             mHideNotificationDelayedTask = null;
         }
-        MediaNotificationManager.show(
-                ContextUtils.getApplicationContext(), mNotificationInfoBuilder.build());
+        MediaNotificationManager.show(mNotificationInfoBuilder.build());
     }
 
     private MediaSessionObserver createMediaSessionObserver(MediaSession mediaSession) {
@@ -247,17 +251,17 @@ public class MediaSessionTabHelper implements MediaImageCallback {
     }
 
     private void setWebContents(WebContents webContents) {
-        MediaSession mediaSession = MediaSession.fromWebContents(webContents);
+        MediaSession mediaSession = getMediaSession(webContents);
         if (mMediaSessionObserver != null
                 && mediaSession == mMediaSessionObserver.getMediaSession()) {
             return;
         }
 
         cleanupMediaSessionObserver();
+        mMediaImageManager.setWebContents(webContents);
         if (mediaSession != null) {
             mMediaSessionObserver = createMediaSessionObserver(mediaSession);
         }
-        mMediaImageManager.setWebContents(webContents);
     }
 
     private void cleanupMediaSessionObserver() {
@@ -267,7 +271,8 @@ public class MediaSessionTabHelper implements MediaImageCallback {
         mMediaSessionActions = null;
     }
 
-    private final TabObserver mTabObserver = new EmptyTabObserver() {
+    @VisibleForTesting
+    final TabObserver mTabObserver = new EmptyTabObserver() {
         @Override
         public void onContentChanged(Tab tab) {
             assert tab == mTab;
@@ -284,27 +289,43 @@ public class MediaSessionTabHelper implements MediaImageCallback {
         }
 
         @Override
-        public void onUrlUpdated(Tab tab) {
+        public void onDidFinishNavigation(Tab tab, String url, boolean isInMainFrame,
+                boolean isErrorPage, boolean hasCommitted, boolean isSameDocument,
+                boolean isFragmentNavigation, Integer pageTransition, int errorCode,
+                int httpStatusCode) {
             assert tab == mTab;
+
+            if (!hasCommitted || !isInMainFrame || isSameDocument) return;
 
             String origin = mTab.getUrl();
             try {
                 origin = UrlFormatter.formatUrlForSecurityDisplay(new URI(origin), true);
-            } catch (URISyntaxException e) {
+            } catch (URISyntaxException | UnsatisfiedLinkError e) {
+                // UnstatisfiedLinkError can only happen in tests as the natives are not initialized
+                // yet.
                 Log.e(TAG, "Unable to parse the origin from the URL. "
                                 + "Using the full URL instead.");
             }
 
-            if (mOrigin != null && mOrigin.equals(origin)) return;
             mOrigin = origin;
             mFavicon = null;
             mPageMediaImage = null;
+            mPageMetadata = null;
+            // |mCurrentMetadata| selects either |mPageMetadata| or |mFallbackTitle|. As there is no
+            // guarantee {@link #onTitleUpdated()} will be called before or after this method,
+            // |mFallbackTitle| is not reset in this callback, i.e. relying solely on
+            // {@link #onTitleUpdated()}. The following assignment is to keep |mCurrentMetadata| up
+            // to date as |mPageMetadata| may have changed.
+            mCurrentMetadata = getMetadata();
+            mMediaSessionActions = null;
 
             if (isNotificationHiddingOrHidden()) return;
 
             mNotificationInfoBuilder.setOrigin(mOrigin);
             mNotificationInfoBuilder.setNotificationLargeIcon(mFavicon);
             mNotificationInfoBuilder.setMediaSessionImage(mPageMediaImage);
+            mNotificationInfoBuilder.setMetadata(mCurrentMetadata);
+            mNotificationInfoBuilder.setMediaSessionActions(mMediaSessionActions);
             showNotification();
         }
 
@@ -337,11 +358,13 @@ public class MediaSessionTabHelper implements MediaImageCallback {
         }
     };
 
-    private MediaSessionTabHelper(Tab tab) {
+    @VisibleForTesting
+    MediaSessionTabHelper(Tab tab) {
         mTab = tab;
         mTab.addObserver(mTabObserver);
-        mMediaImageManager = new MediaImageManager(
-                MINIMAL_FAVICON_SIZE, MediaNotificationManager.getIdealMediaImageSize());
+        mMediaImageManager =
+                new MediaImageManager(MediaNotificationManager.MINIMAL_MEDIA_IMAGE_SIZE_PX,
+                        MediaNotificationManager.getIdealMediaImageSize());
         if (mTab.getWebContents() != null) setWebContents(tab.getWebContents());
 
         Activity activity = getActivityFromTab(mTab);
@@ -405,9 +428,7 @@ public class MediaSessionTabHelper implements MediaImageCallback {
     private boolean updateFavicon(Bitmap icon) {
         if (icon == null) return false;
 
-        if (icon.getWidth() < MINIMAL_FAVICON_SIZE || icon.getHeight() < MINIMAL_FAVICON_SIZE) {
-            return false;
-        }
+        if (!MediaNotificationManager.isBitmapSuitableAsMediaImage(icon)) return false;
         if (mFavicon != null && (icon.getWidth() < mFavicon.getWidth()
                                         || icon.getHeight() < mFavicon.getHeight())) {
             return false;
@@ -487,5 +508,10 @@ public class MediaSessionTabHelper implements MediaImageCallback {
 
     private boolean isNotificationHiddingOrHidden() {
         return mNotificationInfoBuilder == null;
+    }
+
+    private MediaSession getMediaSession(WebContents contents) {
+        return (sOverriddenMediaSession != null) ? sOverriddenMediaSession
+                                                 : MediaSession.fromWebContents(contents);
     }
 }

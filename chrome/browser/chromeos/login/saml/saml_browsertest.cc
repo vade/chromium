@@ -41,6 +41,8 @@
 #include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
+#include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
 #include "chrome/browser/policy/test/local_policy_test_server.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/signin/signin_utils.h"
@@ -61,6 +63,8 @@
 #include "chromeos/dbus/shill_manager_client.h"
 #include "chromeos/login/auth/key.h"
 #include "chromeos/settings/cros_settings_names.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/content_settings/core/common/content_settings_types.h"
 #include "components/guest_view/browser/test_guest_view_manager.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
@@ -960,6 +964,7 @@ class SAMLPolicyTest : public SamlTest {
   void SetSAMLOfflineSigninTimeLimitPolicy(int limit);
   void EnableTransferSAMLCookiesPolicy();
   void SetLoginBehaviorPolicyToSAMLInterstitial();
+  void SetLoginVideoCaptureAllowedUrls(const std::vector<GURL>& allowed);
 
   void ShowGAIALoginForm();
   void ShowSAMLInterstitial();
@@ -1058,7 +1063,7 @@ void SAMLPolicyTest::SetSAMLOfflineSigninTimeLimitPolicy(int limit) {
   user_policy.Set(policy::key::kSAMLOfflineSigninTimeLimit,
                   policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
                   policy::POLICY_SOURCE_CLOUD,
-                  base::MakeUnique<base::FundamentalValue>(limit), nullptr);
+                  base::MakeUnique<base::Value>(limit), nullptr);
   provider_.UpdateChromePolicy(user_policy);
   base::RunLoop().RunUntilIdle();
 }
@@ -1087,6 +1092,23 @@ void SAMLPolicyTest::SetLoginBehaviorPolicyToSAMLInterstitial() {
   base::RunLoop run_loop;
   std::unique_ptr<CrosSettings::ObserverSubscription> observer =
       CrosSettings::Get()->AddSettingsObserver(kLoginAuthenticationBehavior,
+                                               run_loop.QuitClosure());
+  device_policy_->SetDefaultSigningKey();
+  device_policy_->Build();
+  fake_session_manager_client_->set_device_policy(device_policy_->GetBlob());
+  fake_session_manager_client_->OnPropertyChangeComplete(true);
+  run_loop.Run();
+}
+
+void SAMLPolicyTest::SetLoginVideoCaptureAllowedUrls(
+    const std::vector<GURL>& allowed) {
+  em::ChromeDeviceSettingsProto& proto(device_policy_->payload());
+  for (const GURL& url : allowed)
+    proto.mutable_login_video_capture_allowed_urls()->add_urls(url.spec());
+
+  base::RunLoop run_loop;
+  std::unique_ptr<CrosSettings::ObserverSubscription> observer =
+      CrosSettings::Get()->AddSettingsObserver(kLoginVideoCaptureAllowedUrls,
                                                run_loop.QuitClosure());
   device_policy_->SetDefaultSigningKey();
   device_policy_->Build();
@@ -1324,7 +1346,19 @@ IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, TransferCookiesAffiliated) {
   EXPECT_EQ(kSAMLIdPCookieValue2, GetCookieValue(kSAMLIdPCookieName));
 }
 
-IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, PRE_TransferCookiesUnaffiliated) {
+// PRE_TransferCookiesUnaffiliated and TransferCookiesUnaffiliated are flaky on
+// MSAN, ASAN, Debug due to time out - most likely, because of the general
+// slowness of the test. See crbug.com/683161, crbug.com/714167.
+#if defined(MEMORY_SANITIZER) || defined(ADDRESS_SANITIZER) || !defined(NDEBUG)
+#define MAYBE_PRE_TransferCookiesUnaffiliated \
+  DISABLED_PRE_TransferCookiesUnaffiliated
+#define MAYBE_TransferCookiesUnaffiliated DISABLED_TransferCookiesUnaffiliated
+#else
+#define MAYBE_PRE_TransferCookiesUnaffiliated PRE_TransferCookiesUnaffiliated
+#define MAYBE_TransferCookiesUnaffiliated TransferCookiesUnaffiliated
+#endif
+
+IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, MAYBE_PRE_TransferCookiesUnaffiliated) {
   fake_saml_idp()->SetCookieValue(kSAMLIdPCookieValue1);
   LogInWithSAML(kDifferentDomainSAMLUserEmail,
                 kTestAuthSIDCookie1,
@@ -1340,7 +1374,7 @@ IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, PRE_TransferCookiesUnaffiliated) {
 // IdP are not transferred to a user's profile on subsequent login if the user
 // does not belong to the domain that the device is enrolled into. Also verifies
 // that GAIA cookies are not transferred.
-IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, TransferCookiesUnaffiliated) {
+IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, MAYBE_TransferCookiesUnaffiliated) {
   fake_saml_idp()->SetCookieValue(kSAMLIdPCookieValue2);
   fake_saml_idp()->SetLoginHTMLTemplate("saml_login.html");
   ShowGAIALoginForm();
@@ -1382,7 +1416,8 @@ IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, SAMLInterstitialChangeAccount) {
 // Tests that clicking "Next" in the SAML interstitial page successfully
 // triggers a SAML redirect request, and the SAML IdP authentication page is
 // loaded and authenticaing there is successful.
-IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, SAMLInterstitialNext) {
+// Disabled due to flakiness, see crbug.com/699228
+IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, DISABLED_SAMLInterstitialNext) {
   fake_saml_idp()->SetLoginHTMLTemplate("saml_login.html");
   fake_gaia_->SetFakeMergeSessionParams(
       kFirstSAMLUserEmail, kTestAuthSIDCookie1, kTestAuthLSIDCookie1);
@@ -1401,6 +1436,52 @@ IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, SAMLInterstitialNext) {
       content::NotificationService::AllSources());
   ExecuteJsInSigninFrame("document.getElementById('Submit').click();");
   session_start_waiter.Wait();
+}
+
+// Ensure that the permission status of getUserMedia requests from SAML login
+// pages is controlled by the kLoginVideoCaptureAllowedUrls pref rather than the
+// underlying user content setting.
+IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, TestLoginMediaPermission) {
+  fake_saml_idp()->SetLoginHTMLTemplate("saml_login.html");
+
+  const GURL url1("https://google.com");
+  const GURL url2("https://example.com");
+  const GURL url3("https://not-allowed.com");
+  SetLoginVideoCaptureAllowedUrls({url1, url2});
+  WaitForSigninScreen();
+
+  content::WebContents* web_contents = GetLoginUI()->GetWebContents();
+
+  // Mic should always be blocked.
+  EXPECT_FALSE(
+      MediaCaptureDevicesDispatcher::GetInstance()->CheckMediaAccessPermission(
+          web_contents, url1, content::MEDIA_DEVICE_AUDIO_CAPTURE));
+
+  // Camera should be allowed if allowed by the whitelist, otherwise blocked.
+  EXPECT_TRUE(
+      MediaCaptureDevicesDispatcher::GetInstance()->CheckMediaAccessPermission(
+          web_contents, url1, content::MEDIA_DEVICE_VIDEO_CAPTURE));
+
+  EXPECT_TRUE(
+      MediaCaptureDevicesDispatcher::GetInstance()->CheckMediaAccessPermission(
+          web_contents, url2, content::MEDIA_DEVICE_VIDEO_CAPTURE));
+
+  EXPECT_FALSE(
+      MediaCaptureDevicesDispatcher::GetInstance()->CheckMediaAccessPermission(
+          web_contents, url3, content::MEDIA_DEVICE_VIDEO_CAPTURE));
+
+  // Camera should be blocked in the login screen, even if it's allowed via
+  // content setting.
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  HostContentSettingsMapFactory::GetForProfile(profile)
+      ->SetContentSettingDefaultScope(url3, url3,
+                                      CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
+                                      std::string(), CONTENT_SETTING_ALLOW);
+
+  EXPECT_FALSE(
+      MediaCaptureDevicesDispatcher::GetInstance()->CheckMediaAccessPermission(
+          web_contents, url3, content::MEDIA_DEVICE_VIDEO_CAPTURE));
 }
 
 }  // namespace chromeos

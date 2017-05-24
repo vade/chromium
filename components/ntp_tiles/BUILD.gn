@@ -14,15 +14,15 @@ static_library("ntp_tiles") {
     "country_code_ios.mm",
     "field_trial.cc",
     "field_trial.h",
-    "icon_cacher.cc",
     "icon_cacher.h",
+    "icon_cacher_impl.cc",
+    "icon_cacher_impl.h",
     "metrics.cc",
     "metrics.h",
     "most_visited_sites.cc",
     "most_visited_sites.h",
     "ntp_tile.cc",
     "ntp_tile.h",
-    "ntp_tile_source.h",
     "popular_sites.h",
     "popular_sites_impl.cc",
     "popular_sites_impl.h",
@@ -30,8 +30,11 @@ static_library("ntp_tiles") {
     "pref_names.h",
     "switches.cc",
     "switches.h",
+    "tile_source.h",
+    "tile_visual_type.h",
     "webui/ntp_tiles_internals_message_handler.cc",
     "webui/ntp_tiles_internals_message_handler.h",
+    "webui/ntp_tiles_internals_message_handler_client.cc",
     "webui/ntp_tiles_internals_message_handler_client.h",
     "webui/popular_sites_internals_message_handler.cc",
     "webui/popular_sites_internals_message_handler.h",
@@ -48,14 +51,16 @@ static_library("ntp_tiles") {
     "//components/favicon/core",
     "//components/favicon_base",
     "//components/google/core/browser",
-    "//components/image_fetcher",
+    "//components/image_fetcher/core",
     "//components/pref_registry",
     "//components/prefs",
     "//components/rappor/public",
+    "//components/resources",
     "//components/search_engines",
     "//components/url_formatter",
     "//components/variations",
     "//components/variations/service",
+    "//ui/base",
   ]
 
   if (is_android) {
@@ -82,7 +87,7 @@ source_set("json_unsafe_parser") {
 source_set("unit_tests") {
   testonly = true
   sources = [
-    "icon_cacher_unittest.cc",
+    "icon_cacher_impl_unittest.cc",
     "metrics_unittest.cc",
     "most_visited_sites_unittest.cc",
     "popular_sites_impl_unittest.cc",
@@ -94,13 +99,14 @@ source_set("unit_tests") {
     "//base/test:test_support",
     "//components/favicon/core",
     "//components/favicon_base",
-    "//components/image_fetcher",
+    "//components/image_fetcher/core",
     "//components/pref_registry:pref_registry",
     "//components/rappor:test_support",
     "//components/sync_preferences:test_support",
     "//net:test_support",
     "//testing/gmock",
     "//testing/gtest",
+    "//ui/base",
     "//ui/gfx:test_support",
   ]
 }
@@ -108,8 +114,8 @@ source_set("unit_tests") {
 if (is_android) {
   java_cpp_enum("ntp_tiles_enums_java") {
     sources = [
-      "metrics.h",
-      "ntp_tile_source.h",
+      "tile_source.h",
+      "tile_visual_type.h",
     ]
   }
 }

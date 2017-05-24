@@ -24,6 +24,7 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/compositor/compositor_animation_observer.h"
 #include "ui/compositor/compositor_export.h"
+#include "ui/compositor/compositor_lock.h"
 #include "ui/compositor/compositor_observer.h"
 #include "ui/compositor/layer_animator_collection.h"
 #include "ui/gfx/color_space.h"
@@ -43,6 +44,7 @@ class ContextProvider;
 class Layer;
 class LayerTreeDebugState;
 class LayerTreeHost;
+class LocalSurfaceId;
 class RendererSettings;
 class SurfaceManager;
 class TaskGraphRunner;
@@ -67,7 +69,7 @@ class Layer;
 class Reflector;
 class ScopedAnimationDurationScaleMode;
 
-const int kCompositorLockTimeoutMs = 67;
+constexpr int kCompositorLockTimeoutMs = 67;
 
 class COMPOSITOR_EXPORT ContextFactoryObserver {
  public:
@@ -111,8 +113,10 @@ class COMPOSITOR_EXPORT ContextFactoryPrivate {
                              const gfx::Size& size) = 0;
 
   // Set the output color profile into which this compositor should render.
-  virtual void SetDisplayColorSpace(ui::Compositor* compositor,
-                                    const gfx::ColorSpace& color_space) = 0;
+  virtual void SetDisplayColorSpace(
+      ui::Compositor* compositor,
+      const gfx::ColorSpace& blending_color_space,
+      const gfx::ColorSpace& output_color_space) = 0;
 
   virtual void SetAuthoritativeVSyncInterval(ui::Compositor* compositor,
                                              base::TimeDelta interval) = 0;
@@ -145,13 +149,8 @@ class COMPOSITOR_EXPORT ContextFactory {
   // Destroys per-compositor data.
   virtual void RemoveCompositor(Compositor* compositor) = 0;
 
-  // When true, the factory uses test contexts that do not do real GL
-  // operations.
-  virtual bool DoesCreateTestContexts() = 0;
-
-  // Returns the OpenGL target to use for image textures.
-  virtual uint32_t GetImageTextureTarget(gfx::BufferFormat format,
-                                         gfx::BufferUsage usage) = 0;
+  // Returns refresh rate. Tests may return higher values.
+  virtual double GetRefreshRate() const = 0;
 
   // Gets the GPU memory buffer manager.
   virtual gpu::GpuMemoryBufferManager* GetGpuMemoryBufferManager() = 0;
@@ -159,35 +158,12 @@ class COMPOSITOR_EXPORT ContextFactory {
   // Gets the task graph runner.
   virtual cc::TaskGraphRunner* GetTaskGraphRunner() = 0;
 
+  // Gets the renderer settings.
+  virtual const cc::RendererSettings& GetRendererSettings() const = 0;
+
   virtual void AddObserver(ContextFactoryObserver* observer) = 0;
 
   virtual void RemoveObserver(ContextFactoryObserver* observer) = 0;
-};
-
-// This class represents a lock on the compositor, that can be used to prevent
-// commits to the compositor tree while we're waiting for an asynchronous
-// event. The typical use case is when waiting for a renderer to produce a frame
-// at the right size. The caller keeps a reference on this object, and drops the
-// reference once it desires to release the lock.
-// By default, the lock will be cancelled after a short timeout to ensure
-// responsiveness of the UI, so the compositor tree should be kept in a
-// "reasonable" state while the lock is held. If the compositor sets
-// locks to not time out, then the lock will remain in effect until destroyed.
-// Don't instantiate this class directly, use Compositor::GetCompositorLock.
-class COMPOSITOR_EXPORT CompositorLock
-    : public base::RefCounted<CompositorLock>,
-      public base::SupportsWeakPtr<CompositorLock> {
- private:
-  friend class base::RefCounted<CompositorLock>;
-  friend class Compositor;
-
-  explicit CompositorLock(Compositor* compositor);
-  ~CompositorLock();
-
-  void CancelLock();
-
-  Compositor* compositor_;
-  DISALLOW_COPY_AND_ASSIGN(CompositorLock);
 };
 
 // Compositor object to take care of GPU painting.
@@ -197,7 +173,8 @@ class COMPOSITOR_EXPORT CompositorLock
 // view hierarchy.
 class COMPOSITOR_EXPORT Compositor
     : NON_EXPORTED_BASE(public cc::LayerTreeHostClient),
-      NON_EXPORTED_BASE(public cc::LayerTreeHostSingleThreadClient) {
+      NON_EXPORTED_BASE(public cc::LayerTreeHostSingleThreadClient),
+      NON_EXPORTED_BASE(public CompositorLockDelegate) {
  public:
   Compositor(const cc::FrameSinkId& frame_sink_id,
              ui::ContextFactory* context_factory,
@@ -213,6 +190,8 @@ class COMPOSITOR_EXPORT Compositor
 
   void AddFrameSink(const cc::FrameSinkId& frame_sink_id);
   void RemoveFrameSink(const cc::FrameSinkId& frame_sink_id);
+
+  void SetLocalSurfaceId(const cc::LocalSurfaceId& local_surface_id);
 
   void SetCompositorFrameSink(std::unique_ptr<cc::CompositorFrameSink> surface);
 
@@ -258,7 +237,7 @@ class COMPOSITOR_EXPORT Compositor
   void SetScaleAndSize(float scale, const gfx::Size& size_in_pixel);
 
   // Set the output color profile into which this compositor should render.
-  void SetDisplayColorSpace(const gfx::ColorSpace& color_space);
+  void SetDisplayColorProfile(const gfx::ICCProfile& icc_profile);
 
   // Returns the size of the widget that is being drawn to in pixel coordinates.
   const gfx::Size& size() const { return size_; }
@@ -320,16 +299,13 @@ class COMPOSITOR_EXPORT Compositor
   void RemoveAnimationObserver(CompositorAnimationObserver* observer);
   bool HasAnimationObserver(const CompositorAnimationObserver* observer) const;
 
-  // Change the timeout behavior for all future locks that are created. Locks
-  // should time out if there is an expectation that the compositor will be
-  // responsive.
-  void SetLocksWillTimeOut(bool locks_will_time_out) {
-    locks_will_time_out_ = locks_will_time_out;
-  }
-
   // Creates a compositor lock. Returns NULL if it is not possible to lock at
-  // this time (i.e. we're waiting to complete a previous unlock).
-  scoped_refptr<CompositorLock> GetCompositorLock();
+  // this time (i.e. we're waiting to complete a previous unlock). If the
+  // timeout is null, then no timeout is used.
+  std::unique_ptr<CompositorLock> GetCompositorLock(
+      CompositorLockClient* client,
+      base::TimeDelta timeout =
+          base::TimeDelta::FromMilliseconds(kCompositorLockTimeoutMs));
 
   // Internal functions, called back by command-buffer contexts on swap buffer
   // events.
@@ -348,12 +324,15 @@ class COMPOSITOR_EXPORT Compositor
   void DidBeginMainFrame() override {}
   void BeginMainFrame(const cc::BeginFrameArgs& args) override;
   void BeginMainFrameNotExpectedSoon() override;
+  void BeginMainFrameNotExpectedUntil(base::TimeTicks time) override;
   void UpdateLayerTreeHost() override;
   void ApplyViewportDeltas(const gfx::Vector2dF& inner_delta,
                            const gfx::Vector2dF& outer_delta,
                            const gfx::Vector2dF& elastic_overscroll_delta,
                            float page_scale,
                            float top_controls_delta) override {}
+  void RecordWheelAndTouchScrollingCount(bool has_scrolled_by_wheel,
+                                         bool has_scrolled_by_touch) override {}
   void RequestNewCompositorFrameSink() override;
   void DidInitializeCompositorFrameSink() override {}
   void DidFailToInitializeCompositorFrameSink() override;
@@ -363,35 +342,39 @@ class COMPOSITOR_EXPORT Compositor
   void DidReceiveCompositorFrameAck() override;
   void DidCompletePageScaleAnimation() override {}
 
+  bool IsForSubframe() override;
+
   // cc::LayerTreeHostSingleThreadClient implementation.
   void DidSubmitCompositorFrame() override;
   void DidLoseCompositorFrameSink() override {}
 
-  bool IsLocked() { return compositor_lock_ != NULL; }
+  bool IsLocked() { return !active_locks_.empty(); }
 
   void SetOutputIsSecure(bool output_is_secure);
 
   const cc::LayerTreeDebugState& GetLayerTreeDebugState() const;
   void SetLayerTreeDebugState(const cc::LayerTreeDebugState& debug_state);
-  const cc::RendererSettings& GetRendererSettings() const;
 
   LayerAnimatorCollection* layer_animator_collection() {
     return &layer_animator_collection_;
   }
 
   const cc::FrameSinkId& frame_sink_id() const { return frame_sink_id_; }
-  int committed_frame_number() const { return committed_frame_number_; }
+  int activated_frame_count() const { return activated_frame_count_; }
   float refresh_rate() const { return refresh_rate_; }
+
+  void set_allow_locks_to_extend_timeout(bool allowed) {
+    allow_locks_to_extend_timeout_ = allowed;
+  }
 
  private:
   friend class base::RefCounted<Compositor>;
-  friend class CompositorLock;
 
-  // Called by CompositorLock.
-  void UnlockCompositor();
+  // CompositorLockDelegate implementation.
+  void RemoveCompositorLock(CompositorLock* lock) override;
 
-  // Called to release any pending CompositorLock
-  void CancelCompositorLock();
+  // Causes all active CompositorLocks to be timed out.
+  void TimeoutLocks();
 
   gfx::Size size_;
 
@@ -399,22 +382,22 @@ class COMPOSITOR_EXPORT Compositor
   ui::ContextFactoryPrivate* context_factory_private_;
 
   // The root of the Layer tree drawn by this compositor.
-  Layer* root_layer_;
+  Layer* root_layer_ = nullptr;
 
   base::ObserverList<CompositorObserver, true> observer_list_;
   base::ObserverList<CompositorAnimationObserver> animation_observer_list_;
 
-  gfx::AcceleratedWidget widget_;
+  gfx::AcceleratedWidget widget_ = gfx::kNullAcceleratedWidget;
   // A sequence number of a current compositor frame for use with metrics.
-  int committed_frame_number_;
+  int activated_frame_count_ = 0;
 
-  // current VSYNC refresh rate per second.
-  float refresh_rate_;
+  // Current vsync refresh rate per second.
+  float refresh_rate_ = 0.f;
 
   // A map from child id to parent id.
   std::unordered_set<cc::FrameSinkId, cc::FrameSinkIdHash> child_frame_sinks_;
-  bool widget_valid_;
-  bool compositor_frame_sink_requested_;
+  bool widget_valid_ = false;
+  bool compositor_frame_sink_requested_ = false;
   const cc::FrameSinkId frame_sink_id_;
   scoped_refptr<cc::Layer> root_web_layer_;
   std::unique_ptr<cc::AnimationHost> animation_host_;
@@ -426,18 +409,24 @@ class COMPOSITOR_EXPORT Compositor
 
   // The device scale factor of the monitor that this compositor is compositing
   // layers on.
-  float device_scale_factor_;
+  float device_scale_factor_ = 0.f;
 
-  bool locks_will_time_out_;
-  CompositorLock* compositor_lock_;
+  std::vector<CompositorLock*> active_locks_;
 
   LayerAnimatorCollection layer_animator_collection_;
   scoped_refptr<cc::AnimationTimeline> animation_timeline_;
   std::unique_ptr<ScopedAnimationDurationScaleMode> slow_animations_;
 
-  gfx::ColorSpace color_space_;
+  gfx::ColorSpace output_color_space_;
+  gfx::ColorSpace blending_color_space_;
+
+  // The estimated time that the locks will timeout.
+  base::TimeTicks scheduled_timeout_;
+  // If true, the |scheduled_timeout_| might be recalculated and extended.
+  bool allow_locks_to_extend_timeout_;
 
   base::WeakPtrFactory<Compositor> weak_ptr_factory_;
+  base::WeakPtrFactory<Compositor> lock_timeout_weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(Compositor);
 };

@@ -9,7 +9,9 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "ui/views/border.h"
 #include "ui/views/layout/layout_constants.h"
+#include "ui/views/layout/layout_provider.h"
 #include "ui/views/view.h"
 #include "ui/views/window/dialog_delegate.h"
 
@@ -186,7 +188,7 @@ class Column : public LayoutElement {
 
   // Determines the max size of all linked columns, and sets each column
   // to that size. This should only be used for the master column.
-  void UnifySameSizedColumnSizes();
+  void UnifyLinkedColumnSizes(int size_limit);
 
   void AdjustSize(int size) override;
 
@@ -231,17 +233,19 @@ Column* Column::GetLastMasterColumn() {
   return master_column_->GetLastMasterColumn();
 }
 
-void Column::UnifySameSizedColumnSizes() {
+void Column::UnifyLinkedColumnSizes(int size_limit) {
   DCHECK(master_column_ == this);
 
   // Accumulate the size first.
   int size = 0;
-  for (auto column : same_size_columns_)
-    size = std::max(size, column->Size());
+  for (auto* column : same_size_columns_) {
+    if (column->Size() <= size_limit)
+      size = std::max(size, column->Size());
+  }
 
   // Then apply it.
-  for (auto column : same_size_columns_)
-    column->SetSize(size);
+  for (auto* column : same_size_columns_)
+    column->SetSize(std::max(size, column->Size()));
 }
 
 void Column::AdjustSize(int size) {
@@ -365,8 +369,7 @@ static bool CompareByRowSpan(const std::unique_ptr<ViewState>& v1,
 
 // ColumnSet -------------------------------------------------------------
 
-ColumnSet::ColumnSet(int id) : id_(id) {
-}
+ColumnSet::ColumnSet(int id) : id_(id), linked_column_size_limit_(INT_MAX) {}
 
 ColumnSet::~ColumnSet() {
 }
@@ -495,9 +498,9 @@ void ColumnSet::AccumulateMasterColumns() {
   }
 }
 
-void ColumnSet::UnifySameSizedColumnSizes() {
-  for (auto column : master_columns_)
-    column->UnifySameSizedColumnSizes();
+void ColumnSet::UnifyLinkedColumnSizes() {
+  for (auto* column : master_columns_)
+    column->UnifyLinkedColumnSizes(linked_column_size_limit_);
 }
 
 void ColumnSet::UpdateRemainingWidth(ViewState* view_state) {
@@ -583,7 +586,7 @@ void ColumnSet::ResetColumnXCoordinates() {
 void ColumnSet::CalculateSize() {
   gfx::Size pref;
   // Reset the preferred and remaining sizes.
-  for (const auto& view_state : view_states_) {
+  for (auto* view_state : view_states_) {
     if (!view_state->pref_width_fixed || !view_state->pref_height_fixed) {
       pref = view_state->view->GetPreferredSize();
       if (!view_state->pref_width_fixed)
@@ -609,7 +612,7 @@ void ColumnSet::CalculateSize() {
   }
 
   // Make sure all linked columns have the same size.
-  UnifySameSizedColumnSizes();
+  UnifyLinkedColumnSizes();
 
   // Distribute the size of each view with a column span > 1.
   for (; view_state_iterator != view_states_.end(); ++view_state_iterator) {
@@ -623,7 +626,7 @@ void ColumnSet::CalculateSize() {
 
     // Update the size of linked columns.
     // This may need to be combined with previous step.
-    UnifySameSizedColumnSizes();
+    UnifyLinkedColumnSizes();
   }
 }
 
@@ -650,17 +653,10 @@ GridLayout::~GridLayout() {
 // static
 GridLayout* GridLayout::CreatePanel(View* host) {
   GridLayout* layout = new GridLayout(host);
-  layout->SetInsets(kPanelVertMargin, kButtonHEdgeMarginNew,
-                    kPanelVertMargin, kButtonHEdgeMarginNew);
+  host->SetBorder(
+      CreateEmptyBorder(LayoutProvider::Get()->GetInsetsMetric(INSETS_PANEL)));
+  host->SetLayoutManager(layout);
   return layout;
-}
-
-void GridLayout::SetInsets(int top, int left, int bottom, int right) {
-  insets_.Set(top, left, bottom, right);
-}
-
-void GridLayout::SetInsets(const gfx::Insets& insets) {
-  insets_ = insets;
 }
 
 ColumnSet* GridLayout::AddColumnSet(int id) {
@@ -684,10 +680,13 @@ void GridLayout::StartRowWithPadding(float vertical_resize, int column_set_id,
   StartRow(vertical_resize, column_set_id);
 }
 
-void GridLayout::StartRow(float vertical_resize, int column_set_id) {
+void GridLayout::StartRow(float vertical_resize,
+                          int column_set_id,
+                          int height) {
+  DCHECK_GE(height, 0);
   ColumnSet* column_set = GetColumnSet(column_set_id);
   DCHECK(column_set);
-  AddRow(base::MakeUnique<Row>(0, vertical_resize, column_set));
+  AddRow(base::MakeUnique<Row>(height, vertical_resize, column_set));
 }
 
 void GridLayout::AddPaddingRow(float vertical_resize, int pixel_count) {
@@ -779,13 +778,14 @@ void GridLayout::Layout(View* host) {
     ColumnSet* column_set = view_state->column_set;
     View* view = view_state->view;
     DCHECK(view);
-    int x = column_set->columns_[view_state->start_col]->Location() +
-            insets_.left();
+    const gfx::Insets& insets = host_->GetInsets();
+    int x =
+        column_set->columns_[view_state->start_col]->Location() + insets.left();
     int width = column_set->GetColumnWidth(view_state->start_col,
                                            view_state->col_span);
     CalculateSize(view_state->pref_width, view_state->h_align,
                   &x, &width);
-    int y = rows_[view_state->start_row]->Location() + insets_.top();
+    int y = rows_[view_state->start_row]->Location() + insets.top();
     int height = LayoutElement::TotalSize(view_state->start_row,
                                           view_state->row_span, &rows_);
     if (view_state->v_align == BASELINE && view_state->baseline != -1) {
@@ -816,6 +816,11 @@ int GridLayout::GetPreferredHeightForWidth(const View* host, int width) const {
 
 void GridLayout::SizeRowsAndColumns(bool layout, int width, int height,
                                     gfx::Size* pref) const {
+  // Protect against clients asking for metrics during the addition of a View.
+  // The View is in the hierarchy, but it will not be accounted for in the
+  // layout calculations at this point, so the result will be incorrect.
+  DCHECK(!adding_view_) << "GridLayout queried while adding a view.";
+
   // Make sure the master columns have been calculated.
   CalculateMasterColumnsIfNecessary();
   pref->SetSize(0, 0);
@@ -829,14 +834,15 @@ void GridLayout::SizeRowsAndColumns(bool layout, int width, int height,
     column_set->CalculateSize();
     pref->set_width(std::max(pref->width(), column_set->LayoutWidth()));
   }
-  pref->set_width(pref->width() + insets_.width());
+  const gfx::Insets& insets = host_->GetInsets();
+  pref->set_width(pref->width() + insets.width());
 
   // Go over the columns again and set them all to the size we settled for.
   width = width ? width : pref->width();
   for (const auto& column_set : column_sets_) {
     // We're doing a layout, divvy up any extra space.
-    column_set->Resize(width - column_set->LayoutWidth() - insets_.left() -
-                       insets_.right());
+    column_set->Resize(width - column_set->LayoutWidth() - insets.left() -
+                       insets.right());
     // And reset the x coordinates.
     column_set->ResetColumnXCoordinates();
   }
@@ -904,7 +910,7 @@ void GridLayout::SizeRowsAndColumns(bool layout, int width, int height,
 
   // We now know the preferred height, set it here.
   pref->set_height(rows_.back()->Location() + rows_.back()->Size() +
-                   insets_.height());
+                   insets.height());
 
   if (layout && height != pref->height()) {
     // We're doing a layout, and the height differs from the preferred height,

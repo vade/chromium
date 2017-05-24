@@ -39,6 +39,7 @@
 #include "net/base/request_priority.h"
 #include "net/http/http_request_headers.h"
 #include "net/socket/socket_test_util.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -73,8 +74,9 @@ std::unique_ptr<net::URLRequest> RequestURL(
   socket_factory->AddSocketDataProvider(&response_socket_data_provider);
   net::TestDelegate test_delegate;
   test_delegate.set_quit_on_complete(true);
-  std::unique_ptr<net::URLRequest> request(context->CreateRequest(
-      GURL("http://example.com"), net::DEFAULT_PRIORITY, &test_delegate));
+  std::unique_ptr<net::URLRequest> request(
+      context->CreateRequest(GURL("http://example.com"), net::DEFAULT_PRIORITY,
+                             &test_delegate, TRAFFIC_ANNOTATION_FOR_TESTS));
 
   content::ResourceRequestInfo::AllocateForTesting(
       request.get(), content::RESOURCE_TYPE_MAIN_FRAME, nullptr, -2, -2, -2,
@@ -122,6 +124,14 @@ class FakeDataUseAggregator : public data_usage::DataUseAggregator {
   int64_t off_the_record_tx_bytes_;
   int64_t off_the_record_rx_bytes_;
 };
+
+// Helper function to make the IsAccessAllowed test concise.
+bool IsAccessAllowed(const std::string& path,
+                     const std::string& profile_path) {
+  return ChromeNetworkDelegate::IsAccessAllowed(
+      base::FilePath::FromUTF8Unsafe(path),
+      base::FilePath::FromUTF8Unsafe(profile_path));
+}
 
 }  // namespace
 
@@ -227,6 +237,56 @@ TEST_F(ChromeNetworkDelegateTest, ReportOffTheRecordDataUseToAggregator) {
             fake_aggregator.off_the_record_rx_bytes());
 }
 
+TEST_F(ChromeNetworkDelegateTest, HttpRequestCompletionErrorCodes) {
+  Initialize();
+
+  const struct {
+    const GURL url;
+    int net_error;
+    bool is_main_frame;
+    int expected_sample_bucket;
+    int expected_request_completion_count;
+    int expected_request_completion_main_frame_count;
+  } kTests[] = {
+      {GURL("http://example.com"), net::OK, true, std::abs(net::OK), 1, 1},
+      {GURL("http://example.com"), net::ERR_ABORTED, true,
+       std::abs(net::ERR_ABORTED), 1, 1},
+      {GURL("http://example.com"), net::OK, false, std::abs(net::OK), 1, 0},
+      {GURL("https://example.com"), net::OK, true, std::abs(net::OK), 0, 0},
+  };
+
+  const char kHttpRequestCompletionErrorCode[] =
+      "Net.HttpRequestCompletionErrorCodes";
+  const char kHttpRequestCompletionErrorCodeMainFrame[] =
+      "Net.HttpRequestCompletionErrorCodes.MainFrame";
+
+  for (const auto& test : kTests) {
+    base::HistogramTester histograms;
+
+    net::TestDelegate test_delegate;
+    std::unique_ptr<net::URLRequest> request(
+        context()->CreateRequest(test.url, net::DEFAULT_PRIORITY,
+                                 &test_delegate, TRAFFIC_ANNOTATION_FOR_TESTS));
+    if (test.is_main_frame) {
+      request->SetLoadFlags(request->load_flags() |
+                            net::LOAD_MAIN_FRAME_DEPRECATED);
+    }
+    network_delegate()->NotifyCompleted(request.get(), false, test.net_error);
+
+    histograms.ExpectTotalCount(kHttpRequestCompletionErrorCode,
+                                test.expected_request_completion_count);
+    histograms.ExpectUniqueSample(kHttpRequestCompletionErrorCode,
+                                  test.expected_sample_bucket,
+                                  test.expected_request_completion_count);
+    histograms.ExpectTotalCount(
+        kHttpRequestCompletionErrorCodeMainFrame,
+        test.expected_request_completion_main_frame_count);
+    histograms.ExpectUniqueSample(
+        kHttpRequestCompletionErrorCodeMainFrame, test.expected_sample_bucket,
+        test.expected_request_completion_main_frame_count);
+  }
+}
+
 class ChromeNetworkDelegatePolicyTest : public testing::Test {
  public:
   ChromeNetworkDelegatePolicyTest()
@@ -293,8 +353,9 @@ class ChromeNetworkDelegateSafeSearchTest :
     safe_search_util::ClearForceGoogleSafeSearchCountForTesting();
     safe_search_util::ClearForceYouTubeRestrictCountForTesting();
 
-    std::unique_ptr<net::URLRequest> request(context_.CreateRequest(
-        GURL("http://anyurl.com"), net::DEFAULT_PRIORITY, &delegate_));
+    std::unique_ptr<net::URLRequest> request(
+        context_.CreateRequest(GURL("http://anyurl.com"), net::DEFAULT_PRIORITY,
+                               &delegate_, TRAFFIC_ANNOTATION_FOR_TESTS));
 
     request->Start();
     base::RunLoop().RunUntilIdle();
@@ -364,7 +425,7 @@ class ChromeNetworkDelegateAllowedDomainsTest :
     allowed_domains_for_apps_.SetValue(allowed);
 
     std::unique_ptr<net::URLRequest> request(context_.CreateRequest(
-        url, net::DEFAULT_PRIORITY, &delegate_));
+        url, net::DEFAULT_PRIORITY, &delegate_, TRAFFIC_ANNOTATION_FOR_TESTS));
 
     request->Start();
     base::RunLoop().RunUntilIdle();
@@ -527,4 +588,58 @@ TEST_F(ChromeNetworkDelegatePrivacyModeTest,
   // Privacy mode is disabled as kAllowedSite is still getting cookies
   EXPECT_FALSE(network_delegate_->CanEnablePrivacyMode(kAllowedSite,
                                                        kBlockedFirstPartySite));
+}
+
+TEST(ChromeNetworkDelegateStaticTest, IsAccessAllowed) {
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
+  // Platforms other than Chrome OS and Android have access to any files.
+  EXPECT_TRUE(IsAccessAllowed("/", ""));
+  EXPECT_TRUE(IsAccessAllowed("/foo.txt", ""));
+#endif
+
+#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
+  // Chrome OS and Android don't have access to random files.
+  EXPECT_FALSE(IsAccessAllowed("/", ""));
+  EXPECT_FALSE(IsAccessAllowed("/foo.txt", ""));
+#endif
+
+#if defined(OS_CHROMEOS)
+  // Chrome OS allows the following directories.
+  EXPECT_TRUE(IsAccessAllowed("/home/chronos/user/Downloads", ""));
+  EXPECT_TRUE(IsAccessAllowed("/home/chronos/user/log", ""));
+  EXPECT_TRUE(IsAccessAllowed("/home/chronos/user/WebRTC Logs", ""));
+  EXPECT_TRUE(IsAccessAllowed("/media", ""));
+  EXPECT_TRUE(IsAccessAllowed("/opt/oem", ""));
+  EXPECT_TRUE(IsAccessAllowed("/usr/share/chromeos-assets", ""));
+  EXPECT_TRUE(IsAccessAllowed("/tmp", ""));
+  EXPECT_TRUE(IsAccessAllowed("/var/log", ""));
+  // Files under the directories are allowed.
+  EXPECT_TRUE(IsAccessAllowed("/tmp/foo.txt", ""));
+  // Make sure similar paths are not allowed.
+  EXPECT_FALSE(IsAccessAllowed("/home/chronos/user/log.txt", ""));
+  EXPECT_FALSE(IsAccessAllowed("/home/chronos/user", ""));
+  EXPECT_FALSE(IsAccessAllowed("/home/chronos", ""));
+
+  // If profile path is given, the following additional paths are allowed.
+  EXPECT_TRUE(IsAccessAllowed("/profile/Downloads", "/profile"));
+  EXPECT_TRUE(IsAccessAllowed("/profile/WebRTC Logs", "/profile"));
+
+#elif defined(OS_ANDROID)
+  // Android allows the following directories.
+  EXPECT_TRUE(IsAccessAllowed("/sdcard", ""));
+  EXPECT_TRUE(IsAccessAllowed("/mnt/sdcard", ""));
+  // Files under the directories are allowed.
+  EXPECT_TRUE(IsAccessAllowed("/sdcard/foo.txt", ""));
+  // Make sure similar paths are not allowed.
+  EXPECT_FALSE(IsAccessAllowed("/mnt/sdcard.txt", ""));
+  EXPECT_FALSE(IsAccessAllowed("/mnt", ""));
+
+  // Files in external storage are allowed.
+  base::FilePath external_storage_path;
+  PathService::Get(base::DIR_ANDROID_EXTERNAL_STORAGE, &external_storage_path);
+  EXPECT_TRUE(IsAccessAllowed(
+      external_storage_path.AppendASCII("foo.txt").AsUTF8Unsafe(), ""));
+  // The external storage root itself is not allowed.
+  EXPECT_FALSE(IsAccessAllowed(external_storage_path.AsUTF8Unsafe(), ""));
+#endif
 }

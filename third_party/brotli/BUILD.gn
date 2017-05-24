@@ -2,12 +2,23 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//testing/libfuzzer/fuzzer_test.gni")
+
 if (is_win) {
   import("//build/config/win/visual_studio_version.gni")
 }
 
 config("includes") {
   include_dirs = [ "include" ]
+}
+
+source_set("headers") {
+  sources = [
+    "include/brotli/decode.h",
+    "include/brotli/encode.h",
+    "include/brotli/port.h",
+    "include/brotli/types.h",
+  ]
 }
 
 static_library("common") {
@@ -18,6 +29,9 @@ static_library("common") {
     "common/version.h",
   ]
   public_configs = [ ":includes" ]
+  deps = [
+    ":headers",
+  ]
 }
 
 static_library("dec") {
@@ -35,6 +49,10 @@ static_library("dec") {
     "dec/transform.h",
   ]
   public_configs = [ ":includes" ]
+
+  public_deps = [
+    ":headers",
+  ]
 
   deps = [
     ":common",
@@ -111,6 +129,7 @@ if (current_toolchain == host_toolchain) {
     deps = [
       ":common",
       ":dec",
+      ":headers",
       "//build/config/sanitizers:deps",
       "//build/win:default_exe_manifest",
     ]
@@ -127,4 +146,14 @@ if (current_toolchain == host_toolchain) {
       configs += [ "//build/config:release" ]
     }
   }
+}
+
+fuzzer_test("brotli_fuzzer") {
+  sources = [
+    "fuzz/decode_fuzzer.cc",
+  ]
+  deps = [
+    ":dec",
+  ]
+  libfuzzer_options = [ "max_len=1280" ]
 }

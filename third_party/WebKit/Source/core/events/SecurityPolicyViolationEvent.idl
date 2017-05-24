@@ -45,4 +45,5 @@ enum SecurityPolicyViolationEventDisposition {
     [Measure] readonly attribute unsigned short statusCode;
     readonly attribute long      lineNumber;
     readonly attribute long      columnNumber;
+    readonly attribute DOMString sample;
 };

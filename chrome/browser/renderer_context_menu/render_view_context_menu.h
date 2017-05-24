@@ -82,6 +82,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
 
  protected:
   Profile* GetProfile();
+  Browser* GetBrowser() const;
 
   // Returns a (possibly truncated) version of the current selection text
   // suitable for putting in the title of a menu item.
@@ -121,8 +122,6 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   void HandleAuthorizeAllPlugins() override;
 #endif
   void NotifyMenuShown() override;
-  void NotifyURLOpened(const GURL& url,
-                       content::WebContents* new_contents) override;
 
   // Gets the extension (if any) associated with the WebContents that we're in.
   const extensions::Extension* GetExtension() const;
@@ -206,8 +205,6 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   void PluginActionAt(const gfx::Point& location,
                       const blink::WebPluginAction& action);
 
-  Browser* GetBrowser() const;
-
   // Returns a list of registered ProtocolHandlers that can handle the clicked
   // on URL.
   ProtocolHandlerRegistry::ProtocolHandlerList GetHandlersForLinkUrl();
@@ -221,8 +218,6 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   bool multiple_profiles_open_;
   ui::SimpleMenuModel protocol_handler_submenu_model_;
   ProtocolHandlerRegistry* protocol_handler_registry_;
-  // Whether the Save As text experiment is on.
-  bool save_as_text_experiement_enabled_;
 
   // An observer that handles spelling suggestions, "Add to dictionary", and
   // "Ask Google for suggestions" items.

@@ -1,28 +1,28 @@
+<link rel="import" href="chrome://resources/html/action_link.html">
+<link rel="import" href="chrome://resources/html/action_link_css.html">
+<link rel="import" href="chrome://resources/html/assert.html">
+<link rel="import" href="chrome://resources/html/cr/ui/focus_without_ink.html">
 <link rel="import" href="chrome://resources/html/polymer.html">
-<link rel="import" href="/printing_page/cups_add_printer_dialog.html">
-<link rel="import" href="/printing_page/cups_printers_list.html">
-<link rel="import" href="/settings_shared_css.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/paper-button/paper-button.html">
+<link rel="import" href="cups_add_printer_dialog.html">
+<link rel="import" href="cups_printers_list.html">
+<link rel="import" href="../settings_shared_css.html">
 
 <dom-module id="settings-cups-printers">
   <template>
-    <style include="settings-shared">
-      a[is='action-link'] {
-        display: inline-block;
-        text-decoration: none;
-      }
-
-      a[is='action-link']:hover {
-        color: blue;
-        text-decoration: underline;
-      }
-
+    <style include="settings-shared action-link">
       .settings-box .start {
-        color: var(--paper-grey-500);
+        color: var(--paper-grey-600);
       }
 
       .settings-box .start .secondary {
         color: var(--paper-grey-800);
         font-size: 92.31%;  /* 12px / 13px */
+      }
+      
+      .settings-box .primary-button {
+        -webkit-margin-end: 0;
+        -webkit-margin-start: auto;
       }
 
       #message {
@@ -54,19 +54,18 @@
     </style>
 
     <div class="settings-box first">
-      <a is="action-link" on-tap="onAddPrinterTap_" actionable
-          hidden="[[!canAddPrinter_]]">
+      <paper-button class="primary-button" id="addPrinter"
+          on-tap="onAddPrinterTap_" hidden="[[!canAddPrinter_]]">
         $i18n{addCupsPrinter}
-      </a>
+      </paper-button>
       <div class="start" hidden="[[canAddPrinter_]]">
         <span>$i18n{addCupsPrinter}</span>
-        <div class="secondary">
-          $i18n{requireNetworkMessage}
-        </div>
+        <div class="secondary">$i18n{requireNetworkMessage}</div>
       </div>
     </div>
 
-    <settings-cups-add-printer-dialog id="addPrinterDialog">
+    <settings-cups-add-printer-dialog id="addPrinterDialog"
+        on-close="onAddPrinterDialogClose_">
     </settings-cups-add-printer-dialog>
 
     <settings-cups-printers-list printers="{{printers}}"
@@ -79,7 +78,7 @@
       </div>
       <div class="center" id="addPrinterErrorMessage" hidden>
         <span>$i18n{printerAddedFailedMessage}</span>
-        <a is="action-link" on-tap="onAddPrinterTap_" actionable>
+        <a is="action-link" on-tap="onAddPrinterTap_">
           $i18n{printerAddedTryAgainMessage}
         </a>
       </div>

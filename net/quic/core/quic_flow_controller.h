@@ -19,20 +19,35 @@ class QuicConnection;
 
 const QuicStreamId kConnectionLevelId = 0;
 
+// How much larger the session flow control window needs to be relative to any
+// stream's flow control window.
+const float kSessionFlowControlMultiplier = 1.5;
+
+class QUIC_EXPORT_PRIVATE QuicFlowControllerInterface {
+ public:
+  virtual ~QuicFlowControllerInterface() {}
+
+  // Ensures the flow control window is at least |window_size| and send out an
+  // update frame if it is increased.
+  virtual void EnsureWindowAtLeast(QuicByteCount window_size) = 0;
+};
+
 // QuicFlowController allows a QUIC stream or connection to perform flow
 // control. The stream/connection owns a QuicFlowController which keeps track of
 // bytes sent/received, can tell the owner if it is flow control blocked, and
 // can send WINDOW_UPDATE or BLOCKED frames when needed.
-class QUIC_EXPORT_PRIVATE QuicFlowController {
+class QUIC_EXPORT_PRIVATE QuicFlowController
+    : public QuicFlowControllerInterface {
  public:
   QuicFlowController(QuicConnection* connection,
                      QuicStreamId id,
                      Perspective perspective,
-                     QuicStreamOffset send_window_offset,
-                     QuicStreamOffset receive_window_offset,
-                     bool should_auto_tune_receive_window);
+                     QuicStreamOffset send_window_size,
+                     QuicStreamOffset receive_window_size,
+                     bool should_auto_tune_receive_window,
+                     QuicFlowControllerInterface* session_flow_controller);
 
-  ~QuicFlowController() {}
+  ~QuicFlowController() override {}
 
   // Called when we see a new highest received byte offset from the peer, either
   // via a data frame or a RST.
@@ -47,9 +62,14 @@ class QUIC_EXPORT_PRIVATE QuicFlowController {
   // Called when bytes are sent to the peer.
   void AddBytesSent(QuicByteCount bytes_sent);
 
-  // Set a new send window offset.
-  // Returns true if this increases send_window_offset_ and is now blocked.
+  // Increases |send_window_offset_| if |new_send_window_offset| is
+  // greater than the current value.  Returns true if this increase
+  // also causes us to change from a blocked state to unblocked.  In
+  // all other cases, returns false.
   bool UpdateSendWindowOffset(QuicStreamOffset new_send_window_offset);
+
+  // QuicFlowControllerInterface.
+  void EnsureWindowAtLeast(QuicByteCount window_size) override;
 
   // Returns the current available send window.
   QuicByteCount SendWindowSize() const;
@@ -62,6 +82,9 @@ class QUIC_EXPORT_PRIVATE QuicFlowController {
 
   // Returns true if flow control receive limits have been violated by the peer.
   bool FlowControlViolation();
+
+  // Inform the peer of new receive window.
+  void SendWindowUpdate();
 
   QuicByteCount bytes_consumed() const { return bytes_consumed_; }
 
@@ -91,6 +114,13 @@ class QUIC_EXPORT_PRIVATE QuicFlowController {
 
   // Auto-tune the max receive window size.
   void MaybeIncreaseMaxWindowSize();
+
+  // Updates the current offset and sends a window update frame.
+  void UpdateReceiveWindowOffsetAndSendWindowUpdate(
+      QuicStreamOffset available_window);
+
+  // Double the window size as long as we haven't hit the max window size.
+  void IncreaseWindowSize();
 
   // The parent connection, used to send connection close on flow control
   // violation, and WINDOW_UPDATE and BLOCKED frames when appropriate.
@@ -151,6 +181,10 @@ class QUIC_EXPORT_PRIVATE QuicFlowController {
 
   // Used to dynamically enable receive window auto-tuning.
   bool auto_tune_receive_window_;
+
+  // The session's flow controller.  null if this is stream id 0.
+  // Not owned.
+  QuicFlowControllerInterface* session_flow_controller_;
 
   // Send window update when receive window size drops below this.
   QuicByteCount WindowUpdateThreshold();

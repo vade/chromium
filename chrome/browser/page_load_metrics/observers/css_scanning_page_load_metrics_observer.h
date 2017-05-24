@@ -15,14 +15,24 @@ class CssScanningMetricsObserver
   ~CssScanningMetricsObserver() override;
 
   // page_load_metrics::PageLoadMetricsObserver:
-  void OnFirstContentfulPaint(
-      const page_load_metrics::PageLoadTiming& timing,
+  ObservePolicy OnStart(content::NavigationHandle* navigation_handle,
+                        const GURL& currently_committed_url,
+                        bool started_in_foreground) override;
+  ObservePolicy OnHidden(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& info) override;
-  void OnFirstMeaningfulPaint(
-      const page_load_metrics::PageLoadTiming& timing,
+  void OnLoadingBehaviorObserved(
+      const page_load_metrics::PageLoadExtraInfo& info) override;
+  void OnFirstContentfulPaintInPage(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& info) override;
+  void OnFirstMeaningfulPaintInMainFrameDocument(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& info) override;
 
  private:
+  bool css_preload_found_ = false;
+
   DISALLOW_COPY_AND_ASSIGN(CssScanningMetricsObserver);
 };
 

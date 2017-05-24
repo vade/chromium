@@ -16,7 +16,7 @@ function initialize_AutocompleteTest()
         if (lineNumber === -1)
             throw new Error("Test case is invalid: cursor position is not marked with '|' symbol.");
         textEditor.setText(lines.join("\n").replace("|", ""));
-        textEditor.setSelection(Common.TextRange.createFromLocation(lineNumber, columnNumber));
+        textEditor.setSelection(TextUtils.TextRange.createFromLocation(lineNumber, columnNumber));
         InspectorTest.addSniffer(TextEditor.TextEditorAutocompleteController.prototype, "_onSuggestionsShownForTest", suggestionsShown);
         textEditor._autocompleteController.autocomplete();
         function suggestionsShown(words)
@@ -24,7 +24,7 @@ function initialize_AutocompleteTest()
             InspectorTest.addResult("========= Selection In Editor =========");
             InspectorTest.dumpTextWithSelection(textEditor);
             InspectorTest.addResult("======= Autocomplete Suggestions =======");
-            InspectorTest.addResult("[" + words.map(item => item.title).join(", ") + "]");
+            InspectorTest.addResult("[" + words.map(item => item.text).join(", ") + "]");
             resolve();
         }
         return promise;

@@ -36,27 +36,27 @@ namespace blink {
 class WebFormControlElement;
 class WebInputElement;
 class WebKeyboardEvent;
+class WebNode;
 
 class WebAutofillClient {
  public:
   // These methods are called when the users edits a text-field.
-  virtual void textFieldDidEndEditing(const WebInputElement&) {}
-  virtual void textFieldDidChange(const WebFormControlElement&) {}
-  virtual void textFieldDidReceiveKeyDown(const WebInputElement&,
+  virtual void TextFieldDidEndEditing(const WebInputElement&) {}
+  virtual void TextFieldDidChange(const WebFormControlElement&) {}
+  virtual void TextFieldDidReceiveKeyDown(const WebInputElement&,
                                           const WebKeyboardEvent&) {}
   // This is called when a datalist indicator is clicked.
-  virtual void openTextDataListChooser(const WebInputElement&) {}
+  virtual void OpenTextDataListChooser(const WebInputElement&) {}
   // This is called when the datalist for an input has changed.
-  virtual void dataListOptionsChanged(const WebInputElement&) {}
-  // Called the first time the user interacts with the page after a load.
-  virtual void firstUserGestureObserved() {}
+  virtual void DataListOptionsChanged(const WebInputElement&) {}
+  // Called when the user interacts with the page after a load.
+  virtual void UserGestureObserved() {}
 
-  // Informs the client whether or not any subsequent text changes should be
-  // ignored.
-  virtual void setIgnoreTextChanges(bool ignore) {}
+  virtual void DidAssociateFormControlsDynamically() {}
+  virtual void AjaxSucceeded() {}
 
-  virtual void didAssociateFormControlsDynamically() {}
-  virtual void ajaxSucceeded() {}
+  virtual void DidCompleteFocusChangeInFrame() {}
+  virtual void DidReceiveLeftMouseDownOrGestureTapInNode(const WebNode&) {}
 
  protected:
   virtual ~WebAutofillClient() {}

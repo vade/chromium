@@ -11,9 +11,9 @@
 #ifndef NET_QUIC_CORE_QUIC_TIME_H_
 #define NET_QUIC_CORE_QUIC_TIME_H_
 
-#include <stdint.h>
-
 #include <cmath>
+#include <cstdint>
+#include <limits>
 #include <ostream>
 
 #include "base/compiler_specific.h"
@@ -23,6 +23,8 @@
 #define QUICTIME_CONSTEXPR inline
 
 namespace net {
+
+class QuicClock;
 
 // A QuicTime is a purely relative time. QuicTime values from different clocks
 // cannot be compared to each other. If you need an absolute time, see
@@ -104,8 +106,6 @@ class QUIC_EXPORT_PRIVATE QuicTime {
     friend class QuicClock;
   };
 
-  explicit QuicTime(base::TimeTicks ticks) : time_(ticks.ToInternalValue()) {}
-
   // Creates a new QuicTime with an internal value of 0.  IsInitialized()
   // will return false for these times.
   static QUICTIME_CONSTEXPR QuicTime Zero() { return QuicTime(0); }
@@ -124,6 +124,8 @@ class QUIC_EXPORT_PRIVATE QuicTime {
   inline bool IsInitialized() const { return 0 != time_; }
 
  private:
+  friend class QuicClock;
+
   friend inline bool operator==(QuicTime lhs, QuicTime rhs);
   friend inline bool operator<(QuicTime lhs, QuicTime rhs);
   friend inline QuicTime operator+(QuicTime lhs, QuicTime::Delta rhs);

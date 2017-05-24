@@ -70,7 +70,7 @@ gfx::Size WidgetTest::GetNativeWidgetMinimumContentSize(Widget* widget) {
 }
 
 // static
-ui::EventProcessor* WidgetTest::GetEventProcessor(Widget* widget) {
+ui::EventSink* WidgetTest::GetEventSink(Widget* widget) {
   return static_cast<internal::RootView*>(widget->GetRootView());
 }
 
@@ -83,6 +83,16 @@ ui::internal::InputMethodDelegate* WidgetTest::GetInputMethodDelegateForWidget(
 // static
 bool WidgetTest::IsNativeWindowTransparent(gfx::NativeWindow window) {
   return ![window isOpaque];
+}
+
+// static
+Widget::Widgets WidgetTest::GetAllWidgets() {
+  Widget::Widgets all_widgets;
+  for (NSWindow* window : [NSApp windows]) {
+    if (Widget* widget = Widget::GetWidgetForNativeWindow(window))
+      all_widgets.insert(widget);
+  }
+  return all_widgets;
 }
 
 }  // namespace test

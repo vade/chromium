@@ -537,6 +537,24 @@ bool FilesCopyRequest::GetContentData(std::string* upload_content_type,
   return true;
 }
 
+//========================= TeamDriveListRequest =============================
+
+TeamDriveListRequest::TeamDriveListRequest(
+    RequestSender* sender,
+    const DriveApiUrlGenerator& url_generator,
+    const TeamDriveListCallback& callback)
+    : DriveApiDataRequest<TeamDriveList>(sender, callback),
+      url_generator_(url_generator),
+      max_results_(30) {
+  DCHECK(!callback.is_null());
+}
+
+TeamDriveListRequest::~TeamDriveListRequest() {}
+
+GURL TeamDriveListRequest::GetURLInternal() const {
+  return url_generator_.GetTeamDriveListUrl(max_results_, page_token_);
+}
+
 //============================= FilesListRequest =============================
 
 FilesListRequest::FilesListRequest(
@@ -654,8 +672,9 @@ ChangesListRequest::ChangesListRequest(
 ChangesListRequest::~ChangesListRequest() {}
 
 GURL ChangesListRequest::GetURLInternal() const {
-  return url_generator_.GetChangesListUrl(
-      include_deleted_, max_results_, page_token_, start_change_id_);
+  return url_generator_.GetChangesListUrl(include_deleted_, max_results_,
+                                          page_token_, start_change_id_,
+                                          team_drive_id_);
 }
 
 //======================== ChangesListNextPageRequest =========================

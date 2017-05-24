@@ -19,13 +19,13 @@ vars = {
 deps = {
   'buildtools':
       Var('chromium_git') + '/chromium/buildtools.git@' +
-      'f8fc76ea5ce4a60cda2fa5d7df3d4a62935b3113',
+      'a7cc7a3e21a061975b33dcdcd81a9716ba614c3c',
   'crashpad/third_party/gtest/gtest':
       Var('chromium_git') + '/external/github.com/google/googletest@' +
-      'ec44c6c1675c25b9827aacd08c02433cccde7780',
+      'd62d6c6556d96dda924382547c54a4b3afedb22c',
   'crashpad/third_party/gyp/gyp':
       Var('chromium_git') + '/external/gyp@' +
-      '93cc6e2c23e4d5ebd179f388e67aa907d0dfd43d',
+      'ffd524cefaad622e72995e852ffb0b18e83f8054',
 
   # TODO(scottmg): Consider pinning these. For now, we don't have any particular
   # reason to do so.
@@ -38,7 +38,10 @@ deps = {
 
   'crashpad/third_party/mini_chromium/mini_chromium':
       Var('chromium_git') + '/chromium/mini_chromium@' +
-      'de1afb04f4afc074ec6d23bd9ee7b1e6b365427f',
+      'ef0ded8717340c9fe48e8e0f34f3e0e74d10a392',
+  'crashpad/third_party/zlib/zlib':
+      Var('chromium_git') + '/chromium/src/third_party/zlib@' +
+      '13dc246a58e4b72104d35f9b1809af95221ebda7',
 }
 
 hooks = [
@@ -69,6 +72,19 @@ hooks = [
     ],
   },
   {
+    'name': 'clang_format_linux',
+    'pattern': '.',
+    'action': [
+      'download_from_google_storage',
+      '--platform=^linux2?$',
+      '--no_resume',
+      '--no_auth',
+      '--bucket=chromium-clang-format',
+      '--sha1_file',
+      'buildtools/linux64/clang-format.sha1',
+    ],
+  },
+  {
     'name': 'gn_mac',
     'pattern': '.',
     'action': [
@@ -95,8 +111,25 @@ hooks = [
     ],
   },
   {
+    'name': 'gn_linux',
+    'pattern': '.',
+    'action': [
+      'download_from_google_storage',
+      '--platform=^linux2?$',
+      '--no_resume',
+      '--no_auth',
+      '--bucket=chromium-gn',
+      '--sha1_file',
+      'buildtools/linux64/gn.sha1',
+    ],
+  },
+  {
     'name': 'gyp',
     'pattern': '\.gypi?$',
     'action': ['python', 'crashpad/build/gyp_crashpad.py'],
   },
+]
+
+recursedeps = [
+  'buildtools',
 ]

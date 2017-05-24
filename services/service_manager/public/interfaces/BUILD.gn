@@ -9,7 +9,6 @@ mojom("interfaces") {
     "connector.mojom",
     "interface_provider.mojom",
     "interface_provider_spec.mojom",
-    "resolver.mojom",
     "service.mojom",
     "service_control.mojom",
     "service_factory.mojom",
@@ -20,6 +19,9 @@ mojom("interfaces") {
     ":constants",
     "//mojo/common:common_custom_types",
   ]
+
+  # TODO(crbug.com/714018): Convert the implementation to use OnceCallback.
+  use_once_callback = false
 }
 
 mojom("constants") {

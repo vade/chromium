@@ -4,26 +4,26 @@
 
 #include "chrome/browser/payments/payment_request_factory.h"
 
-#include <memory>
+#include <utility>
 
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "chrome/browser/payments/chrome_payment_request_delegate.h"
-#include "components/payments/payment_request_delegate.h"
-#include "components/payments/payment_request_web_contents_manager.h"
-#include "content/public/browser/web_contents.h"
+#include "components/payments/content/payment_request_web_contents_manager.h"
 
 namespace payments {
 
-void CreatePaymentRequestForWebContents(
-    content::WebContents* web_contents,
-    mojo::InterfaceRequest<payments::mojom::PaymentRequest> request) {
+void CreatePaymentRequest(content::RenderFrameHost* render_frame_host,
+                          content::WebContents* web_contents,
+                          const service_manager::BindSourceInfo& source_info,
+                          mojom::PaymentRequestRequest request) {
   DCHECK(web_contents);
   PaymentRequestWebContentsManager::GetOrCreateForWebContents(web_contents)
-      ->CreatePaymentRequest(web_contents,
-                             base::MakeUnique<ChromePaymentRequestDelegate>(
-                                web_contents),
-                             std::move(request));
+      ->CreatePaymentRequest(
+          render_frame_host, web_contents,
+          base::MakeUnique<ChromePaymentRequestDelegate>(web_contents),
+          std::move(request),
+          /*observer_for_testing=*/nullptr);
 }
 
 }  // namespace payments

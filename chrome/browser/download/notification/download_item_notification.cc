@@ -8,8 +8,11 @@
 #include <stdint.h>
 
 #include "base/files/file_util.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task_scheduler/post_task.h"
 #include "build/build_config.h"
+#include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/download/download_item_model.h"
@@ -29,7 +32,6 @@
 #include "content/public/browser/download_interrupt_reasons.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/page_navigator.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/mime_util.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -41,9 +43,9 @@
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/gfx/vector_icons_public.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_style.h"
+#include "ui/vector_icons/vector_icons.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/note_taking_helper.h"
@@ -64,8 +66,6 @@ const SkColor kImageBackgroundColor = SK_ColorWHITE;
 const int64_t kMaxImagePreviewSize = 10 * 1024 * 1024;  // 10 MB
 
 std::string ReadNotificationImage(const base::FilePath& file_path) {
-  DCHECK(content::BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
-
   std::string data;
   bool ret = base::ReadFileToString(file_path, &data);
   if (!ret)
@@ -121,55 +121,54 @@ SkBitmap CropImage(const SkBitmap& original_bitmap) {
 void RecordButtonClickAction(DownloadCommands::Command command) {
   switch (command) {
     case DownloadCommands::SHOW_IN_FOLDER:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_ShowInFolder"));
       break;
     case DownloadCommands::OPEN_WHEN_COMPLETE:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_OpenWhenComplete"));
       break;
     case DownloadCommands::ALWAYS_OPEN_TYPE:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_AlwaysOpenType"));
       break;
     case DownloadCommands::PLATFORM_OPEN:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_PlatformOpen"));
       break;
     case DownloadCommands::CANCEL:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_Cancel"));
       break;
     case DownloadCommands::DISCARD:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_Discard"));
       break;
     case DownloadCommands::KEEP:
-      content::RecordAction(
-          UserMetricsAction("DownloadNotification.Button_Keep"));
+      base::RecordAction(UserMetricsAction("DownloadNotification.Button_Keep"));
       break;
     case DownloadCommands::LEARN_MORE_SCANNING:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_LearnScanning"));
       break;
     case DownloadCommands::LEARN_MORE_INTERRUPTED:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_LearnInterrupted"));
       break;
     case DownloadCommands::PAUSE:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_Pause"));
       break;
     case DownloadCommands::RESUME:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_Resume"));
       break;
     case DownloadCommands::COPY_TO_CLIPBOARD:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_CopyToClipboard"));
       break;
     case DownloadCommands::ANNOTATE:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_Annotate"));
       break;
   }
@@ -183,9 +182,10 @@ DownloadItemNotification::DownloadItemNotification(
     : item_(item),
       message_center_(manager->message_center()),
       weak_factory_(this) {
-
   // Creates the notification instance. |title|, |body| and |icon| will be
   // overridden by UpdateNotificationData() below.
+  message_center::RichNotificationData rich_notification_data;
+  rich_notification_data.should_make_spoken_feedback_for_popup_updates = false;
   notification_.reset(new Notification(
       message_center::NOTIFICATION_TYPE_PROGRESS,
       base::string16(),  // title
@@ -196,7 +196,7 @@ DownloadItemNotification::DownloadItemNotification(
       base::string16(),                    // display_source
       GURL(kDownloadNotificationOrigin),   // origin_url
       base::UintToString(item_->GetId()),  // tag
-      message_center::RichNotificationData(), watcher()));
+      rich_notification_data, watcher()));
 
   notification_->set_progress(0);
   notification_->set_never_timeout(false);
@@ -219,7 +219,7 @@ bool DownloadItemNotification::HasNotificationClickedListener() {
 
 void DownloadItemNotification::OnNotificationClose() {
   if (item_ && item_->IsDangerous() && !item_->IsDone()) {
-    content::RecordAction(
+    base::RecordAction(
         UserMetricsAction("DownloadNotification.Close_Dangerous"));
     closed_ = true;  // Should be set before cancelling the download.
     item_->Cancel(true /* by_user */);
@@ -234,7 +234,7 @@ void DownloadItemNotification::OnNotificationClose() {
 
 void DownloadItemNotification::OnNotificationClick() {
   if (item_->IsDangerous()) {
-    content::RecordAction(
+    base::RecordAction(
         UserMetricsAction("DownloadNotification.Click_Dangerous"));
     // Do nothing.
     return;
@@ -242,13 +242,13 @@ void DownloadItemNotification::OnNotificationClick() {
 
   switch (item_->GetState()) {
     case content::DownloadItem::IN_PROGRESS:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Click_InProgress"));
       item_->SetOpenWhenComplete(!item_->GetOpenWhenComplete());  // Toggle
       break;
     case content::DownloadItem::CANCELLED:
     case content::DownloadItem::INTERRUPTED:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Click_Stopped"));
       GetBrowser()->OpenURL(content::OpenURLParams(
           GURL(chrome::kChromeUIDownloadsURL), content::Referrer(),
@@ -257,7 +257,7 @@ void DownloadItemNotification::OnNotificationClick() {
       CloseNotificationByUser();
       break;
     case content::DownloadItem::COMPLETE:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Click_Completed"));
       item_->OpenDownload();
       CloseNotificationByUser();
@@ -481,8 +481,8 @@ void DownloadItemNotification::UpdateNotificationData(
 
     if (model.HasSupportedImageMimeType()) {
       base::FilePath file_path = item_->GetFullPath();
-      base::PostTaskAndReplyWithResult(
-          content::BrowserThread::GetBlockingPool(), FROM_HERE,
+      base::PostTaskWithTraitsAndReplyWithResult(
+          FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
           base::Bind(&ReadNotificationImage, file_path),
           base::Bind(&DownloadItemNotification::OnImageLoaded,
                      weak_factory_.GetWeakPtr()));
@@ -498,9 +498,9 @@ void DownloadItemNotification::UpdateNotificationIcon() {
                             ? IDR_DOWNLOAD_NOTIFICATION_WARNING_BAD
                             : IDR_DOWNLOAD_NOTIFICATION_WARNING_UNWANTED);
 #else
-    SetNotificationVectorIcon(
-        gfx::VectorIconId::WARNING,
-        model.MightBeMalicious() ? gfx::kGoogleRed700 : gfx::kGoogleYellow700);
+    SetNotificationVectorIcon(ui::kWarningIcon, model.MightBeMalicious()
+                                                    ? gfx::kGoogleRed700
+                                                    : gfx::kGoogleYellow700);
 #endif
     return;
   }
@@ -514,12 +514,11 @@ void DownloadItemNotification::UpdateNotificationIcon() {
 #if defined(OS_MACOSX)
         SetNotificationIcon(IDR_DOWNLOAD_NOTIFICATION_INCOGNITO);
 #else
-        SetNotificationVectorIcon(gfx::VectorIconId::FILE_DOWNLOAD_INCOGNITO,
+        SetNotificationVectorIcon(kFileDownloadIncognitoIcon,
                                   gfx::kChromeIconGrey);
 #endif
       } else {
-        SetNotificationVectorIcon(gfx::VectorIconId::FILE_DOWNLOAD,
-                                  gfx::kGoogleBlue500);
+        SetNotificationVectorIcon(kFileDownloadIcon, gfx::kGoogleBlue500);
       }
       break;
 
@@ -527,8 +526,7 @@ void DownloadItemNotification::UpdateNotificationIcon() {
 #if defined(OS_MACOSX)
       SetNotificationIcon(IDR_DOWNLOAD_NOTIFICATION_ERROR);
 #else
-      SetNotificationVectorIcon(gfx::VectorIconId::ERROR_CIRCLE,
-                                gfx::kGoogleRed700);
+      SetNotificationVectorIcon(ui::kErrorCircleIcon, gfx::kGoogleRed700);
 #endif
       break;
 
@@ -555,20 +553,14 @@ void DownloadItemNotification::OnDownloadRemoved(content::DownloadItem* item) {
 }
 
 void DownloadItemNotification::SetNotificationIcon(int resource_id) {
-  if (image_resource_id_ == resource_id)
-    return;
   ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
-  image_resource_id_ = resource_id;
-  notification_->set_icon(bundle.GetImageNamed(image_resource_id_));
+  notification_->set_icon(bundle.GetImageNamed(resource_id));
 }
 
-void DownloadItemNotification::SetNotificationVectorIcon(gfx::VectorIconId id,
-                                                         SkColor color) {
-  if (vector_icon_params_ == std::make_pair(id, color))
-    return;
-  vector_icon_params_ = std::make_pair(id, color);
-  image_resource_id_ = 0;
-  notification_->set_icon(gfx::Image(gfx::CreateVectorIcon(id, 40, color)));
+void DownloadItemNotification::SetNotificationVectorIcon(
+    const gfx::VectorIcon& icon,
+    SkColor color) {
+  notification_->set_icon(gfx::Image(gfx::CreateVectorIcon(icon, 40, color)));
 }
 
 void DownloadItemNotification::DisablePopup() {
@@ -599,8 +591,8 @@ void DownloadItemNotification::OnImageDecoded(const SkBitmap& decoded_bitmap) {
     return;
   }
 
-  base::PostTaskAndReplyWithResult(
-      content::BrowserThread::GetBlockingPool(), FROM_HERE,
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::Bind(&CropImage, decoded_bitmap),
       base::Bind(&DownloadItemNotification::OnImageCropped,
                  weak_factory_.GetWeakPtr()));

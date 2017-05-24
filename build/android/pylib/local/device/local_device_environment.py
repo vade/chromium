@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import contextlib
 import datetime
 import functools
 import logging
@@ -11,12 +10,14 @@ import shutil
 import tempfile
 import threading
 
+import devil_chromium
 from devil import base_error
 from devil.android import device_blacklist
 from devil.android import device_errors
 from devil.android import device_list
 from devil.android import device_utils
 from devil.android import logcat_monitor
+from devil.android.sdk import adb_wrapper
 from devil.utils import file_utils
 from devil.utils import parallelizer
 from pylib import constants
@@ -93,11 +94,23 @@ class LocalDeviceEnvironment(environment.Environment):
     self._skip_clear_data = args.skip_clear_data
     self._target_devices_file = args.target_devices_file
     self._tool_name = args.tool
-    self._trace_output = args.trace_output
+    self._trace_output = None
+    if hasattr(args, 'trace_output'):
+      self._trace_output = args.trace_output
+
+    devil_chromium.Initialize(
+        output_directory=constants.GetOutDirectory(),
+        adb_path=args.adb_path)
+
+    # Some things such as Forwarder require ADB to be in the environment path.
+    adb_dir = os.path.dirname(adb_wrapper.AdbWrapper.GetAdbPath())
+    if adb_dir and adb_dir not in os.environ['PATH'].split(os.pathsep):
+      os.environ['PATH'] = adb_dir + os.pathsep + os.environ['PATH']
 
   #override
   def SetUp(self):
-    pass
+    if self.trace_output:
+      self.EnableTracing()
 
   def _InitDevices(self):
     device_arg = 'default'
@@ -197,6 +210,9 @@ class LocalDeviceEnvironment(environment.Environment):
 
   #override
   def TearDown(self):
+    if self.trace_output:
+      self.DisableTracing()
+
     if self._devices is None:
       return
     @handle_shard_failures_with(on_failure=self.BlacklistDevice)
@@ -261,11 +277,3 @@ class LocalDeviceEnvironment(environment.Environment):
       logging.warning('Tracing is already running.')
     else:
       trace_event.trace_enable(self._trace_output + '.json')
-
-  @contextlib.contextmanager
-  def Tracing(self):
-    try:
-      self.EnableTracing()
-      yield
-    finally:
-      self.DisableTracing()

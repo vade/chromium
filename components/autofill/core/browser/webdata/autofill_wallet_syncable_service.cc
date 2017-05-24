@@ -6,10 +6,12 @@
 
 #include <stddef.h>
 
-#include <set>
+#include <map>
 #include <utility>
 
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/webdata/autofill_table.h"
@@ -44,6 +46,8 @@ const char* CardTypeFromWalletCardType(
       return kJCBCard;
     case sync_pb::WalletMaskedCreditCard::MASTER_CARD:
       return kMasterCard;
+    case sync_pb::WalletMaskedCreditCard::UNIONPAY:
+      return kUnionPay;
     case sync_pb::WalletMaskedCreditCard::VISA:
       return kVisaCard;
 
@@ -72,7 +76,7 @@ CreditCard CardFromSpecifics(const sync_pb::WalletMaskedCreditCard& card) {
   CreditCard result(CreditCard::MASKED_SERVER_CARD, card.id());
   result.SetNumber(base::UTF8ToUTF16(card.last_four()));
   result.SetServerStatus(ServerToLocalStatus(card.status()));
-  result.SetTypeForMaskedCard(CardTypeFromWalletCardType(card.type()));
+  result.SetNetworkForMaskedCard(CardTypeFromWalletCardType(card.type()));
   result.SetRawInfo(CREDIT_CARD_NAME_FULL,
                     base::UTF8ToUTF16(card.name_on_card()));
   result.SetExpirationMonth(card.exp_month());
@@ -86,8 +90,8 @@ AutofillProfile ProfileFromSpecifics(
   AutofillProfile profile(AutofillProfile::SERVER_PROFILE, std::string());
 
   // AutofillProfile stores multi-line addresses with newline separators.
-  std::vector<std::string> street_address(address.street_address().begin(),
-                                          address.street_address().end());
+  std::vector<base::StringPiece> street_address(
+      address.street_address().begin(), address.street_address().end());
   profile.SetRawInfo(ADDRESS_HOME_STREET_ADDRESS,
                      base::UTF8ToUTF16(base::JoinString(street_address, "\n")));
 
@@ -237,8 +241,8 @@ void AutofillWalletSyncableService::CreateForWebDataServiceAndBackend(
     AutofillWebDataBackend* webdata_backend,
     const std::string& app_locale) {
   web_data_service->GetDBUserData()->SetUserData(
-      UserDataKey(),
-      new AutofillWalletSyncableService(webdata_backend, app_locale));
+      UserDataKey(), base::WrapUnique(new AutofillWalletSyncableService(
+                         webdata_backend, app_locale)));
 }
 
 // static
@@ -291,7 +295,7 @@ void AutofillWalletSyncableService::PopulateWalletCardsAndAddresses(
 }
 
 // static
-void AutofillWalletSyncableService::CopyRelevantBillingAddressesFromDisk(
+void AutofillWalletSyncableService::CopyRelevantMetadataFromDisk(
     const AutofillTable& table,
     std::vector<CreditCard>* cards_from_server) {
   std::vector<std::unique_ptr<CreditCard>> cards_on_disk;
@@ -301,6 +305,11 @@ void AutofillWalletSyncableService::CopyRelevantBillingAddressesFromDisk(
   for (const auto& saved_card : cards_on_disk) {
     for (CreditCard& server_card : *cards_from_server) {
       if (saved_card->server_id() == server_card.server_id()) {
+        // The wallet data doesn't have the use stats. Use the ones present on
+        // disk to not overwrite them with bad data.
+        server_card.set_use_count(saved_card->use_count());
+        server_card.set_use_date(saved_card->use_date());
+
         // Keep the billing address id of the saved cards only if it points to
         // a local address.
         if (saved_card->billing_address_id().length() == kLocalGuidSize) {
@@ -320,11 +329,11 @@ syncer::SyncMergeResult AutofillWalletSyncableService::SetSyncData(
 
   // Users can set billing address of the server credit card locally, but that
   // information does not propagate to either Chrome Sync or Google Payments
-  // server. To preserve user's preferred billing address, copy the billing
-  // addresses from disk into |wallet_cards|.
+  // server. To preserve user's preferred billing address and most recent use
+  // stats, copy them from disk into |wallet_cards|.
   AutofillTable* table =
       AutofillTable::FromWebDatabase(webdata_backend_->GetDatabase());
-  CopyRelevantBillingAddressesFromDisk(*table, &wallet_cards);
+  CopyRelevantMetadataFromDisk(*table, &wallet_cards);
 
   // In the common case, the database won't have changed. Committing an update
   // to the database will require at least one DB page write and will schedule
@@ -353,4 +362,4 @@ syncer::SyncMergeResult AutofillWalletSyncableService::SetSyncData(
   return merge_result;
 }
 
-}  // namespace autofil
+}  // namespace autofill

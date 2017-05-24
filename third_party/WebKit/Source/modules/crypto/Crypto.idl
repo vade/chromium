@@ -26,10 +26,12 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+// https://w3c.github.io/webcrypto/Overview.html#crypto-interface
+
 [
     Exposed=(Window,Worker)
 ] interface Crypto {
     [RaisesException, MeasureAs=CryptoGetRandomValues] ArrayBufferView getRandomValues(ArrayBufferView array);
 
-    readonly attribute SubtleCrypto subtle;
+    [SecureContext] readonly attribute SubtleCrypto subtle;
 };

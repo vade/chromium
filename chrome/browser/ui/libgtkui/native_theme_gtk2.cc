@@ -71,14 +71,14 @@ NativeThemeGtk2::NativeThemeGtk2() {}
 NativeThemeGtk2::~NativeThemeGtk2() {}
 
 void NativeThemeGtk2::PaintMenuPopupBackground(
-    SkCanvas* canvas,
+    cc::PaintCanvas* canvas,
     const gfx::Size& size,
     const MenuBackgroundExtraParams& menu_background) const {
   if (menu_background.corner_radius > 0) {
-    SkPaint paint;
-    paint.setStyle(SkPaint::kFill_Style);
-    paint.setFlags(SkPaint::kAntiAlias_Flag);
-    paint.setColor(GetSystemColor(kColorId_MenuBackgroundColor));
+    cc::PaintFlags flags;
+    flags.setStyle(cc::PaintFlags::kFill_Style);
+    flags.setAntiAlias(true);
+    flags.setColor(GetSystemColor(kColorId_MenuBackgroundColor));
 
     gfx::Path path;
     SkRect rect = SkRect::MakeWH(SkIntToScalar(size.width()),
@@ -88,7 +88,7 @@ void NativeThemeGtk2::PaintMenuPopupBackground(
                          radius, radius, radius, radius};
     path.addRoundRect(rect, radii);
 
-    canvas->drawPath(path, paint);
+    canvas->drawPath(path, flags);
   } else {
     canvas->drawColor(GetSystemColor(kColorId_MenuBackgroundColor),
                       SkBlendMode::kSrc);
@@ -96,22 +96,22 @@ void NativeThemeGtk2::PaintMenuPopupBackground(
 }
 
 void NativeThemeGtk2::PaintMenuItemBackground(
-    SkCanvas* canvas,
+    cc::PaintCanvas* canvas,
     State state,
     const gfx::Rect& rect,
     const MenuItemExtraParams& menu_item) const {
   SkColor color;
-  SkPaint paint;
+  cc::PaintFlags flags;
   switch (state) {
     case NativeTheme::kNormal:
     case NativeTheme::kDisabled:
       color = GetSystemColor(NativeTheme::kColorId_MenuBackgroundColor);
-      paint.setColor(color);
+      flags.setColor(color);
       break;
     case NativeTheme::kHovered:
       color =
           GetSystemColor(NativeTheme::kColorId_FocusedMenuItemBackgroundColor);
-      paint.setColor(color);
+      flags.setColor(color);
       break;
     default:
       NOTREACHED() << "Invalid state " << state;
@@ -119,10 +119,10 @@ void NativeThemeGtk2::PaintMenuItemBackground(
   }
   if (menu_item.corner_radius > 0) {
     const SkScalar radius = SkIntToScalar(menu_item.corner_radius);
-    canvas->drawRoundRect(gfx::RectToSkRect(rect), radius, radius, paint);
+    canvas->drawRoundRect(gfx::RectToSkRect(rect), radius, radius, flags);
     return;
   }
-  canvas->drawRect(gfx::RectToSkRect(rect), paint);
+  canvas->drawRect(gfx::RectToSkRect(rect), flags);
 }
 
 SkColor NativeThemeGtk2::GetSystemColor(ColorId color_id) const {
@@ -156,15 +156,9 @@ SkColor NativeThemeGtk2::GetSystemColor(ColorId color_id) const {
     case kColorId_MenuItemSubtitleColor:
     case kColorId_DisabledMenuItemForegroundColor:
       return GetTextColor(GetMenuItem(), INSENSITIVE);
-    case kColorId_FocusedMenuButtonBorderColor:
-      return GetBgColor(GetEntry(), NORMAL);
-    case kColorId_HoverMenuButtonBorderColor:
-      return GetTextAAColor(GetEntry(), PRELIGHT);
     case kColorId_MenuBorderColor:
-    case kColorId_EnabledMenuButtonBorderColor:
-    case kColorId_MenuSeparatorColor: {
+    case kColorId_MenuSeparatorColor:
       return GetTextColor(GetMenuItem(), INSENSITIVE);
-    }
     case kColorId_MenuBackgroundColor:
       return GetBgColor(GetMenu(), NORMAL);
 
@@ -263,8 +257,6 @@ SkColor NativeThemeGtk2::GetSystemColor(ColorId color_id) const {
     case kColorId_TreeSelectionBackgroundFocused:
     case kColorId_TreeSelectionBackgroundUnfocused:
       return GetBgColor(GetTree(), SELECTED);
-    case kColorId_TreeArrow:
-      return GetFgColor(GetTree(), NORMAL);
     case kColorId_TableGroupingIndicatorColor:
       return GetTextAAColor(GetTree(), NORMAL);
 
@@ -364,7 +356,7 @@ SkColor NativeThemeGtk2::GetSystemColor(ColorId color_id) const {
 }
 
 GtkWidget* NativeThemeGtk2::GetWindow() const {
-  static GtkWidget* fake_window = NULL;
+  static GtkWidget* fake_window = nullptr;
 
   if (!fake_window) {
     fake_window = chrome_gtk_frame_new();
@@ -375,7 +367,7 @@ GtkWidget* NativeThemeGtk2::GetWindow() const {
 }
 
 GtkWidget* NativeThemeGtk2::GetEntry() const {
-  static GtkWidget* fake_entry = NULL;
+  static GtkWidget* fake_entry = nullptr;
 
   if (!fake_entry) {
     fake_entry = gtk_entry_new();
@@ -390,7 +382,7 @@ GtkWidget* NativeThemeGtk2::GetEntry() const {
 }
 
 GtkWidget* NativeThemeGtk2::GetLabel() const {
-  static GtkWidget* fake_label = NULL;
+  static GtkWidget* fake_label = nullptr;
 
   if (!fake_label)
     fake_label = gtk_label_new("");
@@ -399,7 +391,7 @@ GtkWidget* NativeThemeGtk2::GetLabel() const {
 }
 
 GtkWidget* NativeThemeGtk2::GetButton() const {
-  static GtkWidget* fake_button = NULL;
+  static GtkWidget* fake_button = nullptr;
 
   if (!fake_button)
     fake_button = gtk_button_new();
@@ -408,7 +400,7 @@ GtkWidget* NativeThemeGtk2::GetButton() const {
 }
 
 GtkWidget* NativeThemeGtk2::GetBlueButton() const {
-  static GtkWidget* fake_bluebutton = NULL;
+  static GtkWidget* fake_bluebutton = nullptr;
 
   if (!fake_bluebutton) {
     fake_bluebutton = gtk_button_new();
@@ -419,7 +411,7 @@ GtkWidget* NativeThemeGtk2::GetBlueButton() const {
 }
 
 GtkWidget* NativeThemeGtk2::GetTree() const {
-  static GtkWidget* fake_tree = NULL;
+  static GtkWidget* fake_tree = nullptr;
 
   if (!fake_tree)
     fake_tree = gtk_tree_view_new();
@@ -428,7 +420,7 @@ GtkWidget* NativeThemeGtk2::GetTree() const {
 }
 
 GtkWidget* NativeThemeGtk2::GetTooltip() const {
-  static GtkWidget* fake_tooltip = NULL;
+  static GtkWidget* fake_tooltip = nullptr;
 
   if (!fake_tooltip) {
     fake_tooltip = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -440,7 +432,7 @@ GtkWidget* NativeThemeGtk2::GetTooltip() const {
 }
 
 GtkWidget* NativeThemeGtk2::GetMenu() const {
-  static GtkWidget* fake_menu = NULL;
+  static GtkWidget* fake_menu = nullptr;
 
   if (!fake_menu)
     fake_menu = gtk_custom_menu_new();
@@ -449,7 +441,7 @@ GtkWidget* NativeThemeGtk2::GetMenu() const {
 }
 
 GtkWidget* NativeThemeGtk2::GetMenuItem() const {
-  static GtkWidget* fake_menu_item = NULL;
+  static GtkWidget* fake_menu_item = nullptr;
 
   if (!fake_menu_item) {
     fake_menu_item = gtk_custom_menu_item_new();
@@ -460,7 +452,7 @@ GtkWidget* NativeThemeGtk2::GetMenuItem() const {
 }
 
 GtkWidget* NativeThemeGtk2::GetSeparator() const {
-  static GtkWidget* fake_separator = NULL;
+  static GtkWidget* fake_separator = nullptr;
 
   if (!fake_separator)
     fake_separator = gtk_hseparator_new();

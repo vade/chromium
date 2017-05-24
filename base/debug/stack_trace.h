@@ -11,6 +11,7 @@
 #include <string>
 
 #include "base/base_export.h"
+#include "base/debug/debugging_flags.h"
 #include "base/macros.h"
 #include "build/build_config.h"
 
@@ -21,14 +22,6 @@
 #if defined(OS_WIN)
 struct _EXCEPTION_POINTERS;
 struct _CONTEXT;
-#endif
-
-#if defined(OS_POSIX) && ( \
-    defined(__i386__) || defined(__x86_64__) || \
-    (defined(__arm__) && !defined(__thumb__)))
-#define HAVE_TRACE_STACK_FRAME_POINTERS 1
-#else
-#define HAVE_TRACE_STACK_FRAME_POINTERS 0
 #endif
 
 namespace base {
@@ -45,6 +38,11 @@ namespace debug {
 // done in official builds because it has security implications).
 BASE_EXPORT bool EnableInProcessStackDumping();
 
+// Returns end of the stack, or 0 if we couldn't get it.
+#if BUILDFLAG(CAN_UNWIND_WITH_FRAME_POINTERS)
+BASE_EXPORT uintptr_t GetStackEnd();
+#endif
+
 // A stacktrace can be helpful in debugging. For example, you can include a
 // stacktrace member in a object (probably around #ifndef NDEBUG) so that you
 // can later see where the given object was created from.
@@ -53,9 +51,13 @@ class BASE_EXPORT StackTrace {
   // Creates a stacktrace from the current location.
   StackTrace();
 
+  // Creates a stacktrace from the current location, of up to |count| entries.
+  // |count| will be limited to at most |kMaxTraces|.
+  explicit StackTrace(size_t count);
+
   // Creates a stacktrace from an existing array of instruction
   // pointers (such as returned by Addresses()).  |count| will be
-  // trimmed to |kMaxTraces|.
+  // limited to at most |kMaxTraces|.
   StackTrace(const void* const* trace, size_t count);
 
 #if defined(OS_WIN)
@@ -68,8 +70,6 @@ class BASE_EXPORT StackTrace {
 
   // Copying and assignment are allowed with the default functions.
 
-  ~StackTrace();
-
   // Gets an array of instruction pointer values. |*count| will be set to the
   // number of elements in the returned array.
   const void* const* Addresses(size_t* count) const;
@@ -77,7 +77,7 @@ class BASE_EXPORT StackTrace {
   // Prints the stack trace to stderr.
   void Print() const;
 
-#if !defined(__UCLIBC__)
+#if !defined(__UCLIBC__) & !defined(_AIX)
   // Resolves backtrace to symbols and write to stream.
   void OutputToStream(std::ostream* os) const;
 #endif
@@ -102,7 +102,7 @@ class BASE_EXPORT StackTrace {
   size_t count_;
 };
 
-#if HAVE_TRACE_STACK_FRAME_POINTERS
+#if BUILDFLAG(CAN_UNWIND_WITH_FRAME_POINTERS)
 // Traces the stack by using frame pointers. This function is faster but less
 // reliable than StackTrace. It should work for debug and profiling builds,
 // but not for release builds (although there are some exceptions).
@@ -165,7 +165,7 @@ class BASE_EXPORT ScopedStackFrameLinker {
   DISALLOW_COPY_AND_ASSIGN(ScopedStackFrameLinker);
 };
 
-#endif  // HAVE_TRACE_STACK_FRAME_POINTERS
+#endif  // BUILDFLAG(CAN_UNWIND_WITH_FRAME_POINTERS)
 
 namespace internal {
 

@@ -18,12 +18,14 @@
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/env_input_state_controller.h"
+#include "ui/aura/mus/mus_mouse_location_updater.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_targeter.h"
 #include "ui/aura/window_tracker.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/hit_test.h"
+#include "ui/base/ime/input_method.h"
 #include "ui/compositor/dip_util.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
@@ -59,6 +61,22 @@ bool IsEventCandidateForHold(const ui::Event& event) {
   return false;
 }
 
+void ConvertEventLocationToTarget(ui::EventTarget* event_target,
+                                  ui::EventTarget* target,
+                                  ui::Event* event) {
+  if (target == event_target || !event->IsLocatedEvent())
+    return;
+
+  gfx::Point location = event->AsLocatedEvent()->location();
+  gfx::Point root_location = event->AsLocatedEvent()->root_location();
+  Window::ConvertPointToTarget(static_cast<Window*>(event_target),
+                               static_cast<Window*>(target), &location);
+  Window::ConvertPointToTarget(static_cast<Window*>(event_target),
+                               static_cast<Window*>(target), &root_location);
+  event->AsLocatedEvent()->set_location(location);
+  event->AsLocatedEvent()->set_root_location(root_location);
+}
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -74,17 +92,24 @@ WindowEventDispatcher::WindowEventDispatcher(WindowTreeHost* host)
       move_hold_count_(0),
       dispatching_held_event_(nullptr),
       observer_manager_(this),
-      env_controller_(new EnvInputStateController),
+      event_targeter_(new WindowTargeter),
+      skip_ime_(false),
       repost_event_factory_(this),
       held_event_factory_(this) {
   ui::GestureRecognizer::Get()->AddGestureEventHelper(this);
   Env::GetInstance()->AddObserver(this);
+  if (Env::GetInstance()->mode() == Env::Mode::MUS)
+    mus_mouse_location_updater_ = base::MakeUnique<MusMouseLocationUpdater>();
 }
 
 WindowEventDispatcher::~WindowEventDispatcher() {
   TRACE_EVENT0("shutdown", "WindowEventDispatcher::Destructor");
   Env::GetInstance()->RemoveObserver(this);
   ui::GestureRecognizer::Get()->RemoveGestureEventHelper(this);
+}
+
+ui::EventTargeter* WindowEventDispatcher::GetDefaultEventTargeter() {
+  return event_targeter_.get();
 }
 
 void WindowEventDispatcher::RepostEvent(const ui::LocatedEvent* event) {
@@ -206,7 +231,8 @@ void WindowEventDispatcher::OnHostLostMouseGrab() {
 
 void WindowEventDispatcher::OnCursorMovedToRootLocation(
     const gfx::Point& root_location) {
-  env_controller_->SetLastMouseLocation(window(), root_location);
+  Env::GetInstance()->env_controller()->SetLastMouseLocation(window(),
+                                                             root_location);
 
   // Synthesize a mouse move in case the cursor's location in root coordinates
   // changed but its position in WindowTreeHost coordinates did not.
@@ -253,7 +279,8 @@ ui::EventDispatchDetails WindowEventDispatcher::DispatchMouseEnterOrExit(
     Window* target,
     const ui::MouseEvent& event,
     ui::EventType type) {
-  env_controller_->UpdateStateForMouseEvent(window(), event);
+  Env::GetInstance()->env_controller()->UpdateStateForMouseEvent(window(),
+                                                                 event);
   if (!mouse_moved_handler_ || !mouse_moved_handler_->delegate() ||
       !window()->Contains(mouse_moved_handler_))
     return DispatchDetails();
@@ -413,8 +440,33 @@ void WindowEventDispatcher::ReleaseNativeCapture() {
 
 ////////////////////////////////////////////////////////////////////////////////
 // WindowEventDispatcher, ui::EventProcessor implementation:
-ui::EventTarget* WindowEventDispatcher::GetRootTarget() {
-  return window();
+ui::EventTarget* WindowEventDispatcher::GetRootForEvent(ui::Event* event) {
+  if (Env::GetInstance()->mode() == Env::Mode::LOCAL)
+    return window();
+
+  if (!event->target())
+    return window();
+
+  ui::EventTarget* event_target = event->target();
+  if (event->IsLocatedEvent()) {
+    ui::EventTarget* target = event_targeter_->FindTargetInRootWindow(
+        window(), *event->AsLocatedEvent());
+    if (target) {
+      ConvertEventLocationToTarget(event_target, target, event);
+      return target;
+    }
+  }
+
+  ui::EventTarget* ancestor_with_targeter = event_target;
+  for (ui::EventTarget* ancestor = event_target; ancestor;
+       ancestor = ancestor->GetParentTarget()) {
+    if (ancestor->GetEventTargeter())
+      ancestor_with_targeter = ancestor;
+    if (ancestor == window())
+      break;
+  }
+  ConvertEventLocationToTarget(event_target, ancestor_with_targeter, event);
+  return ancestor_with_targeter;
 }
 
 void WindowEventDispatcher::OnEventProcessingStarted(ui::Event* event) {
@@ -423,6 +475,14 @@ void WindowEventDispatcher::OnEventProcessingStarted(ui::Event* event) {
   // coordinate system to |window()|'s coordinate system.
   if (event->IsLocatedEvent() && !is_dispatched_held_event(*event))
     TransformEventForDeviceScaleFactor(static_cast<ui::LocatedEvent*>(event));
+
+  if (mus_mouse_location_updater_)
+    mus_mouse_location_updater_->OnEventProcessingStarted(*event);
+}
+
+void WindowEventDispatcher::OnEventProcessingFinished(ui::Event* event) {
+  if (mus_mouse_location_updater_)
+    mus_mouse_location_updater_->OnEventProcessingFinished();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -437,6 +497,11 @@ ui::EventDispatchDetails WindowEventDispatcher::PreDispatchEvent(
     ui::Event* event) {
   Window* target_window = static_cast<Window*>(target);
   CHECK(window()->Contains(target_window));
+
+  if (!(event->flags() & ui::EF_IS_SYNTHESIZED)) {
+    fraction_of_time_without_user_input_recorder_.RecordEventAtTime(
+        event->time_stamp());
+  }
 
   if (!dispatching_held_event_) {
     bool can_be_held = IsEventCandidateForHold(*event);
@@ -456,6 +521,8 @@ ui::EventDispatchDetails WindowEventDispatcher::PreDispatchEvent(
     details = PreDispatchLocatedEvent(target_window, event->AsScrollEvent());
   } else if (event->IsTouchEvent()) {
     details = PreDispatchTouchEvent(target_window, event->AsTouchEvent());
+  } else if (event->IsKeyEvent()) {
+    details = PreDispatchKeyEvent(event->AsKeyEvent());
   }
   if (details.dispatcher_destroyed || details.target_destroyed)
     return details;
@@ -751,7 +818,8 @@ DispatchDetails WindowEventDispatcher::PreDispatchMouseEvent(
     return DispatchDetails();
   }
 
-  env_controller_->UpdateStateForMouseEvent(window(), *event);
+  Env::GetInstance()->env_controller()->UpdateStateForMouseEvent(window(),
+                                                                 *event);
 
   if (IsEventCandidateForHold(*event) && !dispatching_held_event_) {
     if (move_hold_count_) {
@@ -798,7 +866,7 @@ DispatchDetails WindowEventDispatcher::PreDispatchMouseEvent(
           return target_details;
         }
         // If the |mouse_moved_handler_| changes out from under us, assume a
-        // nested message loop ran and we don't need to do anything.
+        // nested run loop ran and we don't need to do anything.
         if (mouse_moved_handler_ != old_mouse_moved_handler) {
           event->SetHandled();
           return target_details;
@@ -847,7 +915,7 @@ DispatchDetails WindowEventDispatcher::PreDispatchTouchEvent(
     return DispatchDetails();
   }
 
-  env_controller_->UpdateStateForTouchEvent(*event);
+  Env::GetInstance()->env_controller()->UpdateStateForTouchEvent(*event);
 
   ui::TouchEvent orig_event(*event, target, window());
   if (!ui::GestureRecognizer::Get()->ProcessTouchEventPreDispatch(&orig_event,
@@ -863,6 +931,16 @@ DispatchDetails WindowEventDispatcher::PreDispatchTouchEvent(
   event->set_may_cause_scrolling(orig_event.may_cause_scrolling());
 
   return PreDispatchLocatedEvent(target, event);
+}
+
+ui::EventDispatchDetails WindowEventDispatcher::PreDispatchKeyEvent(
+    ui::KeyEvent* event) {
+  if (skip_ime_ || !host_->has_input_method() ||
+      (event->flags() & ui::EF_IS_SYNTHESIZED))
+    return ui::EventDispatchDetails();
+  host_->GetInputMethod()->DispatchKeyEvent(event);
+  event->StopPropagation();
+  return ui::EventDispatchDetails();
 }
 
 }  // namespace aura

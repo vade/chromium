@@ -186,6 +186,7 @@ left: auto
 letter-spacing: normal
 lighting-color: rgb(255, 255, 255)
 line-height: normal
+line-height-step: 0px
 list-style-image: none
 list-style-position: outside
 list-style-type: disc
@@ -211,7 +212,6 @@ offset-distance: 0px
 offset-path: none
 offset-position: auto
 offset-rotate: auto 0deg
-offset-rotation: auto 0deg
 opacity: 1
 order: 0
 orphans: 2
@@ -236,7 +236,7 @@ position: static
 r: 0px
 resize: none
 right: auto
-rotate: 0deg
+rotate: none
 rx: auto
 ry: auto
 scale: none
@@ -250,7 +250,6 @@ shape-image-threshold: 0
 shape-margin: 0px
 shape-outside: none
 shape-rendering: auto
-snap-height: 0px
 speak: normal
 stop-color: rgb(0, 0, 0)
 stop-opacity: 1

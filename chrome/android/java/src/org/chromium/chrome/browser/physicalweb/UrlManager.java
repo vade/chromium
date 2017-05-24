@@ -4,7 +4,6 @@
 
 package org.chromium.chrome.browser.physicalweb;
 
-import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.AsyncTask;
 import android.os.Handler;
@@ -77,8 +76,7 @@ class UrlManager {
      */
     @VisibleForTesting
     public UrlManager() {
-        Context context = ContextUtils.getApplicationContext();
-        mPwsClient = new PwsClientImpl(context);
+        mPwsClient = new PwsClientImpl();
         mObservers = new ObserverList<Listener>();
         mNearbyUrls = new HashSet<>();
         mUrlInfoMap = new HashMap<>();
@@ -86,9 +84,9 @@ class UrlManager {
         mUrlsSortedByTimestamp = new PriorityQueue<String>(1, new Comparator<String>() {
             @Override
             public int compare(String url1, String url2) {
-                Long scanTimestamp1 = Long.valueOf(mUrlInfoMap.get(url1).getScanTimestamp());
-                Long scanTimestamp2 = Long.valueOf(mUrlInfoMap.get(url2).getScanTimestamp());
-                return scanTimestamp1.compareTo(scanTimestamp2);
+                Long timestamp1 = Long.valueOf(mUrlInfoMap.get(url1).getFirstSeenTimestamp());
+                Long timestamp2 = Long.valueOf(mUrlInfoMap.get(url2).getFirstSeenTimestamp());
+                return timestamp1.compareTo(timestamp2);
             }
         });
         initSharedPreferences();
@@ -220,7 +218,10 @@ class UrlManager {
                 return distance1.compareTo(distance2);
             }
         });
-        return urlInfos;
+
+        // Keep only the first UrlInfo with a given groupid. The list is already
+        // sorted by distance, so the first instance will be the closest.
+        return deduplicateByGroupId(urlInfos);
     }
 
     public UrlInfo getUrlInfoByUrl(String url) {
@@ -248,7 +249,7 @@ class UrlManager {
             PwsResult pwsResult = mPwsResultMap.get(requestUrl);
             if (pwsResult != null) {
                 nativeAppendMetadataItem(nativePhysicalWebCollection, requestUrl,
-                        urlInfo.getDistance(), urlInfo.getScanTimestamp(), pwsResult.siteUrl,
+                        urlInfo.getDistance(), urlInfo.getFirstSeenTimestamp(), pwsResult.siteUrl,
                         pwsResult.iconUrl, pwsResult.title, pwsResult.description,
                         pwsResult.groupId);
             }
@@ -292,6 +293,28 @@ class UrlManager {
     }
 
     /**
+     * Given a list of UrlInfos, returns the list with only one UrlInfo for each unique group ID.
+     * When multiple UrlInfos have the same group ID, all but the first instance are discarded.
+     * @param urlInfos A list of UrlInfos, possibly containing duplicates.
+     * @return A list of deduplicated UrlInfos.
+     */
+    private List<UrlInfo> deduplicateByGroupId(List<UrlInfo> urlInfos) {
+        List<UrlInfo> deduplicatedUrlInfos = new ArrayList<>();
+        Set<String> groupIds = new HashSet<>();
+        for (UrlInfo urlInfo : urlInfos) {
+            PwsResult pwsResult = mPwsResultMap.get(urlInfo.getUrl());
+            if (pwsResult != null) {
+                if (pwsResult.groupId == null || groupIds.contains(pwsResult.groupId)) {
+                    continue;
+                }
+                groupIds.add(pwsResult.groupId);
+            }
+            deduplicatedUrlInfos.add(urlInfo);
+        }
+        return deduplicatedUrlInfos;
+    }
+
+    /**
      * Adds a URL that has been resolved by the PWS.
      * @param pwsResult The meta data associated with the resolved URL.
      */
@@ -331,6 +354,8 @@ class UrlManager {
                             .remove("org.chromium.chrome.browser.physicalweb.VERSION")
                             .remove("org.chromium.chrome.browser.physicalweb"
                                     + ".BOTTOM_BAR_DISPLAY_COUNT")
+                            // This clean up code can be deleted in m60
+                            .remove("physical_web_ignore_other_clients")
                             .apply();
                     return null;
                 }
@@ -396,8 +421,7 @@ class UrlManager {
 
     /**
      * Updates a cache entry with new information.
-     * When we reencounter a URL, a subset of its metadata should update.  Only distance and
-     * scanTimestamp fall into this category.
+     * When we reencounter a URL, only its distance should update.
      * @param urlInfo This should be a freshly discovered UrlInfo, though it does not have to be
      * previously undiscovered.
      * @return The updated cache entry
@@ -409,7 +433,6 @@ class UrlManager {
             currentUrlInfo = urlInfo;
         } else {
             mUrlsSortedByTimestamp.remove(urlInfo.getUrl());
-            currentUrlInfo.setScanTimestamp(urlInfo.getScanTimestamp());
             if (urlInfo.getDistance() > 0.0) {
                 currentUrlInfo.setDistance(urlInfo.getDistance());
             }
@@ -465,8 +488,8 @@ class UrlManager {
         for (String url = mUrlsSortedByTimestamp.peek(); url != null;
                 url = mUrlsSortedByTimestamp.peek()) {
             UrlInfo urlInfo = mUrlInfoMap.get(url);
-            if ((System.currentTimeMillis() - urlInfo.getScanTimestamp() <= MAX_CACHE_TIME
-                    && mUrlsSortedByTimestamp.size() <= MAX_CACHE_SIZE)
+            if ((System.currentTimeMillis() - urlInfo.getFirstSeenTimestamp() <= MAX_CACHE_TIME
+                        && mUrlsSortedByTimestamp.size() <= MAX_CACHE_SIZE)
                     || mNearbyUrls.contains(url)) {
                 Log.d(TAG, "Not garbage collecting: ", urlInfo);
                 break;
@@ -616,7 +639,7 @@ class UrlManager {
 
     private native long nativeInit();
     private native void nativeAppendMetadataItem(long nativePhysicalWebCollection,
-            String requestUrl, double distanceEstimate, long scanTimestamp, String siteUrl,
+            String requestUrl, double distanceEstimate, long firstSeenTimestamp, String siteUrl,
             String iconUrl, String title, String description, String groupId);
     private native void nativeOnFound(long nativePhysicalWebDataSourceAndroid, String url);
     private native void nativeOnLost(long nativePhysicalWebDataSourceAndroid, String url);

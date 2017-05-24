@@ -7,8 +7,10 @@
 #import <CoreText/CoreText.h>
 #import <MobileCoreServices/MobileCoreServices.h>
 
+#include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/ios/device_util.h"
+#include "base/ios/ios_util.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
@@ -25,9 +27,9 @@
 #include "ios/chrome/browser/ui/omnibox/omnibox_popup_view_ios.h"
 #include "ios/chrome/browser/ui/omnibox/omnibox_util.h"
 #include "ios/chrome/browser/ui/omnibox/preload_provider.h"
-#include "ios/chrome/browser/ui/omnibox/web_omnibox_edit_controller.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
+#include "ios/shared/chrome/browser/ui/omnibox/web_omnibox_edit_controller.h"
 #include "ios/web/public/referrer.h"
 #import "net/base/mac/url_conversions.h"
 #include "skia/ext/skia_utils_ios.h"
@@ -36,6 +38,10 @@
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/image/image.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 using base::UserMetricsAction;
 
@@ -50,11 +56,6 @@ UIColor* ErrorTextColor() {
   return skia::UIColorFromSkColor(gfx::kGoogleRed700);
 }
 
-// The color of the https when there is a warning.
-UIColor* WarningTextColor() {
-  return skia::UIColorFromSkColor(gfx::kGoogleYellow700);
-}
-
 // The color of the https when there is not an error.
 UIColor* SecureTextColor() {
   return skia::UIColorFromSkColor(gfx::kGoogleGreen700);
@@ -63,13 +64,6 @@ UIColor* SecureTextColor() {
 // The color of the https when highlighted in incognito.
 UIColor* IncognitoSecureTextColor() {
   return [UIColor colorWithWhite:(255 / 255.0) alpha:1.0];
-}
-
-// Helper to make converting url_parse ranges to NSRange easier to
-// read.
-NSRange ComponentToNSRange(const url::Component& component) {
-  return NSMakeRange(static_cast<NSInteger>(component.begin),
-                     static_cast<NSInteger>(component.len));
 }
 
 }  // namespace
@@ -182,10 +176,12 @@ OmniboxViewIOS::OmniboxViewIOS(OmniboxTextFieldIOS* field,
           controller,
           base::MakeUnique<ChromeOmniboxClientIOS>(controller, browser_state)),
       browser_state_(browser_state),
-      field_([field retain]),
+      field_(field),
       controller_(controller),
       preloader_(preloader),
-      ignore_popup_updates_(false) {
+      ignore_popup_updates_(false),
+      attributing_display_string_(nil) {
+  DCHECK(field_);
   popup_view_.reset(new OmniboxPopupViewIOS(this, model(), positioner));
   field_delegate_.reset(
       [[AutocompleteTextFieldDelegate alloc] initWithEditView:this]);
@@ -193,6 +189,7 @@ OmniboxViewIOS::OmniboxViewIOS(OmniboxTextFieldIOS* field,
   [field_ addTarget:field_delegate_
                 action:@selector(textFieldDidChange:)
       forControlEvents:UIControlEventEditingChanged];
+  use_strikethrough_workaround_ = base::ios::IsRunningOnOrLater(10, 3, 0);
 }
 
 OmniboxViewIOS::~OmniboxViewIOS() {
@@ -634,61 +631,83 @@ void OmniboxViewIOS::WillPaste() {
   model()->OnPaste();
 }
 
+// static
+UIColor* OmniboxViewIOS::GetSecureTextColor(
+    security_state::SecurityLevel security_level,
+    bool in_dark_mode) {
+  if (security_level == security_state::EV_SECURE ||
+      security_level == security_state::SECURE) {
+    return in_dark_mode ? IncognitoSecureTextColor() : SecureTextColor();
+  }
+
+  // Don't color strikethrough in dark mode. See https://crbug.com/635004#c6
+  if (security_level == security_state::DANGEROUS && !in_dark_mode)
+    return ErrorTextColor();
+
+  return nil;
+}
+
+void OmniboxViewIOS::SetEmphasis(bool emphasize, const gfx::Range& range) {
+  NSRange ns_range = range.IsValid()
+                         ? range.ToNSRange()
+                         : NSMakeRange(0, [attributing_display_string_ length]);
+
+  [attributing_display_string_
+      addAttribute:NSForegroundColorAttributeName
+             value:(emphasize) ? [field_ displayedTextColor] : BaseTextColor()
+             range:ns_range];
+}
+
+void OmniboxViewIOS::UpdateSchemeStyle(const gfx::Range& range) {
+  if (!range.IsValid())
+    return;
+
+  const security_state::SecurityLevel security_level =
+      controller()->GetToolbarModel()->GetSecurityLevel(false);
+
+  if ((security_level == security_state::NONE) ||
+      (security_level == security_state::HTTP_SHOW_WARNING)) {
+    return;
+  }
+
+  DCHECK_NE(security_state::SECURITY_WARNING, security_level);
+  DCHECK_NE(security_state::SECURE_WITH_POLICY_INSTALLED_CERT, security_level);
+
+  if (security_level == security_state::DANGEROUS) {
+    if (use_strikethrough_workaround_) {
+      // Workaround: Add extra attribute to allow strikethough to apply on iOS
+      // 10.3+. See https://crbug.com/699702 for discussion.
+      [attributing_display_string_
+          addAttribute:NSBaselineOffsetAttributeName
+                 value:@0
+                 range:NSMakeRange(0, [attributing_display_string_ length])];
+    }
+
+    // Add a strikethrough through the scheme.
+    [attributing_display_string_
+        addAttribute:NSStrikethroughStyleAttributeName
+               value:[NSNumber numberWithInteger:NSUnderlineStyleSingle]
+               range:range.ToNSRange()];
+  }
+
+  UIColor* color = GetSecureTextColor(security_level, [field_ incognito]);
+  if (color) {
+    [attributing_display_string_ addAttribute:NSForegroundColorAttributeName
+                                        value:color
+                                        range:range.ToNSRange()];
+  }
+}
+
 NSAttributedString* OmniboxViewIOS::ApplyTextAttributes(
     const base::string16& text) {
-  NSMutableAttributedString* as = [[[NSMutableAttributedString alloc]
-      initWithString:base::SysUTF16ToNSString(text)] autorelease];
-  url::Component scheme, host;
-  AutocompleteInput::ParseForEmphasizeComponents(
-      text, AutocompleteSchemeClassifierImpl(), &scheme, &host);
-
-  const bool emphasize = model()->CurrentTextIsURL() && (host.len > 0);
-  if (emphasize) {
-    [as addAttribute:NSForegroundColorAttributeName
-               value:BaseTextColor()
-               range:NSMakeRange(0, [as length])];
-
-    [as addAttribute:NSForegroundColorAttributeName
-               value:[field_ displayedTextColor]
-               range:ComponentToNSRange(host)];
-
-    if (scheme.len > 0) {
-      UIColor* color = nil;
-      switch (controller_->GetToolbarModel()->GetSecurityLevel(false)) {
-        case security_state::NONE:
-          break;
-        case security_state::SECURITY_WARNING:
-          // Don't color strikethrough schemes. See https://crbug.com/635004#c6
-          if (![field_ incognito])
-            color = WarningTextColor();
-          [as addAttribute:NSStrikethroughStyleAttributeName
-                     value:[NSNumber numberWithInteger:NSUnderlineStyleSingle]
-                     range:ComponentToNSRange(scheme)];
-          break;
-        case security_state::SECURE:
-        case security_state::EV_SECURE:
-          color = [field_ incognito] ? IncognitoSecureTextColor()
-                                     : SecureTextColor();
-          break;
-        case security_state::DANGEROUS:
-          // Don't color strikethrough schemes. See https://crbug.com/635004#c6
-          if (![field_ incognito])
-            color = ErrorTextColor();
-          [as addAttribute:NSStrikethroughStyleAttributeName
-                     value:[NSNumber numberWithInteger:NSUnderlineStyleSingle]
-                     range:ComponentToNSRange(scheme)];
-          break;
-        case security_state::HTTP_SHOW_WARNING:
-        case security_state::SECURE_WITH_POLICY_INSTALLED_CERT:
-          NOTREACHED();
-      }
-      if (color) {
-        [as addAttribute:NSForegroundColorAttributeName
-                   value:color
-                   range:ComponentToNSRange(scheme)];
-      }
-    }
-  }
+  NSMutableAttributedString* as = [[NSMutableAttributedString alloc]
+      initWithString:base::SysUTF16ToNSString(text)];
+  // Cache a pointer to the attributed string to allow the superclass'
+  // virtual method invocations to add attributes.
+  DCHECK(attributing_display_string_ == nil);
+  base::AutoReset<NSMutableAttributedString*> resetter(
+      &attributing_display_string_, as);
+  UpdateTextStyle(text, AutocompleteSchemeClassifierImpl());
   return as;
 }
 

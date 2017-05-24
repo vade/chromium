@@ -17,13 +17,13 @@ namespace leveldb {
 // synchronous and block on responses from the filesystem service. That's fine
 // since, for the most part, they merely open files or check for a file's
 // existence.
-class MojoEnv : public leveldb_env::ChromiumEnv {
+class MojoEnv : public Env, public leveldb_env::UMALogger {
  public:
   MojoEnv(scoped_refptr<LevelDBMojoProxy> file_thread,
           LevelDBMojoProxy::OpaqueDir* dir);
   ~MojoEnv() override;
 
-  // Overridden from leveldb_env::EnvChromium:
+  // Overridden from leveldb::Env:
   Status NewSequentialFile(const std::string& fname,
                            SequentialFile** result) override;
   Status NewRandomAccessFile(const std::string& fname,
@@ -45,10 +45,19 @@ class MojoEnv : public leveldb_env::ChromiumEnv {
   Status GetTestDirectory(std::string* path) override;
   Status NewLogger(const std::string& fname, Logger** result) override;
 
-  // For reference, we specifically don't override Schedule(), StartThread(),
-  // NowMicros() or SleepForMicroseconds() and use the EnvChromium versions.
+  uint64_t NowMicros() override;
+  void SleepForMicroseconds(int micros) override;
+  void Schedule(void (*function)(void* arg), void* arg) override;
+  void StartThread(void (*function)(void* arg), void* arg) override;
 
  private:
+  void RecordErrorAt(leveldb_env::MethodID method) const override;
+  void RecordOSError(leveldb_env::MethodID method,
+                     base::File::Error error) const override;
+
+  void RecordFileError(leveldb_env::MethodID method,
+                       filesystem::mojom::FileError error) const;
+
   scoped_refptr<LevelDBMojoProxy> thread_;
   LevelDBMojoProxy::OpaqueDir* dir_;
 

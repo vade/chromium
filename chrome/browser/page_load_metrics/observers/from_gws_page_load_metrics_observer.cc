@@ -9,9 +9,8 @@
 #include "base/strings/string_util.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
 #include "chrome/common/page_load_metrics/page_load_timing.h"
-#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 
-using page_load_metrics::UserAbortType;
+using page_load_metrics::PageAbortReason;
 
 namespace internal {
 
@@ -96,118 +95,131 @@ const char kHistogramFromGWSAbortBackgroundBeforeInteraction[] =
     "PageLoad.Clients.FromGoogleSearch.Experimental.AbortTiming.Background."
     "AfterPaint.BeforeInteraction";
 
+const char kHistogramFromGWSForegroundDuration[] =
+    "PageLoad.Clients.FromGoogleSearch.PageTiming.ForegroundDuration";
+const char kHistogramFromGWSForegroundDurationAfterPaint[] =
+    "PageLoad.Clients.FromGoogleSearch.PageTiming.ForegroundDuration."
+    "AfterPaint";
+const char kHistogramFromGWSForegroundDurationWithPaint[] =
+    "PageLoad.Clients.FromGoogleSearch.PageTiming.ForegroundDuration."
+    "WithPaint";
+const char kHistogramFromGWSForegroundDurationWithoutPaint[] =
+    "PageLoad.Clients.FromGoogleSearch.PageTiming.ForegroundDuration."
+    "WithoutPaint";
+const char kHistogramFromGWSForegroundDurationNoCommit[] =
+    "PageLoad.Clients.FromGoogleSearch.PageTiming.ForegroundDuration.NoCommit";
+
 }  // namespace internal
 
 namespace {
 
-void LogCommittedAbortsBeforePaint(UserAbortType abort_type,
-                                   base::TimeDelta time_to_abort) {
-  switch (abort_type) {
-    case UserAbortType::ABORT_STOP:
+void LogCommittedAbortsBeforePaint(PageAbortReason abort_reason,
+                                   base::TimeDelta page_end_time) {
+  switch (abort_reason) {
+    case PageAbortReason::ABORT_STOP:
       PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSAbortStopBeforePaint,
-                          time_to_abort);
+                          page_end_time);
       break;
-    case UserAbortType::ABORT_CLOSE:
+    case PageAbortReason::ABORT_CLOSE:
       PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSAbortCloseBeforePaint,
-                          time_to_abort);
+                          page_end_time);
       break;
-    case UserAbortType::ABORT_NEW_NAVIGATION:
+    case PageAbortReason::ABORT_NEW_NAVIGATION:
       PAGE_LOAD_HISTOGRAM(
           internal::kHistogramFromGWSAbortNewNavigationBeforePaint,
-          time_to_abort);
+          page_end_time);
       break;
-    case UserAbortType::ABORT_RELOAD:
+    case PageAbortReason::ABORT_RELOAD:
       PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSAbortReloadBeforePaint,
-                          time_to_abort);
+                          page_end_time);
       break;
-    case UserAbortType::ABORT_FORWARD_BACK:
+    case PageAbortReason::ABORT_FORWARD_BACK:
       PAGE_LOAD_HISTOGRAM(
           internal::kHistogramFromGWSAbortForwardBackBeforePaint,
-          time_to_abort);
+          page_end_time);
       break;
-    case UserAbortType::ABORT_BACKGROUND:
+    case PageAbortReason::ABORT_BACKGROUND:
       PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSAbortBackgroundBeforePaint,
-                          time_to_abort);
+                          page_end_time);
       break;
     default:
       // These should only be logged for provisional aborts.
-      DCHECK_NE(abort_type, UserAbortType::ABORT_OTHER);
+      DCHECK_NE(abort_reason, PageAbortReason::ABORT_OTHER);
       break;
   }
 }
 
-void LogAbortsAfterPaintBeforeInteraction(UserAbortType abort_type,
-                                          base::TimeDelta time_to_abort) {
-  switch (abort_type) {
-    case UserAbortType::ABORT_STOP:
+void LogAbortsAfterPaintBeforeInteraction(
+    const page_load_metrics::PageAbortInfo& abort_info) {
+  switch (abort_info.reason) {
+    case PageAbortReason::ABORT_STOP:
       PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSAbortStopBeforeInteraction,
-                          time_to_abort);
+                          abort_info.time_to_abort);
       break;
-    case UserAbortType::ABORT_CLOSE:
+    case PageAbortReason::ABORT_CLOSE:
       PAGE_LOAD_HISTOGRAM(
           internal::kHistogramFromGWSAbortCloseBeforeInteraction,
-          time_to_abort);
+          abort_info.time_to_abort);
       break;
-    case UserAbortType::ABORT_NEW_NAVIGATION:
+    case PageAbortReason::ABORT_NEW_NAVIGATION:
       PAGE_LOAD_HISTOGRAM(
           internal::kHistogramFromGWSAbortNewNavigationBeforeInteraction,
-          time_to_abort);
+          abort_info.time_to_abort);
       break;
-    case UserAbortType::ABORT_RELOAD:
+    case PageAbortReason::ABORT_RELOAD:
       PAGE_LOAD_HISTOGRAM(
           internal::kHistogramFromGWSAbortReloadBeforeInteraction,
-          time_to_abort);
+          abort_info.time_to_abort);
       break;
-    case UserAbortType::ABORT_FORWARD_BACK:
+    case PageAbortReason::ABORT_FORWARD_BACK:
       PAGE_LOAD_HISTOGRAM(
           internal::kHistogramFromGWSAbortForwardBackBeforeInteraction,
-          time_to_abort);
+          abort_info.time_to_abort);
       break;
-    case UserAbortType::ABORT_BACKGROUND:
+    case PageAbortReason::ABORT_BACKGROUND:
       PAGE_LOAD_HISTOGRAM(
           internal::kHistogramFromGWSAbortBackgroundBeforeInteraction,
-          time_to_abort);
+          abort_info.time_to_abort);
       break;
     default:
       // These should only be logged for provisional aborts.
-      DCHECK_NE(abort_type, UserAbortType::ABORT_OTHER);
+      DCHECK_NE(abort_info.reason, PageAbortReason::ABORT_OTHER);
       break;
   }
 }
 
-void LogProvisionalAborts(UserAbortType abort_type,
-                          base::TimeDelta time_to_abort) {
-  switch (abort_type) {
-    case UserAbortType::ABORT_STOP:
+void LogProvisionalAborts(const page_load_metrics::PageAbortInfo& abort_info) {
+  switch (abort_info.reason) {
+    case PageAbortReason::ABORT_STOP:
       PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSAbortStopBeforeCommit,
-                          time_to_abort);
+                          abort_info.time_to_abort);
       break;
-    case UserAbortType::ABORT_CLOSE:
+    case PageAbortReason::ABORT_CLOSE:
       PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSAbortCloseBeforeCommit,
-                          time_to_abort);
+                          abort_info.time_to_abort);
       break;
-    case UserAbortType::ABORT_OTHER:
+    case PageAbortReason::ABORT_OTHER:
       PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSAbortOtherBeforeCommit,
-                          time_to_abort);
+                          abort_info.time_to_abort);
       break;
-    case UserAbortType::ABORT_NEW_NAVIGATION:
+    case PageAbortReason::ABORT_NEW_NAVIGATION:
       PAGE_LOAD_HISTOGRAM(
           internal::kHistogramFromGWSAbortNewNavigationBeforeCommit,
-          time_to_abort);
+          abort_info.time_to_abort);
       break;
-    case UserAbortType::ABORT_RELOAD:
+    case PageAbortReason::ABORT_RELOAD:
       PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSAbortReloadBeforeCommit,
-                          time_to_abort);
+                          abort_info.time_to_abort);
       break;
-    case UserAbortType::ABORT_FORWARD_BACK:
+    case PageAbortReason::ABORT_FORWARD_BACK:
       PAGE_LOAD_HISTOGRAM(
           internal::kHistogramFromGWSAbortForwardBackBeforeCommit,
-          time_to_abort);
+          abort_info.time_to_abort);
       break;
-    case UserAbortType::ABORT_BACKGROUND:
+    case PageAbortReason::ABORT_BACKGROUND:
       PAGE_LOAD_HISTOGRAM(
           internal::kHistogramFromGWSAbortBackgroundBeforeCommit,
-          time_to_abort);
+          abort_info.time_to_abort);
       break;
     default:
       NOTREACHED();
@@ -215,25 +227,55 @@ void LogProvisionalAborts(UserAbortType abort_type,
   }
 }
 
+void LogForegroundDurations(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
+    const page_load_metrics::PageLoadExtraInfo& info,
+    base::TimeTicks app_background_time) {
+  base::Optional<base::TimeDelta> foreground_duration =
+      GetInitialForegroundDuration(info, app_background_time);
+  if (!foreground_duration)
+    return;
+
+  if (info.did_commit) {
+    PAGE_LOAD_LONG_HISTOGRAM(internal::kHistogramFromGWSForegroundDuration,
+                             foreground_duration.value());
+    if (timing.paint_timing->first_paint &&
+        timing.paint_timing->first_paint < foreground_duration) {
+      PAGE_LOAD_LONG_HISTOGRAM(
+          internal::kHistogramFromGWSForegroundDurationAfterPaint,
+          foreground_duration.value() -
+              timing.paint_timing->first_paint.value());
+      PAGE_LOAD_LONG_HISTOGRAM(
+          internal::kHistogramFromGWSForegroundDurationWithPaint,
+          foreground_duration.value());
+    } else {
+      PAGE_LOAD_LONG_HISTOGRAM(
+          internal::kHistogramFromGWSForegroundDurationWithoutPaint,
+          foreground_duration.value());
+    }
+  } else {
+    PAGE_LOAD_LONG_HISTOGRAM(
+        internal::kHistogramFromGWSForegroundDurationNoCommit,
+        foreground_duration.value());
+  }
+}
+
 bool WasAbortedInForeground(
-    UserAbortType abort_type,
-    const base::Optional<base::TimeDelta>& time_to_abort,
-    const page_load_metrics::PageLoadExtraInfo& info) {
-  if (!time_to_abort)
-    return false;
-  if (abort_type == UserAbortType::ABORT_NONE)
-    return false;
-  if (WasStartedInForegroundOptionalEventInForeground(time_to_abort, info))
-    return true;
-  if (!info.started_in_foreground)
+    const page_load_metrics::PageLoadExtraInfo& info,
+    const page_load_metrics::PageAbortInfo& abort_info) {
+  if (!info.started_in_foreground ||
+      abort_info.reason == PageAbortReason::ABORT_NONE)
     return false;
 
-  const base::TimeDelta time_to_abort_val = time_to_abort.value();
+  base::Optional<base::TimeDelta> time_to_abort(abort_info.time_to_abort);
+  if (WasStartedInForegroundOptionalEventInForeground(time_to_abort, info))
+    return true;
+
   const base::TimeDelta time_to_first_background =
       info.first_background_time.value();
-  DCHECK_GT(time_to_abort_val, time_to_first_background);
+  DCHECK_GT(abort_info.time_to_abort, time_to_first_background);
   base::TimeDelta background_abort_delta =
-      time_to_abort_val - time_to_first_background;
+      abort_info.time_to_abort - time_to_first_background;
   // Consider this a foregrounded abort if it occurred within 100ms of a
   // background. This is needed for closing some tabs, where the signal for
   // background is often slightly ahead of the signal for close.
@@ -243,14 +285,12 @@ bool WasAbortedInForeground(
 }
 
 bool WasAbortedBeforeInteraction(
-    UserAbortType abort_type,
-    const base::Optional<base::TimeDelta>& time_to_interaction,
-    const base::Optional<base::TimeDelta>& time_to_abort) {
+    const page_load_metrics::PageAbortInfo& abort_info,
+    const base::Optional<base::TimeDelta>& time_to_interaction) {
   // These conditions should be guaranteed by the call to
   // WasAbortedInForeground, which is called before WasAbortedBeforeInteraction
   // gets invoked.
-  DCHECK(time_to_abort);
-  DCHECK(abort_type != UserAbortType::ABORT_NONE);
+  DCHECK(abort_info.reason != PageAbortReason::ABORT_NONE);
 
   if (!time_to_interaction)
     return true;
@@ -264,13 +304,13 @@ bool WasAbortedBeforeInteraction(
   // 1000ms is enough to perform a pull to reload / forward_back gesture.
   // It's also too short a time for a user to consume any content
   // revealed by the interaction.
-  if (abort_type == UserAbortType::ABORT_RELOAD ||
-      abort_type == UserAbortType::ABORT_FORWARD_BACK) {
+  if (abort_info.reason == PageAbortReason::ABORT_RELOAD ||
+      abort_info.reason == PageAbortReason::ABORT_FORWARD_BACK) {
     return time_to_interaction.value() +
                base::TimeDelta::FromMilliseconds(1000) >
-           time_to_abort;
+           abort_info.time_to_abort;
   } else {
-    return time_to_interaction > time_to_abort;
+    return time_to_interaction > abort_info.time_to_abort;
   }
 }
 
@@ -281,39 +321,17 @@ bool WasAbortedBeforeInteraction(
 // for additional details.
 
 // static
-bool FromGWSPageLoadMetricsLogger::IsGoogleSearchHostname(
-    base::StringPiece host) {
-  const char kGoogleSearchHostnamePrefix[] = "www.";
-
-  // Hostname must start with 'www.' Hostnames are not case sensitive.
-  if (!base::StartsWith(host, kGoogleSearchHostnamePrefix,
-                        base::CompareCase::INSENSITIVE_ASCII)) {
-    return false;
-  }
-  std::string domain = net::registry_controlled_domains::GetDomainAndRegistry(
-      host,
-      // Do not include private registries, such as appspot.com. We don't want
-      // to match URLs like www.google.appspot.com.
-      net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
-
-  // Domain and registry must start with 'google.' e.g. 'google.com' or
-  // 'google.co.uk'.
-  if (!base::StartsWith(domain, "google.",
-                        base::CompareCase::INSENSITIVE_ASCII)) {
-    return false;
-  }
-
-  // Finally, the length of the URL before the domain and registry must be equal
-  // in length to the search hostname prefix.
-  const size_t url_hostname_prefix_length = host.length() - domain.length();
-  return url_hostname_prefix_length == strlen(kGoogleSearchHostnamePrefix);
+bool FromGWSPageLoadMetricsLogger::IsGoogleSearchHostname(const GURL& url) {
+  base::Optional<std::string> result =
+      page_load_metrics::GetGoogleHostnamePrefix(url);
+  return result && result.value() == "www";
 }
 
 // static
 bool FromGWSPageLoadMetricsLogger::IsGoogleSearchResultUrl(const GURL& url) {
   // NOTE: we do not require 'q=' in the query, as AJAXy search may instead
   // store the query in the URL fragment.
-  if (!IsGoogleSearchHostname(url.host_piece())) {
+  if (!IsGoogleSearchHostname(url)) {
     return false;
   }
 
@@ -330,7 +348,7 @@ bool FromGWSPageLoadMetricsLogger::IsGoogleSearchResultUrl(const GURL& url) {
 // static
 bool FromGWSPageLoadMetricsLogger::IsGoogleSearchRedirectorUrl(
     const GURL& url) {
-  if (!IsGoogleSearchHostname(url.host_piece()))
+  if (!IsGoogleSearchHostname(url))
     return false;
 
   // The primary search redirector.  Google search result redirects are
@@ -426,8 +444,7 @@ void FromGWSPageLoadMetricsLogger::SetPreviouslyCommittedUrl(const GURL& url) {
 }
 
 void FromGWSPageLoadMetricsLogger::SetProvisionalUrl(const GURL& url) {
-  provisional_url_has_search_hostname_ =
-      IsGoogleSearchHostname(url.host_piece());
+  provisional_url_has_search_hostname_ = IsGoogleSearchHostname(url);
 }
 
 FromGWSPageLoadMetricsObserver::FromGWSPageLoadMetricsObserver() {}
@@ -461,56 +478,64 @@ FromGWSPageLoadMetricsObserver::OnCommit(
   return CONTINUE_OBSERVING;
 }
 
+page_load_metrics::PageLoadMetricsObserver::ObservePolicy
+FromGWSPageLoadMetricsObserver::FlushMetricsOnAppEnterBackground(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
+    const page_load_metrics::PageLoadExtraInfo& extra_info) {
+  logger_.FlushMetricsOnAppEnterBackground(timing, extra_info);
+  return STOP_OBSERVING;
+}
+
 void FromGWSPageLoadMetricsObserver::OnDomContentLoadedEventStart(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
   logger_.OnDomContentLoadedEventStart(timing, extra_info);
 }
 
 void FromGWSPageLoadMetricsObserver::OnLoadEventStart(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
   logger_.OnLoadEventStart(timing, extra_info);
 }
 
-void FromGWSPageLoadMetricsObserver::OnFirstPaint(
-    const page_load_metrics::PageLoadTiming& timing,
+void FromGWSPageLoadMetricsObserver::OnFirstPaintInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  logger_.OnFirstPaint(timing, extra_info);
+  logger_.OnFirstPaintInPage(timing, extra_info);
 }
 
-void FromGWSPageLoadMetricsObserver::OnFirstTextPaint(
-    const page_load_metrics::PageLoadTiming& timing,
+void FromGWSPageLoadMetricsObserver::OnFirstTextPaintInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  logger_.OnFirstTextPaint(timing, extra_info);
+  logger_.OnFirstTextPaintInPage(timing, extra_info);
 }
 
-void FromGWSPageLoadMetricsObserver::OnFirstImagePaint(
-    const page_load_metrics::PageLoadTiming& timing,
+void FromGWSPageLoadMetricsObserver::OnFirstImagePaintInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  logger_.OnFirstImagePaint(timing, extra_info);
+  logger_.OnFirstImagePaintInPage(timing, extra_info);
 }
 
-void FromGWSPageLoadMetricsObserver::OnFirstContentfulPaint(
-    const page_load_metrics::PageLoadTiming& timing,
+void FromGWSPageLoadMetricsObserver::OnFirstContentfulPaintInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  logger_.OnFirstContentfulPaint(timing, extra_info);
+  logger_.OnFirstContentfulPaintInPage(timing, extra_info);
 }
 
 void FromGWSPageLoadMetricsObserver::OnParseStart(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
   logger_.OnParseStart(timing, extra_info);
 }
 
 void FromGWSPageLoadMetricsObserver::OnParseStop(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
   logger_.OnParseStop(timing, extra_info);
 }
 
 void FromGWSPageLoadMetricsObserver::OnComplete(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
   logger_.OnComplete(timing, extra_info);
 }
@@ -527,13 +552,13 @@ void FromGWSPageLoadMetricsObserver::OnUserInput(
 }
 
 void FromGWSPageLoadMetricsLogger::OnComplete(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  if (!ShouldLogPostCommitMetrics(extra_info.committed_url))
+  if (!ShouldLogPostCommitMetrics(extra_info.url))
     return;
 
-  UserAbortType abort_type = extra_info.abort_type;
-  if (!WasAbortedInForeground(abort_type, extra_info.time_to_abort, extra_info))
+  page_load_metrics::PageAbortInfo abort_info = GetPageAbortInfo(extra_info);
+  if (!WasAbortedInForeground(extra_info, abort_info))
     return;
 
   // If we did not receive any timing IPCs from the render process, we can't
@@ -543,17 +568,18 @@ void FromGWSPageLoadMetricsLogger::OnComplete(
   // timing IPCs are tracked via the ERR_NO_IPCS_RECEIVED error code in the
   // PageLoad.Events.InternalError histogram, so we can keep track of how often
   // this happens.
-  if (timing.IsEmpty())
+  if (page_load_metrics::IsEmpty(timing))
     return;
 
-  base::TimeDelta time_to_abort = extra_info.time_to_abort.value();
-  if (!timing.first_paint || timing.first_paint >= time_to_abort) {
-    LogCommittedAbortsBeforePaint(abort_type, time_to_abort);
-  } else if (WasAbortedBeforeInteraction(abort_type,
-                                         first_user_interaction_after_paint_,
-                                         extra_info.time_to_abort)) {
-    LogAbortsAfterPaintBeforeInteraction(abort_type, time_to_abort);
+  if (!timing.paint_timing->first_paint ||
+      timing.paint_timing->first_paint >= abort_info.time_to_abort) {
+    LogCommittedAbortsBeforePaint(abort_info.reason, abort_info.time_to_abort);
+  } else if (WasAbortedBeforeInteraction(abort_info,
+                                         first_user_interaction_after_paint_)) {
+    LogAbortsAfterPaintBeforeInteraction(abort_info);
   }
+
+  LogForegroundDurations(timing, extra_info, base::TimeTicks());
 }
 
 void FromGWSPageLoadMetricsLogger::OnFailedProvisionalLoad(
@@ -562,11 +588,14 @@ void FromGWSPageLoadMetricsLogger::OnFailedProvisionalLoad(
   if (!ShouldLogFailedProvisionalLoadMetrics())
     return;
 
-  UserAbortType abort_type = extra_info.abort_type;
-  if (!WasAbortedInForeground(abort_type, extra_info.time_to_abort, extra_info))
+  page_load_metrics::PageAbortInfo abort_info = GetPageAbortInfo(extra_info);
+  if (!WasAbortedInForeground(extra_info, abort_info))
     return;
 
-  LogProvisionalAborts(abort_type, extra_info.time_to_abort.value());
+  LogProvisionalAborts(abort_info);
+
+  LogForegroundDurations(page_load_metrics::mojom::PageLoadTiming(), extra_info,
+                         base::TimeTicks());
 }
 
 bool FromGWSPageLoadMetricsLogger::ShouldLogFailedProvisionalLoadMetrics() {
@@ -579,9 +608,8 @@ bool FromGWSPageLoadMetricsLogger::ShouldLogFailedProvisionalLoadMetrics() {
          previously_committed_url_is_search_redirector_;
 }
 
-bool FromGWSPageLoadMetricsLogger::ShouldLogPostCommitMetrics(
-    const GURL& committed_url) {
-  DCHECK(!committed_url.is_empty());
+bool FromGWSPageLoadMetricsLogger::ShouldLogPostCommitMetrics(const GURL& url) {
+  DCHECK(!url.is_empty());
 
   // If this page has a URL on a known google search hostname, then it may be a
   // page associated with search (either a search results page, or a search
@@ -592,7 +620,7 @@ bool FromGWSPageLoadMetricsLogger::ShouldLogPostCommitMetrics(
   // these cases are relatively uncommon, and we run the risk of logging metrics
   // for some search redirector URLs. Thus we choose the more conservative
   // approach of ignoring all urls on known search hostnames.
-  if (IsGoogleSearchHostname(committed_url.host_piece()))
+  if (IsGoogleSearchHostname(url))
     return false;
 
   // We're only interested in tracking navigations (e.g. clicks) initiated via
@@ -614,95 +642,101 @@ bool FromGWSPageLoadMetricsLogger::ShouldLogPostCommitMetrics(
 bool FromGWSPageLoadMetricsLogger::ShouldLogForegroundEventAfterCommit(
     const base::Optional<base::TimeDelta>& event,
     const page_load_metrics::PageLoadExtraInfo& info) {
-  DCHECK(!info.committed_url.is_empty())
+  DCHECK(info.did_commit)
       << "ShouldLogForegroundEventAfterCommit called without committed URL.";
-  return ShouldLogPostCommitMetrics(info.committed_url) &&
+  return ShouldLogPostCommitMetrics(info.url) &&
          WasStartedInForegroundOptionalEventInForeground(event, info);
 }
 
 void FromGWSPageLoadMetricsLogger::OnDomContentLoadedEventStart(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  if (ShouldLogForegroundEventAfterCommit(timing.dom_content_loaded_event_start,
-                                          extra_info)) {
-    PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSDomContentLoaded,
-                        timing.dom_content_loaded_event_start.value());
+  if (ShouldLogForegroundEventAfterCommit(
+          timing.document_timing->dom_content_loaded_event_start, extra_info)) {
+    PAGE_LOAD_HISTOGRAM(
+        internal::kHistogramFromGWSDomContentLoaded,
+        timing.document_timing->dom_content_loaded_event_start.value());
   }
 }
 
 void FromGWSPageLoadMetricsLogger::OnLoadEventStart(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  if (ShouldLogForegroundEventAfterCommit(timing.load_event_start,
-                                          extra_info)) {
+  if (ShouldLogForegroundEventAfterCommit(
+          timing.document_timing->load_event_start, extra_info)) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSLoad,
-                        timing.load_event_start.value());
+                        timing.document_timing->load_event_start.value());
   }
 }
 
-void FromGWSPageLoadMetricsLogger::OnFirstPaint(
-    const page_load_metrics::PageLoadTiming& timing,
+void FromGWSPageLoadMetricsLogger::OnFirstPaintInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  if (ShouldLogForegroundEventAfterCommit(timing.first_paint, extra_info)) {
+  if (ShouldLogForegroundEventAfterCommit(timing.paint_timing->first_paint,
+                                          extra_info)) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSFirstPaint,
-                        timing.first_paint.value());
+                        timing.paint_timing->first_paint.value());
   }
   first_paint_triggered_ = true;
 }
 
-void FromGWSPageLoadMetricsLogger::OnFirstTextPaint(
-    const page_load_metrics::PageLoadTiming& timing,
+void FromGWSPageLoadMetricsLogger::OnFirstTextPaintInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  if (ShouldLogForegroundEventAfterCommit(timing.first_text_paint,
+  if (ShouldLogForegroundEventAfterCommit(timing.paint_timing->first_text_paint,
                                           extra_info)) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSFirstTextPaint,
-                        timing.first_text_paint.value());
+                        timing.paint_timing->first_text_paint.value());
   }
 }
 
-void FromGWSPageLoadMetricsLogger::OnFirstImagePaint(
-    const page_load_metrics::PageLoadTiming& timing,
+void FromGWSPageLoadMetricsLogger::OnFirstImagePaintInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  if (ShouldLogForegroundEventAfterCommit(timing.first_image_paint,
-                                          extra_info)) {
+  if (ShouldLogForegroundEventAfterCommit(
+          timing.paint_timing->first_image_paint, extra_info)) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSFirstImagePaint,
-                        timing.first_image_paint.value());
+                        timing.paint_timing->first_image_paint.value());
   }
 }
 
-void FromGWSPageLoadMetricsLogger::OnFirstContentfulPaint(
-    const page_load_metrics::PageLoadTiming& timing,
+void FromGWSPageLoadMetricsLogger::OnFirstContentfulPaintInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  if (ShouldLogForegroundEventAfterCommit(timing.first_contentful_paint,
-                                          extra_info)) {
+  if (ShouldLogForegroundEventAfterCommit(
+          timing.paint_timing->first_contentful_paint, extra_info)) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSFirstContentfulPaint,
-                        timing.first_contentful_paint.value());
+                        timing.paint_timing->first_contentful_paint.value());
 
     // If we have a foreground paint, we should have a foreground parse start,
     // since paints can't happen until after parsing starts.
-    DCHECK(WasStartedInForegroundOptionalEventInForeground(timing.parse_start,
-                                                           extra_info));
+    DCHECK(WasStartedInForegroundOptionalEventInForeground(
+        timing.parse_timing->parse_start, extra_info));
     PAGE_LOAD_HISTOGRAM(
         internal::kHistogramFromGWSParseStartToFirstContentfulPaint,
-        timing.first_contentful_paint.value() - timing.parse_start.value());
+        timing.paint_timing->first_contentful_paint.value() -
+            timing.parse_timing->parse_start.value());
   }
 }
 
 void FromGWSPageLoadMetricsLogger::OnParseStart(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  if (ShouldLogForegroundEventAfterCommit(timing.parse_start, extra_info)) {
+  if (ShouldLogForegroundEventAfterCommit(timing.parse_timing->parse_start,
+                                          extra_info)) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSParseStart,
-                        timing.parse_start.value());
+                        timing.parse_timing->parse_start.value());
   }
 }
 
 void FromGWSPageLoadMetricsLogger::OnParseStop(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  if (ShouldLogForegroundEventAfterCommit(timing.parse_stop, extra_info)) {
+  if (ShouldLogForegroundEventAfterCommit(timing.parse_timing->parse_stop,
+                                          extra_info)) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSParseDuration,
-                        timing.parse_stop.value() - timing.parse_start.value());
+                        timing.parse_timing->parse_stop.value() -
+                            timing.parse_timing->parse_start.value());
   }
 }
 
@@ -713,4 +747,10 @@ void FromGWSPageLoadMetricsLogger::OnUserInput(
     first_user_interaction_after_paint_ =
         base::TimeTicks::Now() - navigation_start_;
   }
+}
+
+void FromGWSPageLoadMetricsLogger::FlushMetricsOnAppEnterBackground(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
+    const page_load_metrics::PageLoadExtraInfo& extra_info) {
+  LogForegroundDurations(timing, extra_info, base::TimeTicks::Now());
 }

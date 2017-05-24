@@ -95,6 +95,10 @@ class CONTENT_EXPORT InterstitialPageImpl
       RenderViewHost* render_view_host,
       const FrameHostMsg_DidCommitProvisionalLoad_Params& params);
 
+  // NavigatorDelegate implementation.
+  WebContents* OpenURL(const OpenURLParams& params) override;
+  const std::string& GetUserAgentOverride() const override;
+
  protected:
   // NotificationObserver method:
   void Observe(int type,
@@ -115,7 +119,7 @@ class CONTENT_EXPORT InterstitialPageImpl
   void Paste() override;
   void SelectAll() override;
   void CreateNewWindow(
-      SiteInstance* source_site_instance,
+      RenderFrameHost* opener,
       int32_t render_view_route_id,
       int32_t main_frame_route_id,
       int32_t main_frame_widget_route_id,
@@ -126,6 +130,7 @@ class CONTENT_EXPORT InterstitialPageImpl
                          WindowOpenDisposition disposition,
                          const gfx::Rect& initial_rect,
                          bool user_gesture) override;
+  void SetFocusedFrame(FrameTreeNode* node, SiteInstance* source) override;
 
   // RenderViewHostDelegate implementation:
   RenderViewHostDelegateView* GetDelegateView() override;
@@ -154,12 +159,13 @@ class CONTENT_EXPORT InterstitialPageImpl
 
   // RenderWidgetHostDelegate implementation:
   void RenderWidgetDeleted(RenderWidgetHostImpl* render_widget_host) override;
-  bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                              bool* is_keyboard_shortcut) override;
+  KeyboardEventProcessingResult PreHandleKeyboardEvent(
+      const NativeWebKeyboardEvent& event) override;
   void HandleKeyboardEvent(const NativeWebKeyboardEvent& event) override;
   TextInputManager* GetTextInputManager() override;
   void GetScreenInfo(content::ScreenInfo* screen_info) override;
   void UpdateDeviceScaleFactor(double device_scale_factor) override;
+  RenderWidgetHostInputEventRouter* GetInputEventRouter() override;
 
   bool enabled() const { return enabled_; }
   WebContents* web_contents() const;

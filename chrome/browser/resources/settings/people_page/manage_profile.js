@@ -34,7 +34,9 @@ Polymer({
      */
     availableIcons: {
       type: Array,
-      value: function() { return []; },
+      value: function() {
+        return [];
+      },
     },
 
     /**
@@ -44,19 +46,17 @@ Polymer({
     syncStatus: Object,
 
     /**
-     * @private {!settings.ManageProfileBrowserProxy}
-     */
-    browserProxy_: {
-      type: Object,
-      value: function() {
-        return settings.ManageProfileBrowserProxyImpl.getInstance();
-      },
-    },
-
-    /**
      * True if the profile shortcuts feature is enabled.
      */
     isProfileShortcutSettingVisible_: Boolean,
+  },
+
+  /** @private {?settings.ManageProfileBrowserProxy} */
+  browserProxy_: null,
+
+  /** @override */
+  created: function() {
+    this.browserProxy_ = settings.ManageProfileBrowserProxyImpl.getInstance();
   },
 
   /** @override */
@@ -91,15 +91,26 @@ Polymer({
 
   /**
    * Handler for when the profile name field is changed, then blurred.
-   * @private
    * @param {!Event} event
+   * @private
    */
   onProfileNameChanged_: function(event) {
     if (event.target.invalid)
       return;
 
-    this.browserProxy_.setProfileIconAndName(this.profileIconUrl,
-                                             event.target.value);
+    this.browserProxy_.setProfileName(event.target.value);
+  },
+
+  /**
+   * Handler for profile name keydowns.
+   * @param {!Event} event
+   * @private
+   */
+  onProfileNameKeydown_: function(event) {
+    if (event.key == 'Escape') {
+      event.target.value = this.profileName;
+      event.target.blur();
+    }
   },
 
   /**
@@ -108,8 +119,15 @@ Polymer({
    * @private
    */
   onIconActivate_: function(event) {
-    this.browserProxy_.setProfileIconAndName(event.detail.selected,
-                                             this.profileName);
+    // Explicitly test against undefined, because even when an element has the
+    // data-is-gaia-avatar attribute, dataset.isGaiaAvatar returns an empty
+    // string, which is falsy.
+    var isGaiaAvatar = event.detail.item.dataset.isGaiaAvatar !== undefined;
+
+    if (isGaiaAvatar)
+      this.browserProxy_.setProfileIconToGaiaAvatar();
+    else
+      this.browserProxy_.setProfileIconToDefaultAvatar(event.detail.selected);
   },
 
   /**

@@ -7,7 +7,7 @@
 
 #include "base/macros.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "components/reading_list/ios/reading_list_model_observer.h"
+#include "components/reading_list/core/reading_list_model_observer.h"
 #include "ios/chrome/browser/reading_list/url_downloader.h"
 #include "net/base/network_change_notifier.h"
 
@@ -16,10 +16,6 @@ class PrefService;
 class ReadingListModel;
 namespace base {
 class FilePath;
-}
-
-namespace dom_distiller {
-class DomDistillerService;
 }
 
 namespace reading_list {
@@ -37,16 +33,19 @@ class ReadingListDownloadService
  public:
   ReadingListDownloadService(
       ReadingListModel* reading_list_model,
-      dom_distiller::DomDistillerService* distiller_service,
       PrefService* prefs,
       base::FilePath chrome_profile_path,
       net::URLRequestContextGetter* url_request_context_getter,
+      std::unique_ptr<dom_distiller::DistillerFactory> distiller_factory,
       std::unique_ptr<reading_list::ReadingListDistillerPageFactory>
           distiller_page_factory);
   ~ReadingListDownloadService() override;
 
   // Initializes the reading list download service.
   void Initialize();
+
+  // Clear the current download queue.
+  void Clear();
 
   // The root folder containing all the offline files.
   virtual base::FilePath OfflineRoot() const;
@@ -94,6 +93,7 @@ class ReadingListDownloadService
                      const GURL& distilled_url,
                      URLDownloader::SuccessState success,
                      const base::FilePath& distilled_path,
+                     int64_t size,
                      const std::string& title);
 
   // Callback for entry deletion.
@@ -111,6 +111,7 @@ class ReadingListDownloadService
   bool had_connection_;
   std::unique_ptr<reading_list::ReadingListDistillerPageFactory>
       distiller_page_factory_;
+  std::unique_ptr<dom_distiller::DistillerFactory> distiller_factory_;
 
   base::WeakPtrFactory<ReadingListDownloadService> weak_ptr_factory_;
 

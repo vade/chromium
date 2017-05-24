@@ -6,53 +6,69 @@
 
 #include "base/bind.h"
 #include "device/vr/vr_device.h"
+#include "device/vr/vr_device_manager.h"
 #include "device/vr/vr_service_impl.h"
 
 namespace device {
 
-VRDisplayImpl::VRDisplayImpl(device::VRDevice* device, VRServiceImpl* service)
+VRDisplayImpl::VRDisplayImpl(device::VRDevice* device,
+                             VRServiceImpl* service,
+                             mojom::VRServiceClient* service_client,
+                             mojom::VRDisplayInfoPtr display_info)
     : binding_(this),
       device_(device),
       service_(service),
       weak_ptr_factory_(this) {
-  mojom::VRDisplayInfoPtr display_info = device->GetVRDevice();
-  if (service->client()) {
-    service->client()->OnDisplayConnected(binding_.CreateInterfacePtrAndBind(),
-                                          mojo::MakeRequest(&client_),
-                                          std::move(display_info));
-  }
+  device_->AddDisplay(this);
+  service_client->OnDisplayConnected(binding_.CreateInterfacePtrAndBind(),
+                                     mojo::MakeRequest(&client_),
+                                     std::move(display_info));
 }
 
 VRDisplayImpl::~VRDisplayImpl() {
   device_->RemoveDisplay(this);
 }
 
-void VRDisplayImpl::GetPose(const GetPoseCallback& callback) {
-  if (!device_->IsAccessAllowed(this)) {
-    callback.Run(nullptr);
-    return;
-  }
-
-  callback.Run(device_->GetPose());
+void VRDisplayImpl::OnChanged(mojom::VRDisplayInfoPtr vr_device_info) {
+  client_->OnChanged(std::move(vr_device_info));
 }
 
-void VRDisplayImpl::ResetPose() {
-  if (!device_->IsAccessAllowed(this))
-    return;
+void VRDisplayImpl::OnExitPresent() {
+  client_->OnExitPresent();
+}
 
-  device_->ResetPose();
+void VRDisplayImpl::OnBlur() {
+  client_->OnBlur();
+}
+
+void VRDisplayImpl::OnFocus() {
+  client_->OnFocus();
+}
+
+void VRDisplayImpl::OnActivate(mojom::VRDisplayEventReason reason,
+                               const base::Callback<void(bool)>& on_handled) {
+  VRDeviceManager* manager = VRDeviceManager::GetInstance();
+  if (!manager->IsMostRecentlyListeningForActivate(service_))
+    return;
+  client_->OnActivate(reason, on_handled);
+}
+
+void VRDisplayImpl::OnDeactivate(mojom::VRDisplayEventReason reason) {
+  client_->OnDeactivate(reason);
 }
 
 void VRDisplayImpl::RequestPresent(bool secure_origin,
+                                   mojom::VRSubmitFrameClientPtr submit_client,
                                    const RequestPresentCallback& callback) {
   if (!device_->IsAccessAllowed(this)) {
     callback.Run(false);
     return;
   }
 
-  device_->RequestPresent(base::Bind(&VRDisplayImpl::RequestPresentResult,
-                                     weak_ptr_factory_.GetWeakPtr(), callback,
-                                     secure_origin));
+  device_->RequestPresent(
+      std::move(submit_client),
+      base::Bind(&VRDisplayImpl::RequestPresentResult,
+                 weak_ptr_factory_.GetWeakPtr(), callback, secure_origin));
 }
 
 void VRDisplayImpl::RequestPresentResult(const RequestPresentCallback& callback,
@@ -70,17 +86,31 @@ void VRDisplayImpl::ExitPresent() {
     device_->ExitPresent();
 }
 
-void VRDisplayImpl::SubmitFrame(mojom::VRPosePtr pose) {
+void VRDisplayImpl::SubmitFrame(int16_t frame_index,
+                                const gpu::MailboxHolder& mailbox) {
   if (!device_->CheckPresentingDisplay(this))
     return;
-  device_->SubmitFrame(std::move(pose));
+  device_->SubmitFrame(frame_index, mailbox);
 }
 
-void VRDisplayImpl::UpdateLayerBounds(mojom::VRLayerBoundsPtr left_bounds,
-                                      mojom::VRLayerBoundsPtr right_bounds) {
+void VRDisplayImpl::UpdateLayerBounds(int16_t frame_index,
+                                      mojom::VRLayerBoundsPtr left_bounds,
+                                      mojom::VRLayerBoundsPtr right_bounds,
+                                      int16_t source_width,
+                                      int16_t source_height) {
   if (!device_->IsAccessAllowed(this))
     return;
 
-  device_->UpdateLayerBounds(std::move(left_bounds), std::move(right_bounds));
+  device_->UpdateLayerBounds(frame_index, std::move(left_bounds),
+                             std::move(right_bounds), source_width,
+                             source_height);
 }
+
+void VRDisplayImpl::GetVRVSyncProvider(mojom::VRVSyncProviderRequest request) {
+  if (!device_->IsAccessAllowed(this)) {
+    return;
+  }
+  device_->GetVRVSyncProvider(std::move(request));
 }
+
+}  // namespace device

@@ -81,6 +81,8 @@ void WaylandWindow::Close() {
   NOTIMPLEMENTED();
 }
 
+void WaylandWindow::PrepareForShutdown() {}
+
 void WaylandWindow::SetBounds(const gfx::Rect& bounds) {
   if (bounds == bounds_)
     return;
@@ -149,6 +151,8 @@ bool WaylandWindow::CanDispatchEvent(const PlatformEvent& native_event) {
   Event* event = static_cast<Event*>(native_event);
   if (event->IsMouseEvent())
     return has_pointer_focus_;
+  if (event->IsKeyEvent())
+    return has_keyboard_focus_;
   return false;
 }
 

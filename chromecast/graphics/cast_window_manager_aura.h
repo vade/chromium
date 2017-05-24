@@ -8,12 +8,10 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "base/observer_list.h"
-#include "chromecast/graphics/cast_vsync_settings.h"
 #include "chromecast/graphics/cast_window_manager.h"
+#include "ui/aura/client/window_parenting_client.h"
 
 namespace aura {
-class Window;
 namespace client {
 class DefaultCaptureClient;
 }  // namespace client
@@ -21,16 +19,23 @@ class DefaultCaptureClient;
 
 namespace chromecast {
 
+class CastFocusClientAura;
 class CastWindowTreeHost;
 
 class CastWindowManagerAura : public CastWindowManager,
-                              private CastVSyncSettings::Observer {
+                              public aura::client::WindowParentingClient {
  public:
   ~CastWindowManagerAura() override;
 
   // CastWindowManager implementation:
   void TearDown() override;
   void AddWindow(gfx::NativeView window) override;
+  gfx::NativeView GetRootWindow() override;
+  void SetWindowId(gfx::NativeView window, WindowId window_id) override;
+
+  // aura::client::WindowParentingClient implementation:
+  aura::Window* GetDefaultParent(aura::Window* window,
+                                 const gfx::Rect& bounds) override;
 
  private:
   friend class CastWindowManager;
@@ -38,14 +43,12 @@ class CastWindowManagerAura : public CastWindowManager,
   // This class should only be instantiated by CastWindowManager::Create.
   explicit CastWindowManagerAura(bool enable_input);
 
-  // CastVSyncSettings::Observer implementation:
-  void OnVSyncIntervalChanged(base::TimeDelta interval) override;
-
   void Setup();
 
   const bool enable_input_;
   std::unique_ptr<CastWindowTreeHost> window_tree_host_;
   std::unique_ptr<aura::client::DefaultCaptureClient> capture_client_;
+  std::unique_ptr<CastFocusClientAura> focus_client_;
 
   DISALLOW_COPY_AND_ASSIGN(CastWindowManagerAura);
 };

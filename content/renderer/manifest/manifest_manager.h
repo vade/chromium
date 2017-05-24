@@ -10,6 +10,8 @@
 
 #include "base/callback_forward.h"
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
+#include "content/common/manifest_observer.mojom.h"
 #include "content/public/common/manifest.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/renderer/manifest/manifest_debug_info.h"
@@ -47,7 +49,7 @@ class ManifestManager : public RenderFrameObserver {
   bool OnMessageReceived(const IPC::Message& message) override;
   void DidChangeManifest() override;
   void DidCommitProvisionalLoad(bool is_new_navigation,
-                                bool is_same_page_navigation) override;
+                                bool is_same_document_navigation) override;
 
  private:
   enum ResolveState {
@@ -72,6 +74,9 @@ class ManifestManager : public RenderFrameObserver {
                                const std::string& data);
   void ResolveCallbacks(ResolveState state);
 
+  void ReportManifestChange();
+  mojom::ManifestUrlChangeObserver& GetManifestChangeObserver();
+
   std::unique_ptr<ManifestFetcher> fetcher_;
 
   // Whether the RenderFrame may have an associated Manifest. If true, the frame
@@ -92,7 +97,11 @@ class ManifestManager : public RenderFrameObserver {
   // Current Manifest debug information.
   ManifestDebugInfo manifest_debug_info_;
 
+  mojom::ManifestUrlChangeObserverAssociatedPtr manifest_change_observer_;
+
   std::list<GetManifestCallback> pending_callbacks_;
+
+  base::WeakPtrFactory<ManifestManager> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ManifestManager);
 };

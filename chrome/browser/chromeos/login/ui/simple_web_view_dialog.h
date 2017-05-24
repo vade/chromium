@@ -23,10 +23,6 @@ class Profile;
 class ReloadButton;
 class ToolbarModel;
 
-namespace security_state {
-struct SecurityInfo;
-}  // namespace security_state
-
 namespace views {
 class WebView;
 class Widget;
@@ -80,15 +76,9 @@ class SimpleWebViewDialog : public views::ButtonListener,
   content::WebContents* GetWebContents() override;
   ToolbarModel* GetToolbarModel() override;
   const ToolbarModel* GetToolbarModel() const override;
-  PageActionImageView* CreatePageActionImageView(
-      LocationBarView* owner,
-      ExtensionAction* action) override;
   ContentSettingBubbleModelDelegate* GetContentSettingBubbleModelDelegate()
       override;
-  void ShowWebsiteSettings(
-      content::WebContents* web_contents,
-      const GURL& virtual_url,
-      const security_state::SecurityInfo& security_info) override;
+  void ShowPageInfo(content::WebContents* web_contents) override;
 
   // Implements ChromeToolbarModelDelegate:
   content::WebContents* GetActiveWebContents() const override;

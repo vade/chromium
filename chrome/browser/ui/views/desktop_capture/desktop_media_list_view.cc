@@ -22,7 +22,6 @@
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/aura/window.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/views/focus/focus_manager.h"
 
 using content::DesktopMediaID;
 
@@ -158,7 +157,7 @@ bool DesktopMediaListView::OnKeyPressed(const ui::KeyEvent& event) {
   }
 
   if (new_selected)
-    GetFocusManager()->SetFocusedView(new_selected);
+    new_selected->RequestFocus();
   return true;
 }
 
@@ -207,8 +206,8 @@ void DesktopMediaListView::OnSourceAdded(DesktopMediaList* list, int index) {
     source_view->OnFocus();
     content::BrowserThread::PostTask(
         content::BrowserThread::UI, FROM_HERE,
-        base::Bind(&DesktopMediaListView::AcceptSelection,
-                   weak_factory_.GetWeakPtr()));
+        base::BindOnce(&DesktopMediaListView::AcceptSelection,
+                       weak_factory_.GetWeakPtr()));
   }
 }
 

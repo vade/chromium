@@ -6,8 +6,6 @@
 
 #include "base/metrics/user_metrics.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/media/router/issue.h"
-#include "chrome/browser/media/router/media_route.h"
 #include "chrome/browser/media/router/media_router.h"
 #include "chrome/browser/media/router/media_router_factory.h"
 #include "chrome/browser/media/router/media_router_metrics.h"
@@ -18,11 +16,15 @@
 #include "chrome/browser/ui/toolbar/media_router_action_platform_delegate.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_delegate.h"
 #include "chrome/browser/ui/webui/media_router/media_router_dialog_controller_impl.h"
+#include "chrome/common/media_router/issue.h"
+#include "chrome/common/media_router/media_route.h"
 #include "chrome/grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/paint_vector_icon.h"
+#include "ui/gfx/vector_icon_types.h"
+#include "ui/vector_icons/vector_icons.h"
 
 using media_router::MediaRouterDialogControllerImpl;
 
@@ -39,14 +41,13 @@ MediaRouterAction::MediaRouterAction(Browser* browser,
                                      ToolbarActionsBar* toolbar_actions_bar)
     : media_router::IssuesObserver(GetMediaRouter(browser)),
       media_router::MediaRoutesObserver(GetMediaRouter(browser)),
-      current_icon_(gfx::VectorIconId::MEDIA_ROUTER_IDLE),
+      current_icon_(&ui::kMediaRouterIdleIcon),
       has_local_display_route_(false),
       has_dialog_(false),
       delegate_(nullptr),
       browser_(browser),
       toolbar_actions_bar_(toolbar_actions_bar),
       platform_delegate_(MediaRouterActionPlatformDelegate::Create(browser)),
-      contextual_menu_(browser),
       tab_strip_model_observer_(this),
       toolbar_actions_bar_observer_(this),
       weak_ptr_factory_(this) {
@@ -61,20 +62,18 @@ MediaRouterAction::~MediaRouterAction() {
 }
 
 // static
-SkColor MediaRouterAction::GetIconColor(gfx::VectorIconId icon_id) {
-  switch (icon_id) {
-    case gfx::VectorIconId::MEDIA_ROUTER_IDLE:
-      return gfx::kChromeIconGrey;
-    case gfx::VectorIconId::MEDIA_ROUTER_ACTIVE:
-      return gfx::kGoogleBlue500;
-    case gfx::VectorIconId::MEDIA_ROUTER_WARNING:
-      return gfx::kGoogleYellow700;
-    case gfx::VectorIconId::MEDIA_ROUTER_ERROR:
-      return gfx::kGoogleRed700;
-    default:
-      NOTREACHED();
-      return gfx::kPlaceholderColor;
-  }
+SkColor MediaRouterAction::GetIconColor(const gfx::VectorIcon& icon_id) {
+  if (&icon_id == &ui::kMediaRouterIdleIcon)
+    return gfx::kChromeIconGrey;
+  else if (&icon_id == &ui::kMediaRouterActiveIcon)
+    return gfx::kGoogleBlue500;
+  else if (&icon_id == &ui::kMediaRouterWarningIcon)
+    return gfx::kGoogleYellow700;
+  else if (&icon_id == &ui::kMediaRouterErrorIcon)
+    return gfx::kGoogleRed700;
+
+  NOTREACHED();
+  return gfx::kPlaceholderColor;
 }
 
 std::string MediaRouterAction::GetId() const {
@@ -94,7 +93,7 @@ void MediaRouterAction::SetDelegate(ToolbarActionViewDelegate* delegate) {
 gfx::Image MediaRouterAction::GetIcon(content::WebContents* web_contents,
                                       const gfx::Size& size) {
   return gfx::Image(
-      gfx::CreateVectorIcon(current_icon_, GetIconColor(current_icon_)));
+      gfx::CreateVectorIcon(*current_icon_, GetIconColor(*current_icon_)));
 }
 
 base::string16 MediaRouterAction::GetActionName() const {
@@ -135,7 +134,13 @@ gfx::NativeView MediaRouterAction::GetPopupNativeView() {
 }
 
 ui::MenuModel* MediaRouterAction::GetContextMenu() {
-  return contextual_menu_.menu_model();
+  if (toolbar_actions_bar_->IsActionVisibleOnMainBar(this)) {
+    contextual_menu_ = MediaRouterContextualMenu::CreateForToolbar(browser_);
+  } else {
+    contextual_menu_ =
+        MediaRouterContextualMenu::CreateForOverflowMenu(browser_);
+  }
+  return contextual_menu_->menu_model();
 }
 
 void MediaRouterAction::OnContextMenuClosed() {
@@ -172,7 +177,7 @@ bool MediaRouterAction::DisabledClickOpensMenu() const {
 }
 
 void MediaRouterAction::OnIssue(const media_router::Issue& issue) {
-  current_issue_.reset(new media_router::IssueInfo(issue.info()));
+  current_issue_ = base::MakeUnique<media_router::IssueInfo>(issue.info());
   MaybeUpdateIcon();
 }
 
@@ -261,11 +266,11 @@ MediaRouterActionPlatformDelegate* MediaRouterAction::GetPlatformDelegate() {
 }
 
 void MediaRouterAction::MaybeUpdateIcon() {
-  gfx::VectorIconId new_icon = GetCurrentIcon();
+  const gfx::VectorIcon& new_icon = GetCurrentIcon();
 
   // Update the current state if it has changed.
-  if (new_icon != current_icon_) {
-    current_icon_ = new_icon;
+  if (&new_icon != current_icon_) {
+    current_icon_ = &new_icon;
 
     // Tell the associated view to update its icon to reflect the change made
     // above. If MaybeUpdateIcon() was called as a result of instantiating
@@ -275,17 +280,17 @@ void MediaRouterAction::MaybeUpdateIcon() {
   }
 }
 
-gfx::VectorIconId MediaRouterAction::GetCurrentIcon() const {
+const gfx::VectorIcon& MediaRouterAction::GetCurrentIcon() const {
   // Highest priority is to indicate whether there's an issue.
   if (current_issue_) {
     media_router::IssueInfo::Severity severity = current_issue_->severity;
     if (severity == media_router::IssueInfo::Severity::FATAL)
-      return gfx::VectorIconId::MEDIA_ROUTER_ERROR;
+      return ui::kMediaRouterErrorIcon;
     if (severity == media_router::IssueInfo::Severity::WARNING)
-      return gfx::VectorIconId::MEDIA_ROUTER_WARNING;
+      return ui::kMediaRouterWarningIcon;
     // Fall through for Severity::NOTIFICATION.
   }
 
-  return has_local_display_route_ ? gfx::VectorIconId::MEDIA_ROUTER_ACTIVE
-                                  : gfx::VectorIconId::MEDIA_ROUTER_IDLE;
+  return has_local_display_route_ ? ui::kMediaRouterActiveIcon
+                                  : ui::kMediaRouterIdleIcon;
 }

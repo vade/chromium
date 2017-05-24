@@ -4,7 +4,11 @@
 
 #include "content/browser/devtools/protocol/page_handler.h"
 
+#include <algorithm>
+#include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "base/base64.h"
 #include "base/bind.h"
@@ -18,7 +22,6 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/devtools/devtools_session.h"
 #include "content/browser/devtools/page_navigation_throttle.h"
-#include "content/browser/devtools/protocol/color_picker.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/browser/web_contents/web_contents_impl.h"
@@ -97,8 +100,6 @@ PageHandler::PageHandler()
       session_id_(0),
       frame_counter_(0),
       frames_in_flight_(0),
-      color_picker_(new ColorPicker(
-          base::Bind(&PageHandler::OnColorPicked, base::Unretained(this)))),
       navigation_throttle_enabled_(false),
       next_navigation_id_(0),
       host_(nullptr),
@@ -108,9 +109,10 @@ PageHandler::~PageHandler() {
 }
 
 // static
-PageHandler* PageHandler::FromSession(DevToolsSession* session) {
-  return static_cast<PageHandler*>(
-      session->GetHandlerByName(Page::Metainfo::domainName));
+std::vector<PageHandler*> PageHandler::ForAgentHost(
+    DevToolsAgentHostImpl* host) {
+  return DevToolsSession::HandlersForAgentHost<PageHandler>(
+      host, Page::Metainfo::domainName);
 }
 
 void PageHandler::SetRenderFrameHost(RenderFrameHostImpl* host) {
@@ -128,7 +130,6 @@ void PageHandler::SetRenderFrameHost(RenderFrameHostImpl* host) {
 
   host_ = host;
   widget_host = host_ ? host_->GetRenderWidgetHost() : nullptr;
-  color_picker_->SetRenderWidgetHost(widget_host);
 
   if (widget_host) {
     registrar_.Add(
@@ -150,7 +151,6 @@ void PageHandler::OnSwapCompositorFrame(
 
   if (screencast_enabled_)
     InnerSwapCompositorFrame();
-  color_picker_->OnSwapCompositorFrame();
 }
 
 void PageHandler::OnSynchronousSwapCompositorFrame(
@@ -167,7 +167,6 @@ void PageHandler::OnSynchronousSwapCompositorFrame(
 
   if (screencast_enabled_)
     InnerSwapCompositorFrame();
-  color_picker_->OnSwapCompositorFrame();
 }
 
 void PageHandler::Observe(int type,
@@ -203,7 +202,6 @@ Response PageHandler::Disable() {
   enabled_ = false;
   screencast_enabled_ = false;
   SetControlNavigations(false);
-  color_picker_->SetEnabled(false);
   return Response::FallThrough();
 }
 
@@ -228,6 +226,7 @@ Response PageHandler::Reload(Maybe<bool> bypassCache,
 }
 
 Response PageHandler::Navigate(const std::string& url,
+                               Maybe<std::string> referrer,
                                Page::FrameId* frame_id) {
   GURL gurl(url);
   if (!gurl.is_valid())
@@ -237,8 +236,10 @@ Response PageHandler::Navigate(const std::string& url,
   if (!web_contents)
     return Response::InternalError();
 
-  web_contents->GetController()
-      .LoadURL(gurl, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
+  web_contents->GetController().LoadURL(
+      gurl,
+      Referrer(GURL(referrer.fromMaybe("")), blink::kWebReferrerPolicyDefault),
+      ui::PAGE_TRANSITION_TYPED, std::string());
   return Response::FallThrough();
 }
 
@@ -281,6 +282,7 @@ Response PageHandler::NavigateToHistoryEntry(int entry_id) {
 void PageHandler::CaptureScreenshot(
     Maybe<std::string> format,
     Maybe<int> quality,
+    Maybe<bool> from_surface,
     std::unique_ptr<CaptureScreenshotCallback> callback) {
   if (!host_ || !host_->GetRenderWidgetHost()) {
     callback->sendFailure(Response::InternalError());
@@ -293,7 +295,24 @@ void PageHandler::CaptureScreenshot(
   host_->GetRenderWidgetHost()->GetSnapshotFromBrowser(
       base::Bind(&PageHandler::ScreenshotCaptured, weak_factory_.GetWeakPtr(),
                  base::Passed(std::move(callback)), screenshot_format,
-                 screenshot_quality));
+                 screenshot_quality),
+      from_surface.fromMaybe(false));
+}
+
+void PageHandler::PrintToPDF(Maybe<bool> landscape,
+                             Maybe<bool> display_header_footer,
+                             Maybe<bool> print_background,
+                             Maybe<double> scale,
+                             Maybe<double> paper_width,
+                             Maybe<double> paper_height,
+                             Maybe<double> margin_top,
+                             Maybe<double> margin_bottom,
+                             Maybe<double> margin_left,
+                             Maybe<double> margin_right,
+                             Maybe<String> page_ranges,
+                             std::unique_ptr<PrintToPDFCallback> callback) {
+  callback->sendFailure(Response::Error("PrintToPDF is not implemented"));
+  return;
 }
 
 Response PageHandler::StartScreencast(Maybe<std::string> format,
@@ -361,14 +380,6 @@ Response PageHandler::HandleJavaScriptDialog(bool accept,
   }
 
   return Response::Error("Could not handle JavaScript dialog");
-}
-
-Response PageHandler::SetColorPickerEnabled(bool enabled) {
-  if (!host_)
-    return Response::InternalError();
-
-  color_picker_->SetEnabled(enabled);
-  return Response::OK();
 }
 
 Response PageHandler::RequestAppBanner() {
@@ -462,6 +473,8 @@ void PageHandler::InnerSwapCompositorFrame() {
   RenderWidgetHostViewBase* view = static_cast<RenderWidgetHostViewBase*>(
       host_->GetView());
   // TODO(vkuzkokov): do not use previous frame metadata.
+  // TODO(miu): RWHV to provide an API to provide actual rendering size.
+  // http://crbug.com/73362
   cc::CompositorFrameMetadata& metadata = last_compositor_frame_metadata_;
 
   gfx::SizeF viewport_size_dip = gfx::ScaleSize(
@@ -491,9 +504,8 @@ void PageHandler::InnerSwapCompositorFrame() {
       gfx::ScaleSize(viewport_size_dip, scale)));
 
   if (snapshot_size_dip.width() > 0 && snapshot_size_dip.height() > 0) {
-    gfx::Rect viewport_bounds_dip(gfx::ToRoundedSize(viewport_size_dip));
-    view->CopyFromCompositingSurface(
-        viewport_bounds_dip, snapshot_size_dip,
+    view->CopyFromSurface(
+        gfx::Rect(), snapshot_size_dip,
         base::Bind(&PageHandler::ScreencastFrameCaptured,
                    weak_factory_.GetWeakPtr(),
                    base::Passed(last_compositor_frame_metadata_.Clone())),
@@ -517,8 +529,7 @@ void PageHandler::ScreencastFrameCaptured(cc::CompositorFrameMetadata metadata,
     return;
   }
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, base::TaskTraits().WithShutdownBehavior(
-                     base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN),
+      FROM_HERE, {base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::Bind(&EncodeImage, gfx::Image::CreateFrom1xBitmap(bitmap),
                  screencast_format_, screencast_quality_),
       base::Bind(&PageHandler::ScreencastFrameEncoded,
@@ -570,11 +581,6 @@ void PageHandler::ScreenshotCaptured(
   }
 
   callback->sendSuccess(EncodeImage(image, format, quality));
-}
-
-void PageHandler::OnColorPicked(int r, int g, int b, int a) {
-  frontend_->ColorPicked(
-      DOM::RGBA::Create().SetR(r).SetG(g).SetB(b).SetA(a).Build());
 }
 
 Response PageHandler::StopLoading() {

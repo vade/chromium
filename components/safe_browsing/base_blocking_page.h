@@ -12,13 +12,10 @@
 #include "base/macros.h"
 #include "components/safe_browsing/base_ui_manager.h"
 #include "components/security_interstitials/content/security_interstitial_page.h"
-#include "components/security_interstitials/core/safe_browsing_error_ui.h"
+#include "components/security_interstitials/core/base_safe_browsing_error_ui.h"
+#include "components/security_interstitials/core/metrics_helper.h"
 #include "content/public/browser/interstitial_page_delegate.h"
 #include "url/gurl.h"
-
-namespace history {
-class HistoryService;
-}
 
 namespace safe_browsing {
 
@@ -27,14 +24,15 @@ class BaseBlockingPage
     : public security_interstitials::SecurityInterstitialPage {
  public:
   typedef security_interstitials::UnsafeResource UnsafeResource;
-  typedef security_interstitials::SafeBrowsingErrorUI SafeBrowsingErrorUI;
+  typedef security_interstitials::BaseSafeBrowsingErrorUI
+      BaseSafeBrowsingErrorUI;
   typedef std::vector<UnsafeResource> UnsafeResourceList;
   typedef std::unordered_map<content::WebContents*, UnsafeResourceList>
       UnsafeResourceMap;
 
   ~BaseBlockingPage() override;
 
-  static const SafeBrowsingErrorUI::SBErrorDisplayOptions
+  static const BaseSafeBrowsingErrorUI::SBErrorDisplayOptions
   CreateDefaultDisplayOptions(const UnsafeResourceList& unsafe_resources);
 
   // Shows a blocking page warning the user about phishing/malware for a
@@ -64,7 +62,7 @@ class BaseBlockingPage
       std::unique_ptr<
           security_interstitials::SecurityInterstitialControllerClient>
           controller_client,
-      const SafeBrowsingErrorUI::SBErrorDisplayOptions& display_options);
+      const BaseSafeBrowsingErrorUI::SBErrorDisplayOptions& display_options);
 
   // SecurityInterstitialPage methods:
   bool ShouldCreateNewNavigation() const override;
@@ -84,14 +82,14 @@ class BaseBlockingPage
 
   static std::string GetMetricPrefix(
       const UnsafeResourceList& unsafe_resources,
-      SafeBrowsingErrorUI::SBInterstitialReason interstitial_reason);
+      BaseSafeBrowsingErrorUI::SBInterstitialReason interstitial_reason);
 
   static std::string GetExtraMetricsSuffix(
       const UnsafeResourceList& unsafe_resources);
 
   // Return the most severe interstitial reason from a list of unsafe resources.
   // Severity ranking: malware > UwS (harmful) > phishing.
-  static SafeBrowsingErrorUI::SBInterstitialReason GetInterstitialReason(
+  static BaseSafeBrowsingErrorUI::SBInterstitialReason GetInterstitialReason(
       const UnsafeResourceList& unsafe_resources);
 
   BaseUIManager* ui_manager() const;
@@ -100,19 +98,26 @@ class BaseBlockingPage
 
   UnsafeResourceList unsafe_resources() const;
 
-  SafeBrowsingErrorUI* sb_error_ui() const;
+  BaseSafeBrowsingErrorUI* sb_error_ui() const;
 
   void set_proceeded(bool proceeded);
 
- private:
+  static security_interstitials::MetricsHelper::ReportDetails GetReportingInfo(
+      const UnsafeResourceList& unsafe_resources);
+
+  // Called after OnProceed(). Does nothing in this class, but can be overridden
+  // to handle malicious subresources.
+  virtual void HandleSubresourcesAfterProceed();
+
+  void SetThreatDetailsProceedDelayForTesting(int64_t delay);
+
   static std::unique_ptr<
       security_interstitials::SecurityInterstitialControllerClient>
   CreateControllerClient(content::WebContents* web_contents,
                          const UnsafeResourceList& unsafe_resources,
-                         history::HistoryService* history_service,
-                         const std::string& app_locale,
-                         const GURL& default_safe_page);
+                         BaseUIManager* ui_manager);
 
+ private:
   // For reporting back user actions.
   BaseUIManager* ui_manager_;
 
@@ -127,10 +132,16 @@ class BaseBlockingPage
   UnsafeResourceList unsafe_resources_;
 
   // For displaying safe browsing interstitial.
-  std::unique_ptr<SafeBrowsingErrorUI> sb_error_ui_;
+  std::unique_ptr<BaseSafeBrowsingErrorUI> sb_error_ui_;
 
   // Indicate whether user has proceeded this blocking page.
   bool proceeded_;
+
+  // After a safe browsing interstitial where the user opted-in to the
+  // report but clicked "proceed anyway", we delay the call to
+  // ThreatDetails::FinishCollection() by this much time (in
+  // milliseconds), in order to get data from the blocked resource itself.
+  int64_t threat_details_proceed_delay_ms_;
 
   DISALLOW_COPY_AND_ASSIGN(BaseBlockingPage);
 };

@@ -19,7 +19,7 @@
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/result_codes.h"
-#include "mojo/edk/embedder/embedder.h"
+#include "mojo/edk/embedder/outgoing_broker_client_invitation.h"
 #include "mojo/edk/embedder/scoped_platform_handle.h"
 
 namespace base {
@@ -80,7 +80,8 @@ class CONTENT_EXPORT ChildProcessLauncher : public base::NonThreadSafe {
       std::unique_ptr<base::CommandLine> cmd_line,
       int child_process_id,
       Client* client,
-      const std::string& mojo_child_token,
+      std::unique_ptr<mojo::edk::OutgoingBrokerClientInvitation>
+          broker_client_invitation,
       const mojo::edk::ProcessErrorCallback& process_error_callback,
       bool terminate_on_shutdown = true);
   ~ChildProcessLauncher();
@@ -107,7 +108,7 @@ class CONTENT_EXPORT ChildProcessLauncher : public base::NonThreadSafe {
 
   // Changes whether the process runs in the background or not.  Only call
   // this after the process has started.
-  void SetProcessBackgrounded(bool background);
+  void SetProcessPriority(bool background, bool boost_for_pending_views);
 
   // Terminates the process associated with this ChildProcessLauncher.
   // Returns true if the process was stopped, false if the process had not been
@@ -125,6 +126,21 @@ class CONTENT_EXPORT ChildProcessLauncher : public base::NonThreadSafe {
   // Replaces the ChildProcessLauncher::Client for testing purposes. Returns the
   // previous  client.
   Client* ReplaceClientForTest(Client* client);
+
+  // Sets the files that should be mapped when a new child process is created
+  // for the service |service_name|.
+  static void SetRegisteredFilesForService(
+      const std::string& service_name,
+      catalog::RequiredFileMap required_files);
+
+  // Resets all files registered by |SetRegisteredFilesForService|. Used to
+  // support multiple shell context creation in unit_tests.
+  static void ResetRegisteredFilesForTesting();
+
+#if defined(OS_ANDROID)
+  // Temporary until crbug.com/693484 is fixed.
+  static size_t GetNumberOfRendererSlots();
+#endif  // OS_ANDROID
 
  private:
   friend class internal::ChildProcessLauncherHelper;
@@ -146,13 +162,13 @@ class CONTENT_EXPORT ChildProcessLauncher : public base::NonThreadSafe {
   base::TerminationStatus termination_status_;
   int exit_code_;
   bool starting_;
+  std::unique_ptr<mojo::edk::OutgoingBrokerClientInvitation>
+      broker_client_invitation_;
   const mojo::edk::ProcessErrorCallback process_error_callback_;
 
   // Controls whether the child process should be terminated on browser
   // shutdown. Default behavior is to terminate the child.
   const bool terminate_child_on_shutdown_;
-
-  const std::string mojo_child_token_;
 
   scoped_refptr<internal::ChildProcessLauncherHelper> helper_;
 

@@ -6,8 +6,11 @@
 
 #include <algorithm>
 
-#include "base/mac/objc_property_releaser.h"
 #include "base/mac/scoped_cftyperef.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 @interface OmniboxPopupTruncatingLabel ()
 - (void)setup;
@@ -15,39 +18,22 @@
 @end
 
 @implementation OmniboxPopupTruncatingLabel {
-  // Attributed text.
-  base::scoped_nsobject<CATextLayer> textLayer_;
   // Gradient used to create fade effect. Changes based on view.frame size.
-  base::scoped_nsobject<UIImage> gradient_;
-
-  base::mac::ObjCPropertyReleaser propertyReleaser_OmniboxPopupTruncatingLabel_;
+  UIImage* gradient_;
 }
 
 @synthesize truncateMode = truncateMode_;
-@synthesize attributedText = attributedText_;
-@synthesize highlighted = highlighted_;
-@synthesize highlightedText = highlightedText_;
-@synthesize textAlignment = textAlignment_;
+@synthesize displayAsURL = displayAsURL_;
 
 - (void)setup {
   self.backgroundColor = [UIColor clearColor];
-  self.contentMode = UIViewContentModeRedraw;
   truncateMode_ = OmniboxPopupTruncatingTail;
-
-  // Disable animations in CATextLayer.
-  textLayer_.reset([[CATextLayer layer] retain]);
-  base::scoped_nsobject<NSDictionary> actions([[NSDictionary alloc]
-      initWithObjectsAndKeys:[NSNull null], @"contents", nil]);
-  [textLayer_ setActions:actions];
-  [textLayer_ setFrame:self.bounds];
-  [textLayer_ setContentsScale:[[UIScreen mainScreen] scale]];
 }
 
 - (id)initWithFrame:(CGRect)frame {
   self = [super initWithFrame:frame];
   if (self) {
-    propertyReleaser_OmniboxPopupTruncatingLabel_.Init(
-        self, [OmniboxPopupTruncatingLabel class]);
+    self.lineBreakMode = NSLineBreakByClipping;
     [self setup];
   }
   return self;
@@ -60,45 +46,58 @@
 
 - (void)setFrame:(CGRect)frame {
   [super setFrame:frame];
-  [textLayer_ setFrame:self.bounds];
 
   // Cache the fade gradient when the frame changes.
   if (!CGRectIsEmpty(frame) &&
-      (!gradient_.get() || !CGSizeEqualToSize([gradient_ size], frame.size))) {
+      (!gradient_ || !CGSizeEqualToSize([gradient_ size], frame.size))) {
     CGRect rect = CGRectMake(0, 0, frame.size.width, frame.size.height);
-    gradient_.reset([[self getLinearGradient:rect] retain]);
+    gradient_ = [self getLinearGradient:rect];
   }
 }
 
-- (void)drawRect:(CGRect)rect {
-  if ([attributedText_ length] == 0)
-    return;
-
+// Draw fade gradient mask if attributedText is wider than rect.
+- (void)drawTextInRect:(CGRect)requestedRect {
   CGContextRef context = UIGraphicsGetCurrentContext();
   CGContextSaveGState(context);
-  [textLayer_ setString:highlighted_ ? highlightedText_ : attributedText_];
-  CGContextClipToMask(context, self.bounds, [gradient_ CGImage]);
-  [textLayer_ renderInContext:context];
+
+  if ([self.attributedText size].width > requestedRect.size.width)
+    CGContextClipToMask(context, self.bounds, [gradient_ CGImage]);
+
+  // Add the specified line break and alignment attributes to attributedText and
+  // draw the result.
+  NSMutableAttributedString* attributedString =
+      [self.attributedText mutableCopy];
+  NSMutableParagraphStyle* textStyle =
+      [[NSParagraphStyle defaultParagraphStyle] mutableCopy];
+  textStyle.lineBreakMode = self.lineBreakMode;
+  textStyle.alignment = self.textAlignment;
+  // URLs have their text direction set to to LTR (avoids RTL characters
+  // making the URL render from right to left, as per RFC 3987 Section 4.1).
+  if (self.displayAsURL)
+    textStyle.baseWritingDirection = NSWritingDirectionLeftToRight;
+  [attributedString addAttribute:NSParagraphStyleAttributeName
+                           value:textStyle
+                           range:NSMakeRange(0, [self.text length])];
+  [attributedString drawInRect:requestedRect];
 
   CGContextRestoreGState(context);
 }
 
 - (void)setTextAlignment:(NSTextAlignment)textAlignment {
   if (textAlignment == NSTextAlignmentLeft) {
-    [textLayer_ setAlignmentMode:kCAAlignmentLeft];
     self.truncateMode = OmniboxPopupTruncatingTail;
   } else if (textAlignment == NSTextAlignmentRight) {
-    [textLayer_ setAlignmentMode:kCAAlignmentRight];
     self.truncateMode = OmniboxPopupTruncatingHead;
   } else if (textAlignment == NSTextAlignmentNatural) {
-    [textLayer_ setAlignmentMode:kCAAlignmentNatural];
     self.truncateMode = OmniboxPopupTruncatingTail;
   } else {
     NOTREACHED();
   }
-  if (textAlignment != textAlignment_)
-    gradient_.reset();
-  textAlignment_ = textAlignment;
+
+  if (textAlignment != self.textAlignment)
+    gradient_ = nil;
+
+  [super setTextAlignment:textAlignment];
 }
 
 // Create gradient opacity mask based on direction.

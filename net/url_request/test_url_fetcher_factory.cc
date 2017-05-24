@@ -13,14 +13,15 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
-#include "base/single_thread_task_runner.h"
+#include "base/sequenced_task_runner.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/upload_data_stream.h"
 #include "net/http/http_response_headers.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_fetcher_impl.h"
 #include "net/url_request/url_fetcher_response_writer.h"
@@ -389,7 +390,7 @@ FakeURLFetcher::~FakeURLFetcher() {}
 
 void FakeURLFetcher::Start() {
   TestURLFetcher::Start();
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
+  base::SequencedTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(&FakeURLFetcher::RunDelegate, weak_factory_.GetWeakPtr()));
 }
@@ -485,7 +486,8 @@ std::unique_ptr<URLFetcher> URLFetcherImplFactory::CreateURLFetcher(
     const GURL& url,
     URLFetcher::RequestType request_type,
     URLFetcherDelegate* d) {
-  return std::unique_ptr<URLFetcher>(new URLFetcherImpl(url, request_type, d));
+  return std::unique_ptr<URLFetcher>(
+      new URLFetcherImpl(url, request_type, d, TRAFFIC_ANNOTATION_FOR_TESTS));
 }
 
 }  // namespace net

@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/time/clock.h"
 #include "base/time/default_clock.h"
@@ -15,6 +16,7 @@
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_features.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
@@ -53,8 +55,6 @@ DataReductionProxySettings::DataReductionProxySettings()
     : unreachable_(false),
       deferred_initialization_(false),
       promo_allowed_(false),
-      lo_fi_mode_active_(false),
-      lo_fi_load_image_requested_(false),
       data_reduction_proxy_enabled_pref_name_(),
       prefs_(NULL),
       config_(nullptr),
@@ -105,6 +105,12 @@ void DataReductionProxySettings::InitDataReductionProxySettings(
   UpdateConfigValues();
   RecordDataReductionInit();
   data_reduction_proxy_service_->InitializeLoFiPrefs();
+
+  if (base::FeatureList::IsEnabled(features::kDataReductionSiteBreakdown) &&
+      spdy_proxy_auth_enabled_.GetValue()) {
+    data_reduction_proxy_service_->compression_stats()
+        ->SetDataUsageReportingEnabled(true);
+  }
 }
 
 void DataReductionProxySettings::OnServiceInitialized() {
@@ -141,9 +147,14 @@ bool DataReductionProxySettings::IsDataReductionProxyManaged() {
 
 void DataReductionProxySettings::SetDataReductionProxyEnabled(bool enabled) {
   DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(data_reduction_proxy_service_->compression_stats());
   if (spdy_proxy_auth_enabled_.GetValue() != enabled) {
     spdy_proxy_auth_enabled_.SetValue(enabled);
     OnProxyEnabledPrefChange();
+    if (base::FeatureList::IsEnabled(features::kDataReductionSiteBreakdown)) {
+      data_reduction_proxy_service_->compression_stats()
+          ->SetDataUsageReportingEnabled(enabled);
+    }
   }
 }
 
@@ -152,6 +163,13 @@ int64_t DataReductionProxySettings::GetDataReductionLastUpdateTime() {
   DCHECK(data_reduction_proxy_service_->compression_stats());
   return
       data_reduction_proxy_service_->compression_stats()->GetLastUpdateTime();
+}
+
+void DataReductionProxySettings::ClearDataSavingStatistics() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(data_reduction_proxy_service_->compression_stats());
+  data_reduction_proxy_service_->compression_stats()
+      ->ClearDataSavingStatistics();
 }
 
 int64_t DataReductionProxySettings::GetTotalHttpContentLengthSaved() {
@@ -178,23 +196,10 @@ PrefService* DataReductionProxySettings::GetOriginalProfilePrefs() {
 
 void DataReductionProxySettings::SetLoFiModeActiveOnMainFrame(
     bool lo_fi_mode_active) {
+  // TODO(ryansturm): Remove this method and prefs::kLoFiWasUsedThisSession when
+  // Lo-Fi moves over to using the Previews blacklist completely.
   if (prefs_ && lo_fi_mode_active)
     prefs_->SetBoolean(prefs::kLoFiWasUsedThisSession, true);
-  lo_fi_load_image_requested_ = false;
-  lo_fi_mode_active_ = lo_fi_mode_active;
-}
-
-bool DataReductionProxySettings::WasLoFiModeActiveOnMainFrame() const {
-  return lo_fi_mode_active_ && !params::AreLitePagesEnabledViaFlags() &&
-         !params::IsIncludedInLitePageFieldTrial();
-}
-
-bool DataReductionProxySettings::WasLoFiLoadImageRequestedBefore() {
-  return lo_fi_load_image_requested_;
-}
-
-void DataReductionProxySettings::SetLoFiLoadImageRequested() {
-  lo_fi_load_image_requested_ = true;
 }
 
 void DataReductionProxySettings::IncrementLoFiUIShown() {
@@ -404,17 +409,6 @@ void DataReductionProxySettings::GetContentLengths(
 
   data_reduction_proxy_service_->compression_stats()->GetContentLengths(
       days, original_content_length, received_content_length, last_update_time);
-}
-
-bool DataReductionProxySettings::UpdateDataSavings(
-    const std::string& data_usage_host,
-    int64_t data_used,
-    int64_t original_size) {
-  if (!IsDataReductionProxyEnabled())
-    return false;
-  data_reduction_proxy_service_->compression_stats()->UpdateDataSavings(
-      data_usage_host, data_used, original_size);
-  return true;
 }
 
 }  // namespace data_reduction_proxy

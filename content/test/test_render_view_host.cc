@@ -17,7 +17,6 @@
 #include "content/browser/site_instance_impl.h"
 #include "content/common/dom_storage/dom_storage_types.h"
 #include "content/common/frame_messages.h"
-#include "content/common/site_isolation_policy.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -31,10 +30,11 @@
 #include "media/base/video_frame.h"
 #include "ui/aura/env.h"
 #include "ui/compositor/compositor.h"
+#include "ui/compositor/layer_type.h"
 #include "ui/gfx/geometry/rect.h"
 
-#if defined(OS_ANDROID)
-#include "content/browser/renderer_host/context_provider_factory_impl_android.h"
+#if defined(USE_AURA)
+#include "ui/aura/test/test_window_delegate.h"
 #endif
 
 namespace content {
@@ -46,6 +46,7 @@ void InitNavigateParams(FrameHostMsg_DidCommitProvisionalLoad_Params* params,
                         ui::PageTransition transition) {
   params->nav_entry_id = nav_entry_id;
   params->url = url;
+  params->origin = url::Origin(url);
   params->referrer = Referrer();
   params->transition = transition;
   params->redirects = std::vector<GURL>();
@@ -54,7 +55,7 @@ void InitNavigateParams(FrameHostMsg_DidCommitProvisionalLoad_Params* params,
   params->searchable_form_encoding = std::string();
   params->did_create_new_entry = did_create_new_entry;
   params->gesture = NavigationGestureUser;
-  params->was_within_same_page = false;
+  params->was_within_same_document = false;
   params->method = "GET";
   params->page_state = PageState::CreateFromURL(url);
 }
@@ -63,13 +64,11 @@ TestRenderWidgetHostView::TestRenderWidgetHostView(RenderWidgetHost* rwh)
     : rwh_(RenderWidgetHostImpl::From(rwh)),
       is_showing_(false),
       is_occluded_(false),
-      did_swap_compositor_frame_(false) {
+      did_swap_compositor_frame_(false),
+      background_color_(SK_ColorWHITE) {
 #if defined(OS_ANDROID)
-  // Not all tests initialize or need a context provider factory.
-  if (ContextProviderFactoryImpl::GetInstance()) {
-    frame_sink_id_ = AllocateFrameSinkId();
-    GetSurfaceManager()->RegisterFrameSinkId(frame_sink_id_);
-  }
+  frame_sink_id_ = AllocateFrameSinkId();
+  GetSurfaceManager()->RegisterFrameSinkId(frame_sink_id_);
 #else
   // Not all tests initialize or need an image transport factory.
   if (ImageTransportFactory::GetInstance()) {
@@ -79,16 +78,17 @@ TestRenderWidgetHostView::TestRenderWidgetHostView(RenderWidgetHost* rwh)
 #endif
 
   rwh_->SetView(this);
+
+#if defined(USE_AURA)
+  window_.reset(new aura::Window(
+      aura::test::TestWindowDelegate::CreateSelfDestroyingDelegate()));
+  window_->set_owned_by_parent(false);
+  window_->Init(ui::LayerType::LAYER_NOT_DRAWN);
+#endif
 }
 
 TestRenderWidgetHostView::~TestRenderWidgetHostView() {
-  cc::SurfaceManager* manager = nullptr;
-#if defined(OS_ANDROID)
-  if (ContextProviderFactoryImpl::GetInstance())
-    manager = GetSurfaceManager();
-#else
-  manager = GetSurfaceManager();
-#endif
+  cc::SurfaceManager* manager = GetSurfaceManager();
   if (manager) {
     manager->InvalidateFrameSinkId(frame_sink_id_);
   }
@@ -103,7 +103,11 @@ gfx::Vector2dF TestRenderWidgetHostView::GetLastScrollOffset() const {
 }
 
 gfx::NativeView TestRenderWidgetHostView::GetNativeView() const {
+#if defined(USE_AURA)
+  return window_.get();
+#else
   return nullptr;
+#endif
 }
 
 gfx::NativeViewAccessible TestRenderWidgetHostView::GetNativeViewAccessible() {
@@ -115,10 +119,6 @@ ui::TextInputClient* TestRenderWidgetHostView::GetTextInputClient() {
 }
 
 bool TestRenderWidgetHostView::HasFocus() const {
-  return true;
-}
-
-bool TestRenderWidgetHostView::IsSurfaceAvailableForCopy() const {
   return true;
 }
 
@@ -154,23 +154,12 @@ gfx::Rect TestRenderWidgetHostView::GetViewBounds() const {
   return gfx::Rect();
 }
 
-void TestRenderWidgetHostView::CopyFromCompositingSurface(
-    const gfx::Rect& src_subrect,
-    const gfx::Size& dst_size,
-    const ReadbackRequestCallback& callback,
-    const SkColorType preferred_color_type) {
-  callback.Run(SkBitmap(), content::READBACK_FAILED);
+void TestRenderWidgetHostView::SetBackgroundColor(SkColor color) {
+  background_color_ = color;
 }
 
-void TestRenderWidgetHostView::CopyFromCompositingSurfaceToVideoFrame(
-    const gfx::Rect& src_subrect,
-    const scoped_refptr<media::VideoFrame>& target,
-    const base::Callback<void(const gfx::Rect&, bool)>& callback) {
-  callback.Run(gfx::Rect(), false);
-}
-
-bool TestRenderWidgetHostView::CanCopyToVideoFrame() const {
-  return false;
+SkColor TestRenderWidgetHostView::background_color() const {
+  return background_color_;
 }
 
 bool TestRenderWidgetHostView::HasAcceleratedSurface(
@@ -200,8 +189,7 @@ bool TestRenderWidgetHostView::IsSpeaking() const {
   return false;
 }
 
-void TestRenderWidgetHostView::StopSpeaking() {
-}
+void TestRenderWidgetHostView::StopSpeaking() {}
 
 #endif
 
@@ -209,8 +197,13 @@ gfx::Rect TestRenderWidgetHostView::GetBoundsInRootWindow() {
   return gfx::Rect();
 }
 
-void TestRenderWidgetHostView::OnSwapCompositorFrame(
-    uint32_t compositor_frame_sink_id,
+void TestRenderWidgetHostView::DidCreateNewRendererCompositorFrameSink(
+    cc::mojom::MojoCompositorFrameSinkClient* renderer_compositor_frame_sink) {
+  did_change_compositor_frame_sink_ = true;
+}
+
+void TestRenderWidgetHostView::SubmitCompositorFrame(
+    const cc::LocalSurfaceId& local_surface_id,
     cc::CompositorFrame frame) {
   did_swap_compositor_frame_ = true;
 }
@@ -303,7 +296,7 @@ void TestRenderViewHost::OnWebkitPreferencesChanged() {
 
 void TestRenderViewHost::TestOnStartDragging(
     const DropData& drop_data) {
-  blink::WebDragOperationsMask drag_operation = blink::WebDragOperationEvery;
+  blink::WebDragOperationsMask drag_operation = blink::kWebDragOperationEvery;
   DragEventSourceInfo event_info;
   GetWidget()->OnStartDragging(drop_data, drag_operation, SkBitmap(),
                                gfx::Vector2d(), event_info);
@@ -313,11 +306,7 @@ void TestRenderViewHost::TestOnUpdateStateWithFile(
     const base::FilePath& file_path) {
   PageState state = PageState::CreateForTesting(GURL("http://www.google.com"),
                                                 false, "data", &file_path);
-  if (SiteIsolationPolicy::UseSubframeNavigationEntries()) {
-    static_cast<RenderFrameHostImpl*>(GetMainFrame())->OnUpdateState(state);
-  } else {
-    OnUpdateState(state);
-  }
+  static_cast<RenderFrameHostImpl*>(GetMainFrame())->OnUpdateState(state);
 }
 
 RenderViewHostImplTestHarness::RenderViewHostImplTestHarness() {

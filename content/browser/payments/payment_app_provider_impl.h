@@ -5,17 +5,12 @@
 #ifndef CONTENT_BROWSER_PAYMENTS_PAYMENT_APP_PROVIDER_IMPL_H_
 #define CONTENT_BROWSER_PAYMENTS_PAYMENT_APP_PROVIDER_IMPL_H_
 
-#include <string>
-
 #include "base/macros.h"
 #include "base/memory/singleton.h"
-#include "components/payments/payment_app.mojom.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/payment_app_provider.h"
 
 namespace content {
-
-class BrowserContext;
 
 class CONTENT_EXPORT PaymentAppProviderImpl : public PaymentAppProvider {
  public:
@@ -23,12 +18,12 @@ class CONTENT_EXPORT PaymentAppProviderImpl : public PaymentAppProvider {
 
   // PaymentAppProvider implementation:
   // Should be accessed only on the UI thread.
-  void GetAllManifests(BrowserContext* browser_context,
-                       const GetAllManifestsCallback& callback) override;
-  void InvokePaymentApp(
-      BrowserContext* browser_context,
-      int64_t registration_id,
-      payments::mojom::PaymentAppRequestDataPtr data) override;
+  void GetAllPaymentApps(BrowserContext* browser_context,
+                         GetAllPaymentAppsCallback callback) override;
+  void InvokePaymentApp(BrowserContext* browser_context,
+                        int64_t registration_id,
+                        payments::mojom::PaymentAppRequestPtr app_request,
+                        const InvokePaymentAppCallback& callback) override;
 
  private:
   PaymentAppProviderImpl();

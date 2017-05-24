@@ -5,10 +5,16 @@
 package org.chromium.chrome.browser.webapps;
 
 import android.app.Activity;
-import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
+import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.SmallTest;
+
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
@@ -18,10 +24,12 @@ import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModel;
-import org.chromium.chrome.test.ChromeActivityTestCaseBase;
+import org.chromium.chrome.test.ChromeActivityTestRule;
+import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.browser.TabLoadObserver;
 import org.chromium.chrome.test.util.browser.TabTitleObserver;
 import org.chromium.content.browser.test.util.Criteria;
@@ -34,8 +42,15 @@ import java.util.concurrent.Callable;
 /**
  * Tests org.chromium.chrome.browser.webapps.AddToHomescreenManager and its C++ counterpart.
  */
+@RunWith(ChromeJUnit4ClassRunner.class)
 @RetryOnFailure
-public class AddToHomescreenManagerTest extends ChromeActivityTestCaseBase<ChromeActivity> {
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
+        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+public class AddToHomescreenManagerTest {
+    @Rule
+    public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
+            new ChromeActivityTestRule<>(ChromeActivity.class);
+
     private static final String WEBAPP_ACTION_NAME = "WEBAPP_ACTION";
 
     private static final String WEBAPP_TITLE = "Webapp shortcut";
@@ -76,11 +91,13 @@ public class AddToHomescreenManagerTest extends ChromeActivityTestCaseBase<Chrom
     private static final String EVENT_WEBAPP_TITLE = "appinstalled event test page";
 
     private static class TestShortcutHelperDelegate extends ShortcutHelper.Delegate {
-        public Intent mBroadcastedIntent;
+        public String mRequestedShortcutTitle;
+        public Intent mRequestedShortcutIntent;
 
         @Override
-        public void sendBroadcast(Context context, Intent intent) {
-            mBroadcastedIntent = intent;
+        public void addShortcutToHomescreen(String title, Bitmap icon, Intent shortcutIntent) {
+            mRequestedShortcutTitle = title;
+            mRequestedShortcutIntent = shortcutIntent;
         }
 
         @Override
@@ -88,8 +105,9 @@ public class AddToHomescreenManagerTest extends ChromeActivityTestCaseBase<Chrom
             return WEBAPP_ACTION_NAME;
         }
 
-        public void clearBroadcastedIntent() {
-            mBroadcastedIntent = null;
+        public void clearRequestedShortcutData() {
+            mRequestedShortcutTitle = null;
+            mRequestedShortcutIntent = null;
         }
     }
 
@@ -109,7 +127,7 @@ public class AddToHomescreenManagerTest extends ChromeActivityTestCaseBase<Chrom
 
             @Override
             public void updateSplashScreenImage(String splashScreenImage) {
-                assertNull(mSplashImage);
+                Assert.assertNull(mSplashImage);
                 mSplashImage = splashScreenImage;
             }
         }
@@ -151,54 +169,46 @@ public class AddToHomescreenManagerTest extends ChromeActivityTestCaseBase<Chrom
     private Tab mTab;
     private TestShortcutHelperDelegate mShortcutHelperDelegate;
 
-    public AddToHomescreenManagerTest() {
-        super(ChromeActivity.class);
-    }
-
-    @Override
-    public void startMainActivity() throws InterruptedException {
-        startMainActivityOnBlankPage();
-    }
-
-    @Override
+    @Before
     public void setUp() throws Exception {
-        super.setUp();
+        mActivityTestRule.startMainActivityOnBlankPage();
         ChromeWebApkHost.initForTesting(false);
-        mTestServer = EmbeddedTestServer.createAndStartServer(getInstrumentation().getContext());
+        mTestServer = EmbeddedTestServer.createAndStartServer(
+                InstrumentationRegistry.getInstrumentation().getContext());
         mShortcutHelperDelegate = new TestShortcutHelperDelegate();
         ShortcutHelper.setDelegateForTests(mShortcutHelperDelegate);
-        mActivity = getActivity();
+        mActivity = mActivityTestRule.getActivity();
         mTab = mActivity.getActivityTab();
     }
 
+    @Test
     @SmallTest
     @Feature("{Webapp}")
     public void testAddWebappShortcuts() throws Exception {
         // Add a webapp shortcut and make sure the intent's parameters make sense.
         loadUrl(WEBAPP_HTML, WEBAPP_TITLE);
         addShortcutToTab(mTab, "");
-        Intent firedIntent = mShortcutHelperDelegate.mBroadcastedIntent;
-        assertEquals(WEBAPP_TITLE, firedIntent.getStringExtra(Intent.EXTRA_SHORTCUT_NAME));
+        Assert.assertEquals(WEBAPP_TITLE, mShortcutHelperDelegate.mRequestedShortcutTitle);
 
-        Intent launchIntent = firedIntent.getParcelableExtra(Intent.EXTRA_SHORTCUT_INTENT);
-        assertEquals(WEBAPP_HTML, launchIntent.getStringExtra(ShortcutHelper.EXTRA_URL));
-        assertEquals(WEBAPP_ACTION_NAME, launchIntent.getAction());
-        assertEquals(mActivity.getPackageName(), launchIntent.getPackage());
+        Intent launchIntent = mShortcutHelperDelegate.mRequestedShortcutIntent;
+        Assert.assertEquals(WEBAPP_HTML, launchIntent.getStringExtra(ShortcutHelper.EXTRA_URL));
+        Assert.assertEquals(WEBAPP_ACTION_NAME, launchIntent.getAction());
+        Assert.assertEquals(mActivity.getPackageName(), launchIntent.getPackage());
 
         // Add a second shortcut and make sure it matches the second webapp's parameters.
-        mShortcutHelperDelegate.clearBroadcastedIntent();
+        mShortcutHelperDelegate.clearRequestedShortcutData();
         loadUrl(SECOND_WEBAPP_HTML, SECOND_WEBAPP_TITLE);
         addShortcutToTab(mTab, "");
-        Intent newFiredIntent = mShortcutHelperDelegate.mBroadcastedIntent;
-        assertEquals(SECOND_WEBAPP_TITLE,
-                newFiredIntent.getStringExtra(Intent.EXTRA_SHORTCUT_NAME));
+        Assert.assertEquals(SECOND_WEBAPP_TITLE, mShortcutHelperDelegate.mRequestedShortcutTitle);
 
-        Intent newLaunchIntent = newFiredIntent.getParcelableExtra(Intent.EXTRA_SHORTCUT_INTENT);
-        assertEquals(SECOND_WEBAPP_HTML, newLaunchIntent.getStringExtra(ShortcutHelper.EXTRA_URL));
-        assertEquals(WEBAPP_ACTION_NAME, newLaunchIntent.getAction());
-        assertEquals(mActivity.getPackageName(), newLaunchIntent.getPackage());
+        Intent newLaunchIntent = mShortcutHelperDelegate.mRequestedShortcutIntent;
+        Assert.assertEquals(
+                SECOND_WEBAPP_HTML, newLaunchIntent.getStringExtra(ShortcutHelper.EXTRA_URL));
+        Assert.assertEquals(WEBAPP_ACTION_NAME, newLaunchIntent.getAction());
+        Assert.assertEquals(mActivity.getPackageName(), newLaunchIntent.getPackage());
     }
 
+    @Test
     @SmallTest
     @Feature("{Webapp}")
     public void testAddBookmarkShortcut() throws Exception {
@@ -206,44 +216,44 @@ public class AddToHomescreenManagerTest extends ChromeActivityTestCaseBase<Chrom
         addShortcutToTab(mTab, "");
 
         // Make sure the intent's parameters make sense.
-        Intent firedIntent = mShortcutHelperDelegate.mBroadcastedIntent;
-        assertEquals(NORMAL_TITLE, firedIntent.getStringExtra(Intent.EXTRA_SHORTCUT_NAME));
+        Assert.assertEquals(NORMAL_TITLE, mShortcutHelperDelegate.mRequestedShortcutTitle);
 
-        Intent launchIntent = firedIntent.getParcelableExtra(Intent.EXTRA_SHORTCUT_INTENT);
-        assertEquals(mActivity.getPackageName(), launchIntent.getPackage());
-        assertEquals(Intent.ACTION_VIEW, launchIntent.getAction());
-        assertEquals(NORMAL_HTML, launchIntent.getDataString());
+        Intent launchIntent = mShortcutHelperDelegate.mRequestedShortcutIntent;
+        Assert.assertEquals(mActivity.getPackageName(), launchIntent.getPackage());
+        Assert.assertEquals(Intent.ACTION_VIEW, launchIntent.getAction());
+        Assert.assertEquals(NORMAL_HTML, launchIntent.getDataString());
     }
 
+    @Test
     @SmallTest
     @Feature("{Webapp}")
     public void testAddWebappShortcutsWithoutTitleEdit() throws Exception {
         // Add a webapp shortcut using the page's title.
         loadUrl(WEBAPP_HTML, WEBAPP_TITLE);
         addShortcutToTab(mTab, "");
-        Intent firedIntent = mShortcutHelperDelegate.mBroadcastedIntent;
-        assertEquals(WEBAPP_TITLE, firedIntent.getStringExtra(Intent.EXTRA_SHORTCUT_NAME));
+        Assert.assertEquals(WEBAPP_TITLE, mShortcutHelperDelegate.mRequestedShortcutTitle);
     }
 
+    @Test
     @SmallTest
     @Feature("{Webapp}")
     public void testAddWebappShortcutsWithTitleEdit() throws Exception {
         // Add a webapp shortcut with a custom title.
         loadUrl(WEBAPP_HTML, WEBAPP_TITLE);
         addShortcutToTab(mTab, EDITED_WEBAPP_TITLE);
-        Intent firedIntent = mShortcutHelperDelegate.mBroadcastedIntent;
-        assertEquals(EDITED_WEBAPP_TITLE, firedIntent.getStringExtra(Intent.EXTRA_SHORTCUT_NAME));
+        Assert.assertEquals(EDITED_WEBAPP_TITLE, mShortcutHelperDelegate.mRequestedShortcutTitle);
     }
 
+    @Test
     @SmallTest
     @Feature("{Webapp}")
     public void testAddWebappShortcutsWithApplicationName() throws Exception {
         loadUrl(META_APP_NAME_HTML, META_APP_NAME_PAGE_TITLE);
         addShortcutToTab(mTab, "");
-        Intent firedIntent = mShortcutHelperDelegate.mBroadcastedIntent;
-        assertEquals(META_APP_NAME_TITLE, firedIntent.getStringExtra(Intent.EXTRA_SHORTCUT_NAME));
+        Assert.assertEquals(META_APP_NAME_TITLE, mShortcutHelperDelegate.mRequestedShortcutTitle);
     }
 
+    @Test
     @SmallTest
     @Feature("{Webapp}")
     @Restriction(Restriction.RESTRICTION_TYPE_NON_LOW_END_DEVICE)
@@ -253,6 +263,7 @@ public class AddToHomescreenManagerTest extends ChromeActivityTestCaseBase<Chrom
         addShortcutToTab(spawnedPopup, "");
     }
 
+    @Test
     @SmallTest
     @Feature("{Webapp}")
     public void testAddWebappShortcutSplashScreenIcon() throws Exception {
@@ -277,8 +288,8 @@ public class AddToHomescreenManagerTest extends ChromeActivityTestCaseBase<Chrom
                     R.dimen.webapp_splash_image_size_ideal);
             Bitmap splashImage =
                     ShortcutHelper.decodeBitmapFromString(dataStorageFactory.mSplashImage);
-            assertEquals(idealSize, splashImage.getWidth());
-            assertEquals(idealSize, splashImage.getHeight());
+            Assert.assertEquals(idealSize, splashImage.getWidth());
+            Assert.assertEquals(idealSize, splashImage.getHeight());
         } finally {
             mTestServer.stopAndDestroyServer();
         }
@@ -286,6 +297,7 @@ public class AddToHomescreenManagerTest extends ChromeActivityTestCaseBase<Chrom
 
     /** Tests that the appinstalled event is fired when an app is installed.
      */
+    @Test
     @SmallTest
     @Feature("{Webapp}")
     public void testAddWebappShortcutAppInstalledEvent() throws Exception {
@@ -314,7 +326,7 @@ public class AddToHomescreenManagerTest extends ChromeActivityTestCaseBase<Chrom
         CriteriaHelper.pollUiThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                return mShortcutHelperDelegate.mBroadcastedIntent != null;
+                return mShortcutHelperDelegate.mRequestedShortcutIntent != null;
             }
         });
 
@@ -357,12 +369,15 @@ public class AddToHomescreenManagerTest extends ChromeActivityTestCaseBase<Chrom
         CriteriaHelper.pollUiThread(Criteria.equals(2, new Callable<Integer>() {
             @Override
             public Integer call() {
-                return getActivity().getTabModelSelector().getModel(false).getCount();
+                return mActivityTestRule.getActivity()
+                        .getTabModelSelector()
+                        .getModel(false)
+                        .getCount();
             }
         }));
 
-        TabModel tabModel = getActivity().getTabModelSelector().getModel(false);
-        assertEquals(0, tabModel.indexOf(mTab));
-        return getActivity().getTabModelSelector().getModel(false).getTabAt(1);
+        TabModel tabModel = mActivityTestRule.getActivity().getTabModelSelector().getModel(false);
+        Assert.assertEquals(0, tabModel.indexOf(mTab));
+        return mActivityTestRule.getActivity().getTabModelSelector().getModel(false).getTabAt(1);
     }
 }

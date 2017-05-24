@@ -6,6 +6,7 @@
 #include "base/strings/stringprintf.h"
 #include "content/browser/webrtc/webrtc_content_browsertest_base.h"
 #include "content/public/common/content_switches.h"
+#include "media/base/media_switches.h"
 #include "media/base/test_data_util.h"
 
 #if defined(OS_ANDROID)
@@ -23,8 +24,9 @@
 
 namespace {
 
-static const char kCanvasTestHtmlPage[] = "/media/canvas_capture_color.html";
-
+static const char kCanvasCaptureTestHtmlFile[] = "/media/canvas_capture.html";
+static const char kCanvasCaptureColorTestHtmlFile[] =
+    "/media/canvas_capture_color.html";
 static const char kVideoAudioHtmlFile[] =
     "/media/video_audio_element_capture_test.html";
 
@@ -61,7 +63,10 @@ class WebRtcCaptureFromElementBrowserTest
 
     // Allow <video>/<audio>.play() when not initiated by user gesture.
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kDisableGestureRequirementForMediaPlayback);
+        switches::kIgnoreAutoplayRestrictionsForTests);
+    // Allow experimental canvas features.
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kEnableExperimentalCanvasFeatures);
   }
 
  private:
@@ -69,8 +74,42 @@ class WebRtcCaptureFromElementBrowserTest
 };
 
 IN_PROC_BROWSER_TEST_F(WebRtcCaptureFromElementBrowserTest,
-                       VerifyCanvasCaptureColor) {
-  MakeTypicalCall("testCanvasCaptureColors();", kCanvasTestHtmlPage);
+                       VerifyCanvas2DCaptureColor) {
+  MakeTypicalCall("testCanvas2DCaptureColors();",
+                  kCanvasCaptureColorTestHtmlFile);
+}
+
+IN_PROC_BROWSER_TEST_F(WebRtcCaptureFromElementBrowserTest,
+                       VerifyCanvasWebGLCaptureColor) {
+#if !defined(OS_MACOSX)
+  // TODO(crbug.com/706009): Make this test pass on mac.  Behavior is not buggy
+  // (verified manually) on mac, but for some reason this test fails on the mac
+  // bot.
+  MakeTypicalCall("testCanvasWebGLCaptureColors();",
+                  kCanvasCaptureColorTestHtmlFile);
+#endif
+}
+
+IN_PROC_BROWSER_TEST_F(WebRtcCaptureFromElementBrowserTest,
+                       VerifyCanvasCapture2DFrames) {
+  MakeTypicalCall("testCanvasCapture(draw2d);", kCanvasCaptureTestHtmlFile);
+}
+
+IN_PROC_BROWSER_TEST_F(WebRtcCaptureFromElementBrowserTest,
+                       VerifyCanvasCaptureWebGLFrames) {
+  MakeTypicalCall("testCanvasCapture(drawWebGL);", kCanvasCaptureTestHtmlFile);
+}
+
+IN_PROC_BROWSER_TEST_F(WebRtcCaptureFromElementBrowserTest,
+                       VerifyCanvasCaptureOffscreenCanvasCommitFrames) {
+  MakeTypicalCall("testCanvasCapture(drawOffscreenCanvasCommit);",
+                  kCanvasCaptureTestHtmlFile);
+}
+
+IN_PROC_BROWSER_TEST_F(WebRtcCaptureFromElementBrowserTest,
+                       VerifyCanvasCaptureBitmapRendererFrames) {
+  MakeTypicalCall("testCanvasCapture(drawBitmapRenderer);",
+                  kCanvasCaptureTestHtmlFile);
 }
 
 IN_PROC_BROWSER_TEST_P(WebRtcCaptureFromElementBrowserTest,

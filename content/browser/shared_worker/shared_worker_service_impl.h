@@ -28,6 +28,7 @@ class Message;
 
 namespace content {
 
+class MessagePort;
 class SharedWorkerInstance;
 class SharedWorkerHost;
 class SharedWorkerMessageFilter;
@@ -57,10 +58,13 @@ class CONTENT_EXPORT SharedWorkerServiceImpl
       ResourceContext* resource_context,
       const WorkerStoragePartitionId& partition_id);
   void ConnectToWorker(SharedWorkerMessageFilter* filter,
-                       int route_id,
-                       int sent_message_port_id);
+                       int worker_route_id,
+                       const MessagePort& port);
   void DocumentDetached(SharedWorkerMessageFilter* filter,
                         unsigned long long document_id);
+  void CountFeature(SharedWorkerMessageFilter* filter,
+                    int worker_route_id,
+                    uint32_t feature);
   void WorkerContextClosed(SharedWorkerMessageFilter* filter,
                            int worker_route_id);
   void WorkerContextDestroyed(SharedWorkerMessageFilter* filter,
@@ -72,7 +76,7 @@ class CONTENT_EXPORT SharedWorkerServiceImpl
   void WorkerScriptLoadFailed(SharedWorkerMessageFilter* filter,
                               int worker_route_id);
   void WorkerConnected(SharedWorkerMessageFilter* filter,
-                       int message_port_id,
+                       int connection_request_id,
                        int worker_route_id);
   void AllowFileSystem(SharedWorkerMessageFilter* filter,
                        int worker_route_id,
@@ -101,7 +105,6 @@ class CONTENT_EXPORT SharedWorkerServiceImpl
 
  private:
   class SharedWorkerPendingInstance;
-  class SharedWorkerReserver;
 
   friend struct base::DefaultSingletonTraits<SharedWorkerServiceImpl>;
   friend class SharedWorkerServiceImplTest;
@@ -143,7 +146,8 @@ class CONTENT_EXPORT SharedWorkerServiceImpl
   void RenderProcessReserveFailedCallback(int pending_instance_id,
                                           int worker_process_id,
                                           int worker_route_id,
-                                          bool is_new_worker);
+                                          bool is_new_worker,
+                                          bool pause_on_start);
 
   // Returns nullptr if there is no host for given ids.
   SharedWorkerHost* FindSharedWorkerHost(int render_process_id,

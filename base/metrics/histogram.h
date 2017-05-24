@@ -79,11 +79,6 @@
 #include "base/macros.h"
 #include "base/metrics/bucket_ranges.h"
 #include "base/metrics/histogram_base.h"
-#if defined(OS_CHROMEOS) || defined(OS_IOS)
-// TODO(asvitkine): Migrate callers to to include this directly and remove this.
-// Note: Incrementally migrating platforms as they become clean.
-#include "base/metrics/histogram_macros.h"
-#endif
 #include "base/metrics/histogram_samples.h"
 #include "base/time/time.h"
 
@@ -91,11 +86,13 @@ namespace base {
 
 class BooleanHistogram;
 class CustomHistogram;
+class DelayedPersistentAllocation;
 class Histogram;
 class LinearHistogram;
 class Pickle;
 class PickleIterator;
 class SampleVector;
+class SampleVectorBase;
 
 class BASE_EXPORT Histogram : public HistogramBase {
  public:
@@ -147,9 +144,8 @@ class BASE_EXPORT Histogram : public HistogramBase {
       Sample minimum,
       Sample maximum,
       const BucketRanges* ranges,
-      HistogramBase::AtomicCount* counts,
-      HistogramBase::AtomicCount* logged_counts,
-      uint32_t counts_size,
+      const DelayedPersistentAllocation& counts,
+      const DelayedPersistentAllocation& logged_counts,
       HistogramSamples::Metadata* meta,
       HistogramSamples::Metadata* logged_meta);
 
@@ -184,11 +180,12 @@ class BASE_EXPORT Histogram : public HistogramBase {
   const BucketRanges* bucket_ranges() const { return bucket_ranges_; }
 
   // This function validates histogram construction arguments. It returns false
-  // if some of the arguments are totally bad.
+  // if some of the arguments are bad but also corrects them so they should
+  // function on non-dcheck builds without crashing.
   // Note. Currently it allow some bad input, e.g. 0 as minimum, but silently
   // converts it to good input: 1.
-  // TODO(kaiwang): Be more restrict and return false for any bad input, and
-  // make this a readonly validating function.
+  // TODO(bcwhite): Use false returns to create "sink" histograms so that bad
+  // data doesn't create confusion on the servers.
   static bool InspectConstructionArguments(const std::string& name,
                                            Sample* minimum,
                                            Sample* maximum,
@@ -235,9 +232,8 @@ class BASE_EXPORT Histogram : public HistogramBase {
             Sample minimum,
             Sample maximum,
             const BucketRanges* ranges,
-            HistogramBase::AtomicCount* counts,
-            HistogramBase::AtomicCount* logged_counts,
-            uint32_t counts_size,
+            const DelayedPersistentAllocation& counts,
+            const DelayedPersistentAllocation& logged_counts,
             HistogramSamples::Metadata* meta,
             HistogramSamples::Metadata* logged_meta);
 
@@ -268,8 +264,13 @@ class BASE_EXPORT Histogram : public HistogramBase {
       base::PickleIterator* iter);
   static HistogramBase* DeserializeInfoImpl(base::PickleIterator* iter);
 
-  // Implementation of SnapshotSamples function.
-  std::unique_ptr<SampleVector> SnapshotSampleVector() const;
+  // Create a snapshot containing all samples (both logged and unlogged).
+  // Implementation of SnapshotSamples method with a more specific type for
+  // internal use.
+  std::unique_ptr<SampleVector> SnapshotAllSamples() const;
+
+  // Create a copy of unlogged samples.
+  std::unique_ptr<SampleVector> SnapshotUnloggedSamples() const;
 
   //----------------------------------------------------------------------------
   // Helpers for emitting Ascii graphic.  Each method appends data to output.
@@ -279,10 +280,10 @@ class BASE_EXPORT Histogram : public HistogramBase {
                       std::string* output) const;
 
   // Find out how large (graphically) the largest bucket will appear to be.
-  double GetPeakBucketSize(const SampleVector& samples) const;
+  double GetPeakBucketSize(const SampleVectorBase& samples) const;
 
   // Write a common header message describing this histogram.
-  void WriteAsciiHeader(const SampleVector& samples,
+  void WriteAsciiHeader(const SampleVectorBase& samples,
                         Count sample_count,
                         std::string* output) const;
 
@@ -307,11 +308,10 @@ class BASE_EXPORT Histogram : public HistogramBase {
   Sample declared_min_;  // Less than this goes into the first bucket.
   Sample declared_max_;  // Over this goes into the last bucket.
 
-  // Finally, provide the state that changes with the addition of each new
-  // sample.
-  std::unique_ptr<SampleVector> samples_;
+  // Samples that have not yet been logged with SnapshotDelta().
+  std::unique_ptr<HistogramSamples> unlogged_samples_;
 
-  // Also keep a previous uploaded state for calculating deltas.
+  // Accumulation of all samples that have been logged with SnapshotDelta().
   std::unique_ptr<HistogramSamples> logged_samples_;
 
   // Flag to indicate if PrepareFinalDelta has been previously called. It is
@@ -362,9 +362,8 @@ class BASE_EXPORT LinearHistogram : public Histogram {
       Sample minimum,
       Sample maximum,
       const BucketRanges* ranges,
-      HistogramBase::AtomicCount* counts,
-      HistogramBase::AtomicCount* logged_counts,
-      uint32_t counts_size,
+      const DelayedPersistentAllocation& counts,
+      const DelayedPersistentAllocation& logged_counts,
       HistogramSamples::Metadata* meta,
       HistogramSamples::Metadata* logged_meta);
 
@@ -405,9 +404,8 @@ class BASE_EXPORT LinearHistogram : public Histogram {
                   Sample minimum,
                   Sample maximum,
                   const BucketRanges* ranges,
-                  HistogramBase::AtomicCount* counts,
-                  HistogramBase::AtomicCount* logged_counts,
-                  uint32_t counts_size,
+                  const DelayedPersistentAllocation& counts,
+                  const DelayedPersistentAllocation& logged_counts,
                   HistogramSamples::Metadata* meta,
                   HistogramSamples::Metadata* logged_meta);
 
@@ -451,8 +449,8 @@ class BASE_EXPORT BooleanHistogram : public LinearHistogram {
   static std::unique_ptr<HistogramBase> PersistentCreate(
       const std::string& name,
       const BucketRanges* ranges,
-      HistogramBase::AtomicCount* counts,
-      HistogramBase::AtomicCount* logged_counts,
+      const DelayedPersistentAllocation& counts,
+      const DelayedPersistentAllocation& logged_counts,
       HistogramSamples::Metadata* meta,
       HistogramSamples::Metadata* logged_meta);
 
@@ -465,8 +463,8 @@ class BASE_EXPORT BooleanHistogram : public LinearHistogram {
   BooleanHistogram(const std::string& name, const BucketRanges* ranges);
   BooleanHistogram(const std::string& name,
                    const BucketRanges* ranges,
-                   HistogramBase::AtomicCount* counts,
-                   HistogramBase::AtomicCount* logged_counts,
+                   const DelayedPersistentAllocation& counts,
+                   const DelayedPersistentAllocation& logged_counts,
                    HistogramSamples::Metadata* meta,
                    HistogramSamples::Metadata* logged_meta);
 
@@ -501,9 +499,8 @@ class BASE_EXPORT CustomHistogram : public Histogram {
   static std::unique_ptr<HistogramBase> PersistentCreate(
       const std::string& name,
       const BucketRanges* ranges,
-      HistogramBase::AtomicCount* counts,
-      HistogramBase::AtomicCount* logged_counts,
-      uint32_t counts_size,
+      const DelayedPersistentAllocation& counts,
+      const DelayedPersistentAllocation& logged_counts,
       HistogramSamples::Metadata* meta,
       HistogramSamples::Metadata* logged_meta);
 
@@ -526,9 +523,8 @@ class BASE_EXPORT CustomHistogram : public Histogram {
 
   CustomHistogram(const std::string& name,
                   const BucketRanges* ranges,
-                  HistogramBase::AtomicCount* counts,
-                  HistogramBase::AtomicCount* logged_counts,
-                  uint32_t counts_size,
+                  const DelayedPersistentAllocation& counts,
+                  const DelayedPersistentAllocation& logged_counts,
                   HistogramSamples::Metadata* meta,
                   HistogramSamples::Metadata* logged_meta);
 

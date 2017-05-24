@@ -4,7 +4,7 @@
 
 module ui.mojom;
 
-import "services/ui/public/interfaces/display/display.mojom";
+import "ui/display/mojo/display.mojom";
 import "ui/gfx/geometry/mojo/geometry.mojom";
 
 enum WindowManagerErrorCode {
@@ -22,7 +22,6 @@ enum ShowState {
   MAXIMIZED,
   INACTIVE,
   FULLSCREEN,
-  DOCKED,
 };
 
 const int32 kResizeBehaviorNone = 0;
@@ -65,4 +64,11 @@ enum WindowType {
   BUBBLE,
   DRAG,
   UNKNOWN,
+};
+
+// Used when the window manager explicitly adds a new display.
+struct WmViewportMetrics {
+  gfx.mojom.Rect bounds_in_pixels;
+  float device_scale_factor;
+  float ui_scale_factor;
 };

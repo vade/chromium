@@ -8,16 +8,16 @@
   <template>
     <style include="internet-shared"></style>
     <div class="settings-box first">
-      <div class="start">$i18n{networkIPConfigAuto}</div>
-      <paper-toggle-button checked="{{automatic_}}" disabled="[[!editable]]">
+      <div id="autoIPConfigLabel" class="start">$i18n{networkIPConfigAuto}</div>
+      <paper-toggle-button checked="{{automatic_}}" disabled="[[!editable]]"
+          aria-labelledby="autoIPConfigLabel">
       </paper-toggle-button>
     </div>
     <div class="settings-box continuation"
         hidden$="[[!showIPEditFields_(editable, automatic_)]]">
       <network-property-list
           fields="[[ipConfigFields_]]" property-dict="[[ipConfig_]]"
-          edit-field-types="[[getIPEditFields_(
-                              editable, ipConfig_, automatic_)]]"
+          edit-field-types="[[getIPEditFields_(editable, automatic_)]]"
           on-property-change="onIPChange_">
       </network-property-list>
     </div>

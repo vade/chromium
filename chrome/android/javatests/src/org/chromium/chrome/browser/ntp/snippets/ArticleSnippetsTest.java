@@ -4,59 +4,76 @@
 
 package org.chromium.chrome.browser.ntp.snippets;
 
+import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.media.ThumbnailUtils;
+import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.MediumTest;
 import android.util.TypedValue;
-import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
-import org.chromium.base.Callback;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+
+import org.chromium.base.DiscardableReferencePool;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.favicon.FaviconHelper.FaviconImageCallback;
 import org.chromium.chrome.browser.favicon.FaviconHelper.IconAvailabilityCallback;
 import org.chromium.chrome.browser.favicon.LargeIconBridge.LargeIconCallback;
-import org.chromium.chrome.browser.ntp.NewTabPage.DestructionObserver;
-import org.chromium.chrome.browser.ntp.UiConfig;
-import org.chromium.chrome.browser.ntp.cards.ActionItem;
 import org.chromium.chrome.browser.ntp.cards.NewTabPageAdapter;
-import org.chromium.chrome.browser.ntp.cards.NewTabPageRecyclerView;
 import org.chromium.chrome.browser.ntp.cards.SuggestionsCategoryInfo;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.suggestions.SuggestionsMetricsReporter;
+import org.chromium.chrome.browser.suggestions.ContentSuggestionsAdditionalAction;
+import org.chromium.chrome.browser.suggestions.DestructionObserver;
+import org.chromium.chrome.browser.suggestions.SuggestionsEventReporter;
 import org.chromium.chrome.browser.suggestions.SuggestionsNavigationDelegate;
 import org.chromium.chrome.browser.suggestions.SuggestionsRanker;
+import org.chromium.chrome.browser.suggestions.SuggestionsRecyclerView;
 import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegate;
-import org.chromium.chrome.test.ChromeActivityTestCaseBase;
+import org.chromium.chrome.browser.widget.displaystyle.HorizontalDisplayStyle;
+import org.chromium.chrome.browser.widget.displaystyle.UiConfig;
+import org.chromium.chrome.browser.widget.displaystyle.VerticalDisplayStyle;
+import org.chromium.chrome.test.ChromeActivityTestRule;
+import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.RenderUtils.ViewRenderer;
+import org.chromium.chrome.test.util.browser.suggestions.DummySuggestionsEventReporter;
+import org.chromium.chrome.test.util.browser.suggestions.FakeSuggestionsSource;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Set;
 
 /**
  * Tests for the appearance of Article Snippets.
  */
-public class ArticleSnippetsTest extends ChromeActivityTestCaseBase<ChromeActivity> {
+@RunWith(ChromeJUnit4ClassRunner.class)
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
+        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+public class ArticleSnippetsTest {
+    @Rule
+    public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
+            new ChromeActivityTestRule<>(ChromeActivity.class);
+
     private ViewRenderer mViewRenderer;
 
     private SuggestionsUiDelegate mUiDelegate;
     private FakeSuggestionsSource mSnippetsSource;
-    private NewTabPageRecyclerView mRecyclerView;
+    private SuggestionsRecyclerView mRecyclerView;
     private NewTabPageAdapter mAdapter;
 
     private FrameLayout mContentView;
     private UiConfig mUiConfig;
 
-    public ArticleSnippetsTest() {
-        super(ChromeActivity.class);
-    }
-
+    @Test
     @MediumTest
     @Feature({"ArticleSnippets", "RenderTest"})
     @RetryOnFailure
@@ -66,26 +83,23 @@ public class ArticleSnippetsTest extends ChromeActivityTestCaseBase<ChromeActivi
             public void run() {
                 setupTestData();
 
-                mContentView = new FrameLayout(getActivity());
+                mContentView = new FrameLayout(mActivityTestRule.getActivity());
                 mUiConfig = new UiConfig(mContentView);
 
-                getActivity().setContentView(mContentView);
+                mActivityTestRule.getActivity().setContentView(mContentView);
 
-                mRecyclerView = (NewTabPageRecyclerView) getActivity().getLayoutInflater()
-                        .inflate(R.layout.new_tab_page_recycler_view, mContentView, false);
+                mRecyclerView = new SuggestionsRecyclerView(mActivityTestRule.getActivity());
                 mContentView.addView(mRecyclerView);
 
-                View aboveTheFold = new View(getActivity());
-
-                mRecyclerView.setAboveTheFoldView(aboveTheFold);
-                mAdapter = new NewTabPageAdapter(mUiDelegate, aboveTheFold, mUiConfig,
+                mAdapter = new NewTabPageAdapter(mUiDelegate, /* aboveTheFold = */ null, mUiConfig,
                         OfflinePageBridge.getForProfile(Profile.getLastUsedProfile()),
-                        /* contextMenuManager = */null);
+                        /* contextMenuManager = */ null, /* tileGroupDelegate = */ null);
+                mAdapter.refreshSuggestions();
                 mRecyclerView.setAdapter(mAdapter);
             }
         });
 
-        getInstrumentation().waitForIdleSync();
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
 
         int first = mAdapter.getFirstCardPosition();
         mViewRenderer.renderAndCompare(mRecyclerView.getChildAt(first), "short_snippet");
@@ -109,11 +123,12 @@ public class ArticleSnippetsTest extends ChromeActivityTestCaseBase<ChromeActivi
                         mRecyclerView.getResources().getDisplayMetrics());
                 mContentView.setLayoutParams(params);
 
-                mUiConfig.setDisplayStyleForTesting(UiConfig.DISPLAY_STYLE_NARROW);
+                mUiConfig.setDisplayStyleForTesting(new UiConfig.DisplayStyle(
+                        HorizontalDisplayStyle.NARROW, VerticalDisplayStyle.REGULAR));
             }
         });
 
-        getInstrumentation().waitForIdleSync();
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
 
         mViewRenderer.renderAndCompare(mRecyclerView.getChildAt(first), "short_snippet_narrow");
         mViewRenderer.renderAndCompare(mRecyclerView.getChildAt(first + 1), "long_snippet_narrow");
@@ -131,56 +146,62 @@ public class ArticleSnippetsTest extends ChromeActivityTestCaseBase<ChromeActivi
         int minimalCategory = 1;
         SnippetArticle shortSnippet = new SnippetArticle(fullCategory, "id1", "Snippet",
                 "Publisher", "Preview Text", "www.google.com",
-                1466614774, // Timestamp
-                10f); // Score
-        shortSnippet.setThumbnailBitmap(BitmapFactory.decodeResource(getActivity().getResources(),
-                R.drawable.signin_promo_illustration));
+                1466614774, // Publish timestamp
+                10f, // Score
+                1466634774); // Fetch timestamp
+        Bitmap bitmap = BitmapFactory.decodeResource(mActivityTestRule.getActivity().getResources(),
+                R.drawable.signin_promo_illustration);
+        int thumbnailSize = mActivityTestRule.getActivity().getResources().getDimensionPixelSize(
+                R.dimen.snippets_thumbnail_size);
+        Bitmap thumbnail = ThumbnailUtils.extractThumbnail(
+                bitmap, thumbnailSize, thumbnailSize, ThumbnailUtils.OPTIONS_RECYCLE_INPUT);
+        shortSnippet.setThumbnailBitmap(mUiDelegate.getReferencePool().put(thumbnail));
 
         SnippetArticle longSnippet = new SnippetArticle(fullCategory, "id2",
                 new String(new char[20]).replace("\0", "Snippet "),
                 new String(new char[20]).replace("\0", "Publisher "),
                 new String(new char[80]).replace("\0", "Preview Text "), "www.google.com",
-                1466614074, // Timestamp
-                20f); // Score
+                1466614074, // Publish timestamp
+                20f, // Score
+                1466634774); // Fetch timestamp
 
         SnippetArticle minimalSnippet = new SnippetArticle(minimalCategory, "id3",
                 new String(new char[20]).replace("\0", "Bookmark "), "Publisher",
                 "This should not be displayed", "www.google.com",
-                1466614774, // Timestamp
-                10f); // Score
+                1466614774, // Publish timestamp
+                10f, // Score
+                1466634774); // Fetch timestamp
 
         SnippetArticle minimalSnippet2 = new SnippetArticle(minimalCategory, "id4", "Bookmark",
                 "Publisher", "This should not be displayed", "www.google.com",
-                1466614774, // Timestamp
-                10f); // Score
+                1466614774, // Publish timestamp
+                10f, // Score
+                1466634774); // Fetch timestamp
 
-        mSnippetsSource.setInfoForCategory(
-                fullCategory, new SuggestionsCategoryInfo(fullCategory, "Section Title",
-                                      ContentSuggestionsCardLayout.FULL_CARD, false, false, false,
-                                      true, "No suggestions"));
+        mSnippetsSource.setInfoForCategory(fullCategory,
+                new SuggestionsCategoryInfo(fullCategory, "Section Title",
+                        ContentSuggestionsCardLayout.FULL_CARD,
+                        ContentSuggestionsAdditionalAction.NONE,
+                        /*show_if_empty=*/true, "No suggestions"));
         mSnippetsSource.setStatusForCategory(fullCategory, CategoryStatus.AVAILABLE);
         mSnippetsSource.setSuggestionsForCategory(
                 fullCategory, Arrays.asList(shortSnippet, longSnippet));
 
-        mSnippetsSource.setInfoForCategory(
-                minimalCategory, new SuggestionsCategoryInfo(minimalCategory, "Section Title",
-                                         ContentSuggestionsCardLayout.MINIMAL_CARD, false, false,
-                                         false, true, "No suggestions"));
+        mSnippetsSource.setInfoForCategory(minimalCategory,
+                new SuggestionsCategoryInfo(minimalCategory, "Section Title",
+                        ContentSuggestionsCardLayout.MINIMAL_CARD,
+                        ContentSuggestionsAdditionalAction.NONE,
+                        /* show_if_empty = */ true, "No suggestions"));
         mSnippetsSource.setStatusForCategory(minimalCategory, CategoryStatus.AVAILABLE);
         mSnippetsSource.setSuggestionsForCategory(
                 minimalCategory, Arrays.asList(minimalSnippet, minimalSnippet2));
     }
 
-    @Override
-    public void startMainActivity() throws InterruptedException {
-        startMainActivityOnBlankPage();
-        mViewRenderer = new ViewRenderer(getActivity(),
+    @Before
+    public void setUp() throws Exception {
+        mActivityTestRule.startMainActivityOnBlankPage();
+        mViewRenderer = new ViewRenderer(mActivityTestRule.getActivity(),
                 "chrome/test/data/android/render_tests", this.getClass().getSimpleName());
-    }
-
-    @Override
-    protected void setUp() throws Exception {
-        super.setUp();
         mUiDelegate = new MockUiDelegate();
         mSnippetsSource = new FakeSuggestionsSource();
     }
@@ -189,8 +210,10 @@ public class ArticleSnippetsTest extends ChromeActivityTestCaseBase<ChromeActivi
      * A SuggestionsUiDelegate to initialize our Adapter.
      */
     private class MockUiDelegate implements SuggestionsUiDelegate {
-        private SuggestionsMetricsReporter mSuggestionsMetricsReporter =
-                new DummySuggestionsMetricsReporter();
+        private SuggestionsEventReporter mSuggestionsEventReporter =
+                new DummySuggestionsEventReporter();
+        private SuggestionsRanker mSuggestionsRanker = new SuggestionsRanker();
+        private final DiscardableReferencePool mReferencePool = new DiscardableReferencePool();
 
         @Override
         public void getLocalFaviconImageForURL(
@@ -201,8 +224,9 @@ public class ArticleSnippetsTest extends ChromeActivityTestCaseBase<ChromeActivi
                 public void run() {
                     // Return an arbitrary drawable.
                     faviconCallback.onFaviconAvailable(
-                            BitmapFactory.decodeResource(getActivity().getResources(),
-                            R.drawable.star_green),
+                            BitmapFactory.decodeResource(
+                                    mActivityTestRule.getActivity().getResources(),
+                                    R.drawable.star_green),
                             url);
                 }
             });
@@ -220,21 +244,31 @@ public class ArticleSnippetsTest extends ChromeActivityTestCaseBase<ChromeActivi
         }
 
         @Override
-        public void getUrlsAvailableOffline(Set<String> pageUrls, Callback<Set<String>> callback) {
-            throw new UnsupportedOperationException();
+        public SuggestionsSource getSuggestionsSource() {
+            return mSnippetsSource;
         }
 
         @Override
-        public SuggestionsSource getSuggestionsSource() {
-            return mSnippetsSource;
+        public SuggestionsRanker getSuggestionsRanker() {
+            return mSuggestionsRanker;
+        }
+
+        @Override
+        public DiscardableReferencePool getReferencePool() {
+            return mReferencePool;
         }
 
         @Override
         public void addDestructionObserver(DestructionObserver destructionObserver) {}
 
         @Override
-        public SuggestionsMetricsReporter getMetricsReporter() {
-            return mSuggestionsMetricsReporter;
+        public boolean isVisible() {
+            return true;
+        }
+
+        @Override
+        public SuggestionsEventReporter getEventReporter() {
+            return mSuggestionsEventReporter;
         }
 
         @Override
@@ -243,26 +277,4 @@ public class ArticleSnippetsTest extends ChromeActivityTestCaseBase<ChromeActivi
         }
     }
 
-    private static class DummySuggestionsMetricsReporter implements SuggestionsMetricsReporter {
-        @Override
-        public void onPageShown(int[] categories, int[] suggestionsPerCategory) {}
-
-        @Override
-        public void onSuggestionShown(SnippetArticle suggestion) {}
-
-        @Override
-        public void onSuggestionOpened(SnippetArticle suggestion, int windowOpenDisposition) {}
-
-        @Override
-        public void onSuggestionMenuOpened(SnippetArticle suggestion) {}
-
-        @Override
-        public void onMoreButtonShown(@CategoryInt ActionItem category) {}
-
-        @Override
-        public void onMoreButtonClicked(@CategoryInt ActionItem category) {}
-
-        @Override
-        public void setRanker(SuggestionsRanker suggestionsRanker) {}
-    }
 }

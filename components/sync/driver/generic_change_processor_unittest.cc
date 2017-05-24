@@ -9,9 +9,9 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
+#include "base/test/scoped_task_environment.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/device_info/local_device_info_provider.h"
 #include "components/sync/driver/fake_sync_client.h"
@@ -20,7 +20,6 @@
 #include "components/sync/engine/attachments/fake_attachment_uploader.h"
 #include "components/sync/engine/sync_encryption_handler.h"
 #include "components/sync/model/attachments/attachment_id.h"
-#include "components/sync/model/attachments/attachment_service.h"
 #include "components/sync/model/data_type_error_handler_mock.h"
 #include "components/sync/model/fake_syncable_service.h"
 #include "components/sync/model/sync_change.h"
@@ -124,7 +123,9 @@ class SyncGenericChangeProcessorTest : public testing::Test {
   static const ModelType kType = PREFERENCES;
 
   SyncGenericChangeProcessorTest()
-      : syncable_service_ptr_factory_(&fake_syncable_service_),
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI),
+        syncable_service_ptr_factory_(&fake_syncable_service_),
         mock_attachment_service_(nullptr),
         sync_client_(&sync_factory_) {}
 
@@ -194,7 +195,7 @@ class SyncGenericChangeProcessorTest : public testing::Test {
   }
 
  private:
-  base::MessageLoopForUI loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
 
   std::unique_ptr<SyncMergeResult> sync_merge_result_;
   std::unique_ptr<base::WeakPtrFactory<SyncMergeResult>>

@@ -6,11 +6,12 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <vector>
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/memory/scoped_vector.h"
+#include "base/test/scoped_task_environment.h"
 #include "cc/output/swap_promise.h"
 #include "content/renderer/gpu/frame_swap_message_queue.h"
 #include "content/renderer/gpu/render_widget_compositor.h"
@@ -107,21 +108,18 @@ class QueueMessageSwapPromiseTest : public testing::Test {
     for (size_t i = 0; i < count; ++i) {
       messages_.push_back(
           IPC::Message(0, i + 1, IPC::Message::PRIORITY_NORMAL));
-      promises_.push_back(
-          QueueMessageImpl(new IPC::Message(messages_[i]),
-                           data[i].policy,
-                           data[i].source_frame_number).release());
+      promises_.push_back(QueueMessageImpl(new IPC::Message(messages_[i]),
+                                           data[i].policy,
+                                           data[i].source_frame_number));
     }
   }
 
   void CleanupPromises() {
-    for (ScopedVector<cc::SwapPromise>::iterator i = promises_.begin();
-         i != promises_.end();
-         ++i) {
-      if (*i) {
-        (*i)->DidActivate();
-        (*i)->WillSwap(NULL);
-        (*i)->DidSwap();
+    for (const auto& promise : promises_) {
+      if (promise.get()) {
+        promise->DidActivate();
+        promise->WillSwap(NULL);
+        promise->DidSwap();
       }
     }
   }
@@ -130,11 +128,11 @@ class QueueMessageSwapPromiseTest : public testing::Test {
   void VisualStateSwapPromiseDidNotSwap(
       cc::SwapPromise::DidNotSwapReason reason);
 
-  base::MessageLoop message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   scoped_refptr<FrameSwapMessageQueue> frame_swap_message_queue_;
   scoped_refptr<TestSyncMessageFilter> sync_message_filter_;
   std::vector<IPC::Message> messages_;
-  ScopedVector<cc::SwapPromise> promises_;
+  std::vector<std::unique_ptr<cc::SwapPromise>> promises_;
 
  private:
   std::vector<std::unique_ptr<IPC::Message>> next_swap_messages_;
@@ -149,7 +147,7 @@ TEST_F(QueueMessageSwapPromiseTest, NextSwapPolicySchedulesMessageForNextSwap) {
   };
   QueueMessages(data, arraysize(data));
 
-  ASSERT_TRUE(promises_[0]);
+  ASSERT_TRUE(promises_[0].get());
   promises_[0]->DidActivate();
   promises_[0]->WillSwap(NULL);
   promises_[0]->DidSwap();
@@ -168,8 +166,8 @@ TEST_F(QueueMessageSwapPromiseTest, NextSwapPolicyNeedsAtMostOnePromise) {
   };
   QueueMessages(data, arraysize(data));
 
-  ASSERT_TRUE(promises_[0]);
-  ASSERT_FALSE(promises_[1]);
+  ASSERT_TRUE(promises_[0].get());
+  ASSERT_FALSE(promises_[1].get());
 
   CleanupPromises();
 }
@@ -222,7 +220,7 @@ TEST_F(QueueMessageSwapPromiseTest,
   };
   QueueMessages(data, arraysize(data));
 
-  ASSERT_TRUE(promises_[0]);
+  ASSERT_TRUE(promises_[0].get());
   EXPECT_TRUE(DirectSendMessages().empty());
   EXPECT_FALSE(frame_swap_message_queue_->Empty());
   EXPECT_TRUE(NextSwapMessages().empty());
@@ -258,7 +256,7 @@ TEST_F(QueueMessageSwapPromiseTest, VisualStateSwapPromiseDidActivate) {
   promises_[0]->DidActivate();
   promises_[0]->WillSwap(NULL);
   promises_[0]->DidSwap();
-  ASSERT_FALSE(promises_[1]);
+  ASSERT_FALSE(promises_[1].get());
   std::vector<std::unique_ptr<IPC::Message>> messages;
   messages.swap(NextSwapMessages());
   EXPECT_EQ(2u, messages.size());
@@ -295,7 +293,7 @@ void QueueMessageSwapPromiseTest::VisualStateSwapPromiseDidNotSwap(
                        reason != cc::SwapPromise::ACTIVATION_FAILS;
 
   promises_[0]->DidNotSwap(reason);
-  ASSERT_FALSE(promises_[1]);
+  ASSERT_FALSE(promises_[1].get());
   EXPECT_TRUE(NextSwapMessages().empty());
   EXPECT_EQ(msg_delivered, ContainsMessage(DirectSendMessages(), messages_[0]));
   EXPECT_EQ(msg_delivered, ContainsMessage(DirectSendMessages(), messages_[1]));

@@ -12,6 +12,10 @@
 #include "cc/output/context_provider.h"
 #include "cc/output/shader.h"
 
+namespace gfx {
+class ColorTransform;
+}
+
 namespace gpu {
 namespace gles2 {
 class GLES2Interface;
@@ -66,6 +70,7 @@ enum ProgramType {
 
 class CC_EXPORT ProgramKey {
  public:
+  ProgramKey();
   ProgramKey(const ProgramKey& other);
   ~ProgramKey();
 
@@ -93,13 +98,14 @@ class CC_EXPORT ProgramKey {
   static ProgramKey YUVVideo(TexCoordPrecision precision,
                              SamplerType sampler,
                              YUVAlphaTextureMode yuv_alpha_texture_mode,
-                             UVTextureMode uv_texture_mode,
-                             ColorConversionMode color_conversion_mode);
+                             UVTextureMode uv_texture_mode);
 
   bool operator==(const ProgramKey& other) const;
+  bool operator!=(const ProgramKey& other) const;
+
+  void SetColorTransform(const gfx::ColorTransform* transform);
 
  private:
-  ProgramKey();
   friend struct ProgramKeyHash;
   friend class Program;
 
@@ -122,6 +128,7 @@ class CC_EXPORT ProgramKey {
   UVTextureMode uv_texture_mode_ = UV_TEXTURE_MODE_NA;
 
   ColorConversionMode color_conversion_mode_ = COLOR_CONVERSION_MODE_NONE;
+  const gfx::ColorTransform* color_transform_ = nullptr;
 };
 
 struct ProgramKeyHash {
@@ -159,6 +166,8 @@ class Program : public ProgramBindingBase {
     fragment_shader_.premultiply_alpha_mode_ = key.premultiplied_alpha_;
     fragment_shader_.mask_mode_ = key.mask_mode_;
     fragment_shader_.mask_for_background_ = key.mask_for_background_;
+    fragment_shader_.color_conversion_mode_ = key.color_conversion_mode_;
+    fragment_shader_.color_transform_ = key.color_transform_;
 
     switch (key.type_) {
       case PROGRAM_TYPE_DEBUG_BORDER:
@@ -266,21 +275,17 @@ class Program : public ProgramBindingBase {
     return fragment_shader_.lut_texture_location_;
   }
   int lut_size_location() const { return fragment_shader_.lut_size_location_; }
-  int yuv_matrix_location() const {
-    return fragment_shader_.yuv_matrix_location_;
-  }
-  int yuv_adj_location() const { return fragment_shader_.yuv_adj_location_; }
-  int ya_clamp_rect_location() const {
-    return fragment_shader_.ya_clamp_rect_location_;
-  }
-  int uv_clamp_rect_location() const {
-    return fragment_shader_.uv_clamp_rect_location_;
-  }
   int resource_multiplier_location() const {
     return fragment_shader_.resource_multiplier_location_;
   }
   int resource_offset_location() const {
     return fragment_shader_.resource_offset_location_;
+  }
+  int ya_clamp_rect_location() const {
+    return fragment_shader_.ya_clamp_rect_location_;
+  }
+  int uv_clamp_rect_location() const {
+    return fragment_shader_.uv_clamp_rect_location_;
   }
 
  private:
@@ -389,7 +394,6 @@ class Program : public ProgramBindingBase {
     fragment_shader_.has_uniform_alpha_ = true;
     fragment_shader_.yuv_alpha_texture_mode_ = key.yuv_alpha_texture_mode_;
     fragment_shader_.uv_texture_mode_ = key.uv_texture_mode_;
-    fragment_shader_.color_conversion_mode_ = key.color_conversion_mode_;
   }
 
   void InitializeInternal(ContextProvider* context_provider) {

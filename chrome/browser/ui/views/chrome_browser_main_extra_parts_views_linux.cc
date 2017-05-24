@@ -33,20 +33,16 @@ ui::NativeTheme* GetNativeThemeForWindow(aura::Window* window) {
   if (!window)
     return nullptr;
 
-  Profile* profile = nullptr;
-  // Window types not listed here (such as tooltips) will never use Chrome
-  // theming.
-  if (window->type() == ui::wm::WINDOW_TYPE_NORMAL ||
-      window->type() == ui::wm::WINDOW_TYPE_POPUP) {
-    profile = reinterpret_cast<Profile*>(
-        window->GetNativeWindowProperty(Profile::kProfileKey));
-  }
+  Profile* profile = reinterpret_cast<Profile*>(
+      window->GetNativeWindowProperty(Profile::kProfileKey));
 
   // If using the system (GTK) theme, don't use an Aura NativeTheme at all.
   // NB: ThemeService::UsingSystemTheme() might lag behind this pref. See
   // http://crbug.com/585522
-  if (!profile || profile->GetPrefs()->GetBoolean(prefs::kUsesSystemTheme))
+  if (!profile || (!profile->IsSupervised() &&
+                   profile->GetPrefs()->GetBoolean(prefs::kUsesSystemTheme))) {
     return nullptr;
+  }
 
   // Use a dark theme for incognito browser windows that aren't
   // custom-themed. Otherwise, normal Aura theme.
@@ -66,7 +62,8 @@ ChromeBrowserMainExtraPartsViewsLinux::ChromeBrowserMainExtraPartsViewsLinux() {
 
 ChromeBrowserMainExtraPartsViewsLinux::
     ~ChromeBrowserMainExtraPartsViewsLinux() {
-  views::X11DesktopHandler::get()->RemoveObserver(this);
+  if (views::X11DesktopHandler::get_dont_create())
+    views::X11DesktopHandler::get_dont_create()->RemoveObserver(this);
 }
 
 void ChromeBrowserMainExtraPartsViewsLinux::PreEarlyInitialization() {

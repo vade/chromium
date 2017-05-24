@@ -6,7 +6,6 @@
 
 #include <memory>
 
-#include "base/lazy_instance.h"
 #include "build/build_config.h"
 #include "content/browser/media/audible_metrics.h"
 #include "content/browser/media/audio_stream_monitor.h"
@@ -14,54 +13,73 @@
 #include "content/common/media/media_player_delegate_messages.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
-#include "device/power_save_blocker/power_save_blocker.h"
+#include "device/wake_lock/public/interfaces/wake_lock_context.mojom.h"
 #include "ipc/ipc_message_macros.h"
+#include "mojo/public/cpp/bindings/interface_request.h"
 
 namespace content {
 
 namespace {
 
-static base::LazyInstance<AudibleMetrics>::Leaky g_audible_metrics =
-    LAZY_INSTANCE_INITIALIZER;
+AudibleMetrics* GetAudibleMetrics() {
+  static AudibleMetrics* metrics = new AudibleMetrics();
+  return metrics;
+}
 
 }  // anonymous namespace
 
 MediaWebContentsObserver::MediaWebContentsObserver(WebContents* web_contents)
     : WebContentsObserver(web_contents),
+      has_audio_wake_lock_for_testing_(false),
+      has_video_wake_lock_for_testing_(false),
       session_controllers_manager_(this) {}
 
-MediaWebContentsObserver::~MediaWebContentsObserver() {}
+MediaWebContentsObserver::~MediaWebContentsObserver() = default;
 
 void MediaWebContentsObserver::WebContentsDestroyed() {
-  g_audible_metrics.Get().UpdateAudibleWebContentsState(web_contents(), false);
+  GetAudibleMetrics()->UpdateAudibleWebContentsState(web_contents(), false);
 }
 
 void MediaWebContentsObserver::RenderFrameDeleted(
     RenderFrameHost* render_frame_host) {
-  ClearPowerSaveBlockers(render_frame_host);
+  ClearWakeLocks(render_frame_host);
   session_controllers_manager_.RenderFrameDeleted(render_frame_host);
+
+  if (fullscreen_player_ && fullscreen_player_->first == render_frame_host)
+    fullscreen_player_.reset();
 }
 
 void MediaWebContentsObserver::MaybeUpdateAudibleState() {
   AudioStreamMonitor* audio_stream_monitor =
       static_cast<WebContentsImpl*>(web_contents())->audio_stream_monitor();
 
-  if (audio_stream_monitor->WasRecentlyAudible()) {
-    if (!audio_power_save_blocker_)
-      CreateAudioPowerSaveBlocker();
-  } else {
-    audio_power_save_blocker_.reset();
-  }
+  if (audio_stream_monitor->WasRecentlyAudible())
+    LockAudio();
+  else
+    CancelAudioLock();
 
-  g_audible_metrics.Get().UpdateAudibleWebContentsState(
+  GetAudibleMetrics()->UpdateAudibleWebContentsState(
       web_contents(), audio_stream_monitor->IsCurrentlyAudible());
+}
+
+bool MediaWebContentsObserver::HasActiveEffectivelyFullscreenVideo() const {
+  if (!web_contents()->IsFullscreen() || !fullscreen_player_)
+    return false;
+
+  // Check that the player is active.
+  const auto& players = active_video_players_.find(fullscreen_player_->first);
+  if (players == active_video_players_.end())
+    return false;
+  if (players->second.find(fullscreen_player_->second) == players->second.end())
+    return false;
+
+  return true;
 }
 
 bool MediaWebContentsObserver::OnMessageReceived(
     const IPC::Message& msg,
     RenderFrameHost* render_frame_host) {
   bool handled = true;
-  // TODO(dalecurtis): These should no longer be FrameHostMsg.
   IPC_BEGIN_MESSAGE_MAP_WITH_PARAM(MediaWebContentsObserver, msg,
                                    render_frame_host)
     IPC_MESSAGE_HANDLER(MediaPlayerDelegateHostMsg_OnMediaDestroyed,
@@ -69,22 +87,38 @@ bool MediaWebContentsObserver::OnMessageReceived(
     IPC_MESSAGE_HANDLER(MediaPlayerDelegateHostMsg_OnMediaPaused, OnMediaPaused)
     IPC_MESSAGE_HANDLER(MediaPlayerDelegateHostMsg_OnMediaPlaying,
                         OnMediaPlaying)
+    IPC_MESSAGE_HANDLER(
+        MediaPlayerDelegateHostMsg_OnMediaEffectivelyFullscreenChange,
+        OnMediaEffectivelyFullscreenChange)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
 }
 
 void MediaWebContentsObserver::WasShown() {
-  // Restore power save blocker if there are active video players running.
-  if (!active_video_players_.empty() && !video_power_save_blocker_)
-    CreateVideoPowerSaveBlocker();
+  // Restore wake lock if there are active video players running.
+  if (!active_video_players_.empty())
+    LockVideo();
 }
 
 void MediaWebContentsObserver::WasHidden() {
   // If there are entities capturing screenshots or video (e.g., mirroring),
-  // don't release the power save blocker.
-  if (!web_contents()->GetCapturerCount())
-    video_power_save_blocker_.reset();
+  // don't release the wake lock.
+  if (!web_contents()->GetCapturerCount()) {
+    GetVideoWakeLock()->CancelWakeLock();
+    has_video_wake_lock_for_testing_ = false;
+  }
+}
+
+void MediaWebContentsObserver::RequestPersistentVideo(bool value) {
+  if (!fullscreen_player_)
+    return;
+
+  // The message is sent to the renderer even though the video is already the
+  // fullscreen element itself. It will eventually be handled by Blink.
+  Send(new MediaPlayerDelegateMsg_BecamePersistentVideo(
+      fullscreen_player_->first->GetRoutingID(), fullscreen_player_->second,
+      value));
 }
 
 void MediaWebContentsObserver::OnMediaDestroyed(
@@ -101,7 +135,7 @@ void MediaWebContentsObserver::OnMediaPaused(RenderFrameHost* render_frame_host,
       RemoveMediaPlayerEntry(player_id, &active_audio_players_);
   const bool removed_video =
       RemoveMediaPlayerEntry(player_id, &active_video_players_);
-  MaybeReleasePowerSaveBlockers();
+  MaybeCancelVideoLock();
 
   if (removed_audio || removed_video) {
     // Notify observers the player has been "paused".
@@ -136,11 +170,9 @@ void MediaWebContentsObserver::OnMediaPlaying(
   if (has_video) {
     AddMediaPlayerEntry(id, &active_video_players_);
 
-    // If we're not hidden and have just created a player, create a blocker.
-    if (!video_power_save_blocker_ &&
-        !static_cast<WebContentsImpl*>(web_contents())->IsHidden()) {
-      CreateVideoPowerSaveBlocker();
-    }
+    // If we're not hidden and have just created a player, create a wakelock.
+    if (!static_cast<WebContentsImpl*>(web_contents())->IsHidden())
+      LockVideo();
   }
 
   if (!session_controllers_manager_.RequestPlay(
@@ -155,7 +187,22 @@ void MediaWebContentsObserver::OnMediaPlaying(
                             id);
 }
 
-void MediaWebContentsObserver::ClearPowerSaveBlockers(
+void MediaWebContentsObserver::OnMediaEffectivelyFullscreenChange(
+    RenderFrameHost* render_frame_host,
+    int delegate_id,
+    bool is_fullscreen) {
+  const MediaPlayerId id(render_frame_host, delegate_id);
+
+  if (!is_fullscreen) {
+    if (fullscreen_player_ && *fullscreen_player_ == id)
+      fullscreen_player_.reset();
+    return;
+  }
+
+  fullscreen_player_ = id;
+}
+
+void MediaWebContentsObserver::ClearWakeLocks(
     RenderFrameHost* render_frame_host) {
   std::set<MediaPlayerId> removed_players;
   RemoveAllMediaPlayerEntries(render_frame_host, &active_video_players_,
@@ -163,7 +210,7 @@ void MediaWebContentsObserver::ClearPowerSaveBlockers(
   std::set<MediaPlayerId> video_players(removed_players);
   RemoveAllMediaPlayerEntries(render_frame_host, &active_audio_players_,
                               &removed_players);
-  MaybeReleasePowerSaveBlockers();
+  MaybeCancelVideoLock();
 
   // Notify all observers the player has been "paused".
   WebContentsImpl* wci = static_cast<WebContentsImpl*>(web_contents());
@@ -175,35 +222,65 @@ void MediaWebContentsObserver::ClearPowerSaveBlockers(
   }
 }
 
-void MediaWebContentsObserver::CreateAudioPowerSaveBlocker() {
-  DCHECK(!audio_power_save_blocker_);
-  audio_power_save_blocker_.reset(new device::PowerSaveBlocker(
-      device::PowerSaveBlocker::kPowerSaveBlockPreventAppSuspension,
-      device::PowerSaveBlocker::kReasonAudioPlayback, "Playing audio",
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::UI),
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE)));
-}
-
-void MediaWebContentsObserver::CreateVideoPowerSaveBlocker() {
-  DCHECK(!video_power_save_blocker_);
-  DCHECK(!active_video_players_.empty());
-  video_power_save_blocker_.reset(new device::PowerSaveBlocker(
-      device::PowerSaveBlocker::kPowerSaveBlockPreventDisplaySleep,
-      device::PowerSaveBlocker::kReasonVideoPlayback, "Playing video",
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::UI),
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE)));
-#if defined(OS_ANDROID)
-  if (web_contents()->GetNativeView()) {
-    video_power_save_blocker_.get()->InitDisplaySleepBlocker(
-        web_contents()->GetNativeView());
+device::mojom::WakeLockService* MediaWebContentsObserver::GetAudioWakeLock() {
+  // Here is a lazy binding, and will not reconnect after connection error.
+  if (!audio_wake_lock_) {
+    device::mojom::WakeLockServiceRequest request =
+        mojo::MakeRequest(&audio_wake_lock_);
+    device::mojom::WakeLockContext* wake_lock_context =
+        web_contents()->GetWakeLockContext();
+    if (wake_lock_context) {
+      wake_lock_context->GetWakeLock(
+          device::mojom::WakeLockType::PreventAppSuspension,
+          device::mojom::WakeLockReason::ReasonAudioPlayback, "Playing audio",
+          std::move(request));
+    }
   }
-#endif
+  return audio_wake_lock_.get();
 }
 
-void MediaWebContentsObserver::MaybeReleasePowerSaveBlockers() {
-  // If there are no more video players, clear the video power save blocker.
+device::mojom::WakeLockService* MediaWebContentsObserver::GetVideoWakeLock() {
+  // Here is a lazy binding, and will not reconnect after connection error.
+  if (!video_wake_lock_) {
+    device::mojom::WakeLockServiceRequest request =
+        mojo::MakeRequest(&video_wake_lock_);
+    device::mojom::WakeLockContext* wake_lock_context =
+        web_contents()->GetWakeLockContext();
+    if (wake_lock_context) {
+      wake_lock_context->GetWakeLock(
+          device::mojom::WakeLockType::PreventDisplaySleep,
+          device::mojom::WakeLockReason::ReasonVideoPlayback, "Playing video",
+          std::move(request));
+    }
+  }
+  return video_wake_lock_.get();
+}
+
+void MediaWebContentsObserver::LockAudio() {
+  GetAudioWakeLock()->RequestWakeLock();
+  has_audio_wake_lock_for_testing_ = true;
+}
+
+void MediaWebContentsObserver::CancelAudioLock() {
+  GetAudioWakeLock()->CancelWakeLock();
+  has_audio_wake_lock_for_testing_ = false;
+}
+
+void MediaWebContentsObserver::LockVideo() {
+  DCHECK(!active_video_players_.empty());
+  GetVideoWakeLock()->RequestWakeLock();
+  has_video_wake_lock_for_testing_ = true;
+}
+
+void MediaWebContentsObserver::CancelVideoLock() {
+  GetVideoWakeLock()->CancelWakeLock();
+  has_video_wake_lock_for_testing_ = false;
+}
+
+void MediaWebContentsObserver::MaybeCancelVideoLock() {
+  // If there are no more video players, cancel the video wake lock.
   if (active_video_players_.empty())
-    video_power_save_blocker_.reset();
+    CancelVideoLock();
 }
 
 void MediaWebContentsObserver::AddMediaPlayerEntry(

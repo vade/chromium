@@ -5,8 +5,8 @@
 #include "content/browser/frame_host/render_frame_message_filter.h"
 
 #include "base/command_line.h"
+#include "base/debug/alias.h"
 #include "base/macros.h"
-#include "base/metrics/field_trial.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "content/browser/bad_message.h"
@@ -26,7 +26,6 @@
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/download_url_parameters.h"
 #include "content/public/common/content_constants.h"
-#include "content/public/common/content_switches.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/cookies/cookie_options.h"
@@ -57,14 +56,13 @@ namespace {
 const int kPluginsRefreshThresholdInSeconds = 3;
 #endif
 
-const char kEnforceStrictSecureExperiment[] = "StrictSecureCookies";
-
 void CreateChildFrameOnUI(int process_id,
                           int parent_routing_id,
                           blink::WebTreeScopeType scope,
                           const std::string& frame_name,
                           const std::string& frame_unique_name,
                           blink::WebSandboxFlags sandbox_flags,
+                          const ParsedFeaturePolicyHeader& container_policy,
                           const FrameOwnerProperties& frame_owner_properties,
                           int new_routing_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -73,9 +71,9 @@ void CreateChildFrameOnUI(int process_id,
   // Handles the RenderFrameHost being deleted on the UI thread while
   // processing a subframe creation message.
   if (render_frame_host) {
-    render_frame_host->OnCreateChildFrame(new_routing_id, scope, frame_name,
-                                          frame_unique_name, sandbox_flags,
-                                          frame_owner_properties);
+    render_frame_host->OnCreateChildFrame(
+        new_routing_id, scope, frame_name, frame_unique_name, sandbox_flags,
+        container_policy, frame_owner_properties);
   }
 }
 
@@ -308,7 +306,8 @@ void RenderFrameMessageFilter::OnCreateChildFrame(
       base::Bind(&CreateChildFrameOnUI, render_process_id_,
                  params.parent_routing_id, params.scope, params.frame_name,
                  params.frame_unique_name, params.sandbox_flags,
-                 params.frame_owner_properties, *new_routing_id));
+                 params.container_policy, params.frame_owner_properties,
+                 *new_routing_id));
 }
 
 void RenderFrameMessageFilter::OnCookiesEnabled(
@@ -328,7 +327,7 @@ void RenderFrameMessageFilter::CheckPolicyForCookies(
     int render_frame_id,
     const GURL& url,
     const GURL& first_party_for_cookies,
-    const GetCookiesCallback& callback,
+    GetCookiesCallback callback,
     const net::CookieList& cookie_list) {
   net::URLRequestContext* context = GetRequestContextForURL(url);
   // Check the policy for get cookies, and pass cookie_list to the
@@ -337,9 +336,9 @@ void RenderFrameMessageFilter::CheckPolicyForCookies(
       GetContentClient()->browser()->AllowGetCookie(
           url, first_party_for_cookies, cookie_list, resource_context_,
           render_process_id_, render_frame_id)) {
-    callback.Run(net::CookieStore::BuildCookieLine(cookie_list));
+    std::move(callback).Run(net::CookieStore::BuildCookieLine(cookie_list));
   } else {
-    callback.Run(std::string());
+    std::move(callback).Run(std::string());
   }
 }
 
@@ -396,16 +395,6 @@ void RenderFrameMessageFilter::SetCookie(int32_t render_frame_id,
   }
 
   net::CookieOptions options;
-  bool experimental_web_platform_features_enabled =
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableExperimentalWebPlatformFeatures);
-  const std::string enforce_strict_secure_group =
-      base::FieldTrialList::FindFullName(kEnforceStrictSecureExperiment);
-  if (experimental_web_platform_features_enabled ||
-      base::StartsWith(enforce_strict_secure_group, "Enabled",
-                       base::CompareCase::INSENSITIVE_ASCII)) {
-    options.set_enforce_strict_secure();
-  }
   if (GetContentClient()->browser()->AllowSetCookie(
           url, first_party_for_cookies, cookie, resource_context_,
           render_process_id_, render_frame_id, options)) {
@@ -419,13 +408,13 @@ void RenderFrameMessageFilter::SetCookie(int32_t render_frame_id,
 void RenderFrameMessageFilter::GetCookies(int render_frame_id,
                                           const GURL& url,
                                           const GURL& first_party_for_cookies,
-                                          const GetCookiesCallback& callback) {
+                                          GetCookiesCallback callback) {
   ChildProcessSecurityPolicyImpl* policy =
       ChildProcessSecurityPolicyImpl::GetInstance();
   if (!policy->CanAccessDataForOrigin(render_process_id_, url)) {
     bad_message::ReceivedBadMessage(this,
                                     bad_message::RFMF_GET_COOKIES_BAD_ORIGIN);
-    callback.Run(std::string());
+    std::move(callback).Run(std::string());
     return;
   }
 
@@ -452,7 +441,8 @@ void RenderFrameMessageFilter::GetCookies(int render_frame_id,
   context->cookie_store()->GetCookieListWithOptionsAsync(
       url, options,
       base::Bind(&RenderFrameMessageFilter::CheckPolicyForCookies, this,
-                 render_frame_id, url, first_party_for_cookies, callback));
+                 render_frame_id, url, first_party_for_cookies,
+                 base::Passed(&callback)));
 }
 
 #if BUILDFLAG(ENABLE_PLUGINS)

@@ -5,10 +5,13 @@
 #include "media/blink/new_session_cdm_result_promise.h"
 
 #include "base/logging.h"
+#include "base/metrics/histogram_functions.h"
 #include "media/blink/cdm_result_promise_helper.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 
 namespace media {
+
+const char kTimeUMAPrefix[] = "TimeTo.";
 
 static blink::WebContentDecryptionModuleResult::SessionStatus ConvertStatus(
     SessionInitStatus status) {
@@ -16,24 +19,26 @@ static blink::WebContentDecryptionModuleResult::SessionStatus ConvertStatus(
     case SessionInitStatus::UNKNOWN_STATUS:
       break;
     case SessionInitStatus::NEW_SESSION:
-      return blink::WebContentDecryptionModuleResult::NewSession;
+      return blink::WebContentDecryptionModuleResult::kNewSession;
     case SessionInitStatus::SESSION_NOT_FOUND:
-      return blink::WebContentDecryptionModuleResult::SessionNotFound;
+      return blink::WebContentDecryptionModuleResult::kSessionNotFound;
     case SessionInitStatus::SESSION_ALREADY_EXISTS:
-      return blink::WebContentDecryptionModuleResult::SessionAlreadyExists;
+      return blink::WebContentDecryptionModuleResult::kSessionAlreadyExists;
   }
   NOTREACHED();
-  return blink::WebContentDecryptionModuleResult::SessionNotFound;
+  return blink::WebContentDecryptionModuleResult::kSessionNotFound;
 }
 
 NewSessionCdmResultPromise::NewSessionCdmResultPromise(
     const blink::WebContentDecryptionModuleResult& result,
+    const std::string& key_system_uma_prefix,
     const std::string& uma_name,
     const SessionInitializedCB& new_session_created_cb)
     : web_cdm_result_(result),
+      key_system_uma_prefix_(key_system_uma_prefix),
       uma_name_(uma_name),
-      new_session_created_cb_(new_session_created_cb) {
-}
+      new_session_created_cb_(new_session_created_cb),
+      creation_time_(base::TimeTicks::Now()) {}
 
 NewSessionCdmResultPromise::~NewSessionCdmResultPromise() {
   if (!IsPromiseSettled())
@@ -52,8 +57,13 @@ void NewSessionCdmResultPromise::resolve(const std::string& session_id) {
   }
 
   MarkPromiseSettled();
-  ReportCdmResultUMA(uma_name_, SUCCESS);
-  web_cdm_result_.completeWithSession(ConvertStatus(status));
+  ReportCdmResultUMA(key_system_uma_prefix_ + uma_name_, SUCCESS);
+
+  // Only report time for promise resolution (not rejection).
+  base::UmaHistogramTimes(key_system_uma_prefix_ + kTimeUMAPrefix + uma_name_,
+                          base::TimeTicks::Now() - creation_time_);
+
+  web_cdm_result_.CompleteWithSession(ConvertStatus(status));
 }
 
 void NewSessionCdmResultPromise::reject(CdmPromise::Exception exception_code,
@@ -62,9 +72,9 @@ void NewSessionCdmResultPromise::reject(CdmPromise::Exception exception_code,
   MarkPromiseSettled();
   ReportCdmResultUMA(uma_name_,
                      ConvertCdmExceptionToResultForUMA(exception_code));
-  web_cdm_result_.completeWithError(ConvertCdmException(exception_code),
+  web_cdm_result_.CompleteWithError(ConvertCdmException(exception_code),
                                     system_code,
-                                    blink::WebString::fromUTF8(error_message));
+                                    blink::WebString::FromUTF8(error_message));
 }
 
 }  // namespace media

@@ -43,6 +43,7 @@
     padding-top: 25px;
     background-color: white;
     overflow: hidden;
+    white-space: nowrap;
 }
 
 .scripts-debug-toolbar-drawer.expanded {
@@ -55,41 +56,6 @@
     height: 28px;
 }
 
-.function-location-link {
-    float: right;
-    margin-left: 10px;
-}
-
-.function-location-step-into {
-    position: relative;
-    height: 14px;
-    transform: rotate(-90deg);
-}
-
-.object-popover-container {
-    display: inline-block;
-}
-
-.function-popover-title {
-    border-bottom: 1px solid #AAA;
-    margin-bottom: 3px;
-    padding-bottom: 2px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.function-title-link-container {
-    display: flex;
-    align-items: center;
-    position: relative;
-    margin-left: 10px;
-}
-
-.function-popover-title .function-name {
-    font-weight: bold;
-}
-
 .panel.sources .sidebar-pane-stack {
     overflow: auto;
 }
@@ -100,20 +66,6 @@
 
 .cursor-auto {
     cursor: auto;
-}
-
-.available-node-targets {
-    height: 22px;
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-    padding-left: 20px;
-    border-top: 1px solid #eee;
-    font-style: italic;
-}
-
-.available-node-targets > span {
-    margin-left: 5px;
 }
 
 .watch-expression-delete-button {

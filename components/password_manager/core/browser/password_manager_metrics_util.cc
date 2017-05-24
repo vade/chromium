@@ -6,6 +6,7 @@
 
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -18,7 +19,7 @@
 #include "url/gurl.h"
 
 using base::ListValue;
-using base::FundamentalValue;
+using base::Value;
 
 namespace password_manager {
 
@@ -114,9 +115,20 @@ void LogCountHttpMigratedPasswords(int count) {
   UMA_HISTOGRAM_COUNTS_100("PasswordManager.HttpPasswordMigrationCount", count);
 }
 
-void LogAccountChooserUsability(AccountChooserUsabilityMetric usability) {
+void LogHttpPasswordMigrationMode(HttpPasswordMigrationMode mode) {
+  UMA_HISTOGRAM_ENUMERATION("PasswordManager.HttpPasswordMigrationMode", mode,
+                            HTTP_PASSWORD_MIGRATION_MODE_COUNT);
+}
+
+void LogAccountChooserUsability(AccountChooserUsabilityMetric usability,
+                                int count_empty_icons,
+                                int count_accounts) {
   UMA_HISTOGRAM_ENUMERATION("PasswordManager.AccountChooserDialogUsability",
                             usability, ACCOUNT_CHOOSER_USABILITY_COUNT);
+  UMA_HISTOGRAM_COUNTS_100("PasswordManager.AccountChooserDialogEmptyAvatars",
+                           count_empty_icons);
+  UMA_HISTOGRAM_COUNTS_100("PasswordManager.AccountChooserDialogAccounts",
+                           count_accounts);
 }
 
 void LogCredentialManagerGetResult(CredentialManagerGetResult result,
@@ -147,6 +159,27 @@ void LogPasswordReuse(int password_length,
       "PasswordManager.PasswordReuse.PasswordFieldDetected",
       password_field_detected ? HAS_PASSWORD_FIELD : NO_PASSWORD_FIELD,
       PASSWORD_REUSE_PASSWORD_FIELD_DETECTED_COUNT);
+}
+
+void LogShowedHttpNotSecureExplanation() {
+  base::RecordAction(base::UserMetricsAction(
+      "PasswordManager_ShowedHttpNotSecureExplanation"));
+}
+
+void LogShowedFormNotSecureWarningOnCurrentNavigation() {
+  // Always record 'true': this is a counter of the number of times the warning
+  // is shown, to gather metrics such as the number of times the warning is
+  // shown per million page loads.
+  UMA_HISTOGRAM_BOOLEAN(
+      "PasswordManager.ShowedFormNotSecureWarningOnCurrentNavigation", true);
+}
+
+void LogPasswordSuccessfulSubmissionIndicatorEvent(
+    autofill::PasswordForm::SubmissionIndicatorEvent event) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "PasswordManager.SuccessfulSubmissionIndicatorEvent", event,
+      autofill::PasswordForm::SubmissionIndicatorEvent::
+          SUBMISSION_INDICATOR_EVENT_COUNT);
 }
 
 }  // namespace metrics_util

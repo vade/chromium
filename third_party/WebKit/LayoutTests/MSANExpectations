@@ -1,5 +1,7 @@
 # This file is used for tests that only need to be suppressed on
 # the Chromium Blink MSan bots.
+# Further documentation:
+# https://chromium.googlesource.com/chromium/src/+/master/docs/testing/layout_test_expectations.md
 
 # Those stress V8's simulator, making them very slow under MSan.
 crbug.com/420198 [ Linux ] fast/js/regress [ Skip ]
@@ -13,22 +15,28 @@ crbug.com/420198 [ Linux ] virtual/slimmingpaint/fast/css/fontface-arraybuffer.h
 # a stack overflow due to bloated stack frames under MSan.
 crbug.com/420606 [ Linux ] fast/workers/shared-worker-constructor.html [ Skip ]
 crbug.com/420606 [ Linux ] virtual/slimmingpaint/fast/workers/shared-worker-constructor.html [ Skip ]
-crbug.com/420606 [ Linux ] virtual/sharedarraybuffer/fast/workers/shared-worker-constructor.html [ Skip ]
 crbug.com/420606 [ Linux ] fast/workers/worker-constructor.html [ Skip ]
 crbug.com/420606 [ Linux ] virtual/slimmingpaint/fast/workers/worker-constructor.html [ Skip ]
-crbug.com/420606 [ Linux ] virtual/sharedarraybuffer/fast/workers/worker-constructor.html [ Skip ]
 
 # Flaky under MSan (hang forever).
 crbug.com/422982 [ Linux ] virtual/threaded [ Skip ]
 
 crbug.com/450639 [ Linux ] inspector/tracing/animations.html [ Timeout ]
 crbug.com/450639 [ Linux ] virtual/deferred/inspector/tracing/animations.html [ Timeout ]
+crbug.com/700795 [ Linux ] inspector/animation/animation-transition-setTiming-crash.html [ Skip ]
 
 crbug.com/454267 [ Linux ] virtual/gpu/fast/canvas/canvas-arc-360-winding.html [ Crash ]
 crbug.com/454267 [ Linux ] virtual/gpu/fast/canvas/canvas-ellipse-360-winding.html [ Crash ]
 crbug.com/522315 [ Linux ] virtual/gpu/fast/canvas/quadraticCurveTo.xml [ Crash ]
 
 crbug.com/517704 [ Linux ] external/wpt/encoding/api-invalid-label.html [ Timeout Pass ]
+
+crbug.com/701433 [ Linux ] crypto/subtle/worker-subtle-crypto-concurrent.html [ Timeout Pass ]
+crbug.com/701563 [ Linux ] external/wpt/svg/interfaces.html [ Timeout Pass ]
+
+crbug.com/704360 [ Linux ] shapedetection/detection-HTMLVideoElement.html [ Timeout Pass ]
+crbug.com/704360 [ Linux ] shapedetection/detection-HTMLCanvasElement.html [ Timeout Pass ]
+crbug.com/704360 [ Linux ] shapedetection/detection-ImageData.html [ Timeout Pass ]
 
 # Times out on MSAN
 crbug.com/462190 [ Linux ] inspector-protocol/heap-profiler/heap-samples-in-snapshot.html [ Timeout ]

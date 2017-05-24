@@ -11,7 +11,6 @@
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "net/base/elements_upload_data_stream.h"
 #include "net/base/ip_address.h"
 #include "net/base/test_completion_callback.h"
@@ -30,6 +29,7 @@
 #include "net/http/transport_security_state.h"
 #include "net/log/net_log_with_source.h"
 #include "net/proxy/proxy_service.h"
+#include "net/quic/platform/api/quic_string_piece.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "net/ssl/default_channel_id_store.h"
@@ -42,8 +42,6 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
-
-using base::StringPiece;
 
 namespace net {
 
@@ -111,7 +109,6 @@ class QuicEndToEndTest : public ::testing::TestWithParam<TestParams> {
     request_.load_flags = 0;
 
     params_.enable_quic = true;
-    params_.quic_clock = nullptr;
     params_.quic_random = nullptr;
     if (GetParam().use_stateless_rejects) {
       params_.quic_connection_options.push_back(kSREJ);
@@ -126,8 +123,7 @@ class QuicEndToEndTest : public ::testing::TestWithParam<TestParams> {
     params_.http_auth_handler_factory = auth_handler_factory_.get();
     params_.http_server_properties = &http_server_properties_;
     channel_id_service_.reset(
-        new ChannelIDService(new DefaultChannelIDStore(nullptr),
-                             base::ThreadTaskRunnerHandle::Get()));
+        new ChannelIDService(new DefaultChannelIDStore(nullptr)));
     params_.channel_id_service = channel_id_service_.get();
 
     CertVerifyResult verify_result;
@@ -179,7 +175,7 @@ class QuicEndToEndTest : public ::testing::TestWithParam<TestParams> {
         kInitialSessionFlowControlWindowForTest);
     server_config_options_.token_binding_params = QuicTagVector{kTB10, kP256};
     server_.reset(new QuicSimpleServer(
-        CryptoTestUtils::ProofSourceForTesting(), server_config_,
+        crypto_test_utils::ProofSourceForTesting(), server_config_,
         server_config_options_, AllSupportedVersions(), &response_cache_));
     server_->Listen(server_address_);
     server_address_ = server_->server_address();
@@ -189,10 +185,10 @@ class QuicEndToEndTest : public ::testing::TestWithParam<TestParams> {
 
   // Adds an entry to the cache used by the QUIC server to serve
   // responses.
-  void AddToCache(StringPiece path,
+  void AddToCache(QuicStringPiece path,
                   int response_code,
-                  StringPiece response_detail,
-                  StringPiece body) {
+                  QuicStringPiece response_detail,
+                  QuicStringPiece body) {
     response_cache_.AddSimpleResponse("test.example.com", path, response_code,
                                       body);
   }

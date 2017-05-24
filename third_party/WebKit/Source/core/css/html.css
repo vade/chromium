@@ -909,6 +909,10 @@ u, ins {
     text-decoration: underline
 }
 
+abbr[title], acronym[title] {
+    text-decoration: dotted underline;
+}
+
 strong, b {
     font-weight: bold
 }
@@ -1075,6 +1079,7 @@ dialog:not([open]) {
 }
 
 dialog {
+    display: block;
     position: absolute;
     left: 0;
     right: 0;

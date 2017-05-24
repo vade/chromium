@@ -277,11 +277,12 @@ void AdjustParagraphDirectionality(base::string16* paragraph) {
 }
 
 struct AvailableLocalesTraits
-    : base::DefaultLazyInstanceTraits<std::vector<std::string> > {
+    : base::internal::DestructorAtExitLazyInstanceTraits<
+          std::vector<std::string>> {
   static std::vector<std::string>* New(void* instance) {
     std::vector<std::string>* locales =
-        base::DefaultLazyInstanceTraits<std::vector<std::string> >::New(
-            instance);
+        base::internal::DestructorAtExitLazyInstanceTraits<
+            std::vector<std::string>>::New(instance);
     int num_locales = uloc_countAvailable();
     for (int i = 0; i < num_locales; ++i) {
       std::string locale_name = uloc_getAvailable(i);
@@ -357,6 +358,10 @@ bool CheckAndResolveLocale(const std::string& locale,
     if (base::LowerCaseEqualsASCII(lang, "es") &&
         !base::LowerCaseEqualsASCII(region, "es")) {
       tmp_locale.append("-419");
+    } else if (base::LowerCaseEqualsASCII(lang, "pt")) {
+      // Map pt-RR other than pt-BR to pt-PT. Note that "pt" by itself maps to
+      // pt-BR (logic below).
+      tmp_locale.append("-PT");
     } else if (base::LowerCaseEqualsASCII(lang, "zh")) {
       // Map zh-HK and zh-MO to zh-TW. Otherwise, zh-FOO is mapped to zh-CN.
       if (base::LowerCaseEqualsASCII(region, "hk") ||
@@ -387,14 +392,13 @@ bool CheckAndResolveLocale(const std::string& locale,
   }
 
   // Google updater uses no, tl, iw and en for our nb, fil, he, and en-US.
+  // Note that pt-RR is mapped to pt-PT above, but we want pt -> pt-BR here.
   struct {
     const char* source;
     const char* dest;
   } alias_map[] = {
-      {"no", "nb"},
-      {"tl", "fil"},
-      {"iw", "he"},
-      {"en", "en-US"},
+      {"en", "en-US"}, {"iw", "he"},  {"no", "nb"},
+      {"pt", "pt-BR"}, {"tl", "fil"}, {"zh", "zh-CN"},
   };
   for (const auto& alias : alias_map) {
     if (base::LowerCaseEqualsASCII(lang, alias.source)) {
@@ -546,6 +550,11 @@ base::string16 GetDisplayNameForLocale(const std::string& locale,
     locale_code = "ro-MD";
 
   base::string16 display_name;
+#if defined(OS_IOS)
+  // Use the Foundation API to get the localized display name, removing the need
+  // for the ICU data file to include this data.
+  display_name = GetDisplayNameForLocale(locale_code, display_locale);
+#else
 #if defined(OS_ANDROID)
   // Use Java API to get locale display name so that we can remove most of
   // the lang data from icu data to reduce binary size, except for zh-Hans and
@@ -555,7 +564,7 @@ base::string16 GetDisplayNameForLocale(const std::string& locale,
   if (!base::StartsWith(locale_code, "zh-Han", base::CompareCase::SENSITIVE)) {
     display_name = GetDisplayNameForLocale(locale_code, display_locale);
   } else
-#endif
+#endif  // defined(OS_ANDROID)
   {
     UErrorCode error = U_ZERO_ERROR;
     const int kBufferSize = 1024;
@@ -566,6 +575,7 @@ base::string16 GetDisplayNameForLocale(const std::string& locale,
     DCHECK(U_SUCCESS(error));
     display_name.resize(actual_size);
   }
+#endif
 
   // Add directional markup so parentheses are properly placed.
   if (is_for_ui && base::i18n::IsRTL())

@@ -9,17 +9,7 @@
         {
           "object": "LayoutBlockFlow DIV id='dv'",
           "rect": [8, 70, 80, 36],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [8, 70, 74, 18],
-          "reason": "full"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [8, 70, 47, 36],
-          "reason": "full"
+          "reason": "geometry"
         }
       ]
     }
@@ -27,11 +17,11 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutBlockFlow DIV id='dv'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "RootInlineBox",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutText #text",

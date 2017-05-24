@@ -878,9 +878,8 @@ void GCMClientImpl::Register(
           GCMRegistrationInfo::FromRegistrationInfo(
               registrations_iter->first.get());
       DCHECK(cached_gcm_registration_info);
-      if (cached_gcm_registration_info &&
-          gcm_registration_info->sender_ids !=
-              cached_gcm_registration_info->sender_ids) {
+      if (gcm_registration_info->sender_ids !=
+          cached_gcm_registration_info->sender_ids) {
         matched = false;
       }
     }
@@ -961,14 +960,17 @@ void GCMClientImpl::OnRegisterCompleted(
   Result result;
   PendingRegistrationRequests::const_iterator iter =
       pending_registration_requests_.find(registration_info);
-  if (iter == pending_registration_requests_.end())
+  if (iter == pending_registration_requests_.end()) {
     result = UNKNOWN_ERROR;
-  else if (status == RegistrationRequest::INVALID_SENDER)
+  } else if (status == RegistrationRequest::INVALID_SENDER) {
     result = INVALID_PARAMETER;
-  else if (registration_id.empty())
+  } else if (registration_id.empty()) {
+    // All other errors are currently treated as SERVER_ERROR (including
+    // REACHED_MAX_RETRIES due to the device being offline!).
     result = SERVER_ERROR;
-  else
+  } else {
     result = SUCCESS;
+  }
 
   if (result == SUCCESS) {
     // Cache it.
@@ -994,6 +996,40 @@ void GCMClientImpl::OnRegisterCompleted(
 
   if (iter != pending_registration_requests_.end())
     pending_registration_requests_.erase(iter);
+}
+
+bool GCMClientImpl::ValidateRegistration(
+    const linked_ptr<RegistrationInfo>& registration_info,
+    const std::string& registration_id) {
+  DCHECK_EQ(state_, READY);
+
+  // Must have a cached registration.
+  RegistrationInfoMap::const_iterator registrations_iter =
+      registrations_.find(registration_info);
+  if (registrations_iter == registrations_.end())
+    return false;
+
+  // Cached registration ID must match.
+  const std::string& cached_registration_id = registrations_iter->second;
+  if (registration_id != cached_registration_id)
+    return false;
+
+  // For GCM registration, we also match the sender IDs since multiple
+  // registrations are not supported.
+  const GCMRegistrationInfo* gcm_registration_info =
+      GCMRegistrationInfo::FromRegistrationInfo(registration_info.get());
+  if (gcm_registration_info) {
+    const GCMRegistrationInfo* cached_gcm_registration_info =
+        GCMRegistrationInfo::FromRegistrationInfo(
+            registrations_iter->first.get());
+    DCHECK(cached_gcm_registration_info);
+    if (gcm_registration_info->sender_ids !=
+        cached_gcm_registration_info->sender_ids) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 void GCMClientImpl::Unregister(
@@ -1114,7 +1150,8 @@ void GCMClientImpl::OnUnregisterCompleted(
       result = INVALID_PARAMETER;
       break;
     default:
-      // All other errors are treated as SERVER_ERROR.
+      // All other errors are currently treated as SERVER_ERROR (including
+      // REACHED_MAX_RETRIES due to the device being offline!).
       result = SERVER_ERROR;
       break;
   }

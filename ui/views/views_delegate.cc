@@ -21,6 +21,20 @@ ViewsDelegate* views_delegate = nullptr;
 
 }
 
+ViewsDelegate::ViewsDelegate()
+    : editing_controller_factory_(new ViewsTouchEditingControllerFactory) {
+  DCHECK(!views_delegate);
+  views_delegate = this;
+
+  ui::TouchEditingControllerFactory::SetInstance(
+      editing_controller_factory_.get());
+
+#if defined(USE_AURA)
+  touch_selection_menu_runner_ =
+      base::MakeUnique<TouchSelectionMenuRunnerViews>();
+#endif
+}
+
 ViewsDelegate::~ViewsDelegate() {
   ui::TouchEditingControllerFactory::SetInstance(nullptr);
 
@@ -124,40 +138,6 @@ int ViewsDelegate::GetAppbarAutohideEdges(HMONITOR monitor,
 
 scoped_refptr<base::TaskRunner> ViewsDelegate::GetBlockingPoolTaskRunner() {
   return nullptr;
-}
-
-gfx::Insets ViewsDelegate::GetDialogButtonInsets() {
-  return gfx::Insets(0, kButtonHEdgeMarginNew, kButtonVEdgeMarginNew,
-                     kButtonHEdgeMarginNew);
-}
-
-int ViewsDelegate::GetDialogRelatedButtonHorizontalSpacing() {
-  return kRelatedButtonHSpacing;
-}
-
-int ViewsDelegate::GetDialogRelatedControlVerticalSpacing() {
-  return kRelatedControlVerticalSpacing;
-}
-
-gfx::Insets ViewsDelegate::GetDialogFrameViewInsets() {
-  return gfx::Insets(kPanelVertMargin, kButtonHEdgeMarginNew, 0,
-                     kButtonHEdgeMarginNew);
-}
-
-gfx::Insets ViewsDelegate::GetBubbleDialogMargins() {
-  return gfx::Insets(kPanelVertMargin, kPanelHorizMargin);
-}
-
-ViewsDelegate::ViewsDelegate()
-    : views_tsc_factory_(new ViewsTouchEditingControllerFactory) {
-  DCHECK(!views_delegate);
-  views_delegate = this;
-
-  ui::TouchEditingControllerFactory::SetInstance(views_tsc_factory_.get());
-
-#if defined(USE_AURA)
-  touch_selection_menu_runner_.reset(new TouchSelectionMenuRunnerViews());
-#endif
 }
 
 }  // namespace views

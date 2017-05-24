@@ -13,6 +13,8 @@
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/cpp/service_context.h"
 #include "services/service_manager/public/cpp/service_runner.h"
+#include "ui/aura/client/aura_constants.h"
+#include "ui/aura/client/default_capture_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/mus/property_converter.h"
 #include "ui/aura/mus/property_utils.h"
@@ -38,6 +40,8 @@ class TestWM : public service_manager::Service,
   TestWM() {}
 
   ~TestWM() override {
+    default_capture_client_.reset();
+
     // WindowTreeHost uses state from WindowTreeClient, so destroy it first.
     window_tree_host_.reset();
 
@@ -60,11 +64,9 @@ class TestWM : public service_manager::Service,
     aura_env_->SetWindowTreeClient(window_tree_client_.get());
     window_tree_client_->ConnectAsWindowManager();
   }
-
-  bool OnConnect(const service_manager::ServiceInfo& remote_info,
-                 service_manager::InterfaceRegistry* registry) override {
-    return false;
-  }
+  void OnBindInterface(const service_manager::BindSourceInfo& source_info,
+                       const std::string& interface_name,
+                       mojo::ScopedMessagePipeHandle interface_pipe) override {}
 
   // aura::WindowTreeClientDelegate:
   void OnEmbed(
@@ -87,9 +89,6 @@ class TestWM : public service_manager::Service,
                               aura::Window* target) override {
     // Don't care.
   }
-  aura::client::CaptureClient* GetCaptureClient() override {
-    return wm_state_.capture_controller();
-  }
   aura::PropertyConverter* GetPropertyConverter() override {
     return &property_converter_;
   }
@@ -98,8 +97,9 @@ class TestWM : public service_manager::Service,
   void SetWindowManagerClient(aura::WindowManagerClient* client) override {
     window_manager_client_ = client;
   }
-  bool OnWmSetBounds(aura::Window* window, gfx::Rect* bounds) override {
-    return true;
+  void OnWmConnected() override {}
+  void OnWmSetBounds(aura::Window* window, const gfx::Rect& bounds) override {
+    window->SetBounds(bounds);
   }
   bool OnWmSetProperty(
       aura::Window* window,
@@ -107,10 +107,14 @@ class TestWM : public service_manager::Service,
       std::unique_ptr<std::vector<uint8_t>>* new_data) override {
     return true;
   }
+  void OnWmSetModalType(aura::Window* window, ui::ModalType type) override {}
+  void OnWmSetCanFocus(aura::Window* window, bool can_focus) override {}
   aura::Window* OnWmCreateTopLevelWindow(
       ui::mojom::WindowType window_type,
       std::map<std::string, std::vector<uint8_t>>* properties) override {
     aura::Window* window = new aura::Window(nullptr);
+    window->SetProperty(aura::client::kEmbedType,
+                        aura::client::WindowEmbedType::TOP_LEVEL_IN_WM);
     SetWindowType(window, window_type);
     window->Init(LAYER_NOT_DRAWN);
     window->SetBounds(gfx::Rect(10, 10, 500, 500));
@@ -121,6 +125,12 @@ class TestWM : public service_manager::Service,
                                   bool janky) override {
     // Don't care.
   }
+  void OnWmBuildDragImage(const gfx::Point& screen_location,
+                          const SkBitmap& drag_image,
+                          const gfx::Vector2d& drag_image_offset,
+                          ui::mojom::PointerKind source) override {}
+  void OnWmMoveDragImage(const gfx::Point& screen_location) override {}
+  void OnWmDestroyDragImage() override {}
   void OnWmWillCreateDisplay(const display::Display& display) override {
     // This class only deals with one display.
     DCHECK_EQ(0u, screen_->display_list().displays().size());
@@ -133,6 +143,9 @@ class TestWM : public service_manager::Service,
     DCHECK(!root_);
     window_tree_host_ = std::move(window_tree_host);
     root_ = window_tree_host_->window();
+    default_capture_client_ =
+        base::MakeUnique<aura::client::DefaultCaptureClient>(
+            root_->GetRootWindow());
     DCHECK(window_manager_client_);
     window_manager_client_->AddActivationParent(root_);
     ui::mojom::FrameDecorationValuesPtr frame_decoration_values =
@@ -145,6 +158,7 @@ class TestWM : public service_manager::Service,
   void OnWmDisplayRemoved(aura::WindowTreeHostMus* window_tree_host) override {
     DCHECK_EQ(window_tree_host, window_tree_host_.get());
     root_ = nullptr;
+    default_capture_client_.reset();
     window_tree_host_.reset();
   }
   void OnWmDisplayModified(const display::Display& display) override {}
@@ -177,6 +191,7 @@ class TestWM : public service_manager::Service,
   aura::Window* root_ = nullptr;
   aura::WindowManagerClient* window_manager_client_ = nullptr;
   std::unique_ptr<aura::WindowTreeClient> window_tree_client_;
+  std::unique_ptr<aura::client::DefaultCaptureClient> default_capture_client_;
 
   bool started_ = false;
 

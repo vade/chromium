@@ -2,21 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/common/wm/root_window_finder.h"
-#include "ash/common/wm_window.h"
 #include "ash/shell.h"
+#include "ash/wm/root_window_finder.h"
 #include "ash/wm/window_properties.h"
+#include "ash/wm_window.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/test/ui_controls_factory_aura.h"
-#include "ui/aura/window_property.h"
 #include "ui/aura/window_tree_host.h"
+#include "ui/base/class_property.h"
 #include "ui/base/test/ui_controls.h"
 #include "ui/base/test/ui_controls_aura.h"
 #include "ui/display/screen.h"
 
-DECLARE_WINDOW_PROPERTY_TYPE(ui_controls::UIControlsAura*)
+DECLARE_UI_CLASS_PROPERTY_TYPE(ui_controls::UIControlsAura*)
 
 namespace ash {
 namespace test {
@@ -25,7 +25,7 @@ namespace {
 using ui_controls::UIControlsAura;
 using ui_controls::MouseButton;
 
-DEFINE_OWNED_WINDOW_PROPERTY_KEY(UIControlsAura, kUIControlsKey, NULL);
+DEFINE_OWNED_UI_CLASS_PROPERTY_KEY(UIControlsAura, kUIControlsKey, NULL);
 
 // Returns the UIControls object for RootWindow.
 // kUIControlsKey is owned property and UIControls object
@@ -73,8 +73,8 @@ class UIControlsAsh : public UIControlsAura {
                                   bool alt,
                                   bool command,
                                   const base::Closure& closure) override {
-    aura::Window* root =
-        window ? window->GetRootWindow() : ash::Shell::GetTargetRootWindow();
+    aura::Window* root = window ? window->GetRootWindow()
+                                : ash::Shell::GetRootWindowForNewWindows();
     UIControlsAura* ui_controls = GetUIControlsForRootWindow(root);
     return ui_controls &&
            ui_controls->SendKeyPressNotifyWhenDone(window, key, control, shift,
@@ -120,7 +120,7 @@ class UIControlsAsh : public UIControlsAura {
   void RunClosureAfterAllPendingUIEvents(
       const base::Closure& closure) override {
     UIControlsAura* ui_controls =
-        GetUIControlsForRootWindow(ash::Shell::GetTargetRootWindow());
+        GetUIControlsForRootWindow(ash::Shell::GetRootWindowForNewWindows());
     if (ui_controls)
       ui_controls->RunClosureAfterAllPendingUIEvents(closure);
   }

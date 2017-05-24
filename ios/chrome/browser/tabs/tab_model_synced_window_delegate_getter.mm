@@ -12,13 +12,17 @@
 #import "ios/chrome/browser/tabs/tab_model_list.h"
 #import "ios/chrome/browser/tabs/tab_model_synced_window_delegate.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 TabModelSyncedWindowDelegatesGetter::TabModelSyncedWindowDelegatesGetter() {}
 
 TabModelSyncedWindowDelegatesGetter::~TabModelSyncedWindowDelegatesGetter() {}
 
-std::set<const sync_sessions::SyncedWindowDelegate*>
+TabModelSyncedWindowDelegatesGetter::SyncedWindowDelegateMap
 TabModelSyncedWindowDelegatesGetter::GetSyncedWindowDelegates() {
-  std::set<const sync_sessions::SyncedWindowDelegate*> synced_window_delegates;
+  SyncedWindowDelegateMap synced_window_delegates;
 
   std::vector<ios::ChromeBrowserState*> browser_states =
       GetApplicationContext()
@@ -31,7 +35,10 @@ TabModelSyncedWindowDelegatesGetter::GetSyncedWindowDelegates() {
         GetTabModelsForChromeBrowserState(browser_state);
     for (TabModel* tabModel in tabModels) {
       if (tabModel.currentTab) {
-        synced_window_delegates.insert([tabModel syncedWindowDelegate]);
+        sync_sessions::SyncedWindowDelegate* synced_window_delegate =
+            [tabModel syncedWindowDelegate];
+        synced_window_delegates[synced_window_delegate->GetSessionId()] =
+            synced_window_delegate;
       }
     }
   }
@@ -41,9 +48,9 @@ TabModelSyncedWindowDelegatesGetter::GetSyncedWindowDelegates() {
 
 const sync_sessions::SyncedWindowDelegate*
 TabModelSyncedWindowDelegatesGetter::FindById(SessionID::id_type session_id) {
-  for (const auto* delegate : GetSyncedWindowDelegates()) {
-    if (session_id == delegate->GetSessionId())
-      return delegate;
+  for (const auto& iter : GetSyncedWindowDelegates()) {
+    if (session_id == iter.second->GetSessionId())
+      return iter.second;
   }
   return nullptr;
 }

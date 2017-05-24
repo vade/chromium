@@ -12,7 +12,6 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
-#include "base/threading/worker_pool.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
@@ -31,11 +30,9 @@
 #include "content/public/browser/resource_context.h"
 #include "extensions/common/constants.h"
 #include "extensions/features/features.h"
-#include "net/base/sdch_manager.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_server_properties_impl.h"
-#include "net/sdch/sdch_owner.h"
 #include "net/ssl/channel_id_service.h"
 #include "net/ssl/default_channel_id_store.h"
 #include "net/url_request/url_request_context_storage.h"
@@ -195,7 +192,6 @@ OffTheRecordProfileIOData::~OffTheRecordProfileIOData() {
 }
 
 void OffTheRecordProfileIOData::InitializeInternal(
-    std::unique_ptr<ChromeNetworkDelegate> chrome_network_delegate,
     ProfileParams* profile_params,
     content::ProtocolHandlerMap* protocol_handlers,
     content::URLRequestInterceptorScopedVector request_interceptors) const {
@@ -216,11 +212,6 @@ void OffTheRecordProfileIOData::InitializeInternal(
 
   main_context->set_net_log(io_thread->net_log());
 
-  main_context_storage->set_network_delegate(
-      std::move(chrome_network_delegate));
-
-  main_context->set_host_resolver(
-      io_thread_globals->host_resolver.get());
   main_context->set_http_auth_handler_factory(
       io_thread_globals->http_auth_handler_factory.get());
   main_context->set_proxy_service(proxy_service());
@@ -232,8 +223,7 @@ void OffTheRecordProfileIOData::InitializeInternal(
   // For incognito, we use a non-persistent channel ID store.
   main_context_storage->set_channel_id_service(
       base::MakeUnique<net::ChannelIDService>(
-          new net::DefaultChannelIDStore(nullptr),
-          base::WorkerPool::GetTaskRunner(true)));
+          new net::DefaultChannelIDStore(nullptr)));
 
   using content::CookieStoreConfig;
   main_context_storage->set_cookie_store(CreateCookieStore(CookieStoreConfig(
@@ -258,11 +248,6 @@ void OffTheRecordProfileIOData::InitializeInternal(
       std::move(profile_params->protocol_handler_interceptor),
       main_context->network_delegate(), main_context->host_resolver()));
 
-  // Setup SDCH for this profile.
-  main_context_storage->set_sdch_manager(base::MakeUnique<net::SdchManager>());
-  sdch_policy_.reset(
-      new net::SdchOwner(main_context->sdch_manager(), main_context));
-
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   InitializeExtensionsRequestContext(profile_params);
 #endif
@@ -270,42 +255,15 @@ void OffTheRecordProfileIOData::InitializeInternal(
 
 void OffTheRecordProfileIOData::
     InitializeExtensionsRequestContext(ProfileParams* profile_params) const {
-  net::URLRequestContext* extensions_context = extensions_request_context();
-
-  IOThread* const io_thread = profile_params->io_thread;
-  IOThread::Globals* const io_thread_globals = io_thread->globals();
-
-  ApplyProfileParamsToContext(extensions_context);
-
-  extensions_context->set_transport_security_state(transport_security_state());
-
-  extensions_context->set_net_log(io_thread->net_log());
-
-  extensions_context->set_cert_transparency_verifier(
-      io_thread_globals->cert_transparency_verifier.get());
-
   // All we care about for extensions is the cookie store. For incognito, we
   // use a non-persistent cookie store.
+  net::URLRequestContext* extensions_context = extensions_request_context();
+
   content::CookieStoreConfig cookie_config;
   // Enable cookies for chrome-extension URLs.
   cookie_config.cookieable_schemes.push_back(extensions::kExtensionScheme);
   extensions_cookie_store_ = content::CreateCookieStore(cookie_config);
   extensions_context->set_cookie_store(extensions_cookie_store_.get());
-
-  std::unique_ptr<net::URLRequestJobFactoryImpl> extensions_job_factory(
-      new net::URLRequestJobFactoryImpl());
-  // TODO(shalev): The extensions_job_factory has a NULL NetworkDelegate.
-  // Without a network_delegate, this protocol handler will never
-  // handle file: requests, but as a side effect it makes
-  // job_factory::IsHandledProtocol return true, which prevents attempts to
-  // handle the protocol externally. We pass NULL in to
-  // SetUpJobFactoryDefaults() to get this effect.
-  extensions_job_factory_ = SetUpJobFactoryDefaults(
-      std::move(extensions_job_factory),
-      content::URLRequestInterceptorScopedVector(),
-      std::unique_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>(), NULL,
-      io_thread_globals->host_resolver.get());
-  extensions_context->set_job_factory(extensions_job_factory_.get());
 }
 
 net::URLRequestContext* OffTheRecordProfileIOData::InitializeAppRequestContext(
@@ -326,8 +284,7 @@ net::URLRequestContext* OffTheRecordProfileIOData::InitializeAppRequestContext(
   std::unique_ptr<net::CookieStore> cookie_store =
       content::CreateCookieStore(content::CookieStoreConfig());
   std::unique_ptr<net::ChannelIDService> channel_id_service(
-      new net::ChannelIDService(new net::DefaultChannelIDStore(nullptr),
-                                base::WorkerPool::GetTaskRunner(true)));
+      new net::ChannelIDService(new net::DefaultChannelIDStore(nullptr)));
   cookie_store->SetChannelIDServiceID(channel_id_service->GetUniqueID());
   context->SetCookieStore(std::move(cookie_store));
 
@@ -339,7 +296,7 @@ net::URLRequestContext* OffTheRecordProfileIOData::InitializeAppRequestContext(
       new net::HttpNetworkSession(network_params));
 
   // Use a separate in-memory cache for the app.
-  std::unique_ptr<net::HttpCache> app_http_cache = CreateHttpFactory(
+  std::unique_ptr<net::HttpCache> app_http_cache = CreateMainHttpFactory(
       http_network_session.get(), net::HttpCache::DefaultBackend::InMemory(0));
 
   context->SetChannelIDService(std::move(channel_id_service));
@@ -362,7 +319,7 @@ net::URLRequestContext*
 OffTheRecordProfileIOData::InitializeMediaRequestContext(
     net::URLRequestContext* original_context,
     const StoragePartitionDescriptor& partition_descriptor,
-    const std::string& name) const {
+    const char* name) const {
   NOTREACHED();
   return NULL;
 }

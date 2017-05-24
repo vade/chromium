@@ -29,18 +29,14 @@ class InfoBarManager;
 
 namespace translate {
 
+// Feature flag for "Translate Compact Infobar UI" project.
+extern const base::Feature kTranslateCompactUI;
+
 class TranslateDriver;
 class TranslateManager;
 
 class TranslateInfoBarDelegate : public infobars::InfoBarDelegate {
  public:
-  // The types of background color animations.
-  enum BackgroundAnimationType {
-    NONE,
-    NORMAL_TO_ERROR,
-    ERROR_TO_NORMAL
-  };
-
   static const size_t kNoIndex;
 
   ~TranslateInfoBarDelegate() override;
@@ -66,6 +62,9 @@ class TranslateInfoBarDelegate : public infobars::InfoBarDelegate {
                      const std::string& target_language,
                      TranslateErrors::Type error_type,
                      bool triggered_from_menu);
+
+  // Returns true if compact translate UI is enabled.
+  static bool IsCompactUIEnabled();
 
   // Returns the number of languages supported.
   size_t num_languages() const { return ui_delegate_.GetNumberOfLanguages(); }
@@ -118,12 +117,6 @@ class TranslateInfoBarDelegate : public infobars::InfoBarDelegate {
     return triggered_from_menu_;
   }
 
-  // Returns what kind of background fading effect the infobar should use when
-  // its is shown.
-  BackgroundAnimationType background_animation_type() const {
-    return background_animation_;
-  }
-
   virtual void Translate();
   virtual void RevertTranslation();
   void ReportLanguageDetectionError();
@@ -145,6 +138,9 @@ class TranslateInfoBarDelegate : public infobars::InfoBarDelegate {
   // several times).
   void AlwaysTranslatePageLanguage();
   void NeverTranslatePageLanguage();
+
+  int GetTranslationAcceptedCount();
+  int GetTranslationDeniedCount();
 
   // The following methods are called by the infobar that displays the status
   // while translating and also the one displaying the error message.
@@ -191,7 +187,6 @@ class TranslateInfoBarDelegate : public infobars::InfoBarDelegate {
       const base::WeakPtr<TranslateManager>& translate_manager,
       bool is_off_the_record,
       translate::TranslateStep step,
-      TranslateInfoBarDelegate* old_delegate,
       const std::string& original_language,
       const std::string& target_language,
       TranslateErrors::Type error_type,
@@ -211,10 +206,6 @@ class TranslateInfoBarDelegate : public infobars::InfoBarDelegate {
   bool is_off_the_record_;
   translate::TranslateStep step_;
 
-  // The type of fading animation if any that should be used when showing this
-  // infobar.
-  BackgroundAnimationType background_animation_;
-
   TranslateUIDelegate ui_delegate_;
   base::WeakPtr<TranslateManager> translate_manager_;
 
@@ -227,6 +218,7 @@ class TranslateInfoBarDelegate : public infobars::InfoBarDelegate {
   // Whether the translation was triggered via a menu click vs automatically
   // (due to language detection, preferences...)
   bool triggered_from_menu_;
+
   DISALLOW_COPY_AND_ASSIGN(TranslateInfoBarDelegate);
 };
 

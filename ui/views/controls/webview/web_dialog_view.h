@@ -120,7 +120,7 @@ class WEBVIEW_EXPORT WebDialogView : public views::ClientView,
       int32_t route_id,
       int32_t main_frame_route_id,
       int32_t main_frame_widget_route_id,
-      WindowContainerType window_container_type,
+      content::mojom::WindowContainerType window_container_type,
       const GURL& opener_url,
       const std::string& frame_name,
       const GURL& target_url,
@@ -143,21 +143,21 @@ class WEBVIEW_EXPORT WebDialogView : public views::ClientView,
 
   // Whether user is attempting to close the dialog and we are processing
   // beforeunload event.
-  bool is_attempting_close_dialog_;
+  bool is_attempting_close_dialog_ = false;
 
   // Whether beforeunload event has been fired and we have finished processing
   // beforeunload event.
-  bool before_unload_fired_;
+  bool before_unload_fired_ = false;
 
   // Whether the dialog is closed from WebUI in response to a "dialogClose"
   // message.
-  bool closed_via_webui_;
+  bool closed_via_webui_ = false;
 
   // A json string returned to WebUI from a "dialogClose" message.
   std::string dialog_close_retval_;
 
   // Whether CloseContents() has been called.
-  bool close_contents_called_;
+  bool close_contents_called_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(WebDialogView);
 };

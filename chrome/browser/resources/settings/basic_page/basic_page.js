@@ -9,7 +9,7 @@
 Polymer({
   is: 'settings-basic-page',
 
-  behaviors: [SettingsPageVisibility, MainPageBehavior],
+  behaviors: [MainPageBehavior],
 
   properties: {
     /** Preferences state. */
@@ -24,11 +24,15 @@ Polymer({
      * Dictionary defining page visibility.
      * @type {!GuestModePageVisibility}
      */
-    pageVisibility: Object,
+    pageVisibility: {
+      type: Object,
+      value: function() { return {}; },
+    },
 
     advancedToggleExpanded: {
       type: Boolean,
       notify: true,
+      observer: 'advancedToggleExpandedChanged_',
     },
 
     /**
@@ -51,6 +55,18 @@ Polymer({
         return loadTimeData.getBoolean('showResetProfileBanner');
       },
     },
+
+// <if expr="chromeos">
+    /**
+     * Whether the user is a secondary user. Computed so that it is calculated
+     * correctly after loadTimeData is available.
+     * @private
+     */
+    showSecondaryUserBanner_: {
+      type: Boolean,
+      computed: 'computeShowSecondaryUserBanner_(hasExpandedSection_)',
+    },
+// </if>
 
     /** @private {!settings.Route|undefined} */
     currentRoute_: Object,
@@ -89,26 +105,60 @@ Polymer({
   },
 
   /**
+   * @param {boolean|undefined} visibility
+   * @return {boolean}
+   * @private
+   */
+  showPage_: function(visibility) {
+    return visibility !== false;
+  },
+
+  /**
    * Queues a task to search the basic sections, then another for the advanced
    * sections.
    * @param {string} query The text to search for.
-   * @return {!Promise<!settings.SearchRequest>} A signal indicating that
+   * @return {!Promise<!settings.SearchResult>} A signal indicating that
    *     searching finished.
    */
   searchContents: function(query) {
-    var whenSearchDone = settings.getSearchManager().search(
-        query, assert(this.$$('#basicPage')));
+    var whenSearchDone = [
+      settings.getSearchManager().search(query, assert(this.$$('#basicPage'))),
+    ];
 
     if (this.pageVisibility.advancedSettings !== false) {
-      assert(whenSearchDone === settings.getSearchManager().search(
-          query, assert(this.$$('#advancedPage'))));
+      whenSearchDone.push(this.$$('#advancedPageTemplate').get().then(
+          function(advancedPage) {
+            return settings.getSearchManager().search(query, advancedPage);
+          }));
     }
 
-    return whenSearchDone;
+    return Promise.all(whenSearchDone).then(function(requests) {
+      // Combine the SearchRequests results to a single SearchResult object.
+      return {
+        canceled: requests.some(function(r) { return r.canceled; }),
+        didFindMatches: requests.every(function(r) {
+          return !r.didFindMatches();
+        }),
+        // All requests correspond to the same user query, so only need to check
+        // one of them.
+        wasClearSearch: requests[0].isSame(''),
+      };
+    });
   },
 
+// <if expr="chromeos">
+  /**
+   * @return {boolean}
+   * @private
+   */
+  computeShowSecondaryUserBanner_: function() {
+    return !this.hasExpandedSection_ &&
+        loadTimeData.getBoolean('isSecondaryUser');
+  },
+// </if>
+
   /** @private */
-  onResetDone_: function() {
+  onResetProfileBannerClosed_: function() {
     this.showResetProfileBanner_ = false;
   },
 
@@ -119,7 +169,7 @@ Polymer({
   shouldShowAndroidApps_: function() {
     var visibility = /** @type {boolean|undefined} */ (
         this.get('pageVisibility.androidApps'));
-    return this.showAndroidApps && this.showPage(visibility);
+    return this.showAndroidApps && this.showPage_(visibility);
   },
 
   /**
@@ -128,6 +178,18 @@ Polymer({
    */
   onSubpageExpanded_: function() {
     this.hasExpandedSection_ = true;
+  },
+
+  /**
+   * Render the advanced page now (don't wait for idle).
+   * @private
+   */
+  advancedToggleExpandedChanged_: function() {
+    if (this.advancedToggleExpanded) {
+      this.async(function() {
+        this.$$('#advancedPageTemplate').get();
+      }.bind(this));
+    }
   },
 
   /**
@@ -161,8 +223,8 @@ Polymer({
    *     both routing and search state.
    * @private
    */
-  showAdvancedPage_: function(currentRoute, inSearchMode, hasExpandedSection,
-                              advancedToggleExpanded) {
+  showAdvancedPage_: function(
+      currentRoute, inSearchMode, hasExpandedSection, advancedToggleExpanded) {
     return hasExpandedSection ?
         settings.Route.ADVANCED.contains(currentRoute) :
         advancedToggleExpanded || inSearchMode;

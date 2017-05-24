@@ -32,18 +32,24 @@ class FakeSyncEngine : public SyncEngine {
 
   void UpdateCredentials(const SyncCredentials& credentials) override;
 
+  void StartConfiguration() override;
+
   void StartSyncingWithServer() override;
 
   void SetEncryptionPassphrase(const std::string& passphrase,
                                bool is_explicit) override;
 
-  bool SetDecryptionPassphrase(const std::string& passphrase) override;
+  void SetDecryptionPassphrase(const std::string& passphrase) override;
 
   void StopSyncingForShutdown() override;
 
   void Shutdown(ShutdownReason reason) override;
 
   void ConfigureDataTypes(ConfigureParams params) override;
+
+  void RegisterDirectoryDataType(ModelType type, ModelSafeGroup group) override;
+
+  void UnregisterDirectoryDataType(ModelType type) override;
 
   void EnableEncryptEverything() override;
 
@@ -62,12 +68,6 @@ class FakeSyncEngine : public SyncEngine {
 
   bool HasUnsyncedItems() const override;
 
-  bool IsNigoriEnabled() const override;
-
-  PassphraseType GetPassphraseType() const override;
-
-  base::Time GetExplicitPassphraseTime() const override;
-
   bool IsCryptographerReady(const BaseTransaction* trans) const override;
 
   void GetModelSafeRoutingInfo(ModelSafeRoutingInfo* out) const override;
@@ -82,10 +82,11 @@ class FakeSyncEngine : public SyncEngine {
 
   void RefreshTypesForTest(ModelTypeSet types) override;
 
-  void ClearServerData(
-      const SyncManager::ClearServerDataCallback& callback) override;
+  void ClearServerData(const base::Closure& callback) override;
 
-  void OnCookieJarChanged(bool account_mismatch, bool empty_jar) override;
+  void OnCookieJarChanged(bool account_mismatch,
+                          bool empty_jar,
+                          const base::Closure& callback) override;
 
   void set_fail_initial_download(bool should_fail);
 

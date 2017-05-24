@@ -14,7 +14,6 @@
 #include "base/bind_helpers.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos.h"
@@ -28,7 +27,7 @@
 #include "components/policy/core/common/cloud/policy_builder.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "components/user_manager/fake_user_manager.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "crypto/rsa_private_key.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -44,9 +43,7 @@ namespace chromeos {
 class SessionManagerOperationTest : public testing::Test {
  public:
   SessionManagerOperationTest()
-      : ui_thread_(content::BrowserThread::UI, &message_loop_),
-        file_thread_(content::BrowserThread::FILE, &message_loop_),
-        owner_key_util_(new ownership::MockOwnerKeyUtil()),
+      : owner_key_util_(new ownership::MockOwnerKeyUtil()),
         user_manager_(new chromeos::FakeChromeUserManager()),
         user_manager_enabler_(user_manager_),
         validated_(false) {
@@ -85,9 +82,7 @@ class SessionManagerOperationTest : public testing::Test {
   }
 
  protected:
-  base::MessageLoop message_loop_;
-  content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread file_thread_;
+  content::TestBrowserThreadBundle test_browser_thread_bundle_;
 
   policy::DevicePolicyBuilder policy_;
   DeviceSettingsTestHelper device_settings_test_helper_;
@@ -108,6 +103,7 @@ class SessionManagerOperationTest : public testing::Test {
 TEST_F(SessionManagerOperationTest, LoadNoPolicyNoKey) {
   LoadSettingsOperation op(
       false /* force_key_load */, true /* cloud_validations */,
+      false /* force_immediate_load */,
       base::Bind(&SessionManagerOperationTest::OnOperationCompleted,
                  base::Unretained(this)));
 
@@ -128,6 +124,7 @@ TEST_F(SessionManagerOperationTest, LoadOwnerKey) {
   owner_key_util_->SetPublicKeyFromPrivateKey(*policy_.GetSigningKey());
   LoadSettingsOperation op(
       false /* force_key_load */, true /* cloud_validations */,
+      false /* force_immediate_load */,
       base::Bind(&SessionManagerOperationTest::OnOperationCompleted,
                  base::Unretained(this)));
 
@@ -146,6 +143,30 @@ TEST_F(SessionManagerOperationTest, LoadPolicy) {
   device_settings_test_helper_.set_policy_blob(policy_.GetBlob());
   LoadSettingsOperation op(
       false /* force_key_load */, true /* cloud_validations */,
+      false /* force_immediate_load */,
+      base::Bind(&SessionManagerOperationTest::OnOperationCompleted,
+                 base::Unretained(this)));
+
+  EXPECT_CALL(*this,
+              OnOperationCompleted(&op, DeviceSettingsService::STORE_SUCCESS));
+  op.Start(&device_settings_test_helper_, owner_key_util_, NULL);
+  device_settings_test_helper_.Flush();
+  Mock::VerifyAndClearExpectations(this);
+
+  ASSERT_TRUE(op.policy_data().get());
+  EXPECT_EQ(policy_.policy_data().SerializeAsString(),
+            op.policy_data()->SerializeAsString());
+  ASSERT_TRUE(op.device_settings().get());
+  EXPECT_EQ(policy_.payload().SerializeAsString(),
+            op.device_settings()->SerializeAsString());
+}
+
+TEST_F(SessionManagerOperationTest, LoadImmediately) {
+  owner_key_util_->SetPublicKeyFromPrivateKey(*policy_.GetSigningKey());
+  device_settings_test_helper_.set_policy_blob(policy_.GetBlob());
+  LoadSettingsOperation op(
+      false /* force_key_load */, true /* cloud_validations */,
+      true /* force_immediate_load */,
       base::Bind(&SessionManagerOperationTest::OnOperationCompleted,
                  base::Unretained(this)));
 
@@ -169,6 +190,7 @@ TEST_F(SessionManagerOperationTest, RestartLoad) {
   device_settings_test_helper_.set_policy_blob(policy_.GetBlob());
   LoadSettingsOperation op(
       false /* force_key_load */, true /* cloud_validations */,
+      false /* force_immediate_load */,
       base::Bind(&SessionManagerOperationTest::OnOperationCompleted,
                  base::Unretained(this)));
 

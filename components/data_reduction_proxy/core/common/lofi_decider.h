@@ -20,9 +20,9 @@ class LoFiDecider {
  public:
   virtual ~LoFiDecider() {}
 
-  // Returns true when Lo-Fi mode is on for the given |request|. This means the
-  // Lo-Fi header should be added to the given request.
-  virtual bool IsUsingLoFiMode(const net::URLRequest& request) const = 0;
+  // Returns true when Lo-Fi Previews are on for the given |request|. This means
+  // the Lo-Fi header should be added to the given request.
+  virtual bool IsUsingLoFi(const net::URLRequest& request) const = 0;
 
   // Adds a previews-specific directive to the Chrome-Proxy-Accept-Transform
   // header if needed. If a slow page preview is triggered, adds "lite-page" or
@@ -35,7 +35,7 @@ class LoFiDecider {
   // |is_previews_disabled| is true.
   virtual void MaybeSetAcceptTransformHeader(
       const net::URLRequest& request,
-      bool is_previews_disabled,
+      bool are_previews_disabled,
       net::HttpRequestHeaders* headers) const = 0;
 
   // Returns true if |headers| contains the Chrome-Proxy-Accept-Transform
@@ -63,6 +63,15 @@ class LoFiDecider {
   // true if Lo-Fi is enabled for |request|, Chrome session is in Lo-Fi
   // Enabled or Control field trial, and the network quality was slow.
   virtual bool ShouldRecordLoFiUMA(const net::URLRequest& request) const = 0;
+
+  // Returns whether the request was a client-side Lo-Fi image request.
+  virtual bool IsClientLoFiImageRequest(
+      const net::URLRequest& request) const = 0;
+
+  // Returns true if the request is for a client-side Lo-Fi image that is being
+  // automatically reloaded because of a decoding error.
+  virtual bool IsClientLoFiAutoReloadRequest(
+      const net::URLRequest& request) const = 0;
 };
 
 }  // namespace data_reduction_proxy

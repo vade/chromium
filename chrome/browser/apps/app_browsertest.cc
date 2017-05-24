@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "apps/launcher.h"
+#include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_util.h"
@@ -14,6 +15,7 @@
 #include "base/macros.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
@@ -42,7 +44,6 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/test/browser_test_utils.h"
-#include "content/public/test/test_utils.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/browser/app_window/native_app_window.h"
@@ -123,19 +124,13 @@ class TabsAddedNotificationObserver
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
 class ScopedPreviewTestingDelegate : PrintPreviewUI::TestingDelegate {
  public:
-  explicit ScopedPreviewTestingDelegate(bool auto_cancel)
-      : auto_cancel_(auto_cancel),
-        total_page_count_(1),
-        rendered_page_count_(0) {
+  ScopedPreviewTestingDelegate() {
     PrintPreviewUI::SetDelegateForTesting(this);
   }
 
   ~ScopedPreviewTestingDelegate() {
     PrintPreviewUI::SetDelegateForTesting(NULL);
   }
-
-  // PrintPreviewUI::TestingDelegate implementation.
-  bool IsAutoCancelEnabled() override { return auto_cancel_; }
 
   // PrintPreviewUI::TestingDelegate implementation.
   void DidGetPreviewPageCount(int page_count) override {
@@ -147,18 +142,18 @@ class ScopedPreviewTestingDelegate : PrintPreviewUI::TestingDelegate {
     dialog_size_ = preview_dialog->GetContainerBounds().size();
     ++rendered_page_count_;
     CHECK(rendered_page_count_ <= total_page_count_);
-    if (waiting_runner_.get() && rendered_page_count_ == total_page_count_) {
-      waiting_runner_->Quit();
+    if (rendered_page_count_ == total_page_count_ && run_loop_)  {
+      run_loop_->Quit();
     }
   }
 
   void WaitUntilPreviewIsReady() {
-    CHECK(!waiting_runner_.get());
-    if (rendered_page_count_ < total_page_count_) {
-      waiting_runner_ = new content::MessageLoopRunner;
-      waiting_runner_->Run();
-      waiting_runner_ = NULL;
-    }
+    if (rendered_page_count_ >= total_page_count_)
+      return;
+
+    base::RunLoop run_loop;
+    base::AutoReset<base::RunLoop*> auto_reset(&run_loop_, &run_loop);
+    run_loop.Run();
   }
 
   gfx::Size dialog_size() {
@@ -166,10 +161,9 @@ class ScopedPreviewTestingDelegate : PrintPreviewUI::TestingDelegate {
   }
 
  private:
-  bool auto_cancel_;
-  int total_page_count_;
-  int rendered_page_count_;
-  scoped_refptr<content::MessageLoopRunner> waiting_runner_;
+  int total_page_count_ = 1;
+  int rendered_page_count_ = 0;
+  base::RunLoop* run_loop_ = nullptr;
   gfx::Size dialog_size_;
 };
 
@@ -608,6 +602,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppWithFileBrowserTest,
 // a handler accepts "".
 IN_PROC_BROWSER_TEST_F(PlatformAppWithFileBrowserTest,
                        LaunchWithFileEmptyExtension) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   base::FilePath test_file;
@@ -622,6 +617,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppWithFileBrowserTest,
 // a handler accepts *.
 IN_PROC_BROWSER_TEST_F(PlatformAppWithFileBrowserTest,
                        LaunchWithFileEmptyExtensionAcceptAny) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   base::FilePath test_file;
@@ -730,6 +726,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppWithFileBrowserTest, GetDisplayPath) {
 // Tests that the file is created if the file does not exist and the app has the
 // fileSystem.write permission.
 IN_PROC_BROWSER_TEST_F(PlatformAppWithFileBrowserTest, LaunchNewFile) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   ASSERT_TRUE(RunPlatformAppTestWithFile(
@@ -1040,7 +1037,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
 
   // Clear the registered events to ensure they are updated.
   extensions::EventRouter::Get(browser()->profile())
-      ->SetRegisteredEvents(extension->id(), std::set<std::string>());
+      ->ClearRegisteredEventsForTest(extension->id());
 
   DictionaryPrefUpdate update(extension_prefs->pref_service(),
                               extensions::pref_names::kExtensions);
@@ -1138,17 +1135,9 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, DISABLED_WebContentsHasFocus) {
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
 
-#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_MACOSX)
-#define MAYBE_WindowDotPrintShouldBringUpPrintPreview \
-    DISABLED_WindowDotPrintShouldBringUpPrintPreview
-#else
-#define MAYBE_WindowDotPrintShouldBringUpPrintPreview \
-    WindowDotPrintShouldBringUpPrintPreview
-#endif
-
 IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
-                       MAYBE_WindowDotPrintShouldBringUpPrintPreview) {
-  ScopedPreviewTestingDelegate preview_delegate(true);
+                       WindowDotPrintShouldBringUpPrintPreview) {
+  ScopedPreviewTestingDelegate preview_delegate;
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/print_api")) << message_;
   preview_delegate.WaitUntilPreviewIsReady();
 }
@@ -1156,7 +1145,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
 // This test verifies that http://crbug.com/297179 is fixed.
 IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
                        DISABLED_ClosingWindowWhilePrintingShouldNotCrash) {
-  ScopedPreviewTestingDelegate preview_delegate(false);
+  ScopedPreviewTestingDelegate preview_delegate;
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/print_api")) << message_;
   preview_delegate.WaitUntilPreviewIsReady();
   GetFirstAppWindow()->GetBaseWindow()->Close();
@@ -1178,7 +1167,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
   // areas that are too small, and ones with heights less than 191 pixels will
   // have vertical scrollers for their controls that are too small.
   gfx::Size minimum_dialog_size(410, 191);
-  ScopedPreviewTestingDelegate preview_delegate(false);
+  ScopedPreviewTestingDelegate preview_delegate;
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/print_api")) << message_;
   preview_delegate.WaitUntilPreviewIsReady();
   EXPECT_GE(preview_delegate.dialog_size().width(),
@@ -1375,12 +1364,9 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppsIgnoreDefaultZoom) {
   EXPECT_EQ(0, app_host_zoom_map->GetZoomLevel(web_contents));
 }
 
-// This test will flake until we fix the underlying issue:
-// https://crbug.com/620194.
-#define MAYBE_AppWindowIframe DISABLED_AppWindowIframe
 // Sends chrome.test.sendMessage from chrome.app.window.create's callback.
 // The app window also adds an <iframe> to the page during window.onload.
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, MAYBE_AppWindowIframe) {
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppWindowIframe) {
   LoadAndLaunchPlatformApp("app_window_send_message",
                            "APP_WINDOW_CREATE_CALLBACK");
 }

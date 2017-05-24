@@ -70,12 +70,12 @@ void LoginUIService::DisplayLoginResult(Browser* browser,
 #if defined(OS_CHROMEOS)
   // ChromeOS doesn't have the avatar bubble so it never calls this function.
   NOTREACHED();
-#endif
+#else
   last_login_result_ = error_message;
   last_login_error_email_ = email;
-  if (switches::IsMaterialDesignUserMenu() && !error_message.empty()) {
+  if (!error_message.empty()) {
     if (browser)
-      browser->ShowModalSigninErrorWindow();
+      browser->signin_view_controller()->ShowModalSigninErrorDialog(browser);
     else
       UserManagerProfileDialog::DisplayErrorMessage();
   } else if (browser) {
@@ -83,8 +83,9 @@ void LoginUIService::DisplayLoginResult(Browser* browser,
         error_message.empty() ? BrowserWindow::AVATAR_BUBBLE_MODE_CONFIRM_SIGNIN
                               : BrowserWindow::AVATAR_BUBBLE_MODE_SHOW_ERROR,
         signin::ManageAccountsParams(),
-        signin_metrics::AccessPoint::ACCESS_POINT_EXTENSIONS);
+        signin_metrics::AccessPoint::ACCESS_POINT_EXTENSIONS, false);
   }
+#endif
 }
 
 const base::string16& LoginUIService::GetLastLoginResult() const {

@@ -33,6 +33,7 @@ from collections import defaultdict
 import logging
 import re
 
+from webkitpy.common.path_finder import PathFinder
 from webkitpy.layout_tests.models.test_configuration import TestConfigurationConverter
 
 _log = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ BASELINE_SUFFIX_LIST = ('png', 'wav', 'txt')
 
 WEBKIT_BUG_PREFIX = 'webkit.org/b/'
 CHROMIUM_BUG_PREFIX = 'crbug.com/'
+SKIA_BUG_PREFIX = 'skbug.com/'
 V8_BUG_PREFIX = 'code.google.com/p/v8/issues/detail?id='
 NAMED_BUG_PREFIX = 'Bug('
 
@@ -278,7 +280,7 @@ class TestExpectationLine(object):
 
     # FIXME: Update the original specifiers and remove this once the old syntax is gone.
     _configuration_tokens_list = [
-        'Mac', 'Mac10.9', 'Mac10.10', 'Mac10.11', 'Retina',
+        'Mac', 'Mac10.9', 'Mac10.10', 'Mac10.11', 'Retina', 'Mac10.12',
         'Win', 'Win7', 'Win10',
         'Linux', 'Trusty',
         'Android',
@@ -351,6 +353,7 @@ class TestExpectationLine(object):
         for token in tokens:
             if (token.startswith(WEBKIT_BUG_PREFIX) or
                     token.startswith(CHROMIUM_BUG_PREFIX) or
+                    token.startswith(SKIA_BUG_PREFIX) or
                     token.startswith(V8_BUG_PREFIX) or
                     token.startswith(NAMED_BUG_PREFIX)):
                 if state != 'start':
@@ -359,6 +362,8 @@ class TestExpectationLine(object):
                 if token.startswith(WEBKIT_BUG_PREFIX):
                     bugs.append(token)
                 elif token.startswith(CHROMIUM_BUG_PREFIX):
+                    bugs.append(token)
+                elif token.startswith(SKIA_BUG_PREFIX):
                     bugs.append(token)
                 elif token.startswith(V8_BUG_PREFIX):
                     bugs.append(token)
@@ -971,10 +976,6 @@ class TestExpectations(object):
         return expected_results
 
     @staticmethod
-    def has_pixel_failures(actual_results):
-        return IMAGE in actual_results or FAIL in actual_results
-
-    @staticmethod
     def suffixes_for_expectations(expectations):
         suffixes = set()
         if IMAGE in expectations:
@@ -1095,8 +1096,9 @@ class TestExpectations(object):
         return REBASELINE in self._model.get_expectations(test)
 
     def _shorten_filename(self, filename):
-        if filename.startswith(self._port.path_from_webkit_base()):
-            return self._port.host.filesystem.relpath(filename, self._port.path_from_webkit_base())
+        finder = PathFinder(self._port.host.filesystem)
+        if filename.startswith(finder.path_from_chromium_base()):
+            return self._port.host.filesystem.relpath(filename, finder.path_from_chromium_base())
         return filename
 
     def _report_warnings(self):
@@ -1177,6 +1179,11 @@ class TestExpectations(object):
             expectation_line = self._parser.expectation_for_skipped_test(test_name)
             model.add_expectation_line(expectation_line)
         self._model.merge_model(model)
+
+    def remove_tests(self, tests_to_remove):
+        for test in self._expectations:
+            if test.name and test.name in tests_to_remove:
+                self.remove_expectation_line(test)
 
     def add_expectations_from_bot(self):
         # FIXME: With mode 'very-flaky' and 'maybe-flaky', this will show the expectations entry in the flakiness

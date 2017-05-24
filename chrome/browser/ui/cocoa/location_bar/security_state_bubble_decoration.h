@@ -25,6 +25,10 @@ namespace {
 class SecurityStateBubbleDecorationTest;
 }
 
+namespace {
+class LocationBarViewMacTest;
+}
+
 class SecurityStateBubbleDecoration : public BubbleDecoration,
                                       public gfx::AnimationDelegate {
  public:
@@ -39,12 +43,12 @@ class SecurityStateBubbleDecoration : public BubbleDecoration,
   // Set the color of the label.
   void SetLabelColor(SkColor color);
 
-  // Methods that animate in and out the chip.
-  void AnimateIn(bool image_fade = true);
-  void AnimateOut();
+  // Methods that animate in and out the chip. Virtual for testing.
+  virtual void AnimateIn(bool image_fade = true);
+  virtual void AnimateOut();
 
-  // Shows the chip without animation.
-  void ShowWithoutAnimation();
+  // Shows the chip without animation. Virtual for testing.
+  virtual void ShowWithoutAnimation();
 
   // Returns true if the chip has fully animated in.
   bool HasAnimatedIn() const;
@@ -55,8 +59,8 @@ class SecurityStateBubbleDecoration : public BubbleDecoration,
   // Returns true if the chip is in the process of animating out.
   bool AnimatingOut() const;
 
-  // Resets the animation.
-  void ResetAnimation();
+  // Resets the animation. Virtual for testing.
+  virtual void ResetAnimation();
 
   // LocationBarDecoration:
   CGFloat GetWidthForSpace(CGFloat width) override;
@@ -69,10 +73,10 @@ class SecurityStateBubbleDecoration : public BubbleDecoration,
   bool AcceptsMousePress() override;
   NSPoint GetBubblePointInFrame(NSRect frame) override;
   NSString* GetToolTip() override;
+  NSRect GetRealFocusRingBounds(NSRect apparent_frame) const override;
 
   // BubbleDecoration:
   NSColor* GetBackgroundBorderColor() override;
-  ui::NinePartImageIds GetBubbleImageIds() override;
 
   // gfx::AnimationDelegate:
   void AnimationProgressed(const gfx::Animation* animation) override;
@@ -81,6 +85,7 @@ class SecurityStateBubbleDecoration : public BubbleDecoration,
   NSColor* GetDarkModeTextColor() override;
 
  private:
+  friend class ::LocationBarViewMacTest;
   friend class ::SecurityStateBubbleDecorationTest;
 
   // Returns the animation progress. If not in MD, the animation progress
@@ -106,6 +111,11 @@ class SecurityStateBubbleDecoration : public BubbleDecoration,
   gfx::SlideAnimation animation_;
 
   LocationBarViewMac* owner_;  // weak
+
+  // Distance in points to inset the right edge of the focus ring by. This is
+  // used by |GetRealFocusRingBounds| to prevent the focus ring from including
+  // the divider bar. This is recomputed every time this object is drawn.
+  int focus_ring_right_inset_ = 0;
 
   // Used to disable find bar animations when testing.
   bool disable_animations_during_testing_;

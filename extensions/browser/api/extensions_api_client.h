@@ -38,6 +38,8 @@ class ManagementAPIDelegate;
 class MetricsPrivateDelegate;
 class MimeHandlerViewGuest;
 class MimeHandlerViewGuestDelegate;
+class NetworkingCastPrivateDelegate;
+class NonNativeFileSystemDelegate;
 class RulesCacheDelegate;
 class SettingsObserver;
 class ValueStoreCache;
@@ -131,7 +133,14 @@ class ExtensionsAPIClient {
   // MetricsPrivateAPI behavior.
   virtual MetricsPrivateDelegate* GetMetricsPrivateDelegate();
 
+  // Creates a delegate for networking.castPrivate's API behavior.
+  virtual NetworkingCastPrivateDelegate* GetNetworkingCastPrivateDelegate();
+
 #if defined(OS_CHROMEOS)
+  // If supported by the embedder, returns a delegate for querying non-native
+  // file systems.
+  virtual NonNativeFileSystemDelegate* GetNonNativeFileSystemDelegate();
+
   // Saves image data on clipboard.
   virtual void SaveImageDataToClipboard(
       const std::vector<char>& image_data,

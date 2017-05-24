@@ -17,6 +17,7 @@ import android.webkit.WebSettings.LayoutAlgorithm;
 import android.webkit.WebSettings.PluginState;
 import android.webkit.WebSettings.ZoomDensity;
 
+import org.chromium.base.BuildInfo;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
@@ -33,9 +34,6 @@ import org.chromium.content_public.browser.WebContents;
 public class AwSettings {
     private static final String LOGTAG = AwSettings.class.getSimpleName();
     private static final boolean TRACE = false;
-
-    // TODO(hush): Use android.webkit.WebSettings.MENU_ITEM_*. crbug.com/546762.
-    private static final int MENU_ITEM_NONE = 0;
 
     private static final String TAG = "AwSettings";
 
@@ -89,14 +87,18 @@ public class AwSettings {
     private int mMixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW;
 
     private boolean mOffscreenPreRaster;
-    private int mDisabledMenuItems = MENU_ITEM_NONE;
+    private int mDisabledMenuItems = WebSettings.MENU_ITEM_NONE;
 
     // Although this bit is stored on AwSettings it is actually controlled via the CookieManager.
     private boolean mAcceptThirdPartyCookies;
 
+    // if null, default to AwContentsStatics.getSafeBrowsingEnabled()
+    private Boolean mSafeBrowsingEnabled;
+
     private final boolean mSupportLegacyQuirks;
     private final boolean mAllowEmptyDocumentPersistence;
     private final boolean mAllowGeolocationOnInsecureOrigins;
+    private final boolean mDoNotUpdateSelectionOnMutatingSelectionRange;
 
     private final boolean mPasswordEchoEnabled;
 
@@ -107,7 +109,7 @@ public class AwSettings {
     private int mCacheMode = WebSettings.LOAD_DEFAULT;
     private boolean mShouldFocusFirstNode = true;
     private boolean mGeolocationEnabled = true;
-    private boolean mAutoCompleteEnabled = true;
+    private boolean mAutoCompleteEnabled = !BuildInfo.isAtLeastO();
     private boolean mFullscreenSupported;
     private boolean mSupportZoom = true;
     private boolean mBuiltInZoomControls;
@@ -207,11 +209,10 @@ public class AwSettings {
                 boolean supportsDoubleTapZoom, boolean supportsMultiTouchZoom);
     }
 
-    public AwSettings(Context context,
-            boolean isAccessFromFileURLsGrantedByDefault,
-            boolean supportsLegacyQuirks,
-            boolean allowEmptyDocumentPersistence,
-            boolean allowGeolocationOnInsecureOrigins) {
+    public AwSettings(Context context, boolean isAccessFromFileURLsGrantedByDefault,
+            boolean supportsLegacyQuirks, boolean allowEmptyDocumentPersistence,
+            boolean allowGeolocationOnInsecureOrigins,
+            boolean doNotUpdateSelectionOnMutatingSelectionRange) {
         boolean hasInternetPermission = context.checkPermission(
                 android.Manifest.permission.INTERNET,
                 Process.myPid(),
@@ -242,6 +243,8 @@ public class AwSettings {
             mSupportLegacyQuirks = supportsLegacyQuirks;
             mAllowEmptyDocumentPersistence = allowEmptyDocumentPersistence;
             mAllowGeolocationOnInsecureOrigins = allowGeolocationOnInsecureOrigins;
+            mDoNotUpdateSelectionOnMutatingSelectionRange =
+                    doNotUpdateSelectionOnMutatingSelectionRange;
         }
         // Defer initializing the native side until a native WebContents instance is set.
     }
@@ -324,9 +327,17 @@ public class AwSettings {
     public void setAcceptThirdPartyCookies(boolean accept) {
         if (TRACE) Log.d(LOGTAG, "setAcceptThirdPartyCookies=" + accept);
         synchronized (mAwSettingsLock) {
-            if (mAcceptThirdPartyCookies != accept) {
-                mAcceptThirdPartyCookies = accept;
-            }
+            mAcceptThirdPartyCookies = accept;
+        }
+    }
+
+    /**
+     * Enable/Disable SafeBrowsing per WebView
+     * @param enabled true if this WebView should have SafeBrowsing
+     */
+    public void setSafeBrowsingEnabled(boolean enabled) {
+        synchronized (mAwSettingsLock) {
+            mSafeBrowsingEnabled = enabled;
         }
     }
 
@@ -341,14 +352,25 @@ public class AwSettings {
     }
 
     /**
+     * Return whether Safe Browsing has been enabled for the current WebView
+     * @return true if SafeBrowsing is enabled
+     */
+    public boolean getSafeBrowsingEnabled() {
+        synchronized (mAwSettingsLock) {
+            if (mSafeBrowsingEnabled == null) {
+                return AwContentsStatics.getSafeBrowsingEnabled();
+            }
+            return mSafeBrowsingEnabled;
+        }
+    }
+
+    /**
      * See {@link android.webkit.WebSettings#setAllowFileAccess}.
      */
     public void setAllowFileAccess(boolean allow) {
         if (TRACE) Log.d(LOGTAG, "setAllowFileAccess=" + allow);
         synchronized (mAwSettingsLock) {
-            if (mAllowFileUrlAccess != allow) {
-                mAllowFileUrlAccess = allow;
-            }
+            mAllowFileUrlAccess = allow;
         }
     }
 
@@ -367,9 +389,7 @@ public class AwSettings {
     public void setAllowContentAccess(boolean allow) {
         if (TRACE) Log.d(LOGTAG, "setAllowContentAccess=" + allow);
         synchronized (mAwSettingsLock) {
-            if (mAllowContentUrlAccess != allow) {
-                mAllowContentUrlAccess = allow;
-            }
+            mAllowContentUrlAccess = allow;
         }
     }
 
@@ -388,9 +408,7 @@ public class AwSettings {
     public void setCacheMode(int mode) {
         if (TRACE) Log.d(LOGTAG, "setCacheMode=" + mode);
         synchronized (mAwSettingsLock) {
-            if (mCacheMode != mode) {
-                mCacheMode = mode;
-            }
+            mCacheMode = mode;
         }
     }
 
@@ -499,9 +517,7 @@ public class AwSettings {
     public void setGeolocationEnabled(boolean flag) {
         if (TRACE) Log.d(LOGTAG, "setGeolocationEnabled=" + flag);
         synchronized (mAwSettingsLock) {
-            if (mGeolocationEnabled != flag) {
-                mGeolocationEnabled = flag;
-            }
+            mGeolocationEnabled = flag;
         }
     }
 
@@ -1263,6 +1279,12 @@ public class AwSettings {
         return mAllowGeolocationOnInsecureOrigins;
     }
 
+    @CalledByNative
+    private boolean getDoNotUpdateSelectionOnMutatingSelectionRange() {
+        assert Thread.holdsLock(mAwSettingsLock);
+        return mDoNotUpdateSelectionOnMutatingSelectionRange;
+    }
+
     /**
      * See {@link android.webkit.WebSettings#setUseWideViewPort}.
      */
@@ -1688,9 +1710,7 @@ public class AwSettings {
 
     public void setDisabledActionModeMenuItems(int menuItems) {
         synchronized (mAwSettingsLock) {
-            if (menuItems != mDisabledMenuItems) {
-                mDisabledMenuItems = menuItems;
-            }
+            mDisabledMenuItems = menuItems;
         }
     }
 

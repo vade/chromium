@@ -78,7 +78,9 @@ class CC_EXPORT PictureLayerTilingSet {
       scoped_refptr<RasterSource> raster_source,
       const Region& layer_invalidation);
 
-  PictureLayerTiling* AddTiling(float contents_scale,
+  void UpdateTilingsForImplSideInvalidation(const Region& layer_invalidation);
+
+  PictureLayerTiling* AddTiling(const gfx::AxisTransform2d& raster_transform,
                                 scoped_refptr<RasterSource> raster_source);
   size_t num_tilings() const { return tilings_.size(); }
   int NumHighResTilings() const;
@@ -104,6 +106,9 @@ class CC_EXPORT PictureLayerTilingSet {
   // exist. Note that this returns the maximum of x and y scales depending on
   // the aspect ratio.
   float GetMaximumContentsScale() const;
+
+  // Remove one tiling.
+  void Remove(PictureLayerTiling* tiling);
 
   // Removes all tilings with a contents scale key < |minimum_scale_key|.
   void RemoveTilingsBelowScaleKey(float minimum_scale_key);
@@ -224,8 +229,6 @@ class CC_EXPORT PictureLayerTilingSet {
       scoped_refptr<RasterSource> raster_source,
       const Region& layer_invalidation);
 
-  // Remove one tiling.
-  void Remove(PictureLayerTiling* tiling);
   void VerifyTilings(const PictureLayerTilingSet* pending_twin_set) const;
 
   bool TilingsNeedUpdate(const gfx::Rect& required_rect_in_layer_space,

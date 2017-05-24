@@ -12,7 +12,6 @@ class WebMouseEvent;
 }
 
 namespace gfx {
-class ICCProfile;
 class Point;
 }
 
@@ -23,15 +22,10 @@ namespace content {
 //
 //  An interface implemented by an object owning a RenderWidget. This is
 //  intended to be temporary until the RenderViewImpl and RenderWidget classes
-//  are disentangled; see http://crbug.com/583347 and http://crbug.com/478281.
+//  are disentangled; see https://crbug.com/583347 and https://crbug.com/478281.
 class CONTENT_EXPORT RenderWidgetOwnerDelegate {
  public:
-  // The RenderWidget set a color profile.
-  virtual void RenderWidgetDidSetColorProfile(
-      const gfx::ICCProfile& color_profile) = 0;
-
   // As in RenderWidgetInputHandlerDelegate.
-  virtual void RenderWidgetFocusChangeComplete() = 0;
   virtual bool DoesRenderWidgetHaveTouchEventHandlersAt(
       const gfx::Point& point) const = 0;
   virtual bool RenderWidgetWillHandleMouseEvent(

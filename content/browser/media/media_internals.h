@@ -13,7 +13,6 @@
 
 #include "base/callback_forward.h"
 #include "base/compiler_specific.h"
-#include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
 #include "base/synchronization/lock.h"
@@ -90,13 +89,13 @@ class CONTENT_EXPORT MediaInternals
                                            int render_frame_id,
                                            media::AudioLog* audio_log);
 
+  void OnProcessTerminatedForTesting(int process_id);
+
  private:
   // Inner class to handle reporting pipelinestatus to UMA
   class MediaInternalsUMAHandler;
 
   friend class AudioLogImpl;
-  friend class MediaInternalsTest;
-  friend struct base::DefaultLazyInstanceTraits<MediaInternals>;
 
   MediaInternals();
 

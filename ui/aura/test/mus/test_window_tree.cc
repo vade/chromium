@@ -133,9 +133,13 @@ void TestWindowTree::DeleteWindow(uint32_t change_id, uint32_t window_id) {
   OnChangeReceived(change_id);
 }
 
-void TestWindowTree::SetWindowBounds(uint32_t change_id,
-                                     uint32_t window_id,
-                                     const gfx::Rect& bounds) {
+void TestWindowTree::SetWindowBounds(
+    uint32_t change_id,
+    uint32_t window_id,
+    const gfx::Rect& bounds,
+    const base::Optional<cc::LocalSurfaceId>& local_surface_id) {
+  window_id_ = window_id;
+  last_local_surface_id_ = local_surface_id;
   OnChangeReceived(change_id, WindowTreeChangeType::BOUNDS);
 }
 
@@ -207,7 +211,9 @@ void TestWindowTree::RemoveTransientWindowFromParent(
   OnChangeReceived(change_id, WindowTreeChangeType::REMOVE_TRANSIENT);
 }
 
-void TestWindowTree::SetModal(uint32_t change_id, uint32_t window_id) {
+void TestWindowTree::SetModalType(uint32_t change_id,
+                                  uint32_t window_id,
+                                  ui::ModalType modal_type) {
   OnChangeReceived(change_id, WindowTreeChangeType::MODAL);
 }
 
@@ -244,12 +250,13 @@ void TestWindowTree::SetFocus(uint32_t change_id, uint32_t window_id) {
 
 void TestWindowTree::SetCanFocus(uint32_t window_id, bool can_focus) {}
 
-void TestWindowTree::SetCanAcceptEvents(uint32_t window_id,
-                                        bool can_accept_events) {}
+void TestWindowTree::SetEventTargetingPolicy(
+    uint32_t window_id,
+    ui::mojom::EventTargetingPolicy policy) {}
 
-void TestWindowTree::SetPredefinedCursor(uint32_t change_id,
-                                         uint32_t window_id,
-                                         ui::mojom::Cursor cursor_id) {
+void TestWindowTree::SetCursor(uint32_t change_id,
+                               Id transport_window_id,
+                               ui::CursorData cursor_data) {
   OnChangeReceived(change_id);
 }
 
@@ -268,6 +275,9 @@ void TestWindowTree::OnWindowInputEventAck(uint32_t event_id,
 
 void TestWindowTree::DeactivateWindow(uint32_t window_id) {}
 
+void TestWindowTree::StackAbove(uint32_t change_id, uint32_t above_id,
+                                uint32_t below_id) {}
+
 void TestWindowTree::StackAtTop(uint32_t change_id, uint32_t window_id) {}
 
 void TestWindowTree::GetWindowManagerClient(
@@ -282,8 +292,12 @@ void TestWindowTree::GetCursorLocationMemory(
 void TestWindowTree::PerformDragDrop(
     uint32_t change_id,
     uint32_t source_window_id,
+    const gfx::Point& screen_location,
     const std::unordered_map<std::string, std::vector<uint8_t>>& drag_data,
-    uint32_t drag_operation) {
+    const SkBitmap& drag_image,
+    const gfx::Vector2d& drag_image_offset,
+    uint32_t drag_operation,
+    ui::mojom::PointerKind source) {
   OnChangeReceived(change_id);
 }
 

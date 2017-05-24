@@ -116,21 +116,28 @@ void AddAndroidWidevine(
       kWidevineKeySystem);
 
   // Since we do not control the implementation of the MediaDrm API on Android,
-  // we assume that it can and will make use of persistence even though no
-  // persistence-based features are supported.
+  // we assume that it can and will make use of persistence no matter whether
+  // persistence-based features are supported or not.
+
+  const EmeSessionTypeSupport persistent_license_support =
+      response.is_persistent_license_supported
+          ? EmeSessionTypeSupport::SUPPORTED_WITH_IDENTIFIER
+          : EmeSessionTypeSupport::NOT_SUPPORTED;
 
   if (response.compositing_codecs != media::EME_CODEC_NONE) {
+    DVLOG(3) << __func__ << " Widevine supported.";
     concrete_key_systems->emplace_back(new WidevineKeySystemProperties(
         response.compositing_codecs,           // Regular codecs.
         response.non_compositing_codecs,       // Hardware-secure codecs.
         Robustness::HW_SECURE_CRYPTO,          // Max audio robustness.
         Robustness::HW_SECURE_ALL,             // Max video robustness.
-        EmeSessionTypeSupport::NOT_SUPPORTED,  // persistent-license.
+        persistent_license_support,            // persistent-license.
         EmeSessionTypeSupport::NOT_SUPPORTED,  // persistent-release-message.
         EmeFeatureSupport::ALWAYS_ENABLED,     // Persistent state.
         EmeFeatureSupport::ALWAYS_ENABLED));   // Distinctive identifier.
   } else {
     // It doesn't make sense to support secure codecs but not regular codecs.
+    DVLOG(3) << __func__ << " Widevine NOT supported.";
     DCHECK(response.non_compositing_codecs == media::EME_CODEC_NONE);
   }
 }

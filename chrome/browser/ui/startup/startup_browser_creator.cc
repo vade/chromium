@@ -11,7 +11,6 @@
 #include <memory>
 #include <set>
 
-#include "apps/app_load_service.h"
 #include "apps/switches.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -26,17 +25,18 @@
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/statistics_recorder.h"
-#include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
+#include "chrome/browser/apps/app_load_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
@@ -57,6 +57,7 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/startup/startup_browser_creator_impl.h"
+#include "chrome/browser/ui/startup/startup_features.h"
 #include "chrome/browser/ui/user_manager.h"
 #include "chrome/browser/ui/webui/settings/reset_settings_handler.h"
 #include "chrome/common/chrome_constants.h"
@@ -66,12 +67,10 @@
 #include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/installer/util/browser_distribution.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/search_engines/util.h"
-#include "components/signin/core/common/profile_management_switches.h"
 #include "components/url_formatter/url_fixer.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
@@ -104,6 +103,7 @@
 #endif
 
 #if defined(OS_WIN)
+#include "base/win/windows_version.h"
 #include "chrome/browser/metrics/jumplist_metrics_win.h"
 #endif
 
@@ -203,8 +203,8 @@ class ProfileLaunchObserver : public content::NotificationObserver {
     // open and activate before trying to activate |profile_to_activate_|.
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        base::Bind(&ProfileLaunchObserver::ActivateProfile,
-                   base::Unretained(this)));
+        base::BindOnce(&ProfileLaunchObserver::ActivateProfile,
+                       base::Unretained(this)));
     // Avoid posting more than once before ActivateProfile gets called.
     registrar_.Remove(this, chrome::NOTIFICATION_BROWSER_WINDOW_READY,
                       content::NotificationService::AllSources());
@@ -248,8 +248,8 @@ class ProfileLaunchObserver : public content::NotificationObserver {
   DISALLOW_COPY_AND_ASSIGN(ProfileLaunchObserver);
 };
 
-base::LazyInstance<ProfileLaunchObserver> profile_launch_observer =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<ProfileLaunchObserver>::DestructorAtExit
+    profile_launch_observer = LAZY_INSTANCE_INITIALIZER;
 
 // Dumps the current set of the browser process's histograms to |output_file|.
 // The file is overwritten if it exists. This function should only be called in
@@ -494,6 +494,15 @@ void StartupBrowserCreator::RegisterProfilePrefs(PrefRegistrySimple* registry) {
 }
 
 // static
+bool StartupBrowserCreator::UseConsolidatedFlow() {
+#if defined(OS_WIN)
+  if (base::win::GetVersion() >= base::win::VERSION_WIN10)
+    return base::FeatureList::IsEnabled(features::kEnableWelcomeWin10);
+#endif  // defined(OS_WIN)
+  return base::FeatureList::IsEnabled(features::kUseConsolidatedStartupFlow);
+}
+
+// static
 std::vector<GURL> StartupBrowserCreator::GetURLsFromCommandLine(
     const base::CommandLine& command_line,
     const base::FilePath& cur_dir,
@@ -673,9 +682,11 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
     base::FilePath output_file(
         command_line.GetSwitchValuePath(switches::kDumpBrowserHistograms));
     if (!output_file.empty()) {
-      BrowserThread::PostBlockingPoolTask(
+      base::PostTaskWithTraits(
           FROM_HERE,
-          base::Bind(&DumpBrowserHistograms, output_file));
+          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+           base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
+          base::BindOnce(&DumpBrowserHistograms, output_file));
     }
     silent_launch = true;
   }
@@ -900,6 +911,22 @@ void StartupBrowserCreator::ProcessCommandLineAlreadyRunning(
 }
 
 // static
+void StartupBrowserCreator::OpenStartupPages(Browser* browser,
+                                             bool process_startup) {
+  base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
+  chrome::startup::IsFirstRun is_first_run =
+      first_run::IsChromeFirstRun() ? chrome::startup::IS_FIRST_RUN
+                                    : chrome::startup::IS_NOT_FIRST_RUN;
+  StartupBrowserCreatorImpl startup_browser_creator_impl(
+      base::FilePath(), command_line, is_first_run);
+  SessionStartupPref session_startup_pref =
+      StartupBrowserCreator::GetSessionStartupPref(command_line,
+                                                   browser->profile());
+  startup_browser_creator_impl.OpenURLsInBrowser(browser, process_startup,
+                                                 session_startup_pref.urls);
+}
+
+// static
 bool StartupBrowserCreator::ActivatedProfile() {
   return profile_launch_observer.Get().activated_profile();
 }
@@ -944,8 +971,7 @@ Profile* GetStartupProfile(const base::FilePath& user_data_dir,
   auto* storage = &profile_manager->GetProfileAttributesStorage();
   ProfileAttributesEntry* entry;
   bool has_entry = storage->GetProfileAttributesWithPath(profile_path, &entry);
-  if (has_entry && (!switches::IsNewProfileManagement() ||
-                    !entry->IsSigninRequired() || !profile)) {
+  if (has_entry && (!entry->IsSigninRequired() || !profile)) {
     return profile;
   }
 

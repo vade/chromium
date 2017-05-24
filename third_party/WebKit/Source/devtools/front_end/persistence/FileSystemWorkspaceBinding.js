@@ -33,7 +33,7 @@
  */
 Persistence.FileSystemWorkspaceBinding = class {
   /**
-   * @param {!Workspace.IsolatedFileSystemManager} isolatedFileSystemManager
+   * @param {!Persistence.IsolatedFileSystemManager} isolatedFileSystemManager
    * @param {!Workspace.Workspace} workspace
    */
   constructor(isolatedFileSystemManager, workspace) {
@@ -41,11 +41,11 @@ Persistence.FileSystemWorkspaceBinding = class {
     this._workspace = workspace;
     this._eventListeners = [
       this._isolatedFileSystemManager.addEventListener(
-          Workspace.IsolatedFileSystemManager.Events.FileSystemAdded, this._onFileSystemAdded, this),
+          Persistence.IsolatedFileSystemManager.Events.FileSystemAdded, this._onFileSystemAdded, this),
       this._isolatedFileSystemManager.addEventListener(
-          Workspace.IsolatedFileSystemManager.Events.FileSystemRemoved, this._onFileSystemRemoved, this),
+          Persistence.IsolatedFileSystemManager.Events.FileSystemRemoved, this._onFileSystemRemoved, this),
       this._isolatedFileSystemManager.addEventListener(
-          Workspace.IsolatedFileSystemManager.Events.FileSystemFilesChanged, this._fileSystemFilesChanged, this)
+          Persistence.IsolatedFileSystemManager.Events.FileSystemFilesChanged, this._fileSystemFilesChanged, this)
     ];
     /** @type {!Map.<string, !Persistence.FileSystemWorkspaceBinding.FileSystem>} */
     this._boundFileSystems = new Map();
@@ -106,14 +106,14 @@ Persistence.FileSystemWorkspaceBinding = class {
   }
 
   /**
-   * @return {!Workspace.IsolatedFileSystemManager}
+   * @return {!Persistence.IsolatedFileSystemManager}
    */
   fileSystemManager() {
     return this._isolatedFileSystemManager;
   }
 
   /**
-   * @param {!Array<!Workspace.IsolatedFileSystem>} fileSystems
+   * @param {!Array<!Persistence.IsolatedFileSystem>} fileSystems
    */
   _onFileSystemsLoaded(fileSystems) {
     for (var fileSystem of fileSystems)
@@ -124,12 +124,12 @@ Persistence.FileSystemWorkspaceBinding = class {
    * @param {!Common.Event} event
    */
   _onFileSystemAdded(event) {
-    var fileSystem = /** @type {!Workspace.IsolatedFileSystem} */ (event.data);
+    var fileSystem = /** @type {!Persistence.IsolatedFileSystem} */ (event.data);
     this._addFileSystem(fileSystem);
   }
 
   /**
-   * @param {!Workspace.IsolatedFileSystem} fileSystem
+   * @param {!Persistence.IsolatedFileSystem} fileSystem
    */
   _addFileSystem(fileSystem) {
     var boundFileSystem = new Persistence.FileSystemWorkspaceBinding.FileSystem(this, fileSystem, this._workspace);
@@ -140,7 +140,7 @@ Persistence.FileSystemWorkspaceBinding = class {
    * @param {!Common.Event} event
    */
   _onFileSystemRemoved(event) {
-    var fileSystem = /** @type {!Workspace.IsolatedFileSystem} */ (event.data);
+    var fileSystem = /** @type {!Persistence.IsolatedFileSystem} */ (event.data);
     var boundFileSystem = this._boundFileSystems.get(fileSystem.path());
     boundFileSystem.dispose();
     this._boundFileSystems.remove(fileSystem.path());
@@ -150,12 +150,23 @@ Persistence.FileSystemWorkspaceBinding = class {
    * @param {!Common.Event} event
    */
   _fileSystemFilesChanged(event) {
-    var paths = /** @type {!Array<string>} */ (event.data);
-    for (var path of paths) {
-      for (var key of this._boundFileSystems.keys()) {
-        if (!path.startsWith(key))
-          continue;
-        this._boundFileSystems.get(key)._fileChanged(path);
+    var paths = /** @type {!Persistence.IsolatedFileSystemManager.FilesChangedData} */ (event.data);
+    forEachFile.call(this, paths.changed, (path, fileSystem) => fileSystem._fileChanged(path));
+    forEachFile.call(this, paths.added, (path, fileSystem) => fileSystem._fileChanged(path));
+    forEachFile.call(this, paths.removed, (path, fileSystem) => fileSystem.removeUISourceCode(path));
+
+    /**
+     * @param {!Array<string>} filePaths
+     * @param {function(string, !Persistence.FileSystemWorkspaceBinding.FileSystem)} callback
+     * @this {Persistence.FileSystemWorkspaceBinding}
+     */
+    function forEachFile(filePaths, callback) {
+      for (var filePath of filePaths) {
+        for (var fileSystemPath of this._boundFileSystems.keys()) {
+          if (!filePath.startsWith(fileSystemPath))
+            continue;
+          callback(filePath, this._boundFileSystems.get(fileSystemPath));
+        }
       }
     }
   }
@@ -176,7 +187,7 @@ Persistence.FileSystemWorkspaceBinding._scriptExtensions = new Set([
   'jsp', 'jsx',  'h', 'm',  'mm',   'py',     'sh',  'ts', 'tsx',  'ls'
 ]);
 
-Persistence.FileSystemWorkspaceBinding._imageExtensions = Workspace.IsolatedFileSystem.ImageExtensions;
+Persistence.FileSystemWorkspaceBinding._imageExtensions = Persistence.IsolatedFileSystem.ImageExtensions;
 
 Persistence.FileSystemWorkspaceBinding._binaryExtensions = new Set([
   // Executable extensions, roughly taken from https://en.wikipedia.org/wiki/Comparison_of_executable_file_formats
@@ -197,7 +208,7 @@ Persistence.FileSystemWorkspaceBinding._binaryExtensions = new Set([
 Persistence.FileSystemWorkspaceBinding.FileSystem = class extends Workspace.ProjectStore {
   /**
    * @param {!Persistence.FileSystemWorkspaceBinding} fileSystemWorkspaceBinding
-   * @param {!Workspace.IsolatedFileSystem} isolatedFileSystem
+   * @param {!Persistence.IsolatedFileSystem} isolatedFileSystem
    * @param {!Workspace.Workspace} workspace
    */
   constructor(fileSystemWorkspaceBinding, isolatedFileSystem, workspace) {
@@ -228,8 +239,8 @@ Persistence.FileSystemWorkspaceBinding.FileSystem = class extends Workspace.Proj
   /**
    * @return {!Array<string>}
    */
-  gitFolders() {
-    return this._fileSystem.gitFolders().map(folder => this._fileSystemPath + '/' + folder);
+  initialGitFolders() {
+    return this._fileSystem.initialGitFolders().map(folder => this._fileSystemPath + '/' + folder);
   }
 
   /**
@@ -457,7 +468,7 @@ Persistence.FileSystemWorkspaceBinding.FileSystem = class extends Workspace.Proj
 
   populate() {
     var chunkSize = 1000;
-    var filePaths = this._fileSystem.filePaths();
+    var filePaths = this._fileSystem.initialFilePaths();
     reportFileChunk.call(this, 0);
 
     /**
@@ -531,11 +542,12 @@ Persistence.FileSystemWorkspaceBinding.FileSystem = class extends Workspace.Proj
 
   /**
    * @override
-   * @param {string} path
+   * @param {!Workspace.UISourceCode} uiSourceCode
    */
-  deleteFile(path) {
-    this._fileSystem.deleteFile(path);
-    this.removeUISourceCode(path);
+  deleteFile(uiSourceCode) {
+    var relativePath = this._filePathForUISourceCode(uiSourceCode);
+    this._fileSystem.deleteFile(relativePath);
+    this.removeUISourceCode(uiSourceCode.url());
   }
 
   /**

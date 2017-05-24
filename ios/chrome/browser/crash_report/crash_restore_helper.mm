@@ -20,8 +20,9 @@
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #import "ios/chrome/browser/crash_report/breakpad_helper.h"
 #include "ios/chrome/browser/sessions/ios_chrome_tab_restore_service_factory.h"
-#import "ios/chrome/browser/sessions/session_service.h"
-#import "ios/chrome/browser/sessions/session_window.h"
+#import "ios/chrome/browser/sessions/session_ios.h"
+#import "ios/chrome/browser/sessions/session_service_ios.h"
+#import "ios/chrome/browser/sessions/session_window_ios.h"
 #import "ios/chrome/browser/tabs/tab.h"
 #import "ios/chrome/browser/tabs/tab_model.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
@@ -201,11 +202,9 @@ int SessionCrashedInfoBarDelegate::GetIconId() const {
 
 - (BOOL)deleteSessionForBrowserState:(ios::ChromeBrowserState*)browserState
                           backupFile:(NSString*)file {
-  SessionServiceIOS* sessionService = [SessionServiceIOS sharedService];
   NSString* stashPath =
       base::SysUTF8ToNSString(browserState->GetStatePath().value());
-  NSString* sessionPath =
-      [sessionService sessionFilePathForDirectory:stashPath];
+  NSString* sessionPath = [SessionServiceIOS sessionPathForDirectory:stashPath];
   NSFileManager* fileManager = [NSFileManager defaultManager];
   if (![fileManager fileExistsAtPath:sessionPath])
     return NO;
@@ -261,14 +260,15 @@ int SessionCrashedInfoBarDelegate::GetIconId() const {
   DCHECK(!_sessionRestored);
   _sessionRestored = YES;
   _infoBarBridge.reset();
-  SessionWindowIOS* sessionWindow = [[SessionServiceIOS sharedService]
-      loadWindowFromPath:[self sessionBackupPath]
-         forBrowserState:[_tabModel browserState]];
-  if (sessionWindow) {
-    breakpad_helper::WillStartCrashRestoration();
-    return [_tabModel restoreSessionWindow:sessionWindow];
-  }
-  return NO;
+
+  SessionIOS* session = [[SessionServiceIOS sharedService]
+      loadSessionFromPath:[self sessionBackupPath]];
+  if (!session)
+    return NO;
+
+  DCHECK_EQ(session.sessionWindows.count, 1u);
+  breakpad_helper::WillStartCrashRestoration();
+  return [_tabModel restoreSessionWindow:session.sessionWindows[0]];
 }
 
 - (void)infoBarRemoved:(infobars::InfoBar*)infobar {
@@ -284,20 +284,24 @@ int SessionCrashedInfoBarDelegate::GetIconId() const {
   // the recently closed tabs.
   _sessionRestored = YES;
 
-  SessionWindowIOS* window = [[SessionServiceIOS sharedService]
-      loadWindowFromPath:[self sessionBackupPath]
-         forBrowserState:[_tabModel browserState]];
-  DCHECK(window);
-  if (!window.unclaimedSessions)
+  SessionIOS* session = [[SessionServiceIOS sharedService]
+      loadSessionFromPath:[self sessionBackupPath]];
+  DCHECK_EQ(session.sessionWindows.count, 1u);
+
+  NSArray<CRWSessionStorage*>* sessions = session.sessionWindows[0].sessions;
+  if (!sessions.count)
     return;
+
   sessions::TabRestoreService* const tabRestoreService =
       IOSChromeTabRestoreServiceFactory::GetForBrowserState(_browserState);
   tabRestoreService->LoadTabsFromLastSession();
 
-  while (window.unclaimedSessions) {
+  web::WebState::CreateParams params(_browserState);
+  for (CRWSessionStorage* session in sessions) {
+    std::unique_ptr<web::WebState> webState =
+        web::WebState::CreateWithStorageSession(params, session);
     // Add all tabs at the 0 position as the position is relative to an old
     // tabModel.
-    std::unique_ptr<web::WebStateImpl> webState = [window nextSession];
     tabRestoreService->CreateHistoricalTab(
         sessions::IOSLiveTab::GetForWebState(webState.get()), 0);
   }

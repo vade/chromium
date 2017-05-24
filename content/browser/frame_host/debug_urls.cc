@@ -17,17 +17,16 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread_restrictions.h"
 #include "cc/base/switches.h"
-#include "content/browser/gpu/gpu_process_host_ui_shim.h"
+#include "content/browser/gpu/gpu_process_host.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/url_constants.h"
 #include "ppapi/features/features.h"
-#include "ppapi/proxy/ppapi_messages.h"
-#include "third_party/kasko/kasko_features.h"
 #include "url/gurl.h"
 
 #if BUILDFLAG(ENABLE_PLUGINS)
-#include "content/browser/ppapi_plugin_process_host.h"
+#include "content/browser/ppapi_plugin_process_host.h"  // nogncheck
+#include "ppapi/proxy/ppapi_messages.h"  // nogncheck
 #endif
 
 namespace content {
@@ -49,12 +48,6 @@ const char kAsanCorruptHeapBlock[] = "/browser-corrupt-heap-block";
 const char kAsanCorruptHeap[] = "/browser-corrupt-heap";
 #endif
 
-#if BUILDFLAG(ENABLE_KASKO)
-// Define the Kasko debug URLs.
-const char kKaskoCrashDomain[] = "kasko";
-const char kKaskoSendReport[] = "/send-report";
-#endif
-
 void HandlePpapiFlashDebugURL(const GURL& url) {
 #if BUILDFLAG(ENABLE_PLUGINS)
   bool crash = url == kChromeUIPpapiFlashCrashURL;
@@ -69,50 +62,6 @@ void HandlePpapiFlashDebugURL(const GURL& url) {
     else
       (*iter)->Send(new PpapiMsg_Hang());
   }
-#endif
-}
-
-bool IsKaskoDebugURL(const GURL& url) {
-#if BUILDFLAG(ENABLE_KASKO)
-  return (url.is_valid() && url.SchemeIs(kChromeUIScheme) &&
-          url.DomainIs(kKaskoCrashDomain) &&
-          url.path_piece() == kKaskoSendReport);
-#else
-  return false;
-#endif
-}
-
-void HandleKaskoDebugURL() {
-#if BUILDFLAG(ENABLE_KASKO)
-  // Signature of the exported crash key setting function.
-  using SetCrashKeyValueImplPtr = void(__cdecl *)(const wchar_t*,
-                                                  const wchar_t*);
-  // Signature of an enhanced crash reporting function.
-  using ReportCrashWithProtobufPtr = void(__cdecl *)(EXCEPTION_POINTERS*,
-                                                     const char*);
-
-  HMODULE exe_hmodule = ::GetModuleHandle(NULL);
-
-  // First, set a crash key using the exported function reserved for Kasko
-  // clients (SyzyASAN for now).
-  SetCrashKeyValueImplPtr set_crash_key_value_impl =
-      reinterpret_cast<SetCrashKeyValueImplPtr>(
-          ::GetProcAddress(exe_hmodule, "SetCrashKeyValueImpl"));
-  if (set_crash_key_value_impl)
-    set_crash_key_value_impl(L"kasko-set-crash-key-value-impl", L"true");
-  else
-    NOTREACHED();
-
-  // Next, invoke a crash report via Kasko.
-  ReportCrashWithProtobufPtr report_crash_with_protobuf =
-      reinterpret_cast<ReportCrashWithProtobufPtr>(
-          ::GetProcAddress(exe_hmodule, "ReportCrashWithProtobuf"));
-  if (report_crash_with_protobuf)
-    report_crash_with_protobuf(NULL, "Invoked from debug url.");
-  else
-    NOTREACHED();
-#else
-  NOTIMPLEMENTED();
 #endif
 }
 
@@ -197,11 +146,6 @@ bool HandleDebugURL(const GURL& url, ui::PageTransition transition) {
   if (IsAsanDebugURL(url))
     return HandleAsanDebugURL(url);
 
-  if (IsKaskoDebugURL(url)) {
-    HandleKaskoDebugURL();
-    return true;
-  }
-
   if (url == kChromeUIBrowserCrashURL) {
     // Induce an intentional crash in the browser process.
     CHECK(false);
@@ -223,23 +167,44 @@ bool HandleDebugURL(const GURL& url, ui::PageTransition transition) {
   }
 
   if (url == kChromeUIGpuCleanURL) {
-    GpuProcessHostUIShim* shim = GpuProcessHostUIShim::GetOneInstance();
-    if (shim)
-      shim->SimulateRemoveAllContext();
+    GpuProcessHost::CallOnIO(GpuProcessHost::GPU_PROCESS_KIND_SANDBOXED,
+                             false /* force_create */,
+                             base::Bind([](GpuProcessHost* host) {
+                               if (host)
+                                 host->gpu_service()->DestroyAllChannels();
+                             }));
     return true;
   }
 
   if (url == kChromeUIGpuCrashURL) {
-    GpuProcessHostUIShim* shim = GpuProcessHostUIShim::GetOneInstance();
-    if (shim)
-      shim->SimulateCrash();
+    GpuProcessHost::CallOnIO(GpuProcessHost::GPU_PROCESS_KIND_SANDBOXED,
+                             false /* force_create */,
+                             base::Bind([](GpuProcessHost* host) {
+                               if (host)
+                                 host->gpu_service()->Crash();
+                             }));
     return true;
   }
 
+#if defined(OS_ANDROID)
+  if (url == kChromeUIGpuJavaCrashURL) {
+    GpuProcessHost::CallOnIO(GpuProcessHost::GPU_PROCESS_KIND_SANDBOXED,
+                             false /* force_create */,
+                             base::Bind([](GpuProcessHost* host) {
+                               if (host)
+                                 host->gpu_service()->ThrowJavaException();
+                             }));
+    return true;
+  }
+#endif
+
   if (url == kChromeUIGpuHangURL) {
-    GpuProcessHostUIShim* shim = GpuProcessHostUIShim::GetOneInstance();
-    if (shim)
-      shim->SimulateHang();
+    GpuProcessHost::CallOnIO(GpuProcessHost::GPU_PROCESS_KIND_SANDBOXED,
+                             false /* force_create */,
+                             base::Bind([](GpuProcessHost* host) {
+                               if (host)
+                                 host->gpu_service()->Hang();
+                             }));
     return true;
   }
 
@@ -259,7 +224,8 @@ bool IsRendererDebugURL(const GURL& url) {
   if (url.SchemeIs(url::kJavaScriptScheme))
     return true;
 
-  return url == kChromeUIBadCastCrashURL ||
+  return url == kChromeUICheckCrashURL ||
+         url == kChromeUIBadCastCrashURL ||
          url == kChromeUICrashURL ||
          url == kChromeUIDumpURL ||
          url == kChromeUIKillURL ||

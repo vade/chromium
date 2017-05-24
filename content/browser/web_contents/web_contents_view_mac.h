@@ -13,6 +13,7 @@
 
 #include "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
+#include "content/browser/frame_host/popup_menu_helper_mac.h"
 #include "content/browser/renderer_host/render_view_host_delegate_view.h"
 #include "content/browser/web_contents/web_contents_view.h"
 #include "content/common/content_export.h"
@@ -25,7 +26,7 @@
 @class WebDragSource;
 
 namespace content {
-class PopupMenuHelper;
+class RenderWidgetHostViewMac;
 class WebContentsImpl;
 class WebContentsViewDelegate;
 class WebContentsViewMac;
@@ -61,7 +62,8 @@ namespace content {
 // Mac-specific implementation of the WebContentsView. It owns an NSView that
 // contains all of the contents of the tab and associated child views.
 class WebContentsViewMac : public WebContentsView,
-                           public RenderViewHostDelegateView {
+                           public RenderViewHostDelegateView,
+                           public PopupMenuHelper::Delegate {
  public:
   // The corresponding WebContentsImpl is passed in the constructor, and manages
   // our lifetime. This doesn't need to be the case, but is this way currently
@@ -99,7 +101,16 @@ class WebContentsViewMac : public WebContentsView,
   bool IsEventTracking() const override;
   void CloseTabAfterEventTracking() override;
 
-  // Backend implementation of RenderViewHostDelegateView.
+  // RenderViewHostDelegateView:
+  void StartDragging(const DropData& drop_data,
+                     blink::WebDragOperationsMask allowed_operations,
+                     const gfx::ImageSkia& image,
+                     const gfx::Vector2d& image_offset,
+                     const DragEventSourceInfo& event_info,
+                     RenderWidgetHostImpl* source_rwh) override;
+  void UpdateDragCursor(blink::WebDragOperation operation) override;
+  void GotFocus() override;
+  void TakeFocus(bool reverse) override;
   void ShowContextMenu(RenderFrameHost* render_frame_host,
                        const ContextMenuParams& params) override;
   void ShowPopupMenu(RenderFrameHost* render_frame_host,
@@ -111,15 +122,9 @@ class WebContentsViewMac : public WebContentsView,
                      bool right_aligned,
                      bool allow_multiple_selection) override;
   void HidePopupMenu() override;
-  void StartDragging(const DropData& drop_data,
-                     blink::WebDragOperationsMask allowed_operations,
-                     const gfx::ImageSkia& image,
-                     const gfx::Vector2d& image_offset,
-                     const DragEventSourceInfo& event_info,
-                     RenderWidgetHostImpl* source_rwh) override;
-  void UpdateDragCursor(blink::WebDragOperation operation) override;
-  void GotFocus() override;
-  void TakeFocus(bool reverse) override;
+
+  // PopupMenuHelper::Delegate:
+  void OnMenuClosed() override;
 
   // A helper method for closing the tab in the
   // CloseTabAfterEventTracking() implementation.
@@ -127,6 +132,13 @@ class WebContentsViewMac : public WebContentsView,
 
   WebContentsImpl* web_contents() { return web_contents_; }
   WebContentsViewDelegate* delegate() { return delegate_.get(); }
+
+  using RenderWidgetHostViewCreateFunction =
+      RenderWidgetHostViewMac* (*)(RenderWidgetHost*, bool);
+
+  // Used to override the creation of RenderWidgetHostViews in tests.
+  CONTENT_EXPORT static void InstallCreateHookForTests(
+      RenderWidgetHostViewCreateFunction create_render_widget_host_view);
 
  private:
   // Returns the fullscreen view, if one exists; otherwise, returns the content

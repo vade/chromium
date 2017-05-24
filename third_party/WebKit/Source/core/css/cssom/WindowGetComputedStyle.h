@@ -14,13 +14,12 @@ class WindowGetComputedStyle {
   STATIC_ONLY(WindowGetComputedStyle);
 
  public:
-  static StylePropertyMap* getComputedStyleMap(const DOMWindow&,
-                                               Element* element,
-                                               const String& pseudoElement) {
+  static StylePropertyMapReadonly* getComputedStyleMap(
+      const LocalDOMWindow&,
+      Element* element,
+      const String& pseudo_element) {
     DCHECK(element);
-    CSSComputedStyleDeclaration* computedStyleDeclaration =
-        CSSComputedStyleDeclaration::create(element, false, pseudoElement);
-    return ComputedStylePropertyMap::create(computedStyleDeclaration);
+    return ComputedStylePropertyMap::Create(element, pseudo_element);
   }
 };
 

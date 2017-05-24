@@ -9,7 +9,7 @@
 
 #include "base/containers/stack_container.h"
 #include "base/macros.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/tiles/picture_layer_tiling_set.h"
 #include "cc/tiles/prioritized_tile.h"
 #include "cc/tiles/tile.h"
@@ -44,9 +44,6 @@ class CC_EXPORT TilingSetRasterQueueAll {
 
    protected:
     ~OnePriorityRectIterator() = default;
-    bool TileNeedsRaster(const Tile* tile) const {
-      return tile->draw_info().NeedsRaster() && !tiling_->IsTileOccluded(tile);
-    }
 
     template <typename TilingIteratorType>
     void AdvanceToNextTile(TilingIteratorType* iterator);

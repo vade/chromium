@@ -26,12 +26,14 @@
 #include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/process/process_handle.h"
+#include "base/sequenced_task_runner.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_byteorder.h"
+#include "base/values.h"
 #include "base/win/registry.h"
 #include "base/win/win_util.h"
 #include "components/policy/core/common/async_policy_provider.h"
@@ -398,7 +400,7 @@ void RegistryTestHarness::InstallStringListPolicy(
        element != policy_value->end();
        ++element) {
     std::string element_value;
-    if (!(*element)->GetAsString(&element_value))
+    if (!element->GetAsString(&element_value))
       continue;
     std::string name(base::IntToString(index++));
     key.WriteValue(UTF8ToUTF16(name).c_str(),
@@ -812,7 +814,7 @@ TEST_F(PolicyLoaderWinTest, HKLMOverHKCU) {
   PolicyBundle expected;
   expected.Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
       .Set(test_keys::kKeyString, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_MACHINE,
-           POLICY_SOURCE_PLATFORM, base::MakeUnique<base::StringValue>("hklm"),
+           POLICY_SOURCE_PLATFORM, base::MakeUnique<base::Value>("hklm"),
            nullptr);
   EXPECT_TRUE(Matches(expected));
 }
@@ -865,17 +867,17 @@ TEST_F(PolicyLoaderWinTest, Merge3rdPartyPolicies) {
   PolicyMap& expected_policy = expected.Get(ns);
   expected_policy.Set(
       "a", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_MACHINE, POLICY_SOURCE_PLATFORM,
-      base::MakeUnique<base::StringValue>(kMachineMandatory), nullptr);
-  expected_policy.Set(
-      "b", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER, POLICY_SOURCE_PLATFORM,
-      base::MakeUnique<base::StringValue>(kUserMandatory), nullptr);
+      base::MakeUnique<base::Value>(kMachineMandatory), nullptr);
+  expected_policy.Set("b", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
+                      POLICY_SOURCE_PLATFORM,
+                      base::MakeUnique<base::Value>(kUserMandatory), nullptr);
   expected_policy.Set("c", POLICY_LEVEL_RECOMMENDED, POLICY_SCOPE_MACHINE,
                       POLICY_SOURCE_PLATFORM,
-                      base::MakeUnique<base::StringValue>(kMachineRecommended),
+                      base::MakeUnique<base::Value>(kMachineRecommended),
                       nullptr);
-  expected_policy.Set(
-      "d", POLICY_LEVEL_RECOMMENDED, POLICY_SCOPE_USER, POLICY_SOURCE_PLATFORM,
-      base::MakeUnique<base::StringValue>(kUserRecommended), nullptr);
+  expected_policy.Set("d", POLICY_LEVEL_RECOMMENDED, POLICY_SCOPE_USER,
+                      POLICY_SOURCE_PLATFORM,
+                      base::MakeUnique<base::Value>(kUserRecommended), nullptr);
   EXPECT_TRUE(Matches(expected));
 }
 
@@ -902,19 +904,19 @@ TEST_F(PolicyLoaderWinTest, LoadStringEncodedValues) {
       "}"));
 
   base::DictionaryValue policy;
-  policy.Set("null", base::Value::CreateNullValue());
+  policy.Set("null", base::MakeUnique<base::Value>());
   policy.SetBoolean("bool", true);
   policy.SetInteger("int", -123);
   policy.SetDouble("double", 456.78e9);
   base::ListValue list;
-  list.Append(policy.DeepCopy());
-  list.Append(policy.DeepCopy());
-  policy.Set("list", list.DeepCopy());
+  list.Append(base::MakeUnique<base::Value>(policy));
+  list.Append(base::MakeUnique<base::Value>(policy));
+  policy.Set("list", base::MakeUnique<base::Value>(list));
   // Encode |policy| before adding the "dict" entry.
   std::string encoded_dict;
   base::JSONWriter::Write(policy, &encoded_dict);
   ASSERT_FALSE(encoded_dict.empty());
-  policy.Set("dict", policy.DeepCopy());
+  policy.Set("dict", base::MakeUnique<base::Value>(policy));
   std::string encoded_list;
   base::JSONWriter::Write(list, &encoded_list);
   ASSERT_FALSE(encoded_list.empty());
@@ -1001,7 +1003,7 @@ TEST_F(PolicyLoaderWinTest, DefaultPropertySchemaType) {
   policy.SetString("double2", "123.456e7");
   policy.SetString("invalid", "omg");
   base::DictionaryValue all_policies;
-  all_policies.Set("policy", policy.DeepCopy());
+  all_policies.Set("policy", base::MakeUnique<base::Value>(policy));
 
   const base::string16 kPathSuffix =
       kTestPolicyKey + base::ASCIIToUTF16("\\3rdparty\\extensions\\test");
@@ -1014,7 +1016,8 @@ TEST_F(PolicyLoaderWinTest, DefaultPropertySchemaType) {
   expected_policy.SetDouble("double1", 789.0);
   expected_policy.SetDouble("double2", 123.456e7);
   base::DictionaryValue expected_policies;
-  expected_policies.Set("policy", expected_policy.DeepCopy());
+  expected_policies.Set("policy",
+                        base::MakeUnique<base::Value>(expected_policy));
   PolicyBundle expected;
   expected.Get(ns).LoadFrom(&expected_policies, POLICY_LEVEL_MANDATORY,
                             POLICY_SCOPE_USER, POLICY_SOURCE_PLATFORM);

@@ -35,15 +35,13 @@
 #include "modules/ModulesExport.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
+#include "platform/wtf/Forward.h"
 #include "public/platform/WebStorageQuotaType.h"
-#include "wtf/Forward.h"
 
 namespace blink {
 
 class ExecutionContext;
 class Page;
-class ScriptPromise;
-class ScriptState;
 class StorageErrorCallback;
 class StorageQuotaCallback;
 
@@ -54,20 +52,17 @@ class StorageQuotaClient : public Supplement<Page> {
   StorageQuotaClient() {}
   virtual ~StorageQuotaClient() {}
 
-  virtual void requestQuota(ExecutionContext*,
+  virtual void RequestQuota(ScriptState*,
                             WebStorageQuotaType,
-                            unsigned long long newQuotaInBytes,
+                            unsigned long long new_quota_in_bytes,
                             StorageQuotaCallback*,
                             StorageErrorCallback*) = 0;
-  virtual ScriptPromise requestPersistentQuota(
-      ScriptState*,
-      unsigned long long newQuotaInBytes) = 0;
 
-  static const char* supplementName();
-  static StorageQuotaClient* from(ExecutionContext*);
+  static const char* SupplementName();
+  static StorageQuotaClient* From(ExecutionContext*);
 };
 
-MODULES_EXPORT void provideStorageQuotaClientTo(Page&, StorageQuotaClient*);
+MODULES_EXPORT void ProvideStorageQuotaClientTo(Page&, StorageQuotaClient*);
 
 }  // namespace blink
 

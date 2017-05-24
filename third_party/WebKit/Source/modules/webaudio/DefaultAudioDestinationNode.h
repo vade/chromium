@@ -26,50 +26,60 @@
 #ifndef DefaultAudioDestinationNode_h
 #define DefaultAudioDestinationNode_h
 
+#include <memory>
 #include "modules/webaudio/AudioDestinationNode.h"
 #include "platform/audio/AudioDestination.h"
-#include <memory>
+#include "public/platform/WebAudioLatencyHint.h"
 
 namespace blink {
 
 class BaseAudioContext;
 class ExceptionState;
+class WebAudioLatencyHint;
 
 class DefaultAudioDestinationHandler final : public AudioDestinationHandler {
  public:
-  static PassRefPtr<DefaultAudioDestinationHandler> create(AudioNode&);
+  static PassRefPtr<DefaultAudioDestinationHandler> Create(
+      AudioNode&,
+      const WebAudioLatencyHint&);
   ~DefaultAudioDestinationHandler() override;
 
   // AudioHandler
-  void dispose() override;
-  void initialize() override;
-  void uninitialize() override;
-  void setChannelCount(unsigned long, ExceptionState&) override;
+  void Dispose() override;
+  void Initialize() override;
+  void Uninitialize() override;
+  void SetChannelCount(unsigned long, ExceptionState&) override;
 
   // AudioDestinationHandler
-  void startRendering() override;
-  void stopRendering() override;
-  unsigned long maxChannelCount() const override;
+  void StartRendering() override;
+  void StopRendering() override;
+  unsigned long MaxChannelCount() const override;
   // Returns the rendering callback buffer size.
-  size_t callbackBufferSize() const override;
+  size_t CallbackBufferSize() const override;
+  double SampleRate() const override;
+  int FramesPerBuffer() const override;
 
  private:
-  explicit DefaultAudioDestinationHandler(AudioNode&);
-  void createDestination();
+  explicit DefaultAudioDestinationHandler(AudioNode&,
+                                          const WebAudioLatencyHint&);
+  void CreateDestination();
 
-  std::unique_ptr<AudioDestination> m_destination;
-  String m_inputDeviceId;
-  unsigned m_numberOfInputChannels;
+  std::unique_ptr<AudioDestination> destination_;
+  String input_device_id_;
+  unsigned number_of_input_channels_;
+  const WebAudioLatencyHint latency_hint_;
 };
 
 class DefaultAudioDestinationNode final : public AudioDestinationNode {
  public:
-  static DefaultAudioDestinationNode* create(BaseAudioContext*);
+  static DefaultAudioDestinationNode* Create(BaseAudioContext*,
+                                             const WebAudioLatencyHint&);
 
-  size_t callbackBufferSize() const { return handler().callbackBufferSize(); };
+  size_t CallbackBufferSize() const { return Handler().CallbackBufferSize(); };
 
  private:
-  explicit DefaultAudioDestinationNode(BaseAudioContext&);
+  explicit DefaultAudioDestinationNode(BaseAudioContext&,
+                                       const WebAudioLatencyHint&);
 };
 
 }  // namespace blink

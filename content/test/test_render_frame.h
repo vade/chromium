@@ -5,8 +5,12 @@
 #ifndef CONTENT_TEST_TEST_RENDER_FRAME_H_
 #define CONTENT_TEST_TEST_RENDER_FRAME_H_
 
+#include <memory>
+
 #include "base/macros.h"
+#include "content/common/frame.mojom.h"
 #include "content/renderer/render_frame_impl.h"
+#include "mojo/public/cpp/bindings/scoped_interface_endpoint_handle.h"
 
 namespace blink {
 class WebHistoryItem;
@@ -15,6 +19,7 @@ class WebHistoryItem;
 namespace content {
 
 struct CommonNavigationParams;
+class MockFrameHost;
 struct RequestNavigationParams;
 struct StartNavigationParams;
 
@@ -38,18 +43,25 @@ class TestRenderFrame : public RenderFrameImpl {
   void SetEditableSelectionOffsets(int start, int end);
   void ExtendSelectionAndDelete(int before, int after);
   void DeleteSurroundingText(int before, int after);
-  void Unselect();
+  void DeleteSurroundingTextInCodePoints(int before, int after);
+  void CollapseSelection();
   void SetAccessibilityMode(AccessibilityMode new_mode);
   void SetCompositionFromExistingText(
       int start,
       int end,
       const std::vector<blink::WebCompositionUnderline>& underlines);
 
-  blink::WebNavigationPolicy decidePolicyForNavigation(
-    const blink::WebFrameClient::NavigationPolicyInfo& info) override;
+  blink::WebNavigationPolicy DecidePolicyForNavigation(
+      const blink::WebFrameClient::NavigationPolicyInfo& info) override;
+
+  mojom::FrameHostAssociatedPtr GetFrameHost() override;
 
  private:
+  void BindFrameHost(mojo::ScopedInterfaceEndpointHandle handle);
   explicit TestRenderFrame(const RenderFrameImpl::CreateParams& params);
+
+  std::unique_ptr<MockFrameHost> mock_frame_host_;
+
   DISALLOW_COPY_AND_ASSIGN(TestRenderFrame);
 };
 

@@ -6,6 +6,7 @@ package org.chromium.device.nfc;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -13,6 +14,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -36,7 +38,9 @@ import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.annotation.Config;
+import org.robolectric.shadows.ShadowLooper;
 
+import org.chromium.base.Callback;
 import org.chromium.base.test.util.Feature;
 import org.chromium.device.nfc.mojom.Nfc.CancelAllWatchesResponse;
 import org.chromium.device.nfc.mojom.Nfc.CancelPushResponse;
@@ -65,6 +69,7 @@ import java.io.UnsupportedEncodingException;
 @RunWith(LocalRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public class NFCTest {
+    private TestNfcDelegate mDelegate;
     @Mock
     private Context mContext;
     @Mock
@@ -100,12 +105,8 @@ public class NFCTest {
      * Class that is used test NfcImpl implementation
      */
     private static class TestNfcImpl extends NfcImpl {
-        public TestNfcImpl(Context context) {
-            super(context);
-        }
-
-        public void setActivityForTesting(Activity activity) {
-            super.setActivity(activity);
+        public TestNfcImpl(Context context, NfcDelegate delegate) {
+            super(context, 0, delegate);
         }
 
         public void processPendingOperationsForTesting(NfcTagHandler handler) {
@@ -113,9 +114,28 @@ public class NFCTest {
         }
     }
 
+    private static class TestNfcDelegate implements NfcDelegate {
+        Activity mActivity;
+        Callback<Activity> mCallback;
+
+        public TestNfcDelegate(Activity activity) {
+            mActivity = activity;
+        }
+        public void trackActivityForHost(int hostId, Callback<Activity> callback) {
+            mCallback = callback;
+        }
+
+        public void invokeCallback() {
+            mCallback.onResult(mActivity);
+        }
+
+        public void stopTrackingActivityForHost(int hostId) {}
+    }
+
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
+        mDelegate = new TestNfcDelegate(mActivity);
         doReturn(mNfcManager).when(mContext).getSystemService(Context.NFC_SERVICE);
         doReturn(mNfcAdapter).when(mNfcManager).getDefaultAdapter();
         doReturn(true).when(mNfcAdapter).isEnabled();
@@ -146,8 +166,8 @@ public class NFCTest {
     @Feature({"NFCTest"})
     public void testNFCNotSupported() {
         doReturn(null).when(mNfcManager).getDefaultAdapter();
-        TestNfcImpl nfc = new TestNfcImpl(mContext);
-        nfc.setActivityForTesting(mActivity);
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
+        mDelegate.invokeCallback();
         CancelAllWatchesResponse mockCallback = mock(CancelAllWatchesResponse.class);
         nfc.cancelAllWatches(mockCallback);
         verify(mockCallback).call(mErrorCaptor.capture());
@@ -163,7 +183,7 @@ public class NFCTest {
         doReturn(PackageManager.PERMISSION_DENIED)
                 .when(mContext)
                 .checkPermission(anyString(), anyInt(), anyInt());
-        TestNfcImpl nfc = new TestNfcImpl(mContext);
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
         CancelAllWatchesResponse mockCallback = mock(CancelAllWatchesResponse.class);
         nfc.cancelAllWatches(mockCallback);
         verify(mockCallback).call(mErrorCaptor.capture());
@@ -176,8 +196,8 @@ public class NFCTest {
     @Test
     @Feature({"NFCTest"})
     public void testNFCIsSupported() {
-        TestNfcImpl nfc = new TestNfcImpl(mContext);
-        nfc.setActivityForTesting(mActivity);
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
+        mDelegate.invokeCallback();
         WatchResponse mockCallback = mock(WatchResponse.class);
         nfc.watch(createNfcWatchOptions(), mockCallback);
         verify(mockCallback).call(anyInt(), mErrorCaptor.capture());
@@ -312,8 +332,8 @@ public class NFCTest {
     @Test
     @Feature({"NFCTest"})
     public void testInvalidNfcMessage() {
-        TestNfcImpl nfc = new TestNfcImpl(mContext);
-        nfc.setActivityForTesting(mActivity);
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
+        mDelegate.invokeCallback();
         PushResponse mockCallback = mock(PushResponse.class);
         nfc.push(new NfcMessage(), createNfcPushOptions(), mockCallback);
         nfc.processPendingOperationsForTesting(mNfcTagHandler);
@@ -327,12 +347,12 @@ public class NFCTest {
     @Test
     @Feature({"NFCTest"})
     public void testResumeSuspend() {
-        TestNfcImpl nfc = new TestNfcImpl(mContext);
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
         // No activity / client or active pending operations
         nfc.suspendNfcOperations();
         nfc.resumeNfcOperations();
 
-        nfc.setActivityForTesting(mActivity);
+        mDelegate.invokeCallback();
         nfc.setClient(mNfcClient);
         WatchResponse mockCallback = mock(WatchResponse.class);
         nfc.watch(createNfcWatchOptions(), mockCallback);
@@ -361,8 +381,8 @@ public class NFCTest {
     @Test
     @Feature({"NFCTest"})
     public void testPush() {
-        TestNfcImpl nfc = new TestNfcImpl(mContext);
-        nfc.setActivityForTesting(mActivity);
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
+        mDelegate.invokeCallback();
         PushResponse mockCallback = mock(PushResponse.class);
         nfc.push(createNfcMessage(), createNfcPushOptions(), mockCallback);
         nfc.processPendingOperationsForTesting(mNfcTagHandler);
@@ -376,8 +396,8 @@ public class NFCTest {
     @Test
     @Feature({"NFCTest"})
     public void testCancelPush() {
-        TestNfcImpl nfc = new TestNfcImpl(mContext);
-        nfc.setActivityForTesting(mActivity);
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
+        mDelegate.invokeCallback();
         PushResponse mockPushCallback = mock(PushResponse.class);
         CancelPushResponse mockCancelPushCallback = mock(CancelPushResponse.class);
         nfc.push(createNfcMessage(), createNfcPushOptions(), mockPushCallback);
@@ -398,8 +418,8 @@ public class NFCTest {
     @Test
     @Feature({"NFCTest"})
     public void testWatch() {
-        TestNfcImpl nfc = new TestNfcImpl(mContext);
-        nfc.setActivityForTesting(mActivity);
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
+        mDelegate.invokeCallback();
         nfc.setClient(mNfcClient);
         WatchResponse mockWatchCallback1 = mock(WatchResponse.class);
         nfc.watch(createNfcWatchOptions(), mockWatchCallback1);
@@ -433,8 +453,8 @@ public class NFCTest {
     @Test
     @Feature({"NFCTest"})
     public void testlWatchMatching() {
-        TestNfcImpl nfc = new TestNfcImpl(mContext);
-        nfc.setActivityForTesting(mActivity);
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
+        mDelegate.invokeCallback();
         nfc.setClient(mNfcClient);
 
         // Should match by WebNFC Id.
@@ -496,8 +516,8 @@ public class NFCTest {
     @Test
     @Feature({"NFCTest"})
     public void testCancelWatch() {
-        TestNfcImpl nfc = new TestNfcImpl(mContext);
-        nfc.setActivityForTesting(mActivity);
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
+        mDelegate.invokeCallback();
         WatchResponse mockWatchCallback = mock(WatchResponse.class);
         nfc.watch(createNfcWatchOptions(), mockWatchCallback);
 
@@ -522,8 +542,8 @@ public class NFCTest {
     @Test
     @Feature({"NFCTest"})
     public void testCancelAllWatches() {
-        TestNfcImpl nfc = new TestNfcImpl(mContext);
-        nfc.setActivityForTesting(mActivity);
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
+        mDelegate.invokeCallback();
         WatchResponse mockWatchCallback1 = mock(WatchResponse.class);
         WatchResponse mockWatchCallback2 = mock(WatchResponse.class);
         nfc.watch(createNfcWatchOptions(), mockWatchCallback1);
@@ -548,8 +568,8 @@ public class NFCTest {
     @Test
     @Feature({"NFCTest"})
     public void testCancelWatchInvalidId() {
-        TestNfcImpl nfc = new TestNfcImpl(mContext);
-        nfc.setActivityForTesting(mActivity);
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
+        mDelegate.invokeCallback();
         WatchResponse mockWatchCallback = mock(WatchResponse.class);
         nfc.watch(createNfcWatchOptions(), mockWatchCallback);
 
@@ -570,8 +590,8 @@ public class NFCTest {
     @Test
     @Feature({"NFCTest"})
     public void testCancelAllWatchesWithNoWathcers() {
-        TestNfcImpl nfc = new TestNfcImpl(mContext);
-        nfc.setActivityForTesting(mActivity);
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
+        mDelegate.invokeCallback();
         CancelAllWatchesResponse mockCallback = mock(CancelAllWatchesResponse.class);
         nfc.cancelAllWatches(mockCallback);
 
@@ -579,10 +599,299 @@ public class NFCTest {
         assertEquals(NfcErrorType.NOT_FOUND, mErrorCaptor.getValue().errorType);
     }
 
+    /**
+     * Test that when tag is disconnected during read operation, IllegalStateException is handled.
+     */
+    @Test
+    @Feature({"NFCTest"})
+    public void testTagDisconnectedDuringRead() throws IOException, FormatException {
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
+        mDelegate.invokeCallback();
+        nfc.setClient(mNfcClient);
+        WatchResponse mockWatchCallback = mock(WatchResponse.class);
+        nfc.watch(createNfcWatchOptions(), mockWatchCallback);
+
+        // Force read operation to fail
+        doThrow(IllegalStateException.class).when(mNfcTagHandler).read();
+
+        // Mocks 'NFC tag found' event.
+        nfc.processPendingOperationsForTesting(mNfcTagHandler);
+
+        // Check that client was not notified.
+        verify(mNfcClient, times(0))
+                .onWatch(mOnWatchCallbackCaptor.capture(), any(NfcMessage.class));
+    }
+
+    /**
+     * Test that when tag is disconnected during write operation, IllegalStateException is handled.
+     */
+    @Test
+    @Feature({"NFCTest"})
+    public void testTagDisconnectedDuringWrite() throws IOException, FormatException {
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
+        mDelegate.invokeCallback();
+        PushResponse mockCallback = mock(PushResponse.class);
+
+        // Force write operation to fail
+        doThrow(IllegalStateException.class).when(mNfcTagHandler).write(any(NdefMessage.class));
+        nfc.push(createNfcMessage(), createNfcPushOptions(), mockCallback);
+        nfc.processPendingOperationsForTesting(mNfcTagHandler);
+        verify(mockCallback).call(mErrorCaptor.capture());
+
+        // Test that correct error is returned.
+        assertNotNull(mErrorCaptor.getValue());
+        assertEquals(NfcErrorType.IO_ERROR, mErrorCaptor.getValue().errorType);
+    }
+
+    /**
+     * Test that push operation completes with TIMER_EXPIRED error when operation times-out.
+     */
+    @Test
+    @Feature({"NFCTest"})
+    public void testPushTimeout() {
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
+        mDelegate.invokeCallback();
+        PushResponse mockCallback = mock(PushResponse.class);
+
+        // Set 1 millisecond timeout.
+        nfc.push(createNfcMessage(), createNfcPushOptions(1), mockCallback);
+
+        // Wait for timeout.
+        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+
+        // Test that correct error is returned.
+        verify(mockCallback).call(mErrorCaptor.capture());
+        assertNotNull(mErrorCaptor.getValue());
+        assertEquals(NfcErrorType.TIMER_EXPIRED, mErrorCaptor.getValue().errorType);
+    }
+
+    /**
+     * Test that multiple Nfc.push() invocations do not disable reader mode.
+     */
+    @Test
+    @Feature({"NFCTest"})
+    public void testPushMultipleInvocations() {
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
+        mDelegate.invokeCallback();
+
+        PushResponse mockCallback1 = mock(PushResponse.class);
+        PushResponse mockCallback2 = mock(PushResponse.class);
+        nfc.push(createNfcMessage(), createNfcPushOptions(), mockCallback1);
+        nfc.push(createNfcMessage(), createNfcPushOptions(), mockCallback2);
+
+        verify(mNfcAdapter, times(1))
+                .enableReaderMode(any(Activity.class), any(ReaderCallback.class), anyInt(),
+                        (Bundle) isNull());
+        verify(mNfcAdapter, times(0)).disableReaderMode(mActivity);
+
+        verify(mockCallback1).call(mErrorCaptor.capture());
+        assertNotNull(mErrorCaptor.getValue());
+        assertEquals(NfcErrorType.OPERATION_CANCELLED, mErrorCaptor.getValue().errorType);
+    }
+
+    /**
+     * Test that reader mode is disabled after push operation timeout is expired.
+     */
+    @Test
+    @Feature({"NFCTest"})
+    public void testReaderModeIsDisabledAfterTimeout() {
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
+        mDelegate.invokeCallback();
+        PushResponse mockCallback = mock(PushResponse.class);
+
+        // Set 1 millisecond timeout.
+        nfc.push(createNfcMessage(), createNfcPushOptions(1), mockCallback);
+
+        verify(mNfcAdapter, times(1))
+                .enableReaderMode(any(Activity.class), any(ReaderCallback.class), anyInt(),
+                        (Bundle) isNull());
+
+        // Wait for timeout.
+        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+
+        // Reader mode is disabled
+        verify(mNfcAdapter, times(1)).disableReaderMode(mActivity);
+
+        // Test that correct error is returned.
+        verify(mockCallback).call(mErrorCaptor.capture());
+        assertNotNull(mErrorCaptor.getValue());
+        assertEquals(NfcErrorType.TIMER_EXPIRED, mErrorCaptor.getValue().errorType);
+    }
+
+    /**
+     * Test that reader mode is disabled and two push operations are cancelled with correct
+     * error code.
+     */
+    @Test
+    @Feature({"NFCTest"})
+    public void testTwoPushInvocationsWithCancel() {
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
+        mDelegate.invokeCallback();
+
+        PushResponse mockCallback1 = mock(PushResponse.class);
+
+        // First push without timeout, must be completed with OPERATION_CANCELLED.
+        nfc.push(createNfcMessage(), createNfcPushOptions(), mockCallback1);
+
+        PushResponse mockCallback2 = mock(PushResponse.class);
+
+        // Second push with 1 millisecond timeout, should be cancelled before timer expires,
+        // thus, operation must be completed with OPERATION_CANCELLED.
+        nfc.push(createNfcMessage(), createNfcPushOptions(1), mockCallback2);
+
+        verify(mNfcAdapter, times(1))
+                .enableReaderMode(any(Activity.class), any(ReaderCallback.class), anyInt(),
+                        (Bundle) isNull());
+        verify(mockCallback1).call(mErrorCaptor.capture());
+        assertNotNull(mErrorCaptor.getValue());
+        assertEquals(NfcErrorType.OPERATION_CANCELLED, mErrorCaptor.getValue().errorType);
+
+        CancelPushResponse mockCancelPushCallback = mock(CancelPushResponse.class);
+        nfc.cancelPush(NfcPushTarget.ANY, mockCancelPushCallback);
+
+        // Reader mode is disabled after cancelPush is invoked.
+        verify(mNfcAdapter, times(1)).disableReaderMode(mActivity);
+
+        // Wait for delayed tasks to complete.
+        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+
+        // The disableReaderMode is not called after delayed tasks are processed.
+        verify(mNfcAdapter, times(1)).disableReaderMode(mActivity);
+
+        // Test that correct error is returned.
+        verify(mockCallback2).call(mErrorCaptor.capture());
+        assertNotNull(mErrorCaptor.getValue());
+        assertEquals(NfcErrorType.OPERATION_CANCELLED, mErrorCaptor.getValue().errorType);
+    }
+
+    /**
+     * Test that reader mode is disabled and two push operations with timeout are cancelled
+     * with correct error codes.
+     */
+    @Test
+    @Feature({"NFCTest"})
+    public void testTwoPushInvocationsWithTimeout() {
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
+        mDelegate.invokeCallback();
+
+        PushResponse mockCallback1 = mock(PushResponse.class);
+
+        // First push without timeout, must be completed with OPERATION_CANCELLED.
+        nfc.push(createNfcMessage(), createNfcPushOptions(1), mockCallback1);
+
+        PushResponse mockCallback2 = mock(PushResponse.class);
+
+        // Second push with 1 millisecond timeout, should be cancelled with TIMER_EXPIRED.
+        nfc.push(createNfcMessage(), createNfcPushOptions(1), mockCallback2);
+
+        verify(mNfcAdapter, times(1))
+                .enableReaderMode(any(Activity.class), any(ReaderCallback.class), anyInt(),
+                        (Bundle) isNull());
+
+        // Reader mode enabled for the duration of timeout.
+        verify(mNfcAdapter, times(0)).disableReaderMode(mActivity);
+
+        verify(mockCallback1).call(mErrorCaptor.capture());
+        assertNotNull(mErrorCaptor.getValue());
+        assertEquals(NfcErrorType.OPERATION_CANCELLED, mErrorCaptor.getValue().errorType);
+
+        // Wait for delayed tasks to complete.
+        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+
+        // Reader mode is disabled
+        verify(mNfcAdapter, times(1)).disableReaderMode(mActivity);
+
+        // Test that correct error is returned for second push.
+        verify(mockCallback2).call(mErrorCaptor.capture());
+        assertNotNull(mErrorCaptor.getValue());
+        assertEquals(NfcErrorType.TIMER_EXPIRED, mErrorCaptor.getValue().errorType);
+    }
+
+    /**
+     * Test that reader mode is not disabled when there is an active watch operation and push
+     * operation timer is expired.
+     */
+    @Test
+    @Feature({"NFCTest"})
+    public void testTimeoutDontDisableReaderMode() {
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
+        mDelegate.invokeCallback();
+        WatchResponse mockWatchCallback = mock(WatchResponse.class);
+        nfc.watch(createNfcWatchOptions(), mockWatchCallback);
+
+        PushResponse mockPushCallback = mock(PushResponse.class);
+        // Should be cancelled with TIMER_EXPIRED.
+        nfc.push(createNfcMessage(), createNfcPushOptions(1), mockPushCallback);
+
+        verify(mNfcAdapter, times(1))
+                .enableReaderMode(any(Activity.class), any(ReaderCallback.class), anyInt(),
+                        (Bundle) isNull());
+
+        // Wait for delayed tasks to complete.
+        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+
+        // Push was cancelled with TIMER_EXPIRED.
+        verify(mockPushCallback).call(mErrorCaptor.capture());
+        assertNotNull(mErrorCaptor.getValue());
+        assertEquals(NfcErrorType.TIMER_EXPIRED, mErrorCaptor.getValue().errorType);
+
+        verify(mNfcAdapter, times(0)).disableReaderMode(mActivity);
+
+        CancelAllWatchesResponse mockCancelCallback = mock(CancelAllWatchesResponse.class);
+        nfc.cancelAllWatches(mockCancelCallback);
+
+        // Check that cancel request was successfuly completed.
+        verify(mockCancelCallback).call(mErrorCaptor.capture());
+        assertNull(mErrorCaptor.getValue());
+
+        // Reader mode is disabled when there are no pending push / watch operations.
+        verify(mNfcAdapter, times(1)).disableReaderMode(mActivity);
+    }
+
+    /**
+     * Test timeout overflow and negative timeout
+     */
+    @Test
+    @Feature({"NFCTest"})
+    public void testInvalidPushOptions() {
+        TestNfcImpl nfc = new TestNfcImpl(mContext, mDelegate);
+        mDelegate.invokeCallback();
+        PushResponse mockCallback = mock(PushResponse.class);
+
+        // Long overflow
+        nfc.push(createNfcMessage(), createNfcPushOptions(Long.MAX_VALUE + 1), mockCallback);
+
+        verify(mockCallback).call(mErrorCaptor.capture());
+        assertNotNull(mErrorCaptor.getValue());
+        assertEquals(NfcErrorType.NOT_SUPPORTED, mErrorCaptor.getValue().errorType);
+
+        // Test negative timeout
+        PushResponse mockCallback2 = mock(PushResponse.class);
+        nfc.push(createNfcMessage(), createNfcPushOptions(-1), mockCallback2);
+
+        verify(mockCallback2).call(mErrorCaptor.capture());
+        assertNotNull(mErrorCaptor.getValue());
+        assertEquals(NfcErrorType.NOT_SUPPORTED, mErrorCaptor.getValue().errorType);
+    }
+
+    /**
+     * Creates NfcPushOptions with default values.
+     */
     private NfcPushOptions createNfcPushOptions() {
         NfcPushOptions pushOptions = new NfcPushOptions();
         pushOptions.target = NfcPushTarget.ANY;
-        pushOptions.timeout = 0;
+        pushOptions.timeout = Double.POSITIVE_INFINITY;
+        pushOptions.ignoreRead = false;
+        return pushOptions;
+    }
+
+    /**
+     * Creates NfcPushOptions with specified timeout.
+     */
+    private NfcPushOptions createNfcPushOptions(double timeout) {
+        NfcPushOptions pushOptions = new NfcPushOptions();
+        pushOptions.target = NfcPushTarget.ANY;
+        pushOptions.timeout = timeout;
         pushOptions.ignoreRead = false;
         return pushOptions;
     }

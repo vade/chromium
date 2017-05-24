@@ -16,6 +16,7 @@
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/strings/string16.h"
+#include "chrome/renderer/media/chrome_key_systems_provider.h"
 #include "components/rappor/public/interfaces/rappor_recorder.mojom.h"
 #include "components/spellcheck/spellcheck_build_features.h"
 #include "content/public/renderer/content_renderer_client.h"
@@ -68,7 +69,7 @@ class PhishingClassifierFilter;
 }
 
 namespace subresource_filter {
-class RulesetDealer;
+class UnverifiedRulesetDealer;
 }
 
 namespace web_cache {
@@ -110,7 +111,6 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   SkBitmap* GetSadPluginBitmap() override;
   SkBitmap* GetSadWebViewBitmap() override;
   bool OverrideCreatePlugin(content::RenderFrame* render_frame,
-                            blink::WebLocalFrame* frame,
                             const blink::WebPluginParams& params,
                             blink::WebPlugin** plugin) override;
   blink::WebPlugin* CreatePluginReplacement(
@@ -150,7 +150,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       const content::RenderFrame* render_frame,
       blink::WebPageVisibilityState* override_state) override;
   bool IsExternalPepperPlugin(const std::string& module_name) override;
-  blink::WebSpeechSynthesizer* OverrideSpeechSynthesizer(
+  std::unique_ptr<blink::WebSpeechSynthesizer> OverrideSpeechSynthesizer(
       blink::WebSpeechSynthesizerClient* client) override;
   bool ShouldReportDetailedMessageForSource(
       const base::string16& source) const override;
@@ -162,6 +162,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   void AddSupportedKeySystems(
       std::vector<std::unique_ptr<::media::KeySystemProperties>>* key_systems)
       override;
+  bool IsKeySystemsUpdateNeeded() override;
   bool IsPluginAllowedToUseDevChannelAPIs() override;
   bool IsPluginAllowedToUseCameraDeviceAPI(const GURL& url) override;
   bool IsPluginAllowedToUseCompositorAPI(const GURL& url) override;
@@ -177,6 +178,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       std::map<std::string, std::string>* properties) override;
   void RunScriptsAtDocumentStart(content::RenderFrame* render_frame) override;
   void RunScriptsAtDocumentEnd(content::RenderFrame* render_frame) override;
+  void RunScriptsAtDocumentIdle(content::RenderFrame* render_frame) override;
   void DidInitializeServiceWorkerContextOnWorkerThread(
       v8::Local<v8::Context> context,
       int64_t service_worker_version_id,
@@ -187,10 +189,8 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       const GURL& url) override;
   bool ShouldEnforceWebRTCRoutingPreferences() override;
   GURL OverrideFlashEmbedWithHTML(const GURL& url) override;
-  void GetTaskSchedulerInitializationParams(
-      std::vector<base::SchedulerWorkerPoolParams>* params_vector,
-      base::TaskScheduler::WorkerPoolIndexForTraitsCallback*
-          index_to_traits_callback) override;
+  std::unique_ptr<base::TaskScheduler::InitParams> GetTaskSchedulerInitParams()
+      override;
 
 #if BUILDFLAG(ENABLE_SPELLCHECK)
   // Sets a new |spellcheck|. Used for testing only.
@@ -201,7 +201,6 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
 #if BUILDFLAG(ENABLE_PLUGINS)
   static blink::WebPlugin* CreatePlugin(
       content::RenderFrame* render_frame,
-      blink::WebLocalFrame* frame,
       const blink::WebPluginParams& params,
       const ChromeViewHostMsg_GetPluginInfo_Output& output);
 #endif
@@ -241,11 +240,13 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   std::unique_ptr<network_hints::PrescientNetworkingDispatcher>
       prescient_networking_dispatcher_;
 
+  chrome::ChromeKeySystemsProvider key_systems_provider_;
+
 #if BUILDFLAG(ENABLE_SPELLCHECK)
   std::unique_ptr<SpellCheck> spellcheck_;
 #endif
   std::unique_ptr<safe_browsing::PhishingClassifierFilter> phishing_classifier_;
-  std::unique_ptr<subresource_filter::RulesetDealer>
+  std::unique_ptr<subresource_filter::UnverifiedRulesetDealer>
       subresource_filter_ruleset_dealer_;
   std::unique_ptr<prerender::PrerenderDispatcher> prerender_dispatcher_;
 #if BUILDFLAG(ENABLE_WEBRTC)

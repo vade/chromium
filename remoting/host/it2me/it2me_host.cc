@@ -20,6 +20,7 @@
 #include "remoting/base/chromium_url_request.h"
 #include "remoting/base/logging.h"
 #include "remoting/base/rsa_key_pair.h"
+#include "remoting/base/service_urls.h"
 #include "remoting/host/chromoting_host.h"
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/host_event_logger.h"
@@ -27,9 +28,7 @@
 #include "remoting/host/host_status_logger.h"
 #include "remoting/host/it2me/it2me_confirmation_dialog.h"
 #include "remoting/host/it2me_desktop_environment.h"
-#include "remoting/host/policy_watcher.h"
 #include "remoting/host/register_support_host_request.h"
-#include "remoting/host/service_urls.h"
 #include "remoting/protocol/auth_util.h"
 #include "remoting/protocol/chromium_port_allocator_factory.h"
 #include "remoting/protocol/ice_transport.h"
@@ -52,13 +51,13 @@ const int kMaxLoginAttempts = 5;
 using protocol::ValidatingAuthenticator;
 typedef ValidatingAuthenticator::Result ValidationResult;
 typedef ValidatingAuthenticator::ValidationCallback ValidationCallback;
+typedef ValidatingAuthenticator::ResultCallback ValidationResultCallback;
 
 }  // namespace
 
 It2MeHost::It2MeHost(
     std::unique_ptr<ChromotingHostContext> host_context,
-    std::unique_ptr<PolicyWatcher> policy_watcher,
-    std::unique_ptr<It2MeConfirmationDialog> confirmation_dialog,
+    std::unique_ptr<It2MeConfirmationDialogFactory> dialog_factory,
     base::WeakPtr<It2MeHost::Observer> observer,
     std::unique_ptr<SignalStrategy> signal_strategy,
     const std::string& username,
@@ -68,15 +67,13 @@ It2MeHost::It2MeHost(
       signal_strategy_(std::move(signal_strategy)),
       username_(username),
       directory_bot_jid_(directory_bot_jid),
-      policy_watcher_(std::move(policy_watcher)),
-      confirmation_dialog_(std::move(confirmation_dialog)) {
+      confirmation_dialog_factory_(std::move(dialog_factory)) {
   DCHECK(host_context_->ui_task_runner()->BelongsToCurrentThread());
 }
 
 It2MeHost::~It2MeHost() {
   // Check that resources that need to be torn down on the UI thread are gone.
   DCHECK(!desktop_environment_factory_.get());
-  DCHECK(!policy_watcher_.get());
 }
 
 void It2MeHost::Connect() {
@@ -90,11 +87,6 @@ void It2MeHost::Connect() {
       host_context_->network_task_runner(),
       host_context_->video_capture_task_runner(),
       host_context_->input_task_runner(), host_context_->ui_task_runner()));
-
-  // Start monitoring configured policies.
-  policy_watcher_->StartWatching(
-      base::Bind(&It2MeHost::OnPolicyUpdate, this),
-      base::Bind(&It2MeHost::OnPolicyError, this));
 
   // Switch to the network thread to start the actual connection.
   host_context_->network_task_runner()->PostTask(
@@ -131,8 +123,6 @@ void It2MeHost::DisconnectOnNetworkThread() {
   // Post tasks to delete UI objects on the UI thread.
   host_context_->ui_task_runner()->DeleteSoon(
       FROM_HERE, desktop_environment_factory_.release());
-  host_context_->ui_task_runner()->DeleteSoon(FROM_HERE,
-                                              policy_watcher_.release());
 
   SetState(kDisconnected, "");
 }
@@ -173,11 +163,19 @@ void It2MeHost::FinishConnect() {
   }
 
   // Check the host domain policy.
-  if (!required_host_domain_.empty() &&
-      !base::EndsWith(username_, std::string("@") + required_host_domain_,
-                      base::CompareCase::INSENSITIVE_ASCII)) {
-    SetState(kInvalidDomainError, "");
-    return;
+  if (!required_host_domain_list_.empty()) {
+    bool matched = false;
+    for (const auto& domain : required_host_domain_list_) {
+      if (base::EndsWith(username_, std::string("@") + domain,
+                         base::CompareCase::INSENSITIVE_ASCII)) {
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      SetState(kInvalidDomainError, "");
+      return;
+    }
   }
 
   // Generate a key pair for the Host to use.
@@ -256,6 +254,11 @@ void It2MeHost::OnAccessDenied(const std::string& jid) {
   ++failed_login_attempts_;
   if (failed_login_attempts_ == kMaxLoginAttempts) {
     DisconnectOnNetworkThread();
+  } else if (connecting_jid_ == jid) {
+    DCHECK_EQ(state_, kConnecting);
+    connecting_jid_.clear();
+    confirmation_dialog_proxy_.reset();
+    SetState(kReceivedAccessCode, std::string());
   }
 }
 
@@ -288,15 +291,6 @@ void It2MeHost::OnClientDisconnected(const std::string& jid) {
   DisconnectOnNetworkThread();
 }
 
-void It2MeHost::SetPolicyForTesting(
-    std::unique_ptr<base::DictionaryValue> policies,
-    const base::Closure& done_callback) {
-  host_context_->network_task_runner()->PostTaskAndReply(
-      FROM_HERE,
-      base::Bind(&It2MeHost::OnPolicyUpdate, this, base::Passed(&policies)),
-      done_callback);
-}
-
 ValidationCallback It2MeHost::GetValidationCallbackForTesting() {
   return base::Bind(&It2MeHost::ValidateConnectionDetails,
                     base::Unretained(this));
@@ -317,14 +311,23 @@ void It2MeHost::OnPolicyUpdate(
                            &nat_policy)) {
     UpdateNatPolicy(nat_policy);
   }
-  std::string host_domain;
-  if (policies->GetString(policy::key::kRemoteAccessHostDomain, &host_domain)) {
-    UpdateHostDomainPolicy(host_domain);
+  const base::ListValue* host_domain_list;
+  if (policies->GetList(policy::key::kRemoteAccessHostDomainList,
+                        &host_domain_list)) {
+    std::vector<std::string> host_domain_list_vector;
+    for (const auto& value : *host_domain_list) {
+      host_domain_list_vector.push_back(value.GetString());
+    }
+    UpdateHostDomainListPolicy(std::move(host_domain_list_vector));
   }
-  std::string client_domain;
-  if (policies->GetString(policy::key::kRemoteAccessHostClientDomain,
-                          &client_domain)) {
-    UpdateClientDomainPolicy(client_domain);
+  const base::ListValue* client_domain_list;
+  if (policies->GetList(policy::key::kRemoteAccessHostClientDomainList,
+                        &client_domain_list)) {
+    std::vector<std::string> client_domain_list_vector;
+    for (const auto& value : *client_domain_list) {
+      client_domain_list_vector.push_back(value.GetString());
+    }
+    UpdateClientDomainListPolicy(std::move(client_domain_list_vector));
   }
 
   policy_received_ = true;
@@ -332,11 +335,6 @@ void It2MeHost::OnPolicyUpdate(
   if (!pending_connect_.is_null()) {
     base::ResetAndReturn(&pending_connect_).Run();
   }
-}
-
-void It2MeHost::OnPolicyError() {
-  // TODO(lukasza): Report the policy error to the user.  crbug.com/433009
-  NOTIMPLEMENTED();
 }
 
 void It2MeHost::UpdateNatPolicy(bool nat_traversal_enabled) {
@@ -358,30 +356,34 @@ void It2MeHost::UpdateNatPolicy(bool nat_traversal_enabled) {
                             nat_traversal_enabled_));
 }
 
-void It2MeHost::UpdateHostDomainPolicy(const std::string& host_domain) {
+void It2MeHost::UpdateHostDomainListPolicy(
+    std::vector<std::string> host_domain_list) {
   DCHECK(host_context_->network_task_runner()->BelongsToCurrentThread());
 
-  VLOG(2) << "UpdateHostDomainPolicy: " << host_domain;
+  VLOG(2) << "UpdateHostDomainListPolicy: "
+          << base::JoinString(host_domain_list, ", ");
 
   // When setting a host domain policy, force disconnect any existing session.
-  if (!host_domain.empty() && IsRunning()) {
+  if (!host_domain_list.empty() && IsRunning()) {
     DisconnectOnNetworkThread();
   }
 
-  required_host_domain_ = host_domain;
+  required_host_domain_list_ = std::move(host_domain_list);
 }
 
-void It2MeHost::UpdateClientDomainPolicy(const std::string& client_domain) {
+void It2MeHost::UpdateClientDomainListPolicy(
+    std::vector<std::string> client_domain_list) {
   DCHECK(host_context_->network_task_runner()->BelongsToCurrentThread());
 
-  VLOG(2) << "UpdateClientDomainPolicy: " << client_domain;
+  VLOG(2) << "UpdateClientDomainPolicy: "
+          << base::JoinString(client_domain_list, ", ");
 
   // When setting a client  domain policy, disconnect any existing session.
-  if (!client_domain.empty() && IsRunning()) {
+  if (!client_domain_list.empty() && IsRunning()) {
     DisconnectOnNetworkThread();
   }
 
-  required_client_domain_ = client_domain;
+  required_client_domain_list_ = std::move(client_domain_list);
 }
 
 void It2MeHost::SetState(It2MeHostState state,
@@ -482,7 +484,7 @@ void It2MeHost::OnReceivedSupportID(
 
 void It2MeHost::ValidateConnectionDetails(
     const std::string& remote_jid,
-    const protocol::ValidatingAuthenticator::ResultCallback& result_callback) {
+    const ValidationResultCallback& result_callback) {
   DCHECK(host_context_->network_task_runner()->BelongsToCurrentThread());
 
   // First ensure the JID we received is valid.
@@ -505,24 +507,41 @@ void It2MeHost::ValidateConnectionDetails(
   }
 
   // Check the client domain policy.
-  if (!required_client_domain_.empty()) {
-    if (!base::EndsWith(client_username,
-                        std::string("@") + required_client_domain_,
-                        base::CompareCase::INSENSITIVE_ASCII)) {
+  if (!required_client_domain_list_.empty()) {
+    bool matched = false;
+    for (const auto& domain : required_client_domain_list_) {
+      if (base::EndsWith(client_username, std::string("@") + domain,
+                         base::CompareCase::INSENSITIVE_ASCII)) {
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
       LOG(ERROR) << "Rejecting incoming connection from " << remote_jid
-                 << ": Domain mismatch.";
+                 << ": Domain not allowed.";
       result_callback.Run(ValidationResult::ERROR_INVALID_ACCOUNT);
       DisconnectOnNetworkThread();
       return;
     }
   }
 
+  // If we receive valid connection details multiple times, then we don't know
+  // which remote user (if either) is valid so disconnect everyone.
+  if (state_ != kReceivedAccessCode) {
+    DCHECK_EQ(kConnecting, state_);
+    LOG(ERROR) << "Received too many connection requests.";
+    result_callback.Run(ValidationResult::ERROR_TOO_MANY_CONNECTIONS);
+    DisconnectOnNetworkThread();
+    return;
+  }
+
   HOST_LOG << "Client " << client_username << " connecting.";
+  connecting_jid_ = remote_jid;
   SetState(kConnecting, std::string());
 
   // Show a confirmation dialog to the user to allow them to confirm/reject it.
   confirmation_dialog_proxy_.reset(new It2MeConfirmationDialogProxy(
-      host_context_->ui_task_runner(), std::move(confirmation_dialog_)));
+      host_context_->ui_task_runner(), confirmation_dialog_factory_->Create()));
 
   confirmation_dialog_proxy_->Show(
       client_username, base::Bind(&It2MeHost::OnConfirmationResult,
@@ -530,10 +549,11 @@ void It2MeHost::ValidateConnectionDetails(
 }
 
 void It2MeHost::OnConfirmationResult(
-    const protocol::ValidatingAuthenticator::ResultCallback& result_callback,
+    const ValidationResultCallback& result_callback,
     It2MeConfirmationDialog::Result result) {
   DCHECK(host_context_->network_task_runner()->BelongsToCurrentThread());
 
+  connecting_jid_.clear();
   switch (result) {
     case It2MeConfirmationDialog::Result::OK:
       result_callback.Run(ValidationResult::SUCCESS);
@@ -552,18 +572,14 @@ It2MeHostFactory::~It2MeHostFactory() {}
 
 scoped_refptr<It2MeHost> It2MeHostFactory::CreateIt2MeHost(
     std::unique_ptr<ChromotingHostContext> context,
-    policy::PolicyService* policy_service,
     base::WeakPtr<It2MeHost::Observer> observer,
     std::unique_ptr<SignalStrategy> signal_strategy,
     const std::string& username,
     const std::string& directory_bot_jid) {
   DCHECK(context->ui_task_runner()->BelongsToCurrentThread());
-
-  std::unique_ptr<PolicyWatcher> policy_watcher =
-      PolicyWatcher::Create(policy_service, context->file_task_runner());
-  return new It2MeHost(std::move(context), std::move(policy_watcher),
-                       It2MeConfirmationDialog::Create(), observer,
-                       std::move(signal_strategy), username, directory_bot_jid);
+  return new It2MeHost(
+      std::move(context), base::MakeUnique<It2MeConfirmationDialogFactory>(),
+      observer, std::move(signal_strategy), username, directory_bot_jid);
 }
 
 }  // namespace remoting

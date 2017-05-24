@@ -4,6 +4,7 @@
 
 import("//build/config/mac/mac_sdk.gni")
 import("//testing/test.gni")
+import("//third_party/protobuf/proto_library.gni")
 
 component("sandbox") {
   sources = [
@@ -27,19 +28,39 @@ component("sandbox") {
 
   defines = [ "SANDBOX_IMPLEMENTATION" ]
   libs = [ "bsm" ]
-
+  public_deps = [
+    "//sandbox:sandbox_export",
+  ]
   deps = [
     "//base",
   ]
 }
 
+proto_library("seatbelt_proto") {
+  visibility = [ ":*" ]
+  sources = [
+    "seatbelt.proto",
+  ]
+}
+
 component("seatbelt") {
   sources = [
+    "sandbox_compiler.cc",
+    "sandbox_compiler.h",
     "seatbelt.cc",
     "seatbelt.h",
+    "seatbelt_exec.cc",
+    "seatbelt_exec.h",
     "seatbelt_export.h",
   ]
   libs = [ "sandbox" ]
+  deps = [
+    ":seatbelt_proto",
+  ]
+  public_deps = [
+    "//base",
+    "//third_party/protobuf:protobuf_lite",
+  ]
   defines = [ "SEATBELT_IMPLEMENTATION" ]
 }
 
@@ -47,6 +68,9 @@ test("sandbox_mac_unittests") {
   sources = [
     "bootstrap_sandbox_unittest.mm",
     "policy_unittest.cc",
+    "sandbox_mac_compiler_unittest.mm",
+    "sandbox_mac_compiler_v2_unittest.mm",
+    "sandbox_mac_seatbelt_exec_unittest.cc",
     "xpc_message_server_unittest.cc",
   ]
 
@@ -57,6 +81,8 @@ test("sandbox_mac_unittests") {
 
   deps = [
     ":sandbox",
+    ":seatbelt",
+    ":seatbelt_proto",
     "//base",
     "//base/test:run_all_unittests",
     "//testing/gtest",

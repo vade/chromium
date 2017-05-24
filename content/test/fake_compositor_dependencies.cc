@@ -24,10 +24,6 @@ bool FakeCompositorDependencies::IsGpuRasterizationForced() {
   return false;
 }
 
-bool FakeCompositorDependencies::IsGpuRasterizationEnabled() {
-  return false;
-}
-
 bool FakeCompositorDependencies::IsAsyncWorkerContextEnabled() {
   return false;
 }
@@ -84,15 +80,15 @@ cc::TaskGraphRunner* FakeCompositorDependencies::GetTaskGraphRunner() {
   return &task_graph_runner_;
 }
 
-bool FakeCompositorDependencies::AreImageDecodeTasksEnabled() {
-  return false;
-}
-
 bool FakeCompositorDependencies::IsThreadedAnimationEnabled() {
   return true;
 }
 
 bool FakeCompositorDependencies::IsScrollAnimatorEnabled() {
+  return false;
+}
+
+bool FakeCompositorDependencies::IsSurfaceSynchronizationEnabled() {
   return false;
 }
 

@@ -6,14 +6,13 @@
 #define DOMWindowPerformance_h
 
 #include "core/CoreExport.h"
-#include "core/frame/LocalDOMWindow.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Noncopyable.h"
+#include "platform/wtf/Noncopyable.h"
 
 namespace blink {
 
-class DOMWindow;
+class LocalDOMWindow;
 class Performance;
 
 class CORE_EXPORT DOMWindowPerformance final
@@ -23,18 +22,18 @@ class CORE_EXPORT DOMWindowPerformance final
   WTF_MAKE_NONCOPYABLE(DOMWindowPerformance);
 
  public:
-  static DOMWindowPerformance& from(LocalDOMWindow&);
-  static Performance* performance(DOMWindow&);
+  static DOMWindowPerformance& From(LocalDOMWindow&);
+  static Performance* performance(LocalDOMWindow&);
 
   DECLARE_TRACE();
 
  private:
   explicit DOMWindowPerformance(LocalDOMWindow&);
-  static const char* supplementName();
+  static const char* SupplementName();
 
   Performance* performance();
 
-  Member<Performance> m_performance;
+  Member<Performance> performance_;
 };
 
 }  // namespace blink

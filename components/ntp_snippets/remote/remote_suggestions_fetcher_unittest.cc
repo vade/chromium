@@ -6,16 +6,15 @@
 
 #include <deque>
 #include <map>
-#include <set>
 #include <utility>
 #include <vector>
 
 #include "base/json/json_reader.h"
 #include "base/memory/ptr_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/test/histogram_tester.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/default_clock.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "components/ntp_snippets/category.h"
@@ -23,14 +22,14 @@
 #include "components/ntp_snippets/ntp_snippets_constants.h"
 #include "components/ntp_snippets/remote/remote_suggestion.h"
 #include "components/ntp_snippets/remote/request_params.h"
+#include "components/ntp_snippets/remote/test_utils.h"
 #include "components/ntp_snippets/user_classifier.h"
 #include "components/prefs/testing_pref_service.h"
-#include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
 #include "components/signin/core/browser/fake_signin_manager.h"
-#include "components/signin/core/browser/test_signin_client.h"
 #include "components/variations/entropy_provider.h"
 #include "components/variations/variations_params_manager.h"
+#include "google_apis/gaia/fake_oauth2_token_service_delegate.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -44,22 +43,19 @@ using testing::_;
 using testing::AllOf;
 using testing::ElementsAre;
 using testing::Eq;
-using testing::Field;
 using testing::IsEmpty;
 using testing::Not;
 using testing::NotNull;
-using testing::Pointee;
-using testing::PrintToString;
-using testing::Return;
 using testing::StartsWith;
-using testing::WithArg;
 
 const char kAPIKey[] = "fakeAPIkey";
-const char kTestChromeReaderUrl[] =
-    "https://chromereader-pa.googleapis.com/v1/fetch?key=fakeAPIkey";
-const char kTestChromeContentSuggestionsUrl[] =
+const char kTestChromeContentSuggestionsSignedOutUrl[] =
     "https://chromecontentsuggestions-pa.googleapis.com/v1/suggestions/"
     "fetch?key=fakeAPIkey";
+const char kTestChromeContentSuggestionsSignedInUrl[] =
+    "https://chromecontentsuggestions-pa.googleapis.com/v1/suggestions/fetch";
+
+const char kTestEmail[] = "foo@bar.com";
 
 // Artificial time delay for JSON parsing.
 const int64_t kTestJsonParsingLatencyMs = 20;
@@ -80,6 +76,12 @@ MATCHER_P(HasCode, code, "") {
 
 MATCHER(IsSuccess, "") {
   return arg.IsSuccess();
+}
+
+MATCHER(IsEmptyCategoriesList, "is an empty list of categories") {
+  RemoteSuggestionsFetcher::OptionalFetchedCategories& fetched_categories =
+      *arg;
+  return fetched_categories && fetched_categories->empty();
 }
 
 MATCHER(IsEmptyArticleList, "is an empty list of articles") {
@@ -115,16 +117,8 @@ MATCHER_P(IsSingleArticle, url, "is a list with the single article %(url)s") {
 }
 
 MATCHER(IsCategoryInfoForArticles, "") {
-  if (!arg.has_more_action()) {
-    *result_listener << "missing expected has_more_action";
-    return false;
-  }
-  if (!arg.has_reload_action()) {
-    *result_listener << "missing expected has_reload_action";
-    return false;
-  }
-  if (arg.has_view_all_action()) {
-    *result_listener << "unexpected has_view_all_action";
+  if (arg.additional_action() != ContentSuggestionsAdditionalAction::FETCH) {
+    *result_listener << "missing expected FETCH action";
     return false;
   }
   if (!arg.show_if_empty()) {
@@ -264,8 +258,9 @@ void ParseJsonDelayed(const std::string& json,
                       const SuccessCallback& success_callback,
                       const ErrorCallback& error_callback) {
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::Bind(&ParseJson, json, std::move(success_callback),
-                            std::move(error_callback)),
+      FROM_HERE,
+      base::Bind(&ParseJson, json, std::move(success_callback),
+                 std::move(error_callback)),
       base::TimeDelta::FromMilliseconds(kTestJsonParsingLatencyMs));
 }
 
@@ -276,37 +271,55 @@ class RemoteSuggestionsFetcherTestBase : public testing::Test {
   explicit RemoteSuggestionsFetcherTestBase(const GURL& gurl)
       : default_variation_params_(
             {{"send_top_languages", "true"}, {"send_user_class", "true"}}),
-        params_manager_(ntp_snippets::kStudyName,
+        params_manager_(ntp_snippets::kArticleSuggestionsFeature.name,
                         default_variation_params_,
                         {ntp_snippets::kArticleSuggestionsFeature.name}),
         mock_task_runner_(new base::TestMockTimeTaskRunner()),
         mock_task_runner_handle_(mock_task_runner_),
-        signin_client_(base::MakeUnique<TestSigninClient>(nullptr)),
-        account_tracker_(base::MakeUnique<AccountTrackerService>()),
-        fake_signin_manager_(
-            base::MakeUnique<FakeSigninManagerBase>(signin_client_.get(),
-                                                    account_tracker_.get())),
-        fake_token_service_(base::MakeUnique<FakeProfileOAuth2TokenService>()),
-        pref_service_(base::MakeUnique<TestingPrefServiceSimple>()),
         test_url_(gurl) {
-    RequestThrottler::RegisterProfilePrefs(pref_service_->registry());
-    UserClassifier::RegisterProfilePrefs(pref_service_->registry());
-    user_classifier_ = base::MakeUnique<UserClassifier>(pref_service_.get());
+    UserClassifier::RegisterProfilePrefs(utils_.pref_service()->registry());
+    user_classifier_ = base::MakeUnique<UserClassifier>(
+        utils_.pref_service(), base::MakeUnique<base::DefaultClock>());
     // Increase initial time such that ticks are non-zero.
     mock_task_runner_->FastForwardBy(base::TimeDelta::FromMilliseconds(1234));
-    ResetSnippetsFetcher();
+    ResetFetcher();
   }
 
-  void ResetSnippetsFetcher() {
-    snippets_fetcher_ = base::MakeUnique<RemoteSuggestionsFetcher>(
-        fake_signin_manager_.get(), fake_token_service_.get(),
-        scoped_refptr<net::TestURLRequestContextGetter>(
-            new net::TestURLRequestContextGetter(mock_task_runner_.get())),
-        pref_service_.get(), nullptr, base::Bind(&ParseJsonDelayed), kAPIKey,
+  void ResetFetcher() { ResetFetcherWithAPIKey(kAPIKey); }
+
+  void ResetFetcherWithAPIKey(const std::string& api_key) {
+    scoped_refptr<net::TestURLRequestContextGetter> request_context_getter =
+        new net::TestURLRequestContextGetter(mock_task_runner_.get());
+
+    fake_token_service_ = base::MakeUnique<FakeProfileOAuth2TokenService>(
+        base::MakeUnique<FakeOAuth2TokenServiceDelegate>(
+            request_context_getter.get()));
+
+    fetcher_ = base::MakeUnique<RemoteSuggestionsFetcher>(
+        utils_.fake_signin_manager(), fake_token_service_.get(),
+        std::move(request_context_getter), utils_.pref_service(), nullptr,
+        base::Bind(&ParseJsonDelayed),
+        GetFetchEndpoint(version_info::Channel::STABLE), api_key,
         user_classifier_.get());
 
-    snippets_fetcher_->SetTickClockForTesting(
-        mock_task_runner_->GetMockTickClock());
+    fetcher_->SetClockForTesting(mock_task_runner_->GetMockClock());
+  }
+
+  void SignIn() { utils_.fake_signin_manager()->SignIn(kTestEmail); }
+
+  void IssueRefreshToken() {
+    fake_token_service_->GetDelegate()->UpdateCredentials(kTestEmail, "token");
+  }
+
+  void IssueOAuth2Token() {
+    fake_token_service_->IssueAllTokensForAccount(kTestEmail, "access_token",
+                                                  base::Time::Max());
+  }
+
+  void CancelOAuth2TokenRequests() {
+    fake_token_service_->IssueErrorForAllPendingRequestsForAccount(
+        kTestEmail, GoogleServiceAuthError(
+                        GoogleServiceAuthError::State::REQUEST_CANCELED));
   }
 
   RemoteSuggestionsFetcher::SnippetsAvailableCallback
@@ -315,7 +328,7 @@ class RemoteSuggestionsFetcherTestBase : public testing::Test {
                           base::Unretained(callback));
   }
 
-  RemoteSuggestionsFetcher& snippets_fetcher() { return *snippets_fetcher_; }
+  RemoteSuggestionsFetcher& fetcher() { return *fetcher_; }
   MockSnippetsAvailableCallback& mock_callback() { return mock_callback_; }
   void FastForwardUntilNoTasksRemain() {
     mock_task_runner_->FastForwardUntilNoTasksRemain();
@@ -345,7 +358,7 @@ class RemoteSuggestionsFetcherTestBase : public testing::Test {
 
     params_manager_.ClearAllVariationParams();
     params_manager_.SetVariationParamsWithFeatureAssociations(
-        ntp_snippets::kStudyName, params,
+        ntp_snippets::kArticleSuggestionsFeature.name, params,
         {ntp_snippets::kArticleSuggestionsFeature.name});
   }
 
@@ -357,24 +370,19 @@ class RemoteSuggestionsFetcherTestBase : public testing::Test {
                                                response_code, status);
   }
 
-  TestingPrefServiceSimple* pref_service() const { return pref_service_.get(); }
-
  protected:
   std::map<std::string, std::string> default_variation_params_;
 
  private:
+  test::RemoteSuggestionsTestUtils utils_;
   variations::testing::VariationParamsManager params_manager_;
   scoped_refptr<base::TestMockTimeTaskRunner> mock_task_runner_;
   base::ThreadTaskRunnerHandle mock_task_runner_handle_;
   FailingFakeURLFetcherFactory failing_url_fetcher_factory_;
   // Initialized lazily in SetFakeResponse().
   std::unique_ptr<net::FakeURLFetcherFactory> fake_url_fetcher_factory_;
-  std::unique_ptr<TestSigninClient> signin_client_;
-  std::unique_ptr<AccountTrackerService> account_tracker_;
-  std::unique_ptr<SigninManagerBase> fake_signin_manager_;
-  std::unique_ptr<OAuth2TokenService> fake_token_service_;
-  std::unique_ptr<RemoteSuggestionsFetcher> snippets_fetcher_;
-  std::unique_ptr<TestingPrefServiceSimple> pref_service_;
+  std::unique_ptr<FakeProfileOAuth2TokenService> fake_token_service_;
+  std::unique_ptr<RemoteSuggestionsFetcher> fetcher_;
   std::unique_ptr<UserClassifier> user_classifier_;
   MockSnippetsAvailableCallback mock_callback_;
   const GURL test_url_;
@@ -383,27 +391,28 @@ class RemoteSuggestionsFetcherTestBase : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(RemoteSuggestionsFetcherTestBase);
 };
 
-class ChromeReaderSnippetsFetcherTest
+class RemoteSuggestionsSignedOutFetcherTest
     : public RemoteSuggestionsFetcherTestBase {
  public:
-  ChromeReaderSnippetsFetcherTest()
-      : RemoteSuggestionsFetcherTestBase(GURL(kTestChromeReaderUrl)) {
-    default_variation_params_["content_suggestions_backend"] =
-        kChromeReaderServer;
-    SetVariationParam("content_suggestions_backend", kChromeReaderServer);
-    ResetSnippetsFetcher();
-  }
-};
-
-class NTPSnippetsContentSuggestionsFetcherTest
-    : public RemoteSuggestionsFetcherTestBase {
- public:
-  NTPSnippetsContentSuggestionsFetcherTest()
+  RemoteSuggestionsSignedOutFetcherTest()
       : RemoteSuggestionsFetcherTestBase(
-            GURL(kTestChromeContentSuggestionsUrl)) {}
+            GURL(kTestChromeContentSuggestionsSignedOutUrl)) {}
 };
 
-TEST_F(ChromeReaderSnippetsFetcherTest, ShouldNotFetchOnCreation) {
+// TODO(jkrcal): Investigate whether the "authentication in progress" case can
+// ever happen (see discussion on https://codereview.chromium.org/2582573002),
+// and if so, add unit-tests for it. This will require more changes (instead of
+// FakeSigninManagerBase use FakeSigninManager which does not exist on
+// ChromeOS). crbug.com/688310
+class RemoteSuggestionsSignedInFetcherTest
+    : public RemoteSuggestionsFetcherTestBase {
+ public:
+  RemoteSuggestionsSignedInFetcherTest()
+      : RemoteSuggestionsFetcherTestBase(
+            GURL(kTestChromeContentSuggestionsSignedInUrl)) {}
+};
+
+TEST_F(RemoteSuggestionsSignedOutFetcherTest, ShouldNotFetchOnCreation) {
   // The lack of registered baked in responses would cause any fetch to fail.
   FastForwardUntilNoTasksRemain();
   EXPECT_THAT(histogram_tester().GetAllSamples(
@@ -411,41 +420,10 @@ TEST_F(ChromeReaderSnippetsFetcherTest, ShouldNotFetchOnCreation) {
               IsEmpty());
   EXPECT_THAT(histogram_tester().GetAllSamples("NewTabPage.Snippets.FetchTime"),
               IsEmpty());
-  EXPECT_THAT(snippets_fetcher().last_status(), IsEmpty());
+  EXPECT_THAT(fetcher().last_status(), IsEmpty());
 }
 
-TEST_F(ChromeReaderSnippetsFetcherTest, ShouldFetchSuccessfully) {
-  const std::string kJsonStr =
-      "{\"recos\": [{"
-      "  \"contentInfo\": {"
-      "    \"url\" : \"http://localhost/foobar\","
-      "    \"sourceCorpusInfo\" : [{"
-      "      \"ampUrl\" : \"http://localhost/amp\","
-      "      \"corpusId\" : \"http://localhost/foobar\","
-      "      \"publisherData\": { \"sourceName\" : \"Foo News\" }"
-      "    }]"
-      "  }"
-      "}]}";
-  SetFakeResponse(/*response_data=*/kJsonStr, net::HTTP_OK,
-                  net::URLRequestStatus::SUCCESS);
-  EXPECT_CALL(mock_callback(),
-              Run(IsSuccess(),
-                  AllOf(IsSingleArticle("http://localhost/foobar"),
-                        FirstCategoryHasInfo(IsCategoryInfoForArticles()))));
-  snippets_fetcher().FetchSnippets(
-      test_params(), ToSnippetsAvailableCallback(&mock_callback()));
-  FastForwardUntilNoTasksRemain();
-  EXPECT_THAT(snippets_fetcher().last_status(), Eq("OK"));
-  EXPECT_THAT(snippets_fetcher().last_json(), Eq(kJsonStr));
-  EXPECT_THAT(histogram_tester().GetAllSamples(
-                  "NewTabPage.Snippets.FetchHttpResponseOrErrorCode"),
-              ElementsAre(base::Bucket(/*min=*/200, /*count=*/1)));
-  EXPECT_THAT(histogram_tester().GetAllSamples("NewTabPage.Snippets.FetchTime"),
-              ElementsAre(base::Bucket(/*min=*/kTestJsonParsingLatencyMs,
-                                       /*count=*/1)));
-}
-
-TEST_F(NTPSnippetsContentSuggestionsFetcherTest, ShouldFetchSuccessfully) {
+TEST_F(RemoteSuggestionsSignedOutFetcherTest, ShouldFetchSuccessfully) {
   const std::string kJsonStr =
       "{\"categories\" : [{"
       "  \"id\": 1,"
@@ -469,11 +447,11 @@ TEST_F(NTPSnippetsContentSuggestionsFetcherTest, ShouldFetchSuccessfully) {
               Run(IsSuccess(),
                   AllOf(IsSingleArticle("http://localhost/foobar"),
                         FirstCategoryHasInfo(IsCategoryInfoForArticles()))));
-  snippets_fetcher().FetchSnippets(
-      test_params(), ToSnippetsAvailableCallback(&mock_callback()));
+  fetcher().FetchSnippets(test_params(),
+                          ToSnippetsAvailableCallback(&mock_callback()));
   FastForwardUntilNoTasksRemain();
-  EXPECT_THAT(snippets_fetcher().last_status(), Eq("OK"));
-  EXPECT_THAT(snippets_fetcher().last_json(), Eq(kJsonStr));
+  EXPECT_THAT(fetcher().last_status(), Eq("OK"));
+  EXPECT_THAT(fetcher().last_json(), Eq(kJsonStr));
   EXPECT_THAT(histogram_tester().GetAllSamples(
                   "NewTabPage.Snippets.FetchHttpResponseOrErrorCode"),
               ElementsAre(base::Bucket(/*min=*/200, /*count=*/1)));
@@ -482,7 +460,98 @@ TEST_F(NTPSnippetsContentSuggestionsFetcherTest, ShouldFetchSuccessfully) {
                                        /*count=*/1)));
 }
 
-TEST_F(NTPSnippetsContentSuggestionsFetcherTest, EmptyCategoryIsOK) {
+TEST_F(RemoteSuggestionsSignedInFetcherTest, ShouldFetchSuccessfully) {
+  SignIn();
+  IssueRefreshToken();
+
+  const std::string kJsonStr =
+      "{\"categories\" : [{"
+      "  \"id\": 1,"
+      "  \"localizedTitle\": \"Articles for You\","
+      "  \"suggestions\" : [{"
+      "    \"ids\" : [\"http://localhost/foobar\"],"
+      "    \"title\" : \"Foo Barred from Baz\","
+      "    \"snippet\" : \"...\","
+      "    \"fullPageUrl\" : \"http://localhost/foobar\","
+      "    \"creationTime\" : \"2016-06-30T11:01:37.000Z\","
+      "    \"expirationTime\" : \"2016-07-01T11:01:37.000Z\","
+      "    \"attribution\" : \"Foo News\","
+      "    \"imageUrl\" : \"http://localhost/foobar.jpg\","
+      "    \"ampUrl\" : \"http://localhost/amp\","
+      "    \"faviconUrl\" : \"http://localhost/favicon.ico\" "
+      "  }]"
+      "}]}";
+  SetFakeResponse(/*response_data=*/kJsonStr, net::HTTP_OK,
+                  net::URLRequestStatus::SUCCESS);
+  EXPECT_CALL(mock_callback(),
+              Run(IsSuccess(),
+                  AllOf(IsSingleArticle("http://localhost/foobar"),
+                        FirstCategoryHasInfo(IsCategoryInfoForArticles()))));
+
+  fetcher().FetchSnippets(test_params(),
+                          ToSnippetsAvailableCallback(&mock_callback()));
+
+  IssueOAuth2Token();
+  // Wait for the fake response.
+  FastForwardUntilNoTasksRemain();
+
+  EXPECT_THAT(fetcher().last_status(), Eq("OK"));
+  EXPECT_THAT(fetcher().last_json(), Eq(kJsonStr));
+  EXPECT_THAT(histogram_tester().GetAllSamples(
+                  "NewTabPage.Snippets.FetchHttpResponseOrErrorCode"),
+              ElementsAre(base::Bucket(/*min=*/200, /*count=*/1)));
+  EXPECT_THAT(histogram_tester().GetAllSamples("NewTabPage.Snippets.FetchTime"),
+              ElementsAre(base::Bucket(/*min=*/kTestJsonParsingLatencyMs,
+                                       /*count=*/1)));
+}
+
+TEST_F(RemoteSuggestionsSignedInFetcherTest, ShouldRetryWhenOAuthCancelled) {
+  SignIn();
+  IssueRefreshToken();
+
+  const std::string kJsonStr =
+      "{\"categories\" : [{"
+      "  \"id\": 1,"
+      "  \"localizedTitle\": \"Articles for You\","
+      "  \"suggestions\" : [{"
+      "    \"ids\" : [\"http://localhost/foobar\"],"
+      "    \"title\" : \"Foo Barred from Baz\","
+      "    \"snippet\" : \"...\","
+      "    \"fullPageUrl\" : \"http://localhost/foobar\","
+      "    \"creationTime\" : \"2016-06-30T11:01:37.000Z\","
+      "    \"expirationTime\" : \"2016-07-01T11:01:37.000Z\","
+      "    \"attribution\" : \"Foo News\","
+      "    \"imageUrl\" : \"http://localhost/foobar.jpg\","
+      "    \"ampUrl\" : \"http://localhost/amp\","
+      "    \"faviconUrl\" : \"http://localhost/favicon.ico\" "
+      "  }]"
+      "}]}";
+  SetFakeResponse(/*response_data=*/kJsonStr, net::HTTP_OK,
+                  net::URLRequestStatus::SUCCESS);
+  EXPECT_CALL(mock_callback(),
+              Run(IsSuccess(),
+                  AllOf(IsSingleArticle("http://localhost/foobar"),
+                        FirstCategoryHasInfo(IsCategoryInfoForArticles()))));
+
+  fetcher().FetchSnippets(test_params(),
+                          ToSnippetsAvailableCallback(&mock_callback()));
+
+  CancelOAuth2TokenRequests();
+  IssueOAuth2Token();
+  // Wait for the fake response.
+  FastForwardUntilNoTasksRemain();
+
+  EXPECT_THAT(fetcher().last_status(), Eq("OK"));
+  EXPECT_THAT(fetcher().last_json(), Eq(kJsonStr));
+  EXPECT_THAT(histogram_tester().GetAllSamples(
+                  "NewTabPage.Snippets.FetchHttpResponseOrErrorCode"),
+              ElementsAre(base::Bucket(/*min=*/200, /*count=*/1)));
+  EXPECT_THAT(histogram_tester().GetAllSamples("NewTabPage.Snippets.FetchTime"),
+              ElementsAre(base::Bucket(/*min=*/kTestJsonParsingLatencyMs,
+                                       /*count=*/1)));
+}
+
+TEST_F(RemoteSuggestionsSignedOutFetcherTest, EmptyCategoryIsOK) {
   const std::string kJsonStr =
       "{\"categories\" : [{"
       "  \"id\": 1,"
@@ -491,11 +560,11 @@ TEST_F(NTPSnippetsContentSuggestionsFetcherTest, EmptyCategoryIsOK) {
   SetFakeResponse(/*response_data=*/kJsonStr, net::HTTP_OK,
                   net::URLRequestStatus::SUCCESS);
   EXPECT_CALL(mock_callback(), Run(IsSuccess(), IsEmptyArticleList()));
-  snippets_fetcher().FetchSnippets(
-      test_params(), ToSnippetsAvailableCallback(&mock_callback()));
+  fetcher().FetchSnippets(test_params(),
+                          ToSnippetsAvailableCallback(&mock_callback()));
   FastForwardUntilNoTasksRemain();
-  EXPECT_THAT(snippets_fetcher().last_status(), Eq("OK"));
-  EXPECT_THAT(snippets_fetcher().last_json(), Eq(kJsonStr));
+  EXPECT_THAT(fetcher().last_status(), Eq("OK"));
+  EXPECT_THAT(fetcher().last_json(), Eq(kJsonStr));
   EXPECT_THAT(histogram_tester().GetAllSamples(
                   "NewTabPage.Snippets.FetchHttpResponseOrErrorCode"),
               ElementsAre(base::Bucket(/*min=*/200, /*count=*/1)));
@@ -504,7 +573,7 @@ TEST_F(NTPSnippetsContentSuggestionsFetcherTest, EmptyCategoryIsOK) {
                                        /*count=*/1)));
 }
 
-TEST_F(NTPSnippetsContentSuggestionsFetcherTest, ServerCategories) {
+TEST_F(RemoteSuggestionsSignedOutFetcherTest, ServerCategories) {
   const std::string kJsonStr =
       "{\"categories\" : [{"
       "  \"id\": 1,"
@@ -543,8 +612,8 @@ TEST_F(NTPSnippetsContentSuggestionsFetcherTest, ServerCategories) {
   RemoteSuggestionsFetcher::OptionalFetchedCategories fetched_categories;
   EXPECT_CALL(mock_callback(), Run(IsSuccess(), _))
       .WillOnce(MoveArgument1PointeeTo(&fetched_categories));
-  snippets_fetcher().FetchSnippets(
-      test_params(), ToSnippetsAvailableCallback(&mock_callback()));
+  fetcher().FetchSnippets(test_params(),
+                          ToSnippetsAvailableCallback(&mock_callback()));
   FastForwardUntilNoTasksRemain();
 
   ASSERT_TRUE(fetched_categories);
@@ -558,17 +627,16 @@ TEST_F(NTPSnippetsContentSuggestionsFetcherTest, ServerCategories) {
     } else if (category.category == Category::FromRemoteCategory(2)) {
       ASSERT_THAT(articles.size(), Eq(1u));
       EXPECT_THAT(articles[0]->url().spec(), Eq("http://localhost/foo2"));
-      EXPECT_THAT(category.info.has_more_action(), Eq(true));
-      EXPECT_THAT(category.info.has_reload_action(), Eq(true));
-      EXPECT_THAT(category.info.has_view_all_action(), Eq(false));
+      EXPECT_THAT(category.info.additional_action(),
+                  Eq(ContentSuggestionsAdditionalAction::FETCH));
       EXPECT_THAT(category.info.show_if_empty(), Eq(false));
     } else {
       FAIL() << "unknown category ID " << category.category.id();
     }
   }
 
-  EXPECT_THAT(snippets_fetcher().last_status(), Eq("OK"));
-  EXPECT_THAT(snippets_fetcher().last_json(), Eq(kJsonStr));
+  EXPECT_THAT(fetcher().last_status(), Eq("OK"));
+  EXPECT_THAT(fetcher().last_json(), Eq(kJsonStr));
   EXPECT_THAT(histogram_tester().GetAllSamples(
                   "NewTabPage.Snippets.FetchHttpResponseOrErrorCode"),
               ElementsAre(base::Bucket(/*min=*/200, /*count=*/1)));
@@ -577,7 +645,7 @@ TEST_F(NTPSnippetsContentSuggestionsFetcherTest, ServerCategories) {
                                        /*count=*/1)));
 }
 
-TEST_F(NTPSnippetsContentSuggestionsFetcherTest,
+TEST_F(RemoteSuggestionsSignedOutFetcherTest,
        SupportMissingAllowFetchingMoreResultsOption) {
   // This tests makes sure we handle the missing option although it's required
   // by the interface. It's just that the Service doesn't follow that
@@ -605,18 +673,19 @@ TEST_F(NTPSnippetsContentSuggestionsFetcherTest,
   RemoteSuggestionsFetcher::OptionalFetchedCategories fetched_categories;
   EXPECT_CALL(mock_callback(), Run(IsSuccess(), _))
       .WillOnce(MoveArgument1PointeeTo(&fetched_categories));
-  snippets_fetcher().FetchSnippets(
-      test_params(), ToSnippetsAvailableCallback(&mock_callback()));
+  fetcher().FetchSnippets(test_params(),
+                          ToSnippetsAvailableCallback(&mock_callback()));
   FastForwardUntilNoTasksRemain();
 
   ASSERT_TRUE(fetched_categories);
   ASSERT_THAT(fetched_categories->size(), Eq(1u));
-  EXPECT_THAT(fetched_categories->front().info.has_more_action(), Eq(false));
+  EXPECT_THAT(fetched_categories->front().info.additional_action(),
+              Eq(ContentSuggestionsAdditionalAction::NONE));
   EXPECT_THAT(fetched_categories->front().info.title(),
               Eq(base::UTF8ToUTF16("Articles for Me")));
 }
 
-TEST_F(NTPSnippetsContentSuggestionsFetcherTest, ExclusiveCategoryOnly) {
+TEST_F(RemoteSuggestionsSignedOutFetcherTest, ExclusiveCategoryOnly) {
   const std::string kJsonStr =
       "{\"categories\" : [{"
       "  \"id\": 1,"
@@ -674,8 +743,8 @@ TEST_F(NTPSnippetsContentSuggestionsFetcherTest, ExclusiveCategoryOnly) {
   params.exclusive_category =
       base::Optional<Category>(Category::FromRemoteCategory(2));
 
-  snippets_fetcher().FetchSnippets(
-      params, ToSnippetsAvailableCallback(&mock_callback()));
+  fetcher().FetchSnippets(params,
+                          ToSnippetsAvailableCallback(&mock_callback()));
   FastForwardUntilNoTasksRemain();
 
   ASSERT_TRUE(fetched_categories);
@@ -687,36 +756,35 @@ TEST_F(NTPSnippetsContentSuggestionsFetcherTest, ExclusiveCategoryOnly) {
               Eq("http://localhost/foo2"));
 }
 
-// TODO(fhorschig): Check for behavioral changes instead of state.
-TEST_F(ChromeReaderSnippetsFetcherTest, PersonalizesDependingOnVariations) {
-  // Default setting should be both personalization options.
-  EXPECT_THAT(snippets_fetcher().personalization(), Eq(Personalization::kBoth));
+TEST_F(RemoteSuggestionsSignedOutFetcherTest, ShouldNotFetchWithoutApiKey) {
+  ResetFetcherWithAPIKey(std::string());
 
-  SetVariationParam("fetching_personalization", "personal");
-  ResetSnippetsFetcher();
-  EXPECT_THAT(snippets_fetcher().personalization(),
-              Eq(Personalization::kPersonal));
+  EXPECT_CALL(mock_callback(), Run(HasCode(StatusCode::PERMANENT_ERROR),
+                                   /*snippets=*/Not(HasValue())))
+      .Times(1);
+  fetcher().FetchSnippets(test_params(),
+                          ToSnippetsAvailableCallback(&mock_callback()));
+  FastForwardUntilNoTasksRemain();
 
-  SetVariationParam("fetching_personalization", "non_personal");
-  ResetSnippetsFetcher();
-  EXPECT_THAT(snippets_fetcher().personalization(),
-              Eq(Personalization::kNonPersonal));
-
-  SetVariationParam("fetching_personalization", "both");
-  ResetSnippetsFetcher();
-  EXPECT_THAT(snippets_fetcher().personalization(), Eq(Personalization::kBoth));
+  EXPECT_THAT(fetcher().last_status(), Eq("No API key available."));
+  EXPECT_THAT(histogram_tester().GetAllSamples(
+                  "NewTabPage.Snippets.FetchHttpResponseOrErrorCode"),
+              IsEmpty());
+  EXPECT_THAT(histogram_tester().GetAllSamples("NewTabPage.Snippets.FetchTime"),
+              IsEmpty());
 }
 
-TEST_F(ChromeReaderSnippetsFetcherTest, ShouldFetchSuccessfullyEmptyList) {
-  const std::string kJsonStr = "{\"recos\": []}";
+TEST_F(RemoteSuggestionsSignedOutFetcherTest,
+       ShouldFetchSuccessfullyEmptyList) {
+  const std::string kJsonStr = "{\"categories\": []}";
   SetFakeResponse(/*response_data=*/kJsonStr, net::HTTP_OK,
                   net::URLRequestStatus::SUCCESS);
-  EXPECT_CALL(mock_callback(), Run(IsSuccess(), IsEmptyArticleList()));
-  snippets_fetcher().FetchSnippets(
-      test_params(), ToSnippetsAvailableCallback(&mock_callback()));
+  EXPECT_CALL(mock_callback(), Run(IsSuccess(), IsEmptyCategoriesList()));
+  fetcher().FetchSnippets(test_params(),
+                          ToSnippetsAvailableCallback(&mock_callback()));
   FastForwardUntilNoTasksRemain();
-  EXPECT_THAT(snippets_fetcher().last_status(), Eq("OK"));
-  EXPECT_THAT(snippets_fetcher().last_json(), Eq(kJsonStr));
+  EXPECT_THAT(fetcher().last_status(), Eq("OK"));
+  EXPECT_THAT(fetcher().last_json(), Eq(kJsonStr));
   EXPECT_THAT(
       histogram_tester().GetAllSamples("NewTabPage.Snippets.FetchResult"),
       ElementsAre(base::Bucket(/*min=*/0, /*count=*/1)));
@@ -725,20 +793,20 @@ TEST_F(ChromeReaderSnippetsFetcherTest, ShouldFetchSuccessfullyEmptyList) {
               ElementsAre(base::Bucket(/*min=*/200, /*count=*/1)));
 }
 
-TEST_F(ChromeReaderSnippetsFetcherTest, RetryOnInteractiveRequests) {
+TEST_F(RemoteSuggestionsSignedOutFetcherTest, RetryOnInteractiveRequests) {
   DelegateCallingTestURLFetcherFactory fetcher_factory;
   RequestParams params = test_params();
   params.interactive_request = true;
 
-  snippets_fetcher().FetchSnippets(
-      params, ToSnippetsAvailableCallback(&mock_callback()));
+  fetcher().FetchSnippets(params,
+                          ToSnippetsAvailableCallback(&mock_callback()));
 
   net::TestURLFetcher* fetcher = fetcher_factory.GetLastCreatedFetcher();
   ASSERT_THAT(fetcher, NotNull());
   EXPECT_THAT(fetcher->GetMaxRetriesOn5xx(), Eq(2));
 }
 
-TEST_F(ChromeReaderSnippetsFetcherTest,
+TEST_F(RemoteSuggestionsSignedOutFetcherTest,
        RetriesConfigurableOnNonInteractiveRequests) {
   struct ExpectationForVariationParam {
     std::string param_value;
@@ -758,8 +826,8 @@ TEST_F(ChromeReaderSnippetsFetcherTest,
     DelegateCallingTestURLFetcherFactory fetcher_factory;
     SetVariationParam("background_5xx_retries_count", retry_config.param_value);
 
-    snippets_fetcher().FetchSnippets(
-        params, ToSnippetsAvailableCallback(&mock_callback()));
+    fetcher().FetchSnippets(params,
+                            ToSnippetsAvailableCallback(&mock_callback()));
 
     net::TestURLFetcher* fetcher = fetcher_factory.GetLastCreatedFetcher();
     ASSERT_THAT(fetcher, NotNull());
@@ -768,18 +836,17 @@ TEST_F(ChromeReaderSnippetsFetcherTest,
   }
 }
 
-TEST_F(ChromeReaderSnippetsFetcherTest, ShouldReportUrlStatusError) {
+TEST_F(RemoteSuggestionsSignedOutFetcherTest, ShouldReportUrlStatusError) {
   SetFakeResponse(/*response_data=*/std::string(), net::HTTP_NOT_FOUND,
                   net::URLRequestStatus::FAILED);
   EXPECT_CALL(mock_callback(), Run(HasCode(StatusCode::TEMPORARY_ERROR),
                                    /*snippets=*/Not(HasValue())))
       .Times(1);
-  snippets_fetcher().FetchSnippets(
-      test_params(), ToSnippetsAvailableCallback(&mock_callback()));
+  fetcher().FetchSnippets(test_params(),
+                          ToSnippetsAvailableCallback(&mock_callback()));
   FastForwardUntilNoTasksRemain();
-  EXPECT_THAT(snippets_fetcher().last_status(),
-              Eq("URLRequestStatus error -2"));
-  EXPECT_THAT(snippets_fetcher().last_json(), IsEmpty());
+  EXPECT_THAT(fetcher().last_status(), Eq("URLRequestStatus error -2"));
+  EXPECT_THAT(fetcher().last_json(), IsEmpty());
   EXPECT_THAT(
       histogram_tester().GetAllSamples("NewTabPage.Snippets.FetchResult"),
       ElementsAre(base::Bucket(/*min=*/2, /*count=*/1)));
@@ -790,16 +857,16 @@ TEST_F(ChromeReaderSnippetsFetcherTest, ShouldReportUrlStatusError) {
               Not(IsEmpty()));
 }
 
-TEST_F(ChromeReaderSnippetsFetcherTest, ShouldReportHttpError) {
+TEST_F(RemoteSuggestionsSignedOutFetcherTest, ShouldReportHttpError) {
   SetFakeResponse(/*response_data=*/std::string(), net::HTTP_NOT_FOUND,
                   net::URLRequestStatus::SUCCESS);
   EXPECT_CALL(mock_callback(), Run(HasCode(StatusCode::TEMPORARY_ERROR),
                                    /*snippets=*/Not(HasValue())))
       .Times(1);
-  snippets_fetcher().FetchSnippets(
-      test_params(), ToSnippetsAvailableCallback(&mock_callback()));
+  fetcher().FetchSnippets(test_params(),
+                          ToSnippetsAvailableCallback(&mock_callback()));
   FastForwardUntilNoTasksRemain();
-  EXPECT_THAT(snippets_fetcher().last_json(), IsEmpty());
+  EXPECT_THAT(fetcher().last_json(), IsEmpty());
   EXPECT_THAT(
       histogram_tester().GetAllSamples("NewTabPage.Snippets.FetchResult"),
       ElementsAre(base::Bucket(/*min=*/3, /*count=*/1)));
@@ -810,19 +877,19 @@ TEST_F(ChromeReaderSnippetsFetcherTest, ShouldReportHttpError) {
               Not(IsEmpty()));
 }
 
-TEST_F(ChromeReaderSnippetsFetcherTest, ShouldReportJsonError) {
+TEST_F(RemoteSuggestionsSignedOutFetcherTest, ShouldReportJsonError) {
   const std::string kInvalidJsonStr = "{ \"recos\": []";
   SetFakeResponse(/*response_data=*/kInvalidJsonStr, net::HTTP_OK,
                   net::URLRequestStatus::SUCCESS);
   EXPECT_CALL(mock_callback(), Run(HasCode(StatusCode::TEMPORARY_ERROR),
                                    /*snippets=*/Not(HasValue())))
       .Times(1);
-  snippets_fetcher().FetchSnippets(
-      test_params(), ToSnippetsAvailableCallback(&mock_callback()));
+  fetcher().FetchSnippets(test_params(),
+                          ToSnippetsAvailableCallback(&mock_callback()));
   FastForwardUntilNoTasksRemain();
-  EXPECT_THAT(snippets_fetcher().last_status(),
+  EXPECT_THAT(fetcher().last_status(),
               StartsWith("Received invalid JSON (error "));
-  EXPECT_THAT(snippets_fetcher().last_json(), Eq(kInvalidJsonStr));
+  EXPECT_THAT(fetcher().last_json(), Eq(kInvalidJsonStr));
   EXPECT_THAT(
       histogram_tester().GetAllSamples("NewTabPage.Snippets.FetchResult"),
       ElementsAre(base::Bucket(/*min=*/4, /*count=*/1)));
@@ -834,16 +901,17 @@ TEST_F(ChromeReaderSnippetsFetcherTest, ShouldReportJsonError) {
                                        /*count=*/1)));
 }
 
-TEST_F(ChromeReaderSnippetsFetcherTest, ShouldReportJsonErrorForEmptyResponse) {
+TEST_F(RemoteSuggestionsSignedOutFetcherTest,
+       ShouldReportJsonErrorForEmptyResponse) {
   SetFakeResponse(/*response_data=*/std::string(), net::HTTP_OK,
                   net::URLRequestStatus::SUCCESS);
   EXPECT_CALL(mock_callback(), Run(HasCode(StatusCode::TEMPORARY_ERROR),
                                    /*snippets=*/Not(HasValue())))
       .Times(1);
-  snippets_fetcher().FetchSnippets(
-      test_params(), ToSnippetsAvailableCallback(&mock_callback()));
+  fetcher().FetchSnippets(test_params(),
+                          ToSnippetsAvailableCallback(&mock_callback()));
   FastForwardUntilNoTasksRemain();
-  EXPECT_THAT(snippets_fetcher().last_json(), std::string());
+  EXPECT_THAT(fetcher().last_json(), std::string());
   EXPECT_THAT(
       histogram_tester().GetAllSamples("NewTabPage.Snippets.FetchResult"),
       ElementsAre(base::Bucket(/*min=*/4, /*count=*/1)));
@@ -852,7 +920,7 @@ TEST_F(ChromeReaderSnippetsFetcherTest, ShouldReportJsonErrorForEmptyResponse) {
               ElementsAre(base::Bucket(/*min=*/200, /*count=*/1)));
 }
 
-TEST_F(ChromeReaderSnippetsFetcherTest, ShouldReportInvalidListError) {
+TEST_F(RemoteSuggestionsSignedOutFetcherTest, ShouldReportInvalidListError) {
   const std::string kJsonStr =
       "{\"recos\": [{ \"contentInfo\": { \"foo\" : \"bar\" }}]}";
   SetFakeResponse(/*response_data=*/kJsonStr, net::HTTP_OK,
@@ -860,10 +928,10 @@ TEST_F(ChromeReaderSnippetsFetcherTest, ShouldReportInvalidListError) {
   EXPECT_CALL(mock_callback(), Run(HasCode(StatusCode::TEMPORARY_ERROR),
                                    /*snippets=*/Not(HasValue())))
       .Times(1);
-  snippets_fetcher().FetchSnippets(
-      test_params(), ToSnippetsAvailableCallback(&mock_callback()));
+  fetcher().FetchSnippets(test_params(),
+                          ToSnippetsAvailableCallback(&mock_callback()));
   FastForwardUntilNoTasksRemain();
-  EXPECT_THAT(snippets_fetcher().last_json(), Eq(kJsonStr));
+  EXPECT_THAT(fetcher().last_json(), Eq(kJsonStr));
   EXPECT_THAT(
       histogram_tester().GetAllSamples("NewTabPage.Snippets.FetchResult"),
       ElementsAre(base::Bucket(/*min=*/5, /*count=*/1)));
@@ -876,34 +944,35 @@ TEST_F(ChromeReaderSnippetsFetcherTest, ShouldReportInvalidListError) {
 
 // This test actually verifies that the test setup itself is sane, to prevent
 // hard-to-reproduce test failures.
-TEST_F(ChromeReaderSnippetsFetcherTest,
+TEST_F(RemoteSuggestionsSignedOutFetcherTest,
        ShouldReportHttpErrorForMissingBakedResponse) {
   InitFakeURLFetcherFactory();
   EXPECT_CALL(mock_callback(), Run(HasCode(StatusCode::TEMPORARY_ERROR),
                                    /*snippets=*/Not(HasValue())))
       .Times(1);
-  snippets_fetcher().FetchSnippets(
-      test_params(), ToSnippetsAvailableCallback(&mock_callback()));
+  fetcher().FetchSnippets(test_params(),
+                          ToSnippetsAvailableCallback(&mock_callback()));
   FastForwardUntilNoTasksRemain();
 }
 
-TEST_F(ChromeReaderSnippetsFetcherTest, ShouldProcessConcurrentFetches) {
-  const std::string kJsonStr = "{ \"recos\": [] }";
+TEST_F(RemoteSuggestionsSignedOutFetcherTest, ShouldProcessConcurrentFetches) {
+  const std::string kJsonStr = "{ \"categories\": [] }";
   SetFakeResponse(/*response_data=*/kJsonStr, net::HTTP_OK,
                   net::URLRequestStatus::SUCCESS);
-  EXPECT_CALL(mock_callback(), Run(IsSuccess(), IsEmptyArticleList())).Times(5);
-  snippets_fetcher().FetchSnippets(
-      test_params(), ToSnippetsAvailableCallback(&mock_callback()));
+  EXPECT_CALL(mock_callback(), Run(IsSuccess(), IsEmptyCategoriesList()))
+      .Times(5);
+  fetcher().FetchSnippets(test_params(),
+                          ToSnippetsAvailableCallback(&mock_callback()));
   // More calls to FetchSnippets() do not interrupt the previous.
   // Callback is expected to be called once each time.
-  snippets_fetcher().FetchSnippets(
-      test_params(), ToSnippetsAvailableCallback(&mock_callback()));
-  snippets_fetcher().FetchSnippets(
-      test_params(), ToSnippetsAvailableCallback(&mock_callback()));
-  snippets_fetcher().FetchSnippets(
-      test_params(), ToSnippetsAvailableCallback(&mock_callback()));
-  snippets_fetcher().FetchSnippets(
-      test_params(), ToSnippetsAvailableCallback(&mock_callback()));
+  fetcher().FetchSnippets(test_params(),
+                          ToSnippetsAvailableCallback(&mock_callback()));
+  fetcher().FetchSnippets(test_params(),
+                          ToSnippetsAvailableCallback(&mock_callback()));
+  fetcher().FetchSnippets(test_params(),
+                          ToSnippetsAvailableCallback(&mock_callback()));
+  fetcher().FetchSnippets(test_params(),
+                          ToSnippetsAvailableCallback(&mock_callback()));
   FastForwardUntilNoTasksRemain();
   EXPECT_THAT(
       histogram_tester().GetAllSamples("NewTabPage.Snippets.FetchResult"),

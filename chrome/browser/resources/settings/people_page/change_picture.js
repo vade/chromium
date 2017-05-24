@@ -88,37 +88,34 @@ Polymer({
       value: function() { return []; },
     },
 
-    /**
-     * The fallback image to be selected when the user discards the Old image.
-     * This may be null if the user started with the Old image.
-     * @private {?ChangePictureImageElement}
-     */
-    fallbackImage_: Object,
-
-    /**
-     * Type of the last selected icon. This is used to jump back to the camera
-     * after the user discards a newly taken photo.
-     * @private {string}
-     */
-    lastSelectedImageType_: {
-      type: String,
-      value: '',
-    },
-
     /** @private */
     selectionTypesEnum_: {
       type: Object,
       value: ChangePictureSelectionTypes,
       readOnly: true,
     },
+  },
 
-    /** @private {!settings.ChangePictureBrowserProxy} */
-    browserProxy_: {
-      type: Object,
-      value: function() {
-        return settings.ChangePictureBrowserProxyImpl.getInstance();
-      },
-    },
+  /** @private {?settings.ChangePictureBrowserProxy} */
+  browserProxy_: null,
+
+  /**
+   * The fallback image to be selected when the user discards the Old image.
+   * This may be null if the user started with the Old image.
+   * @private {?ChangePictureImageElement}
+   */
+  fallbackImage_: null,
+
+  /**
+   * Type of the last selected icon. This is used to jump back to the camera
+   * after the user discards a newly taken photo.
+   * @private {string}
+   */
+  lastSelectedImageType_: '',
+
+  /** @override */
+  ready: function() {
+    this.browserProxy_ = settings.ChangePictureBrowserProxyImpl.getInstance();
   },
 
   /** @override */
@@ -145,6 +142,9 @@ Polymer({
       // when navigating away. The selector element doesn't fire its upward
       // data binding unless its selected item has changed.
       this.selectedItem_ = this.$.selector.selectedItem;
+      // Focus the container by default so that the arrow keys work (and since
+      // we use the focus highlight to show which picture is selected).
+      this.$.container.focus();
     } else {
       // Ensure we deactivate the camera when we navigate away.
       this.selectedItem_ = null;
@@ -339,6 +339,7 @@ Polymer({
    */
   onPhotoTaken_: function(event) {
     this.browserProxy_.photoTaken(event.detail.photoDataUrl);
+    this.$.container.focus();
   },
 
   /**

@@ -17,21 +17,14 @@ cr.define('print_preview.ticket_items', function() {
   function Copies(destinationStore) {
     print_preview.ticket_items.TicketItem.call(
         this, null /*appState*/, null /*field*/, destinationStore);
-  };
+  }
 
   Copies.prototype = {
     __proto__: print_preview.ticket_items.TicketItem.prototype,
 
     /** @override */
     wouldValueBeValid: function(value) {
-      if (/[^\d]+/.test(value)) {
-        return false;
-      }
-      var copies = parseInt(value, 10);
-      if (copies > 999 || copies < 1) {
-        return false;
-      }
-      return true;
+      return value != '';
     },
 
     /** @override */
@@ -41,7 +34,8 @@ cr.define('print_preview.ticket_items', function() {
 
     /** @return {number} The number of copies indicated by the ticket item. */
     getValueAsNumber: function() {
-      return parseInt(this.getValue(), 10);
+      var value = this.getValue();
+      return value == '' ? 0 : parseInt(value, 10);
     },
 
     /** @override */

@@ -5,6 +5,7 @@
 #include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_utils.h"
 
 #include "base/feature_list.h"
+#include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/common/chrome_features.h"
@@ -14,39 +15,66 @@
 #include "components/user_manager/user_manager.h"
 
 namespace chromeos {
+namespace quick_unlock {
 
 namespace {
+// Quick unlock is enabled regardless of flags.
 bool enable_for_testing_ = false;
+// If testing is enabled, PIN will use prefs as backend. Otherwise, it will use
+// cryptohome.
+PinStorageType testing_pin_storage_type_ = PinStorageType::kPrefs;
+
 // Options for the quick unlock whitelist.
 const char kQuickUnlockWhitelistOptionAll[] = "all";
 const char kQuickUnlockWhitelistOptionPin[] = "PIN";
+// Default minimum PIN length. Policy can increase or decrease this value.
+constexpr int kDefaultMinimumPinLength = 6;
 }  // namespace
 
-void RegisterQuickUnlockProfilePrefs(PrefRegistrySimple* registry) {
+base::TimeDelta PasswordConfirmationFrequencyToTimeDelta(
+    PasswordConfirmationFrequency frequency) {
+  switch (frequency) {
+    case PasswordConfirmationFrequency::SIX_HOURS:
+      return base::TimeDelta::FromHours(6);
+    case PasswordConfirmationFrequency::TWELVE_HOURS:
+      return base::TimeDelta::FromHours(12);
+    case PasswordConfirmationFrequency::DAY:
+      return base::TimeDelta::FromDays(1);
+    case PasswordConfirmationFrequency::WEEK:
+      return base::TimeDelta::FromDays(7);
+  }
+  NOTREACHED();
+  return base::TimeDelta();
+}
+
+void RegisterProfilePrefs(PrefRegistrySimple* registry) {
   base::ListValue quick_unlock_whitelist_default;
   quick_unlock_whitelist_default.AppendString(kQuickUnlockWhitelistOptionPin);
   registry->RegisterListPref(prefs::kQuickUnlockModeWhitelist,
-                             quick_unlock_whitelist_default.DeepCopy());
+                             quick_unlock_whitelist_default.CreateDeepCopy());
   registry->RegisterIntegerPref(
       prefs::kQuickUnlockTimeout,
-      static_cast<int>(QuickUnlockPasswordConfirmationFrequency::DAY));
+      static_cast<int>(PasswordConfirmationFrequency::DAY));
 
   // Preferences related the lock screen pin unlock.
-  registry->RegisterIntegerPref(prefs::kPinUnlockMinimumLength, 4);
+  registry->RegisterIntegerPref(prefs::kPinUnlockMinimumLength,
+                                kDefaultMinimumPinLength);
   // 0 indicates no maximum length for the pin.
   registry->RegisterIntegerPref(prefs::kPinUnlockMaximumLength, 0);
   registry->RegisterBooleanPref(prefs::kPinUnlockWeakPinsAllowed, true);
+
+  registry->RegisterBooleanPref(prefs::kEnableQuickUnlockFingerprint, false);
 }
 
-bool IsPinUnlockEnabled(PrefService* pref_service) {
+bool IsPinEnabled(PrefService* pref_service) {
   if (enable_for_testing_)
     return true;
 
   // Check if policy allows PIN.
   const base::ListValue* quick_unlock_whitelist =
       pref_service->GetList(prefs::kQuickUnlockModeWhitelist);
-  base::StringValue all_value(kQuickUnlockWhitelistOptionAll);
-  base::StringValue pin_value(kQuickUnlockWhitelistOptionPin);
+  base::Value all_value(kQuickUnlockWhitelistOptionAll);
+  base::Value pin_value(kQuickUnlockWhitelistOptionPin);
   if (quick_unlock_whitelist->Find(all_value) ==
           quick_unlock_whitelist->end() &&
       quick_unlock_whitelist->Find(pin_value) ==
@@ -64,8 +92,27 @@ bool IsPinUnlockEnabled(PrefService* pref_service) {
   return base::FeatureList::IsEnabled(features::kQuickUnlockPin);
 }
 
-void EnableQuickUnlockForTesting() {
-  enable_for_testing_ = true;
+PinStorageType GetPinStorageType() {
+  if (enable_for_testing_)
+    return testing_pin_storage_type_;
+
+  if (base::FeatureList::IsEnabled(features::kQuickUnlockPinSignin))
+    return PinStorageType::kCryptohome;
+  return PinStorageType::kPrefs;
 }
 
+bool IsFingerprintEnabled() {
+  if (enable_for_testing_)
+    return true;
+
+  // Enable fingerprint unlock only if the switch is present.
+  return base::FeatureList::IsEnabled(features::kQuickUnlockFingerprint);
+}
+
+void EnableForTesting(PinStorageType pin_storage_type) {
+  enable_for_testing_ = true;
+  testing_pin_storage_type_ = pin_storage_type;
+}
+
+}  // namespace quick_unlock
 }  // namespace chromeos

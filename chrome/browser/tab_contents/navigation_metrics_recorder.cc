@@ -7,15 +7,13 @@
 #include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/tab_contents/origins_seen_service_factory.h"
 #include "components/navigation_metrics/navigation_metrics.h"
-#include "components/navigation_metrics/origins_seen_service.h"
 #include "components/rappor/public/rappor_utils.h"
 #include "components/rappor/rappor_service_impl.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -70,35 +68,37 @@ void NavigationMetricsRecorder::set_rappor_service_for_testing(
   rappor_service_ = service;
 }
 
-void NavigationMetricsRecorder::DidNavigateMainFrame(
-      const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) {
+void NavigationMetricsRecorder::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  if (!navigation_handle->IsInMainFrame() || !navigation_handle->HasCommitted())
+    return;
 
   content::BrowserContext* context = web_contents()->GetBrowserContext();
-  navigation_metrics::OriginsSeenService* service =
-      OriginsSeenServiceFactory::GetForBrowserContext(context);
-  const url::Origin origin(details.entry->GetVirtualURL());
-  bool have_already_seen_origin = service->Insert(origin);
+  content::NavigationEntry* last_committed_entry =
+      web_contents()->GetController().GetLastCommittedEntry();
 
   navigation_metrics::RecordMainFrameNavigation(
-      details.entry->GetVirtualURL(), details.is_in_page,
-      context->IsOffTheRecord(), have_already_seen_origin);
+      last_committed_entry->GetVirtualURL(),
+      navigation_handle->IsSameDocument(), context->IsOffTheRecord());
 
   // Record the domain and registry of the URL that resulted in a navigation to
   // a |data:| URL, either by redirects or user clicking a link.
-  if (details.entry->GetVirtualURL().SchemeIs(url::kDataScheme) &&
-      !ui::PageTransitionCoreTypeIs(params.transition,
+  if (last_committed_entry->GetVirtualURL().SchemeIs(url::kDataScheme) &&
+      !ui::PageTransitionCoreTypeIs(navigation_handle->GetPageTransition(),
                                     ui::PAGE_TRANSITION_TYPED)) {
-    if (!details.previous_url.is_empty()) {
+    if (!navigation_handle->GetPreviousURL().is_empty()) {
+      // TODO(meacer): Remove once data URL navigations are blocked.
       rappor::SampleDomainAndRegistryFromGURL(
-          rappor_service_, "Navigation.Scheme.Data", details.previous_url);
+          rappor_service_, "Navigation.Scheme.Data",
+          navigation_handle->GetPreviousURL());
     }
 
     // Also record the mime type of the data: URL.
     std::string mime_type;
     std::string charset;
-    if (net::DataURL::Parse(details.entry->GetVirtualURL(), &mime_type,
+    // TODO(meacer): Remove once data URL navigations are blocked.
+    if (net::DataURL::Parse(last_committed_entry->GetVirtualURL(), &mime_type,
                             &charset, nullptr)) {
       RecordDataURLMimeType(mime_type);
     }

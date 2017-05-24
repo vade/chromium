@@ -13,58 +13,34 @@
         },
         {
           "object": "LayoutText #text",
-          "rect": [9, 11, 179, 16],
-          "reason": "subtree"
-        },
-        {
-          "object": "LayoutBlockFlow DIV id='inner-editor'",
-          "rect": [11, 11, 175, 16],
+          "rect": [9, 10, 179, 18],
           "reason": "subtree"
         },
         {
           "object": "LayoutTextControl TEXTAREA id='editor'",
           "rect": [9, 30, 164, 15],
-          "reason": "scroll"
+          "reason": "scroll control"
         },
         {
           "object": "LayoutTextControl TEXTAREA id='editor'",
           "rect": [173, 30, 15, 15],
-          "reason": "scroll"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [186, 10, 2, 18],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [186, 10, 2, 18],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [186, 10, 2, 18],
-          "reason": "invalidate paint rectangle"
+          "reason": "scroll control"
         }
       ]
     }
   ],
   "objectPaintInvalidations": [
     {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
       "object": "LayoutTextControl TEXTAREA id='editor'",
       "reason": "subtree"
     },
     {
       "object": "LayoutTextControl TEXTAREA id='editor'",
-      "reason": "scroll"
+      "reason": "geometry"
     },
     {
       "object": "HorizontalScrollbar",
-      "reason": "scroll"
+      "reason": "scroll control"
     },
     {
       "object": "LayoutBlockFlow DIV id='inner-editor'",
@@ -76,11 +52,7 @@
     },
     {
       "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
+      "reason": "caret"
     },
     {
       "object": "LayoutText #text",

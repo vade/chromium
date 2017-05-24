@@ -100,8 +100,9 @@ void CustomButton::SetState(ButtonState state) {
     }
   }
 
+  ButtonState old_state = state_;
   state_ = state;
-  StateChanged();
+  StateChanged(old_state);
   SchedulePaint();
 }
 
@@ -355,13 +356,13 @@ void CustomButton::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   Button::GetAccessibleNodeData(node_data);
   switch (state_) {
     case STATE_HOVERED:
-      node_data->AddStateFlag(ui::AX_STATE_HOVERED);
+      node_data->AddState(ui::AX_STATE_HOVERED);
       break;
     case STATE_PRESSED:
-      node_data->AddStateFlag(ui::AX_STATE_PRESSED);
+      node_data->AddState(ui::AX_STATE_PRESSED);
       break;
     case STATE_DISABLED:
-      node_data->AddStateFlag(ui::AX_STATE_DISABLED);
+      node_data->AddState(ui::AX_STATE_DISABLED);
       break;
     case STATE_NORMAL:
     case STATE_COUNT:
@@ -369,8 +370,8 @@ void CustomButton::GetAccessibleNodeData(ui::AXNodeData* node_data) {
       break;
   }
   if (enabled()) {
-    node_data->AddIntAttribute(ui::AX_ATTR_ACTION,
-                               ui::AX_SUPPORTED_ACTION_PRESS);
+    node_data->AddIntAttribute(ui::AX_ATTR_DEFAULT_ACTION_VERB,
+                               ui::AX_DEFAULT_ACTION_VERB_PRESS);
   }
 }
 
@@ -437,8 +438,7 @@ CustomButton::CustomButton(ButtonListener* listener)
   hover_animation_.SetSlideDuration(kHoverFadeDurationMs);
 }
 
-void CustomButton::StateChanged() {
-}
+void CustomButton::StateChanged(ButtonState old_state) {}
 
 bool CustomButton::IsTriggerableEvent(const ui::Event& event) {
   return event.type() == ui::ET_GESTURE_TAP_DOWN ||

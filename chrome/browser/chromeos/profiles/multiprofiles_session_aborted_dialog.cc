@@ -4,15 +4,17 @@
 
 #include "chrome/browser/chromeos/profiles/multiprofiles_session_aborted_dialog.h"
 
-#include "ash/common/shelf/wm_shelf.h"
 #include "ash/root_window_controller.h"
+#include "ash/shelf/wm_shelf.h"
 #include "ash/shell.h"
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/views/border.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/grid_layout.h"
@@ -28,8 +30,6 @@ const int kDefaultWidth = 600;
 const int kDefaultHeight = 250;
 
 const int kPaddingToMessage = 20;
-const int kInset = 40;
-const int kTopInset = 10;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Dialog for an aborted multi-profile session due to a user policy change .
@@ -61,6 +61,8 @@ class MultiprofilesSessionAbortedView : public views::DialogDelegateView {
 // MultiprofilesSessionAbortedView implementation.
 
 MultiprofilesSessionAbortedView::MultiprofilesSessionAbortedView() {
+  chrome::RecordDialogCreation(
+      chrome::DialogIdentifier::MULTIPROFILES_SESSION_ABORTED);
 }
 
 MultiprofilesSessionAbortedView::~MultiprofilesSessionAbortedView() {
@@ -72,7 +74,7 @@ void MultiprofilesSessionAbortedView::ShowDialog(
   MultiprofilesSessionAbortedView* dialog_view =
       new MultiprofilesSessionAbortedView();
   views::DialogDelegate::CreateDialogWidget(
-      dialog_view, ash::Shell::GetTargetRootWindow(), NULL);
+      dialog_view, ash::Shell::GetRootWindowForNewWindows(), NULL);
   dialog_view->InitDialog(user_email);
   views::Widget* widget = dialog_view->GetWidget();
   DCHECK(widget);
@@ -113,11 +115,13 @@ gfx::Size MultiprofilesSessionAbortedView::GetPreferredSize() const {
 
 void MultiprofilesSessionAbortedView::InitDialog(
     const std::string& user_email) {
-  const gfx::Insets kDialogInsets(kTopInset, kInset, kInset, kInset);
-
+  constexpr int kTopInset = 10;
+  constexpr int kOtherInset = 40;
   // Create the views and layout manager and set them up.
-  views::GridLayout* grid_layout = views::GridLayout::CreatePanel(this);
-  grid_layout->SetInsets(kDialogInsets);
+  views::GridLayout* grid_layout = new views::GridLayout(this);
+  SetLayoutManager(grid_layout);
+  SetBorder(views::CreateEmptyBorder(kTopInset, kOtherInset, kOtherInset,
+                                     kOtherInset));
 
   views::ColumnSet* column_set = grid_layout->AddColumnSet(0);
   column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1,

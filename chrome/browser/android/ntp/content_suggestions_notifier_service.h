@@ -10,7 +10,6 @@
 #include "base/macros.h"
 #include "components/keyed_service/core/keyed_service.h"
 
-class PrefService;
 class Profile;
 
 namespace ntp_snippets {
@@ -25,16 +24,27 @@ class ContentSuggestionsNotifierService : public KeyedService {
  public:
   ContentSuggestionsNotifierService(
       Profile* profile,
-      ntp_snippets::ContentSuggestionsService* suggestions,
-      PrefService* prefs);
+      ntp_snippets::ContentSuggestionsService* suggestions);
 
   ~ContentSuggestionsNotifierService() override;
 
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
+  // Set whether the service is allowed to show notifications.
+  void SetEnabled(bool enabled);
+
+  // Returns whether the service is allowed to show notifications.
+  bool IsEnabled() const;
+
  private:
+  // Syncs up the state of |observer_| with that of the service.
+  void UpdateObserverRegistrationState();
+
   class NotifyingObserver;
   std::unique_ptr<NotifyingObserver> observer_;
+
+  Profile* const profile_;
+  ntp_snippets::ContentSuggestionsService* const suggestions_service_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(ContentSuggestionsNotifierService);
 };

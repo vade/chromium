@@ -15,6 +15,18 @@
 #define ENABLE_SYNC_CALL_RESTRICTIONS 0
 #endif
 
+namespace display {
+class ForwardingDisplayDelegate;
+}
+
+namespace leveldb {
+class LevelDBMojoProxy;
+}
+
+namespace prefs {
+class PersistentPrefStoreClient;
+}
+
 namespace ui {
 class Gpu;
 }
@@ -52,6 +64,11 @@ class MOJO_CPP_BINDINGS_EXPORT SyncCallRestrictions {
   // DO NOT ADD ANY OTHER FRIEND STATEMENTS, talk to mojo/OWNERS first.
   // BEGIN ALLOWED USAGE.
   friend class ui::Gpu;  // http://crbug.com/620058
+  // LevelDBMojoProxy makes same-process sync calls from the DB thread.
+  friend class leveldb::LevelDBMojoProxy;
+  // Pref service connection is sync at startup.
+  friend class prefs::PersistentPrefStoreClient;
+
   // END ALLOWED USAGE.
 
   // BEGIN USAGE THAT NEEDS TO BE FIXED.
@@ -59,6 +76,10 @@ class MOJO_CPP_BINDINGS_EXPORT SyncCallRestrictions {
   // implementation which weren't caught by sync call restrictions. Our blocking
   // calls to mus, however, are.
   friend class views::ClipboardMus;
+  // In ash::Shell::Init() it assumes that NativeDisplayDelegate will be
+  // synchronous at first. In mushrome ForwardingDisplayDelegate uses a
+  // synchronous call to get the display snapshots as a workaround.
+  friend class display::ForwardingDisplayDelegate;
   // END USAGE THAT NEEDS TO BE FIXED.
 
 #if ENABLE_SYNC_CALL_RESTRICTIONS

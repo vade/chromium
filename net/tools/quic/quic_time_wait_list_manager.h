@@ -15,13 +15,14 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "net/base/linked_hash_map.h"
 #include "net/quic/core/quic_blocked_writer_interface.h"
 #include "net/quic/core/quic_connection.h"
 #include "net/quic/core/quic_framer.h"
 #include "net/quic/core/quic_packet_writer.h"
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_session.h"
+#include "net/quic/platform/api/quic_containers.h"
+#include "net/quic/platform/api/quic_flags.h"
 
 namespace net {
 
@@ -84,9 +85,7 @@ class QuicTimeWaitListManager : public QuicBlockedWriterInterface {
   // state. virtual to override in tests.
   virtual void ProcessPacket(const QuicSocketAddress& server_address,
                              const QuicSocketAddress& client_address,
-                             QuicConnectionId connection_id,
-                             QuicPacketNumber packet_number,
-                             const QuicEncryptedPacket& packet);
+                             QuicConnectionId connection_id);
 
   // Called by the dispatcher when the underlying socket becomes writable again,
   // since we might need to send pending public reset packets which we didn't
@@ -123,8 +122,7 @@ class QuicTimeWaitListManager : public QuicBlockedWriterInterface {
   // Creates a public reset packet and sends it or queues it to be sent later.
   virtual void SendPublicReset(const QuicSocketAddress& server_address,
                                const QuicSocketAddress& client_address,
-                               QuicConnectionId connection_id,
-                               QuicPacketNumber rejected_packet_number);
+                               QuicConnectionId connection_id);
 
  private:
   friend class test::QuicDispatcherPeer;
@@ -181,8 +179,8 @@ class QuicTimeWaitListManager : public QuicBlockedWriterInterface {
     bool connection_rejected_statelessly;
   };
 
-  // linked_hash_map allows lookup by ConnectionId and traversal in add order.
-  typedef linked_hash_map<QuicConnectionId, ConnectionIdData> ConnectionIdMap;
+  // QuicLinkedHashMap allows lookup by ConnectionId and traversal in add order.
+  typedef QuicLinkedHashMap<QuicConnectionId, ConnectionIdData> ConnectionIdMap;
   ConnectionIdMap connection_id_map_;
 
   // Pending public reset packets that need to be sent out to the client

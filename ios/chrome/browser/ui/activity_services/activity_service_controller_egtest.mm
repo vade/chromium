@@ -22,6 +22,10 @@
 #include "ios/web/public/test/response_providers/response_provider.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace {
 
 // Assert the activity service is visible by checking the "copy" button.
@@ -55,9 +59,13 @@ id<GREYMatcher> PrintButton() {
 
 // Test that when trying to print a page redirected to an unprintable page, a
 // snackbar explaining that the page cannot be printed is displayed.
-// TODO(crbug.com/684987): Re-enable this test.
-- (void)
-    DISABLED_testActivityServiceControllerPrintAfterRedirectionToUnprintablePage {
+- (void)testActivityServiceControllerPrintAfterRedirectionToUnprintablePage {
+// TODO(crbug.com/694662): This test relies on external URL because of the bug.
+// Re-enable this test on device once the bug is fixed.
+#if !TARGET_IPHONE_SIMULATOR
+  EARL_GREY_TEST_DISABLED(@"Test disabled on device.");
+#endif
+
   std::map<GURL, std::string> responses;
   const GURL regularPageURL = web::test::HttpServer::MakeUrl("http://choux");
   responses[regularPageURL] = "fleur";
@@ -71,15 +79,7 @@ id<GREYMatcher> PrintButton() {
 
   // Open an error page.
   [ChromeEarlGrey loadURL:ErrorPageResponseProvider::GetDnsFailureUrl()];
-  id<GREYMatcher> webViewMatcher =
-      web::WebViewInWebState(chrome_test_util::GetCurrentWebState());
-  [[EarlGrey selectElementWithMatcher:webViewMatcher]
-      assertWithMatcher:grey_nil()];
-  NSString* const kError =
-      l10n_util::GetNSString(IDS_ERRORPAGES_HEADING_NOT_AVAILABLE);
-  [[EarlGrey
-      selectElementWithMatcher:chrome_test_util::StaticHtmlViewContainingText(
-                                   kError)] assertWithMatcher:grey_notNil()];
+  [ChromeEarlGrey waitForErrorPage];
 
   // Execute the Print action.
   [[EarlGrey selectElementWithMatcher:PrintButton()] performAction:grey_tap()];

@@ -12,13 +12,16 @@ cr.define('md_history.history_routing_test', function() {
       function navigateTo(route) {
         window.history.replaceState({}, '', route);
         window.dispatchEvent(new CustomEvent('location-changed'));
+        // Update from the URL synchronously.
+        app.$$('history-router').flushDebouncer('parseUrl');
       }
 
       setup(function() {
-        assertEquals('chrome://history/', window.location.href);
         app = replaceApp();
+        assertEquals('chrome://history/', window.location.href);
         sidebar = app.$['content-side-bar']
         toolbar = app.$['toolbar'];
+        return PolymerTest.flushTasks();
       });
 
       test('changing route changes active view', function() {
@@ -76,11 +79,6 @@ cr.define('md_history.history_routing_test', function() {
         assertEquals('history', app.selectedPage_);
         assertEquals(searchTerm, toolbar.searchTerm);
         assertEquals('chrome://history/?q=' + searchTerm, window.location.href);
-      });
-
-      teardown(function() {
-        // Reset back to initial navigation state.
-        navigateTo('/');
       });
     });
   }

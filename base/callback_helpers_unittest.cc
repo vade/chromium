@@ -14,6 +14,24 @@ void Increment(int* value) {
   (*value)++;
 }
 
+TEST(CallbackHelpersTest, TestResetAndReturn) {
+  int run_count = 0;
+
+  base::Closure cb = base::Bind(&Increment, &run_count);
+  EXPECT_EQ(0, run_count);
+  base::ResetAndReturn(&cb).Run();
+  EXPECT_EQ(1, run_count);
+  EXPECT_FALSE(cb);
+
+  run_count = 0;
+
+  base::OnceClosure cb2 = base::BindOnce(&Increment, &run_count);
+  EXPECT_EQ(0, run_count);
+  base::ResetAndReturn(&cb2).Run();
+  EXPECT_EQ(1, run_count);
+  EXPECT_FALSE(cb2);
+}
+
 TEST(CallbackHelpersTest, TestScopedClosureRunnerExitScope) {
   int run_count = 0;
   {
@@ -89,6 +107,21 @@ TEST(CallbackHelpersTest, TestScopedClosureRunnerMoveAssignment) {
   }
   EXPECT_EQ(0, run_count_1);
   EXPECT_EQ(1, run_count_2);
+}
+
+TEST(CallbackHelpersTest, TestAdaptCallbackForRepeating) {
+  int count = 0;
+  base::OnceCallback<void(int*)> cb =
+      base::BindOnce([](int* count) { ++*count; });
+
+  base::RepeatingCallback<void(int*)> wrapped =
+      base::AdaptCallbackForRepeating(std::move(cb));
+
+  EXPECT_EQ(0, count);
+  wrapped.Run(&count);
+  EXPECT_EQ(1, count);
+  wrapped.Run(&count);
+  EXPECT_EQ(1, count);
 }
 
 }  // namespace

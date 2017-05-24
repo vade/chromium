@@ -15,10 +15,12 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -30,6 +32,10 @@
 #include "components/password_manager/core/browser/password_store_default.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if defined(OS_MACOSX)
+#include "components/os_crypt/os_crypt_mocker.h"
+#endif
 
 using autofill::PasswordForm;
 using base::WaitableEvent;
@@ -85,6 +91,10 @@ class StartSyncFlareMock {
 
 class PasswordStoreTest : public testing::Test {
  protected:
+  PasswordStoreTest()
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
+
   void SetUp() override { ASSERT_TRUE(temp_dir_.CreateUniqueTempDir()); }
 
   void TearDown() override { ASSERT_TRUE(temp_dir_.Delete()); }
@@ -93,7 +103,7 @@ class PasswordStoreTest : public testing::Test {
     return temp_dir_.GetPath().Append(FILE_PATH_LITERAL("login_test"));
   }
 
-  base::MessageLoopForUI message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   base::ScopedTempDir temp_dir_;
 };
 
@@ -101,7 +111,7 @@ TEST_F(PasswordStoreTest, IgnoreOldWwwGoogleLogins) {
   scoped_refptr<PasswordStoreDefault> store(new PasswordStoreDefault(
       base::ThreadTaskRunnerHandle::Get(), base::ThreadTaskRunnerHandle::Get(),
       base::MakeUnique<LoginDatabase>(test_login_db_file_path())));
-  store->Init(syncer::SyncableService::StartSyncFlare());
+  store->Init(syncer::SyncableService::StartSyncFlare(), nullptr);
 
   const time_t cutoff = 1325376000;  // 00:00 Jan 1 2012 UTC
   static const PasswordFormData form_data[] = {
@@ -197,7 +207,8 @@ TEST_F(PasswordStoreTest, StartSyncFlare) {
       base::MakeUnique<LoginDatabase>(test_login_db_file_path())));
   StartSyncFlareMock mock;
   store->Init(
-      base::Bind(&StartSyncFlareMock::StartSyncFlare, base::Unretained(&mock)));
+      base::Bind(&StartSyncFlareMock::StartSyncFlare, base::Unretained(&mock)),
+      nullptr);
   {
     PasswordForm form;
     form.origin = GURL("http://accounts.google.com/LoginAuth");
@@ -224,7 +235,7 @@ TEST_F(PasswordStoreTest, GetLoginImpl) {
   scoped_refptr<PasswordStoreDefault> store(new PasswordStoreDefault(
       base::ThreadTaskRunnerHandle::Get(), base::ThreadTaskRunnerHandle::Get(),
       base::MakeUnique<LoginDatabase>(test_login_db_file_path())));
-  store->Init(syncer::SyncableService::StartSyncFlare());
+  store->Init(syncer::SyncableService::StartSyncFlare(), nullptr);
 
   // For each attribute in the primary key, create one form that mismatches on
   // that attribute.
@@ -287,7 +298,7 @@ TEST_F(PasswordStoreTest, UpdateLoginPrimaryKeyFields) {
   scoped_refptr<PasswordStoreDefault> store(new PasswordStoreDefault(
       base::ThreadTaskRunnerHandle::Get(), base::ThreadTaskRunnerHandle::Get(),
       base::MakeUnique<LoginDatabase>(test_login_db_file_path())));
-  store->Init(syncer::SyncableService::StartSyncFlare());
+  store->Init(syncer::SyncableService::StartSyncFlare(), nullptr);
 
   std::unique_ptr<PasswordForm> old_form(
       CreatePasswordFormFromDataForTesting(kTestCredentials[0]));
@@ -340,7 +351,7 @@ TEST_F(PasswordStoreTest, RemoveLoginsCreatedBetweenCallbackIsCalled) {
   scoped_refptr<PasswordStoreDefault> store(new PasswordStoreDefault(
       base::ThreadTaskRunnerHandle::Get(), base::ThreadTaskRunnerHandle::Get(),
       base::WrapUnique(new LoginDatabase(test_login_db_file_path()))));
-  store->Init(syncer::SyncableService::StartSyncFlare());
+  store->Init(syncer::SyncableService::StartSyncFlare(), nullptr);
 
   std::unique_ptr<PasswordForm> test_form(
       CreatePasswordFormFromDataForTesting(kTestCredential));
@@ -393,7 +404,7 @@ TEST_F(PasswordStoreTest, GetLoginsWithoutAffiliations) {
   scoped_refptr<PasswordStoreDefault> store(new PasswordStoreDefault(
       base::ThreadTaskRunnerHandle::Get(), base::ThreadTaskRunnerHandle::Get(),
       base::WrapUnique(new LoginDatabase(test_login_db_file_path()))));
-  store->Init(syncer::SyncableService::StartSyncFlare());
+  store->Init(syncer::SyncableService::StartSyncFlare(), nullptr);
 
   MockAffiliatedMatchHelper* mock_helper = new MockAffiliatedMatchHelper;
   store->SetAffiliatedMatchHelper(base::WrapUnique(mock_helper));
@@ -498,7 +509,7 @@ TEST_F(PasswordStoreTest, GetLoginsWithAffiliations) {
   scoped_refptr<PasswordStoreDefault> store(new PasswordStoreDefault(
       base::ThreadTaskRunnerHandle::Get(), base::ThreadTaskRunnerHandle::Get(),
       base::WrapUnique(new LoginDatabase(test_login_db_file_path()))));
-  store->Init(syncer::SyncableService::StartSyncFlare());
+  store->Init(syncer::SyncableService::StartSyncFlare(), nullptr);
 
   MockAffiliatedMatchHelper* mock_helper = new MockAffiliatedMatchHelper;
   store->SetAffiliatedMatchHelper(base::WrapUnique(mock_helper));
@@ -682,7 +693,7 @@ TEST_F(PasswordStoreTest, MAYBE_UpdatePasswordsStoredForAffiliatedWebsites) {
           base::ThreadTaskRunnerHandle::Get(),
           base::ThreadTaskRunnerHandle::Get(),
           base::WrapUnique(new LoginDatabase(test_login_db_file_path()))));
-      store->Init(syncer::SyncableService::StartSyncFlare());
+      store->Init(syncer::SyncableService::StartSyncFlare(), nullptr);
       store->RemoveLoginsCreatedBetween(base::Time(), base::Time::Max(),
                                         base::Closure());
 
@@ -791,7 +802,7 @@ TEST_F(PasswordStoreTest, GetLoginsWithAffiliatedRealms) {
         base::ThreadTaskRunnerHandle::Get(),
         base::ThreadTaskRunnerHandle::Get(),
         base::MakeUnique<LoginDatabase>(test_login_db_file_path())));
-    store->Init(syncer::SyncableService::StartSyncFlare());
+    store->Init(syncer::SyncableService::StartSyncFlare(), nullptr);
     store->RemoveLoginsCreatedBetween(base::Time(), base::Time::Max(),
                                       base::Closure());
 
@@ -840,9 +851,8 @@ TEST_F(PasswordStoreTest, GetLoginsWithAffiliatedRealms) {
   }
 }
 
-#if !defined(OS_MACOSX)
-// TODO(crbug.com/668155): Enable this test after fixing issues with
-// initialization PasswordStore with MockKeyChain in tests on MacOS.
+// TODO(crbug.com/706392): Fix password reuse detection for Android.
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
 TEST_F(PasswordStoreTest, CheckPasswordReuse) {
   static constexpr PasswordFormData kTestCredentials[] = {
       {PasswordForm::SCHEME_HTML, "https://www.google.com",
@@ -850,10 +860,15 @@ TEST_F(PasswordStoreTest, CheckPasswordReuse) {
       {PasswordForm::SCHEME_HTML, "https://facebook.com",
        "https://facebook.com", "", L"", L"", L"", L"", L"topsecret", true, 1}};
 
+#if defined(OS_MACOSX)
+  // Mock Keychain. There is a call to Keychain on initializling
+  // PasswordReuseDetector, so it should be mocked.
+  OSCryptMocker::SetUpWithSingleton();
+#endif
   scoped_refptr<PasswordStoreDefault> store(new PasswordStoreDefault(
       base::ThreadTaskRunnerHandle::Get(), base::ThreadTaskRunnerHandle::Get(),
       base::MakeUnique<LoginDatabase>(test_login_db_file_path())));
-  store->Init(syncer::SyncableService::StartSyncFlare());
+  store->Init(syncer::SyncableService::StartSyncFlare(), nullptr);
 
   for (const auto& test_credentials : kTestCredentials) {
     auto credentials = CreatePasswordFormFromDataForTesting(test_credentials);
@@ -889,6 +904,9 @@ TEST_F(PasswordStoreTest, CheckPasswordReuse) {
 
   store->ShutdownOnUIThread();
   base::RunLoop().RunUntilIdle();
+#if defined(OS_MACOSX)
+  OSCryptMocker::TearDown();
+#endif
 }
 #endif
 

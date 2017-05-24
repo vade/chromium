@@ -17,70 +17,68 @@ namespace blink {
 
 namespace {
 
-// Stub implementation of FrameLoaderClient for the purpose of testing. It will
+// Stub implementation of LocalFrameClient for the purpose of testing. It will
 // alow callers to set the parent/top frames by calling |setParent|. It is used
 // in ElementVisibilityObserverTest in order to mock a RemoteFrame parent of a
 // LocalFrame.
-class StubFrameLoaderClient final : public EmptyFrameLoaderClient {
+class StubLocalFrameClient final : public EmptyLocalFrameClient {
  public:
-  Frame* parent() const override { return m_parent; }
-  Frame* top() const override { return m_parent; }
+  Frame* Parent() const override { return parent_; }
+  Frame* Top() const override { return parent_; }
 
-  void setParent(Frame* frame) { m_parent = frame; }
+  void SetParent(Frame* frame) { parent_ = frame; }
 
   DEFINE_INLINE_VIRTUAL_TRACE() {
-    visitor->trace(m_parent);
-    EmptyFrameLoaderClient::trace(visitor);
+    visitor->Trace(parent_);
+    EmptyLocalFrameClient::Trace(visitor);
   }
 
  private:
-  WeakMember<Frame> m_parent = nullptr;
+  WeakMember<Frame> parent_ = nullptr;
 };
 
 class ElementVisibilityObserverTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    m_frameLoaderClient = new StubFrameLoaderClient();
-    m_dummyPageHolder = DummyPageHolder::create(
-        IntSize(), nullptr, m_frameLoaderClient, nullptr, nullptr);
+    local_frame_client_ = new StubLocalFrameClient();
+    dummy_page_holder_ = DummyPageHolder::Create(
+        IntSize(), nullptr, local_frame_client_, nullptr, nullptr);
   }
 
   void TearDown() override {
-    m_dummyPageHolder->frame().detach(FrameDetachType::Remove);
+    dummy_page_holder_->GetFrame().Detach(FrameDetachType::kRemove);
   }
 
-  Document& document() { return m_dummyPageHolder->document(); }
-  FrameHost& frameHost() { return m_dummyPageHolder->page().frameHost(); }
-  StubFrameLoaderClient* frameLoaderClient() const {
-    return m_frameLoaderClient;
-  }
+  Document& GetDocument() { return dummy_page_holder_->GetDocument(); }
+  Page& GetPage() { return dummy_page_holder_->GetPage(); }
+  StubLocalFrameClient* LocalFrameClient() const { return local_frame_client_; }
 
  private:
-  std::unique_ptr<DummyPageHolder> m_dummyPageHolder;
-  Persistent<StubFrameLoaderClient> m_frameLoaderClient;
+  std::unique_ptr<DummyPageHolder> dummy_page_holder_;
+  Persistent<StubLocalFrameClient> local_frame_client_;
 };
 
 TEST_F(ElementVisibilityObserverTest, ObserveElementWithoutDocumentFrame) {
-  HTMLElement* element = HTMLDivElement::create(
-      *DOMImplementation::create(document())->createHTMLDocument("test"));
+  HTMLElement* element = HTMLDivElement::Create(
+      *DOMImplementation::Create(GetDocument())->createHTMLDocument("test"));
   ElementVisibilityObserver* observer =
       new ElementVisibilityObserver(element, nullptr);
-  observer->start();
-  observer->stop();
+  observer->Start();
+  observer->Stop();
   // It should not crash.
 }
 
 TEST_F(ElementVisibilityObserverTest, ObserveElementInRemoteFrame) {
-  Persistent<RemoteFrame> remoteFrame =
-      RemoteFrame::create(new EmptyRemoteFrameClient(), &frameHost(), nullptr);
-  frameLoaderClient()->setParent(remoteFrame);
+  Persistent<RemoteFrame> remote_frame =
+      RemoteFrame::Create(new EmptyRemoteFrameClient(), GetPage(), nullptr);
+  LocalFrameClient()->SetParent(remote_frame);
 
-  Persistent<HTMLElement> element = HTMLDivElement::create(document());
+  Persistent<HTMLElement> element = HTMLDivElement::Create(GetDocument());
   ElementVisibilityObserver* observer =
-      new ElementVisibilityObserver(element, WTF::bind([](bool) {}));
-  observer->start();
-  observer->deliverObservationsForTesting();
-  observer->stop();
+      new ElementVisibilityObserver(element, WTF::Bind([](bool) {}));
+  observer->Start();
+  observer->DeliverObservationsForTesting();
+  observer->Stop();
   // It should not crash.
 }
 

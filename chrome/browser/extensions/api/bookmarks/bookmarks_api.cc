@@ -403,8 +403,9 @@ void BookmarksAPI::Shutdown() {
   EventRouter::Get(browser_context_)->UnregisterObserver(this);
 }
 
-static base::LazyInstance<BrowserContextKeyedAPIFactory<BookmarksAPI> >
-    g_factory = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<
+    BrowserContextKeyedAPIFactory<BookmarksAPI>>::DestructorAtExit g_factory =
+    LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<BookmarksAPI>*
@@ -745,8 +746,9 @@ void BookmarksIOFunction::SelectFile(ui::SelectFileDialog::Type type) {
   // GetDefaultFilepathForBookmarkExport() might have to touch the filesystem
   // (stat or access, for example), so this requires a thread with IO allowed.
   if (!BrowserThread::CurrentlyOn(BrowserThread::FILE)) {
-    BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-        base::Bind(&BookmarksIOFunction::SelectFile, this, type));
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
+        base::BindOnce(&BookmarksIOFunction::SelectFile, this, type));
     return;
   }
 
@@ -759,9 +761,10 @@ void BookmarksIOFunction::SelectFile(ui::SelectFileDialog::Type type) {
     DCHECK(type == ui::SelectFileDialog::SELECT_OPEN_FILE);
 
   // After getting the |default_path|, ask the UI to display the file dialog.
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-      base::Bind(&BookmarksIOFunction::ShowSelectFileDialog, this,
-                 type, default_path));
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::BindOnce(&BookmarksIOFunction::ShowSelectFileDialog, this, type,
+                     default_path));
 }
 
 void BookmarksIOFunction::ShowSelectFileDialog(

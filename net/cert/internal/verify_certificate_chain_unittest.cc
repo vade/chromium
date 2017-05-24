@@ -14,24 +14,15 @@ namespace {
 
 class VerifyCertificateChainDelegate {
  public:
-  static void Verify(const ParsedCertificateList& chain,
-                     const scoped_refptr<TrustAnchor>& trust_anchor,
-                     const der::GeneralizedTime& time,
-                     bool expected_result,
-                     const std::string& expected_errors,
+  static void Verify(const VerifyCertChainTest& test,
                      const std::string& test_file_path) {
-    ASSERT_TRUE(trust_anchor);
-
     SimpleSignaturePolicy signature_policy(1024);
 
-    CertErrors errors;
-    bool result = VerifyCertificateChain(chain, trust_anchor.get(),
-                                         &signature_policy, time, &errors);
-    EXPECT_EQ(expected_result, result);
-    EXPECT_EQ(expected_errors, errors.ToDebugString()) << "Test file: "
-                                                       << test_file_path;
-    if (!result)
-      EXPECT_FALSE(errors.empty());
+    CertPathErrors errors;
+    VerifyCertificateChain(test.chain, test.last_cert_trust, &signature_policy,
+                           test.time, test.key_purpose, &errors);
+    EXPECT_EQ(test.expected_errors, errors.ToDebugString(test.chain))
+        << "Test file: " << test_file_path;
   }
 };
 

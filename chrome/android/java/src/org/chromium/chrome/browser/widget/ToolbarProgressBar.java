@@ -11,7 +11,6 @@ import android.graphics.Color;
 import android.os.Build;
 import android.support.v4.view.ViewCompat;
 import android.text.TextUtils;
-import android.util.AttributeSet;
 import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityEvent;
 import android.widget.FrameLayout.LayoutParams;
@@ -65,7 +64,6 @@ public class ToolbarProgressBar extends ClipDrawableProgressBar {
     private static final long ANIMATION_START_THRESHOLD = 5000;
 
     private static final float THEMED_BACKGROUND_WHITE_FRACTION = 0.2f;
-    private static final float THEMED_FOREGROUND_BLACK_FRACTION = 0.64f;
     private static final float ANIMATION_WHITE_FRACTION = 0.4f;
 
     private static final long PROGRESS_FRAME_TIME_CAP_MS = 50;
@@ -78,9 +76,12 @@ public class ToolbarProgressBar extends ClipDrawableProgressBar {
     private AnimationLogic mAnimationLogic;
     private boolean mAnimationInitialized;
     private int mMarginTop;
-    private ViewGroup mControlContainer;
+    private ViewGroup mProgressBarContainer;
     private int mProgressStartCount;
     private int mThemeColor;
+
+    /** Whether or not to use the status bar color as the background of the toolbar. */
+    private boolean mUseStatusBarColorAsBackground;
 
     /** Whether the smooth-indeterminate animation is running. */
     private boolean mIsRunningSmoothIndeterminate;
@@ -143,12 +144,18 @@ public class ToolbarProgressBar extends ClipDrawableProgressBar {
     /**
      * Creates a toolbar progress bar.
      *
-     * @param context the application environment.
-     * @param attrs the xml attributes that should be used to initialize this view.
+     * @param context The application environment.
+     * @param height The height of the progress bar in px.
+     * @param topMargin The top margin of the progress bar.
+     * @param useStatusBarColorAsBackground Whether or not to use the status bar color as the
+     *                                      background of the toolbar.
      */
-    public ToolbarProgressBar(Context context, AttributeSet attrs) {
-        super(context, attrs);
+    public ToolbarProgressBar(
+            Context context, int height, int topMargin, boolean useStatusBarColorAsBackground) {
+        super(context, height);
         setAlpha(0.0f);
+        mMarginTop = topMargin;
+        mUseStatusBarColorAsBackground = useStatusBarColorAsBackground;
 
         // This tells accessibility services that progress bar changes are important enough to
         // announce to the user even when not focused.
@@ -156,21 +163,28 @@ public class ToolbarProgressBar extends ClipDrawableProgressBar {
     }
 
     /**
-     * Prepare the progress bar for being attached to the window.
-     * @param topMargin The progress bar's top margin.
+     * Set the top progress bar's top margin.
+     * @param topMargin The top margin of the progress bar in px.
      */
-    public void prepareForAttach(int topMargin) {
-        LayoutParams curParams = new LayoutParams(getLayoutParams());
+    public void setTopMargin(int topMargin) {
         mMarginTop = topMargin;
-        curParams.topMargin = mMarginTop;
-        setLayoutParams(curParams);
+
+        assert getLayoutParams() != null;
+        ((ViewGroup.MarginLayoutParams) getLayoutParams()).topMargin = mMarginTop;
+    }
+
+    @Override
+    public void onAttachedToWindow() {
+        super.onAttachedToWindow();
+
+        ((ViewGroup.MarginLayoutParams) getLayoutParams()).topMargin = mMarginTop;
     }
 
     /**
-     * @param container This View's container.
+     * @param container The view containing the progress bar.
      */
-    public void setControlContainer(ViewGroup container) {
-        mControlContainer = container;
+    public void setProgressBarContainer(ViewGroup container) {
+        mProgressBarContainer = container;
     }
 
     @Override
@@ -220,12 +234,12 @@ public class ToolbarProgressBar extends ClipDrawableProgressBar {
             mAnimatingView = new ToolbarProgressBarAnimatingView(getContext(), animationParams);
 
             // The primary theme color may not have been set.
-            if (mThemeColor != 0) {
+            if (mThemeColor != 0 || mUseStatusBarColorAsBackground) {
                 setThemeColor(mThemeColor, false);
             } else {
                 setForegroundColor(getForegroundColor());
             }
-            UiUtils.insertAfter(mControlContainer, mAnimatingView, this);
+            UiUtils.insertAfter(mProgressBarContainer, mAnimatingView, this);
         } else if (TextUtils.equals(animation, "fast-start")) {
             mAnimationLogic = new ProgressAnimationFastStart();
         } else if (TextUtils.equals(animation, "linear")) {
@@ -389,10 +403,19 @@ public class ToolbarProgressBar extends ClipDrawableProgressBar {
      */
     public void setThemeColor(int color, boolean isIncognito) {
         mThemeColor = color;
+        boolean isDefaultTheme = ColorUtils.isUsingDefaultToolbarColor(getResources(), color);
+
+        // All colors use a single path if using the status bar color as the background.
+        if (mUseStatusBarColorAsBackground) {
+            if (isDefaultTheme) color = Color.BLACK;
+            setForegroundColor(
+                    ApiCompatibilityUtils.getColor(getResources(), R.color.white_alpha_70));
+            setBackgroundColor(ColorUtils.getDarkenedColorForStatusBar(color));
+            return;
+        }
 
         // The default toolbar has specific colors to use.
-        if ((ColorUtils.isUsingDefaultToolbarColor(getResources(), color)
-                || !ColorUtils.isValidThemeColor(color)) && !isIncognito) {
+        if ((isDefaultTheme || !ColorUtils.isValidThemeColor(color)) && !isIncognito) {
             setForegroundColor(ApiCompatibilityUtils.getColor(getResources(),
                     R.color.progress_bar_foreground));
             setBackgroundColor(ApiCompatibilityUtils.getColor(getResources(),

@@ -24,19 +24,6 @@ public interface FirstRunGlue {
     void acceptTermsOfService(boolean allowCrashUpload);
 
     /**
-     * @return Whether a given account name is the default (first) Android account name.
-     * @param appContext An application context.
-     * @param accountName An account name.
-     */
-    boolean isDefaultAccountName(Context appContext, String accountName);
-
-    /**
-     * @return Number of available accounts on the device.
-     * @param appContext An application context.
-     */
-    int numberOfAccounts(Context appContext);
-
-    /**
      * Opens the Android account adder UI.
      * @param fragment A fragment that requested the service.
      */

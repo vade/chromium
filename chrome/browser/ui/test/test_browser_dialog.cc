@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/message_loop/message_loop.h"
+#include "base/stl_util.h"
 #include "base/test/gtest_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/platform_util.h"
@@ -13,8 +14,13 @@
 #include "ui/base/test/material_design_controller_test_api.h"
 #include "ui/base/test/user_interactive_test_case.h"
 #include "ui/base/ui_base_switches.h"
+#include "ui/views/test/widget_test.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
+
+#if defined(OS_CHROMEOS)
+#include "ash/shell.h"  // nogncheck
+#endif
 
 namespace {
 
@@ -36,8 +42,8 @@ class WidgetCloser : public views::WidgetObserver {
       return;
 
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::Bind(&WidgetCloser::CloseNow, weak_ptr_factory_.GetWeakPtr()));
+        FROM_HERE, base::BindOnce(&WidgetCloser::CloseNow,
+                                  weak_ptr_factory_.GetWeakPtr()));
   }
 
   // WidgetObserver:
@@ -86,16 +92,33 @@ void TestBrowserDialog::RunDialog() {
   md_test_api.SetSecondaryUiMaterial(true);
 #endif
 
-  gfx::NativeView parent = platform_util::GetViewForWindow(DialogParent());
-  views::Widget::Widgets widgets_before;
-  views::Widget::GetAllChildWidgets(parent, &widgets_before);
+  views::Widget::Widgets widgets_before =
+      views::test::WidgetTest::GetAllWidgets();
+#if defined(OS_CHROMEOS)
+  // GetAllWidgets() uses AuraTestHelper to find the aura root window, but
+  // that's not used on browser_tests, so ask ash.
+  views::Widget::GetAllChildWidgets(ash::Shell::GetPrimaryRootWindow(),
+                                    &widgets_before);
+#endif  // OS_CHROMEOS
 
   ShowDialog(NameFromTestCase());
-  views::Widget::Widgets widgets_after;
-  views::Widget::GetAllChildWidgets(parent, &widgets_after);
+  views::Widget::Widgets widgets_after =
+      views::test::WidgetTest::GetAllWidgets();
+#if defined(OS_CHROMEOS)
+  views::Widget::GetAllChildWidgets(ash::Shell::GetPrimaryRootWindow(),
+                                    &widgets_after);
+#endif  // OS_CHROMEOS
 
   auto added = base::STLSetDifference<std::vector<views::Widget*>>(
       widgets_after, widgets_before);
+
+  if (added.size() > 1) {
+    // Some tests create a standalone window to anchor a dialog. In those cases,
+    // ignore added Widgets that are not dialogs.
+    base::EraseIf(added, [](views::Widget* widget) {
+      return !widget->widget_delegate()->AsDialogDelegate();
+    });
+  }
 
   // This can fail if no dialog was shown, if the dialog shown wasn't a toolkit-
   // views dialog, or if more than one child dialog was shown.

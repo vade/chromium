@@ -22,7 +22,7 @@
 namespace gl {
 
 namespace {
-base::LazyInstance<base::ThreadLocalPointer<GLSurface> >::Leaky
+base::LazyInstance<base::ThreadLocalPointer<GLSurface>>::Leaky
     current_surface_ = LAZY_INSTANCE_INITIALIZER;
 }  // namespace
 
@@ -52,7 +52,7 @@ bool GLSurface::DeferDraws() {
   return false;
 }
 
-bool GLSurface::SupportsSwapBuffersWithDamage() {
+bool GLSurface::SupportsSwapBuffersWithBounds() {
   return false;
 }
 
@@ -76,10 +76,8 @@ void GLSurface::SwapBuffersAsync(const SwapCompletionCallback& callback) {
   NOTREACHED();
 }
 
-gfx::SwapResult GLSurface::SwapBuffersWithDamage(int x,
-                                                 int y,
-                                                 int width,
-                                                 int height) {
+gfx::SwapResult GLSurface::SwapBuffersWithBounds(
+    const std::vector<gfx::Rect>& rects) {
   return gfx::SwapResult::SWAP_FAILED;
 }
 
@@ -135,11 +133,6 @@ unsigned long GLSurface::GetCompatibilityKey() {
   return 0;
 }
 
-GLSurfaceFormat GLSurface::GetFormat() {
-  NOTIMPLEMENTED();
-  return GLSurfaceFormat();
-}
-
 gfx::VSyncProvider* GLSurface::GetVSyncProvider() {
   return NULL;
 }
@@ -163,6 +156,16 @@ void GLSurface::ScheduleCALayerInUseQuery(
   NOTIMPLEMENTED();
 }
 
+bool GLSurface::ScheduleDCLayer(const ui::DCRendererLayerParams& params) {
+  NOTIMPLEMENTED();
+  return false;
+}
+
+bool GLSurface::SetEnableDCLayers(bool enable) {
+  NOTIMPLEMENTED();
+  return false;
+}
+
 bool GLSurface::IsSurfaceless() const {
   return false;
 }
@@ -173,6 +176,22 @@ bool GLSurface::FlipsVertically() const {
 
 bool GLSurface::BuffersFlipped() const {
   return false;
+}
+
+bool GLSurface::SupportsDCLayers() const {
+  return false;
+}
+
+bool GLSurface::SetDrawRectangle(const gfx::Rect& rect) {
+  return false;
+}
+
+gfx::Vector2d GLSurface::GetDrawOffset() const {
+  return gfx::Vector2d();
+}
+
+void GLSurface::WaitForSnapshotRendering() {
+  // By default, just executing the SwapBuffers is normally enough.
 }
 
 GLSurface* GLSurface::GetCurrent() {
@@ -199,9 +218,6 @@ bool GLSurface::ExtensionsContain(const char* c_extensions, const char* name) {
   delimited_name += " ";
 
   return extensions.find(delimited_name) != std::string::npos;
-}
-
-void GLSurface::OnSetSwapInterval(int interval) {
 }
 
 GLSurfaceAdapter::GLSurfaceAdapter(GLSurface* surface) : surface_(surface) {}
@@ -241,11 +257,9 @@ void GLSurfaceAdapter::SwapBuffersAsync(
   surface_->SwapBuffersAsync(callback);
 }
 
-gfx::SwapResult GLSurfaceAdapter::SwapBuffersWithDamage(int x,
-                                                        int y,
-                                                        int width,
-                                                        int height) {
-  return surface_->SwapBuffersWithDamage(x, y, width, height);
+gfx::SwapResult GLSurfaceAdapter::SwapBuffersWithBounds(
+    const std::vector<gfx::Rect>& rects) {
+  return surface_->SwapBuffersWithBounds(rects);
 }
 
 gfx::SwapResult GLSurfaceAdapter::PostSubBuffer(int x,
@@ -273,8 +287,8 @@ void GLSurfaceAdapter::CommitOverlayPlanesAsync(
   surface_->CommitOverlayPlanesAsync(callback);
 }
 
-bool GLSurfaceAdapter::SupportsSwapBuffersWithDamage() {
-  return surface_->SupportsSwapBuffersWithDamage();
+bool GLSurfaceAdapter::SupportsSwapBuffersWithBounds() {
+  return surface_->SupportsSwapBuffersWithBounds();
 }
 
 bool GLSurfaceAdapter::SupportsPostSubBuffer() {
@@ -346,6 +360,15 @@ bool GLSurfaceAdapter::ScheduleOverlayPlane(int z_order,
       z_order, transform, image, bounds_rect, crop_rect);
 }
 
+bool GLSurfaceAdapter::ScheduleDCLayer(
+    const ui::DCRendererLayerParams& params) {
+  return surface_->ScheduleDCLayer(params);
+}
+
+bool GLSurfaceAdapter::SetEnableDCLayers(bool enable) {
+  return surface_->SetEnableDCLayers(enable);
+}
+
 bool GLSurfaceAdapter::IsSurfaceless() const {
   return surface_->IsSurfaceless();
 }
@@ -356,6 +379,22 @@ bool GLSurfaceAdapter::FlipsVertically() const {
 
 bool GLSurfaceAdapter::BuffersFlipped() const {
   return surface_->BuffersFlipped();
+}
+
+bool GLSurfaceAdapter::SupportsDCLayers() const {
+  return surface_->SupportsDCLayers();
+}
+
+bool GLSurfaceAdapter::SetDrawRectangle(const gfx::Rect& rect) {
+  return surface_->SetDrawRectangle(rect);
+}
+
+gfx::Vector2d GLSurfaceAdapter::GetDrawOffset() const {
+  return surface_->GetDrawOffset();
+}
+
+void GLSurfaceAdapter::WaitForSnapshotRendering() {
+  surface_->WaitForSnapshotRendering();
 }
 
 GLSurfaceAdapter::~GLSurfaceAdapter() {}

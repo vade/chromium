@@ -6,7 +6,6 @@
 #define MEDIA_BASE_AUDIO_BLOCK_FIFO_H_
 
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "media/base/audio_bus.h"
 #include "media/base/media_export.h"
 
@@ -29,6 +28,9 @@ class MEDIA_EXPORT AudioBlockFifo {
   // Push() will crash if the allocated space is insufficient.
   void Push(const void* source, int frames, int bytes_per_sample);
 
+  // Pushes zeroed out frames to the FIFO.
+  void PushSilence(int frames);
+
   // Consumes a block of audio from the FIFO.  Returns an AudioBus which
   // contains the consumed audio data to avoid copying.
   // Consume() will crash if the FIFO does not contain a block of data.
@@ -50,8 +52,13 @@ class MEDIA_EXPORT AudioBlockFifo {
   void IncreaseCapacity(int blocks);
 
  private:
+  // Common implementation for Push() and PushSilence.  if |source| is nullptr,
+  // silence will be pushed. To push silence, set source and bytes_per_sample to
+  // nullptr and 0 respectively.
+  void PushInternal(const void* source, int frames, int bytes_per_sample);
+
   // The actual FIFO is a vector of audio buses.
-  ScopedVector<AudioBus> audio_blocks_;
+  std::vector<std::unique_ptr<AudioBus>> audio_blocks_;
 
   // Number of channels in AudioBus.
   const int channels_;

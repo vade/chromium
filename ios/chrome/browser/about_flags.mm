@@ -26,22 +26,21 @@
 #include "components/flags_ui/flags_storage.h"
 #include "components/flags_ui/flags_ui_switches.h"
 #include "components/ntp_tiles/switches.h"
-#include "components/reading_list/core/reading_list_switches.h"
+#include "components/signin/core/common/signin_switches.h"
 #include "components/strings/grit/components_strings.h"
-#include "components/sync/driver/sync_driver_switches.h"
-#include "google_apis/gaia/gaia_switches.h"
 #include "ios/chrome/browser/chrome_switches.h"
-#include "ios/chrome/browser/google_api_keys.h"
+#include "ios/chrome/browser/ios_chrome_flag_descriptions.h"
 #include "ios/chrome/grit/ios_strings.h"
+#include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #include "ios/web/public/user_agent.h"
 #include "ios/web/public/web_view_creation_util.h"
 
 #if !defined(OFFICIAL_BUILD)
 #include "components/variations/variations_switches.h"
+#endif
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
-#endif
 #endif
 
 namespace {
@@ -57,16 +56,16 @@ namespace {
 //
 // When adding a new choice, add it to the end of the list.
 const flags_ui::FeatureEntry kFeatureEntries[] = {
-    {"contextual-search", IDS_IOS_FLAGS_CONTEXTUAL_SEARCH,
-     IDS_IOS_FLAGS_CONTEXTUAL_SEARCH_DESCRIPTION, flags_ui::kOsIos,
+    {"contextual-search", flag_descriptions::kContextualSearch,
+     flag_descriptions::kContextualSearchDescription, flags_ui::kOsIos,
      ENABLE_DISABLE_VALUE_TYPE(switches::kEnableContextualSearch,
                                switches::kDisableContextualSearch)},
-    {"ios-physical-web", IDS_IOS_FLAGS_PHYSICAL_WEB,
-     IDS_IOS_FLAGS_PHYSICAL_WEB_DESCRIPTION, flags_ui::kOsIos,
+    {"ios-physical-web", flag_descriptions::kPhysicalWeb,
+     flag_descriptions::kPhysicalWebDescription, flags_ui::kOsIos,
      ENABLE_DISABLE_VALUE_TYPE(switches::kEnableIOSPhysicalWeb,
                                switches::kDisableIOSPhysicalWeb)},
-    {"browser-task-scheduler", IDS_IOS_FLAGS_BROWSER_TASK_SCHEDULER_NAME,
-     IDS_IOS_FLAGS_BROWSER_TASK_SCHEDULER_DESCRIPTION, flags_ui::kOsIos,
+    {"browser-task-scheduler", flag_descriptions::kBrowserTaskScheduler,
+     flag_descriptions::kBrowserTaskSchedulerDescription, flags_ui::kOsIos,
      ENABLE_DISABLE_VALUE_TYPE(switches::kEnableBrowserTaskScheduler,
                                switches::kDisableBrowserTaskScheduler)},
 };
@@ -75,42 +74,10 @@ const flags_ui::FeatureEntry kFeatureEntries[] = {
 void AppendSwitchesFromExperimentalSettings(base::CommandLine* command_line) {
   NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
 
-  // GAIA staging environment.
-  NSString* kGAIAEnvironment = @"GAIAEnvironment";
-  NSString* gaia_environment = [defaults stringForKey:kGAIAEnvironment];
-  if ([gaia_environment isEqualToString:@"Staging"]) {
-    command_line->AppendSwitchASCII(switches::kGoogleApisUrl,
-                                    BUILDFLAG(GOOGLE_STAGING_API_URL));
-    command_line->AppendSwitchASCII(switches::kLsoUrl,
-                                    BUILDFLAG(GOOGLE_STAGING_LSO_URL));
-  } else if ([gaia_environment isEqualToString:@"Test"]) {
-    command_line->AppendSwitchASCII(switches::kGaiaUrl,
-                                    BUILDFLAG(GOOGLE_TEST_OAUTH_URL));
-    command_line->AppendSwitchASCII(switches::kGoogleApisUrl,
-                                    BUILDFLAG(GOOGLE_TEST_API_URL));
-    command_line->AppendSwitchASCII(switches::kLsoUrl,
-                                    BUILDFLAG(GOOGLE_TEST_LSO_URL));
-    command_line->AppendSwitchASCII(switches::kSyncServiceURL,
-                                    BUILDFLAG(GOOGLE_TEST_SYNC_URL));
-    command_line->AppendSwitchASCII(switches::kOAuth2ClientID,
-                                    BUILDFLAG(GOOGLE_TEST_OAUTH_CLIENT_ID));
-    command_line->AppendSwitchASCII(switches::kOAuth2ClientSecret,
-                                    BUILDFLAG(GOOGLE_TEST_OAUTH_CLIENT_SECRET));
-  }
-
   // Populate command line flag for the tab strip auto scroll new tabs
   // experiment from the configuration plist.
   if ([defaults boolForKey:@"TabStripAutoScrollNewTabsDisabled"])
     command_line->AppendSwitch(switches::kDisableTabStripAutoScrollNewTabs);
-
-  // Populate command line flag for the Tab Switcher experiment from the
-  // configuration plist.
-  NSString* enableTabSwitcher = [defaults stringForKey:@"EnableTabSwitcher"];
-  if ([enableTabSwitcher isEqualToString:@"Enabled"]) {
-    command_line->AppendSwitch(switches::kEnableTabSwitcher);
-  } else if ([enableTabSwitcher isEqualToString:@"Disabled"]) {
-    command_line->AppendSwitch(switches::kDisableTabSwitcher);
-  }
 
   // Populate command line flag for the SnapshotLRUCache experiment from the
   // configuration plist.
@@ -120,15 +87,6 @@ void AppendSwitchesFromExperimentalSettings(base::CommandLine* command_line) {
     command_line->AppendSwitch(switches::kEnableLRUSnapshotCache);
   } else if ([enableLRUSnapshotCache isEqualToString:@"Disabled"]) {
     command_line->AppendSwitch(switches::kDisableLRUSnapshotCache);
-  }
-
-  // Populate command line flag for the AllBookmarks from the
-  // configuration plist.
-  NSString* enableAllBookmarks = [defaults stringForKey:@"AllBookmarks"];
-  if ([enableAllBookmarks isEqualToString:@"Enabled"]) {
-    command_line->AppendSwitch(switches::kEnableAllBookmarksView);
-  } else if ([enableAllBookmarks isEqualToString:@"Disabled"]) {
-    command_line->AppendSwitch(switches::kDisableAllBookmarksView);
   }
 
   // Populate command line flags from PasswordGenerationEnabled.
@@ -162,9 +120,6 @@ void AppendSwitchesFromExperimentalSettings(base::CommandLine* command_line) {
         switches::kIOSHostResolverRules,
         "MAP * " + base::SysNSStringToUTF8(webPageReplayProxy));
   }
-
-  if ([defaults boolForKey:@"EnableCredentialManagement"])
-    command_line->AppendSwitch(switches::kEnableCredentialManagerAPI);
 
   NSString* autoReloadEnabledValue =
       [defaults stringForKey:@"AutoReloadEnabled"];
@@ -227,13 +182,6 @@ void AppendSwitchesFromExperimentalSettings(base::CommandLine* command_line) {
                                     web::BuildUserAgentFromProduct(product));
   }
 
-  // Populate command line flags from QRScanner.
-  if ([defaults boolForKey:@"DisableQRCodeReader"]) {
-    command_line->AppendSwitch(switches::kDisableQRScanner);
-  } else {
-    command_line->AppendSwitch(switches::kEnableQRScanner);
-  }
-
   // Populate command line flag for the Payment Request API.
   NSString* enable_payment_request =
       [defaults stringForKey:@"EnablePaymentRequest"];
@@ -243,27 +191,23 @@ void AppendSwitchesFromExperimentalSettings(base::CommandLine* command_line) {
     command_line->AppendSwitch(switches::kDisablePaymentRequest);
   }
 
-  // Populate command line flag for Spotlight Actions.
-  if ([defaults boolForKey:@"DisableSpotlightActions"]) {
-    command_line->AppendSwitch(switches::kDisableSpotlightActions);
-  }
-
-  // Populate command line flag for the Rename "Save Image" to "Download Image"
-  // experiment.
-  NSString* enableDownloadRenaming =
-      [defaults stringForKey:@"EnableDownloadRenaming"];
-  if ([enableDownloadRenaming isEqualToString:@"Enabled"]) {
-    command_line->AppendSwitch(switches::kEnableDownloadImageRenaming);
-  } else if ([enableDownloadRenaming isEqualToString:@"Disabled"]) {
-    command_line->AppendSwitch(switches::kDisableDownloadImageRenaming);
-  }
-
   // Populate command line flag for Suggestions UI display.
   NSString* enableSuggestions = [defaults stringForKey:@"EnableSuggestions"];
   if ([enableSuggestions isEqualToString:@"Enabled"]) {
     command_line->AppendSwitch(switches::kEnableSuggestionsUI);
   } else if ([enableSuggestions isEqualToString:@"Disabled"]) {
     command_line->AppendSwitch(switches::kDisableSuggestionsUI);
+  }
+
+  // Populate command line flag for fetching missing favicons for NTP tiles.
+  NSString* enableMostLikelyFaviconsFromServer =
+      [defaults stringForKey:@"EnableNtpMostLikelyFaviconsFromServer"];
+  if ([enableMostLikelyFaviconsFromServer isEqualToString:@"Enabled"]) {
+    command_line->AppendSwitch(
+        ntp_tiles::switches::kEnableNtpMostLikelyFaviconsFromServer);
+  } else if ([enableMostLikelyFaviconsFromServer isEqualToString:@"Disabled"]) {
+    command_line->AppendSwitch(
+        ntp_tiles::switches::kDisableNtpMostLikelyFaviconsFromServer);
   }
 
   // Freeform commandline flags.  These are added last, so that any flags added
@@ -288,6 +232,17 @@ void AppendSwitchesFromExperimentalSettings(base::CommandLine* command_line) {
     base::CommandLine temp_command_line(flags);
     command_line->AppendArguments(temp_command_line, false);
   }
+
+  // Populate command line flag for Sign-in promo.
+  NSString* enableSigninPromo = [defaults stringForKey:@"EnableSigninPromo"];
+  if ([enableSigninPromo isEqualToString:@"Enabled"]) {
+    command_line->AppendSwitch(switches::kEnableSigninPromo);
+  } else if ([enableSigninPromo isEqualToString:@"Disabled"]) {
+    command_line->AppendSwitch(switches::kDisableSigninPromo);
+  }
+
+  ios::GetChromeBrowserProvider()->AppendSwitchesFromExperimentalSettings(
+      defaults, command_line);
 }
 
 bool SkipConditionalFeatureEntry(const flags_ui::FeatureEntry& entry) {

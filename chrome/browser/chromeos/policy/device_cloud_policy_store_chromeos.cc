@@ -45,6 +45,10 @@ DeviceCloudPolicyStoreChromeOS::~DeviceCloudPolicyStoreChromeOS() {
 
 void DeviceCloudPolicyStoreChromeOS::Store(
     const em::PolicyFetchResponse& policy) {
+  // The policy and the public key must have already been loaded by the device
+  // settings service.
+  DCHECK(is_initialized());
+
   // Cancel all pending requests.
   weak_factory_.InvalidateWeakPtrs();
 
@@ -64,10 +68,11 @@ void DeviceCloudPolicyStoreChromeOS::Store(
       public_key->as_string(), install_attributes_->GetDomain());
   validator->ValidateAgainstCurrentPolicy(
       device_settings_service_->policy_data(),
-      CloudPolicyValidatorBase::TIMESTAMP_FULLY_VALIDATED,
+      CloudPolicyValidatorBase::TIMESTAMP_VALIDATED,
       CloudPolicyValidatorBase::DM_TOKEN_REQUIRED,
       CloudPolicyValidatorBase::DEVICE_ID_REQUIRED);
-  validator.release()->StartValidation(
+  DeviceCloudPolicyValidator::StartValidation(
+      std::move(validator),
       base::Bind(&DeviceCloudPolicyStoreChromeOS::OnPolicyToStoreValidated,
                  weak_factory_.GetWeakPtr()));
 }
@@ -90,7 +95,8 @@ void DeviceCloudPolicyStoreChromeOS::InstallInitialPolicy(
   std::unique_ptr<DeviceCloudPolicyValidator> validator(
       CreateValidator(policy));
   validator->ValidateInitialKey(install_attributes_->GetDomain());
-  validator.release()->StartValidation(
+  DeviceCloudPolicyValidator::StartValidation(
+      std::move(validator),
       base::Bind(&DeviceCloudPolicyStoreChromeOS::OnPolicyToStoreValidated,
                  weak_factory_.GetWeakPtr()));
 }
@@ -109,8 +115,7 @@ DeviceCloudPolicyStoreChromeOS::CreateValidator(
     const em::PolicyFetchResponse& policy) {
   std::unique_ptr<DeviceCloudPolicyValidator> validator(
       DeviceCloudPolicyValidator::Create(
-          std::unique_ptr<em::PolicyFetchResponse>(
-              new em::PolicyFetchResponse(policy)),
+          base::MakeUnique<em::PolicyFetchResponse>(policy),
           background_task_runner_));
   validator->ValidateDomain(install_attributes_->GetDomain());
   validator->ValidatePolicyType(dm_protocol::kChromeDevicePolicyType);

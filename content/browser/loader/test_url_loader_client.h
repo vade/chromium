@@ -15,7 +15,7 @@
 #include "content/common/url_loader_factory.mojom.h"
 #include "content/public/common/resource_response.h"
 #include "mojo/public/c/system/data_pipe.h"
-#include "mojo/public/cpp/bindings/associated_binding.h"
+#include "mojo/public/cpp/bindings/binding.h"
 #include "net/url_request/redirect_info.h"
 
 namespace content {
@@ -29,9 +29,9 @@ class TestURLLoaderClient final : public mojom::URLLoaderClient {
   TestURLLoaderClient();
   ~TestURLLoaderClient() override;
 
-  void OnReceiveResponse(
-      const ResourceResponseHead& response_head,
-      mojom::DownloadedTempFileAssociatedPtrInfo downloaded_file) override;
+  void OnReceiveResponse(const ResourceResponseHead& response_head,
+                         const base::Optional<net::SSLInfo>& ssl_info,
+                         mojom::DownloadedTempFilePtr downloaded_file) override;
   void OnReceiveRedirect(const net::RedirectInfo& redirect_info,
                          const ResourceResponseHead& response_head) override;
   void OnDataDownloaded(int64_t data_length, int64_t encoded_length) override;
@@ -39,7 +39,7 @@ class TestURLLoaderClient final : public mojom::URLLoaderClient {
   void OnTransferSizeUpdated(int32_t transfer_size_diff) override;
   void OnUploadProgress(int64_t current_position,
                         int64_t total_size,
-                        const base::Closure& ack_callback) override;
+                        OnUploadProgressCallback ack_callback) override;
   void OnStartLoadingResponseBody(
       mojo::ScopedDataPipeConsumerHandle body) override;
   void OnComplete(const ResourceRequestCompletionStatus& status) override;
@@ -55,6 +55,7 @@ class TestURLLoaderClient final : public mojom::URLLoaderClient {
   }
   bool has_received_completion() const { return has_received_completion_; }
   const ResourceResponseHead& response_head() const { return response_head_; }
+  const base::Optional<net::SSLInfo>& ssl_info() const { return ssl_info_; }
   const net::RedirectInfo& redirect_info() const { return redirect_info_; }
   const std::string& cached_metadata() const {
     return cached_metadata_;
@@ -76,11 +77,8 @@ class TestURLLoaderClient final : public mojom::URLLoaderClient {
   }
 
   void ClearHasReceivedRedirect();
-  // Creates an AssociatedPtrInfo, binds it to |*this| and returns it. The
-  // returned PtrInfo is marked as remote, i.e., expected to be passed to the
-  // remote endpoint.
-  mojom::URLLoaderClientAssociatedPtrInfo CreateRemoteAssociatedPtrInfo(
-      mojo::AssociatedGroup* associated_group);
+  // Creates an InterfacePtr, binds it to |*this| and returns it.
+  mojom::URLLoaderClientPtr CreateInterfacePtr();
 
   void Unbind();
 
@@ -92,8 +90,9 @@ class TestURLLoaderClient final : public mojom::URLLoaderClient {
   void RunUntilComplete();
 
  private:
-  mojo::AssociatedBinding<mojom::URLLoaderClient> binding_;
+  mojo::Binding<mojom::URLLoaderClient> binding_;
   ResourceResponseHead response_head_;
+  base::Optional<net::SSLInfo> ssl_info_;
   net::RedirectInfo redirect_info_;
   std::string cached_metadata_;
   mojo::ScopedDataPipeConsumerHandle response_body_;

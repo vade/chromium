@@ -11,7 +11,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread_checker.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/output/context_provider.h"
 #include "cc/output/overlay_candidate_validator.h"
 #include "cc/output/software_output_device.h"
@@ -82,6 +82,11 @@ class CC_EXPORT OutputSurface {
   // Bind the default framebuffer for drawing to, only valid for GL backed
   // OutputSurfaces.
   virtual void BindFramebuffer() = 0;
+
+  // Marks that the given rectangle will be drawn to on the default, bound
+  // framebuffer. Only valid for surfaces with dc_layers in the context
+  // capabilities.
+  virtual void SetDrawRectangle(const gfx::Rect& rect) = 0;
 
   // Get the class capable of informing cc of hardware overlay capability.
   virtual OverlayCandidateValidator* GetOverlayCandidateValidator() const = 0;

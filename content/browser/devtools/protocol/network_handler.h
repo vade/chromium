@@ -5,15 +5,23 @@
 #ifndef CONTENT_BROWSER_DEVTOOLS_PROTOCOL_NETWORK_HANDLER_H_
 #define CONTENT_BROWSER_DEVTOOLS_PROTOCOL_NETWORK_HANDLER_H_
 
+#include <memory>
+
 #include "base/macros.h"
 #include "content/browser/devtools/protocol/devtools_domain_handler.h"
 #include "content/browser/devtools/protocol/network.h"
+#include "net/base/net_errors.h"
 #include "net/cookies/canonical_cookie.h"
 
 namespace content {
 
-class DevToolsSession;
+class DevToolsAgentHostImpl;
 class RenderFrameHostImpl;
+struct BeginNavigationParams;
+struct CommonNavigationParams;
+struct ResourceRequest;
+struct ResourceRequestCompletionStatus;
+struct ResourceResponseHead;
 
 namespace protocol {
 
@@ -23,7 +31,7 @@ class NetworkHandler : public DevToolsDomainHandler,
   NetworkHandler();
   ~NetworkHandler() override;
 
-  static NetworkHandler* FromSession(DevToolsSession* session);
+  static std::vector<NetworkHandler*> ForAgentHost(DevToolsAgentHostImpl* host);
 
   void Wire(UberDispatcher* dispatcher) override;
   void SetRenderFrameHost(RenderFrameHostImpl* host) override;
@@ -33,7 +41,8 @@ class NetworkHandler : public DevToolsDomainHandler,
   Response Disable() override;
 
   Response ClearBrowserCache() override;
-  Response ClearBrowserCookies() override;
+  void ClearBrowserCookies(
+      std::unique_ptr<ClearBrowserCookiesCallback> callback) override;
 
   void GetCookies(Maybe<protocol::Array<String>> urls,
                   std::unique_ptr<GetCookiesCallback> callback) override;
@@ -56,10 +65,25 @@ class NetworkHandler : public DevToolsDomainHandler,
   Response SetUserAgentOverride(const std::string& user_agent) override;
   Response CanEmulateNetworkConditions(bool* result) override;
 
+  void NavigationPreloadRequestSent(int worker_version_id,
+                                    const std::string& request_id,
+                                    const ResourceRequest& request);
+  void NavigationPreloadResponseReceived(int worker_version_id,
+                                         const std::string& request_id,
+                                         const GURL& url,
+                                         const ResourceResponseHead& head);
+  void NavigationPreloadCompleted(
+      const std::string& request_id,
+      const ResourceRequestCompletionStatus& completion_status);
+  void NavigationFailed(const CommonNavigationParams& common_params,
+                        const BeginNavigationParams& begin_params,
+                        net::Error error_code);
+
   bool enabled() const { return enabled_; }
   std::string UserAgentOverride() const;
 
  private:
+  std::unique_ptr<Network::Frontend> frontend_;
   RenderFrameHostImpl* host_;
   bool enabled_;
   std::string user_agent_;

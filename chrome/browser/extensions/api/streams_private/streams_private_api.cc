@@ -37,9 +37,8 @@ void CreateResponseHeadersDictionary(const net::HttpResponseHeaders* headers,
   while (headers->EnumerateHeaderLines(&iter, &header_name, &header_value)) {
     base::Value* existing_value = NULL;
     if (result->Get(header_name, &existing_value)) {
-      base::StringValue* existing_string_value =
-          static_cast<base::StringValue*>(existing_value);
-      existing_string_value->GetString()->append(", ").append(header_value);
+      *existing_value =
+          base::Value(existing_value->GetString() + ", " + header_value);
     } else {
       result->SetString(header_name, header_value);
     }
@@ -161,7 +160,7 @@ void StreamsPrivateAPI::AbortStream(const std::string& extension_id,
 void StreamsPrivateAPI::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const Extension* extension,
-    UnloadedExtensionInfo::Reason reason) {
+    UnloadedExtensionReason reason) {
   streams_.erase(extension->id());
 }
 
@@ -182,8 +181,8 @@ void StreamsPrivateAbortFunction::OnClose() {
   Respond(NoArguments());
 }
 
-static base::LazyInstance<BrowserContextKeyedAPIFactory<StreamsPrivateAPI> >
-    g_factory = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<BrowserContextKeyedAPIFactory<StreamsPrivateAPI>>::
+    DestructorAtExit g_factory = LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<StreamsPrivateAPI>*

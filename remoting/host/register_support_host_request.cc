@@ -11,12 +11,15 @@
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/stringize_macros.h"
 #include "base/time/time.h"
 #include "remoting/base/constants.h"
 #include "remoting/host/host_config.h"
+#include "remoting/host/host_details.h"
 #include "remoting/signaling/iq_sender.h"
 #include "remoting/signaling/jid_util.h"
 #include "remoting/signaling/signal_strategy.h"
+#include "remoting/signaling/signaling_address.h"
 #include "third_party/libjingle_xmpp/xmllite/xmlelement.h"
 #include "third_party/libjingle_xmpp/xmpp/constants.h"
 
@@ -31,6 +34,9 @@ const char kRegisterQueryTag[] = "register-support-host";
 const char kPublicKeyTag[] = "public-key";
 const char kSignatureTag[] = "signature";
 const char kSignatureTimeAttr[] = "time";
+const char kHostVersionTag[] = "host-version";
+const char kHostOsNameTag[] = "host-os-name";
+const char kHostOsVersionTag[] = "host-os-version";
 
 // Strings used to parse responses received from the bot.
 const char kRegisterQueryResultTag[] = "register-support-host-result";
@@ -65,7 +71,7 @@ void RegisterSupportHostRequest::OnSignalStrategyStateChange(
 
     request_ = iq_sender_->SendIq(
         buzz::STR_SET, directory_bot_jid_,
-        CreateRegistrationRequest(signal_strategy_->GetLocalJid()),
+        CreateRegistrationRequest(signal_strategy_->GetLocalAddress().jid()),
         base::Bind(&RegisterSupportHostRequest::ProcessResponse,
                    base::Unretained(this)));
   } else if (state == SignalStrategy::DISCONNECTED) {
@@ -83,13 +89,34 @@ bool RegisterSupportHostRequest::OnSignalStrategyIncomingStanza(
 
 std::unique_ptr<XmlElement>
 RegisterSupportHostRequest::CreateRegistrationRequest(const std::string& jid) {
-  std::unique_ptr<XmlElement> query(
-      new XmlElement(QName(kChromotingXmlNamespace, kRegisterQueryTag)));
-  XmlElement* public_key = new XmlElement(
+  auto query = base::MakeUnique<XmlElement>(
+      QName(kChromotingXmlNamespace, kRegisterQueryTag));
+
+  auto public_key = base::MakeUnique<XmlElement>(
       QName(kChromotingXmlNamespace, kPublicKeyTag));
   public_key->AddText(key_pair_->GetPublicKey());
-  query->AddElement(public_key);
+  query->AddElement(public_key.release());
+
   query->AddElement(CreateSignature(jid).release());
+
+  // Add host version.
+  auto host_version = base::MakeUnique<XmlElement>(
+      QName(kChromotingXmlNamespace, kHostVersionTag));
+  host_version->AddText(STRINGIZE(VERSION));
+  query->AddElement(host_version.release());
+
+  // Add host os name.
+  auto host_os_name = base::MakeUnique<XmlElement>(
+      QName(kChromotingXmlNamespace, kHostOsNameTag));
+  host_os_name->AddText(GetHostOperatingSystemName());
+  query->AddElement(host_os_name.release());
+
+  // Add host os version.
+  auto host_os_version = base::MakeUnique<XmlElement>(
+      QName(kChromotingXmlNamespace, kHostOsVersionTag));
+  host_os_version->AddText(GetHostOperatingSystemVersion());
+  query->AddElement(host_os_version.release());
+
   return query;
 }
 
@@ -167,7 +194,7 @@ void RegisterSupportHostRequest::ParseResponse(const XmlElement* response,
   }
 
   int lifetime_int;
-  if (!base::StringToInt(lifetime_element->BodyText().c_str(), &lifetime_int) ||
+  if (!base::StringToInt(lifetime_element->BodyText(), &lifetime_int) ||
       lifetime_int <= 0) {
     error << "<" << kSupportIdLifetimeTag
           << "> is malformed in the host registration response: "

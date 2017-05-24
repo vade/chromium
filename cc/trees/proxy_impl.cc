@@ -4,16 +4,20 @@
 
 #include "cc/trees/proxy_impl.h"
 
+#include <string.h>
+
 #include <algorithm>
 #include <string>
 
 #include "base/auto_reset.h"
+#include "base/debug/alias.h"
+#include "base/debug/dump_without_crashing.h"
 #include "base/memory/ptr_util.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
 #include "base/trace_event/trace_event_synthetic_delay.h"
-#include "cc/debug/benchmark_instrumentation.h"
-#include "cc/debug/devtools_instrumentation.h"
+#include "cc/base/devtools_instrumentation.h"
+#include "cc/benchmarks/benchmark_instrumentation.h"
 #include "cc/input/browser_controls_offset_manager.h"
 #include "cc/output/compositor_frame_sink.h"
 #include "cc/output/context_provider.h"
@@ -122,15 +126,18 @@ void ProxyImpl::UpdateBrowserControlsStateOnImpl(
 }
 
 void ProxyImpl::InitializeCompositorFrameSinkOnImpl(
-    CompositorFrameSink* compositor_frame_sink) {
+    CompositorFrameSink* compositor_frame_sink,
+    base::WeakPtr<ProxyMain> proxy_main_frame_sink_bound_weak_ptr) {
   TRACE_EVENT0("cc", "ProxyImpl::InitializeCompositorFrameSinkOnImplThread");
   DCHECK(IsImplThread());
+
+  proxy_main_frame_sink_bound_weak_ptr_ = proxy_main_frame_sink_bound_weak_ptr;
 
   LayerTreeHostImpl* host_impl = layer_tree_host_impl_.get();
   bool success = host_impl->InitializeRenderer(compositor_frame_sink);
   MainThreadTaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&ProxyMain::DidInitializeCompositorFrameSink,
-                            proxy_main_weak_ptr_, success));
+      FROM_HERE, base::BindOnce(&ProxyMain::DidInitializeCompositorFrameSink,
+                                proxy_main_weak_ptr_, success));
   if (success)
     scheduler_->DidCreateAndInitializeCompositorFrameSink();
 }
@@ -223,6 +230,35 @@ void ProxyImpl::MainFrameWillHappenOnImplForTesting(
   completion->Signal();
 }
 
+// TODO(sunnyps): Remove this code once crbug.com/668892 is fixed.
+NOINLINE void ProxyImpl::DumpForBeginMainFrameHang() {
+  DCHECK(IsImplThread());
+  DCHECK(scheduler_);
+
+  auto state = base::MakeUnique<base::trace_event::TracedValue>();
+
+  state->SetBoolean("commit_completion_waits_for_activation",
+                    commit_completion_waits_for_activation_);
+  state->SetBoolean("commit_completion_event", !!commit_completion_event_);
+  state->SetBoolean("activation_completion_event",
+                    !!activation_completion_event_);
+
+  state->BeginDictionary("scheduler_state");
+  scheduler_->AsValueInto(state.get());
+  state->EndDictionary();
+
+  state->BeginDictionary("tile_manager_state");
+  layer_tree_host_impl_->tile_manager()->ActivationStateAsValueInto(
+      state.get());
+  state->EndDictionary();
+
+  char stack_string[50000] = "";
+  base::debug::Alias(&stack_string);
+  strncpy(stack_string, state->ToString().c_str(), arraysize(stack_string) - 1);
+
+  base::debug::DumpWithoutCrashing();
+}
+
 void ProxyImpl::NotifyReadyToCommitOnImpl(
     CompletionEvent* completion,
     LayerTreeHost* layer_tree_host,
@@ -259,8 +295,8 @@ void ProxyImpl::DidLoseCompositorFrameSinkOnImplThread() {
   TRACE_EVENT0("cc", "ProxyImpl::DidLoseCompositorFrameSinkOnImplThread");
   DCHECK(IsImplThread());
   MainThreadTaskRunner()->PostTask(
-      FROM_HERE,
-      base::Bind(&ProxyMain::DidLoseCompositorFrameSink, proxy_main_weak_ptr_));
+      FROM_HERE, base::BindOnce(&ProxyMain::DidLoseCompositorFrameSink,
+                                proxy_main_weak_ptr_));
   scheduler_->DidLoseCompositorFrameSink();
 }
 
@@ -280,8 +316,8 @@ void ProxyImpl::DidReceiveCompositorFrameAckOnImplThread() {
   DCHECK(IsImplThread());
   scheduler_->DidReceiveCompositorFrameAck();
   MainThreadTaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&ProxyMain::DidReceiveCompositorFrameAck,
-                            proxy_main_weak_ptr_));
+      FROM_HERE, base::BindOnce(&ProxyMain::DidReceiveCompositorFrameAck,
+                                proxy_main_frame_sink_bound_weak_ptr_));
 }
 
 void ProxyImpl::OnCanDrawStateChanged(bool can_draw) {
@@ -339,8 +375,8 @@ void ProxyImpl::PostAnimationEventsToMainThreadOnImplThread(
   TRACE_EVENT0("cc", "ProxyImpl::PostAnimationEventsToMainThreadOnImplThread");
   DCHECK(IsImplThread());
   MainThreadTaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&ProxyMain::SetAnimationEvents,
-                            proxy_main_weak_ptr_, base::Passed(&events)));
+      FROM_HERE, base::BindOnce(&ProxyMain::SetAnimationEvents,
+                                proxy_main_weak_ptr_, base::Passed(&events)));
 }
 
 bool ProxyImpl::IsInsideDraw() {
@@ -423,13 +459,18 @@ void ProxyImpl::DidPrepareTiles() {
 void ProxyImpl::DidCompletePageScaleAnimationOnImplThread() {
   DCHECK(IsImplThread());
   MainThreadTaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&ProxyMain::DidCompletePageScaleAnimation,
-                            proxy_main_weak_ptr_));
+      FROM_HERE, base::BindOnce(&ProxyMain::DidCompletePageScaleAnimation,
+                                proxy_main_weak_ptr_));
 }
 
 void ProxyImpl::OnDrawForCompositorFrameSink(bool resourceless_software_draw) {
   DCHECK(IsImplThread());
   scheduler_->OnDrawForCompositorFrameSink(resourceless_software_draw);
+}
+
+void ProxyImpl::NeedsImplSideInvalidation() {
+  DCHECK(IsImplThread());
+  scheduler_->SetNeedsImplSideInvalidation();
 }
 
 void ProxyImpl::WillBeginImplFrame(const BeginFrameArgs& args) {
@@ -457,9 +498,13 @@ void ProxyImpl::ScheduledActionSendBeginMainFrame(const BeginFrameArgs& args) {
       layer_tree_host_impl_->ProcessScrollDeltas();
   begin_main_frame_state->evicted_ui_resources =
       layer_tree_host_impl_->EvictedUIResourcesExist();
+  begin_main_frame_state->completed_image_decode_callbacks =
+      layer_tree_host_impl_->TakeCompletedImageDecodeCallbacks();
   MainThreadTaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&ProxyMain::BeginMainFrame, proxy_main_weak_ptr_,
-                            base::Passed(&begin_main_frame_state)));
+      FROM_HERE,
+      base::BindOnce(&ProxyMain::BeginMainFrame, proxy_main_weak_ptr_,
+                     base::Passed(&begin_main_frame_state)));
+  layer_tree_host_impl_->DidSendBeginMainFrame();
   devtools_instrumentation::DidRequestMainThreadFrame(layer_tree_host_id_);
 }
 
@@ -486,6 +531,12 @@ void ProxyImpl::ScheduledActionCommit() {
   DCHECK(IsImplThread());
   DCHECK(IsMainThreadBlocked());
   DCHECK(commit_completion_event_);
+
+  // Relax the cross-thread access restriction to non-thread-safe RefCount.
+  // It's safe since the main thread is blocked while a main-thread-bound
+  // compositor stuff are accessed from the impl thread.
+  base::ScopedAllowCrossThreadRefCountAccess
+      allow_cross_thread_ref_count_access;
 
   layer_tree_host_impl_->BeginCommit();
   blocked_main_commit().layer_tree_host->FinishCommitOnImplThread(
@@ -531,8 +582,8 @@ void ProxyImpl::ScheduledActionBeginCompositorFrameSinkCreation() {
                "ProxyImpl::ScheduledActionBeginCompositorFrameSinkCreation");
   DCHECK(IsImplThread());
   MainThreadTaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&ProxyMain::RequestNewCompositorFrameSink,
-                            proxy_main_weak_ptr_));
+      FROM_HERE, base::BindOnce(&ProxyMain::RequestNewCompositorFrameSink,
+                                proxy_main_weak_ptr_));
 }
 
 void ProxyImpl::ScheduledActionPrepareTiles() {
@@ -548,11 +599,25 @@ void ProxyImpl::ScheduledActionInvalidateCompositorFrameSink() {
   layer_tree_host_impl_->compositor_frame_sink()->Invalidate();
 }
 
+void ProxyImpl::ScheduledActionPerformImplSideInvalidation() {
+  TRACE_EVENT0("cc", "ProxyImpl::ScheduledActionPerformImplSideInvalidation");
+  DCHECK(IsImplThread());
+  layer_tree_host_impl_->InvalidateContentOnImplSide();
+}
+
 void ProxyImpl::SendBeginMainFrameNotExpectedSoon() {
   DCHECK(IsImplThread());
   MainThreadTaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&ProxyMain::BeginMainFrameNotExpectedSoon,
-                            proxy_main_weak_ptr_));
+      FROM_HERE, base::BindOnce(&ProxyMain::BeginMainFrameNotExpectedSoon,
+                                proxy_main_weak_ptr_));
+}
+
+void ProxyImpl::ScheduledActionBeginMainFrameNotExpectedUntil(
+    base::TimeTicks time) {
+  DCHECK(IsImplThread());
+  MainThreadTaskRunner()->PostTask(
+      FROM_HERE, base::Bind(&ProxyMain::BeginMainFrameNotExpectedUntil,
+                            proxy_main_weak_ptr_, time));
 }
 
 DrawResult ProxyImpl::DrawInternal(bool forced_draw) {
@@ -581,6 +646,7 @@ DrawResult ProxyImpl::DrawInternal(bool forced_draw) {
   // CanDraw() as well.
 
   LayerTreeHostImpl::FrameData frame;
+  frame.begin_frame_ack = scheduler_->CurrentBeginFrameAckForActiveTree();
   bool draw_frame = false;
 
   DrawResult result;
@@ -609,8 +675,8 @@ DrawResult ProxyImpl::DrawInternal(bool forced_draw) {
   if (next_frame_is_newly_committed_frame_) {
     next_frame_is_newly_committed_frame_ = false;
     MainThreadTaskRunner()->PostTask(
-        FROM_HERE,
-        base::Bind(&ProxyMain::DidCommitAndDrawFrame, proxy_main_weak_ptr_));
+        FROM_HERE, base::BindOnce(&ProxyMain::DidCommitAndDrawFrame,
+                                  proxy_main_weak_ptr_));
   }
 
   DCHECK_NE(INVALID_RESULT, result);

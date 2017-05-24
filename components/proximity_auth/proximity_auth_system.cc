@@ -8,24 +8,26 @@
 #include "components/proximity_auth/logging/logging.h"
 #include "components/proximity_auth/proximity_auth_client.h"
 #include "components/proximity_auth/remote_device_life_cycle_impl.h"
-#include "components/proximity_auth/unlock_manager.h"
+#include "components/proximity_auth/unlock_manager_impl.h"
 
 namespace proximity_auth {
-
-namespace {
-
-// The time to wait after the device wakes up before beginning to connect to the
-// remote device.
-const int kWakeUpTimeoutSeconds = 2;
-
-}  // namespace
 
 ProximityAuthSystem::ProximityAuthSystem(
     ScreenlockType screenlock_type,
     ProximityAuthClient* proximity_auth_client)
     : proximity_auth_client_(proximity_auth_client),
       unlock_manager_(
-          new UnlockManager(screenlock_type, proximity_auth_client)),
+          new UnlockManagerImpl(screenlock_type, proximity_auth_client)),
+      suspended_(false),
+      started_(false),
+      weak_ptr_factory_(this) {}
+
+ProximityAuthSystem::ProximityAuthSystem(
+    ScreenlockType screenlock_type,
+    ProximityAuthClient* proximity_auth_client,
+    std::unique_ptr<UnlockManager> unlock_manager)
+    : proximity_auth_client_(proximity_auth_client),
+      unlock_manager_(std::move(unlock_manager)),
       suspended_(false),
       started_(false),
       weak_ptr_factory_(this) {}
@@ -89,22 +91,6 @@ void ProximityAuthSystem::OnSuspend() {
 void ProximityAuthSystem::OnSuspendDone() {
   PA_LOG(INFO) << "Device resumed from suspension.";
   DCHECK(suspended_);
-
-  // TODO(tengs): On ChromeOS, the system's Bluetooth adapter is invalidated
-  // when the system suspends. However, Chrome does not receive this
-  // notification until a second or so after the system wakes up. That means
-  // using the adapter during this time will be problematic, so we wait instead.
-  // See crbug.com/537057.
-  proximity_auth_client_->UpdateScreenlockState(
-      ScreenlockState::BLUETOOTH_CONNECTING);
-  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::Bind(&ProximityAuthSystem::ResumeAfterWakeUpTimeout,
-                            weak_ptr_factory_.GetWeakPtr()),
-      base::TimeDelta::FromSeconds(kWakeUpTimeoutSeconds));
-}
-
-void ProximityAuthSystem::ResumeAfterWakeUpTimeout() {
-  PA_LOG(INFO) << "Resume after suspend";
   suspended_ = false;
 
   if (!ScreenlockBridge::Get()->IsLocked()) {
@@ -114,6 +100,13 @@ void ProximityAuthSystem::ResumeAfterWakeUpTimeout() {
   } else {
     OnFocusedUserChanged(ScreenlockBridge::Get()->focused_account_id());
   }
+}
+
+std::unique_ptr<RemoteDeviceLifeCycle>
+ProximityAuthSystem::CreateRemoteDeviceLifeCycle(
+    const cryptauth::RemoteDevice& remote_device) {
+  return std::unique_ptr<RemoteDeviceLifeCycle>(
+      new RemoteDeviceLifeCycleImpl(remote_device, proximity_auth_client_));
 }
 
 void ProximityAuthSystem::OnLifeCycleStateChanged(
@@ -135,13 +128,17 @@ void ProximityAuthSystem::OnScreenDidUnlock(
 
 void ProximityAuthSystem::OnFocusedUserChanged(const AccountId& account_id) {
   // Update the current RemoteDeviceLifeCycle to the focused user.
-  if (account_id.is_valid() && remote_device_life_cycle_ &&
-      remote_device_life_cycle_->GetRemoteDevice().user_id !=
-          account_id.GetUserEmail()) {
-    PA_LOG(INFO) << "Focused user changed, destroying life cycle for "
-                 << account_id.Serialize() << ".";
-    unlock_manager_->SetRemoteDeviceLifeCycle(nullptr);
-    remote_device_life_cycle_.reset();
+  if (remote_device_life_cycle_) {
+    if (remote_device_life_cycle_->GetRemoteDevice().user_id !=
+        account_id.GetUserEmail()) {
+      PA_LOG(INFO) << "Focused user changed, destroying life cycle for "
+                   << account_id.Serialize() << ".";
+      unlock_manager_->SetRemoteDeviceLifeCycle(nullptr);
+      remote_device_life_cycle_.reset();
+    } else {
+      PA_LOG(INFO) << "Refocused on a user who is already focused.";
+      return;
+    }
   }
 
   if (remote_devices_map_.find(account_id) == remote_devices_map_.end() ||
@@ -157,8 +154,7 @@ void ProximityAuthSystem::OnFocusedUserChanged(const AccountId& account_id) {
   if (!suspended_) {
     PA_LOG(INFO) << "Creating RemoteDeviceLifeCycle for focused user: "
                  << account_id.Serialize();
-    remote_device_life_cycle_.reset(
-        new RemoteDeviceLifeCycleImpl(remote_device, proximity_auth_client_));
+    remote_device_life_cycle_ = CreateRemoteDeviceLifeCycle(remote_device);
     unlock_manager_->SetRemoteDeviceLifeCycle(remote_device_life_cycle_.get());
     remote_device_life_cycle_->AddObserver(this);
     remote_device_life_cycle_->Start();

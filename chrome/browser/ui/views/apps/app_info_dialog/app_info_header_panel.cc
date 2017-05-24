@@ -6,6 +6,8 @@
 
 #include "base/bind.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/extensions/chrome_app_icon.h"
+#include "chrome/browser/extensions/chrome_app_icon_service.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -22,7 +24,6 @@
 #include "net/base/url_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
@@ -47,8 +48,6 @@ const int kIconSize = 64;
 AppInfoHeaderPanel::AppInfoHeaderPanel(Profile* profile,
                                        const extensions::Extension* app)
     : AppInfoPanel(profile, app),
-      app_icon_(NULL),
-      view_in_store_link_(NULL),
       weak_ptr_factory_(this) {
   SetLayoutManager(
       new views::BoxLayout(views::BoxLayout::kHorizontal,
@@ -63,10 +62,12 @@ AppInfoHeaderPanel::~AppInfoHeaderPanel() {
 }
 
 void AppInfoHeaderPanel::CreateControls() {
-  app_icon_ = new views::ImageView();
-  app_icon_->SetImageSize(gfx::Size(kIconSize, kIconSize));
-  AddChildView(app_icon_);
-  LoadAppImageAsync();
+  app_icon_view_ = new views::ImageView();
+  app_icon_view_->SetImageSize(gfx::Size(kIconSize, kIconSize));
+  AddChildView(app_icon_view_);
+
+  app_icon_ = extensions::ChromeAppIconService::Get(profile_)->CreateIcon(
+      this, app_->id(), extension_misc::EXTENSION_ICON_LARGE);
 
   // Create a vertical container to store the app's name and link.
   views::View* vertical_info_container = new views::View();
@@ -77,10 +78,8 @@ void AppInfoHeaderPanel::CreateControls() {
   vertical_info_container->SetLayoutManager(vertical_container_layout);
   AddChildView(vertical_info_container);
 
-  views::Label* app_name_label =
-      new views::Label(base::UTF8ToUTF16(app_->name()),
-                       ui::ResourceBundle::GetSharedInstance().GetFontList(
-                           ui::ResourceBundle::MediumFont));
+  views::Label* app_name_label = new views::Label(
+      base::UTF8ToUTF16(app_->name()), views::style::CONTEXT_DIALOG_TITLE);
   app_name_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   vertical_info_container->AddChildView(app_name_label);
 
@@ -102,25 +101,8 @@ void AppInfoHeaderPanel::LinkClicked(views::Link* source, int event_flags) {
   ShowAppInWebStore();
 }
 
-void AppInfoHeaderPanel::LoadAppImageAsync() {
-  extensions::ExtensionResource image = extensions::IconsInfo::GetIconResource(
-      app_,
-      extension_misc::EXTENSION_ICON_LARGE,
-      ExtensionIconSet::MATCH_BIGGER);
-  int pixel_size =
-      static_cast<int>(kIconSize * gfx::ImageSkia::GetMaxSupportedScale());
-  extensions::ImageLoader::Get(profile_)->LoadImageAsync(
-      app_,
-      image,
-      gfx::Size(pixel_size, pixel_size),
-      base::Bind(&AppInfoHeaderPanel::OnAppImageLoaded, AsWeakPtr()));
-}
-
-void AppInfoHeaderPanel::OnAppImageLoaded(const gfx::Image& image) {
-  if (image.IsEmpty())
-    app_icon_->SetImage(extensions::util::GetDefaultAppIcon());
-  else
-    app_icon_->SetImage(image.AsImageSkia());
+void AppInfoHeaderPanel::OnIconUpdated(extensions::ChromeAppIcon* icon) {
+  app_icon_view_->SetImage(icon->image_skia());
 }
 
 void AppInfoHeaderPanel::ShowAppInWebStore() {

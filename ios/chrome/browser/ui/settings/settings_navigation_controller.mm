@@ -5,11 +5,8 @@
 #import "ios/chrome/browser/ui/settings/settings_navigation_controller.h"
 
 #include "base/ios/ios_util.h"
-#import "base/ios/weak_nsobject.h"
 #include "base/mac/foundation_util.h"
-#import "base/mac/scoped_nsobject.h"
 #include "components/strings/grit/components_strings.h"
-#include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/sync/sync_setup_service.h"
 #include "ios/chrome/browser/sync/sync_setup_service_factory.h"
@@ -22,11 +19,11 @@
 #import "ios/chrome/browser/ui/material_components/app_bar_presenting.h"
 #import "ios/chrome/browser/ui/material_components/utils.h"
 #import "ios/chrome/browser/ui/settings/accounts_collection_view_controller.h"
+#import "ios/chrome/browser/ui/settings/autofill_collection_view_controller.h"
 #import "ios/chrome/browser/ui/settings/clear_browsing_data_collection_view_controller.h"
 #import "ios/chrome/browser/ui/settings/contextual_search_collection_view_controller.h"
 #import "ios/chrome/browser/ui/settings/import_data_collection_view_controller.h"
 #import "ios/chrome/browser/ui/settings/native_apps_collection_view_controller.h"
-#import "ios/chrome/browser/ui/settings/physical_web_collection_view_controller.h"
 #import "ios/chrome/browser/ui/settings/save_passwords_collection_view_controller.h"
 #import "ios/chrome/browser/ui/settings/settings_collection_view_controller.h"
 #import "ios/chrome/browser/ui/settings/settings_utils.h"
@@ -40,6 +37,10 @@
 #import "ios/third_party/material_components_ios/src/components/AppBar/src/MaterialAppBar.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 // TODO(crbug.com/620361): Remove the entire class when iOS 9 is dropped.
 @interface SettingsAppBarContainerViewController
@@ -101,10 +102,10 @@
 
 @implementation SettingsNavigationController {
   ios::ChromeBrowserState* mainBrowserState_;  // weak
-  base::WeakNSProtocol<id<SettingsNavigationControllerDelegate>> delegate_;
+  __weak id<SettingsNavigationControllerDelegate> delegate_;
   // Keeps a mapping between the view controllers that are wrapped to display an
   // app bar and the containers that wrap them.
-  base::scoped_nsobject<NSMutableDictionary> appBarContainedViewControllers_;
+  NSMutableDictionary* appBarContainedViewControllers_;
 }
 
 @synthesize shouldCommitSyncChangesOnDismissal =
@@ -120,10 +121,9 @@
                                                                       delegate:
     (id<SettingsNavigationControllerDelegate>)delegate {
   // clang-format on
-  base::scoped_nsobject<UIViewController> controller(
-      [[SettingsCollectionViewController alloc]
-          initWithBrowserState:browserState
-           currentBrowserState:currentBrowserState]);
+  UIViewController* controller = [[SettingsCollectionViewController alloc]
+      initWithBrowserState:browserState
+       currentBrowserState:currentBrowserState];
   SettingsNavigationController* nc = [[SettingsNavigationController alloc]
       initWithRootViewController:controller
                     browserState:browserState
@@ -135,9 +135,9 @@
 + (SettingsNavigationController*)
 newAccountsController:(ios::ChromeBrowserState*)browserState
              delegate:(id<SettingsNavigationControllerDelegate>)delegate {
-  base::scoped_nsobject<UIViewController> controller([
-      [AccountsCollectionViewController alloc] initWithBrowserState:browserState
-                                          closeSettingsOnAddAccount:YES]);
+  UIViewController* controller = [[AccountsCollectionViewController alloc]
+           initWithBrowserState:browserState
+      closeSettingsOnAddAccount:YES];
   SettingsNavigationController* nc = [[SettingsNavigationController alloc]
       initWithRootViewController:controller
                     browserState:browserState
@@ -150,10 +150,9 @@ newAccountsController:(ios::ChromeBrowserState*)browserState
      newSyncController:(ios::ChromeBrowserState*)browserState
 allowSwitchSyncAccount:(BOOL)allowSwitchSyncAccount
               delegate:(id<SettingsNavigationControllerDelegate>)delegate {
-  base::scoped_nsobject<UIViewController> controller(
-      [[SyncSettingsCollectionViewController alloc]
-            initWithBrowserState:browserState
-          allowSwitchSyncAccount:allowSwitchSyncAccount]);
+  UIViewController* controller = [[SyncSettingsCollectionViewController alloc]
+        initWithBrowserState:browserState
+      allowSwitchSyncAccount:allowSwitchSyncAccount];
   SettingsNavigationController* nc = [[SettingsNavigationController alloc]
       initWithRootViewController:controller
                     browserState:browserState
@@ -169,10 +168,9 @@ newUserFeedbackController:(ios::ChromeBrowserState*)browserState
   DCHECK(ios::GetChromeBrowserProvider()
              ->GetUserFeedbackProvider()
              ->IsUserFeedbackEnabled());
-  base::scoped_nsobject<UIViewController> controller(
-      ios::GetChromeBrowserProvider()
-          ->GetUserFeedbackProvider()
-          ->CreateViewController(dataSource));
+  UIViewController* controller = ios::GetChromeBrowserProvider()
+                                     ->GetUserFeedbackProvider()
+                                     ->CreateViewController(dataSource);
   DCHECK(controller);
   SettingsNavigationController* nc = [[SettingsNavigationController alloc]
       initWithRootViewController:controller
@@ -186,9 +184,9 @@ newUserFeedbackController:(ios::ChromeBrowserState*)browserState
 newClearBrowsingDataController:(ios::ChromeBrowserState*)browserState
                       delegate:
                           (id<SettingsNavigationControllerDelegate>)delegate {
-  base::scoped_nsobject<UIViewController> controller(
+  UIViewController* controller =
       [[ClearBrowsingDataCollectionViewController alloc]
-          initWithBrowserState:browserState]);
+          initWithBrowserState:browserState];
   SettingsNavigationController* nc = [[SettingsNavigationController alloc]
       initWithRootViewController:controller
                     browserState:browserState
@@ -201,9 +199,9 @@ newClearBrowsingDataController:(ios::ChromeBrowserState*)browserState
 newContextualSearchController:(ios::ChromeBrowserState*)browserState
                      delegate:
                          (id<SettingsNavigationControllerDelegate>)delegate {
-  base::scoped_nsobject<UIViewController> controller(
+  UIViewController* controller =
       [[ContextualSearchCollectionViewController alloc]
-          initWithBrowserState:browserState]);
+          initWithBrowserState:browserState];
   SettingsNavigationController* nc = [[SettingsNavigationController alloc]
       initWithRootViewController:controller
                     browserState:browserState
@@ -216,9 +214,9 @@ newContextualSearchController:(ios::ChromeBrowserState*)browserState
 newSyncEncryptionPassphraseController:(ios::ChromeBrowserState*)browserState
                              delegate:(id<SettingsNavigationControllerDelegate>)
                                           delegate {
-  base::scoped_nsobject<UIViewController> controller(
+  UIViewController* controller =
       [[SyncEncryptionPassphraseCollectionViewController alloc]
-          initWithBrowserState:browserState]);
+          initWithBrowserState:browserState];
   SettingsNavigationController* nc = [[SettingsNavigationController alloc]
       initWithRootViewController:controller
                     browserState:browserState
@@ -230,9 +228,8 @@ newSyncEncryptionPassphraseController:(ios::ChromeBrowserState*)browserState
 + (SettingsNavigationController*)
 newNativeAppsController:(ios::ChromeBrowserState*)browserState
                delegate:(id<SettingsNavigationControllerDelegate>)delegate {
-  base::scoped_nsobject<UIViewController> controller(
-      [[NativeAppsCollectionViewController alloc]
-          initWithURLRequestContextGetter:browserState->GetRequestContext()]);
+  UIViewController* controller = [[NativeAppsCollectionViewController alloc]
+      initWithURLRequestContextGetter:browserState->GetRequestContext()];
   SettingsNavigationController* nc = [[SettingsNavigationController alloc]
       initWithRootViewController:controller
                     browserState:browserState
@@ -243,9 +240,8 @@ newNativeAppsController:(ios::ChromeBrowserState*)browserState
 + (SettingsNavigationController*)
 newSavePasswordsController:(ios::ChromeBrowserState*)browserState
                   delegate:(id<SettingsNavigationControllerDelegate>)delegate {
-  base::scoped_nsobject<UIViewController> controller(
-      [[SavePasswordsCollectionViewController alloc]
-          initWithBrowserState:browserState]);
+  UIViewController* controller = [[SavePasswordsCollectionViewController alloc]
+      initWithBrowserState:browserState];
 
   SettingsNavigationController* nc = [[SettingsNavigationController alloc]
       initWithRootViewController:controller
@@ -260,32 +256,17 @@ newSavePasswordsController:(ios::ChromeBrowserState*)browserState
 }
 
 + (SettingsNavigationController*)
-newPhysicalWebController:(ios::ChromeBrowserState*)browserState
-                delegate:(id<SettingsNavigationControllerDelegate>)delegate {
-  base::scoped_nsobject<UIViewController> controller(
-      [[PhysicalWebCollectionViewController alloc]
-          initWithPrefs:GetApplicationContext()->GetLocalState()]);
-  SettingsNavigationController* nc = [[SettingsNavigationController alloc]
-      initWithRootViewController:controller
-                    browserState:browserState
-                        delegate:delegate];
-  [controller navigationItem].rightBarButtonItem = [nc doneButton];
-  return nc;
-}
-
-+ (SettingsNavigationController*)
 newImportDataController:(ios::ChromeBrowserState*)browserState
                delegate:(id<SettingsNavigationControllerDelegate>)delegate
      importDataDelegate:(id<ImportDataControllerDelegate>)importDataDelegate
               fromEmail:(NSString*)fromEmail
                 toEmail:(NSString*)toEmail
              isSignedIn:(BOOL)isSignedIn {
-  base::scoped_nsobject<UIViewController> controller(
-      [[ImportDataCollectionViewController alloc]
-          initWithDelegate:importDataDelegate
-                 fromEmail:fromEmail
-                   toEmail:toEmail
-                isSignedIn:isSignedIn]);
+  UIViewController* controller = [[ImportDataCollectionViewController alloc]
+      initWithDelegate:importDataDelegate
+             fromEmail:fromEmail
+               toEmail:toEmail
+            isSignedIn:isSignedIn];
 
   SettingsNavigationController* nc = [[SettingsNavigationController alloc]
       initWithRootViewController:controller
@@ -293,6 +274,24 @@ newImportDataController:(ios::ChromeBrowserState*)browserState
                         delegate:delegate];
 
   // Make sure the close button is always present, as the Save Passwords screen
+  // isn't just shown from Settings.
+  [controller navigationItem].leftBarButtonItem = [nc closeButton];
+  return nc;
+}
+
++ (SettingsNavigationController*)
+newAutofillController:(ios::ChromeBrowserState*)browserState
+             delegate:(id<SettingsNavigationControllerDelegate>)delegate {
+  UIViewController* controller = [[AutofillCollectionViewController alloc]
+      initWithBrowserState:browserState];
+
+  SettingsNavigationController* nc = [[SettingsNavigationController alloc]
+      initWithRootViewController:controller
+                    browserState:browserState
+                        delegate:delegate];
+  [controller navigationItem].rightBarButtonItem = [nc doneButton];
+
+  // Make sure the close button is always present, as the Autofill screen
   // isn't just shown from Settings.
   [controller navigationItem].leftBarButtonItem = [nc closeButton];
   return nc;
@@ -309,7 +308,7 @@ initWithRootViewController:(UIViewController*)rootViewController
   self = [super initWithRootViewController:rootViewController];
   if (self) {
     mainBrowserState_ = browserState;
-    delegate_.reset(delegate);
+    delegate_ = delegate;
     shouldCommitSyncChangesOnDismissal_ = YES;
     [self configureUI];
   }
@@ -333,7 +332,7 @@ initWithRootViewController:(UIViewController*)rootViewController
 
   // Reset the delegate to prevent any queued transitions from attempting to
   // close the settings.
-  delegate_.reset();
+  delegate_ = nil;
 }
 
 - (void)closeSettings {
@@ -371,7 +370,7 @@ initWithRootViewController:(UIViewController*)rootViewController
       self.topViewController.navigationItem.rightBarButtonItem;
   if (!rightButton)
     return NO;
-  base::scoped_nsobject<UIBarButtonItem> doneButton([self doneButton]);
+  UIBarButtonItem* doneButton = [self doneButton];
   return [rightButton style] == [doneButton style] &&
          [[rightButton title] compare:[doneButton title]] == NSOrderedSame;
 }
@@ -387,11 +386,11 @@ initWithRootViewController:(UIViewController*)rootViewController
 - (UIBarButtonItem*)doneButton {
   // Create a custom Done bar button item, as Material Navigation Bar does not
   // handle a system UIBarButtonSystemItemDone item.
-  return [[[UIBarButtonItem alloc]
+  return [[UIBarButtonItem alloc]
       initWithTitle:l10n_util::GetNSString(IDS_IOS_NAVIGATION_BAR_DONE_BUTTON)
               style:UIBarButtonItemStyleDone
              target:self
-             action:@selector(closeSettings)] autorelease];
+             action:@selector(closeSettings)];
 }
 
 - (UIBarButtonItem*)closeButton {
@@ -406,11 +405,11 @@ initWithRootViewController:(UIViewController*)rootViewController
 - (UIBarButtonItem*)cancelButton {
   // Create a custom Cancel bar button item, as Material Navigation Bar does not
   // handle a system UIBarButtonSystemItemCancel item.
-  return [[[UIBarButtonItem alloc]
+  return [[UIBarButtonItem alloc]
       initWithTitle:l10n_util::GetNSString(IDS_IOS_NAVIGATION_BAR_CANCEL_BUTTON)
               style:UIBarButtonItemStyleDone
              target:self
-             action:@selector(closeSettings)] autorelease];
+             action:@selector(closeSettings)];
 }
 
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations {
@@ -525,25 +524,24 @@ initWithRootViewController:(UIViewController*)rootViewController
       // it can just be forwarded it up the responder chain.
       break;
     case IDC_SHOW_ACCOUNTS_SETTINGS: {
-      base::scoped_nsobject<UIViewController> controller(
-          [[AccountsCollectionViewController alloc]
-                   initWithBrowserState:mainBrowserState_
-              closeSettingsOnAddAccount:NO]);
+      UIViewController* controller = [[AccountsCollectionViewController alloc]
+               initWithBrowserState:mainBrowserState_
+          closeSettingsOnAddAccount:NO];
       [self pushViewController:controller animated:YES];
       return;
     }
     case IDC_SHOW_SYNC_SETTINGS: {
-      base::scoped_nsobject<UIViewController> controller(
+      UIViewController* controller =
           [[SyncSettingsCollectionViewController alloc]
                 initWithBrowserState:mainBrowserState_
-              allowSwitchSyncAccount:YES]);
+              allowSwitchSyncAccount:YES];
       [self pushViewController:controller animated:YES];
       return;
     }
     case IDC_SHOW_SYNC_PASSPHRASE_SETTINGS: {
-      base::scoped_nsobject<UIViewController> controller(
+      UIViewController* controller =
           [[SyncEncryptionPassphraseCollectionViewController alloc]
-              initWithBrowserState:mainBrowserState_]);
+              initWithBrowserState:mainBrowserState_];
       [self pushViewController:controller animated:YES];
       return;
     }
@@ -558,7 +556,10 @@ initWithRootViewController:(UIViewController*)rootViewController
 #pragma mark - UIResponder
 
 - (NSArray*)keyCommands {
-  base::WeakNSObject<SettingsNavigationController> weakSelf(self);
+  if ([self presentedViewController]) {
+    return nil;
+  }
+  __weak SettingsNavigationController* weakSelf = self;
   return @[
     [UIKeyCommand cr_keyCommandWithInput:UIKeyInputEscape
                            modifierFlags:Cr_UIKeyModifierNone
@@ -606,8 +607,8 @@ initWithRootViewController:(UIViewController*)rootViewController
   // wrapped in an MDCAppBarContainerViewController.
   if (![controller conformsToProtocol:@protocol(AppBarPresenting)]) {
     MDCAppBarContainerViewController* appBarContainer =
-        [[[SettingsAppBarContainerViewController alloc]
-            initWithContentViewController:controller] autorelease];
+        [[SettingsAppBarContainerViewController alloc]
+            initWithContentViewController:controller];
 
     // Configure the style.
     ConfigureAppBarWithCardStyle(appBarContainer.appBar);
@@ -647,7 +648,7 @@ initWithRootViewController:(UIViewController*)rootViewController
 // controller's pointer to itself.
 - (void)registerAppBarContainer:(MDCAppBarContainerViewController*)container {
   if (!appBarContainedViewControllers_) {
-    appBarContainedViewControllers_.reset([[NSMutableDictionary alloc] init]);
+    appBarContainedViewControllers_ = [[NSMutableDictionary alloc] init];
   }
   NSValue* key = [self keyForController:[container contentViewController]];
   [appBarContainedViewControllers_ setObject:container forKey:key];
@@ -669,7 +670,13 @@ initWithRootViewController:(UIViewController*)rootViewController
 
 // Returns the dictionary key to use when dealing with |controller|.
 - (NSValue*)keyForController:(UIViewController*)controller {
-  return [NSValue valueWithPointer:controller];
+  return [NSValue valueWithNonretainedObject:controller];
+}
+
+#pragma mark - UIResponder
+
+- (BOOL)canBecomeFirstResponder {
+  return YES;
 }
 
 @end

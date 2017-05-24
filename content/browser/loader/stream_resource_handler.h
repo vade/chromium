@@ -18,6 +18,7 @@ class URLRequest;
 
 namespace content {
 
+class ResourceController;
 class StreamRegistry;
 
 // Redirect this resource to a stream.
@@ -28,30 +29,35 @@ class StreamResourceHandler : public ResourceHandler {
   // how origin check is done on resource loading.
   StreamResourceHandler(net::URLRequest* request,
                         StreamRegistry* registry,
-                        const GURL& origin);
+                        const GURL& origin,
+                        bool immediate_mode);
   ~StreamResourceHandler() override;
 
-  void SetController(ResourceController* controller) override;
-
   // Not needed, as this event handler ought to be the final resource.
-  bool OnRequestRedirected(const net::RedirectInfo& redirect_info,
-                           ResourceResponse* resp,
-                           bool* defer) override;
+  void OnRequestRedirected(
+      const net::RedirectInfo& redirect_info,
+      ResourceResponse* resp,
+      std::unique_ptr<ResourceController> controller) override;
 
-  bool OnResponseStarted(ResourceResponse* resp, bool* defer) override;
+  void OnResponseStarted(
+      ResourceResponse* resp,
+      std::unique_ptr<ResourceController> controller) override;
 
-  bool OnWillStart(const GURL& url, bool* defer) override;
+  void OnWillStart(const GURL& url,
+                   std::unique_ptr<ResourceController> controller) override;
 
   // Create a new buffer to store received data.
-  bool OnWillRead(scoped_refptr<net::IOBuffer>* buf,
+  void OnWillRead(scoped_refptr<net::IOBuffer>* buf,
                   int* buf_size,
-                  int min_size) override;
+                  std::unique_ptr<ResourceController> controller) override;
 
   // A read was completed, forward the data to the Stream.
-  bool OnReadCompleted(int bytes_read, bool* defer) override;
+  void OnReadCompleted(int bytes_read,
+                       std::unique_ptr<ResourceController> controller) override;
 
-  void OnResponseCompleted(const net::URLRequestStatus& status,
-                           bool* defer) override;
+  void OnResponseCompleted(
+      const net::URLRequestStatus& status,
+      std::unique_ptr<ResourceController> controller) override;
 
   void OnDataDownloaded(int bytes_downloaded) override;
 

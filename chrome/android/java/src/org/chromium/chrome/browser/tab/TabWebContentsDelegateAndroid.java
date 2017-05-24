@@ -18,12 +18,17 @@ import android.util.Pair;
 import android.view.KeyEvent;
 import android.view.View;
 
+import org.chromium.base.ActivityState;
+import org.chromium.base.ApplicationStatus;
 import org.chromium.base.Log;
 import org.chromium.base.ObserverList.RewindableIterator;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.blink_public.platform.WebDisplayMode;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeApplication;
+import org.chromium.chrome.browser.AppHooks;
+import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.FullscreenWebContentsActivity;
 import org.chromium.chrome.browser.RepostFormWarningDialog;
 import org.chromium.chrome.browser.document.DocumentUtils;
 import org.chromium.chrome.browser.document.DocumentWebContentsDelegate;
@@ -31,6 +36,7 @@ import org.chromium.chrome.browser.findinpage.FindMatchRectsDetails;
 import org.chromium.chrome.browser.findinpage.FindNotificationDetails;
 import org.chromium.chrome.browser.fullscreen.FullscreenManager;
 import org.chromium.chrome.browser.media.MediaCaptureNotificationService;
+import org.chromium.chrome.browser.media.VideoPersister;
 import org.chromium.chrome.browser.policy.PolicyAuditor;
 import org.chromium.chrome.browser.policy.PolicyAuditor.AuditEvent;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager.TabCreator;
@@ -75,7 +81,7 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
 
     private FindMatchRectsListener mFindMatchRectsListener;
 
-    private int mDisplayMode = WebDisplayMode.Browser;
+    private int mDisplayMode = WebDisplayMode.BROWSER;
 
     protected Handler mHandler;
 
@@ -214,13 +220,14 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
 
     @Override
     public void toggleFullscreenModeForTab(boolean enableFullscreen) {
-        if (mTab.getFullscreenManager() != null) {
-            mTab.getFullscreenManager().setPersistentFullscreenMode(enableFullscreen);
-        }
-
-        RewindableIterator<TabObserver> observers = mTab.getTabObservers();
-        while (observers.hasNext()) {
-            observers.next().onToggleFullscreenMode(mTab, enableFullscreen);
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.FULLSCREEN_ACTIVITY)
+                && mTab.getActivity().supportsFullscreenActivity()) {
+            FullscreenWebContentsActivity.toggleFullscreenMode(enableFullscreen, mTab);
+        } else {
+            if (!VideoPersister.getInstance().shouldDelayFullscreenModeChange(
+                        mTab, enableFullscreen)) {
+                mTab.toggleFullscreenMode(enableFullscreen);
+            }
         }
     }
 
@@ -337,8 +344,7 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
                 webContents, mTab.getId(), TabLaunchType.FROM_LONGPRESS_FOREGROUND, url);
         boolean success = tabCreator.createsTabsAsynchronously() || createdSuccessfully;
         if (success && disposition == WindowOpenDisposition.NEW_POPUP) {
-            PolicyAuditor auditor =
-                    ((ChromeApplication) mTab.getApplicationContext()).getPolicyAuditor();
+            PolicyAuditor auditor = AppHooks.get().getPolicyAuditor();
             auditor.notifyAuditEvent(mTab.getApplicationContext(),
                     AuditEvent.OPEN_POPUP_URL_SUCCESS, url, "");
         }
@@ -348,20 +354,33 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
 
     @Override
     public void activateContents() {
-        boolean activityIsDestroyed = false;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            activityIsDestroyed = mTab.getActivity().isDestroyed();
+        ChromeActivity activity = mTab.getActivity();
+        if (activity == null) {
+            Log.e(TAG, "Activity not set activateContents().  Bailing out.");
+            return;
         }
-        if (activityIsDestroyed || !mTab.isInitialized()) {
+        if (activity.isActivityDestroyed()) {
             Log.e(TAG, "Activity destroyed before calling activateContents().  Bailing out.");
             return;
         }
+        if (!mTab.isInitialized()) {
+            Log.e(TAG, "Tab not initialized before calling activateContents().  Bailing out.");
+            return;
+        }
+
+        // Do nothing if the tab can currently be interacted with by the user.
+        if (mTab.isUserInteractable()) return;
 
         TabModel model = getTabModel();
         int index = model.indexOf(mTab);
         if (index == TabModel.INVALID_TAB_INDEX) return;
         TabModelUtils.setIndex(model, index);
-        bringActivityToForeground();
+
+        // Do nothing if the activity is visible (STOPPED is the only valid invisible state as we
+        // explicitly check isActivityDestroyed above).
+        if (ApplicationStatus.getStateForActivity(activity) == ActivityState.STOPPED) {
+            bringActivityToForeground();
+        }
     }
 
     /**
@@ -399,9 +418,6 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
         if (activity == null) return false;
         if (reverse) {
             View menuButton = activity.findViewById(R.id.menu_button);
-            if (menuButton == null || !menuButton.isShown()) {
-                menuButton = activity.findViewById(R.id.document_menu_button);
-            }
             if (menuButton != null && menuButton.isShown()) {
                 return menuButton.requestFocus();
             }

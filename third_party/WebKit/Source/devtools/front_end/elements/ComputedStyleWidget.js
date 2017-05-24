@@ -51,11 +51,12 @@ Elements.ComputedStyleWidget = class extends UI.ThrottledWidget {
     var filterContainerElement = hbox.createChild('div', 'styles-sidebar-pane-filter-box');
     var filterInput = Elements.StylesSidebarPane.createPropertyFilterElement(
         Common.UIString('Filter'), hbox, filterCallback.bind(this));
+    UI.ARIAUtils.setAccessibleName(filterInput, Common.UIString('Filter Computed Styles'));
     filterContainerElement.appendChild(filterInput);
 
     var toolbar = new UI.Toolbar('styles-pane-toolbar', hbox);
-    toolbar.appendToolbarItem(new UI.ToolbarCheckbox(
-        Common.UIString('Show all'), undefined, this._showInheritedComputedStylePropertiesSetting));
+    toolbar.appendToolbarItem(new UI.ToolbarSettingCheckbox(
+        this._showInheritedComputedStylePropertiesSetting, undefined, Common.UIString('Show all')));
 
     this._propertiesOutline = new UI.TreeOutlineInShadow();
     this._propertiesOutline.hideOverflow();
@@ -157,6 +158,8 @@ Elements.ComputedStyleWidget = class extends UI.ThrottledWidget {
       var inherited = !inhertiedProperties.has(canonicalName);
       if (!showInherited && inherited && !(propertyName in this._alwaysShowComputedProperties))
         continue;
+      if (!showInherited && propertyName.startsWith('--'))
+        continue;
       if (propertyName !== canonicalName && propertyValue === nodeStyle.computedStyle.get(canonicalName))
         continue;
 
@@ -195,10 +198,10 @@ Elements.ComputedStyleWidget = class extends UI.ThrottledWidget {
       var trace = propertyTraces.get(propertyName);
       if (trace) {
         var activeProperty = this._renderPropertyTrace(cssModel, matchedStyles, nodeStyle.node, treeElement, trace);
-        treeElement.listItemElement.addEventListener('mousedown', (e) => e.consume(), false);
-        treeElement.listItemElement.addEventListener('dblclick', (e) => e.consume(), false);
+        treeElement.listItemElement.addEventListener('mousedown', e => e.consume(), false);
+        treeElement.listItemElement.addEventListener('dblclick', e => e.consume(), false);
         treeElement.listItemElement.addEventListener('click', handleClick.bind(null, treeElement), false);
-        var gotoSourceElement = UI.Icon.create('smallicon-arrow-in-circle', 'goto-source-icon');
+        var gotoSourceElement = UI.Icon.create('mediumicon-arrow-in-circle', 'goto-source-icon');
         gotoSourceElement.addEventListener('click', this._navigateToSource.bind(this, activeProperty));
         propertyValueElement.appendChild(gotoSourceElement);
         if (expandedProperties.has(propertyName))
@@ -269,22 +272,22 @@ Elements.ComputedStyleWidget = class extends UI.ThrottledWidget {
       var valueElement = renderer.renderValue();
       valueElement.classList.add('property-trace-value');
       valueElement.addEventListener('click', this._navigateToSource.bind(this, property), false);
-      var gotoSourceElement = UI.Icon.create('smallicon-arrow-in-circle', 'goto-source-icon');
+      var gotoSourceElement = UI.Icon.create('mediumicon-arrow-in-circle', 'goto-source-icon');
       gotoSourceElement.addEventListener('click', this._navigateToSource.bind(this, property));
       valueElement.insertBefore(gotoSourceElement, valueElement.firstChild);
 
       trace.appendChild(valueElement);
 
       var rule = property.ownerStyle.parentRule;
+      var selectorElement = trace.createChild('span', 'property-trace-selector');
+      selectorElement.textContent = rule ? rule.selectorText() : 'element.style';
+      selectorElement.title = selectorElement.textContent;
+
       if (rule) {
         var linkSpan = trace.createChild('span', 'trace-link');
         linkSpan.appendChild(
             Elements.StylePropertiesSection.createRuleOriginNode(matchedStyles, this._linkifier, rule));
       }
-
-      var selectorElement = trace.createChild('span', 'property-trace-selector');
-      selectorElement.textContent = rule ? rule.selectorText() : 'element.style';
-      selectorElement.title = selectorElement.textContent;
 
       var traceTreeElement = new UI.TreeElement();
       traceTreeElement.title = trace;

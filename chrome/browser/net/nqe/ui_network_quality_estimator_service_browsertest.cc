@@ -6,6 +6,7 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/macros.h"
 #include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
 #include "base/test/histogram_tester.h"
@@ -51,6 +52,42 @@ class TestEffectiveConnectionTypeObserver
 
  private:
   net::EffectiveConnectionType effective_connection_type_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestEffectiveConnectionTypeObserver);
+};
+
+class TestRTTAndThroughputEstimatesObserver
+    : public net::NetworkQualityEstimator::RTTAndThroughputEstimatesObserver {
+ public:
+  TestRTTAndThroughputEstimatesObserver()
+      : http_rtt_(base::TimeDelta::FromMilliseconds(-1)),
+        transport_rtt_(base::TimeDelta::FromMilliseconds(-1)),
+        downstream_throughput_kbps_(-1) {}
+  ~TestRTTAndThroughputEstimatesObserver() override {}
+
+  // net::NetworkQualityEstimator::RTTAndThroughputEstimatesObserver
+  // implementation:
+  void OnRTTOrThroughputEstimatesComputed(
+      base::TimeDelta http_rtt,
+      base::TimeDelta transport_rtt,
+      int32_t downstream_throughput_kbps) override {
+    http_rtt_ = http_rtt;
+    transport_rtt_ = transport_rtt;
+    downstream_throughput_kbps_ = downstream_throughput_kbps;
+  }
+
+  base::TimeDelta http_rtt() const { return http_rtt_; }
+  base::TimeDelta transport_rtt() const { return transport_rtt_; }
+  int32_t downstream_throughput_kbps() const {
+    return downstream_throughput_kbps_;
+  }
+
+ private:
+  base::TimeDelta http_rtt_;
+  base::TimeDelta transport_rtt_;
+  int32_t downstream_throughput_kbps_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestRTTAndThroughputEstimatesObserver);
 };
 
 class UINetworkQualityEstimatorServiceBrowserTest
@@ -59,15 +96,9 @@ class UINetworkQualityEstimatorServiceBrowserTest
   UINetworkQualityEstimatorServiceBrowserTest() {}
 
   // Verifies that the network quality prefs are written amd read correctly.
-  void VerifyWritingReadingPrefs(bool persistent_cache_writing_enabled,
-                                 bool persistent_cache_reading_enabled) {
+  void VerifyWritingReadingPrefs() {
     variations::testing::ClearAllVariationParams();
     std::map<std::string, std::string> variation_params;
-
-    variation_params["persistent_cache_writing_enabled"] =
-        persistent_cache_writing_enabled ? "true" : "false";
-    variation_params["persistent_cache_reading_enabled"] =
-        persistent_cache_reading_enabled ? "true" : "false";
 
     variations::AssociateVariationParams("NetworkQualityEstimator", "Enabled",
                                          variation_params);
@@ -104,7 +135,7 @@ class UINetworkQualityEstimatorServiceBrowserTest
 
       // Prefs are written only if the network id was available, and persistent
       // caching was enabled.
-      EXPECT_NE(network_id_available && persistent_cache_writing_enabled,
+      EXPECT_NE(network_id_available,
                 histogram_tester.GetAllSamples("NQE.Prefs.WriteCount").empty());
       histogram_tester.ExpectTotalCount("NQE.Prefs.ReadCount", 0);
 
@@ -120,9 +151,8 @@ class UINetworkQualityEstimatorServiceBrowserTest
       EXPECT_EQ(net::EFFECTIVE_CONNECTION_TYPE_SLOW_2G,
                 nqe_service->GetEffectiveConnectionType());
 
-      // Prefs are written only if the network id was available, and persistent
-      // caching was enabled.
-      EXPECT_NE(network_id_available && persistent_cache_writing_enabled,
+      // Prefs are written only if the network id was available.
+      EXPECT_NE(network_id_available,
                 histogram_tester.GetAllSamples("NQE.Prefs.WriteCount").empty());
       histogram_tester.ExpectTotalCount("NQE.Prefs.ReadCount", 0);
 
@@ -134,13 +164,8 @@ class UINetworkQualityEstimatorServiceBrowserTest
     std::map<net::nqe::internal::NetworkID,
              net::nqe::internal::CachedNetworkQuality>
         read_prefs = nqe_service->ForceReadPrefsForTesting();
-    EXPECT_EQ(network_id_available && persistent_cache_writing_enabled &&
-                      persistent_cache_reading_enabled
-                  ? 1u
-                  : 0u,
-              read_prefs.size());
-    if (network_id_available && persistent_cache_writing_enabled &&
-        persistent_cache_reading_enabled) {
+    EXPECT_EQ(network_id_available ? 1u : 0u, read_prefs.size());
+    if (network_id_available) {
       // Verify that the cached network quality was written correctly.
       EXPECT_EQ(net::EFFECTIVE_CONNECTION_TYPE_SLOW_2G,
                 read_prefs.begin()->second.effective_connection_type());
@@ -217,15 +242,64 @@ IN_PROC_BROWSER_TEST_F(UINetworkQualityEstimatorServiceBrowserTest,
             nqe_observer_3.effective_connection_type());
 }
 
-// Verify that prefs are not read when reading of the prefs is not enabled
-// via field trial.
 IN_PROC_BROWSER_TEST_F(UINetworkQualityEstimatorServiceBrowserTest,
-                       ReadingFromPrefsDisabled) {
-  VerifyWritingReadingPrefs(true, false);
+                       VerifyRTTs) {
+  // Verifies that NQE notifying RTTAndThroughputEstimatesObserver causes the
+  // UINetworkQualityEstimatorService to receive an update.
+  Profile* profile = ProfileManager::GetActiveUserProfile();
+  UINetworkQualityEstimatorService* nqe_service =
+      UINetworkQualityEstimatorServiceFactory::GetForProfile(profile);
+  TestRTTAndThroughputEstimatesObserver nqe_observer;
+  nqe_service->AddRTTAndThroughputEstimatesObserver(&nqe_observer);
+
+  base::TimeDelta rtt_1 = base::TimeDelta::FromMilliseconds(100);
+
+  nqe_test_util::OverrideRTTsAndWait(rtt_1);
+  EXPECT_EQ(rtt_1, nqe_observer.http_rtt());
+
+  EXPECT_EQ(rtt_1, nqe_service->GetHttpRTT());
+  EXPECT_EQ(rtt_1, nqe_service->GetTransportRTT());
+  EXPECT_FALSE(nqe_service->GetDownstreamThroughputKbps().has_value());
+
+  base::TimeDelta rtt_2 = base::TimeDelta::FromMilliseconds(200);
+
+  nqe_test_util::OverrideRTTsAndWait(rtt_2);
+  EXPECT_EQ(rtt_2, nqe_observer.http_rtt());
+
+  EXPECT_EQ(rtt_2, nqe_service->GetHttpRTT());
+  EXPECT_EQ(rtt_2, nqe_service->GetTransportRTT());
+  EXPECT_FALSE(nqe_service->GetDownstreamThroughputKbps().has_value());
+
+  nqe_service->RemoveRTTAndThroughputEstimatesObserver(&nqe_observer);
+
+  base::TimeDelta rtt_3 = base::TimeDelta::FromMilliseconds(300);
+
+  nqe_test_util::OverrideRTTsAndWait(rtt_3);
+  EXPECT_EQ(rtt_2, nqe_observer.http_rtt());
+
+  EXPECT_EQ(rtt_3, nqe_service->GetHttpRTT());
+  EXPECT_EQ(rtt_3, nqe_service->GetTransportRTT());
+  EXPECT_FALSE(nqe_service->GetDownstreamThroughputKbps().has_value());
+
+  // Observer should be notified on addition.
+  TestRTTAndThroughputEstimatesObserver nqe_observer_2;
+  nqe_service->AddRTTAndThroughputEstimatesObserver(&nqe_observer_2);
+  EXPECT_GT(0, nqe_observer_2.http_rtt().InMilliseconds());
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(rtt_3, nqe_observer_2.http_rtt());
+
+  // |nqe_observer_3| should be not notified since it unregisters before the
+  // message loop is run.
+  TestRTTAndThroughputEstimatesObserver nqe_observer_3;
+  nqe_service->AddRTTAndThroughputEstimatesObserver(&nqe_observer_3);
+  EXPECT_GT(0, nqe_observer_3.http_rtt().InMilliseconds());
+  nqe_service->RemoveRTTAndThroughputEstimatesObserver(&nqe_observer_3);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_GT(0, nqe_observer_3.http_rtt().InMilliseconds());
 }
 
 // Verify that prefs are writen and read correctly.
 IN_PROC_BROWSER_TEST_F(UINetworkQualityEstimatorServiceBrowserTest,
                        WritingReadingToPrefsEnabled) {
-  VerifyWritingReadingPrefs(true, true);
+  VerifyWritingReadingPrefs();
 }

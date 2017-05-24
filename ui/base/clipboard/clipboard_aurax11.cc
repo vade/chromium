@@ -265,7 +265,7 @@ class ClipboardAuraX11::AuraX11Details : public PlatformEventDispatcher {
   //
   // If the selection holder is us, this call is synchronous and we pull
   // the data out of |clipboard_selection_| or |primary_selection_|. If the
-  // selection holder is some other window, we spin up a nested message loop
+  // selection holder is some other window, we spin up a nested run loop
   // and do the asynchronous dance with whatever application is holding the
   // selection.
   ui::SelectionData RequestAndWaitForTypes(ClipboardType type,
@@ -402,7 +402,7 @@ SelectionData ClipboardAuraX11::AuraX11Details::RequestAndWaitForTypes(
     const std::vector<::Atom>& types) {
   ::Atom selection_name = LookupSelectionForClipboardType(type);
   if (XGetSelectionOwner(x_display_, selection_name) == x_window_) {
-    // We can local fastpath instead of playing the nested message loop game
+    // We can local fastpath instead of playing the nested run loop game
     // with the X server.
     const SelectionFormatMap& format_map = LookupStorageForAtom(selection_name);
 
@@ -678,7 +678,10 @@ ClipboardAuraX11::ClipboardAuraX11() : aurax11_details_(new AuraX11Details) {
 
 ClipboardAuraX11::~ClipboardAuraX11() {
   DCHECK(CalledOnValidThread());
+}
 
+void ClipboardAuraX11::OnPreShutdown() {
+  DCHECK(CalledOnValidThread());
   aurax11_details_->StoreCopyPasteDataAndWait();
 }
 

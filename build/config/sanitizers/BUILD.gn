@@ -200,7 +200,10 @@ config("default_sanitizer_ldflags") {
     ldflags = []
     if (is_asan) {
       ldflags += [ "-fsanitize=address" ]
-      if (!is_mac && !is_chromeos) {
+      if (is_mac) {
+        # https://crbug.com/708707
+        ldflags += [ "-fno-sanitize-address-use-after-scope" ]
+      } else {
         ldflags += [ "-fsanitize-address-use-after-scope" ]
       }
     }
@@ -274,12 +277,15 @@ config("common_sanitizer_flags") {
   cflags_cc = []
 
   # Sanitizers need line table info for stack traces. They don't need type info
-  # or variable info, so we can leave that out to speed up the build.
+  # or variable info, so we can leave that out to speed up the build (unless
+  # it's explicitly asked for by setting |sanitizer_keep_symbols| to true).
   if (using_sanitizer) {
     assert(is_clang, "sanitizers only supported with clang")
-    cflags += [
-      "-gline-tables-only",
+    if (!sanitizer_keep_symbols) {
+      cflags += [ "-gline-tables-only" ]
+    }
 
+    cflags += [
       # Column info in debug data confuses Visual Studio's debugger, so don't
       # use this by default.  However, clusterfuzz needs it for good attribution
       # of reports to CLs, so turn it on there.
@@ -312,8 +318,11 @@ config("asan_flags") {
   cflags = []
   if (is_asan) {
     cflags += [ "-fsanitize=address" ]
-    if (!is_mac && !is_chromeos && !is_win) {
+    if (!is_mac && !is_win) {
       cflags += [ "-fsanitize-address-use-after-scope" ]
+    } else if (!is_win) {
+      # https://crbug.com/708707
+      cflags += [ "-fno-sanitize-address-use-after-scope" ]
     }
     if (!asan_globals) {
       cflags += [
@@ -344,9 +353,11 @@ config("link_executable") {
       # Windows 64-bit. TODO(etienneb): Remove the assert when this is ready.
       assert(false, "win/asan does not work in 64-bit yet")
       libs = [ "clang_rt.asan-x86_64.lib" ]
+      ldflags = [ "-wholearchive:clang_rt.asan-x86_64.lib" ]
     } else {
       assert(target_cpu == "x86", "WinASan unsupported architecture")
       libs = [ "clang_rt.asan-i386.lib" ]
+      ldflags = [ "-wholearchive:clang_rt.asan-i386.lib" ]
     }
   }
 }
@@ -381,6 +392,10 @@ config("cfi_flags") {
         "-fsanitize=cfi-derived-cast",
         "-fsanitize=cfi-unrelated-cast",
       ]
+    }
+
+    if (use_cfi_icall) {
+      cflags += [ "-fsanitize=cfi-icall" ]
     }
 
     if (use_cfi_diag) {
@@ -534,6 +549,12 @@ config("ubsan_vptr_flags") {
   }
 }
 
+config("fuzzing_build_mode") {
+  if (use_libfuzzer || use_afl) {
+    defines = [ "FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION" ]
+  }
+}
+
 all_sanitizer_configs = [
   ":common_sanitizer_flags",
   ":coverage_flags",
@@ -548,6 +569,7 @@ all_sanitizer_configs = [
   ":ubsan_null_flags",
   ":ubsan_security_flags",
   ":ubsan_vptr_flags",
+  ":fuzzing_build_mode",
 ]
 
 # This config is applied by default to all targets. It sets the compiler flags

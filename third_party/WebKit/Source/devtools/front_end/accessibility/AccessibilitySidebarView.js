@@ -68,7 +68,7 @@ Accessibility.AccessibilitySidebarView = class extends UI.ThrottledWidget {
     this._ariaSubPane.setNode(node);
     if (!node)
       return Promise.resolve();
-    var accessibilityModel = Accessibility.AccessibilityModel.fromTarget(node.target());
+    var accessibilityModel = node.domModel().target().model(Accessibility.AccessibilityModel);
     accessibilityModel.clear();
     return accessibilityModel.requestPartialAXTree(node).then(() => {
       this.accessibilityNodeCallback(accessibilityModel.axNodeForDOMNode(node));
@@ -187,7 +187,7 @@ Accessibility.AccessibilitySubPane = class extends UI.SimpleView {
   createTreeOutline() {
     var treeOutline = new UI.TreeOutlineInShadow();
     treeOutline.registerRequiredCSS('accessibility/accessibilityNode.css');
-    treeOutline.registerRequiredCSS('components/objectValue.css');
+    treeOutline.registerRequiredCSS('object_ui/objectValue.css');
 
     treeOutline.element.classList.add('hidden');
     this.element.appendChild(treeOutline.element);

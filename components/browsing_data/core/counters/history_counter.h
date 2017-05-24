@@ -23,10 +23,11 @@ class HistoryCounter : public browsing_data::BrowsingDataCounter,
   typedef base::Callback<history::WebHistoryService*()>
       GetUpdatedWebHistoryServiceCallback;
 
-  class HistoryResult : public FinishedResult {
+  class HistoryResult : public SyncResult {
    public:
     HistoryResult(const HistoryCounter* source,
                   ResultInt value,
+                  bool is_sync_enabled,
                   bool has_synced_visits);
     ~HistoryResult() override;
 
@@ -58,7 +59,7 @@ class HistoryCounter : public browsing_data::BrowsingDataCounter,
   void MergeResults();
 
   // SyncServiceObserver implementation.
-  void OnStateChanged() override;
+  void OnStateChanged(syncer::SyncService* sync) override;
 
   history::HistoryService* history_service_;
 

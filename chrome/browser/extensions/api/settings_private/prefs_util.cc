@@ -19,11 +19,11 @@
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/proxy_config/proxy_config_pref_names.h"
-#include "components/safe_browsing_db/safe_browsing_prefs.h"
-#include "components/search_engines/search_engines_pref_names.h"
+#include "components/safe_browsing/common/safe_browsing_prefs.h"
+#include "components/search_engines/default_search_manager.h"
 #include "components/spellcheck/browser/pref_names.h"
+#include "components/translate/core/browser/translate_pref_names.h"
 #include "components/translate/core/browser/translate_prefs.h"
-#include "components/translate/core/common/translate_pref_names.h"
 #include "components/url_formatter/url_fixer.h"
 #include "extensions/browser/extension_pref_value_map.h"
 #include "extensions/browser/extension_pref_value_map_factory.h"
@@ -33,12 +33,14 @@
 #include "extensions/common/extension.h"
 
 #if defined(OS_CHROMEOS)
+#include "ash/public/cpp/ash_pref_names.h"
 #include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos.h"
 #include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos_factory.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chromeos/settings/cros_settings_names.h"
+#include "ui/chromeos/events/pref_names.h"
 #endif
 
 namespace {
@@ -107,6 +109,8 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
       settings_private::PrefType::PREF_TYPE_NUMBER;
   (*s_whitelist)[::prefs::kWebKitMinimumFontSize] =
       settings_private::PrefType::PREF_TYPE_NUMBER;
+  (*s_whitelist)[::prefs::kWebKitEncryptedMediaEnabled] =
+      settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)[::prefs::kWebKitFixedFontFamily] =
       settings_private::PrefType::PREF_TYPE_STRING;
   (*s_whitelist)[::prefs::kWebKitSansSerifFontFamily] =
@@ -143,7 +147,7 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
       settings_private::PrefType::PREF_TYPE_STRING;
   (*s_whitelist)[::prefs::kNetworkPredictionOptions] =
       settings_private::PrefType::PREF_TYPE_NUMBER;
-  (*s_whitelist)[password_manager::prefs::kPasswordManagerSavingEnabled] =
+  (*s_whitelist)[password_manager::prefs::kCredentialsEnableService] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)[password_manager::prefs::kCredentialsEnableAutosignin] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
@@ -153,6 +157,8 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)[::prefs::kSearchSuggestEnabled] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
+
+  // Languages page
   (*s_whitelist)[spellcheck::prefs::kSpellCheckDictionaries] =
       settings_private::PrefType::PREF_TYPE_LIST;
   (*s_whitelist)[spellcheck::prefs::kSpellCheckUseSpellingService] =
@@ -161,10 +167,14 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)[translate::TranslatePrefs::kPrefTranslateBlockedLanguages] =
       settings_private::PrefType::PREF_TYPE_LIST;
+#if defined(OS_CHROMEOS)
+  (*s_whitelist)[::prefs::kLanguageImeMenuActivated] =
+      settings_private::PrefType::PREF_TYPE_BOOLEAN;
+#endif
 
   // Search page.
-  (*s_whitelist)[::prefs::kDefaultSearchProviderEnabled] =
-      settings_private::PrefType::PREF_TYPE_BOOLEAN;
+  (*s_whitelist)[DefaultSearchManager::kDefaultSearchProviderDataPrefName] =
+      settings_private::PrefType::PREF_TYPE_DICTIONARY;
   (*s_whitelist)[::prefs::kGoogleNowLauncherEnabled] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
 
@@ -172,6 +182,8 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
   (*s_whitelist)[::prefs::kBlockThirdPartyCookies] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)[::prefs::kPluginsAlwaysOpenPdfExternally] =
+      settings_private::PrefType::PREF_TYPE_BOOLEAN;
+  (*s_whitelist)[::prefs::kEnableDRM] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
 
   // Clear browsing data settings.
@@ -208,6 +220,8 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
       settings_private::PrefType::PREF_TYPE_LIST;
   (*s_whitelist)[::prefs::kEnableAutoScreenLock] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
+  (*s_whitelist)[::prefs::kEnableQuickUnlockFingerprint] =
+      settings_private::PrefType::PREF_TYPE_BOOLEAN;
 
   // Accessibility.
   (*s_whitelist)[::prefs::kAccessibilitySpokenFeedbackEnabled] =
@@ -228,6 +242,8 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)[::prefs::kAccessibilityLargeCursorEnabled] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
+  (*s_whitelist)[::prefs::kAccessibilityLargeCursorDipSize] =
+      settings_private::PrefType::PREF_TYPE_NUMBER;
   (*s_whitelist)[::prefs::kAccessibilityScreenMagnifierEnabled] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)[::prefs::kAccessibilitySelectToSpeakEnabled] =
@@ -264,6 +280,8 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)[::prefs::kWakeOnWifiDarkConnect] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
+  (*s_whitelist)[::chromeos::kSignedDataRoamingEnabled] =
+      settings_private::PrefType::PREF_TYPE_BOOLEAN;
 
   // Timezone settings.
   (*s_whitelist)[chromeos::kSystemTimezone] =
@@ -276,6 +294,10 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)[::prefs::kLaunchPaletteOnEjectEvent] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
+  (*s_whitelist)[ash::prefs::kNightLightEnabled] =
+      settings_private::PrefType::PREF_TYPE_BOOLEAN;
+  (*s_whitelist)[ash::prefs::kNightLightTemperature] =
+      settings_private::PrefType::PREF_TYPE_NUMBER;
 
   // Input method settings.
   (*s_whitelist)[::prefs::kLanguagePreloadEngines] =
@@ -327,15 +349,15 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
 
   // Import data
-  (*s_whitelist)[::prefs::kImportAutofillFormData] =
+  (*s_whitelist)[::prefs::kImportDialogAutofillFormData] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
-  (*s_whitelist)[::prefs::kImportBookmarks] =
+  (*s_whitelist)[::prefs::kImportDialogBookmarks] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
-  (*s_whitelist)[::prefs::kImportHistory] =
+  (*s_whitelist)[::prefs::kImportDialogHistory] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
-  (*s_whitelist)[::prefs::kImportSavedPasswords] =
+  (*s_whitelist)[::prefs::kImportDialogSavedPasswords] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
-  (*s_whitelist)[::prefs::kImportSearchEngine] =
+  (*s_whitelist)[::prefs::kImportDialogSearchEngine] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
 #endif
 
@@ -355,6 +377,14 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
 #endif  // defined(GOOGLE_CHROME_BUILD)
 
   return *s_whitelist;
+}
+
+settings_private::PrefType PrefsUtil::GetWhitelistedPrefType(
+    const std::string& pref_name) {
+  const TypedPrefMap& keys = GetWhitelistedKeys();
+  const auto& iter = keys.find(pref_name);
+  return iter != keys.end() ? iter->second
+                            : settings_private::PrefType::PREF_TYPE_NONE;
 }
 
 settings_private::PrefType PrefsUtil::GetType(const std::string& name,
@@ -384,7 +414,10 @@ std::unique_ptr<settings_private::PrefObject> PrefsUtil::GetCrosSettingsPref(
 
 #if defined(OS_CHROMEOS)
   const base::Value* value = CrosSettings::Get()->GetPref(name);
-  DCHECK(value) << "Pref not found: " << name;
+  if (!value) {
+    LOG(ERROR) << "Cros settings pref not found: " << name;
+    return nullptr;
+  }
   pref_object->key = name;
   pref_object->type = GetType(name, value->GetType());
   pref_object->value.reset(value->DeepCopy());
@@ -395,10 +428,17 @@ std::unique_ptr<settings_private::PrefObject> PrefsUtil::GetCrosSettingsPref(
 
 std::unique_ptr<settings_private::PrefObject> PrefsUtil::GetPref(
     const std::string& name) {
+  if (GetWhitelistedPrefType(name) ==
+      settings_private::PrefType::PREF_TYPE_NONE) {
+    return nullptr;
+  }
+
   const PrefService::Preference* pref = nullptr;
   std::unique_ptr<settings_private::PrefObject> pref_object;
   if (IsCrosSetting(name)) {
     pref_object = GetCrosSettingsPref(name);
+    if (!pref_object)
+      return nullptr;
   } else {
     PrefService* pref_service = FindServiceForPref(name);
     pref = pref_service->FindPreference(name);
@@ -443,13 +483,16 @@ std::unique_ptr<settings_private::PrefObject> PrefsUtil::GetPref(
     return pref_object;
   }
 
-  if (pref && pref->IsRecommended()) {
+  // A pref is recommended if it has a recommended value, regardless of whether
+  // the current value is set by policy. The UI will test to see whether the
+  // current value matches the recommended value and inform the user.
+  const base::Value* recommended = pref ? pref->GetRecommendedValue() : nullptr;
+  if (recommended) {
     pref_object->controlled_by =
         settings_private::ControlledBy::CONTROLLED_BY_USER_POLICY;
     pref_object->enforcement =
         settings_private::Enforcement::ENFORCEMENT_RECOMMENDED;
-    pref_object->recommended_value.reset(
-        pref->GetRecommendedValue()->DeepCopy());
+    pref_object->recommended_value.reset(recommended->DeepCopy());
     return pref_object;
   }
 
@@ -470,6 +513,7 @@ std::unique_ptr<settings_private::PrefObject> PrefsUtil::GetPref(
 #endif
 
   const Extension* extension = GetExtensionControllingPref(*pref_object);
+
   if (extension) {
     pref_object->controlled_by =
         settings_private::ControlledBy::CONTROLLED_BY_EXTENSION;
@@ -490,6 +534,11 @@ std::unique_ptr<settings_private::PrefObject> PrefsUtil::GetPref(
 
 PrefsUtil::SetPrefResult PrefsUtil::SetPref(const std::string& pref_name,
                                             const base::Value* value) {
+  if (GetWhitelistedPrefType(pref_name) ==
+      settings_private::PrefType::PREF_TYPE_NONE) {
+    return PREF_NOT_FOUND;
+  }
+
   if (IsCrosSetting(pref_name))
     return SetCrosSettingsPref(pref_name, value);
 
@@ -501,8 +550,6 @@ PrefsUtil::SetPrefResult PrefsUtil::SetPref(const std::string& pref_name,
   const PrefService::Preference* pref = pref_service->FindPreference(pref_name);
   if (!pref)
     return PREF_NOT_FOUND;
-
-  DCHECK_EQ(pref->GetType(), value->GetType());
 
   switch (pref->GetType()) {
     case base::Value::Type::BOOLEAN:
@@ -605,15 +652,8 @@ bool PrefsUtil::RemoveFromListCrosSetting(const std::string& pref_name,
 }
 
 bool PrefsUtil::IsPrefTypeURL(const std::string& pref_name) {
-  settings_private::PrefType pref_type =
-      settings_private::PrefType::PREF_TYPE_NONE;
-
-  const TypedPrefMap keys = GetWhitelistedKeys();
-  const auto& iter = keys.find(pref_name);
-  if (iter != keys.end())
-    pref_type = iter->second;
-
-  return pref_type == settings_private::PrefType::PREF_TYPE_URL;
+  return GetWhitelistedPrefType(pref_name) ==
+         settings_private::PrefType::PREF_TYPE_URL;
 }
 
 #if defined(OS_CHROMEOS)
@@ -724,13 +764,23 @@ const Extension* PrefsUtil::GetExtensionControllingPref(
   if (pref_object.key == ::prefs::kURLsToRestoreOnStartup)
     return GetExtensionOverridingStartupPages(profile_);
 
-  if (pref_object.key == ::prefs::kDefaultSearchProviderEnabled)
+  if (pref_object.key ==
+      DefaultSearchManager::kDefaultSearchProviderDataPrefName) {
     return GetExtensionOverridingSearchEngine(profile_);
+  }
 
   if (pref_object.key == proxy_config::prefs::kProxy)
     return GetExtensionOverridingProxy(profile_);
 
-  return nullptr;
+  // If it's none of the above, attempt a more general strategy.
+  std::string extension_id =
+      ExtensionPrefValueMapFactory::GetForBrowserContext(profile_)
+          ->GetExtensionControllingPref(pref_object.key);
+  if (extension_id.empty())
+    return nullptr;
+
+  return ExtensionRegistry::Get(profile_)->GetExtensionById(
+      extension_id, ExtensionRegistry::ENABLED);
 }
 
 }  // namespace extensions

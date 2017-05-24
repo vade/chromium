@@ -18,19 +18,19 @@ namespace content {
 
 class WebMouseEventBuilder {
  public:
-  static blink::WebMouseEvent Build(
-      blink::WebInputEvent::Type type,
-      double time_sec,
-      int window_x,
-      int window_y,
-      int modifiers,
-      int click_count,
-      int pointer_id,
-      float pressure,
-      float orientation_rad,
-      float tilt_rad,
-      int changed_button,
-      int tool_type);
+  static blink::WebMouseEvent Build(blink::WebInputEvent::Type type,
+                                    double time_sec,
+                                    int window_x,
+                                    int window_y,
+                                    int modifiers,
+                                    int click_count,
+                                    int pointer_id,
+                                    float pressure,
+                                    float orientation_rad,
+                                    float tilt_x,
+                                    float tilt_y,
+                                    int action_button,
+                                    int tool_type);
 };
 
 class WebMouseWheelEventBuilder {

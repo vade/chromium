@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/stl_util.h"
 #include "cc/animation/animation_delegate.h"
 #include "cc/animation/animation_events.h"
 #include "cc/animation/animation_host.h"
@@ -252,7 +253,7 @@ void AnimationPlayer::PushPropertiesTo(AnimationPlayer* player_impl) {
     return;
 
   MarkAbortedAnimationsForDeletion(player_impl);
-  PurgeAnimationsMarkedForDeletion();
+  PurgeAnimationsMarkedForDeletion(/* impl_only */ false);
   PushNewAnimationsToImplThread(player_impl);
 
   // Remove finished impl side animations only after pushing,
@@ -297,6 +298,7 @@ void AnimationPlayer::UpdateState(bool start_ready_animations,
 
   MarkFinishedAnimations(last_tick_time_);
   MarkAnimationsForDeletion(last_tick_time_, events);
+  PurgeAnimationsMarkedForDeletion(/* impl_only */ true);
 
   if (start_ready_animations) {
     if (needs_to_start_animations()) {
@@ -329,6 +331,7 @@ void AnimationPlayer::RemoveFromTicking() {
   DCHECK(animation_host_);
   // Resetting last_tick_time_ here ensures that calling ::UpdateState
   // before ::Animate doesn't start an animation.
+  is_ticking_ = false;
   last_tick_time_ = base::TimeTicks();
   animation_host_->RemoveFromTicking(this);
 }
@@ -371,6 +374,10 @@ bool AnimationPlayer::NotifyAnimationFinished(const AnimationEvent& event) {
     }
   }
 
+  // This is for the case when an animation is already removed on main thread,
+  // but the impl version of it sent a finished event and is now waiting for
+  // deletion. We would need to delete that animation during push properties.
+  SetNeedsPushProperties();
   return false;
 }
 
@@ -792,6 +799,21 @@ void AnimationPlayer::MarkFinishedAnimations(base::TimeTicks monotonic_time) {
         animations_[i]->IsFinishedAt(monotonic_time)) {
       animations_[i]->SetRunState(Animation::FINISHED, monotonic_time);
       animation_finished = true;
+      SetNeedsPushProperties();
+    }
+    if (!animations_[i]->affects_active_elements() &&
+        !animations_[i]->affects_pending_elements()) {
+      switch (animations_[i]->run_state()) {
+        case Animation::WAITING_FOR_TARGET_AVAILABILITY:
+        case Animation::STARTING:
+        case Animation::RUNNING:
+        case Animation::PAUSED:
+          animations_[i]->SetRunState(Animation::FINISHED, monotonic_time);
+          animation_finished = true;
+          break;
+        default:
+          break;
+      }
     }
   }
 
@@ -811,13 +833,6 @@ void AnimationPlayer::ActivateAnimations() {
     animations_[i]->set_affects_active_elements(
         animations_[i]->affects_pending_elements());
   }
-  auto affects_no_elements = [](const std::unique_ptr<Animation>& animation) {
-    return !animation->affects_active_elements() &&
-           !animation->affects_pending_elements();
-  };
-  animations_.erase(std::remove_if(animations_.begin(), animations_.end(),
-                                   affects_no_elements),
-                    animations_.end());
 
   if (animation_activated)
     element_animations_->UpdateClientAnimationState();
@@ -1098,14 +1113,12 @@ void AnimationPlayer::MarkAbortedAnimationsForDeletion(
     element_animations_->SetNeedsUpdateImplClientState();
 }
 
-void AnimationPlayer::PurgeAnimationsMarkedForDeletion() {
-  animations_.erase(
-      std::remove_if(animations_.begin(), animations_.end(),
-                     [](const std::unique_ptr<Animation>& animation) {
-                       return animation->run_state() ==
-                              Animation::WAITING_FOR_DELETION;
-                     }),
-      animations_.end());
+void AnimationPlayer::PurgeAnimationsMarkedForDeletion(bool impl_only) {
+  base::EraseIf(
+      animations_, [impl_only](const std::unique_ptr<Animation>& animation) {
+        return animation->run_state() == Animation::WAITING_FOR_DELETION &&
+               (!impl_only || animation->is_impl_only());
+      });
 }
 
 void AnimationPlayer::PushNewAnimationsToImplThread(
@@ -1152,7 +1165,9 @@ static bool IsCompleted(Animation* animation,
   if (animation->is_impl_only()) {
     return (animation->run_state() == Animation::WAITING_FOR_DELETION);
   } else {
-    return !main_thread_player->GetAnimationById(animation->id());
+    Animation* main_thread_animation =
+        main_thread_player->GetAnimationById(animation->id());
+    return !main_thread_animation || main_thread_animation->is_finished();
   }
 }
 
@@ -1176,10 +1191,7 @@ void AnimationPlayer::RemoveAnimationsCompletedOnMainThread(
         return animation->run_state() == Animation::WAITING_FOR_DELETION &&
                !animation->affects_pending_elements();
       };
-  animations.erase(
-      std::remove_if(animations.begin(), animations.end(),
-                     affects_active_only_and_is_waiting_for_deletion),
-      animations.end());
+  base::EraseIf(animations, affects_active_only_and_is_waiting_for_deletion);
 
   if (element_animations_ && animation_completed)
     element_animations_->SetNeedsUpdateImplClientState();

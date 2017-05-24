@@ -121,13 +121,11 @@ void SetCookieWithDetailsAsyncOnCookieThread(
     bool secure,
     bool http_only,
     net::CookieSameSite same_site,
-    bool enforce_strict_secure,
     net::CookiePriority priority,
     const net::CookieStore::SetCookiesCallback& callback) {
   GetCookieStore()->SetCookieWithDetailsAsync(
       url, name, value, domain, path, creation_time, expiration_time,
-      last_access_time, secure, http_only, same_site, enforce_strict_secure,
-      priority, callback);
+      last_access_time, secure, http_only, same_site, priority, callback);
 }
 
 void GetCookiesWithOptionsAsyncOnCookieThread(
@@ -204,7 +202,7 @@ void AwCookieStoreWrapper::SetCookieWithOptionsAsync(
     const std::string& cookie_line,
     const net::CookieOptions& options,
     const net::CookieStore::SetCookiesCallback& callback) {
-  DCHECK(client_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
   PostTaskToCookieStoreTaskRunner(
       base::Bind(&SetCookieWithOptionsAsyncOnCookieThread, url, cookie_line,
                  options, CreateWrappedCallback<bool>(callback)));
@@ -222,14 +220,13 @@ void AwCookieStoreWrapper::SetCookieWithDetailsAsync(
     bool secure,
     bool http_only,
     net::CookieSameSite same_site,
-    bool enforce_strict_secure,
     net::CookiePriority priority,
     const SetCookiesCallback& callback) {
-  DCHECK(client_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
   PostTaskToCookieStoreTaskRunner(
       base::Bind(&SetCookieWithDetailsAsyncOnCookieThread, url, name, value,
                  domain, path, creation_time, expiration_time, last_access_time,
-                 secure, http_only, same_site, enforce_strict_secure, priority,
+                 secure, http_only, same_site, priority,
                  CreateWrappedCallback<bool>(callback)));
 }
 
@@ -237,7 +234,7 @@ void AwCookieStoreWrapper::GetCookiesWithOptionsAsync(
     const GURL& url,
     const net::CookieOptions& options,
     const GetCookiesCallback& callback) {
-  DCHECK(client_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
   PostTaskToCookieStoreTaskRunner(
       base::Bind(&GetCookiesWithOptionsAsyncOnCookieThread, url, options,
                  CreateWrappedCallback<const std::string&>(callback)));
@@ -247,7 +244,7 @@ void AwCookieStoreWrapper::GetCookieListWithOptionsAsync(
     const GURL& url,
     const net::CookieOptions& options,
     const GetCookieListCallback& callback) {
-  DCHECK(client_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
   PostTaskToCookieStoreTaskRunner(
       base::Bind(&GetCookieListWithOptionsAsyncOnCookieThread, url, options,
                  CreateWrappedCallback<const net::CookieList&>(callback)));
@@ -255,7 +252,7 @@ void AwCookieStoreWrapper::GetCookieListWithOptionsAsync(
 
 void AwCookieStoreWrapper::GetAllCookiesAsync(
     const GetCookieListCallback& callback) {
-  DCHECK(client_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
   PostTaskToCookieStoreTaskRunner(
       base::Bind(&GetAllCookiesAsyncOnCookieThread,
                  CreateWrappedCallback<const net::CookieList&>(callback)));
@@ -264,7 +261,7 @@ void AwCookieStoreWrapper::GetAllCookiesAsync(
 void AwCookieStoreWrapper::DeleteCookieAsync(const GURL& url,
                                              const std::string& cookie_name,
                                              const base::Closure& callback) {
-  DCHECK(client_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
   PostTaskToCookieStoreTaskRunner(
       base::Bind(&DeleteCookieAsyncOnCookieThread, url, cookie_name,
                  CreateWrappedClosureCallback(callback)));
@@ -273,7 +270,7 @@ void AwCookieStoreWrapper::DeleteCookieAsync(const GURL& url,
 void AwCookieStoreWrapper::DeleteCanonicalCookieAsync(
     const net::CanonicalCookie& cookie,
     const DeleteCallback& callback) {
-  DCHECK(client_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
   PostTaskToCookieStoreTaskRunner(
       base::Bind(&DeleteCanonicalCookieAsyncOnCookieThread, cookie,
                  CreateWrappedCallback<int>(callback)));
@@ -283,7 +280,7 @@ void AwCookieStoreWrapper::DeleteAllCreatedBetweenAsync(
     const base::Time& delete_begin,
     const base::Time& delete_end,
     const DeleteCallback& callback) {
-  DCHECK(client_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
   PostTaskToCookieStoreTaskRunner(
       base::Bind(&DeleteAllCreatedBetweenAsyncOnCookieThread, delete_begin,
                  delete_end, CreateWrappedCallback<int>(callback)));
@@ -294,7 +291,7 @@ void AwCookieStoreWrapper::DeleteAllCreatedBetweenWithPredicateAsync(
     const base::Time& delete_end,
     const CookiePredicate& predicate,
     const DeleteCallback& callback) {
-  DCHECK(client_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
   PostTaskToCookieStoreTaskRunner(base::Bind(
       &DeleteAllCreatedBetweenWithPredicateAsyncOnCookieThread, delete_begin,
       delete_end, predicate, CreateWrappedCallback<int>(callback)));
@@ -302,20 +299,20 @@ void AwCookieStoreWrapper::DeleteAllCreatedBetweenWithPredicateAsync(
 
 void AwCookieStoreWrapper::DeleteSessionCookiesAsync(
     const DeleteCallback& callback) {
-  DCHECK(client_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
   PostTaskToCookieStoreTaskRunner(
       base::Bind(&DeleteSessionCookiesAsyncOnCookieThread,
                  CreateWrappedCallback<int>(callback)));
 }
 
 void AwCookieStoreWrapper::FlushStore(const base::Closure& callback) {
-  DCHECK(client_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
   PostTaskToCookieStoreTaskRunner(base::Bind(
       &FlushStoreOnCookieThread, CreateWrappedClosureCallback(callback)));
 }
 
 void AwCookieStoreWrapper::SetForceKeepSessionState() {
-  DCHECK(client_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
   PostTaskToCookieStoreTaskRunner(
       base::Bind(&SetForceKeepSessionStateOnCookieThread));
 }
@@ -325,7 +322,7 @@ AwCookieStoreWrapper::AddCallbackForCookie(
     const GURL& url,
     const std::string& name,
     const CookieChangedCallback& callback) {
-  DCHECK(client_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
 
   // The SubscriptionWrapper is owned by the subscription itself, and has no
   // connection to the AwCookieStoreWrapper after creation. Other CookieStore
@@ -352,7 +349,7 @@ base::Closure AwCookieStoreWrapper::CreateWrappedClosureCallback(
 }
 
 void AwCookieStoreWrapper::RunClosureCallback(const base::Closure& callback) {
-  DCHECK(client_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
   callback.Run();
 }
 

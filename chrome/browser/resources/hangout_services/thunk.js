@@ -144,15 +144,6 @@ chrome.runtime.onMessageExternal.addListener(
         } else if (method == 'getSinks') {
           chrome.webrtcAudioPrivate.getSinks(doSendResponse);
           return true;
-        } else if (method == 'getActiveSink') {
-          chrome.webrtcAudioPrivate.getActiveSink(
-              requestInfo, doSendResponse);
-          return true;
-        } else if (method == 'setActiveSink') {
-          var sinkId = message['sinkId'];
-          chrome.webrtcAudioPrivate.setActiveSink(
-              requestInfo, sinkId, doSendResponse);
-          return true;
         } else if (method == 'getAssociatedSink') {
           var sourceId = message['sourceId'];
           chrome.webrtcAudioPrivate.getAssociatedSink(
@@ -202,6 +193,12 @@ chrome.runtime.onMessageExternal.addListener(
           chrome.webrtcLoggingPrivate.stopWebRtcEventLogging(
               requestInfo, origin, doSendResponse);
           return true;
+        } else if (method == 'setAudioExperiments') {
+          var experiments = message['experiments'];
+          chrome.webrtcAudioPrivate.setAudioExperiments(
+              requestInfo, origin, experiments);
+          doSendResponse();
+          return false;
         }
 
         throw new Error('Unknown method: ' + method);

@@ -5,15 +5,16 @@
 #ifndef BluetoothRemoteGATTDescriptor_h
 #define BluetoothRemoteGATTDescriptor_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
+#include <memory>
 #include "core/dom/DOMArrayPiece.h"
 #include "core/dom/DOMDataView.h"
 #include "modules/EventTargetModules.h"
+#include "modules/bluetooth/Bluetooth.h"
 #include "modules/bluetooth/BluetoothRemoteGATTCharacteristic.h"
 #include "modules/bluetooth/BluetoothRemoteGATTService.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
-#include "wtf/text/WTFString.h"
-#include <memory>
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -34,16 +35,16 @@ class BluetoothRemoteGATTDescriptor final
       mojom::blink::WebBluetoothRemoteGATTDescriptorPtr,
       BluetoothRemoteGATTCharacteristic*);
 
-  static BluetoothRemoteGATTDescriptor* create(
+  static BluetoothRemoteGATTDescriptor* Create(
       mojom::blink::WebBluetoothRemoteGATTDescriptorPtr,
       BluetoothRemoteGATTCharacteristic*);
 
   // IDL exposed interface:
   BluetoothRemoteGATTCharacteristic* characteristic() {
-    return m_characteristic;
+    return characteristic_;
   }
-  String uuid() { return m_descriptor->uuid; }
-  DOMDataView* value() const { return m_value; }
+  String uuid() { return descriptor_->uuid; }
+  DOMDataView* value() const { return value_; }
   ScriptPromise readValue(ScriptState*);
   ScriptPromise writeValue(ScriptState*, const DOMArrayPiece&);
 
@@ -53,11 +54,24 @@ class BluetoothRemoteGATTDescriptor final
  private:
   friend class DescriptorReadValueCallback;
 
-  BluetoothRemoteGATTServer* getGatt() { return m_characteristic->getGatt(); }
+  BluetoothRemoteGATTServer* GetGatt() { return characteristic_->GetGatt(); }
+  mojom::blink::WebBluetoothService* GetService() {
+    return characteristic_->device_->GetBluetooth()->Service();
+  }
 
-  mojom::blink::WebBluetoothRemoteGATTDescriptorPtr m_descriptor;
-  Member<BluetoothRemoteGATTCharacteristic> m_characteristic;
-  Member<DOMDataView> m_value;
+  void ReadValueCallback(ScriptPromiseResolver*,
+                         mojom::blink::WebBluetoothResult,
+                         const Optional<Vector<uint8_t>>&);
+
+  void WriteValueCallback(ScriptPromiseResolver*,
+                          const Vector<uint8_t>&,
+                          mojom::blink::WebBluetoothResult);
+
+  DOMException* CreateInvalidDescriptorError();
+
+  mojom::blink::WebBluetoothRemoteGATTDescriptorPtr descriptor_;
+  Member<BluetoothRemoteGATTCharacteristic> characteristic_;
+  Member<DOMDataView> value_;
 };
 
 }  // namespace blink

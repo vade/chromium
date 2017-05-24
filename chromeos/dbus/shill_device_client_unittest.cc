@@ -83,7 +83,7 @@ TEST_F(ShillDeviceClientTest, PropertyChanged) {
   writer.AppendVariantOfBool(kValue);
 
   // Set expectations.
-  const base::FundamentalValue value(kValue);
+  const base::Value value(kValue);
   MockPropertyChangeObserver observer;
   EXPECT_CALL(observer,
               OnPropertyChanged(shill::kCellularAllowRoamingProperty,
@@ -126,8 +126,8 @@ TEST_F(ShillDeviceClientTest, GetProperties) {
 
   // Set expectations.
   base::DictionaryValue value;
-  value.SetWithoutPathExpansion(shill::kCellularAllowRoamingProperty,
-                                new base::FundamentalValue(kValue));
+  value.SetBooleanWithoutPathExpansion(shill::kCellularAllowRoamingProperty,
+                                       kValue);
   PrepareForMethodCall(shill::kGetPropertiesFunction,
                        base::Bind(&ExpectNoArgument),
                        response.get());
@@ -159,7 +159,7 @@ TEST_F(ShillDeviceClientTest, SetProperty) {
   std::unique_ptr<dbus::Response> response(dbus::Response::CreateEmpty());
 
   // Set expectations.
-  const base::FundamentalValue value(kValue);
+  const base::Value value(kValue);
   PrepareForMethodCall(shill::kSetPropertyFunction,
                        base::Bind(&ExpectStringAndValueArguments,
                                   shill::kCellularAllowRoamingProperty,

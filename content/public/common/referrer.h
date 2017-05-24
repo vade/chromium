@@ -7,12 +7,9 @@
 
 #include "base/logging.h"
 #include "content/common/content_export.h"
+#include "net/url_request/url_request.h"
 #include "third_party/WebKit/public/platform/WebReferrerPolicy.h"
 #include "url/gurl.h"
-
-namespace net {
-class URLRequest;
-}
 
 namespace content {
 
@@ -22,7 +19,7 @@ namespace content {
 struct CONTENT_EXPORT Referrer {
   Referrer(const GURL& url, blink::WebReferrerPolicy policy)
       : url(url), policy(policy) {}
-  Referrer() : policy(blink::WebReferrerPolicyDefault) {}
+  Referrer() : policy(blink::kWebReferrerPolicyDefault) {}
 
   GURL url;
   blink::WebReferrerPolicy policy;
@@ -32,6 +29,9 @@ struct CONTENT_EXPORT Referrer {
 
   static void SetReferrerForRequest(net::URLRequest* request,
                                     const Referrer& referrer);
+
+  static net::URLRequest::ReferrerPolicy ReferrerPolicyForUrlRequest(
+      const Referrer& referrer);
 };
 
 }  // namespace content

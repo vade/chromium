@@ -56,11 +56,11 @@ struct CONTENT_EXPORT ResourceRequest {
   GURL referrer;
 
   // The referrer policy to use.
-  blink::WebReferrerPolicy referrer_policy = blink::WebReferrerPolicyAlways;
+  blink::WebReferrerPolicy referrer_policy = blink::kWebReferrerPolicyAlways;
 
   // The frame's visibility state.
   blink::WebPageVisibilityState visibility_state =
-      blink::WebPageVisibilityStateVisible;
+      blink::kWebPageVisibilityStateVisible;
 
   // Additional HTTP request headers.
   //
@@ -102,8 +102,9 @@ struct CONTENT_EXPORT ResourceRequest {
   // fetch() in the Service Worker script.
   bool originated_from_service_worker = false;
 
-  // Indicates which types of ServiceWorkers should skip handling this request.
-  SkipServiceWorker skip_service_worker = SkipServiceWorker::NONE;
+  // The service worker mode that indicates which service workers should get
+  // events for this request.
+  ServiceWorkerMode service_worker_mode = ServiceWorkerMode::ALL;
 
   // The request mode passed to the ServiceWorker.
   FetchRequestMode fetch_request_mode = FETCH_REQUEST_MODE_SAME_ORIGIN;
@@ -120,7 +121,7 @@ struct CONTENT_EXPORT ResourceRequest {
 
   // The mixed content context type to be used for mixed content checks.
   blink::WebMixedContentContextType fetch_mixed_content_context_type =
-      blink::WebMixedContentContextType::Blockable;
+      blink::WebMixedContentContextType::kBlockable;
 
   // The frame type passed to the ServiceWorker.
   RequestContextFrameType fetch_frame_type =

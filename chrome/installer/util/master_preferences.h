@@ -38,18 +38,14 @@ const char kDefaultMasterPrefs[] = "master_preferences";
 // {
 //   "distribution": {
 //      "create_all_shortcuts": true,
-//      "import_bookmarks": false,
-//      "import_bookmarks_from_file": "c:\\path",
-//      "import_history": false,
-//      "import_home_page": false,
-//      "import_search_engine": true,
-//      "ping_delay": 40,
-//      "show_welcome_page": true,
-//      "skip_first_run_ui": true,
 //      "do_not_launch_chrome": false,
+//      "import_bookmarks_from_file": "c:\\path",
 //      "make_chrome_default": false,
 //      "make_chrome_default_for_user": true,
+//      "ping_delay": 40,
 //      "require_eula": true,
+//      "show_welcome_page": true,
+//      "skip_first_run_ui": true,
 //      "system_level": false,
 //      "verbose_logging": true,
 //      "welcome_page_on_os_upgrade_enabled": false
@@ -65,7 +61,13 @@ const char kDefaultMasterPrefs[] = "master_preferences";
 //      "https://igoogle.com"
 //   ],
 //   "homepage": "http://example.org",
-//   "homepage_is_newtabpage": false
+//   "homepage_is_newtabpage": false,
+//   "import_autofill_form_data": false,
+//   "import_bookmarks": false,
+//   "import_history": false,
+//   "import_home_page": false,
+//   "import_saved_passwords": false,
+//   "import_search_engine": false
 // }
 //
 // A reserved "distribution" entry in the file is used to group related

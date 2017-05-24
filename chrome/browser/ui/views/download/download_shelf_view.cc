@@ -30,12 +30,13 @@
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/vector_icons_public.h"
 #include "ui/resources/grit/ui_resources.h"
+#include "ui/vector_icons/vector_icons.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
+#include "ui/views/controls/button/image_button.h"
+#include "ui/views/controls/button/image_button_factory.h"
 #include "ui/views/controls/button/md_text_button.h"
-#include "ui/views/controls/button/vector_icon_button.h"
 #include "ui/views/controls/link.h"
 #include "ui/views/mouse_watcher_view_host.h"
 
@@ -95,7 +96,7 @@ DownloadShelfView::DownloadShelfView(Browser* browser, BrowserView* parent)
       new_item_animation_(this),
       shelf_animation_(this),
       show_all_view_(nullptr),
-      close_button_(nullptr),
+      close_button_(views::CreateVectorImageButton(this)),
       parent_(parent),
       mouse_watcher_(new views::MouseWatcherViewHost(this, gfx::Insets()),
                      this) {
@@ -112,9 +113,6 @@ DownloadShelfView::DownloadShelfView(Browser* browser, BrowserView* parent)
       this, l10n_util::GetStringUTF16(IDS_SHOW_ALL_DOWNLOADS));
   AddChildView(show_all_view_);
 
-  views::VectorIconButton* close_button = new views::VectorIconButton(this);
-  close_button->SetIcon(gfx::VectorIconId::BAR_CLOSE);
-  close_button_ = close_button;
   close_button_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_ACCNAME_CLOSE));
   AddChildView(close_button_);
@@ -335,6 +333,10 @@ void DownloadShelfView::UpdateColorsFromTheme() {
 
   set_background(views::Background::CreateSolidBackground(
       GetThemeProvider()->GetColor(ThemeProperties::COLOR_TOOLBAR)));
+
+  views::SetImageFromVectorIcon(
+      close_button_, ui::kCloseIcon,
+      DownloadItemView::GetTextColorForThemeProvider(GetThemeProvider()));
 }
 
 void DownloadShelfView::OnThemeChanged() {
@@ -355,10 +357,6 @@ void DownloadShelfView::ButtonPressed(
     NOTREACHED();
 }
 
-SkColor DownloadShelfView::GetVectorIconBaseColor() const {
-  return DownloadItemView::GetTextColorForThemeProvider(GetThemeProvider());
-}
-
 bool DownloadShelfView::IsShowing() const {
   return visible() && shelf_animation_.IsShowing();
 }
@@ -367,7 +365,7 @@ bool DownloadShelfView::IsClosing() const {
   return shelf_animation_.IsClosing();
 }
 
-void DownloadShelfView::DoShow() {
+void DownloadShelfView::DoOpen() {
   SetVisible(true);
   shelf_animation_.Show();
 }
@@ -382,6 +380,18 @@ void DownloadShelfView::DoClose(CloseReason reason) {
       download_views_.size(), num_in_progress, reason == AUTOMATIC);
   parent_->SetDownloadShelfVisible(false);
   shelf_animation_.Hide();
+}
+
+void DownloadShelfView::DoHide() {
+  SetVisible(false);
+  parent_->ToolbarSizeChanged(false);
+  parent_->SetDownloadShelfVisible(false);
+}
+
+void DownloadShelfView::DoUnhide() {
+  SetVisible(true);
+  parent_->ToolbarSizeChanged(true);
+  parent_->SetDownloadShelfVisible(true);
 }
 
 Browser* DownloadShelfView::browser() const {

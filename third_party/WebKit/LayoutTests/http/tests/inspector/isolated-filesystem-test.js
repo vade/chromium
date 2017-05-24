@@ -14,6 +14,24 @@ InspectorTest.TestFileSystem = function(fileSystemPath)
 InspectorTest.TestFileSystem._instances = {};
 
 InspectorTest.TestFileSystem.prototype = {
+    dumpAsText: function() {
+        var result = [];
+        dfs(this.root, '');
+        result[0] = this.fileSystemPath;
+        return result.join('\n');
+
+        function dfs(node, indent) {
+            result.push(indent + node.name);
+            var newIndent = indent + '    ';
+            for (var child of node._children)
+                dfs(child, newIndent);
+        }
+    },
+
+    reportCreatedPromise: function() {
+        return new Promise(fulfill => this.reportCreated(fulfill));
+    },
+
     reportCreated: function(callback)
     {
         var fileSystemPath = this.fileSystemPath;
@@ -23,14 +41,14 @@ InspectorTest.TestFileSystem.prototype = {
                           fileSystemName: this.fileSystemPath }
         });
 
-        Workspace.isolatedFileSystemManager.addEventListener(Workspace.IsolatedFileSystemManager.Events.FileSystemAdded, created);
+        Persistence.isolatedFileSystemManager.addEventListener(Persistence.IsolatedFileSystemManager.Events.FileSystemAdded, created);
 
         function created(event)
         {
             var fileSystem = event.data;
             if (fileSystem.path() !== fileSystemPath)
                 return;
-            Workspace.isolatedFileSystemManager.removeEventListener(Workspace.IsolatedFileSystemManager.Events.FileSystemAdded, created);
+            Persistence.isolatedFileSystemManager.removeEventListener(Persistence.IsolatedFileSystemManager.Events.FileSystemAdded, created);
             callback(fileSystem);
         }
     },
@@ -43,11 +61,11 @@ InspectorTest.TestFileSystem.prototype = {
 
     addFileMapping: function(urlPrefix, pathPrefix)
     {
-        var fileSystemMapping = new Workspace.FileSystemMapping(Workspace.isolatedFileSystemManager);
+        var fileSystemMapping = new Persistence.FileSystemMapping(Persistence.isolatedFileSystemManager);
         fileSystemMapping.addFileSystem(this.fileSystemPath);
         fileSystemMapping.addFileMapping(this.fileSystemPath, urlPrefix, pathPrefix);
         fileSystemMapping.dispose();
-        Workspace.fileSystemMapping._loadFromSettings();
+        Persistence.fileSystemMapping._loadFromSettings();
     },
 
     /**
@@ -107,7 +125,9 @@ InspectorTest.TestFileSystem.Entry.prototype = {
         this._children.splice(index, 1);
         delete this._childrenMap[child.name];
         child.parent = null;
-        InspectorFrontendHost.events.dispatchEventToListeners(InspectorFrontendHostAPI.Events.FileSystemFilesChanged, [fullPath]);
+        InspectorFrontendHost.events.dispatchEventToListeners(
+            InspectorFrontendHostAPI.Events.FileSystemFilesChangedAddedRemoved,
+            {changed: [], added: [], removed: [fullPath]});
         success();
     },
 
@@ -128,7 +148,9 @@ InspectorTest.TestFileSystem.Entry.prototype = {
         child.parent = this;
         child.content = new Blob([content], {type: 'text/plain'});
         var fullPath = this._fileSystem.fileSystemPath + child.fullPath;
-        InspectorFrontendHost.events.dispatchEventToListeners(InspectorFrontendHostAPI.Events.FileSystemFilesChanged, [fullPath]);
+        InspectorFrontendHost.events.dispatchEventToListeners(
+            InspectorFrontendHostAPI.Events.FileSystemFilesChangedAddedRemoved,
+            {changed: [], added: [fullPath], removed: []});
         return child;
     },
 
@@ -137,7 +159,9 @@ InspectorTest.TestFileSystem.Entry.prototype = {
         this.content = new Blob([content], {type: 'text/plain'});
         this._timestamp += 1000;
         var fullPath = this._fileSystem.fileSystemPath + this.fullPath;
-        InspectorFrontendHost.events.dispatchEventToListeners(InspectorFrontendHostAPI.Events.FileSystemFilesChanged, [fullPath]);
+        InspectorFrontendHost.events.dispatchEventToListeners(
+            InspectorFrontendHostAPI.Events.FileSystemFilesChangedAddedRemoved,
+            {changed: [fullPath], added: [], removed: []});
     },
 
     createReader: function()
@@ -165,10 +189,31 @@ InspectorTest.TestFileSystem.Entry.prototype = {
         this.getEntry(path, noop, callback, errorCallback);
     },
 
-    getEntry: function(path, noop, callback, errorCallback)
+    _createEntry: function(path, options, callback, errorCallback)
+    {
+        var tokens = path.split('/');
+        var name = tokens.pop();
+        var parentEntry = this;
+        for (var token of tokens)
+            parentEntry = parentEntry._childrenMap[token];
+        var entry = parentEntry._childrenMap[name];
+        if (entry && options.exclusive) {
+            errorCallback(new DOMException('File exists: ' + path, 'InvalidModificationError'));
+            return;
+        }
+        if (!entry)
+            entry = parentEntry.addFile(name, '');
+        callback(entry);
+    },
+
+    getEntry: function(path, options, callback, errorCallback)
     {
         if (path.startsWith("/"))
             path = path.substring(1);
+        if (options && options.create) {
+            this._createEntry(path, options, callback, errorCallback);
+            return;
+        }
         if (!path) {
             callback(this);
             return;
@@ -190,9 +235,11 @@ InspectorTest.TestFileSystem.Entry.prototype = {
     moveTo: function(parent, newName, callback, errorCallback)
     {
         this._parent._children.remove(this);
+        delete this._parent._childrenMap[this.name]
         this._parent = parent;
         this._parent._children.push(this);
         this.name = newName;
+        this._parent._childrenMap[this.name] = this;
         callback(this);
     },
 

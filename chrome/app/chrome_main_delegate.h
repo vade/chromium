@@ -6,15 +6,13 @@
 #define CHROME_APP_CHROME_MAIN_DELEGATE_H_
 
 #include <memory>
+#include <vector>
 
 #include "base/macros.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/common/chrome_content_client.h"
 #include "content/public/app/content_main_delegate.h"
-
-template <typename>
-class ScopedVector;
 
 namespace base {
 class CommandLine;
@@ -45,11 +43,24 @@ class ChromeMainDelegate : public content::ContentMainDelegate {
   bool ShouldSendMachPort(const std::string& process_type) override;
   bool DelaySandboxInitialization(const std::string& process_type) override;
 #elif defined(OS_POSIX) && !defined(OS_ANDROID)
-  void ZygoteStarting(
-      ScopedVector<content::ZygoteForkDelegate>* delegates) override;
+  void ZygoteStarting(std::vector<std::unique_ptr<content::ZygoteForkDelegate>>*
+                          delegates) override;
   void ZygoteForked() override;
 #endif
   bool ShouldEnableProfilerRecording() override;
+  service_manager::ProcessType OverrideProcessType() override;
+  std::unique_ptr<base::Value> CreateServiceCatalog() override;
+  void AdjustServiceProcessCommandLine(
+      const service_manager::Identity& identity,
+      base::CommandLine* command_line) override;
+  bool ShouldTerminateServiceManagerOnInstanceQuit(
+      const service_manager::Identity& identity,
+      int* exit_code) override;
+  void OnServiceManagerInitialized(
+      const base::Closure& quit_closure,
+      service_manager::BackgroundServiceManager* service_manager) override;
+  std::unique_ptr<service_manager::Service> CreateEmbeddedService(
+      const std::string& service_name) override;
 
   content::ContentBrowserClient* CreateContentBrowserClient() override;
   content::ContentGpuClient* CreateContentGpuClient() override;

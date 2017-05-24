@@ -172,7 +172,7 @@ class ExtensionInfoGeneratorUnitTest : public ExtensionServiceTestBase {
 
     // Produce test output.
     std::unique_ptr<developer::ExtensionInfo> info =
-        CreateExtensionInfoFromPath(extension_path, Manifest::INVALID_LOCATION);
+        CreateExtensionInfoFromPath(extension_path, Manifest::UNPACKED);
     info->views = std::move(views);
     std::unique_ptr<base::DictionaryValue> actual_output_data = info->ToValue();
     ASSERT_TRUE(actual_output_data);
@@ -210,7 +210,6 @@ class ExtensionInfoGeneratorUnitTest : public ExtensionServiceTestBase {
 // Test some of the basic fields.
 TEST_F(ExtensionInfoGeneratorUnitTest, BasicInfoTest) {
   // Enable error console for testing.
-  ResetThreadBundle(content::TestBrowserThreadBundle::DEFAULT);
   FeatureSwitch::ScopedOverride error_console_override(
       FeatureSwitch::error_console(), true);
   profile()->GetPrefs()->SetBoolean(prefs::kExtensionsUIDeveloperMode, true);

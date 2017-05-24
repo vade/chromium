@@ -64,11 +64,11 @@ bool ReadRemoteData(base::ProcessHandle process, uint64_t address, T* data) {
   const void* typed_address =
       reinterpret_cast<const void*>(static_cast<uintptr_t>(address));
   SIZE_T bytes_read = 0;
-  if (!::ReadProcessMemory(process, typed_address, &data, sizeof(data),
+  if (!::ReadProcessMemory(process, typed_address, data, sizeof(*data),
                            &bytes_read)) {
     return false;
   }
-  if (bytes_read != sizeof(data))
+  if (bytes_read != sizeof(*data))
     return false;
   return true;
 }
@@ -116,10 +116,12 @@ ModuleEventSinkImpl::ModuleEventSinkImpl(base::ProcessHandle process,
 ModuleEventSinkImpl::~ModuleEventSinkImpl() = default;
 
 // static
-void ModuleEventSinkImpl::Create(GetProcessHandleCallback get_process_handle,
-                                 content::ProcessType process_type,
-                                 ModuleDatabase* module_database,
-                                 mojom::ModuleEventSinkRequest request) {
+void ModuleEventSinkImpl::Create(
+    GetProcessHandleCallback get_process_handle,
+    content::ProcessType process_type,
+    ModuleDatabase* module_database,
+    const service_manager::BindSourceInfo& source_info,
+    mojom::ModuleEventSinkRequest request) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   base::ProcessHandle process = get_process_handle.Run();
   auto module_event_sink_impl = base::MakeUnique<ModuleEventSinkImpl>(

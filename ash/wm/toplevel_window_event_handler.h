@@ -6,8 +6,8 @@
 #define ASH_WM_TOPLEVEL_WINDOW_EVENT_HANDLER_H_
 
 #include "ash/ash_export.h"
-#include "ash/common/wm/wm_toplevel_window_event_handler.h"
-#include "ash/common/wm/wm_types.h"
+#include "ash/wm/wm_toplevel_window_event_handler.h"
+#include "ash/wm/wm_types.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "ui/events/event_handler.h"
@@ -29,7 +29,7 @@ class ASH_EXPORT ToplevelWindowEventHandler
     : public ui::EventHandler,
       public aura::client::WindowMoveClient {
  public:
-  explicit ToplevelWindowEventHandler(WmShell* shell);
+  ToplevelWindowEventHandler();
   ~ToplevelWindowEventHandler() override;
 
   // Overridden from ui::EventHandler:
@@ -53,7 +53,7 @@ class ASH_EXPORT ToplevelWindowEventHandler
 
   wm::WmToplevelWindowEventHandler wm_toplevel_window_event_handler_;
 
-  // Are we running a nested message loop from RunMoveLoop().
+  // Are we running a nested run loop from RunMoveLoop().
   bool in_move_loop_ = false;
 
   base::WeakPtrFactory<ToplevelWindowEventHandler> weak_factory_;

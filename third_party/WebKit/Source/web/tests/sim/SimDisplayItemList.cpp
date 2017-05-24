@@ -6,29 +6,29 @@
 
 #include "core/css/parser/CSSParser.h"
 #include "platform/graphics/LoggingCanvas.h"
-#include "third_party/skia/include/core/SkPicture.h"
+#include "platform/graphics/paint/PaintRecord.h"
 #include "third_party/skia/include/core/SkRect.h"
 
 namespace blink {
 
 SimDisplayItemList::SimDisplayItemList() {}
 
-void SimDisplayItemList::appendDrawingItem(const WebRect&,
-                                           sk_sp<const SkPicture> picture) {
-  SkIRect bounds = picture->cullRect().roundOut();
-  SimCanvas canvas(bounds.width(), bounds.height());
-  picture->playback(&canvas);
-  m_commands.append(canvas.commands().data(), canvas.commands().size());
+void SimDisplayItemList::AppendDrawingItem(const WebRect& visual_rect,
+                                           sk_sp<const PaintRecord> record,
+                                           const WebRect& record_bounds) {
+  SimCanvas canvas(record_bounds.width, record_bounds.height);
+  record->playback(&canvas);
+  commands_.Append(canvas.Commands().data(), canvas.Commands().size());
 }
 
-bool SimDisplayItemList::contains(SimCanvas::CommandType type,
-                                  const String& colorString) const {
+bool SimDisplayItemList::Contains(SimCanvas::CommandType type,
+                                  const String& color_string) const {
   Color color = 0;
-  if (!colorString.isNull())
-    CHECK(CSSParser::parseColor(color, colorString, true));
-  for (auto& command : m_commands) {
+  if (!color_string.IsNull())
+    CHECK(CSSParser::ParseColor(color, color_string, true));
+  for (auto& command : commands_) {
     if (command.type == type &&
-        (colorString.isNull() || command.color == color.rgb()))
+        (color_string.IsNull() || command.color == color.Rgb()))
       return true;
   }
   return false;

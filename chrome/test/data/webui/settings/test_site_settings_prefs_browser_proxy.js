@@ -3,6 +3,33 @@
 // found in the LICENSE file.
 
 /**
+ * Only used for tests.
+ * @typedef {{
+ *   auto_downloads: !Array<!RawSiteException>},
+ *   background_sync: !Array<!RawSiteException>},
+ *   camera: !Array<!RawSiteException>},
+ *   cookies: !Array<!RawSiteException>},
+ *   geolocation: !Array<!RawSiteException>},
+ *   javascript: !Array<!RawSiteException>},
+ *   mic: !Array<!RawSiteException>},
+ *   midiDevices: !Array<!RawSiteException>},
+ *   notifications: !Array<!RawSiteException>},
+ *   plugins: !Array<!RawSiteException>},
+ *   popups: !Array<!RawSiteException>},
+ *   unsandboxed_plugins: !Array<!RawSiteException>},
+ * }}
+ */
+var ExceptionListPref;
+
+/**
+ * In the real (non-test) code, these data come from the C++ handler.
+ * Only used for tests.
+ * @typedef {{defaults: CategoryDefaultsPref,
+ *            exceptions: ExceptionListPref}}
+ */
+var SiteSettingsPref;
+
+/**
  * An example empty pref.
  * @type {SiteSettingsPref}
  */
@@ -15,9 +42,11 @@ var prefsEmpty = {
     geolocation: '',
     javascript: '',
     mic: '',
+    midiDevices: '',
     notifications: '',
     plugins: '',
     popups: '',
+    subresource_filter: '',
     unsandboxed_plugins: '',
   },
   exceptions: {
@@ -28,9 +57,11 @@ var prefsEmpty = {
     geolocation: [],
     javascript: [],
     mic: [],
+    midiDevices: [],
     notifications: [],
     plugins: [],
     popups: [],
+    subresource_filter: [],
     unsandboxed_plugins: [],
   },
 };
@@ -48,18 +79,26 @@ var TestSiteSettingsPrefsBrowserProxy = function() {
   settings.TestBrowserProxy.call(this, [
     'fetchUsbDevices',
     'fetchZoomLevels',
+    'getCookieDetails',
     'getDefaultValueForContentType',
     'getExceptionList',
+    'isPatternValid',
     'observeProtocolHandlers',
     'observeProtocolHandlersEnabledState',
+    'reloadCookies',
+    'removeCookie',
     'removeProtocolHandler',
     'removeUsbDevice',
     'removeZoomLevel',
     'resetCategoryPermissionForOrigin',
     'setCategoryPermissionForOrigin',
     'setDefaultValueForContentType',
-    'setProtocolDefault'
+    'setProtocolDefault',
+    'updateIncognitoStatus',
   ]);
+
+  /** @private {boolean} */
+  this.hasIncognito_ = false;
 
   /** @private {!SiteSettingsPref} */
   this.prefs_ = prefsEmpty;
@@ -72,10 +111,25 @@ var TestSiteSettingsPrefsBrowserProxy = function() {
 
   /** @private {!Array<!ProtocolEntry>} */
   this.protocolHandlers_ = [];
+
+  /** @private {?CookieList} */
+  this.cookieDetails_ = null;
+
+  /** @private {boolean} */
+  this.isPatternValid_ = true;
 };
 
 TestSiteSettingsPrefsBrowserProxy.prototype = {
   __proto__: settings.TestBrowserProxy.prototype,
+
+  /**
+   * Pretends an incognito session started or ended.
+   * @param {boolean} hasIncognito True for session started.
+   */
+  setIncognito: function(hasIncognito) {
+    this.hasIncognito_ = hasIncognito;
+    cr.webUIListenerCallback('onIncognitoStatusChanged', hasIncognito);
+  },
 
   /**
    * Sets the prefs to use when testing.
@@ -126,6 +180,19 @@ TestSiteSettingsPrefsBrowserProxy.prototype = {
   },
 
   /** @override */
+  getCookieDetails: function(site) {
+    this.methodCalled('getCookieDetails', site);
+    return Promise.resolve(this.cookieDetails_  || {id: '', children: []});
+  },
+
+  /**
+   * @param {!CookieList} cookieList
+   */
+  setCookieDetails: function(cookieList) {
+    this.cookieDetails_ = cookieList;
+  },
+
+  /** @override */
   getDefaultValueForContentType: function(contentType) {
     this.methodCalled('getDefaultValueForContentType', contentType);
 
@@ -146,6 +213,8 @@ TestSiteSettingsPrefsBrowserProxy.prototype = {
       pref = this.prefs_.defaults.javascript;
     } else if (contentType == settings.ContentSettingsTypes.MIC) {
       pref = this.prefs_.defaults.mic;
+    } else if (contentType == settings.ContentSettingsTypes.MIDI_DEVICES) {
+      pref = this.prefs_.defaults.midiDevices;
     } else if (contentType == settings.ContentSettingsTypes.NOTIFICATIONS) {
       pref = this.prefs_.defaults.notifications;
     } else if (contentType == settings.ContentSettingsTypes.PDF_DOCUMENTS) {
@@ -157,6 +226,9 @@ TestSiteSettingsPrefsBrowserProxy.prototype = {
     } else if (
         contentType == settings.ContentSettingsTypes.UNSANDBOXED_PLUGINS) {
       pref = this.prefs_.defaults.unsandboxed_plugins;
+    }
+    else if (contentType == settings.ContentSettingsTypes.SUBRESOURCE_FILTER) {
+      pref = this.prefs_.defaults.subresource_filter;
     } else {
       console.log('getDefault received unknown category: ' + contentType);
     }
@@ -186,21 +258,49 @@ TestSiteSettingsPrefsBrowserProxy.prototype = {
       pref = this.prefs_.exceptions.javascript;
     else if (contentType == settings.ContentSettingsTypes.MIC)
       pref = this.prefs_.exceptions.mic;
+    else if (contentType == settings.ContentSettingsTypes.MIDI_DEVICES)
+      pref = this.prefs_.exceptions.midiDevices;
     else if (contentType == settings.ContentSettingsTypes.NOTIFICATIONS)
       pref = this.prefs_.exceptions.notifications;
     else if (contentType == settings.ContentSettingsTypes.PDF_DOCUMENTS)
       pref = this.prefs_.exceptions.pdf_documents;
     else if (contentType == settings.ContentSettingsTypes.PLUGINS)
       pref = this.prefs_.exceptions.plugins;
+    else if (contentType == settings.ContentSettingsTypes.PROTECTED_CONTENT)
+      pref = this.prefs_.exceptions.protectedContent;
     else if (contentType == settings.ContentSettingsTypes.POPUPS)
       pref = this.prefs_.exceptions.popups;
     else if (contentType == settings.ContentSettingsTypes.UNSANDBOXED_PLUGINS)
       pref = this.prefs_.exceptions.unsandboxed_plugins;
+    else if (contentType == settings.ContentSettingsTypes.SUBRESOURCE_FILTER) {
+      pref = this.prefs_.exceptions.subresource_filter;
+    }
     else
       console.log('getExceptionList received unknown category: ' + contentType);
 
     assert(pref != undefined, 'Pref is missing for ' + contentType);
+
+    if (this.hasIncognito_) {
+      var incognitoElements = [];
+      for (var i = 0; i < pref.length; ++i)
+        incognitoElements.push(Object.assign({incognito: true}, pref[i]));
+      pref = pref.concat(incognitoElements);
+    }
+
     return Promise.resolve(pref);
+  },
+
+  /** @override */
+  isPatternValid: function(pattern) {
+    this.methodCalled('isPatternValid', pattern);
+    return Promise.resolve(this.isPatternValid_);
+  },
+
+  /**
+   * Specify whether isPatternValid should succeed or fail.
+   */
+  setIsPatternValid: function(isValid) {
+    this.isPatternValid_ = isValid;
   },
 
   /** @override */
@@ -215,7 +315,7 @@ TestSiteSettingsPrefsBrowserProxy.prototype = {
   setCategoryPermissionForOrigin: function(
       primaryPattern, secondaryPattern, contentType, value, incognito) {
     this.methodCalled('setCategoryPermissionForOrigin',
-        [primaryPattern, secondaryPattern, contentType, value]);
+        [primaryPattern, secondaryPattern, contentType, value, incognito]);
     return Promise.resolve();
   },
 
@@ -223,6 +323,16 @@ TestSiteSettingsPrefsBrowserProxy.prototype = {
   fetchZoomLevels: function() {
     cr.webUIListenerCallback('onZoomLevelsChanged', this.zoomList_);
     this.methodCalled('fetchZoomLevels');
+  },
+
+  /** @override */
+  reloadCookies: function() {
+    return Promise.resolve({id: null, children: []});
+  },
+
+  /** @override */
+  removeCookie: function(path) {
+    this.methodCalled('removeCookie', path);
   },
 
   /** @override */
@@ -262,5 +372,10 @@ TestSiteSettingsPrefsBrowserProxy.prototype = {
   /** @override */
   removeProtocolHandler: function() {
     this.methodCalled('removeProtocolHandler', arguments);
+  },
+
+  /** @override */
+  updateIncognitoStatus: function() {
+    this.methodCalled('updateIncognitoStatus', arguments);
   }
 };

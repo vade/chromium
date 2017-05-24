@@ -13,13 +13,9 @@
 #include <algorithm>
 #include <utility>
 
-#include "base/containers/small_map.h"
+#include "base/containers/flat_map.h"
+#include "base/memory/ptr_util.h"
 #include "ui/display/util/edid_parser.h"
-
-#if !defined(DRM_FORMAT_YV12)
-// TODO(dcastagna): after libdrm has this definition, remove it.
-#define DRM_FORMAT_YV12 fourcc_code('Y', 'V', '1', '2')
-#endif
 
 namespace ui {
 
@@ -28,8 +24,10 @@ namespace {
 static const size_t kDefaultCursorWidth = 64;
 static const size_t kDefaultCursorHeight = 64;
 
-bool IsCrtcInUse(uint32_t crtc,
-                 const ScopedVector<HardwareDisplayControllerInfo>& displays) {
+bool IsCrtcInUse(
+    uint32_t crtc,
+    const std::vector<std::unique_ptr<HardwareDisplayControllerInfo>>&
+        displays) {
   for (size_t i = 0; i < displays.size(); ++i) {
     if (crtc == displays[i]->crtc()->crtc_id)
       return true;
@@ -41,10 +39,12 @@ bool IsCrtcInUse(uint32_t crtc,
 // Return a CRTC compatible with |connector| and not already used in |displays|.
 // If there are multiple compatible CRTCs, the one that supports the majority of
 // planes will be returned.
-uint32_t GetCrtc(int fd,
-                 drmModeConnector* connector,
-                 drmModeRes* resources,
-                 const ScopedVector<HardwareDisplayControllerInfo>& displays) {
+uint32_t GetCrtc(
+    int fd,
+    drmModeConnector* connector,
+    drmModeRes* resources,
+    const std::vector<std::unique_ptr<HardwareDisplayControllerInfo>>&
+        displays) {
   ScopedDrmPlaneResPtr plane_resources(drmModeGetPlaneResources(fd));
   std::vector<ScopedDrmPlanePtr> planes;
   for (uint32_t i = 0; i < plane_resources->count_planes; i++)
@@ -200,15 +200,12 @@ bool HasColorCorrectionMatrix(int fd, drmModeCrtc* crtc) {
 
 gfx::Size GetMaximumCursorSize(int fd) {
   uint64_t width = 0, height = 0;
-  if (drmGetCap(fd, DRM_CAP_CURSOR_WIDTH, &width)) {
-    VPLOG(1) << "Unable to get cursor width capability";
+  // Querying cursor dimensions is optional and is unsupported on older Chrome
+  // OS kernels.
+  if (drmGetCap(fd, DRM_CAP_CURSOR_WIDTH, &width) != 0 ||
+      drmGetCap(fd, DRM_CAP_CURSOR_HEIGHT, &height) != 0) {
     return gfx::Size(kDefaultCursorWidth, kDefaultCursorHeight);
   }
-  if (drmGetCap(fd, DRM_CAP_CURSOR_HEIGHT, &height)) {
-    VPLOG(1) << "Unable to get cursor height capability";
-    return gfx::Size(kDefaultCursorWidth, kDefaultCursorHeight);
-  }
-
   return gfx::Size(width, height);
 }
 
@@ -221,11 +218,11 @@ HardwareDisplayControllerInfo::HardwareDisplayControllerInfo(
 HardwareDisplayControllerInfo::~HardwareDisplayControllerInfo() {
 }
 
-ScopedVector<HardwareDisplayControllerInfo> GetAvailableDisplayControllerInfos(
-    int fd) {
+std::vector<std::unique_ptr<HardwareDisplayControllerInfo>>
+GetAvailableDisplayControllerInfos(int fd) {
   ScopedDrmResourcesPtr resources(drmModeGetResources(fd));
   DCHECK(resources) << "Failed to get DRM resources";
-  ScopedVector<HardwareDisplayControllerInfo> displays;
+  std::vector<std::unique_ptr<HardwareDisplayControllerInfo>> displays;
 
   std::vector<ScopedDrmConnectorPtr> available_connectors;
   std::vector<ScopedDrmConnectorPtr::element_type*> connectors;
@@ -239,8 +236,7 @@ ScopedVector<HardwareDisplayControllerInfo> GetAvailableDisplayControllerInfos(
       available_connectors.push_back(std::move(connector));
   }
 
-  base::SmallMap<std::map<ScopedDrmConnectorPtr::element_type*, int>>
-      connector_crtcs;
+  base::flat_map<ScopedDrmConnectorPtr::element_type*, int> connector_crtcs;
   for (auto& c : available_connectors) {
     uint32_t possible_crtcs = 0;
     for (int i = 0; i < c->count_encoders; ++i) {
@@ -273,7 +269,7 @@ ScopedVector<HardwareDisplayControllerInfo> GetAvailableDisplayControllerInfos(
     size_t index = std::find(connectors.begin(), connectors.end(), c.get()) -
                    connectors.begin();
     DCHECK_LT(index, connectors.size());
-    displays.push_back(new HardwareDisplayControllerInfo(
+    displays.push_back(base::MakeUnique<HardwareDisplayControllerInfo>(
         std::move(c), std::move(crtc), index));
   }
 
@@ -382,7 +378,7 @@ int GetFourCCFormatFromBufferFormat(gfx::BufferFormat format) {
     case gfx::BufferFormat::UYVY_422:
       return DRM_FORMAT_UYVY;
     case gfx::BufferFormat::YVU_420:
-      return DRM_FORMAT_YV12;
+      return DRM_FORMAT_YVU420;
     case gfx::BufferFormat::YUV_420_BIPLANAR:
       return DRM_FORMAT_NV12;
     default:
@@ -411,7 +407,7 @@ gfx::BufferFormat GetBufferFormatFromFourCCFormat(int format) {
       return gfx::BufferFormat::UYVY_422;
     case DRM_FORMAT_NV12:
       return gfx::BufferFormat::YUV_420_BIPLANAR;
-    case DRM_FORMAT_YV12:
+    case DRM_FORMAT_YVU420:
       return gfx::BufferFormat::YVU_420;
     default:
       NOTREACHED();
@@ -419,8 +415,10 @@ gfx::BufferFormat GetBufferFormatFromFourCCFormat(int format) {
   }
 }
 
-int GetFourCCFormatForFramebuffer(gfx::BufferFormat format) {
-  // Currently, drm supports 24 bitcolordepth for hardware overlay.
+int GetFourCCFormatForOpaqueFramebuffer(gfx::BufferFormat format) {
+  // DRM atomic interface doesn't currently support specifying an alpha
+  // blending. We can simulate disabling alpha bleding creating an fb
+  // with a format without the alpha channel.
   switch (format) {
     case gfx::BufferFormat::RGBA_8888:
     case gfx::BufferFormat::RGBX_8888:
@@ -432,6 +430,10 @@ int GetFourCCFormatForFramebuffer(gfx::BufferFormat format) {
       return DRM_FORMAT_RGB565;
     case gfx::BufferFormat::UYVY_422:
       return DRM_FORMAT_UYVY;
+    case gfx::BufferFormat::YUV_420_BIPLANAR:
+      return DRM_FORMAT_NV12;
+    case gfx::BufferFormat::YVU_420:
+      return DRM_FORMAT_YVU420;
     default:
       NOTREACHED();
       return 0;

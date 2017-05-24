@@ -811,12 +811,12 @@ interface XXX {
 You can write custom bindings as V8XXX::namedPropertyQuery(...) and V8XXX::namedPropertyEnumerator(...) in Source/bindings/v8/custom/V8XXXCustom.cpp:
 
 ```c++
-v8::Handle<v8::Integer> V8XXX::namedPropertyQuery(v8::Local<v8::String> name, const v8::AccessorInfo& info)
+v8::Local<v8::Integer> V8XXX::namedPropertyQuery(v8::Local<v8::String> name, const v8::AccessorInfo& info)
 {
     ...;
 }
 
-v8::Handle<v8::Array> V8XXX::namedPropertyEnumerator(const v8::AccessorInfo& info)
+v8::Local<v8::Array> V8XXX::namedPropertyEnumerator(const v8::AccessorInfo& info)
 {
     ...;
 }
@@ -841,33 +841,9 @@ If you want to write custom bindings for XXX.call(...), you can use `[Custom=Leg
 You can write custom `V8XXX::callAsFunctionCallback(...)` in Source/bindings/v8/custom/V8XXXCustom.cpp:
 
 ```c++
-v8::Handle<v8::Value> V8XXX::callAsFunctionCallback(const v8::Arguments& args)
+v8::Local<v8::Value> V8XXX::callAsFunctionCallback(const v8::Arguments& args)
 {
     ...;
-}
-```
-
-#### [Custom=VisitDOMWrapper] _(i)_
-
-
-Summary: Allows you to write custom code for visitDOMWrapper: like `[SetWrapperReferenceFrom]`, but with custom code. One use (Nodelist.idl).
-
-Usage:
-
-```webidl
-[
-    Custom=VisitDOMWrapper,
-] interface XXX {
-    ...
-};
-```
-
-And then in V8XXXCustom.cpp:
-
-```c++
-void V8XXX::visitDOMWrapperCustom(v8::Isolate* isolate, ScriptWrappable* scriptWrappable, v8::Persistent<v8::Object> wrapper)
-{
-    ...
 }
 ```
 
@@ -930,8 +906,7 @@ if the wrapper is unreachable on the JS side (i.e., V8's GC assumes that the wra
 reachable in the DOM side). Use `[DependentLifetime]` to relax the assumption.
 For example, if the DOM object has `[ActiveScriptWrappable]` and implements hasPendingActivity(), it must be annotated with
 `[DependentLifetime]`. Otherwise, the wrapper will be collected regardless of the returned value
-of the hasPendingActivity(). DOM objects that are pointed to by `[SetWrapperReferenceFrom]` and
-`[SetWrapperReferenceTo]` must be annotated with `[DependentLifetime]`.
+of the hasPendingActivity().
 
 ### [DeprecateAs] _(m, a, c)_
 
@@ -954,49 +929,6 @@ The deprecation message show on the console can be specified via the [UseCounter
 Summary: Does not generate a test for `[NewObject]` in the binding layer.
 
 When specified, does not generate a test for `[NewObject]`. Some implementation creates a new DOM object and its wrapper before passing through the binding layer. In that case, the generated test doesn't make sense. See Text.splitText() for example.
-
-### [Iterable] _(i)_
-
-Summary: Installs a @@iterator method.
-
-*** note
-In most cases, interfaces should use the standard `iterator<valuetype>`, `iterator<keytype,valuetype>`, `setlike<type>`, or `maplike<keytype, valuetype>` IDL declarations instead. `[Iterable]` should only be necessary for the implementation of iterators themselves.
-***
-
-When the attribute is set on an interface, the code generator installs iterator C++ method into [Symbol.iterator] slot.
-
-```webidl
-[ Iterable ] interface IterableInterface { };
-```
-
-C++ implementation:
-
-```c++
-class IterableInterface : public ScriptWrappable {
-...
-public:
-...
-    // This is called when |obj[Symbol.iterator]| is called.
-    Iterator* iterator(ScriptState*, ExceptionState&);
-};
-```
-
-JavaScript usage:
-
-```js
-var obj = ...; // obj is an IterableInterface object.
-var iter = obj[Symbol.iterator](); // IterableInterface::iterator is called.
-for (var value of obj) {
-    // Iterates over |obj|.
-}
-for (var value of iter) {
-    // Same as above.
-}
-```
-
-*** note
-Currently the code generator doesn't take care of the name conflict. Namely, it is not allowed to have "iterator" method in an iterable interface.
-***
 
 ### [Measure] _(i, m, a, c)_
 
@@ -1048,7 +980,7 @@ Usage: `[NotEnumerable]` can be specified on methods and attributes
 
 Summary: Like `[RuntimeEnabled]`, it controls at runtime whether bindings are exposed, but uses a different mechanism for enabling experimental features.
 
-Usage: `[OriginTrialEnabled=FeatureName]`. FeatureName must be included in [RuntimeEnabledFeatures.in](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/platform/RuntimeEnabledFeatures.in), and is the same value that would be used with `[RuntimeEnabled]`.
+Usage: `[OriginTrialEnabled=FeatureName]`. FeatureName must be included in [RuntimeEnabledFeatures.json5](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/platform/RuntimeEnabledFeatures.json5), and is the same value that would be used with `[RuntimeEnabled]`.
 
 ```webidl
 [
@@ -1060,7 +992,7 @@ When there is an active origin trial for the current execution context, the feat
 
 `[OriginTrialEnabled]` has similar semantics to `[RuntimeEnabled]`, and is intended as a drop-in replacement. For example, `[OriginTrialEnabled]` _cannot_ be applied to arguments, see `[RuntimeEnabled]` for reasoning. The key implementation difference is that `[OriginTrialEnabled]` wraps the generated code with `if (OriginTrials::FeatureNameEnabled(...)) { ...code... }`.
 
-For more information, see [RuntimeEnabledFeatures](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/platform/RuntimeEnabledFeatures.in) and [OriginTrialContext](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/core/origin_trials/OriginTrialContext.h).
+For more information, see [RuntimeEnabledFeatures](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/platform/RuntimeEnabledFeatures.json5) and [OriginTrialContext](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/core/origin_trials/OriginTrialContext.h).
 
 *** note
 **FIXME:** Currently, `[OriginTrialEnabled]` can only be applied to interfaces, attributes, and constants. Methods (including those generated by `iterable`, `setlike`, `maplike`, `serializer` and `stringifier`) are not supported. See [Bug 621641](https://crbug.com/621641).
@@ -1255,7 +1187,7 @@ If there is no match, the empty string will be returned. As required by the spec
 
 Summary: `[RuntimeEnabled]` wraps the generated code with `if (RuntimeEnabledFeatures::FeatureNameEnabled) { ...code... }`.
 
-Usage: `[RuntimeEnabled=FeatureName]`. FeatureName must be included in [RuntimeEnabledFeatures.in](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/platform/RuntimeEnabledFeatures.in).
+Usage: `[RuntimeEnabled=FeatureName]`. FeatureName must be included in [RuntimeEnabledFeatures.in](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/platform/RuntimeEnabledFeatures.json5).
 
 ```webidl
 [
@@ -1279,7 +1211,7 @@ foo(long x);
 [RuntimeEnabled=FeatureName] foo(long x, long y);
 ```
 
-For more information, see [RuntimeEnabledFeatures](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/platform/RuntimeEnabledFeatures.in).
+For more information, see [RuntimeEnabledFeatures](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/platform/RuntimeEnabledFeatures.json5).
 
 ### [SaveSameObject] _(a)_
 
@@ -1287,43 +1219,15 @@ Summary: Caches the resulting object and always returns the same object.
 
 When specified, caches the resulting object and returns it in later calls so that the attribute always returns the same object. Must be accompanied with `[SameObject]`.
 
-### [SetWrapperReferenceFrom=xxx] _(i)_
-
-### [SetWrapperReferenceTo=xxx] _(i)_
-
-Summary: This generates code that allows you to set up implicit references between wrappers which can be used to keep wrappers alive during GC.
-
-Usage: `[SetWrapperReferenceFrom]` and `[SetWrapperReferenceTo]` can be specified on an interface. Use `[Custom=VisitDOMWrapper]` if want to write a custom function.
-
-```webidl
-[
-  SetWrapperReferenceFrom=element
-] interface XXX { ... };
-```
-
-The code generates a function called `XXX::visitDOMWrapper` which is called by `V8GCController` before GC. The function adds implicit references from the specified object to this object's wrapper to keep it alive.
-
-The `[SetWrapperReferenceFrom]` extended attribute takes a value, which is the function to call to get the object that determines whether the object is reachable or not. The currently valid values are: `document`, `element`, `owner`, `ownerNode`
-
-```webidl
-[
-  SetWrapperReferenceTo=targetMethod
-] interface YYY { ... };
-```
-
-The code generates a function called `YYY::visitDOMWrapper` which is called by `V8GCController` before GC. The function adds implicit references from this object's wrapper to a target object's wrapper to keeps it alive.
-
-The `[SetWrapperReferenceTo]` extended attribute takes a value, which is the method name to call to get the target object. For example, with the above declaration a call will be made to `YYY::targetMethod()` to get the target of the reference.
-
 ## Rare Blink-specific IDL Extended Attributes
 
 These extended attributes are rarely used, generally only in one or two places. These are often replacements for `[Custom]` bindings, and may be candidates for deprecation and removal.
 
 ### [CachedAttribute] _(a)_
 
-Summary: For performance optimization, `[CachedAttribute]` indicates that a wrapped object should be cached on a DOM object. Rarely used (only by IndexDB).
+Summary: For performance optimization, `[CachedAttribute]` indicates that a wrapped object should be cached on a DOM object. Rarely used.
 
-Usage: `[CachedAttribute]` can be specified on attributes, and takes a required value, generally called is*Dirty (esp. isValueDirty):
+Usage: `[CachedAttribute]` can be specified on attributes, and takes a required value, generally called is*Dirty (e.g. isValueDirty):
 
 ```webidl
 interface HTMLFoo {
@@ -1366,7 +1270,7 @@ In case where `HTMLFoo::serializedValue()`, the deserialization or the operation
 You should cache attributes if and only if it is really important for performance. Not only does caching increase the DOM object size, but also it increases the overhead of "cache-miss"ed getters. In addition, setters always need to invalidate the cache.
 ***
 
-`[CachedAttribute]` takes a required parameter which the name of a method to call on the implementation object. The method should take void and return bool. Before the cached attribute is used, the method will be called. If the method returns true the cached value is not used, which will result in the accessor being called again. This allows the implementation to both gain the performance benefit of caching (when the conversion to a script value can be done lazily) while allowing the value to be updated. The typical use pattern is:
+`[CachedAttribute]` takes a required parameter which the name of a method to call on the implementation object. The method should be const, take void and return bool. Before the cached attribute is used, the method will be called. If the method returns true the cached value is not used, which will result in the accessor being called again. This allows the implementation to both gain the performance benefit of caching (when the conversion to a script value can be done lazily) while allowing the value to be updated. The typical use pattern is:
 
 ```c++
 // Called internally to update value
@@ -1377,7 +1281,7 @@ void Object::setValue(Type data)
 }
 
 // Called by generated binding code
-bool Object::isAttributeDirty()
+bool Object::isAttributeDirty() const
 {
     return m_attributeDirty;
 }
@@ -1507,7 +1411,7 @@ Consider the following example:
 Then you can write custom bindings in Source/bindings/v8/custom/V8XXXConstructorCustom.cpp:
 
 ```c++
-v8::Handle<v8::Value> V8XXX::constructorCallback(const v8::Arguments& args)
+v8::Local<v8::Value> V8XXX::constructorCallback(const v8::Arguments& args)
 {
    ...;
 }
@@ -1520,6 +1424,21 @@ Summary: `[FlexibleArrayBufferView]` wraps a parameter that is known to be an Ar
 The FlexibleArrayBufferView itself can then either refer to an actual ArrayBufferView or a temporary copy (for small payloads) that may even live on the stack. The idea is that copying the payload on the stack and referring to the temporary copy saves creating global handles (resulting in weak roots) in V8. Note that `[FlexibleArrayBufferView]`  will actually result in a TypedFlexibleArrayBufferView wrapper for typed arrays.
 
 Usage: Applies to arguments of methods. See modules/webgl/WebGLRenderingContextBase.idl for an example.
+
+### [AllowShared] _(p)_
+
+Summary: `[AllowShared]` indicates that a parameter, which must be an ArrayBufferView (or subtype of, e.g. typed arrays), is allowed to be backed by a SharedArrayBuffer.
+
+Usage: `[AllowShared]` must be specified on a parameter to a method:
+
+```webidl
+interface Context {
+    void bufferData1([AllowShared] ArrayBufferView buffer);
+    void bufferData2([AllowShared] Float32Array buffer);
+}
+```
+
+A SharedArrayBuffer is a distinct type from an ArrayBuffer, but both types use ArrayBufferViews to view the data in the buffer. Most methods do not permit an ArrayBufferView that is backed by a SharedArrayBuffer, and will throw an exception. This attribute indicates that this method permits a shared ArrayBufferView.
 
 ### [PermissiveDictionaryConversion] _(p, d)_
 

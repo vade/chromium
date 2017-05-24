@@ -46,7 +46,7 @@ public class BidirectionalStreamTest extends CronetTestBase {
 
         mTestFramework = startCronetTestFrameworkWithUrlAndCronetEngineBuilder(null, builder);
         assertTrue(Http2TestServer.startHttp2TestServer(
-                getContext(), QuicTestServer.getServerCert(), QuicTestServer.getServerCertKey()));
+                getContext(), SERVER_CERT_PEM, SERVER_KEY_PKCS8_PEM));
     }
 
     @Override
@@ -395,6 +395,58 @@ public class BidirectionalStreamTest extends CronetTestBase {
         assertEquals("", callback.mResponseInfo.getAllHeaders().get("echo-empty").get(0));
         assertEquals(
                 "zebra", callback.mResponseInfo.getAllHeaders().get("echo-content-type").get(0));
+    }
+
+    @SmallTest
+    @Feature({"Cronet"})
+    @OnlyRunNativeCronet
+    // Regression test for crbug.com/692168.
+    public void testCancelWhileWriteDataPending() throws Exception {
+        String url = Http2TestServer.getEchoStreamUrl();
+        // Use a direct executor to avoid race.
+        TestBidirectionalStreamCallback callback = new TestBidirectionalStreamCallback(
+                /*useDirectExecutor*/ true) {
+            @Override
+            public void onStreamReady(BidirectionalStream stream) {
+                // Start the first write.
+                stream.write(getDummyData(), false);
+                stream.flush();
+            }
+            @Override
+            public void onReadCompleted(BidirectionalStream stream, UrlResponseInfo info,
+                    ByteBuffer byteBuffer, boolean endOfStream) {
+                super.onReadCompleted(stream, info, byteBuffer, endOfStream);
+                // Cancel now when the write side is busy.
+                stream.cancel();
+            }
+            @Override
+            public void onWriteCompleted(BidirectionalStream stream, UrlResponseInfo info,
+                    ByteBuffer buffer, boolean endOfStream) {
+                // Flush twice to keep the flush queue non-empty.
+                stream.write(getDummyData(), false);
+                stream.flush();
+                stream.write(getDummyData(), false);
+                stream.flush();
+            }
+            // Returns a piece of dummy data to send to the server.
+            private ByteBuffer getDummyData() {
+                byte[] data = new byte[100];
+                for (int i = 0; i < data.length; i++) {
+                    data[i] = 'x';
+                }
+                ByteBuffer dummyData = ByteBuffer.allocateDirect(data.length);
+                dummyData.put(data);
+                dummyData.flip();
+                return dummyData;
+            }
+        };
+        CronetBidirectionalStream stream =
+                (CronetBidirectionalStream) mTestFramework.mCronetEngine
+                        .newBidirectionalStreamBuilder(url, callback, callback.getExecutor())
+                        .build();
+        stream.start();
+        callback.blockForDone();
+        assertTrue(callback.mOnCanceledCalled);
     }
 
     @SmallTest

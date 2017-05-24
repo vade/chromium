@@ -29,7 +29,7 @@ const SkColor kShadowColor = SkColorSetRGB(77, 144, 254);
 FocusRingLayerDelegate::~FocusRingLayerDelegate() {}
 
 FocusRingLayer::FocusRingLayer(FocusRingLayerDelegate* delegate)
-    : delegate_(delegate), root_window_(nullptr), compositor_(nullptr) {}
+    : delegate_(delegate) {}
 
 FocusRingLayer::~FocusRingLayer() {
   if (compositor_ && compositor_->HasAnimationObserver(this))
@@ -52,6 +52,14 @@ void FocusRingLayer::SetOpacity(float opacity) {
   layer()->SetOpacity(opacity);
 }
 
+void FocusRingLayer::SetColor(SkColor color) {
+  custom_color_ = color;
+}
+
+void FocusRingLayer::ResetColor() {
+  custom_color_.reset();
+}
+
 void FocusRingLayer::CreateOrUpdateLayer(aura::Window* root_window,
                                          const char* layer_name,
                                          const gfx::Rect& bounds) {
@@ -70,6 +78,8 @@ void FocusRingLayer::CreateOrUpdateLayer(aura::Window* root_window,
   layer_->parent()->StackAtTop(layer_.get());
 
   layer_->SetBounds(bounds);
+  gfx::Rect layer_bounds(0, 0, bounds.width(), bounds.height());
+  layer_->SchedulePaint(layer_bounds);
 
   // Update the animation observer.
   display::Display display =
@@ -90,20 +100,20 @@ void FocusRingLayer::OnPaintLayer(const ui::PaintContext& context) {
 
   ui::PaintRecorder recorder(context, layer_->size());
 
-  SkPaint paint;
-  paint.setColor(kShadowColor);
-  paint.setFlags(SkPaint::kAntiAlias_Flag);
-  paint.setStyle(SkPaint::kStroke_Style);
-  paint.setStrokeWidth(2);
+  cc::PaintFlags flags;
+  flags.setAntiAlias(true);
+  flags.setColor(custom_color_ ? *custom_color_ : kShadowColor);
+  flags.setStyle(cc::PaintFlags::kStroke_Style);
+  flags.setStrokeWidth(2);
 
   gfx::Rect bounds = focus_ring_ - layer_->bounds().OffsetFromOrigin();
   int r = kShadowRadius;
   for (int i = 0; i < r; i++) {
     // Fade out alpha quadratically.
-    paint.setAlpha((kShadowAlpha * (r - i) * (r - i)) / (r * r));
+    flags.setAlpha((kShadowAlpha * (r - i) * (r - i)) / (r * r));
     gfx::Rect outsetRect = bounds;
     outsetRect.Inset(-i, -i, -i, -i);
-    recorder.canvas()->DrawRect(outsetRect, paint);
+    recorder.canvas()->DrawRect(outsetRect, flags);
   }
 }
 

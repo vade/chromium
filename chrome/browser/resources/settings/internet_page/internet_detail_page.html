@@ -2,17 +2,19 @@
 <link rel="import" href="chrome://resources/cr_elements/icons.html">
 <link rel="import" href="chrome://resources/cr_elements/network/cr_network_icon.html">
 <link rel="import" href="chrome://resources/cr_elements/network/cr_onc_types.html">
+<link rel="import" href="chrome://resources/cr_elements/policy/cr_policy_indicator.html">
 <link rel="import" href="chrome://resources/cr_elements/policy/cr_policy_network_behavior.html">
 <link rel="import" href="chrome://resources/cr_elements/policy/cr_policy_network_indicator.html">
 <link rel="import" href="chrome://resources/html/i18n_behavior.html">
 <link rel="import" href="chrome://resources/html/polymer.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-collapse/iron-collapse.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/iron-flex-layout/classes/iron-flex-layout.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/iron-flex-layout/iron-flex-layout-classes.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-icon/iron-icon.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-button/paper-button.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-toggle-button/paper-toggle-button.html">
-<link rel="import" href="/prefs/prefs.html">
-<link rel="import" href="/route.html">
+<link rel="import" href="../controls/settings_toggle_button.html">
+<link rel="import" href="../prefs/prefs.html">
+<link rel="import" href="../route.html">
 <link rel="import" href="internet_shared_css.html">
 <link rel="import" href="network_apnlist.html">
 <link rel="import" href="network_ip_config.html">
@@ -20,20 +22,17 @@
 <link rel="import" href="network_property_list.html">
 <link rel="import" href="network_proxy.html">
 <link rel="import" href="network_siminfo.html">
+<link rel="import" href="tether_connection_dialog.html">
 
 <dom-module id="settings-internet-detail-page">
   <template>
-    <style include="internet-shared">
+    <style include="internet-shared iron-flex">
       :host {
         padding-bottom: 40px;
       }
 
       cr-network-icon {
         -webkit-padding-end: 8px;
-      }
-
-      cr-policy-network-indicator {
-        -webkit-margin-start: 10px;
       }
 
       iron-collapse {
@@ -44,15 +43,13 @@
         -webkit-margin-end: 10px;
       }
 
-      /* Use <span> for subtitles so as not to interfere with
-       * settings-box:first-of-type. */
-      span.subtitle {
-        font-weight: 700;
-        padding: 20px;
+      paper-toggle-button {
+        -webkit-margin-start: var(--settings-control-label-spacing);
       }
 
-      .advanced {
-        font-weight: 700;
+      cr-policy-network-indicator,
+      cr-policy-indicator {
+        -webkit-margin-start: var(--settings-controlled-by-spacing);
       }
 
       .indented {
@@ -68,22 +65,22 @@
       }
 
       #buttonDiv paper-button {
-        margin: 10px 0;
+        /* Align text edge with trailing margin (12px button padding) */
+        -webkit-margin-end: -12px;
+        /* 8px spacing between highlight edges. */
+        -webkit-margin-start: calc(12px + 8px);
+        margin-bottom: 10px;
+        margin-top: 10px;
       }
 
       #networkState {
-        /* TODO(stevenjb): Finalize font-size / style for this. */
-        font-size: 125%;
+        -webkit-padding-start: 8px;
+        font-size: 107.69%;  /* 14px / 13px */
         font-weight: 500;
-        padding-left: 8px;
       }
 
       #networkState[connected] {
         color: var(--google-green-500);
-      }
-
-      #proxyDiv {
-        max-width: 500px;
       }
     </style>
     <!-- Title section: Icon + name + connection state. -->
@@ -97,10 +94,10 @@
         </div>
         <template is="dom-if"
             if="[[isPolicySource(networkProperties.Source))]]">
-          <cr-policy-network-indicator
+          <cr-policy-indicator
               indicator-type="[[getIndicatorTypeForSource(
                   networkProperties.Source)]]">
-          </cr-policy-network-indicator>
+          </cr-policy-indicator>
         </template>
       </div>
       <div id="buttonDiv" class="layout horizontal center">
@@ -125,7 +122,7 @@
         <paper-button class="primary-button" on-tap="onConnectTap_"
             hidden$="[[!showConnect_(networkProperties, globalPolicy)]]"
             disabled="[[!enableConnect_(networkProperties, defaultNetwork,
-                      globalPolicy)]]">
+                globalPolicy)]]">
           $i18n{networkButtonConnect}
         </paper-button>
         <paper-button class="primary-button" on-tap="onDisconnectTap_"
@@ -138,7 +135,7 @@
     <!-- Disabled by policy / Shared messages. -->
     <div class="settings-box continuation"
         hidden$="[[!connectNotAllowed_(networkProperties, globalPolicy)]]">
-      <iron-icon class="policy" icon="cr:domain"></iron-icon>
+      <iron-icon class="policy" icon="cr20:domain"></iron-icon>
       <div>$i18n{networkConnectNotAllowed}</div>
     </div>
     <div class="settings-box continuation"
@@ -159,29 +156,45 @@
       <!-- Top level properties -->
       <div class="layout vertical">
         <!-- Prefer this network. -->
-        <template is="dom-if" if="[[showPreferNetwork_(networkProperties))]]">
+        <template is="dom-if" if="[[showPreferNetwork_(networkProperties)]]">
           <div class="settings-box">
-            <div class="start">$i18n{networkPrefer}</div>
+            <div id="preferNetworkToggleLabel"class="start">
+              $i18n{networkPrefer}
+            </div>
             <cr-policy-network-indicator
                 property="[[networkProperties.Priority]]">
             </cr-policy-network-indicator>
             <paper-toggle-button checked="{{preferNetwork_}}"
                 disabled="[[isNetworkPolicyEnforced(
-                    networkProperties.Priority)]]">
+                          networkProperties.Priority)]]"
+                aria-labelledby="preferNetworkToggleLabel">
             </paper-toggle-button>
           </div>
         </template>
         <!-- Autoconnect. -->
         <template is="dom-if" if="[[showAutoConnect_(networkProperties)]]">
           <div class="settings-box">
-            <div class="start">$i18n{networkAutoConnect}</div>
+            <div id="autoConnectToggleLabel" class="start">
+              $i18n{networkAutoConnect}
+            </div>
             <cr-policy-network-indicator
                 property="[[getManagedAutoConnect_(networkProperties)]]">
             </cr-policy-network-indicator>
             <paper-toggle-button checked="{{autoConnect_}}"
                 disabled="[[!enableAutoConnect_(networkProperties,
-                          globalPolicy)]]">
+                          globalPolicy)]]"
+                aria-labelledby="autoConnectToggleLabel">
             </paper-toggle-button>
+          </div>
+        </template>
+        <!-- Data roaming (Cellular only). -->
+        <template is="dom-if"
+            if="[[isType_(NetworkType_.CELLULAR, networkProperties)]]">
+          <div class="settings-box">
+            <settings-toggle-button id="allowDataRoaming" class="start"
+                pref="{{prefs.cros.signed.data_roaming_enabled}}"
+                label="$i18n{networkAllowDataRoaming}">
+            </settings-toggle-button>
           </div>
         </template>
         <!-- SIM Info (Cellular only). -->
@@ -212,67 +225,92 @@
         </template>
       </div>
 
-      <!-- Advanced toggle. -->
-      <div class="settings-box" actionable on-tap="toggleAdvancedExpanded_"
-          hidden$="[[!showAdvanced_(networkProperties)]]">
-        <div class="advanced flex">$i18n{networkSectionAdvanced}</div>
-        <cr-expand-button id="expandButton" expanded="{{advancedExpanded_}}"
-            alt="$i18n{networkSectionAdvancedExpandA11yLabel}">
-        </cr-expand-button>
-      </div>
-
-      <!-- Advanced section -->
-      <iron-collapse opened="[[advancedExpanded_]]">
-        <div class="layout vertical indented">
-          <div class="settings-box single-column stretch"
-              hidden$="[[!hasAdvancedOrDeviceFields_(networkProperties)]]">
-            <!-- Advanced properties -->
-            <network-property-list
-                hidden$="[[!hasAdvancedFields_(networkProperties)]]"
-                fields="[[getAdvancedFields_(networkProperties)]]"
-                property-dict="[[networkProperties]]">
-            </network-property-list>
-            <!-- Device properties -->
-            <network-property-list
-                hidden$="[[!hasDeviceFields_(networkProperties)]]"
-                fields="[[getDeviceFields_(networkProperties)]]"
-                property-dict="[[networkProperties]]">
-            </network-property-list>
-          </div>
-
-          <!-- Network sub-section title -->
-          <div class="layout vertical"
-              hidden$="[[!hasNetworkSection_(networkProperties)]]">
-            <span class="subtitle">$i18n{networkSectionNetwork}</span>
-          </div>
-
-          <!-- APN -->
-          <template is="dom-if"
-              if="[[isType_(NetworkType_.CELLULAR, networkProperties)]]">
-            <network-apnlist editable on-apn-change="onNetworkPropertyChange_"
-                network-properties="[[networkProperties]]">
-            </network-apnlist>
-          </template>
-          
-          <!-- IP Config, Nameservers, Proxy -->
-          <template is="dom-if"
-              if="[[isRememberedOrConnected_(networkProperties)]]">
-            <network-ip-config editable on-ip-change="onIPConfigChange_"
-                network-properties="[[networkProperties]]">
-            </network-ip-config>
-            <network-nameservers editable
-                on-nameservers-change="onIPConfigChange_"
-                network-properties="[[networkProperties]]">
-            </network-nameservers>
-            <span class="subtitle">$i18n{networkSectionProxy}</span>
-            <network-proxy editable prefs="{{prefs}}"
-                on-proxy-change="onProxyChange_"
-                network-properties="[[networkProperties]]">
-            </network-proxy>
-          </template>
+      <template is="dom-if" if="[[showAdvanced_(networkProperties)]]">
+        <!-- Advanced toggle. -->
+        <div class="settings-box" actionable on-tap="toggleAdvancedExpanded_">
+          <div class="flex">$i18n{networkSectionAdvanced}</div>
+          <cr-expand-button expanded="{{advancedExpanded_}}"
+              alt="$i18n{networkSectionAdvancedA11yLabel}">
+          </cr-expand-button>
         </div>
-      </iron-collapse>
+
+        <!-- Advanced section -->
+        <iron-collapse opened="[[advancedExpanded_]]">
+          <div class="layout vertical indented">
+            <div class="settings-box single-column stretch"
+                hidden$="[[!hasAdvancedOrDeviceFields_(networkProperties)]]">
+              <!-- Advanced properties -->
+              <network-property-list
+                  hidden$="[[!hasAdvancedFields_(networkProperties)]]"
+                  fields="[[getAdvancedFields_(networkProperties)]]"
+                  property-dict="[[networkProperties]]">
+              </network-property-list>
+              <!-- Device properties -->
+              <network-property-list
+                  hidden$="[[!hasDeviceFields_(networkProperties)]]"
+                  fields="[[getDeviceFields_(networkProperties)]]"
+                  property-dict="[[networkProperties]]">
+              </network-property-list>
+            </div>
+          </div>
+        </iron-collapse>
+      </template>
+
+      <template is="dom-if" if="[[hasNetworkSection_(networkProperties)]]">
+        <!-- Network toggle -->
+        <div class="settings-box" actionable on-tap="toggleNetworkExpanded_">
+          <div class="start">$i18n{networkSectionNetwork}</div>
+          <cr-expand-button expanded="{{networkExpanded_}}"
+              alt="$i18n{networkSectionNetworkExpandA11yLabel}">
+          </cr-expand-button>
+        </div>
+
+        <iron-collapse opened="[[networkExpanded_]]">
+          <div class="layout vertical indented">
+            <!-- APN -->
+            <template is="dom-if"
+                if="[[isType_(NetworkType_.CELLULAR, networkProperties)]]">
+              <network-apnlist editable on-apn-change="onNetworkPropertyChange_"
+                  network-properties="[[networkProperties]]">
+              </network-apnlist>
+            </template>
+
+            <!-- IP Config, Nameservers -->
+            <template is="dom-if"
+                if="[[isRememberedOrConnected_(networkProperties)]]">
+              <network-ip-config editable on-ip-change="onIPConfigChange_"
+                  network-properties="[[networkProperties]]">
+              </network-ip-config>
+              <network-nameservers editable
+                  on-nameservers-change="onIPConfigChange_"
+                  network-properties="[[networkProperties]]">
+              </network-nameservers>
+            </template>
+          </div>
+        </iron-collapse>
+
+        <!-- Proxy toggle -->
+        <div class="settings-box" actionable on-tap="toggleProxyExpanded_">
+          <div class="start">$i18n{networkSectionProxy}</div>
+          <cr-expand-button expanded="{{proxyExpanded_}}"
+              alt="$i18n{networkSectionProxyExpandA11yLabel}">
+          </cr-expand-button>
+        </div>
+
+        <iron-collapse opened="[[proxyExpanded_]]">
+          <network-proxy editable prefs="{{prefs}}"
+              on-proxy-change="onProxyChange_"
+              network-properties="[[networkProperties]]">
+          </network-proxy>
+        </iron-collapse>
+      </template>
     </template>
+
+    <tether-connection-dialog id="tetherDialog"
+        network-properties="[[networkProperties]]"
+        on-tether-connect="onTetherConnect_"
+        on-close="onTetherDialogClose_">
+    </tether-connection-dialog>
   </template>
   <script src="internet_detail_page.js"></script>
 </dom-module>

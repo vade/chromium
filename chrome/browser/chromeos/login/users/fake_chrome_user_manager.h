@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 
+#include "base/callback_forward.h"
 #include "base/macros.h"
 #include "chrome/browser/chromeos/login/user_flow.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
@@ -27,14 +28,16 @@ class FakeChromeUserManager : public ChromeUserManager {
   FakeChromeUserManager();
   ~FakeChromeUserManager() override;
 
-  // Create and add a kiosk app user.
+  // Create and add various types of users.
   user_manager::User* AddKioskAppUser(const AccountId& account_id);
   user_manager::User* AddArcKioskAppUser(const AccountId& account_id);
-
-  // Create and add a public account user.
+  user_manager::User* AddSupervisedUser(const AccountId& account_id);
   const user_manager::User* AddPublicAccountUser(const AccountId& account_id);
 
   // Calculates the user name hash and calls UserLoggedIn to login a user.
+  // Sets the user as having its profile created, but does not create a profile.
+  // NOTE: This does not match production, which first logs in the user, then
+  // creates the profile and updates the user later.
   void LoginUser(const AccountId& account_id);
 
   const user_manager::User* AddUser(const AccountId& account_id);
@@ -55,6 +58,7 @@ class FakeChromeUserManager : public ChromeUserManager {
   void SwitchActiveUser(const AccountId& account_id) override;
   void SwitchToLastActiveUser() override;
   void OnSessionStarted() override;
+  void OnProfileInitialized(user_manager::User* user) override;
   void RemoveUser(const AccountId& account_id,
                   user_manager::RemoveUserDelegate* delegate) override;
   void RemoveUserFromList(const AccountId& account_id) override;
@@ -176,6 +180,8 @@ class FakeChromeUserManager : public ChromeUserManager {
     multi_profile_user_controller_ = controller;
   }
 
+  void set_current_user_new(bool new_user) { current_user_new_ = new_user; }
+
  private:
   // Lazily creates default user flow.
   UserFlow* GetDefaultUserFlow() const;
@@ -186,6 +192,7 @@ class FakeChromeUserManager : public ChromeUserManager {
   std::unique_ptr<FakeSupervisedUserManager> supervised_user_manager_;
   AccountId owner_account_id_ = EmptyAccountId();
   bool fake_ephemeral_users_enabled_ = false;
+  bool current_user_new_ = false;
 
   BootstrapManager* bootstrap_manager_ = nullptr;
   MultiProfileUserController* multi_profile_user_controller_ = nullptr;

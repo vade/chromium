@@ -12,6 +12,8 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/optional.h"
+#include "base/unguessable_token.h"
 #include "media/base/bitstream_buffer.h"
 #include "media/base/cdm_context.h"
 #include "media/base/encryption_scheme.h"
@@ -80,6 +82,13 @@ class MEDIA_EXPORT VideoDecodeAccelerator {
       // If set, video frames will have COPY_REQUIRED flag which will cause
       // an extra texture copy during composition.
       REQUIRES_TEXTURE_COPY = 1 << 3,
+
+      // Whether the VDA supports encrypted streams or not.
+      SUPPORTS_ENCRYPTED_STREAMS = 1 << 4,
+
+      // If set the decoder does not require a restart in order to switch to
+      // using an external output surface.
+      SUPPORTS_SET_EXTERNAL_OUTPUT_SURFACE = 1 << 5,
     };
 
     SupportedProfiles supported_profiles;
@@ -146,7 +155,11 @@ class MEDIA_EXPORT VideoDecodeAccelerator {
     // An optional graphics surface that the VDA should render to. For setting
     // an output SurfaceView on Android. It's only valid when not equal to
     // |kNoSurfaceID|.
+    // TODO(liberato): should this be Optional<> instead?
     int surface_id = SurfaceManager::kNoSurfaceID;
+
+    // An optional routing token for AndroidOverlay.
+    base::Optional<base::UnguessableToken> overlay_routing_token;
 
     // Coded size of the video frame hint, subject to change.
     gfx::Size initial_expected_coded_size = gfx::Size(320, 240);
@@ -162,6 +175,9 @@ class MEDIA_EXPORT VideoDecodeAccelerator {
     // Each SPS and PPS is prefixed with the Annex B framing bytes: 0, 0, 0, 1.
     std::vector<uint8_t> sps;
     std::vector<uint8_t> pps;
+
+    // Color space specified by the container.
+    VideoColorSpace color_space;
   };
 
   // Interface for collaborating with picture interface to provide memory for
@@ -297,7 +313,11 @@ class MEDIA_EXPORT VideoDecodeAccelerator {
   // An optional graphics surface that the VDA should render to. For setting
   // an output SurfaceView on Android. Passing |kNoSurfaceID| will clear any
   // previously set surface in favor of an internally generated texture.
-  virtual void SetSurface(int32_t surface_id);
+  // |routing_token| is an optional AndroidOverlay routing token.  At most one
+  // should be non-empty.
+  virtual void SetSurface(
+      int32_t surface_id,
+      const base::Optional<base::UnguessableToken>& routing_token);
 
   // Destroys the decoder: all pending inputs are dropped immediately and the
   // component is freed.  This call may asynchornously free system resources,

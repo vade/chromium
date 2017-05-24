@@ -243,6 +243,77 @@ bool EnumTraits<mojom::PasswordFormScheme, PasswordForm::Scheme>::FromMojom(
 }
 
 // static
+mojom::PasswordFormSubmissionIndicatorEvent
+EnumTraits<mojom::PasswordFormSubmissionIndicatorEvent,
+           PasswordForm::SubmissionIndicatorEvent>::
+    ToMojom(PasswordForm::SubmissionIndicatorEvent input) {
+  switch (input) {
+    case PasswordForm::SubmissionIndicatorEvent::NONE:
+      return mojom::PasswordFormSubmissionIndicatorEvent::NONE;
+    case PasswordForm::SubmissionIndicatorEvent::HTML_FORM_SUBMISSION:
+      return mojom::PasswordFormSubmissionIndicatorEvent::HTML_FORM_SUBMISSION;
+    case PasswordForm::SubmissionIndicatorEvent::SAME_DOCUMENT_NAVIGATION:
+      return mojom::PasswordFormSubmissionIndicatorEvent::
+          SAME_DOCUMENT_NAVIGATION;
+    case PasswordForm::SubmissionIndicatorEvent::XHR_SUCCEEDED:
+      return mojom::PasswordFormSubmissionIndicatorEvent::XHR_SUCCEEDED;
+    case PasswordForm::SubmissionIndicatorEvent::FRAME_DETACHED:
+      return mojom::PasswordFormSubmissionIndicatorEvent::FRAME_DETACHED;
+    case PasswordForm::SubmissionIndicatorEvent::MANUAL_SAVE:
+      return mojom::PasswordFormSubmissionIndicatorEvent::MANUAL_SAVE;
+    case PasswordForm::SubmissionIndicatorEvent::DOM_MUTATION_AFTER_XHR:
+      return mojom::PasswordFormSubmissionIndicatorEvent::
+          DOM_MUTATION_AFTER_XHR;
+    case PasswordForm::SubmissionIndicatorEvent::
+        SUBMISSION_INDICATOR_EVENT_COUNT:
+      return mojom::PasswordFormSubmissionIndicatorEvent::
+          SUBMISSION_INDICATOR_EVENT_COUNT;
+  }
+
+  NOTREACHED();
+  return mojom::PasswordFormSubmissionIndicatorEvent::NONE;
+}
+
+// static
+bool EnumTraits<mojom::PasswordFormSubmissionIndicatorEvent,
+                PasswordForm::SubmissionIndicatorEvent>::
+    FromMojom(mojom::PasswordFormSubmissionIndicatorEvent input,
+              PasswordForm::SubmissionIndicatorEvent* output) {
+  switch (input) {
+    case mojom::PasswordFormSubmissionIndicatorEvent::NONE:
+      *output = PasswordForm::SubmissionIndicatorEvent::NONE;
+      return true;
+    case mojom::PasswordFormSubmissionIndicatorEvent::HTML_FORM_SUBMISSION:
+      *output = PasswordForm::SubmissionIndicatorEvent::HTML_FORM_SUBMISSION;
+      return true;
+    case mojom::PasswordFormSubmissionIndicatorEvent::SAME_DOCUMENT_NAVIGATION:
+      *output =
+          PasswordForm::SubmissionIndicatorEvent::SAME_DOCUMENT_NAVIGATION;
+      return true;
+    case mojom::PasswordFormSubmissionIndicatorEvent::XHR_SUCCEEDED:
+      *output = PasswordForm::SubmissionIndicatorEvent::XHR_SUCCEEDED;
+      return true;
+    case mojom::PasswordFormSubmissionIndicatorEvent::FRAME_DETACHED:
+      *output = PasswordForm::SubmissionIndicatorEvent::FRAME_DETACHED;
+      return true;
+    case mojom::PasswordFormSubmissionIndicatorEvent::MANUAL_SAVE:
+      *output = PasswordForm::SubmissionIndicatorEvent::MANUAL_SAVE;
+      return true;
+    case mojom::PasswordFormSubmissionIndicatorEvent::DOM_MUTATION_AFTER_XHR:
+      *output = PasswordForm::SubmissionIndicatorEvent::DOM_MUTATION_AFTER_XHR;
+      return true;
+    case mojom::PasswordFormSubmissionIndicatorEvent::
+        SUBMISSION_INDICATOR_EVENT_COUNT:
+      *output = PasswordForm::SubmissionIndicatorEvent::
+          SUBMISSION_INDICATOR_EVENT_COUNT;
+      return true;
+  }
+
+  NOTREACHED();
+  return false;
+}
+
+// static
 mojom::PasswordFormFieldPredictionType EnumTraits<
     mojom::PasswordFormFieldPredictionType,
     PasswordFormFieldPredictionType>::ToMojom(PasswordFormFieldPredictionType
@@ -403,40 +474,6 @@ bool StructTraits<mojom::PasswordAndRealmDataView, PasswordAndRealm>::Read(
 }
 
 // static
-bool StructTraits<
-    mojom::UsernamesCollectionKeyDataView,
-    UsernamesCollectionKey>::Read(mojom::UsernamesCollectionKeyDataView data,
-                                  UsernamesCollectionKey* out) {
-  if (!data.ReadUsername(&out->username))
-    return false;
-  if (!data.ReadPassword(&out->password))
-    return false;
-  if (!data.ReadRealm(&out->realm))
-    return false;
-
-  return true;
-}
-
-// static
-void* StructTraits<mojom::PasswordFormFillDataDataView, PasswordFormFillData>::
-    SetUpContext(const PasswordFormFillData& r) {
-  // Extracts keys vector and values vector from the map, saves them as a pair.
-  auto* pair = new UsernamesCollectionKeysValuesPair();
-  for (const auto& i : r.other_possible_usernames) {
-    pair->first.push_back(i.first);
-    pair->second.push_back(i.second);
-  }
-
-  return pair;
-}
-
-// static
-void StructTraits<mojom::PasswordFormFillDataDataView, PasswordFormFillData>::
-    TearDownContext(const PasswordFormFillData& r, void* context) {
-  delete static_cast<UsernamesCollectionKeysValuesPair*>(context);
-}
-
-// static
 bool StructTraits<mojom::PasswordFormFillDataDataView, PasswordFormFillData>::
     Read(mojom::PasswordFormFillDataDataView data, PasswordFormFillData* out) {
   if (!data.ReadName(&out->name) || !data.ReadOrigin(&out->origin) ||
@@ -447,24 +484,9 @@ bool StructTraits<mojom::PasswordFormFillDataDataView, PasswordFormFillData>::
       !data.ReadAdditionalLogins(&out->additional_logins))
     return false;
 
-  // Combines keys vector and values vector to the map.
-  std::vector<UsernamesCollectionKey> keys;
-  if (!data.ReadOtherPossibleUsernamesKeys(&keys))
-    return false;
-  std::vector<std::vector<base::string16>> values;
-  if (!data.ReadOtherPossibleUsernamesValues(&values))
-    return false;
-  if (keys.size() != values.size())
-    return false;
-  out->other_possible_usernames.clear();
-  for (size_t i = 0; i < keys.size(); ++i)
-    out->other_possible_usernames.insert({keys[i], values[i]});
-
   out->wait_for_username = data.wait_for_username();
   out->is_possible_change_password_form =
       data.is_possible_change_password_form();
-  out->show_form_not_secure_warning_on_autofill =
-      data.show_form_not_secure_warning_on_autofill();
 
   return true;
 }
@@ -476,6 +498,12 @@ bool StructTraits<mojom::PasswordFormGenerationDataDataView,
          PasswordFormGenerationData* out) {
   out->form_signature = data.form_signature();
   out->field_signature = data.field_signature();
+  if (data.has_confirmation_field()) {
+    out->confirmation_field_signature.emplace(
+        data.confirmation_field_signature());
+  } else {
+    DCHECK(!out->confirmation_field_signature);
+  }
   return true;
 }
 
@@ -489,7 +517,8 @@ bool StructTraits<mojom::PasswordFormDataView, PasswordForm>::Read(
       !data.ReadAction(&out->action) ||
       !data.ReadAffiliatedWebRealm(&out->affiliated_web_realm) ||
       !data.ReadSubmitElement(&out->submit_element) ||
-      !data.ReadUsernameElement(&out->username_element))
+      !data.ReadUsernameElement(&out->username_element) ||
+      !data.ReadSubmissionEvent(&out->submission_event))
     return false;
 
   out->username_marked_by_site = data.username_marked_by_site();
@@ -508,6 +537,11 @@ bool StructTraits<mojom::PasswordFormDataView, PasswordForm>::Read(
 
   out->new_password_value_is_default = data.new_password_value_is_default();
   out->new_password_marked_by_site = data.new_password_marked_by_site();
+
+  if (!data.ReadConfirmationPasswordElement(
+          &out->confirmation_password_element))
+    return false;
+
   out->preferred = data.preferred();
 
   if (!data.ReadDateCreated(&out->date_created) ||
@@ -619,6 +653,15 @@ bool StructTraits<mojom::FormsPredictionsMapDataView, FormsPredictionsMap>::
   out->clear();
   for (size_t i = 0; i < keys.size(); ++i)
     out->insert({keys[i], values[i]});
+
+  return true;
+}
+
+// static
+bool StructTraits<mojom::PossibleUsernamePairDataView, PossibleUsernamePair>::
+    Read(mojom::PossibleUsernamePairDataView data, PossibleUsernamePair* out) {
+  if (!data.ReadValue(&out->first) || !data.ReadFieldName(&out->second))
+    return false;
 
   return true;
 }

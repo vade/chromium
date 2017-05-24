@@ -23,7 +23,7 @@ class NetworkQualityProviderStub
   static NetworkQualityProviderStub* GetUserData(
       base::SupportsUserData* supports_user_data);
   static void SetUserData(base::SupportsUserData* supports_user_data,
-                          NetworkQualityProviderStub* stub);
+                          std::unique_ptr<NetworkQualityProviderStub> stub);
 
   net::EffectiveConnectionType GetEffectiveConnectionType() const override;
 
@@ -33,6 +33,14 @@ class NetworkQualityProviderStub
 
   void RemoveEffectiveConnectionTypeObserver(
       net::NetworkQualityEstimator::EffectiveConnectionTypeObserver* observer)
+      override;
+
+  void AddRTTAndThroughputEstimatesObserver(
+      net::NetworkQualityEstimator::RTTAndThroughputEstimatesObserver* observer)
+      override;
+
+  void RemoveRTTAndThroughputEstimatesObserver(
+      net::NetworkQualityEstimator::RTTAndThroughputEstimatesObserver* observer)
       override;
 
   void SetEffectiveConnectionTypeForTest(net::EffectiveConnectionType type) {

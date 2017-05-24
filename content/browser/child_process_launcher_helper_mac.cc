@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/memory/ptr_util.h"
+#include "base/path_service.h"
 #include "base/posix/global_descriptors.h"
 #include "content/browser/bootstrap_sandbox_manager_mac.h"
 #include "content/browser/child_process_launcher.h"
@@ -31,8 +32,10 @@ void ChildProcessLauncherHelper::BeforeLaunchOnClientThread() {
 std::unique_ptr<FileDescriptorInfo>
 ChildProcessLauncherHelper::GetFilesToMap() {
   DCHECK_CURRENTLY_ON(BrowserThread::PROCESS_LAUNCHER);
-  return CreateDefaultPosixFilesToMap(*command_line(), child_process_id(),
-                                      mojo_client_handle());
+  return CreateDefaultPosixFilesToMap(
+      child_process_id(), mojo_client_handle(),
+      false /* include_service_required_files */, GetProcessType(),
+      command_line());
 }
 
 void ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
@@ -113,7 +116,6 @@ void ChildProcessLauncherHelper::AfterLaunchOnLauncherThread(
   broker->GetLock().Release();
 }
 
-// static
 base::TerminationStatus ChildProcessLauncherHelper::GetTerminationStatus(
     const ChildProcessLauncherHelper::Process& process,
     bool known_dead,
@@ -139,11 +141,32 @@ void ChildProcessLauncherHelper::ForceNormalProcessTerminationSync(
   base::EnsureProcessTerminated(std::move(process.process));
 }
 
-// static
-void ChildProcessLauncherHelper::SetProcessBackgroundedOnLauncherThread(
-      base::Process process, bool background) {
+void ChildProcessLauncherHelper::SetProcessPriorityOnLauncherThread(
+    base::Process process,
+    bool background,
+    bool boost_for_pending_views) {
   if (process.CanBackgroundProcesses())
     process.SetProcessBackgrounded(MachBroker::GetInstance(), background);
+}
+
+// static
+void ChildProcessLauncherHelper::SetRegisteredFilesForService(
+    const std::string& service_name,
+    catalog::RequiredFileMap required_files) {
+  // No file passing from the manifest on Mac yet.
+  DCHECK(required_files.empty());
+}
+
+// static
+void ChildProcessLauncherHelper::ResetRegisteredFilesForTesting() {}
+
+// static
+base::File OpenFileToShare(const base::FilePath& path,
+                           base::MemoryMappedFile::Region* region) {
+  // Not used yet (until required files are described in the service manifest on
+  // Mac).
+  NOTREACHED();
+  return base::File();
 }
 
 }  //  namespace internal

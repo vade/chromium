@@ -11,11 +11,37 @@ source_set("common") {
     "safebrowsing_messages.h",
     "safebrowsing_switches.cc",
     "safebrowsing_switches.h",
+    "safebrowsing_types.h",
   ]
 
   deps = [
     "//base",
     "//ipc",
     "//url/ipc:url_ipc",
+  ]
+}
+
+static_library("safe_browsing_prefs") {
+  sources = [
+    "safe_browsing_prefs.cc",
+    "safe_browsing_prefs.h",
+  ]
+  deps = [
+    "//base:base",
+    "//components/prefs",
+  ]
+}
+
+source_set("unit_tests") {
+  testonly = true
+  sources = [
+    "safe_browsing_prefs_unittest.cc",
+  ]
+  deps = [
+    ":safe_browsing_prefs",
+    "//base:base",
+    "//base/test:test_support",
+    "//components/prefs:test_support",
+    "//testing/gtest",
   ]
 }

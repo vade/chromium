@@ -50,7 +50,6 @@
 #include "extensions/common/extension.h"
 #include "extensions/features/features.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "v8/include/v8.h"
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
@@ -165,7 +164,7 @@ class VoiceSearchDomHandler : public WebUIMessageHandler {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
     DCHECK(info);
     base::DictionaryValue voiceSearchInfo;
-    voiceSearchInfo.Set("voiceSearchInfo", info.release());
+    voiceSearchInfo.Set("voiceSearchInfo", std::move(info));
     web_ui()->CallJavascriptFunctionUnsafe("returnVoiceSearchInfo",
                                            voiceSearchInfo);
   }

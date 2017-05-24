@@ -171,9 +171,17 @@ class FakeSchedulerClient : public SchedulerClient,
     actions_.push_back("ScheduledActionInvalidateCompositorFrameSink");
     states_.push_back(scheduler_->AsValue());
   }
+  void ScheduledActionPerformImplSideInvalidation() override {
+    PushAction("ScheduledActionPerformImplSideInvalidation");
+  }
 
   void SendBeginMainFrameNotExpectedSoon() override {
     PushAction("SendBeginMainFrameNotExpectedSoon");
+  }
+
+  void ScheduledActionBeginMainFrameNotExpectedUntil(
+      base::TimeTicks time) override {
+    PushAction("ScheduledActionBeginMainFrameNotExpectedUntil");
   }
 
   bool IsInsideBeginImplFrame() const { return inside_begin_impl_frame_; }
@@ -238,8 +246,7 @@ class SchedulerTest : public testing::Test {
       : now_src_(new base::SimpleTestTickClock()),
         task_runner_(new OrderedSimpleTaskRunner(now_src_.get(), true)),
         fake_external_begin_frame_source_(nullptr),
-        fake_compositor_timing_history_(nullptr),
-        next_begin_frame_number_(BeginFrameArgs::kStartingFrameNumber) {
+        fake_compositor_timing_history_(nullptr) {
     now_src_->Advance(base::TimeDelta::FromMicroseconds(10000));
     // A bunch of tests require NowTicks()
     // to be > BeginFrameArgs::DefaultInterval()
@@ -408,10 +415,9 @@ class SchedulerTest : public testing::Test {
     // Creep the time forward so that any BeginFrameArgs is not equal to the
     // last one otherwise we violate the BeginFrameSource contract.
     now_src_->Advance(BeginFrameArgs::DefaultInterval());
-    BeginFrameArgs args = CreateBeginFrameArgsForTesting(
-        BEGINFRAME_FROM_HERE, fake_external_begin_frame_source_->source_id(),
-        next_begin_frame_number_, now_src());
-    next_begin_frame_number_++;
+    BeginFrameArgs args =
+        fake_external_begin_frame_source_->CreateBeginFrameArgs(
+            BEGINFRAME_FROM_HERE, now_src());
     fake_external_begin_frame_source_->TestOnBeginFrame(args);
     return args;
   }
@@ -440,7 +446,6 @@ class SchedulerTest : public testing::Test {
   std::unique_ptr<FakeSchedulerClient> client_;
   std::unique_ptr<TestScheduler> scheduler_;
   FakeCompositorTimingHistory* fake_compositor_timing_history_;
-  uint64_t next_begin_frame_number_;
 };
 
 TEST_F(SchedulerTest, InitializeCompositorFrameSinkDoesNotBeginImplFrame) {
@@ -481,12 +486,14 @@ TEST_F(SchedulerTest, VideoNeedsBeginFrames) {
   EXPECT_SCOPED(AdvanceFrame());
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
   // WillBeginImplFrame is responsible for sending BeginFrames to video.
-  EXPECT_SINGLE_ACTION("WillBeginImplFrame", client_);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
 
   client_->Reset();
   EXPECT_SCOPED(AdvanceFrame());
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
-  EXPECT_SINGLE_ACTION("WillBeginImplFrame", client_);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
 
   client_->Reset();
   scheduler_->SetVideoNeedsBeginFrames(false);
@@ -537,7 +544,8 @@ TEST_F(SchedulerTest, RequestCommit) {
 
   // BeginImplFrame should prepare the draw.
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 1);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
   EXPECT_TRUE(scheduler_->begin_frames_expected());
   client_->Reset();
@@ -552,7 +560,8 @@ TEST_F(SchedulerTest, RequestCommit) {
   // The following BeginImplFrame deadline should SetNeedsBeginFrame(false)
   // to avoid excessive toggles.
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_SINGLE_ACTION("WillBeginImplFrame", client_);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
   client_->Reset();
 
@@ -972,7 +981,8 @@ TEST_F(SchedulerTest, PrepareTiles) {
   // the deadline task.
   client->Reset();
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_ACTION("WillBeginImplFrame", client, 0, 1);
+  EXPECT_ACTION("WillBeginImplFrame", client, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client, 1, 2);
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
 
   // On the deadline, the actions should have occured in the right order.
@@ -999,7 +1009,8 @@ TEST_F(SchedulerTest, PrepareTiles) {
   // the deadline task.
   client->Reset();
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_ACTION("WillBeginImplFrame", client, 0, 1);
+  EXPECT_ACTION("WillBeginImplFrame", client, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client, 1, 2);
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
 
   // Draw. The draw will trigger SetNeedsPrepareTiles, and
@@ -1019,7 +1030,8 @@ TEST_F(SchedulerTest, PrepareTiles) {
   // We need a BeginImplFrame where we don't swap to go idle.
   client->Reset();
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_SINGLE_ACTION("WillBeginImplFrame", client);
+  EXPECT_ACTION("WillBeginImplFrame", client, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client, 1, 2);
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
   client->Reset();
   task_runner().RunPendingTasks();  // Run posted deadline.
@@ -1040,7 +1052,8 @@ TEST_F(SchedulerTest, PrepareTiles) {
   // BeginImplFrame. There will be no draw, only PrepareTiles.
   client->Reset();
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_SINGLE_ACTION("WillBeginImplFrame", client);
+  EXPECT_ACTION("WillBeginImplFrame", client, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client, 1, 2);
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
   client->Reset();
   task_runner().RunPendingTasks();  // Run posted deadline.
@@ -1061,7 +1074,8 @@ TEST_F(SchedulerTest, PrepareTilesOncePerFrame) {
   scheduler_->SetNeedsRedraw();
   client_->Reset();
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 1);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
 
   EXPECT_TRUE(scheduler_->PrepareTilesPending());
@@ -1083,7 +1097,8 @@ TEST_F(SchedulerTest, PrepareTilesOncePerFrame) {
   scheduler_->SetNeedsRedraw();
   client_->Reset();
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 1);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
 
   client_->Reset();
@@ -1105,7 +1120,8 @@ TEST_F(SchedulerTest, PrepareTilesOncePerFrame) {
   scheduler_->SetNeedsRedraw();
   client_->Reset();
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 1);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
 
   EXPECT_TRUE(scheduler_->PrepareTilesPending());
@@ -1129,7 +1145,8 @@ TEST_F(SchedulerTest, PrepareTilesOncePerFrame) {
   scheduler_->SetNeedsRedraw();
   client_->Reset();
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 1);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
 
   EXPECT_TRUE(scheduler_->PrepareTilesPending());
@@ -1147,7 +1164,8 @@ TEST_F(SchedulerTest, PrepareTilesOncePerFrame) {
   scheduler_->SetNeedsRedraw();
   client_->Reset();
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 1);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
 
   client_->Reset();
@@ -1162,33 +1180,58 @@ TEST_F(SchedulerTest, PrepareTilesOncePerFrame) {
   EXPECT_FALSE(client_->IsInsideBeginImplFrame());
 }
 
-TEST_F(SchedulerTest, PrepareTilesFunnelResetOnVisibilityChange) {
+TEST_F(SchedulerTest, DidPrepareTilesPreventsPrepareTilesForOneFrame) {
   std::unique_ptr<SchedulerClientNeedsPrepareTilesInDraw> client =
       base::WrapUnique(new SchedulerClientNeedsPrepareTilesInDraw);
   SetUpScheduler(EXTERNAL_BFS, std::move(client));
-
-  // Simulate a few visibility changes and associated PrepareTiles.
-  for (int i = 0; i < 10; i++) {
-    scheduler_->SetVisible(false);
-    scheduler_->WillPrepareTiles();
-    scheduler_->DidPrepareTiles();
-
-    scheduler_->SetVisible(true);
-    scheduler_->WillPrepareTiles();
-    scheduler_->DidPrepareTiles();
-  }
 
   client_->Reset();
   scheduler_->SetNeedsRedraw();
   EXPECT_SINGLE_ACTION("AddObserver(this)", client_);
 
   client_->Reset();
-  AdvanceFrame();
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 1);
+  EXPECT_SCOPED(AdvanceFrame());
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
 
   client_->Reset();
-  task_runner().RunTasksWhile(client_->InsideBeginImplFrame(true));
+  task_runner().RunPendingTasks();  // Run posted deadline.
+  EXPECT_FALSE(client_->IsInsideBeginImplFrame());
+  EXPECT_ACTION("ScheduledActionDrawIfPossible", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionPrepareTiles", client_, 1, 2);
+
+  // We don't want to hinder scheduled prepare tiles for more than one frame
+  // even if we call unscheduled prepare tiles many times.
+  for (int i = 0; i < 10; i++) {
+    scheduler_->WillPrepareTiles();
+    scheduler_->DidPrepareTiles();
+  }
+
+  client_->Reset();
+  scheduler_->SetNeedsRedraw();
+  EXPECT_SCOPED(AdvanceFrame());
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
+  EXPECT_TRUE(client_->IsInsideBeginImplFrame());
+
+  // No scheduled prepare tiles because we've already counted a prepare tiles in
+  // between frames.
+  client_->Reset();
+  task_runner().RunPendingTasks();  // Run posted deadline.
+  EXPECT_FALSE(client_->IsInsideBeginImplFrame());
+  EXPECT_SINGLE_ACTION("ScheduledActionDrawIfPossible", client_);
+
+  client_->Reset();
+  scheduler_->SetNeedsRedraw();
+  EXPECT_SCOPED(AdvanceFrame());
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
+  EXPECT_TRUE(client_->IsInsideBeginImplFrame());
+
+  // Resume scheduled prepare tiles.
+  client_->Reset();
+  task_runner().RunPendingTasks();  // Run posted deadline.
   EXPECT_FALSE(client_->IsInsideBeginImplFrame());
   EXPECT_ACTION("ScheduledActionDrawIfPossible", client_, 0, 2);
   EXPECT_ACTION("ScheduledActionPrepareTiles", client_, 1, 2);
@@ -1338,10 +1381,8 @@ TEST_F(SchedulerTest, MainFrameNotSkippedAfterLateBeginFrame) {
 
   // Advance frame and create a begin frame.
   now_src_->Advance(BeginFrameArgs::DefaultInterval());
-  BeginFrameArgs args = CreateBeginFrameArgsForTesting(
-      BEGINFRAME_FROM_HERE, fake_external_begin_frame_source_->source_id(),
-      next_begin_frame_number_, now_src());
-  next_begin_frame_number_++;
+  BeginFrameArgs args = fake_external_begin_frame_source_->CreateBeginFrameArgs(
+      BEGINFRAME_FROM_HERE, now_src());
 
   // Deliver this begin frame super late.
   now_src_->Advance(BeginFrameArgs::DefaultInterval() * 100);
@@ -1673,8 +1714,9 @@ TEST_F(SchedulerTest,
   scheduler_->SetNeedsRedraw();
   EXPECT_FALSE(scheduler_->MainThreadMissedLastDeadline());
   SendNextBeginFrame();
-  EXPECT_ACTION("AddObserver(this)", client_, 0, 2);
-  EXPECT_ACTION("WillBeginImplFrame", client_, 1, 2);
+  EXPECT_ACTION("AddObserver(this)", client_, 0, 3);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 1, 3);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 2, 3);
 
   client_->Reset();
   EXPECT_FALSE(scheduler_->MainThreadMissedLastDeadline());
@@ -1706,7 +1748,9 @@ TEST_F(SchedulerTest,
     client_->Reset();
     EXPECT_FALSE(scheduler_->MainThreadMissedLastDeadline());
     SendNextBeginFrame();
-    EXPECT_ACTION("WillBeginImplFrame", client_, 0, 1);
+    EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+    EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1,
+                  2);
 
     client_->Reset();
     // Deadline should be immediate.
@@ -2084,7 +2128,7 @@ void SchedulerTest::BeginFramesNotFromClient(BeginFrameSourceType bfs_type) {
   // NotifyReadyToCommit should trigger the commit.
   scheduler_->NotifyBeginMainFrameStarted(base::TimeTicks());
   scheduler_->NotifyReadyToCommit();
-  EXPECT_SINGLE_ACTION("ScheduledActionCommit", client_);
+  EXPECT_ACTION("ScheduledActionCommit", client_, 0, 1);
   client_->Reset();
 
   // NotifyReadyToActivate should trigger the activation.
@@ -2095,8 +2139,9 @@ void SchedulerTest::BeginFramesNotFromClient(BeginFrameSourceType bfs_type) {
   // BeginImplFrame deadline should draw. The following BeginImplFrame deadline
   // should SetNeedsBeginFrame(false) to avoid excessive toggles.
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_ACTION("ScheduledActionDrawIfPossible", client_, 0, 2);
-  EXPECT_ACTION("WillBeginImplFrame", client_, 1, 2);
+  EXPECT_ACTION("ScheduledActionDrawIfPossible", client_, 0, 3);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 1, 3);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 2, 3);
   client_->Reset();
 
   // Make sure SetNeedsBeginFrame isn't called on the client
@@ -2347,7 +2392,8 @@ TEST_F(SchedulerTest, DidLoseCompositorFrameSinkAfterSetNeedsPrepareTiles) {
 
   client_->Reset();
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 1);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
 
   client_->Reset();
@@ -2508,7 +2554,8 @@ TEST_F(SchedulerTest, SwitchFrameSourceToUnthrottled) {
   client_->Reset();
 
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 1);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
   EXPECT_TRUE(scheduler_->begin_frames_expected());
   client_->Reset();
@@ -2522,7 +2569,8 @@ TEST_F(SchedulerTest, SwitchFrameSourceToUnthrottled) {
 
   // Unthrottled frame source will immediately begin a new frame.
   task_runner().RunPendingTasks();  // Run posted BeginFrame.
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 1);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
   client_->Reset();
 
@@ -2544,7 +2592,8 @@ TEST_F(SchedulerTest, SwitchFrameSourceToUnthrottledBeforeDeadline) {
   client_->Reset();
 
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_SINGLE_ACTION("WillBeginImplFrame", client_);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
 
   // Switch to an unthrottled frame source before the frame deadline is hit.
   scheduler_->SetBeginFrameSource(unthrottled_frame_source_.get());
@@ -2555,9 +2604,10 @@ TEST_F(SchedulerTest, SwitchFrameSourceToUnthrottledBeforeDeadline) {
   client_->Reset();
 
   task_runner().RunPendingTasks();  // Run posted deadline.
-  EXPECT_ACTION("ScheduledActionDrawIfPossible", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionDrawIfPossible", client_, 0, 3);
   // Unthrottled frame source will immediately begin a new frame.
-  EXPECT_ACTION("WillBeginImplFrame", client_, 1, 2);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 1, 3);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 2, 3);
   scheduler_->SetNeedsRedraw();
   client_->Reset();
 
@@ -2577,7 +2627,8 @@ TEST_F(SchedulerTest, SwitchFrameSourceToThrottled) {
   client_->Reset();
 
   task_runner().RunPendingTasks();  // Run posted BeginFrame.
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 1);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
   client_->Reset();
 
@@ -2597,7 +2648,8 @@ TEST_F(SchedulerTest, SwitchFrameSourceToThrottled) {
   client_->Reset();
 
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 1);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
   EXPECT_TRUE(scheduler_->begin_frames_expected());
   client_->Reset();
@@ -2613,7 +2665,8 @@ TEST_F(SchedulerTest, SwitchFrameSourceToNullInsideDeadline) {
   client_->Reset();
 
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_SINGLE_ACTION("WillBeginImplFrame", client_);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
   client_->Reset();
 
   // Switch to a null frame source.
@@ -2710,6 +2763,23 @@ TEST_F(SchedulerTest, SwitchFrameSourceWhenNotObserving) {
   EXPECT_ACTION("ScheduledActionSendBeginMainFrame", client_, 1, 2);
 }
 
+// Tests to ensure that we send a ScheduledActionBeginMainFrameNotExpectedUntil
+// when expected.
+TEST_F(SchedulerTest, ScheduledActionBeginMainFrameNotExpectedUntil) {
+  SetUpScheduler(EXTERNAL_BFS);
+
+  scheduler_->SetNeedsRedraw();
+  EXPECT_ACTION("AddObserver(this)", client_, 0, 1);
+  client_->Reset();
+
+  EXPECT_SCOPED(AdvanceFrame());
+  task_runner().RunPendingTasks();
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 3);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 3);
+  EXPECT_ACTION("ScheduledActionDrawIfPossible", client_, 2, 3);
+  client_->Reset();
+}
+
 // Tests to ensure that we send a BeginMainFrameNotExpectedSoon when expected.
 TEST_F(SchedulerTest, SendBeginMainFrameNotExpectedSoon) {
   SetUpScheduler(EXTERNAL_BFS);
@@ -2735,7 +2805,8 @@ TEST_F(SchedulerTest, SendBeginMainFrameNotExpectedSoon) {
   // The following BeginImplFrame deadline should SetNeedsBeginFrame(false)
   // and send a SendBeginMainFrameNotExpectedSoon.
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_SINGLE_ACTION("WillBeginImplFrame", client_);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
   client_->Reset();
 
@@ -2760,8 +2831,9 @@ TEST_F(SchedulerTest, SynchronousCompositorAnimation) {
 
   // Next vsync.
   AdvanceFrame();
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
-  EXPECT_ACTION("ScheduledActionInvalidateCompositorFrameSink", client_, 1, 2);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 3);
+  EXPECT_ACTION("ScheduledActionInvalidateCompositorFrameSink", client_, 2, 3);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 3);
   EXPECT_FALSE(client_->IsInsideBeginImplFrame());
   client_->Reset();
 
@@ -2779,8 +2851,9 @@ TEST_F(SchedulerTest, SynchronousCompositorAnimation) {
 
   // Next vsync.
   AdvanceFrame();
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
-  EXPECT_ACTION("ScheduledActionInvalidateCompositorFrameSink", client_, 1, 2);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 3);
+  EXPECT_ACTION("ScheduledActionInvalidateCompositorFrameSink", client_, 1, 3);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 2, 3);
   EXPECT_FALSE(client_->IsInsideBeginImplFrame());
   client_->Reset();
 
@@ -2793,9 +2866,10 @@ TEST_F(SchedulerTest, SynchronousCompositorAnimation) {
 
   // Idle on next vsync, as the animation has completed.
   AdvanceFrame();
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 3);
-  EXPECT_ACTION("RemoveObserver(this)", client_, 1, 3);
-  EXPECT_ACTION("SendBeginMainFrameNotExpectedSoon", client_, 2, 3);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 4);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 4);
+  EXPECT_ACTION("RemoveObserver(this)", client_, 2, 4);
+  EXPECT_ACTION("SendBeginMainFrameNotExpectedSoon", client_, 3, 4);
   EXPECT_FALSE(client_->IsInsideBeginImplFrame());
   client_->Reset();
 }
@@ -2814,9 +2888,10 @@ TEST_F(SchedulerTest, SynchronousCompositorOnDrawDuringIdle) {
 
   // Idle on next vsync.
   AdvanceFrame();
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 3);
-  EXPECT_ACTION("RemoveObserver(this)", client_, 1, 3);
-  EXPECT_ACTION("SendBeginMainFrameNotExpectedSoon", client_, 2, 3);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 4);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 4);
+  EXPECT_ACTION("RemoveObserver(this)", client_, 2, 4);
+  EXPECT_ACTION("SendBeginMainFrameNotExpectedSoon", client_, 3, 4);
   EXPECT_FALSE(client_->IsInsideBeginImplFrame());
   client_->Reset();
 }
@@ -2836,7 +2911,8 @@ TEST_F(SchedulerTest, SetNeedsOneBeginImplFrame) {
 
   // Next vsync, the first requested frame happens.
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 1);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
   client_->Reset();
 
@@ -2845,7 +2921,8 @@ TEST_F(SchedulerTest, SetNeedsOneBeginImplFrame) {
   // Next vsync, the second requested frame happens (the one requested inside
   // the previous frame's begin impl frame step).
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 1);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
   EXPECT_TRUE(client_->IsInsideBeginImplFrame());
   client_->Reset();
 
@@ -2858,32 +2935,55 @@ TEST_F(SchedulerTest, SetNeedsOneBeginImplFrame) {
   EXPECT_ACTION("SendBeginMainFrameNotExpectedSoon", client_, 1, 2);
 }
 
-TEST_F(SchedulerTest, SynchronousCompositorCommit) {
+TEST_F(SchedulerTest, SynchronousCompositorCommitAndVerifyBeginFrameAcks) {
   scheduler_settings_.using_synchronous_renderer_compositor = true;
   SetUpScheduler(EXTERNAL_BFS);
+
+  // Expect the last ack to be for last BeginFrame, which didn't cause damage.
+  uint64_t last_begin_frame_number =
+      fake_external_begin_frame_source_->next_begin_frame_number() - 1;
+  uint64_t latest_confirmed_sequence_number = last_begin_frame_number;
+  bool has_damage = false;
+  EXPECT_EQ(
+      BeginFrameAck(fake_external_begin_frame_source_->source_id(),
+                    last_begin_frame_number, latest_confirmed_sequence_number,
+                    has_damage),
+      fake_external_begin_frame_source_->LastAckForObserver(scheduler_.get()));
 
   scheduler_->SetNeedsBeginMainFrame();
   EXPECT_SINGLE_ACTION("AddObserver(this)", client_);
   client_->Reset();
 
   // Next vsync.
-  AdvanceFrame();
+  BeginFrameArgs args = SendNextBeginFrame();
   EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
   EXPECT_ACTION("ScheduledActionSendBeginMainFrame", client_, 1, 2);
   EXPECT_FALSE(client_->IsInsideBeginImplFrame());
   client_->Reset();
 
+  has_damage = false;
+  EXPECT_EQ(
+      BeginFrameAck(args.source_id, args.sequence_number,
+                    latest_confirmed_sequence_number, has_damage),
+      fake_external_begin_frame_source_->LastAckForObserver(scheduler_.get()));
+
   scheduler_->NotifyBeginMainFrameStarted(base::TimeTicks());
   EXPECT_NO_ACTION(client_);
 
   // Next vsync.
-  AdvanceFrame();
+  args = SendNextBeginFrame();
   EXPECT_SINGLE_ACTION("WillBeginImplFrame", client_);
   EXPECT_FALSE(client_->IsInsideBeginImplFrame());
   client_->Reset();
 
+  has_damage = false;
+  EXPECT_EQ(
+      BeginFrameAck(args.source_id, args.sequence_number,
+                    latest_confirmed_sequence_number, has_damage),
+      fake_external_begin_frame_source_->LastAckForObserver(scheduler_.get()));
+
   scheduler_->NotifyReadyToCommit();
-  EXPECT_SINGLE_ACTION("ScheduledActionCommit", client_);
+  EXPECT_ACTION("ScheduledActionCommit", client_, 0, 1);
   client_->Reset();
 
   scheduler_->NotifyReadyToActivate();
@@ -2891,11 +2991,22 @@ TEST_F(SchedulerTest, SynchronousCompositorCommit) {
   client_->Reset();
 
   // Next vsync.
-  AdvanceFrame();
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
-  EXPECT_ACTION("ScheduledActionInvalidateCompositorFrameSink", client_, 1, 2);
+  args = SendNextBeginFrame();
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 3);
+  EXPECT_ACTION("ScheduledActionInvalidateCompositorFrameSink", client_, 1, 3);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 2, 3);
   EXPECT_FALSE(client_->IsInsideBeginImplFrame());
   client_->Reset();
+
+  // Not confirmed yet and no damage, since not drawn yet.
+  // TODO(eseckler): In the future, |has_damage = false| will prevent us from
+  // filtering this ack (in CompositorExternalBeginFrameSource) and instead
+  // forwarding the one attached to the later submitted CompositorFrame.
+  has_damage = false;
+  EXPECT_EQ(
+      BeginFrameAck(args.source_id, args.sequence_number,
+                    latest_confirmed_sequence_number, has_damage),
+      fake_external_begin_frame_source_->LastAckForObserver(scheduler_.get()));
 
   // Android onDraw.
   scheduler_->SetNeedsRedraw();
@@ -2906,12 +3017,20 @@ TEST_F(SchedulerTest, SynchronousCompositorCommit) {
   client_->Reset();
 
   // Idle on next vsync.
-  AdvanceFrame();
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 3);
-  EXPECT_ACTION("RemoveObserver(this)", client_, 1, 3);
-  EXPECT_ACTION("SendBeginMainFrameNotExpectedSoon", client_, 2, 3);
+  args = SendNextBeginFrame();
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 4);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 4);
+  EXPECT_ACTION("RemoveObserver(this)", client_, 2, 4);
+  EXPECT_ACTION("SendBeginMainFrameNotExpectedSoon", client_, 3, 4);
   EXPECT_FALSE(client_->IsInsideBeginImplFrame());
   client_->Reset();
+
+  latest_confirmed_sequence_number = args.sequence_number;
+  has_damage = false;
+  EXPECT_EQ(
+      BeginFrameAck(args.source_id, args.sequence_number,
+                    latest_confirmed_sequence_number, has_damage),
+      fake_external_begin_frame_source_->LastAckForObserver(scheduler_.get()));
 }
 
 TEST_F(SchedulerTest, SynchronousCompositorDoubleCommitWithoutDraw) {
@@ -2983,8 +3102,9 @@ TEST_F(SchedulerTest, SynchronousCompositorPrepareTilesOnDraw) {
 
   // Next vsync.
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
-  EXPECT_ACTION("ScheduledActionInvalidateCompositorFrameSink", client_, 1, 2);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 3);
+  EXPECT_ACTION("ScheduledActionInvalidateCompositorFrameSink", client_, 1, 3);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 2, 3);
   client_->Reset();
 
   // Android onDraw.
@@ -3009,9 +3129,10 @@ TEST_F(SchedulerTest, SynchronousCompositorPrepareTilesOnDraw) {
   // Next vsync.
   EXPECT_SCOPED(AdvanceFrame());
   EXPECT_FALSE(scheduler_->PrepareTilesPending());
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 3);
-  EXPECT_ACTION("RemoveObserver(this)", client_, 1, 3);
-  EXPECT_ACTION("SendBeginMainFrameNotExpectedSoon", client_, 2, 3);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 4);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 4);
+  EXPECT_ACTION("RemoveObserver(this)", client_, 2, 4);
+  EXPECT_ACTION("SendBeginMainFrameNotExpectedSoon", client_, 3, 4);
   EXPECT_FALSE(scheduler_->begin_frames_expected());
   client_->Reset();
 }
@@ -3026,8 +3147,9 @@ TEST_F(SchedulerTest, SynchronousCompositorSendBeginMainFrameWhileIdle) {
 
   // Next vsync.
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
-  EXPECT_ACTION("ScheduledActionInvalidateCompositorFrameSink", client_, 1, 2);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 3);
+  EXPECT_ACTION("ScheduledActionInvalidateCompositorFrameSink", client_, 1, 3);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 2, 3);
   client_->Reset();
 
   // Android onDraw.
@@ -3055,8 +3177,9 @@ TEST_F(SchedulerTest, SynchronousCompositorSendBeginMainFrameWhileIdle) {
 
   // Next vsync.
   EXPECT_SCOPED(AdvanceFrame());
-  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
-  EXPECT_ACTION("ScheduledActionInvalidateCompositorFrameSink", client_, 1, 2);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 3);
+  EXPECT_ACTION("ScheduledActionInvalidateCompositorFrameSink", client_, 1, 3);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 2, 3);
   client_->Reset();
 
   // Android onDraw.
@@ -3183,6 +3306,87 @@ TEST_F(SchedulerTest, NoCompositorFrameSinkCreationWhileCommitPending) {
                        client_);
 }
 
+TEST_F(SchedulerTest, ImplSideInvalidationsInDeadline) {
+  SetUpScheduler(EXTERNAL_BFS);
+
+  // Request an impl-side invalidation and trigger the deadline. Ensure that the
+  // invalidation runs inside the deadline.
+  scheduler_->SetNeedsImplSideInvalidation();
+  client_->Reset();
+  EXPECT_SCOPED(AdvanceFrame());
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
+
+  // Deadline.
+  client_->Reset();
+  task_runner_->RunTasksWhile(client_->InsideBeginImplFrame(true));
+  EXPECT_SINGLE_ACTION("ScheduledActionPerformImplSideInvalidation", client_);
+}
+
+TEST_F(SchedulerTest, ImplSideInvalidationsMergedWithCommit) {
+  SetUpScheduler(EXTERNAL_BFS);
+
+  // Request a main frame and invalidation, the only action run should be
+  // sending the main frame.
+  scheduler_->SetNeedsBeginMainFrame();
+  scheduler_->SetNeedsImplSideInvalidation();
+  client_->Reset();
+  EXPECT_SCOPED(AdvanceFrame());
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionSendBeginMainFrame", client_, 1, 2);
+
+  // Respond with a commit. The scheduler should only perform the commit
+  // actions since the impl-side invalidation request will be merged with the
+  // commit.
+  client_->Reset();
+  scheduler_->NotifyBeginMainFrameStarted(base::TimeTicks::Now());
+  scheduler_->NotifyReadyToCommit();
+  EXPECT_SINGLE_ACTION("ScheduledActionCommit", client_);
+  EXPECT_FALSE(scheduler_->needs_impl_side_invalidation());
+
+  // Deadline.
+  client_->Reset();
+  task_runner_->RunTasksWhile(client_->InsideBeginImplFrame(true));
+  EXPECT_NO_ACTION(client_);
+}
+
+TEST_F(SchedulerTest, AbortedCommitsTriggerImplSideInvalidations) {
+  SetUpScheduler(EXTERNAL_BFS);
+
+  // Request a main frame and invalidation.
+  scheduler_->SetNeedsBeginMainFrame();
+  scheduler_->SetNeedsImplSideInvalidation();
+  client_->Reset();
+  EXPECT_SCOPED(AdvanceFrame());
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionSendBeginMainFrame", client_, 1, 2);
+
+  // Abort the main frame and request another one, the impl-side invalidations
+  // should not be blocked on the main frame.
+  client_->Reset();
+  scheduler_->SetNeedsBeginMainFrame();
+  scheduler_->NotifyBeginMainFrameStarted(base::TimeTicks::Now());
+  scheduler_->BeginMainFrameAborted(CommitEarlyOutReason::FINISHED_NO_UPDATES);
+  task_runner_->RunTasksWhile(client_->InsideBeginImplFrame(true));
+  EXPECT_SINGLE_ACTION("ScheduledActionPerformImplSideInvalidation", client_);
+
+  // Activate the sync tree.
+  client_->Reset();
+  scheduler_->NotifyReadyToActivate();
+  EXPECT_SINGLE_ACTION("ScheduledActionActivateSyncTree", client_);
+
+  // Second impl frame.
+  client_->Reset();
+  EXPECT_SCOPED(AdvanceFrame());
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionSendBeginMainFrame", client_, 1, 2);
+
+  // Deadline.
+  client_->Reset();
+  task_runner_->RunTasksWhile(client_->InsideBeginImplFrame(true));
+  EXPECT_SINGLE_ACTION("ScheduledActionDrawIfPossible", client_);
+}
+
 // The three letters appeneded to each version of this test mean the following:s
 // tree_priority: B = both trees same priority; A = active tree priority;
 // scroll_handler_state: H = affects scroll handler; N = does not affect scroll
@@ -3254,6 +3458,318 @@ TEST_F(SchedulerTest, BeginMainFrameOnCriticalPath_AHS) {
   EXPECT_FALSE(BeginMainFrameOnCriticalPath(
       SMOOTHNESS_TAKES_PRIORITY,
       ScrollHandlerState::SCROLL_AFFECTS_SCROLL_HANDLER, kSlowDuration));
+}
+
+TEST_F(SchedulerTest, BeginFrameAckForFinishedImplFrame) {
+  // Sets up scheduler and sends two BeginFrames, both finished.
+  SetUpScheduler(EXTERNAL_BFS);
+
+  // Expect the last ack to be for last BeginFrame, which didn't cause damage.
+  uint64_t last_begin_frame_number =
+      fake_external_begin_frame_source_->next_begin_frame_number() - 1;
+  uint64_t latest_confirmed_sequence_number = last_begin_frame_number;
+  bool has_damage = false;
+  EXPECT_EQ(
+      BeginFrameAck(fake_external_begin_frame_source_->source_id(),
+                    last_begin_frame_number, latest_confirmed_sequence_number,
+                    has_damage),
+      fake_external_begin_frame_source_->LastAckForObserver(scheduler_.get()));
+
+  // Run a successful redraw and verify that a new ack is sent.
+  scheduler_->SetNeedsRedraw();
+  client_->Reset();
+
+  BeginFrameArgs args = SendNextBeginFrame();
+  EXPECT_LT(latest_confirmed_sequence_number, args.sequence_number);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
+  EXPECT_TRUE(client_->IsInsideBeginImplFrame());
+  EXPECT_TRUE(scheduler_->begin_frames_expected());
+  client_->Reset();
+
+  task_runner().RunPendingTasks();  // Run posted deadline.
+  EXPECT_ACTION("ScheduledActionDrawIfPossible", client_, 0, 1);
+  EXPECT_FALSE(client_->IsInsideBeginImplFrame());
+  EXPECT_TRUE(scheduler_->begin_frames_expected());
+  client_->Reset();
+
+  // Successful draw caused damage.
+  latest_confirmed_sequence_number = args.sequence_number;
+  has_damage = true;
+  EXPECT_EQ(
+      BeginFrameAck(args.source_id, args.sequence_number,
+                    latest_confirmed_sequence_number, has_damage),
+      fake_external_begin_frame_source_->LastAckForObserver(scheduler_.get()));
+
+  // Request another redraw, but fail it. Verify that a new ack is sent, but
+  // that its |latest_confirmed_sequence_number| didn't change.
+  scheduler_->SetNeedsRedraw();
+  client_->Reset();
+
+  args = SendNextBeginFrame();
+  EXPECT_LT(latest_confirmed_sequence_number, args.sequence_number);
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
+  EXPECT_TRUE(client_->IsInsideBeginImplFrame());
+  EXPECT_TRUE(scheduler_->begin_frames_expected());
+  client_->Reset();
+
+  client_->SetDrawWillHappen(false);
+  task_runner().RunPendingTasks();  // Run posted deadline.
+  EXPECT_ACTION("ScheduledActionDrawIfPossible", client_, 0, 2);
+  // Failed draw triggers SendBeginMainFrame.
+  EXPECT_ACTION("ScheduledActionSendBeginMainFrame", client_, 1, 2);
+  EXPECT_FALSE(client_->IsInsideBeginImplFrame());
+  EXPECT_TRUE(scheduler_->begin_frames_expected());
+  client_->Reset();
+
+  // Failed draw: no damage and unconfirmed frame.
+  has_damage = false;
+  EXPECT_EQ(
+      BeginFrameAck(args.source_id, args.sequence_number,
+                    latest_confirmed_sequence_number, has_damage),
+      fake_external_begin_frame_source_->LastAckForObserver(scheduler_.get()));
+}
+
+TEST_F(SchedulerTest, BeginFrameAckForSkippedImplFrame) {
+  SetUpScheduler(EXTERNAL_BFS);
+
+  // To get into a high latency state, this test disables automatic swap acks.
+  client_->SetAutomaticSubmitCompositorFrameAck(false);
+  fake_compositor_timing_history_->SetAllEstimatesTo(kFastDuration);
+
+  // Run a successful redraw that submits a compositor frame but doesn't receive
+  // a swap ack. Verify that a BeginFrameAck is sent for it.
+  scheduler_->SetNeedsRedraw();
+  client_->Reset();
+
+  BeginFrameArgs args = SendNextBeginFrame();
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
+  EXPECT_TRUE(client_->IsInsideBeginImplFrame());
+  EXPECT_TRUE(scheduler_->begin_frames_expected());
+  client_->Reset();
+
+  task_runner().RunPendingTasks();  // Run posted deadline.
+  EXPECT_ACTION("ScheduledActionDrawIfPossible", client_, 0, 1);
+  EXPECT_FALSE(client_->IsInsideBeginImplFrame());
+  EXPECT_TRUE(scheduler_->begin_frames_expected());
+  client_->Reset();
+
+  // Successful draw caused damage.
+  uint64_t latest_confirmed_sequence_number = args.sequence_number;
+  bool has_damage = true;
+  EXPECT_EQ(
+      BeginFrameAck(args.source_id, args.sequence_number,
+                    latest_confirmed_sequence_number, has_damage),
+      fake_external_begin_frame_source_->LastAckForObserver(scheduler_.get()));
+
+  // Request another redraw that will be skipped because the swap ack is still
+  // missing. Verify that a new BeginFrameAck is sent.
+  scheduler_->SetNeedsRedraw();
+  client_->Reset();
+
+  args = SendNextBeginFrame();
+  EXPECT_LT(latest_confirmed_sequence_number, args.sequence_number);
+  EXPECT_NO_ACTION(client_);
+  EXPECT_FALSE(client_->IsInsideBeginImplFrame());
+  EXPECT_TRUE(scheduler_->begin_frames_expected());
+  client_->Reset();
+
+  // Skipped draw: no damage and unconfirmed frame.
+  has_damage = false;
+  EXPECT_EQ(
+      BeginFrameAck(args.source_id, args.sequence_number,
+                    latest_confirmed_sequence_number, has_damage),
+      fake_external_begin_frame_source_->LastAckForObserver(scheduler_.get()));
+}
+
+TEST_F(SchedulerTest, BeginFrameAckForBeginFrameBeforeLastDeadline) {
+  SetUpScheduler(EXTERNAL_BFS);
+
+  // Request tile preparation to schedule a proactive BeginFrame.
+  scheduler_->SetNeedsPrepareTiles();
+  client_->Reset();
+
+  SendNextBeginFrame();
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
+  EXPECT_TRUE(client_->IsInsideBeginImplFrame());
+  // Until tiles were prepared, further proactive BeginFrames are expected.
+  EXPECT_TRUE(scheduler_->begin_frames_expected());
+  client_->Reset();
+
+  // Send the next BeginFrame before the previous one's deadline was executed.
+  // This should trigger the previous BeginFrame's deadline synchronously,
+  // during which tiles will be prepared. As a result of that, no further
+  // BeginFrames will be needed, and the new BeginFrame should be dropped.
+  BeginFrameArgs args = SendNextBeginFrame();
+  EXPECT_ACTION("ScheduledActionPrepareTiles", client_, 0, 3);
+  EXPECT_ACTION("RemoveObserver(this)", client_, 1, 3);
+  EXPECT_ACTION("SendBeginMainFrameNotExpectedSoon", client_, 2, 3);
+  EXPECT_FALSE(client_->IsInsideBeginImplFrame());
+  EXPECT_FALSE(scheduler_->begin_frames_expected());
+  client_->Reset();
+
+  // Latest ack should be for the dropped BeginFrame. Since we don't have
+  // further updates, its |latest_confirmed_sequence_number| should be for the
+  // dropped BeginFrame, too.
+  uint64_t latest_confirmed_sequence_number = args.sequence_number;
+  bool has_damage = false;
+  EXPECT_EQ(
+      BeginFrameAck(args.source_id, args.sequence_number,
+                    latest_confirmed_sequence_number, has_damage),
+      fake_external_begin_frame_source_->LastAckForObserver(scheduler_.get()));
+}
+
+TEST_F(SchedulerTest, BeginFrameAckForDroppedBeginFrame) {
+  SetUpScheduler(EXTERNAL_BFS);
+
+  // Last confirmed frame was last BeginFrame.
+  uint64_t latest_confirmed_sequence_number =
+      fake_external_begin_frame_source_->next_begin_frame_number() - 1;
+
+  // Request a single BeginFrame.
+  scheduler_->SetNeedsOneBeginImplFrame();
+  EXPECT_TRUE(scheduler_->begin_frames_expected());
+  client_->Reset();
+
+  // First BeginFrame is handled by StateMachine.
+  BeginFrameArgs first_args = SendNextBeginFrame();
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
+  EXPECT_TRUE(client_->IsInsideBeginImplFrame());
+  // State machine is no longer interested in BeginFrames, but scheduler is
+  // still observing the source.
+  EXPECT_TRUE(scheduler_->begin_frames_expected());
+  EXPECT_FALSE(scheduler_->BeginFrameNeeded());
+  client_->Reset();
+
+  // Send the next BeginFrame before the previous one's deadline was executed.
+  // The BeginFrame should be dropped immediately, since the state machine is
+  // not expecting any BeginFrames.
+  BeginFrameArgs second_args = SendNextBeginFrame();
+  EXPECT_NO_ACTION(client_);
+  client_->Reset();
+
+  // Latest ack should be for the dropped (and unconfirmed) BeginFrame.
+  bool has_damage = false;
+  EXPECT_EQ(
+      BeginFrameAck(second_args.source_id, second_args.sequence_number,
+                    latest_confirmed_sequence_number, has_damage),
+      fake_external_begin_frame_source_->LastAckForObserver(scheduler_.get()));
+
+  task_runner().RunPendingTasks();  // Run deadline of prior BeginFrame.
+  EXPECT_ACTION("RemoveObserver(this)", client_, 0, 2);
+  EXPECT_ACTION("SendBeginMainFrameNotExpectedSoon", client_, 1, 2);
+  client_->Reset();
+
+  // We'd expect an out-of-order ack for the prior BeginFrame, confirming it.
+  latest_confirmed_sequence_number = first_args.sequence_number;
+  has_damage = false;
+  EXPECT_EQ(
+      BeginFrameAck(first_args.source_id, first_args.sequence_number,
+                    latest_confirmed_sequence_number, has_damage),
+      fake_external_begin_frame_source_->LastAckForObserver(scheduler_.get()));
+}
+
+TEST_F(SchedulerTest, BeginFrameAckForLateMissedBeginFrame) {
+  SetUpScheduler(EXTERNAL_BFS);
+
+  // Last confirmed frame was last BeginFrame.
+  uint64_t latest_confirmed_sequence_number =
+      fake_external_begin_frame_source_->next_begin_frame_number() - 1;
+
+  scheduler_->SetNeedsRedraw();
+  client_->Reset();
+
+  // Send a missed BeginFrame with a passed deadline.
+  now_src_->Advance(BeginFrameArgs::DefaultInterval());
+  BeginFrameArgs args = fake_external_begin_frame_source_->CreateBeginFrameArgs(
+      BEGINFRAME_FROM_HERE, now_src());
+  args.type = BeginFrameArgs::MISSED;
+  now_src_->Advance(BeginFrameArgs::DefaultInterval());
+  EXPECT_GT(now_src_->NowTicks(), args.deadline);
+  fake_external_begin_frame_source_->TestOnBeginFrame(args);
+
+  EXPECT_NO_ACTION(client_);
+  EXPECT_FALSE(client_->IsInsideBeginImplFrame());
+  client_->Reset();
+
+  // Latest ack should be for the missed BeginFrame that was too late: no damage
+  // and unconfirmed frame.
+  bool has_damage = false;
+  EXPECT_EQ(
+      BeginFrameAck(args.source_id, args.sequence_number,
+                    latest_confirmed_sequence_number, has_damage),
+      fake_external_begin_frame_source_->LastAckForObserver(scheduler_.get()));
+}
+
+TEST_F(SchedulerTest, BeginFrameAckForFinishedBeginFrameWithNewSourceId) {
+  SetUpScheduler(EXTERNAL_BFS);
+
+  scheduler_->SetNeedsRedraw();
+  client_->Reset();
+
+  // Send a BeginFrame with a different source_id.
+  now_src_->Advance(BeginFrameArgs::DefaultInterval());
+  uint32_t source_id = fake_external_begin_frame_source_->source_id() + 1;
+  BeginFrameArgs args = CreateBeginFrameArgsForTesting(BEGINFRAME_FROM_HERE,
+                                                       source_id, 1, now_src());
+  fake_external_begin_frame_source_->TestOnBeginFrame(args);
+
+  EXPECT_ACTION("WillBeginImplFrame", client_, 0, 2);
+  EXPECT_ACTION("ScheduledActionBeginMainFrameNotExpectedUntil", client_, 1, 2);
+  EXPECT_TRUE(client_->IsInsideBeginImplFrame());
+  EXPECT_TRUE(scheduler_->begin_frames_expected());
+  client_->Reset();
+
+  task_runner().RunPendingTasks();  // Run posted deadline.
+  EXPECT_ACTION("ScheduledActionDrawIfPossible", client_, 0, 1);
+  EXPECT_FALSE(client_->IsInsideBeginImplFrame());
+  EXPECT_TRUE(scheduler_->begin_frames_expected());
+  client_->Reset();
+
+  // Successful draw caused damage.
+  uint64_t latest_confirmed_sequence_number = args.sequence_number;
+  bool has_damage = true;
+  EXPECT_EQ(
+      BeginFrameAck(args.source_id, args.sequence_number,
+                    latest_confirmed_sequence_number, has_damage),
+      fake_external_begin_frame_source_->LastAckForObserver(scheduler_.get()));
+}
+
+TEST_F(SchedulerTest,
+       BeginFrameAckForLateMissedBeginFrameWithDifferentSourceId) {
+  SetUpScheduler(EXTERNAL_BFS);
+
+  scheduler_->SetNeedsRedraw();
+  client_->Reset();
+
+  // Send a missed BeginFrame with a passed deadline and different source_id.
+  now_src_->Advance(BeginFrameArgs::DefaultInterval());
+  uint32_t source_id = fake_external_begin_frame_source_->source_id() + 1;
+  BeginFrameArgs args = CreateBeginFrameArgsForTesting(BEGINFRAME_FROM_HERE,
+                                                       source_id, 1, now_src());
+  args.type = BeginFrameArgs::MISSED;
+  now_src_->Advance(BeginFrameArgs::DefaultInterval());
+  EXPECT_GT(now_src_->NowTicks(), args.deadline);
+  fake_external_begin_frame_source_->TestOnBeginFrame(args);
+
+  EXPECT_NO_ACTION(client_);
+  EXPECT_FALSE(client_->IsInsideBeginImplFrame());
+  client_->Reset();
+
+  // Latest ack should be for the missed BeginFrame that was too late: no damage
+  // and unconfirmed frame. Because the source_id changed, the
+  // |latest_confirmed_sequence_number| should be set to invalid.
+  uint64_t latest_confirmed_sequence_number =
+      BeginFrameArgs::kInvalidFrameNumber;
+  bool has_damage = false;
+  EXPECT_EQ(
+      BeginFrameAck(args.source_id, args.sequence_number,
+                    latest_confirmed_sequence_number, has_damage),
+      fake_external_begin_frame_source_->LastAckForObserver(scheduler_.get()));
 }
 
 }  // namespace

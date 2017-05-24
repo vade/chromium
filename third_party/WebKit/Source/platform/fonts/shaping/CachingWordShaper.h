@@ -26,18 +26,19 @@
 #ifndef CachingWordShaper_h
 #define CachingWordShaper_h
 
+#include "platform/fonts/shaping/ShapeResultBuffer.h"
 #include "platform/geometry/FloatRect.h"
 #include "platform/text/TextRun.h"
-#include "wtf/Allocator.h"
-#include "wtf/PassRefPtr.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/PassRefPtr.h"
+#include "platform/wtf/Vector.h"
 
 namespace blink {
 
 struct CharacterRange;
 class Font;
-class GlyphBuffer;
-class SimpleFontData;
 class ShapeCache;
+class SimpleFontData;
 struct GlyphData;
 
 class PLATFORM_EXPORT CachingWordShaper final {
@@ -45,37 +46,28 @@ class PLATFORM_EXPORT CachingWordShaper final {
   WTF_MAKE_NONCOPYABLE(CachingWordShaper);
 
  public:
-  CachingWordShaper(ShapeCache* cache) : m_shapeCache(cache) {}
+  explicit CachingWordShaper(const Font& font) : font_(font) {}
   ~CachingWordShaper() {}
 
-  float width(const Font*,
-              const TextRun&,
-              HashSet<const SimpleFontData*>* fallbackFonts,
-              FloatRect* glyphBounds);
-  int offsetForPosition(const Font*,
-                        const TextRun&,
-                        float targetX,
-                        bool includePartialGlyphs);
-  float fillGlyphBuffer(const Font*,
-                        const TextRun&,
-                        HashSet<const SimpleFontData*>*,
-                        GlyphBuffer*,
-                        unsigned from,
-                        unsigned to);
-  float fillGlyphBufferForTextEmphasis(const Font*,
-                                       const TextRun&,
-                                       const GlyphData* emphasisData,
-                                       GlyphBuffer*,
-                                       unsigned from,
-                                       unsigned to);
-  CharacterRange getCharacterRange(const Font*,
-                                   const TextRun&,
-                                   unsigned from,
-                                   unsigned to);
-  Vector<CharacterRange> individualCharacterRanges(const Font*, const TextRun&);
+  float Width(const TextRun&,
+              HashSet<const SimpleFontData*>* fallback_fonts,
+              FloatRect* glyph_bounds);
+  int OffsetForPosition(const TextRun&,
+                        float target_x,
+                        bool include_partial_glyphs);
+
+  void FillResultBuffer(const TextRunPaintInfo&, ShapeResultBuffer*);
+  CharacterRange GetCharacterRange(const TextRun&, unsigned from, unsigned to);
+  Vector<CharacterRange> IndividualCharacterRanges(const TextRun&);
+
+  Vector<ShapeResultBuffer::RunFontData> GetRunFontData(const TextRun&) const;
+
+  GlyphData EmphasisMarkGlyphData(const TextRun&) const;
 
  private:
-  ShapeCache* m_shapeCache;
+  ShapeCache* GetShapeCache() const;
+
+  const Font& font_;
 };
 
 }  // namespace blink

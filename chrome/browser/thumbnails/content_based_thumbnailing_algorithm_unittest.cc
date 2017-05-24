@@ -2,13 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/macros.h"
-#include "base/message_loop/message_loop.h"
-#include "base/run_loop.h"
 #include "chrome/browser/thumbnails/content_based_thumbnailing_algorithm.h"
+
+#include "base/macros.h"
+#include "base/run_loop.h"
 #include "chrome/browser/thumbnails/simple_thumbnail_crop.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
+#include "skia/ext/platform_canvas.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/canvas.h"
@@ -139,7 +140,7 @@ TEST_F(ContentBasedThumbnailingAlgorithmTest, CreateRetargetedThumbnail) {
 
   // The image consists of vertical non-overlapping stripes 150 pixels wide.
   canvas.FillRect(gfx::Rect(200, 200, 800, 400), SkColorSetRGB(255, 255, 255));
-  SkBitmap source = skia::ReadPixels(canvas.sk_canvas());
+  SkBitmap source = canvas.GetBitmap();
 
   ConsumerCallbackCatcher catcher;
   const gfx::Size thumbnail_size(432, 284);
@@ -148,9 +149,7 @@ TEST_F(ContentBasedThumbnailingAlgorithmTest, CreateRetargetedThumbnail) {
   context->requested_copy_size = image_size;
   context->clip_result = CLIP_RESULT_SOURCE_SAME_AS_TARGET;
 
-  base::MessageLoopForUI message_loop;
-  content::TestBrowserThread ui_thread(content::BrowserThread::UI,
-                                       &message_loop);
+  content::TestBrowserThreadBundle test_browser_thread_bundle;
   ContentBasedThumbnailingAlgorithm::CreateRetargetedThumbnail(
       source,
       thumbnail_size,

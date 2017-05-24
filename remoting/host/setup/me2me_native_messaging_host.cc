@@ -16,6 +16,7 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringize_macros.h"
 #include "base/time/time.h"
@@ -25,11 +26,11 @@
 #include "google_apis/google_api_keys.h"
 #include "net/base/network_interfaces.h"
 #include "remoting/base/auto_thread_task_runner.h"
+#include "remoting/base/oauth_client.h"
 #include "remoting/base/rsa_key_pair.h"
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/native_messaging/log_message_handler.h"
 #include "remoting/host/pin_hash.h"
-#include "remoting/host/setup/oauth_client.h"
 #include "remoting/protocol/pairing_registry.h"
 
 #if defined(OS_WIN)
@@ -457,7 +458,7 @@ void Me2MeNativeMessagingHost::SendConfigResponse(
   if (config) {
     response->Set("config", config.release());
   } else {
-    response->Set("config", base::Value::CreateNullValue());
+    response->Set("config", base::MakeUnique<base::Value>());
   }
   SendMessageToClient(std::move(response));
 }

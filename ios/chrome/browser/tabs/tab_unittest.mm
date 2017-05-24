@@ -9,6 +9,7 @@
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/ios/block_types.h"
+#import "base/ios/weak_nsobject.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
@@ -22,8 +23,11 @@
 #include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
 #include "ios/chrome/browser/browser_state/test_chrome_browser_state_manager.h"
 #import "ios/chrome/browser/chrome_url_util.h"
+#include "ios/chrome/browser/experimental_flags.h"
 #include "ios/chrome/browser/history/history_service_factory.h"
+#import "ios/chrome/browser/tabs/legacy_tab_helper.h"
 #import "ios/chrome/browser/tabs/tab.h"
+#import "ios/chrome/browser/tabs/tab_helper_util.h"
 #import "ios/chrome/browser/tabs/tab_model.h"
 #import "ios/chrome/browser/tabs/tab_private.h"
 #import "ios/chrome/browser/ui/open_in_controller.h"
@@ -43,6 +47,7 @@
 #import "ios/web/public/navigation_manager.h"
 #include "ios/web/public/referrer.h"
 #include "ios/web/public/test/test_web_thread_bundle.h"
+#include "ios/web/web_state/navigation_context_impl.h"
 #import "ios/web/web_state/ui/crw_web_controller.h"
 #import "ios/web/web_state/web_state_impl.h"
 #import "net/base/mac/url_conversions.h"
@@ -53,8 +58,8 @@
 
 using web::WebStateImpl;
 
+static const char kAppSettingsUrl[] = "app-settings://";
 static const char kNewTabUrl[] = "chrome://newtab/";
-static NSString* const kNewTabTitle = @"New Tab";
 static const char kGoogleUserUrl[] = "http://google.com";
 static const char kGoogleRedirectUrl[] = "http://www.google.fr/";
 static NSString* const kGoogleTitle = @"Google";
@@ -95,9 +100,6 @@ const char kValidFilenameUrl[] = "http://www.hostname.com/filename.pdf";
 
 - (void)closeTabAtIndex:(NSUInteger)index {
   [tabsForTesting_ removeObjectAtIndex:index];
-}
-
-- (void)didCloseTab:(Tab*)closedTab {
 }
 @end
 
@@ -160,13 +162,16 @@ class FakeChromeBrowserProvider : public ios::TestChromeBrowserProvider {
   base::scoped_nsprotocol<id<NativeAppWhitelistManager>> manager_;
 };
 
+// TODO(crbug.com/620465): can a TestWebState be used instead of a WebStateImpl
+// for those tests? This will require changing Tab to use a WebState instead of
+// a WebStateImpl first though.
 class TabTest : public BlockCleanupTest {
  public:
   TabTest()
       : thread_bundle_(web::TestWebThreadBundle::REAL_FILE_THREAD),
         scoped_browser_state_manager_(
-            base::MakeUnique<TestChromeBrowserStateManager>(base::FilePath())) {
-  }
+            base::MakeUnique<TestChromeBrowserStateManager>(base::FilePath())),
+        web_state_impl_(nullptr) {}
 
   void SetUp() override {
     BlockCleanupTest::SetUp();
@@ -191,25 +196,21 @@ class TabTest : public BlockCleanupTest {
 
     mock_web_controller_ =
         [OCMockObject niceMockForClass:[CRWWebController class]];
-    std::unique_ptr<WebStateImpl> web_state_impl;
-    web_state_impl.reset(new WebStateImpl(browser_state));
-    web_state_impl->SetWebController(mock_web_controller_);
-    web_state_impl->GetNavigationManagerImpl().InitializeSession(
-        @"window1", @"opener", NO, 0);
-    WebStateImpl* web_state = web_state_impl.get();
-    [[[(OCMockObject*)mock_web_controller_ stub]
-        andReturnValue:OCMOCK_VALUE(web_state)] webStateImpl];
+    web::WebState::CreateParams create_params(browser_state);
+    web_state_impl_ = base::MakeUnique<WebStateImpl>(create_params);
+    web_state_impl_->SetWebController(mock_web_controller_);
+    web_state_impl_->GetNavigationManagerImpl().InitializeSession();
+    web::WebStateImpl* web_state_impl = web_state_impl_.get();
+    [[[static_cast<OCMockObject*>(mock_web_controller_) stub]
+        andReturnValue:OCMOCK_VALUE(web_state_impl)] webStateImpl];
     web_controller_view_.reset([[UIView alloc] init]);
-    [[[(OCMockObject*)mock_web_controller_ stub]
+    [[[static_cast<OCMockObject*>(mock_web_controller_) stub]
         andReturn:web_controller_view_.get()] view];
-    tab_.reset([[Tab alloc] initWithWindowName:nil
-                                        opener:nullptr
-                                   openedByDOM:NO
-                                         model:nil
-                                  browserState:browser_state]);
-    web::NavigationManager::WebLoadParams params(GURL("chrome://version/"));
-    [[tab_ webController] loadWithParams:params];
-    [tab_ replaceWebStateImpl:std::move(web_state_impl)];
+    LegacyTabHelper::CreateForWebState(web_state_impl_.get());
+    tab_.reset(LegacyTabHelper::GetTabForWebState(web_state_impl_.get()));
+    web::NavigationManager::WebLoadParams load_params(
+        GURL("chrome://version/"));
+    [tab_ navigationManager]->LoadURLWithParams(load_params);
 
     // There should be no entries in the history at this point.
     history::QueryResults results;
@@ -222,46 +223,59 @@ class TabTest : public BlockCleanupTest {
   }
 
   void TearDown() override {
-    [tab_ close];
-
+    // Ensure that the Tab is destroyed before the autorelease pool is cleared.
+    web_state_impl_.reset();
     BlockCleanupTest::TearDown();
   }
 
   void BrowseTo(const GURL& userUrl, const GURL& redirectUrl, NSString* title) {
-    web::Referrer empty_referrer;
+    DCHECK_EQ(tab_.get().webState, web_state_impl_.get());
+
     [tab_ webWillAddPendingURL:userUrl transition:ui::PAGE_TRANSITION_TYPED];
-    [tab_ webStateImpl]->OnProvisionalNavigationStarted(userUrl);
+    std::unique_ptr<web::NavigationContext> context1 =
+        web::NavigationContextImpl::CreateNavigationContext(
+            web_state_impl_.get(), userUrl);
+    web_state_impl_->OnNavigationStarted(context1.get());
     [tab_ webWillAddPendingURL:redirectUrl
                     transition:ui::PAGE_TRANSITION_CLIENT_REDIRECT];
-    [[tab_ navigationManager]->GetSessionController()
-          addPendingEntry:redirectUrl
-                 referrer:empty_referrer
-               transition:ui::PAGE_TRANSITION_CLIENT_REDIRECT
-        rendererInitiated:YES];
-    [tab_ webStateImpl]->OnProvisionalNavigationStarted(redirectUrl);
-    [[tab_ navigationManager]->GetSessionController() commitPendingEntry];
-    [[tab_ webController] webStateImpl]->OnNavigationCommitted(redirectUrl);
-    [tab_ webDidStartLoadingURL:redirectUrl shouldUpdateHistory:YES];
-    [tab_ webController:mock_web_controller_ titleDidChange:title];
+
+    web::Referrer empty_referrer;
+    [tab_ navigationManagerImpl]->AddPendingItem(
+        redirectUrl, empty_referrer, ui::PAGE_TRANSITION_CLIENT_REDIRECT,
+        web::NavigationInitiationType::RENDERER_INITIATED,
+        web::NavigationManager::UserAgentOverrideOption::INHERIT);
+
+    std::unique_ptr<web::NavigationContext> context2 =
+        web::NavigationContextImpl::CreateNavigationContext(
+            web_state_impl_.get(), redirectUrl);
+    web_state_impl_->OnNavigationStarted(context2.get());
+    [[tab_ navigationManagerImpl]->GetSessionController() commitPendingItem];
+    web_state_impl_->UpdateHttpResponseHeaders(redirectUrl);
+    web_state_impl_->OnNavigationFinished(context2.get());
+
+    base::string16 new_title = base::SysNSStringToUTF16(title);
+    [tab_ navigationManager]->GetLastCommittedItem()->SetTitle(new_title);
+
+    web_state_impl_->OnTitleChanged();
     [[[(id)mock_web_controller_ expect]
         andReturnValue:OCMOCK_VALUE(kPageLoaded)] loadPhase];
-    [tab_ webStateImpl]->OnPageLoaded(redirectUrl, true);
+    web_state_impl_->OnPageLoaded(redirectUrl, true);
   }
 
   void BrowseToNewTab() {
+    DCHECK_EQ(tab_.get().webState, web_state_impl_.get());
     const GURL url(kNewTabUrl);
     // TODO(crbug.com/661992): This will not work with a mock CRWWebController.
     // The only test that uses it is currently disabled.
     web::NavigationManager::WebLoadParams params(url);
     params.transition_type = ui::PAGE_TRANSITION_TYPED;
-    [[tab_ webController] loadWithParams:params];
+    [tab_ navigationManager]->LoadURLWithParams(params);
     [[[(id)mock_web_controller_ expect]
         andReturnValue:OCMOCK_VALUE(kPageLoading)] loadPhase];
-    [tab_ webDidStartLoadingURL:url shouldUpdateHistory:YES];
     [[[(id)mock_web_controller_ expect]
         andReturnValue:OCMOCK_VALUE(kPageLoaded)] loadPhase];
-    [tab_ webStateImpl]->OnPageLoaded(url, true);
-    [tab_ webController:mock_web_controller_ titleDidChange:kNewTabTitle];
+    web_state_impl_->OnPageLoaded(url, true);
+    web_state_impl_->OnTitleChanged();
   }
 
   void QueryAllHistory(history::QueryResults* results) {
@@ -314,12 +328,13 @@ class TabTest : public BlockCleanupTest {
   web::TestWebThreadBundle thread_bundle_;
   IOSChromeScopedTestingChromeBrowserStateManager scoped_browser_state_manager_;
   std::unique_ptr<TestChromeBrowserState> chrome_browser_state_;
-  base::scoped_nsobject<Tab> tab_;
+  std::unique_ptr<web::WebStateImpl> web_state_impl_;
   history::HistoryService* history_service_;  // weak
   CRWWebController* mock_web_controller_;     // weak
   base::scoped_nsobject<UIView> web_controller_view_;
   base::scoped_nsobject<ArrayTabModel> tabModel_;
   base::scoped_nsobject<id> mock_external_app_launcher_;
+  base::WeakNSObject<Tab> tab_;
 };
 
 TEST_F(TabTest, AddToHistoryWithRedirect) {
@@ -329,6 +344,13 @@ TEST_F(TabTest, AddToHistoryWithRedirect) {
   EXPECT_EQ(1U, results.size());
   CheckHistoryResult(results[0], GURL(kGoogleRedirectUrl), kGoogleTitle);
   CheckCurrentItem(results[0]);
+}
+
+TEST_F(TabTest, FailToOpenAppSettings) {
+  GURL app_settings_url = GURL(kAppSettingsUrl);
+  BOOL will_open_app_settings =
+      [tab_ openExternalURL:app_settings_url sourceURL:GURL() linkClicked:YES];
+  EXPECT_FALSE(will_open_app_settings);
 }
 
 // TODO(crbug.com/378098): Disabled because forward/back is now implemented in
@@ -373,8 +395,7 @@ TEST_F(TabTest, GetSuggestedFilenameFromContentDisposition) {
   headers->AddHeader(base::StringPrintf("Content-Type: application/pdf"));
   headers->AddHeader(base::StringPrintf("Content-Disposition: %s",
                                         kContentDispositionWithFilename));
-  [[tab_ webController] webStateImpl]->OnHttpResponseHeadersReceived(
-      headers.get(), url);
+  web_state_impl_->OnHttpResponseHeadersReceived(headers.get(), url);
   BrowseTo(url, url, [NSString string]);
   EXPECT_NSEQ(@"suggested_filename.pdf",
               [[tab_ openInController] suggestedFilename]);
@@ -389,8 +410,7 @@ TEST_F(TabTest, GetSuggestedFilenameFromURL) {
   headers->AddHeader(base::StringPrintf("Content-Type: application/pdf"));
   headers->AddHeader(base::StringPrintf("Content-Disposition: %s",
                                         kContentDispositionWithoutFilename));
-  [[tab_ webController] webStateImpl]->OnHttpResponseHeadersReceived(
-      headers.get(), url);
+  web_state_impl_->OnHttpResponseHeadersReceived(headers.get(), url);
   BrowseTo(url, url, [NSString string]);
   EXPECT_NSEQ(@"filename.pdf", [[tab_ openInController] suggestedFilename]);
 }
@@ -402,8 +422,7 @@ TEST_F(TabTest, GetSuggestedFilenameFromDefaultName) {
   scoped_refptr<net::HttpResponseHeaders> headers =
       new net::HttpResponseHeaders("HTTP 1.1 200 OK");
   headers->AddHeader(base::StringPrintf("Content-Type: application/pdf"));
-  [[tab_ webController] webStateImpl]->OnHttpResponseHeadersReceived(
-      headers.get(), url);
+  web_state_impl_->OnHttpResponseHeadersReceived(headers.get(), url);
   BrowseTo(url, url, [NSString string]);
   EXPECT_NSEQ(@"Document.pdf", [[tab_ openInController] suggestedFilename]);
 }
@@ -460,6 +479,10 @@ class TabOpenAppOffTheRecordTest : public TabOpenAppTest {
 
 // Tests the opening of matching native apps.
 TEST_F(TabOpenAppTest, testDummyURL) {
+  // TODO(crbug/711511): Remove this test when Native App Launcher has been
+  // fully deprecated.
+  if (!experimental_flags::IsNativeAppLauncherEnabled())
+    return;
   EXPECT_FALSE([tab_ browserState]->IsOffTheRecord());
 
   GURL no_native_app_url("dummy string");
@@ -467,6 +490,11 @@ TEST_F(TabOpenAppTest, testDummyURL) {
 }
 
 TEST_F(TabOpenAppTest, testURL) {
+  // TODO(crbug/711511): Remove this test when Native App Launcher has been
+  // fully deprecated.
+  if (!experimental_flags::IsNativeAppLauncherEnabled())
+    return;
+
   EXPECT_FALSE([tab_ browserState]->IsOffTheRecord());
 
   GURL testURL("http://www.youtube.com/");
@@ -490,6 +518,11 @@ TEST_F(TabOpenAppTest, testURL) {
 // TODO(crbug.com/330189): This test fails if Google Maps is installed (usually
 // on device).
 TEST_F(TabOpenAppTest, DISABLED_testResetShouldAutoOpenOnFailure) {
+  // TODO(crbug/711511): Remove this test when Native App Launcher has been
+  // fully deprecated.
+  if (!experimental_flags::IsNativeAppLauncherEnabled())
+    return;
+
   EXPECT_FALSE([tab_ browserState]->IsOffTheRecord());
 
   // With a regular profile.
@@ -507,6 +540,11 @@ TEST_F(TabOpenAppTest, DISABLED_testResetShouldAutoOpenOnFailure) {
 
 // Tests the opening of matching native apps with off-the-record browser state.
 TEST_F(TabOpenAppOffTheRecordTest, testDummyURL) {
+  // TODO(crbug/711511): Remove this test when Native App Launcher has been
+  // fully deprecated.
+  if (!experimental_flags::IsNativeAppLauncherEnabled())
+    return;
+
   EXPECT_TRUE([tab_ browserState]->IsOffTheRecord());
 
   GURL no_native_app_url("dummy string");
@@ -514,6 +552,11 @@ TEST_F(TabOpenAppOffTheRecordTest, testDummyURL) {
 }
 
 TEST_F(TabOpenAppOffTheRecordTest, testURL) {
+  // TODO(crbug/711511): Remove this test when Native App Launcher has been
+  // fully deprecated.
+  if (!experimental_flags::IsNativeAppLauncherEnabled())
+    return;
+
   EXPECT_TRUE([tab_ browserState]->IsOffTheRecord());
 
   // With a regular chrome browser state.
@@ -536,6 +579,11 @@ TEST_F(TabOpenAppOffTheRecordTest, testURL) {
 // TODO(crbug.com/330189): This test fails if Google Maps is installed (usually
 // on device).
 TEST_F(TabOpenAppOffTheRecordTest, DISABLED_testResetShouldAutoOpenOnFailure) {
+  // TODO(crbug/711511): Remove this test when Native App Launcher has been
+  // fully deprecated.
+  if (!experimental_flags::IsNativeAppLauncherEnabled())
+    return;
+
   EXPECT_TRUE([tab_ browserState]->IsOffTheRecord());
 
   // With a regular profile.

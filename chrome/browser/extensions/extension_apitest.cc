@@ -41,7 +41,6 @@ namespace {
 const char kTestCustomArg[] = "customArg";
 const char kTestDataDirectory[] = "testDataDirectory";
 const char kTestWebSocketPort[] = "testWebSocketPort";
-const char kIsolateExtensions[] = "isolateExtensions";
 const char kFtpServerPort[] = "ftpServer.port";
 const char kEmbeddedTestServerPort[] = "testServer.port";
 
@@ -151,19 +150,19 @@ ExtensionApiTest::ExtensionApiTest() {
 
 ExtensionApiTest::~ExtensionApiTest() {}
 
-void ExtensionApiTest::SetUpInProcessBrowserTestFixture() {
+void ExtensionApiTest::SetUpOnMainThread() {
+  ExtensionBrowserTest::SetUpOnMainThread();
   DCHECK(!test_config_.get()) << "Previous test did not clear config state.";
   test_config_.reset(new base::DictionaryValue());
   test_config_->SetString(kTestDataDirectory,
                           net::FilePathToFileURL(test_data_dir_).spec());
   test_config_->SetInteger(kTestWebSocketPort, 0);
-  bool isolate_extensions = extensions::IsIsolateExtensionsEnabled();
-  test_config_->SetBoolean(kIsolateExtensions, isolate_extensions);
   extensions::TestGetConfigFunction::set_test_config_state(
       test_config_.get());
 }
 
-void ExtensionApiTest::TearDownInProcessBrowserTestFixture() {
+void ExtensionApiTest::TearDownOnMainThread() {
+  ExtensionBrowserTest::TearDownOnMainThread();
   extensions::TestGetConfigFunction::set_test_config_state(NULL);
   test_config_.reset(NULL);
 }
@@ -413,11 +412,13 @@ void ExtensionApiTest::EmbeddedTestServerAcceptConnections() {
 }
 
 bool ExtensionApiTest::StartWebSocketServer(
-    const base::FilePath& root_directory) {
+    const base::FilePath& root_directory,
+    bool enable_basic_auth) {
   websocket_server_.reset(new net::SpawnedTestServer(
       net::SpawnedTestServer::TYPE_WS,
       net::SpawnedTestServer::kLocalhost,
       root_directory));
+  websocket_server_->set_websocket_basic_auth(enable_basic_auth);
 
   if (!websocket_server_->Start())
     return false;

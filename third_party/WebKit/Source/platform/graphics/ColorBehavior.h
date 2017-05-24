@@ -7,14 +7,7 @@
 
 #include "platform/PlatformExport.h"
 #include "public/platform/WebVector.h"
-#include "third_party/skia/include/core/SkColorSpace.h"
-#include "third_party/skia/include/core/SkRefCnt.h"
-
-class SkColorSpace;
-
-namespace gfx {
-class ICCProfile;
-}
+#include "ui/gfx/color_space.h"
 
 namespace blink {
 
@@ -23,59 +16,56 @@ class PLATFORM_EXPORT ColorBehavior {
   // This specifies to ignore color profiles embedded in images entirely. No
   // transformations will be applied to any pixel data, and no SkImages will be
   // tagged with an SkColorSpace.
-  static inline ColorBehavior ignore() {
-    return ColorBehavior(Type::Ignore, nullptr);
-  }
-  bool isIgnore() const { return m_type == Type::Ignore; }
+  static inline ColorBehavior Ignore() { return ColorBehavior(Type::kIgnore); }
+  bool IsIgnore() const { return type_ == Type::kIgnore; }
 
   // This specifies that images will not be transformed (to the extent
   // possible), but that SkImages will be tagged with the embedded SkColorSpace
   // (or sRGB if there was no embedded color profile).
-  static inline ColorBehavior tag() {
-    return ColorBehavior(Type::Tag, nullptr);
-  }
-  bool isTag() const { return m_type == Type::Tag; }
+  static inline ColorBehavior Tag() { return ColorBehavior(Type::kTag); }
+  bool IsTag() const { return type_ == Type::kTag; }
 
   // This specifies that images will be transformed to the specified target
   // color space, and that SkImages will not be tagged with any SkColorSpace.
-  static inline ColorBehavior transformTo(sk_sp<SkColorSpace> target) {
-    return ColorBehavior(Type::TransformTo, std::move(target));
+  static inline ColorBehavior TransformTo(const gfx::ColorSpace& target) {
+    return ColorBehavior(Type::kTransformTo, target);
   }
-  bool isTransformToTargetColorSpace() const {
-    return m_type == Type::TransformTo;
+  bool IsTransformToTargetColorSpace() const {
+    return type_ == Type::kTransformTo;
   }
-  sk_sp<SkColorSpace> targetColorSpace() const {
-    DCHECK(m_type == Type::TransformTo);
-    return m_target;
+  const gfx::ColorSpace& TargetColorSpace() const {
+    DCHECK(type_ == Type::kTransformTo);
+    return target_;
   }
 
   // Set the target color profile into which all images with embedded color
   // profiles should be converted. Note that only the first call to this
   // function in this process has any effect.
-  static void setGlobalTargetColorProfile(const gfx::ICCProfile&);
-  static void setGlobalTargetColorSpaceForTesting(const sk_sp<SkColorSpace>&);
-  static sk_sp<SkColorSpace> globalTargetColorSpace();
+  static void SetGlobalTargetColorProfile(const gfx::ICCProfile&);
+  static void SetGlobalTargetColorSpaceForTesting(const gfx::ColorSpace&);
+  static const gfx::ColorSpace& GlobalTargetColorSpace();
 
   // Return the behavior of transforming to the color space specified above, or
   // sRGB, if the above has not yet been called.
-  static ColorBehavior transformToGlobalTarget();
+  static ColorBehavior TransformToGlobalTarget();
 
   // Transform to a target color space to be used by tests.
-  static ColorBehavior transformToTargetForTesting();
+  static ColorBehavior TransformToTargetForTesting();
 
   bool operator==(const ColorBehavior&) const;
   bool operator!=(const ColorBehavior&) const;
 
  private:
   enum class Type {
-    Ignore,
-    Tag,
-    TransformTo,
+    kIgnore,
+    kTag,
+    kTransformTo,
   };
-  ColorBehavior(Type type, sk_sp<SkColorSpace> target)
-      : m_type(type), m_target(std::move(target)) {}
-  Type m_type;
-  sk_sp<SkColorSpace> m_target;
+  ColorBehavior(Type type) : type_(type) {}
+  ColorBehavior(Type type, const gfx::ColorSpace& target)
+      : type_(type), target_(target) {}
+  Type type_;
+  gfx::ColorSpace target_;
 };
 
 }  // namespace blink

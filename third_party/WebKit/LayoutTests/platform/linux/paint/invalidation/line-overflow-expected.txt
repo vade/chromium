@@ -8,33 +8,23 @@
       "paintInvalidations": [
         {
           "object": "LayoutText #text",
-          "rect": [7, 122, 197, 79],
-          "reason": "forced by layout"
+          "rect": [7, 122, 197, 99],
+          "reason": "geometry"
         },
         {
           "object": "LayoutText #text",
-          "rect": [8, 82, 190, 59],
-          "reason": "forced by layout"
+          "rect": [8, 82, 192, 59],
+          "reason": "geometry"
         },
         {
           "object": "LayoutInline SPAN id='t'",
-          "rect": [47, 92, 33, 49],
+          "rect": [113, 92, 36, 49],
           "reason": "style change"
         },
         {
           "object": "LayoutInline SPAN id='t'",
-          "rect": [77, 122, 33, 19],
+          "rect": [37, 142, 36, 19],
           "reason": "style change"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [77, 122, 33, 19],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [47, 122, 33, 19],
-          "reason": "forced by layout"
         }
       ]
     }
@@ -42,19 +32,23 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutText #text",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
-      "object": "InlineTextBox 'Cras faucibus. Nunc adipiscing,'",
-      "reason": "forced by layout"
+      "object": "InlineTextBox 'Cras faucibus. Nunc'",
+      "reason": "geometry"
     },
     {
-      "object": "InlineTextBox 'enim in scelerisque convallis,'",
-      "reason": "forced by layout"
+      "object": "InlineTextBox 'adipiscing, enim in scelerisque'",
+      "reason": "geometry"
+    },
+    {
+      "object": "InlineTextBox 'convallis,\n'",
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'augue '",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutInline SPAN id='t'",
@@ -66,31 +60,35 @@
     },
     {
       "object": "LayoutText #text",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'purus'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutText #text",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
-      "object": "InlineTextBox ' eleifend lacus, at'",
-      "reason": "forced by layout"
+      "object": "InlineTextBox ' eleifend'",
+      "reason": "geometry"
     },
     {
-      "object": "InlineTextBox 'sagittis eros leo pulvinar velit.'",
-      "reason": "forced by layout"
+      "object": "InlineTextBox 'lacus, at sagittis eros leo'",
+      "reason": "geometry"
     },
     {
-      "object": "InlineTextBox 'Integer sollicitudin nisi ut urna'",
-      "reason": "forced by layout"
+      "object": "InlineTextBox 'pulvinar velit. Integer'",
+      "reason": "geometry"
     },
     {
-      "object": "InlineTextBox 'blandit convallis.'",
-      "reason": "forced by layout"
+      "object": "InlineTextBox 'sollicitudin nisi ut urna blandit'",
+      "reason": "geometry"
+    },
+    {
+      "object": "InlineTextBox 'convallis.'",
+      "reason": "geometry"
     }
   ]
 }

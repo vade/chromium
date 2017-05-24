@@ -6,27 +6,25 @@
 
 namespace blink {
 
-InputDeviceCapabilities::InputDeviceCapabilities(bool firesTouchEvents) {
-  m_firesTouchEvents = firesTouchEvents;
+InputDeviceCapabilities::InputDeviceCapabilities(bool fires_touch_events) {
+  fires_touch_events_ = fires_touch_events;
 }
 
 InputDeviceCapabilities::InputDeviceCapabilities(
     const InputDeviceCapabilitiesInit& initializer) {
-  m_firesTouchEvents = initializer.firesTouchEvents();
+  fires_touch_events_ = initializer.firesTouchEvents();
 }
 
-InputDeviceCapabilities*
-InputDeviceCapabilities::firesTouchEventsSourceCapabilities() {
-  DEFINE_STATIC_LOCAL(InputDeviceCapabilities, instance,
-                      (InputDeviceCapabilities::create(true)));
-  return &instance;
-}
-
-InputDeviceCapabilities*
-InputDeviceCapabilities::doesntFireTouchEventsSourceCapabilities() {
-  DEFINE_STATIC_LOCAL(InputDeviceCapabilities, instance,
-                      (InputDeviceCapabilities::create(false)));
-  return &instance;
+InputDeviceCapabilities* InputDeviceCapabilitiesConstants::FiresTouchEvents(
+    bool fires_touch) {
+  if (fires_touch) {
+    if (!fires_touch_events_)
+      fires_touch_events_ = InputDeviceCapabilities::Create(true);
+    return fires_touch_events_;
+  }
+  if (!doesnt_fire_touch_events_)
+    doesnt_fire_touch_events_ = InputDeviceCapabilities::Create(false);
+  return doesnt_fire_touch_events_;
 }
 
 }  // namespace blink

@@ -7,6 +7,7 @@
 Network.NetworkOverview = class extends PerfUI.TimelineOverviewBase {
   constructor() {
     super();
+    this._selectedFilmStripTime = -1;
     this.element.classList.add('network-overview');
 
     /** @type {number} */
@@ -47,9 +48,9 @@ Network.NetworkOverview = class extends PerfUI.TimelineOverviewBase {
    * @param {!Common.Event} event
    */
   _loadEventFired(event) {
-    var data = /** @type {number} */ (event.data);
-    if (data)
-      this._loadEvents.push(data * 1000);
+    var time = /** @type {number} */ (event.data.loadTime);
+    if (time)
+      this._loadEvents.push(time * 1000);
     this.scheduleUpdate();
   }
 
@@ -101,7 +102,7 @@ Network.NetworkOverview = class extends PerfUI.TimelineOverviewBase {
   onResize() {
     var width = this.element.offsetWidth;
     var height = this.element.offsetHeight;
-    this.calculator().setDisplayWindow(width);
+    this.calculator().setDisplayWidth(width);
     this.resetCanvas();
     var numBands = (((height - 1) / Network.NetworkOverview._bandHeight) - 1) | 0;
     this._numBands = (numBands > 0) ? numBands : 1;

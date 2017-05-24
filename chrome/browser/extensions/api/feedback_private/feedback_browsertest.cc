@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/message_loop/message_loop.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/api/feedback_private/feedback_private_api.h"
@@ -108,6 +109,37 @@ IN_PROC_BROWSER_TEST_F(FeedbackTest, ShowLoginFeedback) {
         "$('page-url').hidden && $('attach-file-container').hidden && "
         "$('attach-file-note').hidden);",
       &bool_result));
+  EXPECT_TRUE(bool_result);
+}
+
+// Tests that there's an option in the email drop down box with a value
+// 'anonymous_user'.
+IN_PROC_BROWSER_TEST_F(FeedbackTest, AnonymousUser) {
+  WaitForExtensionViewsToLoad();
+
+  ASSERT_TRUE(IsFeedbackAppAvailable());
+  StartFeedbackUI(FeedbackFlow::FEEDBACK_FLOW_REGULAR);
+  VerifyFeedbackAppLaunch();
+
+  AppWindow* const window =
+      PlatformAppBrowserTest::GetFirstAppWindowForBrowser(browser());
+  ASSERT_TRUE(window);
+  content::WebContents* const content = window->web_contents();
+
+  bool bool_result = false;
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
+      content,
+      "domAutomationController.send("
+      "  ((function() {"
+      "      var options = $('user-email-drop-down').options;"
+      "      for (var option in options) {"
+      "        if (options[option].value == 'anonymous_user')"
+      "          return true;"
+      "      }"
+      "      return false;"
+      "    })()));",
+      &bool_result));
+
   EXPECT_TRUE(bool_result);
 }
 

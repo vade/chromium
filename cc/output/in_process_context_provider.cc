@@ -40,7 +40,7 @@ gpu::gles2::ContextCreationAttribHelper CreateAttributes() {
   gpu::gles2::ContextCreationAttribHelper attributes;
   attributes.alpha_size = -1;
   attributes.depth_size = 0;
-  attributes.stencil_size = 0;
+  attributes.stencil_size = 8;
   attributes.samples = 0;
   attributes.sample_buffers = 0;
   attributes.fail_if_major_perf_caveat = false;
@@ -103,7 +103,8 @@ class GrContext* InProcessContextProvider::GrContext() {
   if (gr_context_)
     return gr_context_->get();
 
-  gr_context_.reset(new skia_bindings::GrContextForGLES2Interface(ContextGL()));
+  gr_context_.reset(new skia_bindings::GrContextForGLES2Interface(
+      ContextGL(), ContextCapabilities()));
   return gr_context_->get();
 }
 

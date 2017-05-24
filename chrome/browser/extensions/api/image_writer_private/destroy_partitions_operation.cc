@@ -20,8 +20,9 @@ const int kPartitionTableSize = 2 * 4096;
 DestroyPartitionsOperation::DestroyPartitionsOperation(
     base::WeakPtr<OperationManager> manager,
     const ExtensionId& extension_id,
-    const std::string& storage_unit_id)
-    : Operation(manager, extension_id, storage_unit_id) {}
+    const std::string& storage_unit_id,
+    const base::FilePath& download_folder)
+    : Operation(manager, extension_id, storage_unit_id, download_folder) {}
 
 DestroyPartitionsOperation::~DestroyPartitionsOperation() {}
 
@@ -41,11 +42,9 @@ void DestroyPartitionsOperation::StartImpl() {
   }
 
   content::BrowserThread::PostTask(
-      content::BrowserThread::FILE,
-      FROM_HERE,
-      base::Bind(&DestroyPartitionsOperation::Write,
-                 this,
-                 base::Bind(&DestroyPartitionsOperation::Finish, this)));
+      content::BrowserThread::FILE, FROM_HERE,
+      base::BindOnce(&DestroyPartitionsOperation::Write, this,
+                     base::Bind(&DestroyPartitionsOperation::Finish, this)));
 }
 
 }  // namespace image_writer

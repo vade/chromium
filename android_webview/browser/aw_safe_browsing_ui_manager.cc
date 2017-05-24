@@ -4,6 +4,7 @@
 
 #include "android_webview/browser/aw_safe_browsing_ui_manager.h"
 
+#include "android_webview/browser/aw_safe_browsing_blocking_page.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -24,13 +25,18 @@ void AwSafeBrowsingUIManager::DisplayBlockingPage(
   WebContents* web_contents = resource.web_contents_getter.Run();
   // Check the size of the view
   UIManagerClient* client = UIManagerClient::FromWebContents(web_contents);
-  if (!client || !client->CanShowInterstitial()) {
+  if (!client || !client->CanShowBigInterstitial()) {
     LOG(WARNING) << "The view is not suitable to show the SB interstitial";
     OnBlockingPageDone(std::vector<UnsafeResource>{resource}, false,
                        web_contents, resource.url.GetWithEmptyPath());
     return;
   }
   safe_browsing::BaseUIManager::DisplayBlockingPage(resource);
+}
+
+void AwSafeBrowsingUIManager::ShowBlockingPageForResource(
+    const UnsafeResource& resource) {
+  AwSafeBrowsingBlockingPage::ShowBlockingPage(this, resource);
 }
 
 }  // namespace android_webview

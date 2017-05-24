@@ -34,11 +34,8 @@ namespace syncer {
 class DeviceInfoSyncBridge : public ModelTypeSyncBridge,
                              public DeviceInfoTracker {
  public:
-  typedef base::Callback<void(const ModelTypeStore::InitCallback& callback)>
-      StoreFactoryFunction;
-
   DeviceInfoSyncBridge(LocalDeviceInfoProvider* local_device_info_provider,
-                       const StoreFactoryFunction& callback,
+                       const ModelTypeStoreFactory& store_factory,
                        const ChangeProcessorFactory& change_processor_factory);
   ~DeviceInfoSyncBridge() override;
 
@@ -131,7 +128,7 @@ class DeviceInfoSyncBridge : public ModelTypeSyncBridge,
   // initialized during our constructor then the subscription is never used.
   std::unique_ptr<LocalDeviceInfoProvider::Subscription> subscription_;
 
-  // In charge of actually persiting changes to disk, or loading previous data.
+  // In charge of actually persisting changes to disk, or loading previous data.
   std::unique_ptr<ModelTypeStore> store_;
 
   // If |local_device_info_provider_| has initialized.

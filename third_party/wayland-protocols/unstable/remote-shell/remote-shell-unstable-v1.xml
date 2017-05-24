@@ -38,7 +38,7 @@
     reset.
   </description>
 
-  <interface name="zcr_remote_shell_v1" version="2">
+  <interface name="zcr_remote_shell_v1" version="5">
     <description summary="remote_shell">
       The global interface that allows clients to turn a wl_surface into a
       "real window" which is remotely managed but can be stacked, activated
@@ -64,6 +64,7 @@
       <entry name="fullscreen" value="4" summary="fullscreen window state"/>
       <entry name="pinned" value="5" summary="pinned window state"/>
       <entry name="trusted_pinned" value="6" summary="trusted pinned window state"/>
+      <entry name="moving" value="7" summary="moving window state"/>
     </enum>
 
     <enum name="error">
@@ -126,7 +127,7 @@
 
     <event name="configuration_changed">
       <description summary="suggests a re-configuration of remote shell">
-	Suggests a re-configuration of remote shell.
+	[Deprecated] Suggests a re-configuration of remote shell.
       </description>
       <arg name="width" type="int"/>
       <arg name="height" type="int"/>
@@ -138,9 +139,38 @@
       <arg name="work_area_inset_bottom" type="int"/>
       <arg name="layout_mode" type="uint"/>
     </event>
+
+    <!-- Version 5 additions -->
+
+    <event name="workspace" since="5">
+      <description summary="area of remote shell">
+	Defines an area of the remote shell used for layout. Each series of
+	"workspace" events must be terminated by a "configure" event.
+      </description>
+      <arg name="id_hi" type="uint"/>
+      <arg name="id_lo" type="uint"/>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+      <arg name="inset_left" type="int"/>
+      <arg name="inset_top" type="int"/>
+      <arg name="inset_right" type="int"/>
+      <arg name="inset_bottom" type="int"/>
+      <arg name="transform" type="int"/>
+      <arg name="scale_factor" type="fixed"/>
+    </event>
+
+    <event name="configure" since="5">
+      <description summary="suggests configuration of remote shell">
+	Suggests a new configuration of the remote shell. Preceded by a series
+	of "workspace" events.
+      </description>
+      <arg name="layout_mode" type="uint"/>
+    </event>
   </interface>
 
-  <interface name="zcr_remote_surface_v1" version="2">
+  <interface name="zcr_remote_surface_v1" version="5">
     <description summary="A desktop window">
       An interface that may be implemented by a wl_surface, for
       implementations that provide a desktop-style user interface
@@ -155,6 +185,15 @@
       For a surface to be mapped by the compositor the client must have
       committed both an remote_surface state and a buffer.
     </description>
+
+    <enum name="systemui_visibility_state">
+      <description summary="systemui visibility behavior">
+         Determine the visibility behavior of the system UI.
+      </description>
+      <entry name="visible" value="1" summary="system ui is visible"/>
+      <entry name="autohide_non_sticky" value="2" summary="system ui autohides and is not sticky"/>
+      <entry name="autohide_sticky" value="3" summary="system ui autohides and is sticky"/>
+    </enum>
 
     <request name="destroy" type="destructor">
       <description summary="Destroy the remote_surface">
@@ -207,7 +246,7 @@
 
     <request name="set_rectangular_shadow">
       <description summary="set a rectangular shadow">
-	Request that surface needs a rectangular shadow.
+	[Deprecated] Request that surface needs a rectangular shadow.
 
 	This is only a request that the surface should have a rectangular
 	shadow. The compositor may choose to ignore this request.
@@ -369,8 +408,8 @@
 
     <event name="state_type_changed">
       <description summary="surface state type changed">
-	The state_type_changed event is sent by the compositor when the surface
-	state changed.
+	[Deprecated] The state_type_changed event is sent by the compositor when
+	the surface state changed.
 
 	This is an event to notify that the window state changed in compositor.
 	The state change may be triggered by a client's request, or some user
@@ -382,22 +421,117 @@
 
     <!-- Version 2 additions -->
 
-    <request name="set_moving" since="2">
-      <description summary="interactive move started">
-	Notifies the compositor when an interactive, user-driven move of the
-	surface starts. The compositor may assume that subsequent
-	set_window_geometry requests are position updates until it receives a
-	unset_moving request.
+    <request name="set_rectangular_surface_shadow" since="2">
+      <description summary="set a rectangular shadow">
+	Request that surface needs a rectangular shadow.
+
+	This is only a request that the surface should have a rectangular
+	shadow. The compositor may choose to ignore this request.
+
+	The arguments are given in the remote surface coordinate space and
+	specifies inner bounds of the shadow. Specifying zero width and height
+	will disable the shadow.
+      </description>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+    </request>
+
+    <!-- Version 3 additions -->
+    <request name="set_systemui_visibility" since="3">
+      <description summary="requests the system ui visibility behavior for the surface">
+	Requests how the surface will change the visibility of the system UI when it is made active.
+      </description>
+      <arg name="visibility" type="uint"/>
+    </request>
+
+    <!-- Version 4 additions -->
+
+    <request name="set_always_on_top" since="4">
+      <description summary="set always on top">
+	Request that surface is made to be always on top.
+
+	This is only a request that the window should be always on top.
+	The compositor may choose to ignore this request.
+
       </description>
     </request>
 
-    <request name="unset_moving" since="2">
-      <description summary="interactive move stopped">
-	Notifies the compositor when an interactive, user-driven move of the
-	surface stops. The compositor may choose to stop the move regardless
-	of this request.
+    <request name="unset_always_on_top" since="4">
+      <description summary="unset always on top">
+	Request that surface is made to be not always on top.
+
+	This is only a request that the window should be not always on top.
+	The compositor may choose to ignore this request.
       </description>
     </request>
+
+    <!-- Version 5 additions -->
+
+    <event name="configure" since="5">
+      <description summary="suggest a surface change">
+	The configure event asks the client to change surface state.
+
+	The client must apply the origin offset to window positions in
+	set_window_geometry requests.
+
+	The states listed in the event are state_type values, and might change
+	due to a client request or an event directly handled by the compositor.
+
+	Clients should arrange their surface for the new state, and then send an
+	ack_configure request with the serial sent in this configure event at
+	some point before committing the new surface.
+
+	If the client receives multiple configure events before it can respond
+	to one, it is free to discard all but the last event it received.
+      </description>
+      <arg name="origin_offset_x" type="int"/>
+      <arg name="origin_offset_y" type="int"/>
+      <arg name="states" type="array"/>
+      <arg name="serial" type="uint"/>
+    </event>
+
+    <request name="ack_configure" since="5">
+      <description summary="ack a configure event">
+	When a configure event is received, if a client commits the
+	surface in response to the configure event, then the client
+	must make an ack_configure request sometime before the commit
+	request, passing along the serial of the configure event.
+
+	For instance, the compositor might use this information during display
+	configuration to change its coordinate space for set_window_geometry
+	requests only when the client has switched to the new coordinate space.
+
+	If the client receives multiple configure events before it
+	can respond to one, it only has to ack the last configure event.
+
+	A client is not required to commit immediately after sending
+	an ack_configure request - it may even ack_configure several times
+	before its next surface commit.
+
+	A client may send multiple ack_configure requests before committing, but
+	only the last request sent before a commit indicates which configure
+	event the client really is responding to.
+      </description>
+      <arg name="serial" type="uint" summary="the serial from the configure event"/>
+    </request>
+
+    <request name="move" since="5">
+      <description summary="start an interactive move">
+	Start an interactive, user-driven move of the surface.
+
+	The compositor responds to this request with a configure event that
+	transitions to the "moving" state. The client must only initiate motion
+	after acknowledging the state change. The compositor can assume that
+	subsequent set_window_geometry requests are position updates until the
+	next state transition is acknowledged.
+
+	The compositor may ignore move requests depending on the state of the
+	surface, e.g. fullscreen or maximized.
+      </description>
+    </request>
+
   </interface>
 
   <interface name="zcr_notification_surface_v1" version="1">

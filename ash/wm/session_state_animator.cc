@@ -4,7 +4,9 @@
 
 #include "ash/wm/session_state_animator.h"
 
-#include "ash/common/ash_switches.h"
+#include <utility>
+
+#include "ash/ash_switches.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "ash/wm/window_animations.h"
@@ -22,9 +24,7 @@ namespace {
 
 bool IsTouchViewEnabled() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kAshEnableTouchView) ||
-         base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kAshEnableTouchViewTesting);
+      switches::kAshEnableTouchView);
 }
 
 }  // namespace
@@ -40,11 +40,11 @@ const int SessionStateAnimator::kAllNonRootContainersMask =
     SessionStateAnimator::NON_LOCK_SCREEN_CONTAINERS;
 
 SessionStateAnimator::AnimationSequence::AnimationSequence(
-    base::Closure callback)
+    base::OnceClosure callback)
     : sequence_ended_(false),
       animation_completed_(false),
       invoke_callback_(false),
-      callback_(callback) {}
+      callback_(std::move(callback)) {}
 
 SessionStateAnimator::AnimationSequence::~AnimationSequence() {}
 
@@ -68,7 +68,7 @@ void SessionStateAnimator::AnimationSequence::OnAnimationAborted() {
 void SessionStateAnimator::AnimationSequence::CleanupIfSequenceCompleted() {
   if (sequence_ended_ && animation_completed_) {
     if (invoke_callback_)
-      callback_.Run();
+      std::move(callback_).Run();
     delete this;
   }
 }
@@ -95,7 +95,7 @@ base::TimeDelta SessionStateAnimator::GetDuration(
     case ANIMATION_SPEED_UNDO_MOVE_WINDOWS:
       return base::TimeDelta::FromMilliseconds(350);
     case ANIMATION_SPEED_SHUTDOWN:
-      return IsTouchViewEnabled() ? base::TimeDelta::FromMilliseconds(2500)
+      return IsTouchViewEnabled() ? base::TimeDelta::FromMilliseconds(1500)
                                   : base::TimeDelta::FromMilliseconds(1000);
     case ANIMATION_SPEED_REVERT_SHUTDOWN:
       return base::TimeDelta::FromMilliseconds(500);

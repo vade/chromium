@@ -42,8 +42,7 @@ DisplayAndroidManager::~DisplayAndroidManager() {}
 // Screen interface.
 
 Display DisplayAndroidManager::GetDisplayNearestWindow(
-    gfx::NativeView view) const {
-  ui::WindowAndroid* window = view ? view->GetWindowAndroid() : nullptr;
+    gfx::NativeWindow window) const {
   if (window) {
     DisplayList::Displays::const_iterator it =
         display_list().FindDisplayById(window->display_id());
@@ -52,6 +51,11 @@ Display DisplayAndroidManager::GetDisplayNearestWindow(
     }
   }
   return GetPrimaryDisplay();
+}
+
+Display DisplayAndroidManager::GetDisplayNearestView(
+    gfx::NativeView view) const {
+  return GetDisplayNearestWindow(view ? view->GetWindowAndroid() : nullptr);
 }
 
 // There is no notion of relative display positions on Android.
@@ -74,20 +78,13 @@ void DisplayAndroidManager::UpdateDisplay(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& jobject,
     jint sdkDisplayId,
-    jint physicalWidth,
-    jint physicalHeight,
     jint width,
     jint height,
     jfloat dipScale,
     jint rotationDegrees,
     jint bitsPerPixel,
     jint bitsPerComponent) {
-  gfx::Rect bounds_in_pixels = gfx::Rect(physicalWidth, physicalHeight);
-
-  // Physical width and height might be not supported.
-  if (bounds_in_pixels.IsEmpty())
-    bounds_in_pixels = gfx::Rect(width, height);
-
+  gfx::Rect bounds_in_pixels = gfx::Rect(width, height);
   const gfx::Rect bounds_in_dip = gfx::Rect(
       gfx::ScaleToCeiledSize(bounds_in_pixels.size(), 1.0f / dipScale));
 

@@ -4,8 +4,6 @@
 
 #include "chrome/browser/page_load_metrics/observers/previews_page_load_metrics_observer.h"
 
-#include <string>
-
 #include "base/optional.h"
 #include "base/time/time.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
@@ -50,60 +48,72 @@ PreviewsPageLoadMetricsObserver::OnCommit(
              : STOP_OBSERVING;
 }
 
+page_load_metrics::PageLoadMetricsObserver::ObservePolicy
+PreviewsPageLoadMetricsObserver::ShouldObserveMimeType(
+    const std::string& mime_type) const {
+  // On top of base-supported types, support MHTML. Offline previews are served
+  // as MHTML (multipart/related).
+  return PageLoadMetricsObserver::ShouldObserveMimeType(mime_type) ==
+                     CONTINUE_OBSERVING ||
+                 mime_type == "multipart/related"
+             ? CONTINUE_OBSERVING
+             : STOP_OBSERVING;
+}
+
 void PreviewsPageLoadMetricsObserver::OnDomContentLoadedEventStart(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
   if (!WasStartedInForegroundOptionalEventInForeground(
-          timing.dom_content_loaded_event_start, info)) {
+          timing.document_timing->dom_content_loaded_event_start, info)) {
     return;
   }
   PAGE_LOAD_HISTOGRAM(
       internal::kHistogramOfflinePreviewsDOMContentLoadedEventFired,
-      timing.dom_content_loaded_event_start.value());
+      timing.document_timing->dom_content_loaded_event_start.value());
 }
 
 void PreviewsPageLoadMetricsObserver::OnLoadEventStart(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
   if (!WasStartedInForegroundOptionalEventInForeground(
-          timing.dom_content_loaded_event_start, info)) {
+          timing.document_timing->load_event_start, info)) {
     return;
   }
   PAGE_LOAD_HISTOGRAM(internal::kHistogramOfflinePreviewsLoadEventFired,
-                      timing.load_event_start.value());
+                      timing.document_timing->load_event_start.value());
 }
 
 void PreviewsPageLoadMetricsObserver::OnFirstLayout(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
   if (!WasStartedInForegroundOptionalEventInForeground(
-          timing.dom_content_loaded_event_start, info)) {
+          timing.document_timing->first_layout, info)) {
     return;
   }
   PAGE_LOAD_HISTOGRAM(internal::kHistogramOfflinePreviewsFirstLayout,
-                      timing.first_layout.value());
+                      timing.document_timing->first_layout.value());
 }
 
-void PreviewsPageLoadMetricsObserver::OnFirstContentfulPaint(
-    const page_load_metrics::PageLoadTiming& timing,
+void PreviewsPageLoadMetricsObserver::OnFirstContentfulPaintInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
   if (!WasStartedInForegroundOptionalEventInForeground(
-          timing.dom_content_loaded_event_start, info)) {
+          timing.paint_timing->first_contentful_paint, info)) {
     return;
   }
   PAGE_LOAD_HISTOGRAM(internal::kHistogramOfflinePreviewsFirstContentfulPaint,
-                      timing.first_contentful_paint.value());
+                      timing.paint_timing->first_contentful_paint.value());
 }
 
 void PreviewsPageLoadMetricsObserver::OnParseStart(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
   if (!WasStartedInForegroundOptionalEventInForeground(
-          timing.dom_content_loaded_event_start, info)) {
+          timing.parse_timing->parse_start, info)) {
     return;
   }
   PAGE_LOAD_HISTOGRAM(internal::kHistogramOfflinePreviewsParseStart,
-                      timing.parse_start.value());
+                      timing.parse_timing->parse_start.value());
 }
 
 bool PreviewsPageLoadMetricsObserver::IsOfflinePreview(

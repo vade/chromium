@@ -5,8 +5,8 @@
 #ifndef CC_TREES_EFFECT_NODE_H_
 #define CC_TREES_EFFECT_NODE_H_
 
-#include "cc/base/cc_export.h"
-#include "cc/output/filter_operations.h"
+#include "cc/base/filter_operations.h"
+#include "cc/cc_export.h"
 #include "third_party/skia/include/core/SkBlendMode.h"
 #include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/geometry/size_f.h"
@@ -18,8 +18,6 @@ class TracedValue;
 }  // namespace base
 
 namespace cc {
-
-class RenderSurfaceImpl;
 
 struct CC_EXPORT EffectNode {
   EffectNode();
@@ -46,14 +44,6 @@ struct CC_EXPORT EffectNode {
   gfx::Size unscaled_mask_target_size;
 
   bool has_render_surface;
-  RenderSurfaceImpl* render_surface;
-  // Only applicable if has render surface. A true value means a clip needs to
-  // be applied to the output of the surface when it is drawn onto its parent
-  // surface.
-  // TODO(crbug.com/504464): There is ongoing work to delay render surface
-  // decision to later phase of the pipeline. This flag shall be removed and
-  // computed during render surface decision.
-  bool surface_is_clipped;
   bool has_copy_request;
   bool hidden_by_backface_visibility;
   bool double_sided;
@@ -68,13 +58,15 @@ struct CC_EXPORT EffectNode {
   // We need to track changes to effects on the compositor to compute damage
   // rect.
   bool effect_changed;
-  int num_copy_requests_in_subtree;
-  bool has_unclipped_descendants;
+  bool subtree_has_copy_request;
   int transform_id;
   int clip_id;
-  // Effect node id of which this effect contributes to.
+
+  // This is the id of the ancestor effect node that induces a
+  // RenderSurfaceImpl.
   int target_id;
   int mask_layer_id;
+  int closest_ancestor_with_copy_request_id;
 
   bool operator==(const EffectNode& other) const;
 

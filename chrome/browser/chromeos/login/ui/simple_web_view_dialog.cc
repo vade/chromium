@@ -295,21 +295,9 @@ SimpleWebViewDialog::GetContentSettingBubbleModelDelegate() {
   return bubble_model_delegate_.get();
 }
 
-void SimpleWebViewDialog::ShowWebsiteSettings(
-    content::WebContents* web_contents,
-    const GURL& virtual_url,
-    const security_state::SecurityInfo& security_info) {
+void SimpleWebViewDialog::ShowPageInfo(content::WebContents* web_contents) {
   NOTIMPLEMENTED();
   // TODO (markusheintz@): implement this
-}
-
-PageActionImageView* SimpleWebViewDialog::CreatePageActionImageView(
-    LocationBarView* owner,
-    ExtensionAction* action) {
-  // Notreached because SimpleWebViewDialog uses a popup-mode LocationBarView,
-  // and it doesn't create PageActionImageViews.
-  NOTREACHED();
-  return NULL;
 }
 
 content::WebContents* SimpleWebViewDialog::GetActiveWebContents() const {

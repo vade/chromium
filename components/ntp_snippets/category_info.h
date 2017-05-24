@@ -20,14 +20,26 @@ enum class ContentSuggestionsCardLayout {
   MINIMAL_CARD
 };
 
+// On Android builds, a Java counterpart will be generated for this enum.
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.suggestions
+enum class ContentSuggestionsAdditionalAction {
+  // No additional action available.
+  NONE,
+
+  // More suggestions can be fetched using the Fetch methods with this category.
+  FETCH,
+
+  // Open a new surface dedicated to the content related to this category. The
+  // UI has to choose which surface to open.
+  VIEW_ALL
+};
+
 // Contains static meta information about a Category.
 class CategoryInfo {
  public:
   CategoryInfo(const base::string16& title,
                ContentSuggestionsCardLayout card_layout,
-               bool has_more_action,
-               bool has_reload_action,
-               bool has_view_all_action,
+               ContentSuggestionsAdditionalAction additional_action,
                bool show_if_empty,
                const base::string16& no_suggestions_message);
   CategoryInfo() = delete;
@@ -43,17 +55,10 @@ class CategoryInfo {
   // Layout of the cards to be used to display suggestions in this category.
   ContentSuggestionsCardLayout card_layout() const { return card_layout_; }
 
-  // Whether the category supports a "More" action, that triggers fetching more
-  // suggestions for the category, while keeping the current ones.
-  bool has_more_action() const { return has_more_action_; }
-
-  // Whether the category supports a "Reload" action, that triggers fetching new
-  // suggestions to replace the current ones.
-  bool has_reload_action() const { return has_reload_action_; }
-
-  // Whether the category supports a "ViewAll" action, that triggers displaying
-  // all the content related to the current categories.
-  bool has_view_all_action() const { return has_view_all_action_; }
+  // Supported action for the category.
+  ContentSuggestionsAdditionalAction additional_action() const {
+    return additional_action_;
+  }
 
   // Whether this category should be shown if it offers no suggestions.
   bool show_if_empty() const { return show_if_empty_; }
@@ -69,10 +74,7 @@ class CategoryInfo {
   base::string16 title_;
   ContentSuggestionsCardLayout card_layout_;
 
-  // Supported actions for the category.
-  bool has_more_action_;
-  bool has_reload_action_;
-  bool has_view_all_action_;
+  ContentSuggestionsAdditionalAction additional_action_;
 
   // Whether to show the category if a fetch returns no suggestions.
   bool show_if_empty_;

@@ -18,9 +18,10 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/values.h"
-#include "cc/base/cc_export.h"
 #include "cc/base/region.h"
 #include "cc/base/synced_property.h"
+#include "cc/cc_export.h"
+#include "cc/debug/layer_tree_debug_state.h"
 #include "cc/input/input_handler.h"
 #include "cc/layers/draw_properties.h"
 #include "cc/layers/layer_collections.h"
@@ -51,6 +52,7 @@ class DictionaryValue;
 
 namespace cc {
 
+class AppendQuadsData;
 class LayerTreeImpl;
 class MicroBenchmarkImpl;
 class MutatorHost;
@@ -59,9 +61,7 @@ class RenderPass;
 class ScrollbarLayerImplBase;
 class SimpleEnclosedRegion;
 class Tile;
-class ScrollState;
 
-struct AppendQuadsData;
 
 enum DrawMode {
   DRAW_MODE_NONE,
@@ -70,12 +70,17 @@ enum DrawMode {
   DRAW_MODE_RESOURCELESS_SOFTWARE
 };
 
+enum ViewportLayerType {
+  NOT_VIEWPORT_LAYER,
+  INNER_VIEWPORT_CONTAINER,
+  OUTER_VIEWPORT_CONTAINER,
+  INNER_VIEWPORT_SCROLL,
+  OUTER_VIEWPORT_SCROLL,
+  LAST_VIEWPORT_LAYER_TYPE = OUTER_VIEWPORT_SCROLL,
+};
+
 class CC_EXPORT LayerImpl {
  public:
-  typedef LayerImplList RenderSurfaceListType;
-  typedef LayerImplList LayerListType;
-  typedef RenderSurfaceImpl RenderSurfaceType;
-
   static std::unique_ptr<LayerImpl> Create(LayerTreeImpl* tree_impl, int id) {
     return base::WrapUnique(new LayerImpl(tree_impl, id));
   }
@@ -86,11 +91,7 @@ class CC_EXPORT LayerImpl {
 
   // Interactions with attached animations.
   gfx::ScrollOffset ScrollOffsetForAnimation() const;
-  void OnIsAnimatingChanged(const PropertyAnimationState& mask,
-                            const PropertyAnimationState& state);
   bool IsActive() const;
-
-  void DistributeScroll(ScrollState* scroll_state);
 
   void set_property_tree_sequence_number(int sequence_number) {}
 
@@ -123,11 +124,7 @@ class CC_EXPORT LayerImpl {
 
   bool is_clipped() const { return draw_properties_.is_clipped; }
 
-  void UpdatePropertyTreeTransformIsAnimated(bool is_animated);
   void UpdatePropertyTreeScrollOffset();
-
-  // For compatibility with Layer.
-  bool has_render_surface() const { return !!render_surface(); }
 
   LayerTreeImpl* layer_tree_impl() const { return layer_tree_impl_; }
 
@@ -155,7 +152,8 @@ class CC_EXPORT LayerImpl {
   }
 
   virtual void GetContentsResourceId(ResourceId* resource_id,
-                                     gfx::Size* resource_size) const;
+                                     gfx::Size* resource_size,
+                                     gfx::SizeF* resource_uv_size) const;
 
   virtual void NotifyTileStateChanged(const Tile* tile) {}
 
@@ -178,7 +176,6 @@ class CC_EXPORT LayerImpl {
   // non-opaque color.  Tries to return background_color(), if possible.
   SkColor SafeOpaqueBackgroundColor() const;
 
-  bool FilterIsAnimating() const;
   bool HasPotentiallyRunningFilterAnimation() const;
 
   void SetMasksToBounds(bool masks_to_bounds);
@@ -190,23 +187,17 @@ class CC_EXPORT LayerImpl {
   float Opacity() const;
   const gfx::Transform& Transform() const;
 
+  // Stable identifier for clients. See comment in cc/trees/element_id.h.
   void SetElementId(ElementId element_id);
   ElementId element_id() const { return element_id_; }
 
   void SetMutableProperties(uint32_t properties);
   uint32_t mutable_properties() const { return mutable_properties_; }
 
-  void set_draw_blend_mode(SkBlendMode blend_mode) {
-    draw_blend_mode_ = blend_mode;
-  }
-  SkBlendMode draw_blend_mode() const { return draw_blend_mode_; }
-
   void SetPosition(const gfx::PointF& position);
   gfx::PointF position() const { return position_; }
 
   bool IsAffectedByPageScale() const;
-
-  gfx::Vector2dF FixedContainerSizeDelta() const;
 
   bool Is3dSorted() const { return GetSortingContextId() != 0; }
 
@@ -231,15 +222,7 @@ class CC_EXPORT LayerImpl {
     return should_check_backface_visibility_;
   }
 
-  bool ShowDebugBorders() const;
-
-  // These invalidate the host's render surface layer list.  The caller
-  // is responsible for calling set_needs_update_draw_properties on the tree
-  // so that its list can be recreated.
-  void ClearRenderSurfaceLayerList();
-  void SetHasRenderSurface(bool has_render_surface);
-
-  RenderSurfaceImpl* render_surface() const { return render_surface_.get(); }
+  bool ShowDebugBorders(DebugBorderType type) const;
 
   // The render surface which this layer draws into. This can be either owned by
   // the same layer or an ancestor of this layer.
@@ -288,8 +271,22 @@ class CC_EXPORT LayerImpl {
   // Like bounds() but doesn't snap to int. Lossy on giant pages (e.g. millions
   // of pixels) due to use of single precision float.
   gfx::SizeF BoundsForScrolling() const;
-  void SetBoundsDelta(const gfx::Vector2dF& bounds_delta);
-  gfx::Vector2dF bounds_delta() const { return bounds_delta_; }
+
+  // Viewport bounds delta are only used for viewport layers and account for
+  // changes in the viewport layers from browser controls and page scale
+  // factors. These deltas are only set on the active tree.
+  void SetViewportBoundsDelta(const gfx::Vector2dF& bounds_delta);
+  gfx::Vector2dF ViewportBoundsDelta() const;
+
+  void SetViewportLayerType(ViewportLayerType type) {
+    // Once set as a viewport layer type, the viewport type should not change.
+    DCHECK(viewport_layer_type() == NOT_VIEWPORT_LAYER ||
+           viewport_layer_type() == type);
+    viewport_layer_type_ = type;
+  }
+  ViewportLayerType viewport_layer_type() const {
+    return static_cast<ViewportLayerType>(viewport_layer_type_);
+  }
 
   void SetCurrentScrollOffset(const gfx::ScrollOffset& scroll_offset);
   gfx::ScrollOffset CurrentScrollOffset() const;
@@ -338,7 +335,6 @@ class CC_EXPORT LayerImpl {
     return touch_event_handler_region_;
   }
 
-  bool TransformIsAnimating() const;
   bool HasPotentiallyRunningTransformAnimation() const;
 
   bool HasFilterAnimationThatInflatesBounds() const;
@@ -398,12 +394,16 @@ class CC_EXPORT LayerImpl {
   void SetDebugInfo(
       std::unique_ptr<base::trace_event::ConvertableToTraceFormat> debug_info);
 
-  void set_is_drawn_render_surface_layer_list_member(bool is_member) {
-    is_drawn_render_surface_layer_list_member_ = is_member;
+  void set_contributes_to_drawn_render_surface(bool is_member) {
+    contributes_to_drawn_render_surface_ = is_member;
   }
 
-  bool is_drawn_render_surface_layer_list_member() const {
-    return is_drawn_render_surface_layer_list_member_;
+  bool contributes_to_drawn_render_surface() const {
+    return contributes_to_drawn_render_surface_;
+  }
+
+  bool IsDrawnScrollbar() {
+    return ToScrollbarLayer() && contributes_to_drawn_render_surface_;
   }
 
   void set_may_contain_video(bool yes) { may_contain_video_ = yes; }
@@ -420,11 +420,9 @@ class CC_EXPORT LayerImpl {
 
   virtual gfx::Rect GetEnclosingRectInTargetSpace() const;
 
-  int num_copy_requests_in_target_subtree();
+  bool has_copy_requests_in_target_subtree();
 
   void UpdatePropertyTreeForScrollingAndAnimationIfNeeded();
-
-  bool IsHidden() const;
 
   float GetIdealContentsScale() const;
 
@@ -443,18 +441,19 @@ class CC_EXPORT LayerImpl {
     return has_will_change_transform_hint_;
   }
 
-  void SetPreferredRasterBounds(const gfx::Size& preferred_raster_bounds);
-  bool has_preferred_raster_bounds() const {
-    return has_preferred_raster_bounds_;
-  }
-  const gfx::Size& preferred_raster_scale() const {
-    return preferred_raster_bounds_;
-  }
-  void ClearPreferredRasterBounds();
-
   MutatorHost* GetMutatorHost() const;
 
   ElementListType GetElementTypeForAnimation() const;
+
+  void set_needs_show_scrollbars(bool yes) { needs_show_scrollbars_ = yes; }
+  bool needs_show_scrollbars() { return needs_show_scrollbars_; }
+
+  void set_raster_even_if_not_in_rsll(bool yes) {
+    raster_even_if_not_in_rsll_ = yes;
+  }
+  bool raster_even_if_not_in_rsll() const {
+    return raster_even_if_not_in_rsll_;
+  }
 
  protected:
   LayerImpl(LayerTreeImpl* layer_impl,
@@ -479,8 +478,6 @@ class CC_EXPORT LayerImpl {
   gfx::Rect GetScaledEnclosingRectInTargetSpace(float scale) const;
 
  private:
-  bool HasOnlyTranslationTransforms() const;
-
   // This includes all animations, even those that are finished but haven't yet
   // been deleted.
   bool HasAnyAnimationTargetingProperty(TargetProperty::Type property) const;
@@ -493,8 +490,6 @@ class CC_EXPORT LayerImpl {
   LayerTreeImpl* layer_tree_impl_;
 
   std::unique_ptr<LayerImplTestProperties> test_properties_;
-
-  gfx::Vector2dF bounds_delta_;
 
   // Properties synchronized from the associated Layer.
   gfx::Size bounds_;
@@ -517,18 +512,21 @@ class CC_EXPORT LayerImpl {
   bool use_local_transform_for_backface_visibility_ : 1;
   bool should_check_backface_visibility_ : 1;
   bool draws_content_ : 1;
-  bool is_drawn_render_surface_layer_list_member_ : 1;
+  bool contributes_to_drawn_render_surface_ : 1;
 
   // This is true if and only if the layer was ever ready since it last animated
   // (all content was complete).
   bool was_ever_ready_since_last_transform_animation_ : 1;
+
+  static_assert(LAST_VIEWPORT_LAYER_TYPE < (1u << 3),
+                "enough bits for ViewportLayerType (viewport_layer_type_)");
+  uint8_t viewport_layer_type_ : 3;  // ViewportLayerType
 
   Region non_fast_scrollable_region_;
   Region touch_event_handler_region_;
   SkColor background_color_;
   SkColor safe_opaque_background_color_;
 
-  SkBlendMode draw_blend_mode_;
   gfx::PointF position_;
 
   gfx::Rect clip_rect_in_target_space_;
@@ -544,6 +542,7 @@ class CC_EXPORT LayerImpl {
 
  private:
   PropertyTrees* GetPropertyTrees() const;
+  ClipTree& GetClipTree() const;
   EffectTree& GetEffectTree() const;
   ScrollTree& GetScrollTree() const;
   TransformTree& GetTransformTree() const;
@@ -567,17 +566,17 @@ class CC_EXPORT LayerImpl {
   std::unique_ptr<base::trace_event::ConvertableToTraceFormat>
       owned_debug_info_;
   base::trace_event::ConvertableToTraceFormat* debug_info_;
-  // TODO(http://crbug.com/557160): EffectNode instead of LayerImpl should
-  // own RenderSurfaceImpl. Currently SPv2 creates dummy layers for the sole
-  // purpose of holding a render surface. Once done, remember to remove dummy
-  // layers from PaintArtifactCompositor as well
-  std::unique_ptr<RenderSurfaceImpl> render_surface_;
-  gfx::Size preferred_raster_bounds_;
 
-  bool has_preferred_raster_bounds_ : 1;
   bool has_will_change_transform_hint_ : 1;
   bool needs_push_properties_ : 1;
   bool scrollbars_hidden_ : 1;
+
+  // The needs_show_scrollbars_ bit tracks a pending request from Blink to show
+  // the overlay scrollbars. It's set on the scroll layer (not the scrollbar
+  // layers) and consumed by LayerTreeImpl::PushPropertiesTo during activation.
+  bool needs_show_scrollbars_ : 1;
+
+  bool raster_even_if_not_in_rsll_ : 1;
 
   DISALLOW_COPY_AND_ASSIGN(LayerImpl);
 };

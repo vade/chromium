@@ -11,12 +11,12 @@
 #include "net/quic/core/spdy_utils.h"
 #include "net/quic/platform/api/quic_logging.h"
 #include "net/quic/platform/api/quic_socket_address.h"
+#include "net/quic/platform/api/quic_test.h"
 #include "net/quic/platform/api/quic_text_utils.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
+#include "net/quic/test_tools/quic_spdy_session_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "net/tools/quic/quic_client_session.h"
-#include "testing/gmock/include/gmock/gmock.h"
-#include "testing/gtest/include/gtest/gtest.h"
 
 using base::IntToString;
 using std::string;
@@ -38,7 +38,7 @@ class MockQuicClientSession : public QuicClientSession {
             QuicServerId("example.com", 443, PRIVACY_MODE_DISABLED),
             &crypto_config_,
             push_promise_index),
-        crypto_config_(CryptoTestUtils::ProofVerifierForTesting()) {}
+        crypto_config_(crypto_test_utils::ProofVerifierForTesting()) {}
   ~MockQuicClientSession() override {}
 
   MOCK_METHOD1(CloseStream, void(QuicStreamId stream_id));
@@ -49,7 +49,7 @@ class MockQuicClientSession : public QuicClientSession {
   DISALLOW_COPY_AND_ASSIGN(MockQuicClientSession);
 };
 
-class QuicSpdyClientStreamTest : public ::testing::Test {
+class QuicSpdyClientStreamTest : public QuicTest {
  public:
   class StreamVisitor;
 
@@ -64,7 +64,9 @@ class QuicSpdyClientStreamTest : public ::testing::Test {
     headers_[":status"] = "200";
     headers_["content-length"] = "11";
 
-    stream_.reset(new QuicSpdyClientStream(kClientDataStreamId1, &session_));
+    stream_.reset(new QuicSpdyClientStream(
+        QuicSpdySessionPeer::GetNthClientInitiatedStreamId(session_, 0),
+        &session_));
     stream_visitor_.reset(new StreamVisitor());
     stream_->set_visitor(stream_visitor_.get());
   }
@@ -111,7 +113,6 @@ TEST_F(QuicSpdyClientStreamTest, TestFraming) {
 
 TEST_F(QuicSpdyClientStreamTest, TestFraming100Continue) {
   headers_[":status"] = "100";
-  FLAGS_quic_restart_flag_quic_supports_100_continue = true;
   auto headers = AsHeaderList(headers_);
   stream_->OnStreamHeaderList(false, headers.uncompressed_header_bytes(),
                               headers);
@@ -121,20 +122,6 @@ TEST_F(QuicSpdyClientStreamTest, TestFraming100Continue) {
   EXPECT_EQ(0u, stream_->response_headers().size());
   EXPECT_EQ(100, stream_->response_code());
   EXPECT_EQ("", stream_->data());
-}
-
-TEST_F(QuicSpdyClientStreamTest, TestFraming100ContinueNoFlag) {
-  headers_[":status"] = "100";
-  FLAGS_quic_restart_flag_quic_supports_100_continue = false;
-  auto headers = AsHeaderList(headers_);
-  stream_->OnStreamHeaderList(false, headers.uncompressed_header_bytes(),
-                              headers);
-  stream_->OnStreamFrame(
-      QuicStreamFrame(stream_->id(), /*fin=*/false, /*offset=*/0, body_));
-  EXPECT_EQ(0u, stream_->preliminary_headers().size());
-  EXPECT_EQ("100", stream_->response_headers().find(":status")->second);
-  EXPECT_EQ(100, stream_->response_code());
-  EXPECT_EQ(body_, stream_->data());
 }
 
 TEST_F(QuicSpdyClientStreamTest, TestFramingOnePacket) {
@@ -167,14 +154,6 @@ TEST_F(QuicSpdyClientStreamTest, DISABLED_TestFramingExtraData) {
   EXPECT_NE(QUIC_STREAM_NO_ERROR, stream_->stream_error());
 }
 
-TEST_F(QuicSpdyClientStreamTest, TestNoBidirectionalStreaming) {
-  QuicStreamFrame frame(kClientDataStreamId1, false, 3, StringPiece("asd"));
-
-  EXPECT_FALSE(stream_->write_side_closed());
-  stream_->OnStreamFrame(frame);
-  EXPECT_TRUE(stream_->write_side_closed());
-}
-
 TEST_F(QuicSpdyClientStreamTest, ReceivingTrailers) {
   // Test that receiving trailing headers, containing a final offset, results in
   // the stream being closed at that byte offset.
@@ -196,9 +175,9 @@ TEST_F(QuicSpdyClientStreamTest, ReceivingTrailers) {
 
   // Now send the body, which should close the stream as the FIN has been
   // received, as well as all data.
-  EXPECT_CALL(session_, CloseStream(stream_->id()));
   stream_->OnStreamFrame(
       QuicStreamFrame(stream_->id(), /*fin=*/false, /*offset=*/0, body_));
+  EXPECT_TRUE(stream_->reading_stopped());
 }
 
 }  // namespace

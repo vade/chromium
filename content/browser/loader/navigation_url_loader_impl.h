@@ -31,7 +31,8 @@ struct SSLStatus;
 class NavigationURLLoaderImpl : public NavigationURLLoader {
  public:
   // The caller is responsible for ensuring that |delegate| outlives the loader.
-  NavigationURLLoaderImpl(BrowserContext* browser_context,
+  NavigationURLLoaderImpl(ResourceContext* resource_context,
+                          StoragePartition* storage_partition,
                           std::unique_ptr<NavigationRequestInfo> request_info,
                           std::unique_ptr<NavigationUIData> navigation_ui_data,
                           ServiceWorkerNavigationHandle* service_worker_handle,
@@ -68,9 +69,8 @@ class NavigationURLLoaderImpl : public NavigationURLLoader {
 
   NavigationURLLoaderDelegate* delegate_;
 
-  // |core_| is deleted on the IO thread in a subsequent task when the
-  // NavigationURLLoaderImpl goes out of scope.
-  NavigationURLLoaderImplCore* core_;
+  // |core_| is owned by this and the NavigationResourceHandler.
+  scoped_refptr<NavigationURLLoaderImplCore> core_;
 
   base::WeakPtrFactory<NavigationURLLoaderImpl> weak_factory_;
 

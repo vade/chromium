@@ -2,20 +2,19 @@
 <html>
   <head>
     <title>Test setTargetAtTime Approach to Limit</title>
-    <script src="../../resources/js-test.js"></script>
+    <script src="../../resources/testharness.js"></script>
+    <script src="../../resources/testharnessreport.js"></script> 
     <script src="../resources/audit-util.js"></script>
-    <script src="../resources/audio-testing.js"></script>
+    <script src="../resources/audit.js"></script>
     <script src="../resources/audioparam-testing.js"></script>
   </head>
 
   <body>
     <script>
-      description("Test setTargetAtTime Approach to Limit");
-      window.jsTestIsAsync = true;
 
       var audit = Audit.createTaskRunner();
 
-      audit.defineTask("approach 1", function(done) {
+      audit.define("approach 1", (task, should) => {
         var sampleRate = 48000;
 
         // A really short time constant so that setTargetAtTime approaches the limiting value well
@@ -28,7 +27,7 @@
         // (which uses a filter and not the formula.)
         var limitThreshold = 1e-7;
 
-        runTest({
+        runTest(should, {
             sampleRate: sampleRate,
             v0: 0,
             v1: 1,
@@ -36,10 +35,10 @@
             eps: limitThreshold,
             // Experimentally determined
             threshold: 2.4e-5
-        }).then(done);
+        }).then(() => task.done());
       })
 
-      audit.defineTask("approach 0", function(done) {
+      audit.define("approach 0", (task, should) => {
         // Use the equation for setTargetAtTime to figure out when we are close to 0:
         //
         //   v(t) = exp(-t/tau)
@@ -60,7 +59,7 @@
         // (which uses a filter and not the formula.)
         var limitThreshold = 1e-21;
 
-        runTest({
+        runTest(should, {
             sampleRate: sampleRate,
             v0: 1,
             v1: 0,
@@ -68,7 +67,7 @@
             eps: limitThreshold,
             // Experimentally determined
             threshold: 1.3e-7
-        }).then(done);
+        }).then(() => task.done());
       });
 
       function findLimitTime(v0, v1, timeConstant, eps) {
@@ -100,7 +99,7 @@
           return timeConstant * Math.log(v0/eps);
       }
 
-      function runTest(options) {
+      function runTest(should, options) {
         var renderLength = 1;
 
         var context = new OfflineAudioContext(1, renderLength * sampleRate, options.sampleRate);
@@ -132,28 +131,18 @@
           var tailTime = findLimitTime(options.v0, options.v1, options.timeConstant, options.eps);
           var tailFrame = Math.ceil(tailTime * options.sampleRate);
 
-          var success = true;
-          success = Should("Initial output of " + tailFrame + " samples for " + message,
-              actual.slice(0, tailFrame), { numberOfArrayLog: 8 })
-            .beCloseToArray(expected.slice(0, tailFrame), options.threshold) && success;
+          should(actual.slice(0, tailFrame),
+              "Initial output of " + tailFrame + " samples for " + message)
+            .beCloseToArray(expected.slice(0, tailFrame), {
+              absoluteThreshold: options.threshold
+            });
 
-          success = Should("Tail output for " + message,
-              actual.slice(tailFrame))
-            .containValues([options.v1]) && success;
-
-          if (success)
-            testPassed(message + " had the expected values.\n");
-          else
-            testFailed(message + " did not have the expected values.\n");
+          should(actual.slice(tailFrame), "Tail output for " + message)
+            .containValues([options.v1]);
         });
       }
 
-      audit.defineTask("finish", function (done) {
-        finishJSTest();
-        done();
-      });
-
-      audit.runTasks();
+      audit.run();
     </script>
   </body>
 </html>

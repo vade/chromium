@@ -76,10 +76,6 @@ suite('Metrics', function() {
       assertEquals(1, histogram[HistoryPageViewHistogram.SYNCED_TABS]);
       app.selectedPage_ = 'history';
       assertEquals(2, histogram[HistoryPageViewHistogram.HISTORY]);
-      app.fire('change-query', {range: HistoryRange.WEEK});
-      assertEquals(1, histogram[HistoryPageViewHistogram.GROUPED_WEEK]);
-      app.fire('change-query', {range: HistoryRange.MONTH});
-      assertEquals(1, histogram[HistoryPageViewHistogram.GROUPED_MONTH]);
     });
   });
 
@@ -93,8 +89,7 @@ suite('Metrics', function() {
     ]);
 
     return PolymerTest.flushTasks().then(() => {
-      var items = polymerSelectAll(
-          app.$.history.$['infinite-list'], 'history-item');
+      var items = polymerSelectAll(app.$.history, 'history-item');
       MockInteractions.tap(items[1].$$('#bookmark-star'));
       assertEquals(1, actionMap['BookmarkStarClicked']);
       MockInteractions.tap(items[1].$.title);
@@ -112,8 +107,7 @@ suite('Metrics', function() {
       ]);
       return PolymerTest.flushTasks();
     }).then(() => {
-      items = polymerSelectAll(
-          app.$.history.$['infinite-list'], 'history-item');
+      items = polymerSelectAll(app.$.history, 'history-item');
       MockInteractions.tap(items[0].$.title);
       assertEquals(1, actionMap['SearchResultClick']);
       assertEquals(1, histogramMap['HistoryPage.ClickPosition'][0]);
@@ -122,21 +116,20 @@ suite('Metrics', function() {
       MockInteractions.tap(items[4].$.checkbox);
       return PolymerTest.flushTasks();
     }).then(() => {
-      MockInteractions.tap(app.$.toolbar.$$('#delete-button'));
+      app.$.toolbar.deleteSelectedItems();
       assertEquals(1, actionMap['RemoveSelected']);
       return PolymerTest.flushTasks();
     }).then(() => {
       MockInteractions.tap(app.$.history.$$('.cancel-button'));
       assertEquals(1, actionMap['CancelRemoveSelected']);
-      MockInteractions.tap(app.$.toolbar.$$('#delete-button'));
+      app.$.toolbar.deleteSelectedItems();
       return PolymerTest.flushTasks();
     }).then(() => {
       MockInteractions.tap(app.$.history.$$('.action-button'));
       assertEquals(1, actionMap['ConfirmRemoveSelected']);
       return PolymerTest.flushTasks();
     }).then(() => {
-      items = polymerSelectAll(
-          app.$.history.$['infinite-list'], 'history-item');
+      items = polymerSelectAll(app.$.history, 'history-item');
       MockInteractions.tap(items[0].$['menu-button']);
       return PolymerTest.flushTasks();
     }).then(() => {

@@ -63,6 +63,11 @@ class AwContentsIoThreadClient {
   static std::unique_ptr<AwContentsIoThreadClient> FromID(int render_process_id,
                                                           int render_frame_id);
 
+  // This map is useful when browser side navigations are enabled as
+  // render_frame_ids will not be valid anymore for some of the navigations.
+  static std::unique_ptr<AwContentsIoThreadClient> FromID(
+      int frame_tree_node_id);
+
   // Returns the global thread client for service worker related callbacks.
   // An empty scoped_ptr is a valid return value.
   static std::unique_ptr<AwContentsIoThreadClient>
@@ -94,6 +99,9 @@ class AwContentsIoThreadClient {
 
   // Retrieve the AcceptThirdPartyCookies setting value of this AwContents.
   virtual bool ShouldAcceptThirdPartyCookies() const = 0;
+
+  // Retrieve the SafeBrowsingEnabled setting value of this AwContents.
+  virtual bool GetSafeBrowsingEnabled() const = 0;
 };
 
 } // namespace android_webview

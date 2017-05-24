@@ -8,13 +8,16 @@
 #include <memory>
 
 #include "base/logging.h"
-#include "base/mac/scoped_nsobject.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/sync/driver/sync_service.h"
 #include "components/sync_sessions/open_tabs_ui_delegate.h"
 #include "ios/chrome/browser/sync/sync_setup_service.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 
@@ -75,7 +78,7 @@ DistantSession::DistantSession(syncer::SyncService* sync_service,
 
     std::vector<const sync_sessions::SyncedSession*> sessions;
     open_tabs->GetAllForeignSessions(&sessions);
-    for (const auto& session : sessions) {
+    for (const auto* session : sessions) {
       if (tag == session->session_tag) {
         this->InitWithSyncedSession(session, open_tabs);
       }
@@ -100,13 +103,13 @@ void DistantSession::InitWithSyncedSession(
     std::vector<const sessions::SessionTab*> session_tabs;
     open_tabs->GetForeignSessionTabs(synced_session->session_tag,
                                      &session_tabs);
-    for (const auto& session_tab : session_tabs) {
+    for (const auto* session_tab : session_tabs) {
       AddTabToDistantSession(*session_tab, synced_session->session_tag, this);
     }
   } else {
     // Order tabs by their visual position within window.
     for (const auto& kv : synced_session->windows) {
-      for (const auto& session_tab : kv.second->tabs) {
+      for (const auto& session_tab : kv.second->wrapped_window.tabs) {
         AddTabToDistantSession(*session_tab, synced_session->session_tag, this);
       }
     }
@@ -128,7 +131,7 @@ SyncedSessions::SyncedSessions(syncer::SyncService* sync_service) {
 
     std::vector<const sync_sessions::SyncedSession*> sessions;
     open_tabs->GetAllForeignSessions(&sessions);
-    for (const auto& session : sessions) {
+    for (const auto* session : sessions) {
       std::unique_ptr<DistantSession> distant_session(new DistantSession());
       distant_session->InitWithSyncedSession(session, open_tabs);
       // Don't display sessions with no tabs.

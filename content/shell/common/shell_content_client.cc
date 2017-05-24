@@ -14,7 +14,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/user_agent.h"
 #include "content/shell/common/shell_switches.h"
-#include "grit/shell_resources.h"
+#include "content/shell/grit/shell_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -71,10 +71,6 @@ base::StringPiece ShellContentClient::GetDataResource(
 #else
         resource_id = IDR_CONTENT_SHELL_MISSING_IMAGE_GIF;
 #endif
-        break;
-
-      case IDR_TEXTAREA_RESIZER:
-        resource_id = IDR_CONTENT_SHELL_TEXT_AREA_RESIZE_CORNER_PNG;
         break;
     }
   }

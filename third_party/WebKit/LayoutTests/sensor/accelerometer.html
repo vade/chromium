@@ -15,43 +15,25 @@ const kDefaultReadingX = 1.12345;
 const kDefaultReadingY = 2.12345;
 const kDefaultReadingZ = 3.12345;
 
-function update_sensor_reading(buffer, expects_modified_reading, readsCount) {
-  buffer[1] = window.performance.now();
+function update_sensor_reading(buffer) {
   buffer[2] = kDefaultReadingX;
   buffer[3] = kDefaultReadingY;
   buffer[4] = kDefaultReadingZ;
-  if (expects_modified_reading)
-    buffer[2] += readsCount;
 }
 
-function verify_sensor_reading(reading) {
-  return reading.x == kDefaultReadingX &&
-         reading.y == kDefaultReadingY &&
-         reading.z == kDefaultReadingZ;
+function verify_sensor_reading(sensor, should_be_null) {
+  if (should_be_null) {
+    return sensor.x == null &&
+           sensor.y == null &&
+           sensor.z == null &&
+           sensor.timestamp == null;
+  }
+  return sensor.x == kDefaultReadingX &&
+         sensor.y == kDefaultReadingY &&
+         sensor.z == kDefaultReadingZ &&
+         sensor.timestamp != null;
 }
 
 runGenericSensorTests(Accelerometer, update_sensor_reading, verify_sensor_reading);
-
-sensor_test(sensor => {
-  let accelerometer = new Accelerometer({includeGravity: false});
-  accelerometer.start();
-  let testPromise = sensor.mockSensorProvider.getCreatedSensor()
-      .then(mockSensor => {
-        return new Promise((resolve, reject) => {
-          let wrapper = new CallbackWrapper(() => {
-            let configuration = mockSensor.active_sensor_configurations_[0];
-            assert_equals(accelerometer.includesGravity, false);
-            accelerometer.stop();
-            assert_equals(accelerometer.state, 'idle');
-            resolve(mockSensor);
-          }, reject);
-          accelerometer.onactivate = wrapper.callback;
-          accelerometer.onerror = reject;
-        });
-      })
-      .then(mockSensor => { return mockSensor.removeConfigurationCalled(); });
-
-  return testPromise;
-}, 'Test that sensor can be successfully created with sensor specific configuration parameter.');
 
 </script>

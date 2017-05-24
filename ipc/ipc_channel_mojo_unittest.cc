@@ -12,6 +12,7 @@
 
 #include "base/base_paths.h"
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/files/file.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
@@ -37,6 +38,7 @@
 #include "ipc/ipc_test.mojom.h"
 #include "ipc/ipc_test_base.h"
 #include "ipc/ipc_test_channel_listener.h"
+#include "mojo/public/cpp/system/wait.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_POSIX)
@@ -246,8 +248,7 @@ class HandleSendingHelper {
 
     uint32_t num_bytes = static_cast<uint32_t>(content.size());
     ASSERT_EQ(MOJO_RESULT_OK,
-              mojo::Wait(pipe.get(), MOJO_HANDLE_SIGNAL_READABLE,
-                         MOJO_DEADLINE_INDEFINITE, nullptr));
+              mojo::Wait(pipe.get(), MOJO_HANDLE_SIGNAL_READABLE));
     EXPECT_EQ(MOJO_RESULT_OK,
               mojo::ReadMessageRaw(pipe.get(), &content[0], &num_bytes, nullptr,
                                    nullptr, 0));
@@ -355,8 +356,7 @@ DEFINE_IPC_CHANNEL_MOJO_TEST_CLIENT(IPCChannelMojoTestSendMessagePipeClient) {
 void ReadOK(mojo::MessagePipeHandle pipe) {
   std::string should_be_ok("xx");
   uint32_t num_bytes = static_cast<uint32_t>(should_be_ok.size());
-  CHECK_EQ(MOJO_RESULT_OK, mojo::Wait(pipe, MOJO_HANDLE_SIGNAL_READABLE,
-                                      MOJO_DEADLINE_INDEFINITE, nullptr));
+  CHECK_EQ(MOJO_RESULT_OK, mojo::Wait(pipe, MOJO_HANDLE_SIGNAL_READABLE));
   CHECK_EQ(MOJO_RESULT_OK,
            mojo::ReadMessageRaw(pipe, &should_be_ok[0], &num_bytes, nullptr,
                                 nullptr, 0));
@@ -670,8 +670,8 @@ class ChannelProxyRunner {
 
   mojo::ScopedMessagePipeHandle handle_;
   base::Thread io_thread_;
-  std::unique_ptr<IPC::ChannelProxy> proxy_;
   base::WaitableEvent never_signaled_;
+  std::unique_ptr<IPC::ChannelProxy> proxy_;
 
   DISALLOW_COPY_AND_ASSIGN(ChannelProxyRunner);
 };
@@ -724,9 +724,8 @@ class ListenerWithSimpleProxyAssociatedInterface
       const std::string& interface_name,
       mojo::ScopedInterfaceEndpointHandle handle) override {
     DCHECK_EQ(interface_name, IPC::mojom::SimpleTestDriver::Name_);
-    IPC::mojom::SimpleTestDriverAssociatedRequest request;
-    request.Bind(std::move(handle));
-    binding_.Bind(std::move(request));
+    binding_.Bind(
+        IPC::mojom::SimpleTestDriverAssociatedRequest(std::move(handle)));
   }
 
   bool received_all_messages() const {
@@ -856,9 +855,8 @@ class ListenerWithIndirectProxyAssociatedInterface
       mojo::ScopedInterfaceEndpointHandle handle) override {
     DCHECK(!driver_binding_.is_bound());
     DCHECK_EQ(interface_name, IPC::mojom::IndirectTestDriver::Name_);
-    IPC::mojom::IndirectTestDriverAssociatedRequest request;
-    request.Bind(std::move(handle));
-    driver_binding_.Bind(std::move(request));
+    driver_binding_.Bind(
+        IPC::mojom::IndirectTestDriverAssociatedRequest(std::move(handle)));
   }
 
   void set_ping_handler(const base::Closure& handler) {
@@ -919,8 +917,7 @@ DEFINE_IPC_CHANNEL_MOJO_TEST_CLIENT_WITH_CUSTOM_FIXTURE(
   IPC::mojom::IndirectTestDriverAssociatedPtr driver;
   IPC::mojom::PingReceiverAssociatedPtr ping_receiver;
   proxy()->GetRemoteAssociatedInterface(&driver);
-  driver->GetPingReceiver(
-      mojo::MakeRequest(&ping_receiver, driver.associated_group()));
+  driver->GetPingReceiver(mojo::MakeRequest(&ping_receiver));
 
   base::RunLoop loop;
   ping_receiver->Ping(loop.QuitClosure());
@@ -987,10 +984,8 @@ class ListenerWithSyncAssociatedInterface
       mojo::ScopedInterfaceEndpointHandle handle) override {
     DCHECK(!binding_.is_bound());
     DCHECK_EQ(interface_name, IPC::mojom::SimpleTestDriver::Name_);
-
-    IPC::mojom::SimpleTestDriverAssociatedRequest request;
-    request.Bind(std::move(handle));
-    binding_.Bind(std::move(request));
+    binding_.Bind(
+        IPC::mojom::SimpleTestDriverAssociatedRequest(std::move(handle)));
   }
 
   void BindRequest(IPC::mojom::SimpleTestDriverAssociatedRequest request) {
@@ -1123,9 +1118,8 @@ class SimpleTestClientImpl : public IPC::mojom::SimpleTestClient,
     DCHECK(!binding_.is_bound());
     DCHECK_EQ(interface_name, IPC::mojom::SimpleTestClient::Name_);
 
-    IPC::mojom::SimpleTestClientAssociatedRequest request;
-    request.Bind(std::move(handle));
-    binding_.Bind(std::move(request));
+    binding_.Bind(
+        IPC::mojom::SimpleTestClientAssociatedRequest(std::move(handle)));
   }
 
   bool use_sync_sender_ = false;
@@ -1261,6 +1255,53 @@ DEFINE_IPC_CHANNEL_MOJO_TEST_CLIENT_WITH_CUSTOM_FIXTURE(CreatePausedClient,
   RunProxy();
   base::RunLoop().Run();
   EXPECT_TRUE(expected_values.empty());
+  DestroyProxy();
+}
+
+TEST_F(IPCChannelProxyMojoTest, AssociatedRequestClose) {
+  Init("DropAssociatedRequest");
+
+  DummyListener listener;
+  CreateProxy(&listener);
+  RunProxy();
+
+  IPC::mojom::AssociatedInterfaceVendorAssociatedPtr vendor;
+  proxy()->GetRemoteAssociatedInterface(&vendor);
+  IPC::mojom::SimpleTestDriverAssociatedPtr tester;
+  vendor->GetTestInterface(mojo::MakeRequest(&tester));
+  base::RunLoop run_loop;
+  tester.set_connection_error_handler(run_loop.QuitClosure());
+  run_loop.Run();
+
+  proxy()->GetRemoteAssociatedInterface(&tester);
+  EXPECT_TRUE(WaitForClientShutdown());
+  DestroyProxy();
+}
+
+class AssociatedInterfaceDroppingListener : public IPC::Listener {
+ public:
+  AssociatedInterfaceDroppingListener(const base::Closure& callback)
+      : callback_(callback) {}
+  bool OnMessageReceived(const IPC::Message& message) override { return false; }
+
+  void OnAssociatedInterfaceRequest(
+      const std::string& interface_name,
+      mojo::ScopedInterfaceEndpointHandle handle) override {
+    if (interface_name == IPC::mojom::SimpleTestDriver::Name_)
+      base::ResetAndReturn(&callback_).Run();
+  }
+
+ private:
+  base::Closure callback_;
+};
+
+DEFINE_IPC_CHANNEL_MOJO_TEST_CLIENT_WITH_CUSTOM_FIXTURE(DropAssociatedRequest,
+                                                        ChannelProxyClient) {
+  base::RunLoop run_loop;
+  AssociatedInterfaceDroppingListener listener(run_loop.QuitClosure());
+  CreateProxy(&listener);
+  RunProxy();
+  run_loop.Run();
   DestroyProxy();
 }
 

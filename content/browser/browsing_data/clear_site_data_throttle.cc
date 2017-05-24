@@ -119,6 +119,10 @@ ClearSiteDataThrottle::WillProcessResponse() {
   return clearing_in_progress_ ? DEFER : PROCEED;
 }
 
+const char* ClearSiteDataThrottle::GetNameForLogging() {
+  return "ClearSiteDataThrottle";
+}
+
 void ClearSiteDataThrottle::HandleHeader() {
   NavigationHandleImpl* handle =
       static_cast<NavigationHandleImpl*>(navigation_handle());
@@ -206,9 +210,9 @@ bool ClearSiteDataThrottle::ParseHeader(const std::string& header,
   *clear_cache = false;
 
   std::vector<std::string> type_names;
-  for (const std::unique_ptr<base::Value>& value : *types) {
+  for (const base::Value& value : *types) {
     std::string type;
-    value->GetAsString(&type);
+    value.GetAsString(&type);
 
     bool* datatype = nullptr;
 
@@ -221,7 +225,7 @@ bool ClearSiteDataThrottle::ParseHeader(const std::string& header,
     } else {
       std::string serialized_type;
       JSONStringValueSerializer serializer(&serialized_type);
-      serializer.Serialize(*value);
+      serializer.Serialize(value);
       ConsoleLog(
           messages, current_url_,
           base::StringPrintf("Invalid type: %s.", serialized_type.c_str()),

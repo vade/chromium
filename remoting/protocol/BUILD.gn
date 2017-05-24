@@ -104,7 +104,6 @@ static_library("protocol") {
     "monitored_video_stub.h",
     "mouse_input_filter.cc",
     "mouse_input_filter.h",
-    "name_value_map.h",
     "negotiating_authenticator_base.cc",
     "negotiating_authenticator_base.h",
     "negotiating_client_authenticator.cc",
@@ -129,6 +128,7 @@ static_library("protocol") {
     "port_allocator_factory.h",
     "port_range.cc",
     "port_range.h",
+    "process_stats_stub.h",
     "pseudotcp_adapter.cc",
     "pseudotcp_adapter.h",
     "pseudotcp_channel_factory.cc",
@@ -182,7 +182,7 @@ static_library("protocol") {
 
   public_deps = [
     "//remoting/proto",
-    "//third_party/libjingle",
+    "//third_party/webrtc_overrides",
   ]
   deps = [
     "//base",
@@ -236,7 +236,7 @@ static_library("protocol") {
       ]
     }
 
-    deps += [ "//third_party/libjingle/webrtc:libjingle_webrtc" ]
+    deps += [ "//third_party/webrtc_overrides:init_webrtc" ]
   }
 
   if (enable_remoting_host) {

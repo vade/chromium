@@ -17,6 +17,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/gpu_service_registry.h"
 #include "mojo/edk/embedder/embedder.h"
+#include "mojo/edk/embedder/outgoing_broker_client_invitation.h"
 #include "mojo/edk/embedder/platform_channel_pair.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
@@ -27,7 +28,7 @@ namespace {
 
 void ConnectToVideoAcceleratorServiceOnIOThread(
     mojom::VideoAcceleratorServiceRequest request) {
-  content::GetGpuRemoteInterfaces()->GetInterface(std::move(request));
+  content::BindInterfaceInGpuProcess(std::move(request));
 }
 
 }  // namespace
@@ -73,10 +74,15 @@ void GpuArcVideoServiceHost::OnBootstrapVideoAcceleratorFactory(
   // Hardcode pid 0 since it is unused in mojo.
   const base::ProcessHandle kUnusedChildProcessHandle =
       base::kNullProcessHandle;
+  mojo::edk::OutgoingBrokerClientInvitation invitation;
   mojo::edk::PlatformChannelPair channel_pair;
-  std::string child_token = mojo::edk::GenerateRandomToken();
-  mojo::edk::ChildProcessLaunched(kUnusedChildProcessHandle,
-                                  channel_pair.PassServerHandle(), child_token);
+  std::string token = mojo::edk::GenerateRandomToken();
+  mojo::ScopedMessagePipeHandle server_pipe =
+      invitation.AttachMessagePipe(token);
+  invitation.Send(
+      kUnusedChildProcessHandle,
+      mojo::edk::ConnectionParams(mojo::edk::TransportProtocol::kLegacy,
+                                  channel_pair.PassServerHandle()));
 
   MojoHandle wrapped_handle;
   MojoResult wrap_result = mojo::edk::CreatePlatformHandleWrapper(
@@ -88,19 +94,11 @@ void GpuArcVideoServiceHost::OnBootstrapVideoAcceleratorFactory(
   }
   mojo::ScopedHandle child_handle{mojo::Handle(wrapped_handle)};
 
-  std::string token = mojo::edk::GenerateRandomToken();
-  mojo::ScopedMessagePipeHandle server_pipe =
-      mojo::edk::CreateParentMessagePipe(token, child_token);
-  if (!server_pipe.is_valid()) {
-    LOG(ERROR) << "Invalid pipe";
-    callback.Run(mojo::ScopedHandle(), std::string());
-    return;
-  }
   callback.Run(std::move(child_handle), token);
 
-  mojo::MakeStrongBinding(base::MakeUnique<VideoAcceleratorFactoryService>(),
-                          mojo::MakeRequest<mojom::VideoAcceleratorFactory>(
-                              std::move(server_pipe)));
+  mojo::MakeStrongBinding(
+      base::MakeUnique<VideoAcceleratorFactoryService>(),
+      mojom::VideoAcceleratorFactoryRequest(std::move(server_pipe)));
 }
 
 }  // namespace arc

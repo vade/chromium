@@ -121,33 +121,47 @@ void SetEncryptableProtoValues(const EntryKernel& kernel,
 
 // Helper functions for SetFieldValues().
 
-base::StringValue* Int64ToValue(int64_t i) {
-  return new base::StringValue(base::Int64ToString(i));
+base::Value* Int64ToValue(int64_t i) {
+  return new base::Value(base::Int64ToString(i));
 }
 
-base::StringValue* TimeToValue(const base::Time& t) {
-  return new base::StringValue(GetTimeDebugString(t));
+base::Value* TimeToValue(const base::Time& t) {
+  return new base::Value(GetTimeDebugString(t));
 }
 
-base::StringValue* IdToValue(const Id& id) {
+base::Value* IdToValue(const Id& id) {
   return id.ToValue();
 }
 
-base::FundamentalValue* BooleanToValue(bool bool_val) {
-  return new base::FundamentalValue(bool_val);
+base::Value* BooleanToValue(bool bool_val) {
+  return new base::Value(bool_val);
 }
 
-base::StringValue* StringToValue(const std::string& str) {
-  return new base::StringValue(str);
+base::Value* StringToValue(const std::string& str) {
+  return new base::Value(str);
 }
 
-base::StringValue* UniquePositionToValue(const UniquePosition& pos) {
-  return new base::StringValue(pos.ToDebugString());
+base::Value* UniquePositionToValue(const UniquePosition& pos) {
+  return new base::Value(pos.ToDebugString());
 }
 
-base::StringValue* AttachmentMetadataToValue(
-    const sync_pb::AttachmentMetadata& a) {
-  return new base::StringValue(a.SerializeAsString());
+base::Value* AttachmentMetadataToValue(const sync_pb::AttachmentMetadata& a) {
+  return new base::Value(a.SerializeAsString());
+}
+
+// Estimates memory usage of ProtoValuePtr<T> arrays where consecutive
+// elements can share the same value.
+template <class T, size_t N>
+size_t EstimateSharedMemoryUsage(ProtoValuePtr<T> const (&ptrs)[N]) {
+  size_t memory_usage = 0;
+  const T* last_value = nullptr;
+  for (const auto& ptr : ptrs) {
+    if (last_value != &ptr.value()) {
+      memory_usage += EstimateMemoryUsage(ptr);
+      last_value = &ptr.value();
+    }
+  }
+  return memory_usage;
 }
 
 }  // namespace
@@ -217,10 +231,10 @@ size_t EntryKernel::EstimateMemoryUsage() const {
   if (memory_usage_ == kMemoryUsageUnknown) {
     using base::trace_event::EstimateMemoryUsage;
     memory_usage_ = EstimateMemoryUsage(string_fields) +
-                    EstimateMemoryUsage(specifics_fields) +
+                    EstimateSharedMemoryUsage(specifics_fields) +
                     EstimateMemoryUsage(id_fields) +
                     EstimateMemoryUsage(unique_position_fields) +
-                    EstimateMemoryUsage(attachment_metadata_fields);
+                    EstimateSharedMemoryUsage(attachment_metadata_fields);
   }
   return memory_usage_;
 }

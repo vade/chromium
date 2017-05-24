@@ -9,7 +9,7 @@
 #import <Foundation/Foundation.h>
 
 #include "base/macros.h"
-#include "components/reading_list/ios/reading_list_model_observer.h"
+#include "components/reading_list/core/reading_list_model_observer.h"
 
 // Protocol duplicating all Reading List Model Observer methods in Objective-C.
 @protocol ReadingListModelBridgeObserver<NSObject>
@@ -36,6 +36,7 @@
 - (void)readingListModelBeganBatchUpdates:(const ReadingListModel*)model;
 - (void)readingListModelCompletedBatchUpdates:(const ReadingListModel*)model;
 
+- (void)readingListModelBeingShutdown:(const ReadingListModel*)model;
 - (void)readingListModelBeingDeleted:(const ReadingListModel*)model;
 
 - (void)readingListModel:(const ReadingListModel*)model
@@ -58,6 +59,7 @@ class ReadingListModelBridge : public ReadingListModelObserver {
   void ReadingListModelCompletedBatchUpdates(
       const ReadingListModel* model) override;
   void ReadingListModelLoaded(const ReadingListModel* model) override;
+  void ReadingListModelBeingShutdown(const ReadingListModel* model) override;
   void ReadingListModelBeingDeleted(const ReadingListModel* model) override;
   void ReadingListWillRemoveEntry(const ReadingListModel* model,
                                   const GURL& url) override;

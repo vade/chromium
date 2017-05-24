@@ -39,7 +39,7 @@ class TestTokenValidator : TokenValidatorBase {
   explicit TestTokenValidator(const ThirdPartyAuthConfig& config);
   ~TestTokenValidator() override;
 
-  void SelectCertificates(net::CertificateList* selected_certs);
+  void SelectCertificates(net::CertificateList selected_certs);
 
   void ExpectContinueWithCertificate(net::X509Certificate* client_cert);
 
@@ -60,8 +60,8 @@ TestTokenValidator::TestTokenValidator(const ThirdPartyAuthConfig& config) :
 TestTokenValidator::~TestTokenValidator() {}
 
 void TestTokenValidator::SelectCertificates(
-    net::CertificateList* selected_certs) {
-  OnCertificatesSelected(selected_certs, nullptr);
+    net::CertificateList selected_certs) {
+  OnCertificatesSelected(nullptr, std::move(selected_certs));
 }
 
 void TestTokenValidator::ExpectContinueWithCertificate(
@@ -96,59 +96,63 @@ TEST_F(TokenValidatorBaseTest, TestSelectCertificate) {
   scoped_refptr<net::X509Certificate> cert_expired_5_minutes_ago =
       CreateFakeCert(now - base::TimeDelta::FromMinutes(10),
                                         now - base::TimeDelta::FromMinutes(5));
+  ASSERT_TRUE(cert_expired_5_minutes_ago);
 
   scoped_refptr<net::X509Certificate> cert_start_5min_expire_5min =
       CreateFakeCert(now - base::TimeDelta::FromMinutes(5),
                                         now + base::TimeDelta::FromMinutes(5));
+  ASSERT_TRUE(cert_start_5min_expire_5min);
 
   scoped_refptr<net::X509Certificate> cert_start_10min_expire_5min =
       CreateFakeCert(now - base::TimeDelta::FromMinutes(10),
                                         now + base::TimeDelta::FromMinutes(5));
+  ASSERT_TRUE(cert_start_10min_expire_5min);
 
   scoped_refptr<net::X509Certificate> cert_start_5min_expire_10min =
       CreateFakeCert(now - base::TimeDelta::FromMinutes(5),
                                         now + base::TimeDelta::FromMinutes(10));
+  ASSERT_TRUE(cert_start_5min_expire_10min);
 
   // No certificate.
   net::CertificateList certificates {};
   token_validator_->ExpectContinueWithCertificate(nullptr);
-  token_validator_->SelectCertificates(&certificates);
+  token_validator_->SelectCertificates(std::move(certificates));
 
   // One invalid certificate.
   certificates = { cert_expired_5_minutes_ago };
   token_validator_->ExpectContinueWithCertificate(nullptr);
-  token_validator_->SelectCertificates(&certificates);
+  token_validator_->SelectCertificates(std::move(certificates));
 
   // One valid certificate.
   certificates = { cert_start_5min_expire_5min };
   token_validator_->ExpectContinueWithCertificate(
       cert_start_5min_expire_5min.get());
-  token_validator_->SelectCertificates(&certificates);
+  token_validator_->SelectCertificates(std::move(certificates));
 
   // One valid one invalid.
   certificates = { cert_expired_5_minutes_ago, cert_start_5min_expire_5min };
   token_validator_->ExpectContinueWithCertificate(
       cert_start_5min_expire_5min.get());
-  token_validator_->SelectCertificates(&certificates);
+  token_validator_->SelectCertificates(std::move(certificates));
 
   // Two valid certs. Choose latest created.
   certificates = { cert_start_10min_expire_5min, cert_start_5min_expire_5min };
   token_validator_->ExpectContinueWithCertificate(
       cert_start_5min_expire_5min.get());
-  token_validator_->SelectCertificates(&certificates);
+  token_validator_->SelectCertificates(std::move(certificates));
 
   // Two valid certs. Choose latest expires.
   certificates = { cert_start_5min_expire_5min, cert_start_5min_expire_10min };
   token_validator_->ExpectContinueWithCertificate(
       cert_start_5min_expire_10min.get());
-  token_validator_->SelectCertificates(&certificates);
+  token_validator_->SelectCertificates(std::move(certificates));
 
   // Pick the best given all certificates.
   certificates = { cert_expired_5_minutes_ago, cert_start_5min_expire_5min,
       cert_start_5min_expire_10min, cert_start_10min_expire_5min };
     token_validator_->ExpectContinueWithCertificate(
         cert_start_5min_expire_10min.get());
-    token_validator_->SelectCertificates(&certificates);
+    token_validator_->SelectCertificates(std::move(certificates));
 }
 
 }  // namespace remoting

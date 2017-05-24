@@ -31,13 +31,13 @@
 #ifndef DummyPageHolder_h
 #define DummyPageHolder_h
 
-#include "core/loader/FrameLoaderClient.h"
+#include <memory>
+#include "core/frame/LocalFrameClient.h"
 #include "core/page/Page.h"
 #include "platform/geometry/IntSize.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Allocator.h"
-#include "wtf/Noncopyable.h"
-#include <memory>
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/Noncopyable.h"
 
 namespace blink {
 
@@ -67,30 +67,36 @@ class DummyPageHolder {
   USING_FAST_MALLOC(DummyPageHolder);
 
  public:
-  static std::unique_ptr<DummyPageHolder> create(
-      const IntSize& initialViewSize = IntSize(),
+  static std::unique_ptr<DummyPageHolder> Create(
+      const IntSize& initial_view_size = IntSize(),
       Page::PageClients* = 0,
-      FrameLoaderClient* = nullptr,
+      LocalFrameClient* = nullptr,
       FrameSettingOverrideFunction = nullptr,
       InterfaceProvider* = nullptr);
   ~DummyPageHolder();
 
-  Page& page() const;
-  LocalFrame& frame() const;
-  FrameView& frameView() const;
-  Document& document() const;
+  Page& GetPage() const;
+  LocalFrame& GetFrame() const;
+  FrameView& GetFrameView() const;
+  Document& GetDocument() const;
 
  private:
-  DummyPageHolder(const IntSize& initialViewSize,
+  DummyPageHolder(const IntSize& initial_view_size,
                   Page::PageClients*,
-                  FrameLoaderClient*,
-                  FrameSettingOverrideFunction settingOverrider,
+                  LocalFrameClient*,
+                  FrameSettingOverrideFunction setting_overrider,
                   InterfaceProvider* = nullptr);
 
-  Persistent<Page> m_page;
-  Persistent<LocalFrame> m_frame;
+  Persistent<Page> page_;
 
-  Persistent<FrameLoaderClient> m_frameLoaderClient;
+  // The LocalFrame is accessed from worker threads by unit tests
+  // (WorkerThreadableLoaderTest), hence we need to allow cross-thread
+  // usage of |m_frame|.
+  //
+  // TODO: rework the tests to not require cross-thread access.
+  CrossThreadPersistent<LocalFrame> frame_;
+
+  Persistent<LocalFrameClient> local_frame_client_;
 };
 
 }  // namespace blink

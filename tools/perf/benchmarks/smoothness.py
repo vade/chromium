@@ -37,6 +37,7 @@ class _Smoothness(perf_benchmark.PerfBenchmark):
     return True
 
 
+@benchmark.Owner(emails=['vmiura@chromium.org'])
 class SmoothnessTop25(_Smoothness):
   """Measures rendering statistics while scrolling down the top 25 web pages.
 
@@ -61,6 +62,7 @@ class SmoothnessTop25(_Smoothness):
     return False
 
 
+@benchmark.Owner(emails=['senorblanco@chromium.org'])
 class SmoothnessToughFiltersCases(_Smoothness):
   """Measures frame rate and a variety of other statistics.
 
@@ -84,6 +86,7 @@ class SmoothnessToughFiltersCases(_Smoothness):
     return False
 
 
+@benchmark.Owner(emails=['senorblanco@chromium.org'])
 class SmoothnessToughPathRenderingCases(_Smoothness):
   """Tests a selection of pages with SVG and 2D Canvas paths.
 
@@ -96,6 +99,8 @@ class SmoothnessToughPathRenderingCases(_Smoothness):
 
 
 @benchmark.Disabled('android')  # crbug.com/526901
+@benchmark.Disabled('linux')  # crbug.com/715607
+@benchmark.Owner(emails=['junov@chromium.org'])
 class SmoothnessToughCanvasCases(_Smoothness):
   """Measures frame rate and a variety of other statistics.
 
@@ -113,6 +118,7 @@ class SmoothnessToughCanvasCases(_Smoothness):
 
 @benchmark.Disabled('android')  # crbug.com/373812
 @benchmark.Disabled('win-reference')  # crbug.com/612810
+@benchmark.Owner(emails=['kbr@chromium.org', 'zmo@chromium.org'])
 class SmoothnessToughWebGLCases(_Smoothness):
   page_set = page_sets.ToughWebglCasesPageSet
 
@@ -121,8 +127,9 @@ class SmoothnessToughWebGLCases(_Smoothness):
     return 'smoothness.tough_webgl_cases'
 
 
-@benchmark.Enabled('android')
+@benchmark.Disabled('win') # http://crbug.com/692663
 @benchmark.Disabled('android-webview')  # http://crbug.com/653933
+@benchmark.Owner(emails=['kbr@chromium.org', 'zmo@chromium.org'])
 class SmoothnessMaps(perf_benchmark.PerfBenchmark):
   page_set = page_sets.MapsPageSet
 
@@ -133,6 +140,7 @@ class SmoothnessMaps(perf_benchmark.PerfBenchmark):
 
 @benchmark.Disabled('android',
                     'mac')     # crbug.com/567802
+@benchmark.Owner(emails=['ssid@chromium.org'])
 class SmoothnessKeyDesktopMoveCases(_Smoothness):
   page_set = page_sets.KeyDesktopMoveCasesPageSet
 
@@ -147,6 +155,7 @@ class SmoothnessKeyDesktopMoveCases(_Smoothness):
 
 
 @benchmark.Enabled('android')
+@benchmark.Owner(emails=['vmiura@chromium.org', 'tdresser@chromium.org'])
 class SmoothnessKeyMobileSites(_Smoothness):
   """Measures rendering statistics while scrolling down the key mobile sites.
 
@@ -166,8 +175,8 @@ class SmoothnessKeyMobileSites(_Smoothness):
 @benchmark.Disabled('android')  # crbug.com/589580
 @benchmark.Disabled('android-reference')  # crbug.com/588786
 @benchmark.Disabled('mac')  # crbug.com/563615
+@benchmark.Owner(emails=['alancutter@chromium.org'])
 class SmoothnessToughAnimationCases(_Smoothness):
-  test = smoothness.SmoothnessWithRestart
   page_set = page_sets.ToughAnimationCasesPageSet
 
   @classmethod
@@ -182,6 +191,7 @@ class SmoothnessToughAnimationCases(_Smoothness):
 
 
 @benchmark.Enabled('android')
+@benchmark.Owner(emails=['ajuma@chromium.org'])
 class SmoothnessKeySilkCases(_Smoothness):
   """Measures rendering statistics for the key silk cases without GPU
   rasterization.
@@ -203,6 +213,7 @@ class SmoothnessKeySilkCases(_Smoothness):
 
 
 @benchmark.Enabled('android')
+@benchmark.Owner(emails=['vmiura@chromium.org'])
 class SmoothnessGpuRasterizationTop25(_Smoothness):
   """Measures rendering statistics for the top 25 with GPU rasterization.
   """
@@ -225,6 +236,7 @@ class SmoothnessGpuRasterizationTop25(_Smoothness):
 # Although GPU rasterization is enabled on Mac, it is blacklisted for certain
 # path cases, so it is still valuable to run both the GPU and non-GPU versions
 # of this benchmark on Mac.
+@benchmark.Owner(emails=['senorblanco@chromium.org'])
 class SmoothnessGpuRasterizationToughPathRenderingCases(_Smoothness):
   """Tests a selection of pages with SVG and 2D canvas paths with GPU
   rasterization.
@@ -243,6 +255,7 @@ class SmoothnessGpuRasterizationToughPathRenderingCases(_Smoothness):
 # With GPU Raster enabled on Mac, there's no reason to run this benchmark in
 # addition to SmoothnessFiltersCases.
 @benchmark.Disabled('mac')
+@benchmark.Owner(emails=['senorblanco@chromium.org'])
 class SmoothnessGpuRasterizationFiltersCases(_Smoothness):
   """Tests a selection of pages with SVG and CSS filter effects with GPU
   rasterization.
@@ -264,6 +277,7 @@ class SmoothnessGpuRasterizationFiltersCases(_Smoothness):
 
 
 @benchmark.Enabled('android')
+@benchmark.Owner(emails=['tdresser@chromium.org', 'rbyers@chromium.org'])
 class SmoothnessSyncScrollKeyMobileSites(_Smoothness):
   """Measures rendering statistics for the key mobile sites with synchronous
   (main thread) scrolling.
@@ -285,6 +299,7 @@ class SmoothnessSyncScrollKeyMobileSites(_Smoothness):
 
 
 @benchmark.Enabled('android')
+@benchmark.Owner(emails=['vmiura@chromium.org'])
 class SmoothnessSimpleMobilePages(_Smoothness):
   """Measures rendering statistics for simple mobile sites page set.
   """
@@ -296,6 +311,7 @@ class SmoothnessSimpleMobilePages(_Smoothness):
 
 
 @benchmark.Disabled('all') # http://crbug.com/631015
+@benchmark.Owner(emails=['bokan@chromium.org'])
 class SmoothnessToughPinchZoomCases(_Smoothness):
   """Measures rendering statistics for pinch-zooming in the tough pinch zoom
   cases.
@@ -316,6 +332,7 @@ class SmoothnessToughPinchZoomCases(_Smoothness):
 
 
 @benchmark.Enabled('mac')
+@benchmark.Owner(emails=['ericrk@chromium.org'])
 class SmoothnessDesktopToughPinchZoomCases(_Smoothness):
   """Measures rendering statistics for pinch-zooming in the tough pinch zoom
   cases. Uses lower zoom levels customized for desktop limits.
@@ -331,6 +348,7 @@ class SmoothnessDesktopToughPinchZoomCases(_Smoothness):
 # because of http://crbug.com/610021
 # @benchmark.Enabled('android')
 @benchmark.Disabled('all')
+@benchmark.Owner(emails=['ericrk@chromium.org'])
 class SmoothnessGpuRasterizationToughPinchZoomCases(_Smoothness):
   """Measures rendering statistics for pinch-zooming in the tough pinch zoom
   cases with GPU rasterization.
@@ -352,6 +370,7 @@ class SmoothnessGpuRasterizationToughPinchZoomCases(_Smoothness):
 
 
 @benchmark.Enabled('android')
+@benchmark.Owner(emails=['vmiura@chromium.org'])
 class SmoothnessGpuRasterizationPolymer(_Smoothness):
   """Measures rendering statistics for the Polymer cases with GPU rasterization.
   """
@@ -366,6 +385,7 @@ class SmoothnessGpuRasterizationPolymer(_Smoothness):
     return 'smoothness.gpu_rasterization.polymer'
 
 
+@benchmark.Owner(emails=['reveman@chromium.org'])
 class SmoothnessToughScrollingCases(_Smoothness):
   page_set = page_sets.ToughScrollingCasesPageSet
 
@@ -382,6 +402,7 @@ class SmoothnessToughScrollingCases(_Smoothness):
     return 'smoothness.tough_scrolling_cases'
 
 @benchmark.Disabled('all')  # crbug.com/667489
+@benchmark.Owner(emails=['ericrk@chromium.org'])
 class SmoothnessGpuRasterizationToughScrollingCases(_Smoothness):
   tag = 'gpu_rasterization'
   test = smoothness.Smoothness
@@ -406,6 +427,7 @@ class SmoothnessToughImageDecodeCases(_Smoothness):
 
 
 @benchmark.Disabled('android')  # http://crbug.com/610015
+@benchmark.Owner(emails=['cblume@chromium.org'])
 class SmoothnessImageDecodingCases(_Smoothness):
   """Measures decoding statistics for jpeg images.
   """
@@ -425,6 +447,7 @@ class SmoothnessImageDecodingCases(_Smoothness):
 
 
 @benchmark.Disabled('android')  # http://crbug.com/513699
+@benchmark.Owner(emails=['cblume@chromium.org'])
 class SmoothnessGpuImageDecodingCases(_Smoothness):
   """Measures decoding statistics for jpeg images with GPU rasterization.
   """
@@ -442,6 +465,7 @@ class SmoothnessGpuImageDecodingCases(_Smoothness):
 
 
 @benchmark.Enabled('android')
+@benchmark.Owner(emails=['picksi@chromium.org'])
 class SmoothnessPathologicalMobileSites(_Smoothness):
   """Measures task execution statistics while scrolling pathological sites.
   """
@@ -451,7 +475,15 @@ class SmoothnessPathologicalMobileSites(_Smoothness):
   def Name(cls):
     return 'smoothness.pathological_mobile_sites'
 
+  @classmethod
+  def ShouldDisable(cls, possible_browser):
+    # http://crbug.com/685342
+    if possible_browser.platform.GetDeviceTypeName() == 'Nexus 7':
+      return True
+    return False
 
+
+@benchmark.Owner(emails=['vmiura@chromium.org'])
 class SmoothnessToughTextureUploadCases(_Smoothness):
   page_set = page_sets.ToughTextureUploadCasesPageSet
 
@@ -460,6 +492,7 @@ class SmoothnessToughTextureUploadCases(_Smoothness):
     return 'smoothness.tough_texture_upload_cases'
 
 
+@benchmark.Owner(emails=['skyostil@chromium.org'])
 class SmoothnessToughAdCases(_Smoothness):
   """Measures rendering statistics while displaying advertisements."""
   page_set = page_sets.SyntheticToughAdCasesPageSet
@@ -482,6 +515,7 @@ class SmoothnessToughAdCases(_Smoothness):
 # http://crbug.com/522619 (mac/win)
 # http://crbug.com/683247 (android/linux)
 @benchmark.Disabled('win', 'mac', 'android', 'linux')
+@benchmark.Owner(emails=['skyostil@chromium.org'])
 class SmoothnessScrollingToughAdCases(_Smoothness):
   """Measures rendering statistics while scrolling advertisements."""
   page_set = page_sets.ScrollingToughAdCasesPageSet
@@ -496,6 +530,7 @@ class SmoothnessScrollingToughAdCases(_Smoothness):
     return 'smoothness.scrolling_tough_ad_cases'
 
 
+@benchmark.Owner(emails=['skyostil@chromium.org'])
 class SmoothnessToughWebGLAdCases(_Smoothness):
   """Measures rendering statistics while scrolling advertisements."""
   page_set = page_sets.SyntheticToughWebglAdCasesPageSet
@@ -507,3 +542,21 @@ class SmoothnessToughWebGLAdCases(_Smoothness):
   @classmethod
   def ShouldDisable(cls, possible_browser):
     return cls.IsSvelte(possible_browser)  # http://crbug.com/574485
+
+
+@benchmark.Disabled('reference')  # crbug.com/549428
+@benchmark.Owner(emails=['skyostil@chromium.org', 'brianderson@chromium.org'])
+class SmoothnessToughSchedulingCases(_Smoothness):
+  """Measures rendering statistics while interacting with pages that have
+  challenging scheduling properties.
+
+  https://docs.google.com/a/chromium.org/document/d/
+      17yhE5Po9By0sCdM1yZT3LiUECaUr_94rQt9j-4tOQIM/view"""
+  page_set = page_sets.ToughSchedulingCasesPageSet
+
+  @classmethod
+  def Name(cls):
+    # This should be smoothness.tough_scheduling_cases but since the benchmark
+    # has been named this way for long time, we keep the name as-is to avoid
+    # data migration.
+    return 'scheduler.tough_scheduling_cases'

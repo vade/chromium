@@ -27,9 +27,10 @@ PasswordStoreDefault::~PasswordStoreDefault() {
 }
 
 bool PasswordStoreDefault::Init(
-    const syncer::SyncableService::StartSyncFlare& flare) {
+    const syncer::SyncableService::StartSyncFlare& flare,
+    PrefService* prefs) {
   ScheduleTask(base::Bind(&PasswordStoreDefault::InitOnDBThread, this));
-  return PasswordStore::Init(flare);
+  return PasswordStore::Init(flare, prefs);
 }
 
 void PasswordStoreDefault::ShutdownOnUIThread() {
@@ -203,6 +204,12 @@ void PasswordStoreDefault::RemoveSiteStatsImpl(const GURL& origin_domain) {
   DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   if (login_db_)
     login_db_->stats_table().RemoveRow(origin_domain);
+}
+
+std::vector<InteractionsStats> PasswordStoreDefault::GetAllSiteStatsImpl() {
+  DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
+  return login_db_ ? login_db_->stats_table().GetAllRows()
+                   : std::vector<InteractionsStats>();
 }
 
 std::vector<InteractionsStats> PasswordStoreDefault::GetSiteStatsImpl(

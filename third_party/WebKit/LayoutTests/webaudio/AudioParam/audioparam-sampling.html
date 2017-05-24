@@ -1,24 +1,23 @@
 <!doctype html>
 <html>
   <head>
-    <script src="../../resources/js-test.js"></script>
+    <script src="../../resources/testharness.js"></script>
+    <script src="../../resources/testharnessreport.js"></script> 
     <script src="../resources/audit-util.js"></script>
-    <script src="../resources/audio-testing.js"></script>
+    <script src="../resources/audit.js"></script>
     <script src="../resources/audioparam-testing.js"></script>
     <title>Test Sampling of LinearRampToValueAtTime</title>
   </head>
 
   <body>
     <script>
-      description("Test Sampling of LinearRampToValueAtTime");
  
-      window.jsTestIsAsync = true;
       var sampleRate = 12800;
       var context;
 
       var audit = Audit.createTaskRunner();
 
-      function runTest(config) {
+      function runTest(should, config) {
         // Create a short context with a constant signal source connected to a gain node that will
         // be automated.
         context = new OfflineAudioContext(1, 256, sampleRate);
@@ -56,19 +55,10 @@
           var expectedStart = config.expectedFunction(startFrame / sampleRate);
           var expectedEnd = config.expectedFunction(endFrame / sampleRate);
 
-          var success = Should(config.desc + ": Sample " + startFrame,
-            resultData[startFrame], {
-              precision: 7
-            }).beCloseTo(expectedStart, config.startValueThreshold);
-          success = Should(config.desc + ": Sample " + endFrame,
-            resultData[endFrame], {
-              precision: 7
-            }).beCloseTo(expectedEnd, config.endValueThreshold) && success;
-
-          if (success)
-            testPassed(config.desc + " passed.\n");
-          else
-            testFailed(config.desc + " failed.\n");
+          should(resultData[startFrame], config.desc + ": Sample " + startFrame)
+            .beCloseTo(expectedStart, {threshold: config.startValueThreshold});
+          should(resultData[endFrame], config.desc + ": Sample " + endFrame)
+            .beCloseTo(expectedEnd, {threshold: config.endValueThreshold});
         });
       }
 
@@ -158,8 +148,8 @@
       ];
 
       function createTaskFunction(config) {
-        return function (done) {
-          runTest(config).then(done);
+        return (task, should) => {
+          runTest(should, config).then(() => task.done());
         };
       }
 
@@ -167,16 +157,10 @@
       for (var k = 0; k < testConfigs.length; ++k) {
         var config = testConfigs[k];
         var taskName = config.desc + ":task" + k;
-        audit.defineTask(taskName, createTaskFunction(config));
+        audit.define(taskName, createTaskFunction(config));
       }
 
-      audit.defineTask("finish", function (done) {
-        finishJSTest();
-        done();
-      });
-
-      audit.runTasks();
-      successfullyParsed = true;
+      audit.run();
     </script>
   </body>
 </html>

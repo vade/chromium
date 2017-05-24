@@ -9,7 +9,7 @@ import("//build/config/ui.gni")
 import("//media/media_options.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
 import("//ppapi/features/features.gni")
-import("//third_party/webrtc/build/webrtc.gni")
+import("//third_party/webrtc/webrtc.gni")
 
 # See //content/BUILD.gn for how this works.
 group("common") {
@@ -44,6 +44,13 @@ source_set("content_descriptors") {
 
   deps = [
     "//ipc",
+  ]
+}
+
+source_set("content_descriptor_keys") {
+  sources = [
+    "content_descriptor_keys.cc",
+    "content_descriptor_keys.h",
   ]
 }
 
@@ -103,6 +110,7 @@ source_set("common_sources") {
     "appcache_info.h",
     "associated_interface_provider.h",
     "associated_interface_registry.h",
+    "bind_interface_helpers.h",
     "bindings_policy.h",
     "browser_controls_state.h",
     "browser_side_navigation_policy.cc",
@@ -111,12 +119,12 @@ source_set("common_sources") {
     "child_process_host.h",
     "child_process_host_delegate.cc",
     "child_process_host_delegate.h",
-    "child_process_sandbox_support_linux.h",
     "color_suggestion.cc",
     "color_suggestion.h",
     "common_param_traits.cc",
     "common_param_traits.h",
     "common_param_traits_macros.h",
+    "common_sandbox_support_linux.h",
     "connection_filter.h",
     "console_message_level.h",
     "content_client.cc",
@@ -132,6 +140,7 @@ source_set("common_sources") {
     "content_switches.h",
     "context_menu_params.cc",
     "context_menu_params.h",
+    "cursor_info.h",
     "drop_data.cc",
     "drop_data.h",
     "favicon_url.cc",
@@ -140,13 +149,12 @@ source_set("common_sources") {
     "file_chooser_file_info.h",
     "file_chooser_params.cc",
     "file_chooser_params.h",
-    "form_field_data.cc",
-    "form_field_data.h",
     "frame_navigate_params.cc",
     "frame_navigate_params.h",
     "injection_test_mac.h",
     "injection_test_win.h",
-    "javascript_message_type.h",
+    "isolated_world_ids.h",
+    "javascript_dialog_type.h",
     "main_function_params.h",
     "manifest.cc",
     "manifest.h",
@@ -164,7 +172,10 @@ source_set("common_sources") {
     "mojo_channel_switches.h",
     "notification_resources.cc",
     "notification_resources.h",
+    "origin_trial_policy.cc",
+    "origin_trial_policy.h",
     "origin_util.h",
+    "page_importance_signals.h",
     "page_state.cc",
     "page_state.h",
     "page_type.h",
@@ -176,14 +187,14 @@ source_set("common_sources") {
     "platform_notification_data.h",
     "presentation_connection_message.cc",
     "presentation_connection_message.h",
-    "presentation_constants.cc",
-    "presentation_constants.h",
-    "presentation_session.cc",
-    "presentation_session.h",
+    "presentation_info.cc",
+    "presentation_info.h",
     "previews_state.h",
     "process_type.h",
+    "push_event_payload.h",
     "push_messaging_status.cc",
     "push_messaging_status.h",
+    "push_subscription_options.h",
     "quarantine.h",
     "referrer.cc",
     "referrer.h",
@@ -214,6 +225,9 @@ source_set("common_sources") {
     "service_info.cc",
     "service_info.h",
     "service_manager_connection.h",
+    "simple_connection_filter.cc",
+    "simple_connection_filter.h",
+    "socket_permission_request.h",
     "speech_recognition_error.h",
     "speech_recognition_grammar.h",
     "speech_recognition_result.cc",
@@ -231,8 +245,6 @@ source_set("common_sources") {
     "web_preferences.h",
     "webplugininfo.cc",
     "webplugininfo.h",
-    "window_container_type.cc",
-    "window_container_type.h",
     "zygote_fork_delegate_linux.h",
     "zygote_handle.h",
   ]
@@ -248,7 +260,10 @@ source_set("common_sources") {
     ":service_names",
     "//content/common",
     "//content/public/common:interfaces",
+    "//ipc",
+    "//mojo/edk/system",
     "//mojo/public/cpp/bindings",
+    "//net",
     "//services/service_manager/public/cpp",
     "//services/service_manager/public/interfaces",
     "//third_party/WebKit/public:blink_headers",
@@ -257,13 +272,14 @@ source_set("common_sources") {
     "//url/ipc:url_ipc",
   ]
   deps = [
+    ":content_descriptor_keys",
+
     # This looks needless as we have //content/common in public_deps, but it's
     # needed because of allow_circular_includes_from.
+    "//components/mime_util",
     "//content/common:mojo_bindings",
-    "//ipc",
     "//media",
     "//mojo/common",
-    "//net",
     "//ppapi/c",
     "//ppapi/features",
     "//services/service_manager/public/cpp",
@@ -323,6 +339,7 @@ source_set("feature_h264_with_openh264_ffmpeg") {
 
 mojom("interfaces") {
   sources = [
+    "network_service_test.mojom",
     "window_container_type.mojom",
   ]
 }

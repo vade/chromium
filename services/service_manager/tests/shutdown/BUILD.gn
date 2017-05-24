@@ -20,15 +20,14 @@ source_set("shutdown") {
     ":shutdown_service",
     "//base",
     "//base/test:test_config",
+    "//services/service_manager/public/cpp",
     "//services/service_manager/public/cpp:service_test_support",
-    "//services/service_manager/public/cpp:sources",
     "//services/service_manager/public/interfaces",
   ]
 
   data_deps = [
     ":shutdown_client",
     ":shutdown_service",
-    ":shutdown_unittest_manifest",
   ]
 }
 
@@ -36,6 +35,9 @@ mojom("interfaces") {
   sources = [
     "shutdown_unittest.mojom",
   ]
+
+  # TODO(crbug.com/714018): Convert the implementation to use OnceCallback.
+  use_once_callback = false
 }
 
 service_manifest("shutdown_unittest_manifest") {
@@ -56,11 +58,8 @@ service("shutdown_service") {
   deps = [
     ":interfaces",
     "//base",
-    "//services/service_manager/public/cpp:sources",
+    "//services/service_manager/public/cpp",
     "//services/service_manager/public/interfaces",
-  ]
-  data_deps = [
-    ":shutdown_service_manifest",
   ]
 }
 
@@ -77,11 +76,8 @@ service("shutdown_client") {
   deps = [
     ":interfaces",
     "//base",
-    "//services/service_manager/public/cpp:sources",
+    "//services/service_manager/public/cpp",
     "//services/service_manager/public/interfaces",
-  ]
-  data_deps = [
-    ":shutdown_client_manifest",
   ]
 }
 

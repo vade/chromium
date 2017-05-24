@@ -16,8 +16,10 @@
 #include "base/memory/linked_ptr.h"
 #include "components/autofill/content/common/autofill_agent.mojom.h"
 #include "components/autofill/content/common/autofill_driver.mojom.h"
+#include "components/autofill/content/renderer/renderer_save_password_progress_logger.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "mojo/public/cpp/bindings/binding.h"
+#include "services/service_manager/public/cpp/bind_source_info.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
 #include "url/gurl.h"
 
@@ -37,7 +39,8 @@ class PasswordGenerationAgent : public content::RenderFrameObserver,
                           PasswordAutofillAgent* password_agent);
   ~PasswordGenerationAgent() override;
 
-  void BindRequest(mojom::PasswordGenerationAgentRequest request);
+  void BindRequest(const service_manager::BindSourceInfo& source_info,
+                   mojom::PasswordGenerationAgentRequest request);
 
   // mojom::PasswordGenerationAgent:
   void FormNotBlacklisted(const PasswordForm& form) override;
@@ -66,7 +69,7 @@ class PasswordGenerationAgent : public content::RenderFrameObserver,
  protected:
   // Returns true if the document for |render_frame()| is one that we should
   // consider analyzing. Virtual so that it can be overriden during testing.
-  virtual bool ShouldAnalyzeDocument() const;
+  virtual bool ShouldAnalyzeDocument();
 
   // Use to force enable during testing.
   void set_enabled(bool enabled) { enabled_ = enabled; }
@@ -112,11 +115,20 @@ class PasswordGenerationAgent : public content::RenderFrameObserver,
   // Hides a password generation popup if one exists.
   void HidePopup();
 
+  // Stops treating a password as generated.
+  void PasswordNoLongerGenerated();
+
   // Runs HTML parsing based classifier and saves its outcome to proto.
   // TODO(crbug.com/621442): Remove client-side form classifier when server-side
   // classifier is ready.
   void RunFormClassifierAndSaveVote(const blink::WebFormElement& web_form,
                                     const PasswordForm& form);
+
+  void LogMessage(autofill::SavePasswordProgressLogger::StringID message_id);
+  void LogBoolean(autofill::SavePasswordProgressLogger::StringID message_id,
+                  bool truth_value);
+  void LogNumber(autofill::SavePasswordProgressLogger::StringID message_id,
+                 int number);
 
   // Creates a password form to presave a generated password. It copies behavior
   // of CreatePasswordFormFromWebForm/FromUnownedInputElements, but takes

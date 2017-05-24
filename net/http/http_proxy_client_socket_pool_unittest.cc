@@ -10,6 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/histogram_tester.h"
 #include "net/base/net_errors.h"
 #include "net/base/proxy_delegate.h"
 #include "net/base/test_completion_callback.h"
@@ -21,8 +22,8 @@
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/next_proto.h"
 #include "net/socket/socket_test_util.h"
-#include "net/spdy/spdy_protocol.h"
-#include "net/spdy/spdy_test_util_common.h"
+#include "net/spdy/chromium/spdy_test_util_common.h"
+#include "net/spdy/core/spdy_protocol.h"
 #include "net/test/gtest_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -191,6 +192,8 @@ class HttpProxyClientSocketPoolTest
     return transport_socket_pool_.last_request_priority();
   }
 
+  const base::HistogramTester& histogram_tester() { return histogram_tester_; }
+
  private:
   SpdySessionDependencies session_deps_;
 
@@ -200,6 +203,8 @@ class HttpProxyClientSocketPoolTest
   SSLClientSocketPool ssl_socket_pool_;
 
   std::unique_ptr<HttpNetworkSession> session_;
+
+  base::HistogramTester histogram_tester_;
 
  protected:
   SpdyTestUtil spdy_util_;
@@ -230,6 +235,12 @@ TEST_P(HttpProxyClientSocketPoolTest, NoTunnel) {
   EXPECT_FALSE(proxy_delegate->on_before_tunnel_request_called());
   EXPECT_FALSE(proxy_delegate->on_tunnel_headers_received_called());
   EXPECT_TRUE(proxy_delegate->on_tunnel_request_completed_called());
+
+  bool is_secure_proxy = GetParam() == HTTPS || GetParam() == SPDY;
+  histogram_tester().ExpectTotalCount(
+      "Net.HttpProxy.ConnectLatency.Insecure.Success", is_secure_proxy ? 0 : 1);
+  histogram_tester().ExpectTotalCount(
+      "Net.HttpProxy.ConnectLatency.Secure.Success", is_secure_proxy ? 1 : 0);
 }
 
 // Make sure that HttpProxyConnectJob passes on its priority to its
@@ -259,7 +270,7 @@ TEST_P(HttpProxyClientSocketPoolTest, NeedAuth) {
   SpdySerializedFrame req(spdy_util_.ConstructSpdyConnect(
       NULL, 0, 1, LOW, HostPortPair("www.google.com", 443)));
   SpdySerializedFrame rst(
-      spdy_util_.ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
+      spdy_util_.ConstructSpdyRstStream(1, ERROR_CODE_CANCEL));
   MockWrite spdy_writes[] = {
       CreateMockWrite(req, 0, ASYNC), CreateMockWrite(rst, 2, ASYNC),
   };
@@ -440,6 +451,12 @@ TEST_P(HttpProxyClientSocketPoolTest, TCPError) {
 
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
+
+  bool is_secure_proxy = GetParam() == HTTPS;
+  histogram_tester().ExpectTotalCount(
+      "Net.HttpProxy.ConnectLatency.Insecure.Error", is_secure_proxy ? 0 : 1);
+  histogram_tester().ExpectTotalCount(
+      "Net.HttpProxy.ConnectLatency.Secure.Error", is_secure_proxy ? 1 : 0);
 }
 
 TEST_P(HttpProxyClientSocketPoolTest, SSLError) {
@@ -468,6 +485,10 @@ TEST_P(HttpProxyClientSocketPoolTest, SSLError) {
 
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
+  histogram_tester().ExpectTotalCount(
+      "Net.HttpProxy.ConnectLatency.Secure.Error", 1);
+  histogram_tester().ExpectTotalCount(
+      "Net.HttpProxy.ConnectLatency.Insecure.Error", 0);
 }
 
 TEST_P(HttpProxyClientSocketPoolTest, SslClientAuth) {
@@ -496,6 +517,10 @@ TEST_P(HttpProxyClientSocketPoolTest, SslClientAuth) {
 
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
+  histogram_tester().ExpectTotalCount(
+      "Net.HttpProxy.ConnectLatency.Secure.Error", 1);
+  histogram_tester().ExpectTotalCount(
+      "Net.HttpProxy.ConnectLatency.Insecure.Error", 0);
 }
 
 TEST_P(HttpProxyClientSocketPoolTest, TunnelUnexpectedClose) {
@@ -588,7 +613,7 @@ TEST_P(HttpProxyClientSocketPoolTest, TunnelSetupError) {
       spdy_util_.ConstructSpdyConnect(kAuthHeaders, kAuthHeadersSize, 1, LOW,
                                       HostPortPair("www.google.com", 443)));
   SpdySerializedFrame rst(
-      spdy_util_.ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
+      spdy_util_.ConstructSpdyRstStream(1, ERROR_CODE_CANCEL));
   MockWrite spdy_writes[] = {
       CreateMockWrite(req, 0, ASYNC), CreateMockWrite(rst, 2, ASYNC),
   };
@@ -637,7 +662,7 @@ TEST_P(HttpProxyClientSocketPoolTest, TunnelSetupRedirect) {
       spdy_util_.ConstructSpdyConnect(kAuthHeaders, kAuthHeadersSize, 1, LOW,
                                       HostPortPair("www.google.com", 443)));
   SpdySerializedFrame rst(
-      spdy_util_.ConstructSpdyRstStream(1, RST_STREAM_CANCEL));
+      spdy_util_.ConstructSpdyRstStream(1, ERROR_CODE_CANCEL));
 
   MockWrite spdy_writes[] = {
       CreateMockWrite(req, 0, ASYNC), CreateMockWrite(rst, 3, ASYNC),

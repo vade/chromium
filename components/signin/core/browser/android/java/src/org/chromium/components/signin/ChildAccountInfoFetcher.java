@@ -69,9 +69,8 @@ public final class ChildAccountInfoFetcher {
     }
 
     private void fetch() {
-        Context context = ContextUtils.getApplicationContext();
         Log.d(TAG, "Checking child account status for %s", mAccount.name);
-        AccountManagerHelper.get(context).checkChildAccount(mAccount, new Callback<Boolean>() {
+        AccountManagerHelper.get().checkChildAccount(mAccount, new Callback<Boolean>() {
             @Override
             public void onResult(Boolean isChildAccount) {
                 setIsChildAccount(isChildAccount);
@@ -88,6 +87,13 @@ public final class ChildAccountInfoFetcher {
         Log.d(TAG, "Setting child account status for %s to %s", mAccount.name,
                 Boolean.toString(isChildAccount));
         nativeSetIsChildAccount(mNativeAccountFetcherService, mAccountId, isChildAccount);
+    }
+
+    @CalledByNative
+    private static void initializeForTests() {
+        Context context = ContextUtils.getApplicationContext();
+        AccountManagerDelegate delegate = new SystemAccountManagerDelegate();
+        AccountManagerHelper.overrideAccountManagerHelperForTests(context, delegate);
     }
 
     private static native void nativeSetIsChildAccount(

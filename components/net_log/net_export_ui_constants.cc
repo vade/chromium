@@ -10,8 +10,9 @@ namespace net_log {
 const char kNetExportUIJS[] = "net_export.js";
 
 // Message handlers.
-const char kGetExportNetLogInfoHandler[] = "getExportNetLogInfo";
+const char kEnableNotifyUIWithStateHandler[] = "enableNotifyUIWithState";
 const char kSendNetLogHandler[] = "sendNetLog";
+const char kShowFile[] = "showFile";
 const char kStartNetLogHandler[] = "startNetLog";
 const char kStopNetLogHandler[] = "stopNetLog";
 

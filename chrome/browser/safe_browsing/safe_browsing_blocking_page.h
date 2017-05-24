@@ -34,9 +34,8 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/task/cancelable_task_tracker.h"
-#include "chrome/browser/safe_browsing/ui_manager.h"
 #include "components/safe_browsing/base_blocking_page.h"
+#include "components/safe_browsing/base_ui_manager.h"
 
 namespace safe_browsing {
 
@@ -45,6 +44,8 @@ class ThreatDetails;
 
 class SafeBrowsingBlockingPage : public BaseBlockingPage {
  public:
+  typedef security_interstitials::BaseSafeBrowsingErrorUI
+      BaseSafeBrowsingErrorUI;
   // Interstitial type, used in tests.
   static content::InterstitialPageDelegate::TypeID kTypeForTesting;
 
@@ -73,7 +74,6 @@ class SafeBrowsingBlockingPage : public BaseBlockingPage {
   }
 
   // InterstitialPageDelegate method:
-  void OnProceed() override;
   void OverrideRendererPrefs(content::RendererPreferences* prefs) override;
   content::InterstitialPageDelegate::TypeID GetTypeForTesting() const override;
 
@@ -106,13 +106,11 @@ class SafeBrowsingBlockingPage : public BaseBlockingPage {
       content::WebContents* web_contents,
       const GURL& main_frame_url,
       const UnsafeResourceList& unsafe_resources,
-      const SafeBrowsingErrorUI::SBErrorDisplayOptions& display_options);
+      const BaseSafeBrowsingErrorUI::SBErrorDisplayOptions& display_options);
 
-  // After a safe browsing interstitial where the user opted-in to the
-  // report but clicked "proceed anyway", we delay the call to
-  // ThreatDetails::FinishCollection() by this much time (in
-  // milliseconds), in order to get data from the blocked resource itself.
-  int64_t threat_details_proceed_delay_ms_;
+  // Called after the user clicks OnProceed(). If the page has malicious
+  // subresources, then we show another interstitial.
+  void HandleSubresourcesAfterProceed() override;
 
   // Called when the interstitial is going away. If there is a
   // pending threat details object, we look at the user's
@@ -131,15 +129,15 @@ class SafeBrowsingBlockingPage : public BaseBlockingPage {
   // Useful for tests, so they can provide their own implementation of
   // SafeBrowsingBlockingPage.
   static SafeBrowsingBlockingPageFactory* factory_;
-
  private:
   static std::string GetSamplingEventName(
-      SafeBrowsingErrorUI::SBInterstitialReason interstitial_reason);
+      BaseSafeBrowsingErrorUI::SBInterstitialReason interstitial_reason);
 
   static std::unique_ptr<
       security_interstitials::SecurityInterstitialControllerClient>
   CreateControllerClient(content::WebContents* web_contents,
-                         const UnsafeResourceList& unsafe_resources);
+                         const UnsafeResourceList& unsafe_resources,
+                         const BaseUIManager* ui_manager);
 
   DISALLOW_COPY_AND_ASSIGN(SafeBrowsingBlockingPage);
 };

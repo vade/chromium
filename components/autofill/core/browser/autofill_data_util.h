@@ -5,9 +5,11 @@
 #ifndef COMPONENTS_AUTOFILL_CORE_BROWSER_AUTOFILL_DATA_UTIL_H_
 #define COMPONENTS_AUTOFILL_CORE_BROWSER_AUTOFILL_DATA_UTIL_H_
 
+#include <string>
+
 #include "base/strings/string16.h"
+#include "base/strings/string_piece_forward.h"
 #include "components/autofill/core/browser/autofill_profile.h"
-#include "grit/components_scaled_resources.h"
 
 namespace autofill {
 namespace data_util {
@@ -18,33 +20,35 @@ struct NameParts {
   base::string16 family;
 };
 
-// Used to map Chrome card types to Payment Request API basic card payment spec
-// types and icons. https://w3c.github.io/webpayments-methods-card/#method-id
+// Used to map Chrome card issuer networks to Payment Request API basic card
+// payment spec issuer networks and icons.
+// https://w3c.github.io/webpayments-methods-card/#method-id
 struct PaymentRequestData {
-  const char* card_type;
-  const char* basic_card_payment_type;
+  const char* issuer_network;
+  const char* basic_card_issuer_network;
   const int icon_resource_id;
+  const int a11y_label_resource_id;
 };
 
 // Returns true if |name| looks like a CJK name (or some kind of mish-mash of
 // the three, at least).
-bool IsCJKName(const base::string16& name);
+bool IsCJKName(base::StringPiece16 name);
 
 // TODO(crbug.com/586510): Investigate the use of app_locale to do better name
 // splitting.
 // Returns the different name parts (given, middle and family names) of the full
 // |name| passed as a parameter.
-NameParts SplitName(const base::string16& name);
+NameParts SplitName(base::StringPiece16 name);
 
 // Concatenates the name parts together in the correct order (based on script),
 // and returns the result.
-base::string16 JoinNameParts(const base::string16& given,
-                             const base::string16& middle,
-                             const base::string16& family);
+base::string16 JoinNameParts(base::StringPiece16 given,
+                             base::StringPiece16 middle,
+                             base::StringPiece16 family);
 
 // Returns true iff |full_name| is a concatenation of some combination of the
 // first/middle/last (incl. middle initial) in |profile|.
-bool ProfileMatchesFullName(const base::string16 full_name,
+bool ProfileMatchesFullName(base::StringPiece16 full_name,
                             const autofill::AutofillProfile& profile);
 
 // Returns the Payment Request API basic card payment spec data for the provided
@@ -52,9 +56,14 @@ bool ProfileMatchesFullName(const base::string16 full_name,
 // any unrecognized type.
 const PaymentRequestData& GetPaymentRequestData(const std::string& type);
 
-// Returns the autofill credit card type string for the provided Payment Request
-// API basic card payment spec |type|.
-const char* GetCardTypeForBasicCardPaymentType(const std::string& type);
+// Returns the autofill credit card issuer network string for the provided
+// Payment Request API basic card payment spec |basic_card_card_issuer_network|.
+const char* GetIssuerNetworkForBasicCardIssuerNetwork(
+    const std::string& basic_card_issuer_network);
+
+// Returns whether the specified |country_code| is a valid country code.
+bool IsValidCountryCode(const std::string& country_code);
+bool IsValidCountryCode(const base::string16& country_code);
 
 }  // namespace data_util
 }  // namespace autofill

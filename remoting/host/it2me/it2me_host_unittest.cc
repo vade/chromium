@@ -10,10 +10,12 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -25,6 +27,10 @@
 #include "remoting/signaling/fake_signal_strategy.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#if defined(OS_LINUX)
+#include "base/linux_util.h"
+#endif  // defined(OS_LINUX)
+
 namespace remoting {
 
 namespace {
@@ -33,8 +39,9 @@ namespace {
 typedef protocol::ValidatingAuthenticator::Result ValidationResult;
 typedef It2MeConfirmationDialog::Result DialogResult;
 
-const char kTestClientUserName[] = "ficticious_user@gmail.com";
+const char kTestUserName[] = "ficticious_user@gmail.com";
 const char kTestClientJid[] = "ficticious_user@gmail.com/jid_resource";
+const char kTestClientJid2[] = "ficticious_user_2@gmail.com/jid_resource";
 const char kTestClientUsernameNoJid[] = "completely_ficticious_user@gmail.com";
 const char kTestClientJidWithSlash[] = "fake/user@gmail.com/jid_resource";
 const char kResourceOnly[] = "/jid_resource";
@@ -47,20 +54,17 @@ const char kMismatchedDomain3[] = "not_even_close.com";
 
 class FakeIt2MeConfirmationDialog : public It2MeConfirmationDialog {
  public:
-  FakeIt2MeConfirmationDialog();
+  FakeIt2MeConfirmationDialog(const std::string& remote_user_email,
+                              DialogResult dialog_result);
   ~FakeIt2MeConfirmationDialog() override;
 
   // It2MeConfirmationDialog implementation.
   void Show(const std::string& remote_user_email,
             const ResultCallback& callback) override;
 
-  void set_dialog_result(DialogResult dialog_result) {
-    dialog_result_ = dialog_result;
-  }
-
-  const std::string& get_remote_user_email() { return remote_user_email_; }
-
  private:
+  FakeIt2MeConfirmationDialog();
+
   std::string remote_user_email_;
   DialogResult dialog_result_ = DialogResult::OK;
 
@@ -69,20 +73,58 @@ class FakeIt2MeConfirmationDialog : public It2MeConfirmationDialog {
 
 FakeIt2MeConfirmationDialog::FakeIt2MeConfirmationDialog() {}
 
+FakeIt2MeConfirmationDialog::FakeIt2MeConfirmationDialog(
+    const std::string& remote_user_email,
+    DialogResult dialog_result)
+    : remote_user_email_(remote_user_email), dialog_result_(dialog_result) {}
+
 FakeIt2MeConfirmationDialog::~FakeIt2MeConfirmationDialog() {}
 
 void FakeIt2MeConfirmationDialog::Show(const std::string& remote_user_email,
                                        const ResultCallback& callback) {
-  remote_user_email_ = remote_user_email;
+  EXPECT_STREQ(remote_user_email_.c_str(), remote_user_email.c_str());
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(callback, dialog_result_));
 }
 
-class It2MeHostTest : public testing::Test {
+class FakeIt2MeDialogFactory : public It2MeConfirmationDialogFactory {
  public:
-  It2MeHostTest() {}
-  ~It2MeHostTest() override {}
+  FakeIt2MeDialogFactory();
+  ~FakeIt2MeDialogFactory() override;
+
+  std::unique_ptr<It2MeConfirmationDialog> Create() override;
+
+  void set_dialog_result(DialogResult dialog_result) {
+    dialog_result_ = dialog_result;
+  }
+
+  void set_remote_user_email(const std::string& remote_user_email) {
+    remote_user_email_ = remote_user_email;
+  }
+
+ private:
+  std::string remote_user_email_;
+  DialogResult dialog_result_ = DialogResult::OK;
+
+  DISALLOW_COPY_AND_ASSIGN(FakeIt2MeDialogFactory);
+};
+
+FakeIt2MeDialogFactory::FakeIt2MeDialogFactory()
+    : remote_user_email_(kTestUserName) {}
+
+FakeIt2MeDialogFactory::~FakeIt2MeDialogFactory() {}
+
+std::unique_ptr<It2MeConfirmationDialog> FakeIt2MeDialogFactory::Create() {
+  EXPECT_FALSE(remote_user_email_.empty());
+  return base::MakeUnique<FakeIt2MeConfirmationDialog>(remote_user_email_,
+                                                       dialog_result_);
+}
+
+class It2MeHostTest : public testing::Test, public It2MeHost::Observer {
+ public:
+  It2MeHostTest();
+  ~It2MeHostTest() override;
 
   // testing::Test interface.
   void SetUp() override;
@@ -92,17 +134,40 @@ class It2MeHostTest : public testing::Test {
                             ValidationResult validation_result);
 
  protected:
-  void SetClientDomainPolicy(const std::string& policy_value);
+  // It2MeHost::Observer interface.
+  void OnClientAuthenticated(const std::string& client_username) override;
+  void OnStoreAccessCode(const std::string& access_code,
+                         base::TimeDelta access_code_lifetime) override;
+  void OnNatPolicyChanged(bool nat_traversal_enabled) override;
+  void OnStateChanged(It2MeHostState state,
+                      const std::string& error_message) override;
+
+  void SetPolicies(
+      std::initializer_list<std::pair<base::StringPiece, const base::Value&>>
+          policies);
+
+  void RunUntilStateChanged(It2MeHostState expected_state);
 
   void RunValidationCallback(const std::string& remote_jid);
 
+  void StartHost();
+  void ShutdownHost();
+
+  static base::ListValue MakeList(
+      std::initializer_list<base::StringPiece> values);
+
   ValidationResult validation_result_ = ValidationResult::SUCCESS;
-  std::string remote_user_email_;
+
+  base::Closure state_change_callback_;
+
+  It2MeHostState last_host_state_ = It2MeHostState::kDisconnected;
 
   // Used to set ConfirmationDialog behavior.
-  FakeIt2MeConfirmationDialog* dialog_ = nullptr;
+  FakeIt2MeDialogFactory* dialog_factory_ = nullptr;
 
  private:
+  void StartupHostStateHelper(const base::Closure& quit_closure);
+
   std::unique_ptr<base::MessageLoop> message_loop_;
   std::unique_ptr<base::RunLoop> run_loop_;
 
@@ -111,10 +176,21 @@ class It2MeHostTest : public testing::Test {
 
   scoped_refptr<It2MeHost> it2me_host_;
 
+  base::WeakPtrFactory<It2MeHostTest> weak_factory_;
+
   DISALLOW_COPY_AND_ASSIGN(It2MeHostTest);
 };
 
+It2MeHostTest::It2MeHostTest() : weak_factory_(this) {}
+
+It2MeHostTest::~It2MeHostTest() {}
+
 void It2MeHostTest::SetUp() {
+#if defined(OS_LINUX)
+  // Need to prime the host OS version value for linux to prevent IO on the
+  // network thread. base::GetLinuxDistro() caches the result.
+  base::GetLinuxDistro();
+#endif
   message_loop_.reset(new base::MessageLoop());
   run_loop_.reset(new base::RunLoop());
 
@@ -124,16 +200,23 @@ void It2MeHostTest::SetUp() {
   network_task_runner_ = host_context->network_task_runner();
   ui_task_runner_ = host_context->ui_task_runner();
 
-  dialog_ = new FakeIt2MeConfirmationDialog();
-  it2me_host_ =
-      new It2MeHost(std::move(host_context),
-                    /*policy_watcher=*/nullptr, base::WrapUnique(dialog_),
-                    /*observer=*/nullptr,
-                    base::WrapUnique(new FakeSignalStrategy("fake_local_jid")),
-                    "fake_user_name", "fake_bot_jid");
+  std::unique_ptr<FakeIt2MeDialogFactory> dialog_factory(
+      new FakeIt2MeDialogFactory());
+  dialog_factory_ = dialog_factory.get();
+  it2me_host_ = new It2MeHost(
+      std::move(host_context),
+      std::move(dialog_factory), weak_factory_.GetWeakPtr(),
+      base::WrapUnique(
+          new FakeSignalStrategy(SignalingAddress("fake_local_jid"))),
+      kTestUserName, "fake_bot_jid");
+
+  it2me_host_->OnPolicyUpdate(PolicyWatcher::GetDefaultPolicies());
 }
 
 void It2MeHostTest::TearDown() {
+  // Shutdown the host if it hasn't been already. Without this, the call to
+  // run_loop_->Run() may never return.
+  it2me_host_->Disconnect();
   network_task_runner_ = nullptr;
   ui_task_runner_ = nullptr;
   it2me_host_ = nullptr;
@@ -143,36 +226,57 @@ void It2MeHostTest::TearDown() {
 void It2MeHostTest::OnValidationComplete(const base::Closure& resume_callback,
                                          ValidationResult validation_result) {
   validation_result_ = validation_result;
-  remote_user_email_ = dialog_->get_remote_user_email();
 
   ui_task_runner_->PostTask(FROM_HERE, resume_callback);
 }
 
-void It2MeHostTest::SetClientDomainPolicy(const std::string& policy_value) {
-  std::unique_ptr<base::DictionaryValue> policies(new base::DictionaryValue());
-  policies->SetString(policy::key::kRemoteAccessHostClientDomain, policy_value);
+void It2MeHostTest::SetPolicies(
+    std::initializer_list<std::pair<base::StringPiece, const base::Value&>>
+        policies) {
+  auto dictionary = base::MakeUnique<base::DictionaryValue>();
+  for (const auto& policy : policies) {
+    dictionary->Set(policy.first, policy.second.CreateDeepCopy());
+  }
+  it2me_host_->OnPolicyUpdate(std::move(dictionary));
+}
+
+void It2MeHostTest::StartupHostStateHelper(const base::Closure& quit_closure) {
+  if (last_host_state_ == It2MeHostState::kRequestedAccessCode) {
+    network_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&It2MeHost::SetStateForTesting, it2me_host_.get(),
+                   It2MeHostState::kReceivedAccessCode, std::string()));
+  } else if (last_host_state_ != It2MeHostState::kStarting) {
+    quit_closure.Run();
+    return;
+  }
+  state_change_callback_ = base::Bind(&It2MeHostTest::StartupHostStateHelper,
+                                      base::Unretained(this), quit_closure);
+}
+
+void It2MeHostTest::StartHost() {
+  it2me_host_->Connect();
 
   base::RunLoop run_loop;
-  it2me_host_->SetPolicyForTesting(std::move(policies), run_loop.QuitClosure());
+  state_change_callback_ =
+      base::Bind(&It2MeHostTest::StartupHostStateHelper, base::Unretained(this),
+                 run_loop.QuitClosure());
+  run_loop.Run();
+}
+
+void It2MeHostTest::RunUntilStateChanged(It2MeHostState expected_state) {
+  if (last_host_state_ == expected_state) {
+    // Bail out early if the state is already correct.
+    return;
+  }
+
+  base::RunLoop run_loop;
+  state_change_callback_ = run_loop.QuitClosure();
   run_loop.Run();
 }
 
 void It2MeHostTest::RunValidationCallback(const std::string& remote_jid) {
   base::RunLoop run_loop;
-
-  network_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&It2MeHost::SetStateForTesting, it2me_host_.get(),
-                            It2MeHostState::kStarting, std::string()));
-
-  network_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&It2MeHost::SetStateForTesting, it2me_host_.get(),
-                 It2MeHostState::kRequestedAccessCode, std::string()));
-
-  network_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&It2MeHost::SetStateForTesting, it2me_host_.get(),
-                 It2MeHostState::kReceivedAccessCode, std::string()));
 
   network_task_runner_->PostTask(
       FROM_HERE,
@@ -181,78 +285,255 @@ void It2MeHostTest::RunValidationCallback(const std::string& remote_jid) {
                             base::Unretained(this), run_loop.QuitClosure())));
 
   run_loop.Run();
-
-  it2me_host_->Disconnect();
 }
 
-TEST_F(It2MeHostTest, ConnectionValidation_NoClientDomainPolicy_ValidJid) {
+void It2MeHostTest::OnClientAuthenticated(const std::string& client_username) {}
+
+void It2MeHostTest::OnStoreAccessCode(const std::string& access_code,
+                                      base::TimeDelta access_code_lifetime) {}
+
+void It2MeHostTest::OnNatPolicyChanged(bool nat_traversal_enabled) {}
+
+void It2MeHostTest::OnStateChanged(It2MeHostState state,
+                                   const std::string& error_message) {
+  last_host_state_ = state;
+
+  if (state_change_callback_) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::ResetAndReturn(&state_change_callback_));
+  }
+}
+
+void It2MeHostTest::ShutdownHost() {
+  if (it2me_host_) {
+    it2me_host_->Disconnect();
+    RunUntilStateChanged(It2MeHostState::kDisconnected);
+  }
+}
+
+base::ListValue It2MeHostTest::MakeList(
+    std::initializer_list<base::StringPiece> values) {
+  base::ListValue result;
+  for (const auto& value : values) {
+    result.AppendString(value);
+  }
+  return result;
+}
+
+TEST_F(It2MeHostTest, HostValidation_NoHostDomainListPolicy) {
+  StartHost();
+  ASSERT_EQ(It2MeHostState::kReceivedAccessCode, last_host_state_);
+  ShutdownHost();
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+TEST_F(It2MeHostTest, HostValidation_HostDomainListPolicy_MatchingDomain) {
+  SetPolicies({{policy::key::kRemoteAccessHostDomainList,
+                MakeList({kMatchingDomain})}});
+  StartHost();
+  ASSERT_EQ(It2MeHostState::kReceivedAccessCode, last_host_state_);
+  ShutdownHost();
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+TEST_F(It2MeHostTest, HostValidation_HostDomainListPolicy_MatchStart) {
+  SetPolicies({{policy::key::kRemoteAccessHostDomainList,
+                MakeList({kMismatchedDomain2})}});
+  StartHost();
+  ASSERT_EQ(It2MeHostState::kInvalidDomainError, last_host_state_);
+  ShutdownHost();
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+TEST_F(It2MeHostTest, HostValidation_HostDomainListPolicy_MatchEnd) {
+  SetPolicies({{policy::key::kRemoteAccessHostDomainList,
+                MakeList({kMismatchedDomain1})}});
+  StartHost();
+  ASSERT_EQ(It2MeHostState::kInvalidDomainError, last_host_state_);
+  ShutdownHost();
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+TEST_F(It2MeHostTest, HostValidation_HostDomainListPolicy_MatchFirst) {
+  SetPolicies({{policy::key::kRemoteAccessHostDomainList,
+                MakeList({kMatchingDomain, kMismatchedDomain1})}});
+  StartHost();
+  ASSERT_EQ(It2MeHostState::kReceivedAccessCode, last_host_state_);
+  ShutdownHost();
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+TEST_F(It2MeHostTest, HostValidation_HostDomainListPolicy_MatchSecond) {
+  SetPolicies({{policy::key::kRemoteAccessHostDomainList,
+                MakeList({kMismatchedDomain1, kMatchingDomain})}});
+  StartHost();
+  ASSERT_EQ(It2MeHostState::kReceivedAccessCode, last_host_state_);
+  ShutdownHost();
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+TEST_F(It2MeHostTest, HostValidation_HostDomainListPolicy_NoMatch) {
+  SetPolicies({{policy::key::kRemoteAccessHostDomainList,
+                MakeList({kMismatchedDomain1, kMismatchedDomain2,
+                          kMismatchedDomain3})}});
+  StartHost();
+  ASSERT_EQ(It2MeHostState::kInvalidDomainError, last_host_state_);
+  ShutdownHost();
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+TEST_F(It2MeHostTest, ConnectionValidation_NoClientDomainListPolicy_ValidJid) {
+  StartHost();
   RunValidationCallback(kTestClientJid);
   ASSERT_EQ(ValidationResult::SUCCESS, validation_result_);
-}
-
-TEST_F(It2MeHostTest, ConnectionValidation_NoClientDomainPolicy_InvalidJid) {
-  RunValidationCallback(kTestClientUsernameNoJid);
-  ASSERT_EQ(ValidationResult::ERROR_INVALID_ACCOUNT, validation_result_);
+  ASSERT_EQ(It2MeHostState::kConnecting, last_host_state_);
+  ShutdownHost();
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
 }
 
 TEST_F(It2MeHostTest,
-       ConnectionValidation_NoClientDomainPolicy_InvalidUsername) {
-  RunValidationCallback(kTestClientJidWithSlash);
-  ASSERT_EQ(ValidationResult::SUCCESS, validation_result_);
-}
-
-TEST_F(It2MeHostTest, ConnectionValidation_NoClientDomainPolicy_ResourceOnly) {
-  RunValidationCallback(kResourceOnly);
-  ASSERT_EQ(ValidationResult::ERROR_INVALID_ACCOUNT, validation_result_);
-}
-
-TEST_F(It2MeHostTest, ConnectionValidation_ClientDomainPolicy_MatchingDomain) {
-  SetClientDomainPolicy(kMatchingDomain);
-  RunValidationCallback(kTestClientJid);
-  ASSERT_EQ(ValidationResult::SUCCESS, validation_result_);
-}
-
-TEST_F(It2MeHostTest, ConnectionValidation_ClientDomainPolicy_InvalidUserName) {
-  SetClientDomainPolicy(kMatchingDomain);
-  RunValidationCallback(kTestClientJidWithSlash);
-  ASSERT_EQ(ValidationResult::ERROR_INVALID_ACCOUNT, validation_result_);
-}
-
-TEST_F(It2MeHostTest, ConnectionValidation_ClientDomainPolicy_NoJid) {
-  SetClientDomainPolicy(kMatchingDomain);
+       ConnectionValidation_NoClientDomainListPolicy_InvalidJid) {
+  StartHost();
   RunValidationCallback(kTestClientUsernameNoJid);
   ASSERT_EQ(ValidationResult::ERROR_INVALID_ACCOUNT, validation_result_);
+  RunUntilStateChanged(It2MeHostState::kDisconnected);
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
 }
 
-TEST_F(It2MeHostTest, ConnectionValidation_WrongClientDomain_NoMatch) {
-  SetClientDomainPolicy(kMismatchedDomain3);
+TEST_F(It2MeHostTest,
+       ConnectionValidation_NoClientDomainListPolicy_InvalidUsername) {
+  StartHost();
+  dialog_factory_->set_remote_user_email("fake");
+  RunValidationCallback(kTestClientJidWithSlash);
+  ASSERT_EQ(ValidationResult::SUCCESS, validation_result_);
+  ASSERT_EQ(It2MeHostState::kConnecting, last_host_state_);
+  ShutdownHost();
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+TEST_F(It2MeHostTest,
+       ConnectionValidation_NoClientDomainListPolicy_ResourceOnly) {
+  StartHost();
+  RunValidationCallback(kResourceOnly);
+  ASSERT_EQ(ValidationResult::ERROR_INVALID_ACCOUNT, validation_result_);
+  RunUntilStateChanged(It2MeHostState::kDisconnected);
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+TEST_F(It2MeHostTest,
+       ConnectionValidation_ClientDomainListPolicy_MatchingDomain) {
+  SetPolicies({{policy::key::kRemoteAccessHostClientDomainList,
+                MakeList({kMatchingDomain})}});
+  StartHost();
   RunValidationCallback(kTestClientJid);
+  ASSERT_EQ(ValidationResult::SUCCESS, validation_result_);
+  ASSERT_EQ(It2MeHostState::kConnecting, last_host_state_);
+  ShutdownHost();
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+TEST_F(It2MeHostTest,
+       ConnectionValidation_ClientDomainListPolicy_InvalidUserName) {
+  SetPolicies({{policy::key::kRemoteAccessHostClientDomainList,
+                MakeList({kMatchingDomain})}});
+  StartHost();
+  RunValidationCallback(kTestClientJidWithSlash);
+  ASSERT_EQ(ValidationResult::ERROR_INVALID_ACCOUNT, validation_result_);
+  RunUntilStateChanged(It2MeHostState::kDisconnected);
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+TEST_F(It2MeHostTest, ConnectionValidation_ClientDomainListPolicy_NoJid) {
+  SetPolicies({{policy::key::kRemoteAccessHostClientDomainList,
+                MakeList({kMatchingDomain})}});
+  StartHost();
+  RunValidationCallback(kTestClientUsernameNoJid);
+  RunUntilStateChanged(It2MeHostState::kDisconnected);
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
   ASSERT_EQ(ValidationResult::ERROR_INVALID_ACCOUNT, validation_result_);
 }
 
 TEST_F(It2MeHostTest, ConnectionValidation_WrongClientDomain_MatchStart) {
-  SetClientDomainPolicy(kMismatchedDomain2);
+  SetPolicies({{policy::key::kRemoteAccessHostClientDomainList,
+                MakeList({kMismatchedDomain2})}});
+  StartHost();
   RunValidationCallback(kTestClientJid);
   ASSERT_EQ(ValidationResult::ERROR_INVALID_ACCOUNT, validation_result_);
+  RunUntilStateChanged(It2MeHostState::kDisconnected);
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
 }
 
 TEST_F(It2MeHostTest, ConnectionValidation_WrongClientDomain_MatchEnd) {
-  SetClientDomainPolicy(kMismatchedDomain1);
+  SetPolicies({{policy::key::kRemoteAccessHostClientDomainList,
+                MakeList({kMismatchedDomain1})}});
+  StartHost();
   RunValidationCallback(kTestClientJid);
   ASSERT_EQ(ValidationResult::ERROR_INVALID_ACCOUNT, validation_result_);
+  RunUntilStateChanged(It2MeHostState::kDisconnected);
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+TEST_F(It2MeHostTest, ConnectionValidation_ClientDomainListPolicy_MatchFirst) {
+  SetPolicies({{policy::key::kRemoteAccessHostClientDomainList,
+                MakeList({kMatchingDomain, kMismatchedDomain1})}});
+  StartHost();
+  RunValidationCallback(kTestClientJid);
+  ASSERT_EQ(ValidationResult::SUCCESS, validation_result_);
+  ASSERT_EQ(It2MeHostState::kConnecting, last_host_state_);
+  ShutdownHost();
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+TEST_F(It2MeHostTest, ConnectionValidation_ClientDomainListPolicy_MatchSecond) {
+  SetPolicies({{policy::key::kRemoteAccessHostClientDomainList,
+                MakeList({kMismatchedDomain1, kMatchingDomain})}});
+  StartHost();
+  RunValidationCallback(kTestClientJid);
+  ASSERT_EQ(ValidationResult::SUCCESS, validation_result_);
+  ASSERT_EQ(It2MeHostState::kConnecting, last_host_state_);
+  ShutdownHost();
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+TEST_F(It2MeHostTest, ConnectionValidation_ClientDomainListPolicy_NoMatch) {
+  SetPolicies({{policy::key::kRemoteAccessHostClientDomainList,
+                MakeList({kMismatchedDomain1, kMismatchedDomain2,
+                          kMismatchedDomain3})}});
+  StartHost();
+  RunValidationCallback(kTestClientJid);
+  ASSERT_EQ(ValidationResult::ERROR_INVALID_ACCOUNT, validation_result_);
+  RunUntilStateChanged(It2MeHostState::kDisconnected);
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
 }
 
 TEST_F(It2MeHostTest, ConnectionValidation_ConfirmationDialog_Accept) {
+  StartHost();
   RunValidationCallback(kTestClientJid);
   ASSERT_EQ(ValidationResult::SUCCESS, validation_result_);
-  ASSERT_STREQ(kTestClientUserName, remote_user_email_.c_str());
+  ASSERT_EQ(It2MeHostState::kConnecting, last_host_state_);
+  ShutdownHost();
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
 }
 
 TEST_F(It2MeHostTest, ConnectionValidation_ConfirmationDialog_Reject) {
-  dialog_->set_dialog_result(DialogResult::CANCEL);
+  dialog_factory_->set_dialog_result(DialogResult::CANCEL);
+  StartHost();
   RunValidationCallback(kTestClientJid);
   ASSERT_EQ(ValidationResult::ERROR_REJECTED_BY_USER, validation_result_);
-  ASSERT_STREQ(kTestClientUserName, remote_user_email_.c_str());
+  RunUntilStateChanged(It2MeHostState::kDisconnected);
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
+}
+
+TEST_F(It2MeHostTest, MultipleConnectionsTriggerDisconnect) {
+  StartHost();
+  RunValidationCallback(kTestClientJid);
+  ASSERT_EQ(ValidationResult::SUCCESS, validation_result_);
+  ASSERT_EQ(It2MeHostState::kConnecting, last_host_state_);
+
+  RunValidationCallback(kTestClientJid2);
+  ASSERT_EQ(ValidationResult::ERROR_TOO_MANY_CONNECTIONS, validation_result_);
+  RunUntilStateChanged(It2MeHostState::kDisconnected);
+  ASSERT_EQ(It2MeHostState::kDisconnected, last_host_state_);
 }
 
 }  // namespace remoting

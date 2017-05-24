@@ -19,13 +19,14 @@
 #include "chrome/installer/util/master_preferences_constants.h"
 #include "chrome/installer/util/util_constants.h"
 #include "components/variations/pref_names.h"
+#include "rlz/features/features.h"
 
 namespace {
 
 const char kFirstRunTabs[] = "first_run_tabs";
 
-base::LazyInstance<installer::MasterPreferences> g_master_preferences =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<installer::MasterPreferences>::DestructorAtExit
+    g_master_preferences = LAZY_INSTANCE_INITIALIZER;
 
 bool GetURLFromValue(const base::Value* in_value, std::string* out_value) {
   return in_value && out_value && in_value->GetAsString(out_value);
@@ -207,17 +208,55 @@ bool MasterPreferences::InitializeFromString(const std::string& json_data) {
 }
 
 void MasterPreferences::EnforceLegacyPreferences() {
+  // Boolean. This is a legacy preference and should no longer be used; it is
+  // kept around so that old master_preferences which specify
+  // "create_all_shortcuts":false still enforce the new
+  // "do_not_create_(desktop|quick_launch)_shortcut" preferences. Setting this
+  // to true no longer has any impact.
+  static constexpr char kCreateAllShortcuts[] = "create_all_shortcuts";
+
   // If create_all_shortcuts was explicitly set to false, set
   // do_not_create_(desktop|quick_launch)_shortcut to true.
   bool create_all_shortcuts = true;
-  GetBool(installer::master_preferences::kCreateAllShortcuts,
-          &create_all_shortcuts);
+  GetBool(kCreateAllShortcuts, &create_all_shortcuts);
   if (!create_all_shortcuts) {
     distribution_->SetBoolean(
         installer::master_preferences::kDoNotCreateDesktopShortcut, true);
     distribution_->SetBoolean(
         installer::master_preferences::kDoNotCreateQuickLaunchShortcut, true);
   }
+
+  // Deprecated boolean import master preferences now mapped to their duplicates
+  // in prefs::.
+  static constexpr char kDistroImportHistoryPref[] = "import_history";
+  static constexpr char kDistroImportHomePagePref[] = "import_home_page";
+  static constexpr char kDistroImportSearchPref[] = "import_search_engine";
+  static constexpr char kDistroImportBookmarksPref[] = "import_bookmarks";
+
+  static constexpr struct {
+    const char* old_distro_pref_path;
+    const char* modern_pref_path;
+  } kLegacyDistroImportPrefMappings[] = {
+      {kDistroImportBookmarksPref, prefs::kImportBookmarks},
+      {kDistroImportHistoryPref, prefs::kImportHistory},
+      {kDistroImportHomePagePref, prefs::kImportHomepage},
+      {kDistroImportSearchPref, prefs::kImportSearchEngine},
+  };
+
+  for (const auto& mapping : kLegacyDistroImportPrefMappings) {
+    bool value = false;
+    if (GetBool(mapping.old_distro_pref_path, &value))
+      master_dictionary_->SetBoolean(mapping.modern_pref_path, value);
+  }
+
+#if BUILDFLAG(ENABLE_RLZ)
+  // Map the RLZ ping delay shipped in the distribution dictionary into real
+  // prefs.
+  static constexpr char kDistroPingDelay[] = "ping_delay";
+  int rlz_ping_delay = 0;
+  if (GetInt(kDistroPingDelay, &rlz_ping_delay))
+    master_dictionary_->SetInteger(prefs::kRlzPingDelaySeconds, rlz_ping_delay);
+#endif  // BUILDFLAG(ENABLE_RLZ)
 }
 
 bool MasterPreferences::GetBool(const std::string& name, bool* value) const {

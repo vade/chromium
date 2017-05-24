@@ -170,6 +170,7 @@ length
 letterSpacing
 lightingColor
 lineHeight
+lineHeightStep
 listStyle
 listStyleImage
 listStylePosition
@@ -197,7 +198,6 @@ minInlineSize
 minWidth
 minZoom
 mixBlendMode
-motion
 objectFit
 objectPosition
 offset
@@ -206,7 +206,6 @@ offsetDistance
 offsetPath
 offsetPosition
 offsetRotate
-offsetRotation
 opacity
 order
 orientation
@@ -234,6 +233,9 @@ paintOrder
 parentRule
 perspective
 perspectiveOrigin
+placeContent
+placeItems
+placeSelf
 pointerEvents
 position
 quotes
@@ -257,7 +259,6 @@ shapeMargin
 shapeOutside
 shapeRendering
 size
-snapHeight
 speak
 src
 stopColor
@@ -293,6 +294,7 @@ textUnderlinePosition
 top
 touchAction
 transform
+transformBox
 transformOrigin
 transformStyle
 transition

@@ -11,6 +11,7 @@
 #include "base/test/fuzzed_data_provider.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/http/http_request_headers.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/data_protocol_handler.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job_factory_impl.h"
@@ -29,7 +30,7 @@ const size_t kMaxLengthForFuzzedRange = 32;
 class URLRequestDataJobFuzzerHarness : public net::URLRequest::Delegate {
  public:
   URLRequestDataJobFuzzerHarness()
-      : context_(true), task_runner_(base::ThreadTaskRunnerHandle::Get()) {
+      : task_runner_(base::ThreadTaskRunnerHandle::Get()), context_(true) {
     job_factory_.SetProtocolHandler(
         "data", base::MakeUnique<net::DataProtocolHandler>());
     context_.set_job_factory(&job_factory_);
@@ -76,8 +77,8 @@ class URLRequestDataJobFuzzerHarness : public net::URLRequest::Delegate {
 
     // Create a URLRequest with the given data URL and start reading
     // from it.
-    std::unique_ptr<net::URLRequest> request =
-        context_.CreateRequest(data_url, net::DEFAULT_PRIORITY, this);
+    std::unique_ptr<net::URLRequest> request = context_.CreateRequest(
+        data_url, net::DEFAULT_PRIORITY, this, TRAFFIC_ANNOTATION_FOR_TESTS);
     if (use_range) {
       if (!net::HttpUtil::IsValidHeaderValue(range))
         range = "bytes=3-";
@@ -155,11 +156,12 @@ class URLRequestDataJobFuzzerHarness : public net::URLRequest::Delegate {
  private:
   friend struct base::DefaultSingletonTraits<URLRequestDataJobFuzzerHarness>;
 
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+
   net::TestURLRequestContext context_;
   net::URLRequestJobFactoryImpl job_factory_;
   std::vector<size_t> read_lengths_;
   scoped_refptr<net::IOBuffer> buf_;
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   base::RunLoop* read_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestDataJobFuzzerHarness);

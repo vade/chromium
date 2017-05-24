@@ -63,16 +63,13 @@ class Context : public base::RefCountedThreadSafe<Context>,
                       size_t height,
                       unsigned internalformat) override;
   void DestroyImage(int32_t id) override;
-  int32_t CreateGpuMemoryBufferImage(size_t width,
-                                     size_t height,
-                                     unsigned internalformat,
-                                     unsigned usage) override;
   void SignalQuery(uint32_t query, const base::Closure& callback) override;
   void SetLock(base::Lock*) override;
   void EnsureWorkVisible() override;
   gpu::CommandBufferNamespace GetNamespaceID() const override;
   gpu::CommandBufferId GetCommandBufferID() const override;
-  int32_t GetExtraCommandBufferData() const override;
+  int32_t GetStreamId() const override;
+  void FlushOrderingBarrierOnStream(int32_t stream_id) override;
   uint64_t GenerateFenceSyncRelease() override;
   bool IsFenceSyncRelease(uint64_t release) override;
   bool IsFenceSyncFlushed(uint64_t release) override;
@@ -80,7 +77,10 @@ class Context : public base::RefCountedThreadSafe<Context>,
   bool IsFenceSyncReleased(uint64_t release) override;
   void SignalSyncToken(const gpu::SyncToken& sync_token,
                        const base::Closure& callback) override;
-  bool CanWaitUnverifiedSyncToken(const gpu::SyncToken* sync_token) override;
+  void WaitSyncTokenHint(const gpu::SyncToken& sync_token) override;
+  bool CanWaitUnverifiedSyncToken(const gpu::SyncToken& sync_token) override;
+  void AddLatencyInfo(
+      const std::vector<ui::LatencyInfo>& latency_info) override;
 
   // Called by ThreadState to set the needed global variables when this context
   // is current.
@@ -106,6 +106,7 @@ class Context : public base::RefCountedThreadSafe<Context>,
   bool is_destroyed_;
   gpu::GpuPreferences gpu_preferences_;
   const gpu::GpuDriverBugWorkarounds gpu_driver_bug_workarounds_;
+  std::unique_ptr<gpu::TransferBufferManager> transfer_buffer_manager_;
   std::unique_ptr<gpu::CommandBufferService> command_buffer_;
   std::unique_ptr<gpu::gles2::GLES2CmdHelper> gles2_cmd_helper_;
   std::unique_ptr<gpu::gles2::GLES2Decoder> decoder_;

@@ -4,8 +4,13 @@
 
 #import <EarlGrey/EarlGrey.h>
 
+#include "base/format_macros.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/sys_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #import "base/test/ios/wait_util.h"
 #include "components/content_settings/core/common/content_settings.h"
+#include "ios/chrome/grit/ios_strings.h"
 #include "ios/chrome/test/app/settings_test_util.h"
 #import "ios/chrome/test/app/tab_test_util.h"
 #include "ios/chrome/test/app/web_view_interaction_test_util.h"
@@ -15,6 +20,11 @@
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
 #import "ios/web/public/test/http_server.h"
 #include "ios/web/public/test/http_server_util.h"
+#include "ui/base/l10n/l10n_util.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 using chrome_test_util::AssertMainTabCount;
 using chrome_test_util::OmniboxText;
@@ -23,8 +33,16 @@ using chrome_test_util::WebViewContainingText;
 using web::test::HttpServer;
 
 namespace {
+// URL of the file-based page supporting these tests.
 const char kTestURL[] =
     "http://ios/testing/data/http_server_files/window_open.html";
+// Returns the text used for the blocked popup infobar when |blocked_count|
+// popups are blocked.
+NSString* GetBlockedPopupInfobarText(size_t blocked_count) {
+  return base::SysUTF16ToNSString(l10n_util::GetStringFUTF16(
+      IDS_IOS_POPUPS_BLOCKED_MOBILE,
+      base::UTF8ToUTF16(base::StringPrintf("%" PRIuS, blocked_count))));
+}
 }  // namespace
 
 // Test case for opening child windows by DOM.
@@ -58,6 +76,25 @@ const char kTestURL[] =
 - (void)testLinkWithBlankTargetWithImmediateClose {
   TapWebViewElementWithId("webScenarioWindowOpenBlankTargetWithImmediateClose");
   AssertMainTabCount(1);
+}
+
+// Tests that sessionStorage content is available for windows opened by DOM via
+// target="_blank" links.
+- (void)testLinkWithBlankTargetSessionStorage {
+  using chrome_test_util::ExecuteJavaScript;
+
+  __unsafe_unretained NSError* error = nil;
+  ExecuteJavaScript(@"sessionStorage.setItem('key', 'value');", &error);
+  GREYAssert(!error, @"Error during script execution: %@", error);
+
+  TapWebViewElementWithId("webScenarioWindowOpenSameURLWithBlankTarget");
+  AssertMainTabCount(2);
+  [[EarlGrey selectElementWithMatcher:WebViewContainingText("Expected result")]
+      assertWithMatcher:grey_notNil()];
+
+  id value = ExecuteJavaScript(@"sessionStorage.getItem('key');", &error);
+  GREYAssert(!error, @"Error during script execution: %@", error);
+  GREYAssert([value isEqual:@"value"], @"sessionStorage is not shared");
 }
 
 // Tests a link with target="_blank".
@@ -167,6 +204,17 @@ const char kTestURL[] =
 - (void)testCloseWindowNotOpenByDOM {
   TapWebViewElementWithId("webScenarioWindowClose");
   AssertMainTabCount(1);
+}
+
+// Tests that popup blocking works when a popup is injected into a window before
+// its initial load is committed.
+- (void)testBlockPopupInjectedIntoOpenedWindow {
+  chrome_test_util::SetContentSettingsBlockPopups(CONTENT_SETTING_BLOCK);
+  TapWebViewElementWithId("webScenarioOpenWindowAndInjectPopup");
+  NSString* infobarText = GetBlockedPopupInfobarText(1);
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityLabel(infobarText)]
+      assertWithMatcher:grey_notNil()];
+  AssertMainTabCount(2);
 }
 
 @end

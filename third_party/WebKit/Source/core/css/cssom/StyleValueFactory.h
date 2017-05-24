@@ -7,18 +7,20 @@
 
 #include "core/CSSPropertyNames.h"
 #include "core/css/cssom/CSSStyleValue.h"
-#include "wtf/Allocator.h"
+#include "platform/wtf/Allocator.h"
 
 namespace blink {
 
 class CSSValue;
 
-class StyleValueFactory {
+class CORE_EXPORT StyleValueFactory {
   STATIC_ONLY(StyleValueFactory);
 
  public:
-  static CSSStyleValueVector cssValueToStyleValueVector(CSSPropertyID,
+  static CSSStyleValueVector CssValueToStyleValueVector(CSSPropertyID,
                                                         const CSSValue&);
+  // If you don't have complex CSS properties, use this one.
+  static CSSStyleValueVector CssValueToStyleValueVector(const CSSValue&);
 };
 
 }  // namespace blink

@@ -3,6 +3,8 @@
 <script src="../../../resources/testharness.js"></script>
 <script src="../../../resources/testharnessreport.js"></script>
 <script src="../../../resources/bluetooth/bluetooth-helpers.js"></script>
+<script src="../../../resources/bluetooth/web-bluetooth-test.js"></script>
+<script src="../../../resources/mojo-helpers.js"></script>
 <script>
 'use strict';
 promise_test(() => {
@@ -24,8 +26,7 @@ promise_test(() => {
                   'UUID (lowercase hex characters e.g. ' +
                   '\'00001234-0000-1000-8000-00805f9b34fb\'), ' +
                   'or recognized standard name from ' +
-                  'https://developer.bluetooth.org/gatt/descriptors/' +
-                  'Pages/DescriptorsHomePage.aspx' +
+                  'https://www.bluetooth.com/specifications/gatt/descriptors' +
                   ' e.g. \'gatt.characteristic_presentation_format\'.',
               'TypeError'));
 

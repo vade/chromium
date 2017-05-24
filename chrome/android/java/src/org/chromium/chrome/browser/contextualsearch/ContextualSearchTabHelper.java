@@ -118,6 +118,9 @@ public class ContextualSearchTabHelper
         if (mTemplateUrlObserver != null) {
             TemplateUrlService.getInstance().removeObserver(mTemplateUrlObserver);
         }
+        if (NetworkChangeNotifier.isInitialized()) {
+            NetworkChangeNotifier.removeConnectionTypeObserver(this);
+        }
         removeContextualSearchHooks(mBaseContentViewCore);
         mBaseContentViewCore = null;
     }
@@ -191,7 +194,7 @@ public class ContextualSearchTabHelper
         if (mGestureStateListener == null && manager != null) {
             mGestureStateListener = manager.getGestureStateListener();
             cvc.addGestureStateListener(mGestureStateListener);
-            cvc.setContextualSearchClient(manager);
+            cvc.setSelectionClient(manager);
         }
     }
 
@@ -205,7 +208,7 @@ public class ContextualSearchTabHelper
         if (mGestureStateListener != null) {
             cvc.removeGestureStateListener(mGestureStateListener);
             mGestureStateListener = null;
-            cvc.setContextualSearchClient(null);
+            cvc.setSelectionClient(null);
         }
     }
 

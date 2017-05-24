@@ -60,7 +60,7 @@ void TouchAccessibilityEnabler::HandleTouchEvent(const ui::TouchEvent& event) {
   DCHECK(!(event.flags() & ui::EF_TOUCH_ACCESSIBILITY));
   const ui::EventType type = event.type();
   const gfx::PointF& location = event.location_f();
-  const int touch_id = event.touch_id();
+  const int touch_id = event.pointer_details().id;
 
   if (type == ui::ET_TOUCH_PRESSED) {
     touch_locations_.insert(std::pair<int, gfx::PointF>(touch_id, location));
@@ -86,7 +86,7 @@ void TouchAccessibilityEnabler::HandleTouchEvent(const ui::TouchEvent& event) {
       return;
     }
   } else {
-    NOTREACHED() << "Unexpected event type received: " << event.name();
+    NOTREACHED() << "Unexpected event type received: " << event.GetName();
     return;
   }
 
@@ -109,6 +109,7 @@ void TouchAccessibilityEnabler::HandleTouchEvent(const ui::TouchEvent& event) {
     state_ = TWO_FINGERS_DOWN;
     two_finger_start_time_ = Now();
     StartTimer();
+    delegate_->OnTwoFingerTouchStart();
   }
 }
 
@@ -130,8 +131,10 @@ void TouchAccessibilityEnabler::StartTimer() {
 }
 
 void TouchAccessibilityEnabler::CancelTimer() {
-  if (timer_.IsRunning())
+  if (timer_.IsRunning()) {
     timer_.Stop();
+    delegate_->OnTwoFingerTouchStop();
+  }
 }
 
 void TouchAccessibilityEnabler::OnTimer() {

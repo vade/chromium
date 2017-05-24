@@ -11,6 +11,8 @@
 
 #include "base/bind.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/values.h"
 #include "components/certificate_transparency/log_dns_client.h"
 #include "crypto/sha2.h"
 #include "net/base/hash_value.h"
@@ -20,19 +22,15 @@
 #include "net/cert/merkle_tree_leaf.h"
 #include "net/cert/signed_certificate_timestamp.h"
 #include "net/cert/x509_certificate.h"
+#include "net/log/net_log.h"
 
 using net::SHA256HashValue;
-using net::ct::LogEntry;
 using net::ct::MerkleAuditProof;
 using net::ct::MerkleTreeLeaf;
 using net::ct::SignedCertificateTimestamp;
 using net::ct::SignedTreeHead;
 
 // Overview of the process for auditing CT log entries
-//
-// A CT log entry, represented by net::ct::LogEntry, is made up of the
-// end-entity certificate and the Signed Certificate Timestamp associated with
-// it.
 //
 // In this file, obsered CT log entries are audited for inclusion in the CT log.
 // A pre-requirement for auditing a log entry is having a Signed Tree Head (STH)
@@ -166,6 +164,21 @@ bool IsSCTReadyForAudit(base::Time sth_timestamp, base::Time sct_timestamp) {
   return sct_timestamp + kMaximumMergeDelay < sth_timestamp;
 }
 
+std::unique_ptr<base::Value> NetLogEntryAuditingEventCallback(
+    const SHA256HashValue* log_entry,
+    base::StringPiece log_id,
+    bool success,
+    net::NetLogCaptureMode capture_mode) {
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
+
+  dict->SetString("log_entry",
+                  base::HexEncode(log_entry->data, crypto::kSHA256Length));
+  dict->SetString("log_id", base::HexEncode(log_id.data(), log_id.size()));
+  dict->SetBoolean("success", success);
+
+  return std::move(dict);
+}
+
 }  // namespace
 
 // The entry that is being audited.
@@ -200,6 +213,27 @@ struct SingleTreeTracker::EntryAuditState {
   explicit EntryAuditState(AuditState state) : state(state) {}
 };
 
+class SingleTreeTracker::NetworkObserver
+    : public net::NetworkChangeNotifier::NetworkChangeObserver {
+ public:
+  explicit NetworkObserver(SingleTreeTracker* parent) : parent_(parent) {
+    net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
+  }
+
+  ~NetworkObserver() override {
+    net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
+  }
+
+  // net::NetworkChangeNotifier::NetworkChangeObserver implementation.
+  void OnNetworkChanged(
+      net::NetworkChangeNotifier::ConnectionType type) override {
+    parent_->ResetPendingQueue();
+  }
+
+ private:
+  SingleTreeTracker* parent_;
+};
+
 // Orders entries by the SCT timestamp. In case of tie, which is very unlikely
 // as it requires two SCTs issued from a log at exactly the same time, order
 // by leaf hash.
@@ -214,16 +248,21 @@ bool SingleTreeTracker::OrderByTimestamp::operator()(
 
 SingleTreeTracker::SingleTreeTracker(
     scoped_refptr<const net::CTLogVerifier> ct_log,
-    LogDnsClient* dns_client)
+    LogDnsClient* dns_client,
+    net::NetLog* net_log)
     : ct_log_(std::move(ct_log)),
       checked_entries_(kCheckedEntriesCacheSize),
       dns_client_(dns_client),
+      net_log_(net::NetLogWithSource::Make(
+          net_log,
+          net::NetLogSourceType::CT_TREE_STATE_TRACKER)),
+      network_observer_(new NetworkObserver(this)),
       weak_factory_(this) {
   memory_pressure_listener_.reset(new base::MemoryPressureListener(base::Bind(
       &SingleTreeTracker::OnMemoryPressure, base::Unretained(this))));
 }
 
-SingleTreeTracker::~SingleTreeTracker() {}
+SingleTreeTracker::~SingleTreeTracker() = default;
 
 void SingleTreeTracker::OnSCTVerified(net::X509Certificate* cert,
                                       const SignedCertificateTimestamp* sct) {
@@ -326,6 +365,10 @@ void SingleTreeTracker::NewSTHObserved(const SignedTreeHead& sth) {
   ProcessPendingEntries();
 }
 
+void SingleTreeTracker::ResetPendingQueue() {
+  pending_entries_.clear();
+}
+
 SingleTreeTracker::SCTInclusionStatus
 SingleTreeTracker::GetLogEntryInclusionStatus(
     net::X509Certificate* cert,
@@ -368,6 +411,7 @@ void SingleTreeTracker::ProcessPendingEntries() {
       break;
     } else if (result == net::ERR_NAME_RESOLUTION_FAILED) {
       LogInclusionCheckResult(DNS_QUERY_NOT_POSSIBLE);
+      LogAuditResultToNetLog(it->first, false);
       // Lookup failed due to bad DNS configuration, erase the entry and
       // continue to the next one.
       it = pending_entries_.erase(it);
@@ -419,8 +463,9 @@ void SingleTreeTracker::OnAuditProofObtained(const EntryToAudit& entry,
   DCHECK_EQ(it->second.state, INCLUSION_PROOF_REQUESTED);
 
   if (net_error != net::OK) {
-    // XXX(eranm): Should failures be cached? For now, they are not.
+    // TODO(eranm): Should failures be cached? For now, they are not.
     LogInclusionCheckResult(FAILED_GETTING_INCLUSION_PROOF);
+    LogAuditResultToNetLog(entry, false);
     pending_entries_.erase(it);
     return;
   }
@@ -430,6 +475,7 @@ void SingleTreeTracker::OnAuditProofObtained(const EntryToAudit& entry,
 
   bool verified = ct_log_->VerifyAuditProof(it->second.proof,
                                             it->second.root_hash, leaf_hash);
+  LogAuditResultToNetLog(entry, verified);
 
   if (!verified) {
     LogInclusionCheckResult(GOT_INVALID_INCLUSION_PROOF);
@@ -453,6 +499,16 @@ void SingleTreeTracker::OnMemoryPressure(
       checked_entries_.Clear();
       break;
   }
+}
+
+void SingleTreeTracker::LogAuditResultToNetLog(const EntryToAudit& entry,
+                                               bool success) {
+  net::NetLogParametersCallback net_log_callback =
+      base::Bind(&NetLogEntryAuditingEventCallback, &entry.leaf_hash,
+                 ct_log_->key_id(), success);
+
+  net_log_.AddEvent(net::NetLogEventType::CT_LOG_ENTRY_AUDITED,
+                    net_log_callback);
 }
 
 }  // namespace certificate_transparency

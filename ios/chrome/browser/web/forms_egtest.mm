@@ -4,48 +4,114 @@
 
 #import <XCTest/XCTest.h>
 
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/strings/grit/components_strings.h"
-#import "ios/chrome/browser/ui/commands/generic_chrome_command.h"
-#include "ios/chrome/browser/ui/commands/ios_command_ids.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
 #include "ios/chrome/test/app/navigation_test_util.h"
 #include "ios/chrome/test/app/web_view_interaction_test_util.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
+#import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
 #import "ios/testing/wait_util.h"
 #import "ios/web/public/test/http_server.h"
 #import "ios/web/public/test/http_server_util.h"
-#include "ios/web/public/test/response_providers/html_response_provider.h"
-#include "ios/web/public/test/response_providers/html_response_provider_impl.h"
+#include "ios/web/public/test/response_providers/data_response_provider.h"
+#include "ios/web/public/test/url_test_util.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
+using chrome_test_util::ButtonWithAccessibilityLabelId;
+using chrome_test_util::OmniboxText;
+using chrome_test_util::WebViewContainingText;
 
 namespace {
 
-// URL for a generic website in the user navigation flow.
-const char kGenericUrl[] = "http://generic";
-
-// URL for the server to print the HTTP method and the request body.
-const char kPrintFormDataUrl[] = "http://printFormData";
-
-// URL for the server that redirects to kPrintPostData with a 302.
-const char kRedirectUrl[] = "http://redirect";
-
-// URL for the server to return a page that posts a form with some data to
-// |kPrintPostData|.
-const char kFormUrl[] = "http://formURL";
-
-// URL for the server to return a page that posts to |kRedirect|.
-const char kRedirectFormUrl[] = "http://redirectFormURL";
+// Response shown on the page of |GetDestinationUrl|.
+const char kDestinationText[] = "bar!";
 
 // Label for the button in the form.
-const char kSubmitButton[] = "Submit";
+const char kSubmitButtonLabel[] = "submit";
 
-// Expected response from the server.
-const char kExpectedPostData[] = "POST Data=Unicorn";
+// Html form template with a submission button named "submit".
+const char* kFormHtmlTemplate =
+    "<form method='post' action='%s'> submit: "
+    "<input value='textfield' id='textfield' type='text'></label>"
+    "<input type='submit' value='submit' id='submit'>"
+    "</form>";
+
+// GURL of a generic website in the user navigation flow.
+const GURL GetGenericUrl() {
+  return web::test::HttpServer::MakeUrl("http://generic");
+}
+
+// GURL of a page with a form that posts data to |GetDestinationUrl|.
+const GURL GetFormUrl() {
+  return web::test::HttpServer::MakeUrl("http://form");
+}
+
+// GURL of the page to which the |GetFormUrl| posts data to.
+const GURL GetDestinationUrl() {
+  return web::test::HttpServer::MakeUrl("http://destination");
+}
+
+#pragma mark - TestFormRedirectResponseProvider
+
+// URL that redirects to |GetDestinationUrl| with a 302.
+const GURL GetRedirectUrl() {
+  return web::test::HttpServer::MakeUrl("http://redirect");
+}
+
+// URL to return a page that posts to |GetRedirectUrl|.
+const GURL GetRedirectFormUrl() {
+  return web::test::HttpServer::MakeUrl("http://formRedirect");
+}
+
+// A ResponseProvider that provides html response or a redirect.
+class TestFormRedirectResponseProvider : public web::DataResponseProvider {
+ public:
+  // TestResponseProvider implementation.
+  bool CanHandleRequest(const Request& request) override;
+  void GetResponseHeadersAndBody(
+      const Request& request,
+      scoped_refptr<net::HttpResponseHeaders>* headers,
+      std::string* response_body) override;
+};
+
+bool TestFormRedirectResponseProvider::CanHandleRequest(
+    const Request& request) {
+  const GURL& url = request.url;
+  return url == GetDestinationUrl() || url == GetRedirectUrl() ||
+         url == GetRedirectFormUrl();
+}
+
+void TestFormRedirectResponseProvider::GetResponseHeadersAndBody(
+    const Request& request,
+    scoped_refptr<net::HttpResponseHeaders>* headers,
+    std::string* response_body) {
+  const GURL& url = request.url;
+  if (url == GetRedirectUrl()) {
+    *headers = web::ResponseProvider::GetRedirectResponseHeaders(
+        GetDestinationUrl().spec(), net::HTTP_FOUND);
+    return;
+  }
+
+  *headers = web::ResponseProvider::GetDefaultResponseHeaders();
+  if (url == GetRedirectFormUrl()) {
+    *response_body =
+        base::StringPrintf(kFormHtmlTemplate, GetRedirectUrl().spec().c_str());
+    return;
+  } else if (url == GetDestinationUrl()) {
+    *response_body = request.method + std::string(" ") + request.body;
+    return;
+  }
+  NOTREACHED();
+}
 
 }  // namespace
 
@@ -55,96 +121,21 @@ const char kExpectedPostData[] = "POST Data=Unicorn";
 
 @implementation FormsTestCase
 
-// Sets up server urls and responses.
-- (void)setUp {
-  [super setUp];
-  std::map<GURL, HtmlResponseProviderImpl::Response> responses;
-
-  const char* formHtml =
-      "<form method=\"post\" action=\"%s\">"
-      "<textarea rows=\"1\" name=\"Data\">Unicorn</textarea>"
-      "<input type=\"submit\" value=\"%s\" id=\"%s\">"
-      "</form>";
-  GURL printFormDataUrl = web::test::HttpServer::MakeUrl(kPrintFormDataUrl);
-
-  const GURL formUrl = web::test::HttpServer::MakeUrl(kFormUrl);
-  responses[formUrl] = HtmlResponseProviderImpl::GetSimpleResponse(
-      base::StringPrintf(formHtml, printFormDataUrl.spec().c_str(),
-                         kSubmitButton, kSubmitButton));
-
-  const GURL redirectFormUrl = web::test::HttpServer::MakeUrl(kRedirectFormUrl);
-  const std::string redirectFormResponse = base::StringPrintf(
-      formHtml, web::test::HttpServer::MakeUrl(kRedirectUrl).spec().c_str(),
-      kSubmitButton, kSubmitButton);
-  responses[redirectFormUrl] =
-      HtmlResponseProviderImpl::GetSimpleResponse(redirectFormResponse);
-
-  const GURL redirectUrl = web::test::HttpServer::MakeUrl(kRedirectUrl);
-  responses[redirectUrl] = HtmlResponseProviderImpl::GetRedirectResponse(
-      printFormDataUrl, net::HTTP_FOUND);
-
-  std::unique_ptr<web::DataResponseProvider> provider(
-      new HtmlResponseProvider(responses));
-  web::test::SetUpHttpServer(std::move(provider));
-}
-
-// Submits the html form and verifies the destination url.
-- (void)submitForm {
-  chrome_test_util::TapWebViewElementWithId(kSubmitButton);
-
-  GURL url = web::test::HttpServer::MakeUrl(kPrintFormDataUrl);
-  id<GREYMatcher> URLMatcher = chrome_test_util::OmniboxText(url.GetContent());
-  [[EarlGrey selectElementWithMatcher:URLMatcher]
-      assertWithMatcher:grey_notNil()];
-}
-
-// Waits for the |expectedResponse| within the web view.
-- (void)waitForExpectedResponse:(std::string)expectedResponse {
-  [[GREYCondition
-      conditionWithName:@"Waiting for webview to display resulting text."
+// Waits for view with Tab History accessibility ID.
+- (void)waitForTabHistoryView {
+  GREYCondition* condition = [GREYCondition
+      conditionWithName:@"Waiting for Tab History to display."
                   block:^BOOL {
-                    id<GREYMatcher> webViewMatcher =
-                        chrome_test_util::WebViewContainingText(
-                            expectedResponse);
                     NSError* error = nil;
-                    [[EarlGrey selectElementWithMatcher:webViewMatcher]
+                    id<GREYMatcher> tabHistory =
+                        grey_accessibilityID(@"Tab History");
+                    [[EarlGrey selectElementWithMatcher:tabHistory]
                         assertWithMatcher:grey_notNil()
                                     error:&error];
                     return error == nil;
-                  }] waitWithTimeout:5];
-}
-
-// Waits for view with Tab History accessibility ID.
-- (void)waitForTabHistoryView {
-  [[GREYCondition conditionWithName:@"Waiting for Tab History to display."
-                              block:^BOOL {
-                                NSError* error = nil;
-                                id<GREYMatcher> tabHistory =
-                                    grey_accessibilityID(@"Tab History");
-                                [[EarlGrey selectElementWithMatcher:tabHistory]
-                                    assertWithMatcher:grey_notNil()
-                                                error:&error];
-                                return error == nil;
-                              }] waitWithTimeout:5];
-}
-
-// Reloads the web view and waits for the loading to complete.
-// TODO(crbug.com/638674): Evaluate if this can move to shared code
-- (void)reloadPage {
-  base::scoped_nsobject<GenericChromeCommand> reloadCommand(
-      [[GenericChromeCommand alloc] initWithTag:IDC_RELOAD]);
-  chrome_test_util::RunCommandWithActiveViewController(reloadCommand);
-
-  [ChromeEarlGrey waitForPageToFinishLoading];
-}
-
-// Navigates back to the previous webpage.
-- (void)goBack {
-  base::scoped_nsobject<GenericChromeCommand> backCommand(
-      [[GenericChromeCommand alloc] initWithTag:IDC_BACK]);
-  chrome_test_util::RunCommandWithActiveViewController(backCommand);
-
-  [ChromeEarlGrey waitForPageToFinishLoading];
+                  }];
+  GREYAssert([condition waitWithTimeout:testing::kWaitForUIElementTimeout],
+             @"Tab History View not displayed.");
 }
 
 // Open back navigation history.
@@ -153,17 +144,7 @@ const char kExpectedPostData[] = "POST Data=Unicorn";
       performAction:grey_longPress()];
 }
 
-// Navigates forward to a previous webpage.
-// TODO(crbug.com/638674): Evaluate if this can move to shared code
-- (void)goForward {
-  base::scoped_nsobject<GenericChromeCommand> forwardCommand(
-      [[GenericChromeCommand alloc] initWithTag:IDC_FORWARD]);
-  chrome_test_util::RunCommandWithActiveViewController(forwardCommand);
-
-  [ChromeEarlGrey waitForPageToFinishLoading];
-}
-
-// Accepts the warning that the form POST data will be resent.
+// Accepts the warning that the form POST data will be reposted.
 - (void)confirmResendWarning {
   id<GREYMatcher> resendWarning =
       chrome_test_util::ButtonWithAccessibilityLabelId(
@@ -172,88 +153,139 @@ const char kExpectedPostData[] = "POST Data=Unicorn";
       performAction:grey_longPress()];
 }
 
-// Tests whether the request data is resent correctly.
-- (void)testFormsResendPostData {
-  [ChromeEarlGrey loadURL:web::test::HttpServer::MakeUrl(kFormUrl)];
+// Sets up a basic simple http server for form test with a form located at
+// |GetFormUrl|, and posts data to |GetDestinationUrl| upon submission.
+- (void)setUpFormTestSimpleHttpServer {
+  std::map<GURL, std::string> responses;
+  responses[GetGenericUrl()] = "A generic page";
+  responses[GetFormUrl()] =
+      base::StringPrintf(kFormHtmlTemplate, GetDestinationUrl().spec().c_str());
+  responses[GetDestinationUrl()] = kDestinationText;
+  web::test::SetUpSimpleHttpServer(responses);
+}
 
-  [self submitForm];
-  [self waitForExpectedResponse:kExpectedPostData];
+// Tests that a POST followed by reloading the destination page resends data.
+- (void)testRepostFormAfterReload {
+  [self setUpFormTestSimpleHttpServer];
+  const GURL destinationURL = GetDestinationUrl();
 
-  [self reloadPage];
+  [ChromeEarlGrey loadURL:GetFormUrl()];
+  chrome_test_util::TapWebViewElementWithId(kSubmitButtonLabel);
+  [[EarlGrey selectElementWithMatcher:WebViewContainingText(kDestinationText)]
+      assertWithMatcher:grey_notNil()];
+  [[EarlGrey selectElementWithMatcher:OmniboxText(destinationURL.GetContent())]
+      assertWithMatcher:grey_notNil()];
+
+  [ChromeEarlGrey reload];
   [self confirmResendWarning];
 
-  [self waitForExpectedResponse:kExpectedPostData];
+  [[EarlGrey selectElementWithMatcher:WebViewContainingText(kDestinationText)]
+      assertWithMatcher:grey_notNil()];
+  [[EarlGrey selectElementWithMatcher:OmniboxText(destinationURL.GetContent())]
+      assertWithMatcher:grey_notNil()];
 }
 
 // Tests that a POST followed by navigating to a new page and then tapping back
 // to the form result page resends data.
-- (void)testFormsResendPostDataAfterTappingBack {
-  [ChromeEarlGrey loadURL:web::test::HttpServer::MakeUrl(kFormUrl)];
+- (void)testRepostFormAfterTappingBack {
+  [self setUpFormTestSimpleHttpServer];
+  const GURL destinationURL = GetDestinationUrl();
 
-  [self submitForm];
+  [ChromeEarlGrey loadURL:GetFormUrl()];
+  chrome_test_util::TapWebViewElementWithId(kSubmitButtonLabel);
+  [[EarlGrey selectElementWithMatcher:WebViewContainingText(kDestinationText)]
+      assertWithMatcher:grey_notNil()];
+  [[EarlGrey selectElementWithMatcher:OmniboxText(destinationURL.GetContent())]
+      assertWithMatcher:grey_notNil()];
 
-  // Go to a new page.
-  [ChromeEarlGrey loadURL:web::test::HttpServer::MakeUrl(kGenericUrl)];
-
-  // Go back and check that the data is resent.
-  [self goBack];
+  // Go to a new page and go back and check that the data is reposted.
+  [ChromeEarlGrey loadURL:GetGenericUrl()];
+  [ChromeEarlGrey goBack];
   [self confirmResendWarning];
-  [self waitForExpectedResponse:kExpectedPostData];
+  [[EarlGrey selectElementWithMatcher:WebViewContainingText(kDestinationText)]
+      assertWithMatcher:grey_notNil()];
+  [[EarlGrey selectElementWithMatcher:OmniboxText(destinationURL.GetContent())]
+      assertWithMatcher:grey_notNil()];
 }
 
 // Tests that a POST followed by tapping back to the form page and then tapping
 // forward to the result page resends data.
-- (void)testFormsResendPostDataAfterTappingBackAndForward {
-  [ChromeEarlGrey loadURL:web::test::HttpServer::MakeUrl(kFormUrl)];
-  [self submitForm];
+- (void)testRepostFormAfterTappingBackAndForward {
+  [self setUpFormTestSimpleHttpServer];
+  const GURL destinationURL = GetDestinationUrl();
 
-  [self goBack];
-  [self goForward];
+  [ChromeEarlGrey loadURL:GetFormUrl()];
+  chrome_test_util::TapWebViewElementWithId(kSubmitButtonLabel);
+  [[EarlGrey selectElementWithMatcher:WebViewContainingText(kDestinationText)]
+      assertWithMatcher:grey_notNil()];
+  [[EarlGrey selectElementWithMatcher:OmniboxText(destinationURL.GetContent())]
+      assertWithMatcher:grey_notNil()];
+
+  [ChromeEarlGrey goBack];
+  [ChromeEarlGrey goForward];
   [self confirmResendWarning];
-  [self waitForExpectedResponse:kExpectedPostData];
+  [[EarlGrey selectElementWithMatcher:WebViewContainingText(kDestinationText)]
+      assertWithMatcher:grey_notNil()];
+  [[EarlGrey selectElementWithMatcher:OmniboxText(destinationURL.GetContent())]
+      assertWithMatcher:grey_notNil()];
 }
 
 // Tests that a POST followed by a new request and then index navigation to get
 // back to the result page resends data.
-- (void)testFormsResendPostDataAfterIndexNavigation {
-  [ChromeEarlGrey loadURL:web::test::HttpServer::MakeUrl(kFormUrl)];
-  [self submitForm];
+- (void)testRepostFormAfterIndexNavigation {
+  [self setUpFormTestSimpleHttpServer];
+  const GURL destinationURL = GetDestinationUrl();
 
-  // Go to a new page.
-  [ChromeEarlGrey loadURL:web::test::HttpServer::MakeUrl(kGenericUrl)];
+  [ChromeEarlGrey loadURL:GetFormUrl()];
+  chrome_test_util::TapWebViewElementWithId(kSubmitButtonLabel);
+  [[EarlGrey selectElementWithMatcher:WebViewContainingText(kDestinationText)]
+      assertWithMatcher:grey_notNil()];
+  [[EarlGrey selectElementWithMatcher:OmniboxText(destinationURL.GetContent())]
+      assertWithMatcher:grey_notNil()];
 
+  // Go to a new page and go back to destination through back history.
+  [ChromeEarlGrey loadURL:GetGenericUrl()];
   [self openBackHistory];
   [self waitForTabHistoryView];
-
-  const GURL printURL = web::test::HttpServer::MakeUrl(kPrintFormDataUrl);
-  id<GREYMatcher> historyItem =
-      grey_text(base::SysUTF8ToNSString(printURL.spec()));
+  id<GREYMatcher> historyItem = grey_text(
+      base::SysUTF16ToNSString(web::GetDisplayTitleForUrl(destinationURL)));
   [[EarlGrey selectElementWithMatcher:historyItem] performAction:grey_tap()];
-
   [ChromeEarlGrey waitForPageToFinishLoading];
 
   [self confirmResendWarning];
-  [self waitForExpectedResponse:kExpectedPostData];
+  [[EarlGrey selectElementWithMatcher:WebViewContainingText(kDestinationText)]
+      assertWithMatcher:grey_notNil()];
+  [[EarlGrey selectElementWithMatcher:OmniboxText(destinationURL.GetContent())]
+      assertWithMatcher:grey_notNil()];
 }
 
-// When data is not re-sent, the request is done with a GET method.
-- (void)testFormsDontResendPostData {
-  [ChromeEarlGrey loadURL:web::test::HttpServer::MakeUrl(kFormUrl)];
-  [self submitForm];
+// When data is not reposted, the request is canceled.
+- (void)testRepostFormCancelling {
+  [self setUpFormTestSimpleHttpServer];
+  const GURL destinationURL = GetDestinationUrl();
 
-  [self reloadPage];
+  [ChromeEarlGrey loadURL:GetFormUrl()];
+  chrome_test_util::TapWebViewElementWithId(kSubmitButtonLabel);
+  [[EarlGrey selectElementWithMatcher:WebViewContainingText(kDestinationText)]
+      assertWithMatcher:grey_notNil()];
+  [[EarlGrey selectElementWithMatcher:OmniboxText(destinationURL.GetContent())]
+      assertWithMatcher:grey_notNil()];
+
+  [ChromeEarlGrey goBack];
+  [ChromeEarlGrey goForward];
 
   // Abort the reload.
+  // TODO (crbug.com/705020): Use something like ElementToDismissContextMenu
+  // to cancel form repost.
   if (IsIPadIdiom()) {
     // On tablet, dismiss the popover.
-    base::scoped_nsobject<GREYElementMatcherBlock> matcher([
-        [GREYElementMatcherBlock alloc]
+    GREYElementMatcherBlock* matcher = [[GREYElementMatcherBlock alloc]
         initWithMatchesBlock:^BOOL(UIView* view) {
           return [NSStringFromClass([view class]) hasPrefix:@"UIDimmingView"];
         }
         descriptionBlock:^(id<GREYDescription> description) {
           [description appendText:@"class prefixed with UIDimmingView"];
-        }]);
+        }];
     [[EarlGrey selectElementWithMatcher:matcher]
         performAction:grey_tapAtPoint(CGPointMake(50.0f, 50.0f))];
   } else {
@@ -261,27 +293,66 @@ const char kExpectedPostData[] = "POST Data=Unicorn";
     [[EarlGrey selectElementWithMatcher:chrome_test_util::CancelButton()]
         performAction:grey_tap()];
   }
-  // Check that the POST is changed to a GET
-  [self waitForExpectedResponse:"GET"];
+  [ChromeEarlGrey waitForPageToFinishLoading];
+
+  // Verify that navigation was cancelled, and forward navigation is possible.
+  [[EarlGrey selectElementWithMatcher:WebViewContainingText(kSubmitButtonLabel)]
+      assertWithMatcher:grey_notNil()];
+  [[EarlGrey selectElementWithMatcher:OmniboxText(GetFormUrl().GetContent())]
+      assertWithMatcher:grey_notNil()];
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::ForwardButton()]
+      assertWithMatcher:grey_interactable()];
+}
+
+// Tests that pressing the button on a POST-based form changes the page and that
+// the back button works as expected afterwards.
+- (void)testGoBackButtonAfterFormSubmission {
+  [self setUpFormTestSimpleHttpServer];
+  GURL destinationURL = GetDestinationUrl();
+
+  [ChromeEarlGrey loadURL:GetFormUrl()];
+  chrome_test_util::TapWebViewElementWithId(kSubmitButtonLabel);
+  [[EarlGrey selectElementWithMatcher:WebViewContainingText(kDestinationText)]
+      assertWithMatcher:grey_notNil()];
+  [[EarlGrey selectElementWithMatcher:OmniboxText(destinationURL.GetContent())]
+      assertWithMatcher:grey_notNil()];
+
+  // Go back and verify the browser navigates to the original URL.
+  [ChromeEarlGrey goBack];
+  [[EarlGrey selectElementWithMatcher:WebViewContainingText(kSubmitButtonLabel)]
+      assertWithMatcher:grey_notNil()];
+  [[EarlGrey selectElementWithMatcher:OmniboxText(GetFormUrl().GetContent())]
+      assertWithMatcher:grey_notNil()];
 }
 
 // Tests that a POST followed by a redirect does not show the popup.
-- (void)testFormsDontResendPostDataAfterRedirect {
-  [ChromeEarlGrey loadURL:web::test::HttpServer::MakeUrl(kRedirectFormUrl)];
+- (void)testRepostFormCancellingAfterRedirect {
+  web::test::SetUpHttpServer(
+      base::MakeUnique<TestFormRedirectResponseProvider>());
+  const GURL destinationURL = GetDestinationUrl();
+
+  [ChromeEarlGrey loadURL:GetRedirectFormUrl()];
+
   // Submit the form, which redirects before printing the data.
-  [self submitForm];
+  chrome_test_util::TapWebViewElementWithId(kSubmitButtonLabel);
+
   // Check that the redirect changes the POST to a GET.
-  [self waitForExpectedResponse:"GET"];
-  [self reloadPage];
+  [[EarlGrey selectElementWithMatcher:WebViewContainingText("GET")]
+      assertWithMatcher:grey_notNil()];
+  [[EarlGrey selectElementWithMatcher:OmniboxText(destinationURL.GetContent())]
+      assertWithMatcher:grey_notNil()];
+
+  [ChromeEarlGrey reload];
 
   // Check that the popup did not show
   id<GREYMatcher> resendWarning =
-      chrome_test_util::ButtonWithAccessibilityLabelId(
-          IDS_HTTP_POST_WARNING_RESEND);
+      ButtonWithAccessibilityLabelId(IDS_HTTP_POST_WARNING_RESEND);
   [[EarlGrey selectElementWithMatcher:resendWarning]
       assertWithMatcher:grey_nil()];
-
-  [self waitForExpectedResponse:"GET"];
+  [[EarlGrey selectElementWithMatcher:WebViewContainingText("GET")]
+      assertWithMatcher:grey_notNil()];
+  [[EarlGrey selectElementWithMatcher:OmniboxText(destinationURL.GetContent())]
+      assertWithMatcher:grey_notNil()];
 }
 
 @end

@@ -21,6 +21,7 @@
 #include "content/public/common/resource_response.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/redirect_info.h"
+#include "net/url_request/url_request_context_getter.h"
 
 namespace content {
 
@@ -32,15 +33,11 @@ NavigationURLLoaderImplCore::NavigationURLLoaderImplCore(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 
-NavigationURLLoaderImplCore::~NavigationURLLoaderImplCore() {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
-  if (resource_handler_)
-    resource_handler_->Cancel();
-}
+NavigationURLLoaderImplCore::~NavigationURLLoaderImplCore() {}
 
 void NavigationURLLoaderImplCore::Start(
     ResourceContext* resource_context,
+    net::URLRequestContextGetter* url_request_context_getter,
     ServiceWorkerNavigationHandleCore* service_worker_handle_core,
     AppCacheNavigationHandleCore* appcache_handle_core,
     std::unique_ptr<NavigationRequestInfo> request_info,
@@ -55,7 +52,8 @@ void NavigationURLLoaderImplCore::Start(
   // The ResourceDispatcherHostImpl can be null in unit tests.
   if (ResourceDispatcherHostImpl::Get()) {
     ResourceDispatcherHostImpl::Get()->BeginNavigationRequest(
-        resource_context, *request_info, std::move(navigation_ui_data), this,
+        resource_context, url_request_context_getter->GetURLRequestContext(),
+        *request_info, std::move(navigation_ui_data), this,
         service_worker_handle_core, appcache_handle_core);
   }
 }
@@ -72,6 +70,13 @@ void NavigationURLLoaderImplCore::ProceedWithResponse() {
 
   if (resource_handler_)
     resource_handler_->ProceedWithResponse();
+}
+
+void NavigationURLLoaderImplCore::CancelRequestIfNeeded() {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+  if (resource_handler_)
+    resource_handler_->Cancel();
 }
 
 void NavigationURLLoaderImplCore::NotifyRequestRedirected(

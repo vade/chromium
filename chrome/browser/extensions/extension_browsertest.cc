@@ -17,7 +17,8 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/browsertest_util.h"
 #include "chrome/browser/extensions/chrome_test_extension_loader.h"
@@ -56,6 +57,7 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/notification_types.h"
+#include "extensions/browser/test_extension_registry_observer.h"
 #include "extensions/browser/uninstall_reason.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_set.h"
@@ -98,9 +100,9 @@ net::URLRequestJob* ExtensionProtocolTestHandler(
 
   return new net::URLRequestFileJob(
       request, network_delegate, resource_path,
-      content::BrowserThread::GetBlockingPool()
-          ->GetTaskRunnerWithShutdownBehavior(
-              base::SequencedWorkerPool::SKIP_ON_SHUTDOWN));
+      base::CreateTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+           base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN}));
 }
 
 }  // namespace
@@ -145,6 +147,7 @@ Profile* ExtensionBrowserTest::profile() {
 const Extension* ExtensionBrowserTest::GetExtensionByPath(
     const extensions::ExtensionSet& extensions,
     const base::FilePath& path) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::FilePath extension_path = base::MakeAbsoluteFilePath(path);
   EXPECT_TRUE(!extension_path.empty());
   for (const scoped_refptr<const Extension>& extension : extensions) {
@@ -248,6 +251,7 @@ const Extension* ExtensionBrowserTest::LoadExtensionAsComponentWithManifest(
       profile())->extension_service();
   ExtensionRegistry* registry = ExtensionRegistry::Get(profile());
 
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   std::string manifest;
   if (!base::ReadFileToString(path.Append(manifest_relative_path), &manifest)) {
     return NULL;
@@ -288,6 +292,7 @@ const Extension* ExtensionBrowserTest::LoadAndLaunchApp(
 
 base::FilePath ExtensionBrowserTest::PackExtension(
     const base::FilePath& dir_path) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::FilePath crx_path = temp_dir_.GetPath().AppendASCII("temp.crx");
   if (!base::DeleteFile(crx_path, false)) {
     ADD_FAILURE() << "Failed to delete crx: " << crx_path.value();
@@ -316,6 +321,7 @@ base::FilePath ExtensionBrowserTest::PackExtensionWithOptions(
     const base::FilePath& crx_path,
     const base::FilePath& pem_path,
     const base::FilePath& pem_out_path) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   if (!base::PathExists(dir_path)) {
     ADD_FAILURE() << "Extension dir not found: " << dir_path.value();
     return base::FilePath();
@@ -407,7 +413,6 @@ const Extension* ExtensionBrowserTest::InstallOrUpdateExtension(
   ExtensionService* service =
       extensions::ExtensionSystem::Get(profile())->extension_service();
   ExtensionRegistry* registry = ExtensionRegistry::Get(profile());
-  service->set_show_extensions_prompts(false);
   size_t num_before = registry->enabled_extensions().size();
 
   {
@@ -485,14 +490,21 @@ const Extension* ExtensionBrowserTest::InstallOrUpdateExtension(
 }
 
 void ExtensionBrowserTest::ReloadExtension(const std::string& extension_id) {
-  observer_->Watch(extensions::NOTIFICATION_EXTENSION_LOADED_DEPRECATED,
-                   content::NotificationService::AllSources());
+  extensions::ExtensionRegistry* registry =
+      extensions::ExtensionRegistry::Get(profile());
+  const Extension* extension = registry->GetInstalledExtension(extension_id);
+  ASSERT_TRUE(extension);
+  extensions::TestExtensionRegistryObserver observer(registry, extension_id);
+  extensions::ExtensionSystem::Get(profile())
+      ->extension_service()
+      ->ReloadExtension(extension_id);
+  observer.WaitForExtensionLoaded();
 
-  ExtensionService* service =
-      extensions::ExtensionSystem::Get(profile())->extension_service();
-  service->ReloadExtension(extension_id);
-
-  observer_->Wait();
+  // We need to let other ExtensionRegistryObservers handle the extension load
+  // in order to finish initialization. This has to be done before waiting for
+  // extension views to load, since we only register views after observing
+  // extension load.
+  base::RunLoop().RunUntilIdle();
   observer_->WaitForExtensionViewsToLoad();
 }
 
@@ -500,7 +512,7 @@ void ExtensionBrowserTest::UnloadExtension(const std::string& extension_id) {
   ExtensionService* service = extensions::ExtensionSystem::Get(
       profile())->extension_service();
   service->UnloadExtension(extension_id,
-                           extensions::UnloadedExtensionInfo::REASON_DISABLE);
+                           extensions::UnloadedExtensionReason::DISABLE);
 }
 
 void ExtensionBrowserTest::UninstallExtension(const std::string& extension_id) {

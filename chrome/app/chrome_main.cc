@@ -4,10 +4,11 @@
 
 #include <stdint.h>
 
-#include "build/build_config.h"
 #include "base/command_line.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "chrome/app/chrome_main_delegate.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/features.h"
 #include "content/public/app/content_main.h"
 #include "content/public/common/content_switches.h"
@@ -15,10 +16,11 @@
 #include "ui/gfx/switches.h"
 
 #if BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
-#include "chrome/app/mash/mash_runner.h"
-#include "chrome/common/channel_info.h"
-#include "components/version_info/version_info.h"
 #include "services/service_manager/runner/common/client_util.h"
+#endif
+
+#if defined(OS_MACOSX)
+#include "chrome/app/chrome_main_mac.h"
 #endif
 
 #if defined(OS_WIN)
@@ -84,29 +86,24 @@ int ChromeMain(int argc, const char** argv) {
 #else
   params.argc = argc;
   params.argv = argv;
-#endif
-
-#if !defined(OS_WIN)
   base::CommandLine::Init(params.argc, params.argv);
+#endif  // defined(OS_WIN)
+  base::CommandLine::Init(0, nullptr);
   const base::CommandLine* command_line(base::CommandLine::ForCurrentProcess());
   ALLOW_UNUSED_LOCAL(command_line);
+
+#if defined(OS_LINUX) || defined(OS_MACOSX) || defined(OS_WIN)
+  if (command_line->HasSwitch(switches::kHeadless)) {
+#if defined(OS_MACOSX)
+    SetUpBundleOverrides();
 #endif
-
-#if defined(OS_LINUX)
-  if (command_line->HasSwitch(switches::kHeadless))
-    return headless::HeadlessShellMain(argc, argv);
-#endif  // defined(OS_LINUX)
-
-#if BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
-  version_info::Channel channel = chrome::GetChannel();
-  if (channel == version_info::Channel::CANARY ||
-      channel == version_info::Channel::UNKNOWN) {
-    if (command_line->HasSwitch("mash"))
-      return MashMain();
-    WaitForMashDebuggerIfNecessary();
-    if (service_manager::ServiceManagerIsRemote())
-      params.env_mode = aura::Env::Mode::MUS;
+    return headless::HeadlessShellMain(params);
   }
+#endif  // defined(OS_LINUX) || defined(OS_MACOSX) || defined(OS_WIN)
+
+#if defined(OS_CHROMEOS) && BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
+  if (service_manager::ServiceManagerIsRemote())
+    params.env_mode = aura::Env::Mode::MUS;
 #endif  // BUILDFLAG(ENABLE_PACKAGE_MASH_SERVICES)
 
   int rv = content::ContentMain(params);

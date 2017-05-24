@@ -191,14 +191,12 @@ minInlineSize
 minWidth
 minZoom
 mixBlendMode
-motion
 objectFit
 objectPosition
 offset
 offsetDistance
 offsetPath
 offsetRotate
-offsetRotation
 opacity
 order
 orientation
@@ -226,6 +224,9 @@ paintOrder
 parentRule
 perspective
 perspectiveOrigin
+placeContent
+placeItems
+placeSelf
 pointerEvents
 position
 quotes

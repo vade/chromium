@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 /**
- * @implements {SDK.TargetManager.Observer}
+ * @implements {SDK.SDKModelObserver<!Animation.AnimationModel>}
  * @unrestricted
  */
 Animation.AnimationTimeline = class extends UI.VBox {
@@ -33,7 +33,7 @@ Animation.AnimationTimeline = class extends UI.VBox {
     /** @type {!Map.<string, !Animation.AnimationModel.Animation>} */
     this._animationsMap = new Map();
     SDK.targetManager.addModelListener(SDK.DOMModel, SDK.DOMModel.Events.NodeRemoved, this._nodeRemoved, this);
-    SDK.targetManager.observeTargets(this, SDK.Target.Capability.DOM);
+    SDK.targetManager.observeModels(Animation.AnimationModel, this);
     UI.context.addFlavorChangeListener(SDK.DOMNode, this._nodeChanged, this);
   }
 
@@ -41,41 +41,40 @@ Animation.AnimationTimeline = class extends UI.VBox {
    * @override
    */
   wasShown() {
-    for (var target of SDK.targetManager.targets(SDK.Target.Capability.DOM))
-      this._addEventListeners(target);
+    for (var animationModel of SDK.targetManager.models(Animation.AnimationModel))
+      this._addEventListeners(animationModel);
   }
 
   /**
    * @override
    */
   willHide() {
-    for (var target of SDK.targetManager.targets(SDK.Target.Capability.DOM))
-      this._removeEventListeners(target);
+    for (var animationModel of SDK.targetManager.models(Animation.AnimationModel))
+      this._removeEventListeners(animationModel);
     this._popoverHelper.hidePopover();
   }
 
   /**
    * @override
-   * @param {!SDK.Target} target
+   * @param {!Animation.AnimationModel} animationModel
    */
-  targetAdded(target) {
+  modelAdded(animationModel) {
     if (this.isShowing())
-      this._addEventListeners(target);
+      this._addEventListeners(animationModel);
   }
 
   /**
    * @override
-   * @param {!SDK.Target} target
+   * @param {!Animation.AnimationModel} animationModel
    */
-  targetRemoved(target) {
-    this._removeEventListeners(target);
+  modelRemoved(animationModel) {
+    this._removeEventListeners(animationModel);
   }
 
   /**
-   * @param {!SDK.Target} target
+   * @param {!Animation.AnimationModel} animationModel
    */
-  _addEventListeners(target) {
-    var animationModel = Animation.AnimationModel.fromTarget(target);
+  _addEventListeners(animationModel) {
     animationModel.ensureEnabled();
     animationModel.addEventListener(
         Animation.AnimationModel.Events.AnimationGroupStarted, this._animationGroupStarted, this);
@@ -83,10 +82,9 @@ Animation.AnimationTimeline = class extends UI.VBox {
   }
 
   /**
-   * @param {!SDK.Target} target
+   * @param {!Animation.AnimationModel} animationModel
    */
-  _removeEventListeners(target) {
-    var animationModel = Animation.AnimationModel.fromTarget(target);
+  _removeEventListeners(animationModel) {
     animationModel.removeEventListener(
         Animation.AnimationModel.Events.AnimationGroupStarted, this._animationGroupStarted, this);
     animationModel.removeEventListener(Animation.AnimationModel.Events.ModelReset, this._reset, this);
@@ -133,9 +131,8 @@ Animation.AnimationTimeline = class extends UI.VBox {
     this._updatePlaybackControls();
 
     this._previewContainer = this.contentElement.createChild('div', 'animation-timeline-buffer');
-    this._popoverHelper = new UI.PopoverHelper(this._previewContainer, true);
-    this._popoverHelper.initializeCallbacks(
-        this._getPopoverAnchor.bind(this), this._showPopover.bind(this), this._onHidePopover.bind(this));
+    this._popoverHelper = new UI.PopoverHelper(this._previewContainer, this._getPopoverRequest.bind(this));
+    this._popoverHelper.setDisableOnClick(true);
     this._popoverHelper.setTimeout(0);
     var emptyBufferHint = this.contentElement.createChild('div', 'animation-timeline-buffer-hint');
     emptyBufferHint.textContent = Common.UIString('Listening for animations...');
@@ -164,46 +161,44 @@ Animation.AnimationTimeline = class extends UI.VBox {
   }
 
   /**
-   * @param {!Element} element
    * @param {!Event} event
-   * @return {!Element|!AnchorBox|undefined}
+   * @return {?UI.PopoverRequest}
    */
-  _getPopoverAnchor(element, event) {
-    if (element.isDescendant(this._previewContainer))
-      return element;
-  }
+  _getPopoverRequest(event) {
+    var element = event.target;
+    if (!element.isDescendant(this._previewContainer))
+      return null;
 
-  /**
-   * @param {!Element} anchor
-   * @param {!UI.Popover} popover
-   */
-  _showPopover(anchor, popover) {
-    var animGroup;
-    for (var group of this._previewMap.keysArray()) {
-      if (this._previewMap.get(group).element === anchor.parentElement)
-        animGroup = group;
-    }
-    console.assert(animGroup);
-    var screenshots = animGroup.screenshots();
-    if (!screenshots.length)
-      return;
+    return {
+      box: event.target.boxInWindow(),
+      show: popover => {
+        var animGroup;
+        for (var group of this._previewMap.keysArray()) {
+          if (this._previewMap.get(group).element === element.parentElement)
+            animGroup = group;
+        }
+        console.assert(animGroup);
+        var screenshots = animGroup.screenshots();
+        if (!screenshots.length)
+          return Promise.resolve(false);
 
-    if (!screenshots[0].complete)
-      screenshots[0].onload = onFirstScreenshotLoaded.bind(null, screenshots);
-    else
-      onFirstScreenshotLoaded(screenshots);
+        var fulfill;
+        var promise = new Promise(x => fulfill = x);
+        if (!screenshots[0].complete)
+          screenshots[0].onload = onFirstScreenshotLoaded.bind(null, screenshots);
+        else
+          onFirstScreenshotLoaded(screenshots);
+        return promise;
 
-    /**
-     * @param  {!Array.<!Image>} screenshots
-     */
-    function onFirstScreenshotLoaded(screenshots) {
-      var content = new Animation.AnimationScreenshotPopover(screenshots);
-      popover.setNoPadding(true);
-      popover.showView(content, anchor);
-    }
-  }
-
-  _onHidePopover() {
+        /**
+         * @param  {!Array.<!Image>} screenshots
+         */
+        function onFirstScreenshotLoaded(screenshots) {
+          new Animation.AnimationScreenshotPopover(screenshots).show(popover.contentElement);
+          fulfill(true);
+        }
+      }
+    };
   }
 
   _togglePauseAll() {
@@ -218,9 +213,8 @@ Animation.AnimationTimeline = class extends UI.VBox {
    */
   _setPlaybackRate(playbackRate) {
     this._playbackRate = playbackRate;
-    var target = SDK.targetManager.mainTarget();
-    if (target)
-      Animation.AnimationModel.fromTarget(target).setPlaybackRate(this._allPaused ? 0 : this._playbackRate);
+    for (var animationModel of SDK.targetManager.models(Animation.AnimationModel))
+      animationModel.setPlaybackRate(this._allPaused ? 0 : this._playbackRate);
     Host.userMetrics.actionTaken(Host.UserMetrics.Action.AnimationsPlaybackRateChanged);
     if (this._scrubberPlayer)
       this._scrubberPlayer.playbackRate = this._effectivePlaybackRate();

@@ -4,11 +4,8 @@
 
 package org.chromium.chrome.browser.payments;
 
-import android.app.Activity;
-
 import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.content.browser.ContentViewCore;
-import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.browser.RenderFrameHost;
 import org.chromium.mojo.system.MojoException;
 import org.chromium.payments.mojom.CanMakePaymentQueryResult;
 import org.chromium.payments.mojom.PaymentDetails;
@@ -18,13 +15,12 @@ import org.chromium.payments.mojom.PaymentOptions;
 import org.chromium.payments.mojom.PaymentRequest;
 import org.chromium.payments.mojom.PaymentRequestClient;
 import org.chromium.services.service_manager.InterfaceFactory;
-import org.chromium.ui.base.WindowAndroid;
 
 /**
  * Creates instances of PaymentRequest.
  */
 public class PaymentRequestFactory implements InterfaceFactory<PaymentRequest> {
-    private final WebContents mWebContents;
+    private final RenderFrameHost mRenderFrameHost;
 
     /**
      * An implementation of PaymentRequest that immediately rejects all connections.
@@ -75,8 +71,8 @@ public class PaymentRequestFactory implements InterfaceFactory<PaymentRequest> {
      *
      * @param webContents The web contents that may invoke the PaymentRequest API.
      */
-    public PaymentRequestFactory(WebContents webContents) {
-        mWebContents = webContents;
+    public PaymentRequestFactory(RenderFrameHost renderFrameHost) {
+        mRenderFrameHost = renderFrameHost;
     }
 
     @Override
@@ -85,17 +81,8 @@ public class PaymentRequestFactory implements InterfaceFactory<PaymentRequest> {
             return new InvalidPaymentRequest();
         }
 
-        if (mWebContents == null) return new InvalidPaymentRequest();
+        if (mRenderFrameHost == null) return new InvalidPaymentRequest();
 
-        ContentViewCore contentViewCore = ContentViewCore.fromWebContents(mWebContents);
-        if (contentViewCore == null) return new InvalidPaymentRequest();
-
-        WindowAndroid window = contentViewCore.getWindowAndroid();
-        if (window == null) return new InvalidPaymentRequest();
-
-        Activity context = window.getActivity().get();
-        if (context == null) return new InvalidPaymentRequest();
-
-        return new PaymentRequestImpl(context, mWebContents);
+        return new PaymentRequestImpl(mRenderFrameHost);
     }
 }

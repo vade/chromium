@@ -12,7 +12,7 @@
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
-#include "components/translate/core/common/translate_pref_names.h"
+#include "components/translate/core/browser/translate_pref_names.h"
 #include "content/public/common/webrtc_ip_handling_policy.h"
 #include "media/media_features.h"
 
@@ -71,12 +71,6 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterDictionaryPref(prefs::kBrowserWindowPlacement);
   registry->RegisterDictionaryPref(prefs::kBrowserWindowPlacementPopup);
   registry->RegisterDictionaryPref(prefs::kAppWindowPlacement);
-  registry->RegisterBooleanPref(prefs::kImportAutofillFormData, true);
-  registry->RegisterBooleanPref(prefs::kImportBookmarks, true);
-  registry->RegisterBooleanPref(prefs::kImportHistory, true);
-  registry->RegisterBooleanPref(prefs::kImportHomepage, true);
-  registry->RegisterBooleanPref(prefs::kImportSavedPasswords, true);
-  registry->RegisterBooleanPref(prefs::kImportSearchEngine, true);
   registry->RegisterBooleanPref(
       prefs::kEnableDoNotTrack,
       false,

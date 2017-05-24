@@ -1,20 +1,17 @@
 <!DOCTYPE html>
 <script src="../resources/testharness.js"></script>
 <script src="../resources/testharnessreport.js"></script>
-<script src="../resources/mojo-helpers.js"></script>
 <script src="resources/fake-devices.js"></script>
 <script src="resources/usb-helpers.js"></script>
+<script src="resources/webusb-test.js"></script>
 <script>
 'use strict';
 
-usb_test(usb => {
-  usb.mockDeviceManager.addMockDevice(usb.fakeDevices[0]);
-
-  return navigator.usb.getDevices().then(devices => {
-    assert_equals(devices.length, 1);
-    let evt = new USBConnectionEvent('connect', { device: devices[0] });
+usb_test(() => {
+  return getFakeDevice().then(({ device }) => {
+    let evt = new USBConnectionEvent('connect', { device: device });
     assert_equals(evt.type, 'connect');
-    assert_equals(evt.device, devices[0]);
+    assert_equals(evt.device, device);
   });
 }, 'Can construct a USBConnectionEvent with a device');
 

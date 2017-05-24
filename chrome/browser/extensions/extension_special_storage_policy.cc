@@ -70,10 +70,10 @@ void LogHostedAppUnlimitedStorageUsage(
     // https://developers.google.com/chrome/whitepapers/storage.
     BrowserThread::PostAfterStartupTask(
         FROM_HERE, BrowserThread::GetTaskRunnerForThread(BrowserThread::IO),
-        base::Bind(&storage::QuotaManager::GetUsageAndQuotaForWebApps,
-                   partition->GetQuotaManager(), launch_url,
-                   storage::kStorageTypePersistent,
-                   base::Bind(&ReportQuotaUsage)));
+        base::BindOnce(&storage::QuotaManager::GetUsageAndQuotaForWebApps,
+                       partition->GetQuotaManager(), launch_url,
+                       storage::kStorageTypePersistent,
+                       base::Bind(&ReportQuotaUsage)));
   }
 }
 
@@ -112,11 +112,6 @@ bool ExtensionSpecialStoragePolicy::IsStorageSessionOnly(const GURL& origin) {
   if (cookie_settings_.get() == NULL)
     return false;
   return cookie_settings_->IsCookieSessionOnly(origin);
-}
-
-bool ExtensionSpecialStoragePolicy::CanQueryDiskSize(const GURL& origin) {
-  base::AutoLock locker(lock_);
-  return installed_apps_.Contains(origin);
 }
 
 bool ExtensionSpecialStoragePolicy::HasSessionOnlyOrigins() {
@@ -177,9 +172,6 @@ void ExtensionSpecialStoragePolicy::GrantRightsForExtension(
       extension->is_app()) {
     if (NeedsProtection(extension) && protected_apps_.Add(extension))
       change_flags |= SpecialStoragePolicy::STORAGE_PROTECTED;
-    // FIXME: Does GrantRightsForExtension imply |extension| is installed?
-    if (extension->is_app())
-      installed_apps_.Add(extension);
 
     if (extension->permissions_data()->HasAPIPermission(
             APIPermission::kUnlimitedStorage) &&
@@ -225,9 +217,6 @@ void ExtensionSpecialStoragePolicy::RevokeRightsForExtension(
     if (NeedsProtection(extension) && protected_apps_.Remove(extension))
       change_flags |= SpecialStoragePolicy::STORAGE_PROTECTED;
 
-    if (extension->is_app())
-      installed_apps_.Remove(extension);
-
     if (extension->permissions_data()->HasAPIPermission(
             APIPermission::kUnlimitedStorage) &&
         unlimited_extensions_.Remove(extension))
@@ -251,7 +240,6 @@ void ExtensionSpecialStoragePolicy::RevokeRightsForAllExtensions() {
   {
     base::AutoLock locker(lock_);
     protected_apps_.Clear();
-    installed_apps_.Clear();
     unlimited_extensions_.Clear();
     file_handler_extensions_.Clear();
     isolated_extensions_.Clear();
@@ -267,8 +255,8 @@ void ExtensionSpecialStoragePolicy::NotifyGranted(
   if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        base::Bind(&ExtensionSpecialStoragePolicy::NotifyGranted, this,
-                   origin, change_flags));
+        base::BindOnce(&ExtensionSpecialStoragePolicy::NotifyGranted, this,
+                       origin, change_flags));
     return;
   }
   SpecialStoragePolicy::NotifyGranted(origin, change_flags);
@@ -280,8 +268,8 @@ void ExtensionSpecialStoragePolicy::NotifyRevoked(
   if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        base::Bind(&ExtensionSpecialStoragePolicy::NotifyRevoked, this,
-                   origin, change_flags));
+        base::BindOnce(&ExtensionSpecialStoragePolicy::NotifyRevoked, this,
+                       origin, change_flags));
     return;
   }
   SpecialStoragePolicy::NotifyRevoked(origin, change_flags);
@@ -291,7 +279,7 @@ void ExtensionSpecialStoragePolicy::NotifyCleared() {
   if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        base::Bind(&ExtensionSpecialStoragePolicy::NotifyCleared, this));
+        base::BindOnce(&ExtensionSpecialStoragePolicy::NotifyCleared, this));
     return;
   }
   SpecialStoragePolicy::NotifyCleared();

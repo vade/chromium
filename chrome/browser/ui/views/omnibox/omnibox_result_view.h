@@ -102,7 +102,7 @@ class OmniboxResultView : public views::View,
   // Draws given |render_text| on |canvas| at given location (|x|, |y|).
   // |contents| indicates if the |render_text| is for the match contents,
   // separator, or description.  Additional properties from |match| are used to
-  // render Infinite suggestions correctly.  If |max_width| is a non-negative
+  // render tail suggestions correctly.  If |max_width| is a non-negative
   // number, the text will be elided to fit within |max_width|.  Returns the x
   // position to the right of the string.
   int DrawRenderText(const AutocompleteMatch& match,
@@ -133,7 +133,7 @@ class OmniboxResultView : public views::View,
   gfx::ImageSkia GetIcon() const;
 
   // Utility function for creating vector icons.
-  gfx::ImageSkia GetVectorIcon(gfx::VectorIconId icon_id) const;
+  gfx::ImageSkia GetVectorIcon(const gfx::VectorIcon& icon_id) const;
 
   // Whether to render only the keyword match.  Returns true if |match_| has an
   // associated keyword match that has been animated so close to the start that
@@ -158,13 +158,19 @@ class OmniboxResultView : public views::View,
                        bool is_ui_rtl,
                        bool is_match_contents_rtl) const;
 
-  int GetAnswerLineHeight() const;
-  int GetContentLineHeight() const;
+  // Returns the font to use for the description section of answer suggestions.
+  const gfx::FontList& GetAnswerFont() const;
+
+  // Returns the height of the the description section of answer suggestions.
+  int GetAnswerHeight() const;
+
+  // Returns the margin that should appear at the top and bottom of the result.
+  int GetVerticalMargin() const;
 
   // Creates a RenderText with text and styling from the image line.
-  std::unique_ptr<gfx::RenderText> CreateAnswerLine(
+  std::unique_ptr<gfx::RenderText> CreateAnswerText(
       const SuggestionAnswer::ImageLine& line,
-      gfx::FontList font_list) const;
+      const gfx::FontList& font_list) const;
 
   // Adds |text| to |destination|.  |text_type| is an index into the
   // kTextStyles constant defined in the .cc file and is used to style the text,

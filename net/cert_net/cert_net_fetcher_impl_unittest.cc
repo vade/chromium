@@ -9,6 +9,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/synchronization/lock.h"
 #include "net/cert/cert_net_fetcher.h"
@@ -69,7 +70,7 @@ class RequestContext : public URLRequestContext {
         base::MakeUnique<HttpNetworkSession>(params));
     storage_.set_http_transaction_factory(base::MakeUnique<HttpCache>(
         storage_.http_network_session(), HttpCache::DefaultBackend::InMemory(0),
-        false /* set_up_quic_server_info */));
+        false /* is_main_cache */));
     storage_.set_job_factory(base::MakeUnique<URLRequestJobFactoryImpl>());
   }
 

@@ -14,7 +14,7 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/chromeos/printing/cups_print_job.h"
 #include "chrome/browser/chromeos/printing/cups_print_job_manager.h"
-#include "chrome/browser/chromeos/printing/printer_pref_manager.h"
+#include "chrome/browser/chromeos/printing/printers_manager.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "printing/backend/cups_connection.h"
@@ -23,6 +23,15 @@ class Profile;
 
 namespace chromeos {
 
+struct QueryResult {
+  QueryResult();
+  QueryResult(const QueryResult& other);
+  ~QueryResult();
+
+  bool success;
+  std::vector<::printing::QueueStatus> queues;
+};
+
 class CupsPrintJobManagerImpl : public CupsPrintJobManager,
                                 public content::NotificationObserver {
  public:
@@ -30,7 +39,7 @@ class CupsPrintJobManagerImpl : public CupsPrintJobManager,
   ~CupsPrintJobManagerImpl() override;
 
   // CupsPrintJobManager overrides:
-  bool CancelPrintJob(CupsPrintJob* job) override;
+  void CancelPrintJob(CupsPrintJob* job) override;
   bool SuspendPrintJob(CupsPrintJob* job) override;
   bool ResumePrintJob(CupsPrintJob* job) override;
 
@@ -44,22 +53,44 @@ class CupsPrintJobManagerImpl : public CupsPrintJobManager,
   // |title| with the pages |total_page_number|.
   bool CreatePrintJob(const std::string& printer_name,
                       const std::string& title,
+                      int job_id,
                       int total_page_number);
 
-  // Schedule a query of CUPS for print job status.
+  // Schedule a query of CUPS for print job status with the default delay.
   void ScheduleQuery();
+  // Schedule a query of CUPS for print job status with a delay of |delay|.
+  void ScheduleQuery(const base::TimeDelta& delay);
 
-  // Query CUPS for print job status.
-  void QueryCups();
+  // Schedule the CUPS query off the UI thread. Posts results back to UI thread
+  // to UpdateJobs.
+  void PostQuery();
+
+  // Updates the state of a print job based on |printer_status| and |job|.
+  // Returns true if observers need to be notified of an update.
+  bool UpdatePrintJob(const ::printing::PrinterStatus& printer_status,
+                      const ::printing::CupsJob& job,
+                      CupsPrintJob* print_job);
 
   // Process jobs from CUPS and perform notifications.
-  void UpdateJobs(const std::vector<::printing::CupsJob>& jobs);
+  void UpdateJobs(const QueryResult& results);
 
-  // Updates the state and performs the appropriate notifications.
-  void JobStateUpdated(CupsPrintJob* job, CupsPrintJob::State new_state);
+  // Mark remaining jobs as errors and remove active jobs.
+  void PurgeJobs();
+
+  // Cancel the print job on the blocking thread.
+  void CancelJobImpl(const std::string& printer_id, const int job_id);
+
+  // Notify observers that a state update has occured for |job|.
+  void NotifyJobStateUpdate(CupsPrintJob* job);
 
   // Ongoing print jobs.
   std::map<std::string, std::unique_ptr<CupsPrintJob>> jobs_;
+
+  // Prevents multiple queries from being scheduled simultaneously.
+  bool in_query_ = false;
+
+  // Records the number of consecutive times the GetJobs query has failed.
+  int retry_count_ = 0;
 
   ::printing::CupsConnection cups_connection_;
   content::NotificationRegistrar registrar_;

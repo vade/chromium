@@ -5,9 +5,12 @@
 #ifndef CONTENT_BROWSER_LOADER_NAVIGATION_RESOURCE_HANDLER_H_
 #define CONTENT_BROWSER_LOADER_NAVIGATION_RESOURCE_HANDLER_H_
 
+#include <memory>
+
 #include "base/macros.h"
-#include "content/browser/loader/resource_handler.h"
-#include "content/browser/loader/stream_writer.h"
+#include "base/memory/ref_counted.h"
+#include "content/browser/loader/layered_resource_handler.h"
+#include "content/public/browser/stream_handle.h"
 
 namespace net {
 class SSLInfo;
@@ -15,21 +18,23 @@ class SSLInfo;
 
 namespace content {
 class NavigationURLLoaderImplCore;
+class ResourceController;
 class ResourceDispatcherHostDelegate;
 struct SSLStatus;
 
-// PlzNavigate: The leaf ResourceHandler used with NavigationURLLoaderImplCore.
-class NavigationResourceHandler : public ResourceHandler {
+// PlzNavigate: The ResourceHandler used with NavigationURLLoaderImplCore to
+// control the flow of navigation requests.
+class NavigationResourceHandler : public LayeredResourceHandler {
  public:
-  static void GetSSLStatusForRequest(const GURL& url,
-                                     const net::SSLInfo& ssl_info,
-                                     int child_id,
+  static void GetSSLStatusForRequest(const net::SSLInfo& ssl_info,
                                      SSLStatus* ssl_status);
 
   NavigationResourceHandler(
       net::URLRequest* request,
+      std::unique_ptr<ResourceHandler> next_handler,
       NavigationURLLoaderImplCore* core,
-      ResourceDispatcherHostDelegate* resource_dispatcher_host_delegate);
+      ResourceDispatcherHostDelegate* resource_dispatcher_host_delegate,
+      std::unique_ptr<StreamHandle> stream_handle);
   ~NavigationResourceHandler() override;
 
   // Called by the loader the cancel the request.
@@ -41,28 +46,33 @@ class NavigationResourceHandler : public ResourceHandler {
   // Called to proceed with the response.
   void ProceedWithResponse();
 
-  // ResourceHandler implementation.
-  void SetController(ResourceController* controller) override;
-  bool OnRequestRedirected(const net::RedirectInfo& redirect_info,
-                           ResourceResponse* response,
-                           bool* defer) override;
-  bool OnResponseStarted(ResourceResponse* response, bool* defer) override;
-  bool OnWillStart(const GURL& url, bool* defer) override;
-  bool OnWillRead(scoped_refptr<net::IOBuffer>* buf,
-                  int* buf_size,
-                  int min_size) override;
-  bool OnReadCompleted(int bytes_read, bool* defer) override;
-  void OnResponseCompleted(const net::URLRequestStatus& status,
-                           bool* defer) override;
-  void OnDataDownloaded(int bytes_downloaded) override;
+  // LayeredResourceHandler implementation.
+  void OnRequestRedirected(
+      const net::RedirectInfo& redirect_info,
+      ResourceResponse* response,
+      std::unique_ptr<ResourceController> controller) override;
+  void OnResponseStarted(
+      ResourceResponse* response,
+      std::unique_ptr<ResourceController> controller) override;
+  void OnResponseCompleted(
+      const net::URLRequestStatus& status,
+      std::unique_ptr<ResourceController> controller) override;
 
  private:
   // Clears |core_| and its reference to the resource handler. After calling
-  // this, the lifetime of the request is no longer tied to |core_|.
+  // this, the lifetime of the request is no longer managed by the
+  // NavigationURLLoader.
   void DetachFromCore();
 
-  NavigationURLLoaderImplCore* core_;
-  StreamWriter writer_;
+  // Used to buffer the response and redirect info while waiting for UI thread
+  // checks to execute.
+  scoped_refptr<ResourceResponse> response_;
+  std::unique_ptr<net::RedirectInfo> redirect_info_;
+
+  // NavigationResourceHandler has joint ownership of the
+  // NavigationURLLoaderImplCore with the NavigationURLLoaderImpl.
+  scoped_refptr<NavigationURLLoaderImplCore> core_;
+  std::unique_ptr<StreamHandle> stream_handle_;
   ResourceDispatcherHostDelegate* resource_dispatcher_host_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(NavigationResourceHandler);

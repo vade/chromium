@@ -19,7 +19,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
-#include "cc/debug/devtools_instrumentation.h"
+#include "cc/base/devtools_instrumentation.h"
 #include "cc/raster/tile_task.h"
 #include "cc/resources/resource_format_utils.h"
 #include "cc/tiles/mipmap_util.h"
@@ -51,7 +51,10 @@ const size_t kSuspendedMaxItemsInCache = 0;
 // The second part that much be true is that we cache only the needed subrect if
 // the total size needed for the subrect is at most kMemoryRatioToSubrect *
 // (size needed for the full original image).
+// Note that at least one of the dimensions has to be at least
+// kMinDimensionToSubrect before an image can breach the threshold.
 const size_t kMemoryThresholdToSubrect = 64 * 1024 * 1024;
+const int kMinDimensionToSubrect = 4 * 1024;
 const float kMemoryRatioToSubrect = 0.5f;
 
 class AutoRemoveKeyFromTaskMap {
@@ -94,7 +97,7 @@ class ImageDecodeTaskImpl : public TileTask {
   ImageDecodeTaskImpl(SoftwareImageDecodeCache* cache,
                       const SoftwareImageDecodeCache::ImageKey& image_key,
                       const DrawImage& image,
-                      const SoftwareImageDecodeCache::DecodeTaskType task_type,
+                      SoftwareImageDecodeCache::DecodeTaskType task_type,
                       const ImageDecodeCache::TracingInfo& tracing_info)
       : TileTask(true),
         cache_(cache),
@@ -135,7 +138,7 @@ class ImageDecodeTaskImpl : public TileTask {
 SkSize GetScaleAdjustment(const ImageDecodeCacheKey& key) {
   // If the requested filter quality did not require scale, then the adjustment
   // is identity.
-  if (key.can_use_original_decode() || key.should_use_subrect()) {
+  if (key.can_use_original_size_decode() || key.should_use_subrect()) {
     return SkSize::Make(1.f, 1.f);
   } else if (key.filter_quality() == kMedium_SkFilterQuality) {
     return MipMapUtil::GetScaleAdjustmentForSize(key.src_rect().size(),
@@ -174,6 +177,17 @@ void RecordLockExistingCachedImageHistogram(TilePriority::PriorityBin bin,
       UMA_HISTOGRAM_BOOLEAN(
           "Renderer4.LockExistingCachedImage.Software.EVENTUALLY", success);
   }
+}
+
+gfx::Rect GetSrcRect(const DrawImage& image) {
+  const SkIRect& src_rect = image.src_rect();
+  int x = std::max(0, src_rect.x());
+  int y = std::max(0, src_rect.y());
+  int right = std::min(image.image()->width(), src_rect.right());
+  int bottom = std::min(image.image()->height(), src_rect.bottom());
+  if (x >= right || y >= bottom)
+    return gfx::Rect();
+  return gfx::Rect(x, y, right - x, bottom - y);
 }
 
 }  // namespace
@@ -260,7 +274,6 @@ bool SoftwareImageDecodeCache::GetTaskForImageAndRefInternal(
         (new_image_fits_in_memory && decoded_it->second->Lock())) {
       RefImage(key);
       *task = nullptr;
-      SanityCheckState(__LINE__, true);
 
       // If the image wasn't locked, then we just succeeded in locking it.
       if (!image_was_locked) {
@@ -291,7 +304,6 @@ bool SoftwareImageDecodeCache::GetTaskForImageAndRefInternal(
   if (existing_task) {
     RefImage(key);
     *task = existing_task;
-    SanityCheckState(__LINE__, true);
     return true;
   }
 
@@ -303,7 +315,6 @@ bool SoftwareImageDecodeCache::GetTaskForImageAndRefInternal(
   if (!new_image_fits_in_memory && (decoded_images_ref_counts_.find(key) ==
                                     decoded_images_ref_counts_.end())) {
     *task = nullptr;
-    SanityCheckState(__LINE__, true);
     return false;
   }
 
@@ -313,7 +324,6 @@ bool SoftwareImageDecodeCache::GetTaskForImageAndRefInternal(
   existing_task = make_scoped_refptr(
       new ImageDecodeTaskImpl(this, key, image, task_type, tracing_info));
   *task = existing_task;
-  SanityCheckState(__LINE__, true);
   return true;
 }
 
@@ -351,14 +361,11 @@ void SoftwareImageDecodeCache::UnrefImage(const DrawImage& image) {
     auto decoded_image_it = decoded_images_.Peek(key);
     // If we've never decoded the image before ref reached 0, then we wouldn't
     // have it in our cache. This would happen if we canceled tasks.
-    if (decoded_image_it == decoded_images_.end()) {
-      SanityCheckState(__LINE__, true);
+    if (decoded_image_it == decoded_images_.end())
       return;
-    }
     DCHECK(decoded_image_it->second->is_locked());
     decoded_image_it->second->Unlock();
   }
-  SanityCheckState(__LINE__, true);
 }
 
 void SoftwareImageDecodeCache::DecodeImage(const ImageKey& key,
@@ -422,7 +429,6 @@ void SoftwareImageDecodeCache::DecodeImage(const ImageKey& key,
   }
 
   decoded_images_.Put(key, std::move(decoded_image));
-  SanityCheckState(__LINE__, true);
 }
 
 std::unique_ptr<SoftwareImageDecodeCache::DecodedImage>
@@ -439,11 +445,11 @@ SoftwareImageDecodeCache::DecodeImageInternal(const ImageKey& key,
     case kNone_SkFilterQuality:
     case kLow_SkFilterQuality:
       if (key.should_use_subrect())
-        return GetSubrectImageDecode(key, std::move(image));
-      return GetOriginalImageDecode(std::move(image));
+        return GetSubrectImageDecode(key, draw_image.paint_image());
+      return GetOriginalSizeImageDecode(key, std::move(image));
     case kMedium_SkFilterQuality:
     case kHigh_SkFilterQuality:
-      return GetScaledImageDecode(key, std::move(image));
+      return GetScaledImageDecode(key, draw_image.paint_image());
     default:
       NOTREACHED();
       return nullptr;
@@ -480,7 +486,6 @@ DecodedDrawImage SoftwareImageDecodeCache::GetDecodedImageForDrawInternal(
     if (decoded_image->is_locked()) {
       RefImage(key);
       decoded_image->mark_used();
-      SanityCheckState(__LINE__, true);
       return DecodedDrawImage(
           decoded_image->image(), decoded_image->src_rect_offset(),
           GetScaleAdjustment(key), GetDecodedFilterQuality(key));
@@ -496,7 +501,6 @@ DecodedDrawImage SoftwareImageDecodeCache::GetDecodedImageForDrawInternal(
   if (at_raster_images_it != at_raster_decoded_images_.end()) {
     DCHECK(at_raster_images_it->second->is_locked());
     RefAtRasterImage(key);
-    SanityCheckState(__LINE__, true);
     DecodedImage* at_raster_decoded_image = at_raster_images_it->second.get();
     at_raster_decoded_image->mark_used();
     auto decoded_draw_image =
@@ -550,7 +554,6 @@ DecodedDrawImage SoftwareImageDecodeCache::GetDecodedImageForDrawInternal(
   DCHECK(decoded_image);
   DCHECK(decoded_image->is_locked());
   RefAtRasterImage(key);
-  SanityCheckState(__LINE__, true);
   decoded_image->mark_used();
   auto decoded_draw_image =
       DecodedDrawImage(decoded_image->image(), decoded_image->src_rect_offset(),
@@ -560,22 +563,35 @@ DecodedDrawImage SoftwareImageDecodeCache::GetDecodedImageForDrawInternal(
 }
 
 std::unique_ptr<SoftwareImageDecodeCache::DecodedImage>
-SoftwareImageDecodeCache::GetOriginalImageDecode(sk_sp<const SkImage> image) {
+SoftwareImageDecodeCache::GetOriginalSizeImageDecode(
+    const ImageKey& key,
+    sk_sp<const SkImage> image) {
   SkImageInfo decoded_info =
       CreateImageInfo(image->width(), image->height(), format_);
+  sk_sp<SkColorSpace> target_color_space =
+      key.target_color_space().ToSkColorSpace();
+
   std::unique_ptr<base::DiscardableMemory> decoded_pixels;
   {
     TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
-                 "SoftwareImageDecodeCache::GetOriginalImageDecode - "
+                 "SoftwareImageDecodeCache::GetOriginalSizeImageDecode - "
                  "allocate decoded pixels");
     decoded_pixels =
         base::DiscardableMemoryAllocator::GetInstance()
             ->AllocateLockedDiscardableMemory(decoded_info.minRowBytes() *
                                               decoded_info.height());
   }
+  if (target_color_space) {
+    TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
+                 "SoftwareImageDecodeCache::GetOriginalSizeImageDecode - "
+                 "color conversion");
+    image = image->makeColorSpace(target_color_space,
+                                  SkTransferFunctionBehavior::kIgnore);
+    DCHECK(image);
+  }
   {
     TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
-                 "SoftwareImageDecodeCache::GetOriginalImageDecode - "
+                 "SoftwareImageDecodeCache::GetOriginalSizeImageDecode - "
                  "read pixels");
     bool result = image->readPixels(decoded_info, decoded_pixels->data(),
                                     decoded_info.minRowBytes(), 0, 0,
@@ -586,24 +602,30 @@ SoftwareImageDecodeCache::GetOriginalImageDecode(sk_sp<const SkImage> image) {
       return nullptr;
     }
   }
-  return base::MakeUnique<DecodedImage>(decoded_info, std::move(decoded_pixels),
-                                        SkSize::Make(0, 0),
-                                        next_tracing_id_.GetNext());
+
+  return base::MakeUnique<DecodedImage>(
+      decoded_info.makeColorSpace(target_color_space),
+      std::move(decoded_pixels), SkSize::Make(0, 0),
+      next_tracing_id_.GetNext());
 }
 
 std::unique_ptr<SoftwareImageDecodeCache::DecodedImage>
 SoftwareImageDecodeCache::GetSubrectImageDecode(const ImageKey& key,
-                                                sk_sp<const SkImage> image) {
+                                                const PaintImage& image) {
   // Construct a key to use in GetDecodedImageForDrawInternal().
   // This allows us to reuse an image in any cache if available.
-  gfx::Rect full_image_rect(image->width(), image->height());
-  DrawImage original_size_draw_image(std::move(image),
-                                     gfx::RectToSkIRect(full_image_rect),
-                                     kNone_SkFilterQuality, SkMatrix::I());
+  gfx::Rect full_image_rect(image.sk_image()->width(),
+                            image.sk_image()->height());
+  DrawImage original_size_draw_image(image, gfx::RectToSkIRect(full_image_rect),
+                                     kNone_SkFilterQuality, SkMatrix::I(),
+                                     key.target_color_space());
   ImageKey original_size_key =
       ImageKey::FromDrawImage(original_size_draw_image);
+  sk_sp<SkColorSpace> target_color_space =
+      key.target_color_space().ToSkColorSpace();
+
   // Sanity checks.
-  DCHECK(original_size_key.can_use_original_decode())
+  DCHECK(original_size_key.can_use_original_size_decode())
       << original_size_key.ToString();
   DCHECK(full_image_rect.size() == original_size_key.target_size());
 
@@ -614,6 +636,8 @@ SoftwareImageDecodeCache::GetSubrectImageDecode(const ImageKey& key,
   if (!decoded_draw_image.image())
     return nullptr;
 
+  DCHECK(SkColorSpace::Equals(decoded_draw_image.image()->colorSpace(),
+                              target_color_space.get()));
   SkImageInfo subrect_info = CreateImageInfo(
       key.target_size().width(), key.target_size().height(), format_);
   std::unique_ptr<base::DiscardableMemory> subrect_pixels;
@@ -632,7 +656,7 @@ SoftwareImageDecodeCache::GetSubrectImageDecode(const ImageKey& key,
   }
   {
     TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
-                 "SoftwareImageDecodeCache::GetOriginalImageDecode - "
+                 "SoftwareImageDecodeCache::GetSubrectImageDecode - "
                  "read pixels");
     bool result = decoded_draw_image.image()->readPixels(
         subrect_info, subrect_pixels->data(), subrect_info.minRowBytes(),
@@ -641,25 +665,31 @@ SoftwareImageDecodeCache::GetSubrectImageDecode(const ImageKey& key,
     // This should never fail.
     DCHECK(result);
   }
+
   return base::WrapUnique(
-      new DecodedImage(subrect_info, std::move(subrect_pixels),
+      new DecodedImage(subrect_info.makeColorSpace(target_color_space),
+                       std::move(subrect_pixels),
                        SkSize::Make(-key.src_rect().x(), -key.src_rect().y()),
                        next_tracing_id_.GetNext()));
 }
 
 std::unique_ptr<SoftwareImageDecodeCache::DecodedImage>
 SoftwareImageDecodeCache::GetScaledImageDecode(const ImageKey& key,
-                                               sk_sp<const SkImage> image) {
+                                               const PaintImage& image) {
   // Construct a key to use in GetDecodedImageForDrawInternal().
   // This allows us to reuse an image in any cache if available.
-  gfx::Rect full_image_rect(image->width(), image->height());
-  DrawImage original_size_draw_image(std::move(image),
-                                     gfx::RectToSkIRect(full_image_rect),
-                                     kNone_SkFilterQuality, SkMatrix::I());
+  gfx::Rect full_image_rect(image.sk_image()->width(),
+                            image.sk_image()->height());
+  DrawImage original_size_draw_image(image, gfx::RectToSkIRect(full_image_rect),
+                                     kNone_SkFilterQuality, SkMatrix::I(),
+                                     key.target_color_space());
   ImageKey original_size_key =
       ImageKey::FromDrawImage(original_size_draw_image);
+  sk_sp<SkColorSpace> target_color_space =
+      key.target_color_space().ToSkColorSpace();
+
   // Sanity checks.
-  DCHECK(original_size_key.can_use_original_decode())
+  DCHECK(original_size_key.can_use_original_size_decode())
       << original_size_key.ToString();
   DCHECK(full_image_rect.size() == original_size_key.target_size());
 
@@ -680,6 +710,8 @@ SoftwareImageDecodeCache::GetScaledImageDecode(const ImageKey& key,
   }
 
   DCHECK(!key.target_size().IsEmpty());
+  DCHECK(SkColorSpace::Equals(decoded_draw_image.image()->colorSpace(),
+                              target_color_space.get()));
   SkImageInfo scaled_info = CreateImageInfo(
       key.target_size().width(), key.target_size().height(), format_);
   std::unique_ptr<base::DiscardableMemory> scaled_pixels;
@@ -704,7 +736,8 @@ SoftwareImageDecodeCache::GetScaledImageDecode(const ImageKey& key,
   }
 
   return base::MakeUnique<DecodedImage>(
-      scaled_info, std::move(scaled_pixels),
+      scaled_info.makeColorSpace(decoded_draw_image.image()->refColorSpace()),
+      std::move(scaled_pixels),
       SkSize::Make(-key.src_rect().x(), -key.src_rect().y()),
       next_tracing_id_.GetNext());
 }
@@ -723,7 +756,6 @@ void SoftwareImageDecodeCache::DrawWithImageFinished(
     UnrefAtRasterImage(key);
   else
     UnrefImage(image);
-  SanityCheckState(__LINE__, false);
 }
 
 void SoftwareImageDecodeCache::RefAtRasterImage(const ImageKey& key) {
@@ -783,12 +815,10 @@ void SoftwareImageDecodeCache::UnrefAtRasterImage(const ImageKey& key) {
   }
 }
 
-void SoftwareImageDecodeCache::ReduceCacheUsage() {
+void SoftwareImageDecodeCache::ReduceCacheUsageUntilWithinLimit(size_t limit) {
   TRACE_EVENT0("cc", "SoftwareImageDecodeCache::ReduceCacheUsage");
-  base::AutoLock lock(lock_);
-  size_t num_to_remove = (decoded_images_.size() > max_items_in_cache_)
-                             ? (decoded_images_.size() - max_items_in_cache_)
-                             : 0;
+  size_t num_to_remove =
+      (decoded_images_.size() > limit) ? (decoded_images_.size() - limit) : 0;
   for (auto it = decoded_images_.rbegin();
        num_to_remove != 0 && it != decoded_images_.rend();) {
     if (it->second->is_locked()) {
@@ -799,6 +829,20 @@ void SoftwareImageDecodeCache::ReduceCacheUsage() {
     it = decoded_images_.Erase(it);
     --num_to_remove;
   }
+}
+
+void SoftwareImageDecodeCache::ReduceCacheUsage() {
+  base::AutoLock lock(lock_);
+  ReduceCacheUsageUntilWithinLimit(max_items_in_cache_);
+}
+
+void SoftwareImageDecodeCache::ClearCache() {
+  base::AutoLock lock(lock_);
+  ReduceCacheUsageUntilWithinLimit(0);
+}
+
+size_t SoftwareImageDecodeCache::GetMaximumMemoryLimitBytes() const {
+  return locked_images_budget_.total_limit_bytes();
 }
 
 void SoftwareImageDecodeCache::RemovePendingTask(const ImageKey& key,
@@ -847,48 +891,16 @@ void SoftwareImageDecodeCache::DumpImageMemoryForCache(
         reinterpret_cast<uintptr_t>(this), cache_name,
         image_pair.second->tracing_id(), image_pair.first.image_id());
     // CreateMemoryAllocatorDump will automatically add tracking values for the
-    // total size. If locked, we also add a "locked_size" below.
+    // total size. We also add a "locked_size" below.
     MemoryAllocatorDump* dump =
         image_pair.second->memory()->CreateMemoryAllocatorDump(
             dump_name.c_str(), pmd);
     DCHECK(dump);
-    if (image_pair.second->is_locked()) {
-      dump->AddScalar("locked_size", MemoryAllocatorDump::kUnitsBytes,
-                      image_pair.first.locked_bytes());
-    }
+    size_t locked_bytes =
+        image_pair.second->is_locked() ? image_pair.first.locked_bytes() : 0u;
+    dump->AddScalar("locked_size", MemoryAllocatorDump::kUnitsBytes,
+                    locked_bytes);
   }
-}
-
-void SoftwareImageDecodeCache::SanityCheckState(int line, bool lock_acquired) {
-#if DCHECK_IS_ON()
-  if (!lock_acquired) {
-    base::AutoLock lock(lock_);
-    SanityCheckState(line, true);
-    return;
-  }
-
-  MemoryBudget budget(locked_images_budget_.total_limit_bytes());
-  for (const auto& image_pair : decoded_images_) {
-    const auto& key = image_pair.first;
-    const auto& image = image_pair.second;
-
-    auto ref_it = decoded_images_ref_counts_.find(key);
-    if (image->is_locked()) {
-      budget.AddUsage(key.locked_bytes());
-      DCHECK(ref_it != decoded_images_ref_counts_.end()) << line;
-    } else {
-      DCHECK(ref_it == decoded_images_ref_counts_.end() ||
-             pending_in_raster_image_tasks_.find(key) !=
-                 pending_in_raster_image_tasks_.end() ||
-             pending_out_of_raster_image_tasks_.find(key) !=
-                 pending_out_of_raster_image_tasks_.end())
-          << line;
-    }
-  }
-  DCHECK_GE(budget.AvailableMemoryBytes(),
-            locked_images_budget_.AvailableMemoryBytes())
-      << line;
-#endif  // DCHECK_IS_ON()
 }
 
 // SoftwareImageDecodeCacheKey
@@ -898,10 +910,7 @@ ImageDecodeCacheKey ImageDecodeCacheKey::FromDrawImage(const DrawImage& image) {
   // otherwise we might end up with uninitialized memory in the decode process.
   // Note that the scale is still unchanged and the target size is now a
   // function of the new src_rect.
-  gfx::Rect src_rect = gfx::IntersectRects(
-      gfx::SkIRectToRect(image.src_rect()),
-      gfx::Rect(image.image()->width(), image.image()->height()));
-
+  const gfx::Rect& src_rect = GetSrcRect(image);
   gfx::Size target_size(
       SkScalarRoundToInt(std::abs(src_rect.width() * scale.width())),
       SkScalarRoundToInt(std::abs(src_rect.height() * scale.height())));
@@ -947,10 +956,13 @@ ImageDecodeCacheKey ImageDecodeCacheKey::FromDrawImage(const DrawImage& image) {
     }
   }
 
-  bool can_use_original_decode =
+  bool can_use_original_size_decode =
       quality == kLow_SkFilterQuality || quality == kNone_SkFilterQuality;
+
   bool should_use_subrect = false;
-  if (can_use_original_decode) {
+  if (can_use_original_size_decode &&
+      (image.image()->width() >= kMinDimensionToSubrect ||
+       image.image()->height() >= kMinDimensionToSubrect)) {
     base::CheckedNumeric<size_t> checked_original_size = 4u;
     checked_original_size *= image.image()->width();
     checked_original_size *= image.image()->height();
@@ -965,7 +977,7 @@ ImageDecodeCacheKey ImageDecodeCacheKey::FromDrawImage(const DrawImage& image) {
     if (original_size > kMemoryThresholdToSubrect &&
         src_rect_size <= original_size * kMemoryRatioToSubrect) {
       should_use_subrect = true;
-      can_use_original_decode = false;
+      can_use_original_size_decode = false;
     }
   }
 
@@ -976,7 +988,7 @@ ImageDecodeCacheKey ImageDecodeCacheKey::FromDrawImage(const DrawImage& image) {
   if (!target_size.IsEmpty()) {
     if (should_use_subrect)
       target_size = src_rect.size();
-    else if (can_use_original_decode)
+    else if (can_use_original_size_decode)
       target_size = gfx::Size(image.image()->width(), image.image()->height());
   }
 
@@ -988,23 +1000,26 @@ ImageDecodeCacheKey ImageDecodeCacheKey::FromDrawImage(const DrawImage& image) {
   }
 
   return ImageDecodeCacheKey(image.image()->uniqueID(), src_rect, target_size,
-                             quality, can_use_original_decode,
-                             should_use_subrect);
+                             image.target_color_space(), quality,
+                             can_use_original_size_decode, should_use_subrect);
 }
 
-ImageDecodeCacheKey::ImageDecodeCacheKey(uint32_t image_id,
-                                         const gfx::Rect& src_rect,
-                                         const gfx::Size& target_size,
-                                         SkFilterQuality filter_quality,
-                                         bool can_use_original_decode,
-                                         bool should_use_subrect)
+ImageDecodeCacheKey::ImageDecodeCacheKey(
+    uint32_t image_id,
+    const gfx::Rect& src_rect,
+    const gfx::Size& target_size,
+    const gfx::ColorSpace& target_color_space,
+    SkFilterQuality filter_quality,
+    bool can_use_original_size_decode,
+    bool should_use_subrect)
     : image_id_(image_id),
       src_rect_(src_rect),
       target_size_(target_size),
+      target_color_space_(target_color_space),
       filter_quality_(filter_quality),
-      can_use_original_decode_(can_use_original_decode),
+      can_use_original_size_decode_(can_use_original_size_decode),
       should_use_subrect_(should_use_subrect) {
-  if (can_use_original_decode_) {
+  if (can_use_original_size_decode_) {
     hash_ = std::hash<uint32_t>()(image_id_);
   } else {
     // TODO(vmpstr): This is a mess. Maybe it's faster to just search the vector
@@ -1020,6 +1035,8 @@ ImageDecodeCacheKey::ImageDecodeCacheKey(uint32_t image_id,
     hash_ = base::HashInts(base::HashInts(src_rect_hash, target_size_hash),
                            base::HashInts(image_id_, filter_quality_));
   }
+  // Include the target color space in the hash regardless of scaling.
+  hash_ = base::HashInts(hash_, target_color_space.GetHash());
 }
 
 ImageDecodeCacheKey::ImageDecodeCacheKey(const ImageDecodeCacheKey& other) =
@@ -1030,8 +1047,9 @@ std::string ImageDecodeCacheKey::ToString() const {
   str << "id[" << image_id_ << "] src_rect[" << src_rect_.x() << ","
       << src_rect_.y() << " " << src_rect_.width() << "x" << src_rect_.height()
       << "] target_size[" << target_size_.width() << "x"
-      << target_size_.height() << "] filter_quality[" << filter_quality_
-      << "] can_use_original_decode [" << can_use_original_decode_
+      << target_size_.height() << "] target_color_space"
+      << target_color_space_.ToString() << " filter_quality[" << filter_quality_
+      << "] can_use_original_size_decode [" << can_use_original_size_decode_
       << "] should_use_subrect [" << should_use_subrect_ << "] hash [" << hash_
       << "]";
   return str.str();
@@ -1160,7 +1178,11 @@ void SoftwareImageDecodeCache::OnMemoryStateChange(base::MemoryState state) {
         return;
     }
   }
-  ReduceCacheUsage();
+}
+
+void SoftwareImageDecodeCache::OnPurgeMemory() {
+  base::AutoLock lock(lock_);
+  ReduceCacheUsageUntilWithinLimit(0);
 }
 
 }  // namespace cc

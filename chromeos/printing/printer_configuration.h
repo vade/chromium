@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/macros.h"
+#include "base/time/time.h"
 #include "chromeos/chromeos_export.h"
 
 namespace chromeos {
@@ -20,27 +21,21 @@ class CHROMEOS_EXPORT Printer {
   // If you add fields to this struct, you almost certainly will
   // want to update PpdResolver and PpdCache::GetCachePath.
   //
+  // Exactly one of the fields below should be filled in.
+  //
   // At resolution time, we look for a cached PPD that used the same
   // PpdReference before.
   //
-  // If one is not found and user_supplied_ppd_url is set, we'll fail
-  // out with NOT FOUND
-  //
-  // Otherwise, we'll hit QuirksServer to see if we can resolve a Ppd
-  // using manufacturer/model
   struct PpdReference {
     // If non-empty, this is the url of a specific PPD the user has specified
-    // for use with this printer.
+    // for use with this printer.  The ppd can be gzipped or uncompressed.  This
+    // url must use a file:// scheme.
     std::string user_supplied_ppd_url;
 
-    // The *effective* manufacturer and model of this printer, in other words,
-    // the manufacturer and model of the printer for which we grab a PPD.  This
-    // doesn’t have to (but can) be the actual manufacturer/model of the
-    // printer.  We should always try to fill these fields in, even if we don’t
-    // think they’ll be needed, as they provide a fallback mechanism for
-    // finding a PPD.
-    std::string effective_manufacturer;
-    std::string effective_model;
+    // String that identifies which ppd to use from the ppd server.
+    // Where possible, this is the same as the ipp/ldap
+    // printer-make-and-model field.
+    std::string effective_make_and_model;
   };
 
   // The location where the printer is stored.
@@ -52,11 +47,11 @@ class CHROMEOS_EXPORT Printer {
   // Constructs a printer object that is completely empty.
   Printer();
 
-  // Constructs a printer object with an id.
-  explicit Printer(const std::string& id);
+  // Constructs a printer object with an |id| and a |last_updated| timestamp.
+  explicit Printer(const std::string& id, const base::Time& last_updated = {});
 
   // Copy constructor and assignment.
-  explicit Printer(const Printer& printer);
+  Printer(const Printer& printer);
   Printer& operator=(const Printer& printer);
 
   ~Printer();
@@ -99,6 +94,10 @@ class CHROMEOS_EXPORT Printer {
   Source source() const { return source_; }
   void set_source(const Source source) { source_ = source; }
 
+  // Returns the timestamp for the most recent update.  Returns 0 if the
+  // printer was not created with a valid timestamp.
+  base::Time last_updated() const { return last_updated_; }
+
  private:
   // Globally unique identifier. Empty indicates a new printer.
   std::string id_;
@@ -127,6 +126,9 @@ class CHROMEOS_EXPORT Printer {
 
   // The datastore which holds this printer.
   Source source_;
+
+  // Timestamp of most recent change.
+  base::Time last_updated_;
 };
 
 }  // namespace chromeos

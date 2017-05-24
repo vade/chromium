@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/files/file_util.h"
+#include "base/json/json_string_value_serializer.h"
 #include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
@@ -16,7 +17,9 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/printing/ppd_provider_factory.h"
-#include "chrome/browser/chromeos/printing/printer_pref_manager_factory.h"
+#include "chrome/browser/chromeos/printing/printer_configurer.h"
+#include "chrome/browser/chromeos/printing/printer_discoverer.h"
+#include "chrome/browser/chromeos/printing/printers_manager_factory.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -25,13 +28,13 @@
 #include "chrome/common/chrome_paths.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/debug_daemon_client.h"
-#include "chromeos/printing/fake_printer_discoverer.h"
 #include "chromeos/printing/ppd_cache.h"
 #include "chromeos/printing/ppd_provider.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_ui.h"
 #include "google_apis/google_api_keys.h"
+#include "net/base/filename_util.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "printing/backend/print_backend.h"
 #include "url/third_party/mozilla/url_parse.h"
@@ -51,7 +54,6 @@ std::unique_ptr<base::DictionaryValue> GetPrinterInfo(const Printer& printer) {
   printer_info->SetString("printerDescription", printer.description());
   printer_info->SetString("printerManufacturer", printer.manufacturer());
   printer_info->SetString("printerModel", printer.model());
-
   // Get protocol, ip address and queue from the printer's URI.
   const std::string printer_uri = printer.uri();
   url::Parsed parsed;
@@ -66,11 +68,20 @@ std::unique_ptr<base::DictionaryValue> GetPrinterInfo(const Printer& printer) {
     host = std::string(printer_uri, parsed.host.begin, parsed.host.len);
   if (parsed.path.len > 0)
     path = std::string(printer_uri, parsed.path.begin, parsed.path.len);
-
-  printer_info->SetString("printerAddress", host);
+  if (base::ToLowerASCII(scheme) == "usb") {
+    // USB has URI path (and, maybe, query) components that aren't really
+    // associated with a queue -- the mapping between printing semantics and URI
+    // semantics breaks down a bit here.  From the user's point of view, the
+    // entire host/path/query block is the printer address for USB.
+    printer_info->SetString("printerAddress",
+                            printer_uri.substr(parsed.host.begin));
+  } else {
+    printer_info->SetString("printerAddress", host);
+    if (!path.empty()) {
+      printer_info->SetString("printerQueue", path.substr(1));
+    }
+  }
   printer_info->SetString("printerProtocol", base::ToLowerASCII(scheme));
-  if (base::ToLowerASCII(scheme) == "lpd" && !path.empty())
-    printer_info->SetString("printerQueue", path.substr(1));
 
   return printer_info;
 }
@@ -82,6 +93,7 @@ CupsPrintersHandler::CupsPrintersHandler(content::WebUI* webui)
       profile_(Profile::FromWebUI(webui)),
       weak_factory_(this) {
   ppd_provider_ = printing::CreateProvider(profile_);
+  printer_configurer_ = chromeos::PrinterConfigurer::Create(profile_);
 }
 
 CupsPrintersHandler::~CupsPrintersHandler() {}
@@ -132,19 +144,18 @@ void CupsPrintersHandler::HandleGetCupsPrintersList(
   CHECK(args->GetString(0, &callback_id));
 
   std::vector<std::unique_ptr<Printer>> printers =
-      PrinterPrefManagerFactory::GetForBrowserContext(profile_)->GetPrinters();
+      PrintersManagerFactory::GetForBrowserContext(profile_)->GetPrinters();
 
-  base::ListValue* printers_list = new base::ListValue;
+  auto printers_list = base::MakeUnique<base::ListValue>();
   for (const std::unique_ptr<Printer>& printer : printers) {
     std::unique_ptr<base::DictionaryValue> printer_info =
         GetPrinterInfo(*printer.get());
     printers_list->Append(std::move(printer_info));
   }
 
-  std::unique_ptr<base::DictionaryValue> response =
-      base::MakeUnique<base::DictionaryValue>();
-  response->Set("printerList", printers_list);
-  ResolveJavascriptCallback(base::StringValue(callback_id), *response);
+  auto response = base::MakeUnique<base::DictionaryValue>();
+  response->Set("printerList", std::move(printers_list));
+  ResolveJavascriptCallback(base::Value(callback_id), *response);
 }
 
 void CupsPrintersHandler::HandleUpdateCupsPrinter(const base::ListValue* args) {
@@ -155,7 +166,7 @@ void CupsPrintersHandler::HandleUpdateCupsPrinter(const base::ListValue* args) {
 
   std::unique_ptr<Printer> printer = base::MakeUnique<Printer>(printer_id);
   printer->set_display_name(printer_name);
-  PrinterPrefManagerFactory::GetForBrowserContext(profile_)->RegisterPrinter(
+  PrintersManagerFactory::GetForBrowserContext(profile_)->RegisterPrinter(
       std::move(printer));
 }
 
@@ -164,7 +175,7 @@ void CupsPrintersHandler::HandleRemoveCupsPrinter(const base::ListValue* args) {
   std::string printer_name;
   CHECK(args->GetString(0, &printer_id));
   CHECK(args->GetString(1, &printer_name));
-  PrinterPrefManagerFactory::GetForBrowserContext(profile_)->RemovePrinter(
+  PrintersManagerFactory::GetForBrowserContext(profile_)->RemovePrinter(
       printer_id);
 
   chromeos::DebugDaemonClient* client =
@@ -197,10 +208,13 @@ void CupsPrintersHandler::HandleAddCupsPrinter(const base::ListValue* args) {
   CHECK(printer_dict->GetString("printerProtocol", &printer_protocol));
   // printerQueue might be null for a printer whose protocol is not 'LPD'.
   printer_dict->GetString("printerQueue", &printer_queue);
+
   // printerPPDPath might be null for an auto-discovered printer.
   printer_dict->GetString("printerPPDPath", &printer_ppd_path);
-  std::string printer_uri =
-      printer_protocol + "://" + printer_address + "/" + printer_queue;
+  std::string printer_uri = printer_protocol + "://" + printer_address;
+  if (!printer_queue.empty()) {
+    printer_uri += "/" + printer_queue;
+  }
 
   std::unique_ptr<Printer> printer = base::MakeUnique<Printer>(printer_id);
   printer->set_display_name(printer_name);
@@ -208,92 +222,121 @@ void CupsPrintersHandler::HandleAddCupsPrinter(const base::ListValue* args) {
   printer->set_manufacturer(printer_manufacturer);
   printer->set_model(printer_model);
   printer->set_uri(printer_uri);
+
+  // Verify a valid ppd path is present.
   if (!printer_ppd_path.empty()) {
-    printer->mutable_ppd_reference()->user_supplied_ppd_url = printer_ppd_path;
-    if (!ppd_provider_->CachePpd(printer->ppd_reference(),
-                                 base::FilePath(printer_ppd_path))) {
-      LOG(WARNING) << "PPD could not be stored in the cache";
+    GURL tmp = net::FilePathToFileURL(base::FilePath(printer_ppd_path));
+    if (!tmp.is_valid()) {
+      LOG(ERROR) << "Invalid ppd path: " << printer_ppd_path;
       OnAddPrinterError();
       return;
     }
+    printer->mutable_ppd_reference()->user_supplied_ppd_url = tmp.spec();
   } else if (!printer_manufacturer.empty() && !printer_model.empty()) {
-    Printer::PpdReference* ppd = printer->mutable_ppd_reference();
-    ppd->effective_manufacturer = printer_manufacturer;
-    ppd->effective_model = printer_model;
+    // Using the manufacturer and model, get a ppd reference.
+    if (!ppd_provider_->GetPpdReference(printer_manufacturer, printer_model,
+                                        printer->mutable_ppd_reference())) {
+      LOG(ERROR) << "Failed to get ppd reference";
+      OnAddPrinterError();
+      return;
+    }
   }
 
-  if (printer->IsIppEverywhere()) {
-    AddPrinterToCups(std::move(printer), base::FilePath(), true);
-    return;
-  }
-
-  // We need to save a reference to members of printer since we transfer
-  // ownership in the bind call.
-  const Printer::PpdReference& ppd_reference = printer->ppd_reference();
-  ppd_provider_->Resolve(
-      ppd_reference,
-      base::Bind(&CupsPrintersHandler::OnPPDResolved,
+  // Copy the printer for the configurer.  Ownership needs to be transfered to
+  // the receiver of the callback.
+  const Printer printer_copy = *printer;
+  printer_configurer_->SetUpPrinter(
+      printer_copy,
+      base::Bind(&CupsPrintersHandler::OnAddedPrinter,
                  weak_factory_.GetWeakPtr(), base::Passed(&printer)));
 }
 
-void CupsPrintersHandler::OnAddedPrinter(std::unique_ptr<Printer> printer,
-                                         bool success) {
+void CupsPrintersHandler::OnAddedPrinter(
+    std::unique_ptr<Printer> printer,
+    chromeos::PrinterSetupResult result_code) {
   std::string printer_name = printer->display_name();
-  if (success) {
-    PrinterPrefManagerFactory::GetForBrowserContext(profile_)->RegisterPrinter(
-        std::move(printer));
+  switch (result_code) {
+    case chromeos::PrinterSetupResult::SUCCESS: {
+      auto* manager = PrintersManagerFactory::GetForBrowserContext(profile_);
+      manager->PrinterInstalled(*printer);
+      manager->RegisterPrinter(std::move(printer));
+      break;
+    }
+    case chromeos::PrinterSetupResult::PPD_NOT_FOUND:
+      LOG(WARNING) << "Could not locate requested PPD";
+      break;
+    case chromeos::PrinterSetupResult::PPD_TOO_LARGE:
+      LOG(WARNING) << "PPD is too large";
+      break;
+    case chromeos::PrinterSetupResult::PPD_UNRETRIEVABLE:
+      LOG(WARNING) << "Could not retrieve PPD from server";
+      break;
+    case chromeos::PrinterSetupResult::INVALID_PPD:
+      LOG(WARNING) << "Provided PPD is invalid.";
+      break;
+    case chromeos::PrinterSetupResult::PRINTER_UNREACHABLE:
+      LOG(WARNING) << "Could not contact printer for configuration";
+      break;
+    case chromeos::PrinterSetupResult::DBUS_ERROR:
+    case chromeos::PrinterSetupResult::FATAL_ERROR:
+      LOG(ERROR) << "Unrecoverable error.  Reboot required.";
+      break;
   }
   CallJavascriptFunction(
-      "cr.webUIListenerCallback", base::StringValue("on-add-cups-printer"),
-      base::FundamentalValue(success), base::StringValue(printer_name));
+      "cr.webUIListenerCallback", base::Value("on-add-cups-printer"),
+      base::Value(result_code == chromeos::PrinterSetupResult::SUCCESS),
+      base::Value(printer_name));
 }
 
 void CupsPrintersHandler::OnAddPrinterError() {
   CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("on-add-cups-printer"),
-                         base::FundamentalValue(false), base::StringValue(""));
+                         base::Value("on-add-cups-printer"), base::Value(false),
+                         base::Value(""));
 }
 
 void CupsPrintersHandler::HandleGetCupsPrinterManufacturers(
     const base::ListValue* args) {
+  AllowJavascript();
   std::string js_callback;
   CHECK_EQ(1U, args->GetSize());
   CHECK(args->GetString(0, &js_callback));
-  ppd_provider_->QueryAvailable(
-      base::Bind(&CupsPrintersHandler::QueryAvailableManufacturersDone,
-                 weak_factory_.GetWeakPtr(),
-                 js_callback));
+  ppd_provider_->ResolveManufacturers(
+      base::Bind(&CupsPrintersHandler::ResolveManufacturersDone,
+                 weak_factory_.GetWeakPtr(), js_callback));
 }
 
 void CupsPrintersHandler::HandleGetCupsPrinterModels(
     const base::ListValue* args) {
+  AllowJavascript();
   std::string js_callback;
   std::string manufacturer;
   CHECK_EQ(2U, args->GetSize());
   CHECK(args->GetString(0, &js_callback));
   CHECK(args->GetString(1, &manufacturer));
-  // Special case the "asked with no manufacturer case" since the UI sometimes
-  // triggers this and it should yield a trivial (empty) result
+
+  // Empty manufacturer queries may be triggered as a part of the ui
+  // initialization, and should just return empty results.
   if (manufacturer.empty()) {
-    base::SequencedTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::Bind(&CupsPrintersHandler::QueryAvailableModelsDone,
-                   weak_factory_.GetWeakPtr(), js_callback, manufacturer,
-                   chromeos::printing::PpdProvider::SUCCESS,
-                   chromeos::printing::PpdProvider::AvailablePrintersMap()));
-  } else {
-    ppd_provider_->QueryAvailable(
-        base::Bind(&CupsPrintersHandler::QueryAvailableModelsDone,
-                   weak_factory_.GetWeakPtr(), js_callback, manufacturer));
+    base::DictionaryValue response;
+    response.SetBoolean("success", true);
+    response.Set("models", base::MakeUnique<base::ListValue>());
+    ResolveJavascriptCallback(base::Value(js_callback), response);
+    return;
   }
+
+  ppd_provider_->ResolvePrinters(
+      manufacturer, base::Bind(&CupsPrintersHandler::ResolvePrintersDone,
+                               weak_factory_.GetWeakPtr(), js_callback));
 }
 
 void CupsPrintersHandler::HandleSelectPPDFile(const base::ListValue* args) {
   CHECK_EQ(1U, args->GetSize());
   CHECK(args->GetString(0, &webui_callback_id_));
 
-  base::FilePath downloads_path = DownloadPrefs::FromDownloadManager(
-      content::BrowserContext::GetDownloadManager(profile_))->DownloadPath();
+  base::FilePath downloads_path =
+      DownloadPrefs::FromDownloadManager(
+          content::BrowserContext::GetDownloadManager(profile_))
+          ->DownloadPath();
 
   select_file_dialog_ = ui::SelectFileDialog::Create(
       this, new ChromeSelectFilePolicy(web_ui()->GetWebContents()));
@@ -306,70 +349,56 @@ void CupsPrintersHandler::HandleSelectPPDFile(const base::ListValue* args) {
       nullptr, 0, FILE_PATH_LITERAL(""), owning_window, nullptr);
 }
 
-void CupsPrintersHandler::QueryAvailableManufacturersDone(
+void CupsPrintersHandler::ResolveManufacturersDone(
     const std::string& js_callback,
     chromeos::printing::PpdProvider::CallbackResultCode result_code,
-    const chromeos::printing::PpdProvider::AvailablePrintersMap& available) {
-  auto manufacturers = base::MakeUnique<base::ListValue>();
+    const std::vector<std::string>& manufacturers) {
+  auto manufacturers_value = base::MakeUnique<base::ListValue>();
   if (result_code == chromeos::printing::PpdProvider::SUCCESS) {
-    for (const auto& entry : available) {
-      manufacturers->AppendString(entry.first);
-    }
+    manufacturers_value->AppendStrings(manufacturers);
   }
   base::DictionaryValue response;
   response.SetBoolean("success",
                       result_code == chromeos::printing::PpdProvider::SUCCESS);
-  response.Set("manufacturers", std::move(manufacturers));
-  ResolveJavascriptCallback(base::StringValue(js_callback), response);
+  response.Set("manufacturers", std::move(manufacturers_value));
+  ResolveJavascriptCallback(base::Value(js_callback), response);
 }
 
-void CupsPrintersHandler::QueryAvailableModelsDone(
+void CupsPrintersHandler::ResolvePrintersDone(
     const std::string& js_callback,
-    const std::string& manufacturer,
     chromeos::printing::PpdProvider::CallbackResultCode result_code,
-    const chromeos::printing::PpdProvider::AvailablePrintersMap& available) {
-  auto models = base::MakeUnique<base::ListValue>();
+    const std::vector<std::string>& printers) {
+  auto printers_value = base::MakeUnique<base::ListValue>();
   if (result_code == chromeos::printing::PpdProvider::SUCCESS) {
-    const auto it = available.find(manufacturer);
-    if (it != available.end()) {
-      // Everything looks good.
-      models->AppendStrings(it->second);
-    }
+    printers_value->AppendStrings(printers);
   }
   base::DictionaryValue response;
   response.SetBoolean("success",
-                       result_code == chromeos::printing::PpdProvider::SUCCESS);
-  response.Set("models", std::move(models));
-  ResolveJavascriptCallback(base::StringValue(js_callback), response);
+                      result_code == chromeos::printing::PpdProvider::SUCCESS);
+  response.Set("models", std::move(printers_value));
+  ResolveJavascriptCallback(base::Value(js_callback), response);
 }
 
 void CupsPrintersHandler::FileSelected(const base::FilePath& path,
                                        int index,
                                        void* params) {
   DCHECK(!webui_callback_id_.empty());
-  ResolveJavascriptCallback(base::StringValue(webui_callback_id_),
-                            base::StringValue(path.value()));
+  ResolveJavascriptCallback(base::Value(webui_callback_id_),
+                            base::Value(path.value()));
   webui_callback_id_.clear();
 }
 
 void CupsPrintersHandler::HandleStartDiscovery(const base::ListValue* args) {
-  if (!printer_discoverer_.get())
-    printer_discoverer_ = chromeos::PrinterDiscoverer::Create();
+  if (!printer_discoverer_.get()) {
+    printer_discoverer_ =
+        chromeos::PrinterDiscoverer::CreateForProfile(profile_);
+  }
 
   printer_discoverer_->AddObserver(this);
-  if (!printer_discoverer_->StartDiscovery()) {
-    CallJavascriptFunction("cr.webUIListenerCallback",
-                           base::StringValue("on-printer-discovery-failed"));
-    printer_discoverer_->RemoveObserver(this);
-  }
 }
 
 void CupsPrintersHandler::HandleStopDiscovery(const base::ListValue* args) {
-  if (printer_discoverer_.get()) {
-    printer_discoverer_->RemoveObserver(this);
-    printer_discoverer_->StopDiscovery();
-    printer_discoverer_.reset();
-  }
+  printer_discoverer_.reset();
 }
 
 void CupsPrintersHandler::OnPrintersFound(
@@ -377,48 +406,16 @@ void CupsPrintersHandler::OnPrintersFound(
   std::unique_ptr<base::ListValue> printers_list =
       base::MakeUnique<base::ListValue>();
   for (const auto& printer : printers) {
-    std::unique_ptr<base::DictionaryValue> printer_info =
-        GetPrinterInfo(printer);
-    printers_list->Append(std::move(printer_info));
+    printers_list->Append(GetPrinterInfo(printer));
   }
 
   CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("on-printer-discovered"),
-                         *printers_list);
+                         base::Value("on-printer-discovered"), *printers_list);
 }
 
-void CupsPrintersHandler::OnDiscoveryDone() {
+void CupsPrintersHandler::OnDiscoveryInitialScanDone() {
   CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("on-printer-discovery-done"));
-}
-
-void CupsPrintersHandler::AddPrinterToCups(std::unique_ptr<Printer> printer,
-                                           const base::FilePath& ppd_path,
-                                           bool ipp_everywhere) {
-  std::string printer_id = printer->id();
-  std::string printer_uri = printer->uri();
-
-  chromeos::DebugDaemonClient* client =
-      chromeos::DBusThreadManager::Get()->GetDebugDaemonClient();
-  client->CupsAddPrinter(
-      printer_id, printer_uri, ppd_path.value(), ipp_everywhere,
-      base::Bind(&CupsPrintersHandler::OnAddedPrinter,
-                 weak_factory_.GetWeakPtr(), base::Passed(&printer)),
-      base::Bind(&CupsPrintersHandler::OnAddPrinterError,
-                 weak_factory_.GetWeakPtr()));
-}
-
-void CupsPrintersHandler::OnPPDResolved(
-    std::unique_ptr<Printer> printer,
-    printing::PpdProvider::CallbackResultCode result,
-    base::FilePath path) {
-  if (result != printing::PpdProvider::SUCCESS) {
-    // TODO(skau): Add appropriate failure modes crbug.com/670068.
-    OnAddPrinterError();
-    return;
-  }
-
-  AddPrinterToCups(std::move(printer), path, false /* never ipp everywhere */);
+                         base::Value("on-printer-discovery-done"));
 }
 
 }  // namespace settings

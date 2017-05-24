@@ -21,7 +21,10 @@
 #include "content/public/renderer/render_view.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest.h"
+#include "extensions/common/manifest_handlers/background_info.h"
+#include "extensions/renderer/extension_bindings_system.h"
 #include "extensions/renderer/script_context.h"
+#include "gin/converter.h"
 #include "ipc/message_filter.h"
 #include "ui/accessibility/ax_enums.h"
 #include "ui/accessibility/ax_node.h"
@@ -30,20 +33,6 @@
 namespace extensions {
 
 namespace {
-
-// Helper to convert an enum to a V8 object.
-template <typename EnumType>
-v8::Local<v8::Object> ToEnumObject(v8::Isolate* isolate,
-                                   EnumType start_after,
-                                   EnumType end_at) {
-  v8::Local<v8::Object> object = v8::Object::New(isolate);
-  for (int i = start_after + 1; i <= end_at; ++i) {
-    v8::Local<v8::String> value = v8::String::NewFromUtf8(
-        isolate, ui::ToString(static_cast<EnumType>(i)).c_str());
-    object->Set(value, value);
-  }
-  return object;
-}
 
 void ThrowInvalidArgumentsException(
     AutomationInternalCustomBindings* automation_bindings) {
@@ -59,28 +48,43 @@ void ThrowInvalidArgumentsException(
              << automation_bindings->context()->GetStackTraceAsString();
 }
 
-v8::Local<v8::Value> CreateV8String(v8::Isolate* isolate, const char* str) {
-  return v8::String::NewFromUtf8(isolate, str, v8::String::kNormalString,
-                                 strlen(str));
+v8::Local<v8::String> CreateV8String(v8::Isolate* isolate,
+                                     base::StringPiece str) {
+  return gin::StringToSymbol(isolate, str);
 }
 
-v8::Local<v8::Value> CreateV8String(v8::Isolate* isolate,
-                                    const std::string& str) {
-  return v8::String::NewFromUtf8(isolate, str.c_str(),
-                                 v8::String::kNormalString, str.length());
+// Note: when building up an object to return from one of the
+// automation API bindings like a rect ({left: 0, top: 0, ...}) or
+// something like that, we should use this function instead of
+// v8::Object::Set, because a malicious extension author could use
+// Object.defineProperty to override a setter and trigger all sorts of
+// things to happen in the middle of one of our functions below.
+//
+// This is only safe when we're creating the object to return and
+// we're setting properties on it before it's been exposed to
+// untrusted scripts.
+void SafeSetV8Property(v8::Isolate* isolate,
+                       v8::Local<v8::Object> object,
+                       base::StringPiece key,
+                       v8::Local<v8::Value> value) {
+  v8::Maybe<bool> maybe = object->CreateDataProperty(
+      isolate->GetCurrentContext(), CreateV8String(isolate, key), value);
+
+  // There's no legit reason CreateDataProperty should fail.
+  CHECK(maybe.IsJust() && maybe.FromJust());
 }
 
 v8::Local<v8::Object> RectToV8Object(v8::Isolate* isolate,
                                      const gfx::Rect& rect) {
   v8::Local<v8::Object> result(v8::Object::New(isolate));
-  result->Set(CreateV8String(isolate, "left"),
-              v8::Integer::New(isolate, rect.x()));
-  result->Set(CreateV8String(isolate, "top"),
-              v8::Integer::New(isolate, rect.y()));
-  result->Set(CreateV8String(isolate, "width"),
-              v8::Integer::New(isolate, rect.width()));
-  result->Set(CreateV8String(isolate, "height"),
-              v8::Integer::New(isolate, rect.height()));
+  SafeSetV8Property(isolate, result, "left",
+                    v8::Integer::New(isolate, rect.x()));
+  SafeSetV8Property(isolate, result, "top",
+                    v8::Integer::New(isolate, rect.y()));
+  SafeSetV8Property(isolate, result, "width",
+                    v8::Integer::New(isolate, rect.width()));
+  SafeSetV8Property(isolate, result, "height",
+                    v8::Integer::New(isolate, rect.height()));
   return result;
 }
 
@@ -432,10 +436,23 @@ private:
 };
 
 AutomationInternalCustomBindings::AutomationInternalCustomBindings(
-    ScriptContext* context)
+    ScriptContext* context,
+    ExtensionBindingsSystem* bindings_system)
     : ObjectBackedNativeHandler(context),
       is_active_profile_(true),
-      tree_change_observer_overall_filter_(0) {
+      tree_change_observer_overall_filter_(0),
+      bindings_system_(bindings_system),
+      should_ignore_context_(false) {
+  // We will ignore this instance if the extension has a background page and
+  // this context is not that background page. In all other cases, we will have
+  // multiple instances floating around in the same process.
+  if (context && context->extension()) {
+    const GURL background_page_url =
+        extensions::BackgroundInfo::GetBackgroundURL(context->extension());
+    should_ignore_context_ = background_page_url != "" &&
+        background_page_url != context->url();
+  }
+
   // It's safe to use base::Unretained(this) here because these bindings
   // will only be called on a valid AutomationInternalCustomBindings instance
   // and none of the functions have any side effects.
@@ -552,7 +569,6 @@ AutomationInternalCustomBindings::AutomationInternalCustomBindings(
         gfx::RectF local_bounds = ComputeLocalNodeBounds(cache, node);
         gfx::Rect global_bounds =
             ComputeGlobalNodeBounds(cache, node, local_bounds);
-        global_bounds.Offset(cache->location_offset);
         result.Set(RectToV8Object(isolate, global_bounds));
       });
   RouteNodeIDFunction(
@@ -592,7 +608,6 @@ AutomationInternalCustomBindings::AutomationInternalCustomBindings(
         if (node->data().role != ui::AX_ROLE_INLINE_TEXT_BOX) {
           gfx::Rect global_bounds =
               ComputeGlobalNodeBounds(cache, node, local_bounds);
-          global_bounds.Offset(cache->location_offset);
           result.Set(RectToV8Object(isolate, global_bounds));
         }
 
@@ -634,7 +649,6 @@ AutomationInternalCustomBindings::AutomationInternalCustomBindings(
         // transformations.
         gfx::Rect global_bounds =
             ComputeGlobalNodeBounds(cache, node, local_bounds);
-        global_bounds.Offset(cache->location_offset);
         result.Set(RectToV8Object(isolate, global_bounds));
       });
 
@@ -717,6 +731,24 @@ AutomationInternalCustomBindings::AutomationInternalCustomBindings(
 
         result.Set(v8::String::NewFromUtf8(isolate, attr_value.c_str()));
       });
+  RouteNodeIDFunction(
+      "GetNameFrom", [](v8::Isolate* isolate, v8::ReturnValue<v8::Value> result,
+                        TreeCache* cache, ui::AXNode* node) {
+        ui::AXNameFrom name_from = static_cast<ui::AXNameFrom>(
+            node->data().GetIntAttribute(ui::AX_ATTR_NAME_FROM));
+        std::string name_from_str = ui::ToString(name_from);
+        result.Set(v8::String::NewFromUtf8(isolate, name_from_str.c_str()));
+      });
+  RouteNodeIDFunction("GetChecked", [](v8::Isolate* isolate,
+                                       v8::ReturnValue<v8::Value> result,
+                                       TreeCache* cache, ui::AXNode* node) {
+    const ui::AXCheckedState checked_state = static_cast<ui::AXCheckedState>(
+        node->data().GetIntAttribute(ui::AX_ATTR_CHECKED_STATE));
+    if (checked_state) {
+      const std::string checked_str = ui::ToString(checked_state);
+      result.Set(v8::String::NewFromUtf8(isolate, checked_str.c_str()));
+    }
+  });
 }
 
 AutomationInternalCustomBindings::~AutomationInternalCustomBindings() {}
@@ -773,6 +805,9 @@ void AutomationInternalCustomBindings::GetRoutingID(
 
 void AutomationInternalCustomBindings::StartCachingAccessibilityTrees(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
+  if (should_ignore_context_)
+    return;
+
   if (!message_filter_)
     message_filter_ = new AutomationMessageFilter(this);
 }
@@ -780,22 +815,6 @@ void AutomationInternalCustomBindings::StartCachingAccessibilityTrees(
 void AutomationInternalCustomBindings::GetSchemaAdditions(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
   v8::Local<v8::Object> additions = v8::Object::New(GetIsolate());
-
-  additions->Set(
-      v8::String::NewFromUtf8(GetIsolate(), "EventType"),
-      ToEnumObject(GetIsolate(), ui::AX_EVENT_NONE, ui::AX_EVENT_LAST));
-
-  additions->Set(
-      v8::String::NewFromUtf8(GetIsolate(), "RoleType"),
-      ToEnumObject(GetIsolate(), ui::AX_ROLE_NONE, ui::AX_ROLE_LAST));
-
-  additions->Set(
-      v8::String::NewFromUtf8(GetIsolate(), "StateType"),
-      ToEnumObject(GetIsolate(), ui::AX_STATE_NONE, ui::AX_STATE_LAST));
-
-  additions->Set(
-      v8::String::NewFromUtf8(GetIsolate(), "TreeChangeType"),
-      ToEnumObject(GetIsolate(), ui::AX_MUTATION_NONE, ui::AX_MUTATION_LAST));
 
   v8::Local<v8::Object> name_from_type(v8::Object::New(GetIsolate()));
   for (int i = ui::AX_NAME_FROM_NONE; i <= ui::AX_NAME_FROM_LAST; ++i) {
@@ -942,10 +961,10 @@ void AutomationInternalCustomBindings::GetFocus(
 
   v8::Isolate* isolate = GetIsolate();
   v8::Local<v8::Object> result(v8::Object::New(isolate));
-  result->Set(CreateV8String(isolate, "treeId"),
-              v8::Integer::New(isolate, focused_tree_cache->tree_id));
-  result->Set(CreateV8String(isolate, "nodeId"),
-              v8::Integer::New(isolate, focused_node->id()));
+  SafeSetV8Property(isolate, result, "treeId",
+                    v8::Integer::New(isolate, focused_tree_cache->tree_id));
+  SafeSetV8Property(isolate, result, "nodeId",
+                    v8::Integer::New(isolate, focused_node->id()));
   args.GetReturnValue().Set(result);
 }
 
@@ -971,7 +990,7 @@ void AutomationInternalCustomBindings::GetHtmlAttributes(
   for (size_t i = 0; i < src.size(); i++) {
     std::string& key = src[i].first;
     std::string& value = src[i].second;
-    dst->Set(CreateV8String(isolate, key), CreateV8String(isolate, value));
+    SafeSetV8Property(isolate, dst, key, CreateV8String(isolate, value));
   }
   args.GetReturnValue().Set(dst);
 }
@@ -998,7 +1017,7 @@ void AutomationInternalCustomBindings::GetState(
   while (state_shifter) {
     if (state_shifter & 1) {
       std::string key = ToString(static_cast<ui::AXState>(state_pos));
-      state->Set(CreateV8String(isolate, key), v8::Boolean::New(isolate, true));
+      SafeSetV8Property(isolate, state, key, v8::Boolean::New(isolate, true));
     }
     state_shifter = state_shifter >> 1;
     state_pos++;
@@ -1011,13 +1030,13 @@ void AutomationInternalCustomBindings::GetState(
   ui::AXNode* focused_node = nullptr;
   if (GetFocusInternal(top_cache, &focused_cache, &focused_node)) {
     if (focused_cache == cache && focused_node == node) {
-      state->Set(CreateV8String(isolate, "focused"),
-                 v8::Boolean::New(isolate, true));
+      SafeSetV8Property(isolate, state, "focused",
+                        v8::Boolean::New(isolate, true));
     }
   }
   if (cache->tree.data().focus_id == node->id()) {
-    state->Set(CreateV8String(isolate, "focused"),
-               v8::Boolean::New(isolate, true));
+    SafeSetV8Property(isolate, state, "focused",
+                      v8::Boolean::New(isolate, true));
   }
 
   args.GetReturnValue().Set(state);
@@ -1036,8 +1055,12 @@ ui::AXNode* AutomationInternalCustomBindings::GetParent(
     return node->parent();
 
   int parent_tree_id = (*in_out_cache)->tree.data().parent_tree_id;
+
+  // Try the desktop tree if the parent is unknown. If this tree really is
+  // a child of the desktop tree, we'll find its parent, and if not, the
+  // search, below, will fail until the real parent tree loads.
   if (parent_tree_id < 0)
-    return nullptr;
+    parent_tree_id = api::automation::kDesktopTreeID;
 
   TreeCache* parent_cache = GetTreeCacheFromTreeID(parent_tree_id);
   if (!parent_cache)
@@ -1045,9 +1068,9 @@ ui::AXNode* AutomationInternalCustomBindings::GetParent(
 
   // Try to use the cached parent node from the most recent time this
   // was called.
-  if (parent_cache->parent_node_id_from_parent_tree > 0) {
+  if ((*in_out_cache)->parent_node_id_from_parent_tree > 0) {
     ui::AXNode* parent = parent_cache->tree.GetFromId(
-        parent_cache->parent_node_id_from_parent_tree);
+        (*in_out_cache)->parent_node_id_from_parent_tree);
     if (parent) {
       int parent_child_tree_id =
           parent->data().GetIntAttribute(ui::AX_ATTR_CHILD_TREE_ID);
@@ -1155,17 +1178,14 @@ void AutomationInternalCustomBindings::OnAccessibilityEvent(
   }
 
   // Update the internal state whether it's the active profile or not.
-  cache->location_offset = params.location_offset;
   deleted_node_ids_.clear();
-  v8::Isolate* isolate = GetIsolate();
-  v8::HandleScope handle_scope(isolate);
-  v8::Context::Scope context_scope(context()->v8_context());
-  v8::Local<v8::Array> args(v8::Array::New(GetIsolate(), 1U));
   if (!cache->tree.Unserialize(params.update)) {
     LOG(ERROR) << cache->tree.error();
-    args->Set(0U, v8::Number::New(isolate, tree_id));
-    context()->DispatchEvent(
-        "automationInternal.onAccessibilityTreeSerializationError", args);
+    base::ListValue args;
+    args.AppendInteger(tree_id);
+    bindings_system_->DispatchEventInContext(
+        "automationInternal.onAccessibilityTreeSerializationError", &args,
+        nullptr, context());
     return;
   }
 
@@ -1176,21 +1196,19 @@ void AutomationInternalCustomBindings::OnAccessibilityEvent(
   SendNodesRemovedEvent(&cache->tree, deleted_node_ids_);
   deleted_node_ids_.clear();
 
-  v8::Local<v8::Object> event_params(v8::Object::New(GetIsolate()));
-  event_params->Set(CreateV8String(isolate, "treeID"),
-                    v8::Integer::New(GetIsolate(), params.tree_id));
-  event_params->Set(CreateV8String(isolate, "targetID"),
-                    v8::Integer::New(GetIsolate(), params.id));
-  event_params->Set(CreateV8String(isolate, "eventType"),
-                    CreateV8String(isolate, ToString(params.event_type)));
-  event_params->Set(CreateV8String(isolate, "eventFrom"),
-                    CreateV8String(isolate, ToString(params.event_from)));
-  event_params->Set(CreateV8String(isolate, "mouseX"),
-                    v8::Integer::New(GetIsolate(), params.mouse_location.x()));
-  event_params->Set(CreateV8String(isolate, "mouseY"),
-                    v8::Integer::New(GetIsolate(), params.mouse_location.y()));
-  args->Set(0U, event_params);
-  context()->DispatchEvent("automationInternal.onAccessibilityEvent", args);
+  {
+    auto event_params = base::MakeUnique<base::DictionaryValue>();
+    event_params->SetInteger("treeID", params.tree_id);
+    event_params->SetInteger("targetID", params.id);
+    event_params->SetString("eventType", ToString(params.event_type));
+    event_params->SetString("eventFrom", ToString(params.event_from));
+    event_params->SetInteger("mouseX", params.mouse_location.x());
+    event_params->SetInteger("mouseY", params.mouse_location.y());
+    base::ListValue args;
+    args.Append(std::move(event_params));
+    bindings_system_->DispatchEventInContext(
+        "automationInternal.onAccessibilityEvent", &args, nullptr, context());
+  }
 }
 
 void AutomationInternalCustomBindings::OnAccessibilityLocationChange(
@@ -1350,10 +1368,6 @@ void AutomationInternalCustomBindings::SendTreeChangeEvent(
 
   int tree_id = iter->second->tree_id;
 
-  v8::Isolate* isolate = GetIsolate();
-  v8::HandleScope handle_scope(isolate);
-  v8::Context::Scope context_scope(context()->v8_context());
-
   for (const auto& observer : tree_change_observers_) {
     switch (observer.filter) {
       case api::automation::TREE_CHANGE_OBSERVER_FILTER_NOTREECHANGES:
@@ -1374,12 +1388,13 @@ void AutomationInternalCustomBindings::SendTreeChangeEvent(
         break;
     }
 
-    v8::Local<v8::Array> args(v8::Array::New(GetIsolate(), 4U));
-    args->Set(0U, v8::Integer::New(GetIsolate(), observer.id));
-    args->Set(1U, v8::Integer::New(GetIsolate(), tree_id));
-    args->Set(2U, v8::Integer::New(GetIsolate(), node->id()));
-    args->Set(3U, CreateV8String(isolate, ToString(change_type)));
-    context()->DispatchEvent("automationInternal.onTreeChange", args);
+    base::ListValue args;
+    args.AppendInteger(observer.id);
+    args.AppendInteger(tree_id);
+    args.AppendInteger(node->id());
+    args.AppendString(ToString(change_type));
+    bindings_system_->DispatchEventInContext("automationInternal.onTreeChange",
+                                             &args, nullptr, context());
   }
 }
 
@@ -1391,13 +1406,11 @@ void AutomationInternalCustomBindings::SendChildTreeIDEvent(ui::AXTree* tree,
 
   int tree_id = iter->second->tree_id;
 
-  v8::Isolate* isolate = GetIsolate();
-  v8::HandleScope handle_scope(isolate);
-  v8::Context::Scope context_scope(context()->v8_context());
-  v8::Local<v8::Array> args(v8::Array::New(GetIsolate(), 2U));
-  args->Set(0U, v8::Integer::New(GetIsolate(), tree_id));
-  args->Set(1U, v8::Integer::New(GetIsolate(), node->id()));
-  context()->DispatchEvent("automationInternal.onChildTreeID", args);
+  base::ListValue args;
+  args.AppendInteger(tree_id);
+  args.AppendInteger(node->id());
+  bindings_system_->DispatchEventInContext("automationInternal.onChildTreeID",
+                                           &args, nullptr, context());
 }
 
 void AutomationInternalCustomBindings::SendNodesRemovedEvent(
@@ -1409,16 +1422,17 @@ void AutomationInternalCustomBindings::SendNodesRemovedEvent(
 
   int tree_id = iter->second->tree_id;
 
-  v8::Isolate* isolate = GetIsolate();
-  v8::HandleScope handle_scope(isolate);
-  v8::Context::Scope context_scope(context()->v8_context());
-  v8::Local<v8::Array> args(v8::Array::New(GetIsolate(), 2U));
-  args->Set(0U, v8::Integer::New(GetIsolate(), tree_id));
-  v8::Local<v8::Array> nodes(v8::Array::New(GetIsolate(), ids.size()));
-  args->Set(1U, nodes);
-  for (size_t i = 0; i < ids.size(); ++i)
-    nodes->Set(i, v8::Integer::New(GetIsolate(), ids[i]));
-  context()->DispatchEvent("automationInternal.onNodesRemoved", args);
+  base::ListValue args;
+  args.AppendInteger(tree_id);
+  {
+    auto nodes = base::MakeUnique<base::ListValue>();
+    for (auto id : ids)
+      nodes->AppendInteger(id);
+    args.Append(std::move(nodes));
+  }
+
+  bindings_system_->DispatchEventInContext("automationInternal.onNodesRemoved",
+                                           &args, nullptr, context());
 }
 
 }  // namespace extensions

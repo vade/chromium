@@ -147,9 +147,9 @@ Workspace.Project.prototype = {
   createFile(path, name, content, callback) {},
 
   /**
-   * @param {string} path
+   * @param {!Workspace.UISourceCode} uiSourceCode
    */
-  deleteFile(path) {},
+  deleteFile(uiSourceCode) {},
 
   remove() {},
 
@@ -453,6 +453,7 @@ Workspace.Workspace = class extends Common.Object {
 Workspace.Workspace.Events = {
   UISourceCodeAdded: Symbol('UISourceCodeAdded'),
   UISourceCodeRemoved: Symbol('UISourceCodeRemoved'),
+  UISourceCodeRenamed: Symbol('UISourceCodeRenamed'),
   WorkingCopyChanged: Symbol('WorkingCopyChanged'),
   WorkingCopyCommitted: Symbol('WorkingCopyCommitted'),
   WorkingCopyCommittedByUser: Symbol('WorkingCopyCommittedByUser'),

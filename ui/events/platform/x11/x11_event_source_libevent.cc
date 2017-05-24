@@ -68,10 +68,11 @@ std::unique_ptr<ui::Event> TranslateXI2EventToEvent(const XEvent& xev) {
     case ET_TOUCH_CANCELLED:
     case ET_TOUCH_RELEASED:
       return base::MakeUnique<TouchEvent>(
-          event_type, EventLocationFromXEvent(xev),
-          /* flags */ 0, GetTouchIdFromXEvent(xev), EventTimeFromXEvent(xev),
-          GetTouchRadiusXFromXEvent(xev), GetTouchRadiusYFromXEvent(xev),
-          /* angle */ 0.f, GetTouchForceFromXEvent(xev));
+          event_type, EventLocationFromXEvent(xev), EventTimeFromXEvent(xev),
+          ui::PointerDetails(
+              ui::EventPointerType::POINTER_TYPE_TOUCH,
+              GetTouchIdFromXEvent(xev), GetTouchRadiusXFromXEvent(xev),
+              GetTouchRadiusYFromXEvent(xev), GetTouchForceFromXEvent(xev)));
     case ET_UNKNOWN:
       return nullptr;
     default:
@@ -133,7 +134,7 @@ std::unique_ptr<ui::Event> TranslateXEventToEvent(const XEvent& xev) {
 }  // namespace
 
 X11EventSourceLibevent::X11EventSourceLibevent(XDisplay* display)
-    : event_source_(this, display) {
+    : event_source_(this, display), watcher_controller_(FROM_HERE) {
   AddEventWatcher();
 }
 

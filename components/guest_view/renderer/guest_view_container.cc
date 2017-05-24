@@ -4,6 +4,7 @@
 
 #include "components/guest_view/renderer/guest_view_container.h"
 
+#include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/guest_view/common/guest_view_constants.h"
@@ -17,8 +18,8 @@
 namespace {
 
 using GuestViewContainerMap = std::map<int, guest_view::GuestViewContainer*>;
-static base::LazyInstance<GuestViewContainerMap> g_guest_view_container_map =
-    LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<GuestViewContainerMap>::DestructorAtExit
+    g_guest_view_container_map = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 

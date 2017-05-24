@@ -32,38 +32,92 @@ def parse(filename):
   return team, component
 
 
-def aggregate_components_from_owners(root):
+def aggregate_components_from_owners(root, include_subdirs=False):
   """Traverses the given dir and parse OWNERS files for team and component tags.
 
   Args:
     root (str): the path to the src directory.
 
   Returns:
-    A pair (data, warnings) where data is a dict of the form
+    A tuple (data, warnings, errors, stats) where data is a dict of the form
       {'component-to-team': {'Component1': 'team1@chr...', ...},
        'dir-to-component': {'/path/to/1': 'Component1', ...}}
-      and warnings is a list of strings.
+      , warnings is a list of strings, stats is a dict of form
+      {'OWNERS-count': total number of OWNERS files,
+       'OWNERS-with-component-only-count': number of OWNERS have # COMPONENT,
+       'OWNERS-with-team-and-component-count': number of
+                          OWNERS have TEAM and COMPONENT,
+       'OWNERS-count-by-depth': {directory depth: number of OWNERS},
+       'OWNERS-with-component-only-count-by-depth': {directory depth: number
+                          of OWNERS have COMPONENT at this depth},
+       'OWNERS-with-team-and-component-count-by-depth':{directory depth: ...}}
   """
+  stats = {}
+  num_total = 0
+  num_with_component = 0
+  num_with_team_component = 0
+  num_total_by_depth = defaultdict(int)
+  num_with_component_by_depth = defaultdict(int)
+  num_with_team_component_by_depth = defaultdict(int)
   warnings = []
   component_to_team = defaultdict(set)
   dir_to_component = {}
+  dir_missing_info_by_depth = defaultdict(list)
+  # TODO(sergiyb): Remove this mapping. Please do not use it as it is going to
+  # be removed in the future. See http://crbug.com/702202.
+  dir_to_team = {}
   for dirname, _, files in os.walk(root):
     # Proofing against windows casing oddities.
     owners_file_names = [f for f in files if f.upper() == 'OWNERS']
+    rel_dirname = os.path.relpath(dirname, root)
     if owners_file_names:
+      file_depth = dirname[len(root) + len(os.path.sep):].count(os.path.sep)
+      num_total += 1
+      num_total_by_depth[file_depth] += 1
       owners_full_path = os.path.join(dirname, owners_file_names[0])
       owners_rel_path = os.path.relpath(owners_full_path, root)
       team, component = parse(owners_full_path)
       if component:
-        dir_to_component[os.path.relpath(dirname, root)] = component
+        num_with_component += 1
+        num_with_component_by_depth[file_depth] += 1
+        dir_to_component[rel_dirname] = component
         if team:
+          num_with_team_component += 1
+          num_with_team_component_by_depth[file_depth] += 1
           component_to_team[component].add(team)
       else:
         warnings.append('%s has no COMPONENT tag' % owners_rel_path)
+        if not team:
+          dir_missing_info_by_depth[file_depth].append(owners_rel_path)
+
+      # Add dir-to-team mapping unless there is also dir-to-component mapping.
+      if (include_subdirs and team and not component and
+          rel_dirname.startswith('third_party/WebKit/LayoutTests')):
+        dir_to_team[rel_dirname] = team
+
+    if include_subdirs and rel_dirname not in dir_to_component:
+      rel_parent_dirname = os.path.relpath(os.path.dirname(dirname), root)
+      if rel_parent_dirname in dir_to_component:
+        dir_to_component[rel_dirname] = dir_to_component[rel_parent_dirname]
+      if rel_parent_dirname in dir_to_team:
+        dir_to_team[rel_dirname] = dir_to_team[rel_parent_dirname]
+
   mappings = {'component-to-team': component_to_team,
               'dir-to-component': dir_to_component}
+  if include_subdirs:
+    mappings['dir-to-team'] = dir_to_team
   errors = validate_one_team_per_component(mappings)
-  return unwrap(mappings), warnings, errors
+  stats = {'OWNERS-count': num_total,
+           'OWNERS-with-component-only-count': num_with_component,
+           'OWNERS-with-team-and-component-count': num_with_team_component,
+           'OWNERS-count-by-depth': num_total_by_depth,
+           'OWNERS-with-component-only-count-by-depth':
+           num_with_component_by_depth,
+           'OWNERS-with-team-and-component-count-by-depth':
+           num_with_team_component_by_depth,
+           'OWNERS-missing-info-by-depth':
+           dir_missing_info_by_depth}
+  return unwrap(mappings), warnings, errors, stats
 
 
 def validate_one_team_per_component(m):

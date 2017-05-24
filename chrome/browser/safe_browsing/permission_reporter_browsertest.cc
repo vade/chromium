@@ -17,8 +17,8 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/permission_bubble/mock_permission_prompt_factory.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/website_settings/mock_permission_prompt_factory.h"
 #include "chrome/common/safe_browsing/permission_report.pb.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -43,7 +43,7 @@ class PermissionReporterBrowserTest : public SyncTest {
     base::RunLoop run_loop;
     content::BrowserThread::PostTaskAndReply(
         content::BrowserThread::IO, FROM_HERE,
-        base::Bind(
+        base::BindOnce(
             &PermissionReporterBrowserTest::AttachMockReportSenderOnIOThread,
             base::Unretained(this),
             make_scoped_refptr(g_browser_process->safe_browsing_service())),

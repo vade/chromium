@@ -11,13 +11,21 @@ var startSessionPromise = null;
 var startedConnection = null;
 var reconnectedSession = null;
 var presentationUrl = null;
-if (window.location.href.indexOf('__is_android__=true') >= 0) {
+let params = (new URL(window.location.href)).searchParams;
+
+if (params.get('__is_android__') == 'true') {
   // For android, "google.com/cast" is required in presentation URL.
   // TODO(zqzhang): this requirement may be removed in the future.
   presentationUrl = "https://google.com/cast#__castAppId__=CCCCCCCC/";
+} else if (params.get('__oneUA__') == 'true') {
+  presentationUrl =
+      "presentation_receiver.html#__testprovider__=true&__oneUA__=true";
+} else if (params.get('__oneUANoReceiver__') == 'true') {
+  presentationUrl = "https://www.google.com#__testprovider__=true&__oneUA__=true";
 } else {
   presentationUrl = "http://www.google.com/#__testprovider__=true";
 }
+
 var startSessionRequest = new PresentationRequest([presentationUrl]);
 var defaultRequestSessionId = null;
 var lastExecutionResult = null;
@@ -30,7 +38,7 @@ window.navigator.presentation.defaultRequest.onconnectionavailable = function(e)
 };
 
 /**
- * Waits until one device is available.
+ * Waits until one sink is available.
  */
 function waitUntilDeviceAvailable() {
   startSessionRequest.getAvailability(presentationUrl).then(
@@ -44,8 +52,8 @@ function waitUntilDeviceAvailable() {
           sendResult(true, '');
       }
     }
-  }).catch(function(){
-    sendResult(false, 'got error');
+  }).catch(function(e) {
+    sendResult(false, 'got error: ' + e);
   });
 }
 
@@ -71,24 +79,33 @@ function checkSession() {
       } else {
         // set the new session
         startedConnection = session;
-        console.log('connection state is "' + startedConnection.state + '"');
-        if (startedConnection.state == "connected") {
-          sendResult(true, '');
-        } else if (startedConnection.state == "connecting") {
-          startedConnection.onconnect = () => {
-            sendResult(true, '');
-          };
-        } else {
-          sendResult(false,
-            'Expect connection state to be "connecting" or "connected", ' +
-            'actual "' + startedConnection.state + '"');
-        }
+        waitForConnectedStateAndSendResult(startedConnection);
       }
     }).catch(function(e) {
       // terminate old session if exists
       startedConnection && startedConnection.terminate();
       sendResult(false, 'Failed to start session: encountered exception ' + e);
     })
+  }
+}
+
+/**
+ * Asserts the current state of the connection is 'connected' or 'connecting'.
+ * If the current state is connecting, waits for it to become 'connected'.
+ * @param {!PresentationConnection} connection
+ */
+function waitForConnectedStateAndSendResult(connection) {
+  console.log(`connection state is "${connection.state}"`);
+  if (connection.state == 'connected') {
+    sendResult(true, '');
+  } else if (connection.state == 'connecting') {
+    connection.onconnect = () => {
+      sendResult(true, '');
+    };
+  } else {
+    sendResult(false,
+      `Expect connection state to be "connecting" or "connected", actual: \
+      "${connection.state}"`);
   }
 }
 
@@ -131,6 +148,49 @@ function terminateSessionAndWaitForStateChange() {
   }
 }
 
+/**
+ * Closes |startedConnection| and waits for its onclose event.
+ */
+function closeConnectionAndWaitForStateChange() {
+  if (startedConnection) {
+    if (startedConnection.state == 'closed') {
+      sendResult(false, 'startedConnection is unexpectedly closed.');
+    }
+    startedConnection.onclose = function() {
+      sendResult(true, '');
+    };
+    startedConnection.close();
+  } else {
+    sendResult(false, 'startedConnection does not exist.');
+  }
+}
+
+/**
+ * Sends a message to |startedConnection| and expects InvalidStateError to be
+ * thrown. Requires |startedConnection.state| to not equal |initialState|.
+ */
+function checkSendMessageFailed(initialState) {
+  if (!startedConnection) {
+    sendResult(false, 'startedConnection does not exist.');
+    return;
+  }
+  if (startedConnection.state != initialState) {
+    sendResult(false, 'startedConnection.state is "' + startedConnection.state +
+               '", but we expected "' + initialState + '".');
+    return;
+  }
+
+  try {
+    startedConnection.send('test message');
+  } catch (e) {
+    if (e.name == 'InvalidStateError') {
+      sendResult(true, '');
+    } else {
+      sendResult(false, 'Got an unexpected error: ' + e.name);
+    }
+  }
+  sendResult(false, 'Expected InvalidStateError but it was never thrown.');
+}
 
 /**
  * Sends a message, and expects the connection to close on error.
@@ -174,6 +234,26 @@ function sendMessageAndExpectResponse(message) {
 }
 
 /**
+ * Sends 'close' to receiver page, and expects receiver page closing
+ * the connection.
+ */
+function initiateCloseFromReceiverPage() {
+  if (!startedConnection) {
+    sendResult(false, 'startedConnection does not exist.');
+    return;
+  }
+  startedConnection.onclose = (event) => {
+    const reason = event.reason;
+    if (reason != 'closed') {
+      sendResult(false, 'Unexpected close reason: ' + reason);
+      return;
+    }
+    sendResult(true, '');
+  };
+  startedConnection.send('close');
+}
+
+/**
  * Reconnects to |sessionId| and verifies that it succeeds.
  * @param {!string} sessionId ID of session to reconnect.
  */
@@ -184,7 +264,7 @@ function reconnectSession(sessionId) {
       sendResult(false, 'reconnectSession returned null session');
     } else {
       reconnectedSession = session;
-      sendResult(true, '');
+      waitForConnectedStateAndSendResult(reconnectedSession);
     }
   }).catch(function(error) {
     sendResult(false, 'reconnectSession failed: ' + error.message);

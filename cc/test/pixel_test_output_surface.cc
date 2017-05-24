@@ -44,6 +44,8 @@ void PixelTestOutputSurface::BindFramebuffer() {
   context_provider()->ContextGL()->BindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+void PixelTestOutputSurface::SetDrawRectangle(const gfx::Rect& rect) {}
+
 void PixelTestOutputSurface::Reshape(const gfx::Size& size,
                                      float device_scale_factor,
                                      const gfx::ColorSpace& color_space,
@@ -67,8 +69,8 @@ void PixelTestOutputSurface::ApplyExternalStencil() {}
 
 void PixelTestOutputSurface::SwapBuffers(OutputSurfaceFrame frame) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&PixelTestOutputSurface::SwapBuffersCallback,
-                            weak_ptr_factory_.GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&PixelTestOutputSurface::SwapBuffersCallback,
+                                weak_ptr_factory_.GetWeakPtr()));
 }
 
 void PixelTestOutputSurface::SwapBuffersCallback() {

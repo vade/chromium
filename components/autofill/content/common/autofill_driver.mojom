@@ -9,13 +9,11 @@ import "mojo/common/string16.mojom";
 import "mojo/common/text_direction.mojom";
 import "mojo/common/time.mojom";
 import "ui/gfx/geometry/mojo/geometry.mojom";
+import "url/mojo/url.mojom";
 
 // There is one instance of this interface per render frame host in the browser
 // process.
 interface AutofillDriver {
-  // Notification that there has been a user gesture.
-  FirstUserGestureObserved();
-
   // Notification that forms have been seen that are candidates for
   // filling/submitting by the AutofillManager.
   FormsSeen(array<FormData> forms, mojo.common.mojom.TimeTicks timestamp);
@@ -61,11 +59,6 @@ interface AutofillDriver {
 // There is one instance of this interface per render frame host in the browser
 // process.
 interface PasswordManagerDriver {
-  // A ping to the browser that PasswordAutofillAgent was constructed. As a
-  // consequence, the browser sends SetLoggingState with the current
-  // state of the logging activity.
-  PasswordAutofillAgentConstructed();
-
   // Notification that password forms have been seen that are candidates for
   // filling/submitting by the password manager.
   PasswordFormsParsed(array<PasswordForm> forms);
@@ -115,6 +108,11 @@ interface PasswordManagerDriver {
   // forms where password generation should be available.
   SaveGenerationFieldDetectedByClassifier(
       PasswordForm password_form, mojo.common.mojom.String16 generation_field);
+
+  // Checks the safe browsing reputation of the website where the focused
+  // username/password field is on.
+  CheckSafeBrowsingReputation(
+      url.mojom.Url form_action, url.mojom.Url frame_url);
 };
 
 // There is one instance of this interface per web contents in the browser

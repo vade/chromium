@@ -6,8 +6,11 @@
 
 #include <utility>
 
+#include "base/bind.h"
+#include "base/feature_list.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
@@ -19,6 +22,7 @@
 #include "chrome/browser/notifications/notification_test_util.h"
 #include "chrome/browser/notifications/platform_notification_service_impl.h"
 #include "chrome/browser/notifications/stub_notification_platform_bridge.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
@@ -96,6 +100,8 @@ class PlatformNotificationServiceTest : public testing::Test {
     std::unique_ptr<NotificationPlatformBridge> notification_bridge =
         base::MakeUnique<StubNotificationPlatformBridge>();
 
+    // TODO(peter): These tests should use the NotificationDisplayService, which
+    // will allow the StubNotificationPlatformBridge to be removed.
     TestingBrowserProcess::GetGlobal()->SetNotificationUIManager(
         std::move(ui_manager));
     TestingBrowserProcess::GetGlobal()->SetNotificationPlatformBridge(
@@ -105,6 +111,12 @@ class PlatformNotificationServiceTest : public testing::Test {
   void TearDown() override {
     profile_manager_.reset();
     TestingBrowserProcess::DeleteInstance();
+  }
+
+  void DidGetDisplayedNotifications(
+      std::unique_ptr<std::set<std::string>> displayed_notifications,
+      bool supports_synchronization) {
+    displayed_notifications_ = std::move(displayed_notifications);
   }
 
  protected:
@@ -142,17 +154,27 @@ class PlatformNotificationServiceTest : public testing::Test {
   // Returns the Profile to be used for these tests.
   Profile* profile() const { return profile_; }
 
-  size_t GetNotificationCount() const {
-    std::set<std::string> notifications;
-    EXPECT_TRUE(display_service()->GetDisplayed(&notifications));
-    return notifications.size();
+  size_t GetNotificationCount() {
+    display_service()->GetDisplayed(base::Bind(
+        &PlatformNotificationServiceTest::DidGetDisplayedNotifications,
+        base::Unretained(this)));
+    base::RunLoop().RunUntilIdle();
+
+    EXPECT_TRUE(displayed_notifications_.get());
+    return displayed_notifications_->size();
   }
 
   Notification GetDisplayedNotification() {
-#if defined(OS_ANDROID)
-    return static_cast<StubNotificationPlatformBridge*>(
-               g_browser_process->notification_platform_bridge())
-        ->GetNotificationAt(profile_->GetPath().BaseName().value(), 0);
+#if BUILDFLAG(ENABLE_NATIVE_NOTIFICATIONS)
+    if (base::FeatureList::IsEnabled(features::kNativeNotifications)) {
+      return static_cast<StubNotificationPlatformBridge*>(
+                 g_browser_process->notification_platform_bridge())
+          ->GetNotificationAt(profile_->GetPath().BaseName().value(), 0);
+    } else {
+      return static_cast<StubNotificationUIManager*>(
+                 g_browser_process->notification_ui_manager())
+          ->GetNotificationAt(0);
+    }
 #else
     return static_cast<StubNotificationUIManager*>(
                g_browser_process->notification_ui_manager())
@@ -168,6 +190,7 @@ class PlatformNotificationServiceTest : public testing::Test {
   std::unique_ptr<TestingProfileManager> profile_manager_;
   TestingProfile* profile_;
   content::TestBrowserThreadBundle thread_bundle_;
+  std::unique_ptr<std::set<std::string>> displayed_notifications_;
 };
 
 TEST_F(PlatformNotificationServiceTest, DisplayPageDisplayedEvent) {
@@ -289,32 +312,6 @@ TEST_F(PlatformNotificationServiceTest, DisplayPersistentNotificationMatches) {
   EXPECT_EQ(message_center::ButtonType::BUTTON, buttons[0].type);
   EXPECT_EQ("Button 2", base::UTF16ToUTF8(buttons[1].title));
   EXPECT_EQ(message_center::ButtonType::TEXT, buttons[1].type);
-}
-
-TEST_F(PlatformNotificationServiceTest, NotificationPermissionLastUsage) {
-  // Both page and persistent notifications should update the last usage
-  // time of the notification permission for the origin.
-  GURL origin("https://chrome.com/");
-  base::Time begin_time;
-
-  CreateSimplePageNotification();
-
-  base::Time after_page_notification =
-      HostContentSettingsMapFactory::GetForProfile(profile())->GetLastUsage(
-          origin, origin, CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
-  EXPECT_GT(after_page_notification, begin_time);
-
-  // Ensure that there is at least some time between the two calls.
-  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(1));
-
-  service()->DisplayPersistentNotification(
-      profile(), kNotificationId, GURL() /* service_worker_scope */, origin,
-      PlatformNotificationData(), NotificationResources());
-
-  base::Time after_persistent_notification =
-      HostContentSettingsMapFactory::GetForProfile(profile())->GetLastUsage(
-          origin, origin, CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
-  EXPECT_GT(after_persistent_notification, after_page_notification);
 }
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)

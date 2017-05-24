@@ -23,13 +23,15 @@ ChildProcessLauncher::ChildProcessLauncher(
     std::unique_ptr<base::CommandLine> command_line,
     int child_process_id,
     Client* client,
-    const std::string& mojo_child_token,
+    std::unique_ptr<mojo::edk::OutgoingBrokerClientInvitation>
+        broker_client_invitation,
     const mojo::edk::ProcessErrorCallback& process_error_callback,
     bool terminate_on_shutdown)
     : client_(client),
       termination_status_(base::TERMINATION_STATUS_NORMAL_TERMINATION),
       exit_code_(RESULT_CODE_NORMAL_EXIT),
       starting_(true),
+      broker_client_invitation_(std::move(broker_client_invitation)),
       process_error_callback_(process_error_callback),
 #if defined(ADDRESS_SANITIZER) || defined(LEAK_SANITIZER) ||  \
     defined(MEMORY_SANITIZER) || defined(THREAD_SANITIZER) || \
@@ -38,7 +40,6 @@ ChildProcessLauncher::ChildProcessLauncher(
 #else
       terminate_child_on_shutdown_(terminate_on_shutdown),
 #endif
-      mojo_child_token_(mojo_child_token),
       weak_factory_(this) {
   DCHECK(CalledOnValidThread());
   CHECK(BrowserThread::GetCurrentThreadIdentifier(&client_thread_id_));
@@ -59,15 +60,16 @@ ChildProcessLauncher::~ChildProcessLauncher() {
   }
 }
 
-void ChildProcessLauncher::SetProcessBackgrounded(bool background) {
+void ChildProcessLauncher::SetProcessPriority(bool background,
+                                              bool boost_for_pending_views) {
   DCHECK(CalledOnValidThread());
   base::Process to_pass = process_.process.Duplicate();
   BrowserThread::PostTask(
       BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
       base::Bind(
-          &ChildProcessLauncherHelper::SetProcessBackgroundedOnLauncherThread,
-          base::Passed(&to_pass),
-          background));
+          &ChildProcessLauncherHelper::SetProcessPriorityOnLauncherThread,
+          helper_, base::Passed(&to_pass), background,
+          boost_for_pending_views));
 }
 
 void ChildProcessLauncher::Notify(
@@ -78,16 +80,23 @@ void ChildProcessLauncher::Notify(
   starting_ = false;
   process_ = std::move(process);
 
+  // Take ownership of the broker client invitation here so it's destroyed when
+  // we go out of scope regardless of the outcome below.
+  std::unique_ptr<mojo::edk::OutgoingBrokerClientInvitation> invitation =
+      std::move(broker_client_invitation_);
   if (process_.process.IsValid()) {
     // Set up Mojo IPC to the new process.
-    mojo::edk::ChildProcessLaunched(process_.process.Handle(),
-                                    std::move(server_handle),
-                                    mojo_child_token_,
-                                    process_error_callback_);
+    DCHECK(invitation);
+    invitation->Send(
+        process_.process.Handle(),
+        mojo::edk::ConnectionParams(mojo::edk::TransportProtocol::kLegacy,
+                                    std::move(server_handle)),
+        process_error_callback_);
     client_->OnProcessLaunched();
   } else {
-    mojo::edk::ChildProcessLaunchFailed(mojo_child_token_);
     termination_status_ = base::TERMINATION_STATUS_LAUNCH_FAILED;
+
+    // NOTE: May delete |this|.
     client_->OnProcessLaunchFailed(error_code);
   }
 }
@@ -115,8 +124,8 @@ base::TerminationStatus ChildProcessLauncher::GetChildTerminationStatus(
     return termination_status_;
   }
 
-  termination_status_ = ChildProcessLauncherHelper::GetTerminationStatus(
-      process_, known_dead, &exit_code_);
+  termination_status_ =
+      helper_->GetTerminationStatus(process_, known_dead, &exit_code_);
   if (exit_code)
     *exit_code = exit_code_;
 
@@ -144,6 +153,26 @@ bool ChildProcessLauncher::TerminateProcess(const base::Process& process,
                                             bool wait) {
   return ChildProcessLauncherHelper::TerminateProcess(process, exit_code, wait);
 }
+
+// static
+void ChildProcessLauncher::SetRegisteredFilesForService(
+    const std::string& service_name,
+    catalog::RequiredFileMap required_files) {
+  ChildProcessLauncherHelper::SetRegisteredFilesForService(
+      service_name, std::move(required_files));
+}
+
+// static
+void ChildProcessLauncher::ResetRegisteredFilesForTesting() {
+  ChildProcessLauncherHelper::ResetRegisteredFilesForTesting();
+}
+
+#if defined(OS_ANDROID)
+// static
+size_t ChildProcessLauncher::GetNumberOfRendererSlots() {
+  return ChildProcessLauncherHelper::GetNumberOfRendererSlots();
+}
+#endif  // OS_ANDROID
 
 ChildProcessLauncher::Client* ChildProcessLauncher::ReplaceClientForTest(
     Client* client) {

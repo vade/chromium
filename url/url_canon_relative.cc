@@ -288,7 +288,7 @@ bool DoResolveRelativePath(const char* base_url,
   // possible escaped characters.
   output->ReserveSizeIfNeeded(
       base_parsed.path.begin +
-      std::max(path.end(), std::max(query.end(), ref.end())) + 8);
+      std::max(path.end(), std::max(query.end(), ref.end())));
   output->Append(base_url, base_parsed.path.begin);
 
   if (path.len > 0) {
@@ -406,7 +406,7 @@ bool DoResolveRelativeHost(const char* base_url,
   // base URL.
   output->ReserveSizeIfNeeded(
       replacements.components().Length() +
-      base_parsed.CountCharactersBefore(Parsed::USERNAME, false) + 8);
+      base_parsed.CountCharactersBefore(Parsed::USERNAME, false));
   return ReplaceStandardURL(base_url, base_parsed, replacements,
                             query_converter, output, out_parsed);
 }
@@ -441,8 +441,13 @@ bool DoResolveRelativeURL(const char* base_url,
                           CharsetConverter* query_converter,
                           CanonOutput* output,
                           Parsed* out_parsed) {
-  // Starting point for our output parsed. We'll fix what we change.
+  // |base_parsed| is the starting point for our output. Since we may have
+  // removed whitespace from |relative_url| before entering this method, we'll
+  // carry over the |whitespace_removed| flag.
+  bool whitespace_removed = out_parsed->whitespace_removed;
   *out_parsed = base_parsed;
+  if (whitespace_removed)
+    out_parsed->whitespace_removed = true;
 
   // Sanity check: the input should have a host or we'll break badly below.
   // We can only resolve relative URLs with base URLs that have hosts and

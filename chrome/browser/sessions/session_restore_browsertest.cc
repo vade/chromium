@@ -16,6 +16,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/process/launch.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/defaults.h"
@@ -52,6 +53,7 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
@@ -486,7 +488,7 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest,
   // Create a new popup.
   Profile* profile = browser()->profile();
   Browser* popup =
-      new Browser(Browser::CreateParams(Browser::TYPE_POPUP, profile));
+      new Browser(Browser::CreateParams(Browser::TYPE_POPUP, profile, true));
   popup->window()->Show();
 
   // Close the browser.
@@ -858,6 +860,38 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, Basic) {
             new_browser->tab_strip_model()->GetActiveWebContents()->GetURL());
 }
 
+IN_PROC_BROWSER_TEST_F(SessionRestoreTest, StartupPagesWithOnlyNtp) {
+  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUINewTabURL));
+  SessionStartupPref pref(SessionStartupPref::URLS);
+  pref.urls.push_back(url1_);
+  pref.urls.push_back(url2_);
+  SessionStartupPref::SetStartupPref(browser()->profile(), pref);
+
+  SessionRestore::OpenStartupPagesAfterCrash(browser());
+
+  ASSERT_EQ(1u, active_browser_list_->size());
+  ASSERT_EQ(2, browser()->tab_strip_model()->count());
+  EXPECT_EQ(url1_, browser()->tab_strip_model()->GetWebContentsAt(0)->GetURL());
+  EXPECT_EQ(url2_, browser()->tab_strip_model()->GetWebContentsAt(1)->GetURL());
+}
+
+IN_PROC_BROWSER_TEST_F(SessionRestoreTest, StartupPagesWithExistingPages) {
+  ui_test_utils::NavigateToURL(browser(), url3_);
+
+  SessionStartupPref pref(SessionStartupPref::URLS);
+  pref.urls.push_back(url1_);
+  pref.urls.push_back(url2_);
+  SessionStartupPref::SetStartupPref(browser()->profile(), pref);
+
+  SessionRestore::OpenStartupPagesAfterCrash(browser());
+
+  ASSERT_EQ(1u, active_browser_list_->size());
+  ASSERT_EQ(3, browser()->tab_strip_model()->count());
+  EXPECT_EQ(url3_, browser()->tab_strip_model()->GetWebContentsAt(0)->GetURL());
+  EXPECT_EQ(url1_, browser()->tab_strip_model()->GetWebContentsAt(1)->GetURL());
+  EXPECT_EQ(url2_, browser()->tab_strip_model()->GetWebContentsAt(2)->GetURL());
+}
+
 IN_PROC_BROWSER_TEST_F(SessionRestoreTest, NoMemoryPressureLoadsAllTabs) {
   // Add several tabs to the browser. Restart the browser and check that all
   // tabs got loaded properly.
@@ -914,35 +948,35 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, MemoryPressureLoadsNotAllTabs) {
 IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreWebUI) {
   const GURL webui_url("chrome://omnibox");
   ui_test_utils::NavigateToURL(browser(), webui_url);
-  const content::WebContents* old_tab =
+  content::WebContents* old_tab =
       browser()->tab_strip_model()->GetActiveWebContents();
   EXPECT_EQ(content::BINDINGS_POLICY_WEB_UI,
-            old_tab->GetRenderViewHost()->GetEnabledBindings());
+            old_tab->GetMainFrame()->GetEnabledBindings());
 
   Browser* new_browser = QuitBrowserAndRestore(browser(), 1);
   ASSERT_EQ(1u, active_browser_list_->size());
-  const content::WebContents* new_tab =
+  content::WebContents* new_tab =
       new_browser->tab_strip_model()->GetActiveWebContents();
   EXPECT_EQ(webui_url, new_tab->GetURL());
   EXPECT_EQ(content::BINDINGS_POLICY_WEB_UI,
-            new_tab->GetRenderViewHost()->GetEnabledBindings());
+            new_tab->GetMainFrame()->GetEnabledBindings());
 }
 
 IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreWebUISettings) {
   const GURL webui_url("chrome://settings");
   ui_test_utils::NavigateToURL(browser(), webui_url);
-  const content::WebContents* old_tab =
+  content::WebContents* old_tab =
       browser()->tab_strip_model()->GetActiveWebContents();
   EXPECT_EQ(content::BINDINGS_POLICY_WEB_UI,
-            old_tab->GetRenderViewHost()->GetEnabledBindings());
+            old_tab->GetMainFrame()->GetEnabledBindings());
 
   Browser* new_browser = QuitBrowserAndRestore(browser(), 1);
   ASSERT_EQ(1u, active_browser_list_->size());
-  const content::WebContents* new_tab =
+  content::WebContents* new_tab =
       new_browser->tab_strip_model()->GetActiveWebContents();
   EXPECT_EQ(webui_url, new_tab->GetURL());
   EXPECT_EQ(content::BINDINGS_POLICY_WEB_UI,
-            new_tab->GetRenderViewHost()->GetEnabledBindings());
+            new_tab->GetMainFrame()->GetEnabledBindings());
 }
 
 IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoresForwardAndBackwardNavs) {
@@ -1417,6 +1451,7 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, SessionStorageAfterTabReplace) {
 }
 
 IN_PROC_BROWSER_TEST_F(SessionRestoreTest, TabWithDownloadDoesNotGetRestored) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::ScopedTempDir download_directory;
   ASSERT_TRUE(download_directory.CreateUniqueTempDir());
   ASSERT_TRUE(embedded_test_server()->Start());
@@ -1487,7 +1522,16 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, TabWithDownloadDoesNotGetRestored) {
   }
 }
 
-IN_PROC_BROWSER_TEST_F(SmartSessionRestoreTest, PRE_CorrectLoadingOrder) {
+// PRE_CorrectLoadingOrder is flaky on ChromeOS MSAN and Mac.
+// See http://crbug.com/493167.
+#if (defined(OS_CHROMEOS) && defined(MEMORY_SANITIZER)) || defined(OS_MACOSX)
+#define MAYBE_PRE_CorrectLoadingOrder DISABLED_PRE_CorrectLoadingOrder
+#define MAYBE_CorrectLoadingOrder DISABLED_CorrectLoadingOrder
+#else
+#define MAYBE_PRE_CorrectLoadingOrder PRE_CorrectLoadingOrder
+#define MAYBE_CorrectLoadingOrder CorrectLoadingOrder
+#endif
+IN_PROC_BROWSER_TEST_F(SmartSessionRestoreTest, MAYBE_PRE_CorrectLoadingOrder) {
   Profile* profile = browser()->profile();
 
   const int activation_order[] = {4, 2, 1, 5, 0, 3};
@@ -1540,13 +1584,6 @@ IN_PROC_BROWSER_TEST_F(SmartSessionRestoreTest, PRE_CorrectLoadingOrder) {
   new_browser->tab_strip_model()->ActivateTabAt(1, true);
 }
 
-// PRE_CorrectLoadingOrder is flaky on ChromeOS MSAN: https://crbug.com/582323
-// And Mac: https://crbug.com/656687
-#if (defined(OS_CHROMEOS) && defined(MEMORY_SANITIZER)) || defined(OS_MACOSX)
-#define MAYBE_CorrectLoadingOrder DISABLED_CorrectLoadingOrder
-#else
-#define MAYBE_CorrectLoadingOrder CorrectLoadingOrder
-#endif
 IN_PROC_BROWSER_TEST_F(SmartSessionRestoreTest, MAYBE_CorrectLoadingOrder) {
   const int activation_order[] = {4, 2, 5, 0, 3, 1};
   Profile* profile = browser()->profile();

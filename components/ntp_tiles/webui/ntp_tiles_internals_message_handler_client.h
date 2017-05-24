@@ -11,7 +11,7 @@
 
 #include "base/callback_forward.h"
 #include "base/macros.h"
-#include "components/ntp_tiles/ntp_tile_source.h"
+#include "components/ntp_tiles/tile_source.h"
 
 class PrefService;
 
@@ -23,7 +23,6 @@ class ListValue;
 namespace ntp_tiles {
 
 class MostVisitedSites;
-class PopularSites;
 
 // Implemented by embedders to hook up NTPTilesInternalsMessageHandler.
 class NTPTilesInternalsMessageHandlerClient {
@@ -36,14 +35,11 @@ class NTPTilesInternalsMessageHandlerClient {
 
   // Returns true if the given source is enabled (even if, in practice, none of
   // the tiles would come from it).
-  virtual bool DoesSourceExist(NTPTileSource source) = 0;
+  virtual bool DoesSourceExist(TileSource source) = 0;
 
   // Creates a new MostVisitedSites based on the context pf the WebUI page.
   virtual std::unique_ptr<ntp_tiles::MostVisitedSites>
   MakeMostVisitedSites() = 0;
-
-  // Creates a new PopularSites based on the context pf the WebUI page.
-  virtual std::unique_ptr<ntp_tiles::PopularSites> MakePopularSites() = 0;
 
   // Registers a callback in Javascript. See content::WebUI and web::WebUIIOS.
   virtual void RegisterMessageCallback(

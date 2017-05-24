@@ -32,7 +32,6 @@ media::MediaUrlInterceptor* g_media_url_interceptor = nullptr;
 
 MediaPlayerRenderer::MediaPlayerRenderer(RenderFrameHost* render_frame_host)
     : render_frame_host_(render_frame_host),
-      duration_(media::kInfiniteDuration),
       has_error_(false),
       weak_factory_(this) {}
 
@@ -40,19 +39,17 @@ MediaPlayerRenderer::~MediaPlayerRenderer() {
   CancelScopedSurfaceRequest();
 }
 
-void MediaPlayerRenderer::Initialize(
-    media::DemuxerStreamProvider* demuxer_stream_provider,
-    media::RendererClient* client,
-    const media::PipelineStatusCB& init_cb) {
+void MediaPlayerRenderer::Initialize(media::MediaResource* media_resource,
+                                     media::RendererClient* client,
+                                     const media::PipelineStatusCB& init_cb) {
   DVLOG(1) << __func__;
 
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   renderer_client_ = client;
 
-  if (demuxer_stream_provider->GetType() !=
-      media::DemuxerStreamProvider::Type::URL) {
-    DLOG(ERROR) << "DemuxerStreamProvider is not of Type URL";
+  if (media_resource->GetType() != media::MediaResource::Type::URL) {
+    DLOG(ERROR) << "MediaResource is not of Type URL";
     init_cb.Run(media::PIPELINE_ERROR_INITIALIZATION_FAILED);
     return;
   }
@@ -61,7 +58,7 @@ void MediaPlayerRenderer::Initialize(
       media::MediaServiceThrottler::GetInstance()->GetDelayForClientCreation();
 
   if (creation_delay.is_zero()) {
-    CreateMediaPlayer(demuxer_stream_provider->GetMediaUrlParams(), init_cb);
+    CreateMediaPlayer(media_resource->GetMediaUrlParams(), init_cb);
     return;
   }
 
@@ -69,7 +66,7 @@ void MediaPlayerRenderer::Initialize(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&MediaPlayerRenderer::CreateMediaPlayer,
                  weak_factory_.GetWeakPtr(),
-                 demuxer_stream_provider->GetMediaUrlParams(), init_cb),
+                 media_resource->GetMediaUrlParams(), init_cb),
       creation_delay);
 }
 
@@ -197,8 +194,9 @@ void MediaPlayerRenderer::OnMediaMetadataChanged(int player_id,
                                                  int width,
                                                  int height,
                                                  bool success) {
-  if (video_size_ != gfx::Size(width, height))
-    OnVideoSizeChanged(kUnusedAndIrrelevantPlayerId, width, height);
+  // Always try to propage the video size.
+  // This call will no-op if |video_size_| is already current.
+  OnVideoSizeChanged(kUnusedAndIrrelevantPlayerId, width, height);
 
   // For HLS streams, the reported duration may be zero for infinite streams.
   // See http://crbug.com/501213.
@@ -237,8 +235,14 @@ void MediaPlayerRenderer::OnError(int player_id, int error) {
 void MediaPlayerRenderer::OnVideoSizeChanged(int player_id,
                                              int width,
                                              int height) {
-  video_size_ = gfx::Size(width, height);
-  renderer_client_->OnVideoNaturalSizeChange(video_size_);
+  // This method is called when we find a video size from metadata or when
+  // |media_player|'s size actually changes.
+  // We therefore may already have the latest video size.
+  gfx::Size new_size = gfx::Size(width, height);
+  if (video_size_ != new_size) {
+    video_size_ = new_size;
+    renderer_client_->OnVideoNaturalSizeChange(video_size_);
+  }
 }
 
 media::MediaPlayerAndroid* MediaPlayerRenderer::GetFullscreenPlayer() {

@@ -52,6 +52,7 @@
 #include "chromecast/public/cast_sys_info.h"
 #include "chromecast/service/cast_service.h"
 #include "components/prefs/pref_registry_simple.h"
+#include "components/proxy_config/pref_proxy_config_tracker_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/gpu_data_manager.h"
@@ -215,42 +216,52 @@ struct DefaultCommandLineSwitch {
 
 DefaultCommandLineSwitch g_default_switches[] = {
 #if defined(OS_ANDROID)
-  // Disables Chromecast-specific WiFi-related features on ATV for now.
-  { switches::kNoWifi, "" },
-  { switches::kDisableGestureRequirementForMediaPlayback, ""},
-  { switches::kDisableMediaSuspend, ""},
+#if !BUILDFLAG(IS_CAST_AUDIO_ONLY)
+    // Disables Chromecast-specific WiFi-related features on ATV for now.
+    {switches::kNoWifi, ""},
+#endif  // !BUILDFLAG(IS_CAST_AUDIO_ONLY)
+    // TODO(714676): this should probably set the no restrictions autoplay
+    // policy instead.
+    {switches::kIgnoreAutoplayRestrictionsForTests, ""},
+    {switches::kDisableMediaSuspend, ""},
 #else
-  // GPU shader disk cache disabling is largely to conserve disk space.
-  { switches::kDisableGpuShaderDiskCache, "" },
-  // Enable media sessions by default (even on non-Android platforms).
-  { switches::kEnableDefaultMediaSession, "" },
+    // GPU shader disk cache disabling is largely to conserve disk space.
+    {switches::kDisableGpuShaderDiskCache, ""},
+    // Enable audio focus by default (even on non-Android platforms).
+    {switches::kEnableAudioFocus, ""},
 #endif
 #if BUILDFLAG(IS_CAST_AUDIO_ONLY)
-  { switches::kDisableGpu, "" },
-#endif
+    {switches::kDisableGpu, ""},
+#if defined(OS_ANDROID)
+    {switches::kDisableGLDrawingForTests, ""},
+    {switches::kSkipGpuDataLoading, ""},
+#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_CAST_AUDIO_ONLY)
 #if defined(OS_LINUX)
 #if defined(ARCH_CPU_X86_FAMILY)
-  // This is needed for now to enable the x11 Ozone platform to work with
-  // current Linux/NVidia OpenGL drivers.
-  { switches::kIgnoreGpuBlacklist, ""},
+    // This is needed for now to enable the x11 Ozone platform to work with
+    // current Linux/NVidia OpenGL drivers.
+    {switches::kIgnoreGpuBlacklist, ""},
 #elif defined(ARCH_CPU_ARM_FAMILY)
 #if !BUILDFLAG(IS_CAST_AUDIO_ONLY)
-  { switches::kEnableHardwareOverlays, "" },
+    {switches::kEnableHardwareOverlays, "cast"},
 #endif
 #endif
 #endif  // defined(OS_LINUX)
-  // Needed so that our call to GpuDataManager::SetGLStrings doesn't race
-  // against GPU process creation (which is otherwise triggered from
-  // BrowserThreadsStarted).  The GPU process will be created as soon as a
-  // renderer needs it, which always happens after main loop starts.
-  { switches::kDisableGpuEarlyInit, "" },
-  // TODO(halliwell): Cast builds don't support ES3. Remove this switch when
-  // support is added (crbug.com/659395)
-  { switches::kDisableES3GLContext, "" },
-  // Enable navigator.connection API.
-  // TODO(derekjchow): Remove this switch when enabled by default.
-  { switches::kEnableNetworkInformation, "" },
-  { NULL, NULL },  // Termination
+    // Needed so that our call to GpuDataManager::SetGLStrings doesn't race
+    // against GPU process creation (which is otherwise triggered from
+    // BrowserThreadsStarted).  The GPU process will be created as soon as a
+    // renderer needs it, which always happens after main loop starts.
+    {switches::kDisableGpuEarlyInit, ""},
+    // TODO(halliwell): Cast builds don't support ES3. Remove this switch when
+    // support is added (crbug.com/659395)
+    {switches::kDisableES3GLContext, ""},
+    // Enable navigator.connection API.
+    // TODO(derekjchow): Remove this switch when enabled by default.
+    {switches::kEnableNetworkInformation, ""},
+    // TODO(halliwell): Remove after fixing b/35422666.
+    {switches::kEnableUseZoomForDSF, "false"},
+    {nullptr, nullptr},  // Termination
 };
 
 void AddDefaultCommandLineSwitches(base::CommandLine* command_line) {
@@ -277,13 +288,13 @@ CastBrowserMainParts::CastBrowserMainParts(
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   AddDefaultCommandLineSwitches(command_line);
 
-#if !defined(OS_ANDROID)
+#if BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
   media_resource_tracker_ = nullptr;
-#endif  // !defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
 }
 
 CastBrowserMainParts::~CastBrowserMainParts() {
-#if !defined(OS_ANDROID)
+#if BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
   if (media_thread_ && media_pipeline_backend_manager_) {
     // Make sure that media_pipeline_backend_manager_ is destroyed after any
     // pending media thread tasks. The CastAudioOutputStream implementation
@@ -299,30 +310,33 @@ CastBrowserMainParts::~CastBrowserMainParts() {
     media_thread_->task_runner()->DeleteSoon(
         FROM_HERE, media_pipeline_backend_manager_.release());
   }
-#endif  // !defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>
 CastBrowserMainParts::GetMediaTaskRunner() {
-#if defined(OS_ANDROID)
-  return nullptr;
-#else
+#if BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
   if (!media_thread_) {
     media_thread_.reset(new base::Thread("CastMediaThread"));
     base::Thread::Options options;
     options.priority = base::ThreadPriority::REALTIME_AUDIO;
     CHECK(media_thread_->StartWithOptions(options));
+    // Start the media_resource_tracker as soon as the media thread is created.
+    // There are services that run on the media thread that depend on it,
+    // and we want to initialize it with the correct task runner before any
+    // tasks that might use it are posted to the media thread.
+    media_resource_tracker_ = new media::MediaResourceTracker(
+        base::ThreadTaskRunnerHandle::Get(), media_thread_->task_runner());
   }
   return media_thread_->task_runner();
-#endif
+#else
+  return nullptr;
+#endif  // BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
 }
 
-#if !defined(OS_ANDROID)
+#if BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
 media::MediaResourceTracker* CastBrowserMainParts::media_resource_tracker() {
-  if (!media_resource_tracker_) {
-    media_resource_tracker_ = new media::MediaResourceTracker(
-        base::ThreadTaskRunnerHandle::Get(), GetMediaTaskRunner());
-  }
+  DCHECK(media_thread_);
   return media_resource_tracker_;
 }
 
@@ -334,7 +348,7 @@ CastBrowserMainParts::media_pipeline_backend_manager() {
   }
   return media_pipeline_backend_manager_.get();
 }
-#endif
+#endif  // BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
 
 media::MediaCapsImpl* CastBrowserMainParts::media_caps() {
   return media_caps_.get();
@@ -428,6 +442,7 @@ int CastBrowserMainParts::PreCreateThreads() {
 void CastBrowserMainParts::PreMainMessageLoopRun() {
   scoped_refptr<PrefRegistrySimple> pref_registry(new PrefRegistrySimple());
   metrics::RegisterPrefs(pref_registry.get());
+  PrefProxyConfigTrackerImpl::RegisterPrefs(pref_registry.get());
   cast_browser_process_->SetPrefService(
       PrefServiceHelper::CreatePrefService(pref_registry.get()));
 
@@ -435,13 +450,13 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
   memory_pressure_monitor_.reset(new CastMemoryPressureMonitor());
 #endif  // defined(OS_ANDROID)
 
+  cast_browser_process_->SetNetLog(net_log_.get());
+  url_request_context_factory_->InitializeOnUIThread(net_log_.get());
+
   cast_browser_process_->SetConnectivityChecker(ConnectivityChecker::Create(
       content::BrowserThread::GetTaskRunnerForThread(
-          content::BrowserThread::IO)));
-
-  cast_browser_process_->SetNetLog(net_log_.get());
-
-  url_request_context_factory_->InitializeOnUIThread(net_log_.get());
+          content::BrowserThread::IO),
+      url_request_context_factory_->GetSystemGetter()));
 
   cast_browser_process_->SetBrowserContext(
       base::MakeUnique<CastBrowserContext>(url_request_context_factory_));
@@ -479,13 +494,19 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
           cast_browser_process_->browser_context(),
           cast_browser_process_->pref_service(),
           url_request_context_factory_->GetSystemGetter(),
+          base::BindOnce(&URLRequestContextFactory::DisableQuic,
+                         // Safe since |url_request_context_factory_| is owned
+                         // by CastContentBrowserClient, which lives for the
+                         // entire lifetime of cast_shell.
+                         base::Unretained(url_request_context_factory_)),
           video_plane_controller_.get(), window_manager_.get()));
   cast_browser_process_->cast_service()->Initialize();
 
-#if !defined(OS_ANDROID)
+#if BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
   media_resource_tracker()->InitializeMediaLib();
 #endif
   ::media::InitializeMediaLibrary();
+  media_caps_->Initialize();
 
   device::GeolocationProvider::SetGeolocationDelegate(
       new CastGeolocationDelegate(cast_browser_process_->browser_context()));

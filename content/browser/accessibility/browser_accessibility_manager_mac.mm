@@ -111,8 +111,7 @@ BrowserAccessibilityManager* BrowserAccessibilityManager::Create(
     const ui::AXTreeUpdate& initial_tree,
     BrowserAccessibilityDelegate* delegate,
     BrowserAccessibilityFactory* factory) {
-  return new BrowserAccessibilityManagerMac(
-      NULL, initial_tree, delegate, factory);
+  return new BrowserAccessibilityManagerMac(initial_tree, delegate, factory);
 }
 
 BrowserAccessibilityManagerMac*
@@ -121,12 +120,10 @@ BrowserAccessibilityManager::ToBrowserAccessibilityManagerMac() {
 }
 
 BrowserAccessibilityManagerMac::BrowserAccessibilityManagerMac(
-    NSView* parent_view,
     const ui::AXTreeUpdate& initial_tree,
     BrowserAccessibilityDelegate* delegate,
     BrowserAccessibilityFactory* factory)
-    : BrowserAccessibilityManager(delegate, factory),
-      parent_view_(parent_view) {
+    : BrowserAccessibilityManager(delegate, factory) {
   Initialize(initial_tree);
 }
 
@@ -138,8 +135,7 @@ ui::AXTreeUpdate
   ui::AXNodeData empty_document;
   empty_document.id = 0;
   empty_document.role = ui::AX_ROLE_ROOT_WEB_AREA;
-  empty_document.state =
-      1 << ui::AX_STATE_READ_ONLY;
+  empty_document.AddState(ui::AX_STATE_READ_ONLY);
   ui::AXTreeUpdate update;
   update.root_id = empty_document.id;
   update.nodes.push_back(empty_document);
@@ -214,8 +210,7 @@ void BrowserAccessibilityManagerMac::NotifyAccessibilityEvent(
       mac_notification = NSAccessibilityInvalidStatusChangedNotification;
       break;
     case ui::AX_EVENT_SELECTED_CHILDREN_CHANGED:
-      if (node->GetRole() == ui::AX_ROLE_GRID ||
-          node->GetRole() == ui::AX_ROLE_TABLE) {
+      if (node->IsTableLikeRole()) {
         mac_notification = NSAccessibilitySelectedRowsChangedNotification;
       } else {
         mac_notification = NSAccessibilitySelectedChildrenChangedNotification;
@@ -375,7 +370,7 @@ void BrowserAccessibilityManagerMac::OnNodeDataWillChange(
       role == ui::AX_ROLE_TEXT_FIELD) {
     old_text = old_node_data.GetString16Attribute(ui::AX_ATTR_VALUE);
     new_text = new_node_data.GetString16Attribute(ui::AX_ATTR_VALUE);
-  } else if (new_node_data.state & (1 << ui::AX_STATE_EDITABLE)) {
+  } else if (new_node_data.HasState(ui::AX_STATE_EDITABLE)) {
     old_text = old_node_data.GetString16Attribute(ui::AX_ATTR_NAME);
     new_text = new_node_data.GetString16Attribute(ui::AX_ATTR_NAME);
   }
@@ -406,6 +401,18 @@ void BrowserAccessibilityManagerMac::OnNodeDataWillChange(
     base::string16 deleted_text = old_text.substr(i, length);
     text_edits_[new_node_data.id] = deleted_text;
   }
+}
+
+void BrowserAccessibilityManagerMac::OnStateChanged(ui::AXTree* tree,
+                                                    ui::AXNode* ax_node,
+                                                    ui::AXState state,
+                                                    bool new_value) {
+  if (state != ui::AX_STATE_PRESSED)
+    return;
+
+  BrowserAccessibility* node = GetFromID(ax_node->id());
+  NotifyAccessibilityEvent(BrowserAccessibilityEvent::FromTreeChange,
+                           ui::AX_EVENT_CHECKED_STATE_CHANGED, node);
 }
 
 NSDictionary* BrowserAccessibilityManagerMac::
@@ -471,6 +478,10 @@ BrowserAccessibilityManagerMac::GetUserInfoForValueChangedNotification(
     NSAccessibilityTextChangeValues : changes,
     NSAccessibilityTextChangeElement : native_node
   };
+}
+
+NSView* BrowserAccessibilityManagerMac::GetParentView() {
+  return delegate() ? delegate()->AccessibilityGetAcceleratedWidget() : nullptr;
 }
 
 }  // namespace content

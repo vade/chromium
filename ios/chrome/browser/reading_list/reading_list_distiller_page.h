@@ -45,10 +45,11 @@ class ReadingListDistillerPage : public dom_distiller::DistillerPageIOS {
  public:
   typedef base::Callback<void(const GURL&, const GURL&)> RedirectionCallback;
 
-  // Creates a ReadingListDistillerPage. WebStates to download the pages will
-  // be provided by web_state_dispatcher.
+  // Creates a ReadingListDistillerPage to distill |url|. WebStates to download
+  // the pages will be provided by web_state_dispatcher.
   // |browser_state|, |web_state_dispatcher| and |delegate| must not be null.
   explicit ReadingListDistillerPage(
+      const GURL& url,
       web::BrowserState* browser_state,
       FaviconWebStateDispatcher* web_state_dispatcher,
       ReadingListDistillerPageDelegate* delegate);
@@ -79,16 +80,29 @@ class ReadingListDistillerPage : public dom_distiller::DistillerPageIOS {
   // triggers a navigation to it. Stop distillation of the page there as the new
   // load will trigger a new distillation.
   bool HandleGoogleCachedAMPPageJavaScriptResult(id result, id error);
+
+  // Work around the fact that articles from wikipedia has the major part of the
+  // article hidden.
+  // IsWikipediaPage determines if the current page is a wikipedia article.
+  bool IsWikipediaPage();
+  // HandleWikipediaPage sets the style of collapsable parts of article to
+  // visible.
+  void HandleWikipediaPage();
+
   // Continue the distillation on the page that is currently loaded in
   // |CurrentWebState()|.
   void ContinuePageDistillation();
+  // Starts the fetching of |page_url|'s favicon.
+  void FetchFavicon(const GURL& page_url);
 
   // Continues distillation by calling superclass |OnLoadURLDone|.
-  void DelayedOnLoadURLDone();
+  void DelayedOnLoadURLDone(int delayed_task_id);
   GURL original_url_;
+  bool distilling_main_page_;
 
   FaviconWebStateDispatcher* web_state_dispatcher_;
   ReadingListDistillerPageDelegate* delegate_;
+  int delayed_task_id_;
   base::WeakPtrFactory<ReadingListDistillerPage> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ReadingListDistillerPage);

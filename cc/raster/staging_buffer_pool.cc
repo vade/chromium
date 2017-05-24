@@ -114,8 +114,8 @@ void StagingBuffer::OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
   const uint64_t tracing_process_id =
       base::trace_event::MemoryDumpManager::GetInstance()
           ->GetTracingProcessId();
-  MemoryAllocatorDumpGuid shared_buffer_guid =
-      gfx::GetGpuMemoryBufferGUIDForTracing(tracing_process_id, buffer_id);
+  auto shared_buffer_guid =
+      gpu_memory_buffer->GetGUIDForTracing(tracing_process_id);
   pmd->CreateSharedGlobalAllocatorDump(shared_buffer_guid);
 
   // By creating an edge with a higher |importance| (w.r.t. browser-side dumps)
@@ -147,8 +147,9 @@ StagingBufferPool::StagingBufferPool(base::SequencedTaskRunner* task_runner,
       &StagingBufferPool::ReduceMemoryUsage, weak_ptr_factory_.GetWeakPtr());
 
   task_runner_->PostTask(
-      FROM_HERE, base::Bind(&StagingBufferPool::RegisterMemoryCoordinatorClient,
-                            weak_ptr_factory_.GetWeakPtr()));
+      FROM_HERE,
+      base::BindOnce(&StagingBufferPool::RegisterMemoryCoordinatorClient,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 StagingBufferPool::~StagingBufferPool() {
@@ -432,24 +433,10 @@ void StagingBufferPool::ReleaseBuffersNotUsedSince(base::TimeTicks time) {
   }
 }
 
-void StagingBufferPool::OnMemoryStateChange(base::MemoryState state) {
-  switch (state) {
-    case base::MemoryState::NORMAL:
-      // TODO(tasak): go back to normal state.
-      break;
-    case base::MemoryState::THROTTLED:
-      // TODO(tasak): make the limits of this component's caches smaller to
-      // save memory usage.
-      break;
-    case base::MemoryState::SUSPENDED: {
-      base::AutoLock lock(lock_);
-      // Release all buffers, regardless of how recently they were used.
-      ReleaseBuffersNotUsedSince(base::TimeTicks() + base::TimeDelta::Max());
-    } break;
-    case base::MemoryState::UNKNOWN:
-      // NOT_REACHED.
-      break;
-  }
+void StagingBufferPool::OnPurgeMemory() {
+  base::AutoLock lock(lock_);
+  // Release all buffers, regardless of how recently they were used.
+  ReleaseBuffersNotUsedSince(base::TimeTicks() + base::TimeDelta::Max());
 }
 
 }  // namespace cc

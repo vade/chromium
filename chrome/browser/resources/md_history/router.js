@@ -8,24 +8,23 @@ Polymer({
   properties: {
     selectedPage: {
       type: String,
-      observer: 'serializePath_',
       notify: true,
-    },
-
-    path_: {
-      type: String,
-      observer: 'pathChanged_',
+      observer: 'selectedPageChanged_'
     },
 
     /** @type {QueryState} */
     queryState: Object,
 
+    path_: String,
+
     queryParams_: Object,
   },
 
+  /** @private {boolean} */
+  parsing_: false,
+
   observers: [
-    'queryParamsChanged_(queryParams_.*)',
-    'searchTermChanged_(queryState.searchTerm)',
+    'onUrlChanged_(path_, queryParams_)',
   ],
 
   /** @override */
@@ -37,25 +36,52 @@ Polymer({
     }
   },
 
-  /** @private */
-  serializePath_: function() {
-    var page = this.selectedPage == 'history' ? '' : this.selectedPage;
-    this.path_ = '/' + page;
-  },
+  /**
+   * Write all relevant page state to the URL.
+   */
+  serializeUrl: function() {
+    var path = this.selectedPage;
 
-  /** @private */
-  pathChanged_: function() {
-    var sections = this.path_.substr(1).split('/');
-    this.selectedPage = sections[0] || 'history';
-  },
+    if (path == 'history')
+      path = '';
 
-  /** @private */
-  queryParamsChanged_: function() {
-    this.fire('change-query', {search: this.queryParams_.q || ''});
-  },
-
-  /** @private */
-  searchTermChanged_: function() {
+    // Make all modifications at the end of the method so observers can't change
+    // the outcome.
+    this.path_ = '/' + path;
     this.set('queryParams_.q', this.queryState.searchTerm || null);
+  },
+
+  /** @private */
+  selectedPageChanged_: function() {
+    // Update the URL if the page was changed externally, but ignore the update
+    // if it came from parseUrl_().
+    if (!this.parsing_)
+      this.serializeUrl();
+  },
+
+  /** @private */
+  parseUrl_: function() {
+    this.parsing_ = true;
+    var changes = {};
+    var sections = this.path_.substr(1).split('/');
+    var page = sections[0] || 'history';
+
+    changes.search = this.queryParams_.q || '';
+
+    // Must change selectedPage before `change-query`, otherwise the
+    // query-manager will call serializeUrl() with the old page.
+    this.selectedPage = page;
+    this.fire('change-query', changes);
+    this.serializeUrl();
+
+    this.parsing_ = false;
+  },
+
+  /** @private */
+  onUrlChanged_: function() {
+    // Changing the url and query parameters at the same time will cause two
+    // calls to onUrlChanged_. Debounce the actual work so that these two
+    // changes get processed together.
+    this.debounce('parseUrl', this.parseUrl_.bind(this));
   },
 });

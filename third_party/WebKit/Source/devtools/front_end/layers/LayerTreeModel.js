@@ -33,32 +33,24 @@
  */
 Layers.LayerTreeModel = class extends SDK.SDKModel {
   constructor(target) {
-    super(Layers.LayerTreeModel, target);
+    super(target);
+    this._layerTreeAgent = target.layerTreeAgent();
     target.registerLayerTreeDispatcher(new Layers.LayerTreeDispatcher(this));
-    SDK.targetManager.addEventListener(SDK.TargetManager.Events.MainFrameNavigated, this._onMainFrameNavigated, this);
+    this._paintProfilerModel = /** @type {!SDK.PaintProfilerModel} */ (target.model(SDK.PaintProfilerModel));
+    var resourceTreeModel = target.model(SDK.ResourceTreeModel);
+    if (resourceTreeModel) {
+      resourceTreeModel.addEventListener(
+          SDK.ResourceTreeModel.Events.MainFrameNavigated, this._onMainFrameNavigated, this);
+    }
     /** @type {?SDK.LayerTreeBase} */
     this._layerTree = null;
-  }
-
-  /**
-   * @param {!SDK.Target} target
-   * @return {?Layers.LayerTreeModel}
-   */
-  static fromTarget(target) {
-    if (!target.hasDOMCapability())
-      return null;
-
-    var model = target.model(Layers.LayerTreeModel);
-    if (!model)
-      model = new Layers.LayerTreeModel(target);
-    return model;
   }
 
   disable() {
     if (!this._enabled)
       return;
     this._enabled = false;
-    this.target().layerTreeAgent().disable();
+    this._layerTreeAgent.disable();
   }
 
   enable() {
@@ -71,8 +63,8 @@ Layers.LayerTreeModel = class extends SDK.SDKModel {
   _forceEnable() {
     this._lastPaintRectByLayerId = {};
     if (!this._layerTree)
-      this._layerTree = new Layers.AgentLayerTree(this.target());
-    this.target().layerTreeAgent().enable();
+      this._layerTree = new Layers.AgentLayerTree(this);
+    this._layerTreeAgent.enable();
   }
 
   /**
@@ -131,6 +123,8 @@ Layers.LayerTreeModel = class extends SDK.SDKModel {
   }
 };
 
+SDK.SDKModel.register(Layers.LayerTreeModel, SDK.Target.Capability.DOM, false);
+
 /** @enum {symbol} */
 Layers.LayerTreeModel.Events = {
   LayerTreeChanged: Symbol('LayerTreeChanged'),
@@ -142,10 +136,11 @@ Layers.LayerTreeModel.Events = {
  */
 Layers.AgentLayerTree = class extends SDK.LayerTreeBase {
   /**
-   * @param {?SDK.Target} target
+   * @param {!Layers.LayerTreeModel} layerTreeModel
    */
-  constructor(target) {
-    super(target);
+  constructor(layerTreeModel) {
+    super(layerTreeModel.target());
+    this._layerTreeModel = layerTreeModel;
   }
 
   /**
@@ -194,7 +189,7 @@ Layers.AgentLayerTree = class extends SDK.LayerTreeBase {
       if (layer)
         layer._reset(layers[i]);
       else
-        layer = new Layers.AgentLayer(this.target(), layers[i]);
+        layer = new Layers.AgentLayer(this._layerTreeModel, layers[i]);
       this._layersById[layerId] = layer;
       var backendNodeId = layers[i].backendNodeId;
       if (backendNodeId)
@@ -226,11 +221,11 @@ Layers.AgentLayerTree = class extends SDK.LayerTreeBase {
  */
 Layers.AgentLayer = class {
   /**
-   * @param {?SDK.Target} target
+   * @param {!Layers.LayerTreeModel} layerTreeModel
    * @param {!Protocol.LayerTree.Layer} layerPayload
    */
-  constructor(target, layerPayload) {
-    this._target = target;
+  constructor(layerTreeModel, layerPayload) {
+    this._layerTreeModel = layerTreeModel;
     this._reset(layerPayload);
   }
 
@@ -409,14 +404,9 @@ Layers.AgentLayer = class {
    * @param {function(!Array.<string>)} callback
    */
   requestCompositingReasons(callback) {
-    if (!this._target) {
-      callback([]);
-      return;
-    }
-
     var wrappedCallback = Protocol.inspectorBackend.wrapClientCallback(
         callback, 'Protocol.LayerTree.reasonsForCompositingLayer(): ', undefined, []);
-    this._target.layerTreeAgent().compositingReasons(this.id(), wrappedCallback);
+    this._layerTreeModel._layerTreeAgent.compositingReasons(this.id(), wrappedCallback);
   }
 
   /**
@@ -444,11 +434,11 @@ Layers.AgentLayer = class {
    * @return {!Array<!Promise<?SDK.SnapshotWithRect>>}
    */
   snapshots() {
-    var rect = {x: 0, y: 0, width: this.width(), height: this.height()};
-    var promise = this._target.layerTreeAgent().makeSnapshot(
-        this.id(), (error, snapshotId) => error || !this._target ?
-            null :
-            {rect: rect, snapshot: new SDK.PaintProfilerSnapshot(this._target, snapshotId)});
+    var promise = this._layerTreeModel._paintProfilerModel.makeSnapshot(this.id()).then(snapshot => {
+      if (!snapshot)
+        return null;
+      return {rect: {x: 0, y: 0, width: this.width(), height: this.height()}, snapshot: snapshot};
+    });
     return [promise];
   }
 

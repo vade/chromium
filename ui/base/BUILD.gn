@@ -53,6 +53,7 @@ buildflag_header("ui_features") {
     "ENABLE_HIDPI=$enable_hidpi",
     "USE_XKBCOMMON=$use_xkbcommon",
     "MAC_VIEWS_BROWSER=$mac_views_browser",
+    "HAS_NATIVE_ACCESSIBILITY=$has_native_accessibility",
   ]
 }
 
@@ -67,6 +68,8 @@ component("base") {
     "accelerators/platform_accelerator_cocoa.mm",
     "android/ui_base_jni_registrar.cc",
     "android/ui_base_jni_registrar.h",
+    "class_property.cc",
+    "class_property.h",
     "clipboard/clipboard_android.cc",
     "clipboard/clipboard_android.h",
     "clipboard/clipboard_mac.h",
@@ -94,6 +97,8 @@ component("base") {
     "cocoa/constrained_window/constrained_window_animation.mm",
     "cocoa/controls/blue_label_button.h",
     "cocoa/controls/blue_label_button.mm",
+    "cocoa/controls/button_utils.h",
+    "cocoa/controls/button_utils.mm",
     "cocoa/controls/hover_image_menu_button.h",
     "cocoa/controls/hover_image_menu_button.mm",
     "cocoa/controls/hover_image_menu_button_cell.h",
@@ -102,6 +107,8 @@ component("base") {
     "cocoa/controls/hyperlink_button_cell.mm",
     "cocoa/controls/hyperlink_text_view.h",
     "cocoa/controls/hyperlink_text_view.mm",
+    "cocoa/controls/textfield_utils.h",
+    "cocoa/controls/textfield_utils.mm",
     "cocoa/defaults_utils.h",
     "cocoa/defaults_utils.mm",
     "cocoa/find_pasteboard.h",
@@ -135,6 +142,7 @@ component("base") {
     "cocoa/tool_tip_base_view.h",
     "cocoa/tool_tip_base_view.mm",
     "cocoa/touch_bar_forward_declarations.h",
+    "cocoa/touch_bar_forward_declarations.mm",
     "cocoa/tracking_area.h",
     "cocoa/tracking_area.mm",
     "cocoa/underlay_opengl_hosting_window.h",
@@ -147,6 +155,8 @@ component("base") {
     "cursor/cursor.cc",
     "cursor/cursor.h",
     "cursor/cursor_android.cc",
+    "cursor/cursor_data.cc",
+    "cursor/cursor_data.h",
     "cursor/cursor_loader.h",
     "cursor/cursor_win.cc",
     "default_style.h",
@@ -160,7 +170,6 @@ component("base") {
     "dragdrop/drag_drop_types_win.cc",
     "dragdrop/drag_source_win.cc",
     "dragdrop/drag_source_win.h",
-    "dragdrop/drag_utils_win.cc",
     "dragdrop/drop_target_event.cc",
     "dragdrop/drop_target_event.h",
     "dragdrop/drop_target_win.cc",
@@ -227,9 +236,13 @@ component("base") {
     "nine_image_painter_factory.h",
     "page_transition_types.cc",
     "page_transition_types.h",
+    "platform_window_defaults.cc",
+    "platform_window_defaults.h",
+    "property_data.h",
     "resource/resource_bundle.cc",
     "resource/resource_bundle.h",
     "resource/resource_bundle_android.cc",
+    "resource/resource_bundle_android.h",
     "resource/resource_bundle_auralinux.cc",
     "resource/resource_bundle_ios.mm",
     "resource/resource_bundle_mac.mm",
@@ -242,6 +255,7 @@ component("base") {
     "theme_provider.cc",
     "theme_provider.h",
     "touch/touch_device.h",
+    "touch/touch_device_util.cc",
     "touch/touch_editing_controller.cc",
     "touch/touch_editing_controller.h",
     "ui_base_export.h",
@@ -330,8 +344,6 @@ component("base") {
       "default_theme_provider.h",
       "dragdrop/cocoa_dnd_util.h",
       "dragdrop/cocoa_dnd_util.mm",
-      "dragdrop/drag_utils.cc",
-      "dragdrop/drag_utils.h",
       "dragdrop/file_info.cc",
       "dragdrop/file_info.h",
       "idle/idle.cc",
@@ -350,6 +362,7 @@ component("base") {
     sources += [ "touch/touch_device_win.cc" ]
   } else if (is_android) {
     sources += [ "touch/touch_device_android.cc" ]
+    sources -= [ "touch/touch_device_util.cc" ]
   } else if (is_ios) {
     sources += [ "touch/touch_device_ios.cc" ]
   } else if (is_linux) {
@@ -357,6 +370,7 @@ component("base") {
   } else {
     # Empty implementation for all other cases.
     sources += [ "touch/touch_device.cc" ]
+    sources -= [ "touch/touch_device_util.cc" ]
   }
 
   # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
@@ -472,15 +486,11 @@ component("base") {
 
   if (use_glib) {
     configs += [ "//build/config/linux:glib" ]
-  }
-
-  if (is_linux) {
-    if (!toolkit_views && !use_aura) {
-      sources -= [
-        "dragdrop/drag_utils.cc",
-        "dragdrop/drag_utils.h",
-      ]
-    }
+    sources += [
+      "glib/glib_integers.h",
+      "glib/glib_signal.h",
+      "glib/scoped_gobject.h",
+    ]
   }
 
   if (is_chromeos) {
@@ -557,6 +567,8 @@ component("base") {
       "cursor/cursor_ozone.cc",
       "cursor/ozone/bitmap_cursor_factory_ozone.cc",
       "cursor/ozone/bitmap_cursor_factory_ozone.h",
+      "cursor/ozone/cursor_data_factory_ozone.cc",
+      "cursor/ozone/cursor_data_factory_ozone.h",
     ]
 
     deps += [
@@ -592,8 +604,6 @@ component("base") {
       "cursor/image_cursors.cc",
       "cursor/image_cursors.h",
       "default_theme_provider.cc",
-      "dragdrop/drag_utils.cc",
-      "dragdrop/drag_utils.h",
       "idle/idle.cc",
       "idle/idle.h",
       "idle/idle_android.cc",
@@ -634,6 +644,7 @@ static_library("test_support") {
     "test/material_design_controller_test_api.h",
     "test/ui_controls.h",
     "test/ui_controls_aura.cc",
+    "test/ui_controls_aura.h",
     "test/ui_controls_internal_win.cc",
     "test/ui_controls_internal_win.h",
     "test/ui_controls_mac.mm",
@@ -662,6 +673,8 @@ static_library("test_support") {
     sources += [
       "test/ios/keyboard_appearance_listener.h",
       "test/ios/keyboard_appearance_listener.mm",
+      "test/ios/ui_image_test_utils.h",
+      "test/ios/ui_image_test_utils.mm",
       "test/ios/ui_view_test_utils.h",
       "test/ios/ui_view_test_utils.mm",
     ]
@@ -710,7 +723,10 @@ static_library("test_support") {
   }
 
   if (!use_aura) {
-    sources -= [ "test/ui_controls_aura.cc" ]
+    sources -= [
+      "test/ui_controls_aura.cc",
+      "test/ui_controls_aura.h",
+    ]
   } else if (is_win) {
     sources -= [ "test/ui_controls_win.cc" ]
   }
@@ -743,6 +759,7 @@ bundle_data("ui_base_unittests_bundle_data") {
 
 test("ui_base_unittests") {
   sources = [
+    "class_property_unittest.cc",
     "clipboard/clipboard_mac_unittest.mm",
     "clipboard/clipboard_util_mac_unittest.mm",
     "l10n/l10n_util_mac_unittest.mm",
@@ -778,10 +795,14 @@ test("ui_base_unittests") {
   if (is_ios) {
     # Compile this Mac file on iOS as well.
     set_sources_assignment_filter([])
-    sources += [ "l10n/l10n_util_mac_unittest.mm" ]
+    sources += [
+      "l10n/l10n_util_mac_unittest.mm",
+      "test/ios/ui_image_test_utils_unittest.mm",
+    ]
     set_sources_assignment_filter(sources_assignment_filter)
   } else {  # !is_ios
     sources += [
+      "accelerators/accelerator_history_unittest.cc",
       "accelerators/accelerator_manager_unittest.cc",
       "accelerators/accelerator_unittest.cc",
       "accelerators/menu_label_accelerator_util_linux_unittest.cc",
@@ -863,6 +884,8 @@ test("ui_base_unittests") {
 
   if (is_ios) {
     deps += [ "//ui/resources:ui_test_pak_bundle_data" ]
+  } else {
+    deps += [ "//ui/base/accelerators/mojo:unittests" ]
   }
 
   if (is_win) {

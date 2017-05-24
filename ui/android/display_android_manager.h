@@ -19,7 +19,9 @@ class DisplayAndroidManager : public display::ScreenBase {
 
   // Screen interface.
 
-  display::Display GetDisplayNearestWindow(gfx::NativeView view) const override;
+  display::Display GetDisplayNearestWindow(
+      gfx::NativeWindow window) const override;
+  display::Display GetDisplayNearestView(gfx::NativeView view) const override;
   display::Display GetDisplayNearestPoint(
       const gfx::Point& point) const override;
   display::Display GetDisplayMatching(
@@ -30,8 +32,6 @@ class DisplayAndroidManager : public display::ScreenBase {
   void UpdateDisplay(JNIEnv* env,
                      const base::android::JavaParamRef<jobject>& jobject,
                      jint sdkDisplayId,
-                     jint physicalWidth,
-                     jint physicalHeight,
                      jint width,
                      jint height,
                      jfloat dipScale,

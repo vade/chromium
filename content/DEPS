@@ -42,6 +42,7 @@ include_rules = [
   "+ppapi",
   "+printing",
   "+sandbox",
+  "+services/service_manager/embedder",
   "+skia",
 
   # In general, content/ should not rely on google_apis, since URLs
@@ -63,7 +64,6 @@ include_rules = [
   "+third_party/angle",
   "+third_party/boringssl/src/include",
   "+third_party/flac",
-  "+third_party/libjingle",
   "+third_party/mozilla",
   "+third_party/ocmock",
   "+third_party/re2",
@@ -86,6 +86,7 @@ include_rules = [
   "+ui/events",
   "+ui/gfx",
   "+ui/gl",
+  "+ui/latency",
   "+ui/native_theme",
   "+ui/ozone/public",
   "+ui/resources/grit/ui_resources.h",

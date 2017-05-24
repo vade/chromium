@@ -13,7 +13,6 @@
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "content/browser/fileapi/mock_url_request_delegate.h"
 #include "content/browser/service_worker/embedded_worker_test_helper.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_context_request_handler.h"
@@ -30,6 +29,7 @@
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
 #include "net/test/url_request/url_request_failed_job.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job_factory_impl.h"
 #include "net/url_request/url_request_test_job.h"
@@ -290,12 +290,10 @@ class ServiceWorkerWriteToCacheJobTest : public testing::Test {
       int process_id,
       int provider_id,
       const scoped_refptr<ServiceWorkerVersion>& version) {
-    std::unique_ptr<ServiceWorkerProviderHost> host(
-        new ServiceWorkerProviderHost(
-            process_id, MSG_ROUTING_NONE, provider_id,
-            SERVICE_WORKER_PROVIDER_FOR_CONTROLLER,
-            ServiceWorkerProviderHost::FrameSecurityLevel::SECURE,
-            context()->AsWeakPtr(), nullptr));
+    std::unique_ptr<ServiceWorkerProviderHost> host =
+        CreateProviderHostForServiceWorkerContext(
+            process_id, provider_id, true /* is_parent_frame_secure */,
+            context()->AsWeakPtr());
     base::WeakPtr<ServiceWorkerProviderHost> provider_host = host->AsWeakPtr();
     context()->AddProviderHost(std::move(host));
     provider_host->running_hosted_version_ = version;
@@ -317,7 +315,8 @@ class ServiceWorkerWriteToCacheJobTest : public testing::Test {
     url_request_context_->set_job_factory(url_request_job_factory_.get());
 
     request_ = url_request_context_->CreateRequest(
-        script_url_, net::DEFAULT_PRIORITY, &url_request_delegate_);
+        script_url_, net::DEFAULT_PRIORITY, &url_request_delegate_,
+        TRAFFIC_ANNOTATION_FOR_TESTS);
     ServiceWorkerRequestHandler::InitializeHandler(
         request_.get(), context_wrapper(), &blob_storage_context_, process_id,
         provider_id, false, FETCH_REQUEST_MODE_NO_CORS,
@@ -443,7 +442,7 @@ class ServiceWorkerWriteToCacheJobTest : public testing::Test {
   storage::BlobStorageContext blob_storage_context_;
   content::MockResourceContext resource_context_;
 
-  MockURLRequestDelegate url_request_delegate_;
+  net::TestDelegate url_request_delegate_;
   int next_provider_id_ = 1;
   int64_t next_version_id_ = 1L;
 };

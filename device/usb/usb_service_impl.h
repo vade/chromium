@@ -25,14 +25,12 @@
 struct libusb_device;
 struct libusb_context;
 
-namespace base {
-class SequencedTaskRunner;
-}
-
 namespace device {
 
 typedef struct libusb_device* PlatformUsbDevice;
 typedef struct libusb_context* PlatformUsbContext;
+
+class UsbDeviceImpl;
 
 class UsbServiceImpl :
 #if defined(OS_WIN)
@@ -40,8 +38,7 @@ class UsbServiceImpl :
 #endif  // OS_WIN
     public UsbService {
  public:
-  explicit UsbServiceImpl(
-      scoped_refptr<base::SequencedTaskRunner> blocking_task_runner);
+  UsbServiceImpl();
   ~UsbServiceImpl() override;
 
  private:

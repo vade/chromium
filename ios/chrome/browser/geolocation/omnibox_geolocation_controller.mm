@@ -12,7 +12,7 @@
 #import "base/ios/weak_nsobject.h"
 #include "base/logging.h"
 #include "base/mac/scoped_nsobject.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/version.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/version_info/version_info.h"
@@ -442,7 +442,7 @@ const char* const kGeolocationAuthorizationActionNewUser =
 }
 
 - (void)addLocationAndReloadTab:(Tab*)tab {
-  if (self.enabled && [tab navigationManager]) {
+  if (self.enabled && tab.webState) {
     // Make sure that GeolocationUpdater is running the first time we request
     // the current location.
     //
@@ -453,10 +453,12 @@ const char* const kGeolocationAuthorizationActionNewUser =
     // GeolocationUpdater.
     [self startUpdatingLocation];
 
-    web::NavigationItem* item =
-        tab.webState->GetNavigationManager()->GetVisibleItem();
+    web::NavigationManager* navigationManager =
+        tab.webState->GetNavigationManager();
+    web::NavigationItem* item = navigationManager->GetVisibleItem();
     if ([self addLocationToNavigationItem:item browserState:tab.browserState]) {
-      [tab reload];
+      navigationManager->Reload(web::ReloadType::NORMAL,
+                                false /* check_for_repost */);
     }
   }
 }

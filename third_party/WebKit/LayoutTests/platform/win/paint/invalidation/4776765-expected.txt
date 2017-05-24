@@ -8,73 +8,40 @@
       "paintInvalidations": [
         {
           "object": "LayoutBlockFlow DIV",
-          "rect": [7, 41, 786, 56],
-          "reason": "outline"
-        },
-        {
-          "object": "LayoutBlockFlow DIV id='div'",
-          "rect": [8, 78, 784, 18],
-          "reason": "layoutObject insertion"
-        },
-        {
-          "object": "LayoutBlockFlow DIV id='div'",
-          "rect": [7, 77, 3, 19],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutBlockFlow DIV id='div'",
-          "rect": [7, 77, 3, 19],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutBlockFlow DIV id='div'",
-          "rect": [7, 77, 3, 19],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutBlockFlow DIV id='div'",
-          "rect": [7, 59, 3, 19],
-          "reason": "invalidate paint rectangle"
+          "rect": [7, 43, 786, 62],
+          "reason": "geometry"
         }
       ]
     }
   ],
   "objectPaintInvalidations": [
     {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
       "object": "LayoutBlockFlow DIV",
-      "reason": "outline"
+      "reason": "geometry"
+    },
+    {
+      "object": "Caret",
+      "reason": "caret"
     },
     {
       "object": "LayoutBlockFlow DIV id='div'",
-      "reason": "layoutObject insertion"
+      "reason": "appeared"
     },
     {
       "object": "RootInlineBox",
-      "reason": "layoutObject insertion"
+      "reason": "appeared"
     },
     {
       "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
+      "reason": "caret"
     },
     {
       "object": "LayoutBR BR",
-      "reason": "layoutObject insertion"
+      "reason": "appeared"
     },
     {
       "object": "InlineTextBox '\n'",
-      "reason": "layoutObject insertion"
+      "reason": "appeared"
     }
   ]
 }

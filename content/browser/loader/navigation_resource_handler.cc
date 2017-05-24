@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "content/browser/loader/navigation_url_loader_impl_core.h"
 #include "content/browser/loader/netlog_observer.h"
@@ -26,9 +27,7 @@
 namespace content {
 
 void NavigationResourceHandler::GetSSLStatusForRequest(
-    const GURL& url,
     const net::SSLInfo& ssl_info,
-    int child_id,
     SSLStatus* ssl_status) {
   DCHECK(ssl_info.cert);
   *ssl_status = SSLStatus(ssl_info);
@@ -36,13 +35,15 @@ void NavigationResourceHandler::GetSSLStatusForRequest(
 
 NavigationResourceHandler::NavigationResourceHandler(
     net::URLRequest* request,
+    std::unique_ptr<ResourceHandler> next_handler,
     NavigationURLLoaderImplCore* core,
-    ResourceDispatcherHostDelegate* resource_dispatcher_host_delegate)
-    : ResourceHandler(request),
+    ResourceDispatcherHostDelegate* resource_dispatcher_host_delegate,
+    std::unique_ptr<StreamHandle> stream_handle)
+    : LayeredResourceHandler(request, std::move(next_handler)),
       core_(core),
+      stream_handle_(std::move(stream_handle)),
       resource_dispatcher_host_delegate_(resource_dispatcher_host_delegate) {
   core_->set_resource_handler(this);
-  writer_.set_immediate_mode(true);
 }
 
 NavigationResourceHandler::~NavigationResourceHandler() {
@@ -53,51 +54,69 @@ NavigationResourceHandler::~NavigationResourceHandler() {
 }
 
 void NavigationResourceHandler::Cancel() {
-  controller()->Cancel();
-  core_ = nullptr;
+  if (core_) {
+    DetachFromCore();
+    if (has_controller()) {
+      CancelAndIgnore();
+    } else {
+      OutOfBandCancel(net::ERR_ABORTED, true /* tell_renderer */);
+    }
+  }
 }
 
 void NavigationResourceHandler::FollowRedirect() {
-  controller()->Resume();
+  DCHECK(response_);
+  DCHECK(redirect_info_);
+  DCHECK(has_controller());
+  next_handler_->OnRequestRedirected(*redirect_info_, response_.get(),
+                                     ReleaseController());
+  response_ = nullptr;
+  redirect_info_ = nullptr;
 }
 
 void NavigationResourceHandler::ProceedWithResponse() {
+  DCHECK(response_);
+  DCHECK(has_controller());
   // Detach from the loader; at this point, the request is now owned by the
   // StreamHandle sent in OnResponseStarted.
   DetachFromCore();
-  controller()->Resume();
+  next_handler_->OnResponseStarted(response_.get(), ReleaseController());
+  response_ = nullptr;
 }
 
-void NavigationResourceHandler::SetController(ResourceController* controller) {
-  writer_.set_controller(controller);
-  ResourceHandler::SetController(controller);
-}
-
-bool NavigationResourceHandler::OnRequestRedirected(
+void NavigationResourceHandler::OnRequestRedirected(
     const net::RedirectInfo& redirect_info,
     ResourceResponse* response,
-    bool* defer) {
-  DCHECK(core_);
+    std::unique_ptr<ResourceController> controller) {
+  DCHECK(!has_controller());
 
-  // TODO(davidben): Perform a CSP check here, and anything else that would have
-  // been done renderer-side.
+  // The UI thread already cancelled the navigation. Do not proceed.
+  if (!core_) {
+    controller->CancelAndIgnore();
+    return;
+  }
+
   NetLogObserver::PopulateResponseInfo(request(), response);
   response->head.encoded_data_length = request()->GetTotalReceivedBytes();
   core_->NotifyRequestRedirected(redirect_info, response);
-  *defer = true;
-  return true;
+
+  HoldController(std::move(controller));
+  response_ = response;
+  redirect_info_ = base::MakeUnique<net::RedirectInfo>(redirect_info);
 }
 
-bool NavigationResourceHandler::OnResponseStarted(ResourceResponse* response,
-                                                  bool* defer) {
-  DCHECK(core_);
+void NavigationResourceHandler::OnResponseStarted(
+    ResourceResponse* response,
+    std::unique_ptr<ResourceController> controller) {
+  DCHECK(!has_controller());
+
+  // The UI thread already cancelled the navigation. Do not proceed.
+  if (!core_) {
+    controller->CancelAndIgnore();
+    return;
+  }
 
   ResourceRequestInfoImpl* info = GetRequestInfo();
-
-  StreamContext* stream_context =
-      GetStreamContextForResourceContext(info->GetContext());
-  writer_.InitializeStream(stream_context->registry(),
-                           request()->url().GetOrigin());
 
   NetLogObserver::PopulateResponseInfo(request(), response);
   response->head.encoded_data_length = request()->raw_header_size();
@@ -114,69 +133,26 @@ bool NavigationResourceHandler::OnResponseStarted(ResourceResponse* response,
   }
 
   SSLStatus ssl_status;
-  if (request()->ssl_info().cert.get()) {
-    GetSSLStatusForRequest(request()->url(), request()->ssl_info(),
-                           info->GetChildID(), &ssl_status);
-  }
+  if (request()->ssl_info().cert.get())
+    GetSSLStatusForRequest(request()->ssl_info(), &ssl_status);
 
-  core_->NotifyResponseStarted(response, writer_.stream()->CreateHandle(),
-                               ssl_status, std::move(cloned_data),
-                               info->GetGlobalRequestID(), info->IsDownload(),
-                               info->is_stream());
-  // Don't defer stream based requests. This includes requests initiated via
-  // mime type sniffing, etc.
-  // TODO(ananta)
-  // Make sure that the requests go through the throttle checks. Currently this
-  // does not work as the InterceptingResourceHandler is above us and hence it
-  // does not expect the old handler to defer the request.
-  // TODO(clamy): We should also make the downloads wait on the
-  // NavigationThrottle checks be performed. Similarly to streams, it doesn't
-  // work because of the InterceptingResourceHandler.
-  // TODO(clamy): This NavigationResourceHandler should be split in two, with
-  // one part that wait on the NavigationThrottle to execute located between the
-  // MIME sniffing and the ResourceThrotlle, and one part that write the
-  // response to the stream being the leaf ResourceHandler.
-  if (!info->is_stream() && !info->IsDownload())
-    *defer = true;
-
-  return true;
-}
-
-bool NavigationResourceHandler::OnWillStart(const GURL& url, bool* defer) {
-  return true;
-}
-
-bool NavigationResourceHandler::OnWillRead(scoped_refptr<net::IOBuffer>* buf,
-                                           int* buf_size,
-                                           int min_size) {
-  writer_.OnWillRead(buf, buf_size, min_size);
-  return true;
-}
-
-bool NavigationResourceHandler::OnReadCompleted(int bytes_read, bool* defer) {
-  writer_.OnReadCompleted(bytes_read, defer);
-  return true;
+  core_->NotifyResponseStarted(
+      response, std::move(stream_handle_), ssl_status, std::move(cloned_data),
+      info->GetGlobalRequestID(), info->IsDownload(), info->is_stream());
+  HoldController(std::move(controller));
+  response_ = response;
 }
 
 void NavigationResourceHandler::OnResponseCompleted(
     const net::URLRequestStatus& status,
-    bool* defer) {
-  // If the request has already committed, close the stream and leave it as-is.
-  if (writer_.stream()) {
-    writer_.Finalize(status.error());
-    return;
-  }
-
+    std::unique_ptr<ResourceController> controller) {
   if (core_) {
     DCHECK_NE(net::OK, status.error());
     core_->NotifyRequestFailed(request()->response_info().was_cached,
                                status.error());
     DetachFromCore();
   }
-}
-
-void NavigationResourceHandler::OnDataDownloaded(int bytes_downloaded) {
-  NOTREACHED();
+  next_handler_->OnResponseCompleted(status, std::move(controller));
 }
 
 void NavigationResourceHandler::DetachFromCore() {

@@ -15,43 +15,41 @@ class InputMethodController;
 class LocalFrame;
 class WebLocalFrameImpl;
 class WebPlugin;
+class WebRange;
 class WebString;
 
 class WebInputMethodControllerImpl : public WebInputMethodController {
   WTF_MAKE_NONCOPYABLE(WebInputMethodControllerImpl);
 
  public:
-  explicit WebInputMethodControllerImpl(WebLocalFrameImpl* ownerFrame);
+  explicit WebInputMethodControllerImpl(WebLocalFrameImpl* owner_frame);
   ~WebInputMethodControllerImpl() override;
 
-  static WebInputMethodControllerImpl* fromFrame(LocalFrame*);
+  static WebInputMethodControllerImpl* FromFrame(LocalFrame*);
 
   // WebInputMethodController overrides.
-  bool setComposition(const WebString& text,
+  bool SetComposition(const WebString& text,
                       const WebVector<WebCompositionUnderline>& underlines,
-                      int selectionStart,
-                      int selectionEnd) override;
-  bool commitText(const WebString& text,
+                      const WebRange& replacement_range,
+                      int selection_start,
+                      int selection_end) override;
+  bool CommitText(const WebString& text,
                   const WebVector<WebCompositionUnderline>& underlines,
-                  int relativeCaretPosition) override;
-  bool finishComposingText(
-      ConfirmCompositionBehavior selectionBehavior) override;
-  WebTextInputInfo textInputInfo() override;
-  WebTextInputType textInputType() override;
-
-  void setSuppressNextKeypressEvent(bool suppress) {
-    m_suppressNextKeypressEvent = suppress;
-  }
+                  const WebRange& replacement_range,
+                  int relative_caret_position) override;
+  bool FinishComposingText(
+      ConfirmCompositionBehavior selection_behavior) override;
+  WebTextInputInfo TextInputInfo() override;
+  WebTextInputType TextInputType() override;
 
   DECLARE_TRACE();
 
  private:
-  LocalFrame* frame() const;
-  InputMethodController& inputMethodController() const;
-  WebPlugin* focusedPluginIfInputMethodSupported() const;
+  LocalFrame* GetFrame() const;
+  InputMethodController& GetInputMethodController() const;
+  WebPlugin* FocusedPluginIfInputMethodSupported() const;
 
-  WeakMember<WebLocalFrameImpl> m_webLocalFrame;
-  bool m_suppressNextKeypressEvent;
+  WeakMember<WebLocalFrameImpl> web_local_frame_;
 };
 }  // namespace blink
 

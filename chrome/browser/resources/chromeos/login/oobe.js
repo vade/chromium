@@ -86,6 +86,21 @@ cr.define('cr.ui.Oobe', function() {
     },
 
     /**
+     * Returns value of the selected option (see setupSelect() above).
+     * @param {!Object} list The same as in setupSelect() above.
+     */
+    getSelectedValue: function(list) {
+      for (var i = 0; i < list.length; ++i) {
+        var item = list[i];
+        if (item.optionGroupName)
+          continue;
+        if (item.selected)
+          return item.value;
+      }
+      return null;
+    },
+
+    /**
      * Initializes the OOBE flow.  This will cause all C++ handlers to
      * be invoked to do final setup.
      */
@@ -112,6 +127,7 @@ cr.define('cr.ui.Oobe', function() {
       login.TermsOfServiceScreen.register();
       login.ArcTermsOfServiceScreen.register();
       login.AppLaunchSplashScreen.register();
+      login.ArcKioskSplashScreen.register();
       login.ConfirmPasswordScreen.register();
       login.FatalErrorScreen.register();
       login.ControllerPairingScreen.register();
@@ -159,7 +175,16 @@ cr.define('cr.ui.Oobe', function() {
       $('screen-magnifier').addEventListener('click',
                                              Oobe.handleScreenMagnifierClick);
       $('virtual-keyboard').addEventListener('click',
-                                              Oobe.handleVirtualKeyboardClick);
+                                             Oobe.handleVirtualKeyboardClick);
+
+      $('high-contrast').addEventListener('keypress', Oobe.handleA11yKeyPress);
+      $('large-cursor').addEventListener('keypress', Oobe.handleA11yKeyPress);
+      $('spoken-feedback')
+          .addEventListener('keypress', Oobe.handleA11yKeyPress);
+      $('screen-magnifier')
+          .addEventListener('keypress', Oobe.handleA11yKeyPress);
+      $('virtual-keyboard')
+          .addEventListener('keypress', Oobe.handleA11yKeyPress);
 
       // A11y menu should be accessible i.e. disable autohide on any
       // keydown or click inside menu.
@@ -201,6 +226,20 @@ cr.define('cr.ui.Oobe', function() {
         $('accessibility-menu').elementToFocusOnHide = e.target;
       }
       e.stopPropagation();
+    },
+
+    /**
+     * handle a11y menu checkboxes keypress event by simulating click event.
+     */
+    handleA11yKeyPress: function(e) {
+      if (e.key != 'Enter')
+        return;
+
+      if (e.target.tagName != 'INPUT' || e.target.type != 'checkbox')
+        return;
+
+      // Simulate click on the checkbox.
+      e.target.click()
     },
 
     /**
@@ -314,6 +353,15 @@ cr.define('cr.ui.Oobe', function() {
 
       // Update localized content of the screens.
       Oobe.updateLocalizedContent();
+    },
+
+    /**
+     * Reloads localized strings for the eula page.
+     * @param {!Object} data New dictionary with changed eula i18n values.
+     */
+    reloadEulaContent: function(data) {
+      loadTimeData.overrideValues(data);
+      i18nTemplate.process(document, loadTimeData);
     },
 
     /**

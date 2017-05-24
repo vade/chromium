@@ -6,6 +6,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "components/leveldb/public/cpp/util.h"
 #include "components/leveldb/public/interfaces/leveldb.mojom.h"
@@ -17,7 +18,6 @@
 #include "content/common/dom_storage/dom_storage_types.h"
 #include "content/public/browser/local_storage_usage_info.h"
 #include "services/file/public/interfaces/constants.mojom.h"
-#include "services/service_manager/public/cpp/connection.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "sql/connection.h"
 #include "third_party/leveldatabase/env_chromium.h"
@@ -67,11 +67,7 @@ std::vector<uint8_t> CreateMetaDataKey(const url::Origin& origin) {
 }
 
 void NoOpSuccess(bool success) {}
-
-std::vector<uint8_t> String16ToUint8Vector(const base::string16& input) {
-  const uint8_t* data = reinterpret_cast<const uint8_t*>(input.data());
-  return std::vector<uint8_t>(data, data + input.size() * sizeof(base::char16));
-}
+void NoOpDatabaseError(leveldb::mojom::DatabaseError error) {}
 
 void MigrateStorageHelper(
     base::FilePath db_path,
@@ -83,8 +79,8 @@ void MigrateStorageHelper(
   db.ReadAllValues(&map);
   auto values = base::MakeUnique<LevelDBWrapperImpl::ValueMap>();
   for (const auto& it : map) {
-    (*values)[String16ToUint8Vector(it.first)] =
-        String16ToUint8Vector(it.second.string());
+    (*values)[LocalStorageContextMojo::MigrateString(it.first)] =
+        LocalStorageContextMojo::MigrateString(it.second.string());
   }
   reply_task_runner->PostTask(FROM_HERE,
                               base::Bind(callback, base::Passed(&values)));
@@ -94,6 +90,22 @@ void MigrateStorageHelper(
 void CallMigrationCalback(LevelDBWrapperImpl::ValueMapCallback callback,
                           std::unique_ptr<LevelDBWrapperImpl::ValueMap> data) {
   std::move(callback).Run(std::move(data));
+}
+
+void AddDeleteOriginOperations(
+    std::vector<leveldb::mojom::BatchedOperationPtr>* operations,
+    const url::Origin& origin) {
+  leveldb::mojom::BatchedOperationPtr item =
+      leveldb::mojom::BatchedOperation::New();
+  item->type = leveldb::mojom::BatchOperationType::DELETE_PREFIXED_KEY;
+  item->key = leveldb::StdStringToUint8Vector(kDataPrefix + origin.Serialize() +
+                                              kOriginSeparator);
+  operations->push_back(std::move(item));
+
+  item = leveldb::mojom::BatchedOperation::New();
+  item->type = leveldb::mojom::BatchOperationType::DELETE_KEY;
+  item->key = CreateMetaDataKey(origin);
+  operations->push_back(std::move(item));
 }
 
 }  // namespace
@@ -256,11 +268,18 @@ void LocalStorageContextMojo::DeleteStorage(const url::Origin& origin) {
     return;
   }
 
-  LevelDBWrapperImpl* wrapper = GetOrCreateDBWrapper(origin);
-  // Renderer process expects |source| to always be two newline separated
-  // strings.
-  wrapper->DeleteAll("\n", base::Bind(&NoOpSuccess));
-  wrapper->ScheduleImmediateCommit();
+  auto found = level_db_wrappers_.find(origin);
+  if (found != level_db_wrappers_.end()) {
+    // Renderer process expects |source| to always be two newline separated
+    // strings.
+    found->second->level_db_wrapper()->DeleteAll("\n",
+                                                 base::Bind(&NoOpSuccess));
+    found->second->level_db_wrapper()->ScheduleImmediateCommit();
+  } else if (database_) {
+    std::vector<leveldb::mojom::BatchedOperationPtr> operations;
+    AddDeleteOriginOperations(&operations, origin);
+    database_->Write(std::move(operations), base::Bind(&NoOpDatabaseError));
+  }
 }
 
 void LocalStorageContextMojo::DeleteStorageForPhysicalOrigin(
@@ -271,8 +290,18 @@ void LocalStorageContextMojo::DeleteStorageForPhysicalOrigin(
 }
 
 void LocalStorageContextMojo::Flush() {
+  if (connection_state_ != CONNECTION_FINISHED) {
+    RunWhenConnected(base::BindOnce(&LocalStorageContextMojo::Flush,
+                                    weak_ptr_factory_.GetWeakPtr()));
+    return;
+  }
   for (const auto& it : level_db_wrappers_)
     it.second->level_db_wrapper()->ScheduleImmediateCommit();
+}
+
+void LocalStorageContextMojo::PurgeMemory() {
+  for (const auto& it : level_db_wrappers_)
+    it.second->level_db_wrapper()->PurgeMemory();
 }
 
 leveldb::mojom::LevelDBDatabaseAssociatedRequest
@@ -280,24 +309,28 @@ LocalStorageContextMojo::DatabaseRequestForTesting() {
   DCHECK_EQ(connection_state_, NO_CONNECTION);
   connection_state_ = CONNECTION_IN_PROGRESS;
   leveldb::mojom::LevelDBDatabaseAssociatedRequest request =
-      MakeRequestForTesting(&database_);
+      MakeIsolatedRequest(&database_);
   OnDatabaseOpened(true, leveldb::mojom::DatabaseError::OK);
   return request;
+}
+
+// static
+std::vector<uint8_t> LocalStorageContextMojo::MigrateString(
+    const base::string16& input) {
+  static const uint8_t kUTF16Format = 0;
+
+  const uint8_t* data = reinterpret_cast<const uint8_t*>(input.data());
+  std::vector<uint8_t> result;
+  result.reserve(input.size() * sizeof(base::char16) + 1);
+  result.push_back(kUTF16Format);
+  result.insert(result.end(), data, data + input.size() * sizeof(base::char16));
+  return result;
 }
 
 void LocalStorageContextMojo::RunWhenConnected(base::OnceClosure callback) {
   // If we don't have a filesystem_connection_, we'll need to establish one.
   if (connection_state_ == NO_CONNECTION) {
-    CHECK(connector_);
-    file_service_connection_ = connector_->Connect(file::mojom::kServiceName);
     connection_state_ = CONNECTION_IN_PROGRESS;
-    file_service_connection_->AddConnectionCompletedClosure(
-        base::Bind(&LocalStorageContextMojo::OnUserServiceConnectionComplete,
-                   weak_ptr_factory_.GetWeakPtr()));
-    file_service_connection_->SetConnectionLostClosure(
-        base::Bind(&LocalStorageContextMojo::OnUserServiceConnectionError,
-                   weak_ptr_factory_.GetWeakPtr()));
-
     InitiateConnection();
   }
 
@@ -310,30 +343,22 @@ void LocalStorageContextMojo::RunWhenConnected(base::OnceClosure callback) {
   std::move(callback).Run();
 }
 
-void LocalStorageContextMojo::OnUserServiceConnectionComplete() {
-  CHECK_EQ(service_manager::mojom::ConnectResult::SUCCEEDED,
-           file_service_connection_->GetResult());
-}
-
-void LocalStorageContextMojo::OnUserServiceConnectionError() {
-  CHECK(false);
-}
-
 void LocalStorageContextMojo::InitiateConnection(bool in_memory_only) {
   DCHECK_EQ(connection_state_, CONNECTION_IN_PROGRESS);
+  CHECK(connector_);
   if (!subdirectory_.empty() && !in_memory_only) {
     // We were given a subdirectory to write to. Get it and use a disk backed
     // database.
-    file_service_connection_->GetInterface(&file_system_);
+    connector_->BindInterface(file::mojom::kServiceName, &file_system_);
     file_system_->GetSubDirectory(
         subdirectory_.AsUTF8Unsafe(), MakeRequest(&directory_),
         base::Bind(&LocalStorageContextMojo::OnDirectoryOpened,
                    weak_ptr_factory_.GetWeakPtr()));
   } else {
     // We were not given a subdirectory. Use a memory backed database.
-    file_service_connection_->GetInterface(&leveldb_service_);
+    connector_->BindInterface(file::mojom::kServiceName, &leveldb_service_);
     leveldb_service_->OpenInMemory(
-        MakeRequest(&database_, leveldb_service_.associated_group()),
+        MakeRequest(&database_),
         base::Bind(&LocalStorageContextMojo::OnDatabaseOpened,
                    weak_ptr_factory_.GetWeakPtr(), true));
   }
@@ -357,7 +382,7 @@ void LocalStorageContextMojo::OnDirectoryOpened(
 
   // Now that we have a directory, connect to the LevelDB service and get our
   // database.
-  file_service_connection_->GetInterface(&leveldb_service_);
+  connector_->BindInterface(file::mojom::kServiceName, &leveldb_service_);
 
   // We might still need to use the directory, so create a clone.
   filesystem::mojom::DirectoryPtr directory_clone;
@@ -367,7 +392,7 @@ void LocalStorageContextMojo::OnDirectoryOpened(
   options->create_if_missing = true;
   leveldb_service_->OpenWithOptions(
       std::move(options), std::move(directory_clone), "leveldb",
-      MakeRequest(&database_, leveldb_service_.associated_group()),
+      MakeRequest(&database_),
       base::Bind(&LocalStorageContextMojo::OnDatabaseOpened,
                  weak_ptr_factory_.GetWeakPtr(), false));
 }
@@ -483,9 +508,9 @@ void LocalStorageContextMojo::DeleteAndRecreateDatabase() {
 
   tried_to_recreate_ = true;
 
-  // Unit tests might not have a file_service_connection_, in which case there
-  // is nothing to retry.
-  if (!file_service_connection_) {
+  // Unit tests might not have a bound file_service_, in which case there is
+  // nothing to retry.
+  if (!file_system_.is_bound()) {
     database_ = nullptr;
     OnConnectionFinished();
     return;

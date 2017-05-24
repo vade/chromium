@@ -460,60 +460,6 @@ void HttpResponseHeaders::Parse(const std::string& raw_input) {
   DCHECK_EQ('\0', raw_headers_[raw_headers_.size() - 1]);
 }
 
-// Append all of our headers to the final output string.
-void HttpResponseHeaders::GetNormalizedHeaders(std::string* output) const {
-  // copy up to the null byte.  this just copies the status line.
-  output->assign(raw_headers_.c_str());
-
-  // headers may appear multiple times (not necessarily in succession) in the
-  // header data, so we build a map from header name to generated header lines.
-  // to preserve the order of the original headers, the actual values are kept
-  // in a separate list.  finally, the list of headers is flattened to form
-  // the normalized block of headers.
-  //
-  // NOTE: We take special care to preserve the whitespace around any commas
-  // that may occur in the original response headers.  Because our consumer may
-  // be a web app, we cannot be certain of the semantics of commas despite the
-  // fact that RFC 2616 says that they should be regarded as value separators.
-  //
-  using HeadersMap = std::unordered_map<std::string, size_t>;
-  HeadersMap headers_map;
-  HeadersMap::iterator iter = headers_map.end();
-
-  std::vector<std::string> headers;
-
-  for (size_t i = 0; i < parsed_.size(); ++i) {
-    DCHECK(!parsed_[i].is_continuation());
-
-    std::string name(parsed_[i].name_begin, parsed_[i].name_end);
-    std::string lower_name = base::ToLowerASCII(name);
-
-    iter = headers_map.find(lower_name);
-    if (iter == headers_map.end()) {
-      iter = headers_map.insert(
-          HeadersMap::value_type(lower_name, headers.size())).first;
-      headers.push_back(name + ": ");
-    } else {
-      headers[iter->second].append(", ");
-    }
-
-    std::string::const_iterator value_begin = parsed_[i].value_begin;
-    std::string::const_iterator value_end = parsed_[i].value_end;
-    while (++i < parsed_.size() && parsed_[i].is_continuation())
-      value_end = parsed_[i].value_end;
-    --i;
-
-    headers[iter->second].append(value_begin, value_end);
-  }
-
-  for (size_t i = 0; i < headers.size(); ++i) {
-    output->push_back('\n');
-    output->append(headers[i]);
-  }
-
-  output->push_back('\n');
-}
-
 bool HttpResponseHeaders::GetNormalizedHeader(const std::string& name,
                                               std::string* value) const {
   // If you hit this assertion, please use EnumerateHeader instead!
@@ -632,9 +578,6 @@ bool HttpResponseHeaders::HasHeaderValue(const base::StringPiece& name,
 
 bool HttpResponseHeaders::HasHeader(const base::StringPiece& name) const {
   return FindHeader(0, name) != std::string::npos;
-}
-
-HttpResponseHeaders::HttpResponseHeaders() : response_code_(-1) {
 }
 
 HttpResponseHeaders::~HttpResponseHeaders() {
@@ -971,28 +914,14 @@ bool HttpResponseHeaders::IsRedirectResponseCode(int response_code) {
 // Of course, there are other factors that can force a response to always be
 // validated or re-fetched.
 //
-// From RFC 5861 section 3, a stale response may be used while revalidation is
-// performed in the background if
-//
-//   freshness_lifetime + stale_while_revalidate > current_age
-//
-ValidationType HttpResponseHeaders::RequiresValidation(
-    const Time& request_time,
-    const Time& response_time,
-    const Time& current_time) const {
+bool HttpResponseHeaders::RequiresValidation(const Time& request_time,
+                                             const Time& response_time,
+                                             const Time& current_time) const {
   FreshnessLifetimes lifetimes = GetFreshnessLifetimes(response_time);
-  if (lifetimes.freshness.is_zero() && lifetimes.staleness.is_zero())
-    return VALIDATION_SYNCHRONOUS;
-
-  TimeDelta age = GetCurrentAge(request_time, response_time, current_time);
-
-  if (lifetimes.freshness > age)
-    return VALIDATION_NONE;
-
-  if (lifetimes.freshness + lifetimes.staleness > age)
-    return VALIDATION_ASYNCHRONOUS;
-
-  return VALIDATION_SYNCHRONOUS;
+  if (lifetimes.freshness.is_zero())
+    return true;
+  return lifetimes.freshness <=
+         GetCurrentAge(request_time, response_time, current_time);
 }
 
 // From RFC 2616 section 13.2.4:
@@ -1015,9 +944,6 @@ ValidationType HttpResponseHeaders::RequiresValidation(
 //
 //   freshness_lifetime = (date_value - last_modified_value) * 0.10
 //
-// If the stale-while-revalidate directive is present, then it is used to set
-// the |staleness| time, unless it overridden by another directive.
-//
 HttpResponseHeaders::FreshnessLifetimes
 HttpResponseHeaders::GetFreshnessLifetimes(const Time& response_time) const {
   FreshnessLifetimes lifetimes;
@@ -1030,13 +956,6 @@ HttpResponseHeaders::GetFreshnessLifetimes(const Time& response_time) const {
       // Vary: * is never usable: see RFC 2616 section 13.6.
       HasHeaderValue("vary", "*")) {
     return lifetimes;
-  }
-
-  // Cache-Control directive must_revalidate overrides stale-while-revalidate.
-  bool must_revalidate = HasHeaderValue("cache-control", "must-revalidate");
-
-  if (must_revalidate || !GetStaleWhileRevalidateValue(&lifetimes.staleness)) {
-    DCHECK_EQ(TimeDelta(), lifetimes.staleness);
   }
 
   // NOTE: "Cache-Control: max-age" overrides Expires, so we only check the
@@ -1089,7 +1008,8 @@ HttpResponseHeaders::GetFreshnessLifetimes(const Time& response_time) const {
   // experimental RFC that adds 308 permanent redirect as well, for which "any
   // future references ... SHOULD use one of the returned URIs."
   if ((response_code_ == 200 || response_code_ == 203 ||
-       response_code_ == 206) && !must_revalidate) {
+       response_code_ == 206) &&
+      !HasHeaderValue("cache-control", "must-revalidate")) {
     // TODO(darin): Implement a smarter heuristic.
     Time last_modified_value;
     if (GetLastModifiedValue(&last_modified_value)) {
@@ -1105,13 +1025,11 @@ HttpResponseHeaders::GetFreshnessLifetimes(const Time& response_time) const {
   if (response_code_ == 300 || response_code_ == 301 || response_code_ == 308 ||
       response_code_ == 410) {
     lifetimes.freshness = TimeDelta::Max();
-    lifetimes.staleness = TimeDelta();  // It should never be stale.
     return lifetimes;
   }
 
   // Our heuristic freshness estimate for this resource is 0 seconds, in
-  // accordance with common browser behaviour. However, stale-while-revalidate
-  // may still apply.
+  // accordance with common browser behaviour.
   DCHECK_EQ(TimeDelta(), lifetimes.freshness);
   return lifetimes;
 }
@@ -1220,11 +1138,6 @@ bool HttpResponseHeaders::GetLastModifiedValue(Time* result) const {
 
 bool HttpResponseHeaders::GetExpiresValue(Time* result) const {
   return GetTimeValuedHeader("Expires", result);
-}
-
-bool HttpResponseHeaders::GetStaleWhileRevalidateValue(
-    TimeDelta* result) const {
-  return GetCacheControlDirective("stale-while-revalidate", result);
 }
 
 bool HttpResponseHeaders::GetTimeValuedHeader(const std::string& name,
@@ -1389,7 +1302,7 @@ bool HttpResponseHeaders::FromNetLogParam(
        it != header_list->end();
        ++it) {
     std::string header_line;
-    if (!(*it)->GetAsString(&header_line))
+    if (!it->GetAsString(&header_line))
       return false;
 
     raw_headers.append(header_line);

@@ -10,14 +10,16 @@
 #include "base/logging.h"
 #include "base/mac/objc_property_releaser.h"
 #include "base/mac/scoped_nsobject.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #import "ios/chrome/browser/ui/browser_view_controller.h"
+#import "ios/chrome/browser/ui/overscroll_actions/overscroll_actions_gesture_recognizer.h"
 #import "ios/chrome/browser/ui/overscroll_actions/overscroll_actions_view.h"
 #include "ios/chrome/browser/ui/rtl_geometry.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_controller.h"
 #import "ios/chrome/browser/ui/toolbar/web_toolbar_controller.h"
+#include "ios/chrome/browser/ui/uikit_ui_util.h"
 #import "ios/chrome/browser/ui/voice/voice_search_notification_names.h"
-#import "ios/web/public/web_state/crw_web_view_proxy.h"
+#import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
 
 namespace {
 // This enum is used to record the overscroll actions performed by the user on
@@ -142,6 +144,9 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
   // Records if a transition to the overscroll state ACTION_READY was made.
   // This is used to record a cancel gesture.
   BOOL _didTransitionToActionReady;
+  // Records that the controller will be dismissed at the end of the current
+  // animation. No new action should be started.
+  BOOL _shouldInvalidate;
   // Store the set of notifications that did increment the overscroll actions
   // lock. It is used in order to enforce the fact that the lock should only be
   // incremented/decremented once for a given notification.
@@ -276,6 +281,14 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
   self.overscrollActionView.delegate = nil;
   [self invalidate];
   [super dealloc];
+}
+
+- (void)scheduleInvalidate {
+  if (self.overscrollState == OverscrollState::NO_PULL_STARTED) {
+    [self invalidate];
+  } else {
+    _shouldInvalidate = YES;
+  }
 }
 
 - (void)invalidate {
@@ -507,7 +520,6 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
   [self disableOverscrollActions];
   [_webViewScrollViewProxy removeObserver:self];
   _webViewScrollViewProxy.reset();
-  [webController removeObserver:self];
 }
 
 #pragma mark - Private
@@ -563,9 +575,18 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
 }
 
 - (void)setup {
-  base::scoped_nsobject<UIPanGestureRecognizer> panGesture(
-      [[UIPanGestureRecognizer alloc] initWithTarget:self
-                                              action:@selector(panGesture:)]);
+  base::scoped_nsobject<UIPanGestureRecognizer> panGesture;
+  // Workaround a bug occuring when Speak Selection is enabled.
+  // See crbug.com/699655.
+  if (UIAccessibilityIsSpeakSelectionEnabled()) {
+    panGesture.reset([[OverscrollActionsGestureRecognizer alloc]
+        initWithTarget:self
+                action:@selector(panGesture:)]);
+  } else {
+    panGesture.reset([[UIPanGestureRecognizer alloc]
+        initWithTarget:self
+                action:@selector(panGesture:)]);
+  }
   [panGesture setMaximumNumberOfTouches:1];
   [panGesture setDelegate:self];
   [[self scrollView] addGestureRecognizer:panGesture];
@@ -668,6 +689,7 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
         dispatch_async(dispatch_get_main_queue(), ^{
           [self recordMetricForTriggeredAction:self.overscrollActionView
                                                    .selectedAction];
+          TriggerHapticFeedbackForAction();
           [self.delegate overscrollActionsController:self
                                     didTriggerAction:self.overscrollActionView
                                                          .selectedAction];
@@ -704,6 +726,9 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
       [[NSNotificationCenter defaultCenter]
           postNotificationName:kOverscrollActionsDidEnd
                         object:self];
+      if (_shouldInvalidate) {
+        [self invalidate];
+      }
     } break;
     case OverscrollState::STARTED_PULLING: {
       if (!self.overscrollActionView.superview) {
@@ -801,6 +826,9 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
 #pragma mark - Bounce dynamic
 
 - (void)startBounceWithInitialVelocity:(CGPoint)velocity {
+  if (_shouldInvalidate) {
+    return;
+  }
   [self stopBounce];
   CADisplayLink* dpLink =
       [CADisplayLink displayLinkWithTarget:self
@@ -863,6 +891,9 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
 
 - (void)overscrollActionsViewDidTapTriggerAction:
     (OverscrollActionsView*)overscrollActionsView {
+  if (_shouldInvalidate) {
+    return;
+  }
   [self.overscrollActionView displayActionAnimation];
   [self
       recordMetricForTriggeredAction:self.overscrollActionView.selectedAction];
@@ -874,9 +905,16 @@ NSString* const kOverscrollActionsDidEnd = @"OverscrollActionsDidStop";
   [self scrollView].panGestureRecognizer.enabled = NO;
   [self scrollView].panGestureRecognizer.enabled = YES;
   [self startBounceWithInitialVelocity:CGPointZero];
+
+  TriggerHapticFeedbackForAction();
   [self.delegate
       overscrollActionsController:self
                  didTriggerAction:self.overscrollActionView.selectedAction];
+}
+
+- (void)overscrollActionsView:(OverscrollActionsView*)view
+      selectedActionDidChange:(OverscrollAction)newAction {
+  TriggerHapticFeedbackForSelectionChange();
 }
 
 @end

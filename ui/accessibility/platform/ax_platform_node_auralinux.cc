@@ -364,10 +364,6 @@ void ax_platform_node_auralinux_detach(
 
 G_END_DECLS
 
-//
-// AXPlatformNodeAuraLinux implementation.
-//
-
 namespace ui {
 
 // static
@@ -376,6 +372,16 @@ AXPlatformNode* AXPlatformNode::Create(AXPlatformNodeDelegate* delegate) {
   node->Init(delegate);
   return node;
 }
+
+// static
+AXPlatformNode* AXPlatformNode::FromNativeViewAccessible(
+    gfx::NativeViewAccessible accessible) {
+  return AtkObjectToAXPlatformNodeAuraLinux(accessible);
+}
+
+//
+// AXPlatformNodeAuraLinux implementation.
+//
 
 // static
 AXPlatformNode* AXPlatformNodeAuraLinux::application_ = nullptr;
@@ -455,26 +461,37 @@ AtkRole AXPlatformNodeAuraLinux::GetAtkRole() {
 }
 
 void AXPlatformNodeAuraLinux::GetAtkState(AtkStateSet* atk_state_set) {
-  uint32_t state = GetData().state;
-
-  if (state & (1 << ui::AX_STATE_CHECKED))
-    atk_state_set_add_state(atk_state_set, ATK_STATE_CHECKED);
-  if (state & (1 << ui::AX_STATE_DEFAULT))
+  AXNodeData data = GetData();
+  if (data.HasState(ui::AX_STATE_DEFAULT))
     atk_state_set_add_state(atk_state_set, ATK_STATE_DEFAULT);
-  if (state & (1 << ui::AX_STATE_EDITABLE))
+  if (data.HasState(ui::AX_STATE_EDITABLE))
     atk_state_set_add_state(atk_state_set, ATK_STATE_EDITABLE);
-  if (!(state & (1 << ui::AX_STATE_DISABLED)))
+  if (!data.HasState(ui::AX_STATE_DISABLED))
     atk_state_set_add_state(atk_state_set, ATK_STATE_ENABLED);
-  if (state & (1 << ui::AX_STATE_EXPANDED))
+  if (data.HasState(ui::AX_STATE_EXPANDED))
     atk_state_set_add_state(atk_state_set, ATK_STATE_EXPANDED);
-  if (state & (1 << ui::AX_STATE_FOCUSABLE))
+  if (data.HasState(ui::AX_STATE_FOCUSABLE))
     atk_state_set_add_state(atk_state_set, ATK_STATE_FOCUSABLE);
-  if (state & (1 << ui::AX_STATE_PRESSED))
+  if (data.HasState(ui::AX_STATE_PRESSED))
     atk_state_set_add_state(atk_state_set, ATK_STATE_PRESSED);
-  if (state & (1 << ui::AX_STATE_SELECTABLE))
+  if (data.HasState(ui::AX_STATE_SELECTABLE))
     atk_state_set_add_state(atk_state_set, ATK_STATE_SELECTABLE);
-  if (state & (1 << ui::AX_STATE_SELECTED))
+  if (data.HasState(ui::AX_STATE_SELECTED))
     atk_state_set_add_state(atk_state_set, ATK_STATE_SELECTED);
+
+  // Checked state
+  const auto checked_state = static_cast<ui::AXCheckedState>(
+      GetIntAttribute(ui::AX_ATTR_CHECKED_STATE));
+  switch (checked_state) {
+    case ui::AX_CHECKED_STATE_MIXED:
+      atk_state_set_add_state(atk_state_set, ATK_STATE_INDETERMINATE);
+      break;
+    case ui::AX_CHECKED_STATE_TRUE:
+      atk_state_set_add_state(atk_state_set, ATK_STATE_CHECKED);
+      break;
+    default:
+      break;
+  }
 
   if (delegate_->GetFocus() == GetNativeViewAccessible())
     atk_state_set_add_state(atk_state_set, ATK_STATE_FOCUSED);

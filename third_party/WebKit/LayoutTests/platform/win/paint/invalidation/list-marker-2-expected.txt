@@ -8,23 +8,18 @@
       "paintInvalidations": [
         {
           "object": "LayoutListItem LI",
-          "rect": [48, 94, 744, 104],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutImage IMG id='target'",
-          "rect": [48, 94, 100, 100],
-          "reason": "forced by layout"
+          "rect": [48, 100, 744, 105],
+          "reason": "geometry"
         },
         {
           "object": "LayoutListMarker (anonymous)",
-          "rect": [31, 180, 7, 17],
-          "reason": "forced by layout"
+          "rect": [30, 185, 7, 19],
+          "reason": "geometry"
         },
         {
           "object": "LayoutListMarker (anonymous)",
-          "rect": [31, 130, 7, 17],
-          "reason": "forced by layout"
+          "rect": [30, 135, 7, 19],
+          "reason": "geometry"
         }
       ]
     }
@@ -32,19 +27,19 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutListItem LI",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "RootInlineBox",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutListMarker (anonymous)",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutImage IMG id='target'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     }
   ]
 }

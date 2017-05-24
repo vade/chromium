@@ -20,6 +20,7 @@
 #include "base/test/test_reg_util_win.h"
 #include "base/win/registry.h"
 #include "chrome/common/chrome_version.h"
+#include "chrome/install_static/install_util.h"
 #include "chrome_elf/blacklist/blacklist.h"
 #include "chrome_elf/chrome_elf_constants.h"
 #include "chrome_elf/nt_registry/nt_registry.h"
@@ -143,7 +144,8 @@ class BlacklistTest : public testing::Test {
 
   void SetUp() override {
     base::string16 temp;
-    override_manager_.OverrideRegistry(HKEY_CURRENT_USER, &temp);
+    ASSERT_NO_FATAL_FAILURE(
+        override_manager_.OverrideRegistry(HKEY_CURRENT_USER, &temp));
     ASSERT_TRUE(nt::SetTestingOverride(nt::HKCU, temp));
 
     // Make the override path available to our test DLL.
@@ -190,7 +192,9 @@ class BlacklistTest : public testing::Test {
 
     blacklist_registry_key_.reset(
         new base::win::RegKey(HKEY_CURRENT_USER,
-                              blacklist::kRegistryBeaconPath,
+                              install_static::GetRegistryPath()
+                                  .append(blacklist::kRegistryBeaconKeyName)
+                                  .c_str(),
                               KEY_QUERY_VALUE | KEY_SET_VALUE));
 
     // Find out how many dlls were blocked before the test starts.
@@ -283,7 +287,8 @@ TEST_F(BlacklistTest, SuccessfullyBlocked) {
   }
 }
 
-TEST_F(BlacklistTest, LoadBlacklistedLibrary) {
+// Disabled due to flakiness.  https://crbug.com/711651.
+TEST_F(BlacklistTest, DISABLED_LoadBlacklistedLibrary) {
   base::FilePath current_dir;
   ASSERT_TRUE(PathService::Get(base::DIR_EXE, &current_dir));
 

@@ -78,13 +78,17 @@ void FakeAppInstance::SendPackageAppListRefreshed(
 
 void FakeAppInstance::SendInstallShortcuts(
     const std::vector<mojom::ShortcutInfo>& shortcuts) {
-  for (auto& shortcut : shortcuts) {
-    app_host_->OnInstallShortcut(shortcut.Clone());
-  }
+  for (auto& shortcut : shortcuts)
+    SendInstallShortcut(shortcut);
 }
 
 void FakeAppInstance::SendInstallShortcut(const mojom::ShortcutInfo& shortcut) {
   app_host_->OnInstallShortcut(shortcut.Clone());
+}
+
+void FakeAppInstance::SendUninstallShortcut(const std::string& package_name,
+                                            const std::string& intent_uri) {
+  app_host_->OnUninstallShortcut(package_name, intent_uri);
 }
 
 void FakeAppInstance::SendAppAdded(const mojom::AppInfo& app) {
@@ -117,6 +121,12 @@ bool FakeAppInstance::GenerateAndSendIcon(const mojom::AppInfo& app,
                                             png_data_as_string->end()));
 
   return true;
+}
+
+void FakeAppInstance::GenerateAndSendBadIcon(const mojom::AppInfo& app,
+                                             mojom::ScaleFactor scale_factor) {
+  std::vector<uint8_t> badIcon(10, 1);
+  app_host_->OnAppIcon(app.package_name, app.activity, scale_factor, badIcon);
 }
 
 bool FakeAppInstance::GetFakeIcon(mojom::ScaleFactor scale_factor,

@@ -40,12 +40,6 @@ enum NotificationType {
   // containing the affected Browser.  No details are expected.
   NOTIFICATION_BROWSER_WINDOW_READY,
 
-  // This message is sent when a browser is closing. The source is a
-  // Source<Browser> containing the affected Browser. No details are expected.
-  // This is sent prior to BROWSER_CLOSED, and may be sent more than once for a
-  // particular browser.
-  NOTIFICATION_BROWSER_CLOSING,
-
   // This message is sent after a window has been closed.  The source is a
   // Source<Browser> containing the affected Browser.  No details are exptected.
   NOTIFICATION_BROWSER_CLOSED,
@@ -82,12 +76,6 @@ enum NotificationType {
   // Sent when the renderer returns focus to the browser, as part of focus
   // traversal. The source is the browser, there are no details.
   NOTIFICATION_FOCUS_RETURNED_TO_BROWSER,
-
-  // A new tab is created from an existing tab to serve as a target of a
-  // navigation that is about to happen. The source will be a Source<Profile>
-  // corresponding to the profile in which the new tab will live.  Details in
-  // the form of a RetargetingDetails object are provided.
-  NOTIFICATION_RETARGETING,
 
   // Application-wide ----------------------------------------------------------
 

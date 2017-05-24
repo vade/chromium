@@ -6,10 +6,12 @@ interface Blob
 interface BroadcastChannel : EventTarget
     getter name
     getter onmessage
+    getter onmessageerror
     method close
     method constructor
     method postMessage
     setter onmessage
+    setter onmessageerror
 interface ByteLengthQueuingStrategy
     method constructor
     method size
@@ -32,6 +34,7 @@ interface CacheStorage
 interface Client
     getter frameType
     getter id
+    getter type
     getter url
     method constructor
     method postMessage
@@ -179,6 +182,7 @@ interface ExtendableMessageEvent : ExtendableEvent
 interface FetchEvent : ExtendableEvent
     getter clientId
     getter isReload
+    getter preloadResponse
     getter request
     method constructor
     method respondWith
@@ -217,12 +221,6 @@ interface FileReader : EventTarget
     setter onloadend
     setter onloadstart
     setter onprogress
-interface FileReaderSync
-    method constructor
-    method readAsArrayBuffer
-    method readAsBinaryString
-    method readAsDataURL
-    method readAsText
 interface FormData
     method append
     method constructor
@@ -242,7 +240,6 @@ interface Headers
     method entries
     method forEach
     method get
-    method getAll
     method has
     method keys
     method set
@@ -255,6 +252,7 @@ interface IDBCursor
     method advance
     method constructor
     method continue
+    method continuePrimaryKey
     method delete
     method update
 interface IDBCursorWithValue : IDBCursor
@@ -325,6 +323,7 @@ interface IDBObjectStore
     method get
     method getAll
     method getAllKeys
+    method getKey
     method index
     method openCursor
     method openKeyCursor
@@ -373,7 +372,6 @@ interface ImageBitmap
     method close
     method constructor
 interface ImageData
-    getter colorSpace
     getter data
     getter height
     getter width
@@ -394,11 +392,19 @@ interface MessageEvent : Event
     method initMessageEvent
 interface MessagePort : EventTarget
     getter onmessage
+    getter onmessageerror
     method close
     method constructor
     method postMessage
     method start
     setter onmessage
+    setter onmessageerror
+interface NavigationPreloadManager
+    method constructor
+    method disable
+    method enable
+    method getState
+    method setHeaderValue
 interface Notification : EventTarget
     static getter maxActions
     static getter permission
@@ -452,6 +458,7 @@ interface PushEvent : ExtendableEvent
     getter data
     method constructor
 interface PushManager
+    static getter supportedContentEncodings
     method constructor
     method getSubscription
     method permissionState
@@ -464,6 +471,7 @@ interface PushMessageData
     method text
 interface PushSubscription
     getter endpoint
+    getter expirationTime
     getter options
     method constructor
     method getKey
@@ -478,6 +486,8 @@ interface ReadableStream
     method cancel
     method constructor
     method getReader
+    method pipeThrough
+    method pipeTo
     method tee
 interface Request
     getter bodyUsed
@@ -519,6 +529,7 @@ interface ServiceWorkerGlobalScope : WorkerGlobalScope
 interface ServiceWorkerRegistration : EventTarget
     getter active
     getter installing
+    getter navigationPreload
     getter onupdatefound
     getter pushManager
     getter scope
@@ -530,6 +541,10 @@ interface ServiceWorkerRegistration : EventTarget
     method unregister
     method update
     setter onupdatefound
+interface SharedArrayBuffer
+    getter byteLength
+    method constructor
+    method slice
 interface StorageManager
     method constructor
     method persisted
@@ -642,6 +657,7 @@ interface WorkerGlobalScope : EventTarget
     getter onerror
     getter onrejectionhandled
     getter onunhandledrejection
+    getter origin
     getter performance
     getter self
     method atob
@@ -657,6 +673,7 @@ interface WorkerGlobalScope : EventTarget
     setter onerror
     setter onrejectionhandled
     setter onunhandledrejection
+    setter origin
 interface WorkerLocation
     getter hash
     getter host
@@ -681,7 +698,13 @@ interface WorkerNavigator
     getter storage
     getter userAgent
     method constructor
+interface WritableStream
+    getter locked
+    method abort
+    method constructor
+    method getWriter
 global object
+    attribute Atomics
     attribute console
     attribute internals
     getter clients

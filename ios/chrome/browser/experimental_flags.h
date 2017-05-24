@@ -19,11 +19,10 @@ enum GaiaEnvironment {
 };
 
 enum WhatsNewPromoStatus {
-  WHATS_NEW_DEFAULT = 0,          // Not forced to enable a promo.
-  WHATS_NEW_APP_RATING,           // Force enable App Rating Promo.
-  WHATS_NEW_MOVE_TO_DOCK_FASTER,  // Force enable Move To Dock Faster Access
-  WHATS_NEW_MOVE_TO_DOCK_LOVE,    // Force enable Move To Dock Love Chrome
-  WHATS_NEW_MOVE_TO_DOCK_TIP,     // Force enable Move To Dock Tip promo.
+  WHATS_NEW_DEFAULT = 0,         // Not forced to enable a promo.
+  WHATS_NEW_APP_RATING,          // Force enable App Rating Promo.
+  WHATS_NEW_MOVE_TO_DOCK_TIP,    // Force enable Move To Dock Tip promo.
+  WHATS_NEW_PROMO_STATUS_COUNT,  // Count of Whats New Promo Statuses.
 };
 
 // Whether the First Run UI will be always be displayed.
@@ -43,20 +42,8 @@ WhatsNewPromoStatus GetWhatsNewPromoStatus();
 // Whether background crash report upload should generate a local notification.
 bool IsAlertOnBackgroundUploadEnabled();
 
-// Whether the All Bookmarks view is visible in bookmarks.
-bool IsAllBookmarksEnabled();
-
 // Whether auto-reload is enabled.
 bool IsAutoReloadEnabled();
-
-// Whether the credential management API is enabled.
-bool IsCredentialManagementEnabled();
-
-// Whether "Save Image" should be renamed as "Download Image".
-bool IsDownloadRenamingEnabled();
-
-// Whether the external applicaiton prompt is enabled.
-bool IsExternalApplicationPromptEnabled();
 
 // Whether contextual search must be reset to undecided state.
 bool IsForceResetContextualSearchEnabled();
@@ -82,35 +69,20 @@ bool IsPasswordGenerationEnabled();
 // Whether the Payment Request API is enabled or not.
 bool IsPaymentRequestEnabled();
 
-// Whether the back-forward navigation uses pending index.
-bool IsPendingIndexNavigationEnabled();
-
 // Whether the Physical Web feature is enabled.
 bool IsPhysicalWebEnabled();
-
-// Whether the QR Code Reader is enabled.
-bool IsQRCodeReaderEnabled();
 
 // Whether reader mode is enabled.
 bool IsReaderModeEnabled();
 
-// Whether the reading list is enabled.
-bool IsReadingListEnabled();
-
 // Whether the Sign In Flow via SFSafariViewController is enabled.
 bool IsSafariVCSignInEnabled();
-
-// Whether launching actions from Spotlight is enabled.
-bool IsSpotlightActionsEnabled();
 
 // Whether startup crash is enabled.
 bool IsStartupCrashEnabled();
 
 // Whether or not the tab strip scrolls new tabs to be visible.
 bool IsTabStripAutoScrollNewTabsEnabled();
-
-// Whether the Tab Switcher is enabled for iPad or not.
-bool IsTabSwitcherEnabled();
 
 // Whether viewing and copying passwords is enabled.
 bool IsViewCopyPasswordsEnabled();
@@ -121,6 +93,12 @@ bool UseOnlyLocalHeuristicsForPasswordGeneration();
 
 // Whether the Suggestions UI is enabled.
 bool IsSuggestionsUIEnabled();
+
+// Whether Sign-in promo is enabled.
+bool IsSigninPromoEnabled();
+
+// Whether Google Native App Launcher is enabled.
+bool IsNativeAppLauncherEnabled();
 
 }  // namespace experimental_flags
 

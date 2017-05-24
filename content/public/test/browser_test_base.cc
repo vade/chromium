@@ -13,11 +13,13 @@
 #include "base/i18n/icu_util.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/sys_info.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/tracing/tracing_controller_impl.h"
@@ -25,13 +27,16 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
+#include "content/public/common/network_service_test.mojom.h"
+#include "content/public/common/service_manager_connection.h"
+#include "content/public/common/service_names.mojom.h"
 #include "content/public/test/test_launcher.h"
 #include "content/public/test/test_utils.h"
 #include "content/test/content_browser_sanity_checker.h"
-#include "net/base/net_errors.h"
-#include "net/base/network_interfaces.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "services/service_manager/public/cpp/connector.h"
+#include "ui/base/platform_window_defaults.h"
 #include "ui/base/test/material_design_controller_test_api.h"
 #include "ui/compositor/compositor_switches.h"
 #include "ui/gl/gl_implementation.h"
@@ -54,9 +59,6 @@
 #if defined(USE_AURA)
 #include "content/browser/compositor/image_transport_factory.h"
 #include "ui/aura/test/event_generator_delegate_aura.h"  // nogncheck
-#if defined(USE_X11)
-#include "ui/aura/window_tree_host_x11.h"  // nogncheck
-#endif
 #endif
 
 namespace content {
@@ -88,51 +90,6 @@ void RunTaskOnRendererThread(const base::Closure& task,
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, quit_task);
 }
 
-// In many cases it may be not obvious that a test makes a real DNS lookup.
-// We generally don't want to rely on external DNS servers for our tests,
-// so this host resolver procedure catches external queries and returns a failed
-// lookup result.
-class LocalHostResolverProc : public net::HostResolverProc {
- public:
-  LocalHostResolverProc() : HostResolverProc(NULL) {}
-
-  int Resolve(const std::string& host,
-              net::AddressFamily address_family,
-              net::HostResolverFlags host_resolver_flags,
-              net::AddressList* addrlist,
-              int* os_error) override {
-    const char* kLocalHostNames[] = {"localhost", "127.0.0.1", "::1"};
-    bool local = false;
-
-    if (host == net::GetHostName()) {
-      local = true;
-    } else {
-      for (size_t i = 0; i < arraysize(kLocalHostNames); i++)
-        if (host == kLocalHostNames[i]) {
-          local = true;
-          break;
-        }
-    }
-
-    // To avoid depending on external resources and to reduce (if not preclude)
-    // network interactions from tests, we simulate failure for non-local DNS
-    // queries, rather than perform them.
-    // If you really need to make an external DNS query, use
-    // net::RuleBasedHostResolverProc and its AllowDirectLookup method.
-    if (!local) {
-      DVLOG(1) << "To avoid external dependencies, simulating failure for "
-          "external DNS lookup of " << host;
-      return net::ERR_NOT_IMPLEMENTED;
-    }
-
-    return ResolveUsingPrevious(host, address_family, host_resolver_flags,
-                                addrlist, os_error);
-  }
-
- private:
-  ~LocalHostResolverProc() override {}
-};
-
 void TraceStopTracingComplete(const base::Closure& quit,
                                    const base::FilePath& file_path) {
   LOG(ERROR) << "Tracing written to: " << file_path.value();
@@ -147,14 +104,13 @@ BrowserTestBase::BrowserTestBase()
     : expected_exit_code_(0),
       enable_pixel_output_(false),
       use_software_compositing_(false),
-      set_up_called_(false) {
+      set_up_called_(false),
+      disable_io_checks_(false) {
 #if defined(OS_MACOSX)
   base::mac::SetOverrideAmIBundled(true);
 #endif
 
-#if defined(USE_AURA) && defined(USE_X11)
-  aura::test::SetUseOverrideRedirectWindowByDefault(true);
-#endif
+  ui::test::EnableTestConfigForPlatformWindows();
 
 #if defined(OS_POSIX)
   handle_sigterm_ = true;
@@ -240,44 +196,38 @@ void BrowserTestBase::SetUp() {
   aura::test::InitializeAuraEventGeneratorDelegate();
 #endif
 
-  bool use_osmesa = true;
+  bool use_software_gl = true;
 
-  // We usually use OSMesa as this works on all bots. The command line can
-  // override this behaviour to use hardware GL.
+  // We usually use software GL as this works on all bots. The command
+  // line can override this behaviour to use hardware GL.
   if (command_line->HasSwitch(switches::kUseGpuInTests))
-    use_osmesa = false;
+    use_software_gl = false;
 
   // Some bots pass this flag when they want to use hardware GL.
   if (command_line->HasSwitch("enable-gpu"))
-    use_osmesa = false;
+    use_software_gl = false;
 
 #if defined(OS_MACOSX)
   // On Mac we always use hardware GL.
-  use_osmesa = false;
+  use_software_gl = false;
 #endif
 
 #if defined(OS_ANDROID)
   // On Android we always use hardware GL.
-  use_osmesa = false;
+  use_software_gl = false;
 #endif
 
 #if defined(OS_CHROMEOS)
   // If the test is running on the chromeos envrionment (such as
   // device or vm bots), we use hardware GL.
   if (base::SysInfo::IsRunningOnChromeOS())
-    use_osmesa = false;
+    use_software_gl = false;
 #endif
 
-  if (use_osmesa && !use_software_compositing_)
-    command_line->AppendSwitch(switches::kOverrideUseGLWithOSMesaForTests);
+  if (use_software_gl && !use_software_compositing_)
+    command_line->AppendSwitch(switches::kOverrideUseSoftwareGLForTests);
 
-  scoped_refptr<net::HostResolverProc> local_resolver =
-      new LocalHostResolverProc();
-  rule_based_resolver_ =
-      new net::RuleBasedHostResolverProc(local_resolver.get());
-  rule_based_resolver_->AddSimulatedFailure("wpad");
-  net::ScopedDefaultHostResolverProc scoped_local_host_resolver_proc(
-      rule_based_resolver_.get());
+  test_host_resolver_.reset(new TestHostResolver);
 
   ContentBrowserSanityChecker scoped_enable_sanity_checks;
 
@@ -347,7 +297,21 @@ void BrowserTestBase::ProxyRunTestOnMainThreadLoop() {
     // waiting.
     base::MessageLoop::ScopedNestableTaskAllower allow(
         base::MessageLoop::current());
-    RunTestOnMainThreadLoop();
+    PreRunTestOnMainThread();
+    SetUpOnMainThread();
+
+    // Tests would have added their host_resolver() rules by now, so copy them
+    // to the network process if it's in use.
+    InitializeNetworkProcess();
+
+    bool old_io_allowed_value = false;
+    if (!disable_io_checks_)
+      old_io_allowed_value = base::ThreadRestrictions::SetIOAllowed(false);
+    RunTestOnMainThread();
+    if (!disable_io_checks_)
+      base::ThreadRestrictions::SetIOAllowed(old_io_allowed_value);
+    TearDownOnMainThread();
+    PostRunTestOnMainThread();
   }
 
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -403,10 +367,51 @@ void BrowserTestBase::UseSoftwareCompositing() {
   use_software_compositing_ = true;
 }
 
-bool BrowserTestBase::UsingOSMesa() const {
+bool BrowserTestBase::UsingSoftwareGL() const {
   base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
   return cmd->GetSwitchValueASCII(switches::kUseGL) ==
-         gl::kGLImplementationOSMesaName;
+         gl::GetGLImplementationName(gl::GetSoftwareGLImplementation());
+}
+
+void BrowserTestBase::InitializeNetworkProcess() {
+  const testing::TestInfo* const test_info =
+      testing::UnitTest::GetInstance()->current_test_info();
+  bool network_service = base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableNetworkService);
+  // ProcessTransferAfterError is the only browser test which needs to modify
+  // the host rules (when not using the network service).
+  if (network_service ||
+      std::string(test_info->name()) != "ProcessTransferAfterError") {
+    host_resolver()->DisableModifications();
+  }
+
+  if (!network_service)
+    return;
+
+  net::RuleBasedHostResolverProc::RuleList rules = host_resolver()->GetRules();
+  std::vector<mojom::RulePtr> mojo_rules;
+  for (const auto& rule : rules) {
+    // For now, this covers all the rules used in content's tests.
+    // TODO(jam: expand this when we try to make browser_tests and
+    // components_browsertests work.
+    if (rule.resolver_type !=
+            net::RuleBasedHostResolverProc::Rule::kResolverTypeSystem ||
+        rule.address_family != net::AddressFamily::ADDRESS_FAMILY_UNSPECIFIED ||
+        !!rule.latency_ms || rule.replacement.empty())
+      continue;
+    mojom::RulePtr mojo_rule = mojom::Rule::New();
+    mojo_rule->host_pattern = rule.host_pattern;
+    mojo_rule->replacement = rule.replacement;
+    mojo_rules.push_back(std::move(mojo_rule));
+  }
+
+  if (mojo_rules.empty())
+    return;
+
+  mojom::NetworkServiceTestPtr network_service_test;
+  ServiceManagerConnection::GetForProcess()->GetConnector()->BindInterface(
+      mojom::kNetworkServiceName, &network_service_test);
+  network_service_test->AddRules(std::move(mojo_rules));
 }
 
 }  // namespace content

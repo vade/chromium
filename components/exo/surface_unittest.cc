@@ -2,11 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "cc/surfaces/surface.h"
 #include "base/bind.h"
 #include "cc/output/compositor_frame.h"
 #include "cc/quads/texture_draw_quad.h"
-#include "cc/surfaces/surface.h"
 #include "cc/surfaces/surface_manager.h"
+#include "cc/test/begin_frame_args_test.h"
+#include "cc/test/fake_external_begin_frame_source.h"
 #include "components/exo/buffer.h"
 #include "components/exo/surface.h"
 #include "components/exo/test/exo_test_base.h"
@@ -75,6 +77,10 @@ TEST_F(SurfaceTest, Damage) {
   EXPECT_TRUE(surface->HasPendingDamageForTesting(gfx::Rect(0, 0, 10, 10)));
   EXPECT_TRUE(surface->HasPendingDamageForTesting(gfx::Rect(10, 10, 10, 10)));
   EXPECT_FALSE(surface->HasPendingDamageForTesting(gfx::Rect(5, 5, 10, 10)));
+
+  // Check that damage larger than contents is handled correctly at commit.
+  surface->Damage(gfx::Rect(gfx::ScaleToCeiledSize(buffer_size, 2.0f)));
+  surface->Commit();
 }
 
 void SetFrameTime(base::TimeTicks* result, base::TimeTicks frame_time) {
@@ -93,14 +99,71 @@ TEST_F(SurfaceTest, RequestFrameCallback) {
   EXPECT_TRUE(frame_time.is_null());
 }
 
+const cc::CompositorFrame& GetFrameFromSurface(Surface* surface) {
+  cc::SurfaceId surface_id = surface->GetSurfaceId();
+  cc::SurfaceManager* surface_manager =
+      aura::Env::GetInstance()->context_factory_private()->GetSurfaceManager();
+  const cc::CompositorFrame& frame =
+      surface_manager->GetSurfaceForId(surface_id)->GetActiveFrame();
+  return frame;
+}
+
 TEST_F(SurfaceTest, SetOpaqueRegion) {
+  gfx::Size buffer_size(1, 1);
+  std::unique_ptr<Buffer> buffer(
+      new Buffer(exo_test_helper()->CreateGpuMemoryBuffer(buffer_size)));
   std::unique_ptr<Surface> surface(new Surface);
 
-  // Setting a non-empty opaque region should succeed.
-  surface->SetOpaqueRegion(SkRegion(SkIRect::MakeWH(256, 256)));
+  // Attaching a buffer with alpha channel.
+  surface->Attach(buffer.get());
 
-  // Setting an empty opaque region should succeed.
+  // Setting an opaque region that contains the buffer size doesn't require
+  // draw with blending.
+  surface->SetOpaqueRegion(SkRegion(SkIRect::MakeWH(256, 256)));
+  surface->Commit();
+  RunAllPendingInMessageLoop();
+
+  {
+    const cc::CompositorFrame& frame = GetFrameFromSurface(surface.get());
+    ASSERT_EQ(1u, frame.render_pass_list.size());
+    ASSERT_EQ(1u, frame.render_pass_list.back()->quad_list.size());
+    EXPECT_FALSE(frame.render_pass_list.back()
+                     ->quad_list.back()
+                     ->ShouldDrawWithBlending());
+  }
+
+  // Setting an empty opaque region requires draw with blending.
   surface->SetOpaqueRegion(SkRegion(SkIRect::MakeEmpty()));
+  surface->Commit();
+  RunAllPendingInMessageLoop();
+
+  {
+    const cc::CompositorFrame& frame = GetFrameFromSurface(surface.get());
+    ASSERT_EQ(1u, frame.render_pass_list.size());
+    ASSERT_EQ(1u, frame.render_pass_list.back()->quad_list.size());
+    EXPECT_TRUE(frame.render_pass_list.back()
+                    ->quad_list.back()
+                    ->ShouldDrawWithBlending());
+  }
+
+  std::unique_ptr<Buffer> buffer_without_alpha(
+      new Buffer(exo_test_helper()->CreateGpuMemoryBuffer(
+          buffer_size, gfx::BufferFormat::RGBX_8888)));
+
+  // Attaching a buffer without an alpha channel doesn't require draw with
+  // blending.
+  surface->Attach(buffer_without_alpha.get());
+  surface->Commit();
+  RunAllPendingInMessageLoop();
+
+  {
+    const cc::CompositorFrame& frame = GetFrameFromSurface(surface.get());
+    ASSERT_EQ(1u, frame.render_pass_list.size());
+    ASSERT_EQ(1u, frame.render_pass_list.back()->quad_list.size());
+    EXPECT_FALSE(frame.render_pass_list.back()
+                     ->quad_list.back()
+                     ->ShouldDrawWithBlending());
+  }
 }
 
 TEST_F(SurfaceTest, SetInputRegion) {
@@ -192,15 +255,6 @@ TEST_F(SurfaceTest, SetCrop) {
   EXPECT_EQ(crop_size.ToString(), surface->content_size().ToString());
 }
 
-const cc::CompositorFrame& GetFrameFromSurface(Surface* surface) {
-  cc::SurfaceId surface_id = surface->GetSurfaceId();
-  cc::SurfaceManager* surface_manager =
-      aura::Env::GetInstance()->context_factory_private()->GetSurfaceManager();
-  const cc::CompositorFrame& frame =
-      surface_manager->GetSurfaceForId(surface_id)->GetEligibleFrame();
-  return frame;
-}
-
 TEST_F(SurfaceTest, SetBlendMode) {
   gfx::Size buffer_size(1, 1);
   std::unique_ptr<Buffer> buffer(
@@ -257,6 +311,43 @@ TEST_F(SurfaceTest, Commit) {
 
   // Calling commit without a buffer should succeed.
   surface->Commit();
+}
+
+TEST_F(SurfaceTest, SendsBeginFrameAcks) {
+  cc::FakeExternalBeginFrameSource source(0.f, false);
+  gfx::Size buffer_size(1, 1);
+  std::unique_ptr<Buffer> buffer(
+      new Buffer(exo_test_helper()->CreateGpuMemoryBuffer(buffer_size)));
+  std::unique_ptr<Surface> surface(new Surface);
+  surface->SetBeginFrameSource(&source);
+  surface->Attach(buffer.get());
+
+  // Request a frame callback so that Surface now needs BeginFrames.
+  base::TimeTicks frame_time;
+  surface->RequestFrameCallback(
+      base::Bind(&SetFrameTime, base::Unretained(&frame_time)));
+  surface->Commit();  // Move callback from pending callbacks to current ones.
+  RunAllPendingInMessageLoop();
+
+  // Surface should add itself as observer during
+  // DidReceiveCompositorFrameAck().
+  surface->DidReceiveCompositorFrameAck();
+  EXPECT_EQ(1u, source.num_observers());
+
+  cc::BeginFrameArgs args(source.CreateBeginFrameArgs(BEGINFRAME_FROM_HERE));
+  args.frame_time = base::TimeTicks::FromInternalValue(100);
+  source.TestOnBeginFrame(args);  // Runs the frame callback.
+  EXPECT_EQ(args.frame_time, frame_time);
+
+  surface->Commit();  // Acknowledges the BeginFrame.
+  RunAllPendingInMessageLoop();
+
+  cc::BeginFrameAck expected_ack(args.source_id, args.sequence_number,
+                                 args.sequence_number, true);
+  EXPECT_EQ(expected_ack, source.LastAckForObserver(surface.get()));
+
+  const cc::CompositorFrame& frame = GetFrameFromSurface(surface.get());
+  EXPECT_EQ(expected_ack, frame.metadata.begin_frame_ack);
 }
 
 }  // namespace

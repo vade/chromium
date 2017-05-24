@@ -9,25 +9,23 @@
 
 namespace blink {
 
-class GyroscopeReading;
-
 class Gyroscope final : public Sensor {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static Gyroscope* create(ExecutionContext*,
+  static Gyroscope* Create(ExecutionContext*,
                            const SensorOptions&,
                            ExceptionState&);
-  static Gyroscope* create(ExecutionContext*, ExceptionState&);
+  static Gyroscope* Create(ExecutionContext*, ExceptionState&);
 
-  GyroscopeReading* reading() const;
+  double x(bool& is_null) const;
+  double y(bool& is_null) const;
+  double z(bool& is_null) const;
 
   DECLARE_VIRTUAL_TRACE();
 
  private:
   Gyroscope(ExecutionContext*, const SensorOptions&, ExceptionState&);
-  // Sensor overrides.
-  std::unique_ptr<SensorReadingFactory> createSensorReadingFactory() override;
 };
 
 }  // namespace blink

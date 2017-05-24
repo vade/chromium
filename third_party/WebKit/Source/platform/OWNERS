@@ -1,7 +1,6 @@
 dglazkov@chromium.org
 drott@chromium.org
 eae@chromium.org
-esprehn@chromium.org
 fmalita@chromium.org
 haraken@chromium.org
 jbroman@chromium.org
@@ -21,6 +20,6 @@ vollick@chromium.org
 
 # In addition to the above, API_OWNERS are also adequate reviewers
 # for adding / changing the status of a feature.
-per-file RuntimeEnabledFeatures.in=file://third_party/WebKit/API_OWNERS
+per-file RuntimeEnabledFeatures.json5=file://third_party/WebKit/API_OWNERS
 
 # COMPONENT: Platform

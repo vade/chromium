@@ -5,21 +5,16 @@
 #ifndef EXTENSIONS_RENDERER_API_BINDING_HOOKS_H_
 #define EXTENSIONS_RENDERER_API_BINDING_HOOKS_H_
 
-#include <map>
 #include <memory>
 #include <string>
 
-#include "base/callback.h"
 #include "base/macros.h"
 #include "extensions/renderer/api_binding_types.h"
-#include "extensions/renderer/argument_spec.h"
 #include "v8/include/v8.h"
 
-namespace gin {
-class Arguments;
-}
-
 namespace extensions {
+class APIBindingHooksDelegate;
+class APITypeReferenceMap;
 class APISignature;
 
 // A class to register custom hooks for given API calls that need different
@@ -33,64 +28,57 @@ class APIBindingHooks {
   struct RequestResult {
     enum ResultCode {
       HANDLED,             // A custom hook handled the request.
+      ARGUMENTS_UPDATED,   // The arguments were updated post-validation.
       THROWN,              // An exception was thrown during parsing or
                            // handling.
       INVALID_INVOCATION,  // The request was called with invalid arguments.
+                           // |error| will contain the invocation error.
       NOT_HANDLED,         // The request was not handled.
     };
 
     explicit RequestResult(ResultCode code);
     RequestResult(ResultCode code, v8::Local<v8::Function> custom_callback);
+    RequestResult(std::string invocation_error);
     RequestResult(const RequestResult& other);
     ~RequestResult();
 
     ResultCode code;
     v8::Local<v8::Function> custom_callback;
     v8::Local<v8::Value> return_value;  // Only valid if code == HANDLED.
+    std::string error;
   };
 
-  // The callback to handle an API method. We pass in the expected signature
-  // (so the caller can verify arguments, optionally after modifying/"massaging"
-  // them) and the passed arguments. The handler is responsible for returning,
-  // which depending on the API could mean either returning synchronously
-  // through gin::Arguments::Return or asynchronously through a passed callback.
-  // TODO(devlin): As we continue expanding the hooks interface, we should allow
-  // handlers to register a request so that they don't have to maintain a
-  // reference to the callback themselves.
-  using HandleRequestHook =
-      base::Callback<RequestResult(const APISignature*,
-                                   v8::Local<v8::Context> context,
-                                   std::vector<v8::Local<v8::Value>>*,
-                                   const ArgumentSpec::RefMap&)>;
-
-  explicit APIBindingHooks(const binding::RunJSFunctionSync& run_js);
+  APIBindingHooks(const std::string& api_name,
+                  const binding::RunJSFunctionSync& run_js);
   ~APIBindingHooks();
-
-  // Register a custom binding to handle requests.
-  void RegisterHandleRequest(const std::string& method_name,
-                             const HandleRequestHook& hook);
-
-  // Registers a JS script to be compiled and run in order to initialize any JS
-  // hooks within a v8 context.
-  void RegisterJsSource(v8::Global<v8::String> source,
-                        v8::Global<v8::String> resource_name);
-
-  // Initializes JS hooks within a context.
-  void InitializeInContext(v8::Local<v8::Context> context,
-                           const std::string& api_name);
 
   // Looks for any custom hooks associated with the given request, and, if any
   // are found, runs them. Returns the result of running the hooks, if any.
-  RequestResult RunHooks(const std::string& api_name,
-                         const std::string& method_name,
+  RequestResult RunHooks(const std::string& method_name,
                          v8::Local<v8::Context> context,
                          const APISignature* signature,
                          std::vector<v8::Local<v8::Value>>* arguments,
-                         const ArgumentSpec::RefMap& type_refs);
+                         const APITypeReferenceMap& type_refs);
 
   // Returns a JS interface that can be used to register hooks.
-  v8::Local<v8::Object> GetJSHookInterface(const std::string& api_name,
-                                           v8::Local<v8::Context> context);
+  v8::Local<v8::Object> GetJSHookInterface(v8::Local<v8::Context> context);
+
+  // Gets the custom-set JS callback for the given method, if one exists.
+  v8::Local<v8::Function> GetCustomJSCallback(const std::string& method_name,
+                                              v8::Local<v8::Context> context);
+
+  // Creates a new JS event for the given |event_name|, if a custom event is
+  // provided. Returns true if an event was created.
+  bool CreateCustomEvent(v8::Local<v8::Context> context,
+                         const std::string& event_name,
+                         v8::Local<v8::Value>* event_out);
+
+  // Performs any extra initialization on the template.
+  void InitializeTemplate(v8::Isolate* isolate,
+                          v8::Local<v8::ObjectTemplate> object_template,
+                          const APITypeReferenceMap& type_refs);
+
+  void SetDelegate(std::unique_ptr<APIBindingHooksDelegate> delegate);
 
  private:
   // Updates the |arguments| by running |function| and settings arguments to the
@@ -99,23 +87,15 @@ class APIBindingHooks {
                        v8::Local<v8::Context> context,
                        std::vector<v8::Local<v8::Value>>* arguments);
 
-  // Whether we've tried to use any hooks associated with this object.
-  bool hooks_used_ = false;
-
-  // All registered request handlers.
-  std::map<std::string, HandleRequestHook> request_hooks_;
-
-  // The script to run to initialize JS hooks, if any.
-  v8::Global<v8::String> js_hooks_source_;
-
-  // The name of the JS resource for the hooks. Used to create a ScriptOrigin
-  // to make exception stack traces more readable.
-  v8::Global<v8::String> js_resource_name_;
+  // The name of the associated API.
+  std::string api_name_;
 
   // We use synchronous JS execution here because at every point we execute JS,
   // it's in direct response to JS calling in. There should be no reason that
   // script is disabled.
   binding::RunJSFunctionSync run_js_;
+
+  std::unique_ptr<APIBindingHooksDelegate> delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(APIBindingHooks);
 };

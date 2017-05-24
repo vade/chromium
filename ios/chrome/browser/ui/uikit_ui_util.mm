@@ -175,7 +175,7 @@ UIImage* CaptureViewWithOption(UIView* view,
                                CaptureViewOption option) {
   UIGraphicsBeginImageContextWithOptions(view.bounds.size, YES /* opaque */,
                                          scale);
-  if (base::ios::IsRunningOnIOS9OrLater() && option != kClientSideRendering) {
+  if (option != kClientSideRendering) {
     [view drawViewHierarchyInRect:view.bounds
                afterScreenUpdates:option == kAfterScreenUpdate];
   } else {
@@ -570,17 +570,8 @@ void ApplyVisualConstraintsWithMetricsAndOptions(
     NSDictionary* subviewsDictionary,
     NSDictionary* metrics,
     NSLayoutFormatOptions options) {
-  NSMutableArray* layoutConstraints =
-      [NSMutableArray arrayWithCapacity:constraints.count * 3];
-  for (NSString* constraint in constraints) {
-    DCHECK([constraint isKindOfClass:[NSString class]]);
-    [layoutConstraints addObjectsFromArray:
-                           [NSLayoutConstraint
-                               constraintsWithVisualFormat:constraint
-                                                   options:options
-                                                   metrics:metrics
-                                                     views:subviewsDictionary]];
-  }
+  NSArray* layoutConstraints = VisualConstraintsWithMetricsAndOptions(
+      constraints, subviewsDictionary, metrics, options);
   [NSLayoutConstraint activateConstraints:layoutConstraints];
 }
 
@@ -592,6 +583,31 @@ void ApplyVisualConstraintsWithMetricsAndOptions(
     UIView* unused_parentView) {
   ApplyVisualConstraintsWithMetricsAndOptions(constraints, subviewsDictionary,
                                               metrics, options);
+}
+
+NSArray* VisualConstraintsWithMetrics(NSArray* constraints,
+                                      NSDictionary* subviewsDictionary,
+                                      NSDictionary* metrics) {
+  return VisualConstraintsWithMetricsAndOptions(constraints, subviewsDictionary,
+                                                metrics, 0);
+}
+
+NSArray* VisualConstraintsWithMetricsAndOptions(
+    NSArray* constraints,
+    NSDictionary* subviewsDictionary,
+    NSDictionary* metrics,
+    NSLayoutFormatOptions options) {
+  NSMutableArray* layoutConstraints = [NSMutableArray array];
+  for (NSString* constraint in constraints) {
+    DCHECK([constraint isKindOfClass:[NSString class]]);
+    [layoutConstraints addObjectsFromArray:
+                           [NSLayoutConstraint
+                               constraintsWithVisualFormat:constraint
+                                                   options:options
+                                                   metrics:metrics
+                                                     views:subviewsDictionary]];
+  }
+  return [layoutConstraints copy];
 }
 
 void AddSameCenterConstraints(UIView* view1, UIView* view2) {
@@ -621,7 +637,7 @@ void AddSameCenterYConstraint(UIView* unused_parentView,
   AddSameCenterYConstraint(subview1, subview2);
 }
 
-void AddSameSizeConstraint(UIView* view1, UIView* view2) {
+void AddSameConstraints(UIView* view1, UIView* view2) {
   [NSLayoutConstraint activateConstraints:@[
     [view1.leadingAnchor constraintEqualToAnchor:view2.leadingAnchor],
     [view1.trailingAnchor constraintEqualToAnchor:view2.trailingAnchor],
@@ -660,4 +676,34 @@ UIResponder* GetFirstResponder() {
   UIResponder* firstResponder = gFirstResponder;
   gFirstResponder = nil;
   return firstResponder;
+}
+
+// On iOS10 and above, trigger a haptic vibration for the user selecting an
+// action. This is a no-op for devices that do not support it.
+void TriggerHapticFeedbackForAction() {
+  if (base::ios::IsRunningOnIOS10OrLater()) {
+    UIImpactFeedbackGenerator* generator =
+        [[UIImpactFeedbackGenerator alloc] init];
+    [generator impactOccurred];
+  }
+}
+
+// On iOS10 and above, trigger a haptic vibration for the change in selection.
+// This is a no-op for devices that do not support it.
+void TriggerHapticFeedbackForSelectionChange() {
+  if (base::ios::IsRunningOnIOS10OrLater()) {
+    UISelectionFeedbackGenerator* generator =
+        [[UISelectionFeedbackGenerator alloc] init];
+    [generator selectionChanged];
+  }
+}
+
+// On iOS10 and above, trigger a haptic vibration for a notification.
+// This is a no-op for devices that do not support it.
+void TriggerHapticFeedbackForNotification(UINotificationFeedbackType type) {
+  if (base::ios::IsRunningOnIOS10OrLater()) {
+    UINotificationFeedbackGenerator* generator =
+        [[UINotificationFeedbackGenerator alloc] init];
+    [generator notificationOccurred:type];
+  }
 }

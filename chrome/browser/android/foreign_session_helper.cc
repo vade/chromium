@@ -75,7 +75,7 @@ bool ShouldSkipWindow(const sessions::SessionWindow& window) {
 
 bool ShouldSkipSession(const SyncedSession& session) {
   for (const auto& window_pair : session.windows) {
-    const sessions::SessionWindow& window = *(window_pair.second.get());
+    const sessions::SessionWindow& window = window_pair.second->wrapped_window;
     if (!ShouldSkipWindow(window))
       return false;
   }
@@ -120,7 +120,7 @@ void CopySessionToJava(
     const SyncedSession& session,
     ScopedJavaLocalRef<jobject>& j_session) {
   for (const auto& window_pair : session.windows) {
-    const sessions::SessionWindow& window = *(window_pair.second.get());
+    const sessions::SessionWindow& window = window_pair.second->wrapped_window;
 
     if (ShouldSkipWindow(window))
       continue;
@@ -196,11 +196,12 @@ void ForeignSessionHelper::FireForeignSessionCallback() {
   Java_ForeignSessionCallback_onUpdated(env, callback_);
 }
 
-void ForeignSessionHelper::OnSyncConfigurationCompleted() {
+void ForeignSessionHelper::OnSyncConfigurationCompleted(
+    syncer::SyncService* sync) {
   FireForeignSessionCallback();
 }
 
-void ForeignSessionHelper::OnForeignSessionUpdated() {
+void ForeignSessionHelper::OnForeignSessionUpdated(syncer::SyncService* sync) {
   FireForeignSessionCallback();
 }
 

@@ -129,7 +129,6 @@ usage() {
   echo "-b dir     build input directory    [${BUILDDIR}]"
   echo "-d brand   either chromium or google_chrome"
   echo "-s dir     /path/to/sysroot"
-  echo "-e dir     /path/to/dpkg-dev"
   echo "-h         this help message"
 }
 
@@ -164,7 +163,7 @@ verify_channel() {
 }
 
 process_opts() {
-  while getopts ":e:s:o:b:c:a:d:h" OPTNAME
+  while getopts ":s:o:b:c:a:d:h" OPTNAME
   do
     case $OPTNAME in
       o )
@@ -185,9 +184,6 @@ process_opts() {
         ;;
       s )
         SYSROOT="$OPTARG"
-        ;;
-      e )
-        DPKG_DEV_DIR="$OPTARG"
         ;;
       h )
         usage
@@ -231,12 +227,10 @@ trap cleanup 0
 process_opts "$@"
 BUILDDIR=${BUILDDIR:=$(readlink -f "${SCRIPTDIR}/../../../../out/Release")}
 
-if [[ "$(basename ${SYSROOT})" = "debian_wheezy_"*"-sysroot" ]]; then
-  TARGET_DISTRO="wheezy"
-elif [[ "$(basename ${SYSROOT})" = "debian_jessie_"*"-sysroot" ]]; then
+if [[ "$(basename ${SYSROOT})" = "debian_jessie_"*"-sysroot" ]]; then
   TARGET_DISTRO="jessie"
 else
-  echo "Debian package can only be built using the wheezy or jessie sysroot."
+  echo "Debian package can only be built using the jessie sysroot."
   exit 1
 fi
 
@@ -282,11 +276,8 @@ else
   SHLIB_ARGS="${SHLIB_ARGS} -l${SYSROOT}/lib/i386-linux-gnu"
 fi
 SHLIB_ARGS="${SHLIB_ARGS} -l${SYSROOT}/usr/lib"
-# TODO(thomasanderson): Unbundle dpkg-shlibdeps once the Precise->Trusty
-# transition is complete by reverting CL 2411423002 and applying ps40001.
-DPKG_SHLIB_DEPS=$(cd ${SYSROOT} && DPKG_DATADIR=${DPKG_DEV_DIR} \
-  perl -I ${DPKG_DEV_DIR}/scripts ${DPKG_DEV_DIR}/scripts/dpkg-shlibdeps.pl \
-  ${SHLIB_ARGS:-} -O -e"$BUILDDIR/chrome" | sed 's/^shlibs:Depends=//')
+DPKG_SHLIB_DEPS=$(cd ${SYSROOT} && dpkg-shlibdeps ${SHLIB_ARGS:-} -O \
+                  -e"$BUILDDIR/chrome" | sed 's/^shlibs:Depends=//')
 if [ -n "$SAVE_LDLP" ]; then
   LD_LIBRARY_PATH=$SAVE_LDLP
 fi
@@ -303,9 +294,7 @@ if [ $BAD_DIFF -ne 0 ] && [ -z "${IGNORE_DEPS_CHANGES:-}" ]; then
   echo "ERROR: Shared library dependencies changed!"
   echo "If this is intentional, please update:"
   echo "chrome/installer/linux/debian/expected_deps_ia32_jessie"
-  echo "chrome/installer/linux/debian/expected_deps_ia32_wheezy"
   echo "chrome/installer/linux/debian/expected_deps_x64_jessie"
-  echo "chrome/installer/linux/debian/expected_deps_x64_wheezy"
   echo
   exit $BAD_DIFF
 fi

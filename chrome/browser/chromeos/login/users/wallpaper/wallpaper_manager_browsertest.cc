@@ -6,9 +6,8 @@
 
 #include <stddef.h>
 
-#include "ash/common/wallpaper/wallpaper_controller.h"
-#include "ash/common/wm_shell.h"
 #include "ash/shell.h"
+#include "ash/wallpaper/wallpaper_controller.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
@@ -17,9 +16,11 @@
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager_test_utils.h"
+#include "chrome/browser/ui/ash/session_controller_client.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -71,7 +72,7 @@ class WallpaperManagerBrowserTest : public InProcessBrowserTest {
   ~WallpaperManagerBrowserTest() override {}
 
   void SetUpOnMainThread() override {
-    controller_ = ash::WmShell::Get()->wallpaper_controller();
+    controller_ = ash::Shell::Get()->wallpaper_controller();
     controller_->set_wallpaper_reload_delay_for_test(0);
     local_state_ = g_browser_process->local_state();
     UpdateDisplay("800x600");
@@ -87,8 +88,7 @@ class WallpaperManagerBrowserTest : public InProcessBrowserTest {
   // Update the display configuration as given in |display_specs|.  See
   // display::test::DisplayManagerTestApi::UpdateDisplay for more details.
   void UpdateDisplay(const std::string& display_specs) {
-    display::test::DisplayManagerTestApi(
-        ash::Shell::GetInstance()->display_manager())
+    display::test::DisplayManagerTestApi(ash::Shell::Get()->display_manager())
         .UpdateDisplay(display_specs);
   }
 
@@ -103,6 +103,7 @@ class WallpaperManagerBrowserTest : public InProcessBrowserTest {
       const char* sub_dir,
       const wallpaper::WallpaperFilesId& wallpaper_files_id,
       const std::string& id) {
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
     base::FilePath wallpaper_path =
         WallpaperManager::Get()->GetCustomWallpaperPath(sub_dir,
                                                         wallpaper_files_id, id);
@@ -114,10 +115,11 @@ class WallpaperManagerBrowserTest : public InProcessBrowserTest {
 
   // Logs in |account_id|.
   void LogIn(const AccountId& account_id, const std::string& user_id_hash) {
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
     SessionManager::Get()->CreateSession(account_id, user_id_hash);
-    // Adding a secondary display creates a shelf on that display, which
-    // assumes a shelf on the primary display if the user was logged in.
-    ash::WmShell::Get()->CreateShelfView();
+    SessionManager::Get()->SessionStarted();
+    // Flush to ensure the created session and ACTIVE state reaches ash.
+    SessionControllerClient::FlushForTesting();
     WaitAsyncWallpaperLoadStarted();
   }
 
@@ -153,6 +155,7 @@ class WallpaperManagerBrowserTest : public InProcessBrowserTest {
   // Only needs to be called (once) by tests that want to test loading of
   // default wallpapers.
   void CreateCmdlineWallpapers() {
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
     wallpaper_dir_.reset(new base::ScopedTempDir);
     ASSERT_TRUE(wallpaper_dir_->CreateUniqueTempDir());
     wallpaper_manager_test_utils::CreateCmdlineWallpapers(
@@ -627,7 +630,12 @@ class TestObserver : public WallpaperManager::Observer {
   DISALLOW_COPY_AND_ASSIGN(TestObserver);
 };
 
-IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest, DisplayChange) {
+#if defined(OS_CHROMEOS) && defined(USE_OZONE)
+#define MAYBE_DisplayChange DISABLED_DisplayChange
+#else
+#define MAYBE_DisplayChange DisplayChange
+#endif
+IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest, MAYBE_DisplayChange) {
   TestObserver observer(WallpaperManager::Get());
 
   // Set the wallpaper to ensure that UpdateWallpaper() will be called when the

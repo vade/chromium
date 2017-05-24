@@ -13,7 +13,6 @@
 #import "chrome/browser/ui/cocoa/location_bar/location_icon_decoration.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/theme_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "ui/base/cocoa/nsview_additions.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -30,8 +29,8 @@
 
 namespace {
 
-// Padding between the icon and label.
-CGFloat kIconLabelPadding = 4.0;
+// Padding between the label and icon/divider.
+CGFloat kLabelPadding = 4.0;
 
 // Inset for the background.
 const CGFloat kBackgroundYInset = 4.0;
@@ -80,6 +79,8 @@ SecurityStateBubbleDecoration::SecurityStateBubbleDecoration(
   base::scoped_nsobject<NSMutableParagraphStyle> style(
       [[NSMutableParagraphStyle alloc] init]);
   [style setLineBreakMode:NSLineBreakByClipping];
+  if (cocoa_l10n_util::ShouldDoExperimentalRTLLayout())
+    [style setAlignment:NSRightTextAlignment];
   [attributes_ setObject:style forKey:NSParagraphStyleAttributeName];
   animation_.SetTweenType(gfx::Tween::FAST_OUT_SLOW_IN);
 }
@@ -150,6 +151,7 @@ void SecurityStateBubbleDecoration::DrawInFrame(NSRect frame,
   CGFloat text_left_offset = NSMinX(decoration_frame);
   CGFloat text_right_offset = NSMaxX(decoration_frame);
   const BOOL is_rtl = cocoa_l10n_util::ShouldDoExperimentalRTLLayout();
+  focus_ring_right_inset_ = 0;
   if (image_) {
     // The image should fade in if we're animating in.
     CGFloat image_alpha =
@@ -162,10 +164,13 @@ void SecurityStateBubbleDecoration::DrawInFrame(NSRect frame,
               fraction:image_alpha
         respectFlipped:YES
                  hints:nil];
-    if (is_rtl)
-      text_right_offset = NSMinX(image_rect) - kIconLabelPadding;
-    else
-      text_left_offset = NSMaxX(image_rect) + kIconLabelPadding;
+    if (is_rtl) {
+      text_left_offset += DividerPadding();
+      text_right_offset = NSMinX(image_rect);
+    } else {
+      text_right_offset -= DividerPadding();
+      text_left_offset = NSMaxX(image_rect);
+    }
   }
 
   // Set the text color and draw the text.
@@ -198,6 +203,7 @@ void SecurityStateBubbleDecoration::DrawInFrame(NSRect frame,
     text_rect.origin.y = std::round(NSMidY(text_rect) - textHeight / 2.0) - 1;
     text_rect.size.width = text_right_offset - text_left_offset;
     text_rect.size.height = textHeight;
+    text_rect = NSInsetRect(text_rect, kLabelPadding, 0);
 
     NSAffineTransform* transform = [NSAffineTransform transform];
     CGFloat progress = GetAnimationProgress();
@@ -226,22 +232,12 @@ void SecurityStateBubbleDecoration::DrawInFrame(NSRect frame,
 
     // Draw the divider.
     if (state() == DecorationMouseState::NONE && !active()) {
-      const CGFloat divider_x_position =
-          is_rtl ? NSMinX(decoration_frame) + DividerPadding()
-                 : NSMaxX(decoration_frame) - DividerPadding();
-      NSBezierPath* line = [NSBezierPath bezierPath];
-      [line setLineWidth:line_width];
-      [line moveToPoint:NSMakePoint(divider_x_position,
-                                    NSMinY(decoration_frame))];
-      [line lineToPoint:NSMakePoint(divider_x_position,
-                                    NSMaxY(decoration_frame))];
-
-      NSColor* divider_color = GetDividerColor(in_dark_mode);
-      CGFloat divider_alpha =
-          [divider_color alphaComponent] * GetAnimationProgress();
-      divider_color = [divider_color colorWithAlphaComponent:divider_alpha];
-      [divider_color set];
-      [line stroke];
+      DrawDivider(control_view, decoration_frame, GetAnimationProgress());
+      focus_ring_right_inset_ = DividerPadding() + line_width;
+    } else {
+      // When mouse-hovered, the divider isn't drawn, but the padding for it is
+      // still present to separate the button from the location bar text.
+      focus_ring_right_inset_ = DividerPadding();
     }
   }
 }
@@ -279,8 +275,18 @@ NSPoint SecurityStateBubbleDecoration::GetBubblePointInFrame(NSRect frame) {
 }
 
 NSString* SecurityStateBubbleDecoration::GetToolTip() {
-  return [NSString stringWithFormat:@"%@. %@", full_label_.get(),
-                   l10n_util::GetNSStringWithFixup(IDS_TOOLTIP_LOCATION_ICON)];
+  NSString* tooltip_icon_text =
+      l10n_util::GetNSStringWithFixup(IDS_TOOLTIP_LOCATION_ICON);
+  if ([full_label_ length] == 0)
+    return tooltip_icon_text;
+  return [NSString
+      stringWithFormat:@"%@. %@", full_label_.get(), tooltip_icon_text];
+}
+
+NSRect SecurityStateBubbleDecoration::GetRealFocusRingBounds(
+    NSRect bounds) const {
+  bounds.size.width -= focus_ring_right_inset_;
+  return bounds;
 }
 
 //////////////////////////////////////////////////////////////////
@@ -289,10 +295,6 @@ NSString* SecurityStateBubbleDecoration::GetToolTip() {
 NSColor* SecurityStateBubbleDecoration::GetBackgroundBorderColor() {
   return skia::SkColorToSRGBNSColor(
       SkColorSetA(label_color_, 255.0 * GetAnimationProgress()));
-}
-
-ui::NinePartImageIds SecurityStateBubbleDecoration::GetBubbleImageIds() {
-  return IMAGE_GRID(IDR_OMNIBOX_EV_BUBBLE);
 }
 
 NSColor* SecurityStateBubbleDecoration::GetDarkModeTextColor() {

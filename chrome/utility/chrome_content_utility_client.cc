@@ -6,42 +6,40 @@
 
 #include <stddef.h>
 #include <utility>
+#include <vector>
 
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
-#include "build/build_config.h"
-#include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/file_patcher.mojom.h"
-#include "chrome/common/safe_browsing/zip_analyzer.h"
-#include "chrome/common/safe_browsing/zip_analyzer_results.h"
-#include "chrome/utility/chrome_content_utility_ipc_whitelist.h"
 #include "chrome/utility/utility_message_handler.h"
+#include "components/payments/content/utility/payment_manifest_parser.h"
 #include "components/safe_json/utility/safe_json_parser_mojo_impl.h"
-#include "content/public/child/image_decoder_utils.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/service_info.h"
+#include "content/public/common/service_manager_connection.h"
+#include "content/public/common/simple_connection_filter.h"
 #include "content/public/utility/utility_thread.h"
 #include "courgette/courgette.h"
 #include "courgette/third_party/bsdiff/bsdiff.h"
 #include "extensions/features/features.h"
-#include "ipc/ipc_channel.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "printing/features/features.h"
-#include "services/image_decoder/image_decoder_service.h"
-#include "services/image_decoder/public/interfaces/constants.mojom.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "third_party/zlib/google/zip.h"
-#include "ui/gfx/geometry/size.h"
 
 #if !defined(OS_ANDROID)
 #include "chrome/common/resource_usage_reporter.mojom.h"
+#include "chrome/utility/media_router/dial_device_description_parser_impl.h"
 #include "chrome/utility/profile_import_handler.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "net/proxy/mojo_proxy_resolver_factory_impl.h"
 #include "net/proxy/proxy_resolver_v8.h"
+#endif  // !defined(OS_ANDROID)
+
+#if defined(OS_CHROMEOS)
+#include "chrome/common/zip_file_creator.mojom.h"
 #endif
 
 #if defined(OS_WIN)
@@ -51,7 +49,6 @@
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "chrome/utility/extensions/extensions_handler.h"
-#include "chrome/utility/image_writer/image_writer_handler.h"
 #endif
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW) || \
@@ -59,28 +56,24 @@
 #include "chrome/utility/printing_handler.h"
 #endif
 
-#if defined(OS_MACOSX) && defined(FULL_SAFE_BROWSING)
+#if defined(FULL_SAFE_BROWSING)
+#include "chrome/common/safe_archive_analyzer.mojom.h"
+#include "chrome/common/safe_browsing/zip_analyzer.h"
+#include "chrome/common/safe_browsing/zip_analyzer_results.h"
+#if defined(OS_MACOSX)
 #include "chrome/utility/safe_browsing/mac/dmg_analyzer.h"
+#endif
 #endif
 
 namespace {
-
-#if defined(OS_CHROMEOS) || defined(FULL_SAFE_BROWSING)
-bool Send(IPC::Message* message) {
-  return content::UtilityThread::Get()->Send(message);
-}
-
-void ReleaseProcessIfNeeded() {
-  content::UtilityThread::Get()->ReleaseProcessIfNeeded();
-}
-#endif  // defined(OS_CHROMEOS) || defined(FULL_SAFE_BROWSING)
 
 class FilePatcherImpl : public chrome::mojom::FilePatcher {
  public:
   FilePatcherImpl() = default;
   ~FilePatcherImpl() override = default;
 
-  static void Create(chrome::mojom::FilePatcherRequest request) {
+  static void Create(const service_manager::BindSourceInfo& source_info,
+                     chrome::mojom::FilePatcherRequest request) {
     mojo::MakeStrongBinding(base::MakeUnique<FilePatcherImpl>(),
                             std::move(request));
   }
@@ -91,6 +84,10 @@ class FilePatcherImpl : public chrome::mojom::FilePatcher {
                        base::File patch_file,
                        base::File output_file,
                        const PatchFileBsdiffCallback& callback) override {
+    DCHECK(input_file.IsValid());
+    DCHECK(patch_file.IsValid());
+    DCHECK(output_file.IsValid());
+
     const int patch_result_status = bsdiff::ApplyBinaryPatch(
         std::move(input_file), std::move(patch_file), std::move(output_file));
     callback.Run(patch_result_status);
@@ -100,6 +97,10 @@ class FilePatcherImpl : public chrome::mojom::FilePatcher {
                           base::File patch_file,
                           base::File output_file,
                           const PatchFileCourgetteCallback& callback) override {
+    DCHECK(input_file.IsValid());
+    DCHECK(patch_file.IsValid());
+    DCHECK(output_file.IsValid());
+
     const int patch_result_status = courgette::ApplyEnsemblePatch(
         std::move(input_file), std::move(patch_file), std::move(output_file));
     callback.Run(patch_result_status);
@@ -108,8 +109,86 @@ class FilePatcherImpl : public chrome::mojom::FilePatcher {
   DISALLOW_COPY_AND_ASSIGN(FilePatcherImpl);
 };
 
+#if defined(OS_CHROMEOS)
+class ZipFileCreatorImpl : public chrome::mojom::ZipFileCreator {
+ public:
+  ZipFileCreatorImpl() = default;
+  ~ZipFileCreatorImpl() override = default;
+
+  static void Create(const service_manager::BindSourceInfo& source_info,
+                     chrome::mojom::ZipFileCreatorRequest request) {
+    mojo::MakeStrongBinding(base::MakeUnique<ZipFileCreatorImpl>(),
+                            std::move(request));
+  }
+
+ private:
+  // chrome::mojom::ZipFileCreator:
+  void CreateZipFile(const base::FilePath& source_dir,
+                     const std::vector<base::FilePath>& source_relative_paths,
+                     base::File zip_file,
+                     const CreateZipFileCallback& callback) override {
+    DCHECK(zip_file.IsValid());
+
+    for (const auto& path : source_relative_paths) {
+      if (path.IsAbsolute() || path.ReferencesParent()) {
+        callback.Run(false);
+        return;
+      }
+    }
+
+    callback.Run(zip::ZipFiles(source_dir, source_relative_paths,
+                               zip_file.GetPlatformFile()));
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(ZipFileCreatorImpl);
+};
+#endif  // defined(OS_CHROMEOS)
+
+#if defined(FULL_SAFE_BROWSING)
+class SafeArchiveAnalyzerImpl : public chrome::mojom::SafeArchiveAnalyzer {
+ public:
+  SafeArchiveAnalyzerImpl() = default;
+  ~SafeArchiveAnalyzerImpl() override = default;
+
+  static void Create(const service_manager::BindSourceInfo& source_info,
+                     chrome::mojom::SafeArchiveAnalyzerRequest request) {
+    mojo::MakeStrongBinding(base::MakeUnique<SafeArchiveAnalyzerImpl>(),
+                            std::move(request));
+  }
+
+ private:
+  // chrome::mojom::SafeArchiveAnalyzer:
+  void AnalyzeZipFile(base::File zip_file,
+                      base::File temporary_file,
+                      const AnalyzeZipFileCallback& callback) override {
+    DCHECK(temporary_file.IsValid());
+    DCHECK(zip_file.IsValid());
+
+    safe_browsing::zip_analyzer::Results results;
+    safe_browsing::zip_analyzer::AnalyzeZipFile(
+        std::move(zip_file), std::move(temporary_file), &results);
+    callback.Run(results);
+  }
+
+  void AnalyzeDmgFile(base::File dmg_file,
+                      const AnalyzeDmgFileCallback& callback) override {
+#if defined(OS_MACOSX)
+    DCHECK(dmg_file.IsValid());
+    safe_browsing::zip_analyzer::Results results;
+    safe_browsing::dmg::AnalyzeDMGFile(std::move(dmg_file), &results);
+    callback.Run(results);
+#else
+    NOTREACHED();
+#endif
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(SafeArchiveAnalyzerImpl);
+};
+#endif  // defined(FULL_SAFE_BROWSING)
+
 #if !defined(OS_ANDROID)
 void CreateProxyResolverFactory(
+    const service_manager::BindSourceInfo& source_info,
     net::interfaces::ProxyResolverFactoryRequest request) {
   mojo::MakeStrongBinding(base::MakeUnique<net::MojoProxyResolverFactoryImpl>(),
                           std::move(request));
@@ -132,135 +211,113 @@ class ResourceUsageReporterImpl : public chrome::mojom::ResourceUsageReporter {
     }
     callback.Run(std::move(data));
   }
+
+  DISALLOW_COPY_AND_ASSIGN(ResourceUsageReporterImpl);
 };
 
 void CreateResourceUsageReporter(
-    mojo::InterfaceRequest<chrome::mojom::ResourceUsageReporter> request) {
+    const service_manager::BindSourceInfo& source_info,
+    chrome::mojom::ResourceUsageReporterRequest request) {
   mojo::MakeStrongBinding(base::MakeUnique<ResourceUsageReporterImpl>(),
                           std::move(request));
 }
 #endif  // !defined(OS_ANDROID)
 
-std::unique_ptr<service_manager::Service> CreateImageDecoderService() {
-  content::UtilityThread::Get()->EnsureBlinkInitialized();
-  return image_decoder::ImageDecoderService::Create();
-}
-
 }  // namespace
 
 ChromeContentUtilityClient::ChromeContentUtilityClient()
-    : filter_messages_(false) {
+    : utility_process_running_elevated_(false) {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-  handlers_.push_back(new extensions::ExtensionsHandler());
-  handlers_.push_back(new image_writer::ImageWriterHandler());
+  handlers_.push_back(base::MakeUnique<extensions::ExtensionsHandler>());
 #endif
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW) || \
     (BUILDFLAG(ENABLE_BASIC_PRINTING) && defined(OS_WIN))
-  handlers_.push_back(new printing::PrintingHandler());
+  handlers_.push_back(base::MakeUnique<printing::PrintingHandler>());
 #endif
 
 #if defined(OS_WIN)
-  handlers_.push_back(new IPCShellHandler());
+  handlers_.push_back(base::MakeUnique<IPCShellHandler>());
 #endif
 }
 
-ChromeContentUtilityClient::~ChromeContentUtilityClient() {
-}
+ChromeContentUtilityClient::~ChromeContentUtilityClient() = default;
 
 void ChromeContentUtilityClient::UtilityThreadStarted() {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-  extensions::UtilityHandler::UtilityThreadStarted();
+  extensions::utility_handler::UtilityThreadStarted();
 #endif
 
-  if (kMessageWhitelistSize > 0) {
-    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-    if (command_line->HasSwitch(switches::kUtilityProcessRunningElevated)) {
-      message_id_whitelist_.insert(kMessageWhitelist,
-                                   kMessageWhitelist + kMessageWhitelistSize);
-      filter_messages_ = true;
-    }
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kUtilityProcessRunningElevated))
+    utility_process_running_elevated_ = true;
+
+  content::ServiceManagerConnection* connection =
+      content::ChildThread::Get()->GetServiceManagerConnection();
+
+  // NOTE: Some utility process instances are not connected to the Service
+  // Manager. Nothing left to do in that case.
+  if (!connection)
+    return;
+
+  auto registry = base::MakeUnique<service_manager::BinderRegistry>();
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+  extensions::ExtensionsHandler::ExposeInterfacesToBrowser(
+      registry.get(), utility_process_running_elevated_);
+  extensions::utility_handler::ExposeInterfacesToBrowser(
+      registry.get(), utility_process_running_elevated_);
+#endif
+  // If our process runs with elevated privileges, only add elevated Mojo
+  // interfaces to the interface registry.
+  if (!utility_process_running_elevated_) {
+    registry->AddInterface(base::Bind(&FilePatcherImpl::Create),
+                           base::ThreadTaskRunnerHandle::Get());
+#if !defined(OS_ANDROID)
+    registry->AddInterface<net::interfaces::ProxyResolverFactory>(
+        base::Bind(CreateProxyResolverFactory),
+        base::ThreadTaskRunnerHandle::Get());
+    registry->AddInterface(base::Bind(CreateResourceUsageReporter),
+                           base::ThreadTaskRunnerHandle::Get());
+    registry->AddInterface(base::Bind(&ProfileImportHandler::Create),
+                           base::ThreadTaskRunnerHandle::Get());
+    registry->AddInterface(
+        base::Bind(&media_router::DialDeviceDescriptionParserImpl::Create),
+        base::ThreadTaskRunnerHandle::Get());
+#endif  // !defined(OS_ANDROID)
+    registry->AddInterface(base::Bind(&payments::PaymentManifestParser::Create),
+                           base::ThreadTaskRunnerHandle::Get());
+    registry->AddInterface(
+        base::Bind(&safe_json::SafeJsonParserMojoImpl::Create),
+        base::ThreadTaskRunnerHandle::Get());
+#if defined(OS_WIN)
+    registry->AddInterface(base::Bind(&ShellHandlerImpl::Create),
+                           base::ThreadTaskRunnerHandle::Get());
+#endif
+#if defined(OS_CHROMEOS)
+    registry->AddInterface(base::Bind(&ZipFileCreatorImpl::Create),
+                           base::ThreadTaskRunnerHandle::Get());
+#endif
+#if defined(FULL_SAFE_BROWSING)
+    registry->AddInterface(base::Bind(&SafeArchiveAnalyzerImpl::Create),
+                           base::ThreadTaskRunnerHandle::Get());
+#endif
   }
+
+  connection->AddConnectionFilter(
+      base::MakeUnique<content::SimpleConnectionFilter>(std::move(registry)));
 }
 
 bool ChromeContentUtilityClient::OnMessageReceived(
     const IPC::Message& message) {
-  if (filter_messages_ &&
-      !base::ContainsKey(message_id_whitelist_, message.type())) {
+  if (utility_process_running_elevated_)
     return false;
-  }
 
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(ChromeContentUtilityClient, message)
-#if defined(FULL_SAFE_BROWSING)
-    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_AnalyzeZipFileForDownloadProtection,
-                        OnAnalyzeZipFileForDownloadProtection)
-#if defined(OS_MACOSX)
-    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_AnalyzeDmgFileForDownloadProtection,
-                        OnAnalyzeDmgFileForDownloadProtection)
-#endif  // defined(OS_MACOSX)
-#endif  // defined(FULL_SAFE_BROWSING)
-#if defined(OS_CHROMEOS)
-    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_CreateZipFile, OnCreateZipFile)
-#endif
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-
-  if (handled)
-    return true;
-
-  for (auto* handler : handlers_) {
-    // At least one of the utility process handlers adds a new handler to
-    // |handlers_| when it handles a message. This causes any iterator over
-    // |handlers_| to become invalid. Therefore, it is necessary to break the
-    // loop at this point instead of evaluating it as a loop condition (if the
-    // for loop was using iterators explicitly, as originally done).
+  for (const auto& handler : handlers_) {
     if (handler->OnMessageReceived(message))
       return true;
   }
 
   return false;
-}
-
-void ChromeContentUtilityClient::ExposeInterfacesToBrowser(
-    service_manager::InterfaceRegistry* registry) {
-  const bool running_elevated =
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kUtilityProcessRunningElevated);
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-  ChromeContentUtilityClient* utility_client = this;
-  extensions::ExtensionsHandler::ExposeInterfacesToBrowser(
-      registry, utility_client, running_elevated);
-#endif
-  // If our process runs with elevated privileges, only add elevated Mojo
-  // services to the interface registry.
-  if (running_elevated)
-    return;
-
-  registry->AddInterface(base::Bind(&FilePatcherImpl::Create));
-#if !defined(OS_ANDROID)
-  registry->AddInterface<net::interfaces::ProxyResolverFactory>(
-      base::Bind(CreateProxyResolverFactory));
-  registry->AddInterface(base::Bind(CreateResourceUsageReporter));
-  registry->AddInterface(base::Bind(&ProfileImportHandler::Create));
-#endif
-  registry->AddInterface(
-      base::Bind(&safe_json::SafeJsonParserMojoImpl::Create));
-#if defined(OS_WIN)
-  registry->AddInterface(base::Bind(&ShellHandlerImpl::Create));
-#endif
-}
-
-void ChromeContentUtilityClient::RegisterServices(StaticServiceMap* services) {
-  content::ServiceInfo image_decoder_info;
-  image_decoder_info.factory = base::Bind(&CreateImageDecoderService);
-  services->insert(
-      std::make_pair(image_decoder::mojom::kServiceName, image_decoder_info));
-}
-
-void ChromeContentUtilityClient::AddHandler(
-    std::unique_ptr<UtilityMessageHandler> handler) {
-  handlers_.push_back(std::move(handler));
 }
 
 // static
@@ -269,62 +326,3 @@ void ChromeContentUtilityClient::PreSandboxStartup() {
   extensions::ExtensionsHandler::PreSandboxStartup();
 #endif
 }
-
-#if defined(OS_CHROMEOS)
-void ChromeContentUtilityClient::OnCreateZipFile(
-    const base::FilePath& src_dir,
-    const std::vector<base::FilePath>& src_relative_paths,
-    const base::FileDescriptor& dest_fd) {
-  // dest_fd should be closed in the function. See ipc/ipc_message_util.h for
-  // details.
-  base::ScopedFD fd_closer(dest_fd.fd);
-  bool succeeded = true;
-
-  // Check sanity of source relative paths. Reject if path is absolute or
-  // contains any attempt to reference a parent directory ("../" tricks).
-  for (std::vector<base::FilePath>::const_iterator iter =
-           src_relative_paths.begin(); iter != src_relative_paths.end();
-       ++iter) {
-    if (iter->IsAbsolute() || iter->ReferencesParent()) {
-      succeeded = false;
-      break;
-    }
-  }
-
-  if (succeeded)
-    succeeded = zip::ZipFiles(src_dir, src_relative_paths, dest_fd.fd);
-
-  if (succeeded)
-    Send(new ChromeUtilityHostMsg_CreateZipFile_Succeeded());
-  else
-    Send(new ChromeUtilityHostMsg_CreateZipFile_Failed());
-  ReleaseProcessIfNeeded();
-}
-#endif  // defined(OS_CHROMEOS)
-
-#if defined(FULL_SAFE_BROWSING)
-void ChromeContentUtilityClient::OnAnalyzeZipFileForDownloadProtection(
-    const IPC::PlatformFileForTransit& zip_file,
-    const IPC::PlatformFileForTransit& temp_file) {
-  safe_browsing::zip_analyzer::Results results;
-  safe_browsing::zip_analyzer::AnalyzeZipFile(
-      IPC::PlatformFileForTransitToFile(zip_file),
-      IPC::PlatformFileForTransitToFile(temp_file), &results);
-  Send(new ChromeUtilityHostMsg_AnalyzeZipFileForDownloadProtection_Finished(
-      results));
-  ReleaseProcessIfNeeded();
-}
-
-#if defined(OS_MACOSX)
-void ChromeContentUtilityClient::OnAnalyzeDmgFileForDownloadProtection(
-    const IPC::PlatformFileForTransit& dmg_file) {
-  safe_browsing::zip_analyzer::Results results;
-  safe_browsing::dmg::AnalyzeDMGFile(
-      IPC::PlatformFileForTransitToFile(dmg_file), &results);
-  Send(new ChromeUtilityHostMsg_AnalyzeDmgFileForDownloadProtection_Finished(
-      results));
-  ReleaseProcessIfNeeded();
-}
-#endif  // defined(OS_MACOSX)
-
-#endif  // defined(FULL_SAFE_BROWSING)

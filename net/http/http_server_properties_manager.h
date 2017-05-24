@@ -150,6 +150,7 @@ class NET_EXPORT HttpServerPropertiesManager : public HttpServerProperties {
   void SetSupportsQuic(bool used_quic, const IPAddress& last_address) override;
   void SetServerNetworkStats(const url::SchemeHostPort& server,
                              ServerNetworkStats stats) override;
+  void ClearServerNetworkStats(const url::SchemeHostPort& server) override;
   const ServerNetworkStats* GetServerNetworkStats(
       const url::SchemeHostPort& server) override;
   const ServerNetworkStatsMap& server_network_stats_map() const override;
@@ -160,9 +161,15 @@ class NET_EXPORT HttpServerPropertiesManager : public HttpServerProperties {
   size_t max_server_configs_stored_in_properties() const override;
   void SetMaxServerConfigsStoredInProperties(
       size_t max_server_configs_stored_in_properties) override;
+  bool IsInitialized() const override;
+
+  static base::TimeDelta GetUpdateCacheDelayForTesting();
+  static base::TimeDelta GetUpdatePrefsDelayForTesting();
 
  protected:
   // The location where ScheduleUpdatePrefsOnNetworkThread was called.
+  // Must be kept up to date with HttpServerPropertiesUpdatePrefsLocation in
+  // histograms.xml.
   enum Location {
     SUPPORTS_SPDY = 0,
     HTTP_11_REQUIRED = 1,
@@ -178,7 +185,8 @@ class NET_EXPORT HttpServerPropertiesManager : public HttpServerProperties {
     SET_SERVER_NETWORK_STATS = 11,
     DETECTED_CORRUPTED_PREFS = 12,
     SET_QUIC_SERVER_INFO = 13,
-    NUM_LOCATIONS = 14,
+    CLEAR_SERVER_NETWORK_STATS = 14,
+    NUM_LOCATIONS = 15,
   };
 
   // --------------------
@@ -188,10 +196,6 @@ class NET_EXPORT HttpServerPropertiesManager : public HttpServerProperties {
   // |http_server_properties_impl_| while the preferences are changing, and
   // execute only one update per simultaneous prefs changes.
   void ScheduleUpdateCacheOnPrefThread();
-
-  // Starts the timers to update the cached prefs. This are overridden in tests
-  // to prevent the delay.
-  virtual void StartCacheUpdateTimerOnPrefThread(base::TimeDelta delay);
 
   // Update cached prefs in |http_server_properties_impl_| with data from
   // preferences. It gets the data on pref thread and calls
@@ -214,10 +218,6 @@ class NET_EXPORT HttpServerPropertiesManager : public HttpServerProperties {
   // simultaneous spdy_servers or spdy_settings or alternative_service changes.
   // |location| specifies where this method is called from. Virtual for testing.
   virtual void ScheduleUpdatePrefsOnNetworkThread(Location location);
-
-  // Starts the timers to update the prefs from cache. This are overridden in
-  // tests to prevent the delay.
-  virtual void StartPrefsUpdateTimerOnNetworkThread(base::TimeDelta delay);
 
   // Update prefs::kHttpServerProperties in preferences with the cached data
   // from |http_server_properties_impl_|. This gets the data on network thread
@@ -283,6 +283,7 @@ class NET_EXPORT HttpServerPropertiesManager : public HttpServerProperties {
   void SaveQuicServerInfoMapToServerPrefs(
       QuicServerInfoMap* quic_server_info_map,
       base::DictionaryValue* http_server_properties_dict);
+  void SetInitialized();
 
   // -----------
   // Pref thread
@@ -301,6 +302,9 @@ class NET_EXPORT HttpServerPropertiesManager : public HttpServerProperties {
   // --------------
   // Network thread
   // --------------
+
+  // Whether InitializeOnNetworkThread() has completed.
+  bool is_initialized_;
 
   const scoped_refptr<base::SingleThreadTaskRunner> network_task_runner_;
 

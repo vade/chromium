@@ -10,6 +10,7 @@
 
 #include <map>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "base/callback_forward.h"
@@ -20,6 +21,7 @@
 #include "content/public/browser/zoom_level_delegate.h"
 #include "content/public/common/push_event_payload.h"
 #include "content/public/common/push_messaging_status.h"
+#include "content/public/common/service_info.h"
 #include "net/url_request/url_request_interceptor.h"
 #include "net/url_request/url_request_job_factory.h"
 
@@ -51,6 +53,8 @@ namespace content {
 class BackgroundSyncController;
 class BlobHandle;
 class BrowserPluginGuestManager;
+class BrowsingDataRemover;
+class BrowsingDataRemoverDelegate;
 class DownloadManager;
 class DownloadManagerDelegate;
 class PermissionManager;
@@ -83,10 +87,15 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
   // mount points. Currenty, non-nullptr value is returned only on ChromeOS.
   static storage::ExternalMountPoints* GetMountPoints(BrowserContext* context);
 
-  static content::StoragePartition* GetStoragePartition(
-      BrowserContext* browser_context, SiteInstance* site_instance);
-  static content::StoragePartition* GetStoragePartitionForSite(
-      BrowserContext* browser_context, const GURL& site);
+  // Returns a BrowsingDataRemover that can schedule data deletion tasks
+  // for this |context|.
+  static BrowsingDataRemover* GetBrowsingDataRemover(BrowserContext* context);
+
+  static StoragePartition* GetStoragePartition(BrowserContext* browser_context,
+                                               SiteInstance* site_instance);
+  static StoragePartition* GetStoragePartitionForSite(
+      BrowserContext* browser_context,
+      const GURL& site);
   using StoragePartitionCallback = base::Callback<void(StoragePartition*)>;
   static void ForEachStoragePartition(
       BrowserContext* browser_context,
@@ -103,7 +112,7 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
       std::unique_ptr<base::hash_set<base::FilePath>> active_paths,
       const base::Closure& done);
 
-  static content::StoragePartition* GetDefaultStoragePartition(
+  static StoragePartition* GetDefaultStoragePartition(
       BrowserContext* browser_context);
 
   using BlobCallback = base::Callback<void(std::unique_ptr<BlobHandle>)>;
@@ -143,8 +152,9 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
   // across the next restart.
   static void SaveSessionState(BrowserContext* browser_context);
 
-  static void SetDownloadManagerForTesting(BrowserContext* browser_context,
-                                           DownloadManager* download_manager);
+  static void SetDownloadManagerForTesting(
+      BrowserContext* browser_context,
+      std::unique_ptr<content::DownloadManager> download_manager);
 
   // Makes the Service Manager aware of this BrowserContext, and assigns a user
   // ID number to it. Should be called for each BrowserContext created.
@@ -169,6 +179,8 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
       BrowserContext* browser_context);
   static ServiceManagerConnection* GetServiceManagerConnectionFor(
       BrowserContext* browser_context);
+
+  BrowserContext();
 
   ~BrowserContext() override;
 
@@ -221,6 +233,10 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
   // nullptr otherwise.
   virtual BackgroundSyncController* GetBackgroundSyncController() = 0;
 
+  // Returns the BrowsingDataRemoverDelegate for this context. This will be
+  // called once per context. It's valid to return nullptr.
+  virtual BrowsingDataRemoverDelegate* GetBrowsingDataRemoverDelegate();
+
   // Creates the main net::URLRequestContextGetter. It's called only once.
   virtual net::URLRequestContextGetter* CreateRequestContext(
       ProtocolHandlerMap* protocol_handlers,
@@ -244,6 +260,24 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
       CreateMediaRequestContextForStoragePartition(
           const base::FilePath& partition_path,
           bool in_memory) = 0;
+
+  using StaticServiceMap = std::map<std::string, ServiceInfo>;
+
+  // Registers per-browser-context services to be loaded in the browser process
+  // by the Service Manager.
+  virtual void RegisterInProcessServices(StaticServiceMap* services) {}
+
+  // Returns a random salt string that is used for creating media device IDs.
+  // Returns a random string by default.
+  virtual std::string GetMediaDeviceIDSalt();
+
+  // Utility function useful for embedders. Only needs to be called if
+  // 1) The embedder needs to use a new salt, and
+  // 2) The embedder saves its salt across restarts.
+  static std::string CreateRandomMediaDeviceIDSalt();
+
+ private:
+  const std::string media_device_id_salt_;
 };
 
 }  // namespace content

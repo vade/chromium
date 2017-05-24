@@ -145,26 +145,67 @@ if (window.testRunner) {
     };
 
     function start(test, scheduler, runner) {
-        if (!test) {
+        if (!test || !runner) {
             PerfTestRunner.logFatalError("Got a bad test object.");
             return;
         }
         currentTest = test;
-        // FIXME: We should be using multiple instances of test runner on Dromaeo as well but it's too slow now.
-        // FIXME: Don't hard code the number of in-process iterations to use inside a test runner.
-        iterationCount = test.dromaeoIterationCount || (window.testRunner ? 5 : 20);
+
+        if (test.tracingCategories && !test.traceEventsToMeasure) {
+            PerfTestRunner.logFatalError("test's tracingCategories is " +
+                "specified but test's traceEventsToMeasure is empty");
+            return;
+        }
+
+        if (test.traceEventsToMeasure && !test.tracingCategories) {
+            PerfTestRunner.logFatalError("test's traceEventsToMeasure is " +
+                "specified but test's tracingCategories is empty");
+            return;
+        }
+        iterationCount = test.iterationCount || (window.testRunner ? 5 : 20);
         if (test.warmUpCount && test.warmUpCount > 0)
             completedIterations = -test.warmUpCount;
         logLines = PerfTestRunner.bufferedLog || window.testRunner ? [] : null;
         PerfTestRunner.log("Running " + iterationCount + " times");
         if (test.doNotIgnoreInitialRun)
             completedIterations++;
-        if (runner)
+
+        if (!test.tracingCategories) {
             scheduleNextRun(scheduler, runner);
+            return;
+        }
+
+        if (window.testRunner && window.testRunner.supportTracing) {
+            testRunner.startTracing(test.tracingCategories, function() {
+                scheduleNextRun(scheduler, runner);
+            });
+            return;
+        }
+
+        PerfTestRunner.log("Tracing based metrics are specified but " +
+            "tracing is not supported on this platform. To get those " +
+            "metrics from this test, you can run the test using " +
+            "tools/perf/run_benchmarks script.");
+        scheduleNextRun(scheduler, runner);
     }
 
     function scheduleNextRun(scheduler, runner) {
+        if (!scheduler) {
+            // This is an async measurement test which has its own scheduler.
+            try {
+                runner();
+            } catch (exception) {
+                PerfTestRunner.logFatalError("Got an exception while running test.run with name=" + exception.name + ", message=" + exception.message);
+            }
+            return;
+        }
+
         scheduler(function () {
+            // This will be used by tools/perf/benchmarks/blink_perf.py to find
+            // traces during the measured runs.
+            if (completedIterations >= 0)
+                console.time("blink_perf");
+
             try {
                 if (currentTest.setup)
                     currentTest.setup();
@@ -206,6 +247,7 @@ if (window.testRunner) {
 
     function finish() {
         try {
+            console.timeEnd("blink_perf");
             if (currentTest.description)
                 PerfTestRunner.log("Description: " + currentTest.description);
             PerfTestRunner.logStatistics(results, PerfTestRunner.unit, "Time:");
@@ -221,13 +263,22 @@ if (window.testRunner) {
             logInDocument("Got an exception while finalizing the test with name=" + exception.name + ", message=" + exception.message);
         }
 
-        if (window.testRunner)
-            testRunner.notifyDone();
+        if (window.testRunner) {
+            if (currentTest.traceEventsToMeasure &&
+                testRunner.supportTracing) {
+                testRunner.stopTracingAndMeasure(
+                    currentTest.traceEventsToMeasure, function() {
+                        testRunner.notifyDone();
+                    });
+            } else {
+                testRunner.notifyDone();
+            }
+        }
     }
 
-    PerfTestRunner.prepareToMeasureValuesAsync = function (test) {
+    PerfTestRunner.startMeasureValuesAsync = function (test) {
         PerfTestRunner.unit = test.unit;
-        start(test);
+        start(test, undefined, function() { test.run() });
     }
 
     PerfTestRunner.measureValueAsync = function (measuredValue) {
@@ -244,9 +295,30 @@ if (window.testRunner) {
             finish();
     }
 
+    PerfTestRunner.addRunTestStartMarker = function () {
+      if (!window.testRunner || !window.testRunner.supportTracing)
+          return;
+      if (completedIterations < 0)
+          console.time('blink_perf.runTest.warmup');
+      else
+          console.time('blink_perf.runTest');
+    };
+
+    PerfTestRunner.addRunTestEndMarker = function () {
+      if (!window.testRunner || !window.testRunner.supportTracing)
+          return;
+      if (completedIterations < 0)
+          console.timeEnd('blink_perf.runTest.warmup');
+      else
+          console.timeEnd('blink_perf.runTest');
+    };
+
+
     PerfTestRunner.measureFrameTime = function (test) {
         PerfTestRunner.unit = "ms";
         PerfTestRunner.bufferedLog = true;
+        test.warmUpCount = test.warmUpCount || 5;
+        test.iterationCount = test.iterationCount || 10;
         // Force gc before starting the test to avoid the measured time from
         // being affected by gc performance. See crbug.com/667811#c16.
         PerfTestRunner.gc();
@@ -255,9 +327,12 @@ if (window.testRunner) {
 
     var lastFrameTime = -1;
     function measureFrameTimeOnce() {
+        if (lastFrameTime != -1)
+          PerfTestRunner.addRunTestEndMarker();
         var now = PerfTestRunner.now();
         var result = lastFrameTime == -1 ? -1 : now - lastFrameTime;
         lastFrameTime = now;
+        PerfTestRunner.addRunTestStartMarker();
 
         var returnValue = currentTest.run();
         if (returnValue - 0 === returnValue) {
@@ -283,9 +358,11 @@ if (window.testRunner) {
         // Force gc before measuring time to avoid interference between tests.
         PerfTestRunner.gc();
 
+        PerfTestRunner.addRunTestStartMarker();
         var start = PerfTestRunner.now();
         var returnValue = currentTest.run();
         var end = PerfTestRunner.now();
+        PerfTestRunner.addRunTestEndMarker();
 
         if (returnValue - 0 === returnValue) {
             if (returnValue < 0)

@@ -14,9 +14,12 @@
 #include "content/browser/media/media_devices_permission_checker.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "media/audio/audio_device_description.h"
-#include "media/audio/audio_manager.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/output_device_info.h"
+
+namespace media {
+class AudioSystem;
+}
 
 namespace content {
 
@@ -33,14 +36,13 @@ class CONTENT_EXPORT AudioOutputAuthorizationHandler {
   // also has the default audio parameters for the device, and the id for the
   // device, which is needed to open a stream for the device. This id is not
   // hashed, so it must be hashed before sending it to the renderer.
-  // TODO(maxmorin): Change to OnceCallback once base:: code is ready for it.
   using AuthorizationCompletedCallback =
-      base::Callback<void(media::OutputDeviceStatus status,
-                          bool should_send_id,
-                          const media::AudioParameters& params,
-                          const std::string& raw_device_id)>;
+      base::OnceCallback<void(media::OutputDeviceStatus status,
+                              bool should_send_id,
+                              const media::AudioParameters& params,
+                              const std::string& raw_device_id)>;
 
-  AudioOutputAuthorizationHandler(media::AudioManager* audio_manager,
+  AudioOutputAuthorizationHandler(media::AudioSystem* audio_system,
                                   MediaStreamManager* media_stream_manager,
                                   int render_process_id_,
                                   const std::string& salt);
@@ -50,7 +52,8 @@ class CONTENT_EXPORT AudioOutputAuthorizationHandler {
   // Checks authorization of the device with the hashed id |device_id| for the
   // given render frame id and security origin, or uses |session_id| for
   // authorization. Looks up device id (if |session_id| is used for device
-  // selection) and default device parameters.
+  // selection) and default device parameters. This function will always call
+  // |cb|, even if a bad message if received.
   void RequestDeviceAuthorization(int render_frame_id,
                                   int session_id,
                                   const std::string& device_id,
@@ -84,7 +87,7 @@ class CONTENT_EXPORT AudioOutputAuthorizationHandler {
       const std::string& raw_device_id,
       const media::AudioParameters& output_params) const;
 
-  media::AudioManager* audio_manager_;
+  media::AudioSystem* audio_system_;
   MediaStreamManager* const media_stream_manager_;
   std::unique_ptr<MediaDevicesPermissionChecker> permission_checker_;
   const int render_process_id_;

@@ -26,8 +26,10 @@
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "ipc/ipc_message_utils.h"
+#include "media/audio/audio_system_impl.h"
 #include "media/audio/fake_audio_log_factory.h"
 #include "media/audio/fake_audio_manager.h"
+#include "media/audio/test_audio_thread.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/media_switches.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -56,11 +58,11 @@ const char kInvalidDeviceId[] = "invalid-device-id";
 
 void ValidateRenderFrameId(int render_process_id,
                            int render_frame_id,
-                           const base::Callback<void(bool)>& callback) {
+                           base::OnceCallback<void(bool)> callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   const bool frame_exists = (render_frame_id == kRenderFrameId);
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                          base::Bind(callback, frame_exists));
+                          base::BindOnce(std::move(callback), frame_exists));
 }
 
 
@@ -96,10 +98,8 @@ class MockRenderProcessHostWithSignaling : public MockRenderProcessHost {
 
 class FakeAudioManagerWithAssociations : public media::FakeAudioManager {
  public:
-  FakeAudioManagerWithAssociations(
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-      media::AudioLogFactory* factory)
-      : FakeAudioManager(task_runner, task_runner, factory) {}
+  explicit FakeAudioManagerWithAssociations(media::AudioLogFactory* factory)
+      : FakeAudioManager(base::MakeUnique<media::TestAudioThread>(), factory) {}
 
   void CreateDeviceAssociation(const std::string& input_device_id,
                                const std::string& output_device_id) {
@@ -128,11 +128,13 @@ class MockAudioRendererHost : public AudioRendererHost {
   MockAudioRendererHost(base::RunLoop* auth_run_loop,
                         int render_process_id,
                         media::AudioManager* audio_manager,
+                        media::AudioSystem* audio_system,
                         AudioMirroringManager* mirroring_manager,
                         MediaStreamManager* media_stream_manager,
                         const std::string& salt)
       : AudioRendererHost(render_process_id,
                           audio_manager,
+                          audio_system,
                           mirroring_manager,
                           media_stream_manager,
                           salt),
@@ -233,15 +235,17 @@ class AudioRendererHostTest : public testing::Test {
   AudioRendererHostTest()
       : log_factory(base::MakeUnique<media::FakeAudioLogFactory>()),
         audio_manager_(base::MakeUnique<FakeAudioManagerWithAssociations>(
-            base::ThreadTaskRunnerHandle::Get(),
             log_factory.get())),
+        audio_system_(media::AudioSystemImpl::Create(audio_manager_.get())),
         render_process_host_(&browser_context_, &auth_run_loop_) {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kUseFakeDeviceForMediaStream);
-    media_stream_manager_.reset(new MediaStreamManager(audio_manager_.get()));
+    media_stream_manager_ =
+        base::MakeUnique<MediaStreamManager>(audio_system_.get());
     host_ = new MockAudioRendererHost(
         &auth_run_loop_, render_process_host_.GetID(), audio_manager_.get(),
-        &mirroring_manager_, media_stream_manager_.get(), kSalt);
+        audio_system_.get(), &mirroring_manager_, media_stream_manager_.get(),
+        kSalt);
 
     // Simulate IPC channel connected.
     host_->set_peer_process_for_testing(base::Process::Current());
@@ -251,11 +255,7 @@ class AudioRendererHostTest : public testing::Test {
     // Simulate closing the IPC channel and give the audio thread time to close
     // the underlying streams.
     host_->OnChannelClosing();
-    SyncWithAudioThread();
-    // To correctly clean up the audio manager, we first put it in a
-    // ScopedAudioManagerPtr. It will immediately destruct, cleaning up the
-    // audio manager correctly.
-    media::ScopedAudioManagerPtr(audio_manager_.release());
+    audio_manager_->Shutdown();
 
     // Release the reference to the mock object.  The object will be destructed
     // on message_loop_.
@@ -414,8 +414,8 @@ class AudioRendererHostTest : public testing::Test {
     // device gets selected when using session id:
     audio_manager_->CreateDeviceAssociation(input_id, output_id);
     int session_id = media_stream_manager_->audio_input_device_manager()->Open(
-        StreamDeviceInfo(MEDIA_DEVICE_AUDIO_CAPTURE, "Fake input device",
-                         input_id));
+        MediaStreamDevice(MEDIA_DEVICE_AUDIO_CAPTURE, input_id,
+                          "Fake input device"));
     base::RunLoop().RunUntilIdle();
 
     // Send a create stream message to the audio output stream and wait until
@@ -511,6 +511,7 @@ class AudioRendererHostTest : public testing::Test {
   TestBrowserContext browser_context_;
   std::unique_ptr<media::FakeAudioLogFactory> log_factory;
   std::unique_ptr<FakeAudioManagerWithAssociations> audio_manager_;
+  std::unique_ptr<media::AudioSystem> audio_system_;
   MockAudioMirroringManager mirroring_manager_;
   base::RunLoop auth_run_loop_;
   MockRenderProcessHostWithSignaling render_process_host_;

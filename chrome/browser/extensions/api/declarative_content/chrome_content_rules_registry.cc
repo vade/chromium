@@ -8,7 +8,6 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/extensions/api/declarative_content/content_constants.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -20,6 +19,8 @@
 #include "extensions/browser/api/declarative/rules_registry_service.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_util.h"
+#include "extensions/common/api/declarative/declarative_constants.h"
 #include "extensions/common/extension_id.h"
 
 namespace extensions {
@@ -132,15 +133,14 @@ void ChromeContentRulesRegistry::MonitorWebContentsForRuleEvaluation(
     evaluator->TrackForWebContents(contents);
 }
 
-void ChromeContentRulesRegistry::DidNavigateMainFrame(
+void ChromeContentRulesRegistry::DidFinishNavigation(
     content::WebContents* contents,
-    const content::LoadCommittedDetails& details,
-    const content::FrameNavigateParams& params) {
+    content::NavigationHandle* navigation_handle) {
   if (base::ContainsKey(active_rules_, contents)) {
     EvaluationScope evaluation_scope(this);
     for (const std::unique_ptr<ContentPredicateEvaluator>& evaluator :
          evaluators_)
-      evaluator->OnWebContentsNavigation(contents, details, params);
+      evaluator->OnWebContentsNavigation(contents, navigation_handle);
   }
 }
 

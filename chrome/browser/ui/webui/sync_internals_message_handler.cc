@@ -144,18 +144,17 @@ void SyncInternalsMessageHandler::HandleRequestListOfTypes(
        it.Good(); it.Inc()) {
     type_list->AppendString(ModelTypeToString(it.Get()));
   }
-  event_details.Set(syncer::sync_ui_util::kTypes, type_list.release());
+  event_details.Set(syncer::sync_ui_util::kTypes, std::move(type_list));
   web_ui()->CallJavascriptFunctionUnsafe(
       syncer::sync_ui_util::kDispatchEvent,
-      base::StringValue(syncer::sync_ui_util::kOnReceivedListOfTypes),
-      event_details);
+      base::Value(syncer::sync_ui_util::kOnReceivedListOfTypes), event_details);
 }
 
 void SyncInternalsMessageHandler::HandleGetAllNodes(
     const base::ListValue* args) {
   DCHECK_EQ(1U, args->GetSize());
   int request_id = 0;
-  bool success = args->GetInteger(0, &request_id);
+  bool success = ExtractIntegerValue(args, &request_id);
   DCHECK(success);
 
   ProfileSyncService* service = GetProfileSyncService();
@@ -169,12 +168,12 @@ void SyncInternalsMessageHandler::HandleGetAllNodes(
 void SyncInternalsMessageHandler::OnReceivedAllNodes(
     int request_id,
     std::unique_ptr<base::ListValue> nodes) {
-  base::FundamentalValue id(request_id);
+  base::Value id(request_id);
   web_ui()->CallJavascriptFunctionUnsafe(
       syncer::sync_ui_util::kGetAllNodesCallback, id, *nodes);
 }
 
-void SyncInternalsMessageHandler::OnStateChanged() {
+void SyncInternalsMessageHandler::OnStateChanged(syncer::SyncService* sync) {
   SendAboutInfo();
 }
 
@@ -184,7 +183,7 @@ void SyncInternalsMessageHandler::OnProtocolEvent(
       syncer::ProtocolEvent::ToValue(event));
   web_ui()->CallJavascriptFunctionUnsafe(
       syncer::sync_ui_util::kDispatchEvent,
-      base::StringValue(syncer::sync_ui_util::kOnProtocolEvent), *value);
+      base::Value(syncer::sync_ui_util::kOnProtocolEvent), *value);
 }
 
 void SyncInternalsMessageHandler::OnCommitCountersUpdated(
@@ -212,10 +211,10 @@ void SyncInternalsMessageHandler::EmitCounterUpdate(
   std::unique_ptr<base::DictionaryValue> details(new base::DictionaryValue());
   details->SetString(syncer::sync_ui_util::kModelType, ModelTypeToString(type));
   details->SetString(syncer::sync_ui_util::kCounterType, counter_type);
-  details->Set(syncer::sync_ui_util::kCounters, value.release());
+  details->Set(syncer::sync_ui_util::kCounters, std::move(value));
   web_ui()->CallJavascriptFunctionUnsafe(
       syncer::sync_ui_util::kDispatchEvent,
-      base::StringValue(syncer::sync_ui_util::kOnCountersUpdated), *details);
+      base::Value(syncer::sync_ui_util::kOnCountersUpdated), *details);
 }
 
 void SyncInternalsMessageHandler::HandleJsEvent(
@@ -224,8 +223,7 @@ void SyncInternalsMessageHandler::HandleJsEvent(
   DVLOG(1) << "Handling event: " << name
            << " with details " << details.ToString();
   web_ui()->CallJavascriptFunctionUnsafe(syncer::sync_ui_util::kDispatchEvent,
-                                         base::StringValue(name),
-                                         details.Get());
+                                         base::Value(name), details.Get());
 }
 
 void SyncInternalsMessageHandler::SendAboutInfo() {
@@ -236,7 +234,7 @@ void SyncInternalsMessageHandler::SendAboutInfo() {
                                                             signin);
   web_ui()->CallJavascriptFunctionUnsafe(
       syncer::sync_ui_util::kDispatchEvent,
-      base::StringValue(syncer::sync_ui_util::kOnAboutInfoUpdated), *value);
+      base::Value(syncer::sync_ui_util::kOnAboutInfoUpdated), *value);
 }
 
 // Gets the ProfileSyncService of the underlying original profile.

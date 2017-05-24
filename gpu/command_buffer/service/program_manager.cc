@@ -1282,9 +1282,9 @@ bool Program::Link(ShaderManager* manager,
   TimeTicks before_time = TimeTicks::Now();
   bool link = true;
   ProgramCache* cache = manager_->program_cache_;
-  if (cache) {
-    DCHECK(!attached_shaders_[0]->last_compiled_source().empty() &&
-           !attached_shaders_[1]->last_compiled_source().empty());
+  if (cache &&
+      !attached_shaders_[0]->last_compiled_source().empty() &&
+      !attached_shaders_[1]->last_compiled_source().empty()) {
     ProgramCache::LinkedProgramStatus status = cache->GetLinkedProgramStatus(
         attached_shaders_[0]->last_compiled_signature(),
         attached_shaders_[1]->last_compiled_signature(),
@@ -1383,7 +1383,7 @@ bool Program::Link(ShaderManager* manager,
     ExecuteProgramOutputBindCalls();
 
     before_time = TimeTicks::Now();
-    if (cache && gl::g_driver_gl.ext.b_GL_ARB_get_program_binary) {
+    if (cache && gl::g_current_gl_driver->ext.b_GL_ARB_get_program_binary) {
       glProgramParameteri(service_id(),
                           PROGRAM_BINARY_RETRIEVABLE_HINT,
                           GL_TRUE);
@@ -1550,6 +1550,31 @@ const std::string* Program::GetOriginalNameFromHashedName(
           shader->GetOriginalNameFromHashedName(hashed_name);
       if (original_name)
         return original_name;
+    }
+  }
+  return nullptr;
+}
+
+const sh::Varying* Program::GetVaryingInfo(
+    const std::string& hashed_name) const {
+  for (auto shader : attached_shaders_) {
+    if (shader) {
+      const sh::Varying* info = shader->GetVaryingInfo(hashed_name);
+      if (info)
+        return info;
+    }
+  }
+  return nullptr;
+}
+
+const sh::InterfaceBlock* Program::GetInterfaceBlockInfo(
+    const std::string& hashed_name) const {
+  for (auto shader : attached_shaders_) {
+    if (shader) {
+      const sh::InterfaceBlock* info =
+          shader->GetInterfaceBlockInfo(hashed_name);
+      if (info)
+        return info;
     }
   }
   return nullptr;
@@ -2229,18 +2254,17 @@ bool Program::GetUniformBlocks(CommonDecoder::Bucket* bucket) const {
         program, ii, static_cast<GLsizei>(param), &length, &buffer[0]);
     DCHECK_EQ(param, length + 1);
     names[ii] = std::string(&buffer[0], length);
-    // TODO(zmo): optimize the name mapping lookup.
     size_t pos = names[ii].find_first_of('[');
-    const std::string* original_name;
+    const sh::InterfaceBlock* interface_block = nullptr;
     std::string array_index_str = "";
     if (pos != std::string::npos) {
-      original_name = GetOriginalNameFromHashedName(names[ii].substr(0, pos));
+      interface_block = GetInterfaceBlockInfo(names[ii].substr(0, pos));
       array_index_str = names[ii].substr(pos);
     } else {
-      original_name = GetOriginalNameFromHashedName(names[ii]);
+      interface_block = GetInterfaceBlockInfo(names[ii]);
     }
-    if (original_name)
-      names[ii] = *original_name + array_index_str;
+    if (interface_block)
+      names[ii] = interface_block->name + array_index_str;
     blocks[ii].name_length = names[ii].size() + 1;
     size += blocks[ii].name_length;
 
@@ -2370,10 +2394,9 @@ bool Program::GetTransformFeedbackVaryings(
     varyings[ii].name_offset = static_cast<uint32_t>(size.ValueOrDefault(0));
     DCHECK_GT(max_name_length, var_name_length);
     names[ii] = std::string(&buffer[0], var_name_length);
-    // TODO(zmo): optimize the name mapping lookup.
-    const std::string* original_name = GetOriginalNameFromHashedName(names[ii]);
-    if (original_name)
-      names[ii] = *original_name;
+    const sh::Varying* varying = GetVaryingInfo(names[ii]);
+    if (varying)
+      names[ii] = varying->name;
     varyings[ii].name_length = names[ii].size() + 1;
     size += names[ii].size();
     size += 1;

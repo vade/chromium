@@ -14,15 +14,14 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/trace_event/trace_event.h"
+#include "cc/base/filter_operation.h"
+#include "cc/base/filter_operations.h"
 #include "cc/layers/nine_patch_layer.h"
 #include "cc/layers/picture_layer.h"
 #include "cc/layers/solid_color_layer.h"
 #include "cc/layers/surface_layer.h"
 #include "cc/layers/texture_layer.h"
 #include "cc/output/copy_output_request.h"
-#include "cc/output/filter_operation.h"
-#include "cc/output/filter_operations.h"
-#include "cc/playback/display_item_list_settings.h"
 #include "cc/resources/transferable_resource.h"
 #include "cc/trees/layer_tree_settings.h"
 #include "ui/compositor/compositor_switches.h"
@@ -98,6 +97,9 @@ Layer::Layer()
       layer_brightness_(0.0f),
       layer_grayscale_(0.0f),
       layer_inverted_(false),
+      layer_temperature_(0.0f),
+      layer_blue_scale_(1.0f),
+      layer_green_scale_(1.0f),
       layer_mask_(NULL),
       layer_mask_back_link_(NULL),
       zoom_(1),
@@ -121,6 +123,9 @@ Layer::Layer(LayerType type)
       layer_brightness_(0.0f),
       layer_grayscale_(0.0f),
       layer_inverted_(false),
+      layer_temperature_(0.0f),
+      layer_blue_scale_(1.0f),
+      layer_green_scale_(1.0f),
       layer_mask_(NULL),
       layer_mask_back_link_(NULL),
       zoom_(1),
@@ -159,16 +164,6 @@ Layer::~Layer() {
 std::unique_ptr<Layer> Layer::Clone() const {
   auto clone = base::MakeUnique<Layer>(type_);
 
-  clone->SetTransform(GetTargetTransform());
-  clone->SetBounds(bounds_);
-  clone->SetSubpixelPositionOffset(subpixel_position_offset_);
-  clone->SetMasksToBounds(GetMasksToBounds());
-  clone->SetOpacity(GetTargetOpacity());
-  clone->SetVisible(GetTargetVisibility());
-  clone->SetFillsBoundsOpaquely(fills_bounds_opaquely_);
-  clone->SetFillsBoundsCompletely(fills_bounds_completely_);
-  clone->set_name(name_);
-
   // Background filters.
   clone->SetBackgroundBlur(background_blur_radius_);
   clone->SetBackgroundZoom(zoom_, zoom_inset_);
@@ -182,12 +177,23 @@ std::unique_ptr<Layer> Layer::Clone() const {
     clone->SetAlphaShape(base::MakeUnique<SkRegion>(*alpha_shape_));
 
   // cc::Layer state.
-  if (surface_layer_ && surface_layer_->surface_info().id().is_valid()) {
-    clone->SetShowSurface(surface_layer_->surface_info(),
-                          surface_layer_->surface_reference_factory());
+  if (surface_layer_ && surface_layer_->primary_surface_info().is_valid()) {
+    clone->SetShowPrimarySurface(surface_layer_->primary_surface_info(),
+                                 surface_layer_->surface_reference_factory());
   } else if (type_ == LAYER_SOLID_COLOR) {
     clone->SetColor(GetTargetColor());
   }
+
+  clone->SetTransform(GetTargetTransform());
+  clone->SetBounds(bounds_);
+  clone->SetSubpixelPositionOffset(subpixel_position_offset_);
+  clone->SetMasksToBounds(GetMasksToBounds());
+  clone->SetOpacity(GetTargetOpacity());
+  clone->SetVisible(GetTargetVisibility());
+  clone->SetFillsBoundsOpaquely(fills_bounds_opaquely_);
+  clone->SetFillsBoundsCompletely(fills_bounds_completely_);
+  clone->set_name(name_);
+
   return clone;
 }
 
@@ -372,6 +378,10 @@ float Layer::GetCombinedOpacity() const {
   return opacity;
 }
 
+void Layer::SetLayerTemperature(float value) {
+  GetAnimator()->SetTemperature(value);
+}
+
 void Layer::SetBackgroundBlur(int blur_radius) {
   background_blur_radius_ = blur_radius;
 
@@ -457,6 +467,15 @@ void Layer::SetLayerFilters() {
   if (layer_grayscale_) {
     filters.Append(cc::FilterOperation::CreateGrayscaleFilter(
         layer_grayscale_));
+  }
+  if (layer_temperature_) {
+    float color_matrix[] = {
+        1.0f,               0.0f,              0.0f, 0.0f, 0.0f,
+        0.0f, layer_green_scale_,              0.0f, 0.0f, 0.0f,
+        0.0f,               0.0f, layer_blue_scale_, 0.0f, 0.0f,
+        0.0f,               0.0f,              0.0f, 1.0f, 0.0f
+    };
+    filters.Append(cc::FilterOperation::CreateColorMatrixFilter(color_matrix));
   }
   if (layer_inverted_)
     filters.Append(cc::FilterOperation::CreateInvertFilter(1.0));
@@ -598,7 +617,7 @@ void Layer::SwitchToLayer(scoped_refptr<cc::Layer> new_layer) {
   cc_layer_->SetContentsOpaque(fills_bounds_opaquely_);
   cc_layer_->SetIsDrawable(type_ != LAYER_NOT_DRAWN);
   cc_layer_->SetHideLayerAndSubtree(!visible_);
-  cc_layer_->SetElementId(cc::ElementId(cc_layer_->id(), 0));
+  cc_layer_->SetElementId(cc::ElementId(cc_layer_->id()));
 
   SetLayerFilters();
   SetLayerBackgroundFilters();
@@ -653,24 +672,43 @@ bool Layer::TextureFlipped() const {
   return texture_layer_->flipped();
 }
 
-void Layer::SetShowSurface(
+void Layer::SetShowPrimarySurface(
     const cc::SurfaceInfo& surface_info,
     scoped_refptr<cc::SurfaceReferenceFactory> ref_factory) {
   DCHECK(type_ == LAYER_TEXTURED || type_ == LAYER_SOLID_COLOR);
 
-  scoped_refptr<cc::SurfaceLayer> new_layer =
-      cc::SurfaceLayer::Create(ref_factory);
-  new_layer->SetSurfaceInfo(surface_info);
-  SwitchToLayer(new_layer);
-  surface_layer_ = new_layer;
+  if (!surface_layer_) {
+    scoped_refptr<cc::SurfaceLayer> new_layer =
+        cc::SurfaceLayer::Create(ref_factory);
+    SwitchToLayer(new_layer);
+    surface_layer_ = new_layer;
+  }
+
+  surface_layer_->SetPrimarySurfaceInfo(surface_info);
 
   frame_size_in_dip_ = gfx::ConvertSizeToDIP(surface_info.device_scale_factor(),
                                              surface_info.size_in_pixels());
   RecomputeDrawsContentAndUVRect();
 
-  for (const auto& mirror : mirrors_) {
-    mirror->dest()->SetShowSurface(surface_info, ref_factory);
-  }
+  for (const auto& mirror : mirrors_)
+    mirror->dest()->SetShowPrimarySurface(surface_info, ref_factory);
+}
+
+void Layer::SetFallbackSurface(const cc::SurfaceInfo& surface_info) {
+  DCHECK(type_ == LAYER_TEXTURED || type_ == LAYER_SOLID_COLOR);
+  DCHECK(surface_layer_);
+
+  // TODO(fsamuel): We should compute the gutter in the display compositor.
+  surface_layer_->SetFallbackSurfaceInfo(surface_info);
+
+  for (const auto& mirror : mirrors_)
+    mirror->dest()->SetFallbackSurface(surface_info);
+}
+
+const cc::SurfaceInfo* Layer::GetFallbackSurfaceInfo() const {
+  if (surface_layer_)
+    return &surface_layer_->fallback_surface_info();
+  return nullptr;
 }
 
 void Layer::SetShowSolidColorContent() {
@@ -821,8 +859,9 @@ void Layer::OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) {
     delegate_->OnDelegatedFrameDamage(damage_rect_in_dip);
 }
 
-void Layer::SetScrollable(Layer* parent_clip_layer,
-                          const base::Closure& on_scroll) {
+void Layer::SetScrollable(
+    Layer* parent_clip_layer,
+    const base::Callback<void(const gfx::ScrollOffset&)>& on_scroll) {
   cc_layer_->SetScrollClipLayerId(parent_clip_layer->cc_layer_->id());
   cc_layer_->set_did_scroll_callback(on_scroll);
   cc_layer_->SetUserScrollable(true, true);
@@ -865,10 +904,7 @@ scoped_refptr<cc::DisplayItemList> Layer::PaintContentsToDisplayList(
   gfx::Rect invalidation(
       gfx::IntersectRects(paint_region_.bounds(), local_bounds));
   paint_region_.Clear();
-  cc::DisplayItemListSettings settings;
-  settings.use_cached_picture = false;
-  scoped_refptr<cc::DisplayItemList> display_list =
-      cc::DisplayItemList::Create(settings);
+  auto display_list = make_scoped_refptr(new cc::DisplayItemList);
   if (delegate_) {
     delegate_->OnPaintLayer(
         PaintContext(display_list.get(), device_scale_factor_, invalidation));
@@ -1037,6 +1073,17 @@ void Layer::SetColorFromAnimation(SkColor color) {
   SetFillsBoundsOpaquely(SkColorGetA(color) == 0xFF);
 }
 
+void Layer::SetTemperatureFromAnimation(float temperature) {
+  layer_temperature_ = temperature;
+
+  // If we only tone down the blue scale, the screen will look very green so we
+  // also need to tone down the green, but with a less value compared to the
+  // blue scale to avoid making things look very red.
+  layer_blue_scale_ = 1.0f - temperature;
+  layer_green_scale_ = 1.0f - 0.3f * temperature;
+  SetLayerFilters();
+}
+
 void Layer::ScheduleDrawForAnimation() {
   ScheduleDraw();
 }
@@ -1073,6 +1120,10 @@ SkColor Layer::GetColorForAnimation() const {
       solid_color_layer_->background_color() : SK_ColorBLACK;
 }
 
+float Layer::GetTemperatureFromAnimation() const {
+  return layer_temperature_;
+}
+
 float Layer::GetDeviceScaleFactor() const {
   return device_scale_factor_;
 }
@@ -1084,7 +1135,7 @@ LayerAnimatorCollection* Layer::GetLayerAnimatorCollection() {
 
 int Layer::GetFrameNumber() const {
   const Compositor* compositor = GetCompositor();
-  return compositor ? compositor->committed_frame_number() : 0;
+  return compositor ? compositor->activated_frame_count() : 0;
 }
 
 float Layer::GetRefreshRate() const {
@@ -1116,7 +1167,7 @@ void Layer::CreateCcLayer() {
   cc_layer_->SetContentsOpaque(true);
   cc_layer_->SetIsDrawable(type_ != LAYER_NOT_DRAWN);
   cc_layer_->SetLayerClient(this);
-  cc_layer_->SetElementId(cc::ElementId(cc_layer_->id(), 0));
+  cc_layer_->SetElementId(cc::ElementId(cc_layer_->id()));
   RecomputePosition();
 }
 

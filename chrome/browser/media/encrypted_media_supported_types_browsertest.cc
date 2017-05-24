@@ -119,8 +119,6 @@ class EncryptedMediaSupportedTypesTest : public InProcessBrowserTest {
     video_mp4_codecs_.push_back("avc1.4D000C");  // Main profile.
     video_mp4_codecs_.push_back("avc3.64001F");  // High profile.
 
-    video_mp4_codecs_.push_back("vp09.00.01.08.02.01.01.00");
-
     video_mp4_hi10p_codecs_.push_back("avc1.6E001E");  // Hi10P profile
 
 #if BUILDFLAG(ENABLE_HEVC_DEMUXING)
@@ -130,6 +128,16 @@ class EncryptedMediaSupportedTypesTest : public InProcessBrowserTest {
     invalid_codecs_.push_back("hvc1.1.6.L93.B0");
     invalid_codecs_.push_back("hev1.1.6.L93.B0");
 #endif
+
+    // Codecs allowed by both MP4 and WebM (with given command line flags).
+    // For vp9 codec string format, see https://www.webmproject.org/vp9/mp4/
+    video_common_codecs_.push_back("vp09.00.10.08");
+
+    // Non-zero VP9 profiles are not yet supported, even with the given command
+    // line flags. See http://crbug.com/707128
+    invalid_codecs_.push_back("vp09.01.10.08");
+    invalid_codecs_.push_back("vp09.02.10.10");
+    invalid_codecs_.push_back("vp09.03.10.10");
 
     // Extended codecs are used, so make sure generic ones fail. These will be
     // tested against all initDataTypes as they should always fail to be
@@ -154,11 +162,15 @@ class EncryptedMediaSupportedTypesTest : public InProcessBrowserTest {
   void SetUpCommandLine(base::CommandLine* command_line) override {
     InProcessBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnableVp9InMp4);
+    command_line->AppendSwitch(switches::kEnableNewVp9CodecString);
   }
 
   typedef std::vector<std::string> CodecVector;
 
   const CodecVector& no_codecs() const { return no_codecs_; }
+  const CodecVector& video_common_codecs() const {
+    return video_common_codecs_;
+  }
   const CodecVector& audio_webm_codecs() const { return audio_webm_codecs_; }
   const CodecVector& video_webm_codecs() const { return video_webm_codecs_; }
   const CodecVector& audio_mp4_codecs() const { return audio_mp4_codecs_; }
@@ -269,6 +281,7 @@ class EncryptedMediaSupportedTypesTest : public InProcessBrowserTest {
   CodecVector audio_mp4_codecs_;
   CodecVector video_mp4_codecs_;
   CodecVector video_mp4_hi10p_codecs_;
+  CodecVector video_common_codecs_;
   CodecVector invalid_codecs_;
 };
 
@@ -346,53 +359,66 @@ class EncryptedMediaSupportedTypesWidevineCDMRegisteredWithWrongPathTest
 #endif  // BUILDFLAG(ENABLE_PEPPER_CDMS)
 
 IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesClearKeyTest, Basic) {
-  EXPECT_SUCCESS(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), kClearKey));
-  EXPECT_SUCCESS(AreCodecsSupportedByKeySystem(
-      kAudioWebMMimeType, no_codecs(), kClearKey));
+  EXPECT_SUCCESS(AreCodecsSupportedByKeySystem(kVideoWebMMimeType,
+                                               video_webm_codecs(), kClearKey));
+  EXPECT_SUCCESS(AreCodecsSupportedByKeySystem(kAudioWebMMimeType,
+                                               audio_webm_codecs(), kClearKey));
   EXPECT_PROPRIETARY(AreCodecsSupportedByKeySystem(
-      kVideoMP4MimeType, no_codecs(), kClearKey));
+      kVideoMP4MimeType, video_mp4_codecs(), kClearKey));
   EXPECT_PROPRIETARY(AreCodecsSupportedByKeySystem(
-      kAudioMP4MimeType, no_codecs(), kClearKey));
+      kAudioMP4MimeType, audio_mp4_codecs(), kClearKey));
+}
+
+IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesClearKeyTest, NoCodecs) {
+  EXPECT_NO_MATCH(AreCodecsSupportedByKeySystem(kVideoWebMMimeType, no_codecs(),
+                                                kClearKey));
+  EXPECT_NO_MATCH(AreCodecsSupportedByKeySystem(kAudioWebMMimeType, no_codecs(),
+                                                kClearKey));
+  EXPECT_NO_MATCH(
+      AreCodecsSupportedByKeySystem(kVideoMP4MimeType, no_codecs(), kClearKey));
+  EXPECT_NO_MATCH(
+      AreCodecsSupportedByKeySystem(kAudioMP4MimeType, no_codecs(), kClearKey));
 }
 
 IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesClearKeyTest,
                        InvalidKeySystems) {
   // Case sensitive.
   EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), "org.w3.ClEaRkEy"));
+      kVideoWebMMimeType, video_webm_codecs(), "org.w3.ClEaRkEy"));
 
   // Prefixed Clear Key key system.
   EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), "webkit-org.w3.clearkey"));
+      kVideoWebMMimeType, video_webm_codecs(), "webkit-org.w3.clearkey"));
 
   // TLDs are not allowed.
   EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), "org."));
+      kVideoWebMMimeType, video_webm_codecs(), "org."));
   EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), "org"));
+      kVideoWebMMimeType, video_webm_codecs(), "org"));
   EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), "org.w3."));
+      kVideoWebMMimeType, video_webm_codecs(), "org.w3."));
   EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), "org.w3"));
+      kVideoWebMMimeType, video_webm_codecs(), "org.w3"));
 
   // Incomplete.
   EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), "org.w3.clearke"));
+      kVideoWebMMimeType, video_webm_codecs(), "org.w3.clearke"));
 
   // Extra character.
   EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), "org.w3.clearkeyz"));
+      kVideoWebMMimeType, video_webm_codecs(), "org.w3.clearkeyz"));
 
   // There are no child key systems for Clear Key.
   EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), "org.w3.clearkey.foo"));
+      kVideoWebMMimeType, video_webm_codecs(), "org.w3.clearkey.foo"));
 }
 
 IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesClearKeyTest, Video_WebM) {
   // Valid video types.
   EXPECT_SUCCESS(AreCodecsSupportedByKeySystem(
       kVideoWebMMimeType, video_webm_codecs(), kClearKey));
+  EXPECT_SUCCESS(AreCodecsSupportedByKeySystem(
+      kVideoWebMMimeType, video_common_codecs(), kClearKey));
 
   // Non-video WebM codecs.
   EXPECT_NO_MATCH(AreCodecsSupportedByKeySystem(
@@ -429,6 +455,8 @@ IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesClearKeyTest, Video_MP4) {
   // Valid video types.
   EXPECT_PROPRIETARY(AreCodecsSupportedByKeySystem(
       kVideoMP4MimeType, video_mp4_codecs(), kClearKey));
+  EXPECT_PROPRIETARY(AreCodecsSupportedByKeySystem(
+      kVideoMP4MimeType, video_common_codecs(), kClearKey));
 
   // High 10-bit Profile is supported when using ClearKey if
   // it is supported for clear content on this platform.
@@ -479,42 +507,57 @@ IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesClearKeyTest, Audio_MP4) {
 IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesExternalClearKeyTest,
                        Basic) {
   EXPECT_ECK(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), kExternalClearKey));
+      kVideoWebMMimeType, video_webm_codecs(), kExternalClearKey));
   EXPECT_ECK(AreCodecsSupportedByKeySystem(
+      kAudioWebMMimeType, audio_webm_codecs(), kExternalClearKey));
+  EXPECT_ECK_PROPRIETARY(AreCodecsSupportedByKeySystem(
+      kVideoMP4MimeType, video_mp4_codecs(), kExternalClearKey));
+  EXPECT_ECK_PROPRIETARY(AreCodecsSupportedByKeySystem(
+      kAudioMP4MimeType, audio_mp4_codecs(), kExternalClearKey));
+}
+
+IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesExternalClearKeyTest,
+                       NoCodecs) {
+  EXPECT_ECK_NO_MATCH(AreCodecsSupportedByKeySystem(
+      kVideoWebMMimeType, no_codecs(), kExternalClearKey));
+  EXPECT_ECK_NO_MATCH(AreCodecsSupportedByKeySystem(
       kAudioWebMMimeType, no_codecs(), kExternalClearKey));
-  EXPECT_ECK_PROPRIETARY(AreCodecsSupportedByKeySystem(
+  EXPECT_ECK_NO_MATCH(AreCodecsSupportedByKeySystem(
       kVideoMP4MimeType, no_codecs(), kExternalClearKey));
-  EXPECT_ECK_PROPRIETARY(AreCodecsSupportedByKeySystem(
+  EXPECT_ECK_NO_MATCH(AreCodecsSupportedByKeySystem(
       kAudioMP4MimeType, no_codecs(), kExternalClearKey));
 }
 
 IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesExternalClearKeyTest,
                        InvalidKeySystems) {
   // Case sensitive.
-  EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), "org.chromium.ExTeRnAlClEaRkEy"));
+  EXPECT_UNKNOWN_KEYSYSTEM(
+      AreCodecsSupportedByKeySystem(kVideoWebMMimeType, video_webm_codecs(),
+                                    "org.chromium.ExTeRnAlClEaRkEy"));
 
   // TLDs are not allowed.
   EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), "org."));
+      kVideoWebMMimeType, video_webm_codecs(), "org."));
   EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), "org"));
+      kVideoWebMMimeType, video_webm_codecs(), "org"));
   EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), "org.chromium"));
+      kVideoWebMMimeType, video_webm_codecs(), "org.chromium"));
   EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), "org.chromium."));
+      kVideoWebMMimeType, video_webm_codecs(), "org.chromium."));
 
   // Incomplete.
   EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), "org.chromium.externalclearke"));
+      kVideoWebMMimeType, video_webm_codecs(), "org.chromium.externalclearke"));
 
   // Extra character.
-  EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), "org.chromium.externalclearkeyz"));
+  EXPECT_UNKNOWN_KEYSYSTEM(
+      AreCodecsSupportedByKeySystem(kVideoWebMMimeType, video_webm_codecs(),
+                                    "org.chromium.externalclearkeyz"));
 
   // There are no child key systems for External Clear Key.
-  EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), "org.chromium.externalclearkey.foo"));
+  EXPECT_UNKNOWN_KEYSYSTEM(
+      AreCodecsSupportedByKeySystem(kVideoWebMMimeType, video_webm_codecs(),
+                                    "org.chromium.externalclearkey.foo"));
 }
 
 IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesExternalClearKeyTest,
@@ -522,6 +565,8 @@ IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesExternalClearKeyTest,
   // Valid video types.
   EXPECT_ECK(AreCodecsSupportedByKeySystem(
       kVideoWebMMimeType, video_webm_codecs(), kExternalClearKey));
+  EXPECT_ECK(AreCodecsSupportedByKeySystem(
+      kVideoWebMMimeType, video_common_codecs(), kExternalClearKey));
 
   // Non-video WebM codecs.
   EXPECT_ECK_NO_MATCH(AreCodecsSupportedByKeySystem(
@@ -560,6 +605,8 @@ IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesExternalClearKeyTest,
   // Valid video types.
   EXPECT_ECK_PROPRIETARY(AreCodecsSupportedByKeySystem(
       kVideoMP4MimeType, video_mp4_codecs(), kExternalClearKey));
+  EXPECT_ECK_PROPRIETARY(AreCodecsSupportedByKeySystem(
+      kVideoMP4MimeType, video_common_codecs(), kExternalClearKey));
 
   // High 10-bit Profile is not supported when using ExternalClearKey.
   EXPECT_ECK_NO_MATCH(AreCodecsSupportedByKeySystem(
@@ -602,11 +649,11 @@ IN_PROC_BROWSER_TEST_F(
     EncryptedMediaSupportedTypesExternalClearKeyNotEnabledTest,
     Basic) {
   EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), kExternalClearKey));
+      kVideoWebMMimeType, video_webm_codecs(), kExternalClearKey));
 
   // Clear Key should still be registered.
-  EXPECT_SUCCESS(AreCodecsSupportedByKeySystem(kVideoWebMMimeType, no_codecs(),
-                                               kClearKey));
+  EXPECT_SUCCESS(AreCodecsSupportedByKeySystem(kVideoWebMMimeType,
+                                               video_webm_codecs(), kClearKey));
 }
 
 //
@@ -615,19 +662,32 @@ IN_PROC_BROWSER_TEST_F(
 
 IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesWidevineTest, Basic) {
   EXPECT_WV_SUCCESS(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), kWidevine));
+      kVideoWebMMimeType, video_webm_codecs(), kWidevine));
   EXPECT_WV_SUCCESS(AreCodecsSupportedByKeySystem(
-      kAudioWebMMimeType, no_codecs(), kWidevine));
+      kAudioWebMMimeType, audio_webm_codecs(), kWidevine));
   EXPECT_WV_PROPRIETARY(AreCodecsSupportedByKeySystem(
-      kVideoMP4MimeType, no_codecs(), kWidevine));
+      kVideoMP4MimeType, video_mp4_codecs(), kWidevine));
   EXPECT_WV_PROPRIETARY(AreCodecsSupportedByKeySystem(
-      kAudioMP4MimeType, no_codecs(), kWidevine));
+      kAudioMP4MimeType, audio_mp4_codecs(), kWidevine));
+}
+
+IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesWidevineTest, NoCodecs) {
+  EXPECT_WV_NO_MATCH(AreCodecsSupportedByKeySystem(kVideoWebMMimeType,
+                                                   no_codecs(), kWidevine));
+  EXPECT_WV_NO_MATCH(AreCodecsSupportedByKeySystem(kAudioWebMMimeType,
+                                                   no_codecs(), kWidevine));
+  EXPECT_WV_NO_MATCH(
+      AreCodecsSupportedByKeySystem(kVideoMP4MimeType, no_codecs(), kWidevine));
+  EXPECT_WV_NO_MATCH(
+      AreCodecsSupportedByKeySystem(kAudioMP4MimeType, no_codecs(), kWidevine));
 }
 
 IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesWidevineTest, Video_WebM) {
   // Valid video types.
   EXPECT_WV_SUCCESS(AreCodecsSupportedByKeySystem(
       kVideoWebMMimeType, video_webm_codecs(), kWidevine));
+  EXPECT_WV_SUCCESS(AreCodecsSupportedByKeySystem(
+      kVideoWebMMimeType, video_common_codecs(), kWidevine));
 
   // Non-video WebM codecs.
   EXPECT_WV_NO_MATCH(AreCodecsSupportedByKeySystem(
@@ -664,6 +724,8 @@ IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesWidevineTest, Video_MP4) {
   // Valid video types.
   EXPECT_WV_PROPRIETARY(AreCodecsSupportedByKeySystem(
       kVideoMP4MimeType, video_mp4_codecs(), kWidevine));
+  EXPECT_WV_PROPRIETARY(AreCodecsSupportedByKeySystem(
+      kVideoMP4MimeType, video_common_codecs(), kWidevine));
 
   // High 10-bit Profile is not supported when using Widevine.
   EXPECT_WV_NO_MATCH(AreCodecsSupportedByKeySystem(
@@ -707,17 +769,17 @@ IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesWidevineTest, Audio_MP4) {
 IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesTest,
                        PepperCDMsNotRegistered) {
   EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), kExternalClearKey));
+      kVideoWebMMimeType, video_webm_codecs(), kExternalClearKey));
 
 // This will fail in all builds unless widevine is available.
 #if !defined(WIDEVINE_CDM_AVAILABLE)
   EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), kWidevine));
+      kVideoWebMMimeType, video_webm_codecs(), kWidevine));
 #endif
 
   // Clear Key should still be registered.
-  EXPECT_SUCCESS(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), kClearKey));
+  EXPECT_SUCCESS(AreCodecsSupportedByKeySystem(kVideoWebMMimeType,
+                                               video_webm_codecs(), kClearKey));
 }
 
 // Since this test fixture does not register the CDMs on the command line, the
@@ -727,11 +789,11 @@ IN_PROC_BROWSER_TEST_F(
     EncryptedMediaSupportedTypesClearKeyCDMRegisteredWithWrongPathTest,
     PepperCDMsRegisteredButAdapterNotPresent) {
   EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), kExternalClearKey));
+      kVideoWebMMimeType, video_webm_codecs(), kExternalClearKey));
 
   // Clear Key should still be registered.
-  EXPECT_SUCCESS(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), kClearKey));
+  EXPECT_SUCCESS(AreCodecsSupportedByKeySystem(kVideoWebMMimeType,
+                                               video_webm_codecs(), kClearKey));
 }
 
 // This will fail in all builds unless Widevine is available.
@@ -740,11 +802,11 @@ IN_PROC_BROWSER_TEST_F(
     EncryptedMediaSupportedTypesWidevineCDMRegisteredWithWrongPathTest,
     PepperCDMsRegisteredButAdapterNotPresent) {
   EXPECT_UNKNOWN_KEYSYSTEM(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), kWidevine));
+      kVideoWebMMimeType, video_webm_codecs(), kWidevine));
 
   // Clear Key should still be registered.
-  EXPECT_SUCCESS(AreCodecsSupportedByKeySystem(
-      kVideoWebMMimeType, no_codecs(), kClearKey));
+  EXPECT_SUCCESS(AreCodecsSupportedByKeySystem(kVideoWebMMimeType,
+                                               video_webm_codecs(), kClearKey));
 }
 #endif  // !defined(WIDEVINE_CDM_AVAILABLE)
 #endif  // BUILDFLAG(ENABLE_PEPPER_CDMS)

@@ -7,8 +7,7 @@
 #include <memory>
 
 #include "base/mac/foundation_util.h"
-#include "base/mac/objc_property_releaser.h"
-#include "base/mac/scoped_nsobject.h"
+
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_model_observer.h"
 #include "ios/chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -26,6 +25,10 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/tree_node_iterator.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 using bookmarks::BookmarkNode;
 
 @interface BookmarkMenuView ()<BookmarkModelBridgeObserver,
@@ -34,17 +37,15 @@ using bookmarks::BookmarkNode;
                                UITableViewDelegate> {
   // A bridge to receive bookmark model observer callbacks.
   std::unique_ptr<bookmarks::BookmarkModelBridge> _modelBridge;
-
-  base::mac::ObjCPropertyReleaser _propertyReleaser_BookmarkMenuView;
 }
 @property(nonatomic, assign) bookmarks::BookmarkModel* bookmarkModel;
 // This array directly represents the rows that show up in the table.
-@property(nonatomic, retain) NSMutableArray* menuItems;
+@property(nonatomic, strong) NSMutableArray* menuItems;
 // The primary menu item is blue instead of gray.
-@property(nonatomic, retain) BookmarkMenuItem* primaryMenuItem;
+@property(nonatomic, strong) BookmarkMenuItem* primaryMenuItem;
 @property(nonatomic, assign) ios::ChromeBrowserState* browserState;
-@property(nonatomic, retain) UITableView* tableView;
-@property(nonatomic, retain) MDCInkTouchController* inkTouchController;
+@property(nonatomic, strong) UITableView* tableView;
+@property(nonatomic, strong) MDCInkTouchController* inkTouchController;
 
 // Updates the data model, and the UI.
 - (void)reloadData;
@@ -72,8 +73,6 @@ using bookmarks::BookmarkNode;
                                frame:(CGRect)frame {
   self = [super initWithFrame:frame];
   if (self) {
-    _propertyReleaser_BookmarkMenuView.Init(self, [BookmarkMenuView class]);
-
     _browserState = browserState;
 
     // Set up connection to the BookmarkModel.
@@ -93,13 +92,11 @@ using bookmarks::BookmarkNode;
 - (void)dealloc {
   self.tableView.delegate = nil;
   self.tableView.dataSource = nil;
-  [super dealloc];
 }
 
 - (void)createViews {
   // Make the table view.
-  self.tableView = base::scoped_nsobject<UITableView>(
-      [[UITableView alloc] initWithFrame:self.bounds]);
+  self.tableView = [[UITableView alloc] initWithFrame:self.bounds];
   [self addSubview:self.tableView];
   self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
   self.tableView.delegate = self;
@@ -108,8 +105,8 @@ using bookmarks::BookmarkNode;
   [self reloadData];
 
   // Set up ink touch controller.
-  base::scoped_nsobject<MDCInkTouchController> inkTouchController(
-      [[MDCInkTouchController alloc] initWithView:self.tableView]);
+  MDCInkTouchController* inkTouchController =
+      [[MDCInkTouchController alloc] initWithView:self.tableView];
   self.inkTouchController = inkTouchController;
   self.inkTouchController.delegate = self;
   self.inkTouchController.delaysInkSpread = YES;
@@ -133,22 +130,15 @@ using bookmarks::BookmarkNode;
   const BookmarkNode* otherBookmarks = self.bookmarkModel->other_node();
 
   // The first section is always visible.
-  base::scoped_nsobject<NSMutableArray> topSection(
-      [[NSMutableArray alloc] init]);
+  NSMutableArray* topSection = [[NSMutableArray alloc] init];
   [self.menuItems addObject:topSection];
 
-  if (experimental_flags::IsAllBookmarksEnabled()) {
-    // All Items is always visible.
-    [topSection addObject:[BookmarkMenuItem allMenuItem]];
-  }
-  // Bookmarks Bar, Mobile Bookmarks and Other Bookmarks are special folders and
-  // are shown at the top if they contain anything.
-  if (!mobileBookmarks->empty() ||
-      !experimental_flags::IsAllBookmarksEnabled()) {
-    [topSection
-        addObject:[BookmarkMenuItem folderMenuItemForNode:mobileBookmarks
-                                             rootAncestor:mobileBookmarks]];
-  }
+  // Mobile bookmark is shown even if empty.
+  [topSection
+      addObject:[BookmarkMenuItem folderMenuItemForNode:mobileBookmarks
+                                           rootAncestor:mobileBookmarks]];
+  // Bookmarks Bar and Other Bookmarks are special folders and are shown at the
+  // top if they contain anything.
   if (!bookmarkBar->empty()) {
     [topSection addObject:[BookmarkMenuItem folderMenuItemForNode:bookmarkBar
                                                      rootAncestor:bookmarkBar]];
@@ -161,12 +151,11 @@ using bookmarks::BookmarkNode;
 
   // The second section contains all the top level folders (except for the
   // permanent nodes).
-  base::scoped_nsobject<NSMutableArray> folderSection(
-      [[NSMutableArray alloc] init]);
+  NSMutableArray* folderSection = [[NSMutableArray alloc] init];
   std::vector<const BookmarkNode*> rootLevelFolders =
       RootLevelFolders(self.bookmarkModel);
   bookmark_utils_ios::SortFolders(&rootLevelFolders);
-  for (auto node : rootLevelFolders) {
+  for (auto* node : rootLevelFolders) {
     [folderSection addObject:[BookmarkMenuItem folderMenuItemForNode:node
                                                         rootAncestor:node]];
   }
@@ -268,15 +257,6 @@ using bookmarks::BookmarkNode;
     return;
   }
 
-  if (node == self.primaryMenuItem.rootAncestor) {
-    // The deleted node is the root node of the current selected folder. Move to
-    // all items.
-    self.primaryMenuItem = [BookmarkMenuItem allMenuItem];
-    [self.delegate bookmarkMenuView:self selectedMenuItem:self.primaryMenuItem];
-    [self reloadData];
-    return;
-  }
-
   const BookmarkNode* root =
       RootLevelFolderForNode(parentFolder, self.bookmarkModel);
 
@@ -327,9 +307,9 @@ using bookmarks::BookmarkNode;
   BookmarkMenuCell* cell = [tableView
       dequeueReusableCellWithIdentifier:[BookmarkMenuCell reuseIdentifier]];
   if (!cell) {
-    cell = [[[BookmarkMenuCell alloc]
+    cell = [[BookmarkMenuCell alloc]
           initWithStyle:UITableViewCellStyleDefault
-        reuseIdentifier:[BookmarkMenuCell reuseIdentifier]] autorelease];
+        reuseIdentifier:[BookmarkMenuCell reuseIdentifier]];
   }
   cell.selectionStyle = UITableViewCellSelectionStyleNone;
   BookmarkMenuItem* menuItem = [self menuItemAtIndexPath:indexPath];
@@ -386,12 +366,12 @@ using bookmarks::BookmarkNode;
 
 - (UIView*)tableView:(UITableView*)tableView
     viewForHeaderInSection:(NSInteger)section {
-  return [[[UIView alloc] initWithFrame:CGRectZero] autorelease];
+  return [[UIView alloc] initWithFrame:CGRectZero];
 }
 
 - (UIView*)tableView:(UITableView*)tableView
     viewForFooterInSection:(NSInteger)section {
-  return [[[UIView alloc] initWithFrame:CGRectZero] autorelease];
+  return [[UIView alloc] initWithFrame:CGRectZero];
 }
 
 #pragma mark MDCInkTouchControllerDelegate
@@ -400,8 +380,7 @@ using bookmarks::BookmarkNode;
     shouldProcessInkTouchesAtTouchLocation:(CGPoint)location {
   NSIndexPath* indexPath = [self.tableView indexPathForRowAtPoint:location];
   BookmarkMenuItem* menuItem = [self menuItemAtIndexPath:indexPath];
-  return menuItem.type == bookmarks::MenuItemAll ||
-         menuItem.type == bookmarks::MenuItemFolder;
+  return menuItem.type == bookmarks::MenuItemFolder;
 }
 
 - (MDCInkView*)inkTouchController:(MDCInkTouchController*)inkTouchController

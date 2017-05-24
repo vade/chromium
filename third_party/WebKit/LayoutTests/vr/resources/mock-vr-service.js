@@ -13,6 +13,7 @@ let mockVRService = loadMojoModules(
       this.displayClient_ = new vr_service.VRDisplayClientPtr();
       this.displayInfo_ = displayInfo;
       this.service_ = service;
+      this.vsync_provider_ = new MockVRVSyncProvider();
 
       interfaceProvider.addInterfaceOverrideForTesting(
           vr_service.VRDisplay.name,
@@ -27,6 +28,17 @@ let mockVRService = loadMojoModules(
       return Promise.resolve({success: true});
     }
 
+    setPose(pose) {
+      if (pose == null) {
+        this.vsync_provider_.pose_ = null;
+      } else {
+        this.vsync_provider_.initPose();
+        this.vsync_provider_.fillPose(pose);
+      }
+    }
+
+    getVRVSyncProvider(request) { this.vsync_provider_.bind(request); }
+
     forceActivate(reason) {
       this.displayClient_.onActivate(reason);
     }
@@ -40,6 +52,53 @@ let mockVRService = loadMojoModules(
       let clientRequest = bindings.makeRequest(this.displayClient_);
       this.service_.client_.onDisplayConnected(displayPtr, clientRequest,
           this.displayInfo_);
+    }
+  }
+
+  class MockVRVSyncProvider {
+    constructor() {
+      this.timeDelta_ = 0;
+      this.binding_ = new bindings.Binding(vr_service.VRVSyncProvider, this);
+      this.pose_ = null;
+    }
+    bind(request) {
+      this.binding_.close();
+      this.binding_.bind(request);
+    }
+    getVSync() {
+      if (this.pose_) {
+        this.pose_.poseIndex++;
+      }
+
+      let retval = Promise.resolve({
+        pose: this.pose_,
+        time: {
+          microseconds: this.timeDelta_,
+        },
+        frameId: 0,
+        error: vr_service.VRVSyncProvider.Status.SUCCESS,
+      });
+
+      this.timeDelta_ += 1000.0 / 60.0;
+      return retval;
+    }
+    initPose() {
+      this.pose_ = {
+        orientation: null,
+        position: null,
+        angularVelocity: null,
+        linearVelocity: null,
+        angularAcceleration: null,
+        linearAcceleration: null,
+        poseIndex: 0
+      };
+    }
+    fillPose(pose) {
+      for (var field in pose) {
+        if (this.pose_.hasOwnProperty(field)) {
+          this.pose_[field] = pose[field];
+        }
+      }
     }
   }
 

@@ -96,7 +96,8 @@ RemoteSuggestion::~RemoteSuggestion() = default;
 // static
 std::unique_ptr<RemoteSuggestion>
 RemoteSuggestion::CreateFromChromeReaderDictionary(
-    const base::DictionaryValue& dict) {
+    const base::DictionaryValue& dict,
+    const base::Time& fetch_date) {
   const base::DictionaryValue* content = nullptr;
   if (!dict.GetDictionary("contentInfo", &content)) {
     return nullptr;
@@ -118,7 +119,7 @@ RemoteSuggestion::CreateFromChromeReaderDictionary(
   std::vector<SnippetSource> sources;
   for (const auto& value : *corpus_infos_list) {
     const base::DictionaryValue* dict_value = nullptr;
-    if (!value->GetAsDictionary(&dict_value)) {
+    if (!value.GetAsDictionary(&dict_value)) {
       DLOG(WARNING) << "Invalid source info for article " << primary_id;
       continue;
     }
@@ -150,8 +151,8 @@ RemoteSuggestion::CreateFromChromeReaderDictionary(
     // Expected to not have AMP url sometimes.
     if (dict_value->GetString("ampUrl", &amp_url_str)) {
       amp_url = GURL(amp_url_str);
-      DLOG_IF(WARNING, !amp_url.is_valid()) << "Invalid AMP url "
-                                            << amp_url_str;
+      DLOG_IF(WARNING, !amp_url.is_valid())
+          << "Invalid AMP url " << amp_url_str;
     }
     sources.emplace_back(corpus_id, site_title,
                          amp_url.is_valid() ? amp_url : GURL());
@@ -167,6 +168,7 @@ RemoteSuggestion::CreateFromChromeReaderDictionary(
 
   std::unique_ptr<RemoteSuggestion> snippet(
       new RemoteSuggestion(ids, kArticlesRemoteId));
+  snippet->fetch_date_ = fetch_date;
 
   std::string title;
   if (content->GetString("title", &title)) {
@@ -217,7 +219,8 @@ RemoteSuggestion::CreateFromChromeReaderDictionary(
 std::unique_ptr<RemoteSuggestion>
 RemoteSuggestion::CreateFromContentSuggestionsDictionary(
     const base::DictionaryValue& dict,
-    int remote_category_id) {
+    int remote_category_id,
+    const base::Time& fetch_date) {
   const base::ListValue* ids;
   if (!dict.GetList("ids", &ids)) {
     return nullptr;
@@ -225,7 +228,7 @@ RemoteSuggestion::CreateFromContentSuggestionsDictionary(
   std::vector<std::string> parsed_ids;
   for (const auto& value : *ids) {
     std::string id;
-    if (!value->GetAsString(&id)) {
+    if (!value.GetAsString(&id)) {
       return nullptr;
     }
     parsed_ids.push_back(id);
@@ -235,6 +238,7 @@ RemoteSuggestion::CreateFromContentSuggestionsDictionary(
     return nullptr;
   }
   auto snippet = MakeUnique(parsed_ids, remote_category_id);
+  snippet->fetch_date_ = fetch_date;
 
   if (!(dict.GetString("title", &snippet->title_) &&
         dict.GetString("snippet", &snippet->snippet_) &&
@@ -281,6 +285,7 @@ std::unique_ptr<RemoteSuggestion> RemoteSuggestion::CreateFromProto(
                                : kArticlesRemoteId;
 
   std::vector<std::string> ids(proto.ids().begin(), proto.ids().end());
+
   auto snippet = MakeUnique(ids, remote_category_id);
 
   snippet->title_ = proto.title();
@@ -303,8 +308,8 @@ std::unique_ptr<RemoteSuggestion> RemoteSuggestion::CreateFromProto(
     GURL amp_url;
     if (source_proto.has_amp_url()) {
       amp_url = GURL(source_proto.amp_url());
-      DLOG_IF(WARNING, !amp_url.is_valid()) << "Invalid AMP URL "
-                                            << source_proto.amp_url();
+      DLOG_IF(WARNING, !amp_url.is_valid())
+          << "Invalid AMP URL " << source_proto.amp_url();
     }
 
     sources.emplace_back(url, source_proto.publisher_name(), amp_url);
@@ -318,6 +323,10 @@ std::unique_ptr<RemoteSuggestion> RemoteSuggestion::CreateFromProto(
   snippet->url_ = source.url;
   snippet->publisher_name_ = source.publisher_name;
   snippet->amp_url_ = source.amp_url;
+
+  if (proto.has_fetch_date()) {
+    snippet->fetch_date_ = base::Time::FromInternalValue(proto.fetch_date());
+  }
 
   return snippet;
 }
@@ -371,17 +380,26 @@ SnippetProto RemoteSuggestion::ToProto() const {
     source_proto->set_amp_url(amp_url_.spec());
   }
 
+  if (!fetch_date_.is_null()) {
+    result.set_fetch_date(fetch_date_.ToInternalValue());
+  }
   return result;
 }
 
 ContentSuggestion RemoteSuggestion::ToContentSuggestion(
     Category category) const {
   GURL url = url_;
-  if (base::FeatureList::IsEnabled(kPreferAmpUrlsFeature) &&
-      !amp_url_.is_empty()) {
+  bool use_amp = base::FeatureList::IsEnabled(kPreferAmpUrlsFeature) &&
+                 !amp_url_.is_empty();
+  if (use_amp) {
     url = amp_url_;
   }
   ContentSuggestion suggestion(category, id(), url);
+  // Set url for fetching favicons if it differs from the main url (domains of
+  // AMP URLs sometimes failed to provide favicons).
+  if (use_amp) {
+    suggestion.set_url_with_favicon(url_);
+  }
   suggestion.set_title(base::UTF8ToUTF16(title_));
   suggestion.set_snippet_text(base::UTF8ToUTF16(snippet_));
   suggestion.set_publish_date(publish_date_);
@@ -393,6 +411,7 @@ ContentSuggestion RemoteSuggestion::ToContentSuggestion(
     suggestion.set_notification_extra(
         base::MakeUnique<NotificationExtra>(extra));
   }
+  suggestion.set_fetch_date(fetch_date_);
   return suggestion;
 }
 

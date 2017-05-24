@@ -10,7 +10,8 @@ import("//ui/ozone/ozone.gni")
 import("//testing/test.gni")
 
 declare_args() {
-  enable_swiftshader = is_chrome_branded && is_win
+  enable_swiftshader = (is_win || (is_linux && !is_chromeos && use_x11)) &&
+                       (target_cpu == "x86" || target_cpu == "x64")
 }
 
 use_egl = is_win || is_android || is_linux
@@ -53,6 +54,8 @@ component("gl") {
     "android/surface_texture_listener.h",
     "ca_renderer_layer_params.cc",
     "ca_renderer_layer_params.h",
+    "dc_renderer_layer_params.cc",
+    "dc_renderer_layer_params.h",
     "gl_bindings.cc",
     "gl_bindings.h",
     "gl_bindings_autogen_gl.cc",
@@ -65,8 +68,6 @@ component("gl") {
     "gl_context_osmesa.h",
     "gl_context_stub.cc",
     "gl_context_stub.h",
-    "gl_context_stub_with_extensions.cc",
-    "gl_context_stub_with_extensions.h",
     "gl_enums.cc",
     "gl_enums.h",
     "gl_enums_implementation_autogen.h",
@@ -122,8 +123,6 @@ component("gl") {
     "gpu_switching_manager.h",
     "gpu_timing.cc",
     "gpu_timing.h",
-    "scoped_api.cc",
-    "scoped_api.h",
     "scoped_binders.cc",
     "scoped_binders.h",
     "scoped_make_current.cc",
@@ -173,6 +172,13 @@ component("gl") {
       "gl_surface_egl.cc",
       "gl_surface_egl.h",
     ]
+
+    if (is_linux) {
+      sources += [
+        "gl_image_native_pixmap.cc",
+        "gl_image_native_pixmap.h",
+      ]
+    }
   }
   if (is_android || is_linux) {
     sources += [
@@ -229,6 +235,8 @@ component("gl") {
       "gl_bindings_autogen_wgl.h",
       "gl_context_wgl.cc",
       "gl_context_wgl.h",
+      "gl_image_dxgi.cc",
+      "gl_image_dxgi.h",
       "gl_surface_osmesa_win.cc",
       "gl_surface_osmesa_win.h",
       "gl_surface_wgl.cc",
@@ -328,7 +336,9 @@ static_library("test_support") {
     "//ui/gl/init",
   ]
   deps = [
+    "//base/test:test_support",
     "//testing/gtest",
+    "//ui/base",
   ]
 
   if (use_x11) {
@@ -370,6 +380,10 @@ test("gl_unittests") {
     "gl_version_info_unittest.cc",
     "gpu_timing_unittest.cc",
   ]
+
+  if (use_egl && !use_ozone) {
+    sources += [ "gl_surface_egl_unittest.cc" ]
+  }
 
   if (use_egl) {
     sources += [
@@ -416,15 +430,6 @@ group("gl_unittests_ozone") {
   testonly = true
   data_deps = [
     ":gl_unittests",
-  ]
-}
-
-# TODO(GYP_GONE): Delete this after we've converted everything to GN.
-# The _run targets exist only for compatibility w/ GYP.
-group("gl_unittests_ozone_run") {
-  testonly = true
-  deps = [
-    ":gl_unittests_ozone",
   ]
 }
 

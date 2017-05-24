@@ -93,7 +93,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
     // Variables for functionality provided by this adapter ---------------------------------------
     private ContentSettingsAdapter mWebSettings;
     // The WebView wrapper for ContentViewCore and required browser compontents.
-    private AwContents mAwContents;
+    AwContents mAwContents;
     // Non-null if this webview is using the GL accelerated draw path.
     private DrawGLFunctor mGLfunctor;
 
@@ -174,11 +174,15 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
         final boolean allowGeolocationOnInsecureOrigins =
                 mAppTargetSdkVersion <= Build.VERSION_CODES.M;
 
+        // https://crbug.com/698752
+        final boolean doNotUpdateSelectionOnMutatingSelectionRange =
+                mAppTargetSdkVersion <= Build.VERSION_CODES.M;
+
         mContentsClientAdapter = mFactory.createWebViewContentsClientAdapter(mWebView, mContext);
-        mWebSettings = new ContentSettingsAdapter(
-                new AwSettings(mContext, isAccessFromFileURLsGrantedByDefault,
-                        areLegacyQuirksEnabled, allowEmptyDocumentPersistence,
-                        allowGeolocationOnInsecureOrigins));
+        mWebSettings = new ContentSettingsAdapter(new AwSettings(mContext,
+                isAccessFromFileURLsGrantedByDefault, areLegacyQuirksEnabled,
+                allowEmptyDocumentPersistence, allowGeolocationOnInsecureOrigins,
+                doNotUpdateSelectionOnMutatingSelectionRange));
 
         if (mAppTargetSdkVersion < Build.VERSION_CODES.LOLLIPOP) {
             // Prior to Lollipop we always allowed third party cookies and mixed content.
@@ -1695,8 +1699,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
         mAwContents.setLayoutParams(layoutParams);
     }
 
-    // Overrides WebViewProvider.ViewDelegate.onActivityResult (not in system api jar yet).
-    // crbug.com/543272.
+    @Override
     public void onActivityResult(final int requestCode, final int resultCode, final Intent data) {
         if (checkNeedsPost()) {
             mFactory.addTask(new Runnable() {
@@ -1730,8 +1733,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
         mAwContents.onConfigurationChanged(newConfig);
     }
 
-    //TODO(hush): add override after release.
-    //@Override
+    @Override
     public boolean onDragEvent(final DragEvent event) {
         mFactory.startYourEngines(false);
         if (checkNeedsPost()) {
@@ -2213,14 +2215,16 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
 
         @Override
         public void super_startActivityForResult(Intent intent, int requestCode) {
-            // TODO(hush): Use mWebViewPrivate.super_startActivityForResult
-            // after N release. crbug.com/543272.
-            try {
-                Method startActivityForResultMethod =
-                        View.class.getMethod("startActivityForResult", Intent.class, int.class);
-                startActivityForResultMethod.invoke(mWebView, intent, requestCode);
-            } catch (Exception e) {
-                throw new RuntimeException("Invalid reflection", e);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                mWebViewPrivate.super_startActivityForResult(intent, requestCode);
+            } else {
+                try {
+                    Method startActivityForResultMethod =
+                            View.class.getMethod("startActivityForResult", Intent.class, int.class);
+                    startActivityForResultMethod.invoke(mWebView, intent, requestCode);
+                } catch (Exception e) {
+                    throw new RuntimeException("Invalid reflection", e);
+                }
             }
         }
 

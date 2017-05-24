@@ -27,7 +27,6 @@ namespace device {
 scoped_refptr<UsbDeviceAndroid> UsbDeviceAndroid::Create(
     JNIEnv* env,
     base::WeakPtr<UsbServiceAndroid> service,
-    scoped_refptr<base::SequencedTaskRunner> blocking_task_runner,
     const JavaRef<jobject>& usb_device) {
   ScopedJavaLocalRef<jobject> wrapper =
       Java_ChromeUsbDevice_create(env, usb_device);
@@ -51,8 +50,7 @@ scoped_refptr<UsbDeviceAndroid> UsbDeviceAndroid::Create(
       Java_ChromeUsbDevice_getDeviceProtocol(env, wrapper),
       Java_ChromeUsbDevice_getVendorId(env, wrapper),
       Java_ChromeUsbDevice_getProductId(env, wrapper), device_version,
-      manufacturer_string, product_string, serial_number, blocking_task_runner,
-      wrapper));
+      manufacturer_string, product_string, serial_number, wrapper));
 }
 
 void UsbDeviceAndroid::RequestPermission(const ResultCallback& callback) {
@@ -72,8 +70,7 @@ void UsbDeviceAndroid::Open(const OpenCallback& callback) {
     ScopedJavaLocalRef<jobject> connection =
         service_->OpenDevice(env, j_object_);
     if (!connection.is_null()) {
-      device_handle = UsbDeviceHandleAndroid::Create(
-          env, this, blocking_task_runner_, connection);
+      device_handle = UsbDeviceHandleAndroid::Create(env, this, connection);
       handles().push_back(device_handle.get());
     }
   }
@@ -98,7 +95,6 @@ UsbDeviceAndroid::UsbDeviceAndroid(
     const base::string16& manufacturer_string,
     const base::string16& product_string,
     const base::string16& serial_number,
-    scoped_refptr<base::SequencedTaskRunner> blocking_task_runner,
     const JavaRef<jobject>& wrapper)
     : UsbDevice(usb_version,
                 device_class,
@@ -110,7 +106,6 @@ UsbDeviceAndroid::UsbDeviceAndroid(
                 manufacturer_string,
                 product_string,
                 serial_number),
-      blocking_task_runner_(blocking_task_runner),
       device_id_(Java_ChromeUsbDevice_getDeviceId(env, wrapper)),
       service_(service),
       j_object_(wrapper) {
@@ -118,11 +113,12 @@ UsbDeviceAndroid::UsbDeviceAndroid(
     ScopedJavaLocalRef<jobjectArray> configurations =
         Java_ChromeUsbDevice_getConfigurations(env, j_object_);
     jsize count = env->GetArrayLength(configurations.obj());
-    configurations_.reserve(count);
+    descriptor_.configurations.reserve(count);
     for (jsize i = 0; i < count; ++i) {
       ScopedJavaLocalRef<jobject> config(
           env, env->GetObjectArrayElement(configurations.obj(), i));
-      configurations_.push_back(UsbConfigurationAndroid::Convert(env, config));
+      descriptor_.configurations.push_back(
+          UsbConfigurationAndroid::Convert(env, config));
     }
   } else {
     // Pre-lollipop only the first configuration was supported. Build a basic
@@ -141,8 +137,11 @@ UsbDeviceAndroid::UsbDeviceAndroid(
           env, env->GetObjectArrayElement(interfaces.obj(), i));
       config.interfaces.push_back(UsbInterfaceAndroid::Convert(env, interface));
     }
-    configurations_.push_back(config);
+    descriptor_.configurations.push_back(config);
   }
+
+  if (configurations().size() > 0)
+    ActiveConfigurationChanged(configurations()[0].configuration_value);
 }
 
 UsbDeviceAndroid::~UsbDeviceAndroid() {}
@@ -182,11 +181,9 @@ void UsbDeviceAndroid::OnReadDescriptors(
     return;
   }
 
-  usb_version_ = descriptor->usb_version;
-  device_version_ = descriptor->device_version;
-  configurations_ = descriptor->configurations;
+  descriptor_ = *descriptor;
 
-  if (usb_version_ >= 0x0210) {
+  if (usb_version() >= 0x0210) {
     ReadWebUsbDescriptors(device_handle,
                           base::Bind(&UsbDeviceAndroid::OnReadWebUsbDescriptors,
                                      this, device_handle));
@@ -198,10 +195,7 @@ void UsbDeviceAndroid::OnReadDescriptors(
 
 void UsbDeviceAndroid::OnReadWebUsbDescriptors(
     scoped_refptr<UsbDeviceHandle> device_handle,
-    std::unique_ptr<WebUsbAllowedOrigins> allowed_origins,
     const GURL& landing_page) {
-  if (allowed_origins)
-    webusb_allowed_origins_ = std::move(allowed_origins);
   if (landing_page.is_valid())
     webusb_landing_page_ = landing_page;
 

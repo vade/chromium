@@ -17,6 +17,12 @@ var gPeerConnection = null;
 var gIceCandidates = [];
 
 /**
+ * This stores last ICE gathering state emitted on this side.
+ * @private
+ */
+var gIceGatheringState = 'no-gathering-state';
+
+/**
  * Keeps track of whether we have seen crypto information in the SDP.
  * @private
  */
@@ -376,7 +382,8 @@ function hasSeenCryptoInSdp() {
 }
 
 /**
- * Verifies that |RTCPeerConnection.getStats| returns stats.
+ * Verifies that the legacy |RTCPeerConnection.getStats| returns stats and
+ * verifies that each stats member is a string.
  *
  * Returns ok-got-stats on success.
  */
@@ -400,6 +407,29 @@ function verifyStatsGenerated() {
     });
 }
 
+/**
+ * Measures the performance of the legacy (callback-based)
+ * |RTCPeerConnection.getStats| and returns the time it took in milliseconds as
+ * a double (DOMHighResTimeStamp, accurate to one thousandth of a millisecond).
+ *
+ * Returns "ok-" followed by a double.
+ */
+function measureGetStatsCallbackPerformance() {
+  let t0 = performance.now();
+  peerConnection_().getStats(
+    function(response) {
+      let t1 = performance.now();
+      returnToTest('ok-' + (t1 - t0));
+    });
+}
+
+/**
+ * Returns the last iceGatheringState emitted from icegatheringstatechange.
+ */
+function getLastGatheringState() {
+  returnToTest(gIceGatheringState);
+}
+
 // Internals.
 
 /** @private */
@@ -412,6 +442,7 @@ function createPeerConnection_(rtcConfig) {
   peerConnection.onaddstream = addStreamCallback_;
   peerConnection.onremovestream = removeStreamCallback_;
   peerConnection.onicecandidate = iceCallback_;
+  peerConnection.onicegatheringstatechange = iceGatheringCallback_;
   return peerConnection;
 }
 
@@ -427,6 +458,12 @@ function iceCallback_(event) {
   if (event.candidate)
     gIceCandidates.push(event.candidate);
 }
+
+/** @private */
+function iceGatheringCallback_() {
+  gIceGatheringState = peerConnection.iceGatheringState;
+}
+
 
 /** @private */
 function setLocalDescription(peerConnection, sessionDescription) {

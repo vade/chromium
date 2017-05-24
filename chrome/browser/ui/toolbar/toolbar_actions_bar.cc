@@ -14,7 +14,6 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/extensions/extension_message_bubble_controller.h"
-#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
@@ -33,6 +32,7 @@
 #include "components/crx_file/id_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_util.h"
 #include "extensions/browser/runtime_data.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/feature_switch.h"
@@ -372,8 +372,8 @@ void ToolbarActionsBar::CreateActions() {
     // CreateActions() can be called as part of the browser window set up, which
     // we need to let finish before showing the actions.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(&ToolbarActionsBar::MaybeShowExtensionBubble,
-                              weak_ptr_factory_.GetWeakPtr()));
+        FROM_HERE, base::BindOnce(&ToolbarActionsBar::MaybeShowExtensionBubble,
+                                  weak_ptr_factory_.GetWeakPtr()));
   }
 }
 
@@ -582,9 +582,9 @@ void ToolbarActionsBar::ShowToolbarActionBubble(
 void ToolbarActionsBar::ShowToolbarActionBubbleAsync(
     std::unique_ptr<ToolbarActionsBarBubbleDelegate> bubble) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&ToolbarActionsBar::ShowToolbarActionBubble,
-                            weak_ptr_factory_.GetWeakPtr(),
-                            base::Passed(std::move(bubble))));
+      FROM_HERE, base::BindOnce(&ToolbarActionsBar::ShowToolbarActionBubble,
+                                weak_ptr_factory_.GetWeakPtr(),
+                                base::Passed(std::move(bubble))));
 }
 
 void ToolbarActionsBar::MaybeShowExtensionBubble() {
@@ -607,9 +607,10 @@ void ToolbarActionsBar::MaybeShowExtensionBubble() {
   std::unique_ptr<ToolbarActionsBarBubbleDelegate> delegate(
       new ExtensionMessageBubbleBridge(std::move(controller)));
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::Bind(&ToolbarActionsBar::ShowToolbarActionBubble,
-                            weak_ptr_factory_.GetWeakPtr(),
-                            base::Passed(std::move(delegate))),
+      FROM_HERE,
+      base::BindOnce(&ToolbarActionsBar::ShowToolbarActionBubble,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     base::Passed(std::move(delegate))),
       base::TimeDelta::FromSeconds(
           g_extension_bubble_appearance_wait_time_in_seconds));
 }

@@ -388,6 +388,22 @@ bool CheckHeader(const base::DictionaryValue& dict,
   return false;
 }
 
+bool HasHeader(const base::DictionaryValue& dict,
+               base::StringPiece header_name) {
+  const base::ListValue* headers = nullptr;
+  EXPECT_TRUE(dict.GetList("headers", &headers));
+  for (size_t i = 0; i < headers->GetSize(); ++i) {
+    const base::ListValue* name_value_pair = nullptr;
+    EXPECT_TRUE(headers->GetList(i, &name_value_pair));
+    EXPECT_EQ(2u, name_value_pair->GetSize());
+    std::string name;
+    EXPECT_TRUE(name_value_pair->GetString(0, &name));
+    if (name == header_name)
+      return true;
+  }
+  return false;
+}
+
 net::HttpResponseInfo CreateHttpResponseInfo() {
   net::HttpResponseInfo info;
   const char data[] =
@@ -398,6 +414,14 @@ net::HttpResponseInfo CreateHttpResponseInfo() {
       new net::HttpResponseHeaders(std::string(data, arraysize(data)));
   return info;
 }
+
+const std::string kNavigationPreloadAbortError =
+    "The service worker navigation preload request was cancelled before "
+    "'preloadResponse' settled. If you intend to use 'preloadResponse', use "
+    "waitUntil() or respondWith() to wait for the promise to settle.";
+const std::string kNavigationPreloadNetworkError =
+    "The service worker navigation preload request failed with a network "
+    "error.";
 
 }  // namespace
 
@@ -492,6 +516,52 @@ class ConsoleListener : public EmbeddedWorkerInstance::Listener {
   std::vector<base::string16> messages_;
   size_t expected_message_count_ = 0;
   base::Closure quit_;
+};
+
+// Listens to console messages on ServiceWorkerContextWrapper.
+class ConsoleMessageContextObserver
+    : public ServiceWorkerContextObserver,
+      public base::RefCountedThreadSafe<ConsoleMessageContextObserver> {
+ public:
+  explicit ConsoleMessageContextObserver(ServiceWorkerContextWrapper* context)
+      : context_(context) {}
+  void Init() { context_->AddObserver(this); }
+
+  // ServiceWorkerContextObserver overrides.
+  void OnReportConsoleMessage(int64_t version_id,
+                              int process_id,
+                              int thread_id,
+                              const ConsoleMessage& console_message) override {
+    messages_.push_back(console_message.message);
+    if (messages_.size() == expected_message_count_) {
+      run_loop_.Quit();
+    }
+  }
+
+  void WaitForConsoleMessages(size_t expected_message_count) {
+    if (messages_.size() >= expected_message_count) {
+      context_->RemoveObserver(this);
+      return;
+    }
+
+    expected_message_count_ = expected_message_count;
+    run_loop_.Run();
+    ASSERT_EQ(messages_.size(), expected_message_count);
+    context_->RemoveObserver(this);
+  }
+
+  const std::vector<base::string16>& messages() const { return messages_; }
+
+ private:
+  friend class base::RefCountedThreadSafe<ConsoleMessageContextObserver>;
+  ~ConsoleMessageContextObserver() override {}
+
+  std::vector<base::string16> messages_;
+  size_t expected_message_count_ = 0;
+  base::RunLoop run_loop_;
+  ServiceWorkerContextWrapper* context_;
+
+  DISALLOW_COPY_AND_ASSIGN(ConsoleMessageContextObserver);
 };
 
 class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
@@ -598,13 +668,11 @@ class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
 
   void AddControlleeOnIOThread() {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    std::unique_ptr<ServiceWorkerProviderHost> host(
-        new ServiceWorkerProviderHost(
-            33 /* dummy render process id */,
-            MSG_ROUTING_NONE /* render_frame_id */, 1 /* dummy provider_id */,
-            SERVICE_WORKER_PROVIDER_FOR_WINDOW,
-            ServiceWorkerProviderHost::FrameSecurityLevel::SECURE,
-            wrapper()->context()->AsWeakPtr(), NULL));
+    std::unique_ptr<ServiceWorkerProviderHost> host =
+        CreateProviderHostForWindow(33 /* dummy render process id */,
+                                    1 /* dummy provider_id */,
+                                    true /* is_parent_frame_secure */,
+                                    wrapper()->context()->AsWeakPtr());
     host->SetDocumentUrl(
         embedded_test_server()->GetURL("/service_worker/host"));
     host->AssociateRegistration(registration_.get(),
@@ -728,31 +796,26 @@ class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
     int request_id =
         version_->StartRequest(ServiceWorkerMetrics::EventType::INSTALL,
                                CreateReceiver(BrowserThread::UI, done, result));
-    version_
-        ->RegisterRequestCallback<ServiceWorkerHostMsg_InstallEventFinished>(
-            request_id, base::Bind(&self::ReceiveInstallEventOnIOThread,
-                                   base::Unretained(this), done, result));
-    version_->DispatchEvent({request_id},
-                            ServiceWorkerMsg_InstallEvent(request_id));
+    mojom::ServiceWorkerInstallEventMethodsAssociatedPtrInfo ptr_info;
+    mojo::MakeRequest(&ptr_info);
+    version_->event_dispatcher()->DispatchInstallEvent(
+        std::move(ptr_info),
+        base::Bind(&self::ReceiveInstallEventOnIOThread, base::Unretained(this),
+                   done, result, request_id));
   }
 
   void ReceiveInstallEventOnIOThread(const base::Closure& done,
                                      ServiceWorkerStatusCode* out_result,
                                      int request_id,
-                                     blink::WebServiceWorkerEventResult result,
+                                     ServiceWorkerStatusCode status,
                                      bool has_fetch_handler,
                                      base::Time dispatch_event_time) {
-    version_->FinishRequest(
-        request_id, result == blink::WebServiceWorkerEventResultCompleted,
-        dispatch_event_time);
+    version_->FinishRequest(request_id, status == SERVICE_WORKER_OK,
+                            dispatch_event_time);
     version_->set_fetch_handler_existence(
         has_fetch_handler
             ? ServiceWorkerVersion::FetchHandlerExistence::EXISTS
             : ServiceWorkerVersion::FetchHandlerExistence::DOES_NOT_EXIST);
-
-    ServiceWorkerStatusCode status = SERVICE_WORKER_OK;
-    if (result == blink::WebServiceWorkerEventResultRejected)
-      status = SERVICE_WORKER_ERROR_EVENT_WAITUNTIL_REJECTED;
 
     *out_result = status;
     if (!done.is_null())
@@ -788,8 +851,8 @@ class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
     int request_id =
         version_->StartRequest(ServiceWorkerMetrics::EventType::INSTALL,
                                CreateReceiver(BrowserThread::UI, done, result));
-    version_->DispatchSimpleEvent<ServiceWorkerHostMsg_ActivateEventFinished>(
-        request_id, ServiceWorkerMsg_ActivateEvent(request_id));
+    version_->event_dispatcher()->DispatchActivateEvent(
+        version_->CreateSimpleEventCallback(request_id));
   }
 
   void FetchOnIOThread(const base::Closure& done,
@@ -819,6 +882,7 @@ class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
       ServiceWorkerStatusCode actual_status,
       ServiceWorkerFetchEventResult actual_result,
       const ServiceWorkerResponse& actual_response,
+      blink::mojom::ServiceWorkerStreamHandlePtr /* stream */,
       const scoped_refptr<ServiceWorkerVersion>& worker) {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
     ASSERT_TRUE(fetch_dispatcher_);
@@ -894,7 +958,14 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionBrowserTest, StartNotFound) {
   StartWorker(SERVICE_WORKER_ERROR_NETWORK);
 }
 
-IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionBrowserTest, ReadResourceFailure) {
+#if defined(ANDROID)
+// Flaky failures on Android; see https://crbug.com/720275.
+#define MAYBE_ReadResourceFailure DISABLED_ReadResourceFailure
+#else
+#define MAYBE_ReadResourceFailure ReadResourceFailure
+#endif
+IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionBrowserTest,
+                       MAYBE_ReadResourceFailure) {
   StartServerAndNavigateToSetup();
   // Create a registration.
   RunOnIOThread(base::Bind(&self::SetUpRegistrationOnIOThread,
@@ -1260,7 +1331,30 @@ class MockContentBrowserClient : public TestContentBrowserClient {
   bool data_saver_enabled_;
 };
 
+class ServiceWorkerVersionOffMainThreadFetchTest
+    : public ServiceWorkerVersionBrowserTest {
+ public:
+  ~ServiceWorkerVersionOffMainThreadFetchTest() override {}
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    command_line->AppendSwitchASCII(switches::kEnableFeatures,
+                                    features::kOffMainThreadFetch.name);
+  }
+};
+
 IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionBrowserTest, FetchWithSaveData) {
+  embedded_test_server()->RegisterRequestHandler(
+      base::Bind(&VerifySaveDataHeaderInRequest));
+  StartServerAndNavigateToSetup();
+  MockContentBrowserClient content_browser_client;
+  content_browser_client.set_data_saver_enabled(true);
+  ContentBrowserClient* old_client =
+      SetBrowserClientForTesting(&content_browser_client);
+  InstallTestHelper("/service_worker/fetch_in_install.js", SERVICE_WORKER_OK);
+  SetBrowserClientForTesting(old_client);
+}
+
+IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionOffMainThreadFetchTest,
+                       FetchWithSaveData) {
   embedded_test_server()->RegisterRequestHandler(
       base::Bind(&VerifySaveDataHeaderInRequest));
   StartServerAndNavigateToSetup();
@@ -1485,7 +1579,7 @@ class ServiceWorkerNavigationPreloadTest : public ServiceWorkerBrowserTest {
       content::ResourceContext* resource_context,
       OnHeaderProcessedCallback callback) {
     DCHECK_EQ(kNavigationPreloadHeaderName, header);
-    callback.Run(false, 0);
+    callback.Run(HeaderInterceptorResult::KILL);
   }
 
   void SetupForNavigationPreloadTest(const GURL& scope,
@@ -1498,6 +1592,24 @@ class ServiceWorkerNavigationPreloadTest : public ServiceWorkerBrowserTest {
         scope, worker_url,
         base::Bind(&ExpectResultAndRun, true, base::Bind(&base::DoNothing)));
     observer->Wait();
+  }
+
+  std::string LoadNavigationPreloadTestPage(const GURL& page_url,
+                                            const GURL& worker_url,
+                                            const char* expected_result) {
+    RegisterMonitorRequestHandler();
+    StartServerAndNavigateToSetup();
+    SetupForNavigationPreloadTest(page_url, worker_url);
+
+    const base::string16 title = base::ASCIIToUTF16("PASS");
+    TitleWatcher title_watcher(shell()->web_contents(), title);
+    title_watcher.AlsoWaitForTitle(base::ASCIIToUTF16("ERROR"));
+    title_watcher.AlsoWaitForTitle(base::ASCIIToUTF16("REJECTED"));
+    title_watcher.AlsoWaitForTitle(base::ASCIIToUTF16("RESOLVED"));
+    NavigateToURL(shell(), page_url);
+    EXPECT_EQ(base::ASCIIToUTF16(expected_result),
+              title_watcher.WaitAndGetTitle());
+    return GetTextContent();
   }
 
   void RegisterMonitorRequestHandler() {
@@ -1684,15 +1796,8 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerNavigationPreloadTest, NetworkFallback) {
   RegisterStaticFile(kPageUrl, kPage, "text/html");
   RegisterStaticFile(kWorkerUrl, kScript, "text/javascript");
 
-  RegisterMonitorRequestHandler();
-  StartServerAndNavigateToSetup();
-  SetupForNavigationPreloadTest(page_url, worker_url);
-
-  const base::string16 title = base::ASCIIToUTF16("PASS");
-  TitleWatcher title_watcher(shell()->web_contents(), title);
-  NavigateToURL(shell(), page_url);
-  EXPECT_EQ(title, title_watcher.WaitAndGetTitle());
-  EXPECT_EQ("Hello world.", GetTextContent());
+  EXPECT_EQ("Hello world.",
+            LoadNavigationPreloadTestPage(page_url, worker_url, "PASS"));
 
   // The page request must be sent once or twice:
   // - A navigation preload request may be sent. But it is possible that the
@@ -1818,16 +1923,8 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerNavigationPreloadTest,
   RegisterStaticFile(kPageUrl, kPage, "text/html");
   RegisterStaticFile(kWorkerUrl, kScript, "text/javascript");
 
-  RegisterMonitorRequestHandler();
-  StartServerAndNavigateToSetup();
-  SetupForNavigationPreloadTest(page_url, worker_url);
-
-  const base::string16 title = base::ASCIIToUTF16("PASS");
-  TitleWatcher title_watcher(shell()->web_contents(), title);
-  title_watcher.AlsoWaitForTitle(base::ASCIIToUTF16("ERROR"));
-  NavigateToURL(shell(), page_url);
-  EXPECT_EQ(title, title_watcher.WaitAndGetTitle());
-  EXPECT_EQ("Hello world.", GetTextContent());
+  EXPECT_EQ("Hello world.",
+            LoadNavigationPreloadTestPage(page_url, worker_url, "PASS"));
 
   // The page request must be sent only once, since the worker responded with
   // the navigation preload response
@@ -1856,15 +1953,8 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerNavigationPreloadTest, GetResponseText) {
   RegisterStaticFile(kPageUrl, kPage, "text/html");
   RegisterStaticFile(kWorkerUrl, kScript, "text/javascript");
 
-  RegisterMonitorRequestHandler();
-  StartServerAndNavigateToSetup();
-  SetupForNavigationPreloadTest(page_url, worker_url);
-
-  const base::string16 title = base::ASCIIToUTF16("PASS");
-  TitleWatcher title_watcher(shell()->web_contents(), title);
-  NavigateToURL(shell(), page_url);
-  EXPECT_EQ(title, title_watcher.WaitAndGetTitle());
-  EXPECT_EQ("Hello world.", GetTextContent());
+  EXPECT_EQ("Hello world.",
+            LoadNavigationPreloadTestPage(page_url, worker_url, "PASS"));
 
   // The page request must be sent only once, since the worker responded with
   // "Hello world".
@@ -1886,13 +1976,23 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerNavigationPreloadTest, NetworkError) {
 
   EXPECT_TRUE(embedded_test_server()->ShutdownAndWaitUntilComplete());
 
+  scoped_refptr<ConsoleMessageContextObserver> console_observer =
+      new ConsoleMessageContextObserver(wrapper());
+  console_observer->Init();
+
   const base::string16 title = base::ASCIIToUTF16("REJECTED");
   TitleWatcher title_watcher(shell()->web_contents(), title);
   title_watcher.AlsoWaitForTitle(base::ASCIIToUTF16("RESOLVED"));
   NavigateToURL(shell(), page_url);
   EXPECT_EQ(title, title_watcher.WaitAndGetTitle());
-  EXPECT_EQ("NetworkError: Service Worker navigation preload network error.",
+  EXPECT_EQ("NetworkError: " + kNavigationPreloadNetworkError,
             GetTextContent());
+
+  console_observer->WaitForConsoleMessages(1);
+  const base::string16 expected =
+      base::ASCIIToUTF16("net::ERR_CONNECTION_REFUSED");
+  std::vector<base::string16> messages = console_observer->messages();
+  EXPECT_NE(base::string16::npos, messages[0].find(expected));
 }
 
 IN_PROC_BROWSER_TEST_F(ServiceWorkerNavigationPreloadTest,
@@ -1909,17 +2009,8 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerNavigationPreloadTest,
       kWorkerUrl, kEnableNavigationPreloadScript + kPreloadResponseTestScript,
       "text/javascript");
 
-  RegisterMonitorRequestHandler();
-  StartServerAndNavigateToSetup();
-  SetupForNavigationPreloadTest(page_url, worker_url);
-
-  const base::string16 title = base::ASCIIToUTF16("REJECTED");
-  TitleWatcher title_watcher(shell()->web_contents(), title);
-  title_watcher.AlsoWaitForTitle(base::ASCIIToUTF16("RESOLVED"));
-  NavigateToURL(shell(), page_url);
-  EXPECT_EQ(title, title_watcher.WaitAndGetTitle());
-  EXPECT_EQ("NetworkError: Service Worker navigation preload network error.",
-            GetTextContent());
+  EXPECT_EQ("NetworkError: " + kNavigationPreloadAbortError,
+            LoadNavigationPreloadTestPage(page_url, worker_url, "REJECTED"));
 }
 
 IN_PROC_BROWSER_TEST_F(ServiceWorkerNavigationPreloadTest,
@@ -1934,28 +2025,18 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerNavigationPreloadTest,
       kWorkerUrl, kEnableNavigationPreloadScript + kPreloadResponseTestScript,
       "text/javascript");
 
-  RegisterMonitorRequestHandler();
-  StartServerAndNavigateToSetup();
-  SetupForNavigationPreloadTest(page_url, worker_url);
-
-  const base::string16 title = base::ASCIIToUTF16("RESOLVED");
-  TitleWatcher title_watcher(shell()->web_contents(), title);
-  title_watcher.AlsoWaitForTitle(base::ASCIIToUTF16("REJECTED"));
-  title_watcher.AlsoWaitForTitle(base::ASCIIToUTF16("ERROR"));
-  NavigateToURL(shell(), page_url);
-  EXPECT_EQ(title, title_watcher.WaitAndGetTitle());
+  std::unique_ptr<base::Value> result = base::JSONReader::Read(
+      LoadNavigationPreloadTestPage(page_url, worker_url, "RESOLVED"));
 
   // The page request must be sent only once, since the worker responded with
   // a generated Response.
   EXPECT_EQ(1, GetRequestCount(kPageUrl));
-  std::unique_ptr<base::Value> result =
-      base::JSONReader::Read(GetTextContent());
   base::DictionaryValue* dict = nullptr;
   ASSERT_TRUE(result->GetAsDictionary(&dict));
   EXPECT_EQ("basic", GetString(*dict, "type"));
   EXPECT_EQ(page_url, GURL(GetString(*dict, "url")));
   EXPECT_EQ(200, GetInt(*dict, "status"));
-  EXPECT_EQ(true, GetBoolean(*dict, "ok"));
+  EXPECT_TRUE(GetBoolean(*dict, "ok"));
   EXPECT_EQ("OK", GetString(*dict, "statusText"));
   EXPECT_TRUE(CheckHeader(*dict, "content-type", "text/html"));
   EXPECT_TRUE(CheckHeader(*dict, "content-length",
@@ -1971,21 +2052,12 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerNavigationPreloadTest, NotEnabled) {
   RegisterStaticFile(kPageUrl, kPage, "text/html");
   RegisterStaticFile(kWorkerUrl, kPreloadResponseTestScript, "text/javascript");
 
-  RegisterMonitorRequestHandler();
-  StartServerAndNavigateToSetup();
-  SetupForNavigationPreloadTest(page_url, worker_url);
-
-  const base::string16 title = base::ASCIIToUTF16("RESOLVED");
-  TitleWatcher title_watcher(shell()->web_contents(), title);
-  title_watcher.AlsoWaitForTitle(base::ASCIIToUTF16("REJECTED"));
-  title_watcher.AlsoWaitForTitle(base::ASCIIToUTF16("ERROR"));
-  NavigateToURL(shell(), page_url);
-  EXPECT_EQ(title, title_watcher.WaitAndGetTitle());
+  EXPECT_EQ("Resolved with undefined.",
+            LoadNavigationPreloadTestPage(page_url, worker_url, "RESOLVED"));
 
   // The page request must not be sent, since the worker responded with a
   // generated Response and the navigation preload isn't enabled.
   EXPECT_EQ(0, GetRequestCount(kPageUrl));
-  EXPECT_EQ("Resolved with undefined.", GetTextContent());
 }
 
 IN_PROC_BROWSER_TEST_F(ServiceWorkerNavigationPreloadTest,
@@ -2010,77 +2082,100 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerNavigationPreloadTest,
       kWorkerUrl, kEnableNavigationPreloadScript + kPreloadResponseTestScript,
       "text/javascript");
 
-  RegisterMonitorRequestHandler();
-  StartServerAndNavigateToSetup();
-  SetupForNavigationPreloadTest(page_url, worker_url);
-
-  const base::string16 title = base::ASCIIToUTF16("RESOLVED");
-  TitleWatcher title_watcher(shell()->web_contents(), title);
-  title_watcher.AlsoWaitForTitle(base::ASCIIToUTF16("REJECTED"));
-  title_watcher.AlsoWaitForTitle(base::ASCIIToUTF16("ERROR"));
-  NavigateToURL(shell(), page_url);
-  EXPECT_EQ(title, title_watcher.WaitAndGetTitle());
+  std::unique_ptr<base::Value> result = base::JSONReader::Read(
+      LoadNavigationPreloadTestPage(page_url, worker_url, "RESOLVED"));
 
   // The page request must be sent only once, since the worker responded with
   // a generated Response.
   EXPECT_EQ(1, GetRequestCount(kPageUrl));
-  std::unique_ptr<base::Value> result =
-      base::JSONReader::Read(GetTextContent());
   base::DictionaryValue* dict = nullptr;
   ASSERT_TRUE(result->GetAsDictionary(&dict));
   EXPECT_EQ("basic", GetString(*dict, "type"));
   EXPECT_EQ(page_url, GURL(GetString(*dict, "url")));
   EXPECT_EQ(201, GetInt(*dict, "status"));
-  EXPECT_EQ(true, GetBoolean(*dict, "ok"));
+  EXPECT_TRUE(GetBoolean(*dict, "ok"));
   EXPECT_EQ("HELLOWORLD", GetString(*dict, "statusText"));
   EXPECT_TRUE(CheckHeader(*dict, "content-type", "text/html"));
   EXPECT_TRUE(CheckHeader(*dict, "content-length", "32"));
   EXPECT_TRUE(CheckHeader(*dict, "custom-header", "pen pineapple, apple pen"));
   // The forbidden response headers (Set-Cookie, Set-Cookie2) must be removed.
-  EXPECT_FALSE(dict->HasKey("set-cookie"));
-  EXPECT_FALSE(dict->HasKey("set-cookie2"));
+  EXPECT_FALSE(HasHeader(*dict, "set-cookie"));
+  EXPECT_FALSE(HasHeader(*dict, "set-cookie2"));
 }
 
-IN_PROC_BROWSER_TEST_F(ServiceWorkerNavigationPreloadTest, RejectRedirects) {
+IN_PROC_BROWSER_TEST_F(ServiceWorkerNavigationPreloadTest,
+                       InvalidRedirect_MultiLocation) {
   const char kPageUrl[] = "/service_worker/navigation_preload.html";
   const char kWorkerUrl[] = "/service_worker/navigation_preload.js";
-  const char kRedirectedPageUrl[] =
-      "/service_worker/navigation_preload_redirected.html";
+  const char kRedirectedPageUrl1[] =
+      "/service_worker/navigation_preload_redirected1.html";
+  const char kRedirectedPageUrl2[] =
+      "/service_worker/navigation_preload_redirected2.html";
   const char kPageResponse[] =
       "HTTP/1.1 302 Found\r\n"
       "Connection: close\r\n"
-      "Location: /service_worker/navigation_preload_redirected.html\r\n"
+      "Location: /service_worker/navigation_preload_redirected1.html\r\n"
+      "Location: /service_worker/navigation_preload_redirected2.html\r\n"
       "\r\n";
   const char kRedirectedPage[] = "<title>ERROR</title>Redirected page.";
-  const GURL redirecred_page_url =
-      embedded_test_server()->GetURL(kRedirectedPageUrl);
   const GURL page_url = embedded_test_server()->GetURL(kPageUrl);
   const GURL worker_url = embedded_test_server()->GetURL(kWorkerUrl);
   RegisterCustomResponse(kPageUrl, kPageResponse);
   RegisterStaticFile(
       kWorkerUrl, kEnableNavigationPreloadScript + kPreloadResponseTestScript,
       "text/javascript");
-  RegisterStaticFile(kRedirectedPageUrl, kRedirectedPage, "text/html");
+  RegisterStaticFile(kRedirectedPageUrl1, kRedirectedPage, "text/html");
 
-  RegisterMonitorRequestHandler();
-  StartServerAndNavigateToSetup();
-  SetupForNavigationPreloadTest(page_url, worker_url);
+  scoped_refptr<ConsoleMessageContextObserver> console_observer =
+      new ConsoleMessageContextObserver(wrapper());
+  console_observer->Init();
 
-  const base::string16 title = base::ASCIIToUTF16("REJECTED");
-  TitleWatcher title_watcher(shell()->web_contents(), title);
-  title_watcher.AlsoWaitForTitle(base::ASCIIToUTF16("RESOLVED"));
-  NavigateToURL(shell(), page_url);
-  EXPECT_EQ(title, title_watcher.WaitAndGetTitle());
+  // According to the spec, multiple Location headers is not an error. So the
+  // preloadResponse must be resolved with an opaque redirect response.
+  // But Chrome treats multiple Location headers as an error (crbug.com/98895).
+  EXPECT_EQ("NetworkError: " + kNavigationPreloadNetworkError,
+            LoadNavigationPreloadTestPage(page_url, worker_url, "REJECTED"));
+
+  console_observer->WaitForConsoleMessages(1);
+  const base::string16 expected =
+      base::ASCIIToUTF16("ERR_RESPONSE_HEADERS_MULTIPLE_LOCATION");
+  std::vector<base::string16> messages = console_observer->messages();
+  EXPECT_NE(base::string16::npos, messages[0].find(expected));
 
   // The page request must be sent only once, since the worker responded with
   // a generated Response.
   EXPECT_EQ(1, GetRequestCount(kPageUrl));
   // The redirected request must not be sent.
-  EXPECT_EQ(0, GetRequestCount(kRedirectedPageUrl));
-  EXPECT_EQ(
-      "NetworkError: Service Worker navigation preload doesn't support "
-      "redirects.",
-      GetTextContent());
+  EXPECT_EQ(0, GetRequestCount(kRedirectedPageUrl1));
+  EXPECT_EQ(0, GetRequestCount(kRedirectedPageUrl2));
+}
+
+IN_PROC_BROWSER_TEST_F(ServiceWorkerNavigationPreloadTest,
+                       InvalidRedirect_InvalidLocation) {
+  const char kPageUrl[] = "/service_worker/navigation_preload.html";
+  const char kWorkerUrl[] = "/service_worker/navigation_preload.js";
+  const char kPageResponse[] =
+      "HTTP/1.1 302 Found\r\n"
+      "Connection: close\r\n"
+      "Location: http://\r\n"
+      "\r\n";
+  const GURL page_url = embedded_test_server()->GetURL(kPageUrl);
+  const GURL worker_url = embedded_test_server()->GetURL(kWorkerUrl);
+  RegisterCustomResponse(kPageUrl, kPageResponse);
+  RegisterStaticFile(
+      kWorkerUrl, kEnableNavigationPreloadScript + kPreloadResponseTestScript,
+      "text/javascript");
+
+  // TODO(horo): According to the spec, even if the location URL is invalid, the
+  // preloadResponse must be resolve with an opaque redirect response. But
+  // currently Chrome handles the invalid location URL in the browser process as
+  // an error. crbug.com/707185
+  EXPECT_EQ("NetworkError: " + kNavigationPreloadAbortError,
+            LoadNavigationPreloadTestPage(page_url, worker_url, "REJECTED"));
+
+  // The page request must be sent only once, since the worker responded with
+  // a generated Response.
+  EXPECT_EQ(1, GetRequestCount(kPageUrl));
 }
 
 // Tests responding with the navigation preload response when the navigation
@@ -2186,14 +2281,8 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerNavigationPreloadTest,
   EXPECT_EQ(1, GetRequestCount(kPageUrl));
 }
 
-// Flaky on Win/Mac: http://crbug.com/533631
-#if defined(OS_WIN) || defined(OS_MACOSX)
-#define MAYBE_ResponseFromHTTPSServiceWorkerIsMarkedAsSecure DISABLED_ResponseFromHTTPSServiceWorkerIsMarkedAsSecure
-#else
-#define MAYBE_ResponseFromHTTPSServiceWorkerIsMarkedAsSecure ResponseFromHTTPSServiceWorkerIsMarkedAsSecure
-#endif
 IN_PROC_BROWSER_TEST_F(ServiceWorkerBrowserTest,
-                       MAYBE_ResponseFromHTTPSServiceWorkerIsMarkedAsSecure) {
+                       ResponseFromHTTPSServiceWorkerIsMarkedAsSecure) {
   StartServerAndNavigateToSetup();
   const char kPageUrl[] = "/service_worker/fetch_event_blob.html";
   const char kWorkerUrl[] = "/service_worker/fetch_event_blob.js";
@@ -2410,7 +2499,8 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerBlackBoxBrowserTest, Registration) {
   }
 }
 
-#if defined(ANDROID)
+// Times out on CrOS and Linux. https://crbug.com/702256
+#if defined(ANDROID) || defined(OS_LINUX) || defined(OS_CHROMEOS)
 #define MAYBE_CrossSiteTransfer DISABLED_CrossSiteTransfer
 #else
 #define MAYBE_CrossSiteTransfer CrossSiteTransfer
@@ -2581,6 +2671,7 @@ class CacheStorageSideDataSizeChecker
                                          int size_result) {
     ASSERT_EQ(net::OK, size_result);
     if (!blob_reader_->has_side_data()) {
+      blob_reader_ = nullptr;
       continuation.Run();
       return;
     }
@@ -2599,6 +2690,7 @@ class CacheStorageSideDataSizeChecker
                                         storage::BlobReader::Status status) {
     ASSERT_NE(storage::BlobReader::Status::NET_ERROR, status);
     *result = blob_reader_->side_data()->size();
+    blob_reader_ = nullptr;
     continuation.Run();
   }
 

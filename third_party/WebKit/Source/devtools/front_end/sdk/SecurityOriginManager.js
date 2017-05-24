@@ -9,22 +9,11 @@ SDK.SecurityOriginManager = class extends SDK.SDKModel {
    * @param {!SDK.Target} target
    */
   constructor(target) {
-    super(SDK.SecurityOriginManager, target);
+    super(target);
 
     /** @type {!Set<string>} */
     this._securityOrigins = new Set();
     this._mainSecurityOrigin = '';
-  }
-
-  /**
-   * @param {!SDK.Target} target
-   * @return {!SDK.SecurityOriginManager}
-   */
-  static fromTarget(target) {
-    var securityOriginManager = target.model(SDK.SecurityOriginManager);
-    if (!securityOriginManager)
-      securityOriginManager = new SDK.SecurityOriginManager(target);
-    return securityOriginManager;
   }
 
   /**
@@ -67,6 +56,8 @@ SDK.SecurityOriginManager = class extends SDK.SDKModel {
     this.dispatchEventToListeners(SDK.SecurityOriginManager.Events.MainSecurityOriginChanged, securityOrigin);
   }
 };
+
+SDK.SDKModel.register(SDK.SecurityOriginManager, SDK.Target.Capability.None, false);
 
 /** @enum {symbol} */
 SDK.SecurityOriginManager.Events = {

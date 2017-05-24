@@ -472,6 +472,15 @@ var AnchorBox = class {
     this.width = width || 0;
     this.height = height || 0;
   }
+
+  /**
+   * @param {number} x
+   * @param {number} y
+   * @return {boolean}
+   */
+  contains(x, y) {
+    return x >= this.x && x <= this.x + this.width && y >= this.y && y <= this.y + this.height;
+  }
 };
 
 /**
@@ -748,6 +757,9 @@ Node.prototype.setTextContentTruncatedIfNeeded = function(text, placeholder) {
  * @return {?Node}
  */
 Event.prototype.deepElementFromPoint = function() {
+  // Some synthetic events have zero coordinates which lead to a wrong element. Better return nothing in this case.
+  if (!this.which && !this.pageX && !this.pageY && !this.clientX && !this.clientY && !this.movementX && !this.movementY)
+    return null;
   var root = this.target && this.target.getComponentRoot();
   return root ? root.deepElementFromPoint(this.pageX, this.pageY) : null;
 };
@@ -758,9 +770,15 @@ Event.prototype.deepElementFromPoint = function() {
  * @return {?Node}
  */
 Document.prototype.deepElementFromPoint = function(x, y) {
-  var node = this.elementFromPoint(x, y);
-  while (node && node.shadowRoot)
-    node = node.shadowRoot.elementFromPoint(x, y);
+  var container = this;
+  var node = null;
+  while (container) {
+    var innerNode = container.elementFromPoint(x, y);
+    if (!innerNode)
+      break;
+    node = innerNode;
+    container = node.shadowRoot;
+  }
   return node;
 };
 

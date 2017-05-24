@@ -12,9 +12,9 @@
 #include "base/format_macros.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/field_trial_param_associator.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
@@ -28,6 +28,7 @@
 #include "chrome/browser/prerender/prerender_link_manager.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_origin.h"
+#include "chrome/browser/prerender/prerender_test_utils.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/prerender_types.h"
@@ -35,9 +36,8 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/prefs/pref_service.h"
-#include "components/variations/variations_associated_data.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "net/base/network_change_notifier.h"
 #include "net/http/http_cache.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -48,7 +48,6 @@
 using base::Time;
 using base::TimeDelta;
 using base::TimeTicks;
-using content::BrowserThread;
 using content::Referrer;
 
 namespace prerender {
@@ -94,6 +93,30 @@ class DummyPrerenderContents : public PrerenderContents {
 
   UnitTestPrerenderManager* test_prerender_manager_;
   FinalStatus expected_final_status_;
+};
+
+class TestNetworkBytesChangedObserver
+    : public prerender::PrerenderHandle::Observer {
+ public:
+  TestNetworkBytesChangedObserver() : network_bytes_changed_(false) {}
+
+  // prerender::PrerenderHandle::Observer
+  void OnPrerenderStart(PrerenderHandle* prerender_handle) override {}
+  void OnPrerenderStopLoading(PrerenderHandle* prerender_handle) override {}
+  void OnPrerenderDomContentLoaded(PrerenderHandle* prerender_handle) override {
+  }
+  void OnPrerenderStop(PrerenderHandle* prerender_handle) override {}
+  void OnPrerenderNetworkBytesChanged(
+      PrerenderHandle* prerender_handle) override {
+    network_bytes_changed_ = true;
+  }
+
+  bool network_bytes_changed() const { return network_bytes_changed_; }
+
+ private:
+  bool network_bytes_changed_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestNetworkBytesChangedObserver);
 };
 
 int DummyPrerenderContents::g_next_route_id_ = 0;
@@ -263,17 +286,6 @@ class UnitTestPrerenderManager : public PrerenderManager {
   bool is_low_end_device_;
 };
 
-class RestorePrerenderMode {
- public:
-  RestorePrerenderMode() : prev_mode_(PrerenderManager::GetMode()) {
-  }
-
-  ~RestorePrerenderMode() { PrerenderManager::SetMode(prev_mode_); }
-
- private:
-  PrerenderManager::PrerenderManagerMode prev_mode_;
-};
-
 class MockNetworkChangeNotifier4G : public net::NetworkChangeNotifier {
  public:
   ConnectionType GetCurrentConnectionType() const override {
@@ -315,8 +327,7 @@ class PrerenderTest : public testing::Test {
   static const int kDefaultRenderViewRouteId = -1;
 
   PrerenderTest()
-      : ui_thread_(BrowserThread::UI, &message_loop_),
-        prerender_manager_(new UnitTestPrerenderManager(&profile_)),
+      : prerender_manager_(new UnitTestPrerenderManager(&profile_)),
         prerender_link_manager_(
             new PrerenderLinkManager(prerender_manager_.get())),
         last_prerender_id_(0),
@@ -333,6 +344,10 @@ class PrerenderTest : public testing::Test {
     prerender_link_manager_->OnChannelClosing(kDefaultChildId);
     prerender_link_manager_->Shutdown();
     prerender_manager_->Shutdown();
+  }
+
+  void TearDown() override {
+    base::FieldTrialParamAssociator::GetInstance()->ClearAllParamsForTesting();
   }
 
   UnitTestPrerenderManager* prerender_manager() {
@@ -401,77 +416,194 @@ class PrerenderTest : public testing::Test {
         chrome_browser_net::NETWORK_PREDICTION_ALWAYS);
   }
 
+  void SetUpFieldTrial(const std::map<std::string, std::string>& params,
+                       base::test::ScopedFeatureList* scoped_feature_list) {
+    // Set up the prerender mode through a field trial.
+    std::string kTrialName = "name";
+    std::string kTrialGroup = "group";
+    base::FieldTrial* trial =
+        base::FieldTrialList::CreateFieldTrial(kTrialName, kTrialGroup);
+    ASSERT_TRUE(
+        base::FieldTrialParamAssociator::GetInstance()
+            ->AssociateFieldTrialParams(kTrialName, kTrialGroup, params));
+
+    std::unique_ptr<base::FeatureList> feature_list =
+        base::MakeUnique<base::FeatureList>();
+    feature_list->RegisterFieldTrialOverride(
+        kNoStatePrefetchFeature.name,
+        base::FeatureList::OVERRIDE_ENABLE_FEATURE, trial);
+
+    scoped_feature_list->InitWithFeatureList(std::move(feature_list));
+
+    ASSERT_EQ(base::FeatureList::GetFieldTrial(kNoStatePrefetchFeature), trial);
+
+    std::map<std::string, std::string> actual_params;
+    ASSERT_TRUE(base::GetFieldTrialParamsByFeature(kNoStatePrefetchFeature,
+                                                   &actual_params));
+    ASSERT_EQ(params, actual_params);
+  }
+
   const base::HistogramTester& histogram_tester() { return histogram_tester_; }
 
  private:
   // Needed to pass PrerenderManager's DCHECKs.
-  base::MessageLoop message_loop_;
-  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThreadBundle test_browser_thread_bundle_;
 
   TestingProfile profile_;
   std::unique_ptr<UnitTestPrerenderManager> prerender_manager_;
   std::unique_ptr<PrerenderLinkManager> prerender_link_manager_;
   int last_prerender_id_;
-  base::FieldTrialList field_trial_list_;
   base::HistogramTester histogram_tester_;
+
+  // An instance of base::FieldTrialList is necessary in order to initialize
+  // global state.
+  base::FieldTrialList field_trial_list_;
 };
 
 TEST_F(PrerenderTest, PrerenderRespectsDisableFlag) {
-  RestorePrerenderMode restore_prerender_mode;
-  ASSERT_TRUE(PrerenderManager::IsPrerenderingPossible());
+  test_utils::RestorePrerenderMode restore_prerender_mode;
+  ASSERT_TRUE(PrerenderManager::IsAnyPrerenderingPossible());
   ASSERT_EQ(PrerenderManager::PRERENDER_MODE_ENABLED,
-            PrerenderManager::GetMode());
+            PrerenderManager::GetMode(ORIGIN_NONE));
 
   {
     base::test::ScopedFeatureList scoped_feature_list;
     scoped_feature_list.InitAndDisableFeature(kNoStatePrefetchFeature);
     prerender::ConfigurePrerender();
+    EXPECT_FALSE(PrerenderManager::IsAnyPrerenderingPossible());
     EXPECT_EQ(PrerenderManager::PRERENDER_MODE_DISABLED,
-              PrerenderManager::GetMode());
-    EXPECT_FALSE(PrerenderManager::IsPrerenderingPossible());
+              PrerenderManager::GetMode(ORIGIN_NONE));
+    EXPECT_EQ(PrerenderManager::PRERENDER_MODE_DISABLED,
+              PrerenderManager::GetMode(ORIGIN_OMNIBOX));
+    EXPECT_EQ(PrerenderManager::PRERENDER_MODE_DISABLED,
+              PrerenderManager::GetMode(ORIGIN_INSTANT));
   }
 }
 
 TEST_F(PrerenderTest, PrerenderRespectsFieldTrialParameters) {
-  RestorePrerenderMode restore_prerender_mode;
-
-  // Set up the prerender mode through a field trial.
-  std::string kTrialName = "name";
-  std::string kTrialGroup = "group";
-  base::FieldTrial* trial =
-      base::FieldTrialList::CreateFieldTrial(kTrialName, kTrialGroup);
-  std::map<std::string, std::string> params = {
-      {kNoStatePrefetchFeatureModeParameterName,
-       kNoStatePrefetchFeatureModeParameterSimpleLoad}};
-  ASSERT_TRUE(
-      variations::AssociateVariationParams(kTrialName, kTrialGroup, params));
-
-  std::unique_ptr<base::FeatureList> feature_list =
-      base::MakeUnique<base::FeatureList>();
-  feature_list->RegisterFieldTrialOverride(
-      kNoStatePrefetchFeature.name, base::FeatureList::OVERRIDE_ENABLE_FEATURE,
-      trial);
+  test_utils::RestorePrerenderMode restore_prerender_mode;
 
   base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitWithFeatureList(std::move(feature_list));
-
-  EXPECT_EQ(base::FeatureList::GetFieldTrial(kNoStatePrefetchFeature), trial);
-
-  std::map<std::string, std::string> actual_params;
-  EXPECT_TRUE(variations::GetVariationParamsByFeature(kNoStatePrefetchFeature,
-                                                      &actual_params));
-  EXPECT_EQ(params, actual_params);
+  SetUpFieldTrial({{kNoStatePrefetchFeatureModeParameterName,
+                    kNoStatePrefetchFeatureModeParameterSimpleLoad}},
+                  &scoped_feature_list);
 
   prerender::ConfigurePrerender();
-  EXPECT_TRUE(PrerenderManager::IsPrerenderingPossible());
+  EXPECT_TRUE(PrerenderManager::IsAnyPrerenderingPossible());
   EXPECT_EQ(PrerenderManager::PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT,
-            PrerenderManager::GetMode());
+            PrerenderManager::GetMode(ORIGIN_NONE));
+  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT,
+            PrerenderManager::GetMode(ORIGIN_OMNIBOX));
+  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT,
+            PrerenderManager::GetMode(ORIGIN_INSTANT));
+}
+
+TEST_F(PrerenderTest, PrerenderRespectsFieldTrialParametersPrefetchInstant) {
+  test_utils::RestorePrerenderMode restore_prerender_mode;
+
+  base::test::ScopedFeatureList scoped_feature_list;
+  SetUpFieldTrial({{kNoStatePrefetchFeatureModeParameterName,
+                    kNoStatePrefetchFeatureModeParameterSimpleLoad},
+                   {kNoStatePrefetchFeatureInstantModeParameterName,
+                    kNoStatePrefetchFeatureModeParameterPrefetch}},
+                  &scoped_feature_list);
+
+  prerender::ConfigurePrerender();
+  EXPECT_TRUE(PrerenderManager::IsAnyPrerenderingPossible());
+  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT,
+            PrerenderManager::GetMode(ORIGIN_NONE));
+  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT,
+            PrerenderManager::GetMode(ORIGIN_OMNIBOX));
+  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_NOSTATE_PREFETCH,
+            PrerenderManager::GetMode(ORIGIN_INSTANT));
+}
+
+TEST_F(PrerenderTest, PrerenderRespectsFieldTrialParametersPrefetchOmnibox) {
+  test_utils::RestorePrerenderMode restore_prerender_mode;
+
+  base::test::ScopedFeatureList scoped_feature_list;
+  SetUpFieldTrial({{kNoStatePrefetchFeatureModeParameterName,
+                    kNoStatePrefetchFeatureModeParameterSimpleLoad},
+                   {kNoStatePrefetchFeatureOmniboxModeParameterName,
+                    kNoStatePrefetchFeatureModeParameterPrefetch}},
+                  &scoped_feature_list);
+
+  prerender::ConfigurePrerender();
+  EXPECT_TRUE(PrerenderManager::IsAnyPrerenderingPossible());
+  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT,
+            PrerenderManager::GetMode(ORIGIN_NONE));
+  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_NOSTATE_PREFETCH,
+            PrerenderManager::GetMode(ORIGIN_OMNIBOX));
+  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT,
+            PrerenderManager::GetMode(ORIGIN_INSTANT));
+}
+
+TEST_F(PrerenderTest, PrerenderRespectsFieldTrialParametersNoneButInstant) {
+  test_utils::RestorePrerenderMode restore_prerender_mode;
+
+  base::test::ScopedFeatureList scoped_feature_list;
+  SetUpFieldTrial({{kNoStatePrefetchFeatureModeParameterName,
+                    kNoStatePrefetchFeatureModeParameterDisabled},
+                   {kNoStatePrefetchFeatureInstantModeParameterName,
+                    kNoStatePrefetchFeatureModeParameterPrerender},
+                   {kNoStatePrefetchFeatureOmniboxModeParameterName,
+                    kNoStatePrefetchFeatureModeParameterDisabled}},
+                  &scoped_feature_list);
+
+  prerender::ConfigurePrerender();
+  EXPECT_TRUE(PrerenderManager::IsAnyPrerenderingPossible());
+  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_DISABLED,
+            PrerenderManager::GetMode(ORIGIN_NONE));
+  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_DISABLED,
+            PrerenderManager::GetMode(ORIGIN_OMNIBOX));
+  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_ENABLED,
+            PrerenderManager::GetMode(ORIGIN_INSTANT));
+}
+
+TEST_F(PrerenderTest, PrerenderRespectsFieldTrialParametersNoneAtAll) {
+  test_utils::RestorePrerenderMode restore_prerender_mode;
+
+  base::test::ScopedFeatureList scoped_feature_list;
+  SetUpFieldTrial({{kNoStatePrefetchFeatureModeParameterName,
+                    kNoStatePrefetchFeatureModeParameterDisabled},
+                   {kNoStatePrefetchFeatureOmniboxModeParameterName,
+                    kNoStatePrefetchFeatureModeParameterDisabled},
+                   {kNoStatePrefetchFeatureInstantModeParameterName,
+                    kNoStatePrefetchFeatureModeParameterDisabled}},
+                  &scoped_feature_list);
+
+  prerender::ConfigurePrerender();
+  EXPECT_FALSE(PrerenderManager::IsAnyPrerenderingPossible());
+  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_DISABLED,
+            PrerenderManager::GetMode(ORIGIN_NONE));
+  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_DISABLED,
+            PrerenderManager::GetMode(ORIGIN_OMNIBOX));
+  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_DISABLED,
+            PrerenderManager::GetMode(ORIGIN_INSTANT));
+}
+
+TEST_F(PrerenderTest, PrerenderRespectsFieldTrialParametersDefaultNone) {
+  test_utils::RestorePrerenderMode restore_prerender_mode;
+
+  base::test::ScopedFeatureList scoped_feature_list;
+  SetUpFieldTrial({{kNoStatePrefetchFeatureModeParameterName,
+                    kNoStatePrefetchFeatureModeParameterDisabled}},
+                  &scoped_feature_list);
+
+  prerender::ConfigurePrerender();
+  EXPECT_FALSE(PrerenderManager::IsAnyPrerenderingPossible());
+  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_DISABLED,
+            PrerenderManager::GetMode(ORIGIN_NONE));
+  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_DISABLED,
+            PrerenderManager::GetMode(ORIGIN_OMNIBOX));
+  EXPECT_EQ(PrerenderManager::PRERENDER_MODE_DISABLED,
+            PrerenderManager::GetMode(ORIGIN_INSTANT));
 }
 
 TEST_F(PrerenderTest, PrerenderRespectsThirdPartyCookiesPref) {
   GURL url("http://www.google.com/");
-  RestorePrerenderMode restore_prerender_mode;
-  ASSERT_TRUE(PrerenderManager::IsPrerenderingPossible());
+  test_utils::RestorePrerenderMode restore_prerender_mode;
+  ASSERT_TRUE(PrerenderManager::IsAnyPrerenderingPossible());
 
   profile()->GetPrefs()->SetBoolean(prefs::kBlockThirdPartyCookies, true);
   EXPECT_FALSE(AddSimplePrerender(url));
@@ -481,8 +613,8 @@ TEST_F(PrerenderTest, PrerenderRespectsThirdPartyCookiesPref) {
 
 TEST_F(PrerenderTest, OfflinePrerenderIgnoresThirdPartyCookiesPref) {
   GURL url("http://www.google.com/");
-  RestorePrerenderMode restore_prerender_mode;
-  ASSERT_TRUE(PrerenderManager::IsPrerenderingPossible());
+  test_utils::RestorePrerenderMode restore_prerender_mode;
+  ASSERT_TRUE(PrerenderManager::IsAnyPrerenderingPossible());
 
   profile()->GetPrefs()->SetBoolean(prefs::kBlockThirdPartyCookies, true);
   DummyPrerenderContents* prerender_contents =
@@ -500,38 +632,48 @@ TEST_F(PrerenderTest, OfflinePrerenderIgnoresThirdPartyCookiesPref) {
 // Checks that the prerender mode affects "normal" origins such as omnibox, but
 // not offline origin.
 TEST_F(PrerenderTest, PrerenderModePerOrigin) {
-  RestorePrerenderMode restore_prerender_mode;
+  test_utils::RestorePrerenderMode restore_prerender_mode;
 
   prerender_manager()->SetMode(
       PrerenderManager::PRERENDER_MODE_NOSTATE_PREFETCH);
-  EXPECT_TRUE(PrerenderManager::IsPrerenderingPossible());
+  prerender_manager()->SetOmniboxMode(
+      PrerenderManager::PRERENDER_MODE_NOSTATE_PREFETCH);
+  EXPECT_TRUE(PrerenderManager::IsAnyPrerenderingPossible());
+  EXPECT_FALSE(PrerenderManager::IsNoStatePrefetch(ORIGIN_OFFLINE));
+  EXPECT_TRUE(PrerenderManager::IsNoStatePrefetch(ORIGIN_OMNIBOX));
+  EXPECT_FALSE(PrerenderManager::IsNoStatePrefetch(ORIGIN_INSTANT));
+  EXPECT_FALSE(PrerenderManager::IsSimpleLoadExperiment(ORIGIN_OFFLINE));
+  EXPECT_FALSE(PrerenderManager::IsSimpleLoadExperiment(ORIGIN_OMNIBOX));
+
+  prerender_manager()->SetMode(PrerenderManager::PRERENDER_MODE_ENABLED);
+  EXPECT_TRUE(PrerenderManager::IsAnyPrerenderingPossible());
   EXPECT_FALSE(PrerenderManager::IsNoStatePrefetch(ORIGIN_OFFLINE));
   EXPECT_TRUE(PrerenderManager::IsNoStatePrefetch(ORIGIN_OMNIBOX));
   EXPECT_FALSE(PrerenderManager::IsSimpleLoadExperiment(ORIGIN_OFFLINE));
   EXPECT_FALSE(PrerenderManager::IsSimpleLoadExperiment(ORIGIN_OMNIBOX));
 
-  prerender_manager()->SetMode(PrerenderManager::PRERENDER_MODE_ENABLED);
-  EXPECT_TRUE(PrerenderManager::IsPrerenderingPossible());
+  prerender_manager()->SetMode(PrerenderManager::PRERENDER_MODE_DISABLED);
+  prerender_manager()->SetInstantMode(
+      PrerenderManager::PRERENDER_MODE_DISABLED);
+  prerender_manager()->SetOmniboxMode(
+      PrerenderManager::PRERENDER_MODE_DISABLED);
+  EXPECT_FALSE(PrerenderManager::IsAnyPrerenderingPossible());
+
+  prerender_manager()->SetMode(
+      PrerenderManager::PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT);
+  prerender_manager()->SetInstantMode(
+      PrerenderManager::PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT);
+  EXPECT_TRUE(PrerenderManager::IsAnyPrerenderingPossible());
   EXPECT_FALSE(PrerenderManager::IsNoStatePrefetch(ORIGIN_OFFLINE));
   EXPECT_FALSE(PrerenderManager::IsNoStatePrefetch(ORIGIN_OMNIBOX));
   EXPECT_FALSE(PrerenderManager::IsSimpleLoadExperiment(ORIGIN_OFFLINE));
   EXPECT_FALSE(PrerenderManager::IsSimpleLoadExperiment(ORIGIN_OMNIBOX));
-
-  prerender_manager()->SetMode(PrerenderManager::PRERENDER_MODE_DISABLED);
-  EXPECT_FALSE(PrerenderManager::IsPrerenderingPossible());
-
-  prerender_manager()->SetMode(
-      PrerenderManager::PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT);
-  EXPECT_TRUE(PrerenderManager::IsPrerenderingPossible());
-  EXPECT_FALSE(PrerenderManager::IsNoStatePrefetch(ORIGIN_OFFLINE));
-  EXPECT_FALSE(PrerenderManager::IsNoStatePrefetch(ORIGIN_OMNIBOX));
-  EXPECT_FALSE(PrerenderManager::IsSimpleLoadExperiment(ORIGIN_OFFLINE));
-  EXPECT_TRUE(PrerenderManager::IsSimpleLoadExperiment(ORIGIN_OMNIBOX));
+  EXPECT_TRUE(PrerenderManager::IsSimpleLoadExperiment(ORIGIN_INSTANT));
 }
 
 TEST_F(PrerenderTest, PrerenderRespectsPrerenderModeNoStatePrefetch) {
   GURL url("http://www.google.com/");
-  RestorePrerenderMode restore_prerender_mode;
+  test_utils::RestorePrerenderMode restore_prerender_mode;
 
   prerender_manager()->SetMode(
       PrerenderManager::PRERENDER_MODE_NOSTATE_PREFETCH);
@@ -545,7 +687,7 @@ TEST_F(PrerenderTest, PrerenderRespectsPrerenderModeNoStatePrefetch) {
 
 TEST_F(PrerenderTest, PrerenderRespectsPrerenderModeSimpleLoad) {
   GURL url("http://www.google.com/");
-  RestorePrerenderMode restore_prerender_mode;
+  test_utils::RestorePrerenderMode restore_prerender_mode;
 
   prerender_manager()->SetMode(
       PrerenderManager::PRERENDER_MODE_SIMPLE_LOAD_EXPERIMENT);
@@ -556,12 +698,12 @@ TEST_F(PrerenderTest, PrerenderRespectsPrerenderModeSimpleLoad) {
 // prefetch is enabled.
 TEST_F(PrerenderTest, OfflinePrerenderIgnoresPrerenderMode) {
   GURL url("http://www.google.com/");
-  RestorePrerenderMode restore_prerender_mode;
+  test_utils::RestorePrerenderMode restore_prerender_mode;
 
   prerender_manager()->SetMode(
       PrerenderManager::PRERENDER_MODE_NOSTATE_PREFETCH);
 
-  ASSERT_TRUE(PrerenderManager::IsPrerenderingPossible());
+  ASSERT_TRUE(PrerenderManager::IsAnyPrerenderingPossible());
 
   DummyPrerenderContents* prerender_contents =
       prerender_manager()->CreateNextPrerenderContents(
@@ -573,7 +715,7 @@ TEST_F(PrerenderTest, OfflinePrerenderIgnoresPrerenderMode) {
 
 TEST_F(PrerenderTest, PrerenderDisabledOnLowEndDevice) {
   GURL url("http://www.google.com/");
-  ASSERT_TRUE(PrerenderManager::IsPrerenderingPossible());
+  ASSERT_TRUE(PrerenderManager::IsAnyPrerenderingPossible());
   prerender_manager()->SetIsLowEndDevice(true);
   EXPECT_FALSE(AddSimplePrerender(url));
   histogram_tester().ExpectUniqueSample("Prerender.FinalStatus",
@@ -582,7 +724,7 @@ TEST_F(PrerenderTest, PrerenderDisabledOnLowEndDevice) {
 
 TEST_F(PrerenderTest, OfflinePrerenderPossibleOnLowEndDevice) {
   GURL url("http://www.google.com/");
-  ASSERT_TRUE(PrerenderManager::IsPrerenderingPossible());
+  ASSERT_TRUE(PrerenderManager::IsAnyPrerenderingPossible());
 
   prerender_manager()->SetIsLowEndDevice(true);
 
@@ -655,7 +797,7 @@ TEST_F(PrerenderTest, DuplicateTest) {
 // and we don't use the second prerender contents.
 // This test is the same as the "DuplicateTest" above, but for NoStatePrefetch.
 TEST_F(PrerenderTest, DuplicateTest_NoStatePrefetch) {
-  RestorePrerenderMode restore_prerender_mode;
+  test_utils::RestorePrerenderMode restore_prerender_mode;
   prerender_manager()->SetMode(
       PrerenderManager::PRERENDER_MODE_NOSTATE_PREFETCH);
 
@@ -825,8 +967,10 @@ TEST_F(PrerenderTest, LinkManagerNavigateAwayLaunchAnother) {
 TEST_F(PrerenderTest, NoStatePrefetchDuplicate) {
   const GURL kUrl("http://www.google.com/");
 
-  RestorePrerenderMode restore_prerender_mode;
+  test_utils::RestorePrerenderMode restore_prerender_mode;
   prerender_manager()->SetMode(
+      PrerenderManager::PRERENDER_MODE_NOSTATE_PREFETCH);
+  prerender_manager()->SetOmniboxMode(
       PrerenderManager::PRERENDER_MODE_NOSTATE_PREFETCH);
   base::SimpleTestTickClock* tick_clock =
       OverridePrerenderManagerTimeTicks(prerender_manager());
@@ -1006,8 +1150,7 @@ TEST_F(PrerenderTest, PendingPrerenderTest) {
           FINAL_STATUS_USED);
   prerender_link_manager()->OnAddPrerender(
       child_id, GetNextPrerenderID(), pending_url, kDefaultRelTypes,
-      Referrer(url, blink::WebReferrerPolicyDefault),
-      kSize, route_id);
+      Referrer(url, blink::kWebReferrerPolicyDefault), kSize, route_id);
   EXPECT_FALSE(LauncherHasRunningPrerender(child_id, last_prerender_id()));
   EXPECT_FALSE(pending_prerender_contents->prerendering_has_started());
 
@@ -1049,8 +1192,7 @@ TEST_F(PrerenderTest, InvalidPendingPrerenderTest) {
           FINAL_STATUS_UNSUPPORTED_SCHEME);
   prerender_link_manager()->OnAddPrerender(
       child_id, GetNextPrerenderID(), pending_url, kDefaultRelTypes,
-      Referrer(url, blink::WebReferrerPolicyDefault),
-      kSize, route_id);
+      Referrer(url, blink::kWebReferrerPolicyDefault), kSize, route_id);
   EXPECT_FALSE(LauncherHasRunningPrerender(child_id, last_prerender_id()));
   EXPECT_FALSE(pending_prerender_contents->prerendering_has_started());
 
@@ -1083,8 +1225,7 @@ TEST_F(PrerenderTest, CancelPendingPrerenderTest) {
   // Schedule a pending prerender launched from the prerender.
   prerender_link_manager()->OnAddPrerender(
       child_id, GetNextPrerenderID(), pending_url, kDefaultRelTypes,
-      Referrer(url, blink::WebReferrerPolicyDefault),
-      kSize, route_id);
+      Referrer(url, blink::kWebReferrerPolicyDefault), kSize, route_id);
   EXPECT_FALSE(LauncherHasRunningPrerender(child_id, last_prerender_id()));
 
   // Cancel the pending prerender.
@@ -1341,16 +1482,16 @@ TEST_F(PrerenderTest, PrerenderSilenceAllowsForcedCellular) {
   GURL url("http://www.google.com/");
   DummyPrerenderContents* prerender_contents =
       prerender_manager()->CreateNextPrerenderContents(
-          url, ORIGIN_EXTERNAL_REQUEST_FORCED_CELLULAR,
+          url, ORIGIN_EXTERNAL_REQUEST_FORCED_PRERENDER,
           FINAL_STATUS_MANAGER_SHUTDOWN);
   std::unique_ptr<PrerenderHandle> prerender_handle =
-      prerender_manager()->AddPrerenderOnCellularFromExternalRequest(
+      prerender_manager()->AddForcedPrerenderFromExternalRequest(
           url, content::Referrer(), nullptr, gfx::Rect(kSize));
   EXPECT_TRUE(prerender_handle);
   EXPECT_TRUE(prerender_handle->IsPrerendering());
   EXPECT_TRUE(prerender_contents->prerendering_has_started());
   EXPECT_EQ(prerender_contents, prerender_handle->contents());
-  EXPECT_EQ(ORIGIN_EXTERNAL_REQUEST_FORCED_CELLULAR,
+  EXPECT_EQ(ORIGIN_EXTERNAL_REQUEST_FORCED_PRERENDER,
             prerender_handle->contents()->origin());
 }
 
@@ -1406,8 +1547,7 @@ TEST_F(PrerenderTest, PrerenderSilenceAllowsAfterExpiration) {
 
 TEST_F(PrerenderTest, PrerenderAllowedForOfflineAndForcedCellular) {
   const Origin origins[] = {
-    ORIGIN_EXTERNAL_REQUEST_FORCED_CELLULAR,
-    ORIGIN_OFFLINE,
+      ORIGIN_EXTERNAL_REQUEST_FORCED_PRERENDER, ORIGIN_OFFLINE,
   };
 
   EnablePrerender();
@@ -1428,7 +1568,7 @@ TEST_F(PrerenderTest, PrerenderAllowedForOfflineAndForcedCellular) {
       prerender_contents = prerender_manager()->CreateNextPrerenderContents(
           url, origin, FINAL_STATUS_USED);
       prerender_handle =
-          prerender_manager()->AddPrerenderOnCellularFromExternalRequest(
+          prerender_manager()->AddForcedPrerenderFromExternalRequest(
               url, content::Referrer(), nullptr, gfx::Rect(kSize));
     }
     EXPECT_TRUE(prerender_handle);
@@ -1998,6 +2138,22 @@ TEST_F(PrerenderTest, PrerenderContentsIsValidHttpMethod) {
   EXPECT_FALSE(prerender_contents->IsValidHttpMethod("POST"));
   EXPECT_FALSE(prerender_contents->IsValidHttpMethod("TRACE"));
   EXPECT_FALSE(prerender_contents->IsValidHttpMethod("WHATEVER"));
+}
+
+TEST_F(PrerenderTest, PrerenderContentsIncrementsByteCount) {
+  GURL url("http://www.google.com/");
+  DummyPrerenderContents* prerender_contents = nullptr;
+  prerender_contents = prerender_manager()->CreateNextPrerenderContents(
+      url, ORIGIN_OFFLINE, FINAL_STATUS_MANAGER_SHUTDOWN);
+  std::unique_ptr<PrerenderHandle> prerender_handle =
+      prerender_manager()->AddPrerenderForOffline(url, nullptr, kSize);
+
+  TestNetworkBytesChangedObserver observer;
+  prerender_handle->SetObserver(&observer);
+
+  prerender_contents->AddNetworkBytes(12);
+  EXPECT_TRUE(observer.network_bytes_changed());
+  EXPECT_EQ(12, prerender_contents->network_bytes());
 }
 
 }  // namespace prerender

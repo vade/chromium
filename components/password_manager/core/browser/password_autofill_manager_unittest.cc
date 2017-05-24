@@ -9,7 +9,9 @@
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/test/user_action_tester.h"
 #include "components/autofill/core/browser/popup_item_ids.h"
 #include "components/autofill/core/browser/suggestion_test_helpers.h"
 #include "components/autofill/core/browser/test_autofill_client.h"
@@ -184,38 +186,48 @@ TEST_F(PasswordAutofillManagerTest, PreviewSuggestion) {
 // Test that the popup is marked as visible after recieving password
 // suggestions.
 TEST_F(PasswordAutofillManagerTest, ExternalDelegatePasswordSuggestions) {
-  std::unique_ptr<TestPasswordManagerClient> client(
-      new TestPasswordManagerClient);
-  std::unique_ptr<MockAutofillClient> autofill_client(new MockAutofillClient);
-  InitializePasswordAutofillManager(client.get(), autofill_client.get());
+  for (bool is_suggestion_on_password_field : {false, true}) {
+    std::unique_ptr<TestPasswordManagerClient> client(
+        new TestPasswordManagerClient);
+    std::unique_ptr<MockAutofillClient> autofill_client(new MockAutofillClient);
+    InitializePasswordAutofillManager(client.get(), autofill_client.get());
 
-  gfx::RectF element_bounds;
-  autofill::PasswordFormFillData data;
-  data.username_field.value = test_username_;
-  data.password_field.value = test_password_;
-  data.preferred_realm = "http://foo.com/";
-  int dummy_key = 0;
-  password_autofill_manager_->OnAddPasswordFormMapping(dummy_key, data);
+    gfx::RectF element_bounds;
+    autofill::PasswordFormFillData data;
+    data.username_field.value = test_username_;
+    data.password_field.value = test_password_;
+    data.preferred_realm = "http://foo.com/";
+    int dummy_key = 0;
+    password_autofill_manager_->OnAddPasswordFormMapping(dummy_key, data);
 
-  EXPECT_CALL(*client->mock_driver(),
-              FillSuggestion(test_username_, test_password_));
+    EXPECT_CALL(*client->mock_driver(),
+                FillSuggestion(test_username_, test_password_));
 
-  // The enums must be cast to ints to prevent compile errors on linux_rel.
-  EXPECT_CALL(*autofill_client,
-              ShowAutofillPopup(
-                  _,
-                  _,
-                  SuggestionVectorIdsAre(testing::ElementsAre(
-                      autofill::POPUP_ITEM_ID_PASSWORD_ENTRY)),
-                  _));
-  password_autofill_manager_->OnShowPasswordSuggestions(
-      dummy_key, base::i18n::RIGHT_TO_LEFT, base::string16(), false,
-      element_bounds);
+    // The enums must be cast to ints to prevent compile errors on linux_rel.
+    auto suggestion_ids_matcher =
+        is_suggestion_on_password_field
+            ? SuggestionVectorIdsAre(
+                  testing::ElementsAre(autofill::POPUP_ITEM_ID_TITLE,
+                                       autofill::POPUP_ITEM_ID_PASSWORD_ENTRY))
+            : SuggestionVectorIdsAre(
+                  testing::ElementsAre(autofill::POPUP_ITEM_ID_USERNAME_ENTRY));
+    EXPECT_CALL(*autofill_client,
+                ShowAutofillPopup(_, _, suggestion_ids_matcher, _));
 
-  // Accepting a suggestion should trigger a call to hide the popup.
-  EXPECT_CALL(*autofill_client, HideAutofillPopup());
-  password_autofill_manager_->DidAcceptSuggestion(
-      test_username_, autofill::POPUP_ITEM_ID_PASSWORD_ENTRY, 1);
+    int show_suggestion_options =
+        is_suggestion_on_password_field ? autofill::IS_PASSWORD_FIELD : 0;
+    password_autofill_manager_->OnShowPasswordSuggestions(
+        dummy_key, base::i18n::RIGHT_TO_LEFT, base::string16(),
+        show_suggestion_options, element_bounds);
+
+    // Accepting a suggestion should trigger a call to hide the popup.
+    EXPECT_CALL(*autofill_client, HideAutofillPopup());
+    password_autofill_manager_->DidAcceptSuggestion(
+        test_username_, is_suggestion_on_password_field
+                            ? autofill::POPUP_ITEM_ID_PASSWORD_ENTRY
+                            : autofill::POPUP_ITEM_ID_USERNAME_ENTRY,
+        1);
+  }
 }
 
 // Test that OnShowPasswordSuggestions correctly matches the given FormFieldData
@@ -619,8 +631,8 @@ TEST_F(PasswordAutofillManagerTest, ShowStandaloneNotSecureWarning) {
   password_autofill_manager_->OnShowNotSecureWarning(base::i18n::RIGHT_TO_LEFT,
                                                      element_bounds);
 
-  // Accepting the warning message should trigger a call to open the url and
-  // hide the popup.
+  // Accepting the warning message should trigger a call to open an explanation
+  // of the message and hide the popup.
   EXPECT_CALL(*autofill_client, ShowHttpNotSecureExplanation());
   EXPECT_CALL(*autofill_client, HideAutofillPopup());
   password_autofill_manager_->DidAcceptSuggestion(
@@ -680,8 +692,8 @@ TEST_F(PasswordAutofillManagerTest, NonSecurePasswordFieldHttpWarningMessage) {
       dummy_key, base::i18n::RIGHT_TO_LEFT, test_username_,
       autofill::IS_PASSWORD_FIELD, element_bounds);
 
-  // Accepting the warning message should trigger a call to open the url and
-  // hide the popup.
+  // Accepting the warning message should trigger a call to open an explanation
+  // of the message and hide the popup.
   EXPECT_CALL(*autofill_client, ShowHttpNotSecureExplanation());
   EXPECT_CALL(*autofill_client, HideAutofillPopup());
   password_autofill_manager_->DidAcceptSuggestion(
@@ -736,8 +748,8 @@ TEST_F(PasswordAutofillManagerTest, NonSecureUsernameFieldHttpWarningMessage) {
   password_autofill_manager_->OnShowPasswordSuggestions(
       dummy_key, base::i18n::RIGHT_TO_LEFT, test_username_, 0, element_bounds);
 
-  // Accepting the warning message should trigger a call to open the url and
-  // hide the popup.
+  // Accepting the warning message should trigger a call to open an explanation
+  // of the message and hide the popup.
   EXPECT_CALL(*autofill_client, ShowHttpNotSecureExplanation());
   EXPECT_CALL(*autofill_client, HideAutofillPopup());
   password_autofill_manager_->DidAcceptSuggestion(
@@ -786,6 +798,64 @@ TEST_F(PasswordAutofillManagerTest, SecurePasswordFieldHttpWarningMessage) {
   password_autofill_manager_->OnShowPasswordSuggestions(
       dummy_key, base::i18n::RIGHT_TO_LEFT, test_username_,
       autofill::IS_PASSWORD_FIELD, element_bounds);
+}
+
+// Test that a user action is logged when the user selects the Form-Not-Secure
+// warning to receive more information about the warning.
+TEST_F(PasswordAutofillManagerTest, FormNotSecureUserAction) {
+  std::unique_ptr<TestPasswordManagerClient> client(
+      new TestPasswordManagerClient);
+  std::unique_ptr<MockAutofillClient> autofill_client(new MockAutofillClient);
+  InitializePasswordAutofillManager(client.get(), autofill_client.get());
+  base::UserActionTester user_action_tester;
+  password_autofill_manager_->DidAcceptSuggestion(
+      test_username_, autofill::POPUP_ITEM_ID_HTTP_NOT_SECURE_WARNING_MESSAGE,
+      0);
+  EXPECT_EQ(1, user_action_tester.GetActionCount(
+                   "PasswordManager_ShowedHttpNotSecureExplanation"));
+}
+
+// Tests that the Form-Not-Secure warning is recorded in UMA, at most once per
+// navigation.
+TEST_F(PasswordAutofillManagerTest, ShowedFormNotSecureHistogram) {
+  const char kHistogram[] =
+      "PasswordManager.ShowedFormNotSecureWarningOnCurrentNavigation";
+  base::HistogramTester histograms;
+  SetHttpWarningEnabled();
+
+  auto client = base::MakeUnique<TestPasswordManagerClient>();
+  auto autofill_client = base::MakeUnique<MockAutofillClient>();
+  InitializePasswordAutofillManager(client.get(), autofill_client.get());
+
+  // Test that the standalone warning (with no autofill suggestions) records the
+  // histogram.
+  gfx::RectF element_bounds;
+  password_autofill_manager_->OnShowNotSecureWarning(base::i18n::RIGHT_TO_LEFT,
+                                                     element_bounds);
+  histograms.ExpectUniqueSample(kHistogram, true, 1);
+
+  // Simulate a navigation, because the histogram is recorded at most once per
+  // navigation.
+  password_autofill_manager_->DidNavigateMainFrame();
+
+  // Test that the warning, when included with the normal autofill dropdown,
+  // records the histogram.
+  int dummy_key = 0;
+  autofill::PasswordFormFillData data;
+  data.username_field.value = test_username_;
+  data.password_field.value = test_password_;
+  data.origin = GURL("http://foo.test");
+  password_autofill_manager_->OnAddPasswordFormMapping(dummy_key, data);
+
+  password_autofill_manager_->OnShowPasswordSuggestions(
+      dummy_key, base::i18n::RIGHT_TO_LEFT, test_username_,
+      autofill::IS_PASSWORD_FIELD, element_bounds);
+  histograms.ExpectUniqueSample(kHistogram, true, 2);
+
+  // The histogram should not be recorded again on the same navigation.
+  password_autofill_manager_->OnShowNotSecureWarning(base::i18n::RIGHT_TO_LEFT,
+                                                     element_bounds);
+  histograms.ExpectUniqueSample(kHistogram, true, 2);
 }
 
 }  // namespace password_manager

@@ -8,7 +8,6 @@
 
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
-#include "components/reading_list/core/reading_list_switches.h"
 #import "ios/chrome/browser/ui/activity_services/activity_type_util.h"
 #import "ios/chrome/browser/ui/activity_services/appex_constants.h"
 #import "ios/chrome/browser/ui/activity_services/chrome_activity_item_source.h"
@@ -120,12 +119,7 @@
     UIActivityTypeSaveToCameraRoll
   ];
   [activityViewController_ setExcludedActivityTypes:excludedActivityTypes];
-  // Although |completionWithItemsHandler:...| is not present in the iOS
-  // documentation, it is mentioned in the WWDC presentations (specifically
-  // 217_creating_extensions_for_ios_and_os_x_part_2.pdf) and available in
-  // header file UIKit.framework/UIActivityViewController.h as @property.
-  DCHECK([activityViewController_
-      respondsToSelector:@selector(setCompletionWithItemsHandler:)]);
+
   __weak ActivityServiceController* weakSelf = self;
   [activityViewController_ setCompletionWithItemsHandler:^(
                                NSString* activityType, BOOL completed,
@@ -165,7 +159,8 @@
     ShareTo::ShareResult shareResult = completed
                                            ? ShareTo::ShareResult::SHARE_SUCCESS
                                            : ShareTo::ShareResult::SHARE_CANCEL;
-    if (activity_type_util::IsPasswordAppExActivity(activityType)) {
+    if (activity_type_util::TypeFromString(activityType) ==
+        activity_type_util::APPEX_PASSWORD_MANAGEMENT) {
       // A compatible Password Management App Extension was invoked.
       shouldResetUI = [self processItemsReturnedFromActivity:activityType
                                                       status:shareResult
@@ -174,14 +169,14 @@
       activity_type_util::ActivityType type =
           activity_type_util::TypeFromString(activityType);
       activity_type_util::RecordMetricForActivity(type);
-      NSString* successMessage =
-          activity_type_util::SuccessMessageForActivity(type);
+      NSString* completionMessage =
+          activity_type_util::CompletionMessageForActivity(type);
       [shareToDelegate_ shareDidComplete:shareResult
-                          successMessage:successMessage];
+                       completionMessage:completionMessage];
     }
   } else {
     [shareToDelegate_ shareDidComplete:ShareTo::ShareResult::SHARE_CANCEL
-                        successMessage:nil];
+                     completionMessage:nil];
   }
   if (shouldResetUI)
     [self resetUserInterface];
@@ -193,12 +188,13 @@
   DCHECK(data.nsurl);
 
   // In order to support find-login-action protocol, the provider object
-  // UIActivityFindLoginActionSource supports both Password Management
-  // App Extensions (e.g. 1Password) and also provide a public.url UTType
-  // for Share Extensions (e.g. Facebook, Twitter).
-  UIActivityFindLoginActionSource* loginActionProvider =
-      [[UIActivityFindLoginActionSource alloc] initWithURL:data.nsurl
-                                                   subject:data.title];
+  // UIActivityURLSource supports both Password Management App Extensions
+  // (e.g. 1Password) and also provide a public.url UTType for Share Extensions
+  // (e.g. Facebook, Twitter).
+  UIActivityURLSource* loginActionProvider =
+      [[UIActivityURLSource alloc] initWithURL:data.nsurl
+                                       subject:data.title
+                            thumbnailGenerator:data.thumbnailGenerator];
   [activityItems addObject:loginActionProvider];
 
   UIActivityTextSource* textProvider =
@@ -222,7 +218,7 @@
     [printActivity setResponder:controller];
     [applicationActivities addObject:printActivity];
   }
-  if (reading_list::switches::IsReadingListEnabled()) {
+  if (data.url.SchemeIsHTTPOrHTTPS()) {
     ReadingListActivity* readingListActivity =
         [[ReadingListActivity alloc] initWithURL:data.url
                                            title:data.title
@@ -258,7 +254,7 @@
     [shareToDelegate_ passwordAppExDidFinish:ShareTo::ShareResult::SHARE_ERROR
                                     username:nil
                                     password:nil
-                              successMessage:nil];
+                           completionMessage:nil];
     return YES;
   }
 
@@ -278,12 +274,12 @@
       activity_type_util::ActivityType type =
           activity_type_util::TypeFromString(activityType);
       activity_type_util::RecordMetricForActivity(type);
-      message = activity_type_util::SuccessMessageForActivity(type);
+      message = activity_type_util::CompletionMessageForActivity(type);
     }
     [shareToDelegate_ passwordAppExDidFinish:activityResult
                                     username:username
                                     password:password
-                              successMessage:message];
+                           completionMessage:message];
     // Controller state can be reset only after delegate has processed the
     // item returned from the App Extension.
     [self resetUserInterface];

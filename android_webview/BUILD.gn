@@ -16,8 +16,8 @@ declare_args() {
   system_webview_package_name = "com.android.webview"
 }
 
-if (!defined(use_webview_internal_framework)) {
-  use_webview_internal_framework = false
+if (!defined(use_unpublished_apis)) {
+  use_unpublished_apis = false
 }
 
 if (enable_resource_whitelist_generation) {
@@ -29,11 +29,67 @@ system_webview_android_manifest =
     "$target_gen_dir/system_webview_apk/AndroidManifest.xml"
 
 group("android_webview") {
-  if (!use_webview_internal_framework) {
+  if (!use_unpublished_apis) {
     deps = [
       ":system_webview_apk",
     ]
   }
+}
+
+generate_jni("native_jni") {
+  sources = [
+    "java/src/org/chromium/android_webview/AndroidProtocolHandler.java",
+    "java/src/org/chromium/android_webview/AwAutofillClient.java",
+    "java/src/org/chromium/android_webview/AwContents.java",
+    "java/src/org/chromium/android_webview/AwContentsBackgroundThreadClient.java",
+    "java/src/org/chromium/android_webview/AwContentsClientBridge.java",
+    "java/src/org/chromium/android_webview/AwContentsIoThreadClient.java",
+    "java/src/org/chromium/android_webview/AwContentsLifecycleNotifier.java",
+    "java/src/org/chromium/android_webview/AwContentsStatics.java",
+    "java/src/org/chromium/android_webview/AwCookieManager.java",
+    "java/src/org/chromium/android_webview/AwDebug.java",
+    "java/src/org/chromium/android_webview/AwDevToolsServer.java",
+    "java/src/org/chromium/android_webview/AwFormDatabase.java",
+    "java/src/org/chromium/android_webview/AwGLFunctor.java",
+    "java/src/org/chromium/android_webview/AwHttpAuthHandler.java",
+    "java/src/org/chromium/android_webview/AwMetricsLogUploader.java",
+    "java/src/org/chromium/android_webview/AwMetricsServiceClient.java",
+    "java/src/org/chromium/android_webview/AwPdfExporter.java",
+    "java/src/org/chromium/android_webview/AwPicture.java",
+    "java/src/org/chromium/android_webview/AwQuotaManagerBridge.java",
+    "java/src/org/chromium/android_webview/AwRendererPriorityManager.java",
+    "java/src/org/chromium/android_webview/AwResource.java",
+    "java/src/org/chromium/android_webview/AwSettings.java",
+    "java/src/org/chromium/android_webview/AwTokenBindingManager.java",
+    "java/src/org/chromium/android_webview/AwWebContentsDelegate.java",
+    "java/src/org/chromium/android_webview/AwWebResourceResponse.java",
+    "java/src/org/chromium/android_webview/InputStreamUtil.java",
+    "java/src/org/chromium/android_webview/JavaBrowserViewRendererHelper.java",
+    "java/src/org/chromium/android_webview/PopupTouchHandleDrawable.java",
+    "java/src/org/chromium/android_webview/permission/AwPermissionRequest.java",
+  ]
+  jni_package = "android_webview"
+
+  deps = [
+    ":cancellation_signal_android_jar_jni_headers",
+  ]
+}
+
+generate_jar_jni("cancellation_signal_android_jar_jni_headers") {
+  classes = [ "android/os/CancellationSignal.class" ]
+  jni_package = "android_webview"
+}
+
+java_cpp_enum("aw_permission_request_resource") {
+  sources = [
+    "browser/permission/aw_permission_request.h",
+  ]
+}
+
+java_cpp_enum("aw_renderer_priority_manager_renderer_priority") {
+  sources = [
+    "browser/aw_renderer_priority_manager.h",
+  ]
 }
 
 jinja_template("system_webview_manifest") {
@@ -56,9 +112,11 @@ webview_repack_locales("repack_locales") {
 
 android_assets("locale_pak_assets") {
   disable_compression = true
-  sources = []
+  renaming_sources = []
+  renaming_destinations = []
   foreach(_locale, locales) {
-    sources += [ "$root_out_dir/android_webview/locales/$_locale.pak" ]
+    renaming_sources += [ "$root_out_dir/android_webview/locales/$_locale.pak" ]
+    renaming_destinations += [ "stored-locales/$_locale.pak" ]
   }
   deps = [
     ":repack_locales",
@@ -71,9 +129,13 @@ repack("repack_pack") {
     "$root_gen_dir/content/content_resources.pak",
     "$root_gen_dir/net/net_resources.pak",
     "$target_gen_dir/aw_resources.pak",
+    "$target_gen_dir/components_resources.pak",
+    "$target_gen_dir/webui_resources.pak",
   ]
   deps = [
     ":generate_aw_resources",
+    ":generate_components_resources",
+    ":generate_webui_resources",
     "//content:resources",
     "//net:net_resources",
     "//third_party/WebKit/public:resources",
@@ -143,18 +205,29 @@ android_assets("assets") {
   ]
 }
 
+android_assets("stub_assets") {
+  sources = [
+    webview_license_path,
+  ]
+  deps = [
+    ":generate_webview_license_notice",
+  ]
+}
+
 action("generate_webview_license_notice") {
   script = "tools/webview_licenses.py"
-  inputs = exec_script("//android_webview/tools/webview_licenses.py",
-                       [ "gn_notice_deps" ],
-                       "value")
-  inputs += [ "tools/licenses_notice.tmpl" ]
+  depfile = "$target_gen_dir/$target_name.d"
+  inputs = [
+    "tools/licenses_notice.tmpl",
+  ]
   outputs = [
     webview_license_path,
   ]
   args = [
     "notice",
-    rebase_path(webview_license_path),
+    rebase_path(webview_license_path, root_build_dir),
+    "--depfile",
+    rebase_path(depfile, root_build_dir),
   ]
 }
 
@@ -189,6 +262,45 @@ grit("generate_aw_strings") {
   }
 }
 
+grit("generate_webui_resources") {
+  source = "../ui/webui/resources/webui_resources.grd"
+
+  # webui/resources has way too many resources. The whitelist is trim this down
+  # to a reasonable size
+  whitelist = rebase_path("ui/grit_resources_whitelist.txt")
+  inputs = [
+    whitelist,
+  ]
+  grit_flags = [
+    "-w",
+    whitelist,
+  ]
+  outputs = [
+    "grit/webui_resources.h",
+    "grit/webui_resources_map.h",
+    "grit/webui_resources_map.cc",
+    "webui_resources.pak",
+  ]
+}
+
+grit("generate_components_resources") {
+  source = "../components/resources/components_resources.grd"
+
+  # See :generate_webui_resources for an explanation of the whitelist
+  whitelist = rebase_path("ui/grit_resources_whitelist.txt")
+  inputs = [
+    whitelist,
+  ]
+  grit_flags = [
+    "-w",
+    whitelist,
+  ]
+  outputs = [
+    "grit/components_resources.h",
+    "components_resources.pak",
+  ]
+}
+
 grit("generate_components_strings") {
   source = "../components/components_strings.grd"
 
@@ -196,7 +308,7 @@ grit("generate_components_strings") {
   # will never display most of them, so we try to limit the included
   # strings. This whitelist trims about 50% more than the compile-based
   # whitelist generated by :system_webview_pak_whitelist.
-  whitelist = rebase_path("ui/grit_components_whitelist.txt")
+  whitelist = rebase_path("ui/grit_strings_whitelist.txt")
   inputs = [
     whitelist,
   ]
@@ -269,7 +381,8 @@ shared_library("libwebviewchromium") {
   deps = [
     ":webview_entry_point",
   ]
-  configs -= [ "//build/config/android:hide_native_jni_exports" ]
+  configs -= [ "//build/config/android:hide_all_but_jni_onload" ]
+  configs += [ "//build/config/android:hide_all_but_jni" ]
 }
 
 if (android_64bit_target_cpu) {
@@ -291,7 +404,8 @@ if (android_64bit_target_cpu) {
     deps = [
       ":webview_entry_point",
     ]
-    configs -= [ "//build/config/android:hide_native_jni_exports" ]
+    configs -= [ "//build/config/android:hide_all_but_jni_onload" ]
+    configs += [ "//build/config/android:hide_all_but_jni" ]
   }
 }
 
@@ -307,6 +421,16 @@ if (enable_resource_whitelist_generation) {
 
 source_set("common") {
   sources = [
+    "browser/address_parser.cc",
+    "browser/address_parser.h",
+    "browser/address_parser_internal.cc",
+    "browser/address_parser_internal.h",
+    "browser/android_protocol_handler.cc",
+    "browser/android_protocol_handler.h",
+    "browser/android_webview_jni_registrar.cc",
+    "browser/android_webview_jni_registrar.h",
+    "browser/aw_autofill_client.cc",
+    "browser/aw_autofill_client.h",
     "browser/aw_browser_context.cc",
     "browser/aw_browser_context.h",
     "browser/aw_browser_main_parts.cc",
@@ -318,54 +442,94 @@ source_set("common") {
     "browser/aw_browser_terminator.h",
     "browser/aw_content_browser_client.cc",
     "browser/aw_content_browser_client.h",
-    "browser/aw_contents_client_bridge_base.cc",
-    "browser/aw_contents_client_bridge_base.h",
+    "browser/aw_contents.cc",
+    "browser/aw_contents.h",
+    "browser/aw_contents_background_thread_client.cc",
+    "browser/aw_contents_background_thread_client.h",
+    "browser/aw_contents_client_bridge.cc",
+    "browser/aw_contents_client_bridge.h",
     "browser/aw_contents_io_thread_client.h",
+    "browser/aw_contents_io_thread_client_impl.cc",
+    "browser/aw_contents_io_thread_client_impl.h",
+    "browser/aw_contents_lifecycle_notifier.cc",
+    "browser/aw_contents_lifecycle_notifier.h",
+    "browser/aw_contents_statics.cc",
+    "browser/aw_contents_statics.h",
     "browser/aw_cookie_access_policy.cc",
     "browser/aw_cookie_access_policy.h",
+    "browser/aw_debug.cc",
+    "browser/aw_debug.h",
     "browser/aw_devtools_manager_delegate.cc",
     "browser/aw_devtools_manager_delegate.h",
+    "browser/aw_devtools_server.cc",
+    "browser/aw_devtools_server.h",
     "browser/aw_download_manager_delegate.cc",
     "browser/aw_download_manager_delegate.h",
+    "browser/aw_form_database.cc",
+    "browser/aw_form_database.h",
     "browser/aw_form_database_service.cc",
     "browser/aw_form_database_service.h",
+    "browser/aw_gl_functor.cc",
+    "browser/aw_gl_functor.h",
     "browser/aw_gl_surface.cc",
     "browser/aw_gl_surface.h",
-    "browser/aw_http_auth_handler_base.cc",
-    "browser/aw_http_auth_handler_base.h",
+    "browser/aw_http_auth_handler.cc",
+    "browser/aw_http_auth_handler.h",
     "browser/aw_javascript_dialog_manager.cc",
     "browser/aw_javascript_dialog_manager.h",
-    "browser/aw_locale_manager.h",
     "browser/aw_login_delegate.cc",
     "browser/aw_login_delegate.h",
+    "browser/aw_media_url_interceptor.cc",
+    "browser/aw_media_url_interceptor.h",
+    "browser/aw_metrics_log_uploader.cc",
+    "browser/aw_metrics_log_uploader.h",
     "browser/aw_metrics_service_client.cc",
     "browser/aw_metrics_service_client.h",
+    "browser/aw_metrics_service_client_impl.cc",
+    "browser/aw_metrics_service_client_impl.h",
+    "browser/aw_pdf_exporter.cc",
+    "browser/aw_pdf_exporter.h",
     "browser/aw_permission_manager.cc",
     "browser/aw_permission_manager.h",
+    "browser/aw_picture.cc",
+    "browser/aw_picture.h",
     "browser/aw_print_manager.cc",
     "browser/aw_print_manager.h",
     "browser/aw_printing_message_filter.cc",
     "browser/aw_printing_message_filter.h",
     "browser/aw_quota_manager_bridge.cc",
     "browser/aw_quota_manager_bridge.h",
+    "browser/aw_quota_manager_bridge_impl.cc",
+    "browser/aw_quota_manager_bridge_impl.h",
     "browser/aw_quota_permission_context.cc",
     "browser/aw_quota_permission_context.h",
     "browser/aw_render_process_gone_delegate.h",
     "browser/aw_render_thread_context_provider.cc",
     "browser/aw_render_thread_context_provider.h",
+    "browser/aw_renderer_priority_manager.cc",
+    "browser/aw_renderer_priority_manager.h",
+    "browser/aw_resource.cc",
     "browser/aw_resource_context.cc",
     "browser/aw_resource_context.h",
     "browser/aw_result_codes.h",
+    "browser/aw_safe_browsing_blocking_page.cc",
+    "browser/aw_safe_browsing_blocking_page.h",
     "browser/aw_safe_browsing_config_helper.cc",
     "browser/aw_safe_browsing_config_helper.h",
     "browser/aw_safe_browsing_resource_throttle.cc",
     "browser/aw_safe_browsing_resource_throttle.h",
     "browser/aw_safe_browsing_ui_manager.cc",
     "browser/aw_safe_browsing_ui_manager.h",
+    "browser/aw_settings.cc",
+    "browser/aw_settings.h",
     "browser/aw_ssl_host_state_delegate.cc",
     "browser/aw_ssl_host_state_delegate.h",
-    "browser/aw_web_preferences_populater.cc",
-    "browser/aw_web_preferences_populater.h",
+    "browser/aw_web_contents_delegate.cc",
+    "browser/aw_web_contents_delegate.h",
+    "browser/aw_web_contents_view_delegate.cc",
+    "browser/aw_web_contents_view_delegate.h",
+    "browser/aw_web_resource_response_impl.cc",
+    "browser/aw_web_resource_response_impl.h",
     "browser/browser_view_renderer.cc",
     "browser/browser_view_renderer.h",
     "browser/browser_view_renderer_client.h",
@@ -373,8 +537,12 @@ source_set("common") {
     "browser/child_frame.h",
     "browser/command_line_helper.cc",
     "browser/command_line_helper.h",
+    "browser/compositor_frame_consumer.h",
+    "browser/compositor_frame_producer.h",
     "browser/compositor_id.cc",
     "browser/compositor_id.h",
+    "browser/cookie_manager.cc",
+    "browser/cookie_manager.h",
     "browser/deferred_gpu_command_service.cc",
     "browser/deferred_gpu_command_service.h",
     "browser/find_helper.cc",
@@ -386,6 +554,10 @@ source_set("common") {
     "browser/icon_helper.cc",
     "browser/icon_helper.h",
     "browser/input_stream.h",
+    "browser/input_stream_impl.cc",
+    "browser/input_stream_impl.h",
+    "browser/java_browser_view_renderer_helper.cc",
+    "browser/java_browser_view_renderer_helper.h",
     "browser/jni_dependency_factory.h",
     "browser/net/android_stream_reader_url_request_job.cc",
     "browser/net/android_stream_reader_url_request_job.h",
@@ -415,23 +587,42 @@ source_set("common") {
     "browser/net/token_binding_manager.h",
     "browser/net_disk_cache_remover.cc",
     "browser/net_disk_cache_remover.h",
+    "browser/net_init_native_callback.cc",
     "browser/parent_compositor_draw_constraints.cc",
     "browser/parent_compositor_draw_constraints.h",
     "browser/parent_output_surface.cc",
     "browser/parent_output_surface.h",
+    "browser/permission/aw_permission_request.cc",
+    "browser/permission/aw_permission_request.h",
+    "browser/permission/aw_permission_request_delegate.cc",
+    "browser/permission/aw_permission_request_delegate.h",
+    "browser/permission/media_access_permission_request.cc",
+    "browser/permission/media_access_permission_request.h",
+    "browser/permission/permission_request_handler.cc",
+    "browser/permission/permission_request_handler.h",
+    "browser/permission/permission_request_handler_client.cc",
+    "browser/permission/permission_request_handler_client.h",
+    "browser/permission/simple_permission_request.cc",
+    "browser/permission/simple_permission_request.h",
+    "browser/popup_touch_handle_drawable.cc",
+    "browser/popup_touch_handle_drawable.h",
     "browser/render_thread_manager.cc",
     "browser/render_thread_manager.h",
+    "browser/render_thread_manager_client.h",
     "browser/renderer_host/auto_login_parser.cc",
     "browser/renderer_host/auto_login_parser.h",
     "browser/renderer_host/aw_render_view_host_ext.cc",
     "browser/renderer_host/aw_render_view_host_ext.h",
     "browser/renderer_host/aw_resource_dispatcher_host_delegate.cc",
     "browser/renderer_host/aw_resource_dispatcher_host_delegate.h",
-    "browser/scoped_allow_wait_for_legacy_web_view_api.h",
     "browser/scoped_app_gl_state_restore.cc",
     "browser/scoped_app_gl_state_restore.h",
+    "browser/state_serializer.cc",
+    "browser/state_serializer.h",
     "browser/surfaces_instance.cc",
     "browser/surfaces_instance.h",
+    "browser/token_binding_manager_bridge.cc",
+    "browser/token_binding_manager_bridge.h",
     "browser/tracing/aw_tracing_delegate.cc",
     "browser/tracing/aw_tracing_delegate.h",
     "common/android_webview_message_generator.cc",
@@ -441,8 +632,8 @@ source_set("common") {
     "common/aw_descriptors.h",
     "common/aw_hit_test_data.cc",
     "common/aw_hit_test_data.h",
-    "common/aw_media_client_android.cc",
-    "common/aw_media_client_android.h",
+    "common/aw_media_drm_bridge_client.cc",
+    "common/aw_media_drm_bridge_client.h",
     "common/aw_paths.cc",
     "common/aw_paths.h",
     "common/aw_resource.h",
@@ -450,6 +641,8 @@ source_set("common") {
     "common/aw_switches.h",
     "common/crash_reporter/aw_microdump_crash_reporter.cc",
     "common/crash_reporter/aw_microdump_crash_reporter.h",
+    "common/crash_reporter/crash_keys.cc",
+    "common/crash_reporter/crash_keys.h",
     "common/devtools_instrumentation.h",
     "common/render_view_messages.cc",
     "common/render_view_messages.h",
@@ -462,6 +655,7 @@ source_set("common") {
     "lib/main/webview_jni_onload.cc",
     "lib/main/webview_jni_onload.h",
     "public/browser/draw_gl.h",
+    "public/browser/draw_sw.h",
     "renderer/aw_content_renderer_client.cc",
     "renderer/aw_content_renderer_client.h",
     "renderer/aw_content_settings_client.cc",
@@ -484,8 +678,11 @@ source_set("common") {
     ":generate_aw_resources",
     ":generate_aw_strings",
     ":generate_components_strings",
+    ":native_jni",
+    "//android_webview:generate_components_strings",
     "//android_webview/common:version",
-    "//android_webview/native:native",
+    "//base",
+    "//base/third_party/dynamic_annotations:dynamic_annotations",
     "//cc/surfaces",
     "//components/autofill/content/browser",
     "//components/autofill/content/renderer",
@@ -518,6 +715,7 @@ source_set("common") {
     "//content",
     "//content/public/app:both",
     "//content/public/browser",
+    "//content/public/common:content_descriptor_keys",
     "//content/public/common:service_names",
     "//crypto",
     "//gin",
@@ -529,12 +727,17 @@ source_set("common") {
     "//gpu/skia_bindings",
     "//media",
     "//media/midi",
+    "//net",
     "//net:extras",
     "//printing",
     "//services/service_manager/public/cpp",
     "//skia",
+    "//storage/browser",
+    "//storage/common",
     "//third_party/WebKit/public:blink",
+    "//ui/base",
     "//ui/events:gesture_detection",
+    "//ui/gfx",
     "//ui/gl",
     "//ui/gl/init",
     "//ui/shell_dialogs",
@@ -549,6 +752,8 @@ source_set("common") {
   }
 
   configs += [ "//v8:external_startup_data" ]
+
+  libs = [ "jnigraphics" ]
 }
 
 android_library("android_webview_java") {
@@ -559,7 +764,6 @@ android_library("android_webview_java") {
     "java/src/org/chromium/android_webview/AwBrowserContext.java",
     "java/src/org/chromium/android_webview/AwBrowserProcess.java",
     "java/src/org/chromium/android_webview/AwContentVideoViewEmbedder.java",
-    "java/src/org/chromium/android_webview/AwContentViewClient.java",
     "java/src/org/chromium/android_webview/AwContents.java",
     "java/src/org/chromium/android_webview/AwContentsBackgroundThreadClient.java",
     "java/src/org/chromium/android_webview/AwContentsClient.java",
@@ -576,6 +780,7 @@ android_library("android_webview_java") {
     "java/src/org/chromium/android_webview/AwGLFunctor.java",
     "java/src/org/chromium/android_webview/AwHttpAuthHandler.java",
     "java/src/org/chromium/android_webview/AwLayoutSizer.java",
+    "java/src/org/chromium/android_webview/AwMetricsLogUploader.java",
     "java/src/org/chromium/android_webview/AwMetricsServiceClient.java",
     "java/src/org/chromium/android_webview/AwNetworkChangeNotifierRegistrationPolicy.java",
     "java/src/org/chromium/android_webview/AwPdfExporter.java",
@@ -583,6 +788,7 @@ android_library("android_webview_java") {
     "java/src/org/chromium/android_webview/AwPrintDocumentAdapter.java",
     "java/src/org/chromium/android_webview/AwSafeBrowsingConfigHelper.java",
     "java/src/org/chromium/android_webview/AwQuotaManagerBridge.java",
+    "java/src/org/chromium/android_webview/AwRendererPriorityManager.java",
     "java/src/org/chromium/android_webview/AwRenderProcessGoneDetail.java",
     "java/src/org/chromium/android_webview/AwResource.java",
     "java/src/org/chromium/android_webview/AwScrollOffsetManager.java",
@@ -634,19 +840,21 @@ android_library("android_webview_java") {
     "//components/web_contents_delegate_android:web_contents_delegate_android_java",
     "//components/web_restrictions:web_restrictions_java",
     "//content/public/android:content_java",
+    "//device/gamepad:java",
     "//device/geolocation:geolocation_java",
     "//net/android:net_java",
     "//third_party/android_tools:android_support_annotations_java",
     "//ui/android:ui_java",
-    google_play_services_library,
-    google_play_services_resources,
   ]
 
   if (enable_spellcheck) {
     deps += [ "//components/spellcheck/browser/android:java" ]
   }
 
-  srcjar_deps = [ "//android_webview/native:aw_permission_request_resource" ]
+  srcjar_deps = [
+    ":aw_permission_request_resource",
+    ":aw_renderer_priority_manager_renderer_priority",
+  ]
 }
 
 java_strings_grd("strings_grd") {
@@ -710,18 +918,27 @@ android_library("android_webview_platform_services_java") {
   ]
 }
 
+android_library("android_webview_commandline_java") {
+  java_files = [ "java/src/org/chromium/android_webview/command_line/CommandLineUtil.java" ]
+
+  deps = [
+    "//base:base_java",
+  ]
+}
+
 # Keep crash services separate from other WebView code to keep their deps clean
 # (and make them easy to move).
 android_library("android_webview_crash_services_java") {
   java_files = [
+    "java/src/org/chromium/android_webview/crash/AwMinidumpUploadJobService.java",
+    "java/src/org/chromium/android_webview/crash/AwMinidumpUploaderDelegate.java",
     "java/src/org/chromium/android_webview/crash/CrashReceiverService.java",
-    "java/src/org/chromium/android_webview/crash/MinidumpUploaderImpl.java",
-    "java/src/org/chromium/android_webview/crash/MinidumpUploader.java",
-    "java/src/org/chromium/android_webview/crash/MinidumpUploadJobService.java",
-    "java/src/org/chromium/android_webview/crash/SynchronizedWebViewCommandLine.java",
   ]
   deps = [
+    ":android_webview_commandline_java",
+    ":android_webview_platform_services_java",
     "//base:base_java",
+    "//components/background_task_scheduler:background_task_scheduler_java",
     "//components/minidump_uploader:minidump_uploader_java",
   ]
 
@@ -729,13 +946,13 @@ android_library("android_webview_crash_services_java") {
 }
 
 android_aidl("crash_receiver_aidl") {
-  import_include = "java/src"
+  import_include = [ "java/src" ]
   sources = [
     "java/src/org/chromium/android_webview/crash/ICrashReceiverService.aidl",
   ]
 }
 
-if (!use_webview_internal_framework) {
+if (!use_unpublished_apis) {
   system_webview_apk_tmpl("system_webview_apk") {
     android_manifest = system_webview_android_manifest
     android_manifest_dep = ":system_webview_manifest"

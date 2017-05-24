@@ -67,15 +67,15 @@ enum InvariantCheckLevel {
 // treated as pseudo-private.
 class Directory {
  public:
-  typedef std::vector<int64_t> Metahandles;
+  using Metahandles = std::vector<int64_t>;
 
-  typedef std::unordered_map<int64_t, std::unique_ptr<EntryKernel>>
-      MetahandlesMap;
-  typedef std::unordered_map<std::string, EntryKernel*> IdsMap;
-  typedef std::unordered_map<std::string, EntryKernel*> TagsMap;
-  typedef std::string AttachmentIdUniqueId;
-  typedef std::unordered_map<AttachmentIdUniqueId, MetahandleSet>
-      IndexByAttachmentId;
+  using MetahandlesMap =
+      std::unordered_map<int64_t, std::unique_ptr<EntryKernel>>;
+  using IdsMap = std::unordered_map<std::string, EntryKernel*>;
+  using TagsMap = std::unordered_map<std::string, EntryKernel*>;
+  using AttachmentIdUniqueId = std::string;
+  using IndexByAttachmentId =
+      std::unordered_map<AttachmentIdUniqueId, MetahandleSet>;
 
   static const base::FilePath::CharType kSyncDatabaseFilename[];
 
@@ -500,7 +500,8 @@ class Directory {
                                 AttachmentIdList* ids);
 
   // For new entry creation only.
-  bool InsertEntry(BaseWriteTransaction* trans, EntryKernel* entry);
+  bool InsertEntry(BaseWriteTransaction* trans,
+                   std::unique_ptr<EntryKernel> entry);
 
   // Update the attachment index for |metahandle| removing it from the index
   // under |old_metadata| entries and add it under |new_metadata| entries.
@@ -557,7 +558,7 @@ class Directory {
 
   bool InsertEntry(const ScopedKernelLock& lock,
                    BaseWriteTransaction* trans,
-                   EntryKernel* entry);
+                   std::unique_ptr<EntryKernel> entry);
 
   // Remove each of |metahandle|'s attachment ids from index_by_attachment_id.
   void RemoveFromAttachmentIndex(

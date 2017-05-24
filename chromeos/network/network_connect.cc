@@ -20,11 +20,15 @@
 #include "chromeos/network/network_profile_handler.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
+#include "chromeos/network/tether_constants.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace chromeos {
 
 namespace {
+
+void IgnoreDisconnectError(const std::string& error_name,
+                           std::unique_ptr<base::DictionaryValue> error_data) {}
 
 // Returns true for carriers that can be activated through Shill instead of
 // through a WebUI dialog.
@@ -48,6 +52,7 @@ class NetworkConnectImpl : public NetworkConnect {
 
   // NetworkConnect
   void ConnectToNetworkId(const std::string& network_id) override;
+  void DisconnectFromNetworkId(const std::string& network_id) override;
   bool MaybeShowConfigureUI(const std::string& network_id,
                             const std::string& connect_error) override;
   void SetTechnologyEnabled(const NetworkTypePattern& technology,
@@ -238,9 +243,11 @@ void NetworkConnectImpl::CallConnectToNetwork(const std::string& network_id,
                     nullptr);
     return;
   }
+
   NetworkHandler::Get()->network_connection_handler()->ConnectToNetwork(
-      network->path(), base::Bind(&NetworkConnectImpl::OnConnectSucceeded,
-                                  weak_factory_.GetWeakPtr(), network_id),
+      network->path(),
+      base::Bind(&NetworkConnectImpl::OnConnectSucceeded,
+                 weak_factory_.GetWeakPtr(), network_id),
       base::Bind(&NetworkConnectImpl::OnConnectFailed,
                  weak_factory_.GetWeakPtr(), network_id),
       check_error_state);
@@ -382,10 +389,25 @@ void NetworkConnectImpl::ConnectToNetworkId(const std::string& network_id) {
     } else if (network->RequiresActivation()) {
       ActivateCellular(network_id);
       return;
+    } else if (network->type() == kTypeTether &&
+               !network->tether_has_connected_to_host()) {
+      delegate_->ShowNetworkConfigure(network_id);
+      return;
     }
   }
   const bool check_error_state = true;
   CallConnectToNetwork(network_id, check_error_state);
+}
+
+void NetworkConnectImpl::DisconnectFromNetworkId(
+    const std::string& network_id) {
+  NET_LOG_USER("DisconnectFromNetwork", network_id);
+  const NetworkState* network = GetNetworkStateFromId(network_id);
+  if (!network)
+    return;
+  NetworkHandler::Get()->network_connection_handler()->DisconnectNetwork(
+      network->path(), base::Bind(&base::DoNothing),
+      base::Bind(&IgnoreDisconnectError));
 }
 
 bool NetworkConnectImpl::MaybeShowConfigureUI(

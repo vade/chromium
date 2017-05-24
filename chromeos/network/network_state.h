@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/values.h"
 #include "chromeos/network/managed_state.h"
@@ -53,6 +54,7 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
 
   // Accessors
   bool visible() const { return visible_; }
+  void set_visible(bool visible) { visible_ = visible; }
   const std::string& security_class() const { return security_class_; }
   const std::string& device_path() const { return device_path_; }
   const std::string& guid() const { return guid_; }
@@ -63,6 +65,7 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
 
   // Returns |connection_state_| if visible, kStateDisconnect otherwise.
   std::string connection_state() const;
+  void set_connection_state(const std::string connection_state);
 
   const base::DictionaryValue& proxy_config() const { return proxy_config_; }
 
@@ -77,8 +80,12 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
 
   // Wireless property accessors
   bool connectable() const { return connectable_; }
+  void set_connectable(bool connectable) { connectable_ = connectable; }
   bool is_captive_portal() const { return is_captive_portal_; }
   int signal_strength() const { return signal_strength_; }
+  void set_signal_strength(int signal_strength) {
+    signal_strength_ = signal_strength;
+  }
 
   // Wifi property accessors
   const std::string& eap_method() const { return eap_method_; }
@@ -99,6 +106,22 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   const std::string& third_party_vpn_provider_extension_id() const {
     return third_party_vpn_provider_extension_id_;
   }
+
+  // Tether accessors and setters.
+  int battery_percentage() const { return battery_percentage_; }
+  void set_battery_percentage(int battery_percentage) {
+    battery_percentage_ = battery_percentage;
+  }
+  const std::string& carrier() const { return carrier_; }
+  void set_carrier(const std::string& carrier) { carrier_ = carrier; }
+  bool tether_has_connected_to_host() const {
+    return tether_has_connected_to_host_;
+  }
+  void set_tether_has_connected_to_host(bool tether_has_connected_to_host) {
+    tether_has_connected_to_host_ = tether_has_connected_to_host;
+  }
+  const std::string& tether_guid() const { return tether_guid_; }
+  void set_tether_guid(const std::string& guid) { tether_guid_ = guid; }
 
   // Returns true if the network securty is WEP_8021x (Dynamic WEP)
   bool IsDynamicWep() const;
@@ -148,6 +171,7 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   friend class MobileActivatorTest;
   friend class NetworkStateHandler;
   friend class NetworkChangeNotifierChromeosUpdateTest;
+  FRIEND_TEST_ALL_PREFIXES(NetworkStateTest, TetherProperties);
 
   // Updates |name_| from WiFi.HexSSID if provided, and validates |name_|.
   // Returns true if |name_| changes.
@@ -164,6 +188,7 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   std::string eap_key_mgmt_;  // Needed for identifying Dynamic WEP networks
   std::string device_path_;
   std::string guid_;
+  std::string tether_guid_;  // Used to double link a Tether and Wi-Fi network.
   std::string connection_state_;
   std::string last_connection_state_;
   std::string profile_path_;
@@ -206,6 +231,16 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   // configuration dialog.
   std::string vpn_provider_type_;
   std::string third_party_vpn_provider_extension_id_;
+
+  // Tether properties.
+  std::string carrier_;
+  int battery_percentage_;
+  // Whether the current device has already connected to the tether host device
+  // providing the hotspot corresponding to this NetworkState.
+  // Note: this means that the current device has already connected to the
+  // tether host, but it does not necessarily mean that the current device has
+  // connected to the Tether network corresponding to this NetworkState.
+  bool tether_has_connected_to_host_;
 
   // TODO(pneubeck): Remove this once (Managed)NetworkConfigurationHandler
   // provides proxy configuration. crbug.com/241775

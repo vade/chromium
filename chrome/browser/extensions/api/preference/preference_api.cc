@@ -32,9 +32,9 @@
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/proxy_config/proxy_config_pref_names.h"
-#include "components/safe_browsing_db/safe_browsing_prefs.h"
+#include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "components/spellcheck/browser/pref_names.h"
-#include "components/translate/core/common/translate_pref_names.h"
+#include "components/translate/core/browser/translate_pref_names.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "extensions/browser/extension_pref_value_map.h"
@@ -104,7 +104,7 @@ PrefMappingEntry kPrefMapping[] = {
     {"networkPredictionEnabled", prefs::kNetworkPredictionOptions,
      APIPermission::kPrivacy, APIPermission::kPrivacy},
     {"passwordSavingEnabled",
-     password_manager::prefs::kPasswordManagerSavingEnabled,
+     password_manager::prefs::kCredentialsEnableService,
      APIPermission::kPrivacy, APIPermission::kPrivacy},
     {"protectedContentEnabled", prefs::kEnableDRM, APIPermission::kPrivacy,
      APIPermission::kPrivacy},
@@ -171,63 +171,67 @@ PrefMappingEntry kPrefMapping[] = {
 
 class IdentityPrefTransformer : public PrefTransformerInterface {
  public:
-  base::Value* ExtensionToBrowserPref(const base::Value* extension_pref,
-                                      std::string* error,
-                                      bool* bad_message) override {
-    return extension_pref->DeepCopy();
+  std::unique_ptr<base::Value> ExtensionToBrowserPref(
+      const base::Value* extension_pref,
+      std::string* error,
+      bool* bad_message) override {
+    return extension_pref->CreateDeepCopy();
   }
 
-  base::Value* BrowserToExtensionPref(
+  std::unique_ptr<base::Value> BrowserToExtensionPref(
       const base::Value* browser_pref) override {
-    return browser_pref->DeepCopy();
+    return browser_pref->CreateDeepCopy();
   }
 };
 
 class InvertBooleanTransformer : public PrefTransformerInterface {
  public:
-  base::Value* ExtensionToBrowserPref(const base::Value* extension_pref,
-                                      std::string* error,
-                                      bool* bad_message) override {
+  std::unique_ptr<base::Value> ExtensionToBrowserPref(
+      const base::Value* extension_pref,
+      std::string* error,
+      bool* bad_message) override {
     return InvertBooleanValue(extension_pref);
   }
 
-  base::Value* BrowserToExtensionPref(
+  std::unique_ptr<base::Value> BrowserToExtensionPref(
       const base::Value* browser_pref) override {
     return InvertBooleanValue(browser_pref);
   }
 
  private:
-  static base::Value* InvertBooleanValue(const base::Value* value) {
+  static std::unique_ptr<base::Value> InvertBooleanValue(
+      const base::Value* value) {
     bool bool_value = false;
     bool result = value->GetAsBoolean(&bool_value);
     DCHECK(result);
-    return new base::FundamentalValue(!bool_value);
+    return base::MakeUnique<base::Value>(!bool_value);
   }
 };
 
 class NetworkPredictionTransformer : public PrefTransformerInterface {
  public:
-  base::Value* ExtensionToBrowserPref(const base::Value* extension_pref,
-                                      std::string* error,
-                                      bool* bad_message) override {
+  std::unique_ptr<base::Value> ExtensionToBrowserPref(
+      const base::Value* extension_pref,
+      std::string* error,
+      bool* bad_message) override {
     bool bool_value = false;
     const bool pref_found = extension_pref->GetAsBoolean(&bool_value);
     DCHECK(pref_found) << "Preference not found.";
     if (bool_value) {
-      return new base::FundamentalValue(
+      return base::MakeUnique<base::Value>(
           chrome_browser_net::NETWORK_PREDICTION_DEFAULT);
     } else {
-      return new base::FundamentalValue(
+      return base::MakeUnique<base::Value>(
           chrome_browser_net::NETWORK_PREDICTION_NEVER);
     }
   }
 
-  base::Value* BrowserToExtensionPref(
+  std::unique_ptr<base::Value> BrowserToExtensionPref(
       const base::Value* browser_pref) override {
     int int_value = chrome_browser_net::NETWORK_PREDICTION_DEFAULT;
     const bool pref_found = browser_pref->GetAsInteger(&int_value);
     DCHECK(pref_found) << "Preference not found.";
-    return new base::FundamentalValue(
+    return base::MakeUnique<base::Value>(
         int_value != chrome_browser_net::NETWORK_PREDICTION_NEVER);
   }
 };
@@ -383,11 +387,11 @@ void PreferenceEventRouter::OnPrefChanged(PrefService* pref_service,
 
   base::ListValue args;
   const PrefService::Preference* pref =
-      pref_service->FindPreference(browser_pref.c_str());
+      pref_service->FindPreference(browser_pref);
   CHECK(pref);
   PrefTransformerInterface* transformer =
       PrefMapping::GetInstance()->FindTransformerForBrowserPref(browser_pref);
-  base::Value* transformed_value =
+  std::unique_ptr<base::Value> transformed_value =
       transformer->BrowserToExtensionPref(pref->GetValue());
   if (!transformed_value) {
     LOG(ERROR) << ErrorUtils::FormatErrorMessage(kConversionErrorMessage,
@@ -396,7 +400,7 @@ void PreferenceEventRouter::OnPrefChanged(PrefService* pref_service,
   }
 
   std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
-  dict->Set(keys::kValue, transformed_value);
+  dict->Set(keys::kValue, std::move(transformed_value));
   if (incognito) {
     ExtensionPrefs* ep = ExtensionPrefs::Get(profile_);
     dict->SetBoolean(keys::kIncognitoSpecific,
@@ -427,7 +431,7 @@ void PreferenceAPIBase::SetExtensionControlledPref(
     base::Value* value) {
 #ifndef NDEBUG
   const PrefService::Preference* pref =
-      extension_prefs()->pref_service()->FindPreference(pref_key.c_str());
+      extension_prefs()->pref_service()->FindPreference(pref_key);
   DCHECK(pref) << "Extension controlled preference key " << pref_key
                << " not registered.";
   DCHECK_EQ(pref->GetType(), value->GetType())
@@ -445,7 +449,7 @@ void PreferenceAPIBase::SetExtensionControlledPref(
     base::DictionaryValue* preference = update.Get();
     if (!preference)
       preference = update.Create();
-    preference->SetWithoutPathExpansion(pref_key, value->DeepCopy());
+    preference->SetWithoutPathExpansion(pref_key, value->CreateDeepCopy());
   }
   extension_pref_value_map()->SetExtensionPref(
       extension_id, pref_key, scope, value);
@@ -455,7 +459,7 @@ void PreferenceAPIBase::RemoveExtensionControlledPref(
     const std::string& extension_id,
     const std::string& pref_key,
     ExtensionPrefsScope scope) {
-  DCHECK(extension_prefs()->pref_service()->FindPreference(pref_key.c_str()))
+  DCHECK(extension_prefs()->pref_service()->FindPreference(pref_key))
       << "Extension controlled preference key " << pref_key
       << " not registered.";
 
@@ -476,7 +480,7 @@ bool PreferenceAPIBase::CanExtensionControlPref(
      const std::string& extension_id,
      const std::string& pref_key,
      bool incognito) {
-  DCHECK(extension_prefs()->pref_service()->FindPreference(pref_key.c_str()))
+  DCHECK(extension_prefs()->pref_service()->FindPreference(pref_key))
       << "Extension controlled preference key " << pref_key
       << " not registered.";
 
@@ -488,7 +492,7 @@ bool PreferenceAPIBase::DoesExtensionControlPref(
     const std::string& extension_id,
     const std::string& pref_key,
     bool* from_incognito) {
-  DCHECK(extension_prefs()->pref_service()->FindPreference(pref_key.c_str()))
+  DCHECK(extension_prefs()->pref_service()->FindPreference(pref_key))
       << "Extension controlled preference key " << pref_key
       << " not registered.";
 
@@ -519,8 +523,9 @@ void PreferenceAPI::Shutdown() {
   content_settings_store()->RemoveObserver(this);
 }
 
-static base::LazyInstance<BrowserContextKeyedAPIFactory<PreferenceAPI> >
-    g_factory = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<
+    BrowserContextKeyedAPIFactory<PreferenceAPI>>::DestructorAtExit g_factory =
+    LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<PreferenceAPI>*
@@ -618,8 +623,7 @@ ExtensionFunction::ResponseAction GetPreferenceFunction::Run() {
   Profile* profile = Profile::FromBrowserContext(browser_context());
   PrefService* prefs =
       incognito ? profile->GetOffTheRecordPrefs() : profile->GetPrefs();
-  const PrefService::Preference* pref =
-      prefs->FindPreference(browser_pref.c_str());
+  const PrefService::Preference* pref = prefs->FindPreference(browser_pref);
   CHECK(pref);
 
   std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue);
@@ -632,7 +636,7 @@ ExtensionFunction::ResponseAction GetPreferenceFunction::Run() {
   // Retrieve pref value.
   PrefTransformerInterface* transformer =
       PrefMapping::GetInstance()->FindTransformerForBrowserPref(browser_pref);
-  base::Value* transformed_value =
+  std::unique_ptr<base::Value> transformed_value =
       transformer->BrowserToExtensionPref(pref->GetValue());
   if (!transformed_value) {
     // TODO(devlin): Can this happen?  When?  Should it be an error, or a bad
@@ -642,7 +646,7 @@ ExtensionFunction::ResponseAction GetPreferenceFunction::Run() {
                                                 pref->name());
     return RespondNow(Error(kUnknownErrorDoNotUse));
   }
-  result->Set(keys::kValue, transformed_value);
+  result->Set(keys::kValue, std::move(transformed_value));
 
   // Retrieve incognito status.
   if (incognito) {
@@ -707,7 +711,7 @@ ExtensionFunction::ResponseAction SetPreferenceFunction::Run() {
 
   ExtensionPrefs* prefs = ExtensionPrefs::Get(browser_context());
   const PrefService::Preference* pref =
-      prefs->pref_service()->FindPreference(browser_pref.c_str());
+      prefs->pref_service()->FindPreference(browser_pref);
   CHECK(pref);
 
   // Validate new value.

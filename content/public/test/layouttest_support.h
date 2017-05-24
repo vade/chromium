@@ -18,14 +18,18 @@
 class GURL;
 
 namespace blink {
-class WebDeviceMotionData;
-class WebDeviceOrientationData;
 class WebInputEvent;
 class WebLocalFrame;
 struct WebSize;
+class WebURLRequest;
 class WebView;
 class WebWidget;
 class WebURLResponse;
+}
+
+namespace device {
+class MotionData;
+class OrientationData;
 }
 
 namespace gfx {
@@ -103,13 +107,13 @@ void SetMockGamepadProvider(std::unique_ptr<RendererGamepadProvider> provider);
 // a listener through BlinkPlatformImpl::setDeviceLightListener().
 void SetMockDeviceLightData(const double data);
 
-// Sets WebDeviceMotionData that should be used when registering
+// Sets MotionData that should be used when registering
 // a listener through BlinkPlatformImpl::setDeviceMotionListener().
-void SetMockDeviceMotionData(const blink::WebDeviceMotionData& data);
+void SetMockDeviceMotionData(const device::MotionData& data);
 
-// Sets WebDeviceOrientationData that should be used when registering
+// Sets OrientationData that should be used when registering
 // a listener through BlinkPlatformImpl::setDeviceOrientationListener().
-void SetMockDeviceOrientationData(const blink::WebDeviceOrientationData& data);
+void SetMockDeviceOrientationData(const device::OrientationData& data);
 
 // Returns the length of the local session history of a render view.
 int GetLocalSessionHistoryLength(RenderView* render_view);
@@ -175,6 +179,11 @@ void SchedulerRunIdleTasks(const base::Closure& callback);
 // Causes the RenderWidget corresponding to |render_frame| to update its
 // TextInputState.
 void ForceTextInputStateUpdateForRenderFrame(RenderFrame* render_frame);
+
+// PlzNavigate
+// Returns true if the navigation identified by the |request| was initiated by
+// the browser or renderer.
+bool IsNavigationInitiatedByRenderer(const blink::WebURLRequest& request);
 
 }  // namespace content
 

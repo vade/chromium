@@ -37,6 +37,12 @@ VolumeManagerCommon.RootType = {
   // Root for a drive volume.
   DRIVE: 'drive',
 
+  // The grand root entry of Team Drives in Drive volume.
+  TEAM_DRIVES_GRAND_ROOT: 'team_drives_grand_root',
+
+  // Root directory of a Team Drive.
+  TEAM_DRIVE: 'team_drive',
+
   // Root for a MTP volume.
   MTP: 'mtp',
 
@@ -179,6 +185,8 @@ VolumeManagerCommon.getVolumeTypeFromRootType = function(rootType) {
     case VolumeManagerCommon.RootType.REMOVABLE:
       return VolumeManagerCommon.VolumeType.REMOVABLE;
     case VolumeManagerCommon.RootType.DRIVE:
+    case VolumeManagerCommon.RootType.TEAM_DRIVES_GRAND_ROOT:
+    case VolumeManagerCommon.RootType.TEAM_DRIVE:
     case VolumeManagerCommon.RootType.DRIVE_OTHER:
     case VolumeManagerCommon.RootType.DRIVE_OFFLINE:
     case VolumeManagerCommon.RootType.DRIVE_SHARED_WITH_ME:
@@ -252,3 +260,14 @@ VolumeManagerCommon.getMediaViewRootTypeFromVolumeId = function(volumeId) {
  * }}
  */
 var FakeEntry;
+
+/**
+  * An event name trigerred when a user tries to mount the volume which is
+  * already mounted. The event object must have a volumeId property.
+  * @const {string}
+  */
+VolumeManagerCommon.VOLUME_ALREADY_MOUNTED = 'volume_already_mounted';
+
+VolumeManagerCommon.TEAM_DRIVES_DIRECTORY_NAME = 'team_drives';
+VolumeManagerCommon.TEAM_DRIVES_DIRECTORY_PATH =
+    '/' + VolumeManagerCommon.TEAM_DRIVES_DIRECTORY_NAME;

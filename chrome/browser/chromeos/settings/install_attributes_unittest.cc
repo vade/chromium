@@ -13,6 +13,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
+#include "base/test/scoped_task_environment.h"
 #include "chrome/browser/chromeos/policy/proto/install_attributes.pb.h"
 #include "chromeos/chromeos_paths.h"
 #include "chromeos/cryptohome/cryptohome_util.h"
@@ -32,6 +33,13 @@ void CopyLockResult(base::RunLoop* loop,
   loop->Quit();
 }
 
+void OnSetBlockDevmode(chromeos::DBusMethodCallStatus* out_status,
+                       chromeos::DBusMethodCallStatus call_status,
+                       bool result,
+                       const cryptohome::BaseReply& reply) {
+  *out_status = call_status;
+}
+
 }  // namespace
 
 static const char kTestDomain[] = "example.com";
@@ -41,7 +49,9 @@ static const char kTestUserDeprecated[] = "test@example.com";
 
 class InstallAttributesTest : public testing::Test {
  protected:
-  InstallAttributesTest() {}
+  InstallAttributesTest()
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
 
   void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
@@ -69,7 +79,7 @@ class InstallAttributesTest : public testing::Test {
     attribute->set_value(value);
   }
 
-  base::MessageLoopForUI message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   base::ScopedTempDir temp_dir_;
   std::unique_ptr<InstallAttributes> install_attributes_;
 
@@ -293,6 +303,16 @@ TEST_F(InstallAttributesTest, VerifyFakeInstallAttributesCache) {
   EXPECT_EQ(kTestDomain, install_attributes_->GetDomain());
   EXPECT_EQ(std::string(), install_attributes_->GetRealm());
   EXPECT_EQ(std::string(), install_attributes_->GetDeviceId());
+}
+
+TEST_F(InstallAttributesTest, CheckSetBlockDevmodeInTpm) {
+  chromeos::DBusMethodCallStatus status =
+      chromeos::DBusMethodCallStatus::DBUS_METHOD_CALL_FAILURE;
+  install_attributes_->SetBlockDevmodeInTpm(
+      true, base::Bind(&OnSetBlockDevmode, &status));
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(chromeos::DBusMethodCallStatus::DBUS_METHOD_CALL_SUCCESS, status);
 }
 
 }  // namespace chromeos

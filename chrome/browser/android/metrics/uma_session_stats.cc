@@ -8,7 +8,9 @@
 #include "base/android/jni_string.h"
 #include "base/command_line.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
@@ -19,10 +21,10 @@
 #include "components/metrics/metrics_service.h"
 #include "components/metrics_services_manager/metrics_services_manager.h"
 #include "components/prefs/pref_service.h"
+#include "components/ukm/ukm_service.h"
 #include "components/variations/metrics_util.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/user_metrics.h"
 #include "jni/UmaSessionStats_jni.h"
 
 using base::android::ConvertJavaStringToUTF8;
@@ -47,11 +49,13 @@ void UmaSessionStats::UmaResumeSession(JNIEnv* env,
   if (active_session_count_ == 0) {
     session_start_time_ = base::TimeTicks::Now();
 
-    // Tell the metrics service that the application resumes.
+    // Tell the metrics services that the application resumes.
     metrics::MetricsService* metrics = g_browser_process->metrics_service();
-    if (metrics) {
+    if (metrics)
       metrics->OnAppEnterForeground();
-    }
+    ukm::UkmService* ukm_service = g_browser_process->ukm_service();
+    if (ukm_service)
+      ukm_service->OnAppEnterForeground();
   }
   ++active_session_count_;
 }
@@ -69,11 +73,13 @@ void UmaSessionStats::UmaEndSession(JNIEnv* env,
     UMA_HISTOGRAM_LONG_TIMES("Session.TotalDuration", duration);
 
     DCHECK(g_browser_process);
-    // Tell the metrics service it was cleanly shutdown.
+    // Tell the metrics services they were cleanly shutdown.
     metrics::MetricsService* metrics = g_browser_process->metrics_service();
-    if (metrics) {
+    if (metrics)
       metrics->OnAppEnterBackground();
-    }
+    ukm::UkmService* ukm_service = g_browser_process->ukm_service();
+    if (ukm_service)
+      ukm_service->OnAppEnterBackground();
   }
 }
 
@@ -217,15 +223,14 @@ static void RecordPageLoaded(JNIEnv*,
                              const JavaParamRef<jclass>&,
                              jboolean is_desktop_user_agent) {
   // Should be called whenever a page has been loaded.
-  content::RecordAction(UserMetricsAction("MobilePageLoaded"));
+  base::RecordAction(UserMetricsAction("MobilePageLoaded"));
   if (is_desktop_user_agent) {
-    content::RecordAction(
-        UserMetricsAction("MobilePageLoadedDesktopUserAgent"));
+    base::RecordAction(UserMetricsAction("MobilePageLoadedDesktopUserAgent"));
   }
 }
 
 static void RecordPageLoadedWithKeyboard(JNIEnv*, const JavaParamRef<jclass>&) {
-  content::RecordAction(UserMetricsAction("MobilePageLoadedWithKeyboard"));
+  base::RecordAction(UserMetricsAction("MobilePageLoadedWithKeyboard"));
 }
 
 static jlong Init(JNIEnv* env, const JavaParamRef<jclass>& obj) {

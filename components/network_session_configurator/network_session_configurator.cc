@@ -18,7 +18,7 @@
 #include "net/http/http_stream_factory.h"
 #include "net/quic/chromium/quic_utils_chromium.h"
 #include "net/quic/core/quic_packets.h"
-#include "net/spdy/spdy_protocol.h"
+#include "net/spdy/core/spdy_protocol.h"
 #include "net/url_request/url_fetcher.h"
 
 namespace {
@@ -92,6 +92,7 @@ void ConfigureHttp2Params(base::StringPiece http2_trial_group,
 }
 
 bool ShouldEnableQuic(base::StringPiece quic_trial_group,
+                      const VariationParameters& quic_trial_params,
                       bool is_quic_force_disabled,
                       bool is_quic_force_enabled) {
   if (is_quic_force_disabled)
@@ -100,30 +101,26 @@ bool ShouldEnableQuic(base::StringPiece quic_trial_group,
     return true;
 
   return quic_trial_group.starts_with(kQuicFieldTrialEnabledGroupName) ||
-         quic_trial_group.starts_with(kQuicFieldTrialHttpsEnabledGroupName);
+         quic_trial_group.starts_with(kQuicFieldTrialHttpsEnabledGroupName) ||
+         base::LowerCaseEqualsASCII(
+             GetVariationParam(quic_trial_params, "enable_quic"),
+             "true");
 }
 
-bool ShouldDisableQuicWhenConnectionTimesOutWithOpenStreams(
+bool ShouldMarkQuicBrokenWhenNetworkBlackholes(
     const VariationParameters& quic_trial_params) {
   return base::LowerCaseEqualsASCII(
       GetVariationParam(quic_trial_params,
-                        "disable_quic_on_timeout_with_open_streams"),
+                        "mark_quic_broken_when_network_blackholes"),
       "true");
 }
 
-bool ShouldQuicDisableConnectionPooling(
+bool ShouldRetryWithoutAltSvcOnQuicErrors(
     const VariationParameters& quic_trial_params) {
   return base::LowerCaseEqualsASCII(
-      GetVariationParam(quic_trial_params, "disable_connection_pooling"),
-      "true");
-}
-
-bool ShouldQuicEnableAlternativeServicesForDifferentHost(
-    const VariationParameters& quic_trial_params) {
-  return !base::LowerCaseEqualsASCII(
       GetVariationParam(quic_trial_params,
-                        "enable_alternative_service_with_different_host"),
-      "false");
+                        "retry_without_alt_svc_on_quic_errors"),
+      "true");
 }
 
 net::QuicTagVector GetQuicConnectionOptions(
@@ -137,66 +134,9 @@ net::QuicTagVector GetQuicConnectionOptions(
   return net::ParseQuicConnectionOptions(it->second);
 }
 
-bool ShouldQuicAlwaysRequireHandshakeConfirmation(
-    const VariationParameters& quic_trial_params) {
-  return base::LowerCaseEqualsASCII(
-      GetVariationParam(quic_trial_params,
-                        "always_require_handshake_confirmation"),
-      "true");
-}
-
-float GetQuicLoadServerInfoTimeoutSrttMultiplier(
-    const VariationParameters& quic_trial_params) {
-  double value;
-  if (base::StringToDouble(
-          GetVariationParam(quic_trial_params, "load_server_info_time_to_srtt"),
-          &value)) {
-    return static_cast<float>(value);
-  }
-  return 0.0f;
-}
-
-bool ShouldQuicEnableConnectionRacing(
-    const VariationParameters& quic_trial_params) {
-  return base::LowerCaseEqualsASCII(
-      GetVariationParam(quic_trial_params, "enable_connection_racing"), "true");
-}
-
-bool ShouldQuicEnableNonBlockingIO(
-    const VariationParameters& quic_trial_params) {
-  return base::LowerCaseEqualsASCII(
-      GetVariationParam(quic_trial_params, "enable_non_blocking_io"), "true");
-}
-
-bool ShouldQuicDisableDiskCache(const VariationParameters& quic_trial_params) {
-  return base::LowerCaseEqualsASCII(
-      GetVariationParam(quic_trial_params, "disable_disk_cache"), "true");
-}
-
-bool ShouldQuicPreferAes(const VariationParameters& quic_trial_params) {
-  return base::LowerCaseEqualsASCII(
-      GetVariationParam(quic_trial_params, "prefer_aes"), "true");
-}
-
 bool ShouldForceHolBlocking(const VariationParameters& quic_trial_params) {
   return base::LowerCaseEqualsASCII(
       GetVariationParam(quic_trial_params, "force_hol_blocking"), "true");
-}
-
-int GetQuicSocketReceiveBufferSize(
-    const VariationParameters& quic_trial_params) {
-  int value;
-  if (base::StringToInt(
-          GetVariationParam(quic_trial_params, "receive_buffer_size"),
-          &value)) {
-    return value;
-  }
-  return 0;
-}
-
-bool ShouldQuicDelayTcpRace(const VariationParameters& quic_trial_params) {
-  return !base::LowerCaseEqualsASCII(
-      GetVariationParam(quic_trial_params, "disable_delay_tcp_race"), "true");
 }
 
 bool ShouldQuicCloseSessionsOnIpChange(
@@ -251,23 +191,10 @@ bool ShouldQuicDoNotFragment(const VariationParameters& quic_trial_params) {
       GetVariationParam(quic_trial_params, "do_not_fragment"), "true");
 }
 
-bool ShouldQuicDisablePreConnectIfZeroRtt(
+bool ShouldQuicEstimateInitialRtt(
     const VariationParameters& quic_trial_params) {
   return base::LowerCaseEqualsASCII(
-      GetVariationParam(quic_trial_params, "disable_preconnect_if_0rtt"),
-      "true");
-}
-
-std::unordered_set<std::string> GetQuicHostWhitelist(
-    const VariationParameters& quic_trial_params) {
-  std::string whitelist =
-      GetVariationParam(quic_trial_params, "quic_host_whitelist");
-  std::unordered_set<std::string> hosts;
-  for (const std::string& host : base::SplitString(
-           whitelist, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL)) {
-    hosts.insert(host);
-  }
-  return hosts;
+      GetVariationParam(quic_trial_params, "estimate_initial_rtt"), "true");
 }
 
 bool ShouldQuicMigrateSessionsOnNetworkChange(
@@ -306,6 +233,13 @@ net::QuicVersion GetQuicVersion(const VariationParameters& quic_trial_params) {
       GetVariationParam(quic_trial_params, "quic_version"));
 }
 
+bool ShouldEnableServerPushCancelation(
+    const VariationParameters& quic_trial_params) {
+  return base::LowerCaseEqualsASCII(
+      GetVariationParam(quic_trial_params, "enable_server_push_cancellation"),
+      "true");
+}
+
 void ConfigureQuicParams(base::StringPiece quic_trial_group,
                          const VariationParameters& quic_trial_params,
                          bool is_quic_force_disabled,
@@ -313,36 +247,18 @@ void ConfigureQuicParams(base::StringPiece quic_trial_group,
                          const std::string& quic_user_agent_id,
                          net::HttpNetworkSession::Params* params) {
   params->enable_quic = ShouldEnableQuic(
-      quic_trial_group, is_quic_force_disabled, is_quic_force_enabled);
-  params->disable_quic_on_timeout_with_open_streams =
-      ShouldDisableQuicWhenConnectionTimesOutWithOpenStreams(quic_trial_params);
+      quic_trial_group, quic_trial_params, is_quic_force_disabled,
+      is_quic_force_enabled);
+  params->mark_quic_broken_when_network_blackholes =
+      ShouldMarkQuicBrokenWhenNetworkBlackholes(quic_trial_params);
 
-  params->enable_quic_alternative_service_with_different_host =
-      ShouldQuicEnableAlternativeServicesForDifferentHost(quic_trial_params);
+  params->enable_server_push_cancellation =
+      ShouldEnableServerPushCancelation(quic_trial_params);
+
+  params->retry_without_alt_svc_on_quic_errors =
+      ShouldRetryWithoutAltSvcOnQuicErrors(quic_trial_params);
 
   if (params->enable_quic) {
-    params->quic_always_require_handshake_confirmation =
-        ShouldQuicAlwaysRequireHandshakeConfirmation(quic_trial_params);
-    params->quic_disable_connection_pooling =
-        ShouldQuicDisableConnectionPooling(quic_trial_params);
-    int receive_buffer_size = GetQuicSocketReceiveBufferSize(quic_trial_params);
-    if (receive_buffer_size != 0) {
-      params->quic_socket_receive_buffer_size = receive_buffer_size;
-    }
-    params->quic_delay_tcp_race = ShouldQuicDelayTcpRace(quic_trial_params);
-    float load_server_info_timeout_srtt_multiplier =
-        GetQuicLoadServerInfoTimeoutSrttMultiplier(quic_trial_params);
-    if (load_server_info_timeout_srtt_multiplier != 0) {
-      params->quic_load_server_info_timeout_srtt_multiplier =
-          load_server_info_timeout_srtt_multiplier;
-    }
-    params->quic_enable_connection_racing =
-        ShouldQuicEnableConnectionRacing(quic_trial_params);
-    params->quic_enable_non_blocking_io =
-        ShouldQuicEnableNonBlockingIO(quic_trial_params);
-    params->quic_disable_disk_cache =
-        ShouldQuicDisableDiskCache(quic_trial_params);
-    params->quic_prefer_aes = ShouldQuicPreferAes(quic_trial_params);
     params->quic_force_hol_blocking = ShouldForceHolBlocking(quic_trial_params);
     params->quic_connection_options =
         GetQuicConnectionOptions(quic_trial_params);
@@ -370,9 +286,8 @@ void ConfigureQuicParams(base::StringPiece quic_trial_group,
         ShouldQuicRaceCertVerification(quic_trial_params);
     params->quic_do_not_fragment =
         ShouldQuicDoNotFragment(quic_trial_params);
-    params->quic_disable_preconnect_if_0rtt =
-        ShouldQuicDisablePreConnectIfZeroRtt(quic_trial_params);
-    params->quic_host_whitelist = GetQuicHostWhitelist(quic_trial_params);
+    params->quic_estimate_initial_rtt =
+        ShouldQuicEstimateInitialRtt(quic_trial_params);
     params->quic_migrate_sessions_on_network_change =
         ShouldQuicMigrateSessionsOnNetworkChange(quic_trial_params);
     params->quic_migrate_sessions_early =
@@ -394,14 +309,6 @@ void ConfigureQuicParams(base::StringPiece quic_trial_group,
     supported_versions.push_back(version);
     params->quic_supported_versions = supported_versions;
   }
-}
-
-void ConfigureOptimizePreconnectsToProxiesParams(
-    const std::map<std::string, std::string>& proxy_preconnects_trial_params,
-    net::HttpNetworkSession::Params* params) {
-  params->restrict_to_one_preconnect_for_proxies =
-      GetVariationParam(proxy_preconnects_trial_params,
-                        "restrict_to_one_preconnect_for_proxies") == "true";
 }
 
 }  // anonymous namespace
@@ -444,12 +351,6 @@ void ParseFieldTrials(bool is_quic_force_disabled,
   const std::string tfo_trial_group =
       base::FieldTrialList::FindFullName(kTCPFastOpenFieldTrialName);
   ConfigureTCPFastOpenParams(tfo_trial_group, params);
-
-  std::map<std::string, std::string> proxy_preconnects_trial_params;
-  variations::GetVariationParams("NetProxyPreconnects",
-                                 &proxy_preconnects_trial_params);
-  ConfigureOptimizePreconnectsToProxiesParams(proxy_preconnects_trial_params,
-                                              params);
 }
 
 }  // namespace network_session_configurator

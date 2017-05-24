@@ -21,6 +21,9 @@ import java.util.Map.Entry;
  * Implementation of the abstract class {@link ViewAndroidDelegate} for WebView.
  */
 public class AwViewAndroidDelegate extends ViewAndroidDelegate {
+    /** Used for logging. */
+    private static final String TAG = "AwVAD";
+
     /**
      * The current container view. This view can be updated with
      * {@link #updateCurrentContainerView()}.
@@ -33,6 +36,7 @@ public class AwViewAndroidDelegate extends ViewAndroidDelegate {
      */
     private final Map<View, Position> mAnchorViews = new LinkedHashMap<>();
 
+    private final AwContentsClient mContentsClient;
     private final RenderCoordinates mRenderCoordinates;
 
     /**
@@ -59,8 +63,10 @@ public class AwViewAndroidDelegate extends ViewAndroidDelegate {
     }
 
     @VisibleForTesting
-    public AwViewAndroidDelegate(ViewGroup containerView, RenderCoordinates renderCoordinates) {
+    public AwViewAndroidDelegate(ViewGroup containerView, AwContentsClient contentsClient,
+            RenderCoordinates renderCoordinates) {
         mContainerView = containerView;
+        mContentsClient = contentsClient;
         mRenderCoordinates = renderCoordinates;
     }
 
@@ -134,6 +140,11 @@ public class AwViewAndroidDelegate extends ViewAndroidDelegate {
                 new android.widget.AbsoluteLayout.LayoutParams(
                     scaledWidth, scaledHeight, leftMargin, topMargin);
         anchorView.setLayoutParams(lp);
+    }
+
+    @Override
+    public void onBackgroundColorChanged(int color) {
+        mContentsClient.onBackgroundColorChanged(color);
     }
 
     @Override

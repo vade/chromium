@@ -8,7 +8,6 @@
 #include <ostream>
 #include <vector>
 
-#include "crypto/secure_hash.h"
 #include "net/quic/core/crypto/cert_compressor.h"
 #include "net/quic/core/crypto/common_cert_set.h"
 #include "net/quic/core/crypto/crypto_handshake.h"
@@ -17,9 +16,12 @@
 #include "net/quic/core/crypto/proof_source.h"
 #include "net/quic/core/crypto/quic_crypto_server_config.h"
 #include "net/quic/core/crypto/quic_random.h"
-#include "net/quic/core/quic_flags.h"
 #include "net/quic/core/quic_socket_address_coder.h"
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/platform/api/quic_endian.h"
+#include "net/quic/platform/api/quic_flags.h"
+#include "net/quic/platform/api/quic_string_piece.h"
+#include "net/quic/platform/api/quic_test.h"
 #include "net/quic/platform/api/quic_text_utils.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
 #include "net/quic/test_tools/delayed_verify_strike_register_client.h"
@@ -28,9 +30,8 @@
 #include "net/quic/test_tools/mock_random.h"
 #include "net/quic/test_tools/quic_crypto_server_config_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
-#include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/boringssl/src/include/openssl/sha.h"
 
-using base::StringPiece;
 using std::string;
 
 namespace net {
@@ -100,14 +101,14 @@ std::vector<TestParams> GetTestParams() {
   return params;
 }
 
-class CryptoServerTest : public ::testing::TestWithParam<TestParams> {
+class CryptoServerTest : public QuicTestWithParam<TestParams> {
  public:
   CryptoServerTest()
       : rand_(QuicRandom::GetInstance()),
         client_address_(QuicIpAddress::Loopback4(), 1234),
         config_(QuicCryptoServerConfig::TESTING,
                 rand_,
-                CryptoTestUtils::ProofSourceForTesting()),
+                crypto_test_utils::ProofSourceForTesting()),
         peer_(&config_),
         compressed_certs_cache_(
             QuicCompressedCertsCache::kQuicCompressedCertsCacheSize),
@@ -137,7 +138,7 @@ class CryptoServerTest : public ::testing::TestWithParam<TestParams> {
     std::unique_ptr<CryptoHandshakeMessage> msg(
         config_.AddConfig(std::move(primary_config), clock_.WallNow()));
 
-    StringPiece orbit;
+    QuicStringPiece orbit;
     CHECK(msg->GetStringPiece(kORBT, &orbit));
     CHECK_EQ(sizeof(orbit_), orbit.size());
     memcpy(orbit_, orbit.data(), orbit.size());
@@ -149,19 +150,15 @@ class CryptoServerTest : public ::testing::TestWithParam<TestParams> {
     pub_hex_ =
         "#" + QuicTextUtils::HexEncode(public_value, sizeof(public_value));
 
-    // clang-format off
-    CryptoHandshakeMessage client_hello = CryptoTestUtils::Message(
-        "CHLO",
-        "PDMD", "X509",
-        "AEAD", "AESG",
-        "KEXS", "C255",
-        "PUBS", pub_hex_.c_str(),
-        "NONC", nonce_hex_.c_str(),
-        "CSCT", "",
-        "VER\0", client_version_string_.c_str(),
-        "$padding", static_cast<int>(kClientHelloMinimumSize),
-        nullptr);
-    // clang-format on
+    CryptoHandshakeMessage client_hello =
+        crypto_test_utils::CreateCHLO({{"PDMD", "X509"},
+                                       {"AEAD", "AESG"},
+                                       {"KEXS", "C255"},
+                                       {"PUBS", pub_hex_},
+                                       {"NONC", nonce_hex_},
+                                       {"CSCT", ""},
+                                       {"VER\0", client_version_string_}},
+                                      kClientHelloMinimumSize);
     ShouldSucceed(client_hello);
     // The message should be rejected because the source-address token is
     // missing.
@@ -171,15 +168,15 @@ class CryptoServerTest : public ::testing::TestWithParam<TestParams> {
     CheckRejectReasons(kRejectReasons, arraysize(kRejectReasons));
     CheckForServerDesignatedConnectionId();
 
-    StringPiece srct;
+    QuicStringPiece srct;
     ASSERT_TRUE(out_.GetStringPiece(kSourceAddressTokenTag, &srct));
     srct_hex_ = "#" + QuicTextUtils::HexEncode(srct);
 
-    StringPiece scfg;
+    QuicStringPiece scfg;
     ASSERT_TRUE(out_.GetStringPiece(kSCFG, &scfg));
-    server_config_ = CryptoFramer::ParseMessage(scfg);
+    server_config_ = CryptoFramer::ParseMessage(scfg, Perspective::IS_CLIENT);
 
-    StringPiece scid;
+    QuicStringPiece scid;
     ASSERT_TRUE(server_config_->GetStringPiece(kSCID, &scid));
     scid_hex_ = "#" + QuicTextUtils::HexEncode(scid);
 
@@ -227,7 +224,7 @@ class CryptoServerTest : public ::testing::TestWithParam<TestParams> {
       EXPECT_EQ(QuicVersionToQuicTag(supported_versions_[i]), versions[i]);
     }
 
-    StringPiece address;
+    QuicStringPiece address;
     ASSERT_TRUE(server_hello.GetStringPiece(kCADR, &address));
     QuicSocketAddressCoder decoder;
     ASSERT_TRUE(decoder.Decode(address.data(), address.size()));
@@ -289,10 +286,11 @@ class CryptoServerTest : public ::testing::TestWithParam<TestParams> {
       if (should_succeed_) {
         ASSERT_EQ(error, QUIC_NO_ERROR)
             << "Message failed with error " << error_details << ": "
-            << result_->client_hello.DebugString();
+            << result_->client_hello.DebugString(Perspective::IS_SERVER);
       } else {
         ASSERT_NE(error, QUIC_NO_ERROR)
-            << "Message didn't fail: " << result_->client_hello.DebugString();
+            << "Message didn't fail: "
+            << result_->client_hello.DebugString(Perspective::IS_SERVER);
 
         EXPECT_TRUE(error_details.find(error_substr_) != string::npos)
             << error_substr_ << " not in " << error_details;
@@ -334,7 +332,7 @@ class CryptoServerTest : public ::testing::TestWithParam<TestParams> {
     string nonce;
     CryptoUtils::GenerateNonce(
         clock_.WallNow(), rand_,
-        StringPiece(reinterpret_cast<const char*>(orbit_), sizeof(orbit_)),
+        QuicStringPiece(reinterpret_cast<const char*>(orbit_), sizeof(orbit_)),
         &nonce);
     return nonce;
   }
@@ -366,6 +364,11 @@ class CryptoServerTest : public ::testing::TestWithParam<TestParams> {
     } else {
       ASSERT_EQ(QUIC_NO_ERROR,
                 out_.GetUint64(kRCID, &server_designated_connection_id));
+      if (QuicUtils::IsConnectionIdWireFormatBigEndian(
+              Perspective::IS_SERVER)) {
+        server_designated_connection_id =
+            QuicEndian::NetToHost64(server_designated_connection_id);
+      }
       EXPECT_EQ(rand_for_id_generation_.RandUint64(),
                 server_designated_connection_id);
     }
@@ -386,13 +389,12 @@ class CryptoServerTest : public ::testing::TestWithParam<TestParams> {
   }
 
   string XlctHexString() {
-    uint64_t xlct = CryptoTestUtils::LeafCertHashForTesting();
+    uint64_t xlct = crypto_test_utils::LeafCertHashForTesting();
     return "#" + QuicTextUtils::HexEncode(reinterpret_cast<char*>(&xlct),
                                           sizeof(xlct));
   }
 
  protected:
-  QuicFlagSaver flags_;  // Save/restore all QUIC flag values.
   QuicRandom* const rand_;
   MockRandom rand_for_id_generation_;
   MockClock clock_;
@@ -434,15 +436,11 @@ TEST_P(CryptoServerTest, BadSNI) {
   // clang-format on
 
   for (size_t i = 0; i < arraysize(kBadSNIs); i++) {
-    // clang-format off
-    CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-        "CHLO",
-        "PDMD", "X509",
-        "SNI", kBadSNIs[i],
-        "VER\0", client_version_string_.c_str(),
-        "$padding", static_cast<int>(kClientHelloMinimumSize),
-        nullptr);
-    // clang-format on
+    CryptoHandshakeMessage msg =
+        crypto_test_utils::CreateCHLO({{"PDMD", "X509"},
+                                       {"SNI", kBadSNIs[i]},
+                                       {"VER\0", client_version_string_}},
+                                      kClientHelloMinimumSize);
     ShouldFailMentioning("SNI", msg);
     const HandshakeFailureReason kRejectReasons[] = {
         SERVER_CONFIG_INCHOATE_HELLO_FAILURE};
@@ -454,21 +452,17 @@ TEST_P(CryptoServerTest, DefaultCert) {
   // Check that the server replies with a default certificate when no SNI is
   // specified. The CHLO is constructed to generate a REJ with certs, so must
   // not contain a valid STK, and must include PDMD.
-  // clang-format off
-  CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-      "CHLO",
-      "AEAD", "AESG",
-      "KEXS", "C255",
-      "PUBS", pub_hex_.c_str(),
-      "NONC", nonce_hex_.c_str(),
-      "PDMD", "X509",
-      "VER\0", client_version_string_.c_str(),
-      "$padding", static_cast<int>(kClientHelloMinimumSize),
-      nullptr);
-  // clang-format on
+  CryptoHandshakeMessage msg =
+      crypto_test_utils::CreateCHLO({{"AEAD", "AESG"},
+                                     {"KEXS", "C255"},
+                                     {"PUBS", pub_hex_},
+                                     {"NONC", nonce_hex_},
+                                     {"PDMD", "X509"},
+                                     {"VER\0", client_version_string_}},
+                                    kClientHelloMinimumSize);
 
   ShouldSucceed(msg);
-  StringPiece cert, proof, cert_sct;
+  QuicStringPiece cert, proof, cert_sct;
   EXPECT_TRUE(out_.GetStringPiece(kCertificateTag, &cert));
   EXPECT_TRUE(out_.GetStringPiece(kPROF, &proof));
   EXPECT_TRUE(out_.GetStringPiece(kCertificateSCTTag, &cert_sct));
@@ -483,25 +477,21 @@ TEST_P(CryptoServerTest, DefaultCert) {
 TEST_P(CryptoServerTest, RejectTooLarge) {
   // Check that the server replies with no certificate when a CHLO is
   // constructed with a PDMD but no SKT when the REJ would be too large.
-  // clang-format off
-  CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-      "CHLO",
-      "PDMD", "X509",
-      "AEAD", "AESG",
-      "KEXS", "C255",
-      "PUBS", pub_hex_.c_str(),
-      "NONC", nonce_hex_.c_str(),
-      "PDMD", "X509",
-      "VER\0", client_version_string_.c_str(),
-      "$padding", static_cast<int>(kClientHelloMinimumSize),
-      nullptr);
-  // clang-format on
+  CryptoHandshakeMessage msg =
+      crypto_test_utils::CreateCHLO({{"PDMD", "X509"},
+                                     {"AEAD", "AESG"},
+                                     {"KEXS", "C255"},
+                                     {"PUBS", pub_hex_},
+                                     {"NONC", nonce_hex_},
+                                     {"PDMD", "X509"},
+                                     {"VER\0", client_version_string_}},
+                                    kClientHelloMinimumSize);
 
   // The REJ will be larger than the CHLO so no PROF or CRT will be sent.
   config_.set_chlo_multiplier(1);
 
   ShouldSucceed(msg);
-  StringPiece cert, proof, cert_sct;
+  QuicStringPiece cert, proof, cert_sct;
   EXPECT_FALSE(out_.GetStringPiece(kCertificateTag, &cert));
   EXPECT_FALSE(out_.GetStringPiece(kPROF, &proof));
   EXPECT_FALSE(out_.GetStringPiece(kCertificateSCTTag, &cert_sct));
@@ -514,25 +504,21 @@ TEST_P(CryptoServerTest, RejectNotTooLarge) {
   // When the CHLO packet is large enough, ensure that a full REJ is sent.
   chlo_packet_size_ *= 2;
 
-  // clang-format off
-  CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-      "CHLO",
-      "PDMD", "X509",
-      "AEAD", "AESG",
-      "KEXS", "C255",
-      "PUBS", pub_hex_.c_str(),
-      "NONC", nonce_hex_.c_str(),
-      "PDMD", "X509",
-      "VER\0", client_version_string_.c_str(),
-      "$padding", static_cast<int>(kClientHelloMinimumSize),
-      nullptr);
-  // clang-format on
+  CryptoHandshakeMessage msg =
+      crypto_test_utils::CreateCHLO({{"PDMD", "X509"},
+                                     {"AEAD", "AESG"},
+                                     {"KEXS", "C255"},
+                                     {"PUBS", pub_hex_},
+                                     {"NONC", nonce_hex_},
+                                     {"PDMD", "X509"},
+                                     {"VER\0", client_version_string_}},
+                                    kClientHelloMinimumSize);
 
   // The REJ will be larger than the CHLO so no PROF or CRT will be sent.
   config_.set_chlo_multiplier(1);
 
   ShouldSucceed(msg);
-  StringPiece cert, proof, cert_sct;
+  QuicStringPiece cert, proof, cert_sct;
   EXPECT_TRUE(out_.GetStringPiece(kCertificateTag, &cert));
   EXPECT_TRUE(out_.GetStringPiece(kPROF, &proof));
   EXPECT_TRUE(out_.GetStringPiece(kCertificateSCTTag, &cert_sct));
@@ -544,26 +530,22 @@ TEST_P(CryptoServerTest, RejectNotTooLarge) {
 TEST_P(CryptoServerTest, RejectTooLargeButValidSTK) {
   // Check that the server replies with no certificate when a CHLO is
   // constructed with a PDMD but no SKT when the REJ would be too large.
-  // clang-format off
-  CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-      "CHLO",
-      "PDMD", "X509",
-      "AEAD", "AESG",
-      "KEXS", "C255",
-      "PUBS", pub_hex_.c_str(),
-      "NONC", nonce_hex_.c_str(),
-      "#004b5453", srct_hex_.c_str(),
-      "PDMD", "X509",
-      "VER\0", client_version_string_.c_str(),
-      "$padding", static_cast<int>(kClientHelloMinimumSize),
-      nullptr);
-  // clang-format on
+  CryptoHandshakeMessage msg =
+      crypto_test_utils::CreateCHLO({{"PDMD", "X509"},
+                                     {"AEAD", "AESG"},
+                                     {"KEXS", "C255"},
+                                     {"PUBS", pub_hex_},
+                                     {"NONC", nonce_hex_},
+                                     {"#004b5453", srct_hex_},
+                                     {"PDMD", "X509"},
+                                     {"VER\0", client_version_string_}},
+                                    kClientHelloMinimumSize);
 
   // The REJ will be larger than the CHLO so no PROF or CRT will be sent.
   config_.set_chlo_multiplier(1);
 
   ShouldSucceed(msg);
-  StringPiece cert, proof, cert_sct;
+  QuicStringPiece cert, proof, cert_sct;
   EXPECT_TRUE(out_.GetStringPiece(kCertificateTag, &cert));
   EXPECT_TRUE(out_.GetStringPiece(kPROF, &proof));
   EXPECT_TRUE(out_.GetStringPiece(kCertificateSCTTag, &cert_sct));
@@ -575,13 +557,11 @@ TEST_P(CryptoServerTest, RejectTooLargeButValidSTK) {
 }
 
 TEST_P(CryptoServerTest, TooSmall) {
-  // clang-format off
-  ShouldFailMentioning("too small", CryptoTestUtils::Message(
-        "CHLO",
-        "PDMD", "X509",
-        "VER\0", client_version_string_.c_str(),
-        nullptr));
-  // clang-format on
+  ShouldFailMentioning(
+      "too small",
+      crypto_test_utils::CreateCHLO(
+          {{"PDMD", "X509"}, {"VER\0", client_version_string_.c_str()}}));
+
   const HandshakeFailureReason kRejectReasons[] = {
       SERVER_CONFIG_INCHOATE_HELLO_FAILURE};
   CheckRejectReasons(kRejectReasons, arraysize(kRejectReasons));
@@ -599,14 +579,11 @@ TEST_P(CryptoServerTest, BadSourceAddressToken) {
   // clang-format on
 
   for (size_t i = 0; i < arraysize(kBadSourceAddressTokens); i++) {
-    // clang-format off
-    CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-        "CHLO",
-        "PDMD", "X509",
-        "STK", kBadSourceAddressTokens[i],
-        "VER\0", client_version_string_.c_str(),
-        "$padding", static_cast<int>(kClientHelloMinimumSize), nullptr);
-    // clang-format on
+    CryptoHandshakeMessage msg =
+        crypto_test_utils::CreateCHLO({{"PDMD", "X509"},
+                                       {"STK", kBadSourceAddressTokens[i]},
+                                       {"VER\0", client_version_string_}},
+                                      kClientHelloMinimumSize);
     ShouldSucceed(msg);
     const HandshakeFailureReason kRejectReasons[] = {
         SERVER_CONFIG_INCHOATE_HELLO_FAILURE};
@@ -625,37 +602,31 @@ TEST_P(CryptoServerTest, BadClientNonce) {
 
   for (size_t i = 0; i < arraysize(kBadNonces); i++) {
     // Invalid nonces should be ignored, in an inchoate CHLO.
-    // clang-format off
-    CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-        "CHLO",
-        "PDMD", "X509",
-        "NONC", kBadNonces[i],
-        "VER\0", client_version_string_.c_str(),
-        "$padding", static_cast<int>(kClientHelloMinimumSize),
-        nullptr);
-    // clang-format on
+
+    CryptoHandshakeMessage msg =
+        crypto_test_utils::CreateCHLO({{"PDMD", "X509"},
+                                       {"NONC", kBadNonces[i]},
+                                       {"VER\0", client_version_string_}},
+                                      kClientHelloMinimumSize);
+
     ShouldSucceed(msg);
     const HandshakeFailureReason kRejectReasons[] = {
         SERVER_CONFIG_INCHOATE_HELLO_FAILURE};
     CheckRejectReasons(kRejectReasons, arraysize(kRejectReasons));
 
     // Invalid nonces should result in CLIENT_NONCE_INVALID_FAILURE.
-    // clang-format off
-    CryptoHandshakeMessage msg1 = CryptoTestUtils::Message(
-        "CHLO",
-        "PDMD", "X509",
-        "AEAD", "AESG",
-        "KEXS", "C255",
-        "SCID", scid_hex_.c_str(),
-        "#004b5453", srct_hex_.c_str(),
-        "PUBS", pub_hex_.c_str(),
-        "NONC", kBadNonces[i],
-        "NONP", kBadNonces[i],
-        "XLCT", XlctHexString().c_str(),
-        "VER\0", client_version_string_.c_str(),
-        "$padding", static_cast<int>(kClientHelloMinimumSize),
-        nullptr);
-    // clang-format on
+    CryptoHandshakeMessage msg1 =
+        crypto_test_utils::CreateCHLO({{"PDMD", "X509"},
+                                       {"AEAD", "AESG"},
+                                       {"KEXS", "C255"},
+                                       {"SCID", scid_hex_},
+                                       {"#004b5453", srct_hex_},
+                                       {"PUBS", pub_hex_},
+                                       {"NONC", kBadNonces[i]},
+                                       {"NONP", kBadNonces[i]},
+                                       {"XLCT", XlctHexString()},
+                                       {"VER\0", client_version_string_}},
+                                      kClientHelloMinimumSize);
 
     ShouldSucceed(msg1);
 
@@ -668,34 +639,26 @@ TEST_P(CryptoServerTest, BadClientNonce) {
 
 TEST_P(CryptoServerTest, NoClientNonce) {
   // No client nonces should result in INCHOATE_HELLO_FAILURE.
-  // clang-format off
-  CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-      "CHLO",
-      "PDMD", "X509",
-      "VER\0", client_version_string_.c_str(),
-      "$padding", static_cast<int>(kClientHelloMinimumSize),
-      nullptr);
-  // clang-format on
+
+  CryptoHandshakeMessage msg = crypto_test_utils::CreateCHLO(
+      {{"PDMD", "X509"}, {"VER\0", client_version_string_}},
+      kClientHelloMinimumSize);
 
   ShouldSucceed(msg);
   const HandshakeFailureReason kRejectReasons[] = {
       SERVER_CONFIG_INCHOATE_HELLO_FAILURE};
   CheckRejectReasons(kRejectReasons, arraysize(kRejectReasons));
 
-  // clang-format off
-  CryptoHandshakeMessage msg1 = CryptoTestUtils::Message(
-      "CHLO",
-      "PDMD", "X509",
-      "AEAD", "AESG",
-      "KEXS", "C255",
-      "SCID", scid_hex_.c_str(),
-      "#004b5453", srct_hex_.c_str(),
-      "PUBS", pub_hex_.c_str(),
-      "XLCT", XlctHexString().c_str(),
-      "VER\0", client_version_string_.c_str(),
-      "$padding", static_cast<int>(kClientHelloMinimumSize),
-      nullptr);
-  // clang-format on
+  CryptoHandshakeMessage msg1 =
+      crypto_test_utils::CreateCHLO({{"PDMD", "X509"},
+                                     {"AEAD", "AESG"},
+                                     {"KEXS", "C255"},
+                                     {"SCID", scid_hex_},
+                                     {"#004b5453", srct_hex_},
+                                     {"PUBS", pub_hex_},
+                                     {"XLCT", XlctHexString()},
+                                     {"VER\0", client_version_string_}},
+                                    kClientHelloMinimumSize);
 
   ShouldSucceed(msg1);
   CheckRejectTag();
@@ -714,14 +677,9 @@ TEST_P(CryptoServerTest, DowngradeAttack) {
   string bad_version =
       QuicTagToString(QuicVersionToQuicTag(supported_versions_.back()));
 
-  // clang-format off
-  CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-      "CHLO",
-      "PDMD", "X509",
-      "VER\0", bad_version.c_str(),
-      "$padding", static_cast<int>(kClientHelloMinimumSize),
-      nullptr);
-  // clang-format on
+  CryptoHandshakeMessage msg = crypto_test_utils::CreateCHLO(
+      {{"PDMD", "X509"}, {"VER\0", bad_version}}, kClientHelloMinimumSize);
+
   ShouldFailMentioning("Downgrade", msg);
   const HandshakeFailureReason kRejectReasons[] = {
       SERVER_CONFIG_INCHOATE_HELLO_FAILURE};
@@ -730,20 +688,17 @@ TEST_P(CryptoServerTest, DowngradeAttack) {
 
 TEST_P(CryptoServerTest, CorruptServerConfig) {
   // This tests corrupted server config.
-  // clang-format off
-  CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-      "CHLO",
-      "PDMD", "X509",
-      "AEAD", "AESG",
-      "KEXS", "C255",
-      "SCID", (string(1, 'X') + scid_hex_).c_str(),
-      "#004b5453", srct_hex_.c_str(),
-      "PUBS", pub_hex_.c_str(),
-      "NONC", nonce_hex_.c_str(),
-      "VER\0", client_version_string_.c_str(),
-      "$padding", static_cast<int>(kClientHelloMinimumSize),
-      nullptr);
-  // clang-format on
+  CryptoHandshakeMessage msg =
+      crypto_test_utils::CreateCHLO({{"PDMD", "X509"},
+                                     {"AEAD", "AESG"},
+                                     {"KEXS", "C255"},
+                                     {"SCID", (string(1, 'X') + scid_hex_)},
+                                     {"#004b5453", srct_hex_},
+                                     {"PUBS", pub_hex_},
+                                     {"NONC", nonce_hex_},
+                                     {"VER\0", client_version_string_}},
+                                    kClientHelloMinimumSize);
+
   ShouldSucceed(msg);
   CheckRejectTag();
   const HandshakeFailureReason kRejectReasons[] = {
@@ -753,21 +708,18 @@ TEST_P(CryptoServerTest, CorruptServerConfig) {
 
 TEST_P(CryptoServerTest, CorruptSourceAddressToken) {
   // This tests corrupted source address token.
-  // clang-format off
-  CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-      "CHLO",
-      "PDMD", "X509",
-      "AEAD", "AESG",
-      "KEXS", "C255",
-      "SCID", scid_hex_.c_str(),
-      "#004b5453", (string(1, 'X') + srct_hex_).c_str(),
-      "PUBS", pub_hex_.c_str(),
-      "NONC", nonce_hex_.c_str(),
-      "XLCT", XlctHexString().c_str(),
-      "VER\0", client_version_string_.c_str(),
-      "$padding", static_cast<int>(kClientHelloMinimumSize),
-      nullptr);
-  // clang-format on
+  CryptoHandshakeMessage msg = crypto_test_utils::CreateCHLO(
+      {{"PDMD", "X509"},
+       {"AEAD", "AESG"},
+       {"KEXS", "C255"},
+       {"SCID", scid_hex_},
+       {"#004b5453", (string(1, 'X') + srct_hex_)},
+       {"PUBS", pub_hex_},
+       {"NONC", nonce_hex_},
+       {"XLCT", XlctHexString()},
+       {"VER\0", client_version_string_}},
+      kClientHelloMinimumSize);
+
   ShouldSucceed(msg);
   CheckRejectTag();
   const HandshakeFailureReason kRejectReasons[] = {
@@ -777,21 +729,18 @@ TEST_P(CryptoServerTest, CorruptSourceAddressToken) {
 
 TEST_P(CryptoServerTest, CorruptClientNonceAndSourceAddressToken) {
   // This test corrupts client nonce and source address token.
-  // clang-format off
-  CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-      "CHLO",
-      "PDMD", "X509",
-      "AEAD", "AESG",
-      "KEXS", "C255",
-      "SCID", scid_hex_.c_str(),
-      "#004b5453", (string(1, 'X') + srct_hex_).c_str(),
-      "PUBS", pub_hex_.c_str(),
-      "NONC", (string(1, 'X') + nonce_hex_).c_str(),
-      "XLCT", XlctHexString().c_str(),
-      "VER\0", client_version_string_.c_str(),
-      "$padding", static_cast<int>(kClientHelloMinimumSize),
-      nullptr);
-  // clang-format on
+  CryptoHandshakeMessage msg = crypto_test_utils::CreateCHLO(
+      {{"PDMD", "X509"},
+       {"AEAD", "AESG"},
+       {"KEXS", "C255"},
+       {"SCID", scid_hex_},
+       {"#004b5453", (string(1, 'X') + srct_hex_)},
+       {"PUBS", pub_hex_},
+       {"NONC", (string(1, 'X') + nonce_hex_)},
+       {"XLCT", XlctHexString()},
+       {"VER\0", client_version_string_}},
+      kClientHelloMinimumSize);
+
   ShouldSucceed(msg);
   CheckRejectTag();
   const HandshakeFailureReason kRejectReasons[] = {
@@ -801,23 +750,20 @@ TEST_P(CryptoServerTest, CorruptClientNonceAndSourceAddressToken) {
 
 TEST_P(CryptoServerTest, CorruptMultipleTags) {
   // This test corrupts client nonce, server nonce and source address token.
-  // clang-format off
-  CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-      "CHLO",
-      "PDMD", "X509",
-      "AEAD", "AESG",
-      "KEXS", "C255",
-      "SCID", scid_hex_.c_str(),
-      "#004b5453", (string(1, 'X') + srct_hex_).c_str(),
-      "PUBS", pub_hex_.c_str(),
-      "NONC", (string(1, 'X') + nonce_hex_).c_str(),
-      "NONP", (string(1, 'X') + nonce_hex_).c_str(),
-      "SNO\0", (string(1, 'X') + nonce_hex_).c_str(),
-      "XLCT", XlctHexString().c_str(),
-      "VER\0", client_version_string_.c_str(),
-      "$padding", static_cast<int>(kClientHelloMinimumSize),
-      nullptr);
-  // clang-format on
+  CryptoHandshakeMessage msg = crypto_test_utils::CreateCHLO(
+      {{"PDMD", "X509"},
+       {"AEAD", "AESG"},
+       {"KEXS", "C255"},
+       {"SCID", scid_hex_},
+       {"#004b5453", (string(1, 'X') + srct_hex_)},
+       {"PUBS", pub_hex_},
+       {"NONC", (string(1, 'X') + nonce_hex_)},
+       {"NONP", (string(1, 'X') + nonce_hex_)},
+       {"SNO\0", (string(1, 'X') + nonce_hex_)},
+       {"XLCT", XlctHexString()},
+       {"VER\0", client_version_string_}},
+      kClientHelloMinimumSize);
+
   ShouldSucceed(msg);
   CheckRejectTag();
 
@@ -829,22 +775,18 @@ TEST_P(CryptoServerTest, CorruptMultipleTags) {
 TEST_P(CryptoServerTest, NoServerNonce) {
   // When no server nonce is present and no strike register is configured,
   // the CHLO should be rejected.
-  // clang-format off
-  CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-      "CHLO",
-      "PDMD", "X509",
-      "AEAD", "AESG",
-      "KEXS", "C255",
-      "SCID", scid_hex_.c_str(),
-      "#004b5453", srct_hex_.c_str(),
-      "PUBS", pub_hex_.c_str(),
-      "NONC", nonce_hex_.c_str(),
-      "NONP", nonce_hex_.c_str(),
-      "XLCT", XlctHexString().c_str(),
-      "VER\0", client_version_string_.c_str(),
-      "$padding", static_cast<int>(kClientHelloMinimumSize),
-      nullptr);
-  // clang-format on
+  CryptoHandshakeMessage msg =
+      crypto_test_utils::CreateCHLO({{"PDMD", "X509"},
+                                     {"AEAD", "AESG"},
+                                     {"KEXS", "C255"},
+                                     {"SCID", scid_hex_},
+                                     {"#004b5453", srct_hex_},
+                                     {"PUBS", pub_hex_},
+                                     {"NONC", nonce_hex_},
+                                     {"NONP", nonce_hex_},
+                                     {"XLCT", XlctHexString()},
+                                     {"VER\0", client_version_string_}},
+                                    kClientHelloMinimumSize);
 
   ShouldSucceed(msg);
 
@@ -856,22 +798,20 @@ TEST_P(CryptoServerTest, NoServerNonce) {
 
 TEST_P(CryptoServerTest, ProofForSuppliedServerConfig) {
   client_address_ = QuicSocketAddress(QuicIpAddress::Loopback6(), 1234);
-  // clang-format off
-  CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-      "CHLO",
-      "AEAD", "AESG",
-      "KEXS", "C255",
-      "PDMD", "X509",
-      "SCID", kOldConfigId,
-      "#004b5453", srct_hex_.c_str(),
-      "PUBS", pub_hex_.c_str(),
-      "NONC", nonce_hex_.c_str(),
-      "NONP", "123456789012345678901234567890",
-      "VER\0", client_version_string_.c_str(),
-      "XLCT", XlctHexString().c_str(),
-      "$padding", static_cast<int>(kClientHelloMinimumSize),
-      nullptr);
-  // clang-format on
+
+  CryptoHandshakeMessage msg =
+      crypto_test_utils::CreateCHLO({{"AEAD", "AESG"},
+                                     {"KEXS", "C255"},
+                                     {"PDMD", "X509"},
+                                     {"SCID", kOldConfigId},
+                                     {"#004b5453", srct_hex_},
+                                     {"PUBS", pub_hex_},
+                                     {"NONC", nonce_hex_},
+                                     {"NONP", "123456789012345678901234567890"},
+                                     {"VER\0", client_version_string_},
+                                     {"XLCT", XlctHexString()}},
+                                    kClientHelloMinimumSize);
+
   ShouldSucceed(msg);
   // The message should be rejected because the source-address token is no
   // longer valid.
@@ -880,13 +820,13 @@ TEST_P(CryptoServerTest, ProofForSuppliedServerConfig) {
       SOURCE_ADDRESS_TOKEN_DIFFERENT_IP_ADDRESS_FAILURE};
   CheckRejectReasons(kRejectReasons, arraysize(kRejectReasons));
 
-  StringPiece cert, proof, scfg_str;
+  QuicStringPiece cert, proof, scfg_str;
   EXPECT_TRUE(out_.GetStringPiece(kCertificateTag, &cert));
   EXPECT_TRUE(out_.GetStringPiece(kPROF, &proof));
   EXPECT_TRUE(out_.GetStringPiece(kSCFG, &scfg_str));
   std::unique_ptr<CryptoHandshakeMessage> scfg(
-      CryptoFramer::ParseMessage(scfg_str));
-  StringPiece scid;
+      CryptoFramer::ParseMessage(scfg_str, Perspective::IS_CLIENT));
+  QuicStringPiece scid;
   EXPECT_TRUE(scfg->GetStringPiece(kSCID, &scid));
   EXPECT_NE(scid, kOldConfigId);
 
@@ -900,15 +840,15 @@ TEST_P(CryptoServerTest, ProofForSuppliedServerConfig) {
 
   // Check that the proof in the REJ message is valid.
   std::unique_ptr<ProofVerifier> proof_verifier(
-      CryptoTestUtils::ProofVerifierForTesting());
+      crypto_test_utils::ProofVerifierForTesting());
   std::unique_ptr<ProofVerifyContext> verify_context(
-      CryptoTestUtils::ProofVerifyContextForTesting());
+      crypto_test_utils::ProofVerifyContextForTesting());
   std::unique_ptr<ProofVerifyDetails> details;
   string error_details;
   std::unique_ptr<ProofVerifierCallback> callback(
       new DummyProofVerifierCallback());
   string chlo_hash;
-  CryptoUtils::HashHandshakeMessage(msg, &chlo_hash);
+  CryptoUtils::HashHandshakeMessage(msg, &chlo_hash, Perspective::IS_SERVER);
   EXPECT_EQ(QUIC_SUCCESS,
             proof_verifier->VerifyProof(
                 "test.example.com", 443, scfg_str.as_string(), client_version_,
@@ -917,51 +857,44 @@ TEST_P(CryptoServerTest, ProofForSuppliedServerConfig) {
 }
 
 TEST_P(CryptoServerTest, RejectInvalidXlct) {
-  // clang-format off
-  CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-      "CHLO",
-      "PDMD", "X509",
-      "AEAD", "AESG",
-      "KEXS", "C255",
-      "SCID", scid_hex_.c_str(),
-      "#004b5453", srct_hex_.c_str(),
-      "PUBS", pub_hex_.c_str(),
-      "NONC", nonce_hex_.c_str(),
-      "VER\0", client_version_string_.c_str(),
-      "XLCT", "#0102030405060708",
-      "$padding", static_cast<int>(kClientHelloMinimumSize),
-      nullptr);
-  // clang-format on
+  CryptoHandshakeMessage msg =
+      crypto_test_utils::CreateCHLO({{"PDMD", "X509"},
+                                     {"AEAD", "AESG"},
+                                     {"KEXS", "C255"},
+                                     {"SCID", scid_hex_},
+                                     {"#004b5453", srct_hex_},
+                                     {"PUBS", pub_hex_},
+                                     {"NONC", nonce_hex_},
+                                     {"VER\0", client_version_string_},
+                                     {"XLCT", "#0102030405060708"}},
+                                    kClientHelloMinimumSize);
+
   // If replay protection isn't disabled, then
   // QuicCryptoServerConfig::EvaluateClientHello will leave info.unique as false
   // and cause ProcessClientHello to exit early (and generate a REJ message).
   config_.set_replay_protection(false);
 
   ShouldSucceed(msg);
-  // clang-format off
+
   const HandshakeFailureReason kRejectReasons[] = {
-    INVALID_EXPECTED_LEAF_CERTIFICATE
-  };
-  // clang-format on
+      INVALID_EXPECTED_LEAF_CERTIFICATE};
+
   CheckRejectReasons(kRejectReasons, arraysize(kRejectReasons));
 }
 
 TEST_P(CryptoServerTest, ValidXlct) {
-  // clang-format off
-  CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-      "CHLO",
-      "PDMD", "X509",
-      "AEAD", "AESG",
-      "KEXS", "C255",
-      "SCID", scid_hex_.c_str(),
-      "#004b5453", srct_hex_.c_str(),
-      "PUBS", pub_hex_.c_str(),
-      "NONC", nonce_hex_.c_str(),
-      "VER\0", client_version_string_.c_str(),
-      "XLCT", XlctHexString().c_str(),
-      "$padding", static_cast<int>(kClientHelloMinimumSize),
-      nullptr);
-  // clang-format on
+  CryptoHandshakeMessage msg =
+      crypto_test_utils::CreateCHLO({{"PDMD", "X509"},
+                                     {"AEAD", "AESG"},
+                                     {"KEXS", "C255"},
+                                     {"SCID", scid_hex_},
+                                     {"#004b5453", srct_hex_},
+                                     {"PUBS", pub_hex_},
+                                     {"NONC", nonce_hex_},
+                                     {"VER\0", client_version_string_},
+                                     {"XLCT", XlctHexString()}},
+                                    kClientHelloMinimumSize);
+
   // If replay protection isn't disabled, then
   // QuicCryptoServerConfig::EvaluateClientHello will leave info.unique as false
   // and cause ProcessClientHello to exit early (and generate a REJ message).
@@ -972,21 +905,18 @@ TEST_P(CryptoServerTest, ValidXlct) {
 }
 
 TEST_P(CryptoServerTest, NonceInSHLO) {
-  // clang-format off
-  CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-      "CHLO",
-      "PDMD", "X509",
-      "AEAD", "AESG",
-      "KEXS", "C255",
-      "SCID", scid_hex_.c_str(),
-      "#004b5453", srct_hex_.c_str(),
-      "PUBS", pub_hex_.c_str(),
-      "NONC", nonce_hex_.c_str(),
-      "VER\0", client_version_string_.c_str(),
-      "XLCT", XlctHexString().c_str(),
-      "$padding", static_cast<int>(kClientHelloMinimumSize),
-      nullptr);
-  // clang-format on
+  CryptoHandshakeMessage msg =
+      crypto_test_utils::CreateCHLO({{"PDMD", "X509"},
+                                     {"AEAD", "AESG"},
+                                     {"KEXS", "C255"},
+                                     {"SCID", scid_hex_},
+                                     {"#004b5453", srct_hex_},
+                                     {"PUBS", pub_hex_},
+                                     {"NONC", nonce_hex_},
+                                     {"VER\0", client_version_string_},
+                                     {"XLCT", XlctHexString()}},
+                                    kClientHelloMinimumSize);
+
   // If replay protection isn't disabled, then
   // QuicCryptoServerConfig::EvaluateClientHello will leave info.unique as false
   // and cause ProcessClientHello to exit early (and generate a REJ message).
@@ -995,7 +925,7 @@ TEST_P(CryptoServerTest, NonceInSHLO) {
   ShouldSucceed(msg);
   EXPECT_EQ(kSHLO, out_.tag());
 
-  StringPiece nonce;
+  QuicStringPiece nonce;
   EXPECT_TRUE(out_.GetStringPiece(kServerNonceTag, &nonce));
 }
 
@@ -1003,25 +933,23 @@ TEST_P(CryptoServerTest, ProofSourceFailure) {
   // Install a ProofSource which will unconditionally fail
   peer_.ResetProofSource(std::unique_ptr<ProofSource>(new FailingProofSource));
 
-  // clang-format off
-  CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-      "CHLO",
-      "AEAD", "AESG",
-      "KEXS", "C255",
-      "SCID", scid_hex_.c_str(),
-      "PUBS", pub_hex_.c_str(),
-      "NONC", nonce_hex_.c_str(),
-      "PDMD", "X509",
-      "VER\0", client_version_string_.c_str(),
-      "$padding", static_cast<int>(kClientHelloMinimumSize),
-      nullptr);
-  // clang-format on
+  CryptoHandshakeMessage msg =
+      crypto_test_utils::CreateCHLO({{"AEAD", "AESG"},
+                                     {"KEXS", "C255"},
+                                     {"SCID", scid_hex_},
+                                     {"PUBS", pub_hex_},
+                                     {"NONC", nonce_hex_},
+                                     {"PDMD", "X509"},
+                                     {"VER\0", client_version_string_}},
+                                    kClientHelloMinimumSize);
 
   // Just ensure that we don't crash as occurred in b/33916924.
   ShouldFailMentioning("", msg);
 }
 
-TEST(CryptoServerConfigGenerationTest, Determinism) {
+class CryptoServerConfigGenerationTest : public QuicTest {};
+
+TEST_F(CryptoServerConfigGenerationTest, Determinism) {
   // Test that using a deterministic PRNG causes the server-config to be
   // deterministic.
 
@@ -1030,18 +958,19 @@ TEST(CryptoServerConfigGenerationTest, Determinism) {
   MockClock clock;
 
   QuicCryptoServerConfig a(QuicCryptoServerConfig::TESTING, &rand_a,
-                           CryptoTestUtils::ProofSourceForTesting());
+                           crypto_test_utils::ProofSourceForTesting());
   QuicCryptoServerConfig b(QuicCryptoServerConfig::TESTING, &rand_b,
-                           CryptoTestUtils::ProofSourceForTesting());
+                           crypto_test_utils::ProofSourceForTesting());
   std::unique_ptr<CryptoHandshakeMessage> scfg_a(
       a.AddDefaultConfig(&rand_a, &clock, options));
   std::unique_ptr<CryptoHandshakeMessage> scfg_b(
       b.AddDefaultConfig(&rand_b, &clock, options));
 
-  ASSERT_EQ(scfg_a->DebugString(), scfg_b->DebugString());
+  ASSERT_EQ(scfg_a->DebugString(Perspective::IS_SERVER),
+            scfg_b->DebugString(Perspective::IS_SERVER));
 }
 
-TEST(CryptoServerConfigGenerationTest, SCIDVaries) {
+TEST_F(CryptoServerConfigGenerationTest, SCIDVaries) {
   // This test ensures that the server config ID varies for different server
   // configs.
 
@@ -1050,49 +979,48 @@ TEST(CryptoServerConfigGenerationTest, SCIDVaries) {
   MockClock clock;
 
   QuicCryptoServerConfig a(QuicCryptoServerConfig::TESTING, &rand_a,
-                           CryptoTestUtils::ProofSourceForTesting());
+                           crypto_test_utils::ProofSourceForTesting());
   rand_b.ChangeValue();
   QuicCryptoServerConfig b(QuicCryptoServerConfig::TESTING, &rand_b,
-                           CryptoTestUtils::ProofSourceForTesting());
+                           crypto_test_utils::ProofSourceForTesting());
   std::unique_ptr<CryptoHandshakeMessage> scfg_a(
       a.AddDefaultConfig(&rand_a, &clock, options));
   std::unique_ptr<CryptoHandshakeMessage> scfg_b(
       b.AddDefaultConfig(&rand_b, &clock, options));
 
-  StringPiece scid_a, scid_b;
+  QuicStringPiece scid_a, scid_b;
   EXPECT_TRUE(scfg_a->GetStringPiece(kSCID, &scid_a));
   EXPECT_TRUE(scfg_b->GetStringPiece(kSCID, &scid_b));
 
   EXPECT_NE(scid_a, scid_b);
 }
 
-TEST(CryptoServerConfigGenerationTest, SCIDIsHashOfServerConfig) {
+TEST_F(CryptoServerConfigGenerationTest, SCIDIsHashOfServerConfig) {
   MockRandom rand_a;
   const QuicCryptoServerConfig::ConfigOptions options;
   MockClock clock;
 
   QuicCryptoServerConfig a(QuicCryptoServerConfig::TESTING, &rand_a,
-                           CryptoTestUtils::ProofSourceForTesting());
+                           crypto_test_utils::ProofSourceForTesting());
   std::unique_ptr<CryptoHandshakeMessage> scfg(
       a.AddDefaultConfig(&rand_a, &clock, options));
 
-  StringPiece scid;
+  QuicStringPiece scid;
   EXPECT_TRUE(scfg->GetStringPiece(kSCID, &scid));
   // Need to take a copy of |scid| has we're about to call |Erase|.
   const string scid_str(scid.as_string());
 
   scfg->Erase(kSCID);
   scfg->MarkDirty();
-  const QuicData& serialized(scfg->GetSerialized());
+  const QuicData& serialized(scfg->GetSerialized(Perspective::IS_SERVER));
 
-  std::unique_ptr<crypto::SecureHash> hash(
-      crypto::SecureHash::Create(crypto::SecureHash::SHA256));
-  hash->Update(serialized.data(), serialized.length());
-  uint8_t digest[16];
-  hash->Finish(digest, sizeof(digest));
+  uint8_t digest[SHA256_DIGEST_LENGTH];
+  SHA256(reinterpret_cast<const uint8_t*>(serialized.data()),
+         serialized.length(), digest);
 
-  ASSERT_EQ(scid.size(), sizeof(digest));
-  EXPECT_EQ(0, memcmp(digest, scid_str.c_str(), sizeof(digest)));
+  // scid is a SHA-256 hash, truncated to 16 bytes.
+  ASSERT_EQ(scid.size(), 16u);
+  EXPECT_EQ(0, memcmp(digest, scid_str.c_str(), scid.size()));
 }
 
 class CryptoServerTestNoConfig : public CryptoServerTest {
@@ -1103,14 +1031,10 @@ class CryptoServerTestNoConfig : public CryptoServerTest {
 };
 
 TEST_P(CryptoServerTestNoConfig, DontCrash) {
-  // clang-format off
-  CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-      "CHLO",
-      "PDMD", "X509",
-      "VER\0", client_version_string_.c_str(),
-      "$padding", static_cast<int>(kClientHelloMinimumSize),
-      nullptr);
-  // clang-format on
+  CryptoHandshakeMessage msg = crypto_test_utils::CreateCHLO(
+      {{"PDMD", "X509"}, {"VER\0", client_version_string_}},
+      kClientHelloMinimumSize);
+
   ShouldFailMentioning("No config", msg);
 
   const HandshakeFailureReason kRejectReasons[] = {
@@ -1129,21 +1053,18 @@ class CryptoServerTestOldVersion : public CryptoServerTest {
 };
 
 TEST_P(CryptoServerTestOldVersion, ServerIgnoresXlct) {
-  // clang-format off
-  CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-      "CHLO",
-      "PDMD", "X509",
-      "AEAD", "AESG",
-      "KEXS", "C255",
-      "SCID", scid_hex_.c_str(),
-      "#004b5453", srct_hex_.c_str(),
-      "PUBS", pub_hex_.c_str(),
-      "NONC", nonce_hex_.c_str(),
-      "VER\0", client_version_string_.c_str(),
-      "XLCT", "#0100000000000000",
-      "$padding", static_cast<int>(kClientHelloMinimumSize),
-      nullptr);
-  // clang-format on
+  CryptoHandshakeMessage msg =
+      crypto_test_utils::CreateCHLO({{"PDMD", "X509"},
+                                     {"AEAD", "AESG"},
+                                     {"KEXS", "C255"},
+                                     {"SCID", scid_hex_},
+                                     {"#004b5453", srct_hex_},
+                                     {"PUBS", pub_hex_},
+                                     {"NONC", nonce_hex_},
+                                     {"VER\0", client_version_string_},
+                                     {"XLCT", "#0100000000000000"}},
+                                    kClientHelloMinimumSize);
+
   // If replay protection isn't disabled, then
   // QuicCryptoServerConfig::EvaluateClientHello will leave info.unique as false
   // and cause ProcessClientHello to exit early (and generate a REJ message).
@@ -1154,20 +1075,17 @@ TEST_P(CryptoServerTestOldVersion, ServerIgnoresXlct) {
 }
 
 TEST_P(CryptoServerTestOldVersion, XlctNotRequired) {
-  // clang-format off
-  CryptoHandshakeMessage msg = CryptoTestUtils::Message(
-      "CHLO",
-      "PDMD", "X509",
-      "AEAD", "AESG",
-      "KEXS", "C255",
-      "SCID", scid_hex_.c_str(),
-      "#004b5453", srct_hex_.c_str(),
-      "PUBS", pub_hex_.c_str(),
-      "NONC", nonce_hex_.c_str(),
-      "VER\0", client_version_string_.c_str(),
-      "$padding", static_cast<int>(kClientHelloMinimumSize),
-      nullptr);
-  // clang-format on
+  CryptoHandshakeMessage msg =
+      crypto_test_utils::CreateCHLO({{"PDMD", "X509"},
+                                     {"AEAD", "AESG"},
+                                     {"KEXS", "C255"},
+                                     {"SCID", scid_hex_},
+                                     {"#004b5453", srct_hex_},
+                                     {"PUBS", pub_hex_},
+                                     {"NONC", nonce_hex_},
+                                     {"VER\0", client_version_string_}},
+                                    kClientHelloMinimumSize);
+
   // If replay protection isn't disabled, then
   // QuicCryptoServerConfig::EvaluateClientHello will leave info.unique as false
   // and cause ProcessClientHello to exit early (and generate a REJ message).

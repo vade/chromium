@@ -6,10 +6,13 @@
 
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "content/public/test/test_browser_thread.h"
+#include "chrome/browser/prefs/browser_prefs.h"
+#include "chrome/common/pref_names.h"
+#include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/testing_profile.h"
+#include "components/prefs/testing_pref_service.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-using content::BrowserThread;
 
 class FakeExternalProtocolHandlerWorker
     : public shell_integration::DefaultProtocolClientWorker {
@@ -52,8 +55,8 @@ class FakeExternalProtocolHandlerDelegate
     return new FakeExternalProtocolHandlerWorker(callback, protocol, os_state_);
   }
 
-  ExternalProtocolHandler::BlockState GetBlockState(
-      const std::string& scheme) override {
+  ExternalProtocolHandler::BlockState GetBlockState(const std::string& scheme,
+                                                    Profile* profile) override {
     return block_state_;
   }
 
@@ -108,14 +111,21 @@ class FakeExternalProtocolHandlerDelegate
 class ExternalProtocolHandlerTest : public testing::Test {
  protected:
   ExternalProtocolHandlerTest()
-      : ui_thread_(BrowserThread::UI, base::MessageLoop::current()),
-        file_thread_(BrowserThread::FILE) {}
+      : test_browser_thread_bundle_(
+            content::TestBrowserThreadBundle::REAL_FILE_THREAD) {}
 
-  void SetUp() override { file_thread_.Start(); }
+  void SetUp() override {
+    local_state_.reset(new TestingPrefServiceSimple);
+    profile_.reset(new TestingProfile());
+    chrome::RegisterLocalState(local_state_->registry());
+    TestingBrowserProcess::GetGlobal()->SetLocalState(local_state_.get());
+  }
 
   void TearDown() override {
     // Ensure that g_accept_requests gets set back to true after test execution.
     ExternalProtocolHandler::PermitLaunchUrl();
+    TestingBrowserProcess::GetGlobal()->SetLocalState(nullptr);
+    local_state_.reset();
   }
 
   void DoTest(ExternalProtocolHandler::BlockState block_state,
@@ -140,11 +150,12 @@ class ExternalProtocolHandlerTest : public testing::Test {
     ASSERT_EQ(should_block, delegate_.has_blocked());
   }
 
-  base::MessageLoopForUI ui_message_loop_;
-  content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread file_thread_;
+  content::TestBrowserThreadBundle test_browser_thread_bundle_;
 
   FakeExternalProtocolHandlerDelegate delegate_;
+
+  std::unique_ptr<TestingPrefServiceSimple> local_state_;
+  std::unique_ptr<TestingProfile> profile_;
 };
 
 TEST_F(ExternalProtocolHandlerTest, TestLaunchSchemeBlockedChromeDefault) {
@@ -190,4 +201,68 @@ TEST_F(ExternalProtocolHandlerTest, TestLaunchSchemeUnknownChromeNotDefault) {
 TEST_F(ExternalProtocolHandlerTest, TestLaunchSchemeUnknownChromeUnknown) {
   DoTest(ExternalProtocolHandler::UNKNOWN, shell_integration::UNKNOWN_DEFAULT,
          true, false, false);
+}
+
+TEST_F(ExternalProtocolHandlerTest, TestGetBlockStateUnknown) {
+  ExternalProtocolHandler::BlockState block_state =
+      ExternalProtocolHandler::GetBlockState("tel", profile_.get());
+  ASSERT_EQ(ExternalProtocolHandler::UNKNOWN, block_state);
+  ASSERT_TRUE(local_state_->GetDictionary(prefs::kExcludedSchemes)->empty());
+  ASSERT_FALSE(
+      profile_->GetPrefs()->GetDictionary(prefs::kExcludedSchemes)->empty());
+}
+
+TEST_F(ExternalProtocolHandlerTest, TestGetBlockStateDefaultBlock) {
+  ExternalProtocolHandler::BlockState block_state =
+      ExternalProtocolHandler::GetBlockState("afp", profile_.get());
+  ASSERT_EQ(ExternalProtocolHandler::BLOCK, block_state);
+  ASSERT_TRUE(local_state_->GetDictionary(prefs::kExcludedSchemes)->empty());
+  ASSERT_FALSE(
+      profile_->GetPrefs()->GetDictionary(prefs::kExcludedSchemes)->empty());
+}
+
+TEST_F(ExternalProtocolHandlerTest, TestGetBlockStateDefaultDontBlock) {
+  ExternalProtocolHandler::BlockState block_state =
+      ExternalProtocolHandler::GetBlockState("mailto", profile_.get());
+  ASSERT_EQ(ExternalProtocolHandler::DONT_BLOCK, block_state);
+  ASSERT_TRUE(local_state_->GetDictionary(prefs::kExcludedSchemes)->empty());
+  ASSERT_FALSE(
+      profile_->GetPrefs()->GetDictionary(prefs::kExcludedSchemes)->empty());
+}
+
+TEST_F(ExternalProtocolHandlerTest,
+       TestGetBlockStateLocalBlockStateCopiedAndResetOnProfilePref) {
+  base::DictionaryValue prefs_local;
+  prefs_local.SetBoolean("tel", true);
+  local_state_->Set(prefs::kExcludedSchemes, prefs_local);
+  ExternalProtocolHandler::BlockState block_state =
+      ExternalProtocolHandler::GetBlockState("tel", profile_.get());
+  ASSERT_EQ(ExternalProtocolHandler::UNKNOWN, block_state);
+  ASSERT_TRUE(local_state_->GetDictionary(prefs::kExcludedSchemes)->empty());
+  ASSERT_FALSE(
+      profile_->GetPrefs()->GetDictionary(prefs::kExcludedSchemes)->empty());
+}
+
+TEST_F(ExternalProtocolHandlerTest,
+       TestGetBlockStateLocalDontBlockCopiedAsIsToProfilePref) {
+  base::DictionaryValue prefs_local;
+  prefs_local.SetBoolean("tel", false);
+  local_state_->Set(prefs::kExcludedSchemes, prefs_local);
+  ExternalProtocolHandler::BlockState block_state =
+      ExternalProtocolHandler::GetBlockState("tel", profile_.get());
+  ASSERT_EQ(ExternalProtocolHandler::DONT_BLOCK, block_state);
+  ASSERT_TRUE(local_state_->GetDictionary(prefs::kExcludedSchemes)->empty());
+  ASSERT_FALSE(
+      profile_->GetPrefs()->GetDictionary(prefs::kExcludedSchemes)->empty());
+}
+
+TEST_F(ExternalProtocolHandlerTest, TestClearProfileState) {
+  base::DictionaryValue prefs;
+  prefs.SetBoolean("tel", true);
+  profile_->GetPrefs()->Set(prefs::kExcludedSchemes, prefs);
+  ASSERT_FALSE(
+      profile_->GetPrefs()->GetDictionary(prefs::kExcludedSchemes)->empty());
+  ExternalProtocolHandler::ClearData(profile_.get());
+  ASSERT_TRUE(
+      profile_->GetPrefs()->GetDictionary(prefs::kExcludedSchemes)->empty());
 }

@@ -36,21 +36,21 @@ namespace media {
 AudioRendererImpl::AudioRendererImpl(
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
     media::AudioRendererSink* sink,
-    ScopedVector<AudioDecoder> decoders,
-    const scoped_refptr<MediaLog>& media_log)
+    const CreateAudioDecodersCB& create_audio_decoders_cb,
+    MediaLog* media_log)
     : task_runner_(task_runner),
       expecting_config_changes_(false),
       sink_(sink),
-      audio_buffer_stream_(
-          new AudioBufferStream(task_runner, std::move(decoders), media_log)),
       media_log_(media_log),
       client_(nullptr),
       tick_clock_(new base::DefaultTickClock()),
       last_audio_memory_usage_(0),
       last_decoded_sample_rate_(0),
       last_decoded_channel_layout_(CHANNEL_LAYOUT_NONE),
+      is_encrypted_(false),
       playback_rate_(0.0),
       state_(kUninitialized),
+      create_audio_decoders_cb_(create_audio_decoders_cb),
       buffering_state_(BUFFERING_HAVE_NOTHING),
       rendering_(false),
       sink_playing_(false),
@@ -59,9 +59,7 @@ AudioRendererImpl::AudioRendererImpl(
       rendered_end_of_stream_(false),
       is_suspending_(false),
       weak_factory_(this) {
-  audio_buffer_stream_->set_config_change_observer(base::Bind(
-      &AudioRendererImpl::OnConfigChange, weak_factory_.GetWeakPtr()));
-
+  DCHECK(create_audio_decoders_cb_);
   // Tests may not have a power monitor.
   base::PowerMonitor* monitor = base::PowerMonitor::Get();
   if (!monitor)
@@ -93,6 +91,12 @@ AudioRendererImpl::~AudioRendererImpl() {
   // If Render() is in progress, this call will wait for Render() to finish.
   // After this call, the |sink_| will not call back into |this| anymore.
   sink_->Stop();
+
+  // Trying to track down AudioClock crash, http://crbug.com/674856. If the sink
+  // hasn't truly stopped above we will fail to acquire the lock. The sink must
+  // be stopped to avoid destroying the AudioClock while its still being used.
+  CHECK(lock_.Try());
+  lock_.Release();
 
   if (!init_cb_.is_null())
     base::ResetAndReturn(&init_cb_).Run(PIPELINE_ERROR_ABORT);
@@ -334,11 +338,29 @@ void AudioRendererImpl::Initialize(DemuxerStream* stream,
   DCHECK(stream);
   DCHECK_EQ(stream->type(), DemuxerStream::AUDIO);
   DCHECK(!init_cb.is_null());
-  DCHECK_EQ(kUninitialized, state_);
+  DCHECK(state_ == kUninitialized || state_ == kFlushed);
   DCHECK(sink_.get());
+
+  // If we are re-initializing playback (e.g. switching media tracks), stop the
+  // sink first.
+  if (state_ == kFlushed) {
+    sink_->Stop();
+    audio_clock_.reset();
+  }
+
+  // Trying to track down AudioClock crash, http://crbug.com/674856.
+  // AudioRenderImpl should only be initialized once to avoid destroying
+  // AudioClock while the audio thread is still using it.
+  CHECK_EQ(audio_clock_.get(), nullptr);
 
   state_ = kInitializing;
   client_ = client;
+
+  audio_buffer_stream_ = base::MakeUnique<AudioBufferStream>(
+      task_runner_, create_audio_decoders_cb_, media_log_);
+
+  audio_buffer_stream_->set_config_change_observer(base::Bind(
+      &AudioRendererImpl::OnConfigChange, weak_factory_.GetWeakPtr()));
 
   // Always post |init_cb_| because |this| could be destroyed if initialization
   // failed.
@@ -433,6 +455,8 @@ void AudioRendererImpl::Initialize(DemuxerStream* stream,
   last_decoded_channel_layout_ =
       stream->audio_decoder_config().channel_layout();
 
+  is_encrypted_ = stream->audio_decoder_config().is_encrypted();
+
   audio_clock_.reset(
       new AudioClock(base::TimeDelta(), audio_parameters_.sample_rate()));
 
@@ -471,7 +495,7 @@ void AudioRendererImpl::OnAudioBufferStreamInitialized(bool success) {
   // We're all good! Continue initializing the rest of the audio renderer
   // based on the decoder format.
   algorithm_.reset(new AudioRendererAlgorithm());
-  algorithm_->Initialize(audio_parameters_);
+  algorithm_->Initialize(audio_parameters_, is_encrypted_);
   ConfigureChannelMask();
 
   ChangeState_Locked(kFlushed);

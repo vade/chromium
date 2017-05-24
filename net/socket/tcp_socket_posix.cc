@@ -14,9 +14,10 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/posix/eintr_wrapper.h"
-#include "base/task_runner_util.h"
-#include "base/threading/worker_pool.h"
-#include "base/time/default_tick_clock.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/time/time.h"
 #include "net/base/address_list.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
@@ -24,11 +25,13 @@
 #include "net/base/network_activity_monitor.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/sockaddr_storage.h"
+#include "net/http/http_util.h"
 #include "net/log/net_log.h"
 #include "net/log/net_log_event_type.h"
 #include "net/log/net_log_source.h"
 #include "net/log/net_log_source_type.h"
 #include "net/socket/socket_net_log_params.h"
+#include "net/socket/socket_options.h"
 #include "net/socket/socket_posix.h"
 
 // If we don't have a definition for TCPI_OPT_SYN_DATA, create one.
@@ -93,12 +96,15 @@ bool SystemSupportsTCPFastOpen() {
                               &system_supports_tcp_fastopen)) {
     return false;
   }
-  // The read from /proc should return '1' if TCP FastOpen is enabled in the OS.
-  if (system_supports_tcp_fastopen.empty() ||
-      (system_supports_tcp_fastopen[0] != '1')) {
-    return false;
-  }
-  return true;
+  // The read value from /proc will be set in its least significant bit if
+  // TCP FastOpen is enabled.
+  int read_int = 0;
+  base::StringToInt(
+      HttpUtil::TrimLWS(base::StringPiece(system_supports_tcp_fastopen)),
+      &read_int);
+  if ((read_int & 0x1) == 1)
+    return true;
+  return false;
 }
 
 void RegisterTCPFastOpenIntentAndSupport(bool user_enabled,
@@ -132,9 +138,9 @@ bool IsTCPFastOpenUserEnabled() {
 // do that on the IO thread.
 void CheckSupportAndMaybeEnableTCPFastOpen(bool user_enabled) {
 #if defined(OS_LINUX) || defined(OS_ANDROID)
-  base::PostTaskAndReplyWithResult(
-      base::WorkerPool::GetTaskRunner(/*task_is_slow=*/false).get(),
+  base::PostTaskWithTraitsAndReplyWithResult(
       FROM_HERE,
+      {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::Bind(SystemSupportsTCPFastOpen),
       base::Bind(RegisterTCPFastOpenIntentAndSupport, user_enabled));
 #endif
@@ -145,8 +151,6 @@ TCPSocketPosix::TCPSocketPosix(
     NetLog* net_log,
     const NetLogSource& source)
     : socket_performance_watcher_(std::move(socket_performance_watcher)),
-      tick_clock_(new base::DefaultTickClock()),
-      rtt_notifications_minimum_interval_(base::TimeDelta::FromSeconds(1)),
       use_tcp_fastopen_(false),
       tcp_fastopen_write_attempted_(false),
       tcp_fastopen_connected_(false),
@@ -171,7 +175,7 @@ int TCPSocketPosix::Open(AddressFamily family) {
   return rv;
 }
 
-int TCPSocketPosix::AdoptConnectedSocket(int socket_fd,
+int TCPSocketPosix::AdoptConnectedSocket(SocketDescriptor socket,
                                          const IPEndPoint& peer_address) {
   DCHECK(!socket_);
 
@@ -183,7 +187,17 @@ int TCPSocketPosix::AdoptConnectedSocket(int socket_fd,
   }
 
   socket_.reset(new SocketPosix);
-  int rv = socket_->AdoptConnectedSocket(socket_fd, storage);
+  int rv = socket_->AdoptConnectedSocket(socket, storage);
+  if (rv != OK)
+    socket_.reset();
+  return rv;
+}
+
+int TCPSocketPosix::AdoptUnconnectedSocket(SocketDescriptor socket) {
+  DCHECK(!socket_);
+
+  socket_.reset(new SocketPosix);
+  int rv = socket_->AdoptUnconnectedSocket(socket);
   if (rv != OK)
     socket_.reset();
   return rv;
@@ -290,6 +304,21 @@ int TCPSocketPosix::Read(IOBuffer* buf,
   return rv;
 }
 
+int TCPSocketPosix::ReadIfReady(IOBuffer* buf,
+                                int buf_len,
+                                const CompletionCallback& callback) {
+  DCHECK(socket_);
+  DCHECK(!callback.is_null());
+
+  int rv =
+      socket_->ReadIfReady(buf, buf_len,
+                           base::Bind(&TCPSocketPosix::ReadIfReadyCompleted,
+                                      base::Unretained(this), callback));
+  if (rv != ERR_IO_PENDING)
+    rv = HandleReadCompleted(buf, rv);
+  return rv;
+}
+
 int TCPSocketPosix::Write(IOBuffer* buf,
                           int buf_len,
                           const CompletionCallback& callback) {
@@ -351,7 +380,7 @@ int TCPSocketPosix::GetPeerAddress(IPEndPoint* address) const {
 
 int TCPSocketPosix::SetDefaultOptionsForServer() {
   DCHECK(socket_);
-  return SetAddressReuse(true);
+  return AllowAddressReuse();
 }
 
 void TCPSocketPosix::SetDefaultOptionsForClient() {
@@ -380,52 +409,34 @@ void TCPSocketPosix::SetDefaultOptionsForClient() {
 #endif
 }
 
-int TCPSocketPosix::SetAddressReuse(bool allow) {
+int TCPSocketPosix::AllowAddressReuse() {
   DCHECK(socket_);
 
-  // SO_REUSEADDR is useful for server sockets to bind to a recently unbound
-  // port. When a socket is closed, the end point changes its state to TIME_WAIT
-  // and wait for 2 MSL (maximum segment lifetime) to ensure the remote peer
-  // acknowledges its closure. For server sockets, it is usually safe to
-  // bind to a TIME_WAIT end point immediately, which is a widely adopted
-  // behavior.
-  //
-  // Note that on *nix, SO_REUSEADDR does not enable the TCP socket to bind to
-  // an end point that is already bound by another socket. To do that one must
-  // set SO_REUSEPORT instead. This option is not provided on Linux prior
-  // to 3.9.
-  //
-  // SO_REUSEPORT is provided in MacOS X and iOS.
-  int boolean_value = allow ? 1 : 0;
-  int rv = setsockopt(socket_->socket_fd(), SOL_SOCKET, SO_REUSEADDR,
-                      &boolean_value, sizeof(boolean_value));
-  if (rv < 0)
-    return MapSystemError(errno);
-  return OK;
+  return SetReuseAddr(socket_->socket_fd(), true);
 }
 
 int TCPSocketPosix::SetReceiveBufferSize(int32_t size) {
   DCHECK(socket_);
-  int rv = setsockopt(socket_->socket_fd(), SOL_SOCKET, SO_RCVBUF,
-                      reinterpret_cast<const char*>(&size), sizeof(size));
-  return (rv == 0) ? OK : MapSystemError(errno);
+
+  return SetSocketReceiveBufferSize(socket_->socket_fd(), size);
 }
 
 int TCPSocketPosix::SetSendBufferSize(int32_t size) {
   DCHECK(socket_);
-  int rv = setsockopt(socket_->socket_fd(), SOL_SOCKET, SO_SNDBUF,
-                      reinterpret_cast<const char*>(&size), sizeof(size));
-  return (rv == 0) ? OK : MapSystemError(errno);
+
+  return SetSocketSendBufferSize(socket_->socket_fd(), size);
 }
 
 bool TCPSocketPosix::SetKeepAlive(bool enable, int delay) {
   DCHECK(socket_);
+
   return SetTCPKeepAlive(socket_->socket_fd(), enable, delay);
 }
 
 bool TCPSocketPosix::SetNoDelay(bool no_delay) {
   DCHECK(socket_);
-  return SetTCPNoDelay(socket_->socket_fd(), no_delay);
+
+  return SetTCPNoDelay(socket_->socket_fd(), no_delay) == OK;
 }
 
 void TCPSocketPosix::Close() {
@@ -484,9 +495,10 @@ void TCPSocketPosix::EndLoggingMultipleConnectAttempts(int net_error) {
   }
 }
 
-void TCPSocketPosix::SetTickClockForTesting(
-    std::unique_ptr<base::TickClock> tick_clock) {
-  tick_clock_ = std::move(tick_clock);
+SocketDescriptor TCPSocketPosix::ReleaseSocketDescriptorForTesting() {
+  SocketDescriptor socket_descriptor = socket_->ReleaseConnectedSocket();
+  socket_.reset();
+  return socket_descriptor;
 }
 
 void TCPSocketPosix::AcceptCompleted(
@@ -588,10 +600,37 @@ void TCPSocketPosix::ReadCompleted(const scoped_refptr<IOBuffer>& buf,
                                    const CompletionCallback& callback,
                                    int rv) {
   DCHECK_NE(ERR_IO_PENDING, rv);
+
   callback.Run(HandleReadCompleted(buf.get(), rv));
 }
 
+void TCPSocketPosix::ReadIfReadyCompleted(const CompletionCallback& callback,
+                                          int rv) {
+  DCHECK_NE(ERR_IO_PENDING, rv);
+  DCHECK_GE(OK, rv);
+
+  HandleReadCompletedHelper(rv);
+  callback.Run(rv);
+}
+
 int TCPSocketPosix::HandleReadCompleted(IOBuffer* buf, int rv) {
+  HandleReadCompletedHelper(rv);
+
+  if (rv < 0)
+    return rv;
+
+  // Notify the watcher only if at least 1 byte was read.
+  if (rv > 0)
+    NotifySocketPerformanceWatcher();
+
+  net_log_.AddByteTransferEvent(NetLogEventType::SOCKET_BYTES_RECEIVED, rv,
+                                buf->data());
+  NetworkActivityMonitor::GetInstance()->IncrementBytesReceived(rv);
+
+  return rv;
+}
+
+void TCPSocketPosix::HandleReadCompletedHelper(int rv) {
   if (tcp_fastopen_write_attempted_ && !tcp_fastopen_connected_) {
     // A TCP FastOpen connect-with-write was attempted. This read was a
     // subsequent read, which either succeeded or failed. If the read
@@ -612,18 +651,7 @@ int TCPSocketPosix::HandleReadCompleted(IOBuffer* buf, int rv) {
   if (rv < 0) {
     net_log_.AddEvent(NetLogEventType::SOCKET_READ_ERROR,
                       CreateNetLogSocketErrorCallback(rv, errno));
-    return rv;
   }
-
-  // Notify the watcher only if at least 1 byte was read.
-  if (rv > 0)
-    NotifySocketPerformanceWatcher();
-
-  net_log_.AddByteTransferEvent(NetLogEventType::SOCKET_BYTES_RECEIVED, rv,
-                                buf->data());
-  NetworkActivityMonitor::GetInstance()->IncrementBytesReceived(rv);
-
-  return rv;
 }
 
 void TCPSocketPosix::WriteCompleted(const scoped_refptr<IOBuffer>& buf,
@@ -724,13 +752,6 @@ int TCPSocketPosix::TcpFastOpenWrite(IOBuffer* buf,
 
 void TCPSocketPosix::NotifySocketPerformanceWatcher() {
 #if defined(TCP_INFO)
-  const base::TimeTicks now_ticks = tick_clock_->NowTicks();
-  // Do not notify |socket_performance_watcher_| if the last notification was
-  // recent than |rtt_notifications_minimum_interval_| ago. This helps in
-  // reducing the overall overhead of the tcp_info syscalls.
-  if (now_ticks - last_rtt_notification_ < rtt_notifications_minimum_interval_)
-    return;
-
   // Check if |socket_performance_watcher_| is interested in receiving a RTT
   // update notification.
   if (!socket_performance_watcher_ ||
@@ -752,7 +773,6 @@ void TCPSocketPosix::NotifySocketPerformanceWatcher() {
 
   socket_performance_watcher_->OnUpdatedRTTAvailable(
       base::TimeDelta::FromMicroseconds(info.tcpi_rtt));
-  last_rtt_notification_ = now_ticks;
 #endif  // defined(TCP_INFO)
 }
 

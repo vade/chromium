@@ -22,7 +22,6 @@
 #include "components/metrics/metrics_service.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
-#include "components/variations/variations_associated_data.h"
 
 namespace metrics {
 
@@ -122,6 +121,8 @@ FileMetricsProvider::FileMetricsProvider(
     : task_runner_(task_runner),
       pref_service_(local_state),
       weak_factory_(this) {
+  base::StatisticsRecorder::RegisterHistogramProvider(
+      weak_factory_.GetWeakPtr());
 }
 
 FileMetricsProvider::~FileMetricsProvider() {}
@@ -139,8 +140,10 @@ void FileMetricsProvider::RegisterSource(const base::FilePath& path,
   source->prefs_key = prefs_key.as_string();
 
   switch (source->type) {
-    case SOURCE_HISTOGRAMS_ATOMIC_FILE:
     case SOURCE_HISTOGRAMS_ACTIVE_FILE:
+      DCHECK(prefs_key.empty());
+    // fall through
+    case SOURCE_HISTOGRAMS_ATOMIC_FILE:
       source->path = path;
       break;
     case SOURCE_HISTOGRAMS_ATOMIC_DIR:
@@ -333,10 +336,18 @@ FileMetricsProvider::AccessResult FileMetricsProvider::CheckAndMapMetricSource(
     return ACCESS_RESULT_INVALID_CONTENTS;
   }
 
-  // Create an allocator for the mapped file. Ownership passes to the allocator.
-  source->allocator.reset(new base::PersistentHistogramAllocator(
+  // Map the file and validate it.
+  std::unique_ptr<base::PersistentMemoryAllocator> memory_allocator =
       base::MakeUnique<base::FilePersistentMemoryAllocator>(
-          std::move(mapped), 0, 0, base::StringPiece(), read_only)));
+          std::move(mapped), 0, 0, base::StringPiece(), read_only);
+  if (memory_allocator->GetMemoryState() ==
+      base::PersistentMemoryAllocator::MEMORY_DELETED) {
+    return ACCESS_RESULT_MEMORY_DELETED;
+  }
+
+  // Create an allocator for the mapped file. Ownership passes to the allocator.
+  source->allocator = base::MakeUnique<base::PersistentHistogramAllocator>(
+      std::move(memory_allocator));
 
   return ACCESS_RESULT_SUCCESS;
 }
@@ -479,12 +490,6 @@ void FileMetricsProvider::OnDidCreateMetricsLog() {
 bool FileMetricsProvider::HasInitialStabilityMetrics() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  // Check if there is an experiment that disables stability metrics.
-  std::string unreported = variations::GetVariationParamValueByFeature(
-      base::kPersistentHistogramsFeature, "send_unreported_metrics");
-  if (unreported == "no")
-    sources_for_previous_run_.clear();
-
   // Measure the total time spent checking all sources as well as the time
   // per individual file. This method is called during startup and thus blocks
   // the initial showing of the browser window so it's important to know the
@@ -522,20 +527,6 @@ bool FileMetricsProvider::HasInitialStabilityMetrics() {
   return !sources_for_previous_run_.empty();
 }
 
-void FileMetricsProvider::MergeHistogramDeltas() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  // Measure the total time spent processing all sources as well as the time
-  // per individual file. This method is called on the UI thread so it's
-  // important to know how much total "jank" may be introduced.
-  SCOPED_UMA_HISTOGRAM_TIMER("UMA.FileMetricsProvider.SnapshotTime.Total");
-
-  for (std::unique_ptr<SourceInfo>& source : sources_mapped_) {
-    SCOPED_UMA_HISTOGRAM_TIMER("UMA.FileMetricsProvider.SnapshotTime.File");
-    MergeHistogramDeltasFromSource(source.get());
-  }
-}
-
 void FileMetricsProvider::RecordInitialHistogramSnapshots(
     base::HistogramSnapshotManager* snapshot_manager) {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -561,6 +552,20 @@ void FileMetricsProvider::RecordInitialHistogramSnapshots(
 
     // Update the last-seen time so it isn't read again unless it changes.
     RecordSourceAsRead(source.get());
+  }
+}
+
+void FileMetricsProvider::MergeHistogramDeltas() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  // Measure the total time spent processing all sources as well as the time
+  // per individual file. This method is called on the UI thread so it's
+  // important to know how much total "jank" may be introduced.
+  SCOPED_UMA_HISTOGRAM_TIMER("UMA.FileMetricsProvider.SnapshotTime.Total");
+
+  for (std::unique_ptr<SourceInfo>& source : sources_mapped_) {
+    SCOPED_UMA_HISTOGRAM_TIMER("UMA.FileMetricsProvider.SnapshotTime.File");
+    MergeHistogramDeltasFromSource(source.get());
   }
 }
 

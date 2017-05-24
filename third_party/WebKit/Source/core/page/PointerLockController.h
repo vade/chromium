@@ -28,48 +28,48 @@
 
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
-#include "wtf/RefPtr.h"
-#include "wtf/text/AtomicString.h"
+#include "platform/wtf/RefPtr.h"
+#include "platform/wtf/text/AtomicString.h"
 
 namespace blink {
 
 class Element;
 class Document;
 class Page;
-class PlatformMouseEvent;
+class WebMouseEvent;
 
 class CORE_EXPORT PointerLockController final
     : public GarbageCollected<PointerLockController> {
   WTF_MAKE_NONCOPYABLE(PointerLockController);
 
  public:
-  static PointerLockController* create(Page*);
+  static PointerLockController* Create(Page*);
 
-  void requestPointerLock(Element* target);
-  void requestPointerUnlock();
-  void elementRemoved(Element*);
-  void documentDetached(Document*);
-  bool lockPending() const;
-  Element* element() const;
+  void RequestPointerLock(Element* target);
+  void RequestPointerUnlock();
+  void ElementRemoved(Element*);
+  void DocumentDetached(Document*);
+  bool LockPending() const;
+  Element* GetElement() const;
 
-  void didAcquirePointerLock();
-  void didNotAcquirePointerLock();
-  void didLosePointerLock();
-  void dispatchLockedMouseEvent(const PlatformMouseEvent&,
-                                const AtomicString& eventType);
+  void DidAcquirePointerLock();
+  void DidNotAcquirePointerLock();
+  void DidLosePointerLock();
+  void DispatchLockedMouseEvent(const WebMouseEvent&,
+                                const AtomicString& event_type);
 
   DECLARE_TRACE();
 
  private:
   explicit PointerLockController(Page*);
-  void clearElement();
-  void enqueueEvent(const AtomicString& type, Element*);
-  void enqueueEvent(const AtomicString& type, Document*);
+  void ClearElement();
+  void EnqueueEvent(const AtomicString& type, Element*);
+  void EnqueueEvent(const AtomicString& type, Document*);
 
-  Member<Page> m_page;
-  bool m_lockPending;
-  Member<Element> m_element;
-  Member<Document> m_documentOfRemovedElementWhileWaitingForUnlock;
+  Member<Page> page_;
+  bool lock_pending_;
+  Member<Element> element_;
+  Member<Document> document_of_removed_element_while_waiting_for_unlock_;
 };
 
 }  // namespace blink

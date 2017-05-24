@@ -5,11 +5,33 @@
 #ifndef COMPONENTS_NTP_TILES_CONSTANTS_H_
 #define COMPONENTS_NTP_TILES_CONSTANTS_H_
 
+namespace base {
+struct Feature;
+}  // namespace base
+
 namespace ntp_tiles {
 
 // Name of the field trial to configure PopularSites.
 extern const char kPopularSitesFieldTrialName[];
 
+// This feature is enabled by default. Otherwise, users who need it would not
+// get the right configuration timely enough. The configuration affects only
+// Android or iOS users.
+extern const base::Feature kPopularSitesBakedInContentFeature;
+
+// Feature to allow the new Google favicon server for fetching favicons for Most
+// Likely tiles on the New Tab Page.
+extern const base::Feature kNtpMostLikelyFaviconsFromServerFeature;
+
+// Feature to pin any set home page as first tile.
+extern const base::Feature kPinHomePageAsTileFeature;
+
+// Use this to find out whether the kNtpMostLikelyFaviconsFromServerFeature is
+// enabled. This helper function abstracts iOS special way to override the
+// feature (via command-line params).
+// TODO(jkrcal): Remove once crbug.com/718926 is fixed.
+bool AreNtpMostLikelyFaviconsFromServerEnabled();
+
 }  // namespace ntp_tiles
 
-#endif
+#endif  // COMPONENTS_NTP_TILES_CONSTANTS_H_

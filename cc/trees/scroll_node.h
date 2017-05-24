@@ -5,8 +5,9 @@
 #ifndef CC_TREES_SCROLL_NODE_H_
 #define CC_TREES_SCROLL_NODE_H_
 
-#include "cc/base/cc_export.h"
-#include "cc/output/filter_operations.h"
+#include "cc/base/filter_operations.h"
+#include "cc/base/region.h"
+#include "cc/cc_export.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace base {
@@ -37,7 +38,8 @@ struct CC_EXPORT ScrollNode {
   bool scrollable;
 
   uint32_t main_thread_scrolling_reasons;
-  bool contains_non_fast_scrollable_region;
+
+  Region non_fast_scrollable_region;
 
   // Size of the clipped area, not including non-overlay scrollbars. Overlay
   // scrollbars do not affect the clipped area.
@@ -47,8 +49,8 @@ struct CC_EXPORT ScrollNode {
   gfx::Size bounds;
 
   bool max_scroll_offset_affected_by_page_scale;
-  bool is_inner_viewport_scroll_layer;
-  bool is_outer_viewport_scroll_layer;
+  bool scrolls_inner_viewport;
+  bool scrolls_outer_viewport;
 
   // This offset is used when |scrollable| is false and there isn't a transform
   // node already present that covers this offset.

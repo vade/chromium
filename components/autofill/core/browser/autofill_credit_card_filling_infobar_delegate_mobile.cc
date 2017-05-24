@@ -7,9 +7,9 @@
 #include "base/memory/ptr_util.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/common/autofill_constants.h"
+#include "components/grit/components_scaled_resources.h"
 #include "components/infobars/core/infobar_delegate.h"
-#include "grit/components_scaled_resources.h"
-#include "grit/components_strings.h"
+#include "components/strings/grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace autofill {
@@ -22,9 +22,9 @@ AutofillCreditCardFillingInfoBarDelegateMobile::
       card_filling_callback_(card_filling_callback),
       had_user_interaction_(false),
       was_shown_(false),
-      issuer_icon_id_(CreditCard::IconResourceId(card.type())),
+      issuer_icon_id_(CreditCard::IconResourceId(card.network())),
 #if defined(OS_IOS)
-      card_label_(card.TypeAndLastFourDigits()),
+      card_label_(card.NetworkAndLastFourDigits()),
 #else
       card_label_(base::string16(kMidlineEllipsis) + card.LastFourDigits()),
 #endif

@@ -5,6 +5,9 @@
 #ifndef COMPONENTS_OFFLINE_PAGES_CORE_BACKGROUND_OFFLINER_STUB_H_
 #define COMPONENTS_OFFLINE_PAGES_CORE_BACKGROUND_OFFLINER_STUB_H_
 
+#include <memory>
+
+#include "base/callback_forward.h"
 #include "components/offline_pages/core/background/offliner.h"
 
 namespace offline_pages {
@@ -17,9 +20,12 @@ class OfflinerStub : public Offliner {
   ~OfflinerStub() override;
 
   bool LoadAndSave(const SavePageRequest& request,
-                   const CompletionCallback& callback) override;
+                   const CompletionCallback& completion_callback,
+                   const ProgressCallback& progress_callback) override;
 
-  void Cancel() override;
+  bool Cancel(const CancelCallback& callback) override;
+
+  bool HandleTimeout(int64_t request_id) override;
 
   void disable_loading() { disable_loading_ = true; }
 
@@ -27,11 +33,17 @@ class OfflinerStub : public Offliner {
 
   bool cancel_called() { return cancel_called_; }
 
+  void reset_cancel_called() { cancel_called_ = false; }
+
+  void enable_snapshot_on_last_retry() { snapshot_on_last_retry_ = true; }
+
  private:
-  CompletionCallback callback_;
+  base::Closure completion_callback_;
+  std::unique_ptr<SavePageRequest> pending_request_;
   bool disable_loading_;
   bool enable_callback_;
   bool cancel_called_;
+  bool snapshot_on_last_retry_;
 };
 
 }  // namespace offline_pages

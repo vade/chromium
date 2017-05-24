@@ -4,9 +4,9 @@
 
 #include "ui/compositor/paint_recorder.h"
 
-#include "cc/playback/display_item_list.h"
-#include "cc/playback/drawing_display_item.h"
-#include "third_party/skia/include/core/SkPictureRecorder.h"
+#include "cc/paint/display_item_list.h"
+#include "cc/paint/drawing_display_item.h"
+#include "cc/paint/paint_recorder.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "ui/compositor/paint_cache.h"
 #include "ui/compositor/paint_context.h"
@@ -25,7 +25,7 @@ PaintRecorder::PaintRecorder(const PaintContext& context,
                   gfx::RectToSkRect(gfx::Rect(recording_size))),
               context.device_scale_factor_),
       cache_(cache),
-      bounds_in_layer_(context.ToLayerSpaceBounds(recording_size)) {
+      recording_size_(recording_size) {
 #if DCHECK_IS_ON()
   DCHECK(!context.inside_paint_recorder_);
   context.inside_paint_recorder_ = true;
@@ -41,9 +41,11 @@ PaintRecorder::~PaintRecorder() {
 #if DCHECK_IS_ON()
   context_.inside_paint_recorder_ = false;
 #endif
+  gfx::Rect bounds_in_layer = context_.ToLayerSpaceBounds(recording_size_);
   const auto& item =
       context_.list_->CreateAndAppendDrawingItem<cc::DrawingDisplayItem>(
-          bounds_in_layer_, context_.recorder_->finishRecordingAsPicture());
+          bounds_in_layer, context_.recorder_->finishRecordingAsPicture(),
+          gfx::RectToSkRect(gfx::Rect(recording_size_)));
   if (cache_)
     cache_->SetCache(item);
 }

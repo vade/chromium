@@ -10,33 +10,13 @@
 #include "third_party/skia/include/core/SkMetaData.h"
 #include "third_party/skia/include/core/SkTypes.h"
 
-namespace {
-
-#if defined(OS_MACOSX)
-const char kIsPreviewMetafileKey[] = "CrIsPreviewMetafile";
-
-void SetBoolMetaData(const SkCanvas& canvas, const char* key,  bool value) {
-  SkMetaData& meta = skia::GetMetaData(canvas);
-  meta.setBool(key, value);
-}
-
-bool GetBoolMetaData(const SkCanvas& canvas, const char* key) {
-  bool value;
-  SkMetaData& meta = skia::GetMetaData(canvas);
-  if (!meta.findBool(key, &value))
-    value = false;
-  return value;
-}
-#endif
-
-}  // namespace
-
 namespace skia {
 
 SkBitmap ReadPixels(SkCanvas* canvas) {
   SkBitmap bitmap;
-  bitmap.setInfo(canvas->imageInfo());
-  canvas->readPixels(&bitmap, 0, 0);
+  bitmap.allocPixels(canvas->imageInfo());
+  if (!canvas->readPixels(bitmap, 0, 0))
+    bitmap.reset();
   return bitmap;
 }
 
@@ -60,20 +40,6 @@ bool GetWritablePixels(SkCanvas* canvas, SkPixmap* result) {
 size_t PlatformCanvasStrideForWidth(unsigned width) {
   return 4 * width;
 }
-
-SkMetaData& GetMetaData(const SkCanvas& canvas) {
-  return const_cast<SkCanvas&>(canvas).getMetaData();
-}
-
-#if defined(OS_MACOSX)
-void SetIsPreviewMetafile(const SkCanvas& canvas, bool is_preview) {
-  SetBoolMetaData(canvas, kIsPreviewMetafileKey, is_preview);
-}
-
-bool IsPreviewMetafile(const SkCanvas& canvas) {
-  return GetBoolMetaData(canvas, kIsPreviewMetafileKey);
-}
-#endif
 
 #if !defined(WIN32)
 

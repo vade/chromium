@@ -46,7 +46,7 @@ class SigninViewControllerDelegateMac : public ConstrainedWindowMacDelegate,
       signin_metrics::AccessPoint access_point);
 
   static std::unique_ptr<content::WebContents>
-  CreateSyncConfirmationWebContents(Profile* profile);
+  CreateSyncConfirmationWebContents(Browser* browser);
 
   static std::unique_ptr<content::WebContents> CreateSigninErrorWebContents(
       Profile* profile);
@@ -86,12 +86,6 @@ class SigninViewControllerDelegateMac : public ConstrainedWindowMacDelegate,
   // The web contents displayed in the constrained window.
   std::unique_ptr<content::WebContents> web_contents_;
   base::scoped_nsobject<ConstrainedWindowCustomWindow> window_;
-
-  // wait_for_size_ stores whether the dialog should only be shown after its
-  // content's size has been laid out and measured so that the constrained
-  // window is sized to the content.
-  bool wait_for_size_;
-
   Browser* browser_;
 
   // The dialog modal presentation type.

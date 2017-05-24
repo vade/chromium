@@ -6,78 +6,30 @@
 
 #include <utility>
 
-#include "base/bind.h"
-#include "base/memory/ptr_util.h"
-#include "base/threading/thread_task_runner_handle.h"
-#include "build/build_config.h"
-#include "device/power_save_blocker/power_save_blocker.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "device/wake_lock/wake_lock_service_impl.h"
 
 namespace device {
 
+const int WakeLockServiceContext::WakeLockInvalidContextId = -1;
+
 WakeLockServiceContext::WakeLockServiceContext(
+    int context_id,
     scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
-    base::Callback<gfx::NativeView()> native_view_getter)
-    : main_task_runner_(base::ThreadTaskRunnerHandle::Get()),
-      file_task_runner_(file_task_runner),
-      num_lock_requests_(0),
-      native_view_getter_(native_view_getter),
-      weak_factory_(this) {}
+    const WakeLockContextCallback& native_view_getter)
+    : file_task_runner_(std::move(file_task_runner)),
+      context_id_(context_id),
+      native_view_getter_(native_view_getter) {}
 
 WakeLockServiceContext::~WakeLockServiceContext() {}
 
-void WakeLockServiceContext::CreateService(
-    mojo::InterfaceRequest<mojom::WakeLockService> request) {
-  mojo::MakeStrongBinding(
-      base::MakeUnique<WakeLockServiceImpl>(weak_factory_.GetWeakPtr()),
-      std::move(request));
-}
-
-void WakeLockServiceContext::RequestWakeLock() {
-  DCHECK(main_task_runner_->RunsTasksOnCurrentThread());
-  num_lock_requests_++;
-  UpdateWakeLock();
-}
-
-void WakeLockServiceContext::CancelWakeLock() {
-  DCHECK(main_task_runner_->RunsTasksOnCurrentThread());
-  num_lock_requests_--;
-  UpdateWakeLock();
-}
-
-bool WakeLockServiceContext::HasWakeLockForTests() const {
-  return !!wake_lock_;
-}
-
-void WakeLockServiceContext::CreateWakeLock() {
-  DCHECK(!wake_lock_);
-  wake_lock_.reset(new device::PowerSaveBlocker(
-      device::PowerSaveBlocker::kPowerSaveBlockPreventDisplaySleep,
-      device::PowerSaveBlocker::kReasonOther, "Wake Lock API",
-      main_task_runner_, file_task_runner_));
-
-#if defined(OS_ANDROID)
-  gfx::NativeView native_view = native_view_getter_.Run();
-  if (native_view) {
-    wake_lock_.get()->InitDisplaySleepBlocker(native_view);
-  }
-#endif
-}
-
-void WakeLockServiceContext::RemoveWakeLock() {
-  DCHECK(wake_lock_);
-  wake_lock_.reset();
-}
-
-void WakeLockServiceContext::UpdateWakeLock() {
-  DCHECK(num_lock_requests_ >= 0);
-  if (num_lock_requests_) {
-    if (!wake_lock_)
-      CreateWakeLock();
-  } else {
-    if (wake_lock_)
-      RemoveWakeLock();
-  }
+void WakeLockServiceContext::GetWakeLock(
+    mojom::WakeLockType type,
+    mojom::WakeLockReason reason,
+    const std::string& description,
+    mojom::WakeLockServiceRequest request) {
+  // WakeLockServiceImpl owns itself.
+  new WakeLockServiceImpl(std::move(request), type, reason, description,
+                          context_id_, native_view_getter_, file_task_runner_);
 }
 
 }  // namespace device

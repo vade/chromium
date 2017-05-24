@@ -6,6 +6,7 @@
 
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "remoting/protocol/fake_authenticator.h"
 #include "remoting/protocol/session_plugin.h"
@@ -33,16 +34,14 @@ void FakeSession::SimulateConnection(FakeSession* peer) {
   peer->event_handler_->OnSessionStateChange(AUTHENTICATING);
 
   // Initialize transport and authenticator on the client.
-  authenticator_.reset(new FakeAuthenticator(FakeAuthenticator::CLIENT, 0,
-                                             FakeAuthenticator::ACCEPT, false));
+  authenticator_.reset(new FakeAuthenticator(FakeAuthenticator::ACCEPT));
   authenticator_->set_auth_key(kTestAuthKey);
   transport_->Start(authenticator_.get(),
                     base::Bind(&FakeSession::SendTransportInfo,
                                weak_factory_.GetWeakPtr()));
 
   // Initialize transport and authenticator on the host.
-  peer->authenticator_.reset(new FakeAuthenticator(
-      FakeAuthenticator::HOST, 0, FakeAuthenticator::ACCEPT, false));
+  peer->authenticator_.reset(new FakeAuthenticator(FakeAuthenticator::ACCEPT));
   peer->authenticator_->set_auth_key(kTestAuthKey);
   peer->transport_->Start(peer->authenticator_.get(),
                           base::Bind(&FakeSession::SendTransportInfo, peer_));
@@ -76,11 +75,18 @@ void FakeSession::Close(ErrorCode error) {
   error_ = error;
   event_handler_->OnSessionStateChange(CLOSED);
 
-  FakeSession* peer = peer_.get();
+  base::WeakPtr<FakeSession> peer = peer_;
   if (peer) {
     peer->peer_.reset();
     peer_.reset();
-    peer->Close(error);
+
+    if (signaling_delay_.is_zero()) {
+      peer->Close(error);
+    } else {
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+          FROM_HERE, base::Bind(&FakeSession::Close, peer, error),
+          signaling_delay_);
+    }
   }
 }
 
@@ -104,9 +110,24 @@ void FakeSession::ProcessTransportInfo(
   transport_->ProcessTransportInfo(transport_info.get());
 }
 
-// TODO(zijiehe): Supports SessionPlugin in FakeSession.
 void FakeSession::AddPlugin(SessionPlugin* plugin) {
-  NOTIMPLEMENTED();
+  DCHECK(plugin);
+  for (const auto& message : attachments_) {
+    if (message) {
+      JingleMessage jingle_message;
+      jingle_message.AddAttachment(
+          base::MakeUnique<buzz::XmlElement>(*message));
+      plugin->OnIncomingMessage(*(jingle_message.attachments));
+    }
+  }
+}
+
+void FakeSession::SetAttachment(size_t round,
+                                std::unique_ptr<buzz::XmlElement> attachment) {
+  while (attachments_.size() <= round) {
+    attachments_.emplace_back();
+  }
+  attachments_[round] = std::move(attachment);
 }
 
 }  // namespace protocol

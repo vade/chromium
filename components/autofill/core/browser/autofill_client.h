@@ -14,10 +14,10 @@
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "base/values.h"
+#include "components/autofill/core/browser/risk_data_loader.h"
 #include "ui/base/window_open_disposition.h"
 #include "url/gurl.h"
 
-class GURL;
 class IdentityProvider;
 class PrefService;
 
@@ -37,6 +37,10 @@ namespace syncer {
 class SyncService;
 }
 
+namespace ukm {
+class UkmService;
+}
+
 namespace autofill {
 
 class AutofillPopupDelegate;
@@ -45,6 +49,7 @@ class CardUnmaskDelegate;
 class CreditCard;
 class FormStructure;
 class PersonalDataManager;
+class SaveCardBubbleController;
 struct Suggestion;
 
 // A client interface that needs to be supplied to the Autofill component by the
@@ -54,7 +59,7 @@ struct Suggestion;
 // AutofillManager is used (e.g. a single tab), so when we say "for the client"
 // below, we mean "in the execution context the client is associated with" (e.g.
 // for the tab the AutofillManager is attached to).
-class AutofillClient {
+class AutofillClient : public RiskDataLoader {
  public:
   enum PaymentsRpcResult {
     // Empty result. Used for initializing variables and should generally
@@ -86,7 +91,7 @@ class AutofillClient {
 
   typedef base::Callback<void(const CreditCard&)> CreditCardScanCallback;
 
-  virtual ~AutofillClient() {}
+  ~AutofillClient() override {}
 
   // Gets the PersonalDataManager instance associated with the client.
   virtual PersonalDataManager* GetPersonalDataManager() = 0;
@@ -106,6 +111,13 @@ class AutofillClient {
   // Gets the RapporServiceImpl associated with the client (for metrics).
   virtual rappor::RapporServiceImpl* GetRapporServiceImpl() = 0;
 
+  // Gets the UKM service associated with this client (for metrics).
+  virtual ukm::UkmService* GetUkmService() = 0;
+
+  // Gets the SaveCardBubbleController instance associated with the client.
+  // May return nullptr if the save card bubble has not been shown yet.
+  virtual SaveCardBubbleController* GetSaveCardBubbleController() = 0;
+
   // Causes the Autofill settings UI to be shown.
   virtual void ShowAutofillSettings() = 0;
 
@@ -122,20 +134,18 @@ class AutofillClient {
                                             const base::Closure& callback) = 0;
 
   // Runs |callback| if the |card| should be uploaded to Payments. Displays the
-  // contents of |legal_message| to the user.
+  // contents of |legal_message| to the user. Display a CVC field in the bubble
+  // if |should_cvc_be_requested| is true.
   virtual void ConfirmSaveCreditCardToCloud(
       const CreditCard& card,
       std::unique_ptr<base::DictionaryValue> legal_message,
+      bool should_cvc_be_requested,
       const base::Closure& callback) = 0;
 
   // Will show an infobar to get user consent for Credit Card assistive filling.
   // Will run |callback| on success.
   virtual void ConfirmCreditCardFillAssist(const CreditCard& card,
                                            const base::Closure& callback) = 0;
-
-  // Gathers risk data and provides it to |callback|.
-  virtual void LoadRiskData(
-      const base::Callback<void(const std::string&)>& callback) = 0;
 
   // Returns true if both the platform and the device support scanning credit
   // cards. Should be called before ScanCreditCard().
@@ -177,11 +187,8 @@ class AutofillClient {
       const base::string16& autofilled_value,
       const base::string16& profile_full_name) = 0;
 
-  // Informs the client that a user gesture has been observed.
-  virtual void OnFirstUserGestureObserved() = 0;
-
   // If the context is secure.
-  virtual bool IsContextSecure(const GURL& form_origin) = 0;
+  virtual bool IsContextSecure() = 0;
 
   // Whether it is appropriate to show a signin promo for this user.
   virtual bool ShouldShowSigninPromo() = 0;

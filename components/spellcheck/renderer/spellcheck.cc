@@ -20,22 +20,24 @@
 #include "build/build_config.h"
 #include "components/spellcheck/common/spellcheck_common.h"
 #include "components/spellcheck/common/spellcheck_features.h"
-#include "components/spellcheck/common/spellcheck_messages.h"
 #include "components/spellcheck/common/spellcheck_result.h"
 #include "components/spellcheck/common/spellcheck_switches.h"
 #include "components/spellcheck/renderer/spellcheck_language.h"
 #include "components/spellcheck/renderer/spellcheck_provider.h"
 #include "components/spellcheck/spellcheck_build_features.h"
+#include "content/public/common/service_manager_connection.h"
+#include "content/public/common/simple_connection_filter.h"
+#include "content/public/renderer/render_frame.h"
+#include "content/public/renderer/render_frame_visitor.h"
 #include "content/public/renderer/render_thread.h"
-#include "content/public/renderer/render_view.h"
-#include "content/public/renderer/render_view_visitor.h"
-#include "ipc/ipc_platform_file.h"
+#include "services/service_manager/public/cpp/bind_source_info.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebTextCheckingCompletion.h"
 #include "third_party/WebKit/public/web/WebTextCheckingResult.h"
 #include "third_party/WebKit/public/web/WebTextDecorationType.h"
-#include "third_party/WebKit/public/web/WebView.h"
 
 using blink::WebVector;
 using blink::WebString;
@@ -46,51 +48,28 @@ namespace {
 const int kNoOffset = 0;
 const int kNoTag = 0;
 
-class UpdateSpellcheckEnabled : public content::RenderViewVisitor {
+class UpdateSpellcheckEnabled : public content::RenderFrameVisitor {
  public:
   explicit UpdateSpellcheckEnabled(bool enabled) : enabled_(enabled) {}
-  bool Visit(content::RenderView* render_view) override;
+  bool Visit(content::RenderFrame* render_frame) override;
 
  private:
   bool enabled_;  // New spellcheck-enabled state.
   DISALLOW_COPY_AND_ASSIGN(UpdateSpellcheckEnabled);
 };
 
-bool UpdateSpellcheckEnabled::Visit(content::RenderView* render_view) {
-  SpellCheckProvider* provider = SpellCheckProvider::Get(render_view);
+bool UpdateSpellcheckEnabled::Visit(content::RenderFrame* render_frame) {
+  SpellCheckProvider* provider = SpellCheckProvider::Get(render_frame);
   DCHECK(provider);
   provider->EnableSpellcheck(enabled_);
   return true;
 }
 
-class DocumentMarkersCollector : public content::RenderViewVisitor {
- public:
-  DocumentMarkersCollector() {}
-  ~DocumentMarkersCollector() override {}
-  const std::vector<uint32_t>& markers() const { return markers_; }
-  bool Visit(content::RenderView* render_view) override;
-
- private:
-  std::vector<uint32_t> markers_;
-  DISALLOW_COPY_AND_ASSIGN(DocumentMarkersCollector);
-};
-
-bool DocumentMarkersCollector::Visit(content::RenderView* render_view) {
-  if (!render_view || !render_view->GetWebView())
-    return true;
-  WebVector<uint32_t> markers;
-  render_view->GetWebView()->spellingMarkers(&markers);
-  for (size_t i = 0; i < markers.size(); ++i)
-    markers_.push_back(markers[i]);
-  // Visit all render views.
-  return true;
-}
-
-class DocumentMarkersRemover : public content::RenderViewVisitor {
+class DocumentMarkersRemover : public content::RenderFrameVisitor {
  public:
   explicit DocumentMarkersRemover(const std::set<std::string>& words);
   ~DocumentMarkersRemover() override {}
-  bool Visit(content::RenderView* render_view) override;
+  bool Visit(content::RenderFrame* render_frame) override;
 
  private:
   WebVector<WebString> words_;
@@ -101,12 +80,13 @@ DocumentMarkersRemover::DocumentMarkersRemover(
     const std::set<std::string>& words)
     : words_(words.size()) {
   std::transform(words.begin(), words.end(), words_.begin(),
-                 [](const std::string& w) { return WebString::fromUTF8(w); });
+                 [](const std::string& w) { return WebString::FromUTF8(w); });
 }
 
-bool DocumentMarkersRemover::Visit(content::RenderView* render_view) {
-  if (render_view && render_view->GetWebView())
-    render_view->GetWebView()->removeSpellingMarkersUnderWords(words_);
+bool DocumentMarkersRemover::Visit(content::RenderFrame* render_frame) {
+  // TODO(xiaochengh): Both nullptr checks seem unnecessary.
+  if (render_frame && render_frame->GetWebFrame())
+    render_frame->GetWebFrame()->RemoveSpellingMarkersUnderWords(words_);
   return true;
 }
 
@@ -171,7 +151,22 @@ class SpellCheck::SpellcheckRequest {
 // and as such the SpellCheckProviders will never be notified of different
 // values.
 // TODO(groby): Simplify this.
-SpellCheck::SpellCheck() : spellcheck_enabled_(true) {}
+SpellCheck::SpellCheck() : spellcheck_enabled_(true) {
+  if (!content::ChildThread::Get())
+    return;  // Can be NULL in tests.
+
+  auto* service_manager_connection =
+      content::ChildThread::Get()->GetServiceManagerConnection();
+  DCHECK(service_manager_connection);
+
+  auto registry = base::MakeUnique<service_manager::BinderRegistry>();
+  registry->AddInterface(
+      base::Bind(&SpellCheck::SpellCheckerRequest, base::Unretained(this)),
+      base::ThreadTaskRunnerHandle::Get());
+
+  service_manager_connection->AddConnectionFilter(
+      base::MakeUnique<content::SimpleConnectionFilter>(std::move(registry)));
+}
 
 SpellCheck::~SpellCheck() {
 }
@@ -205,65 +200,51 @@ void SpellCheck::FillSuggestions(
   }
 }
 
-bool SpellCheck::OnControlMessageReceived(const IPC::Message& message) {
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(SpellCheck, message)
-    IPC_MESSAGE_HANDLER(SpellCheckMsg_Init, OnInit)
-    IPC_MESSAGE_HANDLER(SpellCheckMsg_CustomDictionaryChanged,
-                        OnCustomDictionaryChanged)
-    IPC_MESSAGE_HANDLER(SpellCheckMsg_EnableSpellCheck, OnEnableSpellCheck)
-    IPC_MESSAGE_HANDLER(SpellCheckMsg_RequestDocumentMarkers,
-                        OnRequestDocumentMarkers)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-
-  return handled;
+void SpellCheck::SpellCheckerRequest(
+    const service_manager::BindSourceInfo& source_info,
+    spellcheck::mojom::SpellCheckerRequest request) {
+  spellchecker_bindings_.AddBinding(this, std::move(request));
 }
 
-void SpellCheck::OnInit(
-    const std::vector<SpellCheckBDictLanguage>& bdict_languages,
-    const std::set<std::string>& custom_words) {
+void SpellCheck::Initialize(
+    std::vector<spellcheck::mojom::SpellCheckBDictLanguagePtr> dictionaries,
+    const std::vector<std::string>& custom_words,
+    bool enable) {
   languages_.clear();
-  for (const auto& bdict_language : bdict_languages) {
-    AddSpellcheckLanguage(
-        IPC::PlatformFileForTransitToFile(bdict_language.file),
-        bdict_language.language);
-  }
 
-  custom_dictionary_.Init(custom_words);
+  for (const auto& dictionary : dictionaries)
+    AddSpellcheckLanguage(std::move(dictionary->file), dictionary->language);
+
+  custom_dictionary_.Init(
+      std::set<std::string>(custom_words.begin(), custom_words.end()));
 #if !BUILDFLAG(USE_BROWSER_SPELLCHECKER)
   PostDelayedSpellCheckTask(pending_request_param_.release());
 #endif
-}
 
-void SpellCheck::OnCustomDictionaryChanged(
-    const std::set<std::string>& words_added,
-    const std::set<std::string>& words_removed) {
-  custom_dictionary_.OnCustomDictionaryChanged(words_added, words_removed);
-  if (words_added.empty())
-    return;
-  DocumentMarkersRemover markersRemover(words_added);
-  content::RenderView::ForEach(&markersRemover);
-}
-
-void SpellCheck::OnEnableSpellCheck(bool enable) {
   spellcheck_enabled_ = enable;
   UpdateSpellcheckEnabled updater(enable);
-  content::RenderView::ForEach(&updater);
+  content::RenderFrame::ForEach(&updater);
 }
 
-void SpellCheck::OnRequestDocumentMarkers() {
-  DocumentMarkersCollector collector;
-  content::RenderView::ForEach(&collector);
-  content::RenderThread::Get()->Send(
-      new SpellCheckHostMsg_RespondDocumentMarkers(collector.markers()));
+void SpellCheck::CustomDictionaryChanged(
+    const std::vector<std::string>& words_added,
+    const std::vector<std::string>& words_removed) {
+  const std::set<std::string> added(words_added.begin(), words_added.end());
+
+  custom_dictionary_.OnCustomDictionaryChanged(
+      added, std::set<std::string>(words_removed.begin(), words_removed.end()));
+  if (added.empty())
+    return;
+
+  DocumentMarkersRemover markersRemover(added);
+  content::RenderFrame::ForEach(&markersRemover);
 }
 
 // TODO(groby): Make sure we always have a spelling engine, even before
 // AddSpellcheckLanguage() is called.
 void SpellCheck::AddSpellcheckLanguage(base::File file,
                                        const std::string& language) {
-  languages_.push_back(new SpellcheckLanguage());
+  languages_.push_back(base::MakeUnique<SpellcheckLanguage>());
   languages_.back()->Init(std::move(file), language);
 }
 
@@ -307,9 +288,7 @@ bool SpellCheck::SpellCheckWord(
     *misspelling_len = 0;
     suggestions_list.clear();
 
-    for (ScopedVector<SpellcheckLanguage>::iterator language =
-             languages_.begin();
-         language != languages_.end();) {
+    for (auto language = languages_.begin(); language != languages_.end();) {
       language_suggestions.clear();
       SpellcheckLanguage::SpellcheckWordResult result =
           (*language)->SpellCheckWord(
@@ -393,19 +372,19 @@ bool SpellCheck::SpellCheckParagraph(
                        &misspelling_start,
                        &misspelling_length,
                        NULL)) {
-      results->assign(textcheck_results);
+      results->Assign(textcheck_results);
       return true;
     }
 
     if (!custom_dictionary_.SpellCheckWord(
             text, misspelling_start, misspelling_length)) {
       textcheck_results.push_back(
-          WebTextCheckingResult(blink::WebTextDecorationTypeSpelling,
+          WebTextCheckingResult(blink::kWebTextDecorationTypeSpelling,
                                 misspelling_start, misspelling_length));
     }
     position_in_text = misspelling_start + misspelling_length;
   }
-  results->assign(textcheck_results);
+  results->Assign(textcheck_results);
   return false;
 #else
   // This function is only invoked for spell checker functionality that runs
@@ -422,7 +401,7 @@ void SpellCheck::RequestTextChecking(
     blink::WebTextCheckingCompletion* completion) {
   // Clean up the previous request before starting a new request.
   if (pending_request_param_.get())
-    pending_request_param_->completion()->didCancelCheckingText();
+    pending_request_param_->completion()->DidCancelCheckingText();
 
   pending_request_param_.reset(new SpellcheckRequest(
       text, completion));
@@ -439,7 +418,7 @@ bool SpellCheck::InitializeIfNeeded() {
     return true;
 
   bool initialize_if_needed = false;
-  for (SpellcheckLanguage* language : languages_)
+  for (auto& language : languages_)
     initialize_if_needed |= language->InitializeIfNeeded();
 
   return initialize_if_needed;
@@ -464,14 +443,14 @@ void SpellCheck::PerformSpellCheck(SpellcheckRequest* param) {
 
   if (languages_.empty() ||
       std::find_if(languages_.begin(), languages_.end(),
-                   [](SpellcheckLanguage* language) {
+                   [](std::unique_ptr<SpellcheckLanguage>& language) {
                      return !language->IsEnabled();
                    }) != languages_.end()) {
-    param->completion()->didCancelCheckingText();
+    param->completion()->DidCancelCheckingText();
   } else {
     WebVector<blink::WebTextCheckingResult> results;
     SpellCheckParagraph(param->text(), &results);
-    param->completion()->didFinishCheckingText(results);
+    param->completion()->DidFinishCheckingText(results);
   }
 }
 #endif
@@ -528,10 +507,10 @@ void SpellCheck::CreateTextCheckingResults(
     results.push_back(WebTextCheckingResult(
         static_cast<WebTextDecorationType>(decoration),
         line_offset + spellcheck_result.location, spellcheck_result.length,
-        blink::WebString::fromUTF16(replacement), spellcheck_result.hash));
+        blink::WebString::FromUTF16(replacement)));
   }
 
-  textcheck_results->assign(results);
+  textcheck_results->Assign(results);
 }
 
 bool SpellCheck::IsSpellcheckEnabled() {

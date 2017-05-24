@@ -69,8 +69,9 @@ void VrWebContentsObserver::DidChangeVisibleSecurityState() {
 }
 
 void VrWebContentsObserver::DidToggleFullscreenModeForTab(
-    bool entered_fullscreen, bool will_cause_resize) {
-  ui_interface_->SetFullscreen(entered_fullscreen);
+    bool entered_fullscreen,
+    bool will_cause_resize) {
+  vr_shell_->OnFullscreenChanged(entered_fullscreen);
 }
 
 void VrWebContentsObserver::WebContentsDestroyed() {
@@ -79,6 +80,10 @@ void VrWebContentsObserver::WebContentsDestroyed() {
 
 void VrWebContentsObserver::WasHidden() {
   vr_shell_->ContentWasHidden();
+}
+
+void VrWebContentsObserver::WasShown() {
+  vr_shell_->ContentWasShown();
 }
 
 void VrWebContentsObserver::MainFrameWasResized(bool width_changed) {

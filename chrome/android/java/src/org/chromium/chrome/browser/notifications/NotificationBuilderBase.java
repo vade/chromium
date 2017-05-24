@@ -211,6 +211,11 @@ public abstract class NotificationBuilderBase {
         return this;
     }
 
+    /** Returns whether a small icon bitmap was set. */
+    public boolean hasSmallIconBitmap() {
+        return mSmallIconBitmap != null;
+    }
+
     /**
      * Sets the PendingIntent to send when the notification is clicked.
      */
@@ -400,7 +405,7 @@ public abstract class NotificationBuilderBase {
      */
     @TargetApi(Build.VERSION_CODES.M) // For the Icon class.
     protected static void setSmallIconOnBuilder(
-            Notification.Builder builder, int iconId, @Nullable Bitmap iconBitmap) {
+            ChromeNotificationBuilder builder, int iconId, @Nullable Bitmap iconBitmap) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && iconBitmap != null) {
             builder.setSmallIcon(Icon.createWithBitmap(iconBitmap));
         } else {
@@ -413,7 +418,7 @@ public abstract class NotificationBuilderBase {
      * level is high enough, otherwise a resource id is used.
      */
     @SuppressWarnings("deprecation") // For addAction(int, CharSequence, PendingIntent)
-    protected static void addActionToBuilder(Notification.Builder builder, Action action) {
+    protected static void addActionToBuilder(ChromeNotificationBuilder builder, Action action) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) {
             // Notification.Action.Builder and RemoteInput were added in KITKAT_WATCH.
             Notification.Action.Builder actionBuilder = getActionBuilder(action);
@@ -436,7 +441,7 @@ public abstract class NotificationBuilderBase {
      * posted for notifications in the group to appear grouped in the notification shade.
      */
     @SuppressLint("NewApi") // For setGroup
-    static void setGroupOnBuilder(Notification.Builder builder, CharSequence origin) {
+    static void setGroupOnBuilder(ChromeNotificationBuilder builder, CharSequence origin) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT_WATCH || origin == null) return;
         builder.setGroup(NotificationConstants.GROUP_WEB_PREFIX + origin);
         // TODO(crbug.com/674927) Post a group summary notification.

@@ -29,6 +29,10 @@
 #include "components/discardable_memory/common/discardable_memory_export.h"
 #include "components/discardable_memory/public/interfaces/discardable_shared_memory_manager.mojom.h"
 
+namespace service_manager {
+struct BindSourceInfo;
+}
+
 namespace discardable_memory {
 
 // Implementation of DiscardableMemoryAllocator that allocates and manages
@@ -45,7 +49,8 @@ class DISCARDABLE_MEMORY_EXPORT DiscardableSharedMemoryManager
   ~DiscardableSharedMemoryManager() override;
 
   // Bind the manager to a mojo interface request.
-  void Bind(mojom::DiscardableSharedMemoryManagerRequest request);
+  void Bind(const service_manager::BindSourceInfo& source_info,
+            mojom::DiscardableSharedMemoryManagerRequest request);
 
   // Overridden from base::DiscardableMemoryAllocator:
   std::unique_ptr<base::DiscardableMemory> AllocateLockedDiscardableMemory(
@@ -107,6 +112,7 @@ class DISCARDABLE_MEMORY_EXPORT DiscardableSharedMemoryManager
 
   // base::MemoryCoordinatorClient implementation:
   void OnMemoryStateChange(base::MemoryState state) override;
+  void OnPurgeMemory() override;
 
   void AllocateLockedDiscardableSharedMemory(
       int client_id,

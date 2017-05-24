@@ -88,10 +88,9 @@ static const int kSampleRateReserved = 3;
 static const int kCodecDelay = 529;
 
 // static
-bool MPEG1AudioStreamParser::ParseHeader(
-    const scoped_refptr<MediaLog>& media_log,
-    const uint8_t* data,
-    Header* header) {
+bool MPEG1AudioStreamParser::ParseHeader(MediaLog* media_log,
+                                         const uint8_t* data,
+                                         Header* header) {
   BitReader reader(data, kHeaderSize);
   int sync;
   int version;
@@ -138,7 +137,7 @@ bool MPEG1AudioStreamParser::ParseHeader(
     return false;
   }
 
-  if (layer == kLayer2 && kIsAllowed[bitrate_index][channel_mode]) {
+  if (layer == kLayer2 && !kIsAllowed[bitrate_index][channel_mode]) {
     MEDIA_LOG(ERROR, media_log) << "Invalid (bitrate_index, channel_mode)"
                                 << " combination :" << std::hex
                                 << " bitrate_index " << bitrate_index

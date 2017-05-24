@@ -292,11 +292,6 @@ void AppListModel::DeleteUninstalledItem(const std::string& id) {
   }
 }
 
-void AppListModel::NotifyExtensionPreferenceChanged() {
-  for (size_t i = 0; i < top_level_item_list_->item_count(); ++i)
-    top_level_item_list_->item_at(i)->OnExtensionPreferenceChanged();
-}
-
 void AppListModel::SetFoldersEnabled(bool folders_enabled) {
   folders_enabled_ = folders_enabled;
   if (folders_enabled)
@@ -361,9 +356,17 @@ void AppListModel::ClearCustomLauncherPageSubpages() {
 }
 
 void AppListModel::SetSearchEngineIsGoogle(bool is_google) {
+  if (search_engine_is_google_ == is_google)
+    return;
+
   search_engine_is_google_ = is_google;
   for (auto& observer : observers_)
     observer.OnSearchEngineIsGoogleChanged(is_google);
+}
+
+void AppListModel::SetSearchAnswerAvailable(bool has_answer) {
+  for (auto& observer : observers_)
+    observer.OnSearchAnswerAvailableChanged(has_answer);
 }
 
 // Private methods

@@ -6,6 +6,7 @@
 #define GPU_COMMAND_BUFFER_CLIENT_CONTEXT_SUPPORT_H_
 
 #include <stdint.h>
+#include <vector>
 
 #include "base/callback.h"
 #include "ui/gfx/overlay_transform.h"
@@ -15,20 +16,30 @@ class Rect;
 class RectF;
 }
 
+namespace ui {
+class LatencyInfo;
+}
+
 namespace gpu {
 
 struct SyncToken;
 
 class ContextSupport {
  public:
+  // Returns the stream id for this context.
+  virtual int32_t GetStreamId() const = 0;
+
+  // Flush any outstanding ordering barriers on given stream.
+  virtual void FlushOrderingBarrierOnStream(int32_t stream_id) = 0;
+
   // Runs |callback| when the given sync token is signalled. The sync token may
   // belong to any context.
   virtual void SignalSyncToken(const SyncToken& sync_token,
                                const base::Closure& callback) = 0;
 
-  // Returns true if the given sync token has been signalled. The sync token
-  // must belong to this context. This may be called from any thread.
-  virtual bool IsSyncTokenSignalled(const SyncToken& sync_token) = 0;
+  // Returns true if the given sync token has been signaled. The sync token must
+  // belong to this context. This may be called from any thread.
+  virtual bool IsSyncTokenSignaled(const SyncToken& sync_token) = 0;
 
   // Runs |callback| when a query created via glCreateQueryEXT() has cleared
   // passed the glEndQueryEXT() point.
@@ -41,7 +52,7 @@ class ContextSupport {
       bool aggressively_free_resources) = 0;
 
   virtual void Swap() = 0;
-  virtual void SwapWithDamage(const gfx::Rect& damage) = 0;
+  virtual void SwapWithBounds(const std::vector<gfx::Rect>& rects) = 0;
   virtual void PartialSwapBuffers(const gfx::Rect& sub_buffer) = 0;
   virtual void CommitOverlayPlanes() = 0;
 
@@ -61,6 +72,11 @@ class ContextSupport {
   // Sets a callback to be run when an error occurs.
   virtual void SetErrorMessageCallback(
       const base::Callback<void(const char*, int32_t)>& callback) = 0;
+
+  // Add |latency_info| to be reported and augumented with GPU latency
+  // components next time there is a GPU buffer swap.
+  virtual void AddLatencyInfo(
+      const std::vector<ui::LatencyInfo>& latency_info) = 0;
 
  protected:
   ContextSupport() {}

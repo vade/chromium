@@ -94,10 +94,10 @@ class CrashReporterClient {
   virtual bool GetDeferredUploadsSupported(bool is_per_user_install);
 
   // Returns true if the running binary is a per-user installation.
-  virtual bool GetIsPerUserInstall(const base::string16& exe_path);
+  virtual bool GetIsPerUserInstall();
 
   // Returns true if larger crash dumps should be dumped.
-  virtual bool GetShouldDumpLargerDumps(bool is_per_user_install);
+  virtual bool GetShouldDumpLargerDumps();
 
   // Returns the result code to return when breakpad failed to respawn a
   // crashed process.
@@ -144,6 +144,11 @@ class CrashReporterClient {
   // reporting server. Returns the size of the union of all keys.
   virtual size_t RegisterCrashKeys();
 
+  virtual bool UseCrashKeysWhiteList();
+
+  // Returns a NULL-terminated array of crash keys to whitelist.
+  virtual const char* const* GetCrashKeyWhiteList();
+
   // Returns true if running in unattended mode (for automated testing).
   virtual bool IsRunningUnattended();
 
@@ -172,6 +177,22 @@ class CrashReporterClient {
   // Returns true if breakpad microdumps should be enabled. This orthogonal to
   // the standard minidump uploader (which depends on the user consent).
   virtual bool ShouldEnableBreakpadMicrodumps();
+#endif
+
+#if defined(OS_MACOSX) || defined(OS_WIN)
+  // This method should return true to configure a crash reporter capable of
+  // monitoring itself for its own crashes to do so, even if self-monitoring
+  // would be expensive. "Expensive" self-monitoring dedicates an additional
+  // crash handler process to handle the crashes of the initial crash handler
+  // process.
+  //
+  // In some cases, inexpensive self-monitoring may also be available. When it
+  // is, it may be used when this method returns false. If only expensive
+  // self-monitoring is available, returning false from this function will
+  // prevent the crash handler process from being monitored for crashes at all.
+  //
+  // The default implementation returns false.
+  virtual bool ShouldMonitorCrashHandlerExpensively();
 #endif
 
   // Returns true if breakpad should run in the given process type.

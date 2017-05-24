@@ -9,6 +9,8 @@
 
 #include "base/feature_list.h"
 #include "base/location.h"
+#include "base/memory/ptr_util.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/strings/string_number_conversions.h"
@@ -21,6 +23,7 @@
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/signin/core/browser/signin_manager_base.h"
 #include "components/suggestions/blacklist_store.h"
+#include "components/suggestions/features.h"
 #include "components/suggestions/image_manager.h"
 #include "components/suggestions/suggestions_store.h"
 #include "components/sync/driver/sync_service.h"
@@ -34,6 +37,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "net/http/http_util.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
 
@@ -43,37 +47,6 @@ using base::TimeTicks;
 namespace suggestions {
 
 namespace {
-
-// Establishes the different sync states that matter to SuggestionsService.
-// There are three different concepts in the sync service: initialized, sync
-// enabled and history sync enabled.
-enum SyncState {
-  // State: Sync service is not initialized, yet not disabled. History sync
-  //     state is unknown (since not initialized).
-  // Behavior: Does not issue a server request, but serves from cache if
-  //     available.
-  NOT_INITIALIZED_ENABLED,
-
-  // State: Sync service is initialized, sync is enabled and history sync is
-  //     enabled.
-  // Behavior: Update suggestions from the server. Serve from cache on timeout.
-  INITIALIZED_ENABLED_HISTORY,
-
-  // State: Sync service is disabled or history sync is disabled.
-  // Behavior: Do not issue a server request. Clear the cache. Serve empty
-  //     suggestions.
-  SYNC_OR_HISTORY_SYNC_DISABLED,
-};
-
-SyncState GetSyncState(syncer::SyncService* sync) {
-  if (!sync || !sync->CanSyncStart() || sync->IsLocalSyncEnabled())
-    return SYNC_OR_HISTORY_SYNC_DISABLED;
-  if (!sync->IsSyncActive() || !sync->ConfigurationDone())
-    return NOT_INITIALIZED_ENABLED;
-  return sync->GetActiveDataTypes().Has(syncer::HISTORY_DELETE_DIRECTIVES)
-             ? INITIALIZED_ENABLED_HISTORY
-             : SYNC_OR_HISTORY_SYNC_DISABLED;
-}
 
 // Used to UMA log the state of the last response from the server.
 enum SuggestionsResponseState {
@@ -111,13 +84,18 @@ GURL GetGoogleBaseURL() {
 // Format strings for the various suggestions URLs. They all have two string
 // params: The Google base URL and the device type.
 // TODO(mathp): Put this in TemplateURL.
-const char kSuggestionsURLFormat[] = "%schromesuggestions?t=%s";
+const char kSuggestionsURLFormat[] = "%schromesuggestions?%s";
 const char kSuggestionsBlacklistURLPrefixFormat[] =
     "%schromesuggestions/blacklist?t=%s&url=";
 const char kSuggestionsBlacklistClearURLFormat[] =
     "%schromesuggestions/blacklist/clear?t=%s";
 
 const char kSuggestionsBlacklistURLParam[] = "url";
+const char kSuggestionsDeviceParam[] = "t=%s";
+const char kSuggestionsMinParam[] = "min=%i";
+
+const char kSuggestionsMinVariationName[] = "min_suggestions";
+const int kSuggestionsMinVariationDefault = 0;
 
 #if defined(OS_ANDROID) || defined(OS_IOS)
 const char kDeviceType[] = "2";
@@ -134,82 +112,40 @@ const char kFaviconURL[] =
 // The default expiry timeout is 168 hours.
 const int64_t kDefaultExpiryUsec = 168 * base::Time::kMicrosecondsPerHour;
 
+int GetMinimumSuggestionsCount() {
+  return base::GetFieldTrialParamByFeatureAsInt(
+      kUseSuggestionsEvenIfFewFeature, kSuggestionsMinVariationName,
+      kSuggestionsMinVariationDefault);
+}
+
 }  // namespace
 
-// Helper class for fetching OAuth2 access tokens.
-// To get a token, call |GetAccessToken|. Does not support multiple concurrent
-// token requests, i.e. check |HasPendingRequest| first.
-class SuggestionsServiceImpl::AccessTokenFetcher
-    : public OAuth2TokenService::Consumer {
- public:
-  using TokenCallback = base::Callback<void(const std::string&)>;
-
-  AccessTokenFetcher(const SigninManagerBase* signin_manager,
-                     OAuth2TokenService* token_service)
-      : OAuth2TokenService::Consumer("suggestions_service"),
-        signin_manager_(signin_manager),
-        token_service_(token_service) {}
-
-  void GetAccessToken(const TokenCallback& callback) {
-    callback_ = callback;
-    std::string account_id;
-    // |signin_manager_| can be null in unit tests.
-    if (signin_manager_)
-      account_id = signin_manager_->GetAuthenticatedAccountId();
-    OAuth2TokenService::ScopeSet scopes;
-    scopes.insert(GaiaConstants::kChromeSyncOAuth2Scope);
-    token_request_ = token_service_->StartRequest(account_id, scopes, this);
-  }
-
-  bool HasPendingRequest() const { return !!token_request_.get(); }
-
- private:
-  void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
-                         const std::string& access_token,
-                         const base::Time& expiration_time) override {
-    DCHECK_EQ(request, token_request_.get());
-    callback_.Run(access_token);
-    token_request_.reset(nullptr);
-  }
-
-  void OnGetTokenFailure(const OAuth2TokenService::Request* request,
-                         const GoogleServiceAuthError& error) override {
-    DCHECK_EQ(request, token_request_.get());
-    LOG(WARNING) << "Token error: " << error.ToString();
-    callback_.Run(std::string());
-    token_request_.reset(nullptr);
-  }
-
-  const SigninManagerBase* signin_manager_;
-  OAuth2TokenService* token_service_;
-
-  TokenCallback callback_;
-  std::unique_ptr<OAuth2TokenService::Request> token_request_;
-};
-
 SuggestionsServiceImpl::SuggestionsServiceImpl(
-    const SigninManagerBase* signin_manager,
+    SigninManagerBase* signin_manager,
     OAuth2TokenService* token_service,
     syncer::SyncService* sync_service,
     net::URLRequestContextGetter* url_request_context,
     std::unique_ptr<SuggestionsStore> suggestions_store,
     std::unique_ptr<ImageManager> thumbnail_manager,
     std::unique_ptr<BlacklistStore> blacklist_store)
-    : sync_service_(sync_service),
+    : signin_manager_(signin_manager),
+      token_service_(token_service),
+      sync_service_(sync_service),
       sync_service_observer_(this),
+      sync_state_(INITIALIZED_ENABLED_HISTORY),
       url_request_context_(url_request_context),
       suggestions_store_(std::move(suggestions_store)),
       thumbnail_manager_(std::move(thumbnail_manager)),
       blacklist_store_(std::move(blacklist_store)),
       scheduling_delay_(TimeDelta::FromSeconds(kDefaultSchedulingDelaySec)),
-      token_fetcher_(new AccessTokenFetcher(signin_manager, token_service)),
       weak_ptr_factory_(this) {
   // |sync_service_| is null if switches::kDisableSync is set (tests use that).
-  if (sync_service_)
+  if (sync_service_) {
     sync_service_observer_.Add(sync_service_);
+  }
   // Immediately get the current sync state, so we'll flush the cache if
   // necessary.
-  OnStateChanged();
+  OnStateChanged(sync_service_);
 }
 
 SuggestionsServiceImpl::~SuggestionsServiceImpl() {}
@@ -217,8 +153,9 @@ SuggestionsServiceImpl::~SuggestionsServiceImpl() {}
 bool SuggestionsServiceImpl::FetchSuggestionsData() {
   DCHECK(thread_checker_.CalledOnValidThread());
   // If sync state allows, issue a network request to refresh the suggestions.
-  if (GetSyncState(sync_service_) != INITIALIZED_ENABLED_HISTORY)
+  if (sync_state_ != INITIALIZED_ENABLED_HISTORY) {
     return false;
+  }
   IssueRequestIfNoneOngoing(BuildSuggestionsURL());
   return true;
 }
@@ -256,6 +193,8 @@ void SuggestionsServiceImpl::GetPageThumbnailWithURL(
 bool SuggestionsServiceImpl::BlacklistURL(const GURL& candidate_url) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
+  // TODO(treib): Do we need to check |sync_state_| here?
+
   if (!blacklist_store_->BlacklistUrl(candidate_url))
     return false;
 
@@ -272,6 +211,9 @@ bool SuggestionsServiceImpl::BlacklistURL(const GURL& candidate_url) {
 
 bool SuggestionsServiceImpl::UndoBlacklistURL(const GURL& url) {
   DCHECK(thread_checker_.CalledOnValidThread());
+
+  // TODO(treib): Do we need to check |sync_state_| here?
+
   TimeDelta time_delta;
   if (blacklist_store_->GetTimeUntilURLReadyForUpload(url, &time_delta) &&
       time_delta > TimeDelta::FromSeconds(0) &&
@@ -287,6 +229,9 @@ bool SuggestionsServiceImpl::UndoBlacklistURL(const GURL& url) {
 
 void SuggestionsServiceImpl::ClearBlacklist() {
   DCHECK(thread_checker_.CalledOnValidThread());
+
+  // TODO(treib): Do we need to check |sync_state_| here?
+
   blacklist_store_->ClearBlacklist();
   callback_list_.Notify(
       GetSuggestionsDataFromCache().value_or(SuggestionsProfile()));
@@ -324,8 +269,16 @@ void SuggestionsServiceImpl::RegisterProfilePrefs(
 
 // static
 GURL SuggestionsServiceImpl::BuildSuggestionsURL() {
+  std::string device = base::StringPrintf(kSuggestionsDeviceParam, kDeviceType);
+  std::string query = device;
+  if (base::FeatureList::IsEnabled(kUseSuggestionsEvenIfFewFeature)) {
+    std::string min_suggestions =
+        base::StringPrintf(kSuggestionsMinParam, GetMinimumSuggestionsCount());
+    query =
+        base::StringPrintf("%s&%s", device.c_str(), min_suggestions.c_str());
+  }
   return GURL(base::StringPrintf(
-      kSuggestionsURLFormat, GetGoogleBaseURL().spec().c_str(), kDeviceType));
+      kSuggestionsURLFormat, GetGoogleBaseURL().spec().c_str(), query.c_str()));
 }
 
 // static
@@ -348,22 +301,64 @@ GURL SuggestionsServiceImpl::BuildSuggestionsBlacklistClearURL() {
                                  kDeviceType));
 }
 
-void SuggestionsServiceImpl::OnStateChanged() {
-  switch (GetSyncState(sync_service_)) {
+SuggestionsServiceImpl::SyncState SuggestionsServiceImpl::ComputeSyncState()
+    const {
+  if (!sync_service_ || !sync_service_->CanSyncStart() ||
+      sync_service_->IsLocalSyncEnabled()) {
+    return SYNC_OR_HISTORY_SYNC_DISABLED;
+  }
+  if (!sync_service_->IsSyncActive() || !sync_service_->ConfigurationDone()) {
+    return NOT_INITIALIZED_ENABLED;
+  }
+  return sync_service_->GetActiveDataTypes().Has(
+             syncer::HISTORY_DELETE_DIRECTIVES)
+             ? INITIALIZED_ENABLED_HISTORY
+             : SYNC_OR_HISTORY_SYNC_DISABLED;
+}
+
+SuggestionsServiceImpl::RefreshAction
+SuggestionsServiceImpl::RefreshSyncState() {
+  SyncState new_sync_state = ComputeSyncState();
+  if (sync_state_ == new_sync_state) {
+    return NO_ACTION;
+  }
+
+  SyncState old_sync_state = sync_state_;
+  sync_state_ = new_sync_state;
+
+  switch (new_sync_state) {
+    case NOT_INITIALIZED_ENABLED:
+      break;
+    case INITIALIZED_ENABLED_HISTORY:
+      // If the user just signed in, we fetch suggestions, so that hopefully the
+      // next NTP will already get them.
+      if (old_sync_state == SYNC_OR_HISTORY_SYNC_DISABLED) {
+        return FETCH_SUGGESTIONS;
+      }
+      break;
     case SYNC_OR_HISTORY_SYNC_DISABLED:
+      // If the user signed out (or disabled history sync), we have to clear
+      // everything.
+      return CLEAR_SUGGESTIONS;
+  }
+  // Otherwise, there's nothing to do.
+  return NO_ACTION;
+}
+
+void SuggestionsServiceImpl::OnStateChanged(syncer::SyncService* sync) {
+  DCHECK(sync_service_ == sync);
+
+  switch (RefreshSyncState()) {
+    case NO_ACTION:
+      break;
+    case CLEAR_SUGGESTIONS:
       // Cancel any ongoing request, to stop interacting with the server.
       pending_request_.reset(nullptr);
       suggestions_store_->ClearSuggestions();
       callback_list_.Notify(SuggestionsProfile());
       break;
-    case NOT_INITIALIZED_ENABLED:
-      // Keep the cache (if any), but don't refresh.
-      break;
-    case INITIALIZED_ENABLED_HISTORY:
-      // If we have any observers, issue a network request to refresh the
-      // suggestions in the cache.
-      if (!callback_list_.empty())
-        IssueRequestIfNoneOngoing(BuildSuggestionsURL());
+    case FETCH_SUGGESTIONS:
+      IssueRequestIfNoneOngoing(BuildSuggestionsURL());
       break;
   }
 }
@@ -383,26 +378,48 @@ void SuggestionsServiceImpl::SetDefaultExpiryTimestamp(
 
 void SuggestionsServiceImpl::IssueRequestIfNoneOngoing(const GURL& url) {
   // If there is an ongoing request, let it complete.
+  // This will silently swallow blacklist and clearblacklist requests if a
+  // request happens to be ongoing.
+  // TODO(treib): Queue such requests and send them after the current one
+  // completes.
   if (pending_request_.get()) {
     return;
   }
   // If there is an ongoing token request, also wait for that.
-  if (token_fetcher_->HasPendingRequest()) {
+  if (token_fetcher_) {
     return;
   }
-  token_fetcher_->GetAccessToken(
-      base::Bind(&SuggestionsServiceImpl::IssueSuggestionsRequest,
-                 base::Unretained(this), url));
+
+  OAuth2TokenService::ScopeSet scopes{GaiaConstants::kChromeSyncOAuth2Scope};
+  token_fetcher_ = base::MakeUnique<AccessTokenFetcher>(
+      "suggestions_service", signin_manager_, token_service_, scopes,
+      base::BindOnce(&SuggestionsServiceImpl::AccessTokenAvailable,
+                     base::Unretained(this), url));
+}
+
+void SuggestionsServiceImpl::AccessTokenAvailable(
+    const GURL& url,
+    const GoogleServiceAuthError& error,
+    const std::string& access_token) {
+  DCHECK(token_fetcher_);
+  std::unique_ptr<AccessTokenFetcher> token_fetcher_deleter(
+      std::move(token_fetcher_));
+
+  if (error.state() != GoogleServiceAuthError::NONE) {
+    UpdateBlacklistDelay(false);
+    ScheduleBlacklistUpload();
+    return;
+  }
+
+  DCHECK(!access_token.empty());
+
+  IssueSuggestionsRequest(url, access_token);
 }
 
 void SuggestionsServiceImpl::IssueSuggestionsRequest(
     const GURL& url,
     const std::string& access_token) {
-  if (access_token.empty()) {
-    UpdateBlacklistDelay(false);
-    ScheduleBlacklistUpload();
-    return;
-  }
+  DCHECK(!access_token.empty());
   pending_request_ = CreateSuggestionsRequest(url, access_token);
   pending_request_->Start();
   last_request_started_time_ = TimeTicks::Now();
@@ -412,8 +429,39 @@ std::unique_ptr<net::URLFetcher>
 SuggestionsServiceImpl::CreateSuggestionsRequest(
     const GURL& url,
     const std::string& access_token) {
-  std::unique_ptr<net::URLFetcher> request =
-      net::URLFetcher::Create(0, url, net::URLFetcher::GET, this);
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("suggestions_service", R"(
+        semantics {
+          sender: "Suggestions Service"
+          description:
+            "For signed-in users with History Sync enabled, the Suggestions "
+            "Service fetches website suggestions, based on the user's browsing "
+            "history, for display on the New Tab page."
+          trigger: "Opening a New Tab page."
+          data: "The user's OAuth2 credentials."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: false
+          setting:
+            "Users can disable this feature by signing out of Chromium, or "
+            "disabling Sync or History Sync in Chromium settings under "
+            "Advanced sync settings. The feature is enabled by default."
+          chrome_policy {
+            SyncDisabled {
+              policy_options {mode: MANDATORY}
+              SyncDisabled: true
+            }
+          }
+          chrome_policy {
+            SigninAllowed {
+              policy_options {mode: MANDATORY}
+              SigninAllowed: false
+            }
+          }
+        })");
+  std::unique_ptr<net::URLFetcher> request = net::URLFetcher::Create(
+      0, url, net::URLFetcher::GET, this, traffic_annotation);
   data_use_measurement::DataUseUserData::AttachToFetcher(
       request.get(), data_use_measurement::DataUseUserData::SUGGESTIONS);
   int load_flags = net::LOAD_DISABLE_CACHE | net::LOAD_DO_NOT_SEND_COOKIES |

@@ -1,7 +1,8 @@
 if (window.GCController)
     GCController.collectAll();
-var initialize_InspectorTest = function() {
 
+var initialize_InspectorTest = function() {
+Protocol.InspectorBackend.Options.suppressRequestErrors = true;
 var results = [];
 
 function consoleOutputHook(messageType)
@@ -20,6 +21,10 @@ console.assert = function(condition, object)
         return;
     var message = "Assertion failed: " + (typeof object !== "undefined" ? object : "");
     InspectorTest.addResult(new Error(message).stack);
+}
+
+InspectorTest.markStep = function(title) {
+    InspectorTest.addResult('\nRunning: ' + title);
 }
 
 InspectorTest.startDumpingProtocolMessages = function()
@@ -49,6 +54,20 @@ InspectorTest.evaluateInPage = function(code, callback)
             callback(InspectorTest.runtimeModel.createRemoteObject(result), exceptionDetails);
     }
     InspectorTest.RuntimeAgent.evaluate(code, "console", false, mycallback);
+}
+
+InspectorTest.addScriptUISourceCode = function(url, content, isContentScript, worldId) {
+    content += '\n//# sourceURL=' + url;
+    if (isContentScript)
+        content = `testRunner.evaluateScriptInIsolatedWorld(${worldId}, \`${content}\`)`;
+    InspectorTest.evaluateInPagePromise(content);
+    return InspectorTest.waitForUISourceCode(url);
+}
+
+InspectorTest.addScriptForFrame = function(url, content, frame) {
+    content += '\n//# sourceURL=' + url;
+    var executionContext = InspectorTest.runtimeModel.executionContexts().find(context => context.frameId === frame.id);
+    InspectorTest.RuntimeAgent.evaluate(content, "console", false, false, executionContext.id, function() { });
 }
 
 InspectorTest.evaluateInPagePromise = function(code)
@@ -344,7 +363,7 @@ InspectorTest.expandAndDumpEventListeners = function(eventListenersView, callbac
             InspectorTest.addResult("======== " + eventType + " ========");
             var listenerItems = listenerTypes[i].children();
             for (var j = 0; j < listenerItems.length; ++j) {
-                InspectorTest.addResult("== " + listenerItems[j].eventListener().listenerType());
+                InspectorTest.addResult("== " + listenerItems[j].eventListener().origin());
                 InspectorTest.dumpObjectPropertyTreeElement(listenerItems[j]);
             }
         }
@@ -354,7 +373,7 @@ InspectorTest.expandAndDumpEventListeners = function(eventListenersView, callbac
     if (force)
         listenersArrived();
     else
-        InspectorTest.addSniffer(Components.EventListenersView.prototype, "_eventListenersArrivedForTest", listenersArrived);
+        InspectorTest.addSniffer(EventListeners.EventListenersView.prototype, "_eventListenersArrivedForTest", listenersArrived);
 }
 
 InspectorTest.dumpNavigatorView = function(navigatorView, dumpIcons)
@@ -408,7 +427,28 @@ InspectorTest.dumpNavigatorViewInMode = function(view, mode)
     InspectorTest.dumpNavigatorView(view);
 }
 
-InspectorTest.waitForUISourceCode = function(callback, url, projectType)
+/**
+ * @param {symbol} event
+ * @param {!Common.Object} obj
+ * @param {function(?):boolean=} condition
+ * @return {!Promise}
+ */
+InspectorTest.waitForEvent = function(event, obj, condition)
+{
+    condition = condition || function() { return true;};
+    return new Promise(resolve => {
+        obj.addEventListener(event, onEventFired);
+
+        function onEventFired(event) {
+            if (!condition(event.data))
+                return;
+            obj.removeEventListener(event, onEventFired);
+            resolve(event.data);
+        }
+    });
+}
+
+InspectorTest.waitForUISourceCode = function(urlSuffix, projectType)
 {
     function matches(uiSourceCode)
     {
@@ -416,41 +456,58 @@ InspectorTest.waitForUISourceCode = function(callback, url, projectType)
             return false;
         if (!projectType && uiSourceCode.project().type() === Workspace.projectTypes.Service)
             return false;
-        if (url && !uiSourceCode.url().endsWith(url))
+        if (urlSuffix && !uiSourceCode.url().endsWith(urlSuffix))
             return false;
         return true;
     }
 
     for (var uiSourceCode of Workspace.workspace.uiSourceCodes()) {
-        if (url && matches(uiSourceCode)) {
-            callback(uiSourceCode);
-            return;
-        }
+        if (urlSuffix && matches(uiSourceCode))
+            return Promise.resolve(uiSourceCode);
     }
 
-    Workspace.workspace.addEventListener(Workspace.Workspace.Events.UISourceCodeAdded, uiSourceCodeAdded);
-    function uiSourceCodeAdded(event)
-    {
-        if (!matches(event.data))
-            return;
-        Workspace.workspace.removeEventListener(Workspace.Workspace.Events.UISourceCodeAdded, uiSourceCodeAdded);
-        callback(event.data);
-    }
+    return InspectorTest.waitForEvent(Workspace.Workspace.Events.UISourceCodeAdded, Workspace.workspace, matches);
 }
 
 InspectorTest.waitForUISourceCodeRemoved = function(callback)
 {
-    Workspace.workspace.addEventListener(Workspace.Workspace.Events.UISourceCodeRemoved, uiSourceCodeRemoved);
-    function uiSourceCodeRemoved(event)
-    {
-        Workspace.workspace.removeEventListener(Workspace.Workspace.Events.UISourceCodeRemoved, uiSourceCodeRemoved);
-        callback(event.data);
-    }
+    InspectorTest.waitForEvent(Workspace.Workspace.Events.UISourceCodeRemoved, Workspace.workspace).then(callback);
 }
 
-InspectorTest.createMockTarget = function(name, capabilities, dontAttachToMain)
-{
-    return SDK.targetManager.createTarget(name, capabilities || SDK.Target.Capability.AllForTests, params => new SDK.StubConnection(params), dontAttachToMain ? null : InspectorTest.mainTarget);
+InspectorTest.waitForTarget = function(filter) {
+    filter = filter || (target => true);
+    for (var target of SDK.targetManager.targets()) {
+        if (filter(target))
+            return Promise.resolve(target);
+    }
+    var fulfill;
+    var promise = new Promise(callback => fulfill = callback);
+    var observer = {
+        targetAdded: function(target) {
+            if (filter(target)) {
+                SDK.targetManager.unobserveTargets(observer);
+                fulfill(target);
+            }
+        },
+        targetRemoved: function() {
+        },
+    };
+    SDK.targetManager.observeTargets(observer);
+    return promise;
+}
+
+InspectorTest.waitForExecutionContext = function(runtimeModel) {
+    if (runtimeModel.executionContexts().length)
+        return Promise.resolve(runtimeModel.executionContexts()[0]);
+    return InspectorTest.waitForEvent(SDK.RuntimeModel.Events.ExecutionContextCreated, runtimeModel);
+}
+
+InspectorTest.waitForExecutionContextDestroyed = function(context) {
+    var runtimeModel = context.runtimeModel;
+    if (runtimeModel.executionContexts().indexOf(context) === -1)
+        return Promise.resolve();
+    return InspectorTest.waitForEvent(SDK.RuntimeModel.Events.ExecutionContextDestroyed, runtimeModel,
+        destroyedContext => destroyedContext === context);
 }
 
 InspectorTest.assertGreaterOrEqual = function(a, b, message)
@@ -465,31 +522,39 @@ InspectorTest.navigate = function(url, callback)
     InspectorTest.evaluateInPage("window.location.replace('" + url + "')");
 }
 
-InspectorTest.hardReloadPage = function(callback, scriptToEvaluateOnLoad, scriptPreprocessor)
-{
-    InspectorTest._innerReloadPage(true, callback, scriptToEvaluateOnLoad, scriptPreprocessor);
-}
-
-InspectorTest.reloadPage = function(callback, scriptToEvaluateOnLoad, scriptPreprocessor)
-{
-    InspectorTest._innerReloadPage(false, callback, scriptToEvaluateOnLoad, scriptPreprocessor);
-}
-
-InspectorTest.reloadPagePromise = function(scriptToEvaluateOnLoad, scriptPreprocessor)
+InspectorTest.navigatePromise = function(url)
 {
     var fulfill;
-    var promise = new Promise(x => fulfill = x);
-    InspectorTest.reloadPage(fulfill, scriptToEvaluateOnLoad, scriptPreprocessor);
+    var promise = new Promise(callback => fulfill = callback);
+    InspectorTest.navigate(url, fulfill);
     return promise;
 }
 
-InspectorTest._innerReloadPage = function(hardReload, callback, scriptToEvaluateOnLoad, scriptPreprocessor)
+InspectorTest.hardReloadPage = function(callback, scriptToEvaluateOnLoad)
+{
+    InspectorTest._innerReloadPage(true, callback, scriptToEvaluateOnLoad);
+}
+
+InspectorTest.reloadPage = function(callback, scriptToEvaluateOnLoad)
+{
+    InspectorTest._innerReloadPage(false, callback, scriptToEvaluateOnLoad);
+}
+
+InspectorTest.reloadPagePromise = function(scriptToEvaluateOnLoad)
+{
+    var fulfill;
+    var promise = new Promise(x => fulfill = x);
+    InspectorTest.reloadPage(fulfill, scriptToEvaluateOnLoad);
+    return promise;
+}
+
+InspectorTest._innerReloadPage = function(hardReload, callback, scriptToEvaluateOnLoad)
 {
     InspectorTest._pageLoadedCallback = InspectorTest.safeWrap(callback);
 
     if (UI.panels.network)
         UI.panels.network._networkLogView.reset();
-    InspectorTest.PageAgent.reload(hardReload, scriptToEvaluateOnLoad, scriptPreprocessor);
+    InspectorTest.resourceTreeModel.reloadPage(hardReload, scriptToEvaluateOnLoad);
 }
 
 InspectorTest.pageLoaded = function()
@@ -656,7 +721,7 @@ InspectorTest.addSnifferPromise = function(receiver, methodName)
 
 InspectorTest.addConsoleSniffer = function(override, opt_sticky)
 {
-    InspectorTest.addSniffer(SDK.ConsoleModel.prototype, "addMessage", override, opt_sticky);
+    InspectorTest.addSniffer(ConsoleModel.ConsoleModel.prototype, "addMessage", override, opt_sticky);
 }
 
 InspectorTest.override = function(receiver, methodName, override, opt_sticky)
@@ -746,7 +811,7 @@ InspectorTest.hideInspectorView = function()
 
 InspectorTest.mainFrame = function()
 {
-    return SDK.ResourceTreeModel.fromTarget(InspectorTest.mainTarget).mainFrame;
+    return InspectorTest.resourceTreeModel.mainFrame;
 }
 
 InspectorTest.StringOutputStream = function(callback)
@@ -954,28 +1019,27 @@ SDK.targetManager.observeTargets({
         InspectorTest.HeapProfilerAgent = target.heapProfilerAgent();
         InspectorTest.InspectorAgent = target.inspectorAgent();
         InspectorTest.NetworkAgent = target.networkAgent();
+        InspectorTest.OverlayAgent = target.overlayAgent();
         InspectorTest.PageAgent = target.pageAgent();
         InspectorTest.ProfilerAgent = target.profilerAgent();
         InspectorTest.RuntimeAgent = target.runtimeAgent();
         InspectorTest.TargetAgent = target.targetAgent();
 
-        InspectorTest.consoleModel = target.consoleModel;
-        InspectorTest.networkManager = SDK.NetworkManager.fromTarget(target);
-        InspectorTest.securityOriginManager = SDK.SecurityOriginManager.fromTarget(target);
-        InspectorTest.resourceTreeModel = SDK.ResourceTreeModel.fromTarget(target);
-        InspectorTest.networkLog = SDK.NetworkLog.fromTarget(target);
-        InspectorTest.debuggerModel = SDK.DebuggerModel.fromTarget(target);
-        InspectorTest.runtimeModel = target.runtimeModel;
-        InspectorTest.domModel = SDK.DOMModel.fromTarget(target);
-        InspectorTest.cssModel = SDK.CSSModel.fromTarget(target);
-        InspectorTest.powerProfiler = target.powerProfiler;
-        InspectorTest.cpuProfilerModel = target.cpuProfilerModel;
-        InspectorTest.heapProfilerModel = target.heapProfilerModel;
-        InspectorTest.animationModel = target.animationModel;
-        InspectorTest.serviceWorkerCacheModel = target.serviceWorkerCacheModel;
-        InspectorTest.serviceWorkerManager = target.serviceWorkerManager;
-        InspectorTest.tracingManager = target.tracingManager;
+        InspectorTest.networkManager = target.model(SDK.NetworkManager);
+        InspectorTest.securityOriginManager = target.model(SDK.SecurityOriginManager);
+        InspectorTest.resourceTreeModel = target.model(SDK.ResourceTreeModel);
+        InspectorTest.debuggerModel = target.model(SDK.DebuggerModel);
+        InspectorTest.runtimeModel = target.model(SDK.RuntimeModel);
+        InspectorTest.domModel = target.model(SDK.DOMModel);
+        InspectorTest.domDebuggerModel = target.model(SDK.DOMDebuggerModel);
+        InspectorTest.cssModel = target.model(SDK.CSSModel);
+        InspectorTest.cpuProfilerModel = target.model(SDK.CPUProfilerModel);
+        InspectorTest.overlayModel = target.model(SDK.OverlayModel);
+        InspectorTest.serviceWorkerManager = target.model(SDK.ServiceWorkerManager);
+        InspectorTest.tracingManager = target.model(SDK.TracingManager);
         InspectorTest.mainTarget = target;
+        InspectorTest.consoleModel = ConsoleModel.consoleModel;
+        InspectorTest.networkLog = NetworkLog.networkLog;
     },
 
     targetRemoved: function(target) { }
@@ -997,12 +1061,12 @@ InspectorTest.preloadModule = function(moduleName)
 
 InspectorTest.isDedicatedWorker = function(target)
 {
-    return target && !target.hasBrowserCapability() && target.hasJSCapability() && !target.hasTargetCapability();
+    return target && !target.hasBrowserCapability() && target.hasJSCapability() && !target.hasNetworkCapability() && !target.hasTargetCapability();
 }
 
 InspectorTest.isServiceWorker = function(target)
 {
-    return target && !target.hasBrowserCapability() && !target.hasJSCapability() && target.hasTargetCapability();
+    return target && !target.hasBrowserCapability() && !target.hasJSCapability() && target.hasNetworkCapability() && target.hasTargetCapability();
 }
 
 InspectorTest.describeTargetType = function(target)
@@ -1159,7 +1223,7 @@ function runTest(pixelTest, enableWatchDogWhileDebugging)
     testRunner.evaluateInWebInspector(initializeCallId, toEvaluate);
 
     if (window.debugTest)
-        test = "function() { window.test = " + test.toString() + "; InspectorTest.addResult = window._originalConsoleLog; InspectorTest.completeTest = function() {}; }";
+        test = "function() { Protocol.InspectorBackend.Options.suppressRequestErrors = false; window.test = " + test.toString() + "; InspectorTest.addResult = window._originalConsoleLog; InspectorTest.completeTest = function() {}; }";
     toEvaluate = "(" + runTestInFrontend + ")(" + test + ");";
     testRunner.evaluateInWebInspector(runTestCallId, toEvaluate);
 

@@ -1,17 +1,21 @@
 <link rel="import" href="chrome://resources/html/polymer.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/iron-flex-layout/classes/iron-flex-layout.html">
+<link rel="import" href="chrome://resources/html/action_link.html">
+<link rel="import" href="chrome://resources/html/action_link_css.html">
+<link rel="import" href="chrome://resources/html/assert.html">
+<link rel="import" href="chrome://resources/html/cr/ui/focus_without_ink.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/iron-flex-layout/iron-flex-layout-classes.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-list/iron-list.html">
 <link rel="import" href="chrome://resources/html/web_ui_listener_behavior.html">
 <link rel="import" href="chrome://resources/cr_elements/cr_scrollable_behavior.html">
-<link rel="import" href="/controls/extension_controlled_indicator.html">
-<link rel="import" href="/settings_shared_css.html">
-<link rel="import" href="/on_startup_page/startup_url_dialog.html">
-<link rel="import" href="/on_startup_page/startup_url_entry.html">
-<link rel="import" href="/on_startup_page/startup_urls_page_browser_proxy.html">
+<link rel="import" href="../controls/extension_controlled_indicator.html">
+<link rel="import" href="../settings_shared_css.html">
+<link rel="import" href="startup_url_dialog.html">
+<link rel="import" href="startup_url_entry.html">
+<link rel="import" href="startup_urls_page_browser_proxy.html">
 
 <dom-module id="settings-startup-urls-page">
   <template>
-    <style include="settings-shared">
+    <style include="settings-shared action-link iron-flex">
       #outer {
         @apply(--settings-list-frame-padding);
         max-height: 395px;  /** Enough height to show six entries. */
@@ -21,17 +25,17 @@
         border-top: var(--settings-separator-line);
       }
 
-      #container settings-startup-url-entry:not([editable]) {
-        background: none;
+      #container settings-startup-url-entry {
         cursor: default;
       }
     </style>
-    <div id="outer" class="layout vertical flex">
-      <div id="container" class="scroll-container flex" scrollable>
+    <div id="outer" class="layout vertical flex vertical-list">
+      <div id="container" class="scroll-container" scrollable>
         <iron-list items="[[startupPages_]]" scroll-target="container">
           <template>
             <settings-startup-url-entry model="[[item]]"
-                tabindex$="[[tabIndex]]"
+                tabindex$="[[tabIndex]]" iron-list-tab-index="[[tabIndex]]"
+                last-focused="{{lastFocused_}}"
                 editable="[[!prefs.session.startup_urls.controlledBy]]">
             </settings-startup-url-entry>
           </template>
@@ -39,11 +43,17 @@
       </div>
       <template is="dom-if" if="[[!prefs.session.startup_urls.controlledBy]]"
           restamp>
-        <div class="list-item list-button" id="addPage" on-tap="onAddPageTap_">
-          $i18n{onStartupAddNewPage}
+        <div class="list-item" id="addPage">
+          <a is="action-link" class="list-button" on-tap="onAddPageTap_">
+            $i18n{onStartupAddNewPage}
+          </a>
         </div>
-        <div class="list-item list-button" id="useCurrentPages"
-            on-tap="onUseCurrentPagesTap_">$i18n{onStartupUseCurrent}</div>
+        <div class="list-item" id="useCurrentPages">
+          <a is="action-link" class="list-button"
+              on-tap="onUseCurrentPagesTap_">
+            $i18n{onStartupUseCurrent}
+          </a>
+        </div>
       </template>
       <template is="dom-if" if="[[prefs.session.startup_urls.extensionId]]"
           restamp>

@@ -47,14 +47,16 @@ class URLPattern {
  public:
   // A collection of scheme bitmasks for use with valid_schemes.
   enum SchemeMasks {
-    SCHEME_NONE       = 0,
-    SCHEME_HTTP       = 1 << 0,
-    SCHEME_HTTPS      = 1 << 1,
-    SCHEME_FILE       = 1 << 2,
-    SCHEME_FTP        = 1 << 3,
-    SCHEME_CHROMEUI   = 1 << 4,
-    SCHEME_EXTENSION  = 1 << 5,
+    SCHEME_NONE = 0,
+    SCHEME_HTTP = 1 << 0,
+    SCHEME_HTTPS = 1 << 1,
+    SCHEME_FILE = 1 << 2,
+    SCHEME_FTP = 1 << 3,
+    SCHEME_CHROMEUI = 1 << 4,
+    SCHEME_EXTENSION = 1 << 5,
     SCHEME_FILESYSTEM = 1 << 6,
+    SCHEME_WS = 1 << 7,
+    SCHEME_WSS = 1 << 8,
 
     // IMPORTANT!
     // SCHEME_ALL will match every scheme, including chrome://, chrome-
@@ -62,7 +64,7 @@ class URLPattern {
     // implications, third-party extensions should usually not be able to get
     // access to URL patterns initialized this way. If there is a reason
     // for violating this general rule, document why this it safe.
-    SCHEME_ALL      = -1,
+    SCHEME_ALL = -1,
   };
 
   // Error codes returned from Parse().
@@ -79,11 +81,20 @@ class URLPattern {
     NUM_PARSE_RESULTS
   };
 
+  // Types of URLPattern that Parse() considers valid.
+  enum ParseOptions {
+    DENY_WILDCARD_FOR_EFFECTIVE_TLD,
+    ALLOW_WILDCARD_FOR_EFFECTIVE_TLD,
+  };
+
   // The <all_urls> string pattern.
   static const char kAllUrlsPattern[];
 
   // Returns true if the given |scheme| is considered valid for extensions.
   static bool IsValidSchemeForExtensions(base::StringPiece scheme);
+
+  // Returns the mask for all schemes considered valid for extensions.
+  static int GetValidSchemeMaskForExtensions();
 
   explicit URLPattern(int valid_schemes);
 
@@ -102,8 +113,10 @@ class URLPattern {
   // Initializes this instance by parsing the provided string. Returns
   // URLPattern::PARSE_SUCCESS on success, or an error code otherwise. On
   // failure, this instance will have some intermediate values and is in an
-  // invalid state.
+  // invalid state. If you want to allow the match pattern to specify a wildcard
+  // for the effective TLD, specify in |parse_options|.
   ParseResult Parse(base::StringPiece pattern_str);
+  ParseResult Parse(base::StringPiece pattern_str, ParseOptions parse_options);
 
   // Gets the bitmask of valid schemes.
   int valid_schemes() const { return valid_schemes_; }
@@ -117,6 +130,15 @@ class URLPattern {
   // Gets whether to match subdomains of host().
   bool match_subdomains() const { return match_subdomains_; }
   void SetMatchSubdomains(bool val);
+
+  // Gets whether host() contains an effective TLD. If false, during
+  // a match, the URL you're comparing must have its TLD removed
+  // prior to comparison.
+  // e.g. For the match pattern https://google.com/*
+  //      If this is true: host() would be google.com
+  //      If this is false: host() would be google
+  bool match_effective_tld() const { return match_effective_tld_; }
+  void SetMatchEffectiveTld(bool val);
 
   // Gets the path the pattern matches with the leading slash. This can have
   // embedded asterisks which are interpreted using glob rules.
@@ -241,6 +263,12 @@ class URLPattern {
   // Whether we should match subdomains of the host. This is true if the first
   // component of the pattern's host was "*".
   bool match_subdomains_;
+
+  // Whether we should match the effective TLD of the host. This is true by
+  // default and only false if ParseOptions is ALLOW_WILDCARD_FOR_EFFECTIVE_TLD
+  // and is only applicable when the the pattern's host ends with ".*"
+  // (e.g. https://example.*/*).
+  bool match_effective_tld_;
 
   // The port.
   std::string port_;

@@ -41,15 +41,14 @@ static const ModelType kStartOrder[] = {
                        //  so we want to do it early.
     PREFERENCES, PRIORITY_PREFERENCES, EXTENSIONS, APPS, APP_LIST, ARC_PACKAGE,
     READING_LIST, THEMES, SEARCH_ENGINES, SESSIONS, APP_NOTIFICATIONS,
-    DICTIONARY, FAVICON_IMAGES, FAVICON_TRACKING, PRINTERS,
+    DICTIONARY, FAVICON_IMAGES, FAVICON_TRACKING, PRINTERS, USER_EVENTS,
     SUPERVISED_USER_SETTINGS, SUPERVISED_USER_SHARED_SETTINGS,
     SUPERVISED_USER_WHITELISTS, ARTICLES, WIFI_CREDENTIALS,
 };
 
 static_assert(arraysize(kStartOrder) ==
                   MODEL_TYPE_COUNT - FIRST_REAL_MODEL_TYPE,
-              "kStartOrder must have MODEL_TYPE_COUNT - "
-              "FIRST_REAL_MODEL_TYPE elements");
+              "When adding a new type, update kStartOrder.");
 
 // The amount of time we wait for association to finish. If some types haven't
 // finished association by the time, DataTypeManager is notified of the
@@ -158,14 +157,25 @@ void ModelAssociationManager::StopDisabledTypes() {
 }
 
 void ModelAssociationManager::LoadEnabledTypes() {
+  for (auto it = desired_types_.First(); it.Good(); it.Inc()) {
+    auto dtc_iter = controllers_->find(it.Get());
+    DCHECK(dtc_iter != controllers_->end());
+    DataTypeController* dtc = dtc_iter->second.get();
+    if (dtc->state() == DataTypeController::NOT_RUNNING) {
+      DCHECK(!loaded_types_.Has(dtc->type()));
+      DCHECK(!associated_types_.Has(dtc->type()));
+      delegate_->OnSingleDataTypeWillStart(dtc->type());
+    }
+  }
   // Load in kStartOrder.
   for (size_t i = 0; i < arraysize(kStartOrder); i++) {
     ModelType type = kStartOrder[i];
     if (!desired_types_.Has(type))
       continue;
 
-    DCHECK(controllers_->find(type) != controllers_->end());
-    DataTypeController* dtc = controllers_->find(type)->second.get();
+    auto dtc_iter = controllers_->find(type);
+    DCHECK(dtc_iter != controllers_->end());
+    DataTypeController* dtc = dtc_iter->second.get();
     if (dtc->state() == DataTypeController::NOT_RUNNING) {
       DCHECK(!loaded_types_.Has(dtc->type()));
       DCHECK(!associated_types_.Has(dtc->type()));

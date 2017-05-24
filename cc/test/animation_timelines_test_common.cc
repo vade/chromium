@@ -10,8 +10,8 @@
 #include "cc/animation/animation_player.h"
 #include "cc/animation/animation_timeline.h"
 #include "cc/animation/element_animations.h"
-#include "cc/output/filter_operation.h"
-#include "cc/output/filter_operations.h"
+#include "cc/base/filter_operation.h"
+#include "cc/base/filter_operations.h"
 #include "ui/gfx/transform.h"
 
 namespace cc {
@@ -355,7 +355,7 @@ AnimationTimelinesTest::AnimationTimelinesTest()
   host_ = client_.host();
   host_impl_ = client_impl_.host();
 
-  element_id_ = ElementId(NextTestLayerId(), 0);
+  element_id_ = ElementId(NextTestLayerId());
 }
 
 AnimationTimelinesTest::~AnimationTimelinesTest() {
@@ -432,7 +432,7 @@ void AnimationTimelinesTest::TickAnimationsTransferEvents(
   host_impl_->TickAnimations(time);
   host_impl_->UpdateAnimationState(true, events.get());
 
-  auto animation_events = static_cast<const AnimationEvents*>(events.get());
+  auto* animation_events = static_cast<const AnimationEvents*>(events.get());
   EXPECT_EQ(expect_events, animation_events->events_.size());
 
   host_->TickAnimations(time);

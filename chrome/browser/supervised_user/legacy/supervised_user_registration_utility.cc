@@ -14,6 +14,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/rand_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task_scheduler/post_task.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
@@ -33,7 +34,6 @@
 #include "components/signin/core/browser/signin_client.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/sync/base/get_session_name.h"
-#include "content/public/browser/browser_thread.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 
@@ -290,8 +290,7 @@ void SupervisedUserRegistrationUtilityImpl::Register(
   const char* kAvatarKey = supervised_users::kChromeAvatarIndex;
 #endif
   supervised_user_shared_settings_service_->SetValue(
-      pending_supervised_user_id_, kAvatarKey,
-      base::FundamentalValue(info.avatar_index));
+      pending_supervised_user_id_, kAvatarKey, base::Value(info.avatar_index));
   if (need_password_update) {
     password_update_.reset(new SupervisedUserSharedSettingsUpdate(
         supervised_user_shared_settings_service_, pending_supervised_user_id_,
@@ -303,9 +302,10 @@ void SupervisedUserRegistrationUtilityImpl::Register(
   }
 
   syncer::GetSessionName(
-      content::BrowserThread::GetBlockingPool()
-          ->GetTaskRunnerWithShutdownBehavior(
-              base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN).get(),
+      base::CreateTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+           base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN})
+          .get(),
       base::Bind(&SupervisedUserRegistrationUtilityImpl::FetchToken,
                  weak_ptr_factory_.GetWeakPtr()));
 }

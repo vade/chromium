@@ -6,10 +6,12 @@
 #define COMPONENTS_FAVICON_CONTENT_CONTENT_FAVICON_DRIVER_H_
 
 #include "base/macros.h"
+#include "base/optional.h"
 #include "components/favicon/core/favicon_driver_impl.h"
 #include "content/public/browser/reload_type.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
+#include "content/public/common/favicon_url.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -27,6 +29,8 @@ class ContentFaviconDriver
       public content::WebContentsUserData<ContentFaviconDriver>,
       public FaviconDriverImpl {
  public:
+  ~ContentFaviconDriver() override;
+
   static void CreateForWebContents(content::WebContents* web_contents,
                                    FaviconService* favicon_service,
                                    history::HistoryService* history_service,
@@ -34,8 +38,8 @@ class ContentFaviconDriver
 
   // Returns the current tab's favicon URLs. If this is empty,
   // DidUpdateFaviconURL has not yet been called for the current navigation.
-  const std::vector<content::FaviconURL>& favicon_urls() const {
-    return favicon_urls_;
+  std::vector<content::FaviconURL> favicon_urls() const {
+    return favicon_urls_.value_or(std::vector<content::FaviconURL>());
   }
 
   // Saves the favicon for the last committed navigation entry to the thumbnail
@@ -45,8 +49,6 @@ class ContentFaviconDriver
   // FaviconDriver implementation.
   gfx::Image GetFavicon() const override;
   bool FaviconIsValid() const override;
-  int StartDownload(const GURL& url, int max_bitmap_size) override;
-  bool IsOffTheRecord() override;
   GURL GetActiveURL() override;
 
  protected:
@@ -54,29 +56,38 @@ class ContentFaviconDriver
                        FaviconService* favicon_service,
                        history::HistoryService* history_service,
                        bookmarks::BookmarkModel* bookmark_model);
-  ~ContentFaviconDriver() override;
 
  private:
   friend class content::WebContentsUserData<ContentFaviconDriver>;
 
-  // FaviconDriver implementation.
-  void OnFaviconUpdated(
-      const GURL& page_url,
-      FaviconDriverObserver::NotificationIconType icon_type,
-      const GURL& icon_url,
-      bool icon_url_changed,
-      const gfx::Image& image) override;
+  // FaviconHandler::Delegate implementation.
+  int DownloadImage(const GURL& url,
+                    int max_image_size,
+                    ImageDownloadCallback callback) override;
+  void DownloadManifest(const GURL& url,
+                        ManifestDownloadCallback callback) override;
+  bool IsOffTheRecord() override;
+  void OnFaviconUpdated(const GURL& page_url,
+                        FaviconDriverObserver::NotificationIconType icon_type,
+                        const GURL& icon_url,
+                        bool icon_url_changed,
+                        const gfx::Image& image) override;
 
   // content::WebContentsObserver implementation.
   void DidUpdateFaviconURL(
       const std::vector<content::FaviconURL>& candidates) override;
+  void DidUpdateWebManifestURL(
+      const base::Optional<GURL>& manifest_url) override;
   void DidStartNavigation(
       content::NavigationHandle* navigation_handle) override;
   void DidFinishNavigation(
       content::NavigationHandle* navigation_handle) override;
 
   GURL bypass_cache_page_url_;
-  std::vector<content::FaviconURL> favicon_urls_;
+  // nullopt until the actual list is reported via DidUpdateFaviconURL().
+  base::Optional<std::vector<content::FaviconURL>> favicon_urls_;
+  // Web Manifest URL or empty URL if none.
+  GURL manifest_url_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentFaviconDriver);
 };

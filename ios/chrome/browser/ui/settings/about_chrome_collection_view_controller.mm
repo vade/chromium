@@ -7,7 +7,6 @@
 #import "base/ios/block_types.h"
 #include "base/logging.h"
 #import "base/mac/foundation_util.h"
-#import "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/version_info/version_info.h"
@@ -17,6 +16,7 @@
 #import "ios/chrome/browser/ui/collection_view/collection_view_model.h"
 #import "ios/chrome/browser/ui/settings/cells/version_item.h"
 #import "ios/chrome/browser/ui/settings/settings_utils.h"
+#include "ios/chrome/browser/ui/uikit_ui_util.h"
 #include "ios/chrome/common/channel_info.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
@@ -25,6 +25,10 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "url/gurl.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 
@@ -63,35 +67,32 @@ typedef NS_ENUM(NSInteger, ItemType) {
 
   [model addSectionWithIdentifier:SectionIdentifierLinks];
 
-  base::scoped_nsobject<CollectionViewTextItem> credits(
-      [[CollectionViewTextItem alloc] initWithType:ItemTypeLinksCredits]);
-  credits.get().text = l10n_util::GetNSString(IDS_IOS_OPEN_SOURCE_LICENSES);
-  credits.get().accessoryType =
-      MDCCollectionViewCellAccessoryDisclosureIndicator;
-  credits.get().accessibilityTraits = UIAccessibilityTraitButton;
+  CollectionViewTextItem* credits =
+      [[CollectionViewTextItem alloc] initWithType:ItemTypeLinksCredits];
+  credits.text = l10n_util::GetNSString(IDS_IOS_OPEN_SOURCE_LICENSES);
+  credits.accessoryType = MDCCollectionViewCellAccessoryDisclosureIndicator;
+  credits.accessibilityTraits = UIAccessibilityTraitButton;
   [model addItem:credits toSectionWithIdentifier:SectionIdentifierLinks];
 
-  base::scoped_nsobject<CollectionViewTextItem> terms(
-      [[CollectionViewTextItem alloc] initWithType:ItemTypeLinksTerms]);
-  terms.get().text = l10n_util::GetNSString(IDS_IOS_TERMS_OF_SERVICE);
-  terms.get().accessoryType = MDCCollectionViewCellAccessoryDisclosureIndicator;
-  terms.get().accessibilityTraits = UIAccessibilityTraitButton;
+  CollectionViewTextItem* terms =
+      [[CollectionViewTextItem alloc] initWithType:ItemTypeLinksTerms];
+  terms.text = l10n_util::GetNSString(IDS_IOS_TERMS_OF_SERVICE);
+  terms.accessoryType = MDCCollectionViewCellAccessoryDisclosureIndicator;
+  terms.accessibilityTraits = UIAccessibilityTraitButton;
   [model addItem:terms toSectionWithIdentifier:SectionIdentifierLinks];
 
-  base::scoped_nsobject<CollectionViewTextItem> privacy(
-      [[CollectionViewTextItem alloc] initWithType:ItemTypeLinksPrivacy]);
-  privacy.get().text = l10n_util::GetNSString(IDS_IOS_PRIVACY_POLICY);
-  privacy.get().accessoryType =
-      MDCCollectionViewCellAccessoryDisclosureIndicator;
-  privacy.get().accessibilityTraits = UIAccessibilityTraitButton;
+  CollectionViewTextItem* privacy =
+      [[CollectionViewTextItem alloc] initWithType:ItemTypeLinksPrivacy];
+  privacy.text = l10n_util::GetNSString(IDS_IOS_PRIVACY_POLICY);
+  privacy.accessoryType = MDCCollectionViewCellAccessoryDisclosureIndicator;
+  privacy.accessibilityTraits = UIAccessibilityTraitButton;
   [model addItem:privacy toSectionWithIdentifier:SectionIdentifierLinks];
 
   [model addSectionWithIdentifier:SectionIdentifierFooter];
 
-  base::scoped_nsobject<VersionItem> version(
-      [[VersionItem alloc] initWithType:ItemTypeVersion]);
-  version.get().text = [self versionDescriptionString];
-  version.get().accessibilityTraits = UIAccessibilityTraitButton;
+  VersionItem* version = [[VersionItem alloc] initWithType:ItemTypeVersion];
+  version.text = [self versionDescriptionString];
+  version.accessibilityTraits = UIAccessibilityTraitButton;
   [model addItem:version toSectionWithIdentifier:SectionIdentifierFooter];
 }
 
@@ -157,6 +158,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
 
 - (void)copyVersionToPasteboard {
   [[UIPasteboard generalPasteboard] setString:[self versionOnlyString]];
+  TriggerHapticFeedbackForNotification(UINotificationFeedbackTypeSuccess);
   NSString* messageText = l10n_util::GetNSString(IDS_IOS_VERSION_COPIED);
   MDCSnackbarMessage* message =
       [MDCSnackbarMessage messageWithText:messageText];

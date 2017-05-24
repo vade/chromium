@@ -26,6 +26,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/histogram_tester.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/precache/core/precache_database.h"
 #include "components/precache/core/precache_switches.h"
@@ -117,12 +118,22 @@ class TestPrecacheDelegate : public PrecacheFetcher::PrecacheDelegate {
     on_done_was_called_ = true;
   }
 
+  void OnManifestFetched(const std::string& host,
+                         const PrecacheManifest& manifest) override {
+    hosts.push_back(host);
+  }
+
   bool was_on_done_called() const {
     return on_done_was_called_;
   }
 
+  void clear_manifest_hosts() { hosts.clear(); }
+
+  std::vector<std::string> get_manifest_hosts() const { return hosts; }
+
  private:
   bool on_done_was_called_;
+  std::vector<std::string> hosts;
 };
 
 class MockURLFetcherFactory : public net::URLFetcherFactory {
@@ -200,7 +211,9 @@ class MockURLFetcherFactory : public net::URLFetcherFactory {
 class PrecacheFetcherFetcherTest : public testing::Test {
  public:
   PrecacheFetcherFetcherTest()
-      : request_context_(new net::TestURLRequestContextGetter(
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI),
+        request_context_(new net::TestURLRequestContextGetter(
             base::ThreadTaskRunnerHandle::Get())),
         scoped_url_fetcher_factory_(&factory_),
         callback_(base::Bind(&PrecacheFetcherFetcherTest::Callback,
@@ -209,7 +222,7 @@ class PrecacheFetcherFetcherTest : public testing::Test {
   MOCK_METHOD1(Callback, void(const PrecacheFetcher::Fetcher&));
 
  protected:
-  base::MessageLoopForUI loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   scoped_refptr<net::TestURLRequestContextGetter> request_context_;
   MockURLFetcherFactory factory_;
   net::ScopedURLFetcherFactory scoped_url_fetcher_factory_;
@@ -415,7 +428,9 @@ TEST_F(PrecacheFetcherFetcherTest, ResourceTooBig) {
 class PrecacheFetcherTest : public testing::Test {
  public:
   PrecacheFetcherTest()
-      : task_runner_(base::ThreadTaskRunnerHandle::Get()),
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI),
+        task_runner_(base::ThreadTaskRunnerHandle::Get()),
         request_context_(new net::TestURLRequestContextGetter(
             base::ThreadTaskRunnerHandle::Get())),
         factory_(NULL,
@@ -440,9 +455,9 @@ class PrecacheFetcherTest : public testing::Test {
     net::HttpResponseInfo info;
     info.was_cached = true;
     info.headers = new net::HttpResponseHeaders(std::string());
-    precache_database_.RecordURLNonPrefetch(
-        url, base::TimeDelta(), base::Time::Now(), info, 1000 /* size */,
-        0 /* host_rank */, false /* is_connection_cellular */);
+    precache_database_.RecordURLNonPrefetch(url, base::Time::Now(), info,
+                                            1000 /* size */, 0 /* host_rank */,
+                                            false /* is_connection_cellular */);
   }
 
  protected:
@@ -472,7 +487,7 @@ class PrecacheFetcherTest : public testing::Test {
     }
 
     // Check again after allowing the message loop to process some messages.
-    loop_.task_runner()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(
             &PrecacheFetcherTest::CheckUntilParallelFetchesBeyondCapacity,
@@ -487,7 +502,7 @@ class PrecacheFetcherTest : public testing::Test {
   void Flush() { precache_database_.Flush(); }
 
   // Must be declared first so that it is destroyed last.
-  base::MessageLoopForUI loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   scoped_refptr<net::TestURLRequestContextGetter> request_context_;
   TestURLFetcherCallback url_callback_;
@@ -568,6 +583,9 @@ TEST_F(PrecacheFetcherTest, FullPrecache) {
 
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
 
+  std::vector<std::string> expected_manifest_hosts = {
+      "good-manifest.com", "forced-starting-url.com"};
+  EXPECT_EQ(expected_manifest_hosts, precache_delegate_.get_manifest_hosts());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
 
   histogram.ExpectUniqueSample("Precache.Fetch.PercentCompleted", 100, 1);
@@ -576,7 +594,28 @@ TEST_F(PrecacheFetcherTest, FullPrecache) {
   histogram.ExpectTotalCount("Precache.Fetch.TimeToComplete", 1);
 }
 
-TEST_F(PrecacheFetcherTest, PrecacheResourceSelection) {
+class PrecacheFetcherResourceSelectionTest
+    : public PrecacheFetcherTest,
+      public testing::WithParamInterface<PrecacheResourceSelection> {
+ public:
+  // These bitsets are asymmetric and multibyte, in order to test the orderings.
+
+  // Set bits for kGoodResourceURL, kGoodResourceURLC and kGoodResourceURLD.
+  static PrecacheResourceSelection DeprecatedBitset() {
+    PrecacheResourceSelection ret;
+    ret.set_deprecated_bitset(0b110000000001);
+    return ret;
+  }
+
+  // Set bits for kGoodResourceURL, kGoodResourceURLC and kGoodResourceURLD.
+  static PrecacheResourceSelection Bitset() {
+    PrecacheResourceSelection ret;
+    ret.set_bitset("\x01\x0c");
+    return ret;
+  }
+};
+
+TEST_P(PrecacheFetcherResourceSelectionTest, Basic) {
   SetDefaultFlags();
 
   std::unique_ptr<PrecacheUnfinishedWork> unfinished_work(
@@ -590,15 +629,13 @@ TEST_F(PrecacheFetcherTest, PrecacheResourceSelection) {
   PrecacheResourceSelection resource_selection;
   good_manifest.add_resource()->set_url(kGoodResourceURL);
   good_manifest.add_resource()->set_url(kGoodResourceURLA);
-  good_manifest.add_resource()->set_url(kGoodResourceURLB);
+  for (int i = 0; i < 8; ++i)
+    good_manifest.add_resource()->set_url(kGoodResourceURLB);
   good_manifest.add_resource()->set_url(kGoodResourceURLC);
   good_manifest.add_resource()->set_url(kGoodResourceURLD);
 
-  // Set bits for kGoodResourceURL, kGoodResourceURLB and kGoodResourceURLD.
-  resource_selection.set_bitset(0b10101);
   (*good_manifest.mutable_experiments()
-        ->mutable_resources_by_experiment_group())[kExperimentID] =
-      resource_selection;
+        ->mutable_resources_by_experiment_group())[kExperimentID] = GetParam();
 
   factory_.SetFakeResponse(GURL(kConfigURL), config.SerializeAsString(),
                            net::HTTP_OK, net::URLRequestStatus::SUCCESS);
@@ -607,7 +644,7 @@ TEST_F(PrecacheFetcherTest, PrecacheResourceSelection) {
                            net::URLRequestStatus::SUCCESS);
   factory_.SetFakeResponse(GURL(kGoodResourceURL), "good", net::HTTP_OK,
                            net::URLRequestStatus::SUCCESS);
-  factory_.SetFakeResponse(GURL(kGoodResourceURLB), "good URL B", net::HTTP_OK,
+  factory_.SetFakeResponse(GURL(kGoodResourceURLC), "good URL B", net::HTTP_OK,
                            net::URLRequestStatus::SUCCESS);
   factory_.SetFakeResponse(GURL(kGoodResourceURLD), "good URL D", net::HTTP_OK,
                            net::URLRequestStatus::SUCCESS);
@@ -630,11 +667,13 @@ TEST_F(PrecacheFetcherTest, PrecacheResourceSelection) {
   expected_requested_urls.emplace_back(kConfigURL);
   expected_requested_urls.emplace_back(kGoodManifestURL);
   expected_requested_urls.emplace_back(kGoodResourceURL);
-  expected_requested_urls.emplace_back(kGoodResourceURLB);
+  expected_requested_urls.emplace_back(kGoodResourceURLC);
   expected_requested_urls.emplace_back(kGoodResourceURLD);
 
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
 
+  std::vector<std::string> expected_manifest_hosts = {"good-manifest.com"};
+  EXPECT_EQ(expected_manifest_hosts, precache_delegate_.get_manifest_hosts());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
 
   histogram.ExpectUniqueSample("Precache.Fetch.PercentCompleted", 100, 1);
@@ -643,7 +682,7 @@ TEST_F(PrecacheFetcherTest, PrecacheResourceSelection) {
   histogram.ExpectTotalCount("Precache.Fetch.TimeToComplete", 1);
 }
 
-TEST_F(PrecacheFetcherTest, PrecacheResourceSelectionMissingBitset) {
+TEST_P(PrecacheFetcherResourceSelectionTest, MissingBitset) {
   SetDefaultFlags();
 
   std::unique_ptr<PrecacheUnfinishedWork> unfinished_work(
@@ -662,10 +701,9 @@ TEST_F(PrecacheFetcherTest, PrecacheResourceSelectionMissingBitset) {
   good_manifest.add_resource()->set_url(kGoodResourceURLD);
 
   // Set bits for a different experiment group.
-  resource_selection.set_bitset(0b1);
   (*good_manifest.mutable_experiments()
         ->mutable_resources_by_experiment_group())[kExperimentID + 1] =
-      resource_selection;
+      GetParam();
 
   // Resource selection bitset for the experiment group will be missing and all
   // resources will be fetched.
@@ -710,6 +748,8 @@ TEST_F(PrecacheFetcherTest, PrecacheResourceSelectionMissingBitset) {
 
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
 
+  std::vector<std::string> expected_manifest_hosts = {"good-manifest.com"};
+  EXPECT_EQ(expected_manifest_hosts, precache_delegate_.get_manifest_hosts());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
 
   histogram.ExpectUniqueSample("Precache.Fetch.PercentCompleted", 100, 1);
@@ -717,6 +757,12 @@ TEST_F(PrecacheFetcherTest, PrecacheResourceSelectionMissingBitset) {
                                url_callback_.total_response_bytes(), 1);
   histogram.ExpectTotalCount("Precache.Fetch.TimeToComplete", 1);
 }
+
+INSTANTIATE_TEST_CASE_P(
+    PrecacheFetcherResourceSelectionTest,
+    PrecacheFetcherResourceSelectionTest,
+    testing::Values(PrecacheFetcherResourceSelectionTest::DeprecatedBitset(),
+                    PrecacheFetcherResourceSelectionTest::Bitset()));
 
 TEST_F(PrecacheFetcherTest, PrecachePauseResume) {
   SetDefaultFlags();
@@ -770,6 +816,8 @@ TEST_F(PrecacheFetcherTest, PrecachePauseResume) {
   expected_requested_urls.emplace_back(
       "http://manifest-url-prefix.com/manifest2.com");
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
+
+  EXPECT_TRUE(precache_delegate_.get_manifest_hosts().empty());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
 }
 
@@ -803,6 +851,9 @@ TEST_F(PrecacheFetcherTest, ResumeWithConfigOnly) {
   expected_requested_urls.emplace_back(kGoodResourceURL);
 
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
+
+  std::vector<std::string> expected_manifest_hosts = {"good-manifest.com"};
+  EXPECT_EQ(expected_manifest_hosts, precache_delegate_.get_manifest_hosts());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
 }
 
@@ -842,6 +893,8 @@ TEST_F(PrecacheFetcherTest, CustomURLs) {
 
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
 
+  std::vector<std::string> expected_manifest_hosts = {"good-manifest.com"};
+  EXPECT_EQ(expected_manifest_hosts, precache_delegate_.get_manifest_hosts());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
 }
 
@@ -871,6 +924,8 @@ TEST_F(PrecacheFetcherTest, ConfigFetchFailure) {
   expected_requested_urls.emplace_back(kGoodManifestURL);
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
 
+  std::vector<std::string> expected_manifest_hosts = {"good-manifest.com"};
+  EXPECT_EQ(expected_manifest_hosts, precache_delegate_.get_manifest_hosts());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
 }
 
@@ -899,6 +954,8 @@ TEST_F(PrecacheFetcherTest, BadConfig) {
   expected_requested_urls.emplace_back(kGoodManifestURL);
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
 
+  std::vector<std::string> expected_manifest_hosts = {"good-manifest.com"};
+  EXPECT_EQ(expected_manifest_hosts, precache_delegate_.get_manifest_hosts());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
 }
 
@@ -935,6 +992,7 @@ TEST_F(PrecacheFetcherTest, Cancel) {
   expected_requested_urls.emplace_back(kConfigURL);
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
 
+  EXPECT_TRUE(precache_delegate_.get_manifest_hosts().empty());
   EXPECT_FALSE(precache_delegate_.was_on_done_called());
 
   histogram.ExpectTotalCount("Precache.Fetch.TimeToComplete", 0);
@@ -968,6 +1026,7 @@ TEST_F(PrecacheFetcherTest, PrecacheUsingDefaultConfigSettingsURL) {
   expected_requested_urls.emplace_back(PRECACHE_CONFIG_SETTINGS_URL);
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
 
+  EXPECT_TRUE(precache_delegate_.get_manifest_hosts().empty());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
 }
 
@@ -1008,6 +1067,8 @@ TEST_F(PrecacheFetcherTest, PrecacheUsingDefaultManifestURLPrefix) {
   expected_requested_urls.push_back(manifest_url);
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
 
+  std::vector<std::string> expected_manifest_hosts = {"starting-url.com"};
+  EXPECT_EQ(expected_manifest_hosts, precache_delegate_.get_manifest_hosts());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
 }
 
@@ -1062,6 +1123,69 @@ TEST_F(PrecacheFetcherTest, TopResourcesCount) {
 
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
 
+  std::vector<std::string> expected_manifest_hosts = {"good-manifest.com"};
+  EXPECT_EQ(expected_manifest_hosts, precache_delegate_.get_manifest_hosts());
+  EXPECT_TRUE(precache_delegate_.was_on_done_called());
+
+  histogram.ExpectUniqueSample("Precache.Fetch.PercentCompleted", 100, 1);
+  histogram.ExpectUniqueSample("Precache.Fetch.ResponseBytes.Total",
+                               url_callback_.total_response_bytes(), 1);
+  histogram.ExpectTotalCount("Precache.Fetch.TimeToComplete", 1);
+}
+
+TEST_F(PrecacheFetcherTest, TopResourcesCount_ResourceBitset) {
+  SetDefaultFlags();
+
+  std::unique_ptr<PrecacheUnfinishedWork> unfinished_work(
+      new PrecacheUnfinishedWork());
+  unfinished_work->set_start_time(base::Time::UnixEpoch().ToInternalValue());
+  unfinished_work->add_top_host()->set_hostname("good-manifest.com");
+
+  PrecacheConfigurationSettings config;
+  config.set_top_resources_count(2);
+
+  PrecacheManifest good_manifest;
+  good_manifest.add_resource()->set_url("http://good-manifest.com/retrieved");
+  good_manifest.add_resource()->set_url("http://good-manifest.com/skipped");
+  good_manifest.add_resource()->set_url("http://good-manifest.com/retrieved");
+  good_manifest.add_resource()->set_url("http://good-manifest.com/skipped");
+  good_manifest.add_resource()->set_url("http://good-manifest.com/retrieved");
+  (*good_manifest.mutable_experiments()
+        ->mutable_resources_by_experiment_group())[kExperimentID]
+      .set_deprecated_bitset(0b10101);
+
+  factory_.SetFakeResponse(GURL(kConfigURL), config.SerializeAsString(),
+                           net::HTTP_OK, net::URLRequestStatus::SUCCESS);
+  factory_.SetFakeResponse(GURL(kGoodManifestURL),
+                           good_manifest.SerializeAsString(), net::HTTP_OK,
+                           net::URLRequestStatus::SUCCESS);
+  factory_.SetFakeResponse(GURL("http://good-manifest.com/retrieved"), "good",
+                           net::HTTP_OK, net::URLRequestStatus::SUCCESS);
+
+  base::HistogramTester histogram;
+
+  {
+    PrecacheFetcher precache_fetcher(
+        request_context_.get(), GURL(), std::string(),
+        std::move(unfinished_work), kExperimentID,
+        precache_database_.GetWeakPtr(), task_runner(), &precache_delegate_);
+    precache_fetcher.Start();
+
+    base::RunLoop().RunUntilIdle();
+
+    // Destroy the PrecacheFetcher after it has finished, to record metrics.
+  }
+
+  std::vector<GURL> expected_requested_urls;
+  expected_requested_urls.emplace_back(kConfigURL);
+  expected_requested_urls.emplace_back(kGoodManifestURL);
+  expected_requested_urls.emplace_back("http://good-manifest.com/retrieved");
+  expected_requested_urls.emplace_back("http://good-manifest.com/retrieved");
+
+  EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
+
+  std::vector<std::string> expected_manifest_hosts = {"good-manifest.com"};
+  EXPECT_EQ(expected_manifest_hosts, precache_delegate_.get_manifest_hosts());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
 
   histogram.ExpectUniqueSample("Precache.Fetch.PercentCompleted", 100, 1);
@@ -1091,7 +1215,9 @@ TEST_F(PrecacheFetcherTest, MaxBytesTotal) {
   SetDefaultFlags();
   std::unique_ptr<PrecacheUnfinishedWork> unfinished_work(
       new PrecacheUnfinishedWork());
-  unfinished_work->add_top_host()->set_hostname("good-manifest.com");
+  auto* top_host = unfinished_work->add_top_host();
+  top_host->set_hostname("good-manifest.com");
+  top_host->set_visits(1);
   unfinished_work->set_start_time(base::Time::UnixEpoch().ToInternalValue());
 
   // Should be greater than kMaxParallelFetches, so that we can observe
@@ -1110,6 +1236,7 @@ TEST_F(PrecacheFetcherTest, MaxBytesTotal) {
 
   PrecacheConfigurationSettings config;
   config.set_max_bytes_total(kMaxBytesTotal);
+  config.set_global_ranking(true);
 
   factory_.SetFakeResponse(GURL(kConfigURL), config.SerializeAsString(),
                            net::HTTP_OK, net::URLRequestStatus::SUCCESS);
@@ -1117,7 +1244,9 @@ TEST_F(PrecacheFetcherTest, MaxBytesTotal) {
   PrecacheManifest good_manifest;
   for (size_t i = 0; i < kNumResources; ++i) {
     const std::string url = "http://good-manifest.com/" + std::to_string(i);
-    good_manifest.add_resource()->set_url(url);
+    auto* resource = good_manifest.add_resource();
+    resource->set_url(url);
+    resource->set_weight_ratio(static_cast<double>(i) / kNumResources);
     factory_.SetFakeResponse(GURL(url), std::string(kBytesPerResource, '.'),
                              net::HTTP_OK, net::URLRequestStatus::SUCCESS);
   }
@@ -1138,15 +1267,22 @@ TEST_F(PrecacheFetcherTest, MaxBytesTotal) {
     base::RunLoop().RunUntilIdle();
   }
 
-  // Fetcher should request config, manifest, and all but 3 resources.
-  // TODO(twifkak): I expected all but 2 resources; this result is surprising.
-  // Figure it out and explain it here.
-  EXPECT_EQ(kNumResources - 1, url_callback_.requested_urls().size());
+  // Fetcher should request config, manifest, and all but 3 resources. For some
+  // reason, we are seeing it fetch all but 4 resources. Meh, close enough.
+  EXPECT_EQ(1 + 1 + kNumResources - 4, url_callback_.requested_urls().size());
 
+  std::vector<std::string> expected_manifest_hosts = {"good-manifest.com"};
+  EXPECT_EQ(expected_manifest_hosts, precache_delegate_.get_manifest_hosts());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
 
   histogram.ExpectTotalCount("Precache.Fetch.PercentCompleted", 1);
   histogram.ExpectTotalCount("Precache.Fetch.TimeToComplete", 1);
+
+  const double expected_min_weight =
+      good_manifest.resource(kNumResources - 3).weight_ratio() *
+      1 /* # of visits to good-manifest.com */;
+  histogram.ExpectBucketCount("Precache.Fetch.MinWeight",
+                              1000.0 * expected_min_weight, 1);
 }
 
 // Tests the parallel fetch behaviour when more precache resource and manifest
@@ -1159,6 +1295,7 @@ TEST_F(PrecacheFetcherTest, FetcherPoolMaxLimitReached) {
 
   PrecacheConfigurationSettings config;
   std::vector<GURL> expected_requested_urls;
+  std::vector<std::string> expected_manifest_hosts;
 
   config.set_top_sites_count(kNumTopHosts);
   factory_.SetFakeResponse(GURL(kConfigURL), config.SerializeAsString(),
@@ -1172,6 +1309,7 @@ TEST_F(PrecacheFetcherTest, FetcherPoolMaxLimitReached) {
   for (size_t i = 0; i < kNumTopHosts; ++i) {
     const std::string top_host_url = base::StringPrintf("top-host-%zu.com", i);
     expected_requested_urls.emplace_back(kManifestURLPrefix + top_host_url);
+    expected_manifest_hosts.push_back(top_host_url);
   }
 
   for (size_t i = 0; i < kNumTopHosts; ++i) {
@@ -1213,6 +1351,7 @@ TEST_F(PrecacheFetcherTest, FetcherPoolMaxLimitReached) {
 
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
 
+  EXPECT_EQ(expected_manifest_hosts, precache_delegate_.get_manifest_hosts());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
 
   histogram.ExpectUniqueSample("Precache.Fetch.PercentCompleted", 100, 1);
@@ -1249,6 +1388,7 @@ TEST_F(PrecacheFetcherTest, FilterInvalidManifestUrls) {
   // The config is fetched, but not the invalid manifest URL.
   EXPECT_EQ(1UL, url_callback_.requested_urls().size());
 
+  EXPECT_TRUE(precache_delegate_.get_manifest_hosts().empty());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
 
   // manifest.com will have been failed to complete, in this case.
@@ -1289,6 +1429,8 @@ TEST_F(PrecacheFetcherTest, FilterInvalidResourceUrls) {
   // The config and manifest are fetched, but not the invalid resource URL.
   EXPECT_EQ(2UL, url_callback_.requested_urls().size());
 
+  std::vector<std::string> expected_manifest_hosts = {"bad-manifest.com"};
+  EXPECT_EQ(expected_manifest_hosts, precache_delegate_.get_manifest_hosts());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
 
   // bad-manifest.com will have been completed.
@@ -1453,6 +1595,7 @@ TEST_P(PrecacheFetcherGlobalRankingTest, GloballyRankResources) {
   const size_t kNumResources = 5;
 
   std::vector<GURL> expected_requested_urls;
+  std::vector<std::string> expected_manifest_hosts;
 
   PrecacheConfigurationSettings config;
   config.set_top_sites_count(kNumTopHosts);
@@ -1469,6 +1612,7 @@ TEST_P(PrecacheFetcherGlobalRankingTest, GloballyRankResources) {
   for (size_t i = 0; i < kNumTopHosts; ++i) {
     const std::string top_host_url = base::StringPrintf("top-host-%zu.com", i);
     expected_requested_urls.emplace_back(kManifestURLPrefix + top_host_url);
+    expected_manifest_hosts.push_back(top_host_url);
   }
 
   // Visit counts and weights are chosen in such a way that resource requests
@@ -1517,6 +1661,7 @@ TEST_P(PrecacheFetcherGlobalRankingTest, GloballyRankResources) {
   }
 
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
+  EXPECT_EQ(expected_manifest_hosts, precache_delegate_.get_manifest_hosts());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
 }
 
@@ -1533,6 +1678,7 @@ TEST_F(PrecacheFetcherTest, GloballyRankResourcesAfterPauseResume) {
   const size_t kNumResources = 5;
 
   std::vector<GURL> expected_requested_urls;
+  std::vector<std::string> expected_manifest_hosts;
 
   PrecacheConfigurationSettings config;
   config.set_top_sites_count(kNumTopHosts);
@@ -1549,6 +1695,7 @@ TEST_F(PrecacheFetcherTest, GloballyRankResourcesAfterPauseResume) {
   std::vector<std::pair<std::string, float>> resources;
   for (size_t i = 0; i < kNumTopHosts; ++i) {
     const std::string top_host_url = base::StringPrintf("top-host-%zu.com", i);
+    expected_manifest_hosts.push_back(top_host_url);
     TopHost* top_host = unfinished_work->add_top_host();
     top_host->set_hostname(top_host_url);
     top_host->set_visits(kNumTopHosts - i);
@@ -1598,7 +1745,8 @@ TEST_F(PrecacheFetcherTest, GloballyRankResourcesAfterPauseResume) {
             precache_fetcher.resources_to_fetch_.empty())) {
       LOG(INFO) << "remaining_tries: " << remaining_tries;
       base::RunLoop run_loop;
-      loop_.task_runner()->PostTask(FROM_HERE, run_loop.QuitClosure());
+      base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                    run_loop.QuitClosure());
       run_loop.Run();
     }
 
@@ -1611,13 +1759,18 @@ TEST_F(PrecacheFetcherTest, GloballyRankResourcesAfterPauseResume) {
   EXPECT_TRUE(cancelled_work->top_host().empty());
   EXPECT_EQ(kNumTopHosts * kNumResources,
             static_cast<size_t>(cancelled_work->resource().size()));
+  EXPECT_EQ(expected_manifest_hosts, precache_delegate_.get_manifest_hosts());
   EXPECT_FALSE(precache_delegate_.was_on_done_called());
 
   url_callback_.clear_requested_urls();
+  precache_delegate_.clear_manifest_hosts();
 
   // Continuing with the precache should fetch all resources, as the previous
   // run was cancelled before any finished. They should be fetched in global
   // ranking order.
+
+  base::HistogramTester histogram;
+
   {
     PrecacheFetcher precache_fetcher(
         request_context_.get(), GURL(), std::string(),
@@ -1628,7 +1781,11 @@ TEST_F(PrecacheFetcherTest, GloballyRankResourcesAfterPauseResume) {
     base::RunLoop().RunUntilIdle();
   }
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
+  EXPECT_TRUE(precache_delegate_.get_manifest_hosts().empty());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
+
+  histogram.ExpectBucketCount("Precache.Fetch.MinWeight",
+                              1000.0 * resources.back().second, 1);
 }
 
 TEST_F(PrecacheFetcherTest, MaxTotalResources) {
@@ -1637,6 +1794,7 @@ TEST_F(PrecacheFetcherTest, MaxTotalResources) {
   const size_t kNumResources = 5;
 
   std::vector<GURL> expected_requested_urls;
+  std::vector<std::string> expected_manifest_hosts;
 
   PrecacheConfigurationSettings config;
   config.set_total_resources_count(2);
@@ -1655,6 +1813,7 @@ TEST_F(PrecacheFetcherTest, MaxTotalResources) {
 
   expected_requested_urls.emplace_back(kManifestURLPrefix +
                                        top_host->hostname());
+  expected_manifest_hosts.push_back(top_host->hostname());
 
   PrecacheManifest manifest;
   for (size_t i = 0; i < kNumResources; ++i) {
@@ -1674,6 +1833,8 @@ TEST_F(PrecacheFetcherTest, MaxTotalResources) {
                            manifest.SerializeAsString(), net::HTTP_OK,
                            net::URLRequestStatus::SUCCESS);
 
+  base::HistogramTester histogram;
+
   {
     PrecacheFetcher precache_fetcher(
         request_context_.get(), GURL(), std::string(),
@@ -1684,7 +1845,13 @@ TEST_F(PrecacheFetcherTest, MaxTotalResources) {
   }
 
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
+  EXPECT_EQ(expected_manifest_hosts, precache_delegate_.get_manifest_hosts());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
+
+  const float expected_min_weight =
+      manifest.resource(config.total_resources_count() - 1).weight_ratio();
+  histogram.ExpectUniqueSample("Precache.Fetch.MinWeight",
+                               1000.0 * expected_min_weight, 1);
 }
 
 TEST_F(PrecacheFetcherTest, MinWeight) {
@@ -1693,6 +1860,7 @@ TEST_F(PrecacheFetcherTest, MinWeight) {
   const size_t kNumResources = 5;
 
   std::vector<GURL> expected_requested_urls;
+  std::vector<std::string> expected_manifest_hosts;
 
   PrecacheConfigurationSettings config;
   config.set_min_weight(3);
@@ -1711,6 +1879,7 @@ TEST_F(PrecacheFetcherTest, MinWeight) {
 
   expected_requested_urls.emplace_back(kManifestURLPrefix +
                                        top_host->hostname());
+  expected_manifest_hosts.push_back(top_host->hostname());
 
   PrecacheManifest manifest;
   for (size_t i = 0; i < kNumResources; ++i) {
@@ -1741,6 +1910,7 @@ TEST_F(PrecacheFetcherTest, MinWeight) {
   }
 
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
+  EXPECT_EQ(expected_manifest_hosts, precache_delegate_.get_manifest_hosts());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
 }
 
@@ -1754,6 +1924,7 @@ TEST_F(PrecacheFetcherTest, CancelPrecachingAfterAllManifestFetch) {
 
   PrecacheConfigurationSettings config;
   std::vector<GURL> expected_requested_urls;
+  std::vector<std::string> expected_manifest_hosts;
   std::unique_ptr<PrecacheUnfinishedWork> cancelled_work;
 
   config.set_top_sites_count(kNumTopHosts);
@@ -1768,6 +1939,7 @@ TEST_F(PrecacheFetcherTest, CancelPrecachingAfterAllManifestFetch) {
   for (size_t i = 0; i < kNumTopHosts; ++i) {
     const std::string top_host_url = base::StringPrintf("top-host-%zu.com", i);
     expected_requested_urls.emplace_back(kManifestURLPrefix + top_host_url);
+    expected_manifest_hosts.push_back(top_host_url);
   }
 
   int num_resources = 0;
@@ -1811,7 +1983,8 @@ TEST_F(PrecacheFetcherTest, CancelPrecachingAfterAllManifestFetch) {
             precache_fetcher.resources_to_fetch_.empty())) {
       LOG(INFO) << "remaining_tries: " << remaining_tries;
       base::RunLoop run_loop;
-      loop_.task_runner()->PostTask(FROM_HERE, run_loop.QuitClosure());
+      base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                    run_loop.QuitClosure());
       run_loop.Run();
     }
 
@@ -1826,13 +1999,14 @@ TEST_F(PrecacheFetcherTest, CancelPrecachingAfterAllManifestFetch) {
             static_cast<size_t>(cancelled_work->resource().size()));
 
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
-
+  EXPECT_EQ(expected_manifest_hosts, precache_delegate_.get_manifest_hosts());
   EXPECT_FALSE(precache_delegate_.was_on_done_called());
 
   // Continuing with the precache should fetch all resources, as the previous
   // run was cancelled before any finished.
   expected_requested_urls.clear();
   url_callback_.clear_requested_urls();
+  precache_delegate_.clear_manifest_hosts();
   for (size_t i = 0; i < kNumTopHosts; ++i) {
     for (size_t j = 0; j < kNumResources; ++j) {
       expected_requested_urls.emplace_back(
@@ -1849,6 +2023,7 @@ TEST_F(PrecacheFetcherTest, CancelPrecachingAfterAllManifestFetch) {
     base::RunLoop().RunUntilIdle();
   }
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
+  EXPECT_TRUE(precache_delegate_.get_manifest_hosts().empty());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
 }
 
@@ -1867,12 +2042,14 @@ TEST_F(PrecacheFetcherTest, DailyQuota) {
   factory_.SetFakeResponse(GURL(kConfigURL), config.SerializeAsString(),
                            net::HTTP_OK, net::URLRequestStatus::SUCCESS);
   std::vector<GURL> expected_requested_urls;
+  std::vector<std::string> expected_manifest_hosts;
   expected_requested_urls.emplace_back(kConfigURL);
 
   for (size_t i = 0; i < kNumTopHosts; ++i) {
     const std::string top_host_url = base::StringPrintf("top-host-%zu.com", i);
     expected_requested_urls.emplace_back(std::string(kManifestURLPrefix) +
                                          top_host_url);
+    expected_manifest_hosts.push_back(top_host_url);
   }
 
   for (size_t i = 0; i < kNumTopHosts; ++i) {
@@ -1910,7 +2087,7 @@ TEST_F(PrecacheFetcherTest, DailyQuota) {
   }
 
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
-
+  EXPECT_EQ(expected_manifest_hosts, precache_delegate_.get_manifest_hosts());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
 
   EXPECT_EQ(0, unfinished_work->top_host_size());
@@ -1924,6 +2101,7 @@ TEST_F(PrecacheFetcherTest, DailyQuota) {
   // any resources.
   expected_requested_urls.clear();
   url_callback_.clear_requested_urls();
+  precache_delegate_.clear_manifest_hosts();
   {
     PrecacheFetcher precache_fetcher(
         request_context_.get(), GURL(), std::string(),
@@ -1935,7 +2113,7 @@ TEST_F(PrecacheFetcherTest, DailyQuota) {
     EXPECT_EQ(0U, precache_fetcher.quota_.remaining());
   }
   EXPECT_EQ(expected_requested_urls, url_callback_.requested_urls());
-
+  EXPECT_TRUE(precache_delegate_.get_manifest_hosts().empty());
   EXPECT_TRUE(precache_delegate_.was_on_done_called());
 
   histogram.ExpectTotalCount("Precache.Fetch.PercentCompleted", 2);

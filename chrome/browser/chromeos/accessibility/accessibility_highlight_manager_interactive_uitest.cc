@@ -8,6 +8,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/run_loop.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/chromeos/ui/accessibility_focus_ring_controller.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chromeos/chromeos_switches.h"
@@ -80,19 +81,23 @@ class AccessibilityHighlightManagerTest : public InProcessBrowserTest {
 
   void CaptureBeforeImage(const gfx::Rect& bounds) {
     Capture(bounds);
-    image_.AsBitmap().deepCopyTo(&before_bmp_);
+    if (before_bmp_.tryAllocPixels(image_.AsBitmap().info())) {
+      image_.AsBitmap().readPixels(before_bmp_.info(), before_bmp_.getPixels(),
+                                   before_bmp_.rowBytes(), 0, 0);
+    }
   }
 
   void CaptureAfterImage(const gfx::Rect& bounds) {
     Capture(bounds);
-    image_.AsBitmap().deepCopyTo(&after_bmp_);
+    if (after_bmp_.tryAllocPixels(image_.AsBitmap().info())) {
+      image_.AsBitmap().readPixels(after_bmp_.info(), after_bmp_.getPixels(),
+                                   after_bmp_.rowBytes(), 0, 0);
+    }
   }
 
   void ComputeImageStats() {
     diff_count_ = 0;
     double accum[4] = {0, 0, 0, 0};
-    SkAutoLockPixels lock_before(before_bmp_);
-    SkAutoLockPixels lock_after(after_bmp_);
     for (int x = 0; x < before_bmp_.width(); ++x) {
       for (int y = 0; y < before_bmp_.height(); ++y) {
         SkColor before_color = before_bmp_.getColor(x, y);
@@ -138,7 +143,6 @@ class AccessibilityHighlightManagerTest : public InProcessBrowserTest {
       run_loop_quitter_ = run_loop.QuitClosure();
       run_loop.Run();
       SkBitmap bitmap = image_.AsBitmap();
-      SkAutoLockPixels lock(bitmap);
       if (bitmap.width() != bounds.width() ||
           bitmap.height() != bounds.height()) {
         LOG(INFO) << "Bitmap not correct size, trying to capture again";

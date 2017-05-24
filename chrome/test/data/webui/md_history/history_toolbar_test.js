@@ -15,8 +15,8 @@ suite('history-toolbar', function() {
 
   setup(function() {
     app = replaceApp();
-    element = app.$['history'].$['infinite-list'];
-    toolbar = app.$['toolbar'];
+    element = app.$.history;
+    toolbar = app.$.toolbar;
     return PolymerTest.flushTasks();
   });
 
@@ -69,37 +69,6 @@ suite('history-toolbar', function() {
     toolbar.$$('cr-toolbar').fire('search-changed', 'Test2');
   });
 
-  test('grouped history navigation buttons', function() {
-    var info = createHistoryInfo();
-    info.finished = false;
-    app.historyResult(info, []);
-    app.grouped_ = true;
-    return PolymerTest.flushTasks().then(function() {
-      app.fire('change-query', {range: HistoryRange.MONTH});
-      groupedList = app.$.history.$$('#grouped-list');
-      assertTrue(!!groupedList);
-      var today = toolbar.$$('#today-button');
-      var next = toolbar.$$('#next-button');
-      var prev = toolbar.$$('#prev-button');
-
-      assertEquals(0, toolbar.groupedOffset);
-      assertTrue(today.disabled);
-      assertTrue(next.disabled);
-      assertFalse(prev.disabled);
-
-      MockInteractions.tap(prev);
-      assertEquals(1, toolbar.groupedOffset);
-      assertFalse(today.disabled);
-      assertFalse(next.disabled);
-      assertFalse(prev.disabled);
-
-      app.historyResult(createHistoryInfo(), []);
-      assertFalse(today.disabled);
-      assertFalse(next.disabled);
-      assertTrue(prev.disabled);
-    });
-  });
-
   test('sync notice shows and hides', function() {
     toolbar.showSyncNotice = true;
     Polymer.dom.flush();
@@ -130,6 +99,14 @@ suite('history-toolbar', function() {
     MockInteractions.tap(button);
     toolbar.showSyncNotice = false;
     assertTrue(notice.hidden);
+  });
+
+  test('menu promo hides when drawer is opened', function() {
+    app.showMenuPromo_ = true;
+    app.hasDrawer_ = true;
+    Polymer.dom.flush();
+    MockInteractions.tap(toolbar.$['main-toolbar'].$$('#menuButton'));
+    assertFalse(app.showMenuPromo_);
   });
 
   teardown(function() {

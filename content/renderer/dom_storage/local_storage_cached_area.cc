@@ -24,25 +24,40 @@ namespace content {
 
 namespace {
 
+// Don't change or reorder any of the values in this enum, as these values
+// are serialized on disk.
+enum class StorageFormat : uint8_t { UTF16 = 0 };
+
 base::string16 Uint8VectorToString16(const std::vector<uint8_t>& input) {
-  return base::string16(reinterpret_cast<const base::char16*>(input.data()),
-                        input.size() / sizeof(base::char16));
+  // TODO(mek): Better error recovery when corrupt (or otherwise invalid) data
+  // is detected.
+  if (input.size() % sizeof(base::char16) != 1 ||
+      input[0] != static_cast<uint8_t>(StorageFormat::UTF16)) {
+    VLOG(1) << "Corrupt data in localstorage";
+    return base::string16();
+  }
+  base::string16 result;
+  result.resize(input.size() / sizeof(base::char16));
+  std::memcpy(reinterpret_cast<void*>(&result[0]), input.data() + 1,
+              input.size() - 1);
+  return result;
 }
 
 std::vector<uint8_t> String16ToUint8Vector(const base::string16& input) {
   const uint8_t* data = reinterpret_cast<const uint8_t*>(input.data());
-  return std::vector<uint8_t>(data, data + input.size() * sizeof(base::char16));
+  std::vector<uint8_t> result;
+  result.reserve(input.size() * sizeof(base::char16) + 1);
+  result.push_back(static_cast<uint8_t>(StorageFormat::UTF16));
+  result.insert(result.end(), data, data + input.size() * sizeof(base::char16));
+  return result;
 }
 
 class GetAllCallback : public mojom::LevelDBWrapperGetAllCallback {
  public:
   static mojom::LevelDBWrapperGetAllCallbackAssociatedPtrInfo CreateAndBind(
-      mojo::AssociatedGroup* associated_group,
       const base::Callback<void(bool)>& callback) {
     mojom::LevelDBWrapperGetAllCallbackAssociatedPtrInfo ptr_info;
-    mojom::LevelDBWrapperGetAllCallbackAssociatedRequest request;
-    associated_group->CreateAssociatedInterface(
-        mojo::AssociatedGroup::WILL_PASS_PTR, &ptr_info, &request);
+    auto request = mojo::MakeRequest(&ptr_info);
     mojo::MakeStrongAssociatedBinding(
         base::WrapUnique(new GetAllCallback(callback)), std::move(request));
     return ptr_info;
@@ -84,7 +99,7 @@ LocalStorageCachedArea::LocalStorageCachedArea(
   storage_partition_service->OpenLocalStorage(origin_,
                                               mojo::MakeRequest(&leveldb_));
   mojom::LevelDBObserverAssociatedPtrInfo ptr_info;
-  binding_.Bind(&ptr_info, leveldb_.associated_group());
+  binding_.Bind(mojo::MakeRequest(&ptr_info));
   leveldb_->AddObserver(std::move(ptr_info));
 }
 
@@ -151,7 +166,6 @@ void LocalStorageCachedArea::RemoveItem(const base::string16& key,
 void LocalStorageCachedArea::Clear(const GURL& page_url,
                                    const std::string& storage_area_id) {
   // No need to prime the cache in this case.
-
   Reset();
   map_ = new DOMStorageMap(kPerStorageAreaQuota);
   ignore_all_mutations_ = true;
@@ -207,9 +221,9 @@ void LocalStorageCachedArea::KeyDeleted(const std::vector<uint8_t>& key,
     }
   }
 
-  blink::WebStorageEventDispatcher::dispatchLocalStorageEvent(
-      blink::WebString::fromUTF16(key_string),
-      blink::WebString::fromUTF16(Uint8VectorToString16(old_value)),
+  blink::WebStorageEventDispatcher::DispatchLocalStorageEvent(
+      blink::WebString::FromUTF16(key_string),
+      blink::WebString::FromUTF16(Uint8VectorToString16(old_value)),
       blink::WebString(), origin_.GetURL(), page_url, originating_area);
 }
 
@@ -239,7 +253,7 @@ void LocalStorageCachedArea::AllDeleted(const std::string& source) {
     }
   }
 
-  blink::WebStorageEventDispatcher::dispatchLocalStorageEvent(
+  blink::WebStorageEventDispatcher::DispatchLocalStorageEvent(
       blink::WebString(), blink::WebString(), blink::WebString(),
       origin_.GetURL(), page_url, originating_area);
 }
@@ -275,10 +289,10 @@ void LocalStorageCachedArea::KeyAddedOrChanged(
     }
   }
 
-  blink::WebStorageEventDispatcher::dispatchLocalStorageEvent(
-      blink::WebString::fromUTF16(key_string),
-      blink::WebString::fromUTF16(old_value),
-      blink::WebString::fromUTF16(new_value_string), origin_.GetURL(), page_url,
+  blink::WebStorageEventDispatcher::DispatchLocalStorageEvent(
+      blink::WebString::FromUTF16(key_string),
+      blink::WebString::FromUTF16(old_value),
+      blink::WebString::FromUTF16(new_value_string), origin_.GetURL(), page_url,
       originating_area);
 }
 
@@ -291,7 +305,6 @@ void LocalStorageCachedArea::EnsureLoaded() {
   leveldb::mojom::DatabaseError status = leveldb::mojom::DatabaseError::OK;
   std::vector<content::mojom::KeyValuePtr> data;
   leveldb_->GetAll(GetAllCallback::CreateAndBind(
-                       leveldb_.associated_group(),
                        base::Bind(&LocalStorageCachedArea::OnGetAllComplete,
                                   weak_factory_.GetWeakPtr())),
                    &status, &data);

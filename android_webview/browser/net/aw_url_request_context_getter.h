@@ -10,6 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
+#include "base/single_thread_task_runner.h"
 #include "components/prefs/pref_member.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/content_browser_client.h"
@@ -46,6 +47,8 @@ class AwURLRequestContextGetter : public net::URLRequestContextGetter {
   // NetLog is thread-safe, so clients can call this method from arbitrary
   // threads (UI and IO).
   net::NetLog* GetNetLog();
+
+  static void set_check_cleartext_permitted(bool permitted);
 
  private:
   friend class AwBrowserContext;

@@ -88,20 +88,15 @@ class SESSIONS_EXPORT SerializedNavigationEntry {
 
   // Accessors for some fields taken from NavigationEntry.
   int unique_id() const { return unique_id_; }
-  const GURL& virtual_url() const { return virtual_url_; }
   const base::string16& title() const { return title_; }
-  const std::string& encoded_page_state() const { return encoded_page_state_; }
   const base::string16& search_terms() const { return search_terms_; }
   const GURL& favicon_url() const { return favicon_url_; }
   int http_status_code() const { return http_status_code_; }
-  const GURL& referrer_url() const { return referrer_url_; }
-  int referrer_policy() const { return referrer_policy_; }
   ui::PageTransition transition_type() const {
     return transition_type_;
   }
   bool has_post_data() const { return has_post_data_; }
   int64_t post_id() const { return post_id_; }
-  const GURL& original_request_url() const { return original_request_url_; }
   bool is_overriding_user_agent() const { return is_overriding_user_agent_; }
   base::Time timestamp() const { return timestamp_; }
 
@@ -113,6 +108,29 @@ class SESSIONS_EXPORT SerializedNavigationEntry {
   PasswordState password_state() const { return password_state_; }
   void set_password_state(PasswordState password_state) {
     password_state_ = password_state;
+  }
+
+  const GURL& virtual_url() const { return virtual_url_; }
+  void set_virtual_url(const GURL& virtual_url) { virtual_url_ = virtual_url; }
+
+  const std::string& encoded_page_state() const { return encoded_page_state_; }
+  void set_encoded_page_state(const std::string& encoded_page_state) {
+    encoded_page_state_ = encoded_page_state;
+  }
+
+  const GURL& original_request_url() const { return original_request_url_; }
+  void set_original_request_url(const GURL& original_request_url) {
+    original_request_url_ = original_request_url;
+  }
+
+  const GURL& referrer_url() const { return referrer_url_; }
+  void set_referrer_url(const GURL& referrer_url) {
+    referrer_url_ = referrer_url;
+  }
+
+  int referrer_policy() const { return referrer_policy_; }
+  void set_referrer_policy(int referrer_policy) {
+    referrer_policy_ = referrer_policy;
   }
 
   std::set<std::string> content_pack_categories() const {
@@ -128,9 +146,10 @@ class SESSIONS_EXPORT SerializedNavigationEntry {
     return extended_info_map_;
   }
 
+  size_t EstimateMemoryUsage() const;
+
  private:
   friend class ContentSerializedNavigationBuilder;
-  friend class ContentSerializedNavigationDriver;
   friend class SerializedNavigationEntryTestHelper;
   friend class IOSSerializedNavigationBuilder;
   friend class IOSSerializedNavigationDriver;
@@ -139,6 +158,8 @@ class SESSIONS_EXPORT SerializedNavigationEntry {
   int index_;
 
   // Member variables corresponding to NavigationEntry fields.
+  // If you add a new field that can allocate memory, please also add
+  // it to the EstimatedMemoryUsage() implementation.
   int unique_id_;
   GURL referrer_url_;
   int referrer_policy_;

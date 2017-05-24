@@ -6,18 +6,18 @@
 
 #include <algorithm>
 
-#include "ash/common/system/chromeos/devicetype_utils.h"
+#include "ash/system/devicetype_utils.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/login/error_screens_histogram_helper.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
-#include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/oobe_screen.h"
 #include "chrome/browser/chromeos/login/screens/network_error.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
@@ -25,8 +25,7 @@
 #include "chrome/browser/chromeos/policy/enrollment_status_chromeos.h"
 #include "chrome/browser/chromeos/policy/policy_oauth2_token_fetcher.h"
 #include "chrome/grit/generated_resources.h"
-#include "chromeos/dbus/auth_policy_client.h"
-#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/login/auth/authpolicy_login_helper.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "components/login/localized_values_builder.h"
@@ -108,34 +107,22 @@ std::string GetEnterpriseDomain() {
   return connector->GetEnterpriseDomain();
 }
 
-enum ActiveDirectoryErrorState {
-  ERROR_STATE_NONE = 0,
-  ERROR_STATE_MACHINE_NAME_INVALID = 1,
-  ERROR_STATE_MACHINE_NAME_TOO_LONG = 2,
-  ERROR_STATE_BAD_USERNAME = 3,
-  ERROR_STATE_BAD_PASSWORD = 4,
-};
-
 }  // namespace
 
 // EnrollmentScreenHandler, public ------------------------------
 
 EnrollmentScreenHandler::EnrollmentScreenHandler(
     const scoped_refptr<NetworkStateInformer>& network_state_informer,
-    NetworkErrorModel* network_error_model)
-    : BaseScreenHandler(kJsScreenPath),
-      controller_(NULL),
-      show_on_init_(false),
-      first_show_(true),
-      observe_network_failure_(false),
+    ErrorScreen* error_screen)
+    : BaseScreenHandler(kScreenId),
       network_state_informer_(network_state_informer),
-      network_error_model_(network_error_model),
+      error_screen_(error_screen),
       histogram_helper_(new ErrorScreensHistogramHelper("Enrollment")),
       weak_ptr_factory_(this) {
-  set_async_assets_load_id(
-      GetOobeScreenName(OobeScreen::SCREEN_OOBE_ENROLLMENT));
+  set_call_js_prefix(kJsScreenPath);
+  set_async_assets_load_id(GetOobeScreenName(kScreenId));
   DCHECK(network_state_informer_.get());
-  DCHECK(network_error_model_);
+  DCHECK(error_screen_);
   network_state_informer_->AddObserver(this);
 }
 
@@ -192,6 +179,8 @@ void EnrollmentScreenHandler::ShowSigninScreen() {
 
 void EnrollmentScreenHandler::ShowAdJoin() {
   observe_network_failure_ = false;
+  if (!authpolicy_login_helper_)
+    authpolicy_login_helper_ = base::MakeUnique<AuthPolicyLoginHelper>();
   ShowStep(kEnrollmentStepAdJoin);
 }
 
@@ -366,7 +355,8 @@ void EnrollmentScreenHandler::ShowEnrollmentStatus(
                 false);
       return;
     case policy::EnrollmentStatus::DM_TOKEN_STORE_FAILED:
-      ShowError(IDS_ENTERPRISE_ENROLLMENT_ERROR_STORE_DM_TOKEN_FAILED, false);
+      ShowError(IDS_ENTERPRISE_ENROLLMENT_ERROR_SAVE_DEVICE_CONFIGURATION,
+                false);
       return;
   }
   NOTREACHED();
@@ -417,13 +407,12 @@ void EnrollmentScreenHandler::DeclareLocalizedValues(
 }
 
 bool EnrollmentScreenHandler::IsOnEnrollmentScreen() const {
-  return (GetCurrentScreen() == OobeScreen::SCREEN_OOBE_ENROLLMENT);
+  return (GetCurrentScreen() == kScreenId);
 }
 
 bool EnrollmentScreenHandler::IsEnrollmentScreenHiddenByError() const {
   return (GetCurrentScreen() == OobeScreen::SCREEN_ERROR_MESSAGE &&
-          network_error_model_->GetParentScreen() ==
-              OobeScreen::SCREEN_OOBE_ENROLLMENT);
+          error_screen_->GetParentScreen() == kScreenId);
 }
 
 void EnrollmentScreenHandler::UpdateState(NetworkError::ErrorReason reason) {
@@ -455,7 +444,7 @@ void EnrollmentScreenHandler::UpdateStateInternal(
                << "reason=" << NetworkError::ErrorReasonString(reason);
 
   if (is_online || !is_behind_captive_portal)
-    network_error_model_->HideCaptivePortal();
+    error_screen_->HideCaptivePortal();
 
   if (is_frame_error) {
     LOG(WARNING) << "Retry page load";
@@ -478,36 +467,36 @@ void EnrollmentScreenHandler::SetupAndShowOfflineMessage(
   const bool is_frame_error = reason == NetworkError::ERROR_REASON_FRAME_ERROR;
 
   if (is_proxy_error) {
-    network_error_model_->SetErrorState(NetworkError::ERROR_STATE_PROXY,
-                                        std::string());
+    error_screen_->SetErrorState(NetworkError::ERROR_STATE_PROXY,
+                                 std::string());
   } else if (is_behind_captive_portal) {
     // Do not bother a user with obsessive captive portal showing. This
     // check makes captive portal being shown only once: either when error
     // screen is shown for the first time or when switching from another
     // error screen (offline, proxy).
-    if (IsOnEnrollmentScreen() || (network_error_model_->GetErrorState() !=
-                                   NetworkError::ERROR_STATE_PORTAL)) {
-      network_error_model_->FixCaptivePortal();
+    if (IsOnEnrollmentScreen() ||
+        (error_screen_->GetErrorState() != NetworkError::ERROR_STATE_PORTAL)) {
+      error_screen_->FixCaptivePortal();
     }
     const std::string network_name = GetNetworkName(network_path);
-    network_error_model_->SetErrorState(NetworkError::ERROR_STATE_PORTAL,
-                                        network_name);
+    error_screen_->SetErrorState(NetworkError::ERROR_STATE_PORTAL,
+                                 network_name);
   } else if (is_frame_error) {
-    network_error_model_->SetErrorState(
-        NetworkError::ERROR_STATE_AUTH_EXT_TIMEOUT, std::string());
+    error_screen_->SetErrorState(NetworkError::ERROR_STATE_AUTH_EXT_TIMEOUT,
+                                 std::string());
   } else {
-    network_error_model_->SetErrorState(NetworkError::ERROR_STATE_OFFLINE,
-                                        std::string());
+    error_screen_->SetErrorState(NetworkError::ERROR_STATE_OFFLINE,
+                                 std::string());
   }
 
   if (GetCurrentScreen() != OobeScreen::SCREEN_ERROR_MESSAGE) {
     const std::string network_type = network_state_informer_->network_type();
-    network_error_model_->SetUIState(NetworkError::UI_STATE_SIGNIN);
-    network_error_model_->SetParentScreen(OobeScreen::SCREEN_OOBE_ENROLLMENT);
-    network_error_model_->SetHideCallback(base::Bind(
-        &EnrollmentScreenHandler::DoShow, weak_ptr_factory_.GetWeakPtr()));
-    network_error_model_->Show();
-    histogram_helper_->OnErrorShow(network_error_model_->GetErrorState());
+    error_screen_->SetUIState(NetworkError::UI_STATE_SIGNIN);
+    error_screen_->SetParentScreen(kScreenId);
+    error_screen_->SetHideCallback(base::Bind(&EnrollmentScreenHandler::DoShow,
+                                              weak_ptr_factory_.GetWeakPtr()));
+    error_screen_->Show();
+    histogram_helper_->OnErrorShow(error_screen_->GetErrorState());
   }
 }
 
@@ -515,7 +504,7 @@ void EnrollmentScreenHandler::HideOfflineMessage(
     NetworkStateInformer::State state,
     NetworkError::ErrorReason reason) {
   if (IsEnrollmentScreenHiddenByError())
-    network_error_model_->Hide();
+    error_screen_->Hide();
   histogram_helper_->OnErrorHide();
 }
 
@@ -527,12 +516,15 @@ void EnrollmentScreenHandler::HandleToggleFakeEnrollment() {
 void EnrollmentScreenHandler::HandleClose(const std::string& reason) {
   DCHECK(controller_);
 
-  if (reason == "cancel")
+  if (reason == "cancel") {
+    if (authpolicy_login_helper_)
+      authpolicy_login_helper_->CancelRequestsAndRestart();
     controller_->OnCancel();
-  else if (reason == "done")
+  } else if (reason == "done") {
     controller_->OnConfirmationClosed();
-  else
+  } else {
     NOTREACHED();
+  }
 }
 
 void EnrollmentScreenHandler::HandleCompleteLogin(
@@ -549,31 +541,11 @@ void EnrollmentScreenHandler::HandleAdCompleteLogin(
     const std::string& password) {
   observe_network_failure_ = false;
   DCHECK(controller_);
-  login::GetPipeReadEnd(
-      password,
-      base::Bind(&EnrollmentScreenHandler::OnPasswordPipeReady,
-                 weak_ptr_factory_.GetWeakPtr(), machine_name, user_name));
-}
-
-void EnrollmentScreenHandler::OnPasswordPipeReady(
-    const std::string& machine_name,
-    const std::string& user_name,
-    base::ScopedFD password_fd) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  if (!password_fd.is_valid()) {
-    DLOG(ERROR) << "Got invalid password_fd";
-    return;
-  }
-  chromeos::AuthPolicyClient* client =
-      chromeos::DBusThreadManager::Get()->GetAuthPolicyClient();
-
-  client->JoinAdDomain(machine_name,
-                       user_name,
-                       password_fd.get(),
-                       base::Bind(&EnrollmentScreenHandler::HandleAdDomainJoin,
-                                  weak_ptr_factory_.GetWeakPtr(),
-                                  machine_name,
-                                  user_name));
+  DCHECK(authpolicy_login_helper_);
+  authpolicy_login_helper_->JoinAdDomain(
+      machine_name, user_name, password,
+      base::BindOnce(&EnrollmentScreenHandler::HandleAdDomainJoin,
+                     weak_ptr_factory_.GetWeakPtr(), machine_name, user_name));
 }
 
 void EnrollmentScreenHandler::HandleAdDomainJoin(
@@ -582,6 +554,7 @@ void EnrollmentScreenHandler::HandleAdDomainJoin(
     authpolicy::ErrorType code) {
   switch (code) {
     case authpolicy::ERROR_NONE:
+      ShowEnrollmentSpinnerScreen();
       controller_->OnAdJoined(gaia::ExtractDomainName(user_name));
       return;
     case authpolicy::ERROR_UNKNOWN:
@@ -601,19 +574,20 @@ void EnrollmentScreenHandler::HandleAdDomainJoin(
     case authpolicy::ERROR_PARSE_UPN_FAILED:
     case authpolicy::ERROR_BAD_USER_NAME:
       CallJS("invalidateAd", machine_name, user_name,
-             static_cast<int>(ERROR_STATE_BAD_USERNAME));
+             static_cast<int>(ActiveDirectoryErrorState::BAD_USERNAME));
       return;
     case authpolicy::ERROR_BAD_PASSWORD:
       CallJS("invalidateAd", machine_name, user_name,
-             static_cast<int>(ERROR_STATE_BAD_PASSWORD));
+             static_cast<int>(ActiveDirectoryErrorState::BAD_PASSWORD));
       return;
     case authpolicy::ERROR_MACHINE_NAME_TOO_LONG:
-      CallJS("invalidateAd", machine_name, user_name,
-             static_cast<int>(ERROR_STATE_MACHINE_NAME_TOO_LONG));
+      CallJS(
+          "invalidateAd", machine_name, user_name,
+          static_cast<int>(ActiveDirectoryErrorState::MACHINE_NAME_TOO_LONG));
       return;
     case authpolicy::ERROR_BAD_MACHINE_NAME:
       CallJS("invalidateAd", machine_name, user_name,
-             static_cast<int>(ERROR_STATE_MACHINE_NAME_INVALID));
+             static_cast<int>(ActiveDirectoryErrorState::MACHINE_NAME_INVALID));
       return;
     case authpolicy::ERROR_JOIN_ACCESS_DENIED:
       ShowError(IDS_AD_USER_DENIED_TO_JOIN_MACHINE, true);
@@ -629,7 +603,7 @@ void EnrollmentScreenHandler::HandleAdDomainJoin(
     default:
       LOG(WARNING) << "Unhandled error code: " << code;
       CallJS("invalidateAd", machine_name, user_name,
-             static_cast<int>(ERROR_STATE_NONE));
+             static_cast<int>(ActiveDirectoryErrorState::NONE));
       return;
   }
 }

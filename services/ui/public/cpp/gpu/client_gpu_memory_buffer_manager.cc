@@ -8,6 +8,7 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/shared_memory.h"
+#include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
 #include "gpu/ipc/client/gpu_memory_buffer_impl.h"
 #include "mojo/public/cpp/system/buffer.h"
@@ -66,7 +67,7 @@ void ClientGpuMemoryBufferManager::DisconnectGpuOnThread() {
   if (!gpu_.is_bound())
     return;
   gpu_.reset();
-  for (auto& waiter : pending_allocation_waiters_)
+  for (auto* waiter : pending_allocation_waiters_)
     waiter->Signal();
   pending_allocation_waiters_.clear();
 }

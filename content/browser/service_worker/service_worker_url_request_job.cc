@@ -23,15 +23,16 @@
 #include "base/strings/stringprintf.h"
 #include "base/task_runner.h"
 #include "base/task_runner_util.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "content/browser/resource_context_impl.h"
 #include "content/browser/service_worker/embedded_worker_instance.h"
 #include "content/browser/service_worker/service_worker_blob_reader.h"
+#include "content/browser/service_worker/service_worker_data_pipe_reader.h"
 #include "content/browser/service_worker/service_worker_fetch_dispatcher.h"
 #include "content/browser/service_worker/service_worker_provider_host.h"
 #include "content/browser/service_worker/service_worker_response_info.h"
-#include "content/browser/service_worker/service_worker_stream_reader.h"
 #include "content/common/resource_request_body_impl.h"
 #include "content/common/service_worker/service_worker_types.h"
 #include "content/common/service_worker/service_worker_utils.h"
@@ -240,7 +241,8 @@ ServiceWorkerURLRequestJob::ServiceWorkerURLRequestJob(
       delegate_(delegate),
       response_type_(NOT_DETERMINED),
       is_started_(false),
-      service_worker_response_type_(blink::WebServiceWorkerResponseTypeDefault),
+      service_worker_response_type_(
+          blink::kWebServiceWorkerResponseTypeDefault),
       client_id_(client_id),
       blob_storage_context_(blob_storage_context),
       resource_context_(resource_context),
@@ -259,7 +261,7 @@ ServiceWorkerURLRequestJob::ServiceWorkerURLRequestJob(
 }
 
 ServiceWorkerURLRequestJob::~ServiceWorkerURLRequestJob() {
-  stream_reader_.reset();
+  data_pipe_reader_.reset();
   file_size_resolver_.reset();
 
   if (!ShouldRecordResult())
@@ -310,7 +312,7 @@ void ServiceWorkerURLRequestJob::Start() {
 
 void ServiceWorkerURLRequestJob::Kill() {
   net::URLRequestJob::Kill();
-  stream_reader_.reset();
+  data_pipe_reader_.reset();
   fetch_dispatcher_.reset();
   blob_reader_.reset();
   weak_factory_.InvalidateWeakPtrs();
@@ -347,12 +349,6 @@ void ServiceWorkerURLRequestJob::GetLoadTimingInfo(
   *load_timing_info = load_timing_info_;
 }
 
-int ServiceWorkerURLRequestJob::GetResponseCode() const {
-  if (!http_info())
-    return -1;
-  return http_info()->headers->response_code();
-}
-
 void ServiceWorkerURLRequestJob::SetExtraRequestHeaders(
     const net::HttpRequestHeaders& headers) {
   std::string range_header;
@@ -371,8 +367,8 @@ int ServiceWorkerURLRequestJob::ReadRawData(net::IOBuffer* buf, int buf_size) {
   DCHECK(buf);
   DCHECK_GE(buf_size, 0);
 
-  if (stream_reader_)
-    return stream_reader_->ReadRawData(buf, buf_size);
+  if (data_pipe_reader_)
+    return data_pipe_reader_->ReadRawData(buf, buf_size);
   if (blob_reader_)
     return blob_reader_->ReadRawData(buf, buf_size);
 
@@ -502,7 +498,7 @@ ServiceWorkerURLRequestJob::CreateFetchRequest() {
         request_->referrer_policy() ==
         net::URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE);
     request->referrer =
-        Referrer(GURL(request_->referrer()), blink::WebReferrerPolicyDefault);
+        Referrer(GURL(request_->referrer()), blink::kWebReferrerPolicyDefault);
   }
   request->fetch_type = fetch_type_;
   return request;
@@ -553,8 +549,10 @@ void ServiceWorkerURLRequestJob::DidPrepareFetchEvent(
       initial_worker_status_ != EmbeddedWorkerStatus::RUNNING) {
     return;
   }
-  if (version->should_exclude_from_uma())
+  if (ServiceWorkerMetrics::ShouldExcludeSiteFromHistogram(
+          version->site_for_uma())) {
     return;
+  }
   worker_start_situation_ = version->embedded_worker()->start_situation();
   ServiceWorkerMetrics::RecordActivatedWorkerPreparationForMainFrame(
       worker_ready_time_ - request()->creation_time(), initial_worker_status_,
@@ -566,6 +564,7 @@ void ServiceWorkerURLRequestJob::DidDispatchFetchEvent(
     ServiceWorkerStatusCode status,
     ServiceWorkerFetchEventResult fetch_result,
     const ServiceWorkerResponse& response,
+    blink::mojom::ServiceWorkerStreamHandlePtr body_as_stream,
     const scoped_refptr<ServiceWorkerVersion>& version) {
   // Do not clear |fetch_dispatcher_| if it has dispatched a navigation preload
   // request to keep the mojom::URLLoader related objects in it, because the
@@ -631,13 +630,13 @@ void ServiceWorkerURLRequestJob::DidDispatchFetchEvent(
   DCHECK(main_script_http_info);
   http_response_info_.reset(new net::HttpResponseInfo(*main_script_http_info));
 
-  // Set up a request for reading the stream.
-  if (response.stream_url.is_valid()) {
-    DCHECK(response.blob_uuid.empty());
+  // Process stream using Mojo's data pipe.
+  if (!body_as_stream.is_null()) {
     SetResponseBodyType(STREAM);
     SetResponse(response);
-    stream_reader_.reset(new ServiceWorkerStreamReader(this, version));
-    stream_reader_->Start(response.stream_url);
+    data_pipe_reader_.reset(new ServiceWorkerDataPipeReader(
+        this, version, std::move(body_as_stream)));
+    data_pipe_reader_->Start();
     return;
   }
 
@@ -683,20 +682,20 @@ void ServiceWorkerURLRequestJob::CreateResponseHeader(
     const ServiceWorkerHeaderMap& headers) {
   // TODO(kinuko): If the response has an identifier to on-disk cache entry,
   // pull response header from the disk.
-  std::string status_line(
-      base::StringPrintf("HTTP/1.1 %d %s", status_code, status_text.c_str()));
-  status_line.push_back('\0');
-  http_response_headers_ = new net::HttpResponseHeaders(status_line);
-  for (ServiceWorkerHeaderMap::const_iterator it = headers.begin();
-       it != headers.end();
-       ++it) {
-    std::string header;
-    header.reserve(it->first.size() + 2 + it->second.size());
-    header.append(it->first);
-    header.append(": ");
-    header.append(it->second);
-    http_response_headers_->AddHeader(header);
+
+  // Build a string instead of using HttpResponseHeaders::AddHeader on
+  // each header, since AddHeader has O(n^2) performance.
+  std::string buf(base::StringPrintf("HTTP/1.1 %d %s\r\n", status_code,
+                                     status_text.c_str()));
+  for (const auto& item : headers) {
+    buf.append(item.first);
+    buf.append(": ");
+    buf.append(item.second);
+    buf.append("\r\n");
   }
+  buf.append("\r\n");
+  http_response_headers_ = new net::HttpResponseHeaders(
+      net::HttpUtil::AssembleRawHeaders(buf.c_str(), buf.size()));
 }
 
 void ServiceWorkerURLRequestJob::CommitResponseHeader() {
@@ -798,7 +797,8 @@ void ServiceWorkerURLRequestJob::NotifyStartError(
 
 void ServiceWorkerURLRequestJob::NotifyRestartRequired() {
   ServiceWorkerResponseInfo::ForRequest(request_, true)
-      ->OnPrepareToRestart(worker_start_time_, worker_ready_time_);
+      ->OnPrepareToRestart(worker_start_time_, worker_ready_time_,
+                           did_navigation_preload_);
   delegate_->OnPrepareToRestart();
   URLRequestJob::NotifyRestartRequired();
 }
@@ -817,12 +817,13 @@ void ServiceWorkerURLRequestJob::OnStartCompleted() const {
               false /* was_fetched_via_foreign_fetch */,
               false /* was_fallback_required */,
               std::vector<GURL>() /* url_list_via_service_worker */,
-              blink::WebServiceWorkerResponseTypeDefault,
+              blink::kWebServiceWorkerResponseTypeDefault,
               base::TimeTicks() /* service_worker_start_time */,
               base::TimeTicks() /* service_worker_ready_time */,
               false /* response_is_in_cache_storage */,
               std::string() /* response_cache_storage_cache_name */,
-              ServiceWorkerHeaderList() /* cors_exposed_header_names */);
+              ServiceWorkerHeaderList() /* cors_exposed_header_names */,
+              did_navigation_preload_);
       break;
     case FALLBACK_TO_RENDERER:
     case FORWARD_TO_SERVICE_WORKER:
@@ -836,7 +837,8 @@ void ServiceWorkerURLRequestJob::OnStartCompleted() const {
               fall_back_required_, response_url_list_,
               service_worker_response_type_, worker_start_time_,
               worker_ready_time_, response_is_in_cache_storage_,
-              response_cache_storage_cache_name_, cors_exposed_header_names_);
+              response_cache_storage_cache_name_, cors_exposed_header_names_,
+              did_navigation_preload_);
       break;
   }
 }

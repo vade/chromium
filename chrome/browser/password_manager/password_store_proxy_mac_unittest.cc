@@ -182,7 +182,7 @@ void PasswordStoreProxyMacTest::CreateAndInitPasswordStore(
       BrowserThread::GetTaskRunnerForThread(BrowserThread::UI),
       base::MakeUnique<crypto::MockAppleKeychain>(), std::move(login_db),
       &testing_prefs_);
-  ASSERT_TRUE(store_->Init(syncer::SyncableService::StartSyncFlare()));
+  ASSERT_TRUE(store_->Init(syncer::SyncableService::StartSyncFlare(), nullptr));
 }
 
 void PasswordStoreProxyMacTest::ClosePasswordStore() {
@@ -211,8 +211,7 @@ MigrationStatus PasswordStoreProxyMacTest::GetTargetStatus(
   if (GetParam() == MigrationStatus::NOT_STARTED ||
       GetParam() == MigrationStatus::FAILED_ONCE ||
       GetParam() == MigrationStatus::FAILED_TWICE) {
-    return keychain_locked ? MigrationStatus::MIGRATED_PARTIALLY
-                           : MigrationStatus::MIGRATED;
+    return MigrationStatus::MIGRATION_STOPPED;
   }
   if (GetParam() == MigrationStatus::MIGRATED)
     return MigrationStatus::MIGRATED_DELETED;
@@ -432,7 +431,8 @@ INSTANTIATE_TEST_CASE_P(,
                                         MigrationStatus::FAILED_ONCE,
                                         MigrationStatus::FAILED_TWICE,
                                         MigrationStatus::MIGRATED_DELETED,
-                                        MigrationStatus::MIGRATED_PARTIALLY));
+                                        MigrationStatus::MIGRATED_PARTIALLY,
+                                        MigrationStatus::MIGRATION_STOPPED));
 
 // Test the migration process.
 class PasswordStoreProxyMacMigrationTest : public PasswordStoreProxyMacTest {
@@ -480,13 +480,13 @@ void PasswordStoreProxyMacMigrationTest::TestMigration(bool lock_keychain) {
   store_ = new PasswordStoreProxyMac(
       BrowserThread::GetTaskRunnerForThread(BrowserThread::UI),
       std::move(keychain_), std::move(login_db_), &testing_prefs_);
-  ASSERT_TRUE(store_->Init(syncer::SyncableService::StartSyncFlare()));
+  ASSERT_TRUE(store_->Init(syncer::SyncableService::StartSyncFlare(), nullptr));
   FinishAsyncProcessing();
 
   MockPasswordStoreConsumer mock_consumer;
   store()->GetLogins(PasswordStore::FormDigest(form), &mock_consumer);
   mock_consumer.WaitForResult();
-  if (before_migration && lock_keychain)
+  if (before_migration)
     EXPECT_THAT(mock_consumer.forms(), IsEmpty());
   else
     EXPECT_THAT(mock_consumer.forms(), ElementsAre(Pointee(form)));
@@ -525,6 +525,7 @@ INSTANTIATE_TEST_CASE_P(,
                                         MigrationStatus::FAILED_ONCE,
                                         MigrationStatus::FAILED_TWICE,
                                         MigrationStatus::MIGRATED_DELETED,
-                                        MigrationStatus::MIGRATED_PARTIALLY));
+                                        MigrationStatus::MIGRATED_PARTIALLY,
+                                        MigrationStatus::MIGRATION_STOPPED));
 
 }  // namespace

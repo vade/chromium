@@ -12,12 +12,15 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.IBinder;
-import android.support.v4.app.NotificationCompat;
 import android.util.SparseIntArray;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.notifications.ChromeNotificationBuilder;
+import org.chromium.chrome.browser.notifications.NotificationBuilderFactory;
+import org.chromium.chrome.browser.notifications.NotificationUmaTracker;
+import org.chromium.chrome.browser.notifications.channels.ChannelDefinitions;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabWebContentsDelegateAndroid;
 
@@ -160,8 +163,10 @@ public class MediaCaptureNotificationService extends Service {
      * @param url Url of the current webrtc call.
      */
     private void createNotification(int notificationId, int mediaType, String url) {
-        NotificationCompat.Builder builder =
-                new NotificationCompat.Builder(mContext)
+        ChromeNotificationBuilder builder =
+                NotificationBuilderFactory
+                        .createChromeNotificationBuilder(
+                                true /* preferCompat */, ChannelDefinitions.CHANNEL_ID_MEDIA)
                         .setAutoCancel(false)
                         .setOngoing(true)
                         .setContentTitle(mContext.getString(R.string.app_name))
@@ -180,7 +185,7 @@ public class MediaCaptureNotificationService extends Service {
                 // into a high priority one.
                 builder.setPriority(Notification.PRIORITY_HIGH);
                 builder.setVibrate(new long[0]);
-                builder.addAction(R.drawable.ic_media_control_stop,
+                builder.addAction(R.drawable.ic_stop_white_36dp,
                         mContext.getResources().getString(R.string.accessibility_stop),
                         buildStopCapturePendingIntent(notificationId));
             } else {
@@ -190,13 +195,14 @@ public class MediaCaptureNotificationService extends Service {
         } else {
             contentText.append(" ").append(url);
         }
-        builder.setContentText(contentText);
+        builder.setContentText(contentText.toString());
 
-        Notification notification = new NotificationCompat.BigTextStyle(builder)
-                .bigText(contentText).build();
+        Notification notification = builder.buildWithBigTextStyle(contentText.toString());
         mNotificationManager.notify(NOTIFICATION_NAMESPACE, notificationId, notification);
         mNotifications.put(notificationId, mediaType);
         updateSharedPreferencesEntry(notificationId, false);
+        NotificationUmaTracker.getInstance().onNotificationShown(
+                NotificationUmaTracker.MEDIA_CAPTURE, ChannelDefinitions.CHANNEL_ID_MEDIA);
     }
 
     /**

@@ -20,6 +20,10 @@
 #include "ios/web/public/test/http_server_util.h"
 #include "url/url_constants.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace {
 
 // Timeout to use when waiting for a condition to be true.
@@ -109,9 +113,8 @@ class ScopedBlockPopupsPref {
   chrome_test_util::AssertMainTabCount(1U);
   const GURL& currentURL =
       chrome_test_util::GetCurrentWebState()->GetVisibleURL();
-  GREYAssert(currentURL == testURL,
-             [NSString stringWithFormat:@"Page navigated unexpectedly %s",
-                                        currentURL.spec().c_str()]);
+  GREYAssert(currentURL == testURL, @"Page navigated unexpectedly %s",
+             currentURL.spec().c_str());
 }
 
 // Taps a link with onclick="event.preventDefault()" and target="_blank" and

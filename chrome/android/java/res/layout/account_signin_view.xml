@@ -33,7 +33,7 @@
 
                 <!-- The layout_width/layout_height is set to 16/9 dynamically in Java -->
                 <TextView
-                    android:id="@+id/signin_title"
+                    android:id="@+id/chooser_title"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="bottom"
@@ -45,11 +45,7 @@
                     android:textSize="@dimen/fre_title_text_size"
                     android:text="@string/sign_in_to_chrome"/>
 
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:background="@color/signin_border_line_color"
-                    android:alpha="0.08"/>
+                <View style="@style/Divider"/>
 
                 <TextView
                     android:id="@+id/signin_choice_description"
@@ -120,11 +116,8 @@
 
                 <View
                     android:id="@+id/signin_confirmation_head_body_border"
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_below="@id/signin_confirmation_head"
-                    android:background="@color/signin_border_line_color"
-                    android:alpha="0.08"/>
+                    style="@style/Divider"
+                    android:layout_below="@id/signin_confirmation_head"/>
 
                 <TextView
                     android:id="@+id/signin_chrome_sync_title"
@@ -157,13 +150,10 @@
 
                 <View
                     android:id="@+id/signin_confirmation_body_rule_line"
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
+                    style="@style/Divider"
                     android:layout_marginStart="56dp"
                     android:layout_marginEnd="16dp"
-                    android:layout_below="@id/signin_chrome_sync_description"
-                    android:background="@color/signin_border_line_color"
-                    android:alpha="0.08"/>
+                    android:layout_below="@id/signin_chrome_sync_description"/>
 
                 <TextView
                     android:id="@+id/signin_personalize_service_title"
@@ -225,6 +215,8 @@
             style="@style/ButtonCompatBorderless"
             android:layout_width="wrap_content"
             android:layout_height="36dp"
+            android:paddingStart="@dimen/fre_button_padding"
+            android:paddingEnd="@dimen/fre_button_padding"
             android:text="@string/fre_skip_text"
             android:textAllCaps="true"
             android:textColor="@color/light_active_color"
@@ -246,6 +238,8 @@
                 android:id="@+id/positive_button"
                 android:layout_width="wrap_content"
                 android:layout_height="36dp"
+                android:paddingStart="@dimen/fre_button_padding"
+                android:paddingEnd="@dimen/fre_button_padding"
                 android:text="@string/choose_account_sign_in"
                 android:textAllCaps="true"
                 android:textColor="@android:color/white"
@@ -265,7 +259,7 @@
                 android:drawableEnd="@drawable/down_arrow"
                 android:drawablePadding="8dp"
                 android:visibility="gone"/>
-            </FrameLayout>
+        </FrameLayout>
 
         <View
             android:id="@+id/positive_button_end_padding"

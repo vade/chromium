@@ -8,7 +8,8 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/arc/arc_support_host.h"
+#include "chrome/browser/chromeos/arc/arc_session_manager.h"
+#include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/launch_util.h"
@@ -82,7 +83,7 @@ const extensions::Extension* GetExtensionByID(Profile* profile,
       id, extensions::ExtensionRegistry::EVERYTHING);
 }
 
-std::string GetSourceFromAppListSource(ash::LaunchSource source) {
+std::string GetSourceFromAppListSource(ash::ShelfLaunchSource source) {
   switch (source) {
     case ash::LAUNCH_FROM_APP_LIST:
       return std::string(extension_urls::kLaunchSourceAppList);
@@ -107,13 +108,11 @@ base::string16 LauncherControllerHelper::GetAppTitle(
   if (app_id.empty())
     return base::string16();
 
-  // Get the title if the app is an Arc app.
+  // Get the title if the app is an ARC app.
   ArcAppListPrefs* arc_prefs = ArcAppListPrefs::Get(profile);
-  const std::string arc_app_id =
-      ArcAppWindowLauncherController::GetArcAppIdFromShelfAppId(app_id);
-  if (arc_prefs && arc_prefs->IsRegistered(arc_app_id)) {
+  if (arc_prefs && arc_prefs->IsRegistered(app_id)) {
     std::unique_ptr<ArcAppListPrefs::AppInfo> app_info =
-        arc_prefs->GetApp(arc_app_id);
+        arc_prefs->GetApp(app_id);
     DCHECK(app_info.get());
     if (app_info)
       return base::UTF8ToUTF16(app_info->name);
@@ -151,33 +150,26 @@ bool LauncherControllerHelper::IsValidIDForCurrentUser(
     return true;
   if (!GetExtensionByID(profile_, id))
     return false;
-  if (id == ArcSupportHost::kHostAppId) {
-    if (!arc::ArcSessionManager::IsAllowedForProfile(profile()))
+  if (id == arc::kPlayStoreAppId) {
+    if (!arc::IsArcAllowedForProfile(profile()))
       return false;
     const arc::ArcSessionManager* arc_session_manager =
         arc::ArcSessionManager::Get();
     DCHECK(arc_session_manager);
     if (!arc_session_manager->IsAllowed())
       return false;
-    if (!arc_session_manager->IsArcEnabled() &&
-        arc_session_manager->IsArcManaged())
+    if (!arc::IsArcPlayStoreEnabledForProfile(profile()) &&
+        arc::IsArcPlayStoreEnabledPreferenceManagedForProfile(profile()))
       return false;
   }
 
   return true;
 }
 
-void LauncherControllerHelper::LaunchApp(const std::string& app_id,
-                                         ash::LaunchSource source,
+void LauncherControllerHelper::LaunchApp(const ash::ShelfID& id,
+                                         ash::ShelfLaunchSource source,
                                          int event_flags) {
-  LaunchAppWithLaunchId(app_id, "", source, event_flags);
-}
-
-void LauncherControllerHelper::LaunchAppWithLaunchId(
-    const std::string& app_id,
-    const std::string& launch_id,
-    ash::LaunchSource source,
-    int event_flags) {
+  const std::string& app_id = id.app_id;
   const ArcAppListPrefs* arc_prefs = GetArcAppListPrefs();
   if (arc_prefs && arc_prefs->IsRegistered(app_id)) {
     arc::LaunchApp(profile_, app_id, event_flags);
@@ -213,7 +205,7 @@ void LauncherControllerHelper::LaunchAppWithLaunchId(
     params.override_url = net::AppendQueryParameter(
         extension_url, extension_urls::kWebstoreSourceField, source_value);
   }
-  params.launch_id = launch_id;
+  params.launch_id = id.launch_id;
 
   OpenApplication(params);
 }
@@ -223,8 +215,8 @@ ArcAppListPrefs* LauncherControllerHelper::GetArcAppListPrefs() const {
 }
 
 void LauncherControllerHelper::ExtensionEnableFlowFinished() {
-  LaunchApp(extension_enable_flow_->extension_id(), ash::LAUNCH_FROM_UNKNOWN,
-            ui::EF_NONE);
+  LaunchApp(ash::ShelfID(extension_enable_flow_->extension_id()),
+            ash::LAUNCH_FROM_UNKNOWN, ui::EF_NONE);
   extension_enable_flow_.reset();
 }
 

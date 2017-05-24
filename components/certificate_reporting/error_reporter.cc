@@ -13,10 +13,11 @@
 #include "base/memory/ptr_util.h"
 #include "components/certificate_reporting/encrypted_cert_logger.pb.h"
 #include "crypto/aead.h"
-#include "crypto/curve25519.h"
 #include "crypto/hkdf.h"
 #include "crypto/random.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/report_sender.h"
+#include "third_party/boringssl/src/include/openssl/curve25519.h"
 
 namespace certificate_reporting {
 
@@ -36,8 +37,8 @@ bool GetHkdfSubkeySecret(size_t subkey_length,
                          const uint8_t* private_key,
                          const uint8_t* public_key,
                          std::string* secret) {
-  uint8_t shared_secret[crypto::curve25519::kBytes];
-  if (!crypto::curve25519::ScalarMult(private_key, public_key, shared_secret))
+  uint8_t shared_secret[X25519_SHARED_KEY_LEN];
+  if (!X25519(shared_secret, private_key, public_key))
     return false;
 
   // By mistake, the HKDF label here ends up with an extra null byte on
@@ -64,11 +65,11 @@ bool EncryptSerializedReport(const uint8_t* server_public_key,
                              const std::string& report,
                              EncryptedCertLoggerRequest* encrypted_report) {
   // Generate an ephemeral key pair to generate a shared secret.
-  uint8_t public_key[crypto::curve25519::kBytes];
-  uint8_t private_key[crypto::curve25519::kScalarBytes];
+  uint8_t public_key[X25519_PUBLIC_VALUE_LEN];
+  uint8_t private_key[X25519_PRIVATE_KEY_LEN];
 
   crypto::RandBytes(private_key, sizeof(private_key));
-  crypto::curve25519::ScalarBaseMult(private_key, public_key);
+  X25519_public_from_private(public_key, private_key);
 
   crypto::Aead aead(crypto::Aead::AES_128_CTR_HMAC_SHA256);
   std::string key;
@@ -98,17 +99,50 @@ bool EncryptSerializedReport(const uint8_t* server_public_key,
   return true;
 }
 
+constexpr net::NetworkTrafficAnnotationTag kTrafficAnnotation =
+    net::DefineNetworkTrafficAnnotation("safe_browsing_extended_reporting", R"(
+        semantics {
+          sender: "Safe Browsing Extended Reporting"
+          description:
+            "When a user has opted in to Safe Browsing Extended Reporting, "
+            "Chrome will send information about HTTPS certificate errors that "
+            "the user encounters to Google. This information includes the "
+            "certificate chain and the type of error encountered. The "
+            "information is used to understand and mitigate common causes of "
+            "spurious certificate errors."
+          trigger:
+            "When the user encounters an HTTPS certificate error and has opted "
+            "in to Safe Browsing Extended Reporting."
+          data:
+            "The hostname that was requested, the certificate chain, the time "
+            "of the request, information about the type of certificate error "
+            "that was encountered, and whether the user was opted in to a "
+            "limited set of field trials that affect certificate validation."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: false
+          setting:
+            "Users can control this feature via the 'Automatically report "
+            "details of possible security incidents to Google' setting under "
+            "'Privacy'. The feature is disabled by default."
+          chrome_policy {
+            SafeBrowsingExtendedReportingOptInAllowed {
+              policy_options {mode: MANDATORY}
+              SafeBrowsingExtendedReportingOptInAllowed: false
+            }
+          }
+        })");
+
 }  // namespace
 
-ErrorReporter::ErrorReporter(
-    net::URLRequestContext* request_context,
-    const GURL& upload_url,
-    net::ReportSender::CookiesPreference cookies_preference)
+ErrorReporter::ErrorReporter(net::URLRequestContext* request_context,
+                             const GURL& upload_url)
     : ErrorReporter(upload_url,
                     kServerPublicKey,
                     kServerPublicKeyVersion,
                     base::MakeUnique<net::ReportSender>(request_context,
-                                                        cookies_preference)) {}
+                                                        kTrafficAnnotation)) {}
 
 ErrorReporter::ErrorReporter(
     const GURL& upload_url,
@@ -128,7 +162,7 @@ ErrorReporter::~ErrorReporter() {}
 void ErrorReporter::SendExtendedReportingReport(
     const std::string& serialized_report,
     const base::Callback<void()>& success_callback,
-    const base::Callback<void(const GURL&, int)>& error_callback) {
+    const base::Callback<void(const GURL&, int, int)>& error_callback) {
   if (upload_url_.SchemeIsCryptographic()) {
     certificate_report_sender_->Send(upload_url_, "application/octet-stream",
                                      serialized_report, success_callback,

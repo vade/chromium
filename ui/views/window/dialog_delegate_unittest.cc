@@ -28,15 +28,7 @@ namespace {
 
 class TestDialog : public DialogDelegateView {
  public:
-  TestDialog()
-      : input_(new views::Textfield()),
-        canceled_(false),
-        accepted_(false),
-        closed_(false),
-        closeable_(false),
-        should_handle_escape_(false) {
-    AddChildView(input_);
-  }
+  TestDialog() : input_(new views::Textfield()) { AddChildView(input_); }
   ~TestDialog() override {}
 
   void Init() {
@@ -51,6 +43,7 @@ class TestDialog : public DialogDelegateView {
   bool ShouldShowWindowTitle() const override {
     return !title_.empty();
   }
+  bool ShouldShowCloseButton() const override { return show_close_button_; }
 
   // DialogDelegateView overrides:
   bool Cancel() override {
@@ -66,7 +59,6 @@ class TestDialog : public DialogDelegateView {
     return closeable_;
   }
 
-  // DialogDelegateView overrides:
   gfx::Size GetPreferredSize() const override { return gfx::Size(200, 200); }
   bool AcceleratorPressed(const ui::Accelerator& accelerator) override {
     return should_handle_escape_;
@@ -74,6 +66,7 @@ class TestDialog : public DialogDelegateView {
   base::string16 GetWindowTitle() const override { return title_; }
   View* GetInitiallyFocusedView() override { return input_; }
   bool ShouldUseCustomFrame() const override { return true; }
+  int GetDialogButtons() const override { return dialog_buttons_; }
 
   void CheckAndResetStates(bool canceled,
                            bool accepted,
@@ -92,21 +85,29 @@ class TestDialog : public DialogDelegateView {
   }
 
   void set_title(const base::string16& title) { title_ = title; }
+  void set_show_close_button(bool show_close) {
+    show_close_button_ = show_close;
+  }
   void set_should_handle_escape(bool should_handle_escape) {
     should_handle_escape_ = should_handle_escape;
+  }
+  void set_dialog_buttons(int dialog_buttons) {
+    dialog_buttons_ = dialog_buttons;
   }
 
   views::Textfield* input() { return input_; }
 
  private:
   views::Textfield* input_;
-  bool canceled_;
-  bool accepted_;
-  bool closed_;
+  bool canceled_ = false;
+  bool accepted_ = false;
+  bool closed_ = false;
   // Prevent the dialog from closing, for repeated ok and cancel button clicks.
-  bool closeable_;
+  bool closeable_ = false;
   base::string16 title_;
-  bool should_handle_escape_;
+  bool show_close_button_ = true;
+  bool should_handle_escape_ = false;
+  int dialog_buttons_ = ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL;
 
   DISALLOW_COPY_AND_ASSIGN(TestDialog);
 };
@@ -118,14 +119,25 @@ class DialogTest : public ViewsTestBase {
 
   void SetUp() override {
     ViewsTestBase::SetUp();
-    dialog_ = new TestDialog();
-    dialog_->Init();
-    DialogDelegate::CreateDialogWidget(dialog_, GetContext(), nullptr)->Show();
+    InitializeDialog();
+    ShowDialog();
   }
 
   void TearDown() override {
     dialog_->TearDown();
     ViewsTestBase::TearDown();
+  }
+
+  void InitializeDialog() {
+    if (dialog_)
+      dialog_->TearDown();
+
+    dialog_ = new TestDialog();
+    dialog_->Init();
+  }
+
+  void ShowDialog() {
+    DialogDelegate::CreateDialogWidget(dialog_, GetContext(), nullptr)->Show();
   }
 
   void SimulateKeyEvent(const ui::KeyEvent& event) {
@@ -208,12 +220,38 @@ TEST_F(DialogTest, HitTest_HiddenTitle) {
     const int point;
     const int hit;
   } cases[] = {
-    { border,      HTSYSMENU },
-    { border + 10, HTSYSMENU },
-    { border + 20, HTCLIENT  },
-    { border + 50, HTCLIENT  },
-    { border + 60, HTCLIENT  },
-    { 1000,        HTNOWHERE },
+      {border, HTSYSMENU},
+      {border + 10, HTSYSMENU},
+      {border + 20, HTNOWHERE},
+      {border + 50, HTCLIENT /* Space is reserved for the close button. */},
+      {border + 60, HTCLIENT},
+      {1000, HTNOWHERE},
+  };
+
+  for (size_t i = 0; i < arraysize(cases); ++i) {
+    gfx::Point point(cases[i].point, cases[i].point);
+    EXPECT_EQ(cases[i].hit, frame->NonClientHitTest(point))
+        << " case " << i << " with border: " << border << ", at point "
+        << cases[i].point;
+  }
+}
+
+TEST_F(DialogTest, HitTest_HiddenTitleNoCloseButton) {
+  InitializeDialog();
+  dialog()->set_show_close_button(false);
+  ShowDialog();
+
+  const NonClientView* view = dialog()->GetWidget()->non_client_view();
+  BubbleFrameView* frame = static_cast<BubbleFrameView*>(view->frame_view());
+  const int border = frame->bubble_border()->GetBorderThickness();
+
+  struct {
+    const int point;
+    const int hit;
+  } cases[] = {
+      {border, HTSYSMENU},     {border + 10, HTSYSMENU},
+      {border + 20, HTCLIENT}, {border + 50, HTCLIENT},
+      {border + 60, HTCLIENT}, {1000, HTNOWHERE},
   };
 
   for (size_t i = 0; i < arraysize(cases); ++i) {
@@ -251,6 +289,19 @@ TEST_F(DialogTest, HitTest_WithTitle) {
   }
 }
 
+TEST_F(DialogTest, HitTest_CloseButton) {
+  const NonClientView* view = dialog()->GetWidget()->non_client_view();
+  dialog()->set_show_close_button(true);
+  BubbleFrameView* frame = static_cast<BubbleFrameView*>(view->frame_view());
+  frame->ResetWindowControls();
+
+  const gfx::Rect close_button_bounds =
+      frame->GetCloseButtonForTest()->bounds();
+  EXPECT_EQ(HTCLOSE,
+            frame->NonClientHitTest(gfx::Point(close_button_bounds.x() + 4,
+                                               close_button_bounds.y() + 4)));
+}
+
 TEST_F(DialogTest, BoundsAccommodateTitle) {
   TestDialog* dialog2(new TestDialog());
   dialog2->set_title(base::ASCIIToUTF16("Title"));
@@ -275,6 +326,44 @@ TEST_F(DialogTest, BoundsAccommodateTitle) {
 TEST_F(DialogTest, InitialFocus) {
   EXPECT_TRUE(dialog()->input()->HasFocus());
   EXPECT_EQ(dialog()->input(), dialog()->GetFocusManager()->GetFocusedView());
+}
+
+// A dialog for testing initial focus with only an OK button.
+class InitialFocusTestDialog : public DialogDelegateView {
+ public:
+  InitialFocusTestDialog() {}
+  ~InitialFocusTestDialog() override {}
+
+  views::View* OkButton() { return GetDialogClientView()->ok_button(); }
+
+  // DialogDelegateView overrides:
+  int GetDialogButtons() const override { return ui::DIALOG_BUTTON_OK; }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(InitialFocusTestDialog);
+};
+
+// If the Widget can't be activated while the initial focus View is requesting
+// focus, test it is still able to receive focus once the Widget is activated.
+TEST_F(DialogTest, InitialFocusWithDeactivatedWidget) {
+  InitialFocusTestDialog* dialog = new InitialFocusTestDialog();
+  Widget* dialog_widget =
+      DialogDelegate::CreateDialogWidget(dialog, GetContext(), nullptr);
+  // Set the initial focus while the Widget is unactivated to prevent the
+  // initially focused View from receiving focus. Use a minimised state here to
+  // prevent the Widget from being activated while this happens.
+  dialog_widget->SetInitialFocus(ui::WindowShowState::SHOW_STATE_MINIMIZED);
+
+  // Nothing should be focused, because the Widget is still deactivated.
+  EXPECT_EQ(nullptr, dialog_widget->GetFocusManager()->GetFocusedView());
+  EXPECT_EQ(dialog->OkButton(),
+            dialog_widget->GetFocusManager()->GetStoredFocusView());
+  dialog_widget->Show();
+  // After activation, the initially focused View should have focus as intended.
+  EXPECT_EQ(dialog->OkButton(),
+            dialog_widget->GetFocusManager()->GetFocusedView());
+  EXPECT_TRUE(dialog->OkButton()->HasFocus());
+  dialog_widget->CloseNow();
 }
 
 // If the initially focused View provided is unfocusable, check the next
@@ -308,7 +397,14 @@ TEST_F(DialogTest, UnfocusableInitialFocus) {
   dialog_widget->Show();
   EXPECT_TRUE(textfield->HasFocus());
   EXPECT_EQ(textfield, dialog->GetFocusManager()->GetFocusedView());
-  dialog_widget->Close();
+  dialog_widget->CloseNow();
+}
+
+TEST_F(DialogTest, DontSnapWithoutButtons) {
+  TestDialog dialog;
+  EXPECT_TRUE(dialog.ShouldSnapFrameWidth());
+  dialog.set_dialog_buttons(ui::DIALOG_BUTTON_NONE);
+  EXPECT_FALSE(dialog.ShouldSnapFrameWidth());
 }
 
 }  // namespace views

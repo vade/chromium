@@ -10,6 +10,7 @@
 #include "base/location.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/strings/string_piece.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/renderer/dispatcher.h"
@@ -17,6 +18,7 @@
 #include "gin/converter.h"
 #include "gin/dictionary.h"
 #include "gin/modules/console.h"
+#include "gin/modules/timer.h"
 #include "mojo/edk/js/core.h"
 #include "mojo/edk/js/handle.h"
 #include "mojo/edk/js/support.h"
@@ -118,14 +120,12 @@ ApiTestEnvironment::~ApiTestEnvironment() {
 
 void ApiTestEnvironment::RegisterModules() {
   v8_schema_registry_.reset(new V8SchemaRegistry);
-  const std::vector<std::pair<std::string, int> > resources =
+  const std::vector<std::pair<const char*, int>> resources =
       Dispatcher::GetJsResources();
-  for (std::vector<std::pair<std::string, int> >::const_iterator resource =
-           resources.begin();
-       resource != resources.end();
-       ++resource) {
-    if (resource->first != "test_environment_specific_bindings")
-      env()->RegisterModule(resource->first, resource->second);
+  for (const auto& resource : resources) {
+    if (base::StringPiece(resource.first) !=
+        "test_environment_specific_bindings")
+      env()->RegisterModule(resource.first, resource.second);
   }
   Dispatcher::RegisterNativeHandlers(env()->module_system(),
                                      env()->context(),
@@ -157,6 +157,9 @@ void ApiTestEnvironment::RegisterModules() {
   gin::ModuleRegistry::From(env()->context()->v8_context())
       ->AddBuiltinModule(env()->isolate(), gin::Console::kModuleName,
                          gin::Console::GetModule(env()->isolate()));
+  gin::ModuleRegistry::From(env()->context()->v8_context())
+      ->AddBuiltinModule(env()->isolate(), gin::TimerModule::kName,
+                         gin::TimerModule::GetModule(env()->isolate()));
   gin::ModuleRegistry::From(env()->context()->v8_context())
       ->AddBuiltinModule(env()->isolate(), mojo::edk::js::Core::kModuleName,
                          mojo::edk::js::Core::GetModule(env()->isolate()));

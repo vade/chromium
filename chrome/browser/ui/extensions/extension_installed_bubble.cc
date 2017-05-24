@@ -15,22 +15,19 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/commands/command_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/browser/ui/sync/sync_promo_ui.h"
 #include "chrome/common/extensions/api/extension_action/action_info.h"
 #include "chrome/common/extensions/api/omnibox/omnibox_handler.h"
 #include "chrome/common/extensions/command.h"
 #include "chrome/common/extensions/sync_helper.h"
 #include "chrome/grit/generated_resources.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/notification_source.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
-#include "extensions/common/feature_switch.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using extensions::Extension;
@@ -44,22 +41,21 @@ const int kAnimationWaitRetries = 10;
 
 // Class responsible for showing the bubble after it's installed. Owns itself.
 class ExtensionInstalledBubbleObserver
-    : public content::NotificationObserver,
+    : public chrome::BrowserListObserver,
       public extensions::ExtensionRegistryObserver {
  public:
   explicit ExtensionInstalledBubbleObserver(
       std::unique_ptr<ExtensionInstalledBubble> bubble)
       : bubble_(std::move(bubble)),
         extension_registry_observer_(this),
+        browser_list_observer_(this),
         animation_wait_retries_(0),
         weak_factory_(this) {
     // |extension| has been initialized but not loaded at this point. We need to
     // wait on showing the Bubble until the EXTENSION_LOADED gets fired.
     extension_registry_observer_.Add(
         extensions::ExtensionRegistry::Get(bubble_->browser()->profile()));
-
-    registrar_.Add(this, chrome::NOTIFICATION_BROWSER_CLOSING,
-                   content::Source<Browser>(bubble_->browser()));
+    browser_list_observer_.Add(BrowserList::GetInstance());
   }
 
   void Run() { OnExtensionLoaded(nullptr, bubble_->extension()); }
@@ -67,15 +63,13 @@ class ExtensionInstalledBubbleObserver
  private:
   ~ExtensionInstalledBubbleObserver() override {}
 
-  // content::NotificationObserver:
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override {
-    DCHECK_EQ(type, chrome::NOTIFICATION_BROWSER_CLOSING)
-        << "Received unexpected notification";
-    // Browser is closing before the bubble was shown.
-    // TODO(hcarmona): Look into logging this with the BubbleManager.
-    delete this;
+  // chrome::BrowserListObserver:
+  void OnBrowserClosing(Browser* browser) override {
+    if (bubble_->browser() == browser) {
+      // Browser is closing before the bubble was shown.
+      // TODO(hcarmona): Look into logging this with the BubbleManager.
+      delete this;
+    }
   }
 
   // extensions::ExtensionRegistryObserver:
@@ -87,15 +81,16 @@ class ExtensionInstalledBubbleObserver
       // views created which we can inspect for the purpose of previewing of
       // pointing to them.
       base::ThreadTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE, base::Bind(&ExtensionInstalledBubbleObserver::Initialize,
-                                weak_factory_.GetWeakPtr()));
+          FROM_HERE,
+          base::BindOnce(&ExtensionInstalledBubbleObserver::Initialize,
+                         weak_factory_.GetWeakPtr()));
     }
   }
 
   void OnExtensionUnloaded(
       content::BrowserContext* browser_context,
       const extensions::Extension* extension,
-      extensions::UnloadedExtensionInfo::Reason reason) override {
+      extensions::UnloadedExtensionReason reason) override {
     if (extension == bubble_->extension()) {
       // Extension is going away.
       delete this;
@@ -123,8 +118,9 @@ class ExtensionInstalledBubbleObserver
     }
     if (animation_wait_retries_++ < kAnimationWaitRetries) {
       base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-          FROM_HERE, base::Bind(&ExtensionInstalledBubbleObserver::Show,
-                                weak_factory_.GetWeakPtr()),
+          FROM_HERE,
+          base::BindOnce(&ExtensionInstalledBubbleObserver::Show,
+                         weak_factory_.GetWeakPtr()),
           base::TimeDelta::FromMilliseconds(kAnimationWaitMs));
     } else {
       // Retries are over; won't try again.
@@ -140,7 +136,7 @@ class ExtensionInstalledBubbleObserver
                  extensions::ExtensionRegistryObserver>
       extension_registry_observer_;
 
-  content::NotificationRegistrar registrar_;
+  ScopedObserver<BrowserList, BrowserListObserver> browser_list_observer_;
 
   // The number of times to retry showing the bubble if the bubble_->browser()
   // action toolbar is animating.
@@ -248,17 +244,12 @@ base::string16 ExtensionInstalledBubble::GetHowToUseDescription() const {
 }
 
 void ExtensionInstalledBubble::Initialize() {
-  bool extension_action_redesign_on =
-      extensions::FeatureSwitch::extension_action_redesign()->IsEnabled();
-
   const extensions::ActionInfo* action_info = nullptr;
   if ((action_info = extensions::ActionInfo::GetBrowserActionInfo(
            extension_)) != nullptr) {
     type_ = BROWSER_ACTION;
   } else if ((action_info = extensions::ActionInfo::GetPageActionInfo(
-                  extension_)) != nullptr &&
-             (extensions::ActionInfo::IsVerboseInstallMessage(extension_) ||
-              extension_action_redesign_on)) {
+                  extension_)) != nullptr) {
     type_ = PAGE_ACTION;
   } else if (!extensions::OmniboxInfo::GetKeyword(extension_).empty()) {
     type_ = OMNIBOX_KEYWORD;
@@ -288,14 +279,7 @@ void ExtensionInstalledBubble::Initialize() {
         options_ |= HOW_TO_MANAGE;
       }
 
-      if (type_ == BROWSER_ACTION || extension_action_redesign_on) {
-        // If the toolbar redesign is enabled, all bubbles for extensions point
-        // to their toolbar action.
-        anchor_position_ = ANCHOR_BROWSER_ACTION;
-      } else {
-        DCHECK_EQ(type_, PAGE_ACTION);
-        anchor_position_ = ANCHOR_PAGE_ACTION;
-      }
+      anchor_position_ = ANCHOR_ACTION;
       break;
     case OMNIBOX_KEYWORD:
       options_ |= HOW_TO_USE | HOW_TO_MANAGE;

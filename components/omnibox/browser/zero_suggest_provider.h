@@ -122,6 +122,12 @@ class ZeroSuggestProvider : public BaseSearchProvider,
   bool ShouldShowNonContextualZeroSuggest(const GURL& suggest_url,
                                           const GURL& current_page_url) const;
 
+  // Returns a URL string that should be used to to request contextual
+  // suggestions from the default provider.  Does not take into account whether
+  // sending this request is prohibited (e.g., in an incognito window).  Returns
+  // an empty string in case of an error.
+  std::string GetContextualSuggestionsUrl() const;
+
   // Checks whether we have a set of zero suggest results cached, and if so
   // populates |matches_| with cached results.
   void MaybeUseCachedSuggestions();
@@ -133,6 +139,9 @@ class ZeroSuggestProvider : public BaseSearchProvider,
 
   // The URL for which a suggestion fetch is pending.
   std::string current_query_;
+
+  // The title of the page for which a suggestion fetch is pending.
+  base::string16 current_title_;
 
   // The type of page the user is viewing (a search results page doing search
   // term replacement, an arbitrary URL, etc.).

@@ -10,7 +10,7 @@
 
 #include <vector>
 
-#include "cc/base/cc_export.h"
+#include "cc/base/base_export.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace cc {
@@ -35,11 +35,21 @@ namespace cc {
 //  Beckmann, N.; Kriegel, H. P.; Schneider, R.; Seeger, B. (1990).
 //  "The R*-tree: an efficient and robust access method for points and
 //  rectangles"
-class CC_EXPORT RTree {
+class CC_BASE_EXPORT RTree {
  public:
   RTree();
   ~RTree();
 
+  // Constructs the rtree from a given container of gfx::Rects. Queries using
+  // Search will then return indices into this container.
+  template <typename Container>
+  void Build(const Container& items) {
+    Build(items, [](const gfx::Rect& bounds) { return bounds; });
+  }
+
+  // Build helper that takes a container and a function used to get gfx::Rect
+  // from each item. That is, "bounds_getter(items[i]);" should return a
+  // gfx::Rect representing the bounds of items[i] for each i.
   template <typename Container, typename Functor>
   void Build(const Container& items, const Functor& bounds_getter) {
     DCHECK_EQ(0u, num_data_elements_);
@@ -52,10 +62,7 @@ class CC_EXPORT RTree {
       if (bounds.IsEmpty())
         continue;
 
-      branches.push_back(Branch());
-      Branch& branch = branches.back();
-      branch.bounds = bounds;
-      branch.index = i;
+      branches.emplace_back(i, bounds);
     }
 
     num_data_elements_ = branches.size();
@@ -89,13 +96,11 @@ class CC_EXPORT RTree {
               static_cast<size_t>(kMinChildren));
   }
 
-  template <typename Container>
-  void Build(const Container& items) {
-    Build(items, [](const gfx::Rect& bounds) { return bounds; });
-  }
+  // Given a query rect, returns sorted indices of elements that were used to
+  // construct this rtree.
+  std::vector<size_t> Search(const gfx::Rect& query) const;
 
-  void Search(const gfx::Rect& query, std::vector<size_t>* results) const;
-
+  // Returns the total bounds of all items in this rtree.
   gfx::Rect GetBounds() const;
 
  private:
@@ -115,12 +120,18 @@ class CC_EXPORT RTree {
       size_t index;
     };
     gfx::Rect bounds;
+
+    Branch() {}
+    Branch(size_t index, const gfx::Rect& bounds)
+        : index(index), bounds(bounds) {}
   };
 
   struct Node {
     uint16_t num_children;
     uint16_t level;
     Branch children[kMaxChildren];
+
+    explicit Node(uint16_t level) : num_children(0), level(level) {}
   };
 
   void SearchRecursive(Node* root,
@@ -135,6 +146,8 @@ class CC_EXPORT RTree {
   size_t num_data_elements_;
   Branch root_;
   std::vector<Node> nodes_;
+
+  DISALLOW_COPY_AND_ASSIGN(RTree);
 };
 
 }  // namespace cc

@@ -9,6 +9,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/feature_list.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
@@ -39,7 +40,6 @@
 #include "net/log/net_log_event_type.h"
 #include "net/log/net_log_source.h"
 #include "net/log/net_log_source_type.h"
-#include "net/quic/chromium/quic_http_stream.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/client_socket_pool.h"
 #include "net/socket/client_socket_pool_manager.h"
@@ -47,20 +47,23 @@
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/ssl_client_socket_pool.h"
 #include "net/socket/stream_socket.h"
-#include "net/spdy/bidirectional_stream_spdy_impl.h"
-#include "net/spdy/spdy_http_stream.h"
-#include "net/spdy/spdy_protocol.h"
-#include "net/spdy/spdy_session.h"
-#include "net/spdy/spdy_session_pool.h"
+#include "net/spdy/chromium/bidirectional_stream_spdy_impl.h"
+#include "net/spdy/chromium/spdy_http_stream.h"
+#include "net/spdy/chromium/spdy_session.h"
+#include "net/spdy/chromium/spdy_session_pool.h"
+#include "net/spdy/core/spdy_protocol.h"
 #include "net/ssl/channel_id_service.h"
 #include "net/ssl/ssl_cert_request_info.h"
-#include "net/ssl/ssl_connection_status_flags.h"
 #include "url/url_constants.h"
 
 namespace net {
 
 namespace {
 
+// Experiment to preconnect only one connection if HttpServerProperties is
+// not supported or initialized.
+const base::Feature kLimitEarlyPreconnectsExperiment{
+    "LimitEarlyPreconnects", base::FEATURE_DISABLED_BY_DEFAULT};
 void DoNothingAsyncCallback(int result) {}
 void RecordChannelIDKeyMatch(SSLClientSocket* ssl_socket,
                              ChannelIDService* channel_id_service,
@@ -145,39 +148,31 @@ std::unique_ptr<base::Value> NetLogHttpStreamProtoCallback(
   return std::move(dict);
 }
 
-// Returns parameters associated with the proxy resolution.
-std::unique_ptr<base::Value> NetLogHttpStreamJobProxyServerResolved(
-    const ProxyServer& proxy_server,
-    NetLogCaptureMode /* capture_mode */) {
-  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
-
-  dict->SetString("proxy_server", proxy_server.is_valid()
-                                      ? proxy_server.ToPacString()
-                                      : std::string());
-  return std::move(dict);
-}
-
 HttpStreamFactoryImpl::Job::Job(Delegate* delegate,
                                 JobType job_type,
                                 HttpNetworkSession* session,
                                 const HttpRequestInfo& request_info,
                                 RequestPriority priority,
+                                const ProxyInfo& proxy_info,
                                 const SSLConfig& server_ssl_config,
                                 const SSLConfig& proxy_ssl_config,
                                 HostPortPair destination,
                                 GURL origin_url,
+                                bool enable_ip_based_pooling,
                                 NetLog* net_log)
     : Job(delegate,
           job_type,
           session,
           request_info,
           priority,
+          proxy_info,
           server_ssl_config,
           proxy_ssl_config,
           destination,
           origin_url,
           AlternativeService(),
           ProxyServer(),
+          enable_ip_based_pooling,
           net_log) {}
 
 HttpStreamFactoryImpl::Job::Job(Delegate* delegate,
@@ -185,15 +180,18 @@ HttpStreamFactoryImpl::Job::Job(Delegate* delegate,
                                 HttpNetworkSession* session,
                                 const HttpRequestInfo& request_info,
                                 RequestPriority priority,
+                                const ProxyInfo& proxy_info,
                                 const SSLConfig& server_ssl_config,
                                 const SSLConfig& proxy_ssl_config,
                                 HostPortPair destination,
                                 GURL origin_url,
                                 AlternativeService alternative_service,
                                 const ProxyServer& alternative_proxy_server,
+                                bool enable_ip_based_pooling,
                                 NetLog* net_log)
     : request_info_(request_info),
       priority_(priority),
+      proxy_info_(proxy_info),
       server_ssl_config_(server_ssl_config),
       proxy_ssl_config_(proxy_ssl_config),
       net_log_(
@@ -201,18 +199,22 @@ HttpStreamFactoryImpl::Job::Job(Delegate* delegate,
       io_callback_(base::Bind(&Job::OnIOComplete, base::Unretained(this))),
       connection_(new ClientSocketHandle),
       session_(session),
+      state_(STATE_NONE),
       next_state_(STATE_NONE),
-      pac_request_(NULL),
       destination_(destination),
       origin_url_(origin_url),
       alternative_service_(alternative_service),
       alternative_proxy_server_(alternative_proxy_server),
+      enable_ip_based_pooling_(enable_ip_based_pooling),
       delegate_(delegate),
       job_type_(job_type),
-      using_ssl_(false),
+      using_ssl_(origin_url_.SchemeIs(url::kHttpsScheme) ||
+                 origin_url_.SchemeIs(url::kWssScheme)),
       using_spdy_(false),
       using_quic_(false),
-      quic_request_(session_->quic_stream_factory()),
+      should_reconsider_proxy_(false),
+      quic_request_(session_->quic_stream_factory(),
+                    session_->http_server_properties()),
       using_existing_quic_session_(false),
       establishing_tunnel_(false),
       was_alpn_negotiated_(false),
@@ -260,9 +262,6 @@ HttpStreamFactoryImpl::Job::~Job() {
     connection_.reset();
   }
 
-  if (pac_request_)
-    session_->proxy_service()->CancelPacRequest(pac_request_);
-
   // The stream could be in a partial state.  It is not reusable.
   if (stream_.get() && next_state_ != STATE_DONE)
     stream_->Close(true /* not reusable */);
@@ -278,8 +277,16 @@ int HttpStreamFactoryImpl::Job::Preconnect(int num_streams) {
   DCHECK_GT(num_streams, 0);
   HttpServerProperties* http_server_properties =
       session_->http_server_properties();
-  // Preconnect one connection if the server supports H2 or QUIC.
-  if (http_server_properties &&
+  DCHECK(http_server_properties);
+  // Preconnect one connection if either of the following is true:
+  //   (1) kLimitEarlyPreconnectsStreamExperiment is turned on,
+  //   HttpServerProperties is not initialized, and url scheme is cryptographic.
+  //   (2) The server supports H2 or QUIC.
+  bool connect_one_stream =
+      base::FeatureList::IsEnabled(kLimitEarlyPreconnectsExperiment) &&
+      !http_server_properties->IsInitialized() &&
+      request_info_.url.SchemeIsCryptographic();
+  if (connect_one_stream ||
       http_server_properties->SupportsRequestPriority(
           url::SchemeHostPort(request_info_.url))) {
     num_streams_ = 1;
@@ -289,18 +296,16 @@ int HttpStreamFactoryImpl::Job::Preconnect(int num_streams) {
   return StartInternal();
 }
 
-int HttpStreamFactoryImpl::Job::RestartTunnelWithProxyAuth(
-    const AuthCredentials& credentials) {
+int HttpStreamFactoryImpl::Job::RestartTunnelWithProxyAuth() {
   DCHECK(establishing_tunnel_);
   next_state_ = STATE_RESTART_TUNNEL_AUTH;
   stream_.reset();
-  return RunLoop(OK);
+  RunLoop(OK);
+  return ERR_IO_PENDING;
 }
 
 LoadState HttpStreamFactoryImpl::Job::GetLoadState() const {
   switch (next_state_) {
-    case STATE_RESOLVE_PROXY_COMPLETE:
-      return session_->proxy_service()->GetLoadState(pac_request_);
     case STATE_INIT_CONNECTION_COMPLETE:
     case STATE_CREATE_STREAM_COMPLETE:
       return using_quic_ ? LOAD_STATE_CONNECTING : connection_->GetLoadState();
@@ -317,23 +322,22 @@ void HttpStreamFactoryImpl::Job::Resume() {
 
 void HttpStreamFactoryImpl::Job::Orphan() {
   net_log_.AddEvent(NetLogEventType::HTTP_STREAM_JOB_ORPHANED);
-
-  if (delegate_->for_websockets()) {
-    // We cancel this job because a WebSocketHandshakeStream can't be created
-    // without a WebSocketHandshakeStreamBase::CreateHelper which is stored in
-    // the Request class and isn't retrievable by this job.
-    if (connection_ && connection_->socket()) {
-      connection_->socket()->Disconnect();
-    }
-    delegate_->OnOrphanedJobComplete(this);
-  }
-  // |this| may be deleted after this call.
 }
 
 void HttpStreamFactoryImpl::Job::SetPriority(RequestPriority priority) {
   priority_ = priority;
-  // TODO(akalin): Propagate this to |connection_| and maybe the
-  // preconnect state.
+  // Ownership of |connection_| is passed to the newly created stream
+  // or H2 session in DoCreateStream(), and the consumer is not
+  // notified immediately, so this call may occur when |connection_|
+  // is null.
+  //
+  // Note that streams are created without a priority associated with them,
+  // and it is up to the consumer to set their priority via
+  // HttpStream::InitializeStream().  So there is no need for this code
+  // to propagate priority changes to the newly created stream.
+  if (connection_ && connection_->is_initialized())
+    connection_->SetPriority(priority);
+  // TODO(akalin): Maybe Propagate this to the preconnect state.
 }
 
 bool HttpStreamFactoryImpl::Job::was_alpn_negotiated() const {
@@ -367,6 +371,20 @@ const ProxyInfo& HttpStreamFactoryImpl::Job::proxy_info() const {
   return proxy_info_;
 }
 
+void HttpStreamFactoryImpl::Job::LogHistograms() const {
+  if (job_type_ == MAIN) {
+    UMA_HISTOGRAM_ENUMERATION("Net.HttpStreamFactoryJob.Main.NextState",
+                              next_state_, STATE_MAX);
+    UMA_HISTOGRAM_ENUMERATION("Net.HttpStreamFactoryJob.Main.State", state_,
+                              STATE_MAX);
+  } else if (job_type_ == ALTERNATIVE) {
+    UMA_HISTOGRAM_ENUMERATION("Net.HttpStreamFactoryJob.Alt.NextState",
+                              next_state_, STATE_MAX);
+    UMA_HISTOGRAM_ENUMERATION("Net.HttpStreamFactoryJob.Alt.State", state_,
+                              STATE_MAX);
+  }
+}
+
 void HttpStreamFactoryImpl::Job::GetSSLInfo() {
   DCHECK(using_ssl_);
   DCHECK(!establishing_tunnel_);
@@ -384,8 +402,8 @@ SpdySessionKey HttpStreamFactoryImpl::Job::GetSpdySessionKey() const {
     return SpdySessionKey(proxy_info_.proxy_server().host_port_pair(),
                           ProxyServer::Direct(), PRIVACY_MODE_DISABLED);
   }
-  return SpdySessionKey(destination_, proxy_info_.proxy_server(),
-                        request_info_.privacy_mode);
+  return SpdySessionKey(HostPortPair::FromURL(origin_url_),
+                        proxy_info_.proxy_server(), request_info_.privacy_mode);
 }
 
 bool HttpStreamFactoryImpl::Job::CanUseExistingSpdySession() const {
@@ -404,6 +422,9 @@ void HttpStreamFactoryImpl::Job::OnStreamReadyCallback() {
   DCHECK(stream_.get());
   DCHECK_NE(job_type_, PRECONNECT);
   DCHECK(!delegate_->for_websockets());
+
+  UMA_HISTOGRAM_TIMES("Net.HttpStreamFactoryJob.StreamReadyCallbackTime",
+                      base::TimeTicks::Now() - job_stream_ready_start_time_);
 
   MaybeCopyConnectionAttemptsFromSocketOrHandle();
 
@@ -488,21 +509,17 @@ void HttpStreamFactoryImpl::Job::OnNeedsClientAuthCallback(
 
 void HttpStreamFactoryImpl::Job::OnHttpsProxyTunnelResponseCallback(
     const HttpResponseInfo& response_info,
-    HttpStream* stream) {
+    std::unique_ptr<HttpStream> stream) {
   DCHECK_NE(job_type_, PRECONNECT);
 
   delegate_->OnHttpsProxyTunnelResponse(this, response_info, server_ssl_config_,
-                                        proxy_info_, stream);
+                                        proxy_info_, std::move(stream));
   // |this| may be deleted after this call.
 }
 
 void HttpStreamFactoryImpl::Job::OnPreconnectsComplete() {
   DCHECK(!new_spdy_session_);
 
-  if (new_spdy_session_.get()) {
-    delegate_->OnNewSpdySessionReady(this, new_spdy_session_,
-                                     spdy_session_direct_);
-  }
   delegate_->OnPreconnectsComplete(this);
   // |this| may be deleted after this call.
 }
@@ -512,13 +529,14 @@ int HttpStreamFactoryImpl::Job::OnHostResolution(
     SpdySessionPool* spdy_session_pool,
     const SpdySessionKey& spdy_session_key,
     const GURL& origin_url,
+    bool enable_ip_based_pooling,
     const AddressList& addresses,
     const NetLogWithSource& net_log) {
   // It is OK to dereference spdy_session_pool, because the
   // ClientSocketPoolManager will be destroyed in the same callback that
   // destroys the SpdySessionPool.
-  return spdy_session_pool->FindAvailableSession(spdy_session_key, origin_url,
-                                                 net_log)
+  return spdy_session_pool->FindAvailableSession(
+             spdy_session_key, origin_url, enable_ip_based_pooling, net_log)
              ? ERR_SPDY_SESSION_ALREADY_EXISTS
              : OK;
 }
@@ -528,19 +546,19 @@ void HttpStreamFactoryImpl::Job::OnIOComplete(int result) {
   RunLoop(result);
 }
 
-int HttpStreamFactoryImpl::Job::RunLoop(int result) {
+void HttpStreamFactoryImpl::Job::RunLoop(int result) {
   TRACE_EVENT0(kNetTracingCategory, "HttpStreamFactoryImpl::Job::RunLoop");
   result = DoLoop(result);
 
   if (result == ERR_IO_PENDING)
-    return result;
+    return;
 
   if (job_type_ == PRECONNECT) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(&HttpStreamFactoryImpl::Job::OnPreconnectsComplete,
                    ptr_factory_.GetWeakPtr()));
-    return ERR_IO_PENDING;
+    return;
   }
 
   if (IsCertificateError(result)) {
@@ -552,15 +570,20 @@ int HttpStreamFactoryImpl::Job::RunLoop(int result) {
         FROM_HERE,
         base::Bind(&HttpStreamFactoryImpl::Job::OnCertificateErrorCallback,
                    ptr_factory_.GetWeakPtr(), result, ssl_info_));
-    return ERR_IO_PENDING;
+    return;
   }
 
   switch (result) {
     case ERR_PROXY_AUTH_REQUESTED: {
       UMA_HISTOGRAM_BOOLEAN("Net.ProxyAuthRequested.HasConnection",
                             connection_.get() != NULL);
-      if (!connection_.get())
-        return ERR_PROXY_AUTH_REQUESTED_WITH_NO_CONNECTION;
+      if (!connection_.get()) {
+        base::ThreadTaskRunnerHandle::Get()->PostTask(
+            FROM_HERE,
+            base::Bind(&Job::OnStreamFailedCallback, ptr_factory_.GetWeakPtr(),
+                       ERR_PROXY_AUTH_REQUESTED_WITH_NO_CONNECTION));
+        return;
+      }
       CHECK(connection_->socket());
       CHECK(establishing_tunnel_);
 
@@ -572,7 +595,7 @@ int HttpStreamFactoryImpl::Job::RunLoop(int result) {
           base::Bind(&Job::OnNeedsProxyAuthCallback, ptr_factory_.GetWeakPtr(),
                      *proxy_socket->GetConnectResponseInfo(),
                      base::RetainedRef(proxy_socket->GetAuthController())));
-      return ERR_IO_PENDING;
+      return;
     }
 
     case ERR_SSL_CLIENT_AUTH_CERT_NEEDED:
@@ -582,7 +605,7 @@ int HttpStreamFactoryImpl::Job::RunLoop(int result) {
               &Job::OnNeedsClientAuthCallback, ptr_factory_.GetWeakPtr(),
               base::RetainedRef(
                   connection_->ssl_error_response_info().cert_request_info)));
-      return ERR_IO_PENDING;
+      return;
 
     case ERR_HTTPS_PROXY_TUNNEL_RESPONSE: {
       DCHECK(connection_.get());
@@ -592,11 +615,13 @@ int HttpStreamFactoryImpl::Job::RunLoop(int result) {
       ProxyClientSocket* proxy_socket =
           static_cast<ProxyClientSocket*>(connection_->socket());
       base::ThreadTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE, base::Bind(&Job::OnHttpsProxyTunnelResponseCallback,
-                                ptr_factory_.GetWeakPtr(),
-                                *proxy_socket->GetConnectResponseInfo(),
-                                proxy_socket->CreateConnectResponseStream()));
-      return ERR_IO_PENDING;
+          FROM_HERE,
+          base::Bind(
+              &Job::OnHttpsProxyTunnelResponseCallback,
+              ptr_factory_.GetWeakPtr(),
+              *proxy_socket->GetConnectResponseInfo(),
+              base::Passed(proxy_socket->CreateConnectResponseStream())));
+      return;
     }
 
     case OK:
@@ -623,17 +648,18 @@ int HttpStreamFactoryImpl::Job::RunLoop(int result) {
         }
       } else {
         DCHECK(stream_.get());
+        job_stream_ready_start_time_ = base::TimeTicks::Now();
         base::ThreadTaskRunnerHandle::Get()->PostTask(
             FROM_HERE,
             base::Bind(&Job::OnStreamReadyCallback, ptr_factory_.GetWeakPtr()));
       }
-      return ERR_IO_PENDING;
+      return;
 
     default:
       base::ThreadTaskRunnerHandle::Get()->PostTask(
           FROM_HERE, base::Bind(&Job::OnStreamFailedCallback,
                                 ptr_factory_.GetWeakPtr(), result));
-      return ERR_IO_PENDING;
+      return;
   }
 }
 
@@ -642,18 +668,13 @@ int HttpStreamFactoryImpl::Job::DoLoop(int result) {
   int rv = result;
   do {
     State state = next_state_;
+    // Added to investigate crbug.com/711721.
+    state_ = state;
     next_state_ = STATE_NONE;
     switch (state) {
       case STATE_START:
         DCHECK_EQ(OK, rv);
         rv = DoStart();
-        break;
-      case STATE_RESOLVE_PROXY:
-        DCHECK_EQ(OK, rv);
-        rv = DoResolveProxy();
-        break;
-      case STATE_RESOLVE_PROXY_COMPLETE:
-        rv = DoResolveProxyComplete(rv);
         break;
       case STATE_WAIT:
         DCHECK_EQ(OK, rv);
@@ -698,13 +719,12 @@ int HttpStreamFactoryImpl::Job::DoLoop(int result) {
 int HttpStreamFactoryImpl::Job::StartInternal() {
   CHECK_EQ(STATE_NONE, next_state_);
   next_state_ = STATE_START;
-  int rv = RunLoop(OK);
-  DCHECK_EQ(ERR_IO_PENDING, rv);
-  return rv;
+  RunLoop(OK);
+  return ERR_IO_PENDING;
 }
 
 int HttpStreamFactoryImpl::Job::DoStart() {
-  const NetLogWithSource* net_log = delegate_->GetNetLog(this);
+  const NetLogWithSource* net_log = delegate_->GetNetLog();
 
   if (net_log) {
     net_log_.BeginEvent(
@@ -722,75 +742,7 @@ int HttpStreamFactoryImpl::Job::DoStart() {
     return ERR_UNSAFE_PORT;
   }
 
-  next_state_ = STATE_RESOLVE_PROXY;
-  return OK;
-}
-
-int HttpStreamFactoryImpl::Job::DoResolveProxy() {
-  DCHECK(!pac_request_);
-  DCHECK(session_);
-
-  next_state_ = STATE_RESOLVE_PROXY_COMPLETE;
-
-  if (request_info_.load_flags & LOAD_BYPASS_PROXY) {
-    proxy_info_.UseDirect();
-    return OK;
-  }
-
-  // If an alternative proxy server was provided, use that.
-  if (alternative_proxy_server_.is_valid()) {
-    proxy_info_.UseProxyServer(alternative_proxy_server_);
-    return OK;
-  }
-
-  return session_->proxy_service()->ResolveProxy(
-      origin_url_, request_info_.method, &proxy_info_, io_callback_,
-      &pac_request_, session_->params().proxy_delegate, net_log_);
-}
-
-int HttpStreamFactoryImpl::Job::DoResolveProxyComplete(int result) {
-  pac_request_ = NULL;
-
-  net_log_.AddEvent(
-      NetLogEventType::HTTP_STREAM_JOB_PROXY_SERVER_RESOLVED,
-      base::Bind(
-          &NetLogHttpStreamJobProxyServerResolved,
-          proxy_info_.is_empty() ? ProxyServer() : proxy_info_.proxy_server()));
-
-  if (result == OK) {
-    // Remove unsupported proxies from the list.
-    int supported_proxies =
-        ProxyServer::SCHEME_DIRECT | ProxyServer::SCHEME_HTTP |
-        ProxyServer::SCHEME_HTTPS | ProxyServer::SCHEME_SOCKS4 |
-        ProxyServer::SCHEME_SOCKS5;
-
-    if (session_->IsQuicEnabled())
-      supported_proxies |= ProxyServer::SCHEME_QUIC;
-
-    proxy_info_.RemoveProxiesWithoutScheme(supported_proxies);
-
-    if (proxy_info_.is_empty()) {
-      // No proxies/direct to choose from. This happens when we don't support
-      // any of the proxies in the returned list.
-      result = ERR_NO_SUPPORTED_PROXIES;
-    } else if (using_quic_ &&
-               (!proxy_info_.is_quic() && !proxy_info_.is_direct())) {
-      // QUIC can not be spoken to non-QUIC proxies.  This error should not be
-      // user visible, because the non-alternative Job should be resumed.
-      result = ERR_NO_SUPPORTED_PROXIES;
-    }
-  }
-
-  if (result != OK) {
-    return result;
-  }
-
   next_state_ = STATE_WAIT;
-
-  delegate_->OnResolveProxyComplete(this, request_info_, priority_,
-                                    server_ssl_config_, proxy_ssl_config_,
-                                    stream_type_);
-
   return OK;
 }
 
@@ -805,19 +757,24 @@ bool HttpStreamFactoryImpl::Job::ShouldForceQuic() const {
 
 int HttpStreamFactoryImpl::Job::DoWait() {
   next_state_ = STATE_WAIT_COMPLETE;
-  if (delegate_->ShouldWait(this))
+  bool should_wait = delegate_->ShouldWait(this);
+  net_log_.BeginEvent(NetLogEventType::HTTP_STREAM_JOB_WAITING,
+                      NetLog::BoolCallback("should_wait", should_wait));
+  if (should_wait)
     return ERR_IO_PENDING;
 
   return OK;
 }
 
 int HttpStreamFactoryImpl::Job::DoWaitComplete(int result) {
+  net_log_.EndEvent(NetLogEventType::HTTP_STREAM_JOB_WAITING);
   DCHECK_EQ(OK, result);
   next_state_ = STATE_INIT_CONNECTION;
   return OK;
 }
 
 int HttpStreamFactoryImpl::Job::DoInitConnection() {
+  net_log_.BeginEvent(NetLogEventType::HTTP_STREAM_JOB_INIT_CONNECTION);
   int result = DoInitConnectionImpl();
   if (result != ERR_SPDY_SESSION_ALREADY_EXISTS)
     delegate_->OnConnectionInitialized(this, result);
@@ -831,6 +788,13 @@ int HttpStreamFactoryImpl::Job::DoInitConnectionImpl() {
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "462812 HttpStreamFactoryImpl::Job::DoInitConnection"));
   DCHECK(!connection_->is_initialized());
+
+  if (using_quic_ && !proxy_info_.is_quic() && !proxy_info_.is_direct()) {
+    // QUIC can not be spoken to non-QUIC proxies.  This error should not be
+    // user visible, because the non-alternative Job should be resumed.
+    return ERR_NO_SUPPORTED_PROXIES;
+  }
+
   DCHECK(proxy_info_.proxy_server().is_valid());
   next_state_ = STATE_INIT_CONNECTION_COMPLETE;
 
@@ -839,8 +803,6 @@ int HttpStreamFactoryImpl::Job::DoInitConnectionImpl() {
     return OK;
   }
 
-  using_ssl_ = origin_url_.SchemeIs(url::kHttpsScheme) ||
-               origin_url_.SchemeIs(url::kWssScheme);
   using_spdy_ = false;
 
   if (ShouldForceQuic())
@@ -888,9 +850,6 @@ int HttpStreamFactoryImpl::Job::DoInitConnectionImpl() {
       replacements.ClearQuery();
       replacements.ClearRef();
       url = url.ReplaceComponents(replacements);
-
-      if (session_->quic_stream_factory()->IsQuicDisabled())
-        return ERR_QUIC_PROTOCOL_ERROR;
     } else {
       DCHECK(using_ssl_);
       // The certificate of a QUIC alternative server is expected to be valid
@@ -923,7 +882,7 @@ int HttpStreamFactoryImpl::Job::DoInitConnectionImpl() {
   if (CanUseExistingSpdySession()) {
     base::WeakPtr<SpdySession> spdy_session =
         session_->spdy_session_pool()->FindAvailableSession(
-            spdy_session_key, origin_url_, net_log_);
+            spdy_session_key, origin_url_, enable_ip_based_pooling_, net_log_);
     if (spdy_session) {
       // If we're preconnecting, but we already have a SpdySession, we don't
       // actually need to preconnect any sockets, so we're done.
@@ -970,7 +929,7 @@ int HttpStreamFactoryImpl::Job::DoInitConnectionImpl() {
   OnHostResolutionCallback resolution_callback =
       CanUseExistingSpdySession()
           ? base::Bind(&Job::OnHostResolution, session_->spdy_session_pool(),
-                       spdy_session_key, origin_url_)
+                       spdy_session_key, origin_url_, enable_ip_based_pooling_)
           : OnHostResolutionCallback();
   if (delegate_->for_websockets()) {
     // TODO(ricea): Re-enable NPN when WebSockets over SPDY is supported.
@@ -992,6 +951,7 @@ int HttpStreamFactoryImpl::Job::DoInitConnectionImpl() {
 }
 
 int HttpStreamFactoryImpl::Job::DoInitConnectionComplete(int result) {
+  net_log_.EndEvent(NetLogEventType::HTTP_STREAM_JOB_INIT_CONNECTION);
   if (job_type_ == PRECONNECT) {
     if (using_quic_)
       return result;
@@ -1005,7 +965,7 @@ int HttpStreamFactoryImpl::Job::DoInitConnectionComplete(int result) {
     SpdySessionKey spdy_session_key = GetSpdySessionKey();
     existing_spdy_session_ =
         session_->spdy_session_pool()->FindAvailableSession(
-            spdy_session_key, origin_url_, net_log_);
+            spdy_session_key, origin_url_, enable_ip_based_pooling_, net_log_);
     if (existing_spdy_session_) {
       using_spdy_ = true;
       next_state_ = STATE_CREATE_STREAM;
@@ -1014,16 +974,6 @@ int HttpStreamFactoryImpl::Job::DoInitConnectionComplete(int result) {
       ReturnToStateInitConnection(true /* close connection */);
     }
     return OK;
-  }
-
-  if (proxy_info_.is_quic()) {
-    DCHECK(using_quic_);
-    // Mark QUIC proxy as bad if QUIC got disabled.
-    // Underlying QUIC layer would have closed the connection.
-    if (session_->quic_stream_factory()->IsQuicDisabled()) {
-      using_quic_ = false;
-      return ReconsiderProxyAfterError(ERR_QUIC_PROTOCOL_ERROR);
-    }
   }
 
   // |result| may be the result of any of the stacked pools. The following
@@ -1117,6 +1067,7 @@ int HttpStreamFactoryImpl::Job::DoInitConnectionComplete(int result) {
 
   if (result < 0 && !ssl_started)
     return ReconsiderProxyAfterError(result);
+
   establishing_tunnel_ = false;
 
   // Handle SSL errors below.
@@ -1154,7 +1105,8 @@ int HttpStreamFactoryImpl::Job::SetSpdyHttpStreamOrBidirectionalStreamImpl(
   if (delegate_->for_websockets())
     return ERR_NOT_IMPLEMENTED;
   if (stream_type_ == HttpStreamRequest::BIDIRECTIONAL_STREAM) {
-    bidirectional_stream_impl_.reset(new BidirectionalStreamSpdyImpl(session));
+    bidirectional_stream_impl_.reset(
+        new BidirectionalStreamSpdyImpl(session, net_log_.source()));
     return OK;
   }
 
@@ -1164,7 +1116,8 @@ int HttpStreamFactoryImpl::Job::SetSpdyHttpStreamOrBidirectionalStreamImpl(
 
   bool use_relative_url =
       direct || request_info_.url.SchemeIs(url::kHttpsScheme);
-  stream_.reset(new SpdyHttpStream(session, use_relative_url));
+  stream_.reset(
+      new SpdyHttpStream(session, use_relative_url, net_log_.source()));
   return OK;
 }
 
@@ -1191,16 +1144,8 @@ int HttpStreamFactoryImpl::Job::DoCreateStream() {
   if (connection_->socket() && !connection_->is_reused())
     SetSocketMotivation();
 
-  if (!using_spdy_)
+  if (!using_spdy_) {
     DCHECK(!IsSpdyAlternative());
-
-  // While websockets over HTTP/2 are not supported, it is still valid to have
-  // websockets tunneled through HTTP/2 proxy (via CONNECT). If websockets are
-  // secure (wss://), ProxyClientSocket with established tunnel is wrapped with
-  // yet another socket (SSLClientSocket), and |using_spdy_| will be false, but
-  // for ws: scheme, ProxyClientSocket is not wrapped into anything.
-  if (!using_spdy_ ||
-      (using_spdy_ && proxy_info_.is_https() && delegate_->for_websockets())) {
     // We may get ftp scheme when fetching ftp resources through proxy.
     bool using_proxy = (proxy_info_.is_http() || proxy_info_.is_https()) &&
                        (request_info_.url.SchemeIs(url::kHttpScheme) ||
@@ -1225,7 +1170,7 @@ int HttpStreamFactoryImpl::Job::DoCreateStream() {
   if (!existing_spdy_session_) {
     existing_spdy_session_ =
         session_->spdy_session_pool()->FindAvailableSession(
-            spdy_session_key, origin_url_, net_log_);
+            spdy_session_key, origin_url_, enable_ip_based_pooling_, net_log_);
   }
   bool direct = !IsHttpsProxyAndHttpUrl();
   if (existing_spdy_session_.get()) {
@@ -1240,6 +1185,11 @@ int HttpStreamFactoryImpl::Job::DoCreateStream() {
     return set_result;
   }
 
+  // Close idle sockets in this group, since subsequent requests will go over
+  // |spdy_session|.
+  if (connection_->socket()->IsConnected())
+    connection_->CloseIdleSocketsInGroup();
+
   base::WeakPtr<SpdySession> spdy_session =
       session_->spdy_session_pool()->CreateAvailableSessionFromSocket(
           spdy_session_key, std::move(connection_), net_log_, using_ssl_);
@@ -1250,19 +1200,11 @@ int HttpStreamFactoryImpl::Job::DoCreateStream() {
     return ERR_SPDY_INADEQUATE_TRANSPORT_SECURITY;
   }
 
-  SSLInfo ssl_info;
-  if (spdy_session->GetSSLInfo(&ssl_info)) {
-    UMA_HISTOGRAM_SPARSE_SLOWLY(
-        "Net.Http2SSLCipherSuite",
-        SSLConnectionStatusToCipherSuite(ssl_info.connection_status));
-  }
-
   new_spdy_session_ = spdy_session;
   spdy_session_direct_ = direct;
   const HostPortPair host_port_pair = spdy_session_key.host_port_pair();
-  bool is_https = ssl_info.is_valid();
   url::SchemeHostPort scheme_host_port(
-      is_https ? url::kHttpsScheme : url::kHttpScheme, host_port_pair.host(),
+      using_ssl_ ? url::kHttpsScheme : url::kHttpScheme, host_port_pair.host(),
       host_port_pair.port());
 
   HttpServerProperties* http_server_properties =
@@ -1392,19 +1334,7 @@ void HttpStreamFactoryImpl::Job::InitSSLConfig(SSLConfig* ssl_config,
     ssl_config->channel_id_enabled = false;
 }
 
-
 int HttpStreamFactoryImpl::Job::ReconsiderProxyAfterError(int error) {
-  DCHECK(!pac_request_);
-  DCHECK(session_);
-
-  // A failure to resolve the hostname or any error related to establishing a
-  // TCP connection could be grounds for trying a new proxy configuration.
-  //
-  // Why do this when a hostname cannot be resolved?  Some URLs only make sense
-  // to proxy servers.  The hostname in those URLs might fail to resolve if we
-  // are still using a non-proxy config.  We need to check if a proxy config
-  // now exists that corresponds to a proxy server that could load the URL.
-  //
   switch (error) {
     case ERR_PROXY_CONNECTION_FAILED:
     case ERR_NAME_NOT_RESOLVED:
@@ -1443,46 +1373,16 @@ int HttpStreamFactoryImpl::Job::ReconsiderProxyAfterError(int error) {
       return error;
   }
 
-  // Do not bypass non-QUIC proxy on ERR_MSG_TOO_BIG.
-  if (!proxy_info_.is_quic() && error == ERR_MSG_TOO_BIG)
-    return error;
-
-  if (request_info_.load_flags & LOAD_BYPASS_PROXY)
-    return error;
-
   // Alternative proxy server job should not use fallback proxies, and instead
   // return. This would resume the main job (if possible) which may try the
   // fallback proxies.
-  if (alternative_proxy_server_.is_valid()) {
+  if (alternative_proxy_server().is_valid()) {
     DCHECK_EQ(STATE_NONE, next_state_);
     return error;
   }
 
-  if (proxy_info_.is_https() && proxy_ssl_config_.send_client_cert) {
-    session_->ssl_client_auth_cache()->Remove(
-        proxy_info_.proxy_server().host_port_pair());
-  }
-
-  int rv = session_->proxy_service()->ReconsiderProxyAfterError(
-      request_info_.url, request_info_.method, error, &proxy_info_,
-      io_callback_, &pac_request_, session_->params().proxy_delegate, net_log_);
-  if (rv == OK || rv == ERR_IO_PENDING) {
-    // If the error was during connection setup, there is no socket to
-    // disconnect.
-    if (connection_->socket())
-      connection_->socket()->Disconnect();
-    connection_->Reset();
-    delegate_->RemoveRequestFromSpdySessionRequestMapForJob(this);
-    next_state_ = STATE_RESOLVE_PROXY_COMPLETE;
-  } else {
-    // If ReconsiderProxyAfterError() failed synchronously, it means
-    // there was nothing left to fall-back to, so fail the transaction
-    // with the last connection error we got.
-    // TODO(eroman): This is a confusing contract, make it more obvious.
-    rv = error;
-  }
-
-  return rv;
+  should_reconsider_proxy_ = true;
+  return error;
 }
 
 int HttpStreamFactoryImpl::Job::HandleCertificateError(int error) {
@@ -1542,6 +1442,71 @@ void HttpStreamFactoryImpl::Job::
   }
 
   delegate_->AddConnectionAttemptsToRequest(this, socket_attempts);
+}
+
+HttpStreamFactoryImpl::JobFactory::JobFactory() {}
+
+HttpStreamFactoryImpl::JobFactory::~JobFactory() {}
+
+HttpStreamFactoryImpl::Job* HttpStreamFactoryImpl::JobFactory::CreateMainJob(
+    HttpStreamFactoryImpl::Job::Delegate* delegate,
+    HttpStreamFactoryImpl::JobType job_type,
+    HttpNetworkSession* session,
+    const HttpRequestInfo& request_info,
+    RequestPriority priority,
+    const ProxyInfo& proxy_info,
+    const SSLConfig& server_ssl_config,
+    const SSLConfig& proxy_ssl_config,
+    HostPortPair destination,
+    GURL origin_url,
+    bool enable_ip_based_pooling,
+    NetLog* net_log) {
+  return new HttpStreamFactoryImpl::Job(
+      delegate, job_type, session, request_info, priority, proxy_info,
+      server_ssl_config, proxy_ssl_config, destination, origin_url,
+      enable_ip_based_pooling, net_log);
+}
+
+HttpStreamFactoryImpl::Job* HttpStreamFactoryImpl::JobFactory::CreateAltSvcJob(
+    HttpStreamFactoryImpl::Job::Delegate* delegate,
+    HttpStreamFactoryImpl::JobType job_type,
+    HttpNetworkSession* session,
+    const HttpRequestInfo& request_info,
+    RequestPriority priority,
+    const ProxyInfo& proxy_info,
+    const SSLConfig& server_ssl_config,
+    const SSLConfig& proxy_ssl_config,
+    HostPortPair destination,
+    GURL origin_url,
+    AlternativeService alternative_service,
+    bool enable_ip_based_pooling,
+    NetLog* net_log) {
+  return new HttpStreamFactoryImpl::Job(
+      delegate, job_type, session, request_info, priority, proxy_info,
+      server_ssl_config, proxy_ssl_config, destination, origin_url,
+      alternative_service, ProxyServer(), enable_ip_based_pooling, net_log);
+}
+
+HttpStreamFactoryImpl::Job*
+HttpStreamFactoryImpl::JobFactory::CreateAltProxyJob(
+    HttpStreamFactoryImpl::Job::Delegate* delegate,
+    HttpStreamFactoryImpl::JobType job_type,
+    HttpNetworkSession* session,
+    const HttpRequestInfo& request_info,
+    RequestPriority priority,
+    const ProxyInfo& proxy_info,
+    const SSLConfig& server_ssl_config,
+    const SSLConfig& proxy_ssl_config,
+    HostPortPair destination,
+    GURL origin_url,
+    const ProxyServer& alternative_proxy_server,
+    bool enable_ip_based_pooling,
+    NetLog* net_log) {
+  return new HttpStreamFactoryImpl::Job(
+      delegate, job_type, session, request_info, priority, proxy_info,
+      server_ssl_config, proxy_ssl_config, destination, origin_url,
+      AlternativeService(), alternative_proxy_server, enable_ip_based_pooling,
+      net_log);
 }
 
 }  // namespace net

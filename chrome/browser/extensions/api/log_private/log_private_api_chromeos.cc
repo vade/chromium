@@ -15,10 +15,11 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/sequenced_task_runner.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_prefs.h"
-#include "chrome/browser/extensions/api/file_handlers/app_file_handler_util.h"
 #include "chrome/browser/extensions/api/log_private/filter_handler.h"
 #include "chrome/browser/extensions/api/log_private/log_parser.h"
 #include "chrome/browser/extensions/api/log_private/syslog_parser.h"
@@ -31,6 +32,7 @@
 #include "components/net_log/chrome_net_log.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
+#include "extensions/browser/api/file_handlers/app_file_handler_util.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function.h"
 #include "extensions/browser/extension_registry.h"
@@ -38,6 +40,7 @@
 #include "net/log/net_log_entry.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/file_manager/filesystem_api_util.h"
 #include "chrome/browser/chromeos/system_logs/debug_log_writer.h"
 #endif
 
@@ -110,7 +113,15 @@ base::FilePath GetAppLogDirectory() {
 // will be stored - /home/chronos/<user_profile_dir>/Downloads/log_dumps
 base::FilePath GetLogDumpDirectory(content::BrowserContext* context) {
   const DownloadPrefs* const prefs = DownloadPrefs::FromBrowserContext(context);
-  return prefs->DownloadPath().Append(kLogDumpsSubdir);
+  base::FilePath path = prefs->DownloadPath();
+
+#if defined(OS_CHROMEOS)
+  Profile* profile = Profile::FromBrowserContext(context);
+  if (file_manager::util::IsUnderNonNativeLocalPath(profile, path))
+    path = prefs->GetDefaultDownloadDirectoryForProfile();
+#endif
+
+  return path.Append(kLogDumpsSubdir);
 }
 
 // Removes direcotry content of |logs_dumps| and |app_logs_dir| (only for the
@@ -206,8 +217,9 @@ void LogPrivateAPI::RegisterTempFile(const std::string& owner_extension_id,
                  base::Unretained(this), owner_extension_id, file_path));
 }
 
-static base::LazyInstance<BrowserContextKeyedAPIFactory<LogPrivateAPI> >
-    g_factory = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<
+    BrowserContextKeyedAPIFactory<LogPrivateAPI>>::DestructorAtExit g_factory =
+    LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<LogPrivateAPI>*
@@ -397,7 +409,7 @@ void LogPrivateAPI::RegisterTempFileOnFileResourceSequence(
 void LogPrivateAPI::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const Extension* extension,
-    UnloadedExtensionInfo::Reason reason) {
+    UnloadedExtensionReason reason) {
   StopNetInternalsWatch(extension->id(), base::Closure());
 }
 
@@ -542,9 +554,9 @@ void LogPrivateDumpLogsFunction::OnStoreLogsCompleted(
   entry->SetString("baseName", file_entry.registered_name);
   entry->SetString("id", file_entry.id);
   entry->SetBoolean("isDirectory", false);
-  base::ListValue* entry_list = new base::ListValue();
+  auto entry_list = base::MakeUnique<base::ListValue>();
   entry_list->Append(std::move(entry));
-  response->Set("entries", entry_list);
+  response->Set("entries", std::move(entry_list));
   response->SetBoolean("multiple", false);
   SetResult(std::move(response));
   SendResponse(succeeded);

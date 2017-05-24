@@ -110,13 +110,18 @@ if ! which lsb_release > /dev/null; then
   exit 1;
 fi
 
-lsb_release=$(lsb_release --codename --short)
-supported_releases="(precise|trusty|utopic|vivid|wily|xenial|yakkety|jessie)"
+distro_codename=$(lsb_release --codename --short)
+distro_id=$(lsb_release --id --short)
+supported_codenames="(trusty|xenial|yakkety)"
+supported_ids="(Debian)"
 if [ 0 -eq "${do_unsupported-0}" ] && [ 0 -eq "${do_quick_check-0}" ] ; then
-  if [[ ! $lsb_release =~ $supported_releases ]]; then
-    echo "ERROR: Only Ubuntu 12.04 (precise), 14.04 (trusty), " \
-      "14.10 (utopic), 15.04 (vivid), 15.10 (wily), 16.04 (xenial), " \
-      "16.10 (yakkety) and Debian 8 (jessie) are currently supported" >&2
+  if [[ ! $distro_codename =~ $supported_codenames &&
+        ! $distro_id =~ $supported_ids ]]; then
+    echo -e "ERROR: The only supported distros are\n" \
+      "\tUbuntu 14.04 (trusty)\n" \
+      "\tUbuntu 16.04 (xenial)\n" \
+      "\tUbuntu 16.10 (yakkety)\n" \
+      "\tDebian 8 (jessie) or later" >&2
     exit 1
   fi
 
@@ -136,19 +141,76 @@ fi
 chromeos_dev_list="libbluetooth-dev libxkbcommon-dev realpath"
 
 # Packages needed for development
-dev_list="bison cdbs curl dpkg-dev elfutils devscripts fakeroot
-          flex fonts-ipafont fonts-thai-tlwg g++ git-core git-svn gperf
-          libasound2-dev libbrlapi-dev libav-tools libbz2-dev libcairo2-dev
-          libcap-dev libcups2-dev libcurl4-gnutls-dev libdrm-dev libelf-dev
-          libffi-dev libgconf2-dev libglib2.0-dev libglu1-mesa-dev
-          libgnome-keyring-dev libgtk2.0-dev libkrb5-dev libnspr4-dev
-          libnss3-dev libpam0g-dev libpci-dev libpulse-dev libsctp-dev
-          libspeechd-dev libsqlite3-dev libssl-dev libudev-dev libwww-perl
-          libxslt1-dev libxss-dev libxt-dev libxtst-dev openbox patch perl
-          pkg-config python python-cherrypy3 python-crypto python-dev
-          python-numpy python-opencv python-openssl python-psutil python-yaml
-          rpm ruby subversion ttf-dejavu-core wdiff xcompmgr zip
-          $chromeos_dev_list"
+dev_list="\
+  bison
+  cdbs
+  curl
+  dpkg-dev
+  elfutils
+  devscripts
+  fakeroot
+  flex
+  fonts-ipafont
+  fonts-thai-tlwg
+  g++
+  git-core
+  git-svn
+  gperf
+  libasound2-dev
+  libbrlapi-dev
+  libav-tools
+  libbz2-dev
+  libcairo2-dev
+  libcap-dev
+  libcups2-dev
+  libcurl4-gnutls-dev
+  libdrm-dev
+  libelf-dev
+  libffi-dev
+  libgconf2-dev
+  libglib2.0-dev
+  libglu1-mesa-dev
+  libgnome-keyring-dev
+  libgtk2.0-dev
+  libgtk-3-dev
+  libkrb5-dev
+  libnspr4-dev
+  libnss3-dev
+  libpam0g-dev
+  libpci-dev
+  libpulse-dev
+  libsctp-dev
+  libspeechd-dev
+  libsqlite3-dev
+  libssl-dev
+  libudev-dev
+  libwww-perl
+  libxslt1-dev
+  libxss-dev
+  libxt-dev
+  libxtst-dev
+  openbox
+  patch
+  perl
+  pkg-config
+  python
+  python-cherrypy3
+  python-crypto
+  python-dev
+  python-numpy
+  python-opencv
+  python-openssl
+  python-psutil
+  python-yaml
+  rpm
+  ruby
+  subversion
+  ttf-dejavu-core
+  wdiff
+  xcompmgr
+  zip
+  $chromeos_dev_list
+"
 
 # 64-bit systems need a minimum set of 32-bit compat packages for the pre-built
 # NaCl binaries.
@@ -160,27 +222,85 @@ fi
 chromeos_lib_list="libpulse0 libbz2-1.0"
 
 # Full list of required run-time libraries
-lib_list="libatk1.0-0 libc6 libasound2 libcairo2 libcap2 libcups2 libexpat1
-          libffi6 libfontconfig1 libfreetype6 libglib2.0-0 libgnome-keyring0
-          libgtk2.0-0 libpam0g libpango1.0-0 libpci3 libpcre3 libpixman-1-0
-          libspeechd2 libstdc++6 libsqlite3-0 libx11-6 libx11-xcb1
-          libxau6 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxdmcp6
-          libxext6 libxfixes3 libxi6 libxinerama1 libxrandr2 libxrender1
-          libxtst6 zlib1g $chromeos_lib_list"
+lib_list="\
+  libatk1.0-0
+  libc6
+  libasound2
+  libcairo2
+  libcap2
+  libcups2
+  libexpat1
+  libffi6
+  libfontconfig1
+  libfreetype6
+  libglib2.0-0
+  libgnome-keyring0
+  libgtk2.0-0
+  libgtk-3-0
+  libpam0g
+  libpango1.0-0
+  libpci3
+  libpcre3
+  libpixman-1-0
+  libspeechd2
+  libstdc++6
+  libsqlite3-0
+  libx11-6
+  libx11-xcb1
+  libxau6
+  libxcb1
+  libxcomposite1
+  libxcursor1
+  libxdamage1
+  libxdmcp6
+  libxext6
+  libxfixes3
+  libxi6
+  libxinerama1
+  libxrandr2
+  libxrender1
+  libxtst6
+  zlib1g
+  $chromeos_lib_list
+"
 
 # Debugging symbols for all of the run-time libraries
-dbg_list="libatk1.0-dbg libc6-dbg libcairo2-dbg libffi6-dbg libfontconfig1-dbg
-          libglib2.0-0-dbg libgtk2.0-0-dbg libpango1.0-0-dbg libpcre3-dbg
-          libpixman-1-0-dbg libsqlite3-0-dbg libx11-6-dbg libx11-xcb1-dbg
-          libxau6-dbg libxcb1-dbg libxcomposite1-dbg libxcursor1-dbg
-          libxdamage1-dbg libxdmcp6-dbg libxext6-dbg libxfixes3-dbg libxi6-dbg
-          libxinerama1-dbg libxrandr2-dbg libxrender1-dbg libxtst6-dbg
-          zlib1g-dbg"
+dbg_list="\
+  libatk1.0-dbg
+  libc6-dbg
+  libcairo2-dbg
+  libffi6-dbg
+  libfontconfig1-dbg
+  libglib2.0-0-dbg
+  libgtk2.0-0-dbg
+  libgtk-3-0-dbg
+  libpango1.0-0-dbg
+  libpcre3-dbg
+  libpixman-1-0-dbg
+  libsqlite3-0-dbg
+  libx11-6-dbg
+  libx11-xcb1-dbg
+  libxau6-dbg
+  libxcb1-dbg
+  libxcomposite1-dbg
+  libxcursor1-dbg
+  libxdamage1-dbg
+  libxdmcp6-dbg
+  libxext6-dbg
+  libxi6-dbg
+  libxinerama1-dbg
+  libxrandr2-dbg
+  libxrender1-dbg
+  libxtst6-dbg
+  zlib1g-dbg
+"
+
+if [[ ! $distro_codename =~ "yakkety" ]]; then
+  dbg_list="${dbg_list} libxfixes3-dbg"
+fi
 
 # Find the proper version of libstdc++6-4.x-dbg.
-if [ "x$lsb_release" = "xprecise" ]; then
-  dbg_list="${dbg_list} libstdc++6-4.6-dbg"
-elif [ "x$lsb_release" = "xtrusty" ]; then
+if [ "x$distro_codename" = "xtrusty" ]; then
   dbg_list="${dbg_list} libstdc++6-4.8-dbg"
 else
   dbg_list="${dbg_list} libstdc++6-4.9-dbg"
@@ -199,8 +319,8 @@ EOF
 )
 EM_ARCHIVE_KEY_FINGER="084C6C6F39159EDB67969AA87DE089671804772E"
 GPP_ARM_PACKAGE="g++-arm-linux-gnueabihf"
-case $lsb_release in
-  "jessie")
+case $distro_codename in
+  jessie)
     eval $(apt-config shell APT_SOURCESDIR 'Dir::Etc::sourceparts/d')
     CROSSTOOLS_LIST="${APT_SOURCESDIR}/crosstools.list"
     arm_list="libc6-dev:armhf
@@ -223,20 +343,23 @@ case $lsb_release in
       fi
     fi
     ;;
+  # All necessary ARM packages are available on the default repos on
+  # Debian 9 and later.
   *)
-    arm_list="libc6-dev-armhf-cross
+    arm_list="binutils-aarch64-linux-gnu
+              libc6-dev-armhf-cross
               linux-libc-dev-armhf-cross
               ${GPP_ARM_PACKAGE}"
     ;;
 esac
 
 # Work around for dependency issue Ubuntu/Trusty: http://crbug.com/435056
-case $lsb_release in
+case $distro_codename in
   trusty)
     arm_list+=" g++-4.8-multilib-arm-linux-gnueabihf
                 gcc-4.8-multilib-arm-linux-gnueabihf"
     ;;
-  wily|xenial|yakkety)
+  xenial|yakkety)
     arm_list+=" g++-5-multilib-arm-linux-gnueabihf
                 gcc-5-multilib-arm-linux-gnueabihf
                 gcc-arm-linux-gnueabihf"
@@ -245,14 +368,43 @@ esac
 
 # Packages to build NaCl, its toolchains, and its ports.
 naclports_list="ant autoconf bison cmake gawk intltool xutils-dev xsltproc"
-nacl_list="g++-mingw-w64-i686 lib32z1-dev
-           libasound2:i386 libcap2:i386 libelf-dev:i386 libfontconfig1:i386
-           libgconf-2-4:i386 libglib2.0-0:i386 libgpm2:i386 libgtk2.0-0:i386
-           libncurses5:i386 lib32ncurses5-dev libnss3:i386 libpango1.0-0:i386
-           libssl1.0.0:i386 libtinfo-dev libtinfo-dev:i386 libtool
-           libxcomposite1:i386 libxcursor1:i386 libxdamage1:i386 libxi6:i386
-           libxrandr2:i386 libxss1:i386 libxtst6:i386 texinfo xvfb
-           ${naclports_list}"
+nacl_list="\
+  g++-mingw-w64-i686
+  lib32z1-dev
+  libasound2:i386
+  libcap2:i386
+  libelf-dev:i386
+  libfontconfig1:i386
+  libgconf-2-4:i386
+  libglib2.0-0:i386
+  libgpm2:i386
+  libgtk2.0-0:i386
+  libgtk-3-0:i386
+  libncurses5:i386
+  lib32ncurses5-dev
+  libnss3:i386
+  libpango1.0-0:i386
+  libssl-dev:i386
+  libtinfo-dev
+  libtinfo-dev:i386
+  libtool
+  libxcomposite1:i386
+  libxcursor1:i386
+  libxdamage1:i386
+  libxi6:i386
+  libxrandr2:i386
+  libxss1:i386
+  libxtst6:i386
+  texinfo
+  xvfb
+  ${naclports_list}
+"
+
+if package_exists libssl1.0.0; then
+  nacl_list="${nacl_list} libssl1.0.0:i386"
+else
+  nacl_list="${nacl_list} libssl1.0.2:i386"
+fi
 
 # Find the proper version of packages that depend on mesa. Only one -lts variant
 # of mesa can be installed and everything that depends on it must match.
@@ -376,6 +528,15 @@ then
 fi
 if test "$do_inst_syms" = "1"; then
   echo "Including debugging symbols."
+  # Many debug packages are not available in Debian stretch,
+  # so exclude the ones that are missing.
+  available_dbg_packages=""
+  for package in ${dbg_list}; do
+    if package_exists ${package}; then
+      available_dbg_packages="${available_dbg_packages} ${package}"
+    fi
+  done
+  dbg_list="${available_dbg_packages}"
 else
   echo "Skipping debugging symbols."
   dbg_list=
@@ -439,11 +600,9 @@ if [ 1 -eq "${do_quick_check-0}" ] ; then
 fi
 
 if test "$do_inst_lib32" = "1" || test "$do_inst_nacl" = "1"; then
-  if [[ ! $lsb_release =~ (precise) ]]; then
-    sudo dpkg --add-architecture i386
-  fi
-  if [[ $lsb_release = "jessie" ]]; then
-    sudo dpkg --add-architecture armhf
+  sudo dpkg --add-architecture i386
+  if [[ $distro_id == "Debian" ]]; then
+      sudo dpkg --add-architecture armhf
   fi
 fi
 sudo apt-get update
@@ -508,36 +667,6 @@ if test "$do_inst_chromeos_fonts" != "0"; then
   fi
 else
   echo "Skipping installation of Chrome OS fonts."
-fi
-
-# $1 - target name
-# $2 - link name
-create_library_symlink() {
-  target=$1
-  linkname=$2
-  if [ -L $linkname ]; then
-    if [ "$(basename $(readlink $linkname))" != "$(basename $target)" ]; then
-      sudo rm $linkname
-    fi
-  fi
-  if [ ! -r $linkname ]; then
-    echo "Creating link: $linkname"
-    sudo ln -fs $target $linkname
-  fi
-}
-
-if test "$do_inst_nacl" = "1"; then
-  echo "Installing symbolic links for NaCl."
-  # naclports needs to cross build python for i386, but libssl1.0.0:i386
-  # only contains libcrypto.so.1.0.0 and not the symlink needed for
-  # linking (libcrypto.so).
-  create_library_symlink /lib/i386-linux-gnu/libcrypto.so.1.0.0 \
-      /usr/lib/i386-linux-gnu/libcrypto.so
-
-  create_library_symlink /lib/i386-linux-gnu/libssl.so.1.0.0 \
-      /usr/lib/i386-linux-gnu/libssl.so
-else
-  echo "Skipping symbolic links for NaCl."
 fi
 
 echo "Installing locales."

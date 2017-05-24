@@ -21,6 +21,7 @@
 #include "cc/quads/tile_draw_quad.h"
 #include "cc/quads/yuv_video_draw_quad.h"
 #include "ui/gfx/geometry/mojo/geometry_struct_traits.h"
+#include "ui/gfx/ipc/color/gfx_param_traits.h"
 
 namespace mojo {
 
@@ -147,10 +148,10 @@ struct StructTraits<cc::mojom::RenderPassQuadStateDataView, cc::DrawQuad> {
     return quad->mask_resource_id();
   }
 
-  static const gfx::Vector2dF& mask_uv_scale(const cc::DrawQuad& input) {
+  static const gfx::RectF& mask_uv_rect(const cc::DrawQuad& input) {
     const cc::RenderPassDrawQuad* quad =
         cc::RenderPassDrawQuad::MaterialCast(&input);
-    return quad->mask_uv_scale;
+    return quad->mask_uv_rect;
   }
 
   static const gfx::Size& mask_texture_size(const cc::DrawQuad& input) {
@@ -169,6 +170,12 @@ struct StructTraits<cc::mojom::RenderPassQuadStateDataView, cc::DrawQuad> {
     const cc::RenderPassDrawQuad* quad =
         cc::RenderPassDrawQuad::MaterialCast(&input);
     return quad->filters_origin;
+  }
+
+  static const gfx::RectF& tex_coord_rect(const cc::DrawQuad& input) {
+    const cc::RenderPassDrawQuad* quad =
+        cc::RenderPassDrawQuad::MaterialCast(&input);
+    return quad->tex_coord_rect;
   }
 
   static bool Read(cc::mojom::RenderPassQuadStateDataView data,
@@ -219,10 +226,23 @@ struct StructTraits<cc::mojom::StreamVideoQuadStateDataView, cc::DrawQuad> {
 };
 
 template <>
+struct EnumTraits<cc::mojom::SurfaceDrawQuadType, cc::SurfaceDrawQuadType> {
+  static cc::mojom::SurfaceDrawQuadType ToMojom(
+      cc::SurfaceDrawQuadType surface_draw_quad_type);
+  static bool FromMojom(cc::mojom::SurfaceDrawQuadType input,
+                        cc::SurfaceDrawQuadType* out);
+};
+template <>
 struct StructTraits<cc::mojom::SurfaceQuadStateDataView, cc::DrawQuad> {
   static const cc::SurfaceId& surface(const cc::DrawQuad& input) {
     const cc::SurfaceDrawQuad* quad = cc::SurfaceDrawQuad::MaterialCast(&input);
     return quad->surface_id;
+  }
+
+  static cc::SurfaceDrawQuadType surface_draw_quad_type(
+      const cc::DrawQuad& input) {
+    const cc::SurfaceDrawQuad* quad = cc::SurfaceDrawQuad::MaterialCast(&input);
+    return quad->surface_draw_quad_type;
   }
 
   static bool Read(cc::mojom::SurfaceQuadStateDataView data, cc::DrawQuad* out);
@@ -394,6 +414,11 @@ struct StructTraits<cc::mojom::YUVVideoQuadStateDataView, cc::DrawQuad> {
     const cc::YUVVideoDrawQuad* quad =
         cc::YUVVideoDrawQuad::MaterialCast(&input);
     return quad->bits_per_channel;
+  }
+  static gfx::ColorSpace video_color_space(const cc::DrawQuad& input) {
+    const cc::YUVVideoDrawQuad* quad =
+        cc::YUVVideoDrawQuad::MaterialCast(&input);
+    return quad->video_color_space;
   }
 
   static bool Read(cc::mojom::YUVVideoQuadStateDataView data,

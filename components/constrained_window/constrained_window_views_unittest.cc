@@ -32,22 +32,16 @@ class DialogContents : public views::DialogDelegateView {
   DialogContents() {}
   ~DialogContents() override {}
 
-  void set_preferred_size(const gfx::Size& preferred_size) {
-    preferred_size_ = preferred_size;
-  }
-
   void set_modal_type(ui::ModalType modal_type) { modal_type_ = modal_type; }
 
   // DialogDelegateView:
   views::View* GetContentsView() override { return this; }
-  gfx::Size GetPreferredSize() const override { return preferred_size_; }
   gfx::Size GetMinimumSize() const override { return gfx::Size(); }
 
   // WidgetDelegate:
   ui::ModalType GetModalType() const override { return modal_type_; }
 
  private:
-  gfx::Size preferred_size_;
   ui::ModalType modal_type_ = ui::MODAL_TYPE_NONE;
 
   DISALLOW_COPY_AND_ASSIGN(DialogContents);
@@ -220,7 +214,7 @@ TEST_F(ConstrainedWindowViewsTest, MaximumWebContentsDialogSize) {
 // Ensure CreateBrowserModalDialogViews() works correctly with a null parent.
 TEST_F(ConstrainedWindowViewsTest, NullModalParent) {
   // Use desktop widgets (except on ChromeOS) for extra coverage.
-  views_delegate()->set_use_desktop_native_widgets(true);
+  test_views_delegate()->set_use_desktop_native_widgets(true);
 
   SetConstrainedWindowViewsClient(
       base::MakeUnique<TestConstrainedWindowViewsClient>());

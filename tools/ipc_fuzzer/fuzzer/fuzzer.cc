@@ -10,8 +10,10 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/shared_memory_handle.h"
 #include "base/strings/string_util.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_utils.h"
@@ -509,50 +511,57 @@ struct FuzzTraits<base::ListValue> {
           bool tmp;
           p->GetBoolean(index, &tmp);
           fuzzer->FuzzBool(&tmp);
-          p->Set(index, new base::FundamentalValue(tmp));
+          p->Set(index, base::MakeUnique<base::Value>(tmp));
           break;
         }
         case base::Value::Type::INTEGER: {
           int tmp;
           p->GetInteger(index, &tmp);
           fuzzer->FuzzInt(&tmp);
-          p->Set(index, new base::FundamentalValue(tmp));
+          p->Set(index, base::MakeUnique<base::Value>(tmp));
           break;
         }
         case base::Value::Type::DOUBLE: {
           double tmp;
           p->GetDouble(index, &tmp);
           fuzzer->FuzzDouble(&tmp);
-          p->Set(index, new base::FundamentalValue(tmp));
+          p->Set(index, base::MakeUnique<base::Value>(tmp));
           break;
         }
         case base::Value::Type::STRING: {
           std::string tmp;
           p->GetString(index, &tmp);
           fuzzer->FuzzString(&tmp);
-          p->Set(index, new base::StringValue(tmp));
+          p->Set(index, base::MakeUnique<base::Value>(tmp));
           break;
         }
         case base::Value::Type::BINARY: {
           char tmp[200];
           size_t bin_length = RandInRange(sizeof(tmp));
           fuzzer->FuzzData(tmp, bin_length);
-          p->Set(index,
-                 base::BinaryValue::CreateWithCopiedBuffer(tmp, bin_length));
+          p->Set(index, base::Value::CreateWithCopiedBuffer(tmp, bin_length));
           break;
         }
         case base::Value::Type::DICTIONARY: {
-          base::DictionaryValue* tmp = new base::DictionaryValue();
-          p->GetDictionary(index, &tmp);
-          FuzzParam(tmp, fuzzer);
-          p->Set(index, tmp);
+          base::DictionaryValue* dict_weak = nullptr;
+          if (p->GetDictionary(index, &dict_weak)) {
+            FuzzParam(dict_weak, fuzzer);
+          } else {
+            auto dict = base::MakeUnique<base::DictionaryValue>();
+            FuzzParam(dict.get(), fuzzer);
+            p->Set(index, std::move(dict));
+          }
           break;
         }
         case base::Value::Type::LIST: {
-          base::ListValue* tmp = new base::ListValue();
-          p->GetList(index, &tmp);
-          FuzzParam(tmp, fuzzer);
-          p->Set(index, tmp);
+          base::ListValue* list_weak = nullptr;
+          if (p->GetList(index, &list_weak)) {
+            FuzzParam(list_weak, fuzzer);
+          } else {
+            auto list = base::MakeUnique<base::ListValue>();
+            FuzzParam(list.get(), fuzzer);
+            p->Set(index, std::move(list));
+          }
           break;
         }
         case base::Value::Type::NONE:
@@ -581,25 +590,25 @@ struct FuzzTraits<base::DictionaryValue> {
         case base::Value::Type::BOOLEAN: {
           bool tmp;
           fuzzer->FuzzBool(&tmp);
-          p->SetWithoutPathExpansion(property, new base::FundamentalValue(tmp));
+          p->SetWithoutPathExpansion(property, new base::Value(tmp));
           break;
         }
         case base::Value::Type::INTEGER: {
           int tmp;
           fuzzer->FuzzInt(&tmp);
-          p->SetWithoutPathExpansion(property, new base::FundamentalValue(tmp));
+          p->SetWithoutPathExpansion(property, new base::Value(tmp));
           break;
         }
         case base::Value::Type::DOUBLE: {
           double tmp;
           fuzzer->FuzzDouble(&tmp);
-          p->SetWithoutPathExpansion(property, new base::FundamentalValue(tmp));
+          p->SetWithoutPathExpansion(property, new base::Value(tmp));
           break;
         }
         case base::Value::Type::STRING: {
           std::string tmp;
           fuzzer->FuzzString(&tmp);
-          p->SetWithoutPathExpansion(property, new base::StringValue(tmp));
+          p->SetWithoutPathExpansion(property, new base::Value(tmp));
           break;
         }
         case base::Value::Type::BINARY: {
@@ -607,8 +616,7 @@ struct FuzzTraits<base::DictionaryValue> {
           size_t bin_length = RandInRange(sizeof(tmp));
           fuzzer->FuzzData(tmp, bin_length);
           p->SetWithoutPathExpansion(
-              property,
-              base::BinaryValue::CreateWithCopiedBuffer(tmp, bin_length));
+              property, base::Value::CreateWithCopiedBuffer(tmp, bin_length));
           break;
         }
         case base::Value::Type::DICTIONARY: {
@@ -810,7 +818,7 @@ struct FuzzTraits<content::SyntheticGesturePacket> {
 template <>
 struct FuzzTraits<content::WebCursor> {
   static bool Fuzz(content::WebCursor* p, Fuzzer* fuzzer) {
-    content::WebCursor::CursorInfo info;
+    content::CursorInfo info;
     p->GetCursorInfo(&info);
 
     // |type| enum is not validated on de-serialization, so pick random value.
@@ -1505,23 +1513,6 @@ struct FuzzTraits<ppapi::SocketOptionData> {
 };
 
 template <>
-struct FuzzTraits<printing::PdfRenderSettings> {
-  static bool Fuzz(printing::PdfRenderSettings* p, Fuzzer* fuzzer) {
-    gfx::Rect area = p->area;
-    int dpi = p->dpi;
-    bool autorotate = p->autorotate;
-    if (!FuzzParam(&area, fuzzer))
-      return false;
-    if (!FuzzParam(&dpi, fuzzer))
-      return false;
-    if (!FuzzParam(&autorotate, fuzzer))
-      return false;
-    *p = printing::PdfRenderSettings(area, dpi, autorotate);
-    return true;
-  }
-};
-
-template <>
 struct FuzzTraits<SkBitmap> {
   static bool Fuzz(SkBitmap* p, Fuzzer* fuzzer) {
     // TODO(mbarbella): This should actually do something.
@@ -1607,21 +1598,12 @@ struct FuzzTraits<ui::LatencyInfo> {
     // TODO(inferno): Add param traits for |latency_components|.
     int64_t trace_id = p->trace_id();
     bool terminated = p->terminated();
-    uint32_t input_coordinates_size = static_cast<uint32_t>(
-        RandInRange(ui::LatencyInfo::kMaxInputCoordinates + 1));
-    gfx::PointF input_coordinates[ui::LatencyInfo::kMaxInputCoordinates];
-    if (!FuzzParamArray(
-        input_coordinates, input_coordinates_size, fuzzer))
-      return false;
     if (!FuzzParam(&trace_id, fuzzer))
       return false;
     if (!FuzzParam(&terminated, fuzzer))
       return false;
 
     ui::LatencyInfo latency(trace_id, terminated);
-    for (size_t i = 0; i < input_coordinates_size; i++) {
-      latency.AddInputCoordinate(input_coordinates[i]);
-    }
     *p = latency;
 
     return true;
@@ -1634,14 +1616,17 @@ struct FuzzTraits<url::Origin> {
     std::string scheme = p->scheme();
     std::string host = p->host();
     uint16_t port = p->port();
+    std::string suborigin = p->suborigin();
     if (!FuzzParam(&scheme, fuzzer))
       return false;
     if (!FuzzParam(&host, fuzzer))
       return false;
     if (!FuzzParam(&port, fuzzer))
       return false;
+    if (!FuzzParam(&suborigin, fuzzer))
+      return false;
     *p = url::Origin::UnsafelyCreateOriginWithoutNormalization(scheme, host,
-                                                               port);
+                                                               port, suborigin);
 
     // Force a unique origin 1% of the time:
     if (RandInRange(100) == 1)

@@ -216,6 +216,9 @@ class FormatTypeValidator {
         // Exposed by GL_APPLE_texture_format_BGRA8888 and
         // GL_EXT_texture_format_BGRA8888
         {GL_BGRA_EXT, GL_BGRA_EXT, GL_UNSIGNED_BYTE},
+
+        // Exposed by GL_EXT_texture_norm16
+        {GL_R16_EXT, GL_RED, GL_UNSIGNED_SHORT},
     };
 
     static const FormatType kSupportedFormatTypesES2Only[] = {
@@ -394,6 +397,23 @@ class ScopedResetPixelUnpackBuffer{
 };
 
 }  // namespace anonymous
+
+DecoderTextureState::DecoderTextureState(
+    const GpuDriverBugWorkarounds& workarounds)
+    : tex_image_failed(false),
+      texsubimage_faster_than_teximage(
+          workarounds.texsubimage_faster_than_teximage),
+      force_cube_map_positive_x_allocation(
+          workarounds.force_cube_map_positive_x_allocation),
+      force_cube_complete(workarounds.force_cube_complete),
+      force_int_or_srgb_cube_texture_complete(
+          workarounds.force_int_or_srgb_cube_texture_complete),
+      unpack_alignment_workaround_with_unpack_buffer(
+          workarounds.unpack_alignment_workaround_with_unpack_buffer),
+      unpack_overlapping_rows_separately_unpack_buffer(
+          workarounds.unpack_overlapping_rows_separately_unpack_buffer),
+      unpack_image_height_workaround_with_unpack_buffer(
+          workarounds.unpack_image_height_workaround_with_unpack_buffer) {}
 
 TextureManager::DestructionObserver::DestructionObserver() {}
 
@@ -1384,10 +1404,13 @@ GLenum Texture::SetParameterf(
     case GL_TEXTURE_BASE_LEVEL:
     case GL_TEXTURE_MAX_LEVEL:
     case GL_TEXTURE_USAGE_ANGLE:
-      {
-        GLint iparam = static_cast<GLint>(std::round(param));
-        return SetParameteri(feature_info, pname, iparam);
-      }
+    case GL_TEXTURE_SWIZZLE_R:
+    case GL_TEXTURE_SWIZZLE_G:
+    case GL_TEXTURE_SWIZZLE_B:
+    case GL_TEXTURE_SWIZZLE_A: {
+      GLint iparam = static_cast<GLint>(std::round(param));
+      return SetParameteri(feature_info, pname, iparam);
+    }
     case GL_TEXTURE_MIN_LOD:
       sampler_state_.min_lod = param;
       break;
@@ -1753,17 +1776,15 @@ void Texture::DumpLevelMemory(base::trace_event::ProcessMemoryDump* pmd,
         continue;
 
       // If a level has a GLImage, ask the GLImage to dump itself.
+      // If a level does not have a GLImage bound to it, then dump the
+      // texture allocation also as the storage is not provided by the
+      // GLImage in that case.
       if (level_infos[level_index].image) {
         level_infos[level_index].image->OnMemoryDump(
             pmd, client_tracing_id,
             base::StringPrintf("%s/face_%d/level_%d", dump_name.c_str(),
                                face_index, level_index));
-      }
-
-      // If a level does not have a GLImage bound to it, then dump the
-      // texture allocation also as the storage is not provided by the
-      // GLImage in that case.
-      if (level_infos[level_index].image_state != BOUND) {
+      } else {
         MemoryAllocatorDump* dump = pmd->CreateAllocatorDump(base::StringPrintf(
             "%s/face_%d/level_%d", dump_name.c_str(), face_index, level_index));
         dump->AddScalar(
@@ -1872,7 +1893,6 @@ TextureManager::TextureManager(MemoryTracker* memory_tracker,
     : memory_type_tracker_(new MemoryTypeTracker(memory_tracker)),
       memory_tracker_(memory_tracker),
       feature_info_(feature_info),
-      framebuffer_manager_(NULL),
       max_texture_size_(max_texture_size),
       max_cube_map_texture_size_(max_cube_map_texture_size),
       max_rectangle_texture_size_(max_rectangle_texture_size),
@@ -1901,6 +1921,23 @@ TextureManager::TextureManager(MemoryTracker* memory_tracker,
   for (int ii = 0; ii < kNumDefaultTextures; ++ii) {
     black_texture_ids_[ii] = 0;
   }
+}
+
+void TextureManager::AddFramebufferManager(
+    FramebufferManager* framebuffer_manager) {
+  framebuffer_managers_.push_back(framebuffer_manager);
+}
+
+void TextureManager::RemoveFramebufferManager(
+    FramebufferManager* framebuffer_manager) {
+  for (unsigned int i = 0; i < framebuffer_managers_.size(); ++i) {
+    if (framebuffer_managers_[i] == framebuffer_manager) {
+      std::swap(framebuffer_managers_[i], framebuffer_managers_.back());
+      framebuffer_managers_.pop_back();
+      return;
+    }
+  }
+  NOTREACHED();
 }
 
 bool TextureManager::Initialize() {
@@ -2311,8 +2348,9 @@ void TextureManager::UpdateNumImages(int delta) {
 }
 
 void TextureManager::IncFramebufferStateChangeCount() {
-  if (framebuffer_manager_)
-    framebuffer_manager_->IncFramebufferStateChangeCount();
+  for (unsigned int i = 0; i < framebuffer_managers_.size(); ++i) {
+    framebuffer_managers_[i]->IncFramebufferStateChangeCount();
+  }
 }
 
 bool TextureManager::ValidateTextureParameters(
@@ -2433,6 +2471,21 @@ bool TextureManager::ValidateTexImage(
         error_state, function_name, args.target, "target");
     return false;
   }
+  if (feature_info_->IsWebGL1OrES2Context()) {
+    switch (args.format) {
+      case GL_DEPTH_COMPONENT:
+      case GL_DEPTH_STENCIL:
+        if (args.target != GL_TEXTURE_2D) {
+          ERRORSTATE_SET_GL_ERROR(
+              error_state, GL_INVALID_OPERATION, function_name,
+              "invalid target for depth/stencil textures");
+          return false;
+        }
+        break;
+      default:
+        break;
+    }
+  }
   if (!ValidateTextureParameters(
       error_state, function_name, true, args.format, args.type,
       args.internal_format, args.level)) {
@@ -2526,7 +2579,8 @@ void TextureManager::DoCubeMapWorkaround(
 
   std::vector<GLenum> undefined_faces;
   Texture* texture = texture_ref->texture();
-  if (texture_state->force_cube_complete) {
+  if (texture_state->force_cube_complete ||
+      texture_state->force_int_or_srgb_cube_texture_complete) {
     int width = 0;
     int height = 0;
     for (unsigned i = 0; i < 6; i++) {
@@ -2584,6 +2638,15 @@ void TextureManager::ValidateAndDoTexImage(
       (texture_state->force_cube_complete ||
        (texture_state->force_cube_map_positive_x_allocation &&
         args.target != GL_TEXTURE_CUBE_MAP_POSITIVE_X));
+  // Force integer or srgb cube map texture complete, see crbug.com/712117.
+  need_cube_map_workaround =
+      need_cube_map_workaround ||
+      (texture->target() == GL_TEXTURE_CUBE_MAP &&
+       texture_state->force_int_or_srgb_cube_texture_complete &&
+       (GLES2Util::IsIntegerFormat(args.internal_format) ||
+        GLES2Util::GetColorEncodingFromInternalFormat(args.internal_format) ==
+            GL_SRGB));
+
   if (need_cube_map_workaround && !buffer) {
     DoCubeMapWorkaround(texture_state, state, framebuffer_state,
                         texture_ref, function_name, args);
@@ -2882,7 +2945,6 @@ void TextureManager::ValidateAndDoTexSubImage(
 
   if (full_image && !texture_state->texsubimage_faster_than_teximage &&
       !texture->IsImmutable() && !texture->HasImages()) {
-    ScopedTextureUploadTimer timer(texture_state);
     GLenum internal_format;
     GLenum tex_type;
     texture->GetLevelType(args.target, args.level, &tex_type, &internal_format);
@@ -2904,7 +2966,6 @@ void TextureManager::ValidateAndDoTexSubImage(
           args.pixels);
     }
   } else {
-    ScopedTextureUploadTimer timer(texture_state);
     if (args.command_type == DoTexSubImageArguments::kTexSubImage3D) {
       glTexSubImage3D(args.target, args.level, args.xoffset, args.yoffset,
                       args.zoffset, args.width, args.height, args.depth,
@@ -2926,7 +2987,6 @@ void TextureManager::DoTexSubImageWithAlignmentWorkaround(
   DCHECK(state->bound_pixel_unpack_buffer.get());
   DCHECK(args.width > 0 && args.height > 0 && args.depth > 0);
 
-  ScopedTextureUploadTimer timer(texture_state);
   uint32_t offset = ToGLuint(args.pixels);
   if (args.command_type == DoTexSubImageArguments::kTexSubImage2D) {
     PixelStoreParams params = state->GetUnpackParams(ContextState::k2D);
@@ -3202,7 +3262,6 @@ void TextureManager::DoTexImage(
   if (texture_state->texsubimage_faster_than_teximage &&
       level_is_same && args.pixels && !unpack_buffer_bound) {
     {
-      ScopedTextureUploadTimer timer(texture_state);
       if (args.command_type == DoTexImageArguments::kTexImage3D) {
         glTexSubImage3D(args.target, args.level, 0, 0, 0, args.width,
                         args.height, args.depth,
@@ -3223,7 +3282,6 @@ void TextureManager::DoTexImage(
 
   ERRORSTATE_COPY_REAL_GL_ERRORS_TO_WRAPPER(error_state, function_name);
   {
-    ScopedTextureUploadTimer timer(texture_state);
     if (args.command_type == DoTexImageArguments::kTexImage3D) {
       glTexImage3D(
           args.target, args.level,
@@ -3282,18 +3340,6 @@ bool TextureManager::CombineAdjacentRects(const gfx::Rect& rect1,
 
   // Return false if it's not possible to combine |rect1| and |rect2|.
   return false;
-}
-
-ScopedTextureUploadTimer::ScopedTextureUploadTimer(
-    DecoderTextureState* texture_state)
-    : texture_state_(texture_state),
-      begin_time_(base::TimeTicks::Now()) {
-}
-
-ScopedTextureUploadTimer::~ScopedTextureUploadTimer() {
-  texture_state_->texture_upload_count++;
-  texture_state_->total_texture_upload_time +=
-      base::TimeTicks::Now() - begin_time_;
 }
 
 bool TextureManager::OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,

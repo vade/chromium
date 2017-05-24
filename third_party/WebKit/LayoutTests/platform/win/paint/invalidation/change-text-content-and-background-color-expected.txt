@@ -8,18 +8,8 @@
       "paintInvalidations": [
         {
           "object": "LayoutTextControl (positioned) INPUT id='input'",
-          "rect": [8, 8, 244, 67],
+          "rect": [8, 8, 244, 68],
           "reason": "style change"
-        },
-        {
-          "object": "LayoutBlockFlow DIV id='inner-editor'",
-          "rect": [30, 30, 200, 23],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [30, 30, 47, 22],
-          "reason": "full"
         }
       ]
     }
@@ -31,11 +21,11 @@
     },
     {
       "object": "LayoutBlockFlow DIV id='inner-editor'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "RootInlineBox",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutText #text",

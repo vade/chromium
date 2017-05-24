@@ -27,6 +27,7 @@
 #include "content/public/common/previews_state.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/request_priority.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -79,7 +80,7 @@ void ExpectDataUseAndQuit(base::RunLoop* ui_run_loop,
   // aren't thread safe.
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&base::RunLoop::Quit, base::Unretained(ui_run_loop)));
+      base::BindOnce(&base::RunLoop::Quit, base::Unretained(ui_run_loop)));
 }
 
 // Tests that for a sample URLRequest, associated with the given
@@ -99,7 +100,8 @@ void TestAnnotateOnIOThread(base::RunLoop* ui_run_loop,
   net::TestURLRequestContext context;
   net::TestDelegate test_delegate;
   std::unique_ptr<net::URLRequest> request =
-      context.CreateRequest(GURL("http://foo.com"), net::IDLE, &test_delegate);
+      context.CreateRequest(GURL("http://foo.com"), net::IDLE, &test_delegate,
+                            TRAFFIC_ANNOTATION_FOR_TESTS);
 
   if (render_process_id != -1 && render_frame_id != -1) {
     // The only args that matter here for the ResourceRequestInfo are the
@@ -135,9 +137,9 @@ TEST_F(TabIdAnnotatorTest, AnnotateWithNoRenderFrame) {
   base::RunLoop ui_run_loop;
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&TestAnnotateOnIOThread, &ui_run_loop,
-                 -1 /* render_process_id */, -1 /* render_frame_id */,
-                 -1 /* expected_tab_id */));
+      base::BindOnce(&TestAnnotateOnIOThread, &ui_run_loop,
+                     -1 /* render_process_id */, -1 /* render_frame_id */,
+                     -1 /* expected_tab_id */));
   ui_run_loop.Run();
 }
 
@@ -148,10 +150,10 @@ TEST_F(TabIdAnnotatorTest, AnnotateWithRenderFrameAndNoTab) {
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&TestAnnotateOnIOThread, &ui_run_loop,
-                 web_contents()->GetMainFrame()->GetProcess()->GetID(),
-                 web_contents()->GetMainFrame()->GetRoutingID(),
-                 -1 /* expected_tab_id */));
+      base::BindOnce(&TestAnnotateOnIOThread, &ui_run_loop,
+                     web_contents()->GetMainFrame()->GetProcess()->GetID(),
+                     web_contents()->GetMainFrame()->GetRoutingID(),
+                     -1 /* expected_tab_id */));
   ui_run_loop.Run();
 }
 
@@ -165,10 +167,10 @@ TEST_F(TabIdAnnotatorTest, AnnotateWithRenderFrameAndTab) {
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&TestAnnotateOnIOThread, &ui_run_loop,
-                 web_contents()->GetMainFrame()->GetProcess()->GetID(),
-                 web_contents()->GetMainFrame()->GetRoutingID(),
-                 expected_tab_id));
+      base::BindOnce(&TestAnnotateOnIOThread, &ui_run_loop,
+                     web_contents()->GetMainFrame()->GetProcess()->GetID(),
+                     web_contents()->GetMainFrame()->GetRoutingID(),
+                     expected_tab_id));
   ui_run_loop.Run();
 }
 

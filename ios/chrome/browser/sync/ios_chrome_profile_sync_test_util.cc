@@ -4,6 +4,8 @@
 
 #include "ios/chrome/browser/sync/ios_chrome_profile_sync_test_util.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
 #include "components/browser_sync/profile_sync_service_mock.h"
@@ -16,7 +18,6 @@
 #include "ios/chrome/browser/signin/signin_manager_factory.h"
 #include "ios/chrome/browser/sync/ios_chrome_sync_client.h"
 #include "ios/chrome/common/channel_info.h"
-#include "ios/web/public/web_thread.h"
 
 browser_sync::ProfileSyncService::InitParams
 CreateProfileSyncServiceParamsForTest(
@@ -38,7 +39,6 @@ CreateProfileSyncServiceParamsForTest(
   init_params.url_request_context = browser_state->GetRequestContext();
   init_params.debug_identifier = browser_state->GetDebugName();
   init_params.channel = ::GetChannel();
-  init_params.blocking_pool = web::WebThread::GetBlockingPool();
 
   return init_params;
 }

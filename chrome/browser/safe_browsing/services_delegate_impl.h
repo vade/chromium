@@ -30,17 +30,15 @@ class ServicesDelegateImpl : public ServicesDelegate {
   // ServicesDelegate:
   const scoped_refptr<SafeBrowsingDatabaseManager>& v4_local_database_manager()
       const override;
-  void Initialize() override;
+  void Initialize(bool v4_enabled) override;
   void InitializeCsdService(
       net::URLRequestContextGetter* context_getter) override;
   void ShutdownServices() override;
   void RefreshState(bool enable) override;
   void ProcessResourceRequest(const ResourceRequestInfo* request) override;
-  std::unique_ptr<TrackedPreferenceValidationDelegate>
-      CreatePreferenceValidationDelegate(Profile* profile) override;
+  std::unique_ptr<prefs::mojom::TrackedPreferenceValidationDelegate>
+  CreatePreferenceValidationDelegate(Profile* profile) override;
   void RegisterDelayedAnalysisCallback(
-      const DelayedAnalysisCallback& callback) override;
-  void RegisterExtendedReportingOnlyDelayedAnalysisCallback(
       const DelayedAnalysisCallback& callback) override;
   void AddDownloadManager(content::DownloadManager* download_manager) override;
   ClientSideDetectionService* GetCsdService() override;
@@ -50,6 +48,14 @@ class ServicesDelegateImpl : public ServicesDelegate {
     net::URLRequestContextGetter* url_request_context_getter,
     const V4ProtocolConfig& v4_config) override;
   void StopOnIOThread(bool shutdown) override;
+
+  // Reports the current extended reporting level. Note that this is an
+  // estimation and may not always be correct. It is possible that the
+  // estimation finds both Scout and legacy extended reporting to be enabled.
+  // This can happen, for instance, if one profile has Scout enabled and another
+  // has legacy extended reporting enabled. In such a case, this method reports
+  // LEGACY as the current level.
+  ExtendedReportingLevel GetEstimatedExtendedReportingLevel() const;
 
   DownloadProtectionService* CreateDownloadProtectionService();
   IncidentReportingService* CreateIncidentReportingService();

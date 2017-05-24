@@ -15,6 +15,8 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task_runner.h"
+#include "base/test/null_task_runner.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "crypto/ec_private_key.h"
 #include "net/base/net_errors.h"
@@ -24,6 +26,7 @@
 #include "net/ssl/default_channel_id_store.h"
 #include "net/test/channel_id_test_util.h"
 #include "net/test/gtest_util.h"
+#include "net/test/net_test_suite.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -37,28 +40,6 @@ namespace {
 void FailTest(int /* result */) {
   FAIL();
 }
-
-// Simple task runner that refuses to actually post any tasks. This simulates
-// a TaskRunner that has been shutdown, by returning false for any attempt to
-// add new tasks.
-class FailingTaskRunner : public base::TaskRunner {
- public:
-  FailingTaskRunner() {}
-
-  bool PostDelayedTask(const tracked_objects::Location& from_here,
-                       const base::Closure& task,
-                       base::TimeDelta delay) override {
-    return false;
-  }
-
-  bool RunsTasksOnCurrentThread() const override { return true; }
-
- protected:
-  ~FailingTaskRunner() override {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(FailingTaskRunner);
-};
 
 class MockChannelIDStoreWithAsyncGet
     : public DefaultChannelIDStore {
@@ -111,8 +92,7 @@ void MockChannelIDStoreWithAsyncGet::CallGetChannelIDCallbackWithResult(
 class ChannelIDServiceTest : public testing::Test {
  public:
   ChannelIDServiceTest()
-      : service_(new ChannelIDService(new DefaultChannelIDStore(NULL),
-                                      base::ThreadTaskRunnerHandle::Get())) {}
+      : service_(new ChannelIDService(new DefaultChannelIDStore(NULL))) {}
 
  protected:
   std::unique_ptr<ChannelIDService> service_;
@@ -321,7 +301,7 @@ TEST_F(ChannelIDServiceTest, CancelRequest) {
 
   // Wait for reply from ChannelIDServiceWorker to be posted back to the
   // ChannelIDService.
-  base::RunLoop().RunUntilIdle();
+  NetTestSuite::GetScopedTaskEnvironment()->RunUntilIdle();
 
   // Even though the original request was cancelled, the service will still
   // store the result, it just doesn't call the callback.
@@ -346,7 +326,7 @@ TEST_F(ChannelIDServiceTest, CancelRequestByHandleDestruction) {
 
   // Wait for reply from ChannelIDServiceWorker to be posted back to the
   // ChannelIDService.
-  base::RunLoop().RunUntilIdle();
+  NetTestSuite::GetScopedTaskEnvironment()->RunUntilIdle();
 
   // Even though the original request was cancelled, the service will still
   // store the result, it just doesn't call the callback.
@@ -376,13 +356,11 @@ TEST_F(ChannelIDServiceTest, DestructionWithPendingRequest) {
   // If we got here without crashing or a valgrind error, it worked.
 }
 
-// Tests that shutting down the sequenced worker pool and then making new
-// requests gracefully fails.
-// This is a regression test for http://crbug.com/236387
+// Tests that making new requests when the ChannelIDService can no longer post
+// tasks gracefully fails. This is a regression test for http://crbug.com/236387
 TEST_F(ChannelIDServiceTest, RequestAfterPoolShutdown) {
-  scoped_refptr<FailingTaskRunner> task_runner(new FailingTaskRunner);
-  service_.reset(new ChannelIDService(
-      new DefaultChannelIDStore(NULL), task_runner));
+  service_->set_task_runner_for_testing(
+      make_scoped_refptr(new base::NullTaskRunner()));
 
   // Make a request that will force synchronous completion.
   std::string host("encrypted.google.com");
@@ -393,8 +371,8 @@ TEST_F(ChannelIDServiceTest, RequestAfterPoolShutdown) {
   error = service_->GetOrCreateChannelID(host, &key, base::Bind(&FailTest),
                                          &request);
   // If we got here without crashing or a valgrind error, it worked.
-  ASSERT_THAT(error, IsError(ERR_INSUFFICIENT_RESOURCES));
-  EXPECT_FALSE(request.is_active());
+  ASSERT_THAT(error, IsError(ERR_IO_PENDING));
+  EXPECT_TRUE(request.is_active());
 }
 
 // Tests that simultaneous creation of different certs works.
@@ -453,8 +431,8 @@ TEST_F(ChannelIDServiceTest, SimultaneousCreation) {
 TEST_F(ChannelIDServiceTest, AsyncStoreGetOrCreateNoChannelIDsInStore) {
   MockChannelIDStoreWithAsyncGet* mock_store =
       new MockChannelIDStoreWithAsyncGet();
-  service_ = std::unique_ptr<ChannelIDService>(
-      new ChannelIDService(mock_store, base::ThreadTaskRunnerHandle::Get()));
+  service_ =
+      std::unique_ptr<ChannelIDService>(new ChannelIDService(mock_store));
 
   std::string host("encrypted.google.com");
 
@@ -482,8 +460,8 @@ TEST_F(ChannelIDServiceTest, AsyncStoreGetOrCreateNoChannelIDsInStore) {
 TEST_F(ChannelIDServiceTest, AsyncStoreGetNoChannelIDsInStore) {
   MockChannelIDStoreWithAsyncGet* mock_store =
       new MockChannelIDStoreWithAsyncGet();
-  service_ = std::unique_ptr<ChannelIDService>(
-      new ChannelIDService(mock_store, base::ThreadTaskRunnerHandle::Get()));
+  service_ =
+      std::unique_ptr<ChannelIDService>(new ChannelIDService(mock_store));
 
   std::string host("encrypted.google.com");
 
@@ -511,8 +489,8 @@ TEST_F(ChannelIDServiceTest, AsyncStoreGetNoChannelIDsInStore) {
 TEST_F(ChannelIDServiceTest, AsyncStoreGetOrCreateOneCertInStore) {
   MockChannelIDStoreWithAsyncGet* mock_store =
       new MockChannelIDStoreWithAsyncGet();
-  service_ = std::unique_ptr<ChannelIDService>(
-      new ChannelIDService(mock_store, base::ThreadTaskRunnerHandle::Get()));
+  service_ =
+      std::unique_ptr<ChannelIDService>(new ChannelIDService(mock_store));
 
   std::string host("encrypted.google.com");
 
@@ -548,8 +526,8 @@ TEST_F(ChannelIDServiceTest, AsyncStoreGetOrCreateOneCertInStore) {
 TEST_F(ChannelIDServiceTest, AsyncStoreGetOneCertInStore) {
   MockChannelIDStoreWithAsyncGet* mock_store =
       new MockChannelIDStoreWithAsyncGet();
-  service_ = std::unique_ptr<ChannelIDService>(
-      new ChannelIDService(mock_store, base::ThreadTaskRunnerHandle::Get()));
+  service_ =
+      std::unique_ptr<ChannelIDService>(new ChannelIDService(mock_store));
 
   std::string host("encrypted.google.com");
 
@@ -584,8 +562,8 @@ TEST_F(ChannelIDServiceTest, AsyncStoreGetOneCertInStore) {
 TEST_F(ChannelIDServiceTest, AsyncStoreGetThenCreateNoCertsInStore) {
   MockChannelIDStoreWithAsyncGet* mock_store =
       new MockChannelIDStoreWithAsyncGet();
-  service_ = std::unique_ptr<ChannelIDService>(
-      new ChannelIDService(mock_store, base::ThreadTaskRunnerHandle::Get()));
+  service_ =
+      std::unique_ptr<ChannelIDService>(new ChannelIDService(mock_store));
 
   std::string host("encrypted.google.com");
 

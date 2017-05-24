@@ -18,9 +18,9 @@
 #include "base/timer/timer.h"
 #include "extensions/browser/api/api_resource.h"
 #include "extensions/browser/api/api_resource_manager.h"
+#include "extensions/browser/api/cast_channel/cast_auth_util.h"
 #include "extensions/browser/api/cast_channel/cast_socket.h"
 #include "extensions/browser/api/cast_channel/cast_transport.h"
-#include "extensions/browser/api/cast_channel/logger_util.h"
 #include "extensions/common/api/cast_channel.h"
 #include "extensions/common/api/cast_channel/logging.pb.h"
 #include "net/base/completion_callback.h"
@@ -71,6 +71,9 @@ class CastSocket : public ApiResource {
   // Instead use Close().
   // |callback| will be invoked with any ChannelError that occurred, or
   // CHANNEL_ERROR_NONE if successful.
+  // If the CastSocket is destroyed while the connection is pending, |callback|
+  // will be invoked with CHANNEL_ERROR_UNKNOWN. In this case, invoking
+  // |callback| must not result in any re-entrancy behavior.
   // |delegate| receives message receipt and error events.
   // Ownership of |delegate| is transferred to this CastSocket.
   virtual void Connect(std::unique_ptr<CastTransport::Delegate> delegate,
@@ -153,6 +156,18 @@ class CastSocketImpl : public CastSocket {
                  bool keep_alive,
                  const scoped_refptr<Logger>& logger,
                  uint64_t device_capabilities);
+
+  // For test-only.
+  // This constructor allows for setting a custom AuthContext.
+  CastSocketImpl(const std::string& owner_extension_id,
+                 const net::IPEndPoint& ip_endpoint,
+                 ChannelAuthType channel_auth,
+                 net::NetLog* net_log,
+                 const base::TimeDelta& connect_timeout,
+                 bool keep_alive,
+                 const scoped_refptr<Logger>& logger,
+                 uint64_t device_capabilities,
+                 const AuthContext& auth_context);
 
   // Ensures that the socket is closed.
   ~CastSocketImpl() override;
@@ -270,7 +285,12 @@ class CastSocketImpl : public CastSocket {
   int DoAuthChallengeReplyComplete(int result);
   /////////////////////////////////////////////////////////////////////////////
 
-  // Schedules asynchrous connection loop processing in the MessageLoop.
+  // Resets the cancellable callback used for async invocations of
+  // DoConnectLoop.
+  void ResetConnectLoopCallback();
+
+  // Posts a task to invoke |connect_loop_callback_| with |result| on the
+  // current message loop.
   void PostTaskToStartConnectLoop(int result);
 
   // Runs the external connection callback and resets it.
@@ -320,6 +340,9 @@ class CastSocketImpl : public CastSocket {
   // certificate is not yet fetched.
   scoped_refptr<net::X509Certificate> peer_cert_;
 
+  // The challenge context for the current connection.
+  const AuthContext auth_context_;
+
   // Reply received from the receiver to a challenge request.
   std::unique_ptr<CastMessage> challenge_reply_;
 
@@ -361,13 +384,12 @@ class CastSocketImpl : public CastSocket {
   // The current status of the channel.
   ReadyState ready_state_;
 
-  // Task invoked to (re)start the connect loop.  Canceled on entry to the
-  // connect loop.
-  base::CancelableClosure connect_loop_callback_;
-
-  // Task invoked to send the auth challenge.  Canceled when the auth challenge
-  // has been sent.
-  base::CancelableClosure send_auth_challenge_callback_;
+  // Callback which, when invoked, will re-enter the connection state machine.
+  // Oustanding callbacks will be cancelled when |this| is destroyed.
+  // The callback signature is based on net::CompletionCallback, which passes
+  // operation result codes as byte counts in the success case, or as
+  // net::Error enum values for error cases.
+  base::CancelableCallback<void(int)> connect_loop_callback_;
 
   // Cast message formatting and parsing layer.
   std::unique_ptr<CastTransport> transport_;

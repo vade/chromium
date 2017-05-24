@@ -2,18 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/common/wm/window_positioner.h"
-#include "ash/common/wm/window_positioning_utils.h"
-#include "ash/common/wm_shell.h"
-#include "ash/common/wm_window.h"
+#include "components/exo/touch.h"
+
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
+#include "ash/shell_port.h"
+#include "ash/wm/window_positioner.h"
+#include "ash/wm/window_positioning_utils.h"
+#include "ash/wm_window.h"
 #include "components/exo/buffer.h"
 #include "components/exo/shell_surface.h"
 #include "components/exo/surface.h"
 #include "components/exo/test/exo_test_base.h"
 #include "components/exo/test/exo_test_helper.h"
-#include "components/exo/touch.h"
 #include "components/exo/touch_delegate.h"
 #include "components/exo/touch_stylus_delegate.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -164,23 +165,24 @@ TEST_F(TouchTest, OnTouchShape) {
     testing::InSequence sequence;
     EXPECT_CALL(delegate, OnTouchDown(window.surface(), testing::_, testing::_,
                                       gfx::PointF()));
-    EXPECT_CALL(delegate, OnTouchShape(testing::_, 1, 1));
+    EXPECT_CALL(delegate, OnTouchShape(testing::_, 20, 10));
     EXPECT_CALL(delegate, OnTouchFrame());
     EXPECT_CALL(delegate,
                 OnTouchMotion(testing::_, testing::_, gfx::PointF(5, 5)));
-    EXPECT_CALL(delegate, OnTouchShape(testing::_, 1, 1));
+    EXPECT_CALL(delegate, OnTouchShape(testing::_, 20, 10));
     EXPECT_CALL(delegate, OnTouchFrame());
     EXPECT_CALL(delegate,
                 OnTouchMotion(testing::_, testing::_, gfx::PointF(10, 10)));
-    EXPECT_CALL(delegate, OnTouchShape(testing::_, 20, 10));
+    EXPECT_CALL(delegate, OnTouchShape(testing::_, 20, 20));
     EXPECT_CALL(delegate, OnTouchFrame());
     EXPECT_CALL(delegate, OnTouchUp(testing::_, testing::_));
     EXPECT_CALL(delegate, OnTouchFrame());
   }
   generator.set_current_location(window.origin());
+  generator.SetTouchRadius(10, 5);
   generator.PressTouch();
   generator.MoveTouchBy(5, 5);
-  generator.SetTouchRadius(20, 10);
+  generator.SetTouchRadius(10, 0);  // Minor not supported
   generator.MoveTouchBy(5, 5);
   generator.ReleaseTouch();
   EXPECT_CALL(delegate, OnTouchDestroying(touch.get()));
@@ -209,8 +211,9 @@ TEST_F(TouchTest, OnTouchCancel) {
   // One touch point being canceled is enough for OnTouchCancel to be called.
   EXPECT_CALL(delegate, OnTouchCancel());
   EXPECT_CALL(delegate, OnTouchFrame());
-  ui::TouchEvent cancel_event(ui::ET_TOUCH_CANCELLED, gfx::Point(), 1,
-                              ui::EventTimeForNow());
+  ui::TouchEvent cancel_event(
+      ui::ET_TOUCH_CANCELLED, gfx::Point(), ui::EventTimeForNow(),
+      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 1));
   generator.Dispatch(&cancel_event);
 
   EXPECT_CALL(delegate, OnTouchDestroying(touch.get()));
@@ -228,7 +231,7 @@ TEST_F(TouchTest, IgnoreTouchEventDuringModal) {
   // Make the window modal.
   modal.shell_surface()->SetSystemModal(true);
 
-  EXPECT_TRUE(ash::WmShell::Get()->IsSystemModalWindowOpen());
+  EXPECT_TRUE(ash::ShellPort::Get()->IsSystemModalWindowOpen());
   EXPECT_CALL(delegate, OnTouchShape(testing::_, testing::_, testing::_))
       .Times(testing::AnyNumber());
   EXPECT_CALL(delegate, CanAcceptTouchEventsForSurface(window.surface()))
@@ -268,7 +271,7 @@ TEST_F(TouchTest, IgnoreTouchEventDuringModal) {
 
   // Make the window non-modal.
   modal.shell_surface()->SetSystemModal(false);
-  EXPECT_FALSE(ash::WmShell::Get()->IsSystemModalWindowOpen());
+  EXPECT_FALSE(ash::ShellPort::Get()->IsSystemModalWindowOpen());
 
   // Check if touch events on non-modal window are registered.
   {

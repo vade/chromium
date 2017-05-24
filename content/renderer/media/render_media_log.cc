@@ -47,9 +47,23 @@ RenderMediaLog::RenderMediaLog(const GURL& security_origin)
       task_runner_(base::ThreadTaskRunnerHandle::Get()),
       tick_clock_(new base::DefaultTickClock()),
       last_ipc_send_time_(tick_clock_->NowTicks()),
-      ipc_send_pending_(false) {
+      ipc_send_pending_(false),
+      weak_factory_(this) {
   DCHECK(RenderThread::Get())
       << "RenderMediaLog must be constructed on the render thread";
+  // Pre-bind the WeakPtr on the right thread since we'll receive calls from
+  // other threads and don't want races.
+  weak_this_ = weak_factory_.GetWeakPtr();
+}
+
+RenderMediaLog::~RenderMediaLog() {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+
+  // There's no further chance to handle this, so send them now. This should not
+  // be racy since nothing should have a pointer to the media log on another
+  // thread by this point.
+  if (ipc_send_pending_)
+    SendQueuedMediaEvents();
 }
 
 void RenderMediaLog::AddEvent(std::unique_ptr<media::MediaLogEvent> event) {
@@ -72,15 +86,22 @@ void RenderMediaLog::AddEvent(std::unique_ptr<media::MediaLogEvent> event) {
         // kind, if any, prior to sending the event batch.
         break;
 
-      // Hold onto the most recent PIPELINE_ERROR and MEDIA_LOG_ERROR_ENTRY for
-      // use in GetLastErrorMessage().
+      case media::MediaLogEvent::DURATION_SET:
+        // Similar to the extents changed message, this may fire many times for
+        // badly muxed media. Suppress within our rate limits here.
+        last_duration_changed_event_.swap(event);
+        break;
+
+      // Hold onto the most recent PIPELINE_ERROR and the first, if any,
+      // MEDIA_LOG_ERROR_ENTRY for use in GetErrorMessage().
       case media::MediaLogEvent::PIPELINE_ERROR:
         queued_media_events_.push_back(*event);
         last_pipeline_error_.swap(event);
         break;
       case media::MediaLogEvent::MEDIA_ERROR_LOG_ENTRY:
         queued_media_events_.push_back(*event);
-        last_media_error_log_entry_.swap(event);
+        if (!cached_media_error_for_message_)
+          cached_media_error_for_message_ = std::move(event);
         break;
 
       // Just enqueue all other event types for throttled transmission.
@@ -98,7 +119,8 @@ void RenderMediaLog::AddEvent(std::unique_ptr<media::MediaLogEvent> event) {
 
   if (delay_for_next_ipc_send > base::TimeDelta()) {
     task_runner_->PostDelayedTask(
-        FROM_HERE, base::Bind(&RenderMediaLog::SendQueuedMediaEvents, this),
+        FROM_HERE,
+        base::Bind(&RenderMediaLog::SendQueuedMediaEvents, weak_this_),
         delay_for_next_ipc_send);
     return;
   }
@@ -109,21 +131,29 @@ void RenderMediaLog::AddEvent(std::unique_ptr<media::MediaLogEvent> event) {
     return;
   }
   task_runner_->PostTask(
-      FROM_HERE, base::Bind(&RenderMediaLog::SendQueuedMediaEvents, this));
+      FROM_HERE,
+      base::Bind(&RenderMediaLog::SendQueuedMediaEvents, weak_this_));
 }
 
-std::string RenderMediaLog::GetLastErrorMessage() {
+std::string RenderMediaLog::GetErrorMessage() {
   base::AutoLock auto_lock(lock_);
 
-  // Return the conditional concatenation of the last pipeline error and the
-  // last media error log.
+  // Keep message structure in sync with
+  // HTMLMediaElement::BuildElementErrorMessage().
+
   std::stringstream result;
-  if (last_pipeline_error_) {
-    result << MediaEventToLogString(*last_pipeline_error_)
-           << (last_media_error_log_entry_ ? ", " : "");
+  if (last_pipeline_error_)
+    result << MediaEventToMessageString(*last_pipeline_error_);
+
+  if (cached_media_error_for_message_) {
+    DCHECK(last_pipeline_error_)
+        << "Message with detail should be associated with a pipeline error";
+    // This ':' lets web apps extract the UA-specific-error-code from the
+    // MediaError.message prefix.
+    result << ": "
+           << MediaEventToMessageString(*cached_media_error_for_message_);
   }
-  if (last_media_error_log_entry_)
-    result << MediaEventToLogString(*last_media_error_log_entry_);
+
   return result.str();
 }
 
@@ -131,7 +161,7 @@ void RenderMediaLog::RecordRapporWithSecurityOrigin(const std::string& metric) {
   if (!task_runner_->BelongsToCurrentThread()) {
     task_runner_->PostTask(
         FROM_HERE, base::Bind(&RenderMediaLog::RecordRapporWithSecurityOrigin,
-                              this, metric));
+                              weak_this_, metric));
     return;
   }
 
@@ -153,14 +183,19 @@ void RenderMediaLog::SendQueuedMediaEvents() {
       last_buffered_extents_changed_event_.reset();
     }
 
+    if (last_duration_changed_event_) {
+      queued_media_events_.push_back(*last_duration_changed_event_);
+      last_duration_changed_event_.reset();
+    }
+
     queued_media_events_.swap(events_to_send);
     last_ipc_send_time_ = tick_clock_->NowTicks();
   }
 
-  RenderThread::Get()->Send(new ViewHostMsg_MediaLogEvents(events_to_send));
-}
+  if (events_to_send.empty())
+    return;
 
-RenderMediaLog::~RenderMediaLog() {
+  RenderThread::Get()->Send(new ViewHostMsg_MediaLogEvents(events_to_send));
 }
 
 void RenderMediaLog::SetTickClockForTesting(

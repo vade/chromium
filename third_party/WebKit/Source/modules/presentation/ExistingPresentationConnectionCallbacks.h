@@ -6,34 +6,40 @@
 #define ExistingPresentationConnectionCallbacks_h
 
 #include "platform/heap/Handle.h"
+#include "platform/wtf/Noncopyable.h"
 #include "public/platform/WebCallbacks.h"
-#include "wtf/Noncopyable.h"
+#include "public/platform/modules/presentation/WebPresentationConnectionCallbacks.h"
 
 namespace blink {
 
 class PresentationConnection;
 class ScriptPromiseResolver;
+struct WebPresentationInfo;
 struct WebPresentationError;
-struct WebPresentationSessionInfo;
 
 // ExistingPresentationConnectionCallbacks extends WebCallbacks to resolve the
 // underlying promise. It takes the PresentationConnection object that
 // originated the call in its constructor and will resolve underlying promise
 // with that object.
+// TODO(crbug.com/684111): Combine ExistingPresentationConnectionCallbacks with
+// PresentationConnectionCallbacks
 class ExistingPresentationConnectionCallbacks final
-    : public WebCallbacks<const WebPresentationSessionInfo&,
-                          const WebPresentationError&> {
+    : public WebPresentationConnectionCallbacks {
  public:
   ExistingPresentationConnectionCallbacks(ScriptPromiseResolver*,
                                           PresentationConnection*);
   ~ExistingPresentationConnectionCallbacks() override = default;
 
-  void onSuccess(const WebPresentationSessionInfo&) override;
-  void onError(const WebPresentationError&) override;
+  // WebCallbacks implementation
+  void OnSuccess(const WebPresentationInfo&) override;
+  void OnError(const WebPresentationError&) override;
+
+  // WebPresentationConnectionCallbacks implementation
+  WebPresentationConnection* GetConnection() override;
 
  private:
-  Persistent<ScriptPromiseResolver> m_resolver;
-  Persistent<PresentationConnection> m_connection;
+  Persistent<ScriptPromiseResolver> resolver_;
+  Persistent<PresentationConnection> connection_;
 
   WTF_MAKE_NONCOPYABLE(ExistingPresentationConnectionCallbacks);
 };

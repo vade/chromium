@@ -12,7 +12,7 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/process/kill.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/api/messaging/native_messaging_host_manifest.h"
 #include "chrome/browser/extensions/api/messaging/native_process_launcher.h"
@@ -70,9 +70,9 @@ NativeMessageProcessHost::~NativeMessageProcessHost() {
     // On OSX base::EnsureProcessTerminated() may block, so we have to post a
     // task on the blocking pool.
 #if defined(OS_MACOSX)
-    content::BrowserThread::PostBlockingPoolTask(
-        FROM_HERE,
-        base::Bind(&base::EnsureProcessTerminated, Passed(&process_)));
+    base::PostTaskWithTraits(
+        FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+        base::BindOnce(&base::EnsureProcessTerminated, Passed(&process_)));
 #else
     base::EnsureProcessTerminated(std::move(process_));
 #endif
@@ -144,10 +144,9 @@ void NativeMessageProcessHost::OnHostProcessLaunched(
   read_file_ = read_file.GetPlatformFile();
 #endif
 
-  scoped_refptr<base::TaskRunner> task_runner(
-      content::BrowserThread::GetBlockingPool()->
-          GetTaskRunnerWithShutdownBehavior(
-              base::SequencedWorkerPool::SKIP_ON_SHUTDOWN));
+  scoped_refptr<base::TaskRunner> task_runner(base::CreateTaskRunnerWithTraits(
+      {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
+       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN}));
 
   read_stream_.reset(new net::FileStream(std::move(read_file), task_runner));
   write_stream_.reset(new net::FileStream(std::move(write_file), task_runner));
@@ -189,9 +188,8 @@ void NativeMessageProcessHost::Start(Client* client) {
   // It's safe to use base::Unretained() here because NativeMessagePort always
   // deletes us on the IO thread.
   task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&NativeMessageProcessHost::LaunchHostProcess,
-                 weak_factory_.GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&NativeMessageProcessHost::LaunchHostProcess,
+                                weak_factory_.GetWeakPtr()));
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>

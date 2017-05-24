@@ -4,40 +4,45 @@
 
 #include "modules/sensor/Gyroscope.h"
 
-#include "modules/sensor/GyroscopeReading.h"
 
 using device::mojom::blink::SensorType;
 
 namespace blink {
 
-Gyroscope* Gyroscope::create(ExecutionContext* executionContext,
+Gyroscope* Gyroscope::Create(ExecutionContext* execution_context,
                              const SensorOptions& options,
-                             ExceptionState& exceptionState) {
-  return new Gyroscope(executionContext, options, exceptionState);
+                             ExceptionState& exception_state) {
+  return new Gyroscope(execution_context, options, exception_state);
 }
 
 // static
-Gyroscope* Gyroscope::create(ExecutionContext* executionContext,
-                             ExceptionState& exceptionState) {
-  return create(executionContext, SensorOptions(), exceptionState);
+Gyroscope* Gyroscope::Create(ExecutionContext* execution_context,
+                             ExceptionState& exception_state) {
+  return Create(execution_context, SensorOptions(), exception_state);
 }
 
-Gyroscope::Gyroscope(ExecutionContext* executionContext,
+Gyroscope::Gyroscope(ExecutionContext* execution_context,
                      const SensorOptions& options,
-                     ExceptionState& exceptionState)
-    : Sensor(executionContext, options, exceptionState, SensorType::GYROSCOPE) {
+                     ExceptionState& exception_state)
+    : Sensor(execution_context,
+             options,
+             exception_state,
+             SensorType::GYROSCOPE) {}
+
+double Gyroscope::x(bool& is_null) const {
+  return ReadingValue(0, is_null);
 }
 
-GyroscopeReading* Gyroscope::reading() const {
-  return static_cast<GyroscopeReading*>(Sensor::reading());
+double Gyroscope::y(bool& is_null) const {
+  return ReadingValue(1, is_null);
 }
 
-std::unique_ptr<SensorReadingFactory> Gyroscope::createSensorReadingFactory() {
-  return WTF::makeUnique<SensorReadingFactoryImpl<GyroscopeReading>>();
+double Gyroscope::z(bool& is_null) const {
+  return ReadingValue(2, is_null);
 }
 
 DEFINE_TRACE(Gyroscope) {
-  Sensor::trace(visitor);
+  Sensor::Trace(visitor);
 }
 
 }  // namespace blink

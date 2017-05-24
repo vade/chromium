@@ -12,12 +12,14 @@
 #ifndef V8TestInterface2Partial_h
 #define V8TestInterface2Partial_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
-#include "bindings/core/v8/ToV8.h"
-#include "bindings/core/v8/V8Binding.h"
-#include "bindings/core/v8/V8DOMWrapper.h"
-#include "bindings/core/v8/WrapperTypeInfo.h"
+#include "bindings/core/v8/GeneratedCodeHelper.h"
+#include "bindings/core/v8/NativeValueTraits.h"
+#include "bindings/core/v8/ToV8ForCore.h"
+#include "bindings/core/v8/V8BindingForCore.h"
 #include "bindings/tests/idls/core/TestInterface2.h"
+#include "platform/bindings/ScriptWrappable.h"
+#include "platform/bindings/V8DOMWrapper.h"
+#include "platform/bindings/WrapperTypeInfo.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -26,6 +28,11 @@ class V8TestInterface2Partial {
   STATIC_ONLY(V8TestInterface2Partial);
  public:
   static void initialize();
+
+  // Callback functions
+
+  static void voidMethodPartial1MethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void voidMethodPartial2MethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info);
 
  private:
   static void installV8TestInterface2Template(v8::Isolate*, const DOMWrapperWorld&, v8::Local<v8::FunctionTemplate> interfaceTemplate);

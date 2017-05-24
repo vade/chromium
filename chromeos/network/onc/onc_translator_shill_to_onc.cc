@@ -33,7 +33,7 @@ std::unique_ptr<base::Value> ConvertStringToValue(const std::string& str,
                                                   base::Value::Type type) {
   std::unique_ptr<base::Value> value;
   if (type == base::Value::Type::STRING) {
-    value.reset(new base::StringValue(str));
+    value.reset(new base::Value(str));
   } else {
     value = base::JSONReader::Read(str);
   }
@@ -90,6 +90,7 @@ class ShillToONCTranslator {
   void TranslateSavedOrStaticIPConfig();
   void TranslateSavedIPConfig();
   void TranslateStaticIPConfig();
+  void TranslateEap();
 
   // Creates an ONC object from |dictionary| according to the signature
   // associated to |onc_field_name| and adds it to |onc_object_| at
@@ -180,6 +181,8 @@ ShillToONCTranslator::CreateTranslatedONCObject() {
     TranslateSavedIPConfig();
   } else if (onc_signature_ == &kStaticIPConfigSignature) {
     TranslateStaticIPConfig();
+  } else if (onc_signature_ == &kEAPSignature) {
+    TranslateEap();
   } else {
     CopyPropertiesAccordingToSignature();
   }
@@ -324,7 +327,7 @@ void ShillToONCTranslator::TranslateVPN() {
       shill_dictionary_->GetBooleanWithoutPathExpansion(
           shill::kSaveCredentialsProperty, &save_credentials)) {
     SetNestedOncValue(provider_type_dictionary, ::onc::vpn::kSaveCredentials,
-                      base::FundamentalValue(save_credentials));
+                      base::Value(save_credentials));
   }
 }
 
@@ -583,7 +586,7 @@ void ShillToONCTranslator::TranslateNetworkWithState() {
         ReadDictionaryFromJson(proxy_config_str));
     if (proxy_config_value) {
       std::unique_ptr<base::DictionaryValue> proxy_settings =
-          ConvertProxyConfigToOncProxySettings(*proxy_config_value);
+          ConvertProxyConfigToOncProxySettings(std::move(proxy_config_value));
       if (proxy_settings) {
         onc_object_->SetWithoutPathExpansion(
             ::onc::network_config::kProxySettings, proxy_settings.release());
@@ -628,6 +631,21 @@ void ShillToONCTranslator::TranslateSavedIPConfig() {
 
 void ShillToONCTranslator::TranslateStaticIPConfig() {
   TranslateSavedOrStaticIPConfig();
+}
+
+void ShillToONCTranslator::TranslateEap() {
+  CopyPropertiesAccordingToSignature();
+
+  // Translate EAP Outer and Inner values if EAP.EAP exists and is not empty.
+  std::string shill_eap;
+  if (shill_dictionary_->GetStringWithoutPathExpansion(
+          shill::kEapMethodProperty, &shill_eap) &&
+      !shill_eap.empty()) {
+    TranslateWithTableAndSet(shill::kEapMethodProperty, kEAPOuterTable,
+                             ::onc::eap::kOuter);
+    TranslateWithTableAndSet(shill::kEapPhase2AuthProperty,
+                             kEAP_TTLS_InnerTable, ::onc::eap::kInner);
+  }
 }
 
 void ShillToONCTranslator::TranslateAndAddNestedObject(
@@ -683,7 +701,7 @@ void ShillToONCTranslator::TranslateAndAddListOfObjects(
   for (base::ListValue::const_iterator it = list.begin(); it != list.end();
        ++it) {
     const base::DictionaryValue* shill_value = NULL;
-    if (!(*it)->GetAsDictionary(&shill_value))
+    if (!it->GetAsDictionary(&shill_value))
       continue;
     ShillToONCTranslator nested_translator(
         *shill_value, onc_source_,

@@ -4,6 +4,7 @@
 
 #include "base/command_line.h"
 #include "base/location.h"
+#include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/test_timeouts.h"
@@ -54,9 +55,8 @@ class TabCaptureApiTest : public ExtensionApiTest {
  protected:
   void SimulateMouseClickInCurrentTab() {
     content::SimulateMouseClick(
-        browser()->tab_strip_model()->GetActiveWebContents(),
-        0,
-        blink::WebMouseEvent::Button::Left);
+        browser()->tab_strip_model()->GetActiveWebContents(), 0,
+        blink::WebMouseEvent::Button::kLeft);
   }
 };
 
@@ -75,8 +75,8 @@ class TabCaptureApiPixelTest : public TabCaptureApiTest {
       return true;
 #endif
 
-    // The tests are too slow to succeed with OSMesa on the bots.
-    if (UsingOSMesa())
+    // The tests are too slow to succeed with software GL on the bots.
+    if (UsingSoftwareGL())
       return true;
 
 #if defined(NDEBUG)

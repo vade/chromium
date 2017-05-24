@@ -9,21 +9,22 @@
 #include <utility>
 #include <vector>
 
-#include "ash/common/shelf/wm_shelf.h"
-#include "ash/common/wm/window_animation_types.h"
-#include "ash/common/wm/workspace_controller.h"
-#include "ash/common/wm_window.h"
-#include "ash/screen_util.h"
+#include "ash/shelf/wm_shelf.h"
+#include "ash/wm/window_animation_types.h"
 #include "ash/wm/window_util.h"
+#include "ash/wm/workspace_controller.h"
+#include "ash/wm_window.h"
 #include "base/i18n/rtl.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
 #include "base/time/time.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
-#include "ui/aura/window_property.h"
+#include "ui/base/class_property.h"
 #include "ui/compositor/compositor_observer.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_observer.h"
@@ -35,6 +36,7 @@
 #include "ui/display/screen.h"
 #include "ui/gfx/interpolated_transform.h"
 #include "ui/gfx/transform.h"
+#include "ui/wm/core/coordinate_conversion.h"
 #include "ui/wm/core/window_util.h"
 
 namespace ash {
@@ -84,6 +86,22 @@ base::TimeDelta GetCrossFadeDuration(aura::Window* window,
       Round64(kCrossFadeDurationMinMs + (factor * kRange)));
 }
 
+class CrossFadeMetricsReporter : public ui::AnimationMetricsReporter {
+ public:
+  CrossFadeMetricsReporter() = default;
+  ~CrossFadeMetricsReporter() override = default;
+
+  void Report(int value) override {
+    UMA_HISTOGRAM_PERCENTAGE("Ash.Window.AnimationSmoothness.CrossFade", value);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(CrossFadeMetricsReporter);
+};
+
+base::LazyInstance<CrossFadeMetricsReporter>::Leaky g_reporter_cross_fade =
+    LAZY_INSTANCE_INITIALIZER;
+
 }  // namespace
 
 const int kCrossFadeDurationMS = 200;
@@ -93,8 +111,7 @@ void AddLayerAnimationsForMinimize(aura::Window* window, bool show) {
   // moved while the window was minimized.
   gfx::Rect bounds = window->bounds();
   gfx::Rect target_bounds = GetMinimizeAnimationTargetBoundsInScreen(window);
-  target_bounds =
-      ScreenUtil::ConvertRectFromScreen(window->parent(), target_bounds);
+  ::wm::ConvertRectFromScreen(window->parent(), &target_bounds);
 
   float scale_x = static_cast<float>(target_bounds.width()) / bounds.width();
   float scale_y = static_cast<float>(target_bounds.height()) / bounds.height();
@@ -320,6 +337,8 @@ base::TimeDelta CrossFadeAnimation(
         new CrossFadeObserver(window, std::move(old_layer_owner)));
     settings.SetTransitionDuration(duration);
     settings.SetTweenType(tween_type);
+    // Only add reporter to |old_layer|.
+    settings.SetAnimationMetricsReporter(g_reporter_cross_fade.Pointer());
     gfx::Transform out_transform;
     float scale_x = static_cast<float>(new_bounds.width()) /
                     static_cast<float>(old_bounds.width());
@@ -414,7 +433,7 @@ CreateBrightnessGrayscaleAnimationSequence(float target_value,
 
 gfx::Rect GetMinimizeAnimationTargetBoundsInScreen(aura::Window* window) {
   WmWindow* wm_window = WmWindow::Get(window);
-  WmShelf* shelf = WmShelf::ForWindow(wm_window);
+  WmShelf* shelf = WmShelf::ForWindow(window);
   gfx::Rect item_rect = shelf->GetScreenBoundsOfItemIconForWindow(wm_window);
 
   // The launcher item is visible and has an icon.

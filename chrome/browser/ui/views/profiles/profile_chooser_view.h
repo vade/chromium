@@ -23,10 +23,6 @@
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/link_listener.h"
 #include "ui/views/controls/styled_label_listener.h"
-#include "ui/views/controls/textfield/textfield_controller.h"
-
-class EditableProfilePhoto;
-class EditableProfileName;
 
 namespace views {
 class GridLayout;
@@ -44,7 +40,6 @@ class ProfileChooserView : public content::WebContentsDelegate,
                            public views::ButtonListener,
                            public views::LinkListener,
                            public views::StyledLabelListener,
-                           public views::TextfieldController,
                            public AvatarMenuObserver,
                            public OAuth2TokenService::Observer {
  public:
@@ -59,9 +54,13 @@ class ProfileChooserView : public content::WebContentsDelegate,
       const signin::ManageAccountsParams& manage_accounts_params,
       signin_metrics::AccessPoint access_point,
       views::View* anchor_view,
-      Browser* browser);
+      Browser* browser,
+      bool is_source_keyboard);
   static bool IsShowing();
+  static views::Widget* GetCurrentBubbleWidget();
   static void Hide();
+
+  const Browser* browser() const { return browser_; }
 
  private:
   friend class ProfileChooserViewExtensionsTest;
@@ -100,10 +99,6 @@ class ProfileChooserView : public content::WebContentsDelegate,
                               const gfx::Range& range,
                               int event_flags) override;
 
-  // views::TextfieldController:
-  bool HandleKeyEvent(views::Textfield* sender,
-                      const ui::KeyEvent& key_event) override;
-
   // AvatarMenuObserver:
   void OnAvatarMenuChanged(AvatarMenu* avatar_menu) override;
 
@@ -125,26 +120,16 @@ class ProfileChooserView : public content::WebContentsDelegate,
                 AvatarMenu* avatar_menu);
   void ShowViewFromMode(profiles::BubbleViewMode mode);
 
+  // Focuses the first profile button in the menu list.
+  void FocusFirstProfileButton();
+
   // Creates the profile chooser view.
   views::View* CreateProfileChooserView(AvatarMenu* avatar_menu);
-
-  // Populates |layout| with only a list of the profiles available to
-  // switch to.
-  void PopulateMinimalProfileChooserView(views::GridLayout* layout,
-                                         AvatarMenu* avatar_menu);
-
-  // Populates |layout| with all the elements of the Avatar Menu (current user
-  // bubble, options buttons, tutorials).
-  void PopulateCompleteProfileChooserView(views::GridLayout* layout,
-                                          AvatarMenu* avatar_menu);
 
   // Creates the main profile card for the profile |avatar_item|. |is_guest|
   // is used to determine whether to show any Sign in/Sign out/Manage accounts
   // links.
   views::View* CreateCurrentProfileView(
-      const AvatarMenu::Item& avatar_item,
-      bool is_guest);
-  views::View* CreateMaterialDesignCurrentProfileView(
       const AvatarMenu::Item& avatar_item,
       bool is_guest);
   views::View* CreateGuestProfileView();
@@ -160,9 +145,6 @@ class ProfileChooserView : public content::WebContentsDelegate,
                            bool is_primary_account,
                            bool reauth_required,
                            int width);
-
-  // Creates a webview showing the gaia signin page.
-  views::View* CreateGaiaSigninView(views::View** signin_content_view);
 
   // Creates a view to confirm account removal for |account_id_to_remove_|.
   views::View* CreateAccountRemovalView();
@@ -185,9 +167,6 @@ class ProfileChooserView : public content::WebContentsDelegate,
 
   // Creates a tutorial card to show the errors in the last Chrome signin.
   views::View* CreateSigninErrorView();
-
-  // Creates a tutorial card telling the user about right-click user switching.
-  views::View* CreateRightClickTutorialView();
 
   views::View* CreateTutorialViewIfNeeded(const AvatarMenu::Item& item);
 
@@ -250,15 +229,12 @@ class ProfileChooserView : public content::WebContentsDelegate,
   views::LabelButton* signin_current_profile_button_;
   views::LabelButton* auth_error_email_button_;
 
-  // The profile name and photo in the active profile card in non-material-
-  // design user menu. Owned by the views hierarchy.
-  EditableProfilePhoto* current_profile_photo_;
-  EditableProfileName* current_profile_name_;
   // For material design user menu, the active profile card owns the profile
   // name and photo.
   views::LabelButton* current_profile_card_;
 
   // Action buttons.
+  views::LabelButton* first_profile_button_;
   views::LabelButton* guest_profile_button_;
   views::LabelButton* users_button_;
   views::LabelButton* go_incognito_button_;

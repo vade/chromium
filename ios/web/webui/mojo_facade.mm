@@ -4,12 +4,15 @@
 
 #import "ios/web/webui/mojo_facade.h"
 
+#include <utility>
+
 #import <Foundation/Foundation.h>
 
 #import "base/ios/block_types.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #import "base/mac/bind_objc_block.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #import "ios/web/public/web_state/js/crw_js_injection_evaluator.h"
@@ -29,7 +32,7 @@ namespace {
 template <typename IntegerT>
 std::unique_ptr<base::Value> ValueFromInteger(IntegerT handle) {
   return std::unique_ptr<base::Value>(
-      new base::FundamentalValue(static_cast<int>(handle)));
+      new base::Value(static_cast<int>(handle)));
 }
 
 }  // namespace
@@ -249,16 +252,17 @@ std::unique_ptr<base::Value> MojoFacade::HandleSupportWatch(
   int callback_id;
   CHECK(args->GetInteger("callbackId", &callback_id));
 
-  mojo::Watcher::ReadyCallback callback = base::BindBlockArc(^(
+  mojo::SimpleWatcher::ReadyCallback callback = base::BindBlockArc(^(
       MojoResult result) {
     NSString* script =
         [NSString stringWithFormat:@"__crWeb.mojo.signalWatch(%d, %d)",
                                    callback_id, result];
     [script_evaluator_ executeJavaScript:script completionHandler:nil];
   });
-
-  mojo::Watcher& watcher = watchers_[++last_watch_id_];
-  watcher.Start(static_cast<mojo::Handle>(handle), signals, callback);
+  mojo::SimpleWatcher* watcher = new mojo::SimpleWatcher(
+      FROM_HERE, mojo::SimpleWatcher::ArmingPolicy::AUTOMATIC);
+  watchers_.insert(std::make_pair(++last_watch_id_, base::WrapUnique(watcher)));
+  watcher->Watch(static_cast<mojo::Handle>(handle), signals, callback);
   return ValueFromInteger(last_watch_id_);
 }
 

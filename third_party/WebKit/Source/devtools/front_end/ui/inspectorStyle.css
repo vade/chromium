@@ -48,7 +48,7 @@ body {
 
 .platform-linux {
     color: rgb(48, 57, 66);
-    font-family: Ubuntu, Arial, sans-serif;
+    font-family: Roboto, Ubuntu, Arial, sans-serif;
 }
 
 .platform-mac {
@@ -69,6 +69,7 @@ body {
     right: 0;
     bottom: 0;
     z-index: 0;
+    background-color: white;
 }
 
 .panel-sidebar {

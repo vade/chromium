@@ -21,9 +21,13 @@ component("compositor") {
     "compositor.h",
     "compositor_animation_observer.h",
     "compositor_export.h",
+    "compositor_lock.cc",
+    "compositor_lock.h",
     "compositor_observer.h",
     "compositor_switches.cc",
     "compositor_switches.h",
+    "compositor_util.cc",
+    "compositor_util.h",
     "compositor_vsync_manager.cc",
     "compositor_vsync_manager.h",
     "debug_utils.cc",
@@ -79,12 +83,15 @@ component("compositor") {
     "//base/third_party/dynamic_annotations",
     "//cc",
     "//cc/animation",
+    "//cc/paint",
     "//cc/surfaces",
     "//cc/surfaces:surface_id",
     "//cc/surfaces:surfaces",
     "//gpu/command_buffer/common",
     "//skia",
+    "//ui/display",
     "//ui/gfx",
+    "//ui/gfx/animation",
     "//ui/gfx/geometry",
     "//ui/gl",
   ]
@@ -107,6 +114,10 @@ static_library("test_support") {
     "test/context_factories_for_test.h",
     "test/draw_waiter_for_test.cc",
     "test/draw_waiter_for_test.h",
+    "test/fake_compositor_lock.cc",
+    "test/fake_compositor_lock.h",
+    "test/fake_context_factory.cc",
+    "test/fake_context_factory.h",
     "test/in_process_context_factory.cc",
     "test/in_process_context_factory.h",
     "test/in_process_context_provider.cc",
@@ -163,6 +174,8 @@ static_library("test_support") {
 
   if (use_ozone) {
     sources += [ "test/test_compositor_host_ozone.cc" ]
+
+    deps += [ "//ui/ozone" ]
   } else if (use_x11) {
     sources += [ "test/test_compositor_host_x11.cc" ]
   }

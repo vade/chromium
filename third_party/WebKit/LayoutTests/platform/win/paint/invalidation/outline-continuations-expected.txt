@@ -8,33 +8,23 @@
       "paintInvalidations": [
         {
           "object": "LayoutBlockFlow (anonymous)",
-          "rect": [18, 148, 200, 18],
-          "reason": "forced by layout"
+          "rect": [18, 150, 200, 20],
+          "reason": "geometry"
         },
         {
           "object": "LayoutBlockFlow (anonymous)",
-          "rect": [18, 110, 200, 18],
-          "reason": "forced by layout"
+          "rect": [18, 110, 200, 20],
+          "reason": "geometry"
         },
         {
           "object": "LayoutInline SPAN id='outer'",
-          "rect": [16, 108, 88, 59],
+          "rect": [16, 108, 87, 63],
           "reason": "style change"
         },
         {
           "object": "LayoutInline SPAN id='outer'",
-          "rect": [16, 146, 88, 21],
+          "rect": [16, 148, 87, 23],
           "reason": "style change"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [18, 148, 84, 17],
-          "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [18, 110, 84, 17],
-          "reason": "forced by layout"
         }
       ]
     }
@@ -42,11 +32,11 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutBlockFlow (anonymous)",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "RootInlineBox",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutInline SPAN id='outer'",
@@ -58,19 +48,19 @@
     },
     {
       "object": "LayoutText #text",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'CONTENTS'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutBlockFlow (anonymous)",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "RootInlineBox",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutInline SPAN id='outer'",
@@ -82,15 +72,15 @@
     },
     {
       "object": "LayoutText #text",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "InlineTextBox 'CONTENTS'",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutBlockFlow (anonymous)",
-      "reason": "forced by layout"
+      "reason": "geometry"
     },
     {
       "object": "LayoutInline SPAN id='outer'",

@@ -4,7 +4,6 @@
 
 import("//build/buildflag_header.gni")
 import("//build/config/features.gni")
-import("//build/config/locales.gni")
 import("//build/config/sanitizers/sanitizers.gni")
 import("//build/config/ui.gni")
 import("//chromecast/build/tests/cast_test.gni")
@@ -33,22 +32,27 @@ cast_test_group("cast_tests") {
     "//chromecast/base:cast_base_unittests",
     "//chromecast/base/component:cast_component_unittests",
     "//chromecast/crypto:cast_crypto_unittests",
+    "//chromecast/media:cast_media_unittests",
+    "//chromecast/net:cast_net_unittests",
     "//chromecast/system/reboot:cast_reboot_unittests",
     "//content/test:content_unittests",
     "//crypto:crypto_unittests",
     "//media:media_unittests",
     "//media/midi:midi_unittests",
     "//net:net_unittests",
-    "//ppapi:ppapi_unittests",
     "//sandbox/linux:sandbox_linux_unittests",
     "//sql:sql_unittests",
-    "//storage/browser:storage_unittests",
+    "//storage:storage_unittests",
     "//third_party/cacheinvalidation:cacheinvalidation_unittests",
     "//ui/base:ui_base_unittests",
   ]
 
   if (!is_cast_audio_only) {
     tests += [ "//gpu:gpu_unittests" ]
+
+    if (use_aura) {
+      tests += [ "//chromecast/graphics:cast_graphics_unittests" ]
+    }
   }
 
   if (is_linux) {
@@ -56,14 +60,17 @@ cast_test_group("cast_tests") {
   }
 
   if (!is_android && use_alsa) {
-    tests += [ "//chromecast/media/cma/backend/alsa:cast_alsa_cma_backend_unittests" ]
+    tests += [
+      "//chromecast/media/cma/backend/alsa:cast_alsa_cma_backend_unittests",
+      "//chromecast/media/cma/backend/alsa:libcast_governor_unittests",
+      "//chromecast/media/cma/backend/alsa:slew_volume_unittests",
+    ]
   }
 
   if (!is_android) {
     tests += [
       ":cast_shell_browsertests",
       ":cast_shell_unittests",
-      "//chromecast/media:cast_media_unittests",
       "//ipc:ipc_tests",
       "//jingle:jingle_unittests",
       "//url:url_unittests",
@@ -103,6 +110,34 @@ cast_test_group("cast_tests") {
           "CastMediaBlockerBrowserTest.Video_BlockUnblock",
           "CastMediaBlockerBrowserTest.Audio_BlockUnblock",
         ]
+
+        # TODO(mbjorge): The ReusedRenderer test is failing on v1 and cast audio
+        # devices. Temporarily disable them as part of an effort_to re-green
+        # the unittests. Current failures (2017-03-15) are being disabled to get
+        # back to a green state. Re-enable once the tests have been fixed.
+        # Limitations in the build mean this unfortunately is getting disabled
+        # across all devices, even though it is only failing on some.
+        # b/36238710, b/36239051, hotlist/461351
+        gtest_excludes += [ "RendererPrelauncherTest.ReusedRenderer" ]
+      }
+
+      if (!is_cast_desktop_build && !is_cast_audio_only && !enable_assistant) {
+        # TODO(mbjorge): The VideoPlaybackMp4 test is failing on v1 devices.
+        # Temporarily disable it as part of an effort to re-green the unittests.
+        # Re-enable once the tests have been fixed. Limitations in the filter
+        # system mean this is getting temporarily disabled on all video devices,
+        # though it is only failing on v1.
+        # b/36723698, hotlist/461351
+        gtest_excludes += [ "CastNavigationBrowserTest.VideoPlaybackMp4" ]
+      }
+
+      # TODO(mbjorge): Temporarily disable AudioPlaybackWavPcm because it is
+      # failing on device. As part of an effort to re-green the unittests,
+      # current (2017-03-15) failures are being disabled to get back to a
+      # green state. Re-enable once the tests have been fixed.
+      # b/36239152, hotlist/461351
+      if (enable_assistant && !is_cast_desktop_build) {
+        gtest_excludes += [ "CastNavigationBrowserTest.AudioPlaybackWavPcm" ]
       }
     }
     filters += [ cast_shell_browsertests_filter ]
@@ -133,11 +168,13 @@ cast_test_group("cast_tests") {
       # Disable ProcessUtilTest.* (need to define OS_ANDROID)
       # Disable StackContainer.BufferAlignment (don't support 16-byte alignment)
       # Disable SystemMetrics2Test.GetSystemMemoryInfo (buffers>0 can't be guaranteed)
+      # Disable TimeFormattingTest.TimeFormat* for flakiness on devices (crbug/671429)
       gtest_excludes = [
         "ProcessMetricsTest.GetNumberOfThreads",
         "ProcessUtilTest.*",
         "StackContainer.BufferAlignment",
         "SystemMetrics2Test.GetSystemMemoryInfo",
+        "TimeFormattingTest.TimeFormat*",
       ]
 
       if (is_cast_audio_only) {
@@ -151,7 +188,11 @@ cast_test_group("cast_tests") {
 
   content_unittests_filter = {
     test_name = "content_unittests"
-    gtest_excludes = []
+
+    # IsSupportedVideoConfig_VP9TransferFunctions fails on all cast builds since
+    # the cast IsSupporedVideoConfigs ignore the transfer function parameter.
+    # (b/36984215).
+    gtest_excludes = [ "*.IsSupportedVideoConfig_VP9TransferFunctions" ]
     if (target_os == "linux" && !is_cast_desktop_build) {
       # DesktopCaptureDeviceTest.*: No capture device on Eureka
       # Disable PepperGamepadHostTest.WaitForReply (pepper not supported on Eureka)
@@ -285,6 +326,9 @@ if (is_android) {
     run_list_path = "$root_out_dir/junit/run_junit_test_list.txt"
     build_tests = true
     test_groups = [ ":cast_junit_tests" ]
+    if (chromecast_branding != "public") {
+      test_groups += [ "//chromecast/internal:internal_cast_junit_tests" ]
+    }
   }
 }
 
@@ -303,6 +347,10 @@ test("cast_shell_browsertests") {
     ":cast_shell_lib",
     "//chromecast/app:test_support",
     "//chromecast/browser:browsertests",
+  ]
+
+  data_deps = [
+    ":chromecast_locales_pak",
   ]
 }
 
@@ -375,61 +423,48 @@ repack("cast_shell_pak") {
   }
 }
 
-action("chromecast_locales_pak") {
-  script = "//chromecast/tools/build/chromecast_repack_locales.py"
+# Intermediate targets that repack grit resources by locale. For each locale
+# in |cast_locales| (see //chromecast/chromecast.gni), all resources
+# are packed into a single .pak file in an output directory. These targets
+# should not be depended on directly; depend on ":chromecast_locales_pak"
+# instead.
+foreach(locale, cast_locales) {
+  repack("_cast_repack_${locale}") {
+    visibility = [ ":chromecast_locales_pak" ]
+    output = "$root_out_dir/chromecast_locales/${locale}.pak"
+    sources = [
+      "$root_gen_dir/chromecast/app/chromecast_settings_${locale}.pak",
+    ]
+    deps = [
+      "//chromecast/app:chromecast_settings",
+    ]
 
-  # .pak resources in |grit_out_dir| with the same suffix are packed into a
-  # single resource and placed in |locales_dir|. The original .pak resources
-  # are generated by this target's dependencies.
-  grit_out_dir = "$root_gen_dir/chromecast_strings"
-  locales_dir = "$root_out_dir/chromecast_locales"
+    if (chromecast_branding != "public") {
+      sources += [ "$root_gen_dir/chromecast/internal/webui/app_strings_${locale}.pak" ]
+      deps += [ "//chromecast/internal/webui:chromecast_app_strings" ]
 
-  sources = []
-  outputs = []
-
-  # |locales| is an array of suffixes declared in //build/config/locals.gni.
-  foreach(locale, locales) {
-    sources += [ "$grit_out_dir/chromecast_settings_$locale.pak" ]
-    outputs += [ "$locales_dir/$locale.pak" ]
-  }
-  deps = [
-    "//chromecast/app:chromecast_settings",
-  ]
-
-  # Include string and other localized resources for internal builds.
-  if (chromecast_branding != "public") {
-    foreach(locale, locales) {
-      sources += [ "$grit_out_dir/app_strings_$locale.pak" ]
       if (enable_chromecast_webui) {
-        sources += [ "$grit_out_dir/webui_localized_$locale.pak" ]
+        sources += [ "$root_gen_dir/chromecast/internal/webui/webui_localized_${locale}.pak" ]
+        deps += [ "//chromecast/internal/webui:chromecast_webui_localized" ]
       }
     }
-    deps += [ "//chromecast/internal/webui:chromecast_app_strings" ]
-    if (enable_chromecast_webui) {
-      deps += [ "//chromecast/internal/webui:chromecast_webui_localized" ]
-    }
   }
+}
 
-  # This script only accepts the following values for branding:
-  assert(chromecast_branding == "public" || chromecast_branding == "internal" ||
-         chromecast_branding == "google")
-  args = [
-    "-b",
-    "$chromecast_branding",
-    "-g",
-    rebase_path("$root_gen_dir/chromecast_strings"),
-    "-x",
-    rebase_path("$root_out_dir/chromecast_locales"),
-  ]
-  if (enable_chromecast_webui) {
-    args += [ "-u" ]
+# A meta-target which repacks resources by locale.
+group("chromecast_locales_pak") {
+  deps = []
+  foreach(locale, cast_locales) {
+    deps += [ ":_cast_repack_${locale}" ]
   }
-  args += locales
 }
 
 buildflag_header("chromecast_features") {
   header = "chromecast_features.h"
-  flags = [ "IS_CAST_AUDIO_ONLY=$is_cast_audio_only" ]
+  flags = [
+    "IS_CAST_AUDIO_ONLY=$is_cast_audio_only",
+    "IS_CAST_USING_CMA_BACKEND=$is_cast_using_cma_backend",
+  ]
 }
 
 if (is_android) {

@@ -9,9 +9,9 @@
 #include <string>
 
 #include "base/macros.h"
-#include "chrome/browser/chromeos/login/enrollment/enrollment_screen_actor.h"
+#include "chrome/browser/chromeos/login/enrollment/enrollment_screen_view.h"
 #include "chrome/browser/chromeos/login/enrollment/enterprise_enrollment_helper.h"
-#include "chrome/browser/chromeos/login/screens/network_error_model.h"
+#include "chrome/browser/chromeos/login/screens/error_screen.h"
 #include "chrome/browser/chromeos/policy/enrollment_config.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
@@ -20,25 +20,36 @@
 
 namespace chromeos {
 
+class AuthPolicyLoginHelper;
 class ErrorScreensHistogramHelper;
 class HelpAppLauncher;
+
+// Possible error states of the Active Directory screen. Must be in the same
+// order as ACTIVE_DIRECTORY_ERROR_STATE enum values.
+enum class ActiveDirectoryErrorState {
+  NONE = 0,
+  MACHINE_NAME_INVALID = 1,
+  MACHINE_NAME_TOO_LONG = 2,
+  BAD_USERNAME = 3,
+  BAD_PASSWORD = 4,
+};
 
 // WebUIMessageHandler implementation which handles events occurring on the
 // page, such as the user pressing the signin button.
 class EnrollmentScreenHandler
     : public BaseScreenHandler,
-      public EnrollmentScreenActor,
+      public EnrollmentScreenView,
       public NetworkStateInformer::NetworkStateInformerObserver {
  public:
   EnrollmentScreenHandler(
       const scoped_refptr<NetworkStateInformer>& network_state_informer,
-      NetworkErrorModel* network_error_model);
+      ErrorScreen* error_screen);
   ~EnrollmentScreenHandler() override;
 
   // Implements WebUIMessageHandler:
   void RegisterMessages() override;
 
-  // Implements EnrollmentScreenActor:
+  // Implements EnrollmentScreenView:
   void SetParameters(Controller* controller,
                      const policy::EnrollmentConfig& config) override;
   void Show() override;
@@ -119,30 +130,34 @@ class EnrollmentScreenHandler
                           const std::string& user_name,
                           authpolicy::ErrorType code);
 
-  // Keeps the controller for this actor.
-  Controller* controller_;
+  // Keeps the controller for this view.
+  Controller* controller_ = nullptr;
 
-  bool show_on_init_;
+  bool show_on_init_ = false;
 
   // The enrollment configuration.
   policy::EnrollmentConfig config_;
 
   // True if screen was not shown yet.
-  bool first_show_;
+  bool first_show_ = true;
 
   // Whether we should handle network errors on enrollment screen.
   // True when signin screen step is shown.
-  bool observe_network_failure_;
+  bool observe_network_failure_ = false;
 
   // Network state informer used to keep signin screen up.
   scoped_refptr<NetworkStateInformer> network_state_informer_;
 
-  NetworkErrorModel* network_error_model_;
+  ErrorScreen* error_screen_ = nullptr;
 
   std::unique_ptr<ErrorScreensHistogramHelper> histogram_helper_;
 
   // Help application used for help dialogs.
   scoped_refptr<HelpAppLauncher> help_app_;
+
+  // Helper to call AuthPolicyClient and cancel calls if needed. Used to join
+  // Active Directory domain.
+  std::unique_ptr<AuthPolicyLoginHelper> authpolicy_login_helper_;
 
   base::WeakPtrFactory<EnrollmentScreenHandler> weak_ptr_factory_;
 

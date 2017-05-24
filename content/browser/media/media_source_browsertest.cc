@@ -5,7 +5,7 @@
 #include "base/command_line.h"
 #include "build/build_config.h"
 #include "content/browser/media/media_browsertest.h"
-#include "content/public/common/content_switches.h"
+#include "media/base/media_switches.h"
 #include "media/media_features.h"
 
 #if defined(OS_ANDROID)
@@ -44,8 +44,7 @@ class MediaSourceTest : public content::MediaBrowserTest {
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitch(
-        switches::kDisableGestureRequirementForMediaPlayback);
+    command_line->AppendSwitch(switches::kIgnoreAutoplayRestrictionsForTests);
   }
 };
 
@@ -78,7 +77,8 @@ IN_PROC_BROWSER_TEST_F(MediaSourceTest, Playback_AudioOnly_WebM) {
 }
 
 IN_PROC_BROWSER_TEST_F(MediaSourceTest, Playback_Type_Error) {
-  TestSimplePlayback("bear-320x240-video-only.webm", kWebMAudioOnly, kError);
+  TestSimplePlayback("bear-320x240-video-only.webm", kWebMAudioOnly,
+                     kErrorEvent);
 }
 
 // Flaky test crbug.com/246308

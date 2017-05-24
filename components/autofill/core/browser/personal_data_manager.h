@@ -27,9 +27,7 @@
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_member.h"
 #include "components/webdata/common/web_data_service_consumer.h"
-#if defined(OS_ANDROID)
 #include "net/url_request/url_request_context_getter.h"
-#endif
 
 class AccountTrackerService;
 class Browser;
@@ -107,10 +105,15 @@ class PersonalDataManager : public KeyedService,
   // a local credit card entry *and* |should_return_local_card| is true, the
   // data is stored into |imported_credit_card| so that we can prompt the user
   // whether to upload it.
-  // Returns |true| if sufficient address or credit card data was found.
-  bool ImportFormData(const FormStructure& form,
-                      bool should_return_local_card,
-                      std::unique_ptr<CreditCard>* imported_credit_card);
+  // |imported_credit_card_matches_masked_server_credit_card| is set to |true|
+  // if the |TypeAndLastFourDigits| in |imported_credit_card| matches the
+  // |TypeAndLastFourDigits| in a saved masked server card. Returns |true| if
+  // sufficient address or credit card data was found.
+  bool ImportFormData(
+      const FormStructure& form,
+      bool should_return_local_card,
+      std::unique_ptr<CreditCard>* imported_credit_card,
+      bool* imported_credit_card_matches_masked_server_credit_card);
 
   // Called to indicate |data_model| was used (to fill in a form). Updates
   // the database accordingly. Can invalidate |data_model|, particularly if
@@ -136,17 +139,26 @@ class PersonalDataManager : public KeyedService,
   // Removes the profile or credit card represented by |guid|.
   virtual void RemoveByGUID(const std::string& guid);
 
-  // Returns the profile with the specified |guid|, or NULL if there is no
+  // Returns the profile with the specified |guid|, or nullptr if there is no
   // profile with the specified |guid|. Both web and auxiliary profiles may
   // be returned.
   AutofillProfile* GetProfileByGUID(const std::string& guid);
 
-  // Adds |credit_card| to the web database.
-  void AddCreditCard(const CreditCard& credit_card);
+  // Returns the profile with the specified |guid| from the given |profiles|, or
+  // nullptr if there is no profile with the specified |guid|.
+  static AutofillProfile* GetProfileFromProfilesByGUID(
+      const std::string& guid,
+      const std::vector<AutofillProfile*>& profiles);
+
+  // Adds |credit_card| to the web database as a local card.
+  virtual void AddCreditCard(const CreditCard& credit_card);
 
   // Updates |credit_card| which already exists in the web database. This
   // can only be used on local credit cards.
   virtual void UpdateCreditCard(const CreditCard& credit_card);
+
+  // Adds |credit_card| to the web database as a full server card.
+  virtual void AddFullServerCreditCard(const CreditCard& credit_card);
 
   // Update a server card. Only the full number and masked/unmasked
   // status can be changed. Looks up the card by server ID.
@@ -168,7 +180,7 @@ class PersonalDataManager : public KeyedService,
   // Sets a server credit card for test.
   void AddServerCreditCardForTest(std::unique_ptr<CreditCard> credit_card);
 
-  // Returns the credit card with the specified |guid|, or NULL if there is
+  // Returns the credit card with the specified |guid|, or nullptr if there is
   // no credit card with the specified |guid|.
   virtual CreditCard* GetCreditCardByGUID(const std::string& guid);
 
@@ -183,17 +195,17 @@ class PersonalDataManager : public KeyedService,
 
   // This PersonalDataManager owns these profiles and credit cards.  Their
   // lifetime is until the web database is updated with new profile and credit
-  // card information, respectively.  |GetProfiles()| returns both web and
-  // auxiliary profiles.  |web_profiles()| returns only web profiles.
+  // card information, respectively.
+  // TODO(crbug.com/687352): Remove one of these since they do the same thing.
+  // |GetProfiles()| and |web_profiles()| returns only local profiles.
   virtual const std::vector<AutofillProfile*>& GetProfiles() const;
   virtual std::vector<AutofillProfile*> web_profiles() const;
+  // Returns just SERVER_PROFILES.
+  virtual std::vector<AutofillProfile*> GetServerProfiles() const;
   // Returns just LOCAL_CARD cards.
   virtual std::vector<CreditCard*> GetLocalCreditCards() const;
   // Returns all credit cards, server and local.
   virtual const std::vector<CreditCard*>& GetCreditCards() const;
-
-  // Returns true if there is some data synced from Wallet.
-  bool HasServerData() const;
 
   // Returns the profiles to suggest to the user, ordered by frecency.
   const std::vector<AutofillProfile*> GetProfilesToSuggest() const;
@@ -268,7 +280,6 @@ class PersonalDataManager : public KeyedService,
     NotifyPersonalDataChanged();
   }
 
-#if defined(OS_ANDROID)
   // Sets the URL request context getter to be used when normalizing addresses
   // with libaddressinput's address validator.
   void SetURLRequestContextGetter(
@@ -280,7 +291,6 @@ class PersonalDataManager : public KeyedService,
   net::URLRequestContextGetter* GetURLRequestContextGetter() const {
     return context_getter_.get();
   }
-#endif
 
  protected:
   // Only PersonalDataManagerFactory and certain tests can create instances of
@@ -316,10 +326,27 @@ class PersonalDataManager : public KeyedService,
                            ApplyDedupingRoutine_OncePerVersion);
   FRIEND_TEST_ALL_PREFIXES(PersonalDataManagerTest,
                            ApplyDedupingRoutine_MultipleDedupes);
+  FRIEND_TEST_ALL_PREFIXES(
+      PersonalDataManagerTest,
+      ConvertWalletAddressesAndUpdateWalletCards_NewProfile);
+  FRIEND_TEST_ALL_PREFIXES(
+      PersonalDataManagerTest,
+      ConvertWalletAddressesAndUpdateWalletCards_MergedProfile);
+  FRIEND_TEST_ALL_PREFIXES(
+      PersonalDataManagerTest,
+      ConvertWalletAddressesAndUpdateWalletCards_NewCrd_AddressAlreadyConverted);  // NOLINT
+  FRIEND_TEST_ALL_PREFIXES(
+      PersonalDataManagerTest,
+      ConvertWalletAddressesAndUpdateWalletCards_AlreadyConverted);
+  FRIEND_TEST_ALL_PREFIXES(
+      PersonalDataManagerTest,
+      ConvertWalletAddressesAndUpdateWalletCards_MultipleSimilarWalletAddresses);  // NOLINT
   friend class autofill::AutofillInteractiveTest;
   friend class autofill::AutofillTest;
   friend class autofill::PersonalDataManagerFactory;
   friend class PersonalDataManagerTest;
+  friend class PersonalDataManagerTestBase;
+  friend class SaveImportedProfileTest;
   friend class ProfileSyncServiceAutofillTest;
   friend class ::RemoveAutofillTester;
   friend std::default_delete<PersonalDataManager>;
@@ -416,7 +443,7 @@ class PersonalDataManager : public KeyedService,
   std::vector<std::unique_ptr<CreditCard>> server_credit_cards_;
 
   // A combination of local and server credit cards. The pointers are owned
-  // by the local/sverver_credit_cards_ vectors.
+  // by the local/server_credit_cards_ vectors.
   mutable std::vector<CreditCard*> credit_cards_;
 
   // When the manager makes a request from WebDataServiceBase, the database
@@ -453,16 +480,21 @@ class PersonalDataManager : public KeyedService,
   // Go through the |form| fields and attempt to extract a new credit card in
   // |imported_credit_card|, or update an existing card.
   // |should_return_local_card| will indicate whether |imported_credit_card| is
-  // filled even if an existing card was updated. Success is defined as having a
+  // filled even if an existing card was updated.
+  // |imported_credit_card_matches_masked_server_credit_card| will indicate
+  // whether |imported_credit_card| is filled even if an existing masked server
+  // card as the same |TypeAndLastFourDigits|. Success is defined as having a
   // new card to import, or having merged with an existing card.
-  bool ImportCreditCard(const FormStructure& form,
-                        bool should_return_local_card,
-                        std::unique_ptr<CreditCard>* imported_credit_card);
+  bool ImportCreditCard(
+      const FormStructure& form,
+      bool should_return_local_card,
+      std::unique_ptr<CreditCard>* imported_credit_card,
+      bool* imported_credit_card_matches_masked_server_credit_card);
 
   // Functionally equivalent to GetProfiles(), but also records metrics if
   // |record_metrics| is true. Metrics should be recorded when the returned
   // profiles will be used to populate the fields shown in an Autofill popup.
-  const std::vector<AutofillProfile*>& GetProfiles(
+  virtual const std::vector<AutofillProfile*>& GetProfiles(
       bool record_metrics) const;
 
   // Returns credit card suggestions based on the |cards_to_suggest| and the
@@ -501,6 +533,41 @@ class PersonalDataManager : public KeyedService,
   // updates the cards entries in the database.
   void UpdateCardsBillingAddressReference(
       const std::unordered_map<std::string, std::string>& guids_merge_map);
+
+  // Converts the Wallet addresses to local autofill profiles. This should be
+  // called after all the syncable data has been processed (local cards and
+  // profiles, Wallet data and metadata). Also updates Wallet cards' billing
+  // address id to point to the local profiles.
+  void ConvertWalletAddressesAndUpdateWalletCards();
+
+  // Converts the Wallet addresses into local profiles either by merging with an
+  // existing |local_profiles| of by adding a new one. Populates the
+  // |server_id_profiles_map| to be used when updating cards where the address
+  // was already converted. Also populates the |guids_merge_map| to keep the
+  // link between the Wallet address and the equivalent local profile (from
+  // merge or creation).
+  bool ConvertWalletAddressesToLocalProfiles(
+      std::vector<AutofillProfile>* local_profiles,
+      std::unordered_map<std::string, AutofillProfile*>* server_id_profiles_map,
+      std::unordered_map<std::string, std::string>* guids_merge_map);
+
+  // Goes through the Wallet cards to find cards where the billing address is a
+  // Wallet address which was already converted in a previous pass. Looks for a
+  // matching local profile and updates the |guids_merge_map| to make the card
+  // refert to it.
+  bool UpdateWalletCardsAlreadyConvertedBillingAddresses(
+      std::vector<AutofillProfile>* local_profiles,
+      std::unordered_map<std::string, AutofillProfile*>* server_id_profiles_map,
+      std::unordered_map<std::string, std::string>* guids_merge_map);
+
+  // Tries to merge the |server_address| into the |existing_profiles| if
+  // possible. Adds it to the list if no match is found. The existing profiles
+  // should be sorted by decreasing frecency outside of this method, since this
+  // will be called multiple times in a row. Returns the guid of the new or
+  // updated profile.
+  std::string MergeServerAddressesIntoProfiles(
+      const AutofillProfile& server_address,
+      std::vector<AutofillProfile>* existing_profiles);
 
   const std::string app_locale_;
 
@@ -541,11 +608,12 @@ class PersonalDataManager : public KeyedService,
   // True if autofill profile cleanup needs to be performed.
   bool is_autofill_profile_cleanup_pending_ = false;
 
-#if defined(OS_ANDROID)
+  // Whether new information was received from the sync server.
+  bool has_synced_new_data_ = false;
+
   // The context for the request to be used to fetch libaddressinput's address
   // validation rules.
   scoped_refptr<net::URLRequestContextGetter> context_getter_;
-#endif
 
   DISALLOW_COPY_AND_ASSIGN(PersonalDataManager);
 };

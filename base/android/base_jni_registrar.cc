@@ -7,11 +7,11 @@
 #include "base/android/animation_frame_time_histogram.h"
 #include "base/android/application_status_listener.h"
 #include "base/android/command_line_android.h"
-#include "base/android/context_utils.h"
 #include "base/android/cpu_features.h"
 #include "base/android/early_trace_event_binding.h"
 #include "base/android/field_trial_list.h"
 #include "base/android/important_file_writer_android.h"
+#include "base/android/java_exception_reporter.h"
 #include "base/android/java_handler_thread.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_registrar.h"
@@ -36,7 +36,6 @@ static RegistrationMethod kBaseRegisteredMethods[] = {
     {"ApplicationStatusListener",
      base::android::ApplicationStatusListener::RegisterBindings},
     {"CommandLine", base::android::RegisterCommandLine},
-    {"ContextUtils", base::android::RegisterContextUtils},
     {"CpuFeatures", base::android::RegisterCpuFeatures},
     {"EarlyTraceEvent", base::android::RegisterEarlyTraceEvent},
     {"FieldTrialList", base::android::RegisterFieldTrialList},
@@ -44,6 +43,7 @@ static RegistrationMethod kBaseRegisteredMethods[] = {
      base::android::RegisterImportantFileWriterAndroid},
     {"MemoryPressureListenerAndroid",
      base::android::MemoryPressureListenerAndroid::Register},
+    {"JavaExceptionReporter", base::android::RegisterJavaExceptionReporterJni},
     {"JavaHandlerThread", base::android::JavaHandlerThread::RegisterBindings},
     {"PathService", base::android::RegisterPathService},
     {"PowerMonitor", base::RegisterPowerMonitor},

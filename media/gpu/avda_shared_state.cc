@@ -61,9 +61,9 @@ class AVDASharedState::OnFrameAvailableHandler
   DISALLOW_COPY_AND_ASSIGN(OnFrameAvailableHandler);
 };
 
-AVDASharedState::AVDASharedState()
-    : surface_texture_service_id_(0),
-      frame_available_event_(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+AVDASharedState::AVDASharedState(
+    scoped_refptr<AVDASurfaceBundle> surface_bundle)
+    : frame_available_event_(base::WaitableEvent::ResetPolicy::AUTOMATIC,
                              base::WaitableEvent::InitialState::NOT_SIGNALED),
 
       gl_matrix_{
@@ -71,18 +71,27 @@ AVDASharedState::AVDASharedState()
           0, 1, 0, 0,  // matrix on the first call. Will be Y-flipped later.
           0, 0, 1, 0,  //
           0, 0, 0, 1,  // Comment preserves 4x4 formatting.
-      } {}
+      },
+      surface_bundle_(surface_bundle),
+      weak_this_factory_(this) {
+  // If the surface bundle has a surface texture, then register to receive
+  // OnFrameAvailable notifications.
+  if (surface_texture()) {
+    on_frame_available_handler_ =
+        new OnFrameAvailableHandler(this, surface_texture());
+  }
+
+  // If we're holding a reference to an overlay, then register to drop it if the
+  // overlay's surface is destroyed.
+  if (overlay()) {
+    overlay()->AddSurfaceDestroyedCallback(base::Bind(
+        &AVDASharedState::OnSurfaceDestroyed, weak_this_factory_.GetWeakPtr()));
+  }
+}
 
 AVDASharedState::~AVDASharedState() {
-  if (!surface_texture_service_id_)
-    return;
-
-  on_frame_available_handler_->ClearListener();
-  ui::ScopedMakeCurrent scoped_make_current(context_.get(), surface_.get());
-  if (scoped_make_current.Succeeded()) {
-    glDeleteTextures(1, &surface_texture_service_id_);
-    DCHECK_EQ(static_cast<GLenum>(GL_NO_ERROR), glGetError());
-  }
+  if (on_frame_available_handler_)
+    on_frame_available_handler_->ClearListener();
 }
 
 void AVDASharedState::SignalFrameAvailable() {
@@ -119,21 +128,6 @@ void AVDASharedState::WaitForFrameAvailable() {
   }
 }
 
-void AVDASharedState::SetSurfaceTexture(
-    scoped_refptr<gl::SurfaceTexture> surface_texture,
-    GLuint attached_service_id) {
-  DCHECK(surface_texture);
-  DCHECK(attached_service_id);
-  surface_texture_ = surface_texture;
-  surface_texture_service_id_ = attached_service_id;
-  context_ = gl::GLContext::GetCurrent();
-  surface_ = gl::GLSurface::GetCurrent();
-  DCHECK(context_);
-  DCHECK(surface_);
-  on_frame_available_handler_ =
-      new OnFrameAvailableHandler(this, surface_texture_.get());
-}
-
 void AVDASharedState::RenderCodecBufferToSurfaceTexture(
     MediaCodecBridge* codec,
     int codec_buffer_index) {
@@ -144,13 +138,18 @@ void AVDASharedState::RenderCodecBufferToSurfaceTexture(
 }
 
 void AVDASharedState::UpdateTexImage() {
-  surface_texture_->UpdateTexImage();
+  surface_texture()->UpdateTexImage();
   // Helpfully, this is already column major.
-  surface_texture_->GetTransformMatrix(gl_matrix_);
+  surface_texture()->GetTransformMatrix(gl_matrix_);
 }
 
 void AVDASharedState::GetTransformMatrix(float matrix[16]) const {
   memcpy(matrix, gl_matrix_, sizeof(gl_matrix_));
+}
+
+void AVDASharedState::OnSurfaceDestroyed(AndroidOverlay* overlay_raw) {
+  if (surface_bundle_ && overlay() == overlay_raw)
+    surface_bundle_ = nullptr;
 }
 
 }  // namespace media

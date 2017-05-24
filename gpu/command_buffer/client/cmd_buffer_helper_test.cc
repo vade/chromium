@@ -14,6 +14,7 @@
 #include "base/bind_helpers.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "gpu/command_buffer/client/cmd_buffer_helper.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
@@ -42,7 +43,7 @@ const int32_t kUnusedCommandId = 5;  // we use 0 and 2 currently.
 class CommandBufferServiceLocked : public CommandBufferService {
  public:
   explicit CommandBufferServiceLocked(
-      TransferBufferManagerInterface* transfer_buffer_manager)
+      TransferBufferManager* transfer_buffer_manager)
       : CommandBufferService(transfer_buffer_manager),
         flush_locked_(false),
         last_flush_(-1),
@@ -68,7 +69,9 @@ class CommandBufferServiceLocked : public CommandBufferService {
 
   int FlushCount() { return flush_count_; }
 
-  State WaitForGetOffsetInRange(int32_t start, int32_t end) override {
+  State WaitForGetOffsetInRange(uint32_t set_get_buffer_count,
+                                int32_t start,
+                                int32_t end) override {
     // Flush only if it's required to unblock this Wait.
     if (last_flush_ != -1 &&
         !CommandBuffer::InRange(start, end, previous_put_offset_)) {
@@ -76,7 +79,8 @@ class CommandBufferServiceLocked : public CommandBufferService {
       CommandBufferService::Flush(last_flush_);
       last_flush_ = -1;
     }
-    return CommandBufferService::WaitForGetOffsetInRange(start, end);
+    return CommandBufferService::WaitForGetOffsetInRange(set_get_buffer_count,
+                                                         start, end);
   }
 
  private:
@@ -100,11 +104,7 @@ class CommandBufferHelperTest : public testing::Test {
     EXPECT_CALL(*api_mock_, DoCommand(cmd::kNoop, _, _))
         .WillRepeatedly(Return(error::kNoError));
 
-    {
-      TransferBufferManager* manager = new TransferBufferManager(nullptr);
-      transfer_buffer_manager_ = manager;
-      EXPECT_TRUE(manager->Initialize());
-    }
+    transfer_buffer_manager_ = base::MakeUnique<TransferBufferManager>(nullptr);
     command_buffer_.reset(
         new CommandBufferServiceLocked(transfer_buffer_manager_.get()));
 
@@ -128,8 +128,6 @@ class CommandBufferHelperTest : public testing::Test {
     base::RunLoop().RunUntilIdle();
     test_command_args_.clear();
   }
-
-  const CommandParser* GetParser() const { return executor_->parser(); }
 
   int32_t ImmediateEntryCount() const {
     return helper_->immediate_entry_count_;
@@ -193,9 +191,9 @@ class CommandBufferHelperTest : public testing::Test {
     }
     helper_->Finish();
 
-    EXPECT_EQ(GetParser()->put(),
+    EXPECT_EQ(GetPutOffset(),
               (start_commands * cmd_size) % kTotalNumCommandEntries);
-    EXPECT_EQ(GetParser()->get(),
+    EXPECT_EQ(GetGetOffset(),
               (start_commands * cmd_size) % kTotalNumCommandEntries);
 
     // Lock flushing to force the buffer to get full.
@@ -222,8 +220,8 @@ class CommandBufferHelperTest : public testing::Test {
 
   // Checks that the buffer from put to put+size is free in the parser.
   void CheckFreeSpace(CommandBufferOffset put, unsigned int size) {
-    CommandBufferOffset parser_put = GetParser()->put();
-    CommandBufferOffset parser_get = GetParser()->get();
+    CommandBufferOffset parser_put = GetPutOffset();
+    CommandBufferOffset parser_get = GetGetOffset();
     CommandBufferOffset limit = put + size;
     if (parser_get > parser_put) {
       // "busy" buffer wraps, so "free" buffer is between put (inclusive) and
@@ -260,7 +258,7 @@ class CommandBufferHelperTest : public testing::Test {
   CommandBufferOffset get_helper_put() { return helper_->put_; }
 
   std::unique_ptr<AsyncAPIMock> api_mock_;
-  scoped_refptr<TransferBufferManagerInterface> transfer_buffer_manager_;
+  std::unique_ptr<TransferBufferManager> transfer_buffer_manager_;
   std::unique_ptr<CommandBufferServiceLocked> command_buffer_;
   std::unique_ptr<CommandExecutor> executor_;
   std::unique_ptr<CommandBufferHelper> helper_;
@@ -437,7 +435,6 @@ TEST_F(CommandBufferHelperTest, TestCalcImmediateEntriesOverFlushLimit) {
 TEST_F(CommandBufferHelperTest, TestCommandProcessing) {
   // Check initial state of the engine - it should have been configured by the
   // helper.
-  EXPECT_TRUE(GetParser() != NULL);
   EXPECT_EQ(error::kNoError, GetError());
   EXPECT_EQ(0, GetGetOffset());
 
@@ -457,7 +454,7 @@ TEST_F(CommandBufferHelperTest, TestCommandProcessing) {
   // Wait until it's done.
   helper_->Finish();
   // Check that the engine has no more work to do.
-  EXPECT_TRUE(GetParser()->IsEmpty());
+  EXPECT_EQ(GetGetOffset(), GetPutOffset());
 
   // Check that the commands did happen.
   Mock::VerifyAndClearExpectations(api_mock_.get());

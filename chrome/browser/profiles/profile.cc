@@ -17,7 +17,7 @@
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_prefs.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
-#include "components/safe_browsing_db/safe_browsing_prefs.h"
+#include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "components/sync/base/sync_prefs.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/notification_service.h"
@@ -100,6 +100,10 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(prefs::kSafeBrowsingScoutReportingEnabled,
                                 false);
   registry->RegisterBooleanPref(prefs::kSafeBrowsingScoutGroupSelected, false);
+  registry->RegisterBooleanPref(
+      prefs::kSafeBrowsingSawInterstitialExtendedReporting, false);
+  registry->RegisterBooleanPref(
+      prefs::kSafeBrowsingSawInterstitialScoutReporting, false);
   registry->RegisterBooleanPref(prefs::kSafeBrowsingProceedAnywayDisabled,
                                 false);
   registry->RegisterBooleanPref(prefs::kSSLErrorOverrideAllowed, true);
@@ -157,7 +161,6 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
                                std::string());
 #endif
 
-#if defined(ENABLE_MEDIA_ROUTER)
   registry->RegisterBooleanPref(
       prefs::kMediaRouterCloudServicesPrefSet,
       false,
@@ -171,11 +174,13 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
       false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterListPref(prefs::kMediaRouterTabMirroringSources);
-#endif
 
 #if defined(OS_CHROMEOS)
   registry->RegisterBooleanPref(prefs::kAllowScreenLock, true);
 #endif
+
+  registry->RegisterDictionaryPref(prefs::kWebShareVisitedTargets);
+  registry->RegisterDictionaryPref(prefs::kExcludedSchemes);
 }
 
 std::string Profile::GetDebugName() {

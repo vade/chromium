@@ -5,16 +5,12 @@
 #ifndef IOS_CLEAN_CHROME_BROWSER_UI_COMMANDS_TAB_COMMANDS_H_
 #define IOS_CLEAN_CHROME_BROWSER_UI_COMMANDS_TAB_COMMANDS_H_
 
-// ======                        New Architecture                         =====
-// =         This code is only used in the new iOS Chrome architecture.       =
-// ============================================================================
+#import "ios/web/public/navigation_manager.h"
 
-// Command protocol for commands relating to tabs.
-// (Commands are for communicating into or within the coordinator layer).
+// Commands relating to the Settings UI.
 @protocol TabCommands
-// Display the tab corresponding to |indexPath|. The receiver determines how
-// this correspondence relates to the tab model(s) it knows about.
-- (void)showTabAtIndexPath:(NSIndexPath*)indexPath;
+// Open a URL.
+- (void)loadURL:(web::NavigationManager::WebLoadParams)params;
 @end
 
 #endif  // IOS_CLEAN_CHROME_BROWSER_UI_COMMANDS_TAB_COMMANDS_H_

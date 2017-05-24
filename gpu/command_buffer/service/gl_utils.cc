@@ -4,6 +4,8 @@
 
 #include "gpu/command_buffer/service/gl_utils.h"
 
+#include <unordered_set>
+
 #include "base/metrics/histogram.h"
 #include "gpu/command_buffer/common/capabilities.h"
 #include "gpu/command_buffer/service/feature_info.h"
@@ -260,24 +262,6 @@ const char* GetServiceShadingLanguageVersionString(
     return "OpenGL ES GLSL ES 3.0 Chromium";
   else
     return "OpenGL ES GLSL ES 1.0 Chromium";
-}
-
-const char* GetServiceRendererString(const FeatureInfo* feature_info) {
-  // Return the unmasked RENDERER string for WebGL contexts.
-  // It is used by WEBGL_debug_renderer_info.
-  if (!feature_info->IsWebGLContext())
-    return "Chromium";
-  else
-    return reinterpret_cast<const char*>(glGetString(GL_RENDERER));
-}
-
-const char* GetServiceVendorString(const FeatureInfo* feature_info) {
-  // Return the unmasked VENDOR string for WebGL contexts.
-  // It is used by WEBGL_debug_renderer_info.
-  if (!feature_info->IsWebGLContext())
-    return "Chromium";
-  else
-    return reinterpret_cast<const char*>(glGetString(GL_VENDOR));
 }
 
 void APIENTRY LogGLDebugMessage(GLenum source,

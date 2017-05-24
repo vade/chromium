@@ -9,21 +9,19 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/json/json_reader.h"
-#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/grit/theme_resources.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_rep.h"
 
-using content::BrowserThread;
 using extensions::Extension;
 
 // Maps scale factors (enum values) to file path.
@@ -36,10 +34,7 @@ typedef std::map<int, TestScaleFactorToFileMap> TestFilePathMap;
 
 class BrowserThemePackTest : public ::testing::Test {
  public:
-  BrowserThemePackTest()
-      : message_loop(),
-        fake_ui_thread(BrowserThread::UI, &message_loop),
-        fake_file_thread(BrowserThread::FILE, &message_loop) {
+  BrowserThemePackTest() {
     std::vector<ui::ScaleFactor> scale_factors;
     scale_factors.push_back(ui::SCALE_FACTOR_100P);
     scale_factors.push_back(ui::SCALE_FACTOR_200P);
@@ -287,25 +282,21 @@ class BrowserThemePackTest : public ::testing::Test {
     ASSERT_FALSE(rep1.is_null());
     EXPECT_EQ(80, rep1.sk_bitmap().width());
     EXPECT_EQ(80, rep1.sk_bitmap().height());
-    rep1.sk_bitmap().lockPixels();
     EXPECT_EQ(SkColorSetRGB(255, 255, 255), rep1.sk_bitmap().getColor(4, 4));
     EXPECT_EQ(SkColorSetRGB(255, 255, 255), rep1.sk_bitmap().getColor(8, 8));
     EXPECT_EQ(SkColorSetRGB(0, 241, 237), rep1.sk_bitmap().getColor(16, 16));
     EXPECT_EQ(SkColorSetRGB(255, 255, 255), rep1.sk_bitmap().getColor(24, 24));
     EXPECT_EQ(SkColorSetRGB(0, 241, 237), rep1.sk_bitmap().getColor(32, 32));
-    rep1.sk_bitmap().unlockPixels();
     // Scale 200%.
     const gfx::ImageSkiaRep& rep2 = image_skia->GetRepresentation(2.0f);
     ASSERT_FALSE(rep2.is_null());
     EXPECT_EQ(160, rep2.sk_bitmap().width());
     EXPECT_EQ(160, rep2.sk_bitmap().height());
-    rep2.sk_bitmap().lockPixels();
     EXPECT_EQ(SkColorSetRGB(255, 255, 255), rep2.sk_bitmap().getColor(4, 4));
     EXPECT_EQ(SkColorSetRGB(223, 42, 0), rep2.sk_bitmap().getColor(8, 8));
     EXPECT_EQ(SkColorSetRGB(223, 42, 0), rep2.sk_bitmap().getColor(16, 16));
     EXPECT_EQ(SkColorSetRGB(223, 42, 0), rep2.sk_bitmap().getColor(24, 24));
     EXPECT_EQ(SkColorSetRGB(255, 255, 255), rep2.sk_bitmap().getColor(32, 32));
-    rep2.sk_bitmap().unlockPixels();
 
     // TODO(sschmitz): I plan to remove the following (to the end of the fct)
     // Reason: this test may be brittle. It depends on details of how we scale
@@ -327,7 +318,6 @@ class BrowserThemePackTest : public ::testing::Test {
     ASSERT_FALSE(rep3.is_null());
     EXPECT_EQ(80, rep3.sk_bitmap().width());
     EXPECT_EQ(80, rep3.sk_bitmap().height());
-    rep3.sk_bitmap().lockPixels();
     // We take samples of colors and locations along the diagonal whenever
     // the color changes. Note these colors are slightly different from
     // the input PNG file due to input processing.
@@ -343,13 +333,11 @@ class BrowserThemePackTest : public ::testing::Test {
       }
     }
     EXPECT_EQ(static_cast<size_t>(9), normal.size());
-    rep3.sk_bitmap().unlockPixels();
     // Scale 200%.
     const gfx::ImageSkiaRep& rep4 = image_skia->GetRepresentation(2.0f);
     ASSERT_FALSE(rep4.is_null());
     EXPECT_EQ(160, rep4.sk_bitmap().width());
     EXPECT_EQ(160, rep4.sk_bitmap().height());
-    rep4.sk_bitmap().lockPixels();
     // We expect the same colors and at locations scaled by 2
     // since this bitmap was scaled by 2.
     for (size_t i = 0; i < normal.size(); ++i) {
@@ -357,12 +345,9 @@ class BrowserThemePackTest : public ::testing::Test {
       SkColor color = normal[i].second;
       EXPECT_EQ(color, rep4.sk_bitmap().getColor(xy, xy));
     }
-    rep4.sk_bitmap().unlockPixels();
   }
 
-  base::MessageLoop message_loop;
-  content::TestBrowserThread fake_ui_thread;
-  content::TestBrowserThread fake_file_thread;
+  content::TestBrowserThreadBundle test_browser_thread_bundle_;
 
   typedef std::unique_ptr<ui::test::ScopedSetSupportedScaleFactors>
       ScopedSetSupportedScaleFactors;
@@ -370,47 +355,11 @@ class BrowserThemePackTest : public ::testing::Test {
   scoped_refptr<BrowserThemePack> theme_pack_;
 };
 
-
-TEST_F(BrowserThemePackTest, DeriveUnderlineLinkColor) {
-  // If we specify a link color, but don't specify the underline color, the
-  // theme provider should create one.
-  std::string color_json = "{ \"ntp_link\": [128, 128, 128],"
-                           "  \"ntp_section_link\": [128, 128, 128] }";
-  LoadColorJSON(color_json);
-
-  std::map<int, SkColor> colors = GetDefaultColorMap();
-  SkColor link_color = SkColorSetRGB(128, 128, 128);
-  colors[ThemeProperties::COLOR_NTP_LINK] = link_color;
-  colors[ThemeProperties::COLOR_NTP_LINK_UNDERLINE] =
-      BuildThirdOpacity(link_color);
-  colors[ThemeProperties::COLOR_NTP_SECTION_LINK] = link_color;
-  colors[ThemeProperties::COLOR_NTP_SECTION_LINK_UNDERLINE] =
-      BuildThirdOpacity(link_color);
-
-  VerifyColorMap(colors);
-}
-
-TEST_F(BrowserThemePackTest, ProvideUnderlineLinkColor) {
-  // If we specify the underline color, it shouldn't try to generate one.
-  std::string color_json = "{ \"ntp_link\": [128, 128, 128],"
-                           "  \"ntp_link_underline\": [255, 255, 255],"
-                           "  \"ntp_section_link\": [128, 128, 128],"
-                           "  \"ntp_section_link_underline\": [255, 255, 255]"
-                           "}";
-  LoadColorJSON(color_json);
-
-  std::map<int, SkColor> colors = GetDefaultColorMap();
-  SkColor link_color = SkColorSetRGB(128, 128, 128);
-  SkColor underline_color = SkColorSetRGB(255, 255, 255);
-  colors[ThemeProperties::COLOR_NTP_LINK] = link_color;
-  colors[ThemeProperties::COLOR_NTP_LINK_UNDERLINE] = underline_color;
-  colors[ThemeProperties::COLOR_NTP_SECTION_LINK] = link_color;
-  colors[ThemeProperties::COLOR_NTP_SECTION_LINK_UNDERLINE] =
-      underline_color;
-
-  VerifyColorMap(colors);
-}
-
+// 'ntp_section' used to correspond to ThemeProperties::COLOR_NTP_SECTION,
+// but COLOR_NTP_SECTION was since removed because it was never used.
+// While it was in use, COLOR_NTP_HEADER used 'ntp_section' as a fallback when
+// 'ntp_header' was absent.  We still preserve this fallback for themes that
+// relied on this.
 TEST_F(BrowserThemePackTest, UseSectionColorAsNTPHeader) {
   std::string color_json = "{ \"ntp_section\": [190, 190, 190] }";
   LoadColorJSON(color_json);
@@ -418,7 +367,6 @@ TEST_F(BrowserThemePackTest, UseSectionColorAsNTPHeader) {
   std::map<int, SkColor> colors = GetDefaultColorMap();
   SkColor ntp_color = SkColorSetRGB(190, 190, 190);
   colors[ThemeProperties::COLOR_NTP_HEADER] = ntp_color;
-  colors[ThemeProperties::COLOR_NTP_SECTION] = ntp_color;
   VerifyColorMap(colors);
 }
 
@@ -429,7 +377,6 @@ TEST_F(BrowserThemePackTest, ProvideNtpHeaderColor) {
 
   std::map<int, SkColor> colors = GetDefaultColorMap();
   colors[ThemeProperties::COLOR_NTP_HEADER] = SkColorSetRGB(120, 120, 120);
-  colors[ThemeProperties::COLOR_NTP_SECTION] = SkColorSetRGB(190, 190, 190);
   VerifyColorMap(colors);
 }
 

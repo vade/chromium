@@ -81,7 +81,7 @@ ProgressCenterItemElement.decorate = function(element) {
   element = /** @type {ProgressCenterItemElement} */ (element);
   element.state_ = ProgressItemState.PROGRESSING;
   element.track_ = element.querySelector('.progress-track');
-  element.track_.addEventListener('webkitTransitionEnd',
+  element.track_.addEventListener('transitionend',
                                   element.onTransitionEnd_.bind(element));
   element.cancelTransition_ = null;
   return element;
@@ -260,7 +260,7 @@ function ProgressCenterPanel(element) {
   // Register event handlers.
   element.addEventListener('click', this.onClick_.bind(this));
   element.addEventListener(
-      'webkitAnimationEnd', this.onToggleAnimationEnd_.bind(this));
+      'animationend', this.onToggleAnimationEnd_.bind(this));
   element.addEventListener(
       ProgressCenterItemElement.PROGRESS_ANIMATION_END_EVENT,
       this.onItemAnimationEnd_.bind(this));
@@ -277,7 +277,7 @@ ProgressCenterPanel.getToggleAnimation_ = function(document) {
     var styleSheet = document.styleSheets[i];
     for (var j = 0; j < styleSheet.cssRules.length; j++) {
       var rule = styleSheet.cssRules[j];
-      if (rule.type === CSSRule.WEBKIT_KEYFRAMES_RULE &&
+      if (rule.type === CSSRule.KEYFRAMES_RULE &&
           rule.name === 'progress-center-toggle') {
         return rule;
       }

@@ -18,6 +18,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/captive_portal/captive_portal_service.h"
@@ -237,8 +238,8 @@ void URLRequestTimeoutOnDemandJob::Start() {
 void URLRequestTimeoutOnDemandJob::WaitForJobs(int num_jobs) {
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&URLRequestTimeoutOnDemandJob::WaitForJobsOnIOThread,
-                 num_jobs));
+      base::BindOnce(&URLRequestTimeoutOnDemandJob::WaitForJobsOnIOThread,
+                     num_jobs));
   content::RunMessageLoop();
 }
 
@@ -246,8 +247,8 @@ void URLRequestTimeoutOnDemandJob::WaitForJobs(int num_jobs) {
 void URLRequestTimeoutOnDemandJob::FailJobs(int expected_num_jobs) {
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&URLRequestTimeoutOnDemandJob::FailOrAbandonJobsOnIOThread,
-                 expected_num_jobs, FAIL_JOBS, net::SSLInfo()));
+      base::BindOnce(&URLRequestTimeoutOnDemandJob::FailOrAbandonJobsOnIOThread,
+                     expected_num_jobs, FAIL_JOBS, net::SSLInfo()));
 }
 
 // static
@@ -256,16 +257,16 @@ void URLRequestTimeoutOnDemandJob::FailJobsWithCertError(
     const net::SSLInfo& ssl_info) {
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&URLRequestTimeoutOnDemandJob::FailOrAbandonJobsOnIOThread,
-                 expected_num_jobs, FAIL_JOBS_WITH_CERT_ERROR, ssl_info));
+      base::BindOnce(&URLRequestTimeoutOnDemandJob::FailOrAbandonJobsOnIOThread,
+                     expected_num_jobs, FAIL_JOBS_WITH_CERT_ERROR, ssl_info));
 }
 
 // static
 void URLRequestTimeoutOnDemandJob::AbandonJobs(int expected_num_jobs) {
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&URLRequestTimeoutOnDemandJob::FailOrAbandonJobsOnIOThread,
-                 expected_num_jobs, ABANDON_JOBS, net::SSLInfo()));
+      base::BindOnce(&URLRequestTimeoutOnDemandJob::FailOrAbandonJobsOnIOThread,
+                     expected_num_jobs, ABANDON_JOBS, net::SSLInfo()));
 }
 
 URLRequestTimeoutOnDemandJob::URLRequestTimeoutOnDemandJob(
@@ -428,7 +429,7 @@ class URLRequestMockCaptivePortalJobFactory {
 void URLRequestMockCaptivePortalJobFactory::AddUrlHandlers() {
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(
+      base::BindOnce(
           &URLRequestMockCaptivePortalJobFactory::AddUrlHandlersOnIOThread,
           base::Unretained(this)));
 }
@@ -437,9 +438,9 @@ void URLRequestMockCaptivePortalJobFactory::SetBehindCaptivePortal(
     bool behind_captive_portal) {
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&URLRequestMockCaptivePortalJobFactory::
-                     SetBehindCaptivePortalOnIOThread,
-                 base::Unretained(this), behind_captive_portal));
+      base::BindOnce(&URLRequestMockCaptivePortalJobFactory::
+                         SetBehindCaptivePortalOnIOThread,
+                     base::Unretained(this), behind_captive_portal));
 }
 
 std::unique_ptr<net::URLRequestInterceptor>
@@ -481,6 +482,8 @@ URLRequestMockCaptivePortalJobFactory::Interceptor::MaybeInterceptRequest(
     net::NetworkDelegate* network_delegate) const {
   EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
+  const base::TaskTraits kTraits = {base::MayBlock()};
+
   // The PathService is threadsafe.
   base::FilePath root_http;
   PathService::Get(chrome::DIR_TEST_DATA, &root_http);
@@ -492,11 +495,9 @@ URLRequestMockCaptivePortalJobFactory::Interceptor::MaybeInterceptRequest(
     // Once logged in to the portal, HTTPS requests return the page that was
     // actually requested.
     return new URLRequestMockHTTPJob(
-        request,
-        network_delegate,
+        request, network_delegate,
         root_http.Append(FILE_PATH_LITERAL("title2.html")),
-        BrowserThread::GetBlockingPool()->GetTaskRunnerWithShutdownBehavior(
-            base::SequencedWorkerPool::SKIP_ON_SHUTDOWN));
+        base::CreateTaskRunnerWithTraits(kTraits));
   } else if (request->url() == kMockHttpsQuickTimeoutUrl) {
     if (behind_captive_portal_)
       return new URLRequestFailedJob(
@@ -504,11 +505,9 @@ URLRequestMockCaptivePortalJobFactory::Interceptor::MaybeInterceptRequest(
     // Once logged in to the portal, HTTPS requests return the page that was
     // actually requested.
     return new URLRequestMockHTTPJob(
-        request,
-        network_delegate,
+        request, network_delegate,
         root_http.Append(FILE_PATH_LITERAL("title2.html")),
-        BrowserThread::GetBlockingPool()->GetTaskRunnerWithShutdownBehavior(
-            base::SequencedWorkerPool::SKIP_ON_SHUTDOWN));
+        base::CreateTaskRunnerWithTraits(kTraits));
   } else {
     // The URL should be the captive portal test URL.
     EXPECT_TRUE(request->url() == kMockCaptivePortalTestUrl ||
@@ -519,27 +518,21 @@ URLRequestMockCaptivePortalJobFactory::Interceptor::MaybeInterceptRequest(
       // by the captive portal.
       if (request->url() == kMockCaptivePortal511Url) {
         return new URLRequestMockHTTPJob(
-            request,
-            network_delegate,
+            request, network_delegate,
             root_http.Append(FILE_PATH_LITERAL("captive_portal/page511.html")),
-            BrowserThread::GetBlockingPool()->GetTaskRunnerWithShutdownBehavior(
-                base::SequencedWorkerPool::SKIP_ON_SHUTDOWN));
+            base::CreateTaskRunnerWithTraits(kTraits));
       }
       return new URLRequestMockHTTPJob(
-          request,
-          network_delegate,
+          request, network_delegate,
           root_http.Append(FILE_PATH_LITERAL("captive_portal/login.html")),
-          BrowserThread::GetBlockingPool()->GetTaskRunnerWithShutdownBehavior(
-              base::SequencedWorkerPool::SKIP_ON_SHUTDOWN));
+          base::CreateTaskRunnerWithTraits(kTraits));
     }
 
     // After logging in to the portal, the test URLs return a 204 response.
     return new URLRequestMockHTTPJob(
-        request,
-        network_delegate,
+        request, network_delegate,
         root_http.Append(FILE_PATH_LITERAL("captive_portal/page204.html")),
-        BrowserThread::GetBlockingPool()->GetTaskRunnerWithShutdownBehavior(
-            base::SequencedWorkerPool::SKIP_ON_SHUTDOWN));
+        base::CreateTaskRunnerWithTraits(kTraits));
   }
 }
 
@@ -1105,7 +1098,7 @@ void CaptivePortalBrowserTest::SetUpOnMainThread() {
   // Enable mock requests.
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
+      base::BindOnce(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
   factory_.AddUrlHandlers();
 
   // Double-check that the captive portal service isn't enabled by default for
@@ -2672,7 +2665,8 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, ReloadTimeout) {
 // the background one.
 // Disabled:  http://crbug.com/134357
 IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, DISABLED_TwoWindows) {
-  Browser* browser2 = new Browser(Browser::CreateParams(browser()->profile()));
+  Browser* browser2 =
+      new Browser(Browser::CreateParams(browser()->profile(), true));
   // Navigate the new browser window so it'll be shown and we can pick the
   // active window.
   ui_test_utils::NavigateToURL(browser2, GURL(url::kAboutBlankURL));
@@ -2799,9 +2793,10 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, HstsLogin) {
   URLRequestFailedJob::GetMockHttpUrl(net::ERR_CONNECTION_TIMED_OUT);
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&AddHstsHost,
-                 base::RetainedRef(browser()->profile()->GetRequestContext()),
-                 http_timeout_url.host()));
+      base::BindOnce(
+          &AddHstsHost,
+          base::RetainedRef(browser()->profile()->GetRequestContext()),
+          http_timeout_url.host()));
 
   SlowLoadBehindCaptivePortal(browser(), true, http_timeout_url, 1, 1);
   Login(browser(), 1, 0);

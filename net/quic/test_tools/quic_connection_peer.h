@@ -6,11 +6,11 @@
 #define NET_QUIC_TEST_TOOLS_QUIC_CONNECTION_PEER_H_
 
 #include "base/macros.h"
-#include "net/base/ip_endpoint.h"
 #include "net/quic/core/quic_connection.h"
 #include "net/quic/core/quic_connection_stats.h"
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/platform/api/quic_socket_address.h"
+#include "net/quic/platform/api/quic_string_piece.h"
 
 namespace net {
 
@@ -66,12 +66,10 @@ class QuicConnectionPeer {
 
   static bool IsSilentCloseEnabled(QuicConnection* connection);
 
-  static bool IsMultipathEnabled(QuicConnection* connection);
-
   static void SwapCrypters(QuicConnection* connection, QuicFramer* framer);
 
   static void SetCurrentPacket(QuicConnection* connection,
-                               base::StringPiece current_packet);
+                               QuicStringPiece current_packet);
 
   static QuicConnectionHelperInterface* GetHelper(QuicConnection* connection);
 
@@ -114,8 +112,9 @@ class QuicConnectionPeer {
   static void SetAckDecimationDelay(QuicConnection* connection,
                                     float ack_decimation_delay);
   static bool HasRetransmittableFrames(QuicConnection* connection,
-                                       QuicPathId path_id,
                                        QuicPacketNumber packet_number);
+  static void SetNoStopWaitingFrames(QuicConnection* connection,
+                                     bool no_stop_waiting_frames);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(QuicConnectionPeer);

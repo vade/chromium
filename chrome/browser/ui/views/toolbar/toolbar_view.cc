@@ -8,6 +8,7 @@
 
 #include "base/command_line.h"
 #include "base/i18n/number_formatting.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
@@ -35,8 +36,6 @@
 #include "chrome/browser/ui/views/bookmarks/bookmark_bubble_view.h"
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/location_bar/page_action_image_view.h"
-#include "chrome/browser/ui/views/location_bar/page_action_with_badge_view.h"
 #include "chrome/browser/ui/views/location_bar/star_view.h"
 #include "chrome/browser/ui/views/outdated_upgrade_bubble_view.h"
 #include "chrome/browser/ui/views/toolbar/app_menu_button.h"
@@ -58,7 +57,6 @@
 #include "content/public/browser/browser_accessibility_state.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -71,6 +69,7 @@
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/native_theme/native_theme_aura.h"
+#include "ui/vector_icons/vector_icons.h"
 #include "ui/views/focus/view_storage.h"
 #include "ui/views/widget/tooltip_manager.h"
 #include "ui/views/widget/widget.h"
@@ -84,7 +83,6 @@
 
 #if !defined(OS_CHROMEOS)
 #include "chrome/browser/signin/signin_global_error_factory.h"
-#include "chrome/browser/sync/sync_global_error_factory.h"
 #endif
 
 #if defined(USE_ASH)
@@ -239,9 +237,6 @@ void ToolbarView::Init() {
 #if !defined(OS_CHROMEOS)
   if (!HasAshShell()) {
     SigninGlobalErrorFactory::GetForProfile(browser_->profile());
-#if !defined(OS_ANDROID)
-    SyncGlobalErrorFactory::GetForProfile(browser_->profile());
-#endif
   }
 
 #if defined(OS_WIN)
@@ -422,17 +417,8 @@ ToolbarView::GetContentSettingBubbleModelDelegate() {
   return browser_->content_setting_bubble_model_delegate();
 }
 
-void ToolbarView::ShowWebsiteSettings(
-    content::WebContents* web_contents,
-    const GURL& virtual_url,
-    const security_state::SecurityInfo& security_info) {
-  chrome::ShowWebsiteSettings(browser_, web_contents, virtual_url,
-                              security_info);
-}
-
-PageActionImageView* ToolbarView::CreatePageActionImageView(
-    LocationBarView* owner, ExtensionAction* action) {
-  return new PageActionImageView(owner, action, browser_);
+void ToolbarView::ShowPageInfo(content::WebContents* web_contents) {
+  chrome::ShowPageInfo(browser_, web_contents);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -692,7 +678,7 @@ void ToolbarView::UpdateSeverity(AppMenuIconController::IconType type,
 
   if (type == AppMenuIconController::IconType::INCOMPATIBILITY_WARNING) {
     if (!was_showing) {
-      content::RecordAction(UserMetricsAction("ConflictBadge"));
+      base::RecordAction(UserMetricsAction("ConflictBadge"));
 #if defined(OS_WIN)
       ConflictingModuleView::MaybeShow(browser_, app_menu_button_);
 #endif
@@ -746,21 +732,19 @@ void ToolbarView::LoadImages() {
   const SkColor disabled_color =
       tp->GetColor(ThemeProperties::COLOR_TOOLBAR_BUTTON_ICON_INACTIVE);
 
-  back_->SetImage(
-      views::Button::STATE_NORMAL,
-      gfx::CreateVectorIcon(kNavigateBackIcon, normal_color));
-  back_->SetImage(
-      views::Button::STATE_DISABLED,
-      gfx::CreateVectorIcon(kNavigateBackIcon, disabled_color));
+  back_->SetImage(views::Button::STATE_NORMAL,
+                  gfx::CreateVectorIcon(ui::kBackArrowIcon, normal_color));
+  back_->SetImage(views::Button::STATE_DISABLED,
+                  gfx::CreateVectorIcon(ui::kBackArrowIcon, disabled_color));
   forward_->SetImage(
       views::Button::STATE_NORMAL,
-      gfx::CreateVectorIcon(kNavigateForwardIcon, normal_color));
+      gfx::CreateVectorIcon(ui::kForwardArrowIcon, normal_color));
   forward_->SetImage(
       views::Button::STATE_DISABLED,
-      gfx::CreateVectorIcon(kNavigateForwardIcon, disabled_color));
+      gfx::CreateVectorIcon(ui::kForwardArrowIcon, disabled_color));
   home_->SetImage(views::Button::STATE_NORMAL,
                   gfx::CreateVectorIcon(kNavigateHomeIcon, normal_color));
-  app_menu_button_->UpdateIcon();
+  app_menu_button_->UpdateIcon(false);
 
   back_->set_ink_drop_base_color(normal_color);
   forward_->set_ink_drop_base_color(normal_color);

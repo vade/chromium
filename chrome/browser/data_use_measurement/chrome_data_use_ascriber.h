@@ -59,6 +59,8 @@ class ChromeDataUseAscriber : public DataUseAscriber {
       net::URLRequest* request) override;
   ChromeDataUseRecorder* GetDataUseRecorder(
       const net::URLRequest& request) override;
+  void OnUrlRequestCompleted(const net::URLRequest& request,
+                             bool started) override;
   void OnUrlRequestDestroyed(net::URLRequest* request) override;
   std::unique_ptr<URLRequestClassifier> CreateURLRequestClassifier()
       const override;
@@ -104,6 +106,10 @@ class ChromeDataUseAscriber : public DataUseAscriber {
                               int new_render_process_id,
                               int new_render_frame_id);
 
+  void DidFinishNavigation(int render_process_id,
+                           int render_frame_id,
+                           uint32_t page_transition);
+
  private:
   friend class ChromeDataUseAscriberTest;
 
@@ -138,7 +144,9 @@ class ChromeDataUseAscriber : public DataUseAscriber {
 
   void OnDataUseCompleted(DataUseRecorderEntry entry);
 
-  DataUseRecorderEntry CreateNewDataUseRecorder(net::URLRequest* request);
+  DataUseRecorderEntry CreateNewDataUseRecorder(
+      net::URLRequest* request,
+      DataUse::TrafficType traffic_type);
 
   bool IsRecorderInPendingNavigationMap(net::URLRequest* request);
 

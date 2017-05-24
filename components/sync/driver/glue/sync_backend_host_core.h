@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/single_thread_task_runner.h"
@@ -35,7 +36,6 @@ class SyncBackendHostImpl;
 class SyncBackendHostCore
     : public base::RefCountedThreadSafe<SyncBackendHostCore>,
       public base::trace_event::MemoryDumpProvider,
-      public SyncEncryptionHandler::Observer,
       public SyncManager::Observer,
       public TypeDebugInfoObserver {
  public:
@@ -60,22 +60,6 @@ class SyncBackendHostCore
   void OnActionableError(const SyncProtocolError& sync_error) override;
   void OnMigrationRequested(ModelTypeSet types) override;
   void OnProtocolEvent(const ProtocolEvent& event) override;
-
-  // SyncEncryptionHandler::Observer implementation.
-  void OnPassphraseRequired(
-      PassphraseRequiredReason reason,
-      const sync_pb::EncryptedData& pending_keys) override;
-  void OnPassphraseAccepted() override;
-  void OnBootstrapTokenUpdated(const std::string& bootstrap_token,
-                               BootstrapTokenType type) override;
-  void OnEncryptedTypesChanged(ModelTypeSet encrypted_types,
-                               bool encrypt_everything) override;
-  void OnEncryptionComplete() override;
-  void OnCryptographerStateChanged(Cryptographer* cryptographer) override;
-  void OnPassphraseTypeChanged(PassphraseType type,
-                               base::Time passphrase_time) override;
-  void OnLocalSetPassphraseEncryption(
-      const SyncEncryptionHandler::NigoriState& nigori_state) override;
 
   // TypeDebugInfoObserver implementation
   void OnCommitCountersUpdated(ModelType type,
@@ -106,10 +90,14 @@ class SyncBackendHostCore
   // SyncEngine::UpdateCredentials.
   void DoUpdateCredentials(const SyncCredentials& credentials);
 
+  // Switches sync engine into configuration mode. In this mode only initial
+  // data for newly enabled types is downloaded from server. No local changes
+  // are committed to server.
+  void DoStartConfiguration();
+
   // Called to tell the syncapi to start syncing (generally after
   // initialization and authentication).
-  void DoStartSyncing(const ModelSafeRoutingInfo& routing_info,
-                      base::Time last_poll_time);
+  void DoStartSyncing(base::Time last_poll_time);
 
   // Called to set the passphrase for encryption.
   void DoSetEncryptionPassphrase(const std::string& passphrase,
@@ -174,11 +162,12 @@ class SyncBackendHostCore
   // application is backgrounded.
   void SaveChanges();
 
-  void DoClearServerData(
-      const SyncManager::ClearServerDataCallback& frontend_callback);
+  void DoClearServerData(const base::Closure& frontend_callback);
 
   // Notify the syncer that the cookie jar has changed.
-  void DoOnCookieJarChanged(bool account_mismatch, bool empty_jar);
+  void DoOnCookieJarChanged(bool account_mismatch,
+                            bool empty_jar,
+                            const base::Closure& callback);
 
  private:
   friend class base::RefCountedThreadSafe<SyncBackendHostCore>;
@@ -204,6 +193,7 @@ class SyncBackendHostCore
 
   // Non-null only between calls to DoInitialize() and DoShutdown().
   std::unique_ptr<SyncBackendRegistrar> registrar_;
+  std::unique_ptr<SyncEncryptionHandler::Observer> encryption_observer_proxy_;
 
   // The timer used to periodically call SaveChanges.
   std::unique_ptr<base::RepeatingTimer> save_changes_timer_;

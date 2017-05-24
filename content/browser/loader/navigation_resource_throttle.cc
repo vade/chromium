@@ -204,8 +204,11 @@ void NavigationResourceThrottle::WillStartRequest(bool* defer) {
     return;
 
   bool is_external_protocol =
-      !info->GetContext()->GetRequestContext()->job_factory()->IsHandledURL(
-          request_->url());
+      request_->url().is_valid() &&
+      !info->GetContext()
+           ->GetRequestContext()
+           ->job_factory()
+           ->IsHandledProtocol(request_->url().scheme());
   UIChecksPerformedCallback callback =
       base::Bind(&NavigationResourceThrottle::OnUIChecksPerformed,
                  weak_ptr_factory_.GetWeakPtr());
@@ -239,8 +242,11 @@ void NavigationResourceThrottle::WillRedirectRequest(
     return;
 
   bool new_is_external_protocol =
-      !info->GetContext()->GetRequestContext()->job_factory()->IsHandledURL(
-          request_->url());
+      request_->url().is_valid() &&
+      !info->GetContext()
+           ->GetRequestContext()
+           ->job_factory()
+           ->IsHandledProtocol(request_->url().scheme());
   DCHECK(redirect_info.new_method == "POST" ||
          redirect_info.new_method == "GET");
   UIChecksPerformedCallback callback =
@@ -305,8 +311,8 @@ void NavigationResourceThrottle::WillProcessResponse(bool* defer) {
 
   SSLStatus ssl_status;
   if (request_->ssl_info().cert.get()) {
-    NavigationResourceHandler::GetSSLStatusForRequest(
-        request_->url(), request_->ssl_info(), info->GetChildID(), &ssl_status);
+    NavigationResourceHandler::GetSSLStatusForRequest(request_->ssl_info(),
+                                                      &ssl_status);
   }
 
   BrowserThread::PostTask(

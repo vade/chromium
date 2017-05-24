@@ -15,8 +15,7 @@ void GenHelper(GLsizei count, GLuint* objects) {
 
 }  // anonymous namespace
 
-GLStubApi::GLStubApi()
-    : version_("OpenGL ES 3.0"), extensions_("GL_EXT_framebuffer_object") {}
+GLStubApi::GLStubApi() {}
 
 GLStubApi::~GLStubApi() = default;
 
@@ -188,6 +187,50 @@ void GLStubApi::glGetProgramivFn(GLuint program, GLenum pname, GLint* params) {
       *params = GL_TRUE;
       break;
     case GL_VALIDATE_STATUS:
+      *params = GL_TRUE;
+      break;
+    default:
+      break;
+  }
+}
+
+void GLStubApi::glGetQueryObjecti64vFn(GLuint id,
+                                       GLenum pname,
+                                       GLint64* params) {
+  switch (pname) {
+    case GL_QUERY_RESULT_AVAILABLE:
+      *params = GL_TRUE;
+      break;
+    default:
+      break;
+  }
+}
+
+void GLStubApi::glGetQueryObjectivFn(GLuint id, GLenum pname, GLint* params) {
+  switch (pname) {
+    case GL_QUERY_RESULT_AVAILABLE:
+      *params = GL_TRUE;
+      break;
+    default:
+      break;
+  }
+}
+
+void GLStubApi::glGetQueryObjectui64vFn(GLuint id,
+                                        GLenum pname,
+                                        GLuint64* params) {
+  switch (pname) {
+    case GL_QUERY_RESULT_AVAILABLE:
+      *params = GL_TRUE;
+      break;
+    default:
+      break;
+  }
+}
+
+void GLStubApi::glGetQueryObjectuivFn(GLuint id, GLenum pname, GLuint* params) {
+  switch (pname) {
+    case GL_QUERY_RESULT_AVAILABLE:
       *params = GL_TRUE;
       break;
     default:

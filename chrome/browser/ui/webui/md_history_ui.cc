@@ -16,15 +16,12 @@
 #include "chrome/browser/ui/webui/foreign_session_handler.h"
 #include "chrome/browser/ui/webui/history_login_handler.h"
 #include "chrome/browser/ui/webui/metrics_handler.h"
-#include "chrome/common/chrome_features.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
 #include "chrome/grit/theme_resources.h"
-#include "components/grit/components_scaled_resources.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/search/search.h"
@@ -33,7 +30,6 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 
 namespace {
 
@@ -69,8 +65,8 @@ content::WebUIDataSource* CreateMdHistoryUIHTMLSource(Profile* profile,
                              IDS_HISTORY_DELETE_PRIOR_VISITS_CONFIRM_BUTTON);
   source->AddLocalizedString("deleteSession",
                              IDS_HISTORY_OTHER_SESSIONS_HIDE_FOR_NOW);
-  source->AddLocalizedString(
-      "deleteWarning", IDS_HISTORY_DELETE_PRIOR_VISITS_WARNING_NO_INCOGNITO);
+  source->AddLocalizedString("deleteWarning",
+                             IDS_HISTORY_DELETE_PRIOR_VISITS_WARNING);
   source->AddLocalizedString("entrySummary", IDS_HISTORY_ENTRY_SUMMARY);
   source->AddLocalizedString("expandSessionButton",
                              IDS_HISTORY_OTHER_SESSIONS_EXPAND_SESSION);
@@ -97,12 +93,6 @@ content::WebUIDataSource* CreateMdHistoryUIHTMLSource(Profile* profile,
   source->AddLocalizedString("noSearchResults", IDS_HISTORY_NO_SEARCH_RESULTS);
   source->AddLocalizedString("noSyncedResults",
                              IDS_MD_HISTORY_NO_SYNCED_RESULTS);
-  source->AddLocalizedString("rangeAllTime", IDS_HISTORY_RANGE_ALL_TIME);
-  source->AddLocalizedString("rangeWeek", IDS_HISTORY_RANGE_WEEK);
-  source->AddLocalizedString("rangeMonth", IDS_HISTORY_RANGE_MONTH);
-  source->AddLocalizedString("rangeToday", IDS_HISTORY_RANGE_TODAY);
-  source->AddLocalizedString("rangeNext", IDS_HISTORY_RANGE_NEXT);
-  source->AddLocalizedString("rangePrevious", IDS_HISTORY_RANGE_PREVIOUS);
   source->AddLocalizedString("removeBookmark", IDS_HISTORY_REMOVE_BOOKMARK);
   source->AddLocalizedString("removeFromHistory", IDS_HISTORY_REMOVE_PAGE);
   source->AddLocalizedString("removeSelected",
@@ -132,11 +122,6 @@ content::WebUIDataSource* CreateMdHistoryUIHTMLSource(Profile* profile,
   source->AddBoolean("allowDeletingHistory", allow_deleting_history);
 
   source->AddBoolean(kShowMenuPromoKey, !MenuPromoShown(profile));
-
-  bool group_by_domain = base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kHistoryEnableGroupByDomain) || profile->IsSupervised();
-  source->AddBoolean("groupByDomain", group_by_domain);
-
   source->AddBoolean("isGuestSession", profile->IsGuestSession());
 
   source->AddBoolean(kIsUserSignedInKey, IsUserSignedIn(profile));
@@ -158,20 +143,14 @@ content::WebUIDataSource* CreateMdHistoryUIHTMLSource(Profile* profile,
     {"app.js", IDR_MD_HISTORY_APP_JS},
     {"browser_service.html", IDR_MD_HISTORY_BROWSER_SERVICE_HTML},
     {"browser_service.js", IDR_MD_HISTORY_BROWSER_SERVICE_JS},
-    {"grouped_list.html", IDR_MD_HISTORY_GROUPED_LIST_HTML},
-    {"grouped_list.js", IDR_MD_HISTORY_GROUPED_LIST_JS},
     {"history_item.html", IDR_MD_HISTORY_HISTORY_ITEM_HTML},
     {"history_item.js", IDR_MD_HISTORY_HISTORY_ITEM_JS},
     {"history_list.html", IDR_MD_HISTORY_HISTORY_LIST_HTML},
     {"history_list.js", IDR_MD_HISTORY_HISTORY_LIST_JS},
-    {"history_list_behavior.html", IDR_MD_HISTORY_HISTORY_LIST_BEHAVIOR_HTML},
-    {"history_list_behavior.js", IDR_MD_HISTORY_HISTORY_LIST_BEHAVIOR_JS},
     {"history_toolbar.html", IDR_MD_HISTORY_HISTORY_TOOLBAR_HTML},
     {"history_toolbar.js", IDR_MD_HISTORY_HISTORY_TOOLBAR_JS},
     {"icons.html", IDR_MD_HISTORY_ICONS_HTML},
     {"lazy_load.html", IDR_MD_HISTORY_LAZY_LOAD_HTML},
-    {"list_container.html", IDR_MD_HISTORY_LIST_CONTAINER_HTML},
-    {"list_container.js", IDR_MD_HISTORY_LIST_CONTAINER_JS},
     {"query_manager.html", IDR_MD_HISTORY_QUERY_MANAGER_HTML},
     {"query_manager.js", IDR_MD_HISTORY_QUERY_MANAGER_JS},
     {"router.html", IDR_MD_HISTORY_ROUTER_HTML},
@@ -239,21 +218,6 @@ MdHistoryUI::MdHistoryUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 }
 
 MdHistoryUI::~MdHistoryUI() {}
-
-// static
-bool MdHistoryUI::IsEnabled(Profile* profile) {
-  return base::FeatureList::IsEnabled(features::kMaterialDesignHistory) &&
-         !base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kHistoryEnableGroupByDomain) &&
-         !profile->IsSupervised();
-}
-
-// static
-base::RefCountedMemory* MdHistoryUI::GetFaviconResourceBytes(
-    ui::ScaleFactor scale_factor) {
-  return ResourceBundle::GetSharedInstance().LoadDataResourceBytesForScale(
-      IDR_HISTORY_FAVICON, scale_factor);
-}
 
 void MdHistoryUI::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {

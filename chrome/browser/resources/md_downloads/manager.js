@@ -40,6 +40,7 @@ cr.define('downloads', function() {
     },
 
     hostAttributes: {
+      // TODO(dbeam): this should use a class instead.
       loading: true,
     },
 
@@ -51,6 +52,10 @@ cr.define('downloads', function() {
     observers: [
       'itemsChanged_(items_.*)',
     ],
+
+    attached: function() {
+      document.documentElement.classList.remove('loading');
+    },
 
     /** @private {!PromiseResolver} */
     loaded_: new PromiseResolver,
@@ -89,6 +94,16 @@ cr.define('downloads', function() {
     /** @private */
     itemsChanged_: function() {
       this.hasDownloads_ = this.items_.length > 0;
+
+      if (this.inSearchMode_) {
+        Polymer.IronA11yAnnouncer.requestAvailability();
+        this.fire('iron-announce', {
+          text: this.hasDownloads_ ?
+              loadTimeData.getStringF(
+                  'searchResultsFor', this.$.toolbar.getSearchText()) :
+              this.noDownloadsText_()
+        });
+      }
     },
 
     /**

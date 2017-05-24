@@ -16,6 +16,7 @@
 #include "chrome/browser/chooser_controller/chooser_controller.h"
 #include "device/usb/public/interfaces/chooser_service.mojom.h"
 #include "device/usb/usb_service.h"
+#include "url/gurl.h"
 
 namespace content {
 class RenderFrameHost;
@@ -26,6 +27,8 @@ class UsbDevice;
 struct UsbDeviceFilter;
 }
 
+class UsbChooserContext;
+
 // UsbChooserController creates a chooser for WebUSB.
 // It is owned by ChooserBubbleDelegate.
 class UsbChooserController : public ChooserController,
@@ -34,7 +37,7 @@ class UsbChooserController : public ChooserController,
   UsbChooserController(
       content::RenderFrameHost* render_frame_host,
       const std::vector<device::UsbDeviceFilter>& device_filters,
-      const device::usb::ChooserService::GetPermissionCallback& callback);
+      const device::mojom::UsbChooserService::GetPermissionCallback& callback);
   ~UsbChooserController() override;
 
   // ChooserController:
@@ -59,11 +62,15 @@ class UsbChooserController : public ChooserController,
       const std::vector<scoped_refptr<device::UsbDevice>>& devices);
   bool DisplayDevice(scoped_refptr<device::UsbDevice> device) const;
 
-  content::RenderFrameHost* const render_frame_host_;
-  device::usb::ChooserService::GetPermissionCallback callback_;
+  std::vector<device::UsbDeviceFilter> filters_;
+  device::mojom::UsbChooserService::GetPermissionCallback callback_;
+  GURL requesting_origin_;
+  GURL embedding_origin_;
+
+  base::WeakPtr<UsbChooserContext> chooser_context_;
   ScopedObserver<device::UsbService, device::UsbService::Observer>
       usb_service_observer_;
-  std::vector<device::UsbDeviceFilter> filters_;
+
   // Each pair is a (device, device name).
   std::vector<std::pair<scoped_refptr<device::UsbDevice>, base::string16>>
       devices_;

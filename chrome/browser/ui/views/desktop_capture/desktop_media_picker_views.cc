@@ -6,10 +6,12 @@
 
 #include "base/callback.h"
 #include "chrome/browser/media/webrtc/desktop_media_list.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/views/desktop_capture/desktop_media_list_view.h"
 #include "chrome/browser/ui/views/desktop_capture/desktop_media_source_view.h"
+#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
@@ -64,8 +66,10 @@ DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
       audio_share_checkbox_(nullptr),
       pane_(new views::TabbedPane()) {
   SetLayoutManager(new views::BoxLayout(
-        views::BoxLayout::kVertical, views::kButtonHEdgeMarginNew,
-        views::kPanelVertMargin, views::kLabelToControlVerticalSpacing));
+      views::BoxLayout::kVertical, views::kButtonHEdgeMarginNew,
+      ChromeLayoutProvider::Get()->GetDistanceMetric(
+          DISTANCE_PANEL_CONTENT_MARGIN),
+      views::kLabelToControlVerticalSpacing));
 
   description_label_->SetMultiLine(true);
   description_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
@@ -170,7 +174,7 @@ DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
 
     tab_scroll_view->SetContents(list_views_.back());
     tab_scroll_view->ClipHeightTo(kTabStyle.item_size.height(),
-                                  kTabStyle.item_size.height() * 2);
+                                  kTabStyle.item_size.height() * 10);
     tab_scroll_view->set_hide_horizontal_scrollbar(true);
     tab_scroll_view->set_background(
         views::Background::CreateSolidBackground(bg_color));
@@ -214,6 +218,7 @@ DesktopMediaPickerDialogView::DesktopMediaPickerDialogView(
     widget = DialogDelegate::CreateDialogWidget(this, context, nullptr);
     widget->Show();
   }
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::DESKTOP_MEDIA_PICKER);
 
   // If the picker is not modal to the calling web contents then it is displayed
   // in its own top-level window, so in that case it needs to be filtered out of
@@ -443,7 +448,7 @@ void DesktopMediaPickerViews::NotifyDialogResult(DesktopMediaID source) {
   // Notify the |callback_| asynchronously because it may need to destroy
   // DesktopMediaPicker.
   content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-                                   base::Bind(callback_, source));
+                                   base::BindOnce(callback_, source));
   callback_.Reset();
 }
 

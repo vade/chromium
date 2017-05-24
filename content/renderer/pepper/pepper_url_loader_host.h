@@ -7,10 +7,10 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
 #include "ppapi/host/resource_host.h"
@@ -45,15 +45,15 @@ class PepperURLLoaderHost : public ppapi::host::ResourceHost,
       ppapi::host::HostMessageContext* context) override;
 
   // blink::WebAssociatedURLLoaderClient implementation.
-  bool willFollowRedirect(const blink::WebURLRequest& new_request,
+  bool WillFollowRedirect(const blink::WebURLRequest& new_request,
                           const blink::WebURLResponse& redir_response) override;
-  void didSendData(unsigned long long bytes_sent,
+  void DidSendData(unsigned long long bytes_sent,
                    unsigned long long total_bytes_to_be_sent) override;
-  void didReceiveResponse(const blink::WebURLResponse& response) override;
-  void didDownloadData(int data_length) override;
-  void didReceiveData(const char* data, int data_length) override;
-  void didFinishLoading(double finish_time) override;
-  void didFail(const blink::WebURLError& error) override;
+  void DidReceiveResponse(const blink::WebURLResponse& response) override;
+  void DidDownloadData(int data_length) override;
+  void DidReceiveData(const char* data, int data_length) override;
+  void DidFinishLoading(double finish_time) override;
+  void DidFail(const blink::WebURLError& error) override;
 
  private:
   // ResourceHost protected overrides.
@@ -76,14 +76,14 @@ class PepperURLLoaderHost : public ppapi::host::ResourceHost,
   // plugin has not connected to us yet.
   //
   // Takes ownership of the given pointer.
-  void SendUpdateToPlugin(IPC::Message* msg);
+  void SendUpdateToPlugin(std::unique_ptr<IPC::Message> msg);
 
   // Sends or queues an unsolicited message to the plugin resource. This is
   // used inside SendUpdateToPlugin for messages that are already ordered
   // properly.
   //
   // Takes ownership of the given pointer.
-  void SendOrderedUpdateToPlugin(IPC::Message* msg);
+  void SendOrderedUpdateToPlugin(std::unique_ptr<IPC::Message> msg);
 
   void Close();
 
@@ -131,8 +131,8 @@ class PepperURLLoaderHost : public ppapi::host::ResourceHost,
   // Messages sent while the resource host is pending. These will be forwarded
   // to the plugin when the plugin side connects. The pointers are owned by
   // this object and must be deleted.
-  ScopedVector<IPC::Message> pending_replies_;
-  ScopedVector<IPC::Message> out_of_order_replies_;
+  std::vector<std::unique_ptr<IPC::Message>> pending_replies_;
+  std::vector<std::unique_ptr<IPC::Message>> out_of_order_replies_;
 
   // True when there's a pending DataFromURLResponse call which will send a
   // PpapiPluginMsg_URLLoader_ReceivedResponse to the plugin, which introduces

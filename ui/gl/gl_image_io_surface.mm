@@ -16,7 +16,6 @@
 #include "base/trace_event/trace_event.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
-#include "ui/gl/scoped_api.h"
 #include "ui/gl/scoped_binders.h"
 #include "ui/gl/yuv_to_rgb_converter.h"
 
@@ -51,6 +50,7 @@ bool ValidFormat(gfx::BufferFormat format) {
     case gfx::BufferFormat::BGRA_8888:
     case gfx::BufferFormat::BGRX_8888:
     case gfx::BufferFormat::RGBA_8888:
+    case gfx::BufferFormat::RGBA_F16:
     case gfx::BufferFormat::UYVY_422:
     case gfx::BufferFormat::YUV_420_BIPLANAR:
       return true;
@@ -80,6 +80,7 @@ GLenum TextureFormat(gfx::BufferFormat format) {
     case gfx::BufferFormat::BGRA_8888:
     case gfx::BufferFormat::BGRX_8888:
     case gfx::BufferFormat::RGBA_8888:
+    case gfx::BufferFormat::RGBA_F16:
       return GL_RGBA;
     case gfx::BufferFormat::UYVY_422:
       return GL_RGB;
@@ -112,6 +113,8 @@ GLenum DataFormat(gfx::BufferFormat format) {
     case gfx::BufferFormat::BGRX_8888:
     case gfx::BufferFormat::RGBA_8888:
       return GL_BGRA;
+    case gfx::BufferFormat::RGBA_F16:
+      return GL_RGBA;
     case gfx::BufferFormat::UYVY_422:
       return GL_YCBCR_422_APPLE;
     case gfx::BufferFormat::ATC:
@@ -141,6 +144,8 @@ GLenum DataType(gfx::BufferFormat format) {
     case gfx::BufferFormat::BGRX_8888:
     case gfx::BufferFormat::RGBA_8888:
       return GL_UNSIGNED_INT_8_8_8_8_REV;
+    case gfx::BufferFormat::RGBA_F16:
+      return GL_HALF_APPLE;
     case gfx::BufferFormat::UYVY_422:
       return GL_UNSIGNED_SHORT_8_8_APPLE;
       break;
@@ -163,8 +168,9 @@ GLenum DataType(gfx::BufferFormat format) {
 }
 
 // When an IOSurface is bound to a texture with internalformat "GL_RGB", many
-// OpenGL operations are broken. Therefore, never allow an IOSurface to be bound
-// with GL_RGB. https://crbug.com/595948.
+// OpenGL operations are broken. Therefore, don't allow an IOSurface to be bound
+// with GL_RGB unless overridden via BindTexImageWithInternalformat.
+// crbug.com/595948, crbug.com/699566.
 GLenum ConvertRequestedInternalFormat(GLenum internalformat) {
   if (internalformat == GL_RGB)
     return GL_RGBA;
@@ -232,6 +238,11 @@ unsigned GLImageIOSurface::GetInternalFormat() {
 }
 
 bool GLImageIOSurface::BindTexImage(unsigned target) {
+  return BindTexImageWithInternalformat(target, 0);
+}
+
+bool GLImageIOSurface::BindTexImageWithInternalformat(unsigned target,
+                                                      unsigned internalformat) {
   DCHECK(thread_checker_.CalledOnValidThread());
   TRACE_EVENT0("gpu", "GLImageIOSurface::BindTexImage");
   base::TimeTicks start_time = base::TimeTicks::Now();
@@ -253,10 +264,12 @@ bool GLImageIOSurface::BindTexImage(unsigned target) {
       static_cast<CGLContextObj>(GLContext::GetCurrent()->GetHandle());
 
   DCHECK(io_surface_);
-  CGLError cgl_error =
-      CGLTexImageIOSurface2D(cgl_context, target, TextureFormat(format_),
-                             size_.width(), size_.height(), DataFormat(format_),
-                             DataType(format_), io_surface_.get(), 0);
+
+  GLenum texture_format =
+      internalformat ? internalformat : TextureFormat(format_);
+  CGLError cgl_error = CGLTexImageIOSurface2D(
+      cgl_context, target, texture_format, size_.width(), size_.height(),
+      DataFormat(format_), DataType(format_), io_surface_.get(), 0);
   if (cgl_error != kCGLNoError) {
     LOG(ERROR) << "Error in CGLTexImageIOSurface2D: "
                << CGLErrorString(cgl_error);
@@ -279,8 +292,6 @@ bool GLImageIOSurface::CopyTexImage(unsigned target) {
 
   YUVToRGBConverter* yuv_to_rgb_converter = gl_context->GetYUVToRGBConverter();
   DCHECK(yuv_to_rgb_converter);
-
-  ScopedSetGLToRealGLApi scoped_set_gl_api;
 
   // Note that state restoration is done explicitly instead of scoped binders to
   // avoid https://crbug.com/601729.
@@ -364,8 +375,16 @@ void GLImageIOSurface::OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
                   base::trace_event::MemoryAllocatorDump::kUnitsBytes,
                   static_cast<uint64_t>(size_bytes));
 
-  auto guid =
-      GetGenericSharedMemoryGUIDForTracing(process_tracing_id, io_surface_id_);
+  // The process tracing id is to identify the GpuMemoryBuffer client that
+  // created the allocation. For CVPixelBufferRefs, there is no corresponding
+  // GpuMemoryBuffer, so use an invalid process id.
+  if (cv_pixel_buffer_) {
+    process_tracing_id =
+        base::trace_event::MemoryDumpManager::kInvalidTracingProcessId;
+  }
+
+  auto guid = GetGenericSharedGpuMemoryGUIDForTracing(process_tracing_id,
+                                                      io_surface_id_);
   pmd->CreateSharedGlobalAllocatorDump(guid);
   pmd->AddOwnershipEdge(dump->guid(), guid);
 }

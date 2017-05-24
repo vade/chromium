@@ -4,23 +4,15 @@
 
 group("media_router_perf_tests") {
   testonly = true
-  data_deps = [
-    "//chrome:chrome",
-  ]
   data = [
-    "$root_out_dir/chrome_200_percent.pak",
     "$root_out_dir/media_router/test_extension/",
     "$root_out_dir/mr_extension/release/",
     "internal/",
     "telemetry/",
-    "../../../third_party/catapult/",
-    "../../../tools/json_comment_eater/",
-    "../../../tools/json_to_struct/",
-    "../../../tools/perf/",
-    "../../../tools/variations/",
   ]
   deps = [
     ":test_extension_resource_files",
+    "//tools/perf:perf",
   ]
 }
 
@@ -48,6 +40,7 @@ media_router_integration_test_resources = [
   "resources/no_provider.json",
   "resources/no_sinks.json",
   "resources/no_supported_sinks.json",
+  "resources/presentation_receiver.html",
   "resources/route_creation_timed_out.json",
 ]
 
@@ -82,6 +75,7 @@ source_set("media_router_browsertests") {
     "media_router_integration_browsertest.cc",
     "media_router_integration_browsertest.h",
     "media_router_integration_ui_browsertest.cc",
+    "media_router_one_ua_integration_browsertest.cc",
     "test_media_sinks_observer.cc",
     "test_media_sinks_observer.h",
   ]

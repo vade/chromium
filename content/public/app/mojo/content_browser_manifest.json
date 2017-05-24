@@ -4,36 +4,43 @@
   "interface_provider_specs": {
     "service_manager:connector": {
       "provides": {
+        "gpu": [
+          "content::mojom::FieldTrialRecorder",
+          "media::mojom::AndroidOverlayProvider"
+        ],
+        "memory_instrumentation": [
+          "memory_instrumentation::mojom::Coordinator"
+        ],
         "plugin": [
           "discardable_memory::mojom::DiscardableSharedMemoryManager",
           "ui::mojom::Gpu"
         ],
         "renderer": [
+          "blink::mojom::BackgroundFetchService",
           "blink::mojom::BackgroundSyncService",
           "blink::mojom::BroadcastChannelProvider",
           "blink::mojom::BudgetService",
           "blink::mojom::Hyphenation",
           "blink::mojom::MimeRegistry",
           "blink::mojom::NotificationService",
-          "blink::mojom::OffscreenCanvasCompositorFrameSinkProvider",
-          "blink::mojom::OffscreenCanvasSurfaceFactory",
+          "blink::mojom::OffscreenCanvasProvider",
           "blink::mojom::PermissionService",
           "blink::mojom::WebSocket",
+          "content::mojom::FieldTrialRecorder",
           "content::mojom::MemoryCoordinatorHandle",
+          "content::mojom::PushMessaging",
+          "content::mojom::FrameSinkProvider",
           "content::mojom::ServiceWorkerDispatcherHost",
           "content::mojom::StoragePartitionService",
           "content::mojom::URLLoaderFactory",
           "content::mojom::VideoCaptureHost",
-          "device::BatteryMonitor",
+          "content::mojom::WorkerURLLoaderFactoryProvider",
           "device::mojom::GamepadMonitor",
-          "device::mojom::LightSensor",
-          "device::mojom::MotionSensor",
-          "device::mojom::OrientationAbsoluteSensor",
-          "device::mojom::OrientationSensor",
           "discardable_memory::mojom::DiscardableSharedMemoryManager",
           "media::mojom::ImageCapture",
           "memory_coordinator::mojom::MemoryCoordinatorHandle",
-          "payments::mojom::PaymentAppManager",
+          "metrics::mojom::SingleSampleMetricsProvider",
+          "payments::mojom::PaymentManager",
           "shape_detection::mojom::BarcodeDetection",
           "shape_detection::mojom::FaceDetectionProvider",
           "shape_detection::mojom::TextDetection",
@@ -46,22 +53,34 @@
       "requires": {
         "*": [ "app" ],
         // In classic ash, the browser supplies ash interfaces to itself.
-        "content_browser": [ "ash" ],
+        "content_browser": [ "ash", "memory_instrumentation" ],
         "content_gpu": [ "browser" ],
         "content_plugin": [ "browser" ],
         "content_renderer": [ "browser" ],
         "content_utility": [ "browser" ],
+        "data_decoder": [ "image_decoder" ],
+        "device": [ "device:nfc", "device:wake_lock" ],
+        "file": [ "file:filesystem", "file:leveldb" ],
+        "media": [ "media:media" ],
+        "network": [
+          "network_service",
+          "test",
+          "url_loader"
+        ],
+        "ui": [ "display_output_protection" ],
         "service_manager": [
           "service_manager:client_process",
           "service_manager:instance_name",
+          "service_manager:service_manager",
           "service_manager:user_id"
         ],
-        "file": [ "file:filesystem", "file:leveldb" ],
-        "media": [ "media:media" ],
         "shape_detection": [
           "barcode_detection",
-          "face_detection"
-        ]
+          "face_detection",
+          "text_detection"
+
+        ],
+        "resource_coordinator": [ "coordination_unit" ]
       }
     },
     "navigation:frame": {
@@ -72,6 +91,7 @@
           // impossible this week. Remove once sky/ken fix this.
           "autofill::mojom::AutofillDriver",
           "autofill::mojom::PasswordManagerDriver",
+          "blink::mojom::KeyboardLockService",
           "blink::mojom::MediaSessionService",
           "blink::mojom::PermissionService",
           "blink::mojom::PresentationService",
@@ -81,9 +101,7 @@
           // TODO(beng): figure out how to overlay test interfaces like this.
           "content::mojom::BrowserTarget",
           "device::mojom::VRService",
-          "device::VibrationManager",
           "device::mojom::GeolocationService",
-          "device::mojom::SensorProvider",
           "device::mojom::WakeLockService",
           "device::nfc::mojom::NFC",
           "device::usb::DeviceManager",

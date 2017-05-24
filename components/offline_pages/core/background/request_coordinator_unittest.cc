@@ -60,6 +60,8 @@ class ObserverStub : public RequestCoordinator::Observer {
       : added_called_(false),
         completed_called_(false),
         changed_called_(false),
+        network_progress_called_(false),
+        network_progress_bytes_(0),
         last_status_(RequestCoordinator::BackgroundSavePageResult::SUCCESS),
         state_(SavePageRequest::RequestState::OFFLINING) {}
 
@@ -67,6 +69,8 @@ class ObserverStub : public RequestCoordinator::Observer {
     added_called_ = false;
     completed_called_ = false;
     changed_called_ = false;
+    network_progress_called_ = false;
+    network_progress_bytes_ = 0;
     state_ = SavePageRequest::RequestState::OFFLINING;
     last_status_ = RequestCoordinator::BackgroundSavePageResult::SUCCESS;
   }
@@ -87,9 +91,17 @@ class ObserverStub : public RequestCoordinator::Observer {
     state_ = request.request_state();
   }
 
+  void OnNetworkProgress(const SavePageRequest& request,
+                         int64_t received_bytes) override {
+    network_progress_called_ = true;
+    network_progress_bytes_ = received_bytes;
+  }
+
   bool added_called() { return added_called_; }
   bool completed_called() { return completed_called_; }
   bool changed_called() { return changed_called_; }
+  bool network_progress_called() { return network_progress_called_; }
+  int64_t network_progress_bytes() { return network_progress_bytes_; }
   RequestCoordinator::BackgroundSavePageResult last_status() {
     return last_status_;
   }
@@ -99,12 +111,16 @@ class ObserverStub : public RequestCoordinator::Observer {
   bool added_called_;
   bool completed_called_;
   bool changed_called_;
+  bool network_progress_called_;
+  int64_t network_progress_bytes_;
   RequestCoordinator::BackgroundSavePageResult last_status_;
   SavePageRequest::RequestState state_;
 };
 
 class RequestCoordinatorTest : public testing::Test {
  public:
+  using RequestCoordinatorState = RequestCoordinator::RequestCoordinatorState;
+
   RequestCoordinatorTest();
   ~RequestCoordinatorTest() override;
 
@@ -116,9 +132,7 @@ class RequestCoordinatorTest : public testing::Test {
     return coordinator_taco_->request_coordinator();
   }
 
-  bool is_busy() { return coordinator()->is_busy(); }
-
-  bool is_starting() { return coordinator()->is_starting(); }
+  RequestCoordinatorState state() { return coordinator()->state(); }
 
   // Test processing callback function.
   void ProcessingCallbackFunction(bool result) {
@@ -130,7 +144,7 @@ class RequestCoordinatorTest : public testing::Test {
   void WaitingCallbackFunction(bool result) { waiter_.Signal(); }
 
   net::NetworkChangeNotifier::ConnectionType GetConnectionType() {
-    return coordinator()->GetConnectionType();
+    return coordinator()->current_conditions_->GetNetConnectionType();
   }
 
   // Callback for Add requests.
@@ -171,9 +185,8 @@ class RequestCoordinatorTest : public testing::Test {
     offliner_->enable_callback(enable);
   }
 
-  void SetNetworkConditionsForTest(
-      net::NetworkChangeNotifier::ConnectionType connection) {
-    coordinator()->SetNetworkConditionsForTest(connection);
+  void EnableSnapshotOnLastRetry() {
+    offliner_->enable_snapshot_on_last_retry();
   }
 
   void SetEffectiveConnectionTypeForTest(net::EffectiveConnectionType type) {
@@ -182,13 +195,17 @@ class RequestCoordinatorTest : public testing::Test {
 
   void SetNetworkConnected(bool connected) {
     if (connected) {
-      SetNetworkConditionsForTest(
-          net::NetworkChangeNotifier::ConnectionType::CONNECTION_3G);
+      DeviceConditions device_conditions(
+          !kPowerRequired, kBatteryPercentageHigh,
+          net::NetworkChangeNotifier::CONNECTION_3G);
+      SetDeviceConditionsForTest(device_conditions);
       SetEffectiveConnectionTypeForTest(
           net::EffectiveConnectionType::EFFECTIVE_CONNECTION_TYPE_3G);
     } else {
-      SetNetworkConditionsForTest(
-          net::NetworkChangeNotifier::ConnectionType::CONNECTION_NONE);
+      DeviceConditions device_conditions(
+          !kPowerRequired, kBatteryPercentageHigh,
+          net::NetworkChangeNotifier::CONNECTION_NONE);
+      SetDeviceConditionsForTest(device_conditions);
       SetEffectiveConnectionTypeForTest(
           net::EffectiveConnectionType::EFFECTIVE_CONNECTION_TYPE_OFFLINE);
     }
@@ -230,6 +247,10 @@ class RequestCoordinatorTest : public testing::Test {
     coordinator()->SetDeviceConditionsForTest(device_conditions);
   }
 
+  DeviceConditions* GetDeviceConditions() {
+    return coordinator()->current_conditions_.get();
+  }
+
   void WaitForCallback() { waiter_.Wait(); }
 
   void AdvanceClockBy(base::TimeDelta delta) {
@@ -240,11 +261,31 @@ class RequestCoordinatorTest : public testing::Test {
 
   SavePageRequest AddRequest2();
 
+  int64_t SavePageLater() {
+    RequestCoordinator::SavePageLaterParams params;
+    params.url = kUrl1;
+    params.client_id = kClientId1;
+    params.user_requested = kUserRequested;
+    return coordinator()->SavePageLater(params);
+  }
+
+  int64_t SavePageLaterWithAvailability(
+      RequestCoordinator::RequestAvailability availability) {
+    RequestCoordinator::SavePageLaterParams params;
+    params.url = kUrl1;
+    params.client_id = kClientId1;
+    params.user_requested = kUserRequested;
+    params.availability = availability;
+    return coordinator()->SavePageLater(params);
+  }
+
   Offliner::RequestStatus last_offlining_status() const {
     return coordinator()->last_offlining_status_;
   }
 
   bool OfflinerWasCanceled() const { return offliner_->cancel_called(); }
+
+  void ResetOfflinerWasCanceled() { offliner_->reset_cancel_called(); }
 
   ObserverStub observer() { return observer_; }
 
@@ -264,6 +305,14 @@ class RequestCoordinatorTest : public testing::Test {
   }
 
   const base::HistogramTester& histograms() const { return histogram_tester_; }
+
+  const std::set<int64_t>& disabled_requests() {
+    return coordinator()->disabled_requests_;
+  }
+
+  const std::deque<int64_t>& prioritized_requests() {
+    return coordinator()->prioritized_requests_;
+  }
 
  private:
   GetRequestsResult last_get_requests_result_;
@@ -424,12 +473,16 @@ TEST_F(RequestCoordinatorTest, StartScheduledProcessingWithNoRequests) {
   }
 }
 
+TEST_F(RequestCoordinatorTest, NetworkProgressCallback) {
+  EXPECT_NE(0, SavePageLater());
+  PumpLoop();
+  EXPECT_TRUE(observer().network_progress_called());
+  EXPECT_GT(observer().network_progress_bytes(), 0LL);
+}
+
 TEST_F(RequestCoordinatorTest, StartScheduledProcessingWithRequestInProgress) {
   // Start processing for this request.
-  EXPECT_NE(coordinator()->SavePageLater(
-                kUrl1, kClientId1, kUserRequested,
-                RequestCoordinator::RequestAvailability::ENABLED_FOR_OFFLINER),
-            0);
+  EXPECT_NE(0, SavePageLater());
 
   // Ensure that the forthcoming request does not finish - we simulate it being
   // in progress by asking it to skip making the completion callback.
@@ -440,7 +493,7 @@ TEST_F(RequestCoordinatorTest, StartScheduledProcessingWithRequestInProgress) {
                                                       processing_callback()));
   PumpLoop();
 
-  EXPECT_TRUE(is_busy());
+  EXPECT_TRUE(state() == RequestCoordinatorState::OFFLINING);
   // Since the offliner is disabled, this callback should not be called.
   EXPECT_FALSE(processing_callback_called());
 
@@ -450,8 +503,7 @@ TEST_F(RequestCoordinatorTest, StartScheduledProcessingWithRequestInProgress) {
 }
 
 TEST_F(RequestCoordinatorTest, StartImmediateProcessingWithNoRequests) {
-  EXPECT_TRUE(coordinator()->StartImmediateProcessing(device_conditions(),
-                                                      processing_callback()));
+  EXPECT_TRUE(coordinator()->StartImmediateProcessing(processing_callback()));
   PumpLoop();
 
   EXPECT_TRUE(processing_callback_called());
@@ -464,8 +516,7 @@ TEST_F(RequestCoordinatorTest, StartImmediateProcessingOnSvelte) {
   // Set as low-end device to verfiy immediate processing will not start.
   SetIsLowEndDeviceForTest(true);
 
-  EXPECT_FALSE(coordinator()->StartImmediateProcessing(device_conditions(),
-                                                       processing_callback()));
+  EXPECT_FALSE(coordinator()->StartImmediateProcessing(processing_callback()));
   histograms().ExpectBucketCount("OfflinePages.Background.ImmediateStartStatus",
                                  5 /* NOT_STARTED_ON_SVELTE */, 1);
 }
@@ -474,34 +525,29 @@ TEST_F(RequestCoordinatorTest, StartImmediateProcessingWhenDisconnected) {
   DeviceConditions disconnected_conditions(
       !kPowerRequired, kBatteryPercentageHigh,
       net::NetworkChangeNotifier::CONNECTION_NONE);
-  EXPECT_FALSE(coordinator()->StartImmediateProcessing(disconnected_conditions,
-                                                       processing_callback()));
+  SetDeviceConditionsForTest(disconnected_conditions);
+  EXPECT_FALSE(coordinator()->StartImmediateProcessing(processing_callback()));
   histograms().ExpectBucketCount("OfflinePages.Background.ImmediateStartStatus",
                                  3 /* NO_CONNECTION */, 1);
 }
 
 TEST_F(RequestCoordinatorTest, StartImmediateProcessingWithRequestInProgress) {
   // Start processing for this request.
-  EXPECT_NE(coordinator()->SavePageLater(
-                kUrl1, kClientId1, kUserRequested,
-                RequestCoordinator::RequestAvailability::ENABLED_FOR_OFFLINER),
-            0);
+  EXPECT_NE(0, SavePageLater());
 
   // Disable the automatic offliner callback.
   EnableOfflinerCallback(false);
 
   // Sending the request to the offliner should make it busy.
-  EXPECT_TRUE(coordinator()->StartImmediateProcessing(device_conditions(),
-                                                      processing_callback()));
+  EXPECT_TRUE(coordinator()->StartImmediateProcessing(processing_callback()));
   PumpLoop();
 
-  EXPECT_TRUE(is_busy());
+  EXPECT_TRUE(state() == RequestCoordinatorState::OFFLINING);
   // Since the offliner is disabled, this callback should not be called.
   EXPECT_FALSE(processing_callback_called());
 
   // Now trying to start processing should return false since already busy.
-  EXPECT_FALSE(coordinator()->StartImmediateProcessing(device_conditions(),
-                                                       processing_callback()));
+  EXPECT_FALSE(coordinator()->StartImmediateProcessing(processing_callback()));
 
   histograms().ExpectBucketCount("OfflinePages.Background.ImmediateStartStatus",
                                  1 /* BUSY */, 1);
@@ -513,23 +559,30 @@ TEST_F(RequestCoordinatorTest, SavePageLater) {
   coordinator()->SetInternalStartProcessingCallbackForTest(
       processing_callback());
 
-  EXPECT_NE(coordinator()->SavePageLater(
-                kUrl1, kClientId1, kUserRequested,
-                RequestCoordinator::RequestAvailability::ENABLED_FOR_OFFLINER),
-            0);
+  // Use default values for |user_requested| and |availability|.
+  RequestCoordinator::SavePageLaterParams params;
+  params.url = kUrl1;
+  params.client_id = kClientId1;
+  params.original_url = kUrl2;
+  EXPECT_NE(0, coordinator()->SavePageLater(params));
 
   // Expect that a request got placed on the queue.
   coordinator()->queue()->GetRequests(base::Bind(
       &RequestCoordinatorTest::GetRequestsDone, base::Unretained(this)));
+
+  // Expect that the request is not added to the disabled list by default.
+  EXPECT_TRUE(disabled_requests().empty());
 
   // Wait for callbacks to finish, both request queue and offliner.
   PumpLoop();
   EXPECT_TRUE(processing_callback_called());
 
   // Check the request queue is as expected.
-  EXPECT_EQ(1UL, last_requests().size());
+  ASSERT_EQ(1UL, last_requests().size());
   EXPECT_EQ(kUrl1, last_requests().at(0)->url());
   EXPECT_EQ(kClientId1, last_requests().at(0)->client_id());
+  EXPECT_TRUE(last_requests().at(0)->user_requested());
+  EXPECT_EQ(kUrl2, last_requests().at(0)->original_url());
 
   // Expect that the scheduler got notified.
   SchedulerStub* scheduler_stub =
@@ -538,7 +591,7 @@ TEST_F(RequestCoordinatorTest, SavePageLater) {
   EXPECT_EQ(coordinator()
                 ->GetTriggerConditions(last_requests()[0]->user_requested())
                 .minimum_battery_percentage,
-            scheduler_stub->conditions()->minimum_battery_percentage);
+            scheduler_stub->trigger_conditions()->minimum_battery_percentage);
 
   // Check that the observer got the notification that a page is available
   EXPECT_TRUE(observer().added_called());
@@ -557,10 +610,7 @@ TEST_F(RequestCoordinatorTest, SavePageLaterFailed) {
   coordinator()->SetInternalStartProcessingCallbackForTest(
       processing_callback());
 
-  EXPECT_TRUE(
-      coordinator()->SavePageLater(
-          kUrl1, kClientId1, kUserRequested,
-          RequestCoordinator::RequestAvailability::ENABLED_FOR_OFFLINER) != 0);
+  EXPECT_NE(0, SavePageLater());
 
   // Expect that a request got placed on the queue.
   coordinator()->queue()->GetRequests(base::Bind(
@@ -590,7 +640,7 @@ TEST_F(RequestCoordinatorTest, SavePageLaterFailed) {
   EXPECT_EQ(coordinator()
                 ->GetTriggerConditions(last_requests()[0]->user_requested())
                 .minimum_battery_percentage,
-            scheduler_stub->conditions()->minimum_battery_percentage);
+            scheduler_stub->trigger_conditions()->minimum_battery_percentage);
 
   // Check that the observer got the notification that a page is available
   EXPECT_TRUE(observer().added_called());
@@ -620,6 +670,9 @@ TEST_F(RequestCoordinatorTest, OfflinerDoneRequestSucceeded) {
   // Check that the observer got the notification that we succeeded, and that
   // the request got removed from the queue.
   EXPECT_TRUE(observer().completed_called());
+  histograms().ExpectBucketCount(
+      "OfflinePages.Background.FinalSavePageResult.bookmark", 0 /* SUCCESS */,
+      1);
   EXPECT_EQ(RequestCoordinator::BackgroundSavePageResult::SUCCESS,
             observer().last_status());
 }
@@ -644,13 +697,13 @@ TEST_F(RequestCoordinatorTest, OfflinerDoneRequestSucceededButLostNetwork) {
   EXPECT_TRUE(processing_callback_called());
 
   // Verify not busy with 2nd request (since no connection).
-  EXPECT_FALSE(is_busy());
+  EXPECT_FALSE(state() == RequestCoordinatorState::OFFLINING);
 
   // Now connect network and verify processing starts.
   SetNetworkConnected(true);
   CallConnectionTypeObserver();
   PumpLoop();
-  EXPECT_TRUE(is_busy());
+  EXPECT_TRUE(state() == RequestCoordinatorState::OFFLINING);
 }
 
 TEST_F(RequestCoordinatorTest, OfflinerDoneRequestFailed) {
@@ -676,7 +729,7 @@ TEST_F(RequestCoordinatorTest, OfflinerDoneRequestFailed) {
   EXPECT_FALSE(processing_callback_called());
 
   // Busy processing 2nd request.
-  EXPECT_TRUE(is_busy());
+  EXPECT_TRUE(state() == RequestCoordinatorState::OFFLINING);
 
   coordinator()->queue()->GetRequests(base::Bind(
       &RequestCoordinatorTest::GetRequestsDone, base::Unretained(this)));
@@ -689,6 +742,9 @@ TEST_F(RequestCoordinatorTest, OfflinerDoneRequestFailed) {
   // subsequent notification that the request was removed) since we exceeded
   // retry count.
   EXPECT_TRUE(observer().completed_called());
+  histograms().ExpectBucketCount(
+      "OfflinePages.Background.FinalSavePageResult.bookmark",
+      6 /* RETRY_COUNT_EXCEEDED */, 1);
   EXPECT_EQ(RequestCoordinator::BackgroundSavePageResult::RETRY_COUNT_EXCEEDED,
             observer().last_status());
 }
@@ -715,7 +771,7 @@ TEST_F(RequestCoordinatorTest, OfflinerDoneRequestFailedNoRetryFailure) {
   EXPECT_FALSE(processing_callback_called());
 
   // Busy processing 2nd request.
-  EXPECT_TRUE(is_busy());
+  EXPECT_TRUE(state() == RequestCoordinatorState::OFFLINING);
 
   coordinator()->queue()->GetRequests(base::Bind(
       &RequestCoordinatorTest::GetRequestsDone, base::Unretained(this)));
@@ -728,6 +784,12 @@ TEST_F(RequestCoordinatorTest, OfflinerDoneRequestFailedNoRetryFailure) {
   EXPECT_TRUE(observer().completed_called());
   EXPECT_EQ(RequestCoordinator::BackgroundSavePageResult::LOADING_FAILURE,
             observer().last_status());
+  // We should have a histogram entry for the effective network conditions
+  // when this failed request began.
+  histograms().ExpectBucketCount(
+      "OfflinePages.Background.EffectiveConnectionType.OffliningStartType."
+      "bookmark",
+      net::NetworkChangeNotifier::CONNECTION_UNKNOWN, 1);
 }
 
 TEST_F(RequestCoordinatorTest, OfflinerDoneRequestFailedNoNextFailure) {
@@ -752,7 +814,7 @@ TEST_F(RequestCoordinatorTest, OfflinerDoneRequestFailedNoNextFailure) {
   EXPECT_TRUE(processing_callback_called());
 
   // Not busy for NO_NEXT failure.
-  EXPECT_FALSE(is_busy());
+  EXPECT_FALSE(state() == RequestCoordinatorState::OFFLINING);
 
   coordinator()->queue()->GetRequests(base::Bind(
       &RequestCoordinatorTest::GetRequestsDone, base::Unretained(this)));
@@ -786,7 +848,7 @@ TEST_F(RequestCoordinatorTest, OfflinerDoneForegroundCancel) {
   EXPECT_EQ(0L, last_requests().at(0)->completed_attempt_count());
 }
 
-TEST_F(RequestCoordinatorTest, OfflinerDonePrerenderingCancel) {
+TEST_F(RequestCoordinatorTest, OfflinerDoneOffliningCancel) {
   // Add a request to the queue, wait for callbacks to finish.
   offline_pages::SavePageRequest request(kRequestId1, kUrl1, kClientId1,
                                          base::Time::Now(), kUserRequested);
@@ -805,7 +867,7 @@ TEST_F(RequestCoordinatorTest, OfflinerDonePrerenderingCancel) {
 
   // Request still in the queue.
   EXPECT_EQ(1UL, last_requests().size());
-  // Verify prerendering cancel not counted as an attempt after all.
+  // Verify offlining cancel not counted as an attempt after all.
   const std::unique_ptr<SavePageRequest>& found_request =
       last_requests().front();
   EXPECT_EQ(0L, found_request->completed_attempt_count());
@@ -816,13 +878,13 @@ TEST_F(RequestCoordinatorTest, OfflinerDonePrerenderingCancel) {
 TEST_F(RequestCoordinatorTest, RequestNotPickedDisabledItemsRemain) {
   coordinator()->StartScheduledProcessing(device_conditions(),
                                           processing_callback());
-  EXPECT_TRUE(is_starting());
+  EXPECT_TRUE(state() == RequestCoordinatorState::PICKING);
 
   // Call RequestNotPicked, simulating a request on the disabled list.
   CallRequestNotPicked(false, true);
   PumpLoop();
 
-  EXPECT_FALSE(is_starting());
+  EXPECT_FALSE(state() == RequestCoordinatorState::PICKING);
 
   // The scheduler should have been called to schedule the disabled task for
   // 5 minutes from now.
@@ -837,14 +899,14 @@ TEST_F(RequestCoordinatorTest, RequestNotPickedDisabledItemsRemain) {
 TEST_F(RequestCoordinatorTest, RequestNotPickedNonUserRequestedItemsRemain) {
   coordinator()->StartScheduledProcessing(device_conditions(),
                                           processing_callback());
-  EXPECT_TRUE(is_starting());
+  EXPECT_TRUE(state() == RequestCoordinatorState::PICKING);
 
   // Call RequestNotPicked, and make sure we pick schedule a task for non user
   // requested conditions, with no tasks on the disabled list.
   CallRequestNotPicked(true, false);
   PumpLoop();
 
-  EXPECT_FALSE(is_starting());
+  EXPECT_FALSE(state() == RequestCoordinatorState::PICKING);
   EXPECT_TRUE(processing_callback_called());
 
   // The scheduler should have been called to schedule the non-user requested
@@ -853,7 +915,8 @@ TEST_F(RequestCoordinatorTest, RequestNotPickedNonUserRequestedItemsRemain) {
       reinterpret_cast<SchedulerStub*>(coordinator()->scheduler());
   EXPECT_TRUE(scheduler_stub->schedule_called());
   EXPECT_TRUE(scheduler_stub->unschedule_called());
-  const Scheduler::TriggerConditions* conditions = scheduler_stub->conditions();
+  const Scheduler::TriggerConditions* conditions =
+      scheduler_stub->trigger_conditions();
   EXPECT_EQ(conditions->require_power_connected,
             coordinator()->policy()->PowerRequired(!kUserRequested));
   EXPECT_EQ(
@@ -882,7 +945,8 @@ TEST_F(RequestCoordinatorTest, SchedulerGetsLeastRestrictiveConditions) {
   // priority.
   SchedulerStub* scheduler_stub =
       reinterpret_cast<SchedulerStub*>(coordinator()->scheduler());
-  const Scheduler::TriggerConditions* conditions = scheduler_stub->conditions();
+  const Scheduler::TriggerConditions* conditions =
+      scheduler_stub->trigger_conditions();
   EXPECT_TRUE(scheduler_stub->schedule_called());
   EXPECT_EQ(conditions->require_power_connected,
             coordinator()->policy()->PowerRequired(kUserRequested));
@@ -905,7 +969,7 @@ TEST_F(RequestCoordinatorTest, StartScheduledProcessingWithLoadingDisabled) {
   PumpLoop();
   EXPECT_TRUE(processing_callback_called());
 
-  EXPECT_FALSE(is_starting());
+  EXPECT_FALSE(state() == RequestCoordinatorState::PICKING);
   EXPECT_EQ(Offliner::LOADING_NOT_ACCEPTED, last_offlining_status());
 }
 
@@ -921,7 +985,7 @@ TEST_F(RequestCoordinatorTest,
 
   EXPECT_TRUE(coordinator()->StartScheduledProcessing(device_conditions(),
                                                       processing_callback()));
-  EXPECT_TRUE(is_starting());
+  EXPECT_TRUE(state() == RequestCoordinatorState::PICKING);
 
   // Now, quick, before it can do much (we haven't called PumpLoop), cancel it.
   coordinator()->StopProcessing(Offliner::REQUEST_COORDINATOR_CANCELED);
@@ -930,7 +994,7 @@ TEST_F(RequestCoordinatorTest,
   PumpLoop();
   EXPECT_TRUE(processing_callback_called());
 
-  EXPECT_FALSE(is_starting());
+  EXPECT_FALSE(state() == RequestCoordinatorState::PICKING);
 
   // OfflinerDoneCallback will not end up getting called with status SAVED,
   // since we cancelled the event before it called offliner_->LoadAndSave().
@@ -953,7 +1017,7 @@ TEST_F(RequestCoordinatorTest,
 
   EXPECT_TRUE(coordinator()->StartScheduledProcessing(device_conditions(),
                                                       processing_callback()));
-  EXPECT_TRUE(is_starting());
+  EXPECT_TRUE(state() == RequestCoordinatorState::PICKING);
 
   // Let all the async parts of the start processing pipeline run to completion.
   PumpLoop();
@@ -967,8 +1031,8 @@ TEST_F(RequestCoordinatorTest,
   EXPECT_FALSE(processing_callback_called());
 
   // Coordinator should now be busy.
-  EXPECT_TRUE(is_busy());
-  EXPECT_FALSE(is_starting());
+  EXPECT_TRUE(state() == RequestCoordinatorState::OFFLINING);
+  EXPECT_FALSE(state() == RequestCoordinatorState::PICKING);
 
   // Now we cancel it while the prerenderer is busy.
   coordinator()->StopProcessing(Offliner::REQUEST_COORDINATOR_CANCELED);
@@ -981,7 +1045,7 @@ TEST_F(RequestCoordinatorTest,
   EXPECT_EQ(SavePageRequest::RequestState::AVAILABLE, observer().state());
   observer().Clear();
 
-  EXPECT_FALSE(is_busy());
+  EXPECT_FALSE(state() == RequestCoordinatorState::OFFLINING);
 
   // OfflinerDoneCallback will not end up getting called with status SAVED,
   // since we cancelled the event before the LoadAndSave completed.
@@ -1024,9 +1088,12 @@ TEST_F(RequestCoordinatorTest, RemoveInflightRequest) {
 }
 
 TEST_F(RequestCoordinatorTest, MarkRequestCompleted) {
-  int64_t request_id = coordinator()->SavePageLater(
-      kUrl1, kClientId1, kUserRequested,
+  int64_t request_id = SavePageLaterWithAvailability(
       RequestCoordinator::RequestAvailability::DISABLED_FOR_OFFLINER);
+
+  // Verify that the request is added to the disabled list.
+  EXPECT_FALSE(disabled_requests().empty());
+
   PumpLoop();
   EXPECT_NE(request_id, 0l);
 
@@ -1038,7 +1105,7 @@ TEST_F(RequestCoordinatorTest, MarkRequestCompleted) {
   coordinator()->MarkRequestCompleted(request_id);
   PumpLoop();
 
-  // Our observer should have seen SUCCESS instead of REMOVED.
+  // Our observer should have seen SUCCESS instead of USER_CANCELED.
   EXPECT_EQ(RequestCoordinator::BackgroundSavePageResult::SUCCESS,
             observer().last_status());
   EXPECT_TRUE(observer().completed_called());
@@ -1048,9 +1115,12 @@ TEST_F(RequestCoordinatorTest, EnableForOffliner) {
   // Pretend we are on low-end device so immediate start won't happen.
   SetIsLowEndDeviceForTest(true);
 
-  int64_t request_id = coordinator()->SavePageLater(
-      kUrl1, kClientId1, kUserRequested,
+  int64_t request_id = SavePageLaterWithAvailability(
       RequestCoordinator::RequestAvailability::DISABLED_FOR_OFFLINER);
+
+  // Verify that the request is added to the disabled list.
+  EXPECT_FALSE(disabled_requests().empty());
+
   PumpLoop();
   EXPECT_NE(request_id, 0l);
 
@@ -1071,7 +1141,8 @@ TEST_F(RequestCoordinatorTest, EnableForOffliner) {
   EXPECT_EQ(SavePageRequest::RequestState::AVAILABLE, observer().state());
 }
 
-TEST_F(RequestCoordinatorTest, WatchdogTimeoutForScheduledProcessing) {
+TEST_F(RequestCoordinatorTest,
+       WatchdogTimeoutForScheduledProcessingNoLastSnapshot) {
   // Build a request to use with the pre-renderer, and put it on the queue.
   offline_pages::SavePageRequest request(kRequestId1, kUrl1, kClientId1,
                                          base::Time::Now(), kUserRequested);
@@ -1106,24 +1177,22 @@ TEST_F(RequestCoordinatorTest, WatchdogTimeoutForScheduledProcessing) {
   WaitForCallback();
   PumpLoop();
 
-  EXPECT_FALSE(is_starting());
-  EXPECT_FALSE(coordinator()->is_busy());
+  EXPECT_FALSE(state() == RequestCoordinatorState::PICKING);
+  EXPECT_FALSE(state() == RequestCoordinatorState::OFFLINING);
   EXPECT_TRUE(OfflinerWasCanceled());
 }
 
-TEST_F(RequestCoordinatorTest, WatchdogTimeoutForImmediateProcessing) {
+TEST_F(RequestCoordinatorTest,
+       WatchdogTimeoutForImmediateProcessingNoLastSnapshot) {
   // Ensure that the new request does not finish - we simulate it being
   // in progress by asking it to skip making the completion callback.
   EnableOfflinerCallback(false);
 
-  EXPECT_NE(coordinator()->SavePageLater(
-                kUrl1, kClientId1, kUserRequested,
-                RequestCoordinator::RequestAvailability::ENABLED_FOR_OFFLINER),
-            0);
+  EXPECT_NE(0, SavePageLater());
   PumpLoop();
 
   // Verify that immediate start from adding the request did happen.
-  EXPECT_TRUE(coordinator()->is_busy());
+  EXPECT_TRUE(state() == RequestCoordinatorState::OFFLINING);
 
   // Advance the mock clock 1 second before the watchdog timeout.
   AdvanceClockBy(base::TimeDelta::FromSeconds(
@@ -1134,7 +1203,7 @@ TEST_F(RequestCoordinatorTest, WatchdogTimeoutForImmediateProcessing) {
   PumpLoop();
 
   // Verify still busy.
-  EXPECT_TRUE(coordinator()->is_busy());
+  EXPECT_TRUE(state() == RequestCoordinatorState::OFFLINING);
   EXPECT_FALSE(OfflinerWasCanceled());
 
   // Advance the mock clock past the watchdog timeout now.
@@ -1194,7 +1263,7 @@ TEST_F(RequestCoordinatorTest, TryNextRequestWithNoNetwork) {
   EXPECT_TRUE(coordinator()->StartScheduledProcessing(device_conditions(),
                                                       waiting_callback()));
   PumpLoop();
-  EXPECT_TRUE(coordinator()->is_busy());
+  EXPECT_TRUE(state() == RequestCoordinatorState::OFFLINING);
 
   // Now lose the network connection.
   SetNetworkConnected(false);
@@ -1205,8 +1274,8 @@ TEST_F(RequestCoordinatorTest, TryNextRequestWithNoNetwork) {
   PumpLoop();
 
   // Not starting nor busy with next request.
-  EXPECT_FALSE(coordinator()->is_starting());
-  EXPECT_FALSE(coordinator()->is_busy());
+  EXPECT_FALSE(state() == RequestCoordinatorState::PICKING);
+  EXPECT_FALSE(state() == RequestCoordinatorState::OFFLINING);
 
   // Get queued requests.
   coordinator()->queue()->GetRequests(base::Bind(
@@ -1238,13 +1307,7 @@ TEST_F(RequestCoordinatorTest, GetAllRequests) {
   EXPECT_EQ(kRequestId2, last_requests().at(1)->request_id());
 }
 
-#if defined(OS_IOS)
-// Flaky on IOS. http://crbug/663311
-#define MAYBE_PauseAndResumeObserver DISABLED_PauseAndResumeObserver
-#else
-#define MAYBE_PauseAndResumeObserver PauseAndResumeObserver
-#endif
-TEST_F(RequestCoordinatorTest, MAYBE_PauseAndResumeObserver) {
+TEST_F(RequestCoordinatorTest, PauseAndResumeObserver) {
   // Set low-end device status to actual status.
   SetIsLowEndDeviceForTest(base::SysInfo::IsLowEndDevice());
 
@@ -1296,7 +1359,7 @@ TEST_F(RequestCoordinatorTest, RemoveRequest) {
   PumpLoop();
 
   EXPECT_TRUE(observer().completed_called());
-  EXPECT_EQ(RequestCoordinator::BackgroundSavePageResult::REMOVED,
+  EXPECT_EQ(RequestCoordinator::BackgroundSavePageResult::USER_CANCELED,
             observer().last_status());
   EXPECT_EQ(1UL, last_remove_results().size());
   EXPECT_EQ(kRequestId1, std::get<0>(last_remove_results().at(0)));
@@ -1307,13 +1370,10 @@ TEST_F(RequestCoordinatorTest,
   // Turn off the callback so that the request stops before processing in
   // PumpLoop.
   EnableOfflinerCallback(false);
-  EXPECT_NE(coordinator()->SavePageLater(
-                kUrl1, kClientId1, kUserRequested,
-                RequestCoordinator::RequestAvailability::ENABLED_FOR_OFFLINER),
-            0);
+  EXPECT_NE(0, SavePageLater());
   PumpLoop();
 
-  EXPECT_TRUE(is_busy());
+  EXPECT_TRUE(state() == RequestCoordinatorState::OFFLINING);
 }
 
 TEST_F(RequestCoordinatorTest,
@@ -1323,14 +1383,11 @@ TEST_F(RequestCoordinatorTest,
   EXPECT_FALSE(offline_pages::IsOfflinePagesSvelteConcurrentLoadingEnabled());
 
   // Make a request.
-  EXPECT_NE(coordinator()->SavePageLater(
-                kUrl1, kClientId1, kUserRequested,
-                RequestCoordinator::RequestAvailability::ENABLED_FOR_OFFLINER),
-            0);
+  EXPECT_NE(0, SavePageLater());
   PumpLoop();
 
   // Verify not immediately busy (since low-end device).
-  EXPECT_FALSE(is_busy());
+  EXPECT_FALSE(state() == RequestCoordinatorState::OFFLINING);
 
   // Set feature flag to allow concurrent loads.
   base::test::ScopedFeatureList scoped_feature_list;
@@ -1343,38 +1400,37 @@ TEST_F(RequestCoordinatorTest,
   EnableOfflinerCallback(false);
 
   // Make another request.
-  EXPECT_NE(coordinator()->SavePageLater(
-                kUrl2, kClientId2, kUserRequested,
-                RequestCoordinator::RequestAvailability::ENABLED_FOR_OFFLINER),
-            0);
+  RequestCoordinator::SavePageLaterParams params;
+  params.url = kUrl2;
+  params.client_id = kClientId2;
+  params.user_requested = kUserRequested;
+  EXPECT_NE(0, coordinator()->SavePageLater(params));
   PumpLoop();
 
   // Verify immediate processing did start this time.
-  EXPECT_TRUE(is_busy());
+  EXPECT_TRUE(state() == RequestCoordinatorState::OFFLINING);
 }
 
 TEST_F(RequestCoordinatorTest, SavePageDoesntStartProcessingWhenDisconnected) {
   SetNetworkConnected(false);
   EnableOfflinerCallback(false);
-  EXPECT_NE(
-      coordinator()->SavePageLater(
-          kUrl1, kClientId1, kUserRequested,
-          RequestCoordinator::RequestAvailability::ENABLED_FOR_OFFLINER), 0);
+  EXPECT_NE(0, SavePageLater());
   PumpLoop();
-  EXPECT_FALSE(is_busy());
+  EXPECT_FALSE(state() == RequestCoordinatorState::OFFLINING);
 
   // Now connect network and verify processing starts.
   SetNetworkConnected(true);
   CallConnectionTypeObserver();
   PumpLoop();
-  EXPECT_TRUE(is_busy());
+  EXPECT_TRUE(state() == RequestCoordinatorState::OFFLINING);
 }
 
 TEST_F(RequestCoordinatorTest,
        SavePageDoesStartProcessingWhenPoorlyConnected) {
   // Set specific network type for 2G with poor effective connection.
-  SetNetworkConditionsForTest(
-      net::NetworkChangeNotifier::ConnectionType::CONNECTION_2G);
+  DeviceConditions device_conditions(!kPowerRequired, kBatteryPercentageHigh,
+                                     net::NetworkChangeNotifier::CONNECTION_2G);
+  SetDeviceConditionsForTest(device_conditions);
   SetEffectiveConnectionTypeForTest(
       net::EffectiveConnectionType::EFFECTIVE_CONNECTION_TYPE_SLOW_2G);
 
@@ -1382,12 +1438,9 @@ TEST_F(RequestCoordinatorTest,
   // PumpLoop.
   EnableOfflinerCallback(false);
 
-  EXPECT_NE(coordinator()->SavePageLater(
-                kUrl1, kClientId1, kUserRequested,
-                RequestCoordinator::RequestAvailability::ENABLED_FOR_OFFLINER),
-            0);
+  EXPECT_NE(0, SavePageLater());
   PumpLoop();
-  EXPECT_TRUE(is_busy());
+  EXPECT_TRUE(state() == RequestCoordinatorState::OFFLINING);
 }
 
 TEST_F(RequestCoordinatorTest,
@@ -1402,7 +1455,7 @@ TEST_F(RequestCoordinatorTest,
   // Add a request to the queue.
   AddRequest1();
   PumpLoop();
-  EXPECT_FALSE(is_busy());
+  EXPECT_FALSE(state() == RequestCoordinatorState::OFFLINING);
 
   // Pause the request.
   std::vector<int64_t> request_ids;
@@ -1413,21 +1466,123 @@ TEST_F(RequestCoordinatorTest,
   // Resume the request while disconnected.
   coordinator()->ResumeRequests(request_ids);
   PumpLoop();
-  EXPECT_FALSE(is_busy());
+  EXPECT_FALSE(state() == RequestCoordinatorState::OFFLINING);
+  EXPECT_EQ(1UL, prioritized_requests().size());
 
   // Pause the request again.
   coordinator()->PauseRequests(request_ids);
   PumpLoop();
+  EXPECT_EQ(0UL, prioritized_requests().size());
 
   // Now simulate reasonable connection.
   SetNetworkConnected(true);
 
   // Resume the request while connected.
   coordinator()->ResumeRequests(request_ids);
-  EXPECT_FALSE(is_busy());
+  EXPECT_FALSE(state() == RequestCoordinatorState::OFFLINING);
+  PumpLoop();
+  EXPECT_EQ(1UL, prioritized_requests().size());
+
+  EXPECT_TRUE(state() == RequestCoordinatorState::OFFLINING);
+}
+
+TEST_F(RequestCoordinatorTest, SnapshotOnLastTryForScheduledProcessing) {
+  // Build a request to use with the pre-renderer, and put it on the queue.
+  offline_pages::SavePageRequest request(kRequestId1, kUrl1, kClientId1,
+                                         base::Time::Now(), kUserRequested);
+  // Set request to allow one more completed attempt. So that the next try would
+  // be the last retry.
+  int max_tries = coordinator()->policy()->GetMaxCompletedTries();
+  request.set_completed_attempt_count(max_tries - 1);
+  coordinator()->queue()->AddRequest(
+      request,
+      base::Bind(&RequestCoordinatorTest::AddRequestDone,
+                 base::Unretained(this)));
   PumpLoop();
 
-  EXPECT_TRUE(is_busy());
+  // Ensure that the new request does not finish - we simulate it being
+  // in progress by asking it to skip making the completion callback.
+  // Also make snapshot on last retry happen in this case.
+  EnableOfflinerCallback(false);
+  EnableSnapshotOnLastRetry();
+
+  // Sending the request to the offliner.
+  EXPECT_TRUE(coordinator()->StartScheduledProcessing(device_conditions(),
+                                                      waiting_callback()));
+  PumpLoop();
+
+  // Advance the mock clock far enough to cause a watchdog timeout
+  AdvanceClockBy(base::TimeDelta::FromSeconds(
+      coordinator()
+          ->policy()
+          ->GetSinglePageTimeLimitWhenBackgroundScheduledInSeconds() +
+      1));
+  PumpLoop();
+
+  // Wait for timeout to expire.  Use a TaskRunner with a DelayedTaskRunner
+  // which won't time out immediately, so the watchdog thread doesn't kill valid
+  // tasks too soon.
+  WaitForCallback();
+  PumpLoop();
+
+  // Check the offliner didn't get a cancel and the result was success.
+  EXPECT_FALSE(OfflinerWasCanceled());
+  EXPECT_EQ(RequestCoordinator::BackgroundSavePageResult::SUCCESS,
+            observer().last_status());
+  EXPECT_TRUE(observer().completed_called());
+}
+
+TEST_F(RequestCoordinatorTest, SnapshotOnLastTryForImmediateProcessing) {
+  // Ensure that the new request does not finish - we simulate it being
+  // in progress by asking it to skip making the completion callback.
+  EnableOfflinerCallback(false);
+
+  EXPECT_NE(0, SavePageLater());
+
+  // Repeat the timeout for MaxCompleteTries - 1 times in order to increase the
+  // completed tries on this request.
+  int max_tries = coordinator()->policy()->GetMaxCompletedTries();
+  for (int i = 0; i < max_tries - 1; i++) {
+    PumpLoop();
+    // Reset states.
+    ResetOfflinerWasCanceled();
+    observer().Clear();
+
+    // Verify that the request is being processed.
+    EXPECT_TRUE(state() == RequestCoordinatorState::OFFLINING);
+
+    // Advance the mock clock 1 second more than the watchdog timeout.
+    AdvanceClockBy(base::TimeDelta::FromSeconds(
+        coordinator()
+            ->policy()
+            ->GetSinglePageTimeLimitForImmediateLoadInSeconds() +
+        1));
+    PumpLoop();
+
+    // Verify the request timed out.
+    EXPECT_TRUE(OfflinerWasCanceled());
+    EXPECT_TRUE(observer().changed_called());
+  }
+
+  // Reset states.
+  ResetOfflinerWasCanceled();
+  observer().Clear();
+  // Make snapshot on last retry happen.
+  EnableSnapshotOnLastRetry();
+
+  // Advance the mock clock 1 second more than the watchdog timeout.
+  AdvanceClockBy(base::TimeDelta::FromSeconds(
+      coordinator()
+          ->policy()
+          ->GetSinglePageTimeLimitForImmediateLoadInSeconds() +
+      1));
+  PumpLoop();
+
+  // The last time would trigger the snapshot on last retry and succeed.
+  EXPECT_FALSE(OfflinerWasCanceled());
+  EXPECT_EQ(RequestCoordinator::BackgroundSavePageResult::SUCCESS,
+            observer().last_status());
+  EXPECT_TRUE(observer().completed_called());
 }
 
 }  // namespace offline_pages

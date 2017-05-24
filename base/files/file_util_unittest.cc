@@ -7,11 +7,15 @@
 
 #include <algorithm>
 #include <fstream>
+#include <initializer_list>
 #include <set>
 #include <utility>
 #include <vector>
 
 #include "base/base_paths.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/environment.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
@@ -244,6 +248,30 @@ std::wstring ReadTextFile(const FilePath& filename) {
   file.getline(contents, arraysize(contents));
   file.close();
   return std::wstring(contents);
+}
+
+// Sets |is_inheritable| to indicate whether or not |stream| is set up to be
+// inerhited into child processes (i.e., HANDLE_FLAG_INHERIT is set on the
+// underlying handle on Windows, or FD_CLOEXEC is not set on the underlying file
+// descriptor on POSIX). Calls to this function must be wrapped with
+// ASSERT_NO_FATAL_FAILURE to properly abort tests in case of fatal failure.
+void GetIsInheritable(FILE* stream, bool* is_inheritable) {
+#if defined(OS_WIN)
+  HANDLE handle = reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(stream)));
+  ASSERT_NE(INVALID_HANDLE_VALUE, handle);
+
+  DWORD info = 0;
+  ASSERT_EQ(TRUE, ::GetHandleInformation(handle, &info));
+  *is_inheritable = ((info & HANDLE_FLAG_INHERIT) != 0);
+#elif defined(OS_POSIX)
+  int fd = fileno(stream);
+  ASSERT_NE(-1, fd);
+  int flags = fcntl(fd, F_GETFD, 0);
+  ASSERT_NE(-1, flags);
+  *is_inheritable = ((flags & FD_CLOEXEC) == 0);
+#else
+#error Not implemented
+#endif
 }
 
 TEST_F(FileUtilTest, FileAndDirectorySize) {
@@ -1711,6 +1739,26 @@ TEST_F(FileUtilTest, GetTempDirTest) {
 }
 #endif  // OS_WIN
 
+// Test that files opened by OpenFile are not set up for inheritance into child
+// procs.
+TEST_F(FileUtilTest, OpenFileNoInheritance) {
+  FilePath file_path(temp_dir_.GetPath().Append(FPL("a_file")));
+
+  for (const char* mode : {"wb", "r,ccs=UTF-8"}) {
+    SCOPED_TRACE(mode);
+    ASSERT_NO_FATAL_FAILURE(CreateTextFile(file_path, L"Geepers"));
+    FILE* file = OpenFile(file_path, mode);
+    ASSERT_NE(nullptr, file);
+    {
+      ScopedClosureRunner file_closer(Bind(IgnoreResult(&CloseFile), file));
+      bool is_inheritable = true;
+      ASSERT_NO_FATAL_FAILURE(GetIsInheritable(file, &is_inheritable));
+      EXPECT_FALSE(is_inheritable);
+    }
+    ASSERT_TRUE(DeleteFile(file_path, false));
+  }
+}
+
 TEST_F(FileUtilTest, CreateTemporaryFileTest) {
   FilePath temp_files[3];
   for (int i = 0; i < 3; i++) {
@@ -2164,7 +2212,8 @@ TEST_F(FileUtilTest, TouchFile) {
 
   FilePath foobar(data_dir.Append(FILE_PATH_LITERAL("foobar.txt")));
   std::string data("hello");
-  ASSERT_TRUE(WriteFile(foobar, data.c_str(), data.length()));
+  ASSERT_EQ(static_cast<int>(data.length()),
+            WriteFile(foobar, data.c_str(), data.length()));
 
   Time access_time;
   // This timestamp is divisible by one day (in local timezone),
@@ -2199,12 +2248,36 @@ TEST_F(FileUtilTest, IsDirectoryEmpty) {
 
   FilePath foo(empty_dir.Append(FILE_PATH_LITERAL("foo.txt")));
   std::string bar("baz");
-  ASSERT_TRUE(WriteFile(foo, bar.c_str(), bar.length()));
+  ASSERT_EQ(static_cast<int>(bar.length()),
+            WriteFile(foo, bar.c_str(), bar.length()));
 
   EXPECT_FALSE(IsDirectoryEmpty(empty_dir));
 }
 
 #if defined(OS_POSIX)
+TEST_F(FileUtilTest, SetNonBlocking) {
+  const int kInvalidFd = 99999;
+  EXPECT_FALSE(SetNonBlocking(kInvalidFd));
+
+  base::FilePath path;
+  ASSERT_TRUE(PathService::Get(base::DIR_TEST_DATA, &path));
+  path = path.Append(FPL("file_util")).Append(FPL("original.txt"));
+  ScopedFD fd(open(path.value().c_str(), O_RDONLY));
+  ASSERT_GE(fd.get(), 0);
+  EXPECT_TRUE(SetNonBlocking(fd.get()));
+}
+
+TEST_F(FileUtilTest, SetCloseOnExec) {
+  const int kInvalidFd = 99999;
+  EXPECT_FALSE(SetCloseOnExec(kInvalidFd));
+
+  base::FilePath path;
+  ASSERT_TRUE(PathService::Get(base::DIR_TEST_DATA, &path));
+  path = path.Append(FPL("file_util")).Append(FPL("original.txt"));
+  ScopedFD fd(open(path.value().c_str(), O_RDONLY));
+  ASSERT_GE(fd.get(), 0);
+  EXPECT_TRUE(SetCloseOnExec(fd.get()));
+}
 
 // Testing VerifyPathControlledByAdmin() is hard, because there is no
 // way a test can make a file owned by root, or change file paths

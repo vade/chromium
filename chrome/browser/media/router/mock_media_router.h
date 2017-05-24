@@ -10,12 +10,14 @@
 #include <string>
 #include <vector>
 
-#include "chrome/browser/media/router/issue.h"
-#include "chrome/browser/media/router/media_route.h"
 #include "chrome/browser/media/router/media_router_base.h"
-#include "chrome/browser/media/router/media_sink.h"
-#include "chrome/browser/media/router/media_source.h"
+#include "chrome/browser/media/router/mojo/media_route_controller.h"
+#include "chrome/common/media_router/issue.h"
+#include "chrome/common/media_router/media_route.h"
+#include "chrome/common/media_router/media_sink.h"
+#include "chrome/common/media_router/media_source.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "url/origin.h"
 
 namespace media_router {
 
@@ -28,7 +30,7 @@ class MockMediaRouter : public MediaRouterBase {
   MOCK_METHOD7(CreateRoute,
                void(const MediaSource::Id& source,
                     const MediaSink::Id& sink_id,
-                    const GURL& origin,
+                    const url::Origin& origin,
                     content::WebContents* web_contents,
                     const std::vector<MediaRouteResponseCallback>& callbacks,
                     base::TimeDelta timeout,
@@ -36,7 +38,7 @@ class MockMediaRouter : public MediaRouterBase {
   MOCK_METHOD7(JoinRoute,
                void(const MediaSource::Id& source,
                     const std::string& presentation_id,
-                    const GURL& origin,
+                    const url::Origin& origin,
                     content::WebContents* web_contents,
                     const std::vector<MediaRouteResponseCallback>& callbacks,
                     base::TimeDelta timeout,
@@ -44,7 +46,7 @@ class MockMediaRouter : public MediaRouterBase {
   MOCK_METHOD7(ConnectRouteByRouteId,
                void(const MediaSource::Id& source,
                     const MediaRoute::Id& route_id,
-                    const GURL& origin,
+                    const url::Origin& origin,
                     content::WebContents* web_contents,
                     const std::vector<MediaRouteResponseCallback>& callbacks,
                     base::TimeDelta timeout,
@@ -75,6 +77,8 @@ class MockMediaRouter : public MediaRouterBase {
            const std::string& search_input,
            const std::string& domain,
            const MediaSinkSearchResponseCallback& sink_callback));
+  MOCK_METHOD2(ProvideSinks,
+               void(const std::string&, const std::vector<MediaSinkInternal>&));
   MOCK_METHOD1(OnPresentationSessionDetached,
                void(const MediaRoute::Id& route_id));
   std::unique_ptr<PresentationConnectionStateSubscription>
@@ -88,6 +92,9 @@ class MockMediaRouter : public MediaRouterBase {
   MOCK_CONST_METHOD0(GetCurrentRoutes, std::vector<MediaRoute>());
 
   MOCK_METHOD0(OnIncognitoProfileShutdown, void());
+  MOCK_METHOD1(
+      GetRouteController,
+      scoped_refptr<MediaRouteController>(const MediaRoute::Id& route_id));
   MOCK_METHOD1(OnAddPresentationConnectionStateChangedCallbackInvoked,
                void(const content::PresentationConnectionStateChangedCallback&
                         callback));
@@ -104,6 +111,9 @@ class MockMediaRouter : public MediaRouterBase {
                void(RouteMessageObserver* observer));
   MOCK_METHOD1(UnregisterRouteMessageObserver,
                void(RouteMessageObserver* observer));
+  MOCK_METHOD2(DetachRouteController,
+               void(const MediaRoute::Id& route_id,
+                    MediaRouteController* controller));
 
  private:
   base::CallbackList<void(

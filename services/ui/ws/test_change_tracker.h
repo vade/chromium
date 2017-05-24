@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "base/macros.h"
@@ -21,6 +22,7 @@ namespace ws {
 
 enum ChangeType {
   CHANGE_TYPE_CAPTURE_CHANGED,
+  CHANGE_TYPE_FRAME_SINK_ID_ALLOCATED,
   CHANGE_TYPE_EMBED,
   CHANGE_TYPE_EMBEDDED_APP_DISCONNECTED,
   CHANGE_TYPE_UNEMBED,
@@ -77,6 +79,8 @@ struct Change {
   Id window_id3;
   gfx::Rect bounds;
   gfx::Rect bounds2;
+  cc::FrameSinkId frame_sink_id;
+  base::Optional<cc::LocalSurfaceId> local_surface_id;
   int32_t event_action;
   bool matches_pointer_watcher;
   std::string embed_url;
@@ -85,11 +89,13 @@ struct Change {
   float float_value;
   std::string property_key;
   std::string property_value;
-  int32_t cursor_id;
+  ui::CursorType cursor_type;
   uint32_t change_id;
   cc::SurfaceId surface_id;
   gfx::Size frame_size;
   float device_scale_factor;
+  // Set in OnWindowInputEvent() if the event is a KeyEvent.
+  std::unordered_map<std::string, std::vector<uint8_t>> key_event_properties;
 };
 
 // Converts Changes to string descriptions.
@@ -142,11 +148,15 @@ class TestChangeTracker {
   void OnEmbeddedAppDisconnected(Id window_id);
   void OnUnembed(Id window_id);
   void OnCaptureChanged(Id new_capture_window_id, Id old_capture_window_id);
+  void OnFrameSinkIdAllocated(Id window_id,
+                              const cc::FrameSinkId& frame_sink_id);
   void OnTransientWindowAdded(Id window_id, Id transient_window_id);
   void OnTransientWindowRemoved(Id window_id, Id transient_window_id);
-  void OnWindowBoundsChanged(Id window_id,
-                             const gfx::Rect& old_bounds,
-                             const gfx::Rect& new_bounds);
+  void OnWindowBoundsChanged(
+      Id window_id,
+      const gfx::Rect& old_bounds,
+      const gfx::Rect& new_bounds,
+      const base::Optional<cc::LocalSurfaceId>& local_surface_id);
   void OnWindowHierarchyChanged(Id window_id,
                                 Id old_parent_id,
                                 Id new_parent_id,
@@ -168,7 +178,7 @@ class TestChangeTracker {
       const std::string& name,
       const base::Optional<std::vector<uint8_t>>& data);
   void OnWindowFocused(Id window_id);
-  void OnWindowPredefinedCursorChanged(Id window_id, mojom::Cursor cursor_id);
+  void OnWindowCursorChanged(Id window_id, const ui::CursorData& cursor);
   void OnChangeCompleted(uint32_t change_id, bool success);
   void OnTopLevelCreated(uint32_t change_id,
                          mojom::WindowDataPtr window_data,

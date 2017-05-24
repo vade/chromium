@@ -16,6 +16,7 @@
 #include "content/public/common/process_type.h"
 #include "content/public/test/mock_resource_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -23,6 +24,7 @@ namespace {
 int kRenderProcessId = 1;
 int kRenderFrameId = 2;
 int kRequestId = 3;
+void* kNavigationHandle = &kNavigationHandle;
 }
 
 namespace data_use_measurement {
@@ -54,8 +56,8 @@ class ChromeDataUseAscriberTest : public testing::Test {
                                                     int request_id,
                                                     int render_process_id,
                                                     int render_frame_id) {
-    std::unique_ptr<net::URLRequest> request =
-        context()->CreateRequest(GURL(url), net::IDLE, nullptr);
+    std::unique_ptr<net::URLRequest> request = context()->CreateRequest(
+        GURL(url), net::IDLE, nullptr, TRAFFIC_ANNOTATION_FOR_TESTS);
     // TODO(kundaji): Allow request_id to be specified in AllocateForTesting.
     content::ResourceRequestInfo::AllocateForTesting(
         request.get(), content::RESOURCE_TYPE_MAIN_FRAME, resource_context(),
@@ -168,6 +170,73 @@ TEST_F(ChromeDataUseAscriberTest, RenderFrameHostChanged) {
   ascriber()->WasShownOrHidden(kRenderProcessId + 1, kRenderFrameId + 1, true);
   ascriber()->RenderFrameDeleted(kRenderProcessId + 1, kRenderFrameId + 1, -1,
                                  -1);
+}
+
+TEST_F(ChromeDataUseAscriberTest, MainFrameNavigation) {
+  if (content::IsBrowserSideNavigationEnabled())
+    return;
+
+  std::unique_ptr<net::URLRequest> request = CreateNewRequest(
+      "http://test.com", true, kRequestId, kRenderProcessId, kRenderFrameId);
+
+  // Mainframe is created.
+  ascriber()->RenderFrameCreated(kRenderProcessId, kRenderFrameId, -1, -1);
+  EXPECT_EQ(1u, recorders().size());
+
+  // Request should cause a recorder to be created.
+  ascriber()->OnBeforeUrlRequest(request.get());
+  EXPECT_EQ(2u, recorders().size());
+
+  // Navigation starts.
+  ascriber()->DidStartMainFrameNavigation(GURL("http://test.com"),
+                                          kRenderProcessId, kRenderFrameId,
+                                          kNavigationHandle);
+
+  ascriber()->ReadyToCommitMainFrameNavigation(
+      GURL("http://mobile.test.com"),
+      content::GlobalRequestID(kRenderProcessId, 0), kRenderProcessId,
+      kRenderFrameId, false, kNavigationHandle);
+
+  // Navigation commit should merge the two data use recorder entries.
+  EXPECT_EQ(1u, recorders().size());
+  auto& recorder_entry = recorders().front();
+  EXPECT_EQ(RenderFrameHostID(kRenderProcessId, kRenderFrameId),
+            recorder_entry.main_frame_id());
+  EXPECT_EQ(content::GlobalRequestID(kRenderProcessId, 0),
+            recorder_entry.main_frame_request_id());
+  EXPECT_EQ(GURL("http://mobile.test.com"), recorder_entry.data_use().url());
+  EXPECT_EQ(DataUse::TrafficType::USER_TRAFFIC,
+            recorder_entry.data_use().traffic_type());
+
+  ascriber()->RenderFrameDeleted(kRenderProcessId, kRenderFrameId, -1, -1);
+  ascriber()->OnUrlRequestDestroyed(request.get());
+
+  EXPECT_EQ(0u, recorders().size());
+}
+
+TEST_F(ChromeDataUseAscriberTest, FailedMainFrameNavigation) {
+  if (content::IsBrowserSideNavigationEnabled())
+    return;
+
+  std::unique_ptr<net::URLRequest> request = CreateNewRequest(
+      "http://test.com", true, kRequestId, kRenderProcessId, kRenderFrameId);
+
+  // Mainframe is created.
+  ascriber()->RenderFrameCreated(kRenderProcessId, kRenderFrameId, -1, -1);
+  EXPECT_EQ(1u, recorders().size());
+
+  // Request should cause a recorder to be created.
+  ascriber()->OnBeforeUrlRequest(request.get());
+  EXPECT_EQ(2u, recorders().size());
+
+  // Failed request will remove the pending entry.
+  request->Cancel();
+  ascriber()->OnUrlRequestCompleted(*request, false);
+
+  ascriber()->RenderFrameDeleted(kRenderProcessId, kRenderFrameId, -1, -1);
+  ascriber()->OnUrlRequestDestroyed(request.get());
+
+  EXPECT_EQ(0u, recorders().size());
 }
 
 }  // namespace data_use_measurement

@@ -38,6 +38,10 @@ class TestWebState : public WebState {
   void Stop() override {}
   const NavigationManager* GetNavigationManager() const override;
   NavigationManager* GetNavigationManager() override;
+  const SessionCertificatePolicyCache* GetSessionCertificatePolicyCache()
+      const override;
+  SessionCertificatePolicyCache* GetSessionCertificatePolicyCache() override;
+  CRWSessionStorage* BuildSessionStorage() override;
   CRWJSInjectionReceiver* GetJSInjectionReceiver() const override;
   void ExecuteJavaScript(const base::string16& javascript) override;
   void ExecuteJavaScript(const base::string16& javascript,
@@ -52,7 +56,8 @@ class TestWebState : public WebState {
   const GURL& GetVisibleURL() const override;
   const GURL& GetLastCommittedURL() const override;
   GURL GetCurrentURL(URLVerificationTrustLevel* trust_level) const override;
-  void ShowTransientContentView(CRWContentView* content_view) override {}
+  void ShowTransientContentView(CRWContentView* content_view) override;
+  void ClearTransientContentView();
   void AddScriptCommandCallback(const ScriptCommandCallback& callback,
                                 const std::string& command_prefix) override {}
   void RemoveScriptCommandCallback(const std::string& command_prefix) override {
@@ -61,6 +66,7 @@ class TestWebState : public WebState {
   bool IsShowingWebInterstitial() const override;
   WebInterstitial* GetWebInterstitial() const override;
   void OnPasswordInputShownOnHttp() override {}
+  void OnCreditCardInputShownOnHttp() override {}
 
   void AddObserver(WebStateObserver* observer) override;
 
@@ -68,15 +74,12 @@ class TestWebState : public WebState {
 
   void AddPolicyDecider(WebStatePolicyDecider* decider) override {}
   void RemovePolicyDecider(WebStatePolicyDecider* decider) override {}
-  int DownloadImage(const GURL& url,
-                    bool is_favicon,
-                    uint32_t max_bitmap_size,
-                    bool bypass_cache,
-                    const ImageDownloadCallback& callback) override;
-  service_manager::InterfaceRegistry* GetMojoInterfaceRegistry() override;
+  WebStateInterfaceProvider* GetWebStateInterfaceProvider() override;
+  bool HasOpener() const override;
   base::WeakPtr<WebState> AsWeakPtr() override;
 
   // Setters for test data.
+  void SetBrowserState(BrowserState* browser_state);
   void SetContentIsHTML(bool content_is_html);
   void SetLoading(bool is_loading);
   void SetCurrentURL(const GURL& url);
@@ -85,13 +88,19 @@ class TestWebState : public WebState {
       std::unique_ptr<NavigationManager> navigation_manager);
   void SetView(UIView* view);
 
+  // Getters for test data.
+  CRWContentView* GetTransientContentView();
+
   // Notifier for tests.
   void OnPageLoaded(PageLoadCompletionStatus load_completion_status);
   void OnProvisionalNavigationStarted(const GURL& url);
+  void OnRenderProcessGone();
 
  private:
+  BrowserState* browser_state_;
   bool web_usage_enabled_;
   bool is_loading_;
+  base::scoped_nsobject<CRWContentView> transient_content_view_;
   GURL url_;
   base::string16 title_;
   URLVerificationTrustLevel trust_level_;

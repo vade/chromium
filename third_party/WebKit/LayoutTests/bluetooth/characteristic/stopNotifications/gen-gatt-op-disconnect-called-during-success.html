@@ -3,6 +3,8 @@
 <script src="../../../resources/testharness.js"></script>
 <script src="../../../resources/testharnessreport.js"></script>
 <script src="../../../resources/bluetooth/bluetooth-helpers.js"></script>
+<script src="../../../resources/bluetooth/web-bluetooth-test.js"></script>
+<script src="../../../resources/mojo-helpers.js"></script>
 <script>
 'use strict';
 promise_test(() => {
@@ -19,7 +21,8 @@ promise_test(() => {
           let promise = assert_promise_rejects_with_message(
             measurement_interval.stopNotifications(),
             new DOMException(
-              'GATT Server disconnected while performing a GATT operation.',
+              'GATT Server is disconnected. Cannot perform GATT operations. ' +
+              '(Re)connect first with `device.gatt.connect`.',
               'NetworkError'));
           gattServer.disconnect();
           return promise;

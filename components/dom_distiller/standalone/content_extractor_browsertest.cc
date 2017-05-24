@@ -10,11 +10,14 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/id_map.h"
 #include "base/location.h"
+#include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/dom_distiller/content/browser/distiller_javascript_utils.h"
 #include "components/dom_distiller/content/browser/distiller_page_web_contents.h"
@@ -30,7 +33,6 @@
 #include "components/leveldb_proto/proto_database_impl.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/isolated_world_ids.h"
 #include "content/public/test/content_browser_test.h"
@@ -126,8 +128,7 @@ std::unique_ptr<DomDistillerService> CreateDomDistillerService(
     const base::FilePath& db_path,
     const FileToUrlMap& file_to_url_map) {
   scoped_refptr<base::SequencedTaskRunner> background_task_runner =
-      content::BrowserThread::GetBlockingPool()->GetSequencedTaskRunner(
-          content::BrowserThread::GetBlockingPool()->GetSequenceToken());
+      base::CreateSequencedTaskRunnerWithTraits({base::MayBlock()});
 
   // TODO(cjhopman): use an in-memory database instead of an on-disk one with
   // temporary directory.
@@ -248,16 +249,16 @@ class ContentExtractionRequest : public ViewRequestDelegate {
     return *article_proto_;
   }
 
-  static ScopedVector<ContentExtractionRequest> CreateForCommandLine(
-      const base::CommandLine& command_line,
-      FileToUrlMap* file_to_url_map) {
-    ScopedVector<ContentExtractionRequest> requests;
+  static std::vector<std::unique_ptr<ContentExtractionRequest>>
+  CreateForCommandLine(const base::CommandLine& command_line,
+                       FileToUrlMap* file_to_url_map) {
+    std::vector<std::unique_ptr<ContentExtractionRequest>> requests;
     if (command_line.HasSwitch(kUrlSwitch)) {
       GURL url;
       std::string url_string = command_line.GetSwitchValueASCII(kUrlSwitch);
       url = GURL(url_string);
       if (url.is_valid()) {
-        requests.push_back(new ContentExtractionRequest(url));
+        requests.push_back(base::WrapUnique(new ContentExtractionRequest(url)));
         if (command_line.HasSwitch(kOriginalUrl)) {
           (*file_to_url_map)[url.spec()] =
               command_line.GetSwitchValueASCII(kOriginalUrl);
@@ -283,7 +284,8 @@ class ContentExtractionRequest : public ViewRequestDelegate {
       for (size_t i = 0; i < urls.size(); ++i) {
         GURL url(urls[i]);
         if (url.is_valid()) {
-          requests.push_back(new ContentExtractionRequest(url));
+          requests.push_back(
+              base::WrapUnique(new ContentExtractionRequest(url)));
           // Only regard non-empty original urls.
           if (!original_urls.empty() && !original_urls[i].empty()) {
               (*file_to_url_map)[url.spec()] = original_urls[i];
@@ -431,7 +433,7 @@ class ContentExtractor : public ContentBrowserTest {
   std::unique_ptr<net::ScopedDefaultHostResolverProc>
       mock_host_resolver_override_;
   std::unique_ptr<DomDistillerService> service_;
-  ScopedVector<ContentExtractionRequest> requests_;
+  std::vector<std::unique_ptr<ContentExtractionRequest>> requests_;
 
   std::string output_data_;
   std::unique_ptr<google::protobuf::io::StringOutputStream>

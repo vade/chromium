@@ -24,22 +24,6 @@ public interface CrashReportingPermissionManager {
     public boolean isNetworkAvailableForCrashUploads();
 
     /**
-     * Checks whether uploading of crash dumps is permitted, based on the corresponding command line
-     * flag only.
-     *
-     * @return whether uploading of crash dumps is enabled or disabled by a command line flag.
-     */
-    public boolean isCrashUploadDisabledByCommandLine();
-
-    /**
-     * Checks whether uploading of usage metrics is currently permitted. This is a combination of
-     * the below checks, plus networking restrictions.
-     *
-     * @return whether uploading usage metrics is currently permitted.
-     */
-    public boolean isMetricsUploadPermitted();
-
-    /**
      * Checks whether uploading of usage metrics and crash dumps is currently permitted, based on
      * user consent only.
      *

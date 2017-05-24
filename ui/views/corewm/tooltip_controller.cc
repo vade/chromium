@@ -181,6 +181,14 @@ void TooltipController::OnKeyEvent(ui::KeyEvent* event) {
 }
 
 void TooltipController::OnMouseEvent(ui::MouseEvent* event) {
+  // Ignore mouse events that coincide with the last touch event.
+  if (event->location() == last_touch_loc_) {
+    SetTooltipWindow(nullptr);
+
+    if (tooltip_->IsVisible())
+      UpdateIfRequired();
+    return;
+  }
   switch (event->type()) {
     case ui::ET_MOUSE_CAPTURE_CHANGED:
     case ui::ET_MOUSE_EXITED:
@@ -224,11 +232,10 @@ void TooltipController::OnMouseEvent(ui::MouseEvent* event) {
 }
 
 void TooltipController::OnTouchEvent(ui::TouchEvent* event) {
-  // TODO(varunjain): need to properly implement tooltips for
-  // touch events.
   // Hide the tooltip for touch events.
   tooltip_->Hide();
   SetTooltipWindow(NULL);
+  last_touch_loc_ = event->location();
 }
 
 void TooltipController::OnCancelMode(ui::CancelModeEvent* event) {
@@ -308,6 +315,7 @@ void TooltipController::UpdateIfRequired() {
                          &tooltip_text_whitespace_trimmed_);
     if (tooltip_text_whitespace_trimmed_.empty()) {
       tooltip_->Hide();
+      tooltip_defer_timer_.Stop();
     } else if (tooltip_show_delayed_) {
       // Initialize the one-shot timer to show the tooltip in a while.
       // If there is already a request queued then cancel it and post the new

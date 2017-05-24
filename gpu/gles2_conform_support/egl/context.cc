@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/memory/ptr_util.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/client/shared_memory_limits.h"
@@ -173,14 +174,6 @@ void Context::DestroyImage(int32_t id) {
   NOTIMPLEMENTED();
 }
 
-int32_t Context::CreateGpuMemoryBufferImage(size_t width,
-                                            size_t height,
-                                            unsigned internalformat,
-                                            unsigned usage) {
-  NOTIMPLEMENTED();
-  return -1;
-}
-
 void Context::SignalQuery(uint32_t query, const base::Closure& callback) {
   NOTIMPLEMENTED();
 }
@@ -201,8 +194,12 @@ gpu::CommandBufferId Context::GetCommandBufferID() const {
   return gpu::CommandBufferId();
 }
 
-int32_t Context::GetExtraCommandBufferData() const {
+int32_t Context::GetStreamId() const {
   return 0;
+}
+
+void Context::FlushOrderingBarrierOnStream(int32_t stream_id) {
+  // This is only relevant for out-of-process command buffers.
 }
 
 uint64_t Context::GenerateFenceSyncRelease() {
@@ -231,8 +228,13 @@ void Context::SignalSyncToken(const gpu::SyncToken& sync_token,
   NOTIMPLEMENTED();
 }
 
-bool Context::CanWaitUnverifiedSyncToken(const gpu::SyncToken* sync_token) {
+void Context::WaitSyncTokenHint(const gpu::SyncToken& sync_token) {}
+
+bool Context::CanWaitUnverifiedSyncToken(const gpu::SyncToken& sync_token) {
   return false;
+}
+
+void Context::AddLatencyInfo(const std::vector<ui::LatencyInfo>& latency_info) {
 }
 
 void Context::ApplyCurrentContext(gl::GLSurface* current_surface) {
@@ -252,12 +254,11 @@ void Context::ApplyContextReleased() {
 }
 
 bool Context::CreateService(gl::GLSurface* gl_surface) {
-  scoped_refptr<gpu::TransferBufferManager> transfer_buffer_manager(
-      new gpu::TransferBufferManager(nullptr));
-  transfer_buffer_manager->Initialize();
+  transfer_buffer_manager_ =
+      base::MakeUnique<gpu::TransferBufferManager>(nullptr);
 
   std::unique_ptr<gpu::CommandBufferService> command_buffer(
-      new gpu::CommandBufferService(transfer_buffer_manager.get()));
+      new gpu::CommandBufferService(transfer_buffer_manager_.get()));
 
   scoped_refptr<gpu::gles2::FeatureInfo> feature_info(
       new gpu::gles2::FeatureInfo(gpu_driver_bug_workarounds_));
@@ -265,7 +266,7 @@ bool Context::CreateService(gl::GLSurface* gl_surface) {
       gpu_preferences_, nullptr, nullptr,
       new gpu::gles2::ShaderTranslatorCache(gpu_preferences_),
       new gpu::gles2::FramebufferCompletenessCache, feature_info, true, nullptr,
-      nullptr));
+      nullptr, gpu::GpuFeatureInfo()));
 
   std::unique_ptr<gpu::gles2::GLES2Decoder> decoder(
       gpu::gles2::GLES2Decoder::Create(group.get()));

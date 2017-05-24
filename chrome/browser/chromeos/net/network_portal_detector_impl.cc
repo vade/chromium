@@ -25,6 +25,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/content_switches.h"
 #include "net/http/http_status_code.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 using base::StringPrintf;
@@ -446,7 +447,8 @@ void NetworkPortalDetectorImpl::StartAttempt() {
   captive_portal_detector_->DetectCaptivePortal(
       portal_test_url_,
       base::Bind(&NetworkPortalDetectorImpl::OnAttemptCompleted,
-                 weak_factory_.GetWeakPtr()));
+                 weak_factory_.GetWeakPtr()),
+      NO_TRAFFIC_ANNOTATION_YET);
   attempt_timeout_.Reset(
       base::Bind(&NetworkPortalDetectorImpl::OnAttemptTimeout,
                  weak_factory_.GetWeakPtr()));
@@ -551,8 +553,15 @@ void NetworkPortalDetectorImpl::OnAttemptCompleted(
   }
 
   // Observers (via OnDetectionCompleted) may already schedule new attempt.
-  if (is_idle())
-    ScheduleAttempt(results.retry_after_delta);
+  if (!is_idle())
+    return;
+
+  // If behind a captive portal and the response code was 200 (OK), do not
+  // schedule a new attempt.
+  if (state.status == CAPTIVE_PORTAL_STATUS_PORTAL && response_code == 200)
+    return;
+
+  ScheduleAttempt(results.retry_after_delta);
 }
 
 void NetworkPortalDetectorImpl::Observe(

@@ -29,66 +29,61 @@
 * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include "bindings/core/v8/SharedPersistent.h"
-#include "bindings/core/v8/V8Binding.h"
+#include <memory>
+#include "bindings/core/v8/V8BindingForCore.h"
 #include "bindings/core/v8/V8HTMLEmbedElement.h"
 #include "bindings/core/v8/V8HTMLObjectElement.h"
 #include "core/frame/Deprecation.h"
 #include "core/frame/UseCounter.h"
-#include "wtf/PtrUtil.h"
-#include <memory>
+#include "platform/bindings/SharedPersistent.h"
+#include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
 namespace {
 
 template <typename ElementType>
-void getScriptableObjectProperty(
+void GetScriptableObjectProperty(
     const AtomicString& name,
     const v8::PropertyCallbackInfo<v8::Value>& info) {
   HTMLPlugInElement* impl = ElementType::toImpl(info.Holder());
-  RefPtr<SharedPersistent<v8::Object>> wrapper = impl->pluginWrapper();
-  if (!wrapper)
-    return;
-
-  v8::Local<v8::Object> instance = wrapper->newLocal(info.GetIsolate());
+  v8::Local<v8::Object> instance = impl->PluginWrapper();
   if (instance.IsEmpty())
     return;
 
-  v8::Local<v8::String> v8Name = v8String(info.GetIsolate(), name);
-  if (!v8CallBoolean(instance->HasOwnProperty(
-          info.GetIsolate()->GetCurrentContext(), v8Name)))
+  v8::Local<v8::String> v8_name = V8String(info.GetIsolate(), name);
+  if (!V8CallBoolean(instance->HasOwnProperty(
+          info.GetIsolate()->GetCurrentContext(), v8_name)))
     return;
 
   v8::Local<v8::Value> value;
-  if (!instance->Get(info.GetIsolate()->GetCurrentContext(), v8Name)
+  if (!instance->Get(info.GetIsolate()->GetCurrentContext(), v8_name)
            .ToLocal(&value))
     return;
 
-  v8SetReturnValue(info, value);
+  V8SetReturnValue(info, value);
 }
 
 template <typename ElementType>
-void setScriptableObjectProperty(
+void SetScriptableObjectProperty(
     const AtomicString& name,
     v8::Local<v8::Value> value,
     const v8::PropertyCallbackInfo<v8::Value>& info) {
-  ASSERT(!value.IsEmpty());
-  // Don't intercept any of the properties of the HTMLPluginElement.
-  v8::Local<v8::String> v8Name = v8String(info.GetIsolate(), name);
-  if (v8CallBoolean(
-          info.Holder()->Has(info.GetIsolate()->GetCurrentContext(), v8Name)))
-    return;
+  DCHECK(!value.IsEmpty());
 
   HTMLPlugInElement* impl = ElementType::toImpl(info.Holder());
-  RefPtr<SharedPersistent<v8::Object>> wrapper = impl->pluginWrapper();
-  if (!wrapper)
-    return;
-
-  v8::Local<v8::Object> instance = wrapper->newLocal(info.GetIsolate());
-
+  v8::Local<v8::Object> instance = impl->PluginWrapper();
   if (instance.IsEmpty())
     return;
+
+  // Don't intercept any of the properties of the HTMLPluginElement.
+  v8::Local<v8::String> v8_name = V8String(info.GetIsolate(), name);
+  if (!V8CallBoolean(instance->HasOwnProperty(
+          info.GetIsolate()->GetCurrentContext(), v8_name)) &&
+      V8CallBoolean(info.Holder()->Has(info.GetIsolate()->GetCurrentContext(),
+                                       v8_name))) {
+    return;
+  }
 
   // FIXME: The gTalk pepper plugin is the only plugin to make use of
   // SetProperty and that is being deprecated. This can be removed as soon as
@@ -99,9 +94,9 @@ void setScriptableObjectProperty(
   // DOM element will also be set. For plugin's that don't intercept the call
   // (all except gTalk) this makes no difference at all. For gTalk the fact
   // that the property on the DOM element also gets set is inconsequential.
-  v8CallBoolean(instance->CreateDataProperty(
-      info.GetIsolate()->GetCurrentContext(), v8Name, value));
-  v8SetReturnValue(info, value);
+  V8CallBoolean(instance->CreateDataProperty(
+      info.GetIsolate()->GetCurrentContext(), v8_name, value));
+  V8SetReturnValue(info, value);
 }
 
 }  // namespace
@@ -109,70 +104,35 @@ void setScriptableObjectProperty(
 void V8HTMLEmbedElement::namedPropertyGetterCustom(
     const AtomicString& name,
     const v8::PropertyCallbackInfo<v8::Value>& info) {
-  getScriptableObjectProperty<V8HTMLEmbedElement>(name, info);
+  UseCounter::Count(CurrentExecutionContext(info.GetIsolate()),
+                    UseCounter::kHTMLEmbedElementGetter);
+  GetScriptableObjectProperty<V8HTMLEmbedElement>(name, info);
 }
 
 void V8HTMLObjectElement::namedPropertyGetterCustom(
     const AtomicString& name,
     const v8::PropertyCallbackInfo<v8::Value>& info) {
-  getScriptableObjectProperty<V8HTMLObjectElement>(name, info);
+  UseCounter::Count(CurrentExecutionContext(info.GetIsolate()),
+                    UseCounter::kHTMLObjectElementGetter);
+  GetScriptableObjectProperty<V8HTMLObjectElement>(name, info);
 }
 
 void V8HTMLEmbedElement::namedPropertySetterCustom(
     const AtomicString& name,
     v8::Local<v8::Value> value,
     const v8::PropertyCallbackInfo<v8::Value>& info) {
-  setScriptableObjectProperty<V8HTMLEmbedElement>(name, value, info);
+  UseCounter::Count(CurrentExecutionContext(info.GetIsolate()),
+                    UseCounter::kHTMLEmbedElementSetter);
+  SetScriptableObjectProperty<V8HTMLEmbedElement>(name, value, info);
 }
 
 void V8HTMLObjectElement::namedPropertySetterCustom(
     const AtomicString& name,
     v8::Local<v8::Value> value,
     const v8::PropertyCallbackInfo<v8::Value>& info) {
-  setScriptableObjectProperty<V8HTMLObjectElement>(name, value, info);
-}
-
-namespace {
-
-template <typename ElementType>
-void invokeOnScriptableObject(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  HTMLPlugInElement* impl = ElementType::toImpl(info.Holder());
-  RefPtr<SharedPersistent<v8::Object>> wrapper = impl->pluginWrapper();
-  if (!wrapper)
-    return;
-
-  v8::Local<v8::Object> instance = wrapper->newLocal(info.GetIsolate());
-  if (instance.IsEmpty())
-    return;
-
-  std::unique_ptr<v8::Local<v8::Value>[]> arguments =
-      wrapArrayUnique(new v8::Local<v8::Value>[ info.Length() ]);
-  for (int i = 0; i < info.Length(); ++i)
-    arguments[i] = info[i];
-
-  v8::Local<v8::Value> retVal;
-  if (!instance
-           ->CallAsFunction(info.GetIsolate()->GetCurrentContext(),
-                            info.Holder(), info.Length(), arguments.get())
-           .ToLocal(&retVal))
-    return;
-  v8SetReturnValue(info, retVal);
-}
-
-}  // namespace
-
-void V8HTMLEmbedElement::legacyCallCustom(
-    const v8::FunctionCallbackInfo<v8::Value>& info) {
-  invokeOnScriptableObject<V8HTMLEmbedElement>(info);
-  Deprecation::countDeprecation(currentExecutionContext(info.GetIsolate()),
-                                UseCounter::HTMLEmbedElementLegacyCall);
-}
-
-void V8HTMLObjectElement::legacyCallCustom(
-    const v8::FunctionCallbackInfo<v8::Value>& info) {
-  invokeOnScriptableObject<V8HTMLObjectElement>(info);
-  Deprecation::countDeprecation(currentExecutionContext(info.GetIsolate()),
-                                UseCounter::HTMLObjectElementLegacyCall);
+  UseCounter::Count(CurrentExecutionContext(info.GetIsolate()),
+                    UseCounter::kHTMLObjectElementSetter);
+  SetScriptableObjectProperty<V8HTMLObjectElement>(name, value, info);
 }
 
 }  // namespace blink

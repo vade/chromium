@@ -100,9 +100,8 @@ TEST_F(PersistentMemoryAllocatorTest, AllocateAndIterate) {
   EXPECT_TRUE(allocator_->used_histogram_);
   EXPECT_EQ("UMA.PersistentAllocator." + base_name + ".UsedPct",
             allocator_->used_histogram_->histogram_name());
-  EXPECT_TRUE(allocator_->allocs_histogram_);
-  EXPECT_EQ("UMA.PersistentAllocator." + base_name + ".Allocs",
-            allocator_->allocs_histogram_->histogram_name());
+  EXPECT_EQ(PersistentMemoryAllocator::MEMORY_INITIALIZED,
+            allocator_->GetMemoryState());
 
   // Get base memory info for later comparison.
   PersistentMemoryAllocator::MemoryInfo meminfo0;
@@ -112,7 +111,7 @@ TEST_F(PersistentMemoryAllocatorTest, AllocateAndIterate) {
 
   // Validate allocation of test object and make sure it can be referenced
   // and all metadata looks correct.
-  TestObject1* obj1 = allocator_->AllocateObject<TestObject1>();
+  TestObject1* obj1 = allocator_->New<TestObject1>();
   ASSERT_TRUE(obj1);
   Reference block1 = allocator_->GetAsReference(obj1);
   ASSERT_NE(0U, block1);
@@ -152,7 +151,7 @@ TEST_F(PersistentMemoryAllocatorTest, AllocateAndIterate) {
 
   // Create second test-object and ensure everything is good and it cannot
   // be confused with test-object of another type.
-  TestObject2* obj2 = allocator_->AllocateObject<TestObject2>();
+  TestObject2* obj2 = allocator_->New<TestObject2>();
   ASSERT_TRUE(obj2);
   Reference block2 = allocator_->GetAsReference(obj2);
   ASSERT_NE(0U, block2);
@@ -206,26 +205,11 @@ TEST_F(PersistentMemoryAllocatorTest, AllocateAndIterate) {
   EXPECT_TRUE(used_samples);
   EXPECT_EQ(1, used_samples->TotalCount());
 
-  // Check the internal histogram record of allocation requests.
-  std::unique_ptr<HistogramSamples> allocs_samples(
-      allocator_->allocs_histogram_->SnapshotSamples());
-  EXPECT_TRUE(allocs_samples);
-  EXPECT_EQ(2, allocs_samples->TotalCount());
-  EXPECT_EQ(0, allocs_samples->GetCount(0));
-  EXPECT_EQ(1, allocs_samples->GetCount(sizeof(TestObject1)));
-  EXPECT_EQ(1, allocs_samples->GetCount(sizeof(TestObject2)));
-#if !DCHECK_IS_ON()  // DCHECK builds will die at a NOTREACHED().
-  EXPECT_EQ(0U, allocator_->Allocate(TEST_MEMORY_SIZE + 1, 0));
-  allocs_samples = allocator_->allocs_histogram_->SnapshotSamples();
-  EXPECT_EQ(3, allocs_samples->TotalCount());
-  EXPECT_EQ(1, allocs_samples->GetCount(0));
-#endif
-
   // Check that an object's type can be changed.
   EXPECT_EQ(2U, allocator_->GetType(block2));
-  allocator_->ChangeType(block2, 3, 2);
+  allocator_->ChangeType(block2, 3, 2, false);
   EXPECT_EQ(3U, allocator_->GetType(block2));
-  allocator_->ChangeObject<TestObject2>(block2, 3);
+  allocator_->New<TestObject2>(block2, 3, false);
   EXPECT_EQ(2U, allocator_->GetType(block2));
 
   // Create second allocator (read/write) using the same memory segment.
@@ -234,8 +218,6 @@ TEST_F(PersistentMemoryAllocatorTest, AllocateAndIterate) {
                                     TEST_MEMORY_PAGE, 0, "", false));
   EXPECT_EQ(TEST_ID, allocator2->Id());
   EXPECT_FALSE(allocator2->used_histogram_);
-  EXPECT_FALSE(allocator2->allocs_histogram_);
-  EXPECT_NE(allocator2->allocs_histogram_, allocator_->allocs_histogram_);
 
   // Ensure that iteration and access through second allocator works.
   PersistentMemoryAllocator::Iterator iter2(allocator2.get());
@@ -251,7 +233,6 @@ TEST_F(PersistentMemoryAllocatorTest, AllocateAndIterate) {
                                     TEST_MEMORY_PAGE, 0, "", true));
   EXPECT_EQ(TEST_ID, allocator3->Id());
   EXPECT_FALSE(allocator3->used_histogram_);
-  EXPECT_FALSE(allocator3->allocs_histogram_);
 
   // Ensure that iteration and access through third allocator works.
   PersistentMemoryAllocator::Iterator iter3(allocator3.get());
@@ -272,9 +253,14 @@ TEST_F(PersistentMemoryAllocatorTest, AllocateAndIterate) {
   EXPECT_EQ(nullptr, iter1d.GetNextOfObject<TestObject2>());
 
   // Ensure that deleting an object works.
-  allocator_->DeleteObject(obj2);
+  allocator_->Delete(obj2);
   PersistentMemoryAllocator::Iterator iter1z(allocator_.get());
   EXPECT_EQ(nullptr, iter1z.GetNextOfObject<TestObject2>());
+
+  // Ensure that the memory state can be set.
+  allocator_->SetMemoryState(PersistentMemoryAllocator::MEMORY_DELETED);
+  EXPECT_EQ(PersistentMemoryAllocator::MEMORY_DELETED,
+            allocator_->GetMemoryState());
 }
 
 TEST_F(PersistentMemoryAllocatorTest, PageTest) {
@@ -486,6 +472,47 @@ TEST_F(PersistentMemoryAllocatorTest, IteratorParallelismTest) {
 #endif
 }
 
+TEST_F(PersistentMemoryAllocatorTest, DelayedAllocationTest) {
+  std::atomic<Reference> ref1, ref2;
+  ref1.store(0, std::memory_order_relaxed);
+  ref2.store(0, std::memory_order_relaxed);
+  DelayedPersistentAllocation da1(allocator_.get(), &ref1, 1001, 100, true);
+  DelayedPersistentAllocation da2a(allocator_.get(), &ref2, 2002, 200, 0, true);
+  DelayedPersistentAllocation da2b(allocator_.get(), &ref2, 2002, 200, 5, true);
+
+  // Nothing should yet have been allocated.
+  uint32_t type;
+  PersistentMemoryAllocator::Iterator iter(allocator_.get());
+  EXPECT_EQ(0U, iter.GetNext(&type));
+
+  // Do first delayed allocation and check that a new persistent object exists.
+  EXPECT_EQ(0U, da1.reference());
+  void* mem1 = da1.Get();
+  ASSERT_TRUE(mem1);
+  EXPECT_NE(0U, da1.reference());
+  EXPECT_EQ(allocator_->GetAsReference(mem1, 1001),
+            ref1.load(std::memory_order_relaxed));
+  EXPECT_NE(0U, iter.GetNext(&type));
+  EXPECT_EQ(1001U, type);
+  EXPECT_EQ(0U, iter.GetNext(&type));
+
+  // Do second delayed allocation and check.
+  void* mem2a = da2a.Get();
+  ASSERT_TRUE(mem2a);
+  EXPECT_EQ(allocator_->GetAsReference(mem2a, 2002),
+            ref2.load(std::memory_order_relaxed));
+  EXPECT_NE(0U, iter.GetNext(&type));
+  EXPECT_EQ(2002U, type);
+  EXPECT_EQ(0U, iter.GetNext(&type));
+
+  // Third allocation should just return offset into second allocation.
+  void* mem2b = da2b.Get();
+  ASSERT_TRUE(mem2b);
+  EXPECT_EQ(0U, iter.GetNext(&type));
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(mem2a) + 5,
+            reinterpret_cast<uintptr_t>(mem2b));
+}
+
 // This test doesn't verify anything other than it doesn't crash. Its goal
 // is to find coding errors that aren't otherwise tested for, much like a
 // "fuzzer" would.
@@ -587,16 +614,16 @@ TEST(SharedPersistentMemoryAllocatorTest, CreationTest) {
     r456 = local.Allocate(456, 456);
     r789 = local.Allocate(789, 789);
     local.MakeIterable(r123);
-    local.ChangeType(r456, 654, 456);
+    local.ChangeType(r456, 654, 456, false);
     local.MakeIterable(r789);
     local.GetMemoryInfo(&meminfo1);
     EXPECT_FALSE(local.IsFull());
     EXPECT_FALSE(local.IsCorrupt());
 
-    ASSERT_TRUE(local.shared_memory()->ShareToProcess(GetCurrentProcessHandle(),
-                                                      &shared_handle_1));
-    ASSERT_TRUE(local.shared_memory()->ShareToProcess(GetCurrentProcessHandle(),
-                                                      &shared_handle_2));
+    shared_handle_1 = local.shared_memory()->handle().Duplicate();
+    ASSERT_TRUE(shared_handle_1.IsValid());
+    shared_handle_2 = local.shared_memory()->handle().Duplicate();
+    ASSERT_TRUE(shared_handle_2.IsValid());
   }
 
   // Read-only test.
@@ -656,6 +683,25 @@ TEST(SharedPersistentMemoryAllocatorTest, CreationTest) {
   shalloc3.MakeIterable(obj);
   EXPECT_EQ(obj, iter2.GetNext(&type));
   EXPECT_EQ(42U, type);
+
+  // Clear-on-change test.
+  Reference data_ref = shalloc3.Allocate(sizeof(int) * 4, 911);
+  int* data = shalloc3.GetAsArray<int>(data_ref, 911, 4);
+  ASSERT_TRUE(data);
+  data[0] = 0;
+  data[1] = 1;
+  data[2] = 2;
+  data[3] = 3;
+  ASSERT_TRUE(shalloc3.ChangeType(data_ref, 119, 911, false));
+  EXPECT_EQ(0, data[0]);
+  EXPECT_EQ(1, data[1]);
+  EXPECT_EQ(2, data[2]);
+  EXPECT_EQ(3, data[3]);
+  ASSERT_TRUE(shalloc3.ChangeType(data_ref, 191, 119, true));
+  EXPECT_EQ(0, data[0]);
+  EXPECT_EQ(0, data[1]);
+  EXPECT_EQ(0, data[2]);
+  EXPECT_EQ(0, data[3]);
 }
 
 
@@ -676,7 +722,7 @@ TEST(FilePersistentMemoryAllocatorTest, CreationTest) {
     r456 = local.Allocate(456, 456);
     r789 = local.Allocate(789, 789);
     local.MakeIterable(r123);
-    local.ChangeType(r456, 654, 456);
+    local.ChangeType(r456, 654, 456, false);
     local.MakeIterable(r789);
     local.GetMemoryInfo(&meminfo1);
     EXPECT_FALSE(local.IsFull());
@@ -693,8 +739,8 @@ TEST(FilePersistentMemoryAllocatorTest, CreationTest) {
   const size_t mmlength = mmfile->length();
   EXPECT_GE(meminfo1.total, mmlength);
 
-  FilePersistentMemoryAllocator file(std::move(mmfile), 0, 0, "", true);
-  EXPECT_TRUE(file.IsReadonly());
+  FilePersistentMemoryAllocator file(std::move(mmfile), 0, 0, "", false);
+  EXPECT_FALSE(file.IsReadonly());
   EXPECT_EQ(TEST_ID, file.Id());
   EXPECT_FALSE(file.IsFull());
   EXPECT_FALSE(file.IsCorrupt());
@@ -715,6 +761,11 @@ TEST(FilePersistentMemoryAllocatorTest, CreationTest) {
   EXPECT_GE(meminfo1.free, meminfo2.free);
   EXPECT_EQ(mmlength, meminfo2.total);
   EXPECT_EQ(0U, meminfo2.free);
+
+  // There's no way of knowing if Flush actually does anything but at least
+  // verify that it runs without CHECK violations.
+  file.Flush(false);
+  file.Flush(true);
 }
 
 TEST(FilePersistentMemoryAllocatorTest, ExtendTest) {

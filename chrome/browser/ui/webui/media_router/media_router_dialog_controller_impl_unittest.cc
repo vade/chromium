@@ -29,8 +29,7 @@ class MediaRouterDialogControllerImplTest : public MediaRouterWebUITest {
   void OpenMediaRouterDialog();
 
   MOCK_METHOD2(PresentationSuccessCallback,
-               void(const content::PresentationSessionInfo&,
-                    const MediaRoute&));
+               void(const content::PresentationInfo&, const MediaRoute&));
   MOCK_METHOD1(PresentationErrorCallback,
                void(const content::PresentationError& error));
 
@@ -258,7 +257,7 @@ TEST_F(MediaRouterDialogControllerImplTest, NotifyActionController) {
           new CreatePresentationConnectionRequest(
               RenderFrameHostId(1, 2),
               {GURL("http://test.com"), GURL("http://test2.com")},
-              GURL("http://example.com"),
+              url::Origin(GURL("http://example.com")),
               base::Bind(&MediaRouterDialogControllerImplTest::
                              PresentationSuccessCallback,
                          base::Unretained(this)),

@@ -23,7 +23,6 @@ class StubPasswordManagerClient : public PasswordManagerClient {
   // PasswordManagerClient:
   bool PromptUserToSaveOrUpdatePassword(
       std::unique_ptr<PasswordFormManager> form_to_save,
-      password_manager::CredentialSourceType type,
       bool update_password) override;
   bool PromptUserToChooseCredentials(
       std::vector<std::unique_ptr<autofill::PasswordForm>> local_forms,
@@ -44,6 +43,14 @@ class StubPasswordManagerClient : public PasswordManagerClient {
   const GURL& GetLastCommittedEntryURL() const override;
   const CredentialsFilter* GetStoreResultFilter() const override;
   const LogManager* GetLogManager() const override;
+#if defined(SAFE_BROWSING_DB_LOCAL)
+  safe_browsing::PasswordProtectionService* GetPasswordProtectionService()
+      const override;
+  void CheckSafeBrowsingReputation(const GURL& form_action,
+                                   const GURL& frame_url) override;
+  void CheckProtectedPasswordEntry(
+      const std::string& password_saved_domain) override;
+#endif
 
  private:
   const StubCredentialsFilter credentials_filter_;

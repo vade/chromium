@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <map>
+#include <vector>
 
 #include "ash/mus/accelerators/accelerator_handler.h"
 #include "base/macros.h"
@@ -35,22 +36,43 @@ class AcceleratorControllerRegistrar : public AcceleratorHandler,
   ~AcceleratorControllerRegistrar() override;
 
   // AcceleratorHandler:
-  ui::mojom::EventResult OnAccelerator(uint32_t id,
-                                       const ui::Event& event) override;
-
-  // ui::AcceleratorManagerDelegate:
-  void OnAcceleratorRegistered(const ui::Accelerator& accelerator) override;
-  void OnAcceleratorUnregistered(const ui::Accelerator& accelerator) override;
+  ui::mojom::EventResult OnAccelerator(
+      uint32_t id,
+      const ui::Event& event,
+      std::unordered_map<std::string, std::vector<uint8_t>>* properties)
+      override;
 
  private:
   friend class AcceleratorControllerRegistrarTestApi;
+
+  // Accelerators for window cycle.
+  const ui::Accelerator window_cycle_complete_accelerator_;
+  const ui::Accelerator window_cycle_cancel_accelerator_;
+
+  // ui::AcceleratorManagerDelegate:
+  void OnAcceleratorsRegistered(
+      const std::vector<ui::Accelerator>& accelerators) override;
+  void OnAcceleratorUnregistered(const ui::Accelerator& accelerator) override;
+
+  // Generate id and add the corresponding accelerator to accelerator vector.
+  // Creates a PRE_TARGET and POST_TARGET mojom accelerators for the provided
+  // |accelerator| and adds them to the provided |accelerator_vector|.
+  void AddAcceleratorToVector(
+      const ui::Accelerator& accelerator,
+      std::vector<ui::mojom::WmAcceleratorPtr>& accelerator_vector);
+
+  // TODO(moshayedi): crbug.com/629191. Handling window cycle accelerators here
+  // is just a temporary solution and we should remove these once we have a
+  // proper solution.
+  void RegisterWindowCycleAccelerators();
+  bool HandleWindowCycleAccelerator(const ui::Accelerator& accelerator);
 
   // The flow of accelerators in ash is:
   // . wm::AcceleratorFilter() sees events first as it's a pre-target handler.
   // . AcceleratorFilter forwards to its delegate, which indirectly is
   //   implemented by AcceleratorRouter.
   // . AcceleratorRouter may early out, if not it calls through to
-  //   AcceleratorController. This stop may stop propagation entirely.
+  //   AcceleratorController. This may stop propagation entirely.
   // . If focus is on a Widget, then NativeWidgetAura gets the key event, calls
   //   to Widget::OnKeyEvent(), which calls to FocusManager::OnKeyEvent(), which
   //   calls to AshFocusManagerFactory::Delegate::ProcessAccelerator() finally

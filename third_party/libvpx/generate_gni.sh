@@ -15,14 +15,14 @@
 # --disable-avx : AVX+AVX2 support is disabled.
 # --only-configs : Excludes generation of GN and GYP files (i.e. only
 #                  configuration headers are generated).
-# --enable-vp9-highbitdepth : Allow for high bit depth internal, 10 and 12 bit
-#                             vp9 encode and decode. Only applied to x86[_64].
+# --disable-vp9-highbitdepth : Revert x86[_64] builds to low-bit-depth only.
 
 export LC_ALL=C
 BASE_DIR=$(pwd)
 LIBVPX_SRC_DIR="source/libvpx"
 LIBVPX_CONFIG_DIR="source/config"
 unset DISABLE_AVX
+HIGHBD="--enable-vp9-highbitdepth"
 
 for i in "$@"
 do
@@ -36,7 +36,10 @@ case $i in
   shift
   ;;
   --enable-vp9-highbitdepth)
-  HIGHBD="--enable-vp9-highbitdepth"
+  shift
+  ;;
+  --disable-vp9-highbitdepth)
+  unset HIGHBD
   shift
   ;;
   *)
@@ -111,6 +114,9 @@ function convert_srcs_to_project_files {
 
   # Not sure why vpx_config.c is not included.
   source_list=$(echo "$source_list" | grep -v 'vpx_config\.c')
+
+  # Ignore include files.
+  source_list=$(echo "$source_list" | grep -v 'x86_abi_support\.asm')
 
   # The actual ARM files end in .asm. We have rules to translate them to .S
   source_list=$(echo "$source_list" | sed s/\.asm\.s$/.asm/)
@@ -268,7 +274,8 @@ function gen_config_files {
 
   # Disable HAVE_UNISTD_H as it causes vp8 to try to detect how many cpus
   # available, which doesn't work from inside a sandbox on linux.
-  ( echo '/HAVE_UNISTD_H/s/[01]/0/' ; echo 'w' ; echo 'q' ) | ed -s vpx_config.h
+  sed -i.bak -e 's/\(HAVE_UNISTD_H[[:space:]]*\)1/\10/' vpx_config.h
+  rm vpx_config.h.bak
 
   # Use the correct ads2gas script.
   if [[ "$1" == linux* ]]; then

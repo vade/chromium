@@ -483,11 +483,17 @@ class UserSessionManager
   std::map<Profile*, std::unique_ptr<EolNotification>, ProfileCompare>
       eol_notification_handler_;
 
-  // Per-user-session Quick Unlock Feature Notification
+  // Per-user-session PIN Unlock Feature Notification
   std::map<Profile*,
-           scoped_refptr<QuickUnlockNotificationController>,
+           scoped_refptr<quick_unlock::QuickUnlockNotificationController>,
            ProfileCompare>
-      quick_unlock_notification_handler_;
+      pin_unlock_notification_handler_;
+
+  // Per-user-session Fingerprint Unlock Feature Notification
+  std::map<Profile*,
+           scoped_refptr<quick_unlock::QuickUnlockNotificationController>,
+           ProfileCompare>
+      fingerprint_unlock_notification_handler_;
 
   // Manages Easy unlock cryptohome keys.
   std::unique_ptr<EasyUnlockKeyManager> easy_unlock_key_manager_;
@@ -506,8 +512,7 @@ class UserSessionManager
   // Child account status is necessary for InitializeStartUrls call.
   bool waiting_for_child_account_status_;
 
-  scoped_refptr<typename HatsNotificationController::HatsNotificationController>
-      hats_notification_controller_;
+  scoped_refptr<HatsNotificationController> hats_notification_controller_;
 
   base::WeakPtrFactory<UserSessionManager> weak_factory_;
 

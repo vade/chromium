@@ -12,6 +12,7 @@
 #include "base/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/optional.h"
+#include "base/time/time.h"
 #include "components/ntp_snippets/remote/request_params.h"
 #include "components/ntp_snippets/status.h"
 #include "components/translate/core/browser/language_model.h"
@@ -20,11 +21,8 @@
 
 namespace base {
 class Value;
-class TickClock;
+class Clock;
 }  // namespace base
-
-class FetchAPI;
-class Personalization;
 
 namespace ntp_snippets {
 class UserClassifier;
@@ -35,21 +33,17 @@ namespace internal {
 // histograms, so do not change existing values. Insert new values at the end,
 // and update the histogram definition.
 enum class FetchResult {
-  SUCCESS,
-  DEPRECATED_EMPTY_HOSTS,
-  URL_REQUEST_STATUS_ERROR,
-  HTTP_ERROR,
-  JSON_PARSE_ERROR,
-  INVALID_SNIPPET_CONTENT_ERROR,
-  OAUTH_TOKEN_ERROR,
-  INTERACTIVE_QUOTA_ERROR,
-  NON_INTERACTIVE_QUOTA_ERROR,
-  RESULT_MAX
-};
-
-enum FetchAPI {
-  CHROME_READER_API,
-  CHROME_CONTENT_SUGGESTIONS_API,
+  SUCCESS = 0,
+  // DEPRECATED_EMPTY_HOSTS = 1,
+  URL_REQUEST_STATUS_ERROR = 2,
+  HTTP_ERROR = 3,
+  JSON_PARSE_ERROR = 4,
+  INVALID_SNIPPET_CONTENT_ERROR = 5,
+  OAUTH_TOKEN_ERROR = 6,
+  // DEPRECATED_INTERACTIVE_QUOTA_ERROR = 7,
+  // DEPRECATED_NON_INTERACTIVE_QUOTA_ERROR = 8,
+  MISSING_API_KEY = 9,
+  RESULT_MAX = 10
 };
 
 // A single request to query remote suggestions. On success, the suggestions are
@@ -76,17 +70,15 @@ class JsonRequest : public net::URLFetcherDelegate {
     Builder& SetAuthentication(const std::string& account_id,
                                const std::string& auth_header);
     Builder& SetCreationTime(base::TimeTicks creation_time);
-    Builder& SetFetchAPI(FetchAPI fetch_api);
     // The language_model borrowed from the fetcher needs to stay alive until
     // the request body is built.
     Builder& SetLanguageModel(const translate::LanguageModel* language_model);
     Builder& SetParams(const RequestParams& params);
     Builder& SetParseJsonCallback(ParseJSONCallback callback);
-    Builder& SetPersonalization(Personalization personalization);
-    // The tick_clock borrowed from the fetcher will be injected into the
+    // The clock borrowed from the fetcher will be injected into the
     // request. It will be used at build time and after the fetch returned.
     // It has to be alive until the request is destroyed.
-    Builder& SetTickClock(base::TickClock* tick_clock);
+    Builder& SetClock(base::Clock* clock);
     Builder& SetUrl(const GURL& url);
     Builder& SetUrlRequestContextGetter(
         const scoped_refptr<net::URLRequestContextGetter>& context_getter);
@@ -111,22 +103,15 @@ class JsonRequest : public net::URLFetcherDelegate {
         const std::string& headers,
         const std::string& body) const;
 
-    bool ReturnOnlyPersonalizedResults() const {
-      return !obfuscated_gaia_id_.empty() &&
-             personalization_ == Personalization::kPersonal;
-    }
-
     void PrepareLanguages(
         translate::LanguageModel::LanguageInfo* ui_language,
         translate::LanguageModel::LanguageInfo* other_top_language) const;
 
     // Only required, if the request needs to be sent.
     std::string auth_header_;
-    base::TickClock* tick_clock_;
-    FetchAPI fetch_api_;
+    base::Clock* clock_;
     RequestParams params_;
     ParseJSONCallback parse_json_callback_;
-    Personalization personalization_;
     GURL url_;
     scoped_refptr<net::URLRequestContextGetter> url_request_context_getter_;
 
@@ -139,7 +124,7 @@ class JsonRequest : public net::URLFetcherDelegate {
   };
 
   JsonRequest(base::Optional<Category> exclusive_category,
-              base::TickClock* tick_clock,
+              base::Clock* clock,
               const ParseJSONCallback& callback);
   JsonRequest(JsonRequest&&);
   ~JsonRequest() override;
@@ -168,11 +153,11 @@ class JsonRequest : public net::URLFetcherDelegate {
   // If set, only return results for this category.
   base::Optional<Category> exclusive_category_;
 
-  // Use the TickClock from the Fetcher to measure the fetch time. It will be
+  // Use the Clock from the Fetcher to measure the fetch time. It will be
   // used on creation and after the fetch returned. It has to be alive until the
   // request is destroyed.
-  base::TickClock* tick_clock_;
-  base::TimeTicks creation_time_;
+  base::Clock* clock_;
+  base::Time creation_time_;
 
   // This callback is called to parse a json string. It contains callbacks for
   // error and success cases.

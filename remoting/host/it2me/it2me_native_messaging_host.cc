@@ -13,6 +13,7 @@
 #include "base/callback_helpers.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringize_macros.h"
@@ -25,11 +26,11 @@
 #include "net/socket/client_socket_factory.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "remoting/base/auto_thread_task_runner.h"
+#include "remoting/base/name_value_map.h"
+#include "remoting/base/service_urls.h"
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/host_exit_codes.h"
 #include "remoting/host/policy_watcher.h"
-#include "remoting/host/service_urls.h"
-#include "remoting/protocol/name_value_map.h"
 #include "remoting/signaling/delegating_signal_strategy.h"
 
 #if defined(OS_WIN)
@@ -43,7 +44,7 @@ namespace remoting {
 
 namespace {
 
-const remoting::protocol::NameMapElement<It2MeHostState> kIt2MeHostStates[] = {
+const NameMapElement<It2MeHostState> kIt2MeHostStates[] = {
     {kDisconnected, "DISCONNECTED"},
     {kStarting, "STARTING"},
     {kRequestedAccessCode, "REQUESTED_ACCESS_CODE"},
@@ -61,48 +62,47 @@ const base::FilePath::CharType kElevatedHostBinaryName[] =
     FILE_PATH_LITERAL("remote_assistance_host_uiaccess.exe");
 #endif  // defined(OS_WIN)
 
-// Helper function to run |callback| on the correct thread using |task_runner|.
+// Helper functions to run |callback| asynchronously on the correct thread
+// using |task_runner|.
 void PolicyUpdateCallback(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     remoting::PolicyWatcher::PolicyUpdatedCallback callback,
     std::unique_ptr<base::DictionaryValue> policies) {
-  DCHECK(!callback.is_null());
-
-  // Always post the task so the execution is consistent (always asynchronous).
+  DCHECK(callback);
   task_runner->PostTask(FROM_HERE,
                         base::Bind(callback, base::Passed(&policies)));
 }
 
-// Called when malformed policies are detected.
-void OnPolicyError() {
-  // TODO(joedow): Report the policy error to the user.  crbug.com/433009
-  NOTIMPLEMENTED();
+void PolicyErrorCallback(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    remoting::PolicyWatcher::PolicyErrorCallback callback) {
+  DCHECK(callback);
+  task_runner->PostTask(FROM_HERE, callback);
 }
 
 }  // namespace
 
 It2MeNativeMessagingHost::It2MeNativeMessagingHost(
     bool needs_elevation,
-    policy::PolicyService* policy_service,
+    std::unique_ptr<PolicyWatcher> policy_watcher,
     std::unique_ptr<ChromotingHostContext> context,
     std::unique_ptr<It2MeHostFactory> factory)
     : needs_elevation_(needs_elevation),
       host_context_(std::move(context)),
       factory_(std::move(factory)),
-      policy_service_(policy_service),
-      policy_watcher_(PolicyWatcher::Create(policy_service_,
-                                            host_context_->file_task_runner())),
+      policy_watcher_(std::move(policy_watcher)),
       weak_factory_(this) {
   weak_ptr_ = weak_factory_.GetWeakPtr();
 
   // The policy watcher runs on the |file_task_runner| but we want to run the
-  // update code on |task_runner| so we use a shim to post the callback to the
-  // preferred task runner.
+  // callbacks on |task_runner| so we use a shim to post them to it.
   PolicyWatcher::PolicyUpdatedCallback update_callback =
       base::Bind(&It2MeNativeMessagingHost::OnPolicyUpdate, weak_ptr_);
+  PolicyWatcher::PolicyErrorCallback error_callback =
+      base::Bind(&It2MeNativeMessagingHost::OnPolicyError, weak_ptr_);
   policy_watcher_->StartWatching(
       base::Bind(&PolicyUpdateCallback, task_runner(), update_callback),
-      base::Bind(&OnPolicyError));
+      base::Bind(&PolicyErrorCallback, task_runner(), error_callback));
 }
 
 It2MeNativeMessagingHost::~It2MeNativeMessagingHost() {
@@ -195,7 +195,7 @@ void It2MeNativeMessagingHost::ProcessConnect(
   DCHECK(task_runner()->BelongsToCurrentThread());
 
   if (!policy_received_) {
-    DCHECK(pending_connect_.is_null());
+    DCHECK(!pending_connect_);
     pending_connect_ =
         base::Bind(&It2MeNativeMessagingHost::ProcessConnect, weak_ptr_,
                    base::Passed(&message), base::Passed(&response));
@@ -296,11 +296,14 @@ void It2MeNativeMessagingHost::ProcessConnect(
       return;
     }
 
-    delegating_signal_strategy_ = new DelegatingSignalStrategy(
-        local_jid, host_context_->network_task_runner(),
-        base::Bind(&It2MeNativeMessagingHost::SendOutgoingIq,
-                   weak_factory_.GetWeakPtr()));
-    signal_strategy.reset(delegating_signal_strategy_);
+    auto delegating_signal_strategy =
+        base::MakeUnique<DelegatingSignalStrategy>(
+            SignalingAddress(local_jid), host_context_->network_task_runner(),
+            base::Bind(&It2MeNativeMessagingHost::SendOutgoingIq,
+                       weak_factory_.GetWeakPtr()));
+    incoming_message_callback_ =
+        delegating_signal_strategy->GetIncomingMessageCallback();
+    signal_strategy = std::move(delegating_signal_strategy);
   }
 
   std::string directory_bot_jid = service_urls->directory_bot_jid();
@@ -313,10 +316,22 @@ void It2MeNativeMessagingHost::ProcessConnect(
   }
 #endif  // !defined(NDEBUG)
 
+  std::unique_ptr<base::DictionaryValue> policies =
+      policy_watcher_->GetCurrentPolicies();
+  if (policies->size() == 0) {
+    // At this point policies have been read, so if there are none set then
+    // it indicates an error. Since this can be fixed by end users it has a
+    // dedicated message type rather than the generic "error" so that the
+    // right error message can be displayed.
+    SendPolicyErrorAndExit();
+    return;
+  }
+
   // Create the It2Me host and start connecting.
-  it2me_host_ = factory_->CreateIt2MeHost(
-      host_context_->Copy(), policy_service_, weak_ptr_,
-      std::move(signal_strategy), username, directory_bot_jid);
+  it2me_host_ = factory_->CreateIt2MeHost(host_context_->Copy(), weak_ptr_,
+                                          std::move(signal_strategy), username,
+                                          directory_bot_jid);
+  it2me_host_->OnPolicyUpdate(std::move(policies));
   it2me_host_->Connect();
 
   SendMessageToClient(std::move(response));
@@ -357,8 +372,7 @@ void It2MeNativeMessagingHost::ProcessIncomingIq(
     return;
   }
 
-  if (delegating_signal_strategy_)
-    delegating_signal_strategy_->OnIncomingMessage(iq);
+  incoming_message_callback_.Run(iq);
   SendMessageToClient(std::move(response));
 };
 
@@ -381,6 +395,15 @@ void It2MeNativeMessagingHost::SendErrorAndExit(
   SendMessageToClient(std::move(response));
 
   // Trigger a host shutdown by sending an empty message.
+  client_->CloseChannel(std::string());
+}
+
+void It2MeNativeMessagingHost::SendPolicyErrorAndExit() const {
+  DCHECK(task_runner()->BelongsToCurrentThread());
+
+  auto message = base::MakeUnique<base::DictionaryValue>();
+  message->SetString("type", "policyError");
+  SendMessageToClient(std::move(message));
   client_->CloseChannel(std::string());
 }
 
@@ -426,6 +449,11 @@ void It2MeNativeMessagingHost::OnStateChanged(
   SendMessageToClient(std::move(message));
 }
 
+void It2MeNativeMessagingHost::SetPolicyErrorClosureForTesting(
+    const base::Closure& closure) {
+  policy_error_closure_for_testing_ = closure;
+}
+
 void It2MeNativeMessagingHost::OnNatPolicyChanged(bool nat_traversal_enabled) {
   DCHECK(task_runner()->BelongsToCurrentThread());
 
@@ -467,29 +495,54 @@ std::string It2MeNativeMessagingHost::HostStateToString(
 
 void It2MeNativeMessagingHost::OnPolicyUpdate(
     std::unique_ptr<base::DictionaryValue> policies) {
-  if (policy_received_) {
-    // Don't dynamically change how the host operates since we don't have a good
-    // way to communicate changes to the user.
-    return;
-  }
-
-  bool allow_elevated_host = false;
-  if (!policies->GetBoolean(
-          policy::key::kRemoteAccessHostAllowUiAccessForRemoteAssistance,
-          &allow_elevated_host)) {
-    LOG(WARNING) << "Failed to retrieve elevated host policy value.";
-  }
+  // Don't dynamically change the elevation status since we don't have a good
+  // way to communicate changes to the user.
+  if (!policy_received_) {
+    bool allow_elevated_host = false;
+    if (!policies->GetBoolean(
+            policy::key::kRemoteAccessHostAllowUiAccessForRemoteAssistance,
+            &allow_elevated_host)) {
+      LOG(WARNING) << "Failed to retrieve elevated host policy value.";
+    }
 #if defined(OS_WIN)
-  LOG(INFO) << "Allow UiAccess for Remote Assistance: " << allow_elevated_host;
+    LOG(INFO) << "Allow UiAccess for Remote Assistance: "
+              << allow_elevated_host;
 #endif  // defined(OS_WIN)
 
+    policy_received_ = true;
+
+    // If |allow_elevated_host| is false, then we will fall back to using a host
+    // running in the current context regardless of the elevation request.  This
+    // may not be ideal, but is still functional.
+    needs_elevation_ = needs_elevation_ && allow_elevated_host;
+    if (pending_connect_) {
+      base::ResetAndReturn(&pending_connect_).Run();
+    }
+  }
+
+  if (it2me_host_.get()) {
+    it2me_host_->OnPolicyUpdate(std::move(policies));
+  }
+}
+
+void It2MeNativeMessagingHost::OnPolicyError() {
+  LOG(ERROR) << "Malformed policies detected.";
   policy_received_ = true;
 
-  // If |allow_elevated_host| is false, then we will fall back to using a host
-  // running in the current context regardless of the elevation request.  This
-  // may not be ideal, but is still functional.
-  needs_elevation_ = needs_elevation_ && allow_elevated_host;
-  if (!pending_connect_.is_null()) {
+  if (policy_error_closure_for_testing_) {
+    policy_error_closure_for_testing_.Run();
+  }
+
+  if (it2me_host_) {
+    // If there is already a connection, close it and notify the webapp.
+    it2me_host_->Disconnect();
+    it2me_host_ = nullptr;
+    SendPolicyErrorAndExit();
+  } else if (pending_connect_) {
+    // If there is no connection, run the pending connection callback if there
+    // is one, but otherwise do nothing. The policy error will be sent when a
+    // connection is made; doing so beforehand would break assumptions made by
+    // the Chrome app.
     base::ResetAndReturn(&pending_connect_).Run();
   }
 }

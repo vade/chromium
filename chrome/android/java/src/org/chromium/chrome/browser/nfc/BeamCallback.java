@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.nfc;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.nfc.NdefMessage;
 import android.nfc.NdefRecord;
@@ -18,6 +19,7 @@ import android.text.TextUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.ui.widget.Toast;
 
 import java.net.MalformedURLException;
@@ -53,6 +55,8 @@ class BeamCallback implements CreateNdefMessageCallback, OnNdefPushCompleteCallb
     // In ICS returning null from createNdefMessage will cause beam to send our market
     // link so we need to hook to the return from the beam overlay to display the error.
     // But in SDK_INT >= 16, beam won't activate, so the hook wouldn't go off. (b/5943350)
+    // TODO(crbug.com/635567): Fix this properly.
+    @SuppressLint("ObsoleteSdkInt")
     private static final boolean NFC_BUGS_ACTIVE = Build.VERSION.SDK_INT < 16;
 
     // Arbitrarily chosen interval to delay toast to allow NFC animations to finish
@@ -143,7 +147,8 @@ class BeamCallback implements CreateNdefMessageCallback, OnNdefPushCompleteCallb
         if (TextUtils.isEmpty(url)) return false;
         try {
             String urlProtocol = (new URL(url)).getProtocol();
-            return urlProtocol.matches("http|https");
+            return (UrlConstants.HTTP_SCHEME.equals(urlProtocol)
+                    || UrlConstants.HTTPS_SCHEME.equals(urlProtocol));
         } catch (MalformedURLException e) {
             return false;
         }

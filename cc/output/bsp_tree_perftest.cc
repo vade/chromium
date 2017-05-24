@@ -14,7 +14,7 @@
 #include "base/strings/string_piece.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
-#include "cc/debug/lap_timer.h"
+#include "cc/base/lap_timer.h"
 #include "cc/layers/layer.h"
 #include "cc/output/bsp_tree.h"
 #include "cc/quads/draw_polygon.h"
@@ -44,11 +44,11 @@ class BspTreePerfTest : public LayerTreeTest {
 
   void SetupTree() override {
     gfx::Size viewport = gfx::Size(720, 1038);
-    layer_tree()->SetViewportSize(viewport);
+    layer_tree_host()->SetViewportSize(viewport);
     scoped_refptr<Layer> root =
         ParseTreeFromJson(json_, &content_layer_client_);
     ASSERT_TRUE(root.get());
-    layer_tree()->SetRootLayer(root);
+    layer_tree_host()->SetRootLayer(root);
     content_layer_client_.set_bounds(viewport);
   }
 
@@ -71,10 +71,8 @@ class BspTreePerfTest : public LayerTreeTest {
     LayerTreeImpl* active_tree = host_impl->active_tree();
     // First build the tree and then we'll start running tests on layersorter
     // itself
-    bool can_render_to_separate_surface = true;
     int max_texture_size = 8096;
-    DoCalcDrawPropertiesImpl(can_render_to_separate_surface, max_texture_size,
-                             active_tree, host_impl);
+    DoCalcDrawPropertiesImpl(max_texture_size, active_tree, host_impl);
 
     LayerImplList base_list;
     BuildLayerImplList(active_tree->root_layer_for_testing(), &base_list);
@@ -104,24 +102,21 @@ class BspTreePerfTest : public LayerTreeTest {
     EndTest();
   }
 
-  void DoCalcDrawPropertiesImpl(bool can_render_to_separate_surface,
-                                int max_texture_size,
+  void DoCalcDrawPropertiesImpl(int max_texture_size,
                                 LayerTreeImpl* active_tree,
                                 LayerTreeHostImpl* host_impl) {
-    LayerImplList update_list;
+    RenderSurfaceList update_list;
     LayerTreeHostCommon::CalcDrawPropsImplInputs inputs(
-        active_tree->root_layer_for_testing(), active_tree->DrawViewportSize(),
-        host_impl->DrawTransform(), active_tree->device_scale_factor(),
+        active_tree->root_layer_for_testing(),
+        active_tree->DeviceViewport().size(), host_impl->DrawTransform(),
+        active_tree->device_scale_factor(),
         active_tree->current_page_scale_factor(),
         active_tree->InnerViewportContainerLayer(),
         active_tree->InnerViewportScrollLayer(),
         active_tree->OuterViewportScrollLayer(),
         active_tree->elastic_overscroll()->Current(active_tree->IsActiveTree()),
         active_tree->OverscrollElasticityLayer(), max_texture_size,
-        can_render_to_separate_surface,
         host_impl->settings().layer_transforms_should_scale_layer_contents,
-        false,  // do not verify_clip_tree_calculation for perf tests
-        false,  // do not verify_visible_rect_calculation for perf tests
         &update_list, active_tree->property_trees());
     LayerTreeHostCommon::CalculateDrawProperties(&inputs);
   }

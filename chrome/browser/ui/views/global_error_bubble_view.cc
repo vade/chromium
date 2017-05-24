@@ -9,11 +9,13 @@
 #include <vector>
 
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/global_error/global_error.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/views/elevation_icon_setter.h"
+#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/toolbar/app_menu_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -25,7 +27,6 @@
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/grid_layout.h"
-#include "ui/views/layout/layout_constants.h"
 #include "ui/views/window/dialog_client_view.h"
 
 #if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
@@ -69,22 +70,28 @@ GlobalErrorBubbleView::GlobalErrorBubbleView(
       error_(error) {
   if (!anchor_view)
     SetAnchorRect(gfx::Rect(anchor_point, gfx::Size()));
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::GLOBAL_ERROR);
 }
 
 GlobalErrorBubbleView::~GlobalErrorBubbleView() {}
 
 base::string16 GlobalErrorBubbleView::GetWindowTitle() const {
+  if (!error_)
+    return base::string16();
   return error_->GetBubbleViewTitle();
 }
 
 gfx::ImageSkia GlobalErrorBubbleView::GetWindowIcon() {
-  gfx::Image image = error_->GetBubbleViewIcon();
-  DCHECK(!image.IsEmpty());
+  gfx::Image image;
+  if (error_) {
+    image = error_->GetBubbleViewIcon();
+    DCHECK(!image.IsEmpty());
+  }
   return *image.ToImageSkia();
 }
 
 bool GlobalErrorBubbleView::ShouldShowWindowIcon() const {
-  return true;
+  return ChromeLayoutProvider::Get()->ShouldShowWindowIcon();
 }
 
 void GlobalErrorBubbleView::WindowClosing() {
@@ -93,6 +100,9 @@ void GlobalErrorBubbleView::WindowClosing() {
 }
 
 void GlobalErrorBubbleView::Init() {
+  // |error_| is assumed to be valid, and stay valid, at least until Init()
+  // returns.
+
   // Compensate for built-in vertical padding in the anchor view's image.
   set_anchor_view_insets(gfx::Insets(
       GetLayoutConstant(LOCATION_BAR_BUBBLE_ANCHOR_VERTICAL_INSET), 0));
@@ -118,7 +128,8 @@ void GlobalErrorBubbleView::Init() {
     layout->StartRow(1, 0);
     layout->AddView(message_labels[i]);
     if (i < message_labels.size() - 1)
-      layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+      layout->AddPaddingRow(0, ChromeLayoutProvider::Get()->GetDistanceMetric(
+                                   views::DISTANCE_RELATED_CONTROL_VERTICAL));
   }
 
   // These bubbles show at times where activation is sporadic (like at startup,
@@ -129,12 +140,16 @@ void GlobalErrorBubbleView::Init() {
 
 void GlobalErrorBubbleView::UpdateButton(views::LabelButton* button,
                                          ui::DialogButton type) {
-  BubbleDialogDelegateView::UpdateButton(button, type);
-  if (type == ui::DIALOG_BUTTON_OK &&
-      error_->ShouldAddElevationIconToAcceptButton()) {
-    elevation_icon_setter_.reset(new ElevationIconSetter(
-        button, base::Bind(&GlobalErrorBubbleView::SizeToContents,
-                           base::Unretained(this))));
+  if (error_) {
+    // UpdateButton can result in calls back in to GlobalErrorBubbleView,
+    // possibly accessing |error_|.
+    BubbleDialogDelegateView::UpdateButton(button, type);
+    if (type == ui::DIALOG_BUTTON_OK &&
+        error_->ShouldAddElevationIconToAcceptButton()) {
+      elevation_icon_setter_.reset(new ElevationIconSetter(
+          button, base::Bind(&GlobalErrorBubbleView::SizeToContents,
+                             base::Unretained(this))));
+    }
   }
 }
 
@@ -148,12 +163,16 @@ bool GlobalErrorBubbleView::ShouldDefaultButtonBeBlue() const {
 
 base::string16 GlobalErrorBubbleView::GetDialogButtonLabel(
     ui::DialogButton button) const {
+  if (!error_)
+    return base::string16();
   return button == ui::DIALOG_BUTTON_OK
              ? error_->GetBubbleViewAcceptButtonLabel()
              : error_->GetBubbleViewCancelButtonLabel();
 }
 
 int GlobalErrorBubbleView::GetDialogButtons() const {
+  if (!error_)
+    return ui::DIALOG_BUTTON_NONE;
   return ui::DIALOG_BUTTON_OK |
          (error_->GetBubbleViewCancelButtonLabel().empty()
               ? 0
@@ -161,12 +180,14 @@ int GlobalErrorBubbleView::GetDialogButtons() const {
 }
 
 bool GlobalErrorBubbleView::Cancel() {
-  error_->BubbleViewCancelButtonPressed(browser_);
+  if (error_)
+    error_->BubbleViewCancelButtonPressed(browser_);
   return true;
 }
 
 bool GlobalErrorBubbleView::Accept() {
-  error_->BubbleViewAcceptButtonPressed(browser_);
+  if (error_)
+    error_->BubbleViewAcceptButtonPressed(browser_);
   return true;
 }
 

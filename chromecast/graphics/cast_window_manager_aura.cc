@@ -5,7 +5,9 @@
 #include "chromecast/graphics/cast_window_manager_aura.h"
 
 #include "base/memory/ptr_util.h"
+#include "chromecast/graphics/cast_focus_client_aura.h"
 #include "ui/aura/client/default_capture_client.h"
+#include "ui/aura/client/focus_change_observer.h"
 #include "ui/aura/env.h"
 #include "ui/aura/layout_manager.h"
 #include "ui/aura/window.h"
@@ -16,6 +18,31 @@
 #include "ui/display/screen.h"
 
 namespace chromecast {
+
+// An ui::EventTarget that ignores events.
+class CastEventIgnorer : public ui::EventTargeter {
+ public:
+  ~CastEventIgnorer() override;
+
+  // ui::EventTargeter implementation:
+  ui::EventTarget* FindTargetForEvent(ui::EventTarget* root,
+                                      ui::Event* event) override;
+  ui::EventTarget* FindNextBestTarget(ui::EventTarget* previous_target,
+                                      ui::Event* event) override;
+};
+
+CastEventIgnorer::~CastEventIgnorer() {}
+
+ui::EventTarget* CastEventIgnorer::FindTargetForEvent(ui::EventTarget* root,
+                                                      ui::Event* event) {
+  return nullptr;
+}
+
+ui::EventTarget* CastEventIgnorer::FindNextBestTarget(
+    ui::EventTarget* previous_target,
+    ui::Event* event) {
+  return nullptr;
+}
 
 // An aura::WindowTreeHost that correctly converts input events.
 class CastWindowTreeHost : public aura::WindowTreeHostPlatform {
@@ -34,7 +61,12 @@ class CastWindowTreeHost : public aura::WindowTreeHostPlatform {
 
 CastWindowTreeHost::CastWindowTreeHost(bool enable_input,
                                        const gfx::Rect& bounds)
-    : WindowTreeHostPlatform(bounds), enable_input_(enable_input) {}
+    : WindowTreeHostPlatform(bounds), enable_input_(enable_input) {
+  if (!enable_input) {
+    window()->SetEventTargeter(
+        std::unique_ptr<ui::EventTargeter>(new CastEventIgnorer));
+  }
+}
 
 CastWindowTreeHost::~CastWindowTreeHost() {}
 
@@ -93,7 +125,41 @@ void CastLayoutManager::OnWindowRemovedFromLayout(aura::Window* child) {
 
 void CastLayoutManager::OnChildWindowVisibilityChanged(aura::Window* child,
                                                        bool visible) {
-  // Note: this is invoked for child windows of the root window.
+  aura::Window* parent = child->parent();
+  if (!visible || !parent->IsRootWindow()) {
+    return;
+  }
+
+  // We set z-order here, because the window's ID could be set after the window
+  // is added to the layout, particularly when using views::Widget to create the
+  // window.  The window ID must be set prior to showing the window.  Since we
+  // only process z-order on visibility changes for top-level windows, this
+  // logic will execute infrequently.
+
+  // Determine z-order relative to existing windows.
+  aura::Window::Windows windows = parent->children();
+  aura::Window* above = nullptr;
+  aura::Window* below = nullptr;
+  for (auto* other : windows) {
+    if (other == child) {
+      continue;
+    }
+    if ((other->id() < child->id()) && (!below || other->id() > below->id())) {
+      below = other;
+    } else if ((other->id() > child->id()) &&
+               (!above || other->id() < above->id())) {
+      above = other;
+    }
+  }
+
+  // Adjust the z-order of the new child window.
+  if (above) {
+    parent->StackChildBelow(child, above);
+  } else if (below) {
+    parent->StackChildAbove(child, below);
+  } else {
+    parent->StackChildAtBottom(child);
+  }
 }
 
 void CastLayoutManager::SetChildBounds(aura::Window* child,
@@ -136,12 +202,14 @@ void CastWindowManagerAura::Setup() {
   window_tree_host_->compositor()->SetHostHasTransparentBackground(true);
   window_tree_host_->compositor()->SetBackgroundColor(SK_ColorTRANSPARENT);
 
+  focus_client_.reset(new CastFocusClientAura());
+  aura::client::SetFocusClient(window_tree_host_->window(),
+                               focus_client_.get());
+  aura::client::SetActivationClient(window_tree_host_->window(),
+                                    focus_client_.get());
+  aura::client::SetWindowParentingClient(window_tree_host_->window(), this);
   capture_client_.reset(
       new aura::client::DefaultCaptureClient(window_tree_host_->window()));
-
-  CastVSyncSettings::GetInstance()->AddObserver(this);
-  window_tree_host_->compositor()->SetAuthoritativeVSyncInterval(
-      CastVSyncSettings::GetInstance()->GetVSyncInterval());
 
   window_tree_host_->Show();
 }
@@ -150,9 +218,28 @@ void CastWindowManagerAura::TearDown() {
   if (!window_tree_host_) {
     return;
   }
-  CastVSyncSettings::GetInstance()->RemoveObserver(this);
   capture_client_.reset();
+  aura::client::SetWindowParentingClient(window_tree_host_->window(), nullptr);
+  aura::client::SetActivationClient(window_tree_host_->window(), nullptr);
+  aura::client::SetFocusClient(window_tree_host_->window(), nullptr);
+  focus_client_.reset();
   window_tree_host_.reset();
+}
+
+void CastWindowManagerAura::SetWindowId(gfx::NativeView window,
+                                        WindowId window_id) {
+  window->set_id(window_id);
+}
+
+gfx::NativeView CastWindowManagerAura::GetRootWindow() {
+  Setup();
+  return window_tree_host_->window();
+}
+
+aura::Window* CastWindowManagerAura::GetDefaultParent(aura::Window* window,
+                                                      const gfx::Rect& bounds) {
+  DCHECK(window_tree_host_);
+  return window_tree_host_->window();
 }
 
 void CastWindowManagerAura::AddWindow(gfx::NativeView child) {
@@ -164,14 +251,6 @@ void CastWindowManagerAura::AddWindow(gfx::NativeView child) {
   if (!parent->Contains(child)) {
     parent->AddChild(child);
   }
-
-  parent->StackChildAtTop(child);
-  child->SetBounds(window_tree_host_->window()->bounds());
-}
-
-void CastWindowManagerAura::OnVSyncIntervalChanged(base::TimeDelta interval) {
-  DCHECK(window_tree_host_.get());
-  window_tree_host_->compositor()->SetAuthoritativeVSyncInterval(interval);
 }
 
 }  // namespace chromecast

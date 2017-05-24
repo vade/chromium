@@ -59,11 +59,17 @@ extern const char kPasswordManagerSavingEnabled[];
 // prompt was shown or not.
 extern const char kWasAutoSignInFirstRunExperienceShown[];
 
+// Boolean that indicated if obsolete HTTP data has been cleaned in the past.
+extern const char kWasObsoleteHttpDataCleaned[];
+
 // Boolean that indicated if user interacted with the Chrome Sign in promo.
 extern const char kWasSignInPasswordPromoClicked[];
 
 // Number of times the Chrome Sign in promo popped up.
 extern const char kNumberSignInPasswordPromoShown[];
+
+// String that represent the sync password hash.
+extern const char kSyncPasswordHash[];
 
 }  // namespace prefs
 }  // namespace password_manager

@@ -2,16 +2,14 @@
 <html>
   <head>
     <title>Test Different PeriodicWave Lengths at Different Sample Rates</title>
-    <script src="../../resources/js-test.js"></script>
+    <script src="../../resources/testharness.js"></script>
+    <script src="../../resources/testharnessreport.js"></script> 
     <script src="../resources/audit-util.js"></script>
-    <script src="../resources/audio-testing.js"></script>
+    <script src="../resources/audit.js"></script>
   </head>
 
   <body>
     <script>
-      description("Test Different PeriodicWave Lengths at Different Sample Rates");
-      window.jsTestIsAsync = true;
-
       // Test PeriodicWave objects with varying number of coefficients at different sample rates.
       // Basically, verify that the coefficients are used at the appropriate sample rates.  This is
       // done by comparing the outputs of two periodic waves used in oscillators.  The output should
@@ -49,15 +47,12 @@
           verifier: resultShouldBeNonZero
         },
 
-        // Test that we use all 8192 Fourier coefficients at 192 kHz sample rate.  Ideally, we'd
-        // like to compare 8191 coefficients vs 8192 coefficients.  However, due to single-precision
-        // arithmetic, the wave forms are identical in this case.  Thus, use a somewhat smaller
-        // value where the wave forms are actually different.
+        // Test that we use all 8192 Fourier coefficients at 192 kHz sample rate.
         {
           name: "192khz-test-3",
           sampleRate: 192000,
           bigWave: 8192,
-          smallWave: (8 - 1 / 256) * 1024,
+          smallWave: 8191,
           verifier: resultShouldBeNonZero
         },
 
@@ -144,39 +139,35 @@
 
       // Returns a function the verifies that the result is zero.  The parameters control what is
       // printed in the messages.
-      function resultShouldBeZero(sampleRate, bigLength, smallLength) {
+      function resultShouldBeZero(should, sampleRate, bigLength, smallLength) {
         return function (buffer) {
           var prefix = generatePrefix(sampleRate, bigLength, smallLength);
-          if (isBufferZero(buffer))
-            testPassed(prefix + "identical as expected.");
-          else
-            testFailed(prefix + "unexpectedly differ.");
+          should(isBufferZero(buffer), prefix + "are identical")
+            .beEqualTo(true);
         }
       }
 
       // Returns a function the verifies that the result is non-zero.  The parameters control what is
       // printed in the messages.
-      function resultShouldBeNonZero(sampleRate, bigLength, smallLength) {
+      function resultShouldBeNonZero(should, sampleRate, bigLength, smallLength) {
         return function (buffer) {
           var prefix = generatePrefix(sampleRate, bigLength, smallLength);
-          if (!isBufferZero(buffer))
-            testPassed(prefix + "differ as expected.");
-          else
-            testFailed(prefix + "unexpectedly are identical.");
+          should(!isBufferZero(buffer), prefix + "are different")
+            .beEqualTo(true);
         }
       }
 
       // Creates a function that is used to run an Audit test for a given sample rate, periodic wave
       // sizes, and verifier.
       function createAuditTestFunction(sampleRate, bigLength, smallLength, verifier) {
-         return function (done) {
+         return (task, should) => {
            // Create the audio graph, render it, and then verify that the output is the expected
            // result.
            createAudioGraph(sampleRate, bigLength, smallLength);
 
-           context.startRendering()
-             .then(verifier(sampleRate, bigLength, smallLength))
-             .then(done);
+           return context.startRendering()
+             .then(verifier(should, sampleRate, bigLength, smallLength))
+             .then(() => task.done());
         }
       }
 
@@ -191,9 +182,12 @@
          var bigWaveRealCoef = new Float32Array(bigPeriodicWaveLength);
          var bigWaveImagCoef = new Float32Array(bigPeriodicWaveLength);
 
-         // Set up the Fourier coefficients for a square wave.
-         for (var k = 0; k < bigPeriodicWaveLength; k += 2) {
-           bigWaveImagCoef[k] = 4 / Math.PI / k;
+         // Set up the Fourier coefficients for a sawtooth wave.  We use
+         // sawtooth because all coefficients are non-zero
+         bigWaveImagCoef[0] = 0;
+         for (var k = 1; k < bigPeriodicWaveLength; k++) {
+           var piFactor = 2 / (Math.PI * k);
+           bigWaveImagCoef[k] = piFactor * ((k % 2 === 0) ? -1 : 1);
            if (k < smallPeriodicWaveLength)
              smallWaveImagCoef[k] = bigWaveImagCoef[k];
          }
@@ -240,24 +234,17 @@
       }
 
       // Define the tasks based on the entries in testSet.
-      function defineAuditTests () {
+      function defineAuditTests() {
         for (var k = 0; k < testSet.length; ++k) {
-          var test = testSet[k];
-          var actualName = actualTestName(test.name, k);
-          audit.defineTask(actualName,
-            createAuditTestFunction(test.sampleRate, test.bigWave, test.smallWave, test.verifier));
+          let {name, sampleRate, bigWave, smallWave, verifier} = testSet[k];
+          let  actualName = actualTestName(name, k);
+          audit.define(actualName,
+            createAuditTestFunction(sampleRate, bigWave, smallWave, verifier));
         }
-        // Define the finish test last.
-        audit.defineTask(actualTestName("finish-tests", testSet.length), function (done) {
-          finishJSTest();
-          done();
-        });
       }
 
       defineAuditTests();
-      audit.runTasks();
-
-      successfullyParsed = true;
+      audit.run();
     </script>
   </body>
 </html>

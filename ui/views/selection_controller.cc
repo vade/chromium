@@ -27,8 +27,10 @@ SelectionController::SelectionController(SelectionControllerDelegate* delegate)
   DCHECK(delegate);
 }
 
-bool SelectionController::OnMousePressed(const ui::MouseEvent& event,
-                                         bool handled) {
+bool SelectionController::OnMousePressed(
+    const ui::MouseEvent& event,
+    bool handled,
+    InitialFocusStateOnMousePress initial_focus_state) {
   gfx::RenderText* render_text = GetRenderText();
   DCHECK(render_text);
 
@@ -61,38 +63,31 @@ bool SelectionController::OnMousePressed(const ui::MouseEvent& event,
         break;
       case 2:
         // Select all the text on a triple click.
-        delegate_->OnBeforePointerAction();
-        render_text->SelectAll(false);
-        delegate_->OnAfterPointerAction(false, true);
+        SelectAll();
         break;
       default:
         NOTREACHED();
     }
   }
 
-  // TODO(crbug.com/676296): Right clicking an unfocused text view should select
-  // all its text on Mac.
-  const bool select_word_on_right_click =
-      event.IsOnlyRightMouseButton() &&
-      PlatformStyle::kSelectWordOnRightClick &&
-      !render_text->IsPointInSelection(event.location());
-  if (select_word_on_right_click)
-    SelectWord(event.location());
-
-  if (handles_selection_clipboard_ && event.IsOnlyMiddleMouseButton()) {
-    if (render_text->IsPointInSelection(event.location())) {
-      delegate_->OnBeforePointerAction();
-      render_text->ClearSelection();
-      delegate_->UpdateSelectionClipboard();
-      delegate_->OnAfterPointerAction(false, true);
-    } else if (!delegate_->IsReadOnly()) {
-      delegate_->OnBeforePointerAction();
-      const bool selection_changed =
-          render_text->MoveCursorTo(event.location(), false);
-      const bool text_changed = delegate_->PasteSelectionClipboard();
-      delegate_->OnAfterPointerAction(text_changed,
-                                      selection_changed | text_changed);
+  if (event.IsOnlyRightMouseButton()) {
+    if (PlatformStyle::kSelectAllOnRightClickWhenUnfocused &&
+        initial_focus_state == InitialFocusStateOnMousePress::UNFOCUSED) {
+      SelectAll();
+    } else if (PlatformStyle::kSelectWordOnRightClick &&
+               !render_text->IsPointInSelection(event.location())) {
+      SelectWord(event.location());
     }
+  }
+
+  if (handles_selection_clipboard_ && event.IsOnlyMiddleMouseButton() &&
+      !delegate_->IsReadOnly()) {
+    delegate_->OnBeforePointerAction();
+    const bool selection_changed =
+        render_text->MoveCursorTo(event.location(), false);
+    const bool text_changed = delegate_->PasteSelectionClipboard();
+    delegate_->OnAfterPointerAction(text_changed,
+                                    selection_changed | text_changed);
   }
 
   return true;
@@ -183,6 +178,14 @@ void SelectionController::SelectWord(const gfx::Point& point) {
   delegate_->OnBeforePointerAction();
   render_text->MoveCursorTo(point, false);
   render_text->SelectWord();
+  delegate_->OnAfterPointerAction(false, true);
+}
+
+void SelectionController::SelectAll() {
+  gfx::RenderText* render_text = GetRenderText();
+  DCHECK(render_text);
+  delegate_->OnBeforePointerAction();
+  render_text->SelectAll(false);
   delegate_->OnAfterPointerAction(false, true);
 }
 

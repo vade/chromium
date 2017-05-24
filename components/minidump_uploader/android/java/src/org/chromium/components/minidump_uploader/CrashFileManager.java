@@ -19,19 +19,35 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Date;
-import java.util.HashSet;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Scanner;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 /**
- * Responsible for the Crash Report directory. It routinely scans the directory
- * for new Minidump files and takes appropriate actions by either uploading new
- * crash dumps or deleting old ones.
+ * The CrashFileManager is responsible for managing the "Crash Reports" directory containing
+ * minidump files and shepherding them through a state machine represented by the file names. Note
+ * that some of the steps are optional:
+ *  1. foo.dmp is a minidump file, written to the directory by Breakpad.
+ * (2) foo.dmpNNNNN is a minidump file, where NNNNN is the PID (process id) of the crashing
+ *     process. This step is optional -- that is, a minidump could fail to have its PID included in
+ *     the filename.
+ * (3) foo.dmpNNNNN.try0 is a minidump file with recent logcat output attached to it. This step is
+ *     optional -- that is, logcat output might fail to be extracted for the minidump. Notably,
+ *     Webview-generated minidumps do not include logcat output.
+ *  4. foo.dmpNNNNN.tryM for M > 0 is a minidump file that's been attempted to be uploaded to the
+ *     crash server, but for which M upload attempts have failed.
+ *  5. foo.up, foo.upNNNNN, or foo.upNNNNN.tryM are all valid possible names for a successfully
+ *     uploaded file.
+ *  6. foo.skipped, foo.skippedNNNNN, or foo.skippedNNNNN.tryM are all valid possible names for a
+ *     file whose upload was skipped. An upload may be skipped, for example, if the user has not
+ *     consented to uploading crash reports. These files are marked as skipped rather than deleted
+ *     immediately to allow the user to manually initiate an upload.
+ *  7. foo.forced, foo.forcedNNNNN, or foo.forcedNNNNN.tryM are all valid possible names for a file
+ *     that the user has manually requested to upload.
+ *  8. foo.tmp is a temporary file.
  */
 public class CrashFileManager {
     private static final String TAG = "CrashFileManager";
@@ -45,16 +61,14 @@ public class CrashFileManager {
     @VisibleForTesting
     public static final String CRASH_DUMP_LOGFILE = "uploads.log";
 
-    private static final Pattern MINIDUMP_FIRST_TRY_PATTERN =
-            Pattern.compile("\\.dmp([0-9]*)$\\z");
-
     private static final Pattern MINIDUMP_MIME_FIRST_TRY_PATTERN =
             Pattern.compile("\\.dmp([0-9]+)$\\z");
 
     private static final Pattern MINIDUMP_PATTERN =
-            Pattern.compile("\\.dmp([0-9]*)(\\.try([0-9]+))?\\z");
+            Pattern.compile("\\.(dmp|forced)([0-9]*)(\\.try([0-9]+))?\\z");
 
-    private static final Pattern UPLOADED_MINIDUMP_PATTERN = Pattern.compile("\\.up([0-9]*)\\z");
+    private static final Pattern UPLOADED_MINIDUMP_PATTERN =
+            Pattern.compile("\\.up([0-9]*)(\\.try([0-9]+))?\\z");
 
     private static final String NOT_YET_UPLOADED_MINIDUMP_SUFFIX = ".dmp";
 
@@ -102,7 +116,7 @@ public class CrashFileManager {
      * @return Comparator for prioritizing the more recently modified file
      */
     @VisibleForTesting
-    protected static final Comparator<File> sFileComparator =  new Comparator<File>() {
+    protected static final Comparator<File> sFileComparator = new Comparator<File>() {
         @Override
         public int compare(File lhs, File rhs) {
             if (lhs.lastModified() == rhs.lastModified()) {
@@ -126,10 +140,6 @@ public class CrashFileManager {
         return isSuccess;
     }
 
-    public File[] getMinidumpWithoutLogcat() {
-        return listCrashFiles(MINIDUMP_FIRST_TRY_PATTERN);
-    }
-
     public static boolean isMinidumpMIMEFirstTry(String path) {
         return MINIDUMP_MIME_FIRST_TRY_PATTERN.matcher(path).find();
     }
@@ -144,15 +154,15 @@ public class CrashFileManager {
      */
     @VisibleForTesting
     public static String filenameWithIncrementedAttemptNumber(String filename) {
-        int numTried = readAttemptNumber(filename);
+        int numTried = readAttemptNumberInternal(filename);
         if (numTried >= 0) {
             int newCount = numTried + 1;
             return filename.replace(
                     UPLOAD_ATTEMPT_DELIMITER + numTried, UPLOAD_ATTEMPT_DELIMITER + newCount);
         } else {
-            // readAttemptNumber returning -1 means there is no UPLOAD_ATTEMPT_DELIMITER in the file
-            // name (or that there is a delimiter but no attempt number). So, we have to add the
-            // delimiter and attempt number ourselves.
+            // readAttemptNumberInternal returning -1 means there is no UPLOAD_ATTEMPT_DELIMITER in
+            // the file name (or that there is a delimiter but no attempt number). So, we have to
+            // add the delimiter and attempt number ourselves.
             return filename + UPLOAD_ATTEMPT_DELIMITER + "1";
         }
     }
@@ -196,12 +206,22 @@ public class CrashFileManager {
     }
 
     /**
-     * Returns how many times we've tried to upload a certain Minidump file.
-     * @return the number of attempts to upload the given Minidump file, parsed from its file name,
-     *     returns -1 if an attempt-number cannot be parsed from the file-name.
+     * Returns how many times we've tried to upload a certain minidump file.
+     * @return The number of attempts to upload the given minidump file, parsed from its filename.
+     *     Returns 0 if an attempt number cannot be parsed from the filename.
+     */
+    public static int readAttemptNumber(String filename) {
+        int numTries = readAttemptNumberInternal(filename);
+        return numTries >= 0 ? numTries : 0;
+    }
+
+    /**
+     * Returns how many times we've tried to upload a certain minidump file.
+     * @return The number of attempts to upload the given minidump file, parsed from its filename,
+     *     Returns -1 if an attempt number cannot be parsed from the filename.
      */
     @VisibleForTesting
-    public static int readAttemptNumber(String filename) {
+    static int readAttemptNumberInternal(String filename) {
         int tryIndex = filename.lastIndexOf(UPLOAD_ATTEMPT_DELIMITER);
         if (tryIndex >= 0) {
             tryIndex += UPLOAD_ATTEMPT_DELIMITER.length();
@@ -265,8 +285,7 @@ public class CrashFileManager {
         if (cacheDir == null) {
             throw new NullPointerException("Specified context cannot be null.");
         } else if (!cacheDir.isDirectory()) {
-            throw new IllegalArgumentException(cacheDir.getAbsolutePath()
-                    + " is not a directory.");
+            throw new IllegalArgumentException(cacheDir.getAbsolutePath() + " is not a directory.");
         }
         mCacheDir = cacheDir;
     }
@@ -275,16 +294,23 @@ public class CrashFileManager {
      * Create the crash directory for this file manager unless it exists already.
      * @return true iff the crash directory exists when this method returns.
      */
-    public boolean ensureCrashDirExists() {
+    private boolean ensureCrashDirExists() {
         File crashDir = getCrashDirectory();
-        if (crashDir.exists()) return true;
-        return crashDir.mkdir();
+        // Call mkdir before isDirectory to ensure that if another thread created the directory
+        // just before the call to mkdir, the current thread fails mkdir, but passes isDirectory.
+        return crashDir.mkdir() || crashDir.isDirectory();
+    }
+
+    /**
+     * @return whether the crash directory already exists.
+     */
+    public boolean crashDirectoryExists() {
+        return getCrashDirectory().isDirectory();
     }
 
     /**
      * Returns all minidump files that could still be uploaded, sorted by modification time stamp.
-     * Forced uploads are not included. Only returns files that we have tried to upload less
-     * than {@param maxTries} number of times.
+     * Only returns files that we have tried to upload less than {@param maxTries} number of times.
      */
     public File[] getAllMinidumpFiles(int maxTries) {
         return getFilesBelowMaxTries(getAllMinidumpFilesIncludingFailed(), maxTries);
@@ -292,7 +318,6 @@ public class CrashFileManager {
 
     /**
      * Returns all minidump files sorted by modification time stamp.
-     * Forced uploads are not included.
      */
     private File[] getAllMinidumpFilesIncludingFailed() {
         return listCrashFiles(MINIDUMP_PATTERN);
@@ -319,7 +344,7 @@ public class CrashFileManager {
             deleteFile(f);
         }
 
-        Set<String> recentCrashes = new HashSet<String>();
+        int numSavedCrashes = 0;
         for (File f : listCrashFiles(null)) {
             // The uploads.log file should always be preserved, as it stores the metadata that
             // powers the chrome://crashes UI.
@@ -336,12 +361,11 @@ public class CrashFileManager {
             }
 
             // Delete the oldest crash reports that exceed the cap on the number of allowed reports.
-            // Each crash typically has two files associated with it: a .dmp file and a .logcat
-            // file. These have the same filename other than the file extension.
-            String fileNameSansExtension = f.getName().split("\\.")[0];
-            if (recentCrashes.size() < MAX_CRASH_REPORTS_TO_KEEP) {
-                recentCrashes.add(fileNameSansExtension);
-            } else if (!recentCrashes.contains(fileNameSansExtension)) {
+            if (numSavedCrashes < MAX_CRASH_REPORTS_TO_KEEP) {
+                // Note that /not/ deleting the file is a no-op, so all that's needed is to mark
+                // that one more file has been kept.
+                ++numSavedCrashes;
+            } else {
                 deleteFile(f);
             }
         }
@@ -404,8 +428,7 @@ public class CrashFileManager {
             if (f.delete()) {
                 f = new File(getCrashDirectory(), name);
             } else {
-                Log.w(TAG, "Unable to delete previous logfile"
-                        + f.getAbsolutePath());
+                Log.w(TAG, "Unable to delete previous logfile" + f.getAbsolutePath());
             }
         }
         return f;
@@ -495,16 +518,21 @@ public class CrashFileManager {
      * @return The new minidump file copied with the contents of the File Descriptor, or null if the
      *         copying failed.
      */
-    public File copyMinidumpFromFD(FileDescriptor fd, File tmpDir, int uid)
-            throws IOException {
+    public File copyMinidumpFromFD(FileDescriptor fd, File tmpDir, int uid) throws IOException {
         File crashDirectory = getCrashDirectory();
-        if (!crashDirectory.isDirectory() && !crashDirectory.mkdir()) {
-            throw new RuntimeException("Couldn't create " + crashDirectory.getAbsolutePath());
+        if (!ensureCrashDirExists()) {
+            Log.e(TAG, "Crash directory doesn't exist");
+            return null;
         }
+        // Only threads copying minidumps will be touching this tmp-directory. Since these threads
+        // are synchronized to avoid copying several minidumps simultaneously we don't need
+        // synchronization explicitly for creating this tmp-directory.
         if (!tmpDir.isDirectory() && !tmpDir.mkdir()) {
-            throw new RuntimeException("Couldn't create " + tmpDir.getAbsolutePath());
+            Log.e(TAG, "Couldn't create " + tmpDir.getAbsolutePath());
+            return null;
         }
         if (tmpDir.getCanonicalPath().equals(crashDirectory.getCanonicalPath())) {
+            // Cause a hard failure since this should never happen in the wild.
             throw new RuntimeException("The tmp-dir and the crash dir can't have the same paths.");
         }
 
@@ -547,7 +575,6 @@ public class CrashFileManager {
             } catch (IOException e) {
                 Log.w(TAG, "Couldn't close minidump input stream ", e);
             }
-
         }
         File minidumpFile = new File(crashDirectory, createUniqueMinidumpNameForUid(uid));
         if (tmpFile.renameTo(minidumpFile)) {

@@ -174,9 +174,9 @@ bool HasAndroidSupportedMediaExtension(const base::FilePath& path) {
   DCHECK(std::is_sorted(std::begin(kAndroidSupportedMediaExtensions),
                         std::end(kAndroidSupportedMediaExtensions),
                         less_comparator));
-  auto iter = std::lower_bound(std::begin(kAndroidSupportedMediaExtensions),
-                               std::end(kAndroidSupportedMediaExtensions),
-                               extension.c_str(), less_comparator);
+  auto** iter = std::lower_bound(std::begin(kAndroidSupportedMediaExtensions),
+                                 std::end(kAndroidSupportedMediaExtensions),
+                                 extension.c_str(), less_comparator);
   return iter != std::end(kAndroidSupportedMediaExtensions) &&
          strcmp(*iter, extension.c_str()) == 0;
 }
@@ -278,7 +278,7 @@ void ArcDownloadsWatcherService::DownloadsWatcher::DelayBuildTimestampMap() {
   DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   DCHECK(outstanding_task_);
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, base::TaskTraits().MayBlock(),
+      FROM_HERE, {base::MayBlock()},
       base::Bind(&BuildTimestampMapCallback, downloads_dir_),
       base::Bind(&DownloadsWatcher::OnBuildTimestampMap,
                  weak_ptr_factory_.GetWeakPtr()));

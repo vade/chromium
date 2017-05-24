@@ -214,7 +214,7 @@ SDK.CSSMatchedStyles = class {
      * @param {!SDK.DOMNode} node
      * @param {string} selectorText
      * @param {function()} callback
-     * @param {!Array.<!Protocol.DOM.NodeId>=} matchingNodeIds
+     * @param {?Array<!Protocol.DOM.NodeId>} matchingNodeIds
      * @this {SDK.CSSMatchedStyles}
      */
     function onQueryComplete(node, selectorText, callback, matchingNodeIds) {
@@ -303,6 +303,20 @@ SDK.CSSMatchedStyles = class {
    */
   nodeForStyle(style) {
     return this._nodeForStyle.get(style) || null;
+  }
+
+  /**
+   * @return {!Array<string>}
+   */
+  cssVariables() {
+    var cssVariables = [];
+    for (var style of this.nodeStyles()) {
+      for (var property of style.allProperties()) {
+        if (property.name.startsWith('--'))
+          cssVariables.push(property.name);
+      }
+    }
+    return cssVariables;
   }
 
   /**

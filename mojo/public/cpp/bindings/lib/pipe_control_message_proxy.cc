@@ -7,8 +7,8 @@
 #include <stddef.h>
 #include <utility>
 
-#include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "mojo/public/cpp/bindings/lib/message_builder.h"
 #include "mojo/public/cpp/bindings/lib/serialization.h"
 #include "mojo/public/interfaces/bindings/pipe_control_messages.mojom.h"
@@ -25,8 +25,8 @@ Message ConstructRunOrClosePipeMessage(
 
   size_t size = internal::PrepareToSerialize<
       pipe_control::RunOrClosePipeMessageParamsDataView>(params_ptr, &context);
-  internal::MessageBuilder builder(pipe_control::kRunOrClosePipeMessageId,
-                                   size);
+  internal::MessageBuilder builder(pipe_control::kRunOrClosePipeMessageId, 0,
+                                   size, 0);
 
   pipe_control::internal::RunOrClosePipeMessageParams_Data* params = nullptr;
   internal::Serialize<pipe_control::RunOrClosePipeMessageParamsDataView>(
@@ -44,22 +44,7 @@ void PipeControlMessageProxy::NotifyPeerEndpointClosed(
     InterfaceId id,
     const base::Optional<DisconnectReason>& reason) {
   Message message(ConstructPeerEndpointClosedMessage(id, reason));
-  bool ok = receiver_->Accept(&message);
-  ALLOW_UNUSED_LOCAL(ok);
-}
-
-void PipeControlMessageProxy::NotifyEndpointClosedBeforeSent(InterfaceId id) {
-  DCHECK(!IsMasterInterfaceId(id));
-
-  auto event = pipe_control::AssociatedEndpointClosedBeforeSentEvent::New();
-  event->id = id;
-
-  auto input = pipe_control::RunOrClosePipeInput::New();
-  input->set_associated_endpoint_closed_before_sent_event(std::move(event));
-
-  Message message(ConstructRunOrClosePipeMessage(std::move(input)));
-  bool ok = receiver_->Accept(&message);
-  ALLOW_UNUSED_LOCAL(ok);
+  ignore_result(receiver_->Accept(&message));
 }
 
 // static

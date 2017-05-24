@@ -4,14 +4,13 @@
 
 #include "chrome/browser/media/android/router/media_router_dialog_controller_android.h"
 
-#include "base/android/context_utils.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "chrome/browser/media/android/router/media_router_android.h"
 #include "chrome/browser/media/router/media_router.h"
 #include "chrome/browser/media/router/media_router_factory.h"
-#include "chrome/browser/media/router/media_source.h"
 #include "chrome/browser/media/router/presentation_request.h"
+#include "chrome/common/media_router/media_source.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
@@ -53,7 +52,7 @@ void MediaRouterDialogControllerAndroid::OnSinkSelected(
   // TODO(crbug.com/627655): Support multiple URLs.
   const MediaSource::Id source_id =
       presentation_request.GetMediaSources()[0].id();
-  const GURL origin = presentation_request.frame_url().GetOrigin();
+  const auto& origin = presentation_request.frame_origin();
 
   std::vector<MediaRouteResponseCallback> route_response_callbacks;
   route_response_callbacks.push_back(
@@ -88,6 +87,18 @@ void MediaRouterDialogControllerAndroid::OnDialogCancelled(
   CancelPresentationRequest();
 }
 
+void MediaRouterDialogControllerAndroid::OnMediaSourceNotSupported(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
+  std::unique_ptr<CreatePresentationConnectionRequest> request =
+      TakeCreateConnectionRequest();
+  if (!request)
+    return;
+
+  request->InvokeErrorCallback(content::PresentationError(
+      content::PRESENTATION_ERROR_NO_AVAILABLE_SCREENS, "No screens found."));
+}
+
 void MediaRouterDialogControllerAndroid::CancelPresentationRequest() {
   std::unique_ptr<CreatePresentationConnectionRequest> request =
       TakeCreateConnectionRequest();
@@ -95,7 +106,7 @@ void MediaRouterDialogControllerAndroid::CancelPresentationRequest() {
     return;
 
   request->InvokeErrorCallback(content::PresentationError(
-      content::PRESENTATION_ERROR_SESSION_REQUEST_CANCELLED,
+      content::PRESENTATION_ERROR_PRESENTATION_REQUEST_CANCELLED,
       "Dialog closed."));
 }
 
@@ -104,9 +115,7 @@ MediaRouterDialogControllerAndroid::MediaRouterDialogControllerAndroid(
     : MediaRouterDialogController(web_contents) {
   JNIEnv* env = base::android::AttachCurrentThread();
   java_dialog_controller_.Reset(Java_ChromeMediaRouterDialogController_create(
-      env,
-      reinterpret_cast<jlong>(this),
-      base::android::GetApplicationContext()));
+      env, reinterpret_cast<jlong>(this)));
 }
 
 // static

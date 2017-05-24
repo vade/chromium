@@ -21,11 +21,13 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/save_page_type.h"
+#include "content/public/browser/screen_orientation_delegate.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/stop_find_action.h"
 #include "ipc/ipc_sender.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/accessibility/ax_tree_update.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
@@ -40,6 +42,12 @@ class TimeTicks;
 
 namespace blink {
 struct WebFindOptions;
+}
+
+namespace device {
+namespace mojom {
+class WakeLockContext;
+}
 }
 
 namespace net {
@@ -191,6 +199,10 @@ class WebContents : public PageNavigator,
   CONTENT_EXPORT static WebContents* FromFrameTreeNodeId(
       int frame_tree_node_id);
 
+  // Sets delegate for platform specific screen orientation functionality.
+  CONTENT_EXPORT static void SetScreenOrientationDelegate(
+      ScreenOrientationDelegate* delegate);
+
   ~WebContents() override {}
 
   // Intrinsic tab state -------------------------------------------------------
@@ -239,9 +251,22 @@ class WebContents : public PageNavigator,
   virtual RenderFrameHost* GetFocusedFrame() = 0;
 
   // Returns the current RenderFrameHost for a given FrameTreeNode ID if it is
-  // part of this tab. See RenderFrameHost::GetFrameTreeNodeId for documentation
-  // on this ID.
-  virtual RenderFrameHost* FindFrameByFrameTreeNodeId(
+  // part of this frame tree, not including frames in any inner WebContents.
+  // Returns nullptr if |process_id| does not match the current
+  // RenderFrameHost's process ID, to avoid security bugs where callers do not
+  // realize a cross-process navigation (and thus privilege change) has taken
+  // place. See RenderFrameHost::GetFrameTreeNodeId for documentation on
+  // frame_tree_node_id.
+  virtual RenderFrameHost* FindFrameByFrameTreeNodeId(int frame_tree_node_id,
+                                                      int process_id) = 0;
+
+  // NOTE: This is generally unsafe to use. Use FindFrameByFrameTreeNodeId
+  // instead.
+  // Returns the current RenderFrameHost for a given FrameTreeNode ID if it is
+  // part of this frame tree. This may not match the caller's expectation, if a
+  // cross-process navigation (and thus privilege change) has taken place.
+  // See RenderFrameHost::GetFrameTreeNodeId for documentation on this ID.
+  virtual RenderFrameHost* UnsafeFindFrameByFrameTreeNodeId(
       int frame_tree_node_id) = 0;
 
   // Calls |on_frame| for each frame in the currently active view.
@@ -272,6 +297,12 @@ class WebContents : public PageNavigator,
   // RenderWidgetHostViewChildFrame), which can be used to create context
   // menus.
   virtual RenderWidgetHostView* GetTopLevelRenderWidgetHostView() = 0;
+
+  // Request a one-time snapshot of the accessibility tree without changing
+  // the accessibility mode.
+  using AXTreeSnapshotCallback = base::Callback<void(const ui::AXTreeUpdate&)>;
+  virtual void RequestAXTreeSnapshot(
+      const AXTreeSnapshotCallback& callback) = 0;
 
   // Causes the current page to be closed, including running its onunload event
   // handler.
@@ -459,7 +490,7 @@ class WebContents : public PageNavigator,
   virtual void PasteAndMatchStyle() = 0;
   virtual void Delete() = 0;
   virtual void SelectAll() = 0;
-  virtual void Unselect() = 0;
+  virtual void CollapseSelection() = 0;
 
   // Adjust the selection starting and ending points in the focused frame by
   // the given amounts. A negative amount moves the selection towards the
@@ -581,7 +612,7 @@ class WebContents : public PageNavigator,
   virtual content::RendererPreferences* GetMutableRendererPrefs() = 0;
 
   // Tells the tab to close now. The tab will take care not to close until it's
-  // out of nested message loops.
+  // out of nested run loops.
   virtual void Close() = 0;
 
   // A render view-originated drag has ended. Informs the render view host and
@@ -632,11 +663,25 @@ class WebContents : public PageNavigator,
   // to see what it should do.
   virtual bool FocusLocationBarByDefault() = 0;
 
-  // Does this have an opener associated with it?
+  // Does this have an opener (corresponding to window.opener in JavaScript)
+  // associated with it?
   virtual bool HasOpener() const = 0;
 
   // Returns the opener if HasOpener() is true, or nullptr otherwise.
   virtual WebContents* GetOpener() const = 0;
+
+  // Returns true if this WebContents was opened by another WebContents, even
+  // if the opener was suppressed. In contrast to HasOpener/GetOpener, the
+  // original opener doesn't reflect window.opener which can be suppressed or
+  // updated.
+  virtual bool HasOriginalOpener() const = 0;
+
+  // Returns the original opener if HasOriginalOpener() is true, or nullptr
+  // otherwise.
+  virtual WebContents* GetOriginalOpener() const = 0;
+
+  // Returns the WakeLockContext accociated with this WebContents.
+  virtual device::mojom::WakeLockContext* GetWakeLockContext() = 0;
 
   typedef base::Callback<void(
       int, /* id */

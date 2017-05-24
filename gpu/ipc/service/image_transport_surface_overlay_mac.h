@@ -14,9 +14,9 @@
 #include "gpu/ipc/service/gpu_command_buffer_stub.h"
 #include "gpu/ipc/service/image_transport_surface.h"
 #include "ui/base/cocoa/remote_layer_api.h"
-#include "ui/events/latency_info.h"
 #include "ui/gl/gl_surface.h"
 #include "ui/gl/gpu_switching_observer.h"
+#include "ui/latency/latency_info.h"
 
 @class CAContext;
 @class CALayer;
@@ -50,6 +50,7 @@ class ImageTransportSurfaceOverlayMac : public gl::GLSurface,
   bool SupportsPostSubBuffer() override;
   gfx::Size GetSize() override;
   void* GetHandle() override;
+  gl::GLSurfaceFormat GetFormat() override;
   bool OnMakeCurrent(gl::GLContext* context) override;
   bool ScheduleOverlayPlane(int z_order,
                             gfx::OverlayTransform transform,
@@ -92,8 +93,7 @@ class ImageTransportSurfaceOverlayMac : public gl::GLSurface,
   std::vector<CALayerInUseQuery> ca_layer_in_use_queries_;
 
   // A GLFence marking the end of the previous frame. Must only be accessed
-  // while in a ScopedSetGLToRealGLApi, and while the associated
-  // |previous_frame_context_| is bound.
+  // while the associated |previous_frame_context_| is bound.
   std::unique_ptr<gl::GLFence> previous_frame_fence_;
   base::ScopedTypeRef<CGLContextObj> fence_context_obj_;
 

@@ -21,9 +21,6 @@ found in the LICENSE file.
     <h2>Properties</h2>
     <table class="section-details">
       <tr>
-        <td class="name">Snippets enabled
-        <td id="flag-snippets" class="value">
-      <tr>
         <td class="name">Article Suggestions enabled
         <td id="flag-article-suggestions" class="value">
       <tr>
@@ -53,6 +50,9 @@ found in the LICENSE file.
       <tr>
         <td class="name">Snippets fetch URL
         <td id="switch-fetch-url" class="value">
+      <tr>
+        <td class="name">Server-provided experiment IDs
+        <td id="experiment-ids" class="value">
     </table>
   </div>
 
@@ -75,6 +75,16 @@ found in the LICENSE file.
     <button id="clear-classification" type="button">
       Clear my classification
     </button>
+  </div>
+
+  <div id="ranker">
+    <h2>CategoryRanker</h2>
+      <table class="section-details">
+        <tr jsselect="list" style="display:none">
+          <td jscontent="label">
+          <td jscontent="content" class="value">
+        </tr>
+      </table>
   </div>
 
   <div id="snippets">
@@ -114,7 +124,8 @@ found in the LICENSE file.
       <h3>
         <span jscontent="title"></span>
         <span class="detail">
-          (<span jscontent="status"></span>)
+          (id = <span jscontent="categoryId"></span>,
+          <span jscontent="status"></span>)
         </span>
 
         <button jsvalues="category-id:categoryId" type="button"
@@ -146,6 +157,11 @@ found in the LICENSE file.
                 <tr>
                   <td>URL
                   <td><a class="url" jsvalues="href:url" jscontent="url"></a>
+                <tr>
+                  <td>URL with favicon
+                  <td>
+                    <a class="url" jsvalues="href:urlWithFavicon"
+                        jscontent="urlWithFavicon"></a>
                 <tr>
                   <td>Snippet text
                   <td jscontent="snippetText">

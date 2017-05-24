@@ -19,7 +19,7 @@
 #import "base/mac/objc_property_releaser.h"
 #include "base/mac/scoped_block.h"
 #import "base/mac/scoped_nsobject.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/strings/sys_string_conversions.h"
@@ -48,12 +48,12 @@
 #import "ios/chrome/browser/ui/stack_view/title_label.h"
 #import "ios/chrome/browser/ui/toolbar/new_tab_button.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_owner.h"
-#import "ios/chrome/browser/ui/tools_menu/tools_menu_context.h"
 #import "ios/chrome/browser/ui/tools_menu/tools_menu_view_item.h"
 #import "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #import "ios/chrome/common/material_timing.h"
 #include "ios/chrome/grit/ios_strings.h"
+#import "ios/shared/chrome/browser/ui/tools_menu/tools_menu_configuration.h"
 #include "ios/web/public/referrer.h"
 #import "net/base/mac/url_conversions.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -2045,14 +2045,13 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
     position = [_activeCardSet.tabModel count];
   DCHECK(position <= [_activeCardSet.tabModel count]);
 
-  Tab* tab = [_activeCardSet.tabModel insertOrUpdateTabWithURL:URL
-                                                      referrer:web::Referrer()
-                                                    transition:transition
-                                                    windowName:nil
-                                                        opener:nil
-                                                   openedByDOM:NO
-                                                       atIndex:position
-                                                  inBackground:NO];
+  Tab* tab = [_activeCardSet.tabModel insertTabWithURL:URL
+                                              referrer:web::Referrer()
+                                            transition:transition
+                                                opener:nil
+                                           openedByDOM:NO
+                                               atIndex:position
+                                          inBackground:NO];
   [_activeCardSet.tabModel setCurrentTab:tab];
 
   [_delegate tabSwitcher:self
@@ -2717,17 +2716,17 @@ NSString* const kDummyToolbarBackgroundViewAnimationKey =
 }
 
 - (void)showToolsMenuPopup {
-  base::scoped_nsobject<ToolsMenuContext> context(
-      [[ToolsMenuContext alloc] initWithDisplayView:[self view]]);
-  [context setInTabSwitcher:YES];
+  base::scoped_nsobject<ToolsMenuConfiguration> configuration(
+      [[ToolsMenuConfiguration alloc] initWithDisplayView:[self view]]);
+  [configuration setInTabSwitcher:YES];
   // When checking for the existence of tabs, catch the case where the main set
   // is both active and empty, but the incognito set has some cards.
   if (([[_activeCardSet cards] count] == 0) &&
       (_activeCardSet == _otrCardSet || [[_otrCardSet cards] count] == 0))
-    [context setNoOpenedTabs:YES];
+    [configuration setNoOpenedTabs:YES];
   if (_activeCardSet == _otrCardSet)
-    [context setInIncognito:YES];
-  [_toolbarController showToolsMenuPopupWithContext:context];
+    [configuration setInIncognito:YES];
+  [_toolbarController showToolsMenuPopupWithConfiguration:configuration];
 }
 
 #pragma mark Notification Handlers

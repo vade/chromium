@@ -16,15 +16,12 @@
 #include "cc/output/copy_output_request.h"
 #include "cc/test/pixel_test_output_surface.h"
 #include "cc/test/test_compositor_frame_sink.h"
-#include "components/test_runner/test_common.h"
-#include "components/test_runner/web_frame_test_proxy.h"
-#include "components/test_runner/web_view_test_proxy.h"
-#include "components/test_runner/web_widget_test_proxy.h"
 #include "content/browser/bluetooth/bluetooth_device_chooser_controller.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
+#include "content/child/request_extra_data.h"
+#include "content/common/gpu_stream_constants.h"
 #include "content/common/renderer.mojom.h"
-#include "content/common/site_isolation_policy.h"
 #include "content/public/common/page_state.h"
 #include "content/public/common/screen_info.h"
 #include "content/public/renderer/renderer_gamepad_provider.h"
@@ -40,14 +37,17 @@
 #include "content/renderer/render_widget.h"
 #include "content/renderer/renderer_blink_platform_impl.h"
 #include "content/shell/common/shell_switches.h"
+#include "content/shell/test_runner/test_common.h"
+#include "content/shell/test_runner/web_frame_test_proxy.h"
+#include "content/shell/test_runner/web_view_test_proxy.h"
+#include "content/shell/test_runner/web_widget_test_proxy.h"
+#include "device/sensors/public/cpp/motion_data.h"
+#include "device/sensors/public/cpp/orientation_data.h"
 #include "gpu/ipc/service/image_transport_surface.h"
 #include "services/ui/public/cpp/gpu/context_provider_command_buffer.h"
 #include "third_party/WebKit/public/platform/WebFloatRect.h"
-#include "third_party/WebKit/public/platform/WebGamepads.h"
 #include "third_party/WebKit/public/platform/WebInputEvent.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
-#include "third_party/WebKit/public/platform/modules/device_orientation/WebDeviceMotionData.h"
-#include "third_party/WebKit/public/platform/modules/device_orientation/WebDeviceOrientationData.h"
 #include "third_party/WebKit/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/WebKit/public/web/WebHistoryItem.h"
 #include "third_party/WebKit/public/web/WebView.h"
@@ -67,10 +67,8 @@
 #include "ui/gfx/win/direct_write.h"
 #endif
 
-using blink::WebDeviceMotionData;
-using blink::WebDeviceOrientationData;
-using blink::WebGamepad;
-using blink::WebGamepads;
+using device::MotionData;
+using device::OrientationData;
 using blink::WebRect;
 using blink::WebSize;
 
@@ -147,7 +145,7 @@ RenderFrameImpl* CreateWebFrameTestProxy(
 
 float GetWindowToViewportScale(RenderWidget* render_widget) {
   blink::WebFloatRect rect(0, 0, 1.0f, 0.0);
-  render_widget->convertWindowToViewport(&rect);
+  render_widget->ConvertWindowToViewport(&rect);
   return rect.width;
 }
 
@@ -160,7 +158,7 @@ void RegisterSideloadedTypefaces(SkFontMgr* fontmgr) {
        i != files.end();
        ++i) {
     SkTypeface* typeface = fontmgr->createFromFile(i->c_str());
-    blink::WebFontRendering::addSideloadedFontForTesting(typeface);
+    blink::WebFontRendering::AddSideloadedFontForTesting(typeface);
   }
 }
 #endif  // OS_WIN
@@ -184,7 +182,7 @@ test_runner::WebFrameTestProxyBase* GetWebFrameTestProxyBase(
 test_runner::WebWidgetTestProxyBase* GetWebWidgetTestProxyBase(
     blink::WebLocalFrame* frame) {
   DCHECK(frame);
-  RenderFrame* local_root = RenderFrame::FromWebFrame(frame->localRoot());
+  RenderFrame* local_root = RenderFrame::FromWebFrame(frame->LocalRoot());
   DCHECK(local_root);
   // TODO(lfg): Simplify once RenderView no longer inherits from RenderWidget.
   if (local_root->IsMainFrame()) {
@@ -193,7 +191,7 @@ test_runner::WebWidgetTestProxyBase* GetWebWidgetTestProxyBase(
     auto* web_widget_test_proxy_base =
         static_cast<test_runner::WebWidgetTestProxyBase*>(
             web_view_test_proxy_base);
-    DCHECK(web_widget_test_proxy_base->web_widget()->isWebView());
+    DCHECK(web_widget_test_proxy_base->web_widget()->IsWebView());
     return web_widget_test_proxy_base;
   } else {
     RenderWidget* render_widget =
@@ -203,7 +201,7 @@ test_runner::WebWidgetTestProxyBase* GetWebWidgetTestProxyBase(
         static_cast<WebWidgetTestProxyType*>(render_widget);
     auto* web_widget_test_proxy_base =
         static_cast<test_runner::WebWidgetTestProxyBase*>(render_widget_proxy);
-    DCHECK(web_widget_test_proxy_base->web_widget()->isWebFrameWidget());
+    DCHECK(web_widget_test_proxy_base->web_widget()->IsWebFrameWidget());
     return web_widget_test_proxy_base;
   }
 }
@@ -214,13 +212,13 @@ RenderWidget* GetRenderWidget(
 
   blink::WebWidget* widget = web_widget_test_proxy_base->web_widget();
   // TODO(lfg): Simplify once RenderView no longer inherits from RenderWidget.
-  if (widget->isWebView()) {
+  if (widget->IsWebView()) {
     WebViewTestProxyType* render_view_proxy =
         static_cast<WebViewTestProxyType*>(web_widget_test_proxy_base);
     RenderViewImpl* render_view_impl =
         static_cast<RenderViewImpl*>(render_view_proxy);
     return render_view_impl;
-  } else if (widget->isWebFrameWidget()) {
+  } else if (widget->IsWebFrameWidget()) {
     WebWidgetTestProxyType* render_widget_proxy =
         static_cast<WebWidgetTestProxyType*>(web_widget_test_proxy_base);
     return static_cast<RenderWidget*>(render_widget_proxy);
@@ -260,29 +258,23 @@ void FetchManifest(blink::WebView* view, const GURL& url,
   // A raw pointer is used instead of a scoped_ptr as base::Passes passes
   // ownership and thus nulls the scoped_ptr. On MSVS this happens before
   // the call to Start, resulting in a crash.
-  fetcher->Start(view->mainFrame(),
-                 false,
+  fetcher->Start(view->MainFrame(), false,
                  base::Bind(&FetchManifestDoneCallback,
-                            base::Passed(&autodeleter),
-                            callback));
+                            base::Passed(&autodeleter), callback));
 }
 
 void SetMockGamepadProvider(std::unique_ptr<RendererGamepadProvider> provider) {
   RenderThreadImpl::current()
       ->blink_platform_impl()
-      ->SetPlatformEventObserverForTesting(blink::WebPlatformEventTypeGamepad,
+      ->SetPlatformEventObserverForTesting(blink::kWebPlatformEventTypeGamepad,
                                            std::move(provider));
 }
 
-void SetMockDeviceLightData(const double data) {
-  RendererBlinkPlatformImpl::SetMockDeviceLightDataForTesting(data);
-}
-
-void SetMockDeviceMotionData(const WebDeviceMotionData& data) {
+void SetMockDeviceMotionData(const MotionData& data) {
   RendererBlinkPlatformImpl::SetMockDeviceMotionDataForTesting(data);
 }
 
-void SetMockDeviceOrientationData(const WebDeviceOrientationData& data) {
+void SetMockDeviceOrientationData(const OrientationData& data) {
   RendererBlinkPlatformImpl::SetMockDeviceOrientationDataForTesting(data);
 }
 
@@ -352,14 +344,15 @@ class LayoutTestDependenciesImpl : public LayoutTestDependencies,
     ScreenInfo dummy_screen_info;
     cc::LayerTreeSettings settings =
         RenderWidgetCompositor::GenerateLayerTreeSettings(
-            *base::CommandLine::ForCurrentProcess(), deps, 1.f,
+            *base::CommandLine::ForCurrentProcess(), deps, 1.f, false,
             dummy_screen_info);
 
+    constexpr bool disable_display_vsync = false;
     auto compositor_frame_sink = base::MakeUnique<cc::TestCompositorFrameSink>(
         std::move(compositor_context_provider),
         std::move(worker_context_provider), nullptr /* shared_bitmap_manager */,
         gpu_memory_buffer_manager, settings.renderer_settings, task_runner,
-        synchronous_composite, false /* force_disable_reclaim_resources */);
+        synchronous_composite, disable_display_vsync);
     compositor_frame_sink->SetClient(this);
     compositor_frame_sinks_[routing_id] = compositor_frame_sink.get();
     return std::move(compositor_frame_sink);
@@ -399,8 +392,8 @@ class LayoutTestDependenciesImpl : public LayoutTestDependencies,
 
     auto context_provider =
         make_scoped_refptr(new ui::ContextProviderCommandBuffer(
-            gpu_channel_, gpu::GPU_STREAM_DEFAULT,
-            gpu::GpuStreamPriority::NORMAL, gpu::kNullSurfaceHandle,
+            gpu_channel_, kGpuStreamIdDefault, kGpuStreamPriorityDefault,
+            gpu::kNullSurfaceHandle,
             GURL("chrome://gpu/"
                  "LayoutTestDependenciesImpl::CreateOutputSurface"),
             automatic_flushes, support_locking, gpu::SharedMemoryLimits(),
@@ -412,6 +405,8 @@ class LayoutTestDependenciesImpl : public LayoutTestDependencies,
     return base::MakeUnique<cc::PixelTestOutputSurface>(
         std::move(context_provider), flipped_output_surface);
   }
+  void DisplayReceivedLocalSurfaceId(
+      const cc::LocalSurfaceId& local_surface_id) override {}
   void DisplayReceivedCompositorFrame(
       const cc::CompositorFrame& frame) override {}
   void DisplayWillDrawAndSwap(
@@ -459,9 +454,6 @@ int GetLocalSessionHistoryLength(RenderView* render_view) {
 void SyncNavigationState(RenderView* render_view) {
   // TODO(creis): Add support for testing in OOPIF-enabled modes.
   // See https://crbug.com/477150.
-  if (SiteIsolationPolicy::UseSubframeNavigationEntries())
-    return;
-  static_cast<RenderViewImpl*>(render_view)->SendUpdateState();
 }
 
 void SetFocusAndActivate(RenderView* render_view, bool enable) {
@@ -491,7 +483,7 @@ std::unique_ptr<blink::WebInputEvent> TransformScreenToWidgetCoordinates(
   DCHECK(web_widget_test_proxy_base);
   RenderWidget* render_widget = GetRenderWidget(web_widget_test_proxy_base);
 
-  blink::WebRect view_rect = render_widget->viewRect();
+  blink::WebRect view_rect = render_widget->ViewRect();
   float scale = GetWindowToViewportScale(render_widget);
   gfx::Vector2d delta(-view_rect.x, -view_rect.y);
   return ui::TranslateAndScaleWebInputEvent(event, delta, scale);
@@ -512,9 +504,8 @@ gfx::ICCProfile GetTestingICCProfile(const std::string& name) {
 
 void SetDeviceColorProfile(
     RenderView* render_view, const gfx::ICCProfile& icc_profile) {
-  static_cast<RenderViewImpl*>(render_view)
-      ->GetWidget()
-      ->SetDeviceColorProfileForTesting(icc_profile);
+  static_cast<RenderViewImpl*>(render_view)->
+      SetDeviceColorProfileForTesting(icc_profile);
 }
 
 void SetTestBluetoothScanDuration() {
@@ -541,8 +532,8 @@ void DisableAutoResizeMode(RenderView* render_view, const WebSize& new_size) {
 // Returns True if node1 < node2.
 bool HistoryEntryCompareLess(HistoryEntry::HistoryNode* node1,
                              HistoryEntry::HistoryNode* node2) {
-  base::string16 target1 = node1->item().target().utf16();
-  base::string16 target2 = node2->item().target().utf16();
+  base::string16 target1 = node1->item().Target().Utf16();
+  base::string16 target2 = node2->item().Target().Utf16();
   return base::CompareCaseInsensitiveASCII(target1, target2) < 0;
 }
 
@@ -560,11 +551,11 @@ std::string DumpHistoryItem(HistoryEntry::HistoryNode* node,
   }
 
   std::string url =
-      test_runner::NormalizeLayoutTestURL(item.urlString().utf8());
+      test_runner::NormalizeLayoutTestURL(item.UrlString().Utf8());
   result.append(url);
-  if (!item.target().isEmpty()) {
+  if (!item.Target().IsEmpty()) {
     result.append(" (in frame \"");
-    result.append(item.target().utf8());
+    result.append(item.Target().Utf8());
     result.append("\")");
   }
   result.append("\n");
@@ -606,6 +597,12 @@ void ForceTextInputStateUpdateForRenderFrame(RenderFrame* frame) {
           static_cast<RenderFrameImpl*>(frame)->GetRenderWidget()) {
     render_widget->ShowVirtualKeyboard();
   }
+}
+
+bool IsNavigationInitiatedByRenderer(const blink::WebURLRequest& request) {
+  RequestExtraData* extra_data =
+      static_cast<RequestExtraData*>(request.GetExtraData());
+  return extra_data && extra_data->navigation_initiated_by_renderer();
 }
 
 }  // namespace content

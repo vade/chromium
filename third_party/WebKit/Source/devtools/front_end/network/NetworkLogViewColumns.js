@@ -75,22 +75,23 @@ Network.NetworkLogViewColumns = class {
 
   _setupDataGrid() {
     var defaultColumns = Network.NetworkLogViewColumns._defaultColumns;
+
     var defaultColumnConfig = Network.NetworkLogViewColumns._defaultColumnConfig;
 
     this._columns = /** @type {!Array<!Network.NetworkLogViewColumns.Descriptor>} */ ([]);
     for (var currentConfigColumn of defaultColumns) {
       var columnConfig = /** @type {!Network.NetworkLogViewColumns.Descriptor} */ (
-          Object.assign(/** @type {!Object} */ ({}), defaultColumnConfig, currentConfigColumn));
+          Object.assign({}, defaultColumnConfig, currentConfigColumn));
       columnConfig.id = columnConfig.id;
       if (columnConfig.subtitle)
         columnConfig.titleDOMFragment = this._makeHeaderFragment(columnConfig.title, columnConfig.subtitle);
       this._columns.push(columnConfig);
     }
-    this._loadColumns();
+    this._loadCustomColumnsAndSettings();
 
-    this._popoverHelper = new UI.PopoverHelper(this._networkLogView.element);
-    this._popoverHelper.initializeCallbacks(
-        this._getPopoverAnchor.bind(this), this._showPopover.bind(this), this._onHidePopover.bind(this));
+    this._popoverHelper = new UI.PopoverHelper(this._networkLogView.element, this._getPopoverRequest.bind(this));
+    this._popoverHelper.setHasPadding(true);
+    this._popoverHelper.setTimeout(300, 300);
 
     /** @type {!DataGrid.SortableDataGrid<!Network.NetworkNode>} */
     this._dataGrid =
@@ -117,15 +118,13 @@ Network.NetworkLogViewColumns = class {
   }
 
   _setupWaterfall() {
-    this._waterfallColumn =
-        new Network.NetworkWaterfallColumn(this._networkLogView.rowHeight(), this._networkLogView.calculator());
+    this._waterfallColumn = new Network.NetworkWaterfallColumn(this._networkLogView.calculator());
 
     this._waterfallColumn.element.addEventListener('contextmenu', handleContextMenu.bind(this));
     this._waterfallColumn.element.addEventListener('mousewheel', this._onMouseWheel.bind(this, false), {passive: true});
     this._dataGridScroller.addEventListener('mousewheel', this._onMouseWheel.bind(this, true), true);
 
     this._waterfallScroller = this._waterfallColumn.contentElement.createChild('div', 'network-waterfall-v-scroll');
-    this._waterfallScroller.addEventListener('scroll', this._syncScrollers.bind(this), {passive: true});
     this._waterfallScrollerContent = this._waterfallScroller.createChild('div', 'network-waterfall-v-scroll-content');
 
     this._dataGrid.addEventListener(DataGrid.DataGrid.Events.PaddingChanged, () => {
@@ -151,8 +150,11 @@ Network.NetworkLogViewColumns = class {
       var node = this._waterfallColumn.getNodeFromPoint(event.offsetX, event.offsetY);
       if (!node)
         return;
+      var request = node.request();
+      if (!request)
+        return;
       var contextMenu = new UI.ContextMenu(event);
-      this._networkLogView.handleContextMenuForRequest(contextMenu, node.request());
+      this._networkLogView.handleContextMenuForRequest(contextMenu, request);
       contextMenu.show();
     }
   }
@@ -232,11 +234,12 @@ Network.NetworkLogViewColumns = class {
 
   _updateRowsSize() {
     var largeRows = !!this._networkLogLargeRowsSetting.get();
+
     this._dataGrid.element.classList.toggle('small', !largeRows);
     this._dataGrid.scheduleUpdate();
 
     this._waterfallScrollerWidthIsStale = true;
-    this._waterfallColumn.setRowHeight(this._networkLogView.rowHeight());
+    this._waterfallColumn.setRowHeight(largeRows ? 41 : 21);
     this._waterfallScroller.classList.toggle('small', !largeRows);
     this._waterfallHeaderElement.classList.toggle('small', !largeRows);
     this._waterfallColumn.setHeaderHeight(this._waterfallScroller.offsetTop);
@@ -327,13 +330,13 @@ Network.NetworkLogViewColumns = class {
    * @param {!Network.NetworkLogViewColumns.Descriptor} columnConfig
    */
   _toggleColumnVisibility(columnConfig) {
-    this._loadColumns();
+    this._loadCustomColumnsAndSettings();
     columnConfig.visible = !columnConfig.visible;
-    this._saveColumns();
+    this._saveColumnsSettings();
     this._updateColumns();
   }
 
-  _saveColumns() {
+  _saveColumnsSettings() {
     var saveableSettings = {};
     for (var columnConfig of this._columns)
       saveableSettings[columnConfig.id] = {visible: columnConfig.visible, title: columnConfig.title};
@@ -341,7 +344,7 @@ Network.NetworkLogViewColumns = class {
     this._persistantSettings.set(saveableSettings);
   }
 
-  _loadColumns() {
+  _loadCustomColumnsAndSettings() {
     var savedSettings = this._persistantSettings.get();
     var columnIds = Object.keys(savedSettings);
     for (var columnId of columnIds) {
@@ -442,9 +445,9 @@ Network.NetworkLogViewColumns = class {
         customHeaders, headerTitle => !!this._addCustomHeader(headerTitle), this._changeCustomHeader.bind(this),
         this._removeCustomHeader.bind(this));
     var dialog = new UI.Dialog();
-    manageCustomHeaders.show(dialog.element);
-    dialog.setWrapsContent(true);
-    dialog.show();
+    manageCustomHeaders.show(dialog.contentElement);
+    dialog.setSizeBehavior(UI.GlassPane.SizeBehavior.MeasureContent);
+    dialog.show(this._networkLogView.element);
   }
 
   /**
@@ -458,7 +461,7 @@ Network.NetworkLogViewColumns = class {
       return false;
     this._columns.splice(index, 1);
     this._dataGrid.removeColumn(headerId);
-    this._saveColumns();
+    this._saveColumnsSettings();
     this._updateColumns();
     return true;
   }
@@ -480,7 +483,7 @@ Network.NetworkLogViewColumns = class {
       return null;
 
     var columnConfig = /** @type {!Network.NetworkLogViewColumns.Descriptor} */ (
-        Object.assign(/** @type {!Object} */ ({}), Network.NetworkLogViewColumns._defaultColumnConfig, {
+        Object.assign({}, Network.NetworkLogViewColumns._defaultColumnConfig, {
           id: headerId,
           title: headerTitle,
           isResponseHeader: true,
@@ -491,7 +494,7 @@ Network.NetworkLogViewColumns = class {
     this._columns.splice(index, 0, columnConfig);
     if (this._dataGrid)
       this._dataGrid.addColumn(Network.NetworkLogViewColumns._convertToDataGridDescriptor(columnConfig), index);
-    this._saveColumns();
+    this._saveColumnsSettings();
     this._updateColumns();
     return columnConfig;
   }
@@ -519,36 +522,33 @@ Network.NetworkLogViewColumns = class {
   }
 
   /**
-   * @param {!Element} element
    * @param {!Event} event
-   * @return {!Element|!AnchorBox|undefined}
+   * @return {?UI.PopoverRequest}
    */
-  _getPopoverAnchor(element, event) {
+  _getPopoverRequest(event) {
     if (!this._gridMode)
-      return;
-    var anchor = element.enclosingNodeOrSelfWithClass('network-script-initiated');
-    if (anchor && anchor.request) {
-      var initiator = /** @type {!SDK.NetworkRequest} */ (anchor.request).initiator();
-      if (initiator && initiator.stack)
-        return anchor;
-    }
-  }
+      return null;
+    var hoveredNode = this._networkLogView.hoveredNode();
+    if (!hoveredNode)
+      return null;
 
-  /**
-   * @param {!Element} anchor
-   * @param {!UI.Popover} popover
-   */
-  _showPopover(anchor, popover) {
-    var request = /** @type {!SDK.NetworkRequest} */ (anchor.request);
-    var initiator = /** @type {!Protocol.Network.Initiator} */ (request.initiator());
-    var content = Components.DOMPresentationUtils.buildStackTracePreviewContents(
-        request.target(), this._popupLinkifier, initiator.stack);
-    popover.setCanShrink(true);
-    popover.showForAnchor(content, anchor);
-  }
-
-  _onHidePopover() {
-    this._popupLinkifier.reset();
+    var anchor = event.target.enclosingNodeOrSelfWithClass('network-script-initiated');
+    if (!anchor)
+      return null;
+    var request = hoveredNode.request();
+    var initiator = request ? request.initiator() : null;
+    if (!initiator || !initiator.stack)
+      return null;
+    return {
+      box: anchor.boxInWindow(),
+      show: popover => {
+        var content = Components.DOMPresentationUtils.buildStackTracePreviewContents(
+            anchor.request.networkManager().target(), this._popupLinkifier, initiator.stack);
+        popover.contentElement.appendChild(content);
+        return Promise.resolve(true);
+      },
+      hide: this._popupLinkifier.reset.bind(this._popupLinkifier)
+    };
   }
 
   /**

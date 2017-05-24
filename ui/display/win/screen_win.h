@@ -102,8 +102,15 @@ class DISPLAY_EXPORT ScreenWin : public Screen {
   // Returns |hwnd|'s scale factor.
   static float GetScaleFactorForHWND(HWND hwnd);
 
+  // Returns the system's global scale factor, ignoring the value of
+  // --force-device-scale-factor. Only use this if you are working with Windows
+  // metrics global to the system. Otherwise you should call
+  // GetScaleFactorForHWND() to get the correct scale factor for the monitor
+  // you are targeting.
+  static float GetSystemScaleFactor();
+
   // Returns the HWND associated with the NativeView.
-  virtual HWND GetHWNDFromNativeView(gfx::NativeView window) const;
+  virtual HWND GetHWNDFromNativeView(gfx::NativeView view) const;
 
   // Returns the NativeView associated with the HWND.
   virtual gfx::NativeWindow GetNativeWindowFromHWND(HWND hwnd) const;
@@ -115,7 +122,7 @@ class DISPLAY_EXPORT ScreenWin : public Screen {
   gfx::NativeWindow GetWindowAtScreenPoint(const gfx::Point& point) override;
   int GetNumDisplays() const override;
   const std::vector<Display>& GetAllDisplays() const override;
-  Display GetDisplayNearestWindow(gfx::NativeView window) const override;
+  Display GetDisplayNearestWindow(gfx::NativeWindow window) const override;
   Display GetDisplayNearestPoint(const gfx::Point& point) const override;
   Display GetDisplayMatching(const gfx::Rect& match_rect) const override;
   Display GetPrimaryDisplay() const override;

@@ -9,6 +9,7 @@
 #include "base/test/histogram_tester.h"
 #include "chrome/browser/page_load_metrics/metrics_web_contents_observer.h"
 #include "chrome/browser/page_load_metrics/page_load_tracker.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "content/public/test/web_contents_tester.h"
 #include "third_party/WebKit/public/platform/WebInputEvent.h"
@@ -27,7 +28,7 @@ class PageLoadMetricsObserverTestHarness
 
   // Helper that fills in any timing fields that MWCO requires but that are
   // currently missing.
-  static void PopulateRequiredTimingFields(PageLoadTiming* inout_timing);
+  static void PopulateRequiredTimingFields(mojom::PageLoadTiming* inout_timing);
 
   void SetUp() override;
 
@@ -42,17 +43,37 @@ class PageLoadMetricsObserverTestHarness
   void NavigateWithPageTransitionAndCommit(const GURL& url,
                                            ui::PageTransition transition);
 
+  // Navigates to a URL that is not tracked by page_load_metrics. Useful for
+  // forcing the OnComplete method of a PageLoadMetricsObserver to run.
+  void NavigateToUntrackedUrl() {
+    NavigateAndCommit(GURL(url::kAboutBlankURL));
+  }
+
   // Call this to simulate sending a PageLoadTiming IPC from the render process
   // to the browser process. These will update the timing information for the
   // most recently committed navigation.
-  void SimulateTimingUpdate(const PageLoadTiming& timing);
-  void SimulateTimingAndMetadataUpdate(const PageLoadTiming& timing,
-                                       const PageLoadMetadata& metadata);
+  void SimulateTimingUpdate(const mojom::PageLoadTiming& timing);
+  void SimulateTimingAndMetadataUpdate(const mojom::PageLoadTiming& timing,
+                                       const mojom::PageLoadMetadata& metadata);
+
+  // Simulates a loaded resource.
+  void SimulateStartedResource(const ExtraRequestStartInfo& info);
+
+  // Simulates a loaded resource.
+  void SimulateLoadedResource(const ExtraRequestCompleteInfo& info);
 
   // Simulates a user input.
   void SimulateInputEvent(const blink::WebInputEvent& event);
 
+  // Simulates the app being backgrounded.
+  void SimulateAppEnterBackground();
+
+  // Simulate playing a media element.
+  void SimulateMediaPlayed();
+
   const base::HistogramTester& histogram_tester() const;
+
+  MetricsWebContentsObserver* observer() const;
 
   // Gets the PageLoadExtraInfo for the committed_load_ in observer_.
   const PageLoadExtraInfo GetPageLoadExtraInfoForCommittedLoad();

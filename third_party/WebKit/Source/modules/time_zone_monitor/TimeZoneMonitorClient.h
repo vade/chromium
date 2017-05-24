@@ -5,8 +5,8 @@
 #ifndef TimeZoneMonitorClient_h
 #define TimeZoneMonitorClient_h
 
-#include "device/time_zone_monitor/public/interfaces/time_zone_monitor.mojom-blink.h"
 #include "mojo/public/cpp/bindings/binding.h"
+#include "services/device/public/interfaces/time_zone_monitor.mojom-blink.h"
 
 namespace blink {
 
@@ -21,9 +21,9 @@ class TimeZoneMonitorClient final
   TimeZoneMonitorClient();
 
   // device::mojom::blink::TimeZoneClient:
-  void OnTimeZoneChange(const String& timeZoneInfo) override;
+  void OnTimeZoneChange(const String& time_zone_info) override;
 
-  mojo::Binding<device::mojom::blink::TimeZoneMonitorClient> m_binding;
+  mojo::Binding<device::mojom::blink::TimeZoneMonitorClient> binding_;
 };
 
 }  // namespace blink

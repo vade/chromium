@@ -23,37 +23,27 @@
         },
         {
           "object": "LayoutBlockFlow P",
-          "rect": [8, 2200, 777, 100],
-          "reason": "subtree"
-        },
-        {
-          "object": "LayoutBlockFlow P",
-          "rect": [8, 2050, 777, 100],
-          "reason": "subtree"
-        },
-        {
-          "object": "LayoutBlockFlow P",
           "rect": [8, 2050, 777, 100],
           "reason": "subtree"
         },
         {
           "object": "LayoutText #text",
-          "rect": [8, 2047, 774, 106],
+          "rect": [8, 2046, 766, 108],
           "reason": "subtree"
         },
         {
           "object": "LayoutText #text",
-          "rect": [8, 2047, 774, 106],
+          "rect": [8, 2046, 766, 108],
           "reason": "subtree"
         },
         {
           "object": "LayoutText #text",
-          "rect": [8, 2197, 653, 106],
+          "rect": [8, 2196, 639, 108],
           "reason": "subtree"
         },
         {
           "object": "LayoutText #text",
-          "rect": [8, 2197, 653, 106],
+          "rect": [8, 2196, 639, 108],
           "reason": "subtree"
         }
       ]

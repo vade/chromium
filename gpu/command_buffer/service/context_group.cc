@@ -11,6 +11,7 @@
 #include <string>
 
 #include "base/command_line.h"
+#include "base/memory/ptr_util.h"
 #include "gpu/command_buffer/service/buffer_manager.h"
 #include "gpu/command_buffer/service/framebuffer_manager.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder_passthrough.h"
@@ -38,6 +39,8 @@ void GetIntegerv(GLenum pname, uint32_t* var) {
   *var = value;
 }
 
+}  // namespace anonymous
+
 DisallowedFeatures AdjustDisallowedFeatures(
     ContextType context_type, const DisallowedFeatures& disallowed_features) {
   DisallowedFeatures adjusted_disallowed_features = disallowed_features;
@@ -50,12 +53,11 @@ DisallowedFeatures AdjustDisallowedFeatures(
     adjusted_disallowed_features.chromium_color_buffer_float_rgba = true;
     adjusted_disallowed_features.chromium_color_buffer_float_rgb = true;
     adjusted_disallowed_features.ext_color_buffer_float = true;
+    adjusted_disallowed_features.ext_color_buffer_half_float = true;
     adjusted_disallowed_features.oes_texture_float_linear = true;
   }
   return adjusted_disallowed_features;
 }
-
-}  // namespace anonymous
 
 ContextGroup::ContextGroup(
     const GpuPreferences& gpu_preferences,
@@ -67,7 +69,8 @@ ContextGroup::ContextGroup(
     const scoped_refptr<FeatureInfo>& feature_info,
     bool bind_generates_resource,
     gpu::ImageFactory* image_factory,
-    ProgressReporter* progress_reporter)
+    ProgressReporter* progress_reporter,
+    const GpuFeatureInfo& gpu_feature_info)
     : gpu_preferences_(gpu_preferences),
       mailbox_manager_(mailbox_manager),
       memory_tracker_(memory_tracker),
@@ -106,21 +109,21 @@ ContextGroup::ContextGroup(
       feature_info_(feature_info),
       image_factory_(image_factory),
       passthrough_resources_(new PassthroughResources),
-      progress_reporter_(progress_reporter) {
-  {
-    DCHECK(feature_info_);
-    if (!mailbox_manager_.get())
-      mailbox_manager_ = new MailboxManagerImpl;
-    transfer_buffer_manager_ = new TransferBufferManager(memory_tracker_.get());
-  }
+      progress_reporter_(progress_reporter),
+      gpu_feature_info_(gpu_feature_info) {
+  DCHECK(feature_info_);
+  if (!mailbox_manager_.get())
+    mailbox_manager_ = new MailboxManagerImpl;
+  transfer_buffer_manager_ =
+      base::MakeUnique<TransferBufferManager>(memory_tracker_.get());
 }
 
 bool ContextGroup::Initialize(GLES2Decoder* decoder,
                               ContextType context_type,
                               const DisallowedFeatures& disallowed_features) {
-  if (!gpu_preferences_.enable_es3_apis &&
-      (context_type == CONTEXT_TYPE_OPENGLES3 ||
-       context_type == CONTEXT_TYPE_WEBGL2)) {
+  bool enable_es3 = context_type == CONTEXT_TYPE_OPENGLES3 ||
+                    context_type == CONTEXT_TYPE_WEBGL2;
+  if (!gpu_preferences_.enable_es3_apis && enable_es3) {
     DLOG(ERROR) << "ContextGroup::Initialize failed because ES3 APIs are "
                 << "not available.";
     return false;
@@ -145,8 +148,6 @@ bool ContextGroup::Initialize(GLES2Decoder* decoder,
     return false;
   }
 
-  transfer_buffer_manager_->Initialize();
-
   const GLint kMinRenderbufferSize = 512;  // GL says 1 pixel!
   GLint max_renderbuffer_size = 0;
   if (!QueryGLFeature(
@@ -168,7 +169,7 @@ bool ContextGroup::Initialize(GLES2Decoder* decoder,
     }
   }
 
-  if (feature_info_->feature_flags().ext_draw_buffers) {
+  if (enable_es3 || feature_info_->feature_flags().ext_draw_buffers) {
     GetIntegerv(GL_MAX_COLOR_ATTACHMENTS_EXT, &max_color_attachments_);
     if (max_color_attachments_ < 1)
       max_color_attachments_ = 1;
@@ -216,9 +217,6 @@ bool ContextGroup::Initialize(GLES2Decoder* decoder,
 
   buffer_manager_.reset(
       new BufferManager(memory_tracker_.get(), feature_info_.get()));
-  framebuffer_manager_.reset(
-      new FramebufferManager(max_draw_buffers_, max_color_attachments_,
-                             framebuffer_completeness_cache_));
   renderbuffer_manager_.reset(new RenderbufferManager(
       memory_tracker_.get(), max_renderbuffer_size, max_samples,
       feature_info_.get()));
@@ -314,7 +312,6 @@ bool ContextGroup::Initialize(GLES2Decoder* decoder,
       max_cube_map_texture_size, max_rectangle_texture_size,
       max_3d_texture_size, max_array_texture_layers, bind_generates_resource_,
       progress_reporter_));
-  texture_manager_->set_framebuffer_manager(framebuffer_manager_.get());
 
   const GLint kMinTextureImageUnits = 8;
   const GLint kMinVertexTextureImageUnits = 0;
@@ -507,14 +504,6 @@ void ContextGroup::Destroy(GLES2Decoder* decoder, bool have_context) {
     ReportProgress();
   }
 
-  if (framebuffer_manager_ != NULL) {
-    framebuffer_manager_->Destroy(have_context);
-    if (texture_manager_)
-      texture_manager_->set_framebuffer_manager(NULL);
-    framebuffer_manager_.reset();
-    ReportProgress();
-  }
-
   if (renderbuffer_manager_ != NULL) {
     renderbuffer_manager_->Destroy(have_context);
     renderbuffer_manager_.reset();
@@ -553,9 +542,11 @@ void ContextGroup::Destroy(GLES2Decoder* decoder, bool have_context) {
 
   memory_tracker_ = NULL;
 
-  passthrough_resources_->Destroy(have_context);
-  passthrough_resources_.reset();
-  ReportProgress();
+  if (passthrough_resources_) {
+    passthrough_resources_->Destroy(have_context);
+    passthrough_resources_.reset();
+    ReportProgress();
+  }
 }
 
 uint32_t ContextGroup::GetMemRepresented() const {

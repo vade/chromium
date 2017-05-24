@@ -21,9 +21,11 @@ OverlayStrategyFullscreen::OverlayStrategyFullscreen(
 
 OverlayStrategyFullscreen::~OverlayStrategyFullscreen() {}
 
-bool OverlayStrategyFullscreen::Attempt(ResourceProvider* resource_provider,
-                                        RenderPass* render_pass,
-                                        OverlayCandidateList* candidate_list) {
+bool OverlayStrategyFullscreen::Attempt(
+    ResourceProvider* resource_provider,
+    RenderPass* render_pass,
+    OverlayCandidateList* candidate_list,
+    std::vector<gfx::Rect>* content_bounds) {
   QuadList* quad_list = &render_pass->quad_list;
   // First quad of quad_list is the top most quad.
   auto front = quad_list->begin();
@@ -36,12 +38,12 @@ bool OverlayStrategyFullscreen::Attempt(ResourceProvider* resource_provider,
   if (front == quad_list->end())
     return false;
 
-  OverlayCandidate candidate;
-  if (!OverlayCandidate::FromDrawQuad(resource_provider, *front, &candidate)) {
+  const DrawQuad* quad = *front;
+  if (quad->ShouldDrawWithBlending())
     return false;
-  }
 
-  if (candidate.transform != gfx::OVERLAY_TRANSFORM_NONE) {
+  OverlayCandidate candidate;
+  if (!OverlayCandidate::FromDrawQuad(resource_provider, quad, &candidate)) {
     return false;
   }
 

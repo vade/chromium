@@ -2,16 +2,64 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//services/catalog/public/tools/catalog.gni")
+import("//services/service_manager/public/tools/test/service_test.gni")
 import("//testing/test.gni")
 
 # One Big Target for services to register their unit test sources. This exists
 # to avoid having to maintain a separate test binary for every service.
 #
 # To add tests for a new service, please define a "tests" source_set in the
-# service subdirectory and add it as a dependency here.
-test("service_unittests") {
+# service subdirectory and add it as a dependency here. If your unit tests
+# use the ServiceTest framework, you must also include corresponding catalog
+# entries in the "service_unittests_catalog" target below.
+service_test("service_unittests") {
   deps = [
-    "//services/image_decoder:tests",
-    "//services/service_manager/public/cpp/test:run_all_service_tests",
+    "//services/data_decoder:tests",
+    "//services/device:tests",
+    "//services/identity:tests",
+    "//services/preferences:tests",
+    "//services/resource_coordinator:tests",
+    "//services/shape_detection:tests",
   ]
+
+  if (is_android) {
+    deps += [
+      "//services/device:java",
+
+      # Some tests need to initialize V8.
+      "//v8:v8_external_startup_data_assets",
+    ]
+  } else {
+    # NOTE: We do not currently support standalone service binaries on Android,
+    # so any tests which use the ServiceTest framework to connect to standalone
+    # services must be added here.
+    deps += [ "//services/video_capture:tests" ]
+  }
+
+  catalog = ":service_unittests_catalog"
+}
+
+catalog("service_unittests_catalog") {
+  testonly = true
+  catalog_deps = [
+    "//services/device:tests_catalog",
+    "//services/identity:tests_catalog",
+    "//services/preferences:tests_catalog",
+    "//services/video_capture:tests_catalog",
+  ]
+}
+
+if (is_android) {
+  junit_binary("service_junit_tests") {
+    java_files = [ "device/generic_sensor/android/junit/src/org/chromium/device/sensors/PlatformSensorAndProviderTest.java" ]
+    deps = [
+      "//base:base_java",
+      "//base:base_java_test_support",
+      "//device/generic_sensor:java",
+      "//device/generic_sensor/public/interfaces:interfaces_java",
+      "//mojo/public/java:bindings_java",
+      "//third_party/android_tools:android_support_annotations_java",
+    ]
+  }
 }

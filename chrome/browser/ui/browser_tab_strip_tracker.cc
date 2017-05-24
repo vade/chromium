@@ -28,18 +28,12 @@ BrowserTabStripTracker::~BrowserTabStripTracker() {
   BrowserList::RemoveObserver(this);
 }
 
-void BrowserTabStripTracker::Init(InitWith init_with) {
+void BrowserTabStripTracker::Init() {
   BrowserList::AddObserver(this);
 
   base::AutoReset<bool> restter(&is_processing_initial_browsers_, true);
-  if (init_with == InitWith::BROWSERS_IN_ACTIVE_DESKTOP) {
-    for (Browser* browser : *BrowserList::GetInstance())
-      MaybeTrackBrowser(browser);
-  } else {
-    DCHECK(InitWith::ALL_BROWERS == init_with);
-    for (auto* browser : *BrowserList::GetInstance())
-      MaybeTrackBrowser(browser);
-  }
+  for (auto* browser : *BrowserList::GetInstance())
+    MaybeTrackBrowser(browser);
 }
 
 void BrowserTabStripTracker::StopObservingAndSendOnBrowserRemoved() {
@@ -59,6 +53,11 @@ bool BrowserTabStripTracker::ShouldTrackBrowser(Browser* browser) {
 
 void BrowserTabStripTracker::MaybeTrackBrowser(Browser* browser) {
   if (!ShouldTrackBrowser(browser))
+    return;
+
+  // It's possible that a browser is added to the observed browser list twice.
+  // In this case it might cause crash as seen in crbug.com/685731.
+  if (browsers_observing_.find(browser) != browsers_observing_.end())
     return;
 
   browsers_observing_.insert(browser);

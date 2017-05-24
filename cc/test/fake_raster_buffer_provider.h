@@ -22,9 +22,15 @@ class FakeRasterBufferProviderImpl : public RasterBufferProvider {
       uint64_t previous_content_id) override;
   void ReleaseBufferForRaster(std::unique_ptr<RasterBuffer> buffer) override;
   void OrderingBarrier() override;
+  void Flush() override;
   ResourceFormat GetResourceFormat(bool must_support_alpha) const override;
   bool IsResourceSwizzleRequired(bool must_support_alpha) const override;
   bool CanPartialRasterIntoProvidedResource() const override;
+  bool IsResourceReadyToDraw(ResourceId id) const override;
+  uint64_t SetReadyToDrawCallback(
+      const ResourceProvider::ResourceIdArray& resource_ids,
+      const base::Callback<void()>& callback,
+      uint64_t pending_callback_id) const override;
   void Shutdown() override;
 };
 

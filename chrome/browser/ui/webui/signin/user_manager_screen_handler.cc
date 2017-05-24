@@ -13,6 +13,7 @@
 #include "base/feature_list.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
@@ -33,6 +34,7 @@
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/signin/local_auth.h"
+#include "chrome/browser/signin/signin_util.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_dialogs.h"
@@ -57,7 +59,6 @@
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
@@ -310,7 +311,7 @@ UserManagerScreenHandler::UserManagerScreenHandler() : weak_ptr_factory_(this) {
        add_person_enabled_pref->HasUserSetting())) {
     service->ClearPref(guest_mode_enabled_pref->name());
     service->ClearPref(add_person_enabled_pref->name());
-    content::RecordAction(
+    base::RecordAction(
         base::UserMetricsAction("UserManager_Cleared_Legacy_User_Prefs"));
   }
 }
@@ -322,8 +323,7 @@ UserManagerScreenHandler::~UserManagerScreenHandler() {
 void UserManagerScreenHandler::ShowBannerMessage(
     const base::string16& message) {
   web_ui()->CallJavascriptFunctionUnsafe(
-      "login.AccountPickerScreen.showBannerMessage",
-      base::StringValue(message));
+      "login.AccountPickerScreen.showBannerMessage", base::Value(message));
 }
 
 void UserManagerScreenHandler::ShowUserPodCustomIcon(
@@ -336,14 +336,14 @@ void UserManagerScreenHandler::ShowUserPodCustomIcon(
     return;
   web_ui()->CallJavascriptFunctionUnsafe(
       "login.AccountPickerScreen.showUserPodCustomIcon",
-      base::StringValue(account_id.GetUserEmail()), *icon);
+      base::Value(account_id.GetUserEmail()), *icon);
 }
 
 void UserManagerScreenHandler::HideUserPodCustomIcon(
     const AccountId& account_id) {
   web_ui()->CallJavascriptFunctionUnsafe(
       "login.AccountPickerScreen.hideUserPodCustomIcon",
-      base::StringValue(account_id.GetUserEmail()));
+      base::Value(account_id.GetUserEmail()));
 }
 
 void UserManagerScreenHandler::EnableInput() {
@@ -361,8 +361,8 @@ void UserManagerScreenHandler::SetAuthType(
   user_auth_type_map_[account_id.GetUserEmail()] = auth_type;
   web_ui()->CallJavascriptFunctionUnsafe(
       "login.AccountPickerScreen.setAuthType",
-      base::StringValue(account_id.GetUserEmail()),
-      base::FundamentalValue(auth_type), base::StringValue(auth_value));
+      base::Value(account_id.GetUserEmail()), base::Value(auth_type),
+      base::Value(auth_value));
 }
 
 proximity_auth::ScreenlockBridge::LockHandler::AuthType
@@ -400,8 +400,7 @@ void UserManagerScreenHandler::HandleInitialize(const base::ListValue* args) {
   SendUserList();
   web_ui()->CallJavascriptFunctionUnsafe(
       "cr.ui.UserManager.showUserManagerScreen",
-      base::FundamentalValue(IsGuestModeEnabled()),
-      base::FundamentalValue(IsAddPersonEnabled()));
+      base::Value(IsGuestModeEnabled()), base::Value(IsAddPersonEnabled()));
 
   proximity_auth::ScreenlockBridge::Get()->SetLockHandler(this);
 }
@@ -501,9 +500,8 @@ void UserManagerScreenHandler::HandleRemoveUser(const base::ListValue* args) {
 
   if (profiles::AreAllNonChildNonSupervisedProfilesLocked()) {
     web_ui()->CallJavascriptFunctionUnsafe(
-        "cr.webUIListenerCallback",
-        base::StringValue("show-error-dialog"),
-        base::StringValue(l10n_util::GetStringUTF8(
+        "cr.webUIListenerCallback", base::Value("show-error-dialog"),
+        base::Value(l10n_util::GetStringUTF8(
             IDS_USER_MANAGER_REMOVE_PROFILE_PROFILES_LOCKED_ERROR)));
     return;
   }
@@ -536,9 +534,8 @@ void UserManagerScreenHandler::HandleAreAllProfilesLocked(
 
   AllowJavascript();
   ResolveJavascriptCallback(
-      base::StringValue(webui_callback_id),
-      base::FundamentalValue(
-          profiles::AreAllNonChildNonSupervisedProfilesLocked()));
+      base::Value(webui_callback_id),
+      base::Value(profiles::AreAllNonChildNonSupervisedProfilesLocked()));
 }
 
 void UserManagerScreenHandler::HandleLaunchUser(const base::ListValue* args) {
@@ -605,7 +602,7 @@ void UserManagerScreenHandler::HandleRemoveUserWarningLoadStats(
   if (!base::GetValueAsFilePath(*profile_path_value, &profile_path))
     return;
 
-  base::StringValue return_profile_path(profile_path.value());
+  base::Value return_profile_path(profile_path.value());
   Profile* profile = g_browser_process->profile_manager()->
       GetProfileByPath(profile_path);
 
@@ -632,9 +629,9 @@ void UserManagerScreenHandler::HandleRemoveUserWarningLoadStats(
       stats_success &= item.success;
     }
     if (stats_success) {
-      web_ui()->CallJavascriptFunctionUnsafe(
-          "updateRemoveWarningDialog", base::StringValue(profile_path.value()),
-          return_value);
+      web_ui()->CallJavascriptFunctionUnsafe("updateRemoveWarningDialog",
+                                             base::Value(profile_path.value()),
+                                             return_value);
       return;
     }
   }
@@ -656,9 +653,9 @@ void UserManagerScreenHandler::RemoveUserDialogLoadStatsCallback(
     stat->SetBooleanWithoutPathExpansion("success", item.success);
     return_value.SetWithoutPathExpansion(item.category, std::move(stat));
   }
-  web_ui()->CallJavascriptFunctionUnsafe(
-      "updateRemoveWarningDialog", base::StringValue(profile_path.value()),
-      return_value);
+  web_ui()->CallJavascriptFunctionUnsafe("updateRemoveWarningDialog",
+                                         base::Value(profile_path.value()),
+                                         return_value);
 }
 
 void UserManagerScreenHandler::HandleGetRemoveWarningDialogMessage(
@@ -686,12 +683,12 @@ void UserManagerScreenHandler::HandleGetRemoveWarningDialogMessage(
       (has_errors ? IDS_LOGIN_POD_USER_REMOVE_WARNING_NONSYNC_WITH_ERRORS :
                     IDS_LOGIN_POD_USER_REMOVE_WARNING_NONSYNC);
 
-  base::StringValue message = base::StringValue(
-      l10n_util::GetPluralStringFUTF16(message_id, total_count));
+  base::Value message =
+      base::Value(l10n_util::GetPluralStringFUTF16(message_id, total_count));
 
-  web_ui()->CallJavascriptFunctionUnsafe(
-      "updateRemoveWarningDialogSetMessage", base::StringValue(profile_path),
-      message, base::FundamentalValue(total_count));
+  web_ui()->CallJavascriptFunctionUnsafe("updateRemoveWarningDialogSetMessage",
+                                         base::Value(profile_path), message,
+                                         base::Value(total_count));
 }
 
 void UserManagerScreenHandler::OnGetTokenInfoResponse(
@@ -763,6 +760,7 @@ void UserManagerScreenHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback("loginVisible", kDoNothingCallback);
   // Unused callbacks from user_pod_row.js
   web_ui()->RegisterMessageCallback("focusPod", kDoNothingCallback);
+  web_ui()->RegisterMessageCallback("noPodFocused", kDoNothingCallback);
 }
 
 void UserManagerScreenHandler::GetLocalizedValues(
@@ -773,8 +771,8 @@ void UserManagerScreenHandler::GetLocalizedValues(
   localized_strings->SetString("addUser",
       l10n_util::GetStringUTF16(IDS_ADD_USER_BUTTON));
   localized_strings->SetString("cancel", l10n_util::GetStringUTF16(IDS_CANCEL));
-  localized_strings->SetString("browseAsGuest",
-      l10n_util::GetStringUTF16(IDS_GO_INCOGNITO_BUTTON));
+  localized_strings->SetString(
+      "browseAsGuest", l10n_util::GetStringUTF16(IDS_BROWSE_AS_GUEST_BUTTON));
   localized_strings->SetString("signOutUser",
       l10n_util::GetStringUTF16(IDS_SCREEN_LOCK_SIGN_OUT));
   localized_strings->SetString("addSupervisedUser",
@@ -974,9 +972,9 @@ void UserManagerScreenHandler::SendUserList() {
     users_list.Append(std::move(profile_value));
   }
 
-  web_ui()->CallJavascriptFunctionUnsafe(
-      "login.AccountPickerScreen.loadUsers", users_list,
-      base::FundamentalValue(IsGuestModeEnabled()));
+  web_ui()->CallJavascriptFunctionUnsafe("login.AccountPickerScreen.loadUsers",
+                                         users_list,
+                                         base::Value(IsGuestModeEnabled()));
 
   // This is the latest C++ code we have in the flow to show the UserManager.
   // This may be invoked more than once per UserManager lifetime; the
@@ -998,12 +996,12 @@ void UserManagerScreenHandler::ReportAuthenticationResult(
         ProfileMetrics::SWITCH_PROFILE_UNLOCK);
   } else {
     web_ui()->CallJavascriptFunctionUnsafe(
-        "cr.ui.UserManager.showSignInError", base::FundamentalValue(0),
-        base::StringValue(l10n_util::GetStringUTF8(
+        "cr.ui.UserManager.showSignInError", base::Value(0),
+        base::Value(l10n_util::GetStringUTF8(
             auth == ProfileMetrics::AUTH_FAILED_OFFLINE
                 ? IDS_LOGIN_ERROR_AUTHENTICATING_OFFLINE
                 : IDS_LOGIN_ERROR_AUTHENTICATING)),
-        base::StringValue(""), base::FundamentalValue(0));
+        base::Value(""), base::Value(0));
   }
 }
 
@@ -1013,20 +1011,24 @@ void UserManagerScreenHandler::OnBrowserWindowReady(Browser* browser) {
 
   // Unlock the profile after browser opens so startup can read the lock bit.
   // Any necessary authentication must have been successful to reach this point.
+  ProfileAttributesEntry* entry = nullptr;
   if (!browser->profile()->IsGuestSession()) {
-    ProfileAttributesEntry* entry = nullptr;
     bool has_entry = g_browser_process->profile_manager()->
         GetProfileAttributesStorage().
         GetProfileAttributesWithPath(browser->profile()->GetPath(), &entry);
     DCHECK(has_entry);
+    // If force sign in is enabled and profile is not signed in, do not close
+    // UserManager and unlock profile.
+    if (signin_util::IsForceSigninEnabled() && !entry->IsAuthenticated())
+      return;
     entry->SetIsSigninRequired(false);
   }
 
   if (!url_hash_.empty()) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
-        base::Bind(&UrlHashHelper::ExecuteUrlHash,
-                   base::Owned(new UrlHashHelper(browser, url_hash_))));
+        base::BindOnce(&UrlHashHelper::ExecuteUrlHash,
+                       base::Owned(new UrlHashHelper(browser, url_hash_))));
   }
 
   // This call is last as it deletes this object.

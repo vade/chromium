@@ -10,6 +10,7 @@
 
 #include "base/files/file_util.h"
 #include "base/sys_info.h"
+#include "base/task_scheduler/post_task.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_appcache_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_cache_storage_helper.h"
@@ -21,18 +22,18 @@
 #include "chrome/browser/browsing_data/browsing_data_indexed_db_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_service_worker_helper.h"
-#include "chrome/browser/chromeos/arc/arc_session_manager.h"
+#include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/file_manager/path_util.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/cryptohome/homedir_methods.h"
+#include "components/arc/arc_util.h"
 #include "components/browsing_data/content/conditional_cache_counting_helper.h"
 #include "components/drive/chromeos/file_system_interface.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/text/bytes_formatting.h"
@@ -41,9 +42,9 @@ namespace chromeos {
 namespace settings {
 namespace {
 
-void GetSizeStatOnBlockingPool(const base::FilePath& mount_path,
-                               int64_t* total_size,
-                               int64_t* available_size) {
+void GetSizeStatBlocking(const base::FilePath& mount_path,
+                         int64_t* total_size,
+                         int64_t* available_size) {
   int64_t size = base::SysInfo::AmountOfTotalDiskSpace(mount_path);
   if (size >= 0)
     *total_size = size;
@@ -69,8 +70,8 @@ StorageHandler::StorageHandler()
       updating_drive_cache_size_(false),
       updating_browsing_data_size_(false),
       updating_android_size_(false),
-      updating_other_users_size_(false) {
-}
+      updating_other_users_size_(false),
+      weak_ptr_factory_(this) {}
 
 StorageHandler::~StorageHandler() {
 }
@@ -131,7 +132,7 @@ void StorageHandler::HandleClearDriveCache(
   file_system->FreeDiskSpaceIfNeededFor(
       std::numeric_limits<int64_t>::max(),  // Removes as much as possible.
       base::Bind(&StorageHandler::OnClearDriveCacheDone,
-                 base::Unretained(this)));
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 void StorageHandler::UpdateSizeStat() {
@@ -141,16 +142,12 @@ void StorageHandler::UpdateSizeStat() {
 
   int64_t* total_size = new int64_t(0);
   int64_t* available_size = new int64_t(0);
-  content::BrowserThread::PostBlockingPoolTaskAndReply(
-      FROM_HERE,
-      base::Bind(&GetSizeStatOnBlockingPool,
-                 downloads_path,
-                 total_size,
+  base::PostTaskWithTraitsAndReply(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+      base::Bind(&GetSizeStatBlocking, downloads_path, total_size,
                  available_size),
-      base::Bind(&StorageHandler::OnGetSizeStat,
-                 base::Unretained(this),
-                 base::Owned(total_size),
-                 base::Owned(available_size)));
+      base::Bind(&StorageHandler::OnGetSizeStat, weak_ptr_factory_.GetWeakPtr(),
+                 base::Owned(total_size), base::Owned(available_size)));
 }
 
 void StorageHandler::OnGetSizeStat(int64_t* total_size,
@@ -170,8 +167,7 @@ void StorageHandler::OnGetSizeStat(int64_t* total_size,
   size_stat.SetInteger("spaceState", storage_space_state);
 
   CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("storage-size-stat-changed"),
-                         size_stat);
+                         base::Value("storage-size-stat-changed"), size_stat);
 }
 
 void StorageHandler::UpdateDownloadsSize() {
@@ -183,19 +179,18 @@ void StorageHandler::UpdateDownloadsSize() {
   const base::FilePath downloads_path =
       file_manager::util::GetDownloadsFolderForProfile(profile);
 
-  base::PostTaskAndReplyWithResult(
-      content::BrowserThread::GetBlockingPool(),
-      FROM_HERE,
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::Bind(&base::ComputeDirectorySize, downloads_path),
       base::Bind(&StorageHandler::OnGetDownloadsSize,
-                 base::Unretained(this)));
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 void StorageHandler::OnGetDownloadsSize(int64_t size) {
   updating_downloads_size_ = false;
   CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("storage-downloads-size-changed"),
-                         base::StringValue(ui::FormatBytes(size)));
+                         base::Value("storage-downloads-size-changed"),
+                         base::Value(ui::FormatBytes(size)));
 }
 
 void StorageHandler::UpdateDriveCacheSize() {
@@ -209,18 +204,19 @@ void StorageHandler::UpdateDriveCacheSize() {
 
   // Shows the item "Offline cache" and start calculating size.
   CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("storage-drive-enabled-changed"),
-                         base::FundamentalValue(true));
+                         base::Value("storage-drive-enabled-changed"),
+                         base::Value(true));
   updating_drive_cache_size_ = true;
-  file_system->CalculateCacheSize(
-      base::Bind(&StorageHandler::OnGetDriveCacheSize, base::Unretained(this)));
+  file_system->CalculateCacheSize(base::Bind(
+      &StorageHandler::OnGetDriveCacheSize, weak_ptr_factory_.GetWeakPtr()));
 }
 
 void StorageHandler::OnGetDriveCacheSize(int64_t size) {
   updating_drive_cache_size_ = false;
   CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("storage-drive-cache-size-changed"),
-                         base::StringValue(ui::FormatBytes(size)));
+                         base::Value("storage-drive-cache-size-changed"),
+                         base::Value(ui::FormatBytes(size)),
+                         base::Value(size > 0));
 }
 
 void StorageHandler::UpdateBrowsingDataSize() {
@@ -236,8 +232,8 @@ void StorageHandler::UpdateBrowsingDataSize() {
   browsing_data::ConditionalCacheCountingHelper::CreateForRange(
       content::BrowserContext::GetDefaultStoragePartition(profile),
       base::Time(), base::Time::Max())
-      ->CountAndDestroySelfWhenFinished(
-          base::Bind(&StorageHandler::OnGetCacheSize, base::Unretained(this)));
+      ->CountAndDestroySelfWhenFinished(base::Bind(
+          &StorageHandler::OnGetCacheSize, weak_ptr_factory_.GetWeakPtr()));
 
   // Fetch the size of site data in browsing data.
   if (!site_data_size_collector_.get()) {
@@ -262,10 +258,10 @@ void StorageHandler::UpdateBrowsingDataSize() {
   }
   site_data_size_collector_->Fetch(
       base::Bind(&StorageHandler::OnGetBrowsingDataSize,
-                 base::Unretained(this), true));
+                 weak_ptr_factory_.GetWeakPtr(), true));
 }
 
-void StorageHandler::OnGetCacheSize(int64_t size, bool is_upper_limit) {
+void StorageHandler::OnGetCacheSize(bool is_upper_limit, int64_t size) {
   DCHECK(!is_upper_limit);
   OnGetBrowsingDataSize(false, size);
 }
@@ -288,10 +284,9 @@ void StorageHandler::OnGetBrowsingDataSize(bool is_site_data, int64_t size) {
           IDS_OPTIONS_SETTINGS_STORAGE_SIZE_UNKNOWN);
     }
     updating_browsing_data_size_ = false;
-    CallJavascriptFunction(
-        "cr.webUIListenerCallback",
-        base::StringValue("storage-browsing-data-size-changed"),
-        base::StringValue(size_string));
+    CallJavascriptFunction("cr.webUIListenerCallback",
+                           base::Value("storage-browsing-data-size-changed"),
+                           base::Value(size_string));
   }
 }
 
@@ -311,15 +306,14 @@ void StorageHandler::UpdateOtherUsersSize() {
     cryptohome::HomedirMethods::GetInstance()->GetAccountDiskUsage(
         cryptohome::Identification(user->GetAccountId()),
         base::Bind(&StorageHandler::OnGetOtherUserSize,
-                   base::Unretained(this)));
+                   weak_ptr_factory_.GetWeakPtr()));
   }
   // We should show "0 B" if there is no other user.
   if (other_users_.empty()) {
     updating_other_users_size_ = false;
-    CallJavascriptFunction(
-        "cr.webUIListenerCallback",
-        base::StringValue("storage-other-users-size-changed"),
-        base::StringValue(ui::FormatBytes(0)));
+    CallJavascriptFunction("cr.webUIListenerCallback",
+                           base::Value("storage-other-users-size-changed"),
+                           base::Value(ui::FormatBytes(0)));
   }
 }
 
@@ -336,10 +330,9 @@ void StorageHandler::OnGetOtherUserSize(bool success, int64_t size) {
           IDS_OPTIONS_SETTINGS_STORAGE_SIZE_UNKNOWN);
     }
     updating_other_users_size_ = false;
-    CallJavascriptFunction(
-        "cr.webUIListenerCallback",
-        base::StringValue("storage-other-users-size-changed"),
-        base::StringValue(size_string));
+    CallJavascriptFunction("cr.webUIListenerCallback",
+                           base::Value("storage-other-users-size-changed"),
+                           base::Value(size_string));
   }
 }
 
@@ -349,19 +342,17 @@ void StorageHandler::UpdateAndroidSize() {
   updating_android_size_ = true;
 
   Profile* const profile = Profile::FromWebUI(web_ui());
-  if (!arc::ArcSessionManager::IsAllowedForProfile(profile) ||
-      arc::ArcSessionManager::IsOptInVerificationDisabled() ||
-      !arc::ArcSessionManager::Get()->IsArcEnabled()) {
+  if (!arc::IsArcPlayStoreEnabledForProfile(profile) ||
+      arc::IsArcOptInVerificationDisabled()) {
     return;
   }
 
   // Shows the item "Android apps and cache" and start calculating size.
   CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("storage-android-enabled-changed"),
-                         base::FundamentalValue(true));
-  bool success = arc::ArcStorageManager::Get()->GetApplicationsSize(
-      base::Bind(&StorageHandler::OnGetAndroidSize,
-                 base::Unretained(this)));
+                         base::Value("storage-android-enabled-changed"),
+                         base::Value(true));
+  bool success = arc::ArcStorageManager::Get()->GetApplicationsSize(base::Bind(
+      &StorageHandler::OnGetAndroidSize, weak_ptr_factory_.GetWeakPtr()));
   if (!success)
     updating_android_size_ = false;
 }
@@ -380,8 +371,8 @@ void StorageHandler::OnGetAndroidSize(bool succeeded,
   }
   updating_android_size_ = false;
   CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("storage-android-size-changed"),
-                         base::StringValue(size_string));
+                         base::Value("storage-android-size-changed"),
+                         base::Value(size_string));
 }
 
 void StorageHandler::OnClearDriveCacheDone(bool success) {

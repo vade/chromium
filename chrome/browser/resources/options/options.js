@@ -182,7 +182,7 @@ function load() {
       BrowserOptions.getInstance());
 // </if>
 
-  if (loadTimeData.getBoolean('showAbout')) {
+  if (loadTimeData.valueExists('aboutOverlayTabTitle')) {
     PageManager.registerOverlay(help.HelpPage.getInstance(),
                                 BrowserOptions.getInstance());
     if (help.ChannelChangePage) {
@@ -290,6 +290,9 @@ function load() {
   window.setTimeout(function() {
     document.documentElement.classList.remove('loading');
     chrome.send('onFinishedLoadingOptions');
+    chrome.send(
+        'metricsHandler:recordTime',
+        ['Settings.TimeUntilInteractive', window.performance.now()]);
   }, 0);
 }
 

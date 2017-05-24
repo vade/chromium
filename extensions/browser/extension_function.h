@@ -53,7 +53,7 @@ class QuotaLimitHeuristic;
 #define EXTENSION_FUNCTION_VALIDATE(test) \
   do {                                    \
     if (!(test)) {                        \
-      this->set_bad_message(true);        \
+      this->SetBadMessage();              \
       return ValidationFailure(this);     \
     }                                     \
   } while (0)
@@ -65,7 +65,7 @@ class QuotaLimitHeuristic;
 #define EXTENSION_FUNCTION_PRERUN_VALIDATE(test) \
   do {                                           \
     if (!(test)) {                               \
-      this->set_bad_message(true);               \
+      this->SetBadMessage();                     \
       return false;                              \
     }                                            \
   } while (0)
@@ -76,7 +76,7 @@ class QuotaLimitHeuristic;
 #define EXTENSION_FUNCTION_ERROR(error) \
   do {                                  \
     error_ = error;                     \
-    this->set_bad_message(true);        \
+    this->SetBadMessage();              \
     return ValidationFailure(this);     \
   } while (0)
 
@@ -84,10 +84,14 @@ class QuotaLimitHeuristic;
 // supply a unique |histogramvalue| used for histograms of extension function
 // invocation (add new ones at the end of the enum in
 // extension_function_histogram_value.h).
-#define DECLARE_EXTENSION_FUNCTION(name, histogramvalue) \
-  public: static const char* function_name() { return name; } \
-  public: static extensions::functions::HistogramValue histogram_value() \
-    { return extensions::functions::histogramvalue; }
+#define DECLARE_EXTENSION_FUNCTION(name, histogramvalue)                     \
+ public:                                                                     \
+  static constexpr const char* function_name() { return name; }              \
+                                                                             \
+ public:                                                                     \
+  static constexpr extensions::functions::HistogramValue histogram_value() { \
+    return extensions::functions::histogramvalue;                            \
+  }
 
 // Traits that describe how ExtensionFunction should be deleted. This just calls
 // the virtual "Destruct" method on ExtensionFunction, allowing derived classes
@@ -241,8 +245,7 @@ class ExtensionFunction
   // Retrieves any error string from the function.
   virtual const std::string& GetError() const;
 
-  bool bad_message() const { return bad_message_; }
-  void set_bad_message(bool bad_message) { bad_message_ = bad_message; }
+  virtual void SetBadMessage();
 
   // Specifies the name of the function. A long-lived string (such as a string
   // literal) must be provided.
@@ -507,6 +510,7 @@ class UIThreadExtensionFunction : public ExtensionFunction {
   UIThreadExtensionFunction* AsUIThreadExtensionFunction() override;
 
   bool PreRunValidation(std::string* error) override;
+  void SetBadMessage() final;
 
   // Called when a message was received.
   // Should return true if it processed the message.
@@ -605,6 +609,7 @@ class IOThreadExtensionFunction : public ExtensionFunction {
   IOThreadExtensionFunction();
 
   IOThreadExtensionFunction* AsIOThreadExtensionFunction() override;
+  void SetBadMessage() final;
 
   void set_ipc_sender(
       base::WeakPtr<extensions::IOThreadExtensionMessageFilter> ipc_sender,

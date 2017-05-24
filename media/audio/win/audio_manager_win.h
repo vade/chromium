@@ -20,10 +20,9 @@ class AudioDeviceListenerWin;
 // the AudioManager class.
 class MEDIA_EXPORT AudioManagerWin : public AudioManagerBase {
  public:
-  AudioManagerWin(
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> worker_task_runner,
-      AudioLogFactory* audio_log_factory);
+  AudioManagerWin(std::unique_ptr<AudioThread> audio_thread,
+                  AudioLogFactory* audio_log_factory);
+  ~AudioManagerWin() override;
 
   // Implementation of AudioManager.
   bool HasAudioOutputDevices() override;
@@ -57,39 +56,14 @@ class MEDIA_EXPORT AudioManagerWin : public AudioManagerBase {
   std::string GetDefaultOutputDeviceID() override;
 
  protected:
-  ~AudioManagerWin() override;
-
+  void ShutdownOnAudioThread() override;
   AudioParameters GetPreferredOutputStreamParameters(
       const std::string& output_device_id,
       const AudioParameters& input_params) override;
 
  private:
-  enum EnumerationType {
-    kMMDeviceEnumeration,
-    kWaveEnumeration,
-  };
-
   // Allow unit test to modify the utilized enumeration API.
   friend class AudioManagerTest;
-
-  EnumerationType enumeration_type_;
-  EnumerationType enumeration_type() { return enumeration_type_; }
-  void SetEnumerationType(EnumerationType type) {
-    enumeration_type_ = type;
-  }
-
-  inline bool core_audio_supported() const {
-    return enumeration_type_ == kMMDeviceEnumeration;
-  }
-
-  // Returns a PCMWaveInAudioInputStream instance or NULL on failure.
-  // This method converts MMDevice-style device ID to WaveIn-style device ID if
-  // necessary.
-  // (Please see device_enumeration_win.h for more info about the two kinds of
-  // device IDs.)
-  AudioInputStream* CreatePCMWaveInAudioInputStream(
-      const AudioParameters& params,
-      const std::string& device_id);
 
   // Helper methods for performing expensive initialization tasks on the audio
   // thread instead of on the UI thread which AudioManager is constructed on.

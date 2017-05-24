@@ -19,7 +19,7 @@
 #include "base/macros.h"
 #include "base/time/clock.h"
 #include "base/time/time.h"
-#include "components/image_fetcher/image_fetcher_delegate.h"
+#include "components/image_fetcher/core/image_fetcher_delegate.h"
 #include "components/ntp_snippets/category.h"
 #include "components/ntp_snippets/category_status.h"
 #include "components/ntp_snippets/content_suggestion.h"
@@ -39,14 +39,15 @@ class Image;
 }  // namespace gfx
 
 namespace image_fetcher {
-class ImageDecoder;
 class ImageFetcher;
+struct RequestMetadata;
 }  // namespace image_fetcher
 
 namespace ntp_snippets {
 
 class CategoryRanker;
 class RemoteSuggestionsDatabase;
+class RemoteSuggestionsScheduler;
 
 // CachedImageFetcher takes care of fetching images from the network and caching
 // them in the database.
@@ -59,7 +60,6 @@ class CachedImageFetcher : public image_fetcher::ImageFetcherDelegate {
   // |pref_service| and |database| need to outlive the created image fetcher
   // instance.
   CachedImageFetcher(std::unique_ptr<image_fetcher::ImageFetcher> image_fetcher,
-                     std::unique_ptr<image_fetcher::ImageDecoder> image_decoder,
                      PrefService* pref_service,
                      RemoteSuggestionsDatabase* database);
   ~CachedImageFetcher() override;
@@ -74,26 +74,26 @@ class CachedImageFetcher : public image_fetcher::ImageFetcherDelegate {
   // image_fetcher::ImageFetcherDelegate implementation.
   void OnImageDataFetched(const std::string& id_within_category,
                           const std::string& image_data) override;
+
   void OnImageDecodingDone(const ImageFetchedCallback& callback,
                            const std::string& id_within_category,
-                           const gfx::Image& image);
-  void OnSnippetImageFetchedFromDatabase(
+                           const gfx::Image& image,
+                           const image_fetcher::RequestMetadata& metadata);
+  void OnImageFetchedFromDatabase(
       const ImageFetchedCallback& callback,
       const ContentSuggestion::ID& suggestion_id,
       const GURL& image_url,
-      // SnippetImageCallback requires nonconst reference
+      // SnippetImageCallback requires by-value (not const ref).
       std::string data);
-  void OnSnippetImageDecodedFromDatabase(
-      const ImageFetchedCallback& callback,
-      const ContentSuggestion::ID& suggestion_id,
-      const GURL& url,
-      const gfx::Image& image);
-  void FetchSnippetImageFromNetwork(const ContentSuggestion::ID& suggestion_id,
-                                    const GURL& url,
-                                    const ImageFetchedCallback& callback);
+  void OnImageDecodedFromDatabase(const ImageFetchedCallback& callback,
+                                  const ContentSuggestion::ID& suggestion_id,
+                                  const GURL& url,
+                                  const gfx::Image& image);
+  void FetchImageFromNetwork(const ContentSuggestion::ID& suggestion_id,
+                             const GURL& url,
+                             const ImageFetchedCallback& callback);
 
   std::unique_ptr<image_fetcher::ImageFetcher> image_fetcher_;
-  std::unique_ptr<image_fetcher::ImageDecoder> image_decoder_;
   RemoteSuggestionsDatabase* database_;
   // Request throttler for limiting requests to thumbnail images.
   RequestThrottler thumbnail_requests_throttler_;
@@ -117,9 +117,9 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
       PrefService* pref_service,
       const std::string& application_language_code,
       CategoryRanker* category_ranker,
+      RemoteSuggestionsScheduler* scheduler,
       std::unique_ptr<RemoteSuggestionsFetcher> suggestions_fetcher,
       std::unique_ptr<image_fetcher::ImageFetcher> image_fetcher,
-      std::unique_ptr<image_fetcher::ImageDecoder> image_decoder,
       std::unique_ptr<RemoteSuggestionsDatabase> database,
       std::unique_ptr<RemoteSuggestionsStatusService> status_service);
 
@@ -128,8 +128,8 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
   static void RegisterProfilePrefs(PrefRegistrySimple* registry);
 
   // Returns whether the service is ready. While this is false, the list of
-  // snippets will be empty, and all modifications to it (fetch, dismiss, etc)
-  // will be ignored.
+  // suggestions will be empty, and all modifications to it (fetch, dismiss,
+  // etc) will be ignored.
   bool ready() const { return state_ == State::READY; }
 
   // Returns whether the service is successfully initialized. While this is
@@ -137,15 +137,15 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
   bool initialized() const { return ready() || state_ == State::DISABLED; }
 
   // RemoteSuggestionsProvider implementation.
-  void SetProviderStatusCallback(
-      std::unique_ptr<ProviderStatusCallback> callback) override;
-  void RefetchInTheBackground(
-      std::unique_ptr<FetchStatusCallback> callback) override;
+  void RefetchInTheBackground(const FetchStatusCallback& callback) override;
 
   // TODO(fhorschig): Remove this getter when there is an interface for the
   // fetcher that allows better mocks.
   const RemoteSuggestionsFetcher* suggestions_fetcher_for_debugging()
       const override;
+
+  GURL GetUrlWithFavicon(
+      const ContentSuggestion::ID& suggestion_id) const override;
 
   // ContentSuggestionsProvider implementation.
   CategoryStatus GetCategoryStatus(Category category) override;
@@ -168,18 +168,18 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
       const DismissedSuggestionsCallback& callback) override;
   void ClearDismissedSuggestionsForDebugging(Category category) override;
 
-  // Returns the maximum number of snippets that will be shown at once.
-  static int GetMaxSnippetCountForTesting();
+  // Returns the maximum number of suggestions that will be shown at once.
+  static int GetMaxSuggestionCountForTesting();
 
-  // Available snippets, only for unit tests.
+  // Available suggestions, only for unit tests.
   // TODO(treib): Get rid of this. Tests should use a fake observer instead.
-  const RemoteSuggestion::PtrVector& GetSnippetsForTesting(
+  const RemoteSuggestion::PtrVector& GetSuggestionsForTesting(
       Category category) const {
     return category_contents_.find(category)->second.suggestions;
   }
 
-  // Dismissed snippets, only for unit tests.
-  const RemoteSuggestion::PtrVector& GetDismissedSnippetsForTesting(
+  // Dismissed suggestions, only for unit tests.
+  const RemoteSuggestion::PtrVector& GetDismissedSuggestionsForTesting(
       Category category) const {
     return category_contents_.find(category)->second.dismissed;
   }
@@ -196,21 +196,19 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
  private:
   friend class RemoteSuggestionsProviderImplTest;
 
+  // TODO(jkrcal): Mock the database to trigger the error naturally (or remove
+  // the error state and get rid of the test).
   FRIEND_TEST_ALL_PREFIXES(RemoteSuggestionsProviderImplTest,
-                           CallsProviderStatusCallbackWhenReady);
+                           CallsSchedulerOnError);
+  // TODO(jkrcal): Mock the status service and remove these friend declarations.
   FRIEND_TEST_ALL_PREFIXES(RemoteSuggestionsProviderImplTest,
-                           CallsProviderStatusCallbackOnError);
-  FRIEND_TEST_ALL_PREFIXES(RemoteSuggestionsProviderImplTest,
-                           CallsProviderStatusCallbackWhenDisabled);
-  FRIEND_TEST_ALL_PREFIXES(RemoteSuggestionsProviderImplTest,
-                           ShouldNotCrashWhenCallingEmptyCallback);
+                           CallsSchedulerWhenDisabled);
   FRIEND_TEST_ALL_PREFIXES(RemoteSuggestionsProviderImplTest,
                            DontNotifyIfNotAvailable);
   FRIEND_TEST_ALL_PREFIXES(RemoteSuggestionsProviderImplTest,
-                           RemoveExpiredDismissedContent);
-  FRIEND_TEST_ALL_PREFIXES(RemoteSuggestionsProviderImplTest, StatusChanges);
+                           CallsSchedulerWhenSignedIn);
   FRIEND_TEST_ALL_PREFIXES(RemoteSuggestionsProviderImplTest,
-                           SuggestionsFetchedOnSignInAndSignOut);
+                           CallsSchedulerWhenSignedOut);
 
   // Possible state transitions:
   //       NOT_INITED --------+
@@ -220,6 +218,8 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
   //       \       /          |
   //        v     v           |
   //     ERROR_OCCURRED <-----+
+  // TODO(jkrcal): Do we need to keep the distinction between states DISABLED
+  // and ERROR_OCCURED?
   enum class State {
     // The service has just been created. Can change to states:
     // - DISABLED: After the database is done loading,
@@ -231,7 +231,7 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
     NOT_INITED,
 
     // The service registered observers, timers, etc. and is ready to answer to
-    // queries, fetch snippets... Can change to states:
+    // queries, fetch suggestions... Can change to states:
     // - DISABLED: when the global Chrome state changes, for example after
     //             |OnStateChanged| is called and sync is disabled.
     // - ERROR_OCCURRED: when an unrecoverable error occurred.
@@ -277,9 +277,9 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
     // expire so we won't re-add them to |suggestions| on the next fetch.
     RemoteSuggestion::PtrVector dismissed;
 
-    // Returns a non-dismissed snippet with the given |id_within_category|, or
-    // null if none exist.
-    const RemoteSuggestion* FindSnippet(
+    // Returns a non-dismissed suggestion with the given |id_within_category|,
+    // or null if none exist.
+    const RemoteSuggestion* FindSuggestion(
         const std::string& id_within_category) const;
 
     explicit CategoryContent(const CategoryInfo& info);
@@ -288,21 +288,22 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
     CategoryContent& operator=(CategoryContent&&);
   };
 
-  // Fetches snippets from the server and replaces old snippets by the new ones.
-  // Requests can be marked more important by setting |interactive_request| to
-  // true (such request might circumvent the daily quota for requests, etc.)
-  // Useful for requests triggered by the user. After the fetch finished, the
-  // provided |callback| will be triggered with the status of the fetch.
-  void FetchSnippets(bool interactive_request,
-                     std::unique_ptr<FetchStatusCallback> callback);
+  // Fetches suggestions from the server and replaces old suggestions by the new
+  // ones. Requests can be marked more important by setting
+  // |interactive_request| to true (such request might circumvent the daily
+  // quota for requests, etc.), useful for requests triggered by the user. After
+  // the fetch finished, the provided |callback| will be triggered with the
+  // status of the fetch.
+  void FetchSuggestions(bool interactive_request,
+                        const FetchStatusCallback& callback);
 
-  // Returns the URL of the image of a snippet if it is among the current or
-  // among the archived snippets in the matching category. Returns an empty URL
-  // otherwise.
-  GURL FindSnippetImageUrl(const ContentSuggestion::ID& suggestion_id) const;
+  // Returns the URL of the image of a suggestion if it is among the current or
+  // among the archived suggestions in the matching category. Returns an empty
+  // URL otherwise.
+  GURL FindSuggestionImageUrl(const ContentSuggestion::ID& suggestion_id) const;
 
   // Callbacks for the RemoteSuggestionsDatabase.
-  void OnDatabaseLoaded(RemoteSuggestion::PtrVector snippets);
+  void OnDatabaseLoaded(RemoteSuggestion::PtrVector suggestions);
   void OnDatabaseError();
 
   // Callback for fetch-more requests with the RemoteSuggestionsFetcher.
@@ -313,44 +314,53 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
 
   // Callback for regular fetch requests with the RemoteSuggestionsFetcher.
   void OnFetchFinished(
-      std::unique_ptr<FetchStatusCallback> callback,
+      const FetchStatusCallback& callback,
       bool interactive_request,
       Status status,
       RemoteSuggestionsFetcher::OptionalFetchedCategories fetched_categories);
 
-  // Moves all snippets from |to_archive| into the archive of the |content|.
+  // Moves all suggestions from |to_archive| into the archive of the |content|.
   // Clears |to_archive|. As the archive is a FIFO buffer of limited size, this
   // function will also delete images from the database in case the associated
-  // snippet gets evicted from the archive.
-  void ArchiveSnippets(CategoryContent* content,
-                       RemoteSuggestion::PtrVector* to_archive);
+  // suggestion gets evicted from the archive.
+  void ArchiveSuggestions(CategoryContent* content,
+                          RemoteSuggestion::PtrVector* to_archive);
 
-  // Sanitizes newly fetched snippets -- e.g. adding missing dates and filtering
-  // out incomplete results or dismissed snippets (indicated by |dismissed|).
-  void SanitizeReceivedSnippets(const RemoteSuggestion::PtrVector& dismissed,
-                                RemoteSuggestion::PtrVector* snippets);
+  // Sanitizes newly fetched suggestions -- e.g. adding missing dates and
+  // filtering out incomplete results or dismissed suggestions (indicated by
+  // |dismissed|).
+  void SanitizeReceivedSuggestions(const RemoteSuggestion::PtrVector& dismissed,
+                                   RemoteSuggestion::PtrVector* suggestions);
 
   // Adds newly available suggestions to |content|.
-  void IntegrateSnippets(CategoryContent* content,
-                         RemoteSuggestion::PtrVector new_snippets);
+  void IntegrateSuggestions(CategoryContent* content,
+                            RemoteSuggestion::PtrVector new_suggestions);
 
-  // Dismisses a snippet within a given category content.
-  // Note that this modifies the snippet datastructures of |content|
+  // Dismisses a suggestion within a given category content.
+  // Note that this modifies the suggestion datastructures of |content|
   // invalidating iterators.
   void DismissSuggestionFromCategoryContent(
       CategoryContent* content,
       const std::string& id_within_category);
 
-  // Removes expired dismissed snippets from the service and the database.
-  void ClearExpiredDismissedSnippets();
+  // Removes expired dismissed suggestions from the service and the database.
+  void ClearExpiredDismissedSuggestions();
 
-  // Removes images from the DB that are not referenced from any known snippet.
-  // Needs to iterate the whole snippet database -- so do it often enough to
-  // keep it small but not too often as it still iterates over the file system.
+  // Removes images from the DB that are not referenced from any known
+  // suggestion. Needs to iterate the whole suggestion database -- so do it
+  // often enough to keep it small but not too often as it still iterates over
+  // the file system.
   void ClearOrphanedImages();
 
-  // Clears all stored snippets and updates the observer.
-  void NukeAllSnippets();
+  // Clears suggestions because any history item has been removed.
+  void ClearHistoryDependentState();
+
+  // Clears suggestions for any non-history related reason (e.g., sign-in status
+  // change, etc.).
+  void ClearSuggestions();
+
+  // Clears all stored suggestions and updates the observer.
+  void NukeAllSuggestions();
 
   // Completes the initialization phase of the service, registering the last
   // observers. This is done after construction, once the database is loaded.
@@ -380,8 +390,8 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
   // Do not call directly, use |EnterState| instead.
   void EnterStateError();
 
-  // Converts the cached snippets in the given |category| to content suggestions
-  // and notifies the observer.
+  // Converts the cached suggestions in the given |category| to content
+  // suggestions and notifies the observer.
   void NotifyNewSuggestions(Category category, const CategoryContent& content);
 
   // Updates the internal status for |category| to |category_status_| and
@@ -417,6 +427,9 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
   // Ranker that orders the categories. Not owned.
   CategoryRanker* category_ranker_;
 
+  // Scheduler to inform about scheduling-related events. Not owned.
+  RemoteSuggestionsScheduler* remote_suggestions_scheduler_;
+
   // The suggestions fetcher.
   std::unique_ptr<RemoteSuggestionsFetcher> suggestions_fetcher_;
 
@@ -430,21 +443,19 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
   // The service that provides events and data about the signin and sync state.
   std::unique_ptr<RemoteSuggestionsStatusService> status_service_;
 
-  // Set to true if FetchSnippets is called while the service isn't ready.
+  // Set to true if FetchSuggestions is called while the service isn't ready.
   // The fetch will be executed once the service enters the READY state.
   // TODO(jkrcal): create a struct and have here just one base::Optional<>?
   bool fetch_when_ready_;
 
   // The parameters for the fetch to perform later.
   bool fetch_when_ready_interactive_;
-  std::unique_ptr<FetchStatusCallback> fetch_when_ready_callback_;
+  FetchStatusCallback fetch_when_ready_callback_;
 
-  std::unique_ptr<ProviderStatusCallback> provider_status_callback_;
-
-  // Set to true if NukeAllSnippets is called while the service isn't ready.
-  // The nuke will be executed once the service finishes initialization or
-  // enters the READY state.
-  bool nuke_when_initialized_;
+  // Set to true if ClearHistoryDependentState is called while the service isn't
+  // ready. The nuke will be executed once the service finishes initialization
+  // or enters the READY state.
+  bool clear_history_dependent_state_when_initialized_;
 
   // A clock for getting the time. This allows to inject a clock in tests.
   std::unique_ptr<base::Clock> clock_;

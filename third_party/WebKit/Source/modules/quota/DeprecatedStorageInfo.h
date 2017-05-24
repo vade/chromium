@@ -31,14 +31,14 @@
 #ifndef DeprecatedStorageInfo_h
 #define DeprecatedStorageInfo_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "modules/quota/DeprecatedStorageQuota.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Forward.h"
+#include "platform/wtf/Forward.h"
 
 namespace blink {
 
-class ExecutionContext;
+class ScriptState;
 class StorageErrorCallback;
 class StorageQuotaCallback;
 class StorageUsageCallback;
@@ -54,16 +54,16 @@ class DeprecatedStorageInfo final
     kPersistent,
   };
 
-  static DeprecatedStorageInfo* create() { return new DeprecatedStorageInfo(); }
+  static DeprecatedStorageInfo* Create() { return new DeprecatedStorageInfo(); }
 
-  void queryUsageAndQuota(ExecutionContext*,
-                          int storageType,
+  void queryUsageAndQuota(ScriptState*,
+                          int storage_type,
                           StorageUsageCallback*,
                           StorageErrorCallback*);
 
-  void requestQuota(ExecutionContext*,
-                    int storageType,
-                    unsigned long long newQuotaInBytes,
+  void requestQuota(ScriptState*,
+                    int storage_type,
+                    unsigned long long new_quota_in_bytes,
                     StorageQuotaCallback*,
                     StorageErrorCallback*);
 
@@ -72,10 +72,10 @@ class DeprecatedStorageInfo final
  private:
   DeprecatedStorageInfo();
 
-  DeprecatedStorageQuota* getStorageQuota(int storageType);
+  DeprecatedStorageQuota* GetStorageQuota(int storage_type);
 
-  mutable Member<DeprecatedStorageQuota> m_temporaryStorage;
-  mutable Member<DeprecatedStorageQuota> m_persistentStorage;
+  mutable Member<DeprecatedStorageQuota> temporary_storage_;
+  mutable Member<DeprecatedStorageQuota> persistent_storage_;
 };
 
 }  // namespace blink

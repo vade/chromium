@@ -42,6 +42,7 @@ struct ExtensionMsg_ExternalConnectionInfo;
 struct ExtensionMsg_Loaded_Params;
 struct ExtensionMsg_TabConnectionInfo;
 struct ExtensionMsg_UpdatePermissions_Params;
+struct ExtensionMsg_UpdateDefaultPolicyHostRestrictions_Params;
 
 namespace blink {
 class WebLocalFrame;
@@ -55,7 +56,6 @@ namespace extensions {
 class ContentWatcher;
 class DispatcherDelegate;
 class ExtensionBindingsSystem;
-class RequestSender;
 class ScriptContext;
 class ScriptInjectionManager;
 struct Message;
@@ -113,6 +113,7 @@ class Dispatcher : public content::RenderThreadObserver,
   // cause |render_frame| to become invalid.
   void RunScriptsAtDocumentStart(content::RenderFrame* render_frame);
   void RunScriptsAtDocumentEnd(content::RenderFrame* render_frame);
+  void RunScriptsAtDocumentIdle(content::RenderFrame* render_frame);
 
   void OnExtensionResponse(int request_id,
                            bool success,
@@ -134,11 +135,11 @@ class Dispatcher : public content::RenderThreadObserver,
 
   // Returns a list of (module name, resource id) pairs for the JS modules to
   // add to the source map.
-  static std::vector<std::pair<std::string, int> > GetJsResources();
+  static std::vector<std::pair<const char*, int>> GetJsResources();
   static void RegisterNativeHandlers(ModuleSystem* module_system,
                                      ScriptContext* context,
                                      Dispatcher* dispatcher,
-                                     RequestSender* request_sender,
+                                     ExtensionBindingsSystem* bindings_system,
                                      V8SchemaRegistry* v8_schema_registry);
 
  private:
@@ -183,6 +184,8 @@ class Dispatcher : public content::RenderThreadObserver,
   void OnTransferBlobs(const std::vector<std::string>& blob_uuids);
   void OnUnloaded(const std::string& id);
   void OnUpdatePermissions(const ExtensionMsg_UpdatePermissions_Params& params);
+  void OnUpdateDefaultPolicyHostRestrictions(
+      const ExtensionMsg_UpdateDefaultPolicyHostRestrictions_Params& params);
   void OnUpdateTabSpecificPermissions(const GURL& visible_url,
                                       const std::string& extension_id,
                                       const URLPatternSet& new_hosts,
@@ -220,7 +223,7 @@ class Dispatcher : public content::RenderThreadObserver,
 
   void RegisterNativeHandlers(ModuleSystem* module_system,
                               ScriptContext* context,
-                              RequestSender* request_sender,
+                              ExtensionBindingsSystem* bindings_system,
                               V8SchemaRegistry* v8_schema_registry);
 
   // Updates a web page context with any content capabilities granted by active

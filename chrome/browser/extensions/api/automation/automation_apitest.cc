@@ -33,8 +33,8 @@
 #include "ui/accessibility/tree_generator.h"
 
 #if defined(OS_CHROMEOS)
-#include "ash/common/accelerators/accelerator_controller.h"
-#include "ash/common/wm_shell.h"
+#include "ash/accelerators/accelerator_controller.h"
+#include "ash/shell.h"
 #include "chrome/browser/ui/aura/accessibility/automation_manager_aura.h"
 #endif
 
@@ -65,12 +65,12 @@ class AutomationApiTest : public ExtensionApiTest {
         test_data.AppendASCII("extensions/api_test")
         .AppendASCII(kSitesDir));
     ASSERT_TRUE(ExtensionApiTest::StartEmbeddedTestServer());
-    host_resolver()->AddRule("*", embedded_test_server()->base_url().host());
   }
 
  public:
-  void SetUpInProcessBrowserTestFixture() override {
-    ExtensionApiTest::SetUpInProcessBrowserTestFixture();
+  void SetUpOnMainThread() override {
+    ExtensionApiTest::SetUpOnMainThread();
+    host_resolver()->AddRule("*", "127.0.0.1");
   }
 };
 
@@ -203,12 +203,17 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopFocusIframe) {
 IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopFocusViews) {
   AutomationManagerAura::GetInstance()->Enable(browser()->profile());
   // Trigger the shelf subtree to be computed.
-  ash::WmShell::Get()->accelerator_controller()->PerformActionIfEnabled(
+  ash::Shell::Get()->accelerator_controller()->PerformActionIfEnabled(
       ash::FOCUS_SHELF);
 
   ASSERT_TRUE(
       RunExtensionSubtest("automation/tests/desktop", "focus_views.html"))
       << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, LocationInWebView) {
+  StartEmbeddedTestServer();
+  ASSERT_TRUE(RunPlatformAppTest("automation/tests/webview")) << message_;
 }
 #endif
 
@@ -221,10 +226,15 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopNotRequested) {
 IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopActions) {
   AutomationManagerAura::GetInstance()->Enable(browser()->profile());
   // Trigger the shelf subtree to be computed.
-  ash::WmShell::Get()->accelerator_controller()->PerformActionIfEnabled(
+  ash::Shell::Get()->accelerator_controller()->PerformActionIfEnabled(
       ash::FOCUS_SHELF);
 
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/desktop", "actions.html"))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopHitTest) {
+  ASSERT_TRUE(RunExtensionSubtest("automation/tests/desktop", "hit_test.html"))
       << message_;
 }
 
@@ -277,6 +287,12 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, DocumentSelection) {
   StartEmbeddedTestServer();
   ASSERT_TRUE(
       RunExtensionSubtest("automation/tests/tabs", "document_selection.html"))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, HitTest) {
+  StartEmbeddedTestServer();
+  ASSERT_TRUE(RunExtensionSubtest("automation/tests/tabs", "hit_test.html"))
       << message_;
 }
 

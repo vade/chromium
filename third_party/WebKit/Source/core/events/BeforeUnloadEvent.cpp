@@ -25,17 +25,16 @@
 
 namespace blink {
 
-BeforeUnloadEvent::BeforeUnloadEvent()
-    : Event(EventTypeNames::beforeunload, false, true) {}
+BeforeUnloadEvent::BeforeUnloadEvent() {}
 
 BeforeUnloadEvent::~BeforeUnloadEvent() {}
 
-bool BeforeUnloadEvent::isBeforeUnloadEvent() const {
+bool BeforeUnloadEvent::IsBeforeUnloadEvent() const {
   return true;
 }
 
 DEFINE_TRACE(BeforeUnloadEvent) {
-  Event::trace(visitor);
+  Event::Trace(visitor);
 }
 
 }  // namespace blink

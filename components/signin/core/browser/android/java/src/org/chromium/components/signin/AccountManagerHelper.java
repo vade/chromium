@@ -4,16 +4,13 @@
 
 package org.chromium.components.signin;
 
-import android.Manifest;
 import android.accounts.Account;
 import android.accounts.AuthenticatorDescription;
 import android.app.Activity;
 import android.content.Context;
-import android.content.pm.PackageManager;
 import android.os.AsyncTask;
-import android.os.Process;
+import android.support.annotation.Nullable;
 
-import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Callback;
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
@@ -24,22 +21,20 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
 /**
  * AccountManagerHelper wraps our access of AccountManager in Android.
  *
- * Use the AccountManagerHelper.get(someContext) to instantiate it
+ * Use the {@link #initializeAccountManagerHelper} to instantiate it.
+ * After initialization, instance get be acquired by calling {@link #get}.
  */
 public class AccountManagerHelper {
     private static final String TAG = "Sync_Signin";
-
     private static final Pattern AT_SYMBOL = Pattern.compile("@");
-
     private static final String GMAIL_COM = "gmail.com";
-
     private static final String GOOGLEMAIL_COM = "googlemail.com";
-
     public static final String GOOGLE_ACCOUNT_TYPE = "com.google";
 
     /**
@@ -49,13 +44,9 @@ public class AccountManagerHelper {
     @VisibleForTesting
     public static final String FEATURE_IS_CHILD_ACCOUNT_KEY = "service_uca";
 
-    private static final Object sLock = new Object();
+    private static final AtomicReference<AccountManagerHelper> sInstance = new AtomicReference<>();
 
-    private static AccountManagerHelper sAccountManagerHelper;
-
-    private final AccountManagerDelegate mAccountManager;
-
-    private Context mApplicationContext;
+    private final AccountManagerDelegate mDelegate;
 
     /**
      * A simple callback for getAuthToken.
@@ -78,12 +69,10 @@ public class AccountManagerHelper {
     }
 
     /**
-     * @param context the Android context
-     * @param accountManager the account manager to use as a backend service
+     * @param delegate the account manager to use as a backend service
      */
-    private AccountManagerHelper(Context context, AccountManagerDelegate accountManager) {
-        mApplicationContext = context.getApplicationContext();
-        mAccountManager = accountManager;
+    private AccountManagerHelper(AccountManagerDelegate delegate) {
+        mDelegate = delegate;
     }
 
     /**
@@ -91,32 +80,24 @@ public class AccountManagerHelper {
      * Ensures that the singleton AccountManagerHelper hasn't been created yet.
      * This can be overriden in tests using the overrideAccountManagerHelperForTests method.
      *
-     * @param context the applicationContext is retrieved from the context used as an argument.
      * @param delegate the custom AccountManagerDelegate to use.
      */
-    public static void initializeAccountManagerHelper(
-            Context context, AccountManagerDelegate delegate) {
-        synchronized (sLock) {
-            assert sAccountManagerHelper == null;
-            sAccountManagerHelper = new AccountManagerHelper(context, delegate);
+    public static void initializeAccountManagerHelper(AccountManagerDelegate delegate) {
+        if (!sInstance.compareAndSet(null, new AccountManagerHelper(delegate))) {
+            throw new IllegalStateException("AccountManagerHelper is already initialized!");
         }
     }
 
     /**
-     * A getter method for AccountManagerHelper singleton which also initializes it if not wasn't
-     * already initialized.
+     * Singleton instance getter. Singleton must be initialized before calling this
+     * (by initializeAccountManagerHelper or overrideAccountManagerHelperForTests).
      *
-     * @param context the applicationContext is retrieved from the context used as an argument.
-     * @return a singleton instance of the AccountManagerHelper
+     * @return a singleton instance
      */
-    public static AccountManagerHelper get(Context context) {
-        synchronized (sLock) {
-            if (sAccountManagerHelper == null) {
-                sAccountManagerHelper = new AccountManagerHelper(
-                        context, new SystemAccountManagerDelegate(context));
-            }
-        }
-        return sAccountManagerHelper;
+    public static AccountManagerHelper get() {
+        AccountManagerHelper instance = sInstance.get();
+        assert instance != null : "AccountManagerHelper is not initialized!";
+        return instance;
     }
 
     /**
@@ -130,9 +111,16 @@ public class AccountManagerHelper {
     @VisibleForTesting
     public static void overrideAccountManagerHelperForTests(
             Context context, AccountManagerDelegate delegate) {
-        synchronized (sLock) {
-            sAccountManagerHelper = new AccountManagerHelper(context, delegate);
-        }
+        sInstance.set(new AccountManagerHelper(delegate));
+    }
+
+    /**
+     * Resets custom AccountManagerHelper set with {@link #overrideAccountManagerHelperForTests}.
+     * Only for use in Tests.
+     */
+    @VisibleForTesting
+    public static void resetAccountManagerHelperForTests() {
+        sInstance.set(null);
     }
 
     /**
@@ -148,7 +136,7 @@ public class AccountManagerHelper {
      * See http://crbug.com/517697 for details.
      */
     public List<String> getGoogleAccountNames() {
-        List<String> accountNames = new ArrayList<String>();
+        List<String> accountNames = new ArrayList<>();
         for (Account account : getGoogleAccounts()) {
             accountNames.add(account.name);
         }
@@ -162,7 +150,7 @@ public class AccountManagerHelper {
         getGoogleAccounts(new Callback<Account[]>() {
             @Override
             public void onResult(Account[] accounts) {
-                List<String> accountNames = new ArrayList<String>();
+                List<String> accountNames = new ArrayList<>();
                 for (Account account : accounts) {
                     accountNames.add(account.name);
                 }
@@ -177,14 +165,24 @@ public class AccountManagerHelper {
      * See http://crbug.com/517697 for details.
      */
     public Account[] getGoogleAccounts() {
-        return mAccountManager.getAccountsByType(GOOGLE_ACCOUNT_TYPE);
+        return mDelegate.getAccountsByType(GOOGLE_ACCOUNT_TYPE);
     }
 
     /**
      * Retrieves all Google accounts on the device asynchronously.
      */
-    public void getGoogleAccounts(Callback<Account[]> callback) {
-        mAccountManager.getAccountsByType(GOOGLE_ACCOUNT_TYPE, callback);
+    public void getGoogleAccounts(final Callback<Account[]> callback) {
+        new AsyncTask<Void, Void, Account[]>() {
+            @Override
+            protected Account[] doInBackground(Void... params) {
+                return getGoogleAccounts();
+            }
+
+            @Override
+            protected void onPostExecute(Account[] accounts) {
+                callback.onResult(accounts);
+            }
+        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
     }
 
     /**
@@ -284,7 +282,7 @@ public class AccountManagerHelper {
      * @return Whether or not there is an account authenticator for Google accounts.
      */
     public boolean hasGoogleAccountAuthenticator() {
-        AuthenticatorDescription[] descs = mAccountManager.getAuthenticatorTypes();
+        AuthenticatorDescription[] descs = mDelegate.getAuthenticatorTypes();
         for (AuthenticatorDescription desc : descs) {
             if (GOOGLE_ACCOUNT_TYPE.equals(desc.type)) return true;
         }
@@ -303,7 +301,7 @@ public class AccountManagerHelper {
         ConnectionRetry.runAuthTask(new AuthTask<String>() {
             @Override
             public String run() throws AuthException {
-                return mAccountManager.getAuthToken(account, authTokenType);
+                return mDelegate.getAuthToken(account, authTokenType);
             }
             @Override
             public void onSuccess(String token) {
@@ -314,12 +312,6 @@ public class AccountManagerHelper {
                 callback.tokenUnavailable(isTransientError);
             }
         });
-    }
-
-    public boolean hasGetAccountsPermission() {
-        return ApiCompatibilityUtils.checkPermission(mApplicationContext,
-                       Manifest.permission.GET_ACCOUNTS, Process.myPid(), Process.myUid())
-                == PackageManager.PERMISSION_GRANTED;
     }
 
     /**
@@ -343,7 +335,7 @@ public class AccountManagerHelper {
         ConnectionRetry.runAuthTask(new AuthTask<Boolean>() {
             @Override
             public Boolean run() throws AuthException {
-                mAccountManager.invalidateAuthToken(authToken);
+                mDelegate.invalidateAuthToken(authToken);
                 return true;
             }
             @Override
@@ -356,16 +348,35 @@ public class AccountManagerHelper {
     }
 
     public void checkChildAccount(Account account, Callback<Boolean> callback) {
-        String[] features = {FEATURE_IS_CHILD_ACCOUNT_KEY};
-        mAccountManager.hasFeatures(account, features, callback);
+        hasFeatures(account, new String[] {FEATURE_IS_CHILD_ACCOUNT_KEY}, callback);
+    }
+
+    private boolean hasFeatures(Account account, String[] features) {
+        return mDelegate.hasFeatures(account, features);
+    }
+
+    private void hasFeatures(
+            final Account account, final String[] features, final Callback<Boolean> callback) {
+        new AsyncTask<Void, Void, Boolean>() {
+            @Override
+            public Boolean doInBackground(Void... params) {
+                return hasFeatures(account, features);
+            }
+
+            @Override
+            public void onPostExecute(Boolean value) {
+                callback.onResult(value);
+            }
+        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
     }
 
     /**
      * Asks the user to enter a new password for an account, updating the saved credentials for the
      * account.
      */
-    public void updateCredentials(Account account, Activity activity, Callback<Boolean> callback) {
-        mAccountManager.updateCredentials(account, activity, callback);
+    public void updateCredentials(
+            Account account, Activity activity, @Nullable Callback<Boolean> callback) {
+        mDelegate.updateCredentials(account, activity, callback);
     }
 
     private interface AuthTask<T> {

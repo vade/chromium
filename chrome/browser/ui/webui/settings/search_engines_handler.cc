@@ -4,9 +4,12 @@
 
 #include "chrome/browser/ui/webui/settings/search_engines_handler.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -26,7 +29,6 @@
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_ui.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -195,13 +197,12 @@ SearchEnginesHandler::GetSearchEnginesList() {
 void SearchEnginesHandler::OnModelChanged() {
   AllowJavascript();
   CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("search-engines-changed"),
+                         base::Value("search-engines-changed"),
                          *GetSearchEnginesList());
   // Google Now availability may have changed.
-  CallJavascriptFunction(
-      "cr.webUIListenerCallback",
-      base::StringValue("google-now-availability-changed"),
-      base::FundamentalValue(IsGoogleNowAvailable(profile_)));
+  CallJavascriptFunction("cr.webUIListenerCallback",
+                         base::Value("google-now-availability-changed"),
+                         base::Value(IsGoogleNowAvailable(profile_)));
 }
 
 void SearchEnginesHandler::OnItemsChanged(int start, int length) {
@@ -263,7 +264,7 @@ SearchEnginesHandler::CreateDictionaryForEngine(int index, bool is_default) {
                            !extensions::ExtensionSystem::Get(profile)
                                 ->management_policy()
                                 ->MustRemainEnabled(extension, nullptr));
-      dict->Set("extension", ext_info.release());
+      dict->Set("extension", std::move(ext_info));
     }
   }
   return dict;
@@ -302,8 +303,7 @@ void SearchEnginesHandler::HandleSetDefaultSearchEngine(
   // Hotword status may have changed.
   SendHotwordInfo();
 
-  content::RecordAction(
-      base::UserMetricsAction("Options_SearchEngineSetDefault"));
+  base::RecordAction(base::UserMetricsAction("Options_SearchEngineSetDefault"));
 }
 
 void SearchEnginesHandler::HandleRemoveSearchEngine(
@@ -318,8 +318,7 @@ void SearchEnginesHandler::HandleRemoveSearchEngine(
 
   if (list_controller_.CanRemove(list_controller_.GetTemplateURL(index))) {
     list_controller_.RemoveTemplateURL(index);
-    content::RecordAction(
-        base::UserMetricsAction("Options_SearchEngineRemoved"));
+    base::RecordAction(base::UserMetricsAction("Options_SearchEngineRemoved"));
   }
 }
 
@@ -367,8 +366,7 @@ void SearchEnginesHandler::HandleValidateSearchEngineInput(
   CHECK(args->GetString(1, &field_name));
   CHECK(args->GetString(2, &field_value));
   ResolveJavascriptCallback(
-      *callback_id,
-      base::FundamentalValue(CheckFieldValidity(field_name, field_value)));
+      *callback_id, base::Value(CheckFieldValidity(field_name, field_value)));
 }
 
 bool SearchEnginesHandler::CheckFieldValidity(const std::string& field_name,
@@ -454,8 +452,8 @@ void SearchEnginesHandler::HandleGetGoogleNowAvailability(
   const base::Value* callback_id;
   CHECK(args->Get(0, &callback_id));
   AllowJavascript();
-  ResolveJavascriptCallback(
-      *callback_id, base::FundamentalValue(IsGoogleNowAvailable(profile_)));
+  ResolveJavascriptCallback(*callback_id,
+                            base::Value(IsGoogleNowAvailable(profile_)));
 }
 
 std::unique_ptr<base::DictionaryValue> SearchEnginesHandler::GetHotwordInfo() {
@@ -520,7 +518,7 @@ void SearchEnginesHandler::HotwordInfoComplete(
     ResolveJavascriptCallback(*callback_id, status);
   } else {
     CallJavascriptFunction("cr.webUIListenerCallback",
-                           base::StringValue("hotword-info-update"), status);
+                           base::Value("hotword-info-update"), status);
   }
 }
 

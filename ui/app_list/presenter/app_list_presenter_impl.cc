@@ -4,6 +4,7 @@
 
 #include "ui/app_list/presenter/app_list_presenter_impl.h"
 
+#include "base/metrics/user_metrics.h"
 #include "ui/app_list/app_list_constants.h"
 #include "ui/app_list/app_list_switches.h"
 #include "ui/app_list/pagination_model.h"
@@ -20,12 +21,12 @@ namespace app_list {
 namespace {
 
 // Duration for show/hide animation in milliseconds.
-const int kAnimationDurationMs = 200;
+constexpr int kAnimationDurationMs = 200;
 
 // The maximum shift in pixels when over-scroll happens.
-const int kMaxOverScrollShift = 48;
+constexpr int kMaxOverScrollShift = 48;
 
-ui::Layer* GetLayer(views::Widget* widget) {
+inline ui::Layer* GetLayer(views::Widget* widget) {
   return widget->GetNativeView()->layer();
 }
 
@@ -74,6 +75,7 @@ void AppListPresenterImpl::Show(int64_t display_id) {
     SetView(view);
   }
   presenter_delegate_->OnShown(display_id);
+  base::RecordAction(base::UserMetricsAction("Launcher_Show"));
 }
 
 void AppListPresenterImpl::Dismiss() {
@@ -98,6 +100,7 @@ void AppListPresenterImpl::Dismiss() {
 
   presenter_delegate_->OnDismissed();
   ScheduleAnimation();
+  base::RecordAction(base::UserMetricsAction("Launcher_Dismiss"));
 }
 
 void AppListPresenterImpl::ToggleAppList(int64_t display_id) {
@@ -164,16 +167,14 @@ void AppListPresenterImpl::ScheduleAnimation() {
   ui::Layer* layer = GetLayer(widget);
   layer->GetAnimator()->StopAnimating();
 
-  gfx::Rect target_bounds;
+  gfx::Rect target_bounds = widget->GetWindowBoundsInScreen();
   gfx::Vector2d offset = presenter_delegate_->GetVisibilityAnimationOffset(
       widget->GetNativeView()->GetRootWindow());
   if (is_visible_) {
-    target_bounds = widget->GetWindowBoundsInScreen();
     gfx::Rect start_bounds = gfx::Rect(target_bounds);
     start_bounds.Offset(offset);
     widget->SetBounds(start_bounds);
   } else {
-    target_bounds = widget->GetWindowBoundsInScreen();
     target_bounds.Offset(offset);
   }
 
@@ -191,7 +192,7 @@ int64_t AppListPresenterImpl::GetDisplayId() {
   if (!widget)
     return display::kInvalidDisplayId;
   return display::Screen::GetScreen()
-      ->GetDisplayNearestWindow(widget->GetNativeView())
+      ->GetDisplayNearestView(widget->GetNativeView())
       .id();
 }
 

@@ -36,6 +36,8 @@ namespace {
   }
 
 // This enum backs an UMA histogram, so it should be treated as append-only.
+// A Java counterpart will be generated for this enum.
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.tab
 enum SadTabEvent {
   DISPLAYED,
   BUTTON_CLICKED,
@@ -53,7 +55,7 @@ void RecordEvent(bool feedback, SadTabEvent event) {
   }
 }
 
-const char kCategoryTagCrash[] = "Crash";
+constexpr char kCategoryTagCrash[] = "Crash";
 
 bool ShouldShowFeedbackButton() {
 #if defined(GOOGLE_CHROME_BUILD)
@@ -158,9 +160,10 @@ void SadTab::PerformAction(SadTab::Action action) {
     case Action::BUTTON:
       RecordEvent(show_feedback_button_, SadTabEvent::BUTTON_CLICKED);
       if (show_feedback_button_) {
-        chrome::ShowFeedbackPage(
-            chrome::FindBrowserWithWebContents(web_contents_),
-            l10n_util::GetStringUTF8(kind_ == chrome::SAD_TAB_KIND_CRASHED
+        ShowFeedbackPage(
+            FindBrowserWithWebContents(web_contents_),
+            kFeedbackSourceSadTabPage,
+            l10n_util::GetStringUTF8(kind_ == SAD_TAB_KIND_CRASHED
                                          ? IDS_CRASHED_TAB_FEEDBACK_MESSAGE
                                          : IDS_KILLED_TAB_FEEDBACK_MESSAGE),
             std::string(kCategoryTagCrash));

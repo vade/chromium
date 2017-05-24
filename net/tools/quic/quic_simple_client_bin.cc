@@ -47,6 +47,8 @@
 #include "net/base/net_errors.h"
 #include "net/base/privacy_mode.h"
 #include "net/cert/cert_verifier.h"
+#include "net/cert/ct_known_logs.h"
+#include "net/cert/ct_log_verifier.h"
 #include "net/cert/multi_log_ct_verifier.h"
 #include "net/http/transport_security_state.h"
 #include "net/quic/chromium/crypto/proof_verifier_chromium.h"
@@ -55,20 +57,21 @@
 #include "net/quic/core/quic_server_id.h"
 #include "net/quic/platform/api/quic_socket_address.h"
 #include "net/quic/platform/api/quic_str_cat.h"
+#include "net/quic/platform/api/quic_string_piece.h"
 #include "net/quic/platform/api/quic_text_utils.h"
-#include "net/spdy/spdy_header_block.h"
-#include "net/spdy/spdy_http_utils.h"
+#include "net/spdy/chromium/spdy_http_utils.h"
+#include "net/spdy/core/spdy_header_block.h"
 #include "net/tools/quic/quic_simple_client.h"
 #include "net/tools/quic/synchronous_host_resolver.h"
 #include "url/gurl.h"
 
-using base::StringPiece;
 using net::CertVerifier;
 using net::CTPolicyEnforcer;
 using net::CTVerifier;
 using net::MultiLogCTVerifier;
 using net::ProofVerifier;
 using net::ProofVerifierChromium;
+using net::QuicStringPiece;
 using net::QuicTextUtils;
 using net::SpdyHeaderBlock;
 using net::TransportSecurityState;
@@ -109,7 +112,7 @@ class FakeProofVerifier : public ProofVerifier {
       const uint16_t port,
       const string& server_config,
       net::QuicVersion quic_version,
-      StringPiece chlo_hash,
+      QuicStringPiece chlo_hash,
       const std::vector<string>& certs,
       const string& cert_sct,
       const string& signature,
@@ -258,7 +261,8 @@ int main(int argc, char* argv[]) {
   std::unique_ptr<CertVerifier> cert_verifier(CertVerifier::CreateDefault());
   std::unique_ptr<TransportSecurityState> transport_security_state(
       new TransportSecurityState);
-  std::unique_ptr<CTVerifier> ct_verifier(new MultiLogCTVerifier());
+  std::unique_ptr<MultiLogCTVerifier> ct_verifier(new MultiLogCTVerifier());
+  ct_verifier->AddLogs(net::ct::CreateLogVerifiersForKnownLogs());
   std::unique_ptr<CTPolicyEnforcer> ct_policy_enforcer(new CTPolicyEnforcer());
   std::unique_ptr<ProofVerifier> proof_verifier;
   if (line->HasSwitch("disable-certificate-verification")) {
@@ -305,12 +309,12 @@ int main(int argc, char* argv[]) {
   header_block[":path"] = url.path();
 
   // Append any additional headers supplied on the command line.
-  for (StringPiece sp : QuicTextUtils::Split(FLAGS_headers, ';')) {
+  for (QuicStringPiece sp : QuicTextUtils::Split(FLAGS_headers, ';')) {
     QuicTextUtils::RemoveLeadingAndTrailingWhitespace(&sp);
     if (sp.empty()) {
       continue;
     }
-    std::vector<StringPiece> kv = QuicTextUtils::Split(sp, ':');
+    std::vector<QuicStringPiece> kv = QuicTextUtils::Split(sp, ':');
     QuicTextUtils::RemoveLeadingAndTrailingWhitespace(&kv[0]);
     QuicTextUtils::RemoveLeadingAndTrailingWhitespace(&kv[1]);
     header_block[kv[0]] = kv[1];

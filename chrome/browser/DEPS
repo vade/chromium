@@ -1,11 +1,12 @@
 include_rules = [
   "+apps",
   "+ash",
+  "+cc/paint",
   "+chrome/app",
   "+chrome/chrome_watcher",
   "+chrome/grit",
   "+chrome/install_static",
-  "+chrome/installer",
+  "+chrome/installer/util",
   "+chrome_elf/blacklist",
   "+chrome_elf/chrome_elf_constants.h",
   "+chrome_elf/dll_hash",
@@ -14,13 +15,13 @@ include_rules = [
   "+content/public/browser",
   "+courgette",
   "+device/base",
-  "+device/battery",
   "+device/bluetooth",
   "+device/geolocation",
   "+device/hid",
   "+device/media_transfer_protocol",
   "+device/power_save_blocker",
   "+device/usb",
+  "+device/vr/features/features.h",
   "+extensions/browser",
   "+extensions/common",
   "+extensions/components/javascript_dialog_extensions_client",
@@ -33,6 +34,7 @@ include_rules = [
   "+google_update",
   "+installer_util_strings",  # For generated headers
   "+jni",
+  "+mash/public/interfaces",
   "+media/audio", # For media audio hang monitor.
   "+media/base",  # For media switches
   "+media/cdm/cdm_paths.h",
@@ -44,18 +46,20 @@ include_rules = [
   "+ppapi/shared_impl",
   "+rlz",
   "+sandbox/win/src",  # The path doesn't say it, but this is the Windows sandbox.
-  "+services/image_decoder/public/cpp",
-  "+services/image_decoder/public/interfaces",
+  "+services/data_decoder/public/cpp",
+  "+services/device/public/cpp/device_features.h",
+  "+services/identity/public/interfaces",
+  "+services/preferences/public/cpp",
   "+services/preferences/public/interfaces",
+  "+services/resource_coordinator/public/cpp",
+  "+services/resource_coordinator/public/interfaces/memory",
   "+services/service_manager",
   "+services/shape_detection/public/interfaces",
   "+services/ui/public",
   "+skia/ext",
-  "+syzygy/kasko",
   "+third_party/boringssl/src/include",
   "+third_party/crashpad",
   "+third_party/cros_system_api",
-  "+third_party/kasko",
 
   # chrome only needs switches from cc. All usage of the compositor is from
   # content. Definitely don't include generic stuff from cc/base here, if this
@@ -71,7 +75,14 @@ include_rules = [
   "-chrome/browser/ui/views",
   "+chrome/browser/ui/views/chrome_browser_main_extra_parts_views.h",
   "+chrome/browser/ui/views/chrome_browser_main_extra_parts_views_linux.h",
+  "+chrome/browser/ui/views/extensions/request_file_system_dialog_view.h",
+  "+chrome/browser/ui/views/try_chrome_dialog_view.h",
   "+chrome/browser/ui/views/ash/chrome_browser_main_extra_parts_ash.h",
+
+  # Code in chrome should not use ash::SessionStateDelegate and friends.
+  # Instead, use SessionManager/UserManager/SessionControllerClient directly
+  # since they are part of chrome.
+  "-ash/session",
 
   # Explicitly disallow using SyncMessageFilter to prevent browser from
   # sending synchronous IPC messages on non-UI threads.
@@ -95,7 +106,9 @@ include_rules = [
   # No inclusion of WebKit from the browser, other than strictly enum/POD,
   # header-only types, and some selected common code.
   "-third_party/WebKit",
+  "+third_party/WebKit/public/platform/WebCache.h",
   "+third_party/WebKit/public/platform/WebDisplayMode.h",
+  "+third_party/WebKit/public/platform/WebFeaturePolicyFeature.h",
   "+third_party/WebKit/public/platform/WebLoadingBehaviorFlag.h",
   "+third_party/WebKit/public/platform/WebGestureEvent.h",
   "+third_party/WebKit/public/platform/WebInputEvent.h",
@@ -106,19 +119,19 @@ include_rules = [
   "+third_party/WebKit/public/platform/modules/app_banner/app_banner.mojom.h",
   "+third_party/WebKit/public/platform/modules/budget_service/budget_service.mojom.h",
   "+third_party/WebKit/public/platform/modules/installation/installation.mojom.h",
+  "+third_party/WebKit/public/platform/modules/installedapp/installed_app_provider.mojom.h",
   "+third_party/WebKit/public/platform/modules/notifications/WebNotificationConstants.h",
+  "+third_party/WebKit/public/platform/modules/permissions/permission_status.mojom.h",
   "+third_party/WebKit/public/platform/modules/push_messaging/WebPushPermissionStatus.h",
   "+third_party/WebKit/public/platform/modules/remoteplayback/WebRemotePlaybackAvailability.h",
   "+third_party/WebKit/public/platform/modules/screen_orientation/WebScreenOrientationLockType.h",
-  "+third_party/WebKit/public/platform/modules/permissions/permission_status.mojom.h",
   "+third_party/WebKit/public/platform/modules/webshare/webshare.mojom.h",
   "+third_party/WebKit/public/platform/site_engagement.mojom.h",
   "+third_party/WebKit/public/public_features.h",
-  "+third_party/WebKit/public/web/WebCache.h",
   "+third_party/WebKit/public/web/WebContextMenuData.h",
   "+third_party/WebKit/public/web/WebFindOptions.h",
   "+third_party/WebKit/public/web/WebMediaPlayerAction.h",
   "+third_party/WebKit/public/web/WebPluginAction.h",
   "+third_party/WebKit/public/web/WebTextDirection.h",
-  "+third_party/WebKit/public/web/WebWindowFeatures.h",
+  "+third_party/WebKit/public/web/window_features.mojom.h",
 ]

@@ -33,8 +33,8 @@ class NET_EXPORT_PRIVATE QuicChromiumPacketReader {
     virtual void OnReadError(int result,
                              const DatagramClientSocket* socket) = 0;
     virtual bool OnPacket(const QuicReceivedPacket& packet,
-                          IPEndPoint local_address,
-                          IPEndPoint peer_address) = 0;
+                          const QuicSocketAddress& local_address,
+                          const QuicSocketAddress& peer_address) = 0;
   };
 
   QuicChromiumPacketReader(DatagramClientSocket* socket,
@@ -48,6 +48,9 @@ class NET_EXPORT_PRIVATE QuicChromiumPacketReader {
   // Causes the QuicConnectionHelper to start reading from the socket
   // and passing the data along to the QuicConnection.
   void StartReading();
+
+  // Returns the estimate of dynamically allocated memory in bytes.
+  size_t EstimateMemoryUsage() const;
 
  private:
   // A completion callback invoked when a read completes.

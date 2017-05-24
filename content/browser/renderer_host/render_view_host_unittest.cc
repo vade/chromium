@@ -88,8 +88,8 @@ TEST_F(RenderViewHostTest, DontGrantBindingsToSharedProcess) {
   std::unique_ptr<TestWebContents> new_web_contents(
       TestWebContents::Create(browser_context(), rvh()->GetSiteInstance()));
 
-  rvh()->AllowBindings(BINDINGS_POLICY_WEB_UI);
-  EXPECT_FALSE(rvh()->GetEnabledBindings() & BINDINGS_POLICY_WEB_UI);
+  main_rfh()->AllowBindings(BINDINGS_POLICY_WEB_UI);
+  EXPECT_FALSE(main_rfh()->GetEnabledBindings() & BINDINGS_POLICY_WEB_UI);
 }
 
 class MockDraggingRenderViewHostDelegateView
@@ -177,8 +177,9 @@ TEST_F(RenderViewHostTest, DragEnteredFileURLsStillBlocked) {
   // TODO(paulmeyer): These will need to target the correct specific
   // RenderWidgetHost to work with OOPIFs. See crbug.com/647249.
   rvh()->GetWidget()->FilterDropData(&dropped_data);
-  rvh()->GetWidget()->DragTargetDragEnter(
-      dropped_data, client_point, screen_point, blink::WebDragOperationNone, 0);
+  rvh()->GetWidget()->DragTargetDragEnter(dropped_data, client_point,
+                                          screen_point,
+                                          blink::kWebDragOperationNone, 0);
 
   int id = process()->GetID();
   ChildProcessSecurityPolicyImpl* policy =

@@ -10,7 +10,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/test/scoped_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/aura/mus/property_converter.h"
 #include "ui/aura/mus/window_manager_delegate.h"
@@ -78,7 +78,7 @@ class AuraTestBase : public testing::Test,
 
   Window* root_window() { return helper_->root_window(); }
   WindowTreeHost* host() { return helper_->host(); }
-  ui::EventProcessor* event_processor() { return helper_->event_processor(); }
+  ui::EventSink* event_sink() { return helper_->event_sink(); }
   TestScreen* test_screen() { return helper_->test_screen(); }
 
   TestWindowTree* window_tree() { return helper_->window_tree(); }
@@ -97,23 +97,35 @@ class AuraTestBase : public testing::Test,
 
   // WindowManagerDelegate:
   void SetWindowManagerClient(WindowManagerClient* client) override;
-  bool OnWmSetBounds(Window* window, gfx::Rect* bounds) override;
+  void OnWmConnected() override;
+  void OnWmSetBounds(Window* window, const gfx::Rect& bounds) override;
   bool OnWmSetProperty(
       Window* window,
       const std::string& name,
       std::unique_ptr<std::vector<uint8_t>>* new_data) override;
+  void OnWmSetModalType(Window* window, ui::ModalType type) override;
+  void OnWmSetCanFocus(Window* window, bool can_focus) override;
   Window* OnWmCreateTopLevelWindow(
       ui::mojom::WindowType window_type,
       std::map<std::string, std::vector<uint8_t>>* properties) override;
   void OnWmClientJankinessChanged(const std::set<Window*>& client_windows,
                                   bool janky) override;
+  void OnWmBuildDragImage(const gfx::Point& cursor_location,
+                          const SkBitmap& drag_image,
+                          const gfx::Vector2d& drag_image_offset,
+                          ui::mojom::PointerKind source) override {}
+  void OnWmMoveDragImage(const gfx::Point& cursor_location) override {}
+  void OnWmDestroyDragImage() override {}
   void OnWmWillCreateDisplay(const display::Display& display) override;
   void OnWmNewDisplay(std::unique_ptr<WindowTreeHostMus> window_tree_host,
                       const display::Display& display) override;
   void OnWmDisplayRemoved(WindowTreeHostMus* window_tree_host) override;
   void OnWmDisplayModified(const display::Display& display) override;
-  ui::mojom::EventResult OnAccelerator(uint32_t id,
-                                       const ui::Event& event) override;
+  ui::mojom::EventResult OnAccelerator(
+      uint32_t id,
+      const ui::Event& event,
+      std::unordered_map<std::string, std::vector<uint8_t>>* properties)
+      override;
   void OnWmPerformMoveLoop(Window* window,
                            ui::mojom::MoveLoopSource source,
                            const gfx::Point& cursor_location,
@@ -125,10 +137,11 @@ class AuraTestBase : public testing::Test,
       const std::vector<gfx::Rect>& additional_client_areas) override;
   bool IsWindowActive(aura::Window* window) override;
   void OnWmDeactivateWindow(Window* window) override;
-  client::CaptureClient* GetCaptureClient() override;
   PropertyConverter* GetPropertyConverter() override;
 
  private:
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
+
   // Only used for mus. Both are are initialized to this, but may be reset.
   WindowManagerDelegate* window_manager_delegate_;
   WindowTreeClientDelegate* window_tree_client_delegate_;
@@ -136,7 +149,6 @@ class AuraTestBase : public testing::Test,
   bool use_mus_ = false;
   bool setup_called_ = false;
   bool teardown_called_ = false;
-  base::MessageLoopForUI message_loop_;
   PropertyConverter property_converter_;
   std::unique_ptr<AuraTestHelper> helper_;
   std::vector<std::unique_ptr<WindowTreeHostMus>> window_tree_hosts_;
@@ -158,6 +170,18 @@ class AuraTestBaseWithType : public AuraTestBase,
   bool setup_called_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(AuraTestBaseWithType);
+};
+
+class AuraTestBaseMus : public AuraTestBase {
+ public:
+  AuraTestBaseMus();
+  ~AuraTestBaseMus() override;
+
+  // AuraTestBase:
+  void SetUp() override;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(AuraTestBaseMus);
 };
 
 }  // namespace test

@@ -666,11 +666,10 @@ LayerViewer.Layers3DView = class extends UI.VBox {
    * @return {!Common.Setting}
    */
   _createVisibilitySetting(caption, name, value, toolbar) {
-    var checkbox = new UI.ToolbarCheckbox(Common.UIString(caption));
-    toolbar.appendToolbarItem(checkbox);
     var setting = Common.settings.createSetting(name, value);
-    UI.SettingsUI.bindCheckbox(checkbox.inputElement, setting);
+    setting.setTitle(Common.UIString(caption));
     setting.addChangeListener(this._update, this);
+    toolbar.appendToolbarItem(new UI.ToolbarSettingCheckbox(setting));
     return setting;
   }
 
@@ -981,7 +980,7 @@ LayerViewer.LayerTextureManager = class {
   forceUpdate() {
     this._queue.forEach(layer => this._updateLayer(layer));
     this._queue = [];
-    this._throttler.flush();
+    this._update();
   }
 
   /**

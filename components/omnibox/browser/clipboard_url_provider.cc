@@ -4,14 +4,17 @@
 
 #include "components/omnibox/browser/clipboard_url_provider.h"
 
+#include "base/feature_list.h"
 #include "base/logging.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_provider_client.h"
+#include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/omnibox/browser/verbatim_match.h"
 #include "components/open_from_clipboard/clipboard_recent_content.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/url_formatter.h"
-#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 ClipboardURLProvider::ClipboardURLProvider(
@@ -46,10 +49,19 @@ void ClipboardURLProvider::Start(const AutocompleteInput& input,
   // If the omnibox is not empty, add a default match.
   // This match will be opened when the user presses "Enter".
   if (!input.text().empty()) {
-    AutocompleteMatch verbatim_match = VerbatimMatchForURL(
-        client_, input, input.current_url(), history_url_provider_, -1);
+    const base::string16 description =
+        (base::FeatureList::IsEnabled(omnibox::kDisplayTitleForCurrentUrl))
+            ? input.current_title()
+            : base::string16();
+    AutocompleteMatch verbatim_match =
+        VerbatimMatchForURL(client_, input, input.current_url(), description,
+                            history_url_provider_, -1);
     matches_.push_back(verbatim_match);
   }
+  UMA_HISTOGRAM_BOOLEAN("Omnibox.ClipboardSuggestionShownWithCurrentURL",
+                        !matches_.empty());
+  UMA_HISTOGRAM_LONG_TIMES_100("Omnibox.ClipboardSuggestionShownAge",
+                               clipboard_content_->GetClipboardContentAge());
 
   // Add the clipboard match. The relevance is 800 to beat ZeroSuggest results.
   AutocompleteMatch match(this, 800, false, AutocompleteMatchType::CLIPBOARD);

@@ -25,7 +25,7 @@ namespace data_use_measurement {
 // tracked by exactly one DataUseRecorder.
 class DataUseRecorder {
  public:
-  DataUseRecorder();
+  explicit DataUseRecorder(DataUse::TrafficType traffic_type);
   virtual ~DataUseRecorder();
 
   // Returns the actual data used by the entity being tracked.
@@ -42,6 +42,12 @@ class DataUseRecorder {
   bool is_visible() const { return is_visible_; }
 
   void set_is_visible(bool is_visible) { is_visible_ = is_visible; }
+
+  uint64_t page_transition() const { return page_transition_; }
+
+  void set_page_transition(uint64_t page_transition) {
+    page_transition_ = page_transition;
+  }
 
   // Returns whether data use is complete and no additional data can be used
   // by the entity tracked by this recorder. For example,
@@ -97,6 +103,9 @@ class DataUseRecorder {
 
   // Whether the entity that owns this data use is currently visible.
   bool is_visible_;
+
+  // ui::PageTransition casted as a uint64_t.
+  uint64_t page_transition_;
 
   DISALLOW_COPY_AND_ASSIGN(DataUseRecorder);
 };

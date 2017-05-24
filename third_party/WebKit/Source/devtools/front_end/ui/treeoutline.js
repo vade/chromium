@@ -30,13 +30,11 @@
  * @unrestricted
  */
 UI.TreeOutline = class extends Common.Object {
-  /**
-   * @param {boolean=} nonFocusable
-   */
-  constructor(nonFocusable) {
+  constructor() {
     super();
     this._createRootElement();
 
+    /** @type {?UI.TreeElement} */
     this.selectedTreeElement = null;
     this.expandTreeElementsWhenArrowing = false;
     /** @type {?function(!UI.TreeElement, !UI.TreeElement):number} */
@@ -44,26 +42,17 @@ UI.TreeOutline = class extends Common.Object {
 
     this.contentElement = this._rootElement._childrenListNode;
     this.contentElement.addEventListener('keydown', this._treeKeyDown.bind(this), true);
-    this.contentElement.addEventListener('focus', setFocused.bind(this, true), false);
-    this.contentElement.addEventListener('blur', setFocused.bind(this, false), false);
 
-    this.setFocusable(!nonFocusable);
-
+    this._focusable = true;
+    this.setFocusable(this._focusable);
+    if (this._focusable)
+      this.contentElement.setAttribute('tabIndex', -1);
     this.element = this.contentElement;
+    UI.ARIAUtils.markAsTree(this.element);
 
     // Adjust to allow computing margin-left for the selection element.
     // Check the padding-left for the li element for correct value.
     this._paddingSize = 0;
-
-    /**
-     * @param {boolean} isFocused
-     * @this {UI.TreeOutline}
-     */
-    function setFocused(isFocused) {
-      this._focused = isFocused;
-      if (this.selectedTreeElement)
-        this.selectedTreeElement._setFocused(this._focused);
-    }
   }
 
   _createRootElement() {
@@ -150,14 +139,24 @@ UI.TreeOutline = class extends Common.Object {
    * @param {boolean} focusable
    */
   setFocusable(focusable) {
-    if (focusable)
-      this.contentElement.setAttribute('tabIndex', 0);
-    else
+    if (focusable) {
+      this._focusable = true;
+      this.contentElement.setAttribute('tabIndex', -1);
+      if (this.selectedTreeElement)
+        this.selectedTreeElement._setFocusable(true);
+    } else {
+      this._focusable = false;
       this.contentElement.removeAttribute('tabIndex');
+      if (this.selectedTreeElement)
+        this.selectedTreeElement._setFocusable(false);
+    }
   }
 
   focus() {
-    this.contentElement.focus();
+    if (this.selectedTreeElement)
+      this.selectedTreeElement.listItemElement.focus();
+    else
+      this.contentElement.focus();
   }
 
   /**
@@ -223,10 +222,8 @@ UI.TreeOutline = class extends Common.Object {
    * @param {!Event} event
    */
   _treeKeyDown(event) {
-    if (event.target !== this.contentElement)
-      return;
-
-    if (!this.selectedTreeElement || event.shiftKey || event.metaKey || event.ctrlKey)
+    if (!this.selectedTreeElement || event.target !== this.selectedTreeElement.listItemElement || event.shiftKey ||
+        event.metaKey || event.ctrlKey)
       return;
 
     var handled = false;
@@ -329,6 +326,8 @@ UI.TreeElement = class {
     this.parent = null;
     this.previousSibling = null;
     this.nextSibling = null;
+    this._boundOnFocus = this._onFocus.bind(this);
+    this._boundOnBlur = this._onBlur.bind(this);
 
     this._listItemNode = createElement('li');
     this._titleElement = this._listItemNode.createChild('span', 'tree-element-title');
@@ -338,10 +337,12 @@ UI.TreeElement = class {
     this._listItemNode.addEventListener('mousedown', this._handleMouseDown.bind(this), false);
     this._listItemNode.addEventListener('click', this._treeElementToggled.bind(this), false);
     this._listItemNode.addEventListener('dblclick', this._handleDoubleClick.bind(this), false);
+    UI.ARIAUtils.markAsTreeitem(this._listItemNode);
 
     this._childrenListNode = createElement('ol');
     this._childrenListNode.parentTreeElement = this;
     this._childrenListNode.classList.add('children');
+    UI.ARIAUtils.markAsGroup(this._childrenListNode);
 
     this._hidden = false;
     this._selectable = true;
@@ -611,8 +612,6 @@ UI.TreeElement = class {
     }
 
     this._listItemNode.removeChildren();
-    if (this._iconElement)
-      this._listItemNode.appendChild(this._iconElement);
     if (this._leadingIconsElement)
       this._listItemNode.appendChild(this._leadingIconsElement);
     this._listItemNode.appendChild(this._titleElement);
@@ -637,15 +636,7 @@ UI.TreeElement = class {
    */
   startEditingTitle(editingConfig) {
     UI.InplaceEditor.startEditing(this._titleElement, editingConfig);
-    this.treeOutline._shadowRoot.getSelection().setBaseAndExtent(this._titleElement, 0, this._titleElement, 1);
-  }
-
-  createIcon() {
-    if (!this._iconElement) {
-      this._iconElement = createElementWithClass('div', 'icon');
-      this._listItemNode.insertBefore(this._iconElement, this._listItemNode.firstChild);
-      this._ensureSelection();
-    }
+    this.treeOutline._shadowRoot.getSelection().selectAllChildren(this._titleElement);
   }
 
   /**
@@ -682,13 +673,6 @@ UI.TreeElement = class {
       this._trailingIconsElement.appendChild(icon);
   }
 
-  /**
-   * @param {boolean} focused
-   */
-  _setFocused(focused) {
-    this._focused = focused;
-    this._listItemNode.classList.toggle('force-white-icons', focused);
-  }
 
   /**
    * @return {string}
@@ -724,8 +708,12 @@ UI.TreeElement = class {
     this._expandable = expandable;
 
     this._listItemNode.classList.toggle('parent', expandable);
-    if (!expandable)
+    if (!expandable) {
       this.collapse();
+      UI.ARIAUtils.unsetExpanded(this._listItemNode);
+    } else {
+      UI.ARIAUtils.setExpanded(this._listItemNode, false);
+    }
   }
 
   /**
@@ -857,6 +845,7 @@ UI.TreeElement = class {
       return;
     this._listItemNode.classList.remove('expanded');
     this._childrenListNode.classList.remove('expanded');
+    UI.ARIAUtils.setExpanded(this._listItemNode, false);
     this.expanded = false;
     this.oncollapse();
     if (this.treeOutline)
@@ -885,6 +874,7 @@ UI.TreeElement = class {
     this._populateIfNeeded();
     this._listItemNode.classList.add('expanded');
     this._childrenListNode.classList.add('expanded');
+    UI.ARIAUtils.setExpanded(this._listItemNode, true);
 
     if (this.treeOutline) {
       this.onexpand();
@@ -1028,17 +1018,38 @@ UI.TreeElement = class {
 
     this.selected = true;
 
-    if (!omitFocus)
-      this.treeOutline.focus();
-
-    // Focusing on another node may detach "this" from tree.
-    if (!this.treeOutline)
-      return false;
     this.treeOutline.selectedTreeElement = this;
+    if (this.treeOutline._focusable)
+      this._setFocusable(true);
+    if (!omitFocus || this.treeOutline.contentElement.hasFocus())
+      this.listItemElement.focus();
+
     this._listItemNode.classList.add('selected');
-    this._setFocused(this.treeOutline._focused);
     this.treeOutline.dispatchEventToListeners(UI.TreeOutline.Events.ElementSelected, this);
     return this.onselect(selectedByUser);
+  }
+
+  /**
+   * @param {boolean} focusable
+   */
+  _setFocusable(focusable) {
+    if (focusable) {
+      this._listItemNode.setAttribute('tabIndex', 0);
+      this._listItemNode.addEventListener('focus', this._boundOnFocus, false);
+      this._listItemNode.addEventListener('blur', this._boundOnBlur, false);
+    } else {
+      this._listItemNode.removeAttribute('tabIndex');
+      this._listItemNode.removeEventListener('focus', this._boundOnFocus, false);
+      this._listItemNode.removeEventListener('blur', this._boundOnBlur, false);
+    }
+  }
+
+  _onFocus() {
+    this._listItemNode.classList.add('force-white-icons');
+  }
+
+  _onBlur() {
+    this._listItemNode.classList.remove('force-white-icons');
   }
 
   /**
@@ -1049,17 +1060,17 @@ UI.TreeElement = class {
     this.select(omitFocus);
   }
 
-  /**
-   * @param {boolean=} supressOnDeselect
-   */
-  deselect(supressOnDeselect) {
-    if (!this.treeOutline || this.treeOutline.selectedTreeElement !== this || !this.selected)
-      return;
-
+  deselect() {
+    var hadFocus = this._listItemNode.hasFocus();
     this.selected = false;
-    this.treeOutline.selectedTreeElement = null;
     this._listItemNode.classList.remove('selected');
-    this._setFocused(false);
+    this._setFocusable(false);
+
+    if (this.treeOutline && this.treeOutline.selectedTreeElement === this) {
+      this.treeOutline.selectedTreeElement = null;
+      if (hadFocus)
+        this.treeOutline.focus();
+    }
   }
 
   _populateIfNeeded() {
@@ -1211,3 +1222,12 @@ UI.TreeElement = class {
 
 /** @const */
 UI.TreeElement._ArrowToggleWidth = 10;
+
+(function() {
+  var img = new Image();
+  if (window.devicePixelRatio > 1)
+    img.src = 'Images/treeoutlineTriangles_2x.png';
+  else
+    img.src = 'Images/treeoutlineTriangles.png';
+  UI.TreeElement._imagePreload = img;
+})();

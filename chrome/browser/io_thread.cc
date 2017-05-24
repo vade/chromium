@@ -20,15 +20,15 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread.h"
-#include "base/threading/worker_pool.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
@@ -62,6 +62,7 @@
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
+#include "content/public/browser/network_quality_observer_factory.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/user_agent.h"
@@ -91,7 +92,7 @@
 #include "net/http/http_server_properties_impl.h"
 #include "net/net_features.h"
 #include "net/nqe/external_estimate_provider.h"
-#include "net/nqe/network_quality_estimator.h"
+#include "net/nqe/network_quality_estimator_params.h"
 #include "net/proxy/proxy_config_service.h"
 #include "net/proxy/proxy_script_fetcher_impl.h"
 #include "net/proxy/proxy_service.h"
@@ -108,6 +109,7 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "net/url_request/url_request_context_storage.h"
 #include "net/url_request/url_request_job_factory_impl.h"
 #include "url/url_constants.h"
 
@@ -131,6 +133,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/net/cert_verify_proc_chromeos.h"
+#include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chromeos/network/host_resolver_impl_chromeos.h"
 #endif
 
@@ -196,13 +199,19 @@ class SystemURLRequestContext : public net::URLRequestContext {
 #endif
   }
 
- private:
   ~SystemURLRequestContext() override {
     AssertNoURLRequests();
 #if defined(USE_NSS_CERTS)
     net::SetURLRequestContextForNSSHttpIO(NULL);
 #endif
+
+#if defined(OS_ANDROID)
+    net::CertVerifyProcAndroid::ShutdownCertNetFetcher();
+#endif
   }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SystemURLRequestContext);
 };
 
 std::unique_ptr<net::HostResolver> CreateGlobalHostResolver(
@@ -265,24 +274,21 @@ int GetSwitchValueAsInt(const base::CommandLine& command_line,
 void UpdateMetricsUsagePrefsOnUIThread(const std::string& service_name,
                                        int message_size,
                                        bool is_cellular) {
-  BrowserThread::PostTask(
-      BrowserThread::UI,
-      FROM_HERE,
-      base::Bind([](const std::string& service_name,
-                    int message_size,
-                    bool is_cellular) {
-                   // Some unit tests use IOThread but do not initialize
-                   // MetricsService. In that case it's fine to skip the update.
-                   auto metrics_service = g_browser_process->metrics_service();
-                   if (metrics_service) {
-                     metrics_service->UpdateMetricsUsagePrefs(service_name,
-                                                              message_size,
-                                                              is_cellular);
-                   }
-                 },
-                 service_name,
-                 message_size,
-                 is_cellular));
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                          base::BindOnce(
+                              [](const std::string& service_name,
+                                 int message_size, bool is_cellular) {
+                                // Some unit tests use IOThread but do not
+                                // initialize MetricsService. In that case it's
+                                // fine to skip the update.
+                                auto* metrics_service =
+                                    g_browser_process->metrics_service();
+                                if (metrics_service) {
+                                  metrics_service->UpdateMetricsUsagePrefs(
+                                      service_name, message_size, is_cellular);
+                                }
+                              },
+                              service_name, message_size, is_cellular));
 }
 
 }  // namespace
@@ -357,7 +363,7 @@ IOThread::IOThread(
 #endif
       globals_(nullptr),
       is_quic_allowed_by_policy_(true),
-      http_09_on_non_default_ports_enabled_(true),
+      http_09_on_non_default_ports_enabled_(false),
       creation_time_(base::TimeTicks::Now()),
       weak_factory_(this) {
   scoped_refptr<base::SingleThreadTaskRunner> io_thread_proxy =
@@ -390,9 +396,16 @@ IOThread::IOThread(
 #if defined(OS_POSIX) && !defined(OS_ANDROID)
   gssapi_library_name_ = local_state->GetString(prefs::kGSSAPILibraryName);
 #endif
+#if defined(OS_CHROMEOS)
+  policy::BrowserPolicyConnectorChromeOS* connector =
+      g_browser_process->platform_part()->browser_policy_connector_chromeos();
+  allow_gssapi_library_load_ = connector->IsActiveDirectoryManaged();
+#endif
   pref_proxy_config_tracker_.reset(
       ProxyServiceFactory::CreatePrefProxyConfigTrackerOfLocalState(
           local_state));
+  system_proxy_config_service_ = ProxyServiceFactory::CreateProxyConfigService(
+      pref_proxy_config_tracker_.get());
   ChromeNetworkDelegate::InitializePrefsOnUIThread(
       &system_enable_referrers_,
       nullptr,
@@ -405,8 +418,8 @@ IOThread::IOThread(
           local_state,
           BrowserThread::GetTaskRunnerForThread(BrowserThread::IO)));
 
-  base::Value* dns_client_enabled_default = new base::FundamentalValue(
-      chrome_browser_net::ConfigureAsyncDnsFieldTrial());
+  base::Value* dns_client_enabled_default =
+      new base::Value(chrome_browser_net::ConfigureAsyncDnsFieldTrial());
   local_state->SetDefaultPrefValue(prefs::kBuiltInDnsClientEnabled,
                                    dns_client_enabled_default);
   chrome_browser_net::LogAsyncDnsPrefSource(
@@ -476,16 +489,16 @@ net_log::ChromeNetLog* IOThread::net_log() {
 void IOThread::ChangedToOnTheRecord() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&IOThread::ChangedToOnTheRecordOnIOThread,
-                 base::Unretained(this)));
+      BrowserThread::IO, FROM_HERE,
+      base::BindOnce(&IOThread::ChangedToOnTheRecordOnIOThread,
+                     base::Unretained(this)));
 }
 
 net::URLRequestContextGetter* IOThread::system_url_request_context_getter() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!system_url_request_context_getter_.get()) {
-    InitSystemRequestContext();
+    system_url_request_context_getter_ =
+        new SystemURLRequestContextGetter(this);
   }
   return system_url_request_context_getter_.get();
 }
@@ -565,6 +578,19 @@ void IOThread::Init() {
   variations::GetVariationParams(kNetworkQualityEstimatorFieldTrialName,
                                  &network_quality_estimator_params);
 
+  if (command_line.HasSwitch(switches::kForceEffectiveConnectionType)) {
+    const std::string force_ect_value =
+        base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+            switches::kForceEffectiveConnectionType);
+
+    if (!force_ect_value.empty()) {
+      // If the effective connection type is forced using command line switch,
+      // it overrides the one set by field trial.
+      network_quality_estimator_params[net::kForceEffectiveConnectionType] =
+          force_ect_value;
+    }
+  }
+
   std::unique_ptr<net::ExternalEstimateProvider> external_estimate_provider;
 #if defined(OS_ANDROID)
   external_estimate_provider.reset(
@@ -574,6 +600,8 @@ void IOThread::Init() {
   globals_->network_quality_estimator.reset(new net::NetworkQualityEstimator(
       std::move(external_estimate_provider), network_quality_estimator_params,
       net_log_));
+  globals_->network_quality_observer = content::CreateNetworkQualityObserver(
+      globals_->network_quality_estimator.get());
 
   UpdateDnsClientEnabled();
 #if defined(OS_CHROMEOS)
@@ -597,8 +625,8 @@ void IOThread::Init() {
   // Add built-in logs
   ct_verifier->AddLogs(globals_->ct_logs);
 
-  ct_tree_tracker_.reset(
-      new certificate_transparency::TreeStateTracker(globals_->ct_logs));
+  ct_tree_tracker_.reset(new certificate_transparency::TreeStateTracker(
+      globals_->ct_logs, net_log_));
   // Register the ct_tree_tracker_ as observer for new STHs.
   RegisterSTHObserver(ct_tree_tracker_.get());
   // Register the ct_tree_tracker_ as observer for verified SCTs.
@@ -614,16 +642,6 @@ void IOThread::Init() {
   // For the ProxyScriptFetcher, we use a direct ProxyService.
   globals_->proxy_script_fetcher_proxy_service =
       net::ProxyService::CreateDirectWithNetLog(net_log_);
-  // In-memory cookie store.
-  globals_->system_cookie_store =
-      content::CreateCookieStore(content::CookieStoreConfig());
-  // In-memory channel ID store.
-  globals_->system_channel_id_service.reset(
-      new net::ChannelIDService(
-          new net::DefaultChannelIDStore(NULL),
-          base::WorkerPool::GetTaskRunner(true)));
-  globals_->system_cookie_store->SetChannelIDServiceID(
-      globals_->system_channel_id_service->GetUniqueID());
   globals_->dns_probe_service.reset(new chrome_browser_net::DnsProbeService());
   globals_->host_mapping_rules.reset(new net::HostMappingRules());
   params_.host_mapping_rules = globals_->host_mapping_rules.get();
@@ -653,13 +671,6 @@ void IOThread::Init() {
       command_line, is_quic_allowed_by_policy_,
       http_09_on_non_default_ports_enabled_, &params_);
 
-  TRACE_EVENT_BEGIN0("startup",
-                     "IOThread::Init:ProxyScriptFetcherRequestContext");
-  globals_->proxy_script_fetcher_context.reset(
-      ConstructProxyScriptFetcherContext(globals_, params_, net_log_));
-  TRACE_EVENT_END0("startup",
-                   "IOThread::Init:ProxyScriptFetcherRequestContext");
-
 #if defined(OS_MACOSX)
   // Start observing Keychain events. This needs to be done on the UI thread,
   // as Keychain services requires a CFRunLoop.
@@ -668,27 +679,14 @@ void IOThread::Init() {
                           base::Bind(&ObserveKeychainEvents));
 #endif
 
-  // InitSystemRequestContext turns right around and posts a task back
-  // to the IO thread, so we can't let it run until we know the IO
-  // thread has started.
-  //
-  // Note that since we are at BrowserThread::Init time, the UI thread
-  // is blocked waiting for the thread to start.  Therefore, posting
-  // this task to the main thread's message loop here is guaranteed to
-  // get it onto the message loop while the IOThread object still
-  // exists.  However, the message might not be processed on the UI
-  // thread until after IOThread is gone, so use a weak pointer.
-  BrowserThread::PostTask(BrowserThread::UI,
-                          FROM_HERE,
-                          base::Bind(&IOThread::InitSystemRequestContext,
-                                     weak_factory_.GetWeakPtr()));
-
 #if defined(OS_ANDROID) && defined(ARCH_CPU_ARMEL)
   // Record how common CPUs with broken NEON units are. See
   // https://crbug.com/341598.
   crypto::EnsureOpenSSLInit();
   UMA_HISTOGRAM_BOOLEAN("Net.HasBrokenNEON", CRYPTO_has_broken_NEON());
 #endif
+
+  ConstructSystemRequestContext();
 }
 
 void IOThread::CleanUp() {
@@ -698,19 +696,19 @@ void IOThread::CleanUp() {
   net::ShutdownNSSHttpIO();
 #endif
 
-#if defined(OS_ANDROID)
-  net::CertVerifyProcAndroid::ShutdownCertNetFetcher();
-#endif
-
   system_url_request_context_getter_ = NULL;
 
   // Unlink the ct_tree_tracker_ from the global cert_transparency_verifier
   // and unregister it from new STH notifications so it will take no actions
   // on anything observed during CleanUp process.
-  globals()->cert_transparency_verifier->SetObserver(nullptr);
-  UnregisterSTHObserver(ct_tree_tracker_.get());
-
-  ct_tree_tracker_.reset();
+  //
+  // Null checks are just for tests that use TestingIOThreadState.
+  if (globals()->cert_transparency_verifier)
+    globals()->cert_transparency_verifier->SetObserver(nullptr);
+  if (ct_tree_tracker_.get()) {
+    UnregisterSTHObserver(ct_tree_tracker_.get());
+    ct_tree_tracker_.reset();
+  }
 
   // Release objects that the net::URLRequestContext could have been pointing
   // to.
@@ -783,6 +781,10 @@ void IOThread::CreateDefaultAuthHandlerFactory() {
       ,
       gssapi_library_name_
 #endif
+#if defined(OS_CHROMEOS)
+      ,
+      allow_gssapi_library_load_
+#endif
       ));
   UpdateServerWhitelist();
   UpdateDelegateWhitelist();
@@ -812,8 +814,9 @@ const net::HttpNetworkSession::Params& IOThread::NetworkSessionParams() const {
 void IOThread::DisableQuic() {
   params_.enable_quic = false;
 
-  if (globals_->system_http_network_session)
-    globals_->system_http_network_session->DisableQuic();
+  if (globals_->system_request_context_storage)
+    globals_->system_request_context_storage->http_network_session()
+        ->DisableQuic();
 
   if (globals_->proxy_script_fetcher_http_network_session)
     globals_->proxy_script_fetcher_http_network_session->DisableQuic();
@@ -833,42 +836,6 @@ void IOThread::ChangedToOnTheRecordOnIOThread() {
   // Clear the host cache to avoid showing entries from the OTR session
   // in about:net-internals.
   ClearHostCache(base::Callback<bool(const std::string&)>());
-}
-
-void IOThread::InitSystemRequestContext() {
-  if (system_url_request_context_getter_.get())
-    return;
-  // If we're in unit_tests, IOThread may not be run.
-  if (!BrowserThread::IsMessageLoopValid(BrowserThread::IO))
-    return;
-  system_proxy_config_service_ = ProxyServiceFactory::CreateProxyConfigService(
-      pref_proxy_config_tracker_.get());
-  system_url_request_context_getter_ =
-      new SystemURLRequestContextGetter(this);
-  // Safe to post an unretained this pointer, since IOThread is
-  // guaranteed to outlive the IO BrowserThread.
-  BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&IOThread::InitSystemRequestContextOnIOThread,
-                 base::Unretained(this)));
-}
-
-void IOThread::InitSystemRequestContextOnIOThread() {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK(!globals_->system_proxy_service.get());
-  DCHECK(system_proxy_config_service_.get());
-
-  const base::CommandLine& command_line =
-      *base::CommandLine::ForCurrentProcess();
-  globals_->system_proxy_service = ProxyServiceFactory::CreateProxyService(
-      net_log_, globals_->proxy_script_fetcher_context.get(),
-      globals_->system_network_delegate.get(),
-      std::move(system_proxy_config_service_), command_line,
-      WpadQuickCheckEnabled(), PacHttpsUrlStrippingEnabled());
-
-  globals_->system_request_context.reset(
-      ConstructSystemRequestContext(globals_, params_, net_log_));
 }
 
 void IOThread::UpdateDnsClientEnabled() {
@@ -891,55 +858,77 @@ bool IOThread::PacHttpsUrlStrippingEnabled() const {
   return pac_https_url_stripping_enabled_.GetValue();
 }
 
-// static
-net::URLRequestContext* IOThread::ConstructSystemRequestContext(
-    IOThread::Globals* globals,
-    const net::HttpNetworkSession::Params& params,
-    net::NetLog* net_log) {
-  net::URLRequestContext* context = new SystemURLRequestContext;
-  context->set_net_log(net_log);
-  context->set_host_resolver(globals->host_resolver.get());
-  context->set_cert_verifier(globals->cert_verifier.get());
-  context->set_transport_security_state(
-      globals->transport_security_state.get());
-  context->set_cert_transparency_verifier(
-      globals->cert_transparency_verifier.get());
-  context->set_ct_policy_enforcer(globals->ct_policy_enforcer.get());
-  context->set_ssl_config_service(globals->ssl_config_service.get());
-  context->set_http_auth_handler_factory(
-      globals->http_auth_handler_factory.get());
-  context->set_proxy_service(globals->system_proxy_service.get());
+void IOThread::ConstructSystemRequestContext() {
+  globals_->system_request_context =
+      base::MakeUnique<SystemURLRequestContext>();
+  net::URLRequestContext* context = globals_->system_request_context.get();
+  globals_->system_request_context_storage =
+      base::MakeUnique<net::URLRequestContextStorage>(context);
+  net::URLRequestContextStorage* context_storage =
+      globals_->system_request_context_storage.get();
 
-  globals->system_url_request_job_factory.reset(
-      new net::URLRequestJobFactoryImpl());
-  context->set_job_factory(globals->system_url_request_job_factory.get());
-
-  context->set_cookie_store(globals->system_cookie_store.get());
-  context->set_channel_id_service(
-      globals->system_channel_id_service.get());
-  context->set_network_delegate(globals->system_network_delegate.get());
-  context->set_http_user_agent_settings(
-      globals->http_user_agent_settings.get());
   context->set_network_quality_estimator(
-      globals->network_quality_estimator.get());
+      globals_->network_quality_estimator.get());
+  context->set_enable_brotli(globals_->enable_brotli);
+  context->set_name("system");
 
-  context->set_http_server_properties(globals->http_server_properties.get());
+  context->set_http_user_agent_settings(
+      globals_->http_user_agent_settings.get());
+  context->set_network_delegate(globals_->system_network_delegate.get());
+  context->set_net_log(net_log_);
+  context->set_host_resolver(globals_->host_resolver.get());
 
-  context->set_enable_brotli(globals->enable_brotli);
+  context->set_ssl_config_service(globals_->ssl_config_service.get());
+  context->set_http_auth_handler_factory(
+      globals_->http_auth_handler_factory.get());
 
-  net::HttpNetworkSession::Params system_params(params);
+  // In-memory cookie store.
+  context_storage->set_cookie_store(
+      content::CreateCookieStore(content::CookieStoreConfig()));
+  // In-memory channel ID store.
+  context_storage->set_channel_id_service(
+      base::MakeUnique<net::ChannelIDService>(
+          new net::DefaultChannelIDStore(nullptr)));
+  context->cookie_store()->SetChannelIDServiceID(
+      context->channel_id_service()->GetUniqueID());
+
+  context->set_transport_security_state(
+      globals_->transport_security_state.get());
+
+  context->set_http_server_properties(globals_->http_server_properties.get());
+
+  context->set_cert_verifier(globals_->cert_verifier.get());
+  context->set_cert_transparency_verifier(
+      globals_->cert_transparency_verifier.get());
+  context->set_ct_policy_enforcer(globals_->ct_policy_enforcer.get());
+
+  TRACE_EVENT_BEGIN0("startup",
+                     "IOThread::Init:ProxyScriptFetcherRequestContext");
+  globals_->proxy_script_fetcher_context.reset(
+      ConstructProxyScriptFetcherContext(globals_, params_, net_log_));
+  TRACE_EVENT_END0("startup",
+                   "IOThread::Init:ProxyScriptFetcherRequestContext");
+
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+  context_storage->set_proxy_service(ProxyServiceFactory::CreateProxyService(
+      net_log_, globals_->proxy_script_fetcher_context.get(),
+      globals_->system_network_delegate.get(),
+      std::move(system_proxy_config_service_), command_line,
+      WpadQuickCheckEnabled(), PacHttpsUrlStrippingEnabled()));
+
+  net::HttpNetworkSession::Params system_params(params_);
   net::URLRequestContextBuilder::SetHttpNetworkSessionComponents(
       context, &system_params);
 
-  globals->system_http_network_session.reset(
-      new net::HttpNetworkSession(system_params));
-  globals->system_http_transaction_factory.reset(
-      new net::HttpNetworkLayer(globals->system_http_network_session.get()));
-  context->set_name("system");
-  context->set_http_transaction_factory(
-      globals->system_http_transaction_factory.get());
+  context_storage->set_http_network_session(
+      base::MakeUnique<net::HttpNetworkSession>(system_params));
+  context_storage->set_http_transaction_factory(
+      base::MakeUnique<net::HttpNetworkLayer>(
+          context_storage->http_network_session()));
 
-  return context;
+  context_storage->set_job_factory(
+      base::MakeUnique<net::URLRequestJobFactoryImpl>());
 }
 
 // static
@@ -977,16 +966,6 @@ void IOThread::ConfigureParamsFromFieldTrialsAndCommandLine(
           net::ParseQuicConnectionOptions(
               command_line.GetSwitchValueASCII(
                   switches::kQuicConnectionOptions));
-    }
-
-    if (command_line.HasSwitch(switches::kQuicHostWhitelist)) {
-      std::string whitelist =
-          command_line.GetSwitchValueASCII(switches::kQuicHostWhitelist);
-      params->quic_host_whitelist.clear();
-      for (const std::string& host : base::SplitString(
-               whitelist, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL)) {
-        params->quic_host_whitelist.insert(host);
-      }
     }
 
     if (command_line.HasSwitch(switches::kQuicMaxPacketLength)) {
@@ -1068,9 +1047,9 @@ net::URLRequestContext* IOThread::ConstructProxyScriptFetcherContext(
   context->set_job_factory(
       globals->proxy_script_fetcher_url_request_job_factory.get());
 
-  context->set_cookie_store(globals->system_cookie_store.get());
+  context->set_cookie_store(globals->system_request_context->cookie_store());
   context->set_channel_id_service(
-      globals->system_channel_id_service.get());
+      globals->system_request_context->channel_id_service());
   context->set_network_delegate(globals->system_network_delegate.get());
   context->set_http_user_agent_settings(
       globals->http_user_agent_settings.get());
@@ -1099,9 +1078,9 @@ net::URLRequestContext* IOThread::ConstructProxyScriptFetcherContext(
   job_factory->SetProtocolHandler(
       url::kFileScheme,
       base::MakeUnique<net::FileProtocolHandler>(
-          content::BrowserThread::GetBlockingPool()
-              ->GetTaskRunnerWithShutdownBehavior(
-                  base::SequencedWorkerPool::SKIP_ON_SHUTDOWN)));
+          base::CreateTaskRunnerWithTraits(
+              {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
+               base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})));
 #if !BUILDFLAG(DISABLE_FTP_SUPPORT)
   job_factory->SetProtocolHandler(
       url::kFtpScheme,

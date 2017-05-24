@@ -9,13 +9,14 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/safe_browsing_blocking_page.h"
 #include "chrome/browser/safe_browsing/test_safe_browsing_service.h"
-#include "chrome/browser/safe_browsing/threat_details.h"
 #include "chrome/browser/safe_browsing/ui_manager.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
+#include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/prefs/pref_service.h"
-#include "components/safe_browsing_db/safe_browsing_prefs.h"
+#include "components/safe_browsing/browser/threat_details.h"
+#include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_process_host.h"
@@ -28,7 +29,7 @@ using content::InterstitialPage;
 using content::NavigationEntry;
 using content::WebContents;
 using content::WebContentsTester;
-using security_interstitials::SafeBrowsingErrorUI;
+using security_interstitials::BaseSafeBrowsingErrorUI;
 
 static const char* kGoogleURL = "http://www.google.com/";
 static const char* kGoodURL = "http://www.goodguys.com/";
@@ -48,14 +49,14 @@ class TestSafeBrowsingBlockingPage : public SafeBrowsingBlockingPage {
       WebContents* web_contents,
       const GURL& main_frame_url,
       const UnsafeResourceList& unsafe_resources,
-      const SafeBrowsingErrorUI::SBErrorDisplayOptions& display_options)
+      const BaseSafeBrowsingErrorUI::SBErrorDisplayOptions& display_options)
       : SafeBrowsingBlockingPage(manager,
                                  web_contents,
                                  main_frame_url,
                                  unsafe_resources,
                                  display_options) {
     // Don't delay details at all for the unittest.
-    threat_details_proceed_delay_ms_ = 0;
+    SetThreatDetailsProceedDelayForTesting(0);
     DontCreateViewForTesting();
   }
 };
@@ -79,12 +80,13 @@ class TestSafeBrowsingBlockingPageFactory
         prefs->GetBoolean(prefs::kSafeBrowsingExtendedReportingOptInAllowed);
     bool is_proceed_anyway_disabled =
         prefs->GetBoolean(prefs::kSafeBrowsingProceedAnywayDisabled);
-    SafeBrowsingErrorUI::SBErrorDisplayOptions display_options(
+    BaseSafeBrowsingErrorUI::SBErrorDisplayOptions display_options(
         BaseBlockingPage::IsMainPageLoadBlocked(unsafe_resources),
         is_extended_reporting_opt_in_allowed,
         web_contents->GetBrowserContext()->IsOffTheRecord(),
         IsExtendedReportingEnabled(*prefs), IsScout(*prefs),
-        is_proceed_anyway_disabled);
+        is_proceed_anyway_disabled,
+        BaseBlockingPage::IsMainPageLoadBlocked(unsafe_resources));
     return new TestSafeBrowsingBlockingPage(manager, web_contents,
                                             main_frame_url, unsafe_resources,
                                             display_options);
@@ -118,14 +120,30 @@ class SafeBrowsingBlockingPageTest : public ChromeRenderViewHostTestHarness {
 
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
+
     SafeBrowsingBlockingPage::RegisterFactory(&factory_);
     ResetUserResponse();
     SafeBrowsingUIManager::CreateWhitelistForTesting(web_contents());
+
+    safe_browsing::TestSafeBrowsingServiceFactory sb_service_factory;
+    sb_service_factory.SetTestUIManager(ui_manager_.get());
+    auto* safe_browsing_service =
+        sb_service_factory.CreateSafeBrowsingService();
+    // A profile was created already but SafeBrowsingService wasn't around to
+    // get notified of it, so include that notification now.
+    safe_browsing_service->AddPrefService(
+        Profile::FromBrowserContext(web_contents()->GetBrowserContext())
+            ->GetPrefs());
+    TestingBrowserProcess::GetGlobal()->SetSafeBrowsingService(
+        safe_browsing_service);
+    g_browser_process->safe_browsing_service()->Initialize();
   }
 
   void TearDown() override {
     // Release the UI manager before the BrowserThreads are destroyed.
     ui_manager_ = NULL;
+    TestingBrowserProcess::GetGlobal()->safe_browsing_service()->ShutDown();
+    TestingBrowserProcess::GetGlobal()->SetSafeBrowsingService(nullptr);
     SafeBrowsingBlockingPage::RegisterFactory(NULL);
     // Clean up singleton reference (crbug.com/110594).
     ThreatDetails::RegisterFactory(NULL);

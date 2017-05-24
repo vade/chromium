@@ -5,10 +5,12 @@
 #include "chrome/browser/browsing_data/browsing_data_counter_utils.h"
 
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browsing_data/cache_counter.h"
 #include "chrome/browser/browsing_data/media_licenses_counter.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
@@ -25,6 +27,7 @@
 #include "chrome/browser/browsing_data/hosted_apps_counter.h"
 #endif
 
+
 bool AreCountersEnabled() {
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableClearBrowsingDataCounters)) {
@@ -38,6 +41,11 @@ bool AreCountersEnabled() {
 
   // Enabled by default.
   return true;
+}
+
+bool IsSiteDataCounterEnabled() {
+  // Only use the site data counter for the new CBD ui.
+  return base::FeatureList::IsEnabled(features::kTabsInCbd);
 }
 
 // A helper function to display the size of cache in units of MB or higher.
@@ -61,7 +69,8 @@ base::string16 GetChromeCounterTextFromResult(
     return l10n_util::GetStringUTF16(IDS_CLEAR_BROWSING_DATA_CALCULATING);
   }
 
-  if (pref_name == browsing_data::prefs::kDeleteCache) {
+  if (pref_name == browsing_data::prefs::kDeleteCache ||
+      pref_name == browsing_data::prefs::kDeleteCacheBasic) {
     // Cache counter.
     const auto* cache_result =
         static_cast<const CacheCounter::CacheResult*>(result);
@@ -71,14 +80,36 @@ base::string16 GetChromeCounterTextFromResult(
     // Three cases: Nonzero result for the entire cache, nonzero result for
     // a subset of cache (i.e. a finite time interval), and almost zero (< 1MB).
     static const int kBytesInAMegabyte = 1024 * 1024;
+    base::string16 size_string;
     if (cache_size_bytes >= kBytesInAMegabyte) {
       base::string16 formatted_size = FormatBytesMBOrHigher(cache_size_bytes);
-      return !is_upper_limit
-                 ? formatted_size
-                 : l10n_util::GetStringFUTF16(
-                       IDS_DEL_CACHE_COUNTER_UPPER_ESTIMATE, formatted_size);
+      size_string = !is_upper_limit ? formatted_size
+                                    : l10n_util::GetStringFUTF16(
+                                          IDS_DEL_CACHE_COUNTER_UPPER_ESTIMATE,
+                                          formatted_size);
+    } else {
+      size_string =
+          l10n_util::GetStringUTF16(IDS_DEL_CACHE_COUNTER_ALMOST_EMPTY);
     }
-    return l10n_util::GetStringUTF16(IDS_DEL_CACHE_COUNTER_ALMOST_EMPTY);
+    if (pref_name == browsing_data::prefs::kDeleteCacheBasic) {
+      return l10n_util::GetStringFUTF16(IDS_DEL_CACHE_COUNTER_BASIC,
+                                        size_string);
+    }
+    return size_string;
+  }
+  if (pref_name == browsing_data::prefs::kDeleteCookiesBasic) {
+    // The basic tab doesn't show cookie counter results.
+    NOTREACHED();
+  }
+  if (pref_name == browsing_data::prefs::kDeleteCookies) {
+    // Site data counter.
+    DCHECK(IsSiteDataCounterEnabled());
+    browsing_data::BrowsingDataCounter::ResultInt origins =
+        static_cast<const browsing_data::BrowsingDataCounter::FinishedResult*>(
+            result)
+            ->Value();
+    return l10n_util::GetPluralStringFUTF16(IDS_DEL_COOKIES_COUNTER_ADVANCED,
+                                            origins);
   }
 
   if (pref_name == browsing_data::prefs::kDeleteMediaLicenses) {

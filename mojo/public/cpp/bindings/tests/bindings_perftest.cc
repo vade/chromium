@@ -154,14 +154,15 @@ class PingPongPaddle : public MessageReceiverWithResponderStatus {
       }
     }
 
-    internal::MessageBuilder builder(count, 8);
+    internal::MessageBuilder builder(count, 0, 8, 0);
     bool result = sender_->Accept(builder.message());
     DCHECK(result);
     return true;
   }
 
-  bool AcceptWithResponder(Message* message,
-                           MessageReceiverWithStatus* responder) override {
+  bool AcceptWithResponder(
+      Message* message,
+      std::unique_ptr<MessageReceiverWithStatus> responder) override {
     NOTREACHED();
     return true;
   }
@@ -173,7 +174,7 @@ class PingPongPaddle : public MessageReceiverWithResponderStatus {
     quit_closure_ = run_loop.QuitClosure();
 
     start_time_ = base::TimeTicks::Now();
-    internal::MessageBuilder builder(0, 8);
+    internal::MessageBuilder builder(0, 0, 8, 0);
     bool result = sender_->Accept(builder.message());
     DCHECK(result);
 
@@ -232,8 +233,9 @@ class CounterReceiver : public MessageReceiverWithResponderStatus {
     return true;
   }
 
-  bool AcceptWithResponder(Message* message,
-                           MessageReceiverWithStatus* responder) override {
+  bool AcceptWithResponder(
+      Message* message,
+      std::unique_ptr<MessageReceiverWithStatus> responder) override {
     NOTREACHED();
     return true;
   }
@@ -262,7 +264,7 @@ TEST_F(MojoBindingsPerftest, MultiplexRouterDispatchCost) {
     receiver.Reset();
     base::TimeTicks start_time = base::TimeTicks::Now();
     for (size_t j = 0; j < kIterations[i]; ++j) {
-      internal::MessageBuilder builder(0, 8);
+      internal::MessageBuilder builder(0, 0, 8, 0);
       bool result =
           router->SimulateReceivingMessageForTesting(builder.message());
       DCHECK(result);

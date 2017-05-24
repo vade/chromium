@@ -4,8 +4,8 @@
 
 #include "net/quic/core/quic_unacked_packet_map.h"
 
+#include "net/quic/platform/api/quic_test.h"
 #include "net/quic/test_tools/quic_test_utils.h"
-#include "testing/gtest/include/gtest/gtest.h"
 
 namespace net {
 namespace test {
@@ -14,7 +14,7 @@ namespace {
 // Default packet length.
 const uint32_t kDefaultLength = 1000;
 
-class QuicUnackedPacketMapTest : public ::testing::Test {
+class QuicUnackedPacketMapTest : public QuicTest {
  protected:
   QuicUnackedPacketMapTest()
       : unacked_packets_(),
@@ -30,9 +30,8 @@ class QuicUnackedPacketMapTest : public ::testing::Test {
   SerializedPacket CreateRetransmittablePacketForStream(
       QuicPacketNumber packet_number,
       QuicStreamId stream_id) {
-    SerializedPacket packet(kDefaultPathId, packet_number,
-                            PACKET_1BYTE_PACKET_NUMBER, nullptr, kDefaultLength,
-                            false, false);
+    SerializedPacket packet(packet_number, PACKET_1BYTE_PACKET_NUMBER, nullptr,
+                            kDefaultLength, false, false);
     QuicStreamFrame* frame = new QuicStreamFrame();
     frame->stream_id = stream_id;
     packet.retransmittable_frames.push_back(QuicFrame(frame));
@@ -41,9 +40,8 @@ class QuicUnackedPacketMapTest : public ::testing::Test {
 
   SerializedPacket CreateNonRetransmittablePacket(
       QuicPacketNumber packet_number) {
-    return SerializedPacket(kDefaultPathId, packet_number,
-                            PACKET_1BYTE_PACKET_NUMBER, nullptr, kDefaultLength,
-                            false, false);
+    return SerializedPacket(packet_number, PACKET_1BYTE_PACKET_NUMBER, nullptr,
+                            kDefaultLength, false, false);
   }
 
   void VerifyInFlightPackets(QuicPacketNumber* packets, size_t num_packets) {

@@ -14,7 +14,8 @@
 
 #include "base/macros.h"
 #include "gpu/command_buffer/common/buffer.h"
-#include "gpu/command_buffer/service/cmd_parser.h"
+#include "gpu/command_buffer/common/cmd_buffer_common.h"
+#include "gpu/command_buffer/service/async_api_interface.h"
 #include "gpu/gpu_export.h"
 
 // Forwardly declare a few GL types to avoid including GL header files.
@@ -152,13 +153,16 @@ class GPU_EXPORT CommonDecoder : NON_EXPORTED_BASE(public AsyncAPIInterface) {
 
   void* GetAddressAndSize(unsigned int shm_id,
                           unsigned int offset,
+                          unsigned int minimum_size,
                           unsigned int* size);
 
   template <typename T>
   T GetSharedMemoryAndSizeAs(unsigned int shm_id,
                              unsigned int offset,
+                             unsigned int minimum_size,
                              unsigned int* size) {
-    return static_cast<T>(GetAddressAndSize(shm_id, offset, size));
+    return static_cast<T>(
+        GetAddressAndSize(shm_id, offset, minimum_size, size));
   }
 
   unsigned int GetSharedMemorySize(unsigned int shm_id, unsigned int offset);

@@ -14,6 +14,7 @@
 #include "ui/base/ime/input_method_observer.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/keyboard/keyboard_event_filter.h"
 #include "ui/keyboard/keyboard_export.h"
 #include "ui/keyboard/keyboard_layout_delegate.h"
 
@@ -63,8 +64,12 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
   ~KeyboardController() override;
 
   // Returns the container for the keyboard, which is owned by
-  // KeyboardController.
+  // KeyboardController. Creates the container if it's not already created.
   aura::Window* GetContainerWindow();
+
+  // Same as GetContainerWindow except that this function doesn't create the
+  // window.
+  aura::Window* GetContainerWindowWithoutCreationForTest();
 
   // Whether the container window for the keyboard has been initialized.
   bool keyboard_container_initialized() const { return container_ != nullptr; }
@@ -83,8 +88,9 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
   void NotifyKeyboardBoundsChanging(const gfx::Rect& new_bounds);
 
   // Management of the observer list.
-  virtual void AddObserver(KeyboardControllerObserver* observer);
-  virtual void RemoveObserver(KeyboardControllerObserver* observer);
+  void AddObserver(KeyboardControllerObserver* observer);
+  bool HasObserver(KeyboardControllerObserver* observer);
+  void RemoveObserver(KeyboardControllerObserver* observer);
 
   KeyboardUI* ui() { return ui_.get(); }
 
@@ -176,7 +182,7 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
   // If true, the keyboard is always visible even if no window has input focus.
   bool keyboard_locked_;
   KeyboardMode keyboard_mode_;
-  ui::TextInputType type_;
+  KeyboardEventFilter event_filter_;
 
   base::ObserverList<KeyboardControllerObserver> observer_list_;
 

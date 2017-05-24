@@ -4,7 +4,6 @@
 
 #include "net/quic/core/quic_unacked_packet_map.h"
 
-#include "base/stl_util.h"
 #include "net/quic/core/quic_connection_stats.h"
 #include "net/quic/core/quic_utils.h"
 #include "net/quic/platform/api/quic_bug_tracker.h"
@@ -44,6 +43,7 @@ void QuicUnackedPacketMap::AddSentPacket(SerializedPacket* packet,
   QuicTransmissionInfo info(
       packet->encryption_level, packet->packet_number_length, transmission_type,
       sent_time, bytes_sent, has_crypto_handshake, packet->num_padding_bytes);
+  info.largest_acked = packet->largest_acked;
   if (old_packet_number > 0) {
     TransferRetransmissionInfo(old_packet_number, packet_number,
                                transmission_type, &info);

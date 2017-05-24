@@ -11,6 +11,7 @@
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_fence.h"
 #include "ui/gl/gl_image.h"
+#include "ui/gl/gl_image_dxgi.h"
 #include "ui/gl/gl_surface_egl.h"
 #include "ui/gl/scoped_binders.h"
 
@@ -73,20 +74,6 @@ class GLImagePbuffer : public DummyGLImage {
   }
 
   EGLSurface surface_;
-};
-
-class GLImageEGLStream : public DummyGLImage {
- public:
-  GLImageEGLStream(const gfx::Size& size, EGLStreamKHR stream)
-      : DummyGLImage(size), stream_(stream) {}
-
- private:
-  ~GLImageEGLStream() override {
-    EGLDisplay egl_display = gl::GLSurfaceEGL::GetHardwareDisplay();
-    eglDestroyStreamKHR(egl_display, stream_);
-  }
-
-  EGLStreamKHR stream_;
 };
 
 }  // namespace
@@ -189,7 +176,10 @@ bool PbufferPictureBuffer::Initialize(const DXVAVideoDecodeAccelerator& decoder,
   eglGetConfigAttrib(egl_display, egl_config, EGL_BIND_TO_TEXTURE_RGB,
                      &use_rgb);
 
-  if (!InitializeTexture(decoder, !!use_rgb))
+  EGLint red_bits = 8;
+  eglGetConfigAttrib(egl_display, egl_config, EGL_RED_SIZE, &red_bits);
+
+  if (!InitializeTexture(decoder, !!use_rgb, red_bits == 16))
     return false;
 
   EGLint attrib_list[] = {EGL_WIDTH,
@@ -223,7 +213,8 @@ bool PbufferPictureBuffer::Initialize(const DXVAVideoDecodeAccelerator& decoder,
 
 bool PbufferPictureBuffer::InitializeTexture(
     const DXVAVideoDecodeAccelerator& decoder,
-    bool use_rgb) {
+    bool use_rgb,
+    bool use_fp16) {
   DCHECK(!texture_share_handle_);
   if (decoder.d3d11_device_) {
     D3D11_TEXTURE2D_DESC desc;
@@ -231,7 +222,11 @@ bool PbufferPictureBuffer::InitializeTexture(
     desc.Height = picture_buffer_.size().height();
     desc.MipLevels = 1;
     desc.ArraySize = 1;
-    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    if (use_fp16) {
+      desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    } else {
+      desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    }
     desc.SampleDesc.Count = 1;
     desc.SampleDesc.Quality = 0;
     desc.Usage = D3D11_USAGE_DEFAULT;
@@ -242,15 +237,15 @@ bool PbufferPictureBuffer::InitializeTexture(
                          : D3D11_RESOURCE_MISC_SHARED;
 
     HRESULT hr = decoder.d3d11_device_->CreateTexture2D(
-        &desc, nullptr, dx11_decoding_texture_.Receive());
+        &desc, nullptr, dx11_decoding_texture_.GetAddressOf());
     RETURN_ON_HR_FAILURE(hr, "Failed to create texture", false);
     if (decoder.use_keyed_mutex_) {
-      hr = dx11_keyed_mutex_.QueryFrom(dx11_decoding_texture_.get());
+      hr = dx11_decoding_texture_.CopyTo(dx11_keyed_mutex_.GetAddressOf());
       RETURN_ON_HR_FAILURE(hr, "Failed to get keyed mutex", false);
     }
 
     base::win::ScopedComPtr<IDXGIResource> resource;
-    hr = resource.QueryFrom(dx11_decoding_texture_.get());
+    hr = dx11_decoding_texture_.CopyTo(resource.GetAddressOf());
     DCHECK(SUCCEEDED(hr));
     hr = resource->GetSharedHandle(&texture_share_handle_);
     RETURN_ON_FAILURE(SUCCEEDED(hr) && texture_share_handle_,
@@ -261,7 +256,8 @@ bool PbufferPictureBuffer::InitializeTexture(
     hr = decoder.d3d9_device_ex_->CreateTexture(
         picture_buffer_.size().width(), picture_buffer_.size().height(), 1,
         D3DUSAGE_RENDERTARGET, use_rgb ? D3DFMT_X8R8G8B8 : D3DFMT_A8R8G8B8,
-        D3DPOOL_DEFAULT, decoding_texture_.Receive(), &texture_share_handle_);
+        D3DPOOL_DEFAULT, decoding_texture_.GetAddressOf(),
+        &texture_share_handle_);
     RETURN_ON_HR_FAILURE(hr, "Failed to create texture", false);
     RETURN_ON_FAILURE(texture_share_handle_, "Failed to query shared handle",
                       false);
@@ -291,7 +287,7 @@ bool PbufferPictureBuffer::CopyOutputSampleDataToPictureBuffer(
     // when we receive a notification that the copy was completed or when the
     // DXVAPictureBuffer instance is destroyed.
     decoder_dx11_texture_ = dx11_texture;
-    decoder->CopyTexture(dx11_texture, dx11_decoding_texture_.get(),
+    decoder->CopyTexture(dx11_texture, dx11_decoding_texture_.Get(),
                          dx11_keyed_mutex_, keyed_mutex_value_, id(),
                          input_buffer_id, color_space_);
     return true;
@@ -316,19 +312,19 @@ bool PbufferPictureBuffer::CopyOutputSampleDataToPictureBuffer(
 
   // The same picture buffer can be reused for a different frame. Release the
   // target surface and the decoder references here.
-  target_surface_.Release();
-  decoder_surface_.Release();
+  target_surface_.Reset();
+  decoder_surface_.Reset();
 
   // Grab a reference on the decoder surface and the target surface. These
   // references will be released when we receive a notification that the
   // copy was completed or when the DXVAPictureBuffer instance is destroyed.
   // We hold references here as it is easier to manage their lifetimes.
-  hr = decoding_texture_->GetSurfaceLevel(0, target_surface_.Receive());
+  hr = decoding_texture_->GetSurfaceLevel(0, target_surface_.GetAddressOf());
   RETURN_ON_HR_FAILURE(hr, "Failed to get surface from texture", false);
 
   decoder_surface_ = dest_surface;
 
-  decoder->CopySurface(decoder_surface_.get(), target_surface_.get(), id(),
+  decoder->CopySurface(decoder_surface_.Get(), target_surface_.Get(), id(),
                        input_buffer_id, color_space_);
   color_space_ = gfx::ColorSpace();
   return true;
@@ -352,13 +348,13 @@ bool PbufferPictureBuffer::CopySurfaceComplete(
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
   if (src_surface && dest_surface) {
-    DCHECK_EQ(src_surface, decoder_surface_.get());
-    DCHECK_EQ(dest_surface, target_surface_.get());
-    decoder_surface_.Release();
-    target_surface_.Release();
+    DCHECK_EQ(src_surface, decoder_surface_.Get());
+    DCHECK_EQ(dest_surface, target_surface_.Get());
+    decoder_surface_.Reset();
+    target_surface_.Reset();
   } else {
-    DCHECK(decoder_dx11_texture_.get());
-    decoder_dx11_texture_.Release();
+    DCHECK(decoder_dx11_texture_.Get());
+    decoder_dx11_texture_.Reset();
   }
   if (egl_keyed_mutex_) {
     keyed_mutex_value_++;
@@ -373,6 +369,10 @@ bool PbufferPictureBuffer::CopySurfaceComplete(
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glBindTexture(GL_TEXTURE_2D, current_texture);
   return true;
+}
+
+bool PbufferPictureBuffer::AllowOverlay() const {
+  return false;
 }
 
 PbufferPictureBuffer::PbufferPictureBuffer(const PictureBuffer& buffer)
@@ -392,9 +392,9 @@ bool PbufferPictureBuffer::ReusePictureBuffer() {
   EGLDisplay egl_display = gl::GLSurfaceEGL::GetHardwareDisplay();
   eglReleaseTexImage(egl_display, decoding_surface_, EGL_BACK_BUFFER);
 
-  decoder_surface_.Release();
-  target_surface_.Release();
-  decoder_dx11_texture_.Release();
+  decoder_surface_.Reset();
+  target_surface_.Reset();
+  decoder_dx11_texture_.Reset();
   state_ = UNUSED;
   if (egl_keyed_mutex_) {
     HRESULT hr = egl_keyed_mutex_->ReleaseSync(++keyed_mutex_value_);
@@ -424,7 +424,7 @@ bool EGLStreamPictureBuffer::Initialize() {
   };
   stream_ = eglCreateStreamKHR(egl_display, stream_attributes);
   RETURN_ON_FAILURE(!!stream_, "Could not create stream", false);
-  gl_image_ = make_scoped_refptr(new GLImageEGLStream(size(), stream_));
+  gl_image_ = make_scoped_refptr(new gl::GLImageDXGI(size(), stream_));
   gl::ScopedActiveTexture texture0(GL_TEXTURE0);
   gl::ScopedTextureBinder texture0_binder(
       GL_TEXTURE_EXTERNAL_OES, picture_buffer_.service_texture_ids()[0]);
@@ -466,8 +466,8 @@ bool EGLStreamPictureBuffer::ReusePictureBuffer() {
     RETURN_ON_FAILURE(result, "Could not release stream", false);
   }
   if (current_d3d_sample_) {
-    dx11_decoding_texture_.Release();
-    current_d3d_sample_.Release();
+    dx11_decoding_texture_.Reset();
+    current_d3d_sample_.Reset();
   }
   state_ = UNUSED;
   return true;
@@ -483,14 +483,15 @@ bool EGLStreamPictureBuffer::BindSampleToTexture(
 
   base::win::ScopedComPtr<IMFMediaBuffer> output_buffer;
   HRESULT hr =
-      current_d3d_sample_->GetBufferByIndex(0, output_buffer.Receive());
+      current_d3d_sample_->GetBufferByIndex(0, output_buffer.GetAddressOf());
   RETURN_ON_HR_FAILURE(hr, "Failed to get buffer from output sample", false);
 
   base::win::ScopedComPtr<IMFDXGIBuffer> dxgi_buffer;
-  hr = dxgi_buffer.QueryFrom(output_buffer.get());
+  hr = output_buffer.CopyTo(dxgi_buffer.GetAddressOf());
   RETURN_ON_HR_FAILURE(hr, "Failed to get DXGIBuffer from output sample",
                        false);
-  hr = dxgi_buffer->GetResource(IID_PPV_ARGS(dx11_decoding_texture_.Receive()));
+  hr = dxgi_buffer->GetResource(
+      IID_PPV_ARGS(dx11_decoding_texture_.GetAddressOf()));
   RETURN_ON_HR_FAILURE(hr, "Failed to get texture from output sample", false);
   UINT subresource;
   dxgi_buffer->GetSubresourceIndex(&subresource);
@@ -500,11 +501,20 @@ bool EGLStreamPictureBuffer::BindSampleToTexture(
   };
 
   EGLBoolean result = eglStreamPostD3DTextureNV12ANGLE(
-      egl_display, stream_, static_cast<void*>(dx11_decoding_texture_.get()),
+      egl_display, stream_, static_cast<void*>(dx11_decoding_texture_.Get()),
       frame_attributes);
   RETURN_ON_FAILURE(result, "Could not post texture", false);
   result = eglStreamConsumerAcquireKHR(egl_display, stream_);
   RETURN_ON_FAILURE(result, "Could not post acquire stream", false);
+  gl::GLImageDXGI* gl_image_dxgi =
+      gl::GLImageDXGI::FromGLImage(gl_image_.get());
+  DCHECK(gl_image_dxgi);
+
+  gl_image_dxgi->SetTexture(dx11_decoding_texture_, subresource);
+  return true;
+}
+
+bool EGLStreamPictureBuffer::AllowOverlay() const {
   return true;
 }
 
@@ -531,7 +541,7 @@ bool EGLStreamCopyPictureBuffer::Initialize(
   };
   stream_ = eglCreateStreamKHR(egl_display, stream_attributes);
   RETURN_ON_FAILURE(!!stream_, "Could not create stream", false);
-  gl_image_ = make_scoped_refptr(new GLImageEGLStream(size(), stream_));
+  gl_image_ = make_scoped_refptr(new gl::GLImageDXGI(size(), stream_));
   gl::ScopedActiveTexture texture0(GL_TEXTURE0);
   gl::ScopedTextureBinder texture0_binder(
       GL_TEXTURE_EXTERNAL_OES, picture_buffer_.service_texture_ids()[0]);
@@ -577,23 +587,23 @@ bool EGLStreamCopyPictureBuffer::Initialize(
   desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
 
   HRESULT hr = decoder.d3d11_device_->CreateTexture2D(
-      &desc, nullptr, decoder_copy_texture_.Receive());
+      &desc, nullptr, decoder_copy_texture_.GetAddressOf());
   RETURN_ON_HR_FAILURE(hr, "Failed to create texture", false);
   DCHECK(decoder.use_keyed_mutex_);
-  hr = dx11_keyed_mutex_.QueryFrom(decoder_copy_texture_.get());
+  hr = decoder_copy_texture_.CopyTo(dx11_keyed_mutex_.GetAddressOf());
   RETURN_ON_HR_FAILURE(hr, "Failed to get keyed mutex", false);
 
   base::win::ScopedComPtr<IDXGIResource> resource;
-  hr = resource.QueryFrom(decoder_copy_texture_.get());
+  hr = decoder_copy_texture_.CopyTo(resource.GetAddressOf());
   DCHECK(SUCCEEDED(hr));
   hr = resource->GetSharedHandle(&texture_share_handle_);
   RETURN_ON_FAILURE(SUCCEEDED(hr) && texture_share_handle_,
                     "Failed to query shared handle", false);
 
   hr = decoder.angle_device_->OpenSharedResource(
-      texture_share_handle_, IID_PPV_ARGS(angle_copy_texture_.Receive()));
+      texture_share_handle_, IID_PPV_ARGS(angle_copy_texture_.GetAddressOf()));
   RETURN_ON_HR_FAILURE(hr, "Failed to open shared resource", false);
-  hr = egl_keyed_mutex_.QueryFrom(angle_copy_texture_.get());
+  hr = angle_copy_texture_.CopyTo(egl_keyed_mutex_.GetAddressOf());
   RETURN_ON_HR_FAILURE(hr, "Failed to get ANGLE mutex", false);
   return true;
 }
@@ -610,7 +620,7 @@ bool EGLStreamCopyPictureBuffer::CopyOutputSampleDataToPictureBuffer(
   // when we receive a notification that the copy was completed or when the
   // DXVAPictureBuffer instance is destroyed.
   dx11_decoding_texture_ = dx11_texture;
-  decoder->CopyTexture(dx11_texture, decoder_copy_texture_.get(),
+  decoder->CopyTexture(dx11_texture, decoder_copy_texture_.Get(),
                        dx11_keyed_mutex_, keyed_mutex_value_, id(),
                        input_buffer_id, color_space_);
   // The texture copy will acquire the current keyed mutex value and release
@@ -627,7 +637,7 @@ bool EGLStreamCopyPictureBuffer::CopySurfaceComplete(
   DCHECK_EQ(COPYING, state_);
   state_ = IN_CLIENT;
 
-  dx11_decoding_texture_.Release();
+  dx11_decoding_texture_.Reset();
 
   HRESULT hr =
       egl_keyed_mutex_->AcquireSync(keyed_mutex_value_, kAcquireSyncWaitMs);
@@ -640,11 +650,16 @@ bool EGLStreamCopyPictureBuffer::CopySurfaceComplete(
   EGLDisplay egl_display = gl::GLSurfaceEGL::GetHardwareDisplay();
 
   EGLBoolean result = eglStreamPostD3DTextureNV12ANGLE(
-      egl_display, stream_, static_cast<void*>(angle_copy_texture_.get()),
+      egl_display, stream_, static_cast<void*>(angle_copy_texture_.Get()),
       frame_attributes);
   RETURN_ON_FAILURE(result, "Could not post stream", false);
   result = eglStreamConsumerAcquireKHR(egl_display, stream_);
   RETURN_ON_FAILURE(result, "Could not post acquire stream", false);
+  gl::GLImageDXGI* gl_image_dxgi =
+      gl::GLImageDXGI::FromGLImage(gl_image_.get());
+  DCHECK(gl_image_dxgi);
+
+  gl_image_dxgi->SetTexture(angle_copy_texture_, 0);
 
   return true;
 }
@@ -663,6 +678,10 @@ bool EGLStreamCopyPictureBuffer::ReusePictureBuffer() {
     EGLBoolean result = eglStreamConsumerReleaseKHR(egl_display, stream_);
     RETURN_ON_FAILURE(result, "Could not release stream", false);
   }
+  return true;
+}
+
+bool EGLStreamCopyPictureBuffer::AllowOverlay() const {
   return true;
 }
 

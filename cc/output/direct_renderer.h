@@ -6,21 +6,22 @@
 #define CC_OUTPUT_DIRECT_RENDERER_H_
 
 #include <memory>
-#include <unordered_map>
 #include <vector>
 
 #include "base/callback.h"
+#include "base/containers/flat_map.h"
 #include "base/macros.h"
-#include "cc/base/cc_export.h"
+#include "cc/base/filter_operations.h"
+#include "cc/cc_export.h"
 #include "cc/output/ca_layer_overlay.h"
-#include "cc/output/filter_operations.h"
+#include "cc/output/dc_layer_overlay.h"
 #include "cc/output/overlay_processor.h"
 #include "cc/quads/tile_draw_quad.h"
 #include "cc/resources/resource_provider.h"
 #include "gpu/command_buffer/common/texture_in_use_response.h"
-#include "ui/events/latency_info.h"
 #include "ui/gfx/geometry/quad_f.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/latency/latency_info.h"
 
 namespace gfx {
 class ColorSpace;
@@ -55,7 +56,6 @@ class CC_EXPORT DirectRenderer {
   bool HasAllocatedResourcesForTesting(int render_pass_id) const;
   void DrawFrame(RenderPassList* render_passes_in_draw_order,
                  float device_scale_factor,
-                 const gfx::ColorSpace& device_color_space,
                  const gfx::Size& device_viewport_size);
 
   // Public interface implemented by subclasses.
@@ -74,6 +74,7 @@ class CC_EXPORT DirectRenderer {
   struct CC_EXPORT DrawingFrame {
     DrawingFrame();
     ~DrawingFrame();
+    gfx::Rect ComputeScissorRectForRenderPass() const;
 
     const RenderPassList* render_passes_in_draw_order = nullptr;
     const RenderPass* root_render_pass = nullptr;
@@ -81,15 +82,20 @@ class CC_EXPORT DirectRenderer {
     const ScopedResource* current_texture = nullptr;
 
     gfx::Rect root_damage_rect;
+    std::vector<gfx::Rect> root_content_bounds;
     gfx::Size device_viewport_size;
-    gfx::ColorSpace device_color_space;
 
     gfx::Transform projection_matrix;
     gfx::Transform window_matrix;
 
     OverlayCandidateList overlay_list;
     CALayerOverlayList ca_layer_overlay_list;
+    DCLayerOverlayList dc_layer_overlay_list;
   };
+
+  void DisableColorChecksForTesting() {
+    disable_color_checks_for_testing_ = true;
+  }
 
  protected:
   friend class BspWalkActionDrawPolygon;
@@ -104,38 +110,33 @@ class CC_EXPORT DirectRenderer {
   static void QuadRectTransform(gfx::Transform* quad_rect_transform,
                                 const gfx::Transform& quad_transform,
                                 const gfx::RectF& quad_rect);
+  // This function takes DrawingFrame as an argument because RenderPass drawing
+  // code uses its computations for buffer sizing.
   void InitializeViewport(DrawingFrame* frame,
                           const gfx::Rect& draw_rect,
                           const gfx::Rect& viewport_rect,
                           const gfx::Size& surface_size);
-  gfx::Rect MoveFromDrawToWindowSpace(const DrawingFrame* frame,
-                                      const gfx::Rect& draw_rect) const;
+  gfx::Rect MoveFromDrawToWindowSpace(const gfx::Rect& draw_rect) const;
 
-  gfx::Rect DeviceViewportRectInDrawSpace(const DrawingFrame* frame) const;
-  gfx::Rect OutputSurfaceRectInDrawSpace(const DrawingFrame* frame) const;
-  static gfx::Rect ComputeScissorRectForRenderPass(const DrawingFrame* frame);
-  void SetScissorStateForQuad(const DrawingFrame* frame,
-                              const DrawQuad& quad,
+  gfx::Rect DeviceViewportRectInDrawSpace() const;
+  gfx::Rect OutputSurfaceRectInDrawSpace() const;
+  void SetScissorStateForQuad(const DrawQuad& quad,
                               const gfx::Rect& render_pass_scissor,
                               bool use_render_pass_scissor);
   bool ShouldSkipQuad(const DrawQuad& quad,
                       const gfx::Rect& render_pass_scissor);
-  void SetScissorTestRectInDrawSpace(const DrawingFrame* frame,
-                                     const gfx::Rect& draw_space_rect);
+  void SetScissorTestRectInDrawSpace(const gfx::Rect& draw_space_rect);
 
   static gfx::Size RenderPassTextureSize(const RenderPass* render_pass);
 
   void FlushPolygons(std::deque<std::unique_ptr<DrawPolygon>>* poly_list,
-                     DrawingFrame* frame,
                      const gfx::Rect& render_pass_scissor,
                      bool use_render_pass_scissor);
-  void DrawRenderPassAndExecuteCopyRequests(DrawingFrame* frame,
-                                            RenderPass* render_pass);
-  void DrawRenderPass(DrawingFrame* frame, const RenderPass* render_pass);
-  bool UseRenderPass(DrawingFrame* frame, const RenderPass* render_pass);
+  void DrawRenderPassAndExecuteCopyRequests(RenderPass* render_pass);
+  void DrawRenderPass(const RenderPass* render_pass);
+  bool UseRenderPass(const RenderPass* render_pass);
 
   void DoDrawPolygon(const DrawPolygon& poly,
-                     DrawingFrame* frame,
                      const gfx::Rect& render_pass_scissor,
                      bool use_render_pass_scissor);
 
@@ -144,34 +145,32 @@ class CC_EXPORT DirectRenderer {
 
   // Private interface implemented by subclasses for use by DirectRenderer.
   virtual bool CanPartialSwap() = 0;
-  virtual void BindFramebufferToOutputSurface(DrawingFrame* frame) = 0;
-  virtual bool BindFramebufferToTexture(DrawingFrame* frame,
-                                        const ScopedResource* resource) = 0;
+  virtual ResourceFormat BackbufferFormat() const = 0;
+  virtual void BindFramebufferToOutputSurface() = 0;
+  virtual bool BindFramebufferToTexture(const ScopedResource* resource) = 0;
   virtual void SetScissorTestRect(const gfx::Rect& scissor_rect) = 0;
   virtual void PrepareSurfaceForPass(
-      DrawingFrame* frame,
       SurfaceInitializationMode initialization_mode,
       const gfx::Rect& render_pass_scissor) = 0;
   // |clip_region| is a (possibly null) pointer to a quad in the same
   // space as the quad. When non-null only the area of the quad that overlaps
   // with clip_region will be drawn.
-  virtual void DoDrawQuad(DrawingFrame* frame,
-                          const DrawQuad* quad,
+  virtual void DoDrawQuad(const DrawQuad* quad,
                           const gfx::QuadF* clip_region) = 0;
-  virtual void BeginDrawingFrame(DrawingFrame* frame) = 0;
-  virtual void FinishDrawingFrame(DrawingFrame* frame) = 0;
+  virtual void BeginDrawingFrame() = 0;
+  virtual void FinishDrawingFrame() = 0;
   // If a pass contains a single tile draw quad and can be drawn without
   // a render pass (e.g. applying a filter directly to the tile quad)
   // return that quad, otherwise return null.
   virtual const TileDrawQuad* CanPassBeDrawnDirectly(const RenderPass* pass);
   virtual void FinishDrawingQuadList() {}
-  virtual bool FlippedFramebuffer(const DrawingFrame* frame) const = 0;
+  virtual bool FlippedFramebuffer() const = 0;
   virtual void EnsureScissorTestEnabled() = 0;
   virtual void EnsureScissorTestDisabled() = 0;
   virtual void DidChangeVisibility() = 0;
   virtual void CopyCurrentRenderPassToBitmap(
-      DrawingFrame* frame,
       std::unique_ptr<CopyOutputRequest> request) = 0;
+  virtual void SetEnableDCLayers(bool enable) = 0;
 
   gfx::Size surface_size_for_swap_buffers() const {
     return reshape_surface_size_;
@@ -185,21 +184,32 @@ class CC_EXPORT DirectRenderer {
 
   // Whether it's valid to SwapBuffers with an empty rect. Trivially true when
   // using partial swap.
-  bool allow_empty_swap_;
+  bool allow_empty_swap_ = false;
   // Whether partial swap can be used.
-  bool use_partial_swap_;
+  bool use_partial_swap_ = false;
   // Whether overdraw feedback is enabled and can be used.
   bool overdraw_feedback_ = false;
+  // Whether the SetDrawRectangle and EnableDCLayers commands are in
+  // use.
+  bool supports_dc_layers_ = false;
+  // Whether the output surface is actually using DirectComposition.
+  bool using_dc_layers_ = false;
+  // This counts the number of draws since the last time
+  // DirectComposition layers needed to be used.
+  int frames_since_using_dc_layers_ = 0;
 
-  // TODO(danakj): Just use a vector of pairs here? Hash map is way overkill.
-  std::unordered_map<int, std::unique_ptr<ScopedResource>>
-      render_pass_textures_;
-  std::unordered_map<int, TileDrawQuad> render_pass_bypass_quads_;
+  // A map from RenderPass id to the texture used to draw the RenderPass from.
+  base::flat_map<int, std::unique_ptr<ScopedResource>> render_pass_textures_;
+  // A map from RenderPass id to the single quad present in and replacing the
+  // RenderPass.
+  base::flat_map<int, TileDrawQuad> render_pass_bypass_quads_;
 
-  RenderPassFilterList render_pass_filters_;
-  RenderPassFilterList render_pass_background_filters_;
+  // A map from RenderPass id to the filters used when drawing the RenderPass.
+  base::flat_map<int, FilterOperations*> render_pass_filters_;
+  base::flat_map<int, FilterOperations*> render_pass_background_filters_;
 
   bool visible_ = false;
+  bool disable_color_checks_for_testing_ = false;
 
   // For use in coordinate conversion, this stores the output rect, viewport
   // rect (= unflipped version of glViewport rect), the size of target
@@ -211,12 +221,29 @@ class CC_EXPORT DirectRenderer {
   gfx::Size current_surface_size_;
   gfx::Rect current_window_space_viewport_;
 
+  DrawingFrame* current_frame() {
+    DCHECK(current_frame_valid_);
+    return &current_frame_;
+  }
+  const DrawingFrame* current_frame() const {
+    DCHECK(current_frame_valid_);
+    return &current_frame_;
+  }
+
+  void SetCurrentFrameForTesting(const DrawingFrame& frame);
+
  private:
   bool initialized_ = false;
 #if DCHECK_IS_ON()
   bool overdraw_feedback_support_missing_logged_once_ = false;
 #endif
   gfx::Size enlarge_pass_texture_amount_;
+
+  // The current drawing frame is valid only during the duration of the
+  // DrawFrame function. Use the accessor current_frame() to ensure that use
+  // is valid;
+  DrawingFrame current_frame_;
+  bool current_frame_valid_ = false;
 
   // Cached values given to Reshape().
   gfx::Size reshape_surface_size_;

@@ -14,10 +14,13 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/timer/timer.h"
 #include "build/build_config.h"
 #include "content/browser/media/capture/desktop_capture_device_uma_types.h"
@@ -64,7 +67,7 @@ bool IsFrameUnpackedOrInverted(webrtc::DesktopFrame* frame) {
 
 #if defined(OS_WIN)
 const base::Feature kDirectXCapturer{"DirectXCapturer",
-                                     base::FEATURE_DISABLED_BY_DEFAULT};
+                                     base::FEATURE_ENABLED_BY_DEFAULT};
 #endif
 
 class DesktopCaptureDevice::Core : public webrtc::DesktopCapturer::Callback {
@@ -186,6 +189,8 @@ void DesktopCaptureDevice::Core::AllocateAndStart(
       BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE)));
 
   desktop_capturer_->Start(this);
+  // Assume it will be always started successfully for now.
+  client_->OnStarted();
 
   CaptureFrameAndScheduleNext();
 }
@@ -433,6 +438,7 @@ void DesktopCaptureDevice::AllocateAndStart(
 
 void DesktopCaptureDevice::StopAndDeAllocate() {
   if (core_) {
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
     thread_.task_runner()->DeleteSoon(FROM_HERE, core_.release());
     thread_.Stop();
   }

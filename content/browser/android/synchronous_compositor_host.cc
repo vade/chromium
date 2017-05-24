@@ -10,6 +10,7 @@
 #include "base/containers/hash_tables.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/shared_memory.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/trace_event/trace_event_argument.h"
 #include "content/browser/android/synchronous_compositor_browser_filter.h"
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
@@ -122,10 +123,13 @@ SynchronousCompositor::Frame SynchronousCompositorHost::DemandDrawHw(
   base::Optional<cc::CompositorFrame> compositor_frame;
   SyncCompositorCommonRendererParams common_renderer_params;
 
-  if (!sender_->Send(new SyncCompositorMsg_DemandDrawHw(
-          routing_id_, params, &common_renderer_params,
-          &compositor_frame_sink_id, &compositor_frame))) {
-    return SynchronousCompositor::Frame();
+  {
+    base::ThreadRestrictions::ScopedAllowWait wait;
+    if (!sender_->Send(new SyncCompositorMsg_DemandDrawHw(
+            routing_id_, params, &common_renderer_params,
+            &compositor_frame_sink_id, &compositor_frame))) {
+      return SynchronousCompositor::Frame();
+    }
   }
 
   ProcessCommonParams(common_renderer_params);
@@ -172,19 +176,20 @@ class ScopedSetSkCanvas {
 
 bool SynchronousCompositorHost::DemandDrawSwInProc(SkCanvas* canvas) {
   SyncCompositorCommonRendererParams common_renderer_params;
-  bool success = false;
-  std::unique_ptr<cc::CompositorFrame> frame(new cc::CompositorFrame);
+  base::Optional<cc::CompositorFrameMetadata> metadata;
   ScopedSetSkCanvas set_sk_canvas(canvas);
   SyncCompositorDemandDrawSwParams params;  // Unused.
-  if (!sender_->Send(new SyncCompositorMsg_DemandDrawSw(
-          routing_id_, params, &success, &common_renderer_params,
-          frame.get()))) {
-    return false;
+  {
+    base::ThreadRestrictions::ScopedAllowWait wait;
+    if (!sender_->Send(new SyncCompositorMsg_DemandDrawSw(
+            routing_id_, params, &common_renderer_params, &metadata))) {
+      return false;
+    }
   }
-  if (!success)
+  if (!metadata)
     return false;
   ProcessCommonParams(common_renderer_params);
-  UpdateFrameMetaData(std::move(frame->metadata));
+  UpdateFrameMetaData(std::move(*metadata));
   return true;
 }
 
@@ -218,8 +223,7 @@ bool SynchronousCompositorHost::DemandDrawSw(SkCanvas* canvas) {
   SyncCompositorDemandDrawSwParams params;
   params.size = gfx::Size(canvas->getBaseLayerSize().width(),
                           canvas->getBaseLayerSize().height());
-  SkIRect canvas_clip;
-  canvas->getClipDeviceBounds(&canvas_clip);
+  SkIRect canvas_clip = canvas->getDeviceClipBounds();
   params.clip = gfx::SkIRectToRect(canvas_clip);
   params.transform.matrix() = canvas->getTotalMatrix();
   if (params.size.IsEmpty())
@@ -237,20 +241,21 @@ bool SynchronousCompositorHost::DemandDrawSw(SkCanvas* canvas) {
   if (!software_draw_shm_)
     return false;
 
-  std::unique_ptr<cc::CompositorFrame> frame(new cc::CompositorFrame);
+  base::Optional<cc::CompositorFrameMetadata> metadata;
   SyncCompositorCommonRendererParams common_renderer_params;
-  bool success = false;
-  if (!sender_->Send(new SyncCompositorMsg_DemandDrawSw(
-          routing_id_, params, &success, &common_renderer_params,
-          frame.get()))) {
-    return false;
+  {
+    base::ThreadRestrictions::ScopedAllowWait wait;
+    if (!sender_->Send(new SyncCompositorMsg_DemandDrawSw(
+            routing_id_, params, &common_renderer_params, &metadata))) {
+      return false;
+    }
   }
   ScopedSendZeroMemory send_zero_memory(this);
-  if (!success)
+  if (!metadata)
     return false;
 
   ProcessCommonParams(common_renderer_params);
-  UpdateFrameMetaData(std::move(frame->metadata));
+  UpdateFrameMetaData(std::move(*metadata));
 
   SkBitmap bitmap;
   if (!bitmap.installPixels(info, software_draw_shm_->shm.memory(), stride))
@@ -284,19 +289,19 @@ void SynchronousCompositorHost::SetSoftwareDrawSharedMemoryIfNeeded(
 
   SyncCompositorSetSharedMemoryParams set_shm_params;
   set_shm_params.buffer_size = buffer_size;
-  base::ProcessHandle renderer_process_handle =
-      rwhva_->GetRenderWidgetHost()->GetProcess()->GetHandle();
-  if (!software_draw_shm->shm.ShareToProcess(renderer_process_handle,
-                                             &set_shm_params.shm_handle)) {
+  set_shm_params.shm_handle = software_draw_shm->shm.handle().Duplicate();
+  if (!set_shm_params.shm_handle.IsValid())
     return;
-  }
 
   bool success = false;
   SyncCompositorCommonRendererParams common_renderer_params;
-  if (!sender_->Send(new SyncCompositorMsg_SetSharedMemory(
-          routing_id_, set_shm_params, &success, &common_renderer_params)) ||
-      !success) {
-    return;
+  {
+    base::ThreadRestrictions::ScopedAllowWait wait;
+    if (!sender_->Send(new SyncCompositorMsg_SetSharedMemory(
+            routing_id_, set_shm_params, &success, &common_renderer_params)) ||
+        !success) {
+      return;
+    }
   }
   software_draw_shm_ = std::move(software_draw_shm);
   ProcessCommonParams(common_renderer_params);
@@ -337,9 +342,12 @@ void SynchronousCompositorHost::DidChangeRootLayerScrollOffset(
 void SynchronousCompositorHost::SynchronouslyZoomBy(float zoom_delta,
                                                     const gfx::Point& anchor) {
   SyncCompositorCommonRendererParams common_renderer_params;
-  if (!sender_->Send(new SyncCompositorMsg_ZoomBy(
-          routing_id_, zoom_delta, anchor, &common_renderer_params))) {
-    return;
+  {
+    base::ThreadRestrictions::ScopedAllowWait wait;
+    if (!sender_->Send(new SyncCompositorMsg_ZoomBy(
+            routing_id_, zoom_delta, anchor, &common_renderer_params))) {
+      return;
+    }
   }
   ProcessCommonParams(common_renderer_params);
 }

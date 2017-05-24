@@ -41,20 +41,6 @@ Polymer({
       reflectToAttribute: true,
     },
 
-    // Whether domain-grouped history is enabled.
-    isGroupedMode: {
-      type: Boolean,
-      reflectToAttribute: true,
-    },
-
-    // The period to search over. Matches BrowsingHistoryHandler::Range.
-    groupedRange: {
-      type: Number,
-      reflectToAttribute: true,
-    },
-
-    groupedOffset: Number,
-
     // Show an (i) button on the right of the toolbar to display a notice about
     // synced history.
     showSyncNotice: {
@@ -65,7 +51,7 @@ Polymer({
     // Sync notice is currently visible.
     syncNoticeVisible_: {
       type: Boolean,
-      value: false
+      value: false,
     },
 
     hasMoreResults: Boolean,
@@ -108,6 +94,14 @@ Polymer({
 
   showSearchField: function() {
     this.searchField.showAndFocus();
+  },
+
+  deleteSelectedItems: function() {
+    this.fire('delete-selected');
+  },
+
+  clearSelectedItems: function() {
+    this.fire('unselect-all');
   },
 
   /**
@@ -183,76 +177,7 @@ Polymer({
   },
 
   /** @private */
-  onClearSelectionTap_: function() {
-    this.fire('unselect-all');
-  },
-
-  /** @private */
-  onDeleteTap_: function() {
-    this.fire('delete-selected');
-  },
-
-  /**
-   * If the user is a supervised user the delete button is not shown.
-   * @private
-   */
-  deletingAllowed_: function() {
-    return loadTimeData.getBoolean('allowDeletingHistory');
-  },
-
-  /** @private */
   numberOfItemsSelected_: function(count) {
     return count > 0 ? loadTimeData.getStringF('itemsSelected', count) : '';
-  },
-
-  /** @private */
-  getHistoryInterval_: function() {
-    var info = this.queryInfo;
-    if (this.groupedRange == HistoryRange.WEEK)
-      return info.queryInterval;
-
-    if (this.groupedRange == HistoryRange.MONTH)
-      return info.queryStartMonth;
-  },
-
-  /**
-   * @param {Event} e
-   * @private
-   */
-  onTabSelected_: function(e) {
-    this.fire(
-        'change-query', {range: Number(e.detail.item.getAttribute('value'))});
-  },
-
-  /**
-   * @param {number} newOffset
-   * @private
-   */
-  changeOffset_: function(newOffset) {
-    if (!this.querying)
-      this.fire('change-query', {offset: newOffset});
-  },
-
-  /** @private */
-  onTodayTap_: function() {
-    this.changeOffset_(0);
-  },
-
-  /** @private */
-  onPrevTap_: function() {
-    this.changeOffset_(this.groupedOffset + 1);
-  },
-
-  /** @private */
-  onNextTap_: function() {
-    this.changeOffset_(this.groupedOffset - 1);
-  },
-
-  /**
-   * @private
-   * @return {boolean}
-   */
-  isToday_: function() {
-    return this.groupedOffset == 0;
   },
 });

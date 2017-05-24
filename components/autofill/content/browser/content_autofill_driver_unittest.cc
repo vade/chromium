@@ -21,8 +21,8 @@
 #include "components/autofill/core/common/autofill_switches.h"
 #include "components/autofill/core/common/form_data_predictions.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/ssl_status.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
@@ -52,8 +52,7 @@ class FakeAutofillAgent : public mojom::AutofillAgent {
   ~FakeAutofillAgent() override {}
 
   void BindRequest(mojo::ScopedMessagePipeHandle handle) {
-    bindings_.AddBinding(
-        this, mojo::MakeRequest<mojom::AutofillAgent>(std::move(handle)));
+    bindings_.AddBinding(this, mojom::AutofillAgentRequest(std::move(handle)));
   }
 
   void SetQuitLoopClosure(base::Closure closure) { quit_closure_ = closure; }
@@ -264,6 +263,9 @@ class ContentAutofillDriverTest : public content::RenderViewHostTestHarness {
  public:
   void SetUp() override {
     content::RenderViewHostTestHarness::SetUp();
+    // This needed to keep the WebContentsObserverSanityChecker checks happy for
+    // when AppendChild is called.
+    NavigateAndCommit(GURL("about:blank"));
 
     test_autofill_client_.reset(new MockAutofillClient());
     driver_.reset(new TestContentAutofillDriver(web_contents()->GetMainFrame(),
@@ -284,6 +286,18 @@ class ContentAutofillDriverTest : public content::RenderViewHostTestHarness {
     content::RenderViewHostTestHarness::TearDown();
   }
 
+  void Navigate(bool main_frame) {
+    content::RenderFrameHost* rfh = main_rfh();
+    content::RenderFrameHostTester* rfh_tester =
+        content::RenderFrameHostTester::For(rfh);
+    if (!main_frame)
+      rfh = rfh_tester->AppendChild("subframe");
+    std::unique_ptr<content::NavigationHandle> navigation_handle =
+        content::NavigationHandle::CreateNavigationHandleForTesting(
+            GURL(), rfh, true);
+   driver_->DidNavigateFrame(navigation_handle.get());
+  }
+
  protected:
   std::unique_ptr<MockAutofillClient> test_autofill_client_;
   std::unique_ptr<TestContentAutofillDriver> driver_;
@@ -302,21 +316,12 @@ TEST_F(ContentAutofillDriverTest, GetURLRequestContext) {
 
 TEST_F(ContentAutofillDriverTest, NavigatedToDifferentPage) {
   EXPECT_CALL(*driver_->mock_autofill_manager(), Reset());
-  content::LoadCommittedDetails details = content::LoadCommittedDetails();
-  details.is_main_frame = true;
-  details.is_in_page = false;
-  ASSERT_TRUE(details.is_navigation_to_different_page());
-  content::FrameNavigateParams params = content::FrameNavigateParams();
-  driver_->DidNavigateFrame(details, params);
+  Navigate(true);
 }
 
 TEST_F(ContentAutofillDriverTest, NavigatedWithinSamePage) {
   EXPECT_CALL(*driver_->mock_autofill_manager(), Reset()).Times(0);
-  content::LoadCommittedDetails details = content::LoadCommittedDetails();
-  details.is_main_frame = false;
-  ASSERT_TRUE(!details.is_navigation_to_different_page());
-  content::FrameNavigateParams params = content::FrameNavigateParams();
-  driver_->DidNavigateFrame(details, params);
+  Navigate(false);
 }
 
 TEST_F(ContentAutofillDriverTest, FormDataSentToRenderer_FillForm) {
@@ -483,17 +488,6 @@ TEST_F(ContentAutofillDriverTest, CreditCardFormInteractionOnHTTPS) {
   EXPECT_EQ(url, entry->GetURL());
   EXPECT_FALSE(!!(entry->GetSSL().content_status &
                   content::SSLStatus::DISPLAYED_CREDIT_CARD_FIELD_ON_HTTP));
-}
-
-TEST_F(ContentAutofillDriverTest, NotifyFirstUserGestureObservedInTab) {
-  driver_->NotifyFirstUserGestureObservedInTab();
-  EXPECT_CALL(fake_agent_, FirstUserGestureObservedInTab());
-  base::RunLoop().RunUntilIdle();
-}
-
-TEST_F(ContentAutofillDriverTest, FirstUserGestureObserved) {
-  EXPECT_CALL(*test_autofill_client_, OnFirstUserGestureObserved());
-  driver_->FirstUserGestureObserved();
 }
 
 }  // namespace autofill

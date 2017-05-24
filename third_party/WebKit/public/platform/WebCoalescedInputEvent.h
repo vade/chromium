@@ -13,32 +13,37 @@
 
 namespace blink {
 
-struct BLINK_COMMON_EXPORT WebInputEventDeleter {
-  void operator()(blink::WebInputEvent*) const;
-};
-
-using WebScopedInputEvent =
-    std::unique_ptr<WebInputEvent, WebInputEventDeleter>;
-
 // This class is representing a polymorphic WebInputEvent structure with its
 // coalesced events. The event could be any events defined in WebInputEvent.h.
-class BLINK_COMMON_EXPORT WebCoalescedInputEvent {
+class BLINK_PLATFORM_EXPORT WebCoalescedInputEvent {
  public:
-  explicit WebCoalescedInputEvent(WebScopedInputEvent);
   explicit WebCoalescedInputEvent(const WebInputEvent&);
   WebCoalescedInputEvent(const WebInputEvent&,
                          const std::vector<const WebInputEvent*>&);
+  // Copy constructor to deep copy the event.
+  WebCoalescedInputEvent(const WebCoalescedInputEvent&);
 
-  WebInputEvent* eventPointer();
-  void addCoalescedEvent(const blink::WebInputEvent&);
-  const WebInputEvent& event() const;
-  size_t coalescedEventSize() const;
-  const WebInputEvent& coalescedEvent(size_t index) const;
-  std::vector<const WebInputEvent*> getCoalescedEventsPointers() const;
+  WebInputEvent* EventPointer();
+  void AddCoalescedEvent(const blink::WebInputEvent&);
+  const WebInputEvent& Event() const;
+  size_t CoalescedEventSize() const;
+  const WebInputEvent& CoalescedEvent(size_t index) const;
+  std::vector<const WebInputEvent*> GetCoalescedEventsPointers() const;
 
  private:
-  WebScopedInputEvent m_event;
-  std::vector<WebScopedInputEvent> m_coalescedEvents;
+  // TODO(hans): Remove this once clang-cl knows to not inline dtors that
+  // call operator(), https://crbug.com/691714
+  struct BLINK_PLATFORM_EXPORT WebInputEventDeleter {
+    void operator()(blink::WebInputEvent*) const;
+  };
+
+  using WebScopedInputEvent =
+      std::unique_ptr<WebInputEvent, WebInputEventDeleter>;
+
+  WebScopedInputEvent MakeWebScopedInputEvent(const blink::WebInputEvent&);
+
+  WebScopedInputEvent event_;
+  std::vector<WebScopedInputEvent> coalesced_events_;
 };
 
 using WebScopedCoalescedInputEvent = std::unique_ptr<WebCoalescedInputEvent>;

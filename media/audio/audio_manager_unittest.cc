@@ -10,18 +10,23 @@
 #include "base/bind.h"
 #include "base/environment.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_message_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "media/audio/audio_device_description.h"
+#include "media/audio/audio_device_info_accessor_for_tests.h"
 #include "media/audio/audio_device_name.h"
 #include "media/audio/audio_output_proxy.h"
 #include "media/audio/audio_unittest_util.h"
 #include "media/audio/fake_audio_log_factory.h"
 #include "media/audio/fake_audio_manager.h"
+#include "media/audio/test_audio_thread.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(USE_ALSA)
@@ -31,11 +36,11 @@
 #if defined(OS_WIN)
 #include "base/win/scoped_com_initializer.h"
 #include "media/audio/win/audio_manager_win.h"
-#include "media/audio/win/wavein_input_win.h"
 #endif
 
 #if defined(USE_PULSEAUDIO)
 #include "media/audio/pulse/audio_manager_pulse.h"
+#include "media/audio/pulse/pulse_util.h"
 #endif  // defined(USE_PULSEAUDIO)
 
 #if defined(USE_CRAS)
@@ -49,34 +54,37 @@
 namespace media {
 
 namespace {
+
 template <typename T>
 struct TestAudioManagerFactory {
-  static ScopedAudioManagerPtr Create(AudioLogFactory* audio_log_factory) {
-    return ScopedAudioManagerPtr(new T(base::ThreadTaskRunnerHandle::Get(),
-                                       base::ThreadTaskRunnerHandle::Get(),
-                                       audio_log_factory));
+  static std::unique_ptr<AudioManager> Create(
+      AudioLogFactory* audio_log_factory) {
+    return base::MakeUnique<T>(base::MakeUnique<TestAudioThread>(),
+                               audio_log_factory);
   }
 };
 
 #if defined(USE_PULSEAUDIO)
 template <>
 struct TestAudioManagerFactory<AudioManagerPulse> {
-  static ScopedAudioManagerPtr Create(AudioLogFactory* audio_log_factory) {
-    std::unique_ptr<AudioManagerPulse, AudioManagerDeleter> manager(
-        new AudioManagerPulse(base::ThreadTaskRunnerHandle::Get(),
-                              base::ThreadTaskRunnerHandle::Get(),
-                              audio_log_factory));
-    if (!manager->Init())
-      manager.reset();
-    return std::move(manager);
+  static std::unique_ptr<AudioManager> Create(
+      AudioLogFactory* audio_log_factory) {
+    pa_threaded_mainloop* pa_mainloop = nullptr;
+    pa_context* pa_context = nullptr;
+    if (!pulse::InitPulse(&pa_mainloop, &pa_context))
+      return nullptr;
+    return base::MakeUnique<AudioManagerPulse>(
+        base::MakeUnique<TestAudioThread>(), audio_log_factory, pa_mainloop,
+        pa_context);
   }
 };
 #endif  // defined(USE_PULSEAUDIO)
 
 template <>
 struct TestAudioManagerFactory<std::nullptr_t> {
-  static ScopedAudioManagerPtr Create(AudioLogFactory* audio_log_factory) {
-    return AudioManager::CreateForTesting(base::ThreadTaskRunnerHandle::Get());
+  static std::unique_ptr<AudioManager> Create(
+      AudioLogFactory* audio_log_factory) {
+    return AudioManager::CreateForTesting(base::MakeUnique<TestAudioThread>());
   }
 };
 
@@ -201,13 +209,13 @@ class AudioManagerTest : public ::testing::Test {
   }
 
   void GetDefaultOutputStreamParameters(media::AudioParameters* params) {
-    *params = audio_manager_->GetDefaultOutputStreamParameters();
+    *params = device_info_accessor_->GetDefaultOutputStreamParameters();
   }
 
   void GetAssociatedOutputDeviceID(const std::string& input_device_id,
                                    std::string* output_device_id) {
     *output_device_id =
-        audio_manager_->GetAssociatedOutputDeviceID(input_device_id);
+        device_info_accessor_->GetAssociatedOutputDeviceID(input_device_id);
   }
 
 #if defined(USE_CRAS)
@@ -231,38 +239,7 @@ class AudioManagerTest : public ::testing::Test {
 
  protected:
   AudioManagerTest() { CreateAudioManagerForTesting(); }
-  ~AudioManagerTest() override {}
-
-#if defined(OS_WIN)
-  bool SetMMDeviceEnumeration() {
-    AudioManagerWin* amw = static_cast<AudioManagerWin*>(audio_manager_.get());
-    // Windows Wave is used as default if Windows XP was detected =>
-    // return false since MMDevice is not supported on XP.
-    if (amw->enumeration_type() == AudioManagerWin::kWaveEnumeration)
-      return false;
-
-    amw->SetEnumerationType(AudioManagerWin::kMMDeviceEnumeration);
-    return true;
-  }
-
-  void SetWaveEnumeration() {
-    AudioManagerWin* amw = static_cast<AudioManagerWin*>(audio_manager_.get());
-    amw->SetEnumerationType(AudioManagerWin::kWaveEnumeration);
-  }
-
-  std::string GetDeviceIdFromPCMWaveInAudioInputStream(
-      const std::string& device_id) {
-    AudioManagerWin* amw = static_cast<AudioManagerWin*>(audio_manager_.get());
-    AudioParameters parameters(
-        AudioParameters::AUDIO_PCM_LINEAR, CHANNEL_LAYOUT_STEREO,
-        AudioParameters::kAudioCDSampleRate, 16,
-        1024);
-    std::unique_ptr<PCMWaveInAudioInputStream> stream(
-        static_cast<PCMWaveInAudioInputStream*>(
-            amw->CreatePCMWaveInAudioInputStream(parameters, device_id)));
-    return stream.get() ? stream->device_id_ : std::string();
-  }
-#endif
+  ~AudioManagerTest() override { audio_manager_->Shutdown(); }
 
   // Helper method which verifies that the device list starts with a valid
   // default record followed by non-default device names.
@@ -348,10 +325,10 @@ class AudioManagerTest : public ::testing::Test {
 #endif  // defined(USE_CRAS)
 
   bool InputDevicesAvailable() {
-    return audio_manager_->HasAudioInputDevices();
+    return device_info_accessor_->HasAudioInputDevices();
   }
   bool OutputDevicesAvailable() {
-    return audio_manager_->HasAudioOutputDevices();
+    return device_info_accessor_->HasAudioOutputDevices();
   }
 
   template <typename T = std::nullptr_t>
@@ -359,8 +336,10 @@ class AudioManagerTest : public ::testing::Test {
     // Only one AudioManager may exist at a time, so destroy the one we're
     // currently holding before creating a new one.
     // Flush the message loop to run any shutdown tasks posted by AudioManager.
-    audio_manager_.reset();
-    base::RunLoop().RunUntilIdle();
+    if (audio_manager_) {
+      audio_manager_->Shutdown();
+      audio_manager_.reset();
+    }
 
     audio_manager_ =
         TestAudioManagerFactory<T>::Create(&fake_audio_log_factory_);
@@ -369,11 +348,14 @@ class AudioManagerTest : public ::testing::Test {
     // initialized and ready to use before returning from this function.
     // TODO(alokp): We should perhaps do this in AudioManager::Create().
     base::RunLoop().RunUntilIdle();
+    device_info_accessor_ =
+        base::MakeUnique<AudioDeviceInfoAccessorForTests>(audio_manager_.get());
   }
 
   base::TestMessageLoop message_loop_;
   FakeAudioLogFactory fake_audio_log_factory_;
-  ScopedAudioManagerPtr audio_manager_;
+  std::unique_ptr<AudioManager> audio_manager_;
+  std::unique_ptr<AudioDeviceInfoAccessorForTests> device_info_accessor_;
 
 #if defined(USE_CRAS)
   chromeos::CrasAudioHandler* cras_audio_handler_ = nullptr;  // Not owned.
@@ -383,8 +365,7 @@ class AudioManagerTest : public ::testing::Test {
 };
 
 #if defined(USE_CRAS)
-// TODO(warx): enable the test once crbug.com/554168 is fixed.
-TEST_F(AudioManagerTest, DISABLED_EnumerateInputDevicesCras) {
+TEST_F(AudioManagerTest, EnumerateInputDevicesCras) {
   // Setup the devices without internal mic, so that it doesn't exist
   // beamforming capable mic.
   AudioNodeList audio_nodes;
@@ -409,12 +390,11 @@ TEST_F(AudioManagerTest, DISABLED_EnumerateInputDevicesCras) {
   DVLOG(2) << "Testing AudioManagerCras.";
   CreateAudioManagerForTesting<AudioManagerCras>();
   AudioDeviceDescriptions device_descriptions;
-  audio_manager_->GetAudioInputDeviceDescriptions(&device_descriptions);
+  device_info_accessor_->GetAudioInputDeviceDescriptions(&device_descriptions);
   CheckDeviceDescriptionsCras(device_descriptions, expectation);
 }
 
-// TODO(warx): enable the test once crbug.com/554168 is fixed.
-TEST_F(AudioManagerTest, DISABLED_EnumerateOutputDevicesCras) {
+TEST_F(AudioManagerTest, EnumerateOutputDevicesCras) {
   // Setup the devices without internal mic, so that it doesn't exist
   // beamforming capable mic.
   AudioNodeList audio_nodes;
@@ -437,7 +417,7 @@ TEST_F(AudioManagerTest, DISABLED_EnumerateOutputDevicesCras) {
   DVLOG(2) << "Testing AudioManagerCras.";
   CreateAudioManagerForTesting<AudioManagerCras>();
   AudioDeviceDescriptions device_descriptions;
-  audio_manager_->GetAudioOutputDeviceDescriptions(&device_descriptions);
+  device_info_accessor_->GetAudioOutputDeviceDescriptions(&device_descriptions);
   CheckDeviceDescriptionsCras(device_descriptions, expectation);
 }
 #else  // !defined(USE_CRAS)
@@ -455,7 +435,7 @@ TEST_F(AudioManagerTest, EnumerateInputDevices) {
   ABORT_AUDIO_TEST_IF_NOT(InputDevicesAvailable());
 
   AudioDeviceDescriptions device_descriptions;
-  audio_manager_->GetAudioInputDeviceDescriptions(&device_descriptions);
+  device_info_accessor_->GetAudioInputDeviceDescriptions(&device_descriptions);
   CheckDeviceDescriptions(device_descriptions);
 }
 
@@ -464,7 +444,7 @@ TEST_F(AudioManagerTest, EnumerateOutputDevices) {
   ABORT_AUDIO_TEST_IF_NOT(OutputDevicesAvailable());
 
   AudioDeviceDescriptions device_descriptions;
-  audio_manager_->GetAudioOutputDeviceDescriptions(&device_descriptions);
+  device_info_accessor_->GetAudioOutputDeviceDescriptions(&device_descriptions);
   CheckDeviceDescriptions(device_descriptions);
 }
 
@@ -479,12 +459,7 @@ TEST_F(AudioManagerTest, EnumerateInputDevicesWinMMDevice) {
   ABORT_AUDIO_TEST_IF_NOT(InputDevicesAvailable());
 
   AudioDeviceDescriptions device_descriptions;
-  if (!SetMMDeviceEnumeration()) {
-    // Usage of MMDevice will fail on XP and lower.
-    LOG(WARNING) << "MM device enumeration is not supported.";
-    return;
-  }
-  audio_manager_->GetAudioInputDeviceDescriptions(&device_descriptions);
+  device_info_accessor_->GetAudioInputDeviceDescriptions(&device_descriptions);
   CheckDeviceDescriptions(device_descriptions);
 }
 
@@ -492,79 +467,9 @@ TEST_F(AudioManagerTest, EnumerateOutputDevicesWinMMDevice) {
   ABORT_AUDIO_TEST_IF_NOT(OutputDevicesAvailable());
 
   AudioDeviceDescriptions device_descriptions;
-  if (!SetMMDeviceEnumeration()) {
-    // Usage of MMDevice will fail on XP and lower.
-    LOG(WARNING) << "MM device enumeration is not supported.";
-    return;
-  }
-  audio_manager_->GetAudioOutputDeviceDescriptions(&device_descriptions);
+  device_info_accessor_->GetAudioOutputDeviceDescriptions(&device_descriptions);
   CheckDeviceDescriptions(device_descriptions);
 }
-
-// Override default enumeration API and force usage of Windows Wave.
-// This test will run on Windows XP, Windows Vista and Windows 7.
-TEST_F(AudioManagerTest, EnumerateInputDevicesWinWave) {
-  ABORT_AUDIO_TEST_IF_NOT(InputDevicesAvailable());
-
-  AudioDeviceDescriptions device_descriptions;
-  SetWaveEnumeration();
-  audio_manager_->GetAudioInputDeviceDescriptions(&device_descriptions);
-  CheckDeviceDescriptions(device_descriptions);
-}
-
-TEST_F(AudioManagerTest, EnumerateOutputDevicesWinWave) {
-  ABORT_AUDIO_TEST_IF_NOT(OutputDevicesAvailable());
-
-  AudioDeviceDescriptions device_descriptions;
-  SetWaveEnumeration();
-  audio_manager_->GetAudioOutputDeviceDescriptions(&device_descriptions);
-  CheckDeviceDescriptions(device_descriptions);
-}
-
-TEST_F(AudioManagerTest, WinXPDeviceIdUnchanged) {
-  ABORT_AUDIO_TEST_IF_NOT(InputDevicesAvailable());
-
-  AudioDeviceDescriptions xp_device_descriptions;
-  SetWaveEnumeration();
-  audio_manager_->GetAudioInputDeviceDescriptions(&xp_device_descriptions);
-  CheckDeviceDescriptions(xp_device_descriptions);
-
-  // Device ID should remain unchanged, including the default device ID.
-  for (const auto& description : xp_device_descriptions) {
-    EXPECT_EQ(description.unique_id,
-              GetDeviceIdFromPCMWaveInAudioInputStream(description.unique_id));
-  }
-}
-
-TEST_F(AudioManagerTest, ConvertToWinXPInputDeviceId) {
-  ABORT_AUDIO_TEST_IF_NOT(InputDevicesAvailable());
-
-  if (!SetMMDeviceEnumeration()) {
-    // Usage of MMDevice will fail on XP and lower.
-    LOG(WARNING) << "MM device enumeration is not supported.";
-    return;
-  }
-
-  AudioDeviceDescriptions device_descriptions;
-  audio_manager_->GetAudioInputDeviceDescriptions(&device_descriptions);
-  CheckDeviceDescriptions(device_descriptions);
-
-  for (AudioDeviceDescriptions::iterator i = device_descriptions.begin();
-       i != device_descriptions.end(); ++i) {
-    std::string converted_id =
-        GetDeviceIdFromPCMWaveInAudioInputStream(i->unique_id);
-    if (i == device_descriptions.begin()) {
-      // The first in the list is the default device ID, which should not be
-      // changed when passed to PCMWaveInAudioInputStream.
-      EXPECT_EQ(i->unique_id, converted_id);
-    } else {
-      // MMDevice-style device IDs should be converted to WaveIn-style device
-      // IDs.
-      EXPECT_NE(i->unique_id, converted_id);
-    }
-  }
-}
-
 #endif  // defined(OS_WIN)
 
 #if defined(USE_PULSEAUDIO)
@@ -578,7 +483,8 @@ TEST_F(AudioManagerTest, EnumerateInputDevicesPulseaudio) {
   CreateAudioManagerForTesting<AudioManagerPulse>();
   if (audio_manager_.get()) {
     AudioDeviceDescriptions device_descriptions;
-    audio_manager_->GetAudioInputDeviceDescriptions(&device_descriptions);
+    device_info_accessor_->GetAudioInputDeviceDescriptions(
+        &device_descriptions);
     CheckDeviceDescriptions(device_descriptions);
   } else {
     LOG(WARNING) << "No pulseaudio on this system.";
@@ -591,7 +497,8 @@ TEST_F(AudioManagerTest, EnumerateOutputDevicesPulseaudio) {
   CreateAudioManagerForTesting<AudioManagerPulse>();
   if (audio_manager_.get()) {
     AudioDeviceDescriptions device_descriptions;
-    audio_manager_->GetAudioOutputDeviceDescriptions(&device_descriptions);
+    device_info_accessor_->GetAudioOutputDeviceDescriptions(
+        &device_descriptions);
     CheckDeviceDescriptions(device_descriptions);
   } else {
     LOG(WARNING) << "No pulseaudio on this system.";
@@ -610,7 +517,7 @@ TEST_F(AudioManagerTest, EnumerateInputDevicesAlsa) {
   DVLOG(2) << "Testing AudioManagerAlsa.";
   CreateAudioManagerForTesting<AudioManagerAlsa>();
   AudioDeviceDescriptions device_descriptions;
-  audio_manager_->GetAudioInputDeviceDescriptions(&device_descriptions);
+  device_info_accessor_->GetAudioInputDeviceDescriptions(&device_descriptions);
   CheckDeviceDescriptions(device_descriptions);
 }
 
@@ -620,7 +527,7 @@ TEST_F(AudioManagerTest, EnumerateOutputDevicesAlsa) {
   DVLOG(2) << "Testing AudioManagerAlsa.";
   CreateAudioManagerForTesting<AudioManagerAlsa>();
   AudioDeviceDescriptions device_descriptions;
-  audio_manager_->GetAudioOutputDeviceDescriptions(&device_descriptions);
+  device_info_accessor_->GetAudioOutputDeviceDescriptions(&device_descriptions);
   CheckDeviceDescriptions(device_descriptions);
 }
 #endif  // defined(USE_ALSA)
@@ -640,7 +547,7 @@ TEST_F(AudioManagerTest, GetAssociatedOutputDeviceID) {
   ABORT_AUDIO_TEST_IF_NOT(InputDevicesAvailable() && OutputDevicesAvailable());
 
   AudioDeviceDescriptions device_descriptions;
-  audio_manager_->GetAudioInputDeviceDescriptions(&device_descriptions);
+  device_info_accessor_->GetAudioInputDeviceDescriptions(&device_descriptions);
   bool found_an_associated_device = false;
   for (const auto& description : device_descriptions) {
     EXPECT_FALSE(description.unique_id.empty());
@@ -659,17 +566,33 @@ TEST_F(AudioManagerTest, GetAssociatedOutputDeviceID) {
 }
 #endif  // defined(USE_CRAS)
 
+// Mock class to verify enable and disable debug recording calls.
+class MockAudioDebugRecordingManager : public AudioDebugRecordingManager {
+ public:
+  MockAudioDebugRecordingManager(
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> file_task_runner)
+      : AudioDebugRecordingManager(std::move(task_runner),
+                                   std::move(file_task_runner)) {}
+
+  ~MockAudioDebugRecordingManager() override {}
+
+  MOCK_METHOD1(EnableDebugRecording, void(const base::FilePath&));
+  MOCK_METHOD0(DisableDebugRecording, void());
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockAudioDebugRecordingManager);
+};
+
 class TestAudioManager : public FakeAudioManager {
   // For testing the default implementation of GetGroupId(Input|Output)
   // input$i is associated to output$i, if both exist.
   // Default input is input1.
   // Default output is output2.
  public:
-  TestAudioManager(
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> worker_task_runner,
-      AudioLogFactory* audio_log_factory)
-      : FakeAudioManager(task_runner, worker_task_runner, audio_log_factory) {}
+  TestAudioManager(std::unique_ptr<AudioThread> audio_thread,
+                   AudioLogFactory* audio_log_factory)
+      : FakeAudioManager(std::move(audio_thread), audio_log_factory) {}
 
   std::string GetDefaultOutputDeviceID() override { return "output4"; }
 
@@ -699,6 +622,13 @@ class TestAudioManager : public FakeAudioManager {
     device_names->emplace_back("Output 4", "output4");
     device_names->push_front(AudioDeviceName::CreateDefault());
   }
+
+  std::unique_ptr<AudioDebugRecordingManager> CreateAudioDebugRecordingManager(
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> file_task_runner) override {
+    return base::MakeUnique<MockAudioDebugRecordingManager>(
+        std::move(task_runner), std::move(file_task_runner));
+  }
 };
 
 TEST_F(AudioManagerTest, GroupId) {
@@ -710,9 +640,9 @@ TEST_F(AudioManagerTest, GroupId) {
   // output3
   // output4, default output
   AudioDeviceDescriptions inputs;
-  audio_manager_->GetAudioInputDeviceDescriptions(&inputs);
+  device_info_accessor_->GetAudioInputDeviceDescriptions(&inputs);
   AudioDeviceDescriptions outputs;
-  audio_manager_->GetAudioOutputDeviceDescriptions(&outputs);
+  device_info_accessor_->GetAudioOutputDeviceDescriptions(&outputs);
   EXPECT_EQ(inputs[0].group_id, outputs[1].group_id);
   EXPECT_EQ(inputs[1].group_id, outputs[1].group_id);
   EXPECT_EQ(inputs[2].group_id, outputs[2].group_id);
@@ -722,6 +652,33 @@ TEST_F(AudioManagerTest, GroupId) {
   EXPECT_NE(inputs[1].group_id, outputs[2].group_id);
   EXPECT_NE(inputs[2].group_id, outputs[3].group_id);
   EXPECT_NE(inputs[1].group_id, outputs[3].group_id);
+}
+
+TEST_F(AudioManagerTest, AudioDebugRecording) {
+  CreateAudioManagerForTesting<TestAudioManager>();
+
+  AudioManagerBase* audio_manager_base =
+      static_cast<AudioManagerBase*>(audio_manager_.get());
+
+  // Initialize is normally done in AudioManager::Create(), but since we don't
+  // use that in this test, we need to initialize here.
+  audio_manager_->InitializeOutputDebugRecording(
+      audio_manager_->GetTaskRunner());
+
+  MockAudioDebugRecordingManager* mock_debug_recording_manager =
+      static_cast<MockAudioDebugRecordingManager*>(
+          audio_manager_base->debug_recording_manager_.get());
+  ASSERT_TRUE(mock_debug_recording_manager);
+
+  EXPECT_CALL(*mock_debug_recording_manager, DisableDebugRecording());
+  audio_manager_->DisableOutputDebugRecording();
+
+  base::FilePath file_path(FILE_PATH_LITERAL("path"));
+  EXPECT_CALL(*mock_debug_recording_manager, EnableDebugRecording(file_path));
+  audio_manager_->EnableOutputDebugRecording(file_path);
+
+  EXPECT_CALL(*mock_debug_recording_manager, DisableDebugRecording());
+  audio_manager_->DisableOutputDebugRecording();
 }
 
 }  // namespace media

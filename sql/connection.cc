@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/debug/alias.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -1110,6 +1111,15 @@ bool Connection::Raze() {
   // TODO(shess): With this, "PRAGMA auto_vacuum" and "PRAGMA
   // page_size" can be used to query such a database.
   ScopedWritableSchema writable_schema(db_);
+
+#if defined(OS_WIN)
+  // On Windows, truncate silently fails when applied to memory-mapped files.
+  // Disable memory-mapping so that the truncate succeeds.  Note that other
+  // connections may have memory-mapped the file, so this may not entirely
+  // prevent the problem.
+  // [Source: <https://sqlite.org/mmap.html> plus experiments.]
+  ignore_result(Execute("PRAGMA mmap_size = 0"));
+#endif
 
   const char* kMain = "main";
   int rc = BackupDatabase(null_db.db_, db_, kMain);

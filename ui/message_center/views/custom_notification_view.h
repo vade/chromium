@@ -9,6 +9,10 @@
 #include "ui/message_center/message_center_export.h"
 #include "ui/message_center/views/message_view.h"
 
+namespace ui {
+struct AXActionData;
+}
+
 namespace views {
 class Painter;
 }
@@ -19,6 +23,8 @@ namespace message_center {
 // content of the notification.
 class MESSAGE_CENTER_EXPORT CustomNotificationView : public MessageView {
  public:
+  static const char kViewClassName[];
+
   CustomNotificationView(MessageCenterController* controller,
                          const Notification& notification);
   ~CustomNotificationView() override;
@@ -32,14 +38,18 @@ class MESSAGE_CENTER_EXPORT CustomNotificationView : public MessageView {
   void SetDrawBackgroundAsActive(bool active) override;
   bool IsCloseButtonFocused() const override;
   void RequestFocusOnCloseButton() override;
-  bool IsPinned() const override;
+  void UpdateControlButtonsVisibility() override;
 
   // Overridden from views::View:
+  const char* GetClassName() const override;
   gfx::Size GetPreferredSize() const override;
   void Layout() override;
   bool HasFocus() const override;
   void RequestFocus() override;
   void OnPaint(gfx::Canvas* canvas) override;
+  bool OnKeyPressed(const ui::KeyEvent& event) override;
+  void ChildPreferredSizeChanged(View* child) override;
+  bool HandleAccessibleAction(const ui::AXActionData& action) override;
 
  private:
   friend class CustomNotificationViewTest;

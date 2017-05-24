@@ -26,8 +26,8 @@
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_observer.h"
-#include "ui/aura/window_property.h"
 #include "ui/aura/window_tree_host.h"
+#include "ui/base/class_property.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/compositor/layer.h"
@@ -48,6 +48,7 @@
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/views/widget/window_reorderer.h"
 #include "ui/wm/core/shadow_types.h"
+#include "ui/wm/core/transient_window_manager.h"
 #include "ui/wm/core/window_animations.h"
 #include "ui/wm/core/window_util.h"
 #include "ui/wm/public/activation_client.h"
@@ -71,13 +72,13 @@
 #include "ui/views/widget/desktop_aura/desktop_window_tree_host.h"
 #endif
 
-DECLARE_WINDOW_PROPERTY_TYPE(views::internal::NativeWidgetPrivate*)
+DECLARE_UI_CLASS_PROPERTY_TYPE(views::internal::NativeWidgetPrivate*)
 
 namespace views {
 
 namespace {
 
-DEFINE_WINDOW_PROPERTY_KEY(internal::NativeWidgetPrivate*,
+DEFINE_UI_CLASS_PROPERTY_KEY(internal::NativeWidgetPrivate*,
                            kNativeWidgetPrivateKey,
                            nullptr);
 
@@ -130,6 +131,18 @@ void NativeWidgetAura::AssignIconToAuraWindow(aura::Window* window,
   }
 }
 
+// static
+void NativeWidgetAura::SetShadowElevationFromInitParams(
+    aura::Window* window,
+    const Widget::InitParams& params) {
+  if (params.shadow_type == Widget::InitParams::SHADOW_TYPE_NONE) {
+    SetShadowElevation(window, wm::ShadowElevation::NONE);
+  } else if (params.shadow_type == Widget::InitParams::SHADOW_TYPE_DROP &&
+             params.shadow_elevation) {
+    SetShadowElevation(window, *params.shadow_elevation);
+  }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // NativeWidgetAura, internal::NativeWidgetPrivate implementation:
 
@@ -152,12 +165,7 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
   window_->Init(params.layer_type);
   // Set name after layer init so it propagates to layer.
   window_->SetName(params.name);
-  if (params.shadow_type == Widget::InitParams::SHADOW_TYPE_NONE) {
-    SetShadowElevation(window_, wm::ShadowElevation::NONE);
-  } else if (params.shadow_type == Widget::InitParams::SHADOW_TYPE_DROP &&
-             params.shadow_elevation) {
-    SetShadowElevation(window_, *params.shadow_elevation);
-  }
+  SetShadowElevationFromInitParams(window_, params);
   if (params.type == Widget::InitParams::TYPE_CONTROL)
     window_->Show();
 
@@ -174,6 +182,14 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
       if (!context)
         context = parent;
       parent = NULL;
+
+      // Generally transient bubbles are showing state associated to the parent
+      // window. Make sure the transient bubble is only visible if the parent is
+      // visible, otherwise the bubble may not make sense by itself.
+      if (params.type == Widget::InitParams::TYPE_BUBBLE) {
+        wm::TransientWindowManager::Get(window_)
+            ->set_parent_controls_visibility(true);
+      }
     }
     // SetAlwaysOnTop before SetParent so that always-on-top container is used.
     SetAlwaysOnTop(params.keep_on_top);
@@ -423,7 +439,7 @@ gfx::Rect NativeWidgetAura::GetRestoredBounds() const {
     return gfx::Rect();
 
   // Restored bounds should only be relevant if the window is minimized,
-  // maximized, fullscreen or docked. However, in some places the code expects
+  // maximized, or fullscreen. However, in some places the code expects
   // GetRestoredBounds() to return the current window bounds if the window is
   // not in either state.
   if (IsMinimized() || IsMaximized() || IsFullscreen()) {
@@ -433,20 +449,7 @@ gfx::Rect NativeWidgetAura::GetRestoredBounds() const {
     if (restore_bounds)
       return *restore_bounds;
   }
-  gfx::Rect bounds = window_->GetBoundsInScreen();
-  if (IsDocked()) {
-    // Restore bounds are in screen coordinates, no need to convert.
-    gfx::Rect* restore_bounds =
-        window_->GetProperty(aura::client::kRestoreBoundsKey);
-    // Use current window horizontal offset origin in order to preserve docked
-    // alignment but preserve restored size and vertical offset for the time
-    // when the |window_| gets undocked.
-    if (restore_bounds) {
-      bounds.set_size(restore_bounds->size());
-      bounds.set_y(restore_bounds->y());
-    }
-  }
-  return bounds;
+  return window_->GetBoundsInScreen();
 }
 
 std::string NativeWidgetAura::GetWorkspace() const {
@@ -534,10 +537,8 @@ void NativeWidgetAura::ShowWithWindowState(ui::WindowShowState state) {
   if (!window_)
     return;
 
-  if (state == ui::SHOW_STATE_MAXIMIZED || state == ui::SHOW_STATE_FULLSCREEN ||
-      state == ui::SHOW_STATE_DOCKED) {
+  if (state == ui::SHOW_STATE_MAXIMIZED || state == ui::SHOW_STATE_FULLSCREEN)
     window_->SetProperty(aura::client::kShowStateKey, state);
-  }
   window_->Show();
   if (delegate_->CanActivate()) {
     if (state != ui::SHOW_STATE_INACTIVE)
@@ -991,12 +992,6 @@ NativeWidgetAura::~NativeWidgetAura() {
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeWidgetAura, private:
-
-bool NativeWidgetAura::IsDocked() const {
-  return window_ &&
-         window_->GetProperty(aura::client::kShowStateKey) ==
-             ui::SHOW_STATE_DOCKED;
-}
 
 void NativeWidgetAura::SetInitialFocus(ui::WindowShowState show_state) {
   // The window does not get keyboard messages unless we focus it.

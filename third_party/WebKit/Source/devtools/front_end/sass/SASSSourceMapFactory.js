@@ -17,12 +17,12 @@ Sass.SASSSourceMapFactory = class {
    * @return {!Promise<?SDK.SourceMap>}
    */
   editableSourceMap(target, sourceMap) {
-    var cssModel = SDK.CSSModel.fromTarget(target);
+    var cssModel = target.model(SDK.CSSModel);
     if (!cssModel)
       return Promise.resolve(/** @type {?SDK.SourceMap} */ (null));
 
-    var header =
-        cssModel.styleSheetHeaders().find(styleSheetHeader => styleSheetHeader.sourceMapURL === sourceMap.url());
+    var headers = cssModel.sourceMapManager().clientsForSourceMap(sourceMap);
+    var header = headers.length ? headers[0] : null;
     if (!header)
       return Promise.resolve(/** @type {?SDK.SourceMap} */ (null));
 

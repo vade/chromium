@@ -15,16 +15,19 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/process/process_metrics.h"
 #include "base/rand_util.h"
 #include "base/strings/string16.h"
 #include "base/threading/platform_thread.h"
+#include "base/threading/sequenced_worker_pool.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/crash/core/common/crash_keys.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "components/metrics/call_stack_profile_metrics_provider.h"
 #include "components/metrics/drive_metrics_provider.h"
+#include "components/metrics/metrics_log_uploader.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/metrics_reporting_default_state.h"
 #include "components/metrics/metrics_service.h"
@@ -42,7 +45,6 @@
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/signin_status_metrics_provider.h"
 #include "components/sync/device_info/device_count_metrics_provider.h"
-#include "components/translate/core/browser/translate_ranker_metrics_provider.h"
 #include "components/ukm/ukm_service.h"
 #include "components/variations/variations_associated_data.h"
 #include "components/version_info/version_info.h"
@@ -54,9 +56,11 @@
 #include "ios/chrome/browser/metrics/ios_chrome_stability_metrics_provider.h"
 #include "ios/chrome/browser/metrics/mobile_session_shutdown_metrics_provider.h"
 #include "ios/chrome/browser/signin/ios_chrome_signin_status_metrics_provider_delegate.h"
+#include "ios/chrome/browser/sync/ios_chrome_profile_sync_service_factory.h"
 #include "ios/chrome/browser/sync/ios_chrome_sync_client.h"
 #include "ios/chrome/browser/tab_parenting_global_observer.h"
 #include "ios/chrome/browser/tabs/tab_model_list.h"
+#include "ios/chrome/browser/translate/translate_ranker_metrics_provider.h"
 #include "ios/chrome/common/channel_info.h"
 #include "ios/web/public/web_thread.h"
 
@@ -159,12 +163,13 @@ void IOSChromeMetricsServiceClient::CollectFinalMetricsForLog(
 
 std::unique_ptr<metrics::MetricsLogUploader>
 IOSChromeMetricsServiceClient::CreateUploader(
-    const std::string& server_url,
-    const std::string& mime_type,
-    const base::Callback<void(int)>& on_upload_complete) {
+    base::StringPiece server_url,
+    base::StringPiece mime_type,
+    metrics::MetricsLogUploader::MetricServiceType service_type,
+    const metrics::MetricsLogUploader::UploadCallback& on_upload_complete) {
   return base::MakeUnique<metrics::NetMetricsLogUploader>(
-      GetApplicationContext()->GetSystemURLRequestContext(),
-      server_url, mime_type, on_upload_complete);
+      GetApplicationContext()->GetSystemURLRequestContext(), server_url,
+      mime_type, service_type, on_upload_complete);
 }
 
 base::TimeDelta IOSChromeMetricsServiceClient::GetStandardUploadInterval() {
@@ -327,16 +332,20 @@ void IOSChromeMetricsServiceClient::RegisterForNotifications() {
           ->GetChromeBrowserStateManager()
           ->GetLoadedBrowserStates();
   for (ios::ChromeBrowserState* browser_state : loaded_browser_states) {
-    RegisterForHistoryDeletions(browser_state);
+    RegisterForBrowserStateEvents(browser_state);
   }
 }
 
-void IOSChromeMetricsServiceClient::RegisterForHistoryDeletions(
+void IOSChromeMetricsServiceClient::RegisterForBrowserStateEvents(
     ios::ChromeBrowserState* browser_state) {
   history::HistoryService* history_service =
       ios::HistoryServiceFactory::GetForBrowserState(
           browser_state, ServiceAccessType::IMPLICIT_ACCESS);
   ObserveServiceForDeletions(history_service);
+  browser_sync::ProfileSyncService* sync =
+      IOSChromeProfileSyncServiceFactory::GetInstance()->GetForBrowserState(
+          browser_state);
+  ObserveServiceForSyncDisables(static_cast<syncer::SyncService*>(sync));
 }
 
 void IOSChromeMetricsServiceClient::OnTabParented(web::WebState* web_state) {
@@ -356,4 +365,19 @@ IOSChromeMetricsServiceClient::GetMetricsReportingDefaultState() {
 void IOSChromeMetricsServiceClient::OnHistoryDeleted() {
   if (ukm_service_)
     ukm_service_->Purge();
+}
+
+void IOSChromeMetricsServiceClient::OnSyncPrefsChanged(bool must_purge) {
+  if (!ukm_service_)
+    return;
+  if (must_purge) {
+    ukm_service_->Purge();
+    ukm_service_->ResetClientId();
+  }
+  // Signal service manager to enable/disable UKM based on new state.
+  UpdateRunningServices();
+}
+
+bool IOSChromeMetricsServiceClient::IsHistorySyncEnabledOnAllProfiles() {
+  return SyncDisableObserver::IsHistorySyncEnabledOnAllProfiles();
 }

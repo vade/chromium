@@ -28,8 +28,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /**
- * @implements {SDK.TargetManager.Observer}
  * @unrestricted
+ * @implements {SDK.SDKModelObserver<!SDK.DebuggerModel>}
  */
 Snippets.ScriptSnippetModel = class extends Common.Object {
   /**
@@ -43,40 +43,37 @@ Snippets.ScriptSnippetModel = class extends Common.Object {
     /** @type {!Map.<!Workspace.UISourceCode, string>} */
     this._snippetIdForUISourceCode = new Map();
 
-    /** @type {!Map.<!SDK.Target, !Snippets.SnippetScriptMapping>} */
-    this._mappingForTarget = new Map();
+    /** @type {!Map.<!SDK.DebuggerModel, !Snippets.SnippetScriptMapping>} */
+    this._mappingForDebuggerModel = new Map();
     this._snippetStorage = new Snippets.SnippetStorage('script', 'Script snippet #');
     this._lastSnippetEvaluationIndexSetting = Common.settings.createSetting('lastSnippetEvaluationIndex', 0);
     this._project = new Snippets.SnippetsProject(workspace, this);
     this._loadSnippets();
-    SDK.targetManager.observeTargets(this);
+    SDK.targetManager.observeModels(SDK.DebuggerModel, this);
   }
 
   /**
    * @override
-   * @param {!SDK.Target} target
+   * @param {!SDK.DebuggerModel} debuggerModel
    */
-  targetAdded(target) {
-    var debuggerModel = SDK.DebuggerModel.fromTarget(target);
-    if (debuggerModel)
-      this._mappingForTarget.set(target, new Snippets.SnippetScriptMapping(debuggerModel, this));
+  modelAdded(debuggerModel) {
+    this._mappingForDebuggerModel.set(debuggerModel, new Snippets.SnippetScriptMapping(debuggerModel, this));
   }
 
   /**
    * @override
-   * @param {!SDK.Target} target
+   * @param {!SDK.DebuggerModel} debuggerModel
    */
-  targetRemoved(target) {
-    if (SDK.DebuggerModel.fromTarget(target))
-      this._mappingForTarget.remove(target);
+  modelRemoved(debuggerModel) {
+    this._mappingForDebuggerModel.remove(debuggerModel);
   }
 
   /**
-   * @param {!SDK.Target} target
+   * @param {!SDK.DebuggerModel} debuggerModel
    * @return {!Snippets.SnippetScriptMapping|undefined}
    */
-  snippetScriptMapping(target) {
-    return this._mappingForTarget.get(target);
+  snippetScriptMapping(debuggerModel) {
+    return this._mappingForDebuggerModel.get(debuggerModel);
   }
 
   /**
@@ -124,12 +121,9 @@ Snippets.ScriptSnippetModel = class extends Common.Object {
   }
 
   /**
-   * @param {string} url
+   * @param {!Workspace.UISourceCode} uiSourceCode
    */
-  deleteScriptSnippet(url) {
-    var uiSourceCode = this._project.uiSourceCodeForURL(url);
-    if (!uiSourceCode)
-      return;
+  deleteScriptSnippet(uiSourceCode) {
     var snippetId = this._snippetIdForUISourceCode.get(uiSourceCode) || '';
     var snippet = this._snippetStorage.snippetForId(snippetId);
     if (!snippet)
@@ -180,7 +174,7 @@ Snippets.ScriptSnippetModel = class extends Common.Object {
     var breakpointLocations = this._removeBreakpoints(uiSourceCode);
     this._releaseSnippetScript(uiSourceCode);
     this._restoreBreakpoints(uiSourceCode, breakpointLocations);
-    this._mappingForTarget.valuesArray().forEach(function(mapping) {
+    this._mappingForDebuggerModel.valuesArray().forEach(function(mapping) {
       mapping._restoreBreakpoints(uiSourceCode, breakpointLocations);
     });
   }
@@ -204,10 +198,10 @@ Snippets.ScriptSnippetModel = class extends Common.Object {
     this._releaseSnippetScript(uiSourceCode);
     this._restoreBreakpoints(uiSourceCode, breakpointLocations);
 
-    var target = executionContext.target();
-    var runtimeModel = target.runtimeModel;
+    var runtimeModel = executionContext.runtimeModel;
+    var debuggerModel = executionContext.debuggerModel;
     var evaluationIndex = this._nextEvaluationIndex();
-    var mapping = this._mappingForTarget.get(target);
+    var mapping = this._mappingForDebuggerModel.get(debuggerModel);
     mapping._setEvaluationIndex(evaluationIndex, uiSourceCode);
     var evaluationUrl = mapping._evaluationSourceURL(uiSourceCode);
     uiSourceCode.requestContent().then(compileSnippet.bind(this));
@@ -227,16 +221,15 @@ Snippets.ScriptSnippetModel = class extends Common.Object {
      * @this {Snippets.ScriptSnippetModel}
      */
     function compileCallback(scriptId, exceptionDetails) {
-      var mapping = this._mappingForTarget.get(target);
       if (mapping.evaluationIndex(uiSourceCode) !== evaluationIndex)
         return;
 
       var script = /** @type {!SDK.Script} */ (
-          executionContext.debuggerModel.scriptForId(/** @type {string} */ (scriptId || exceptionDetails.scriptId)));
+          debuggerModel.scriptForId(/** @type {string} */ (scriptId || exceptionDetails.scriptId)));
       mapping._addScript(script, uiSourceCode);
       if (!scriptId) {
         this._printRunOrCompileScriptResultFailure(
-            target, /** @type {!Protocol.Runtime.ExceptionDetails} */ (exceptionDetails), evaluationUrl);
+            runtimeModel, /** @type {!Protocol.Runtime.ExceptionDetails} */ (exceptionDetails), evaluationUrl);
         return;
       }
 
@@ -253,47 +246,45 @@ Snippets.ScriptSnippetModel = class extends Common.Object {
    * @param {?string=} sourceURL
    */
   _runScript(scriptId, executionContext, sourceURL) {
-    var target = executionContext.target();
-    target.runtimeModel.runScript(
+    var runtimeModel = executionContext.runtimeModel;
+    runtimeModel.runScript(
         scriptId, executionContext.id, 'console', /* silent */ false, /* includeCommandLineAPI */ true,
-        /* returnByValue */ false, /* generatePreview */ true, /* awaitPromise */ undefined,
-        runCallback.bind(this, target));
+        /* returnByValue */ false, /* generatePreview */ true, /* awaitPromise */ undefined, runCallback.bind(this));
 
     /**
-     * @param {!SDK.Target} target
      * @param {?Protocol.Runtime.RemoteObject} result
      * @param {?Protocol.Runtime.ExceptionDetails=} exceptionDetails
      * @this {Snippets.ScriptSnippetModel}
      */
-    function runCallback(target, result, exceptionDetails) {
+    function runCallback(result, exceptionDetails) {
       if (!exceptionDetails)
-        this._printRunScriptResult(target, result, scriptId, sourceURL);
+        this._printRunScriptResult(runtimeModel, result, scriptId, sourceURL);
       else
-        this._printRunOrCompileScriptResultFailure(target, exceptionDetails, sourceURL);
+        this._printRunOrCompileScriptResultFailure(runtimeModel, exceptionDetails, sourceURL);
     }
   }
 
   /**
-   * @param {!SDK.Target} target
+   * @param {!SDK.RuntimeModel} runtimeModel
    * @param {?Protocol.Runtime.RemoteObject} result
    * @param {!Protocol.Runtime.ScriptId} scriptId
    * @param {?string=} sourceURL
    */
-  _printRunScriptResult(target, result, scriptId, sourceURL) {
-    var consoleMessage = new SDK.ConsoleMessage(
-        target, SDK.ConsoleMessage.MessageSource.JS, SDK.ConsoleMessage.MessageLevel.Info, '', undefined, sourceURL,
-        undefined, undefined, undefined, [result], undefined, undefined, undefined, scriptId);
-    target.consoleModel.addMessage(consoleMessage);
+  _printRunScriptResult(runtimeModel, result, scriptId, sourceURL) {
+    var consoleMessage = new ConsoleModel.ConsoleMessage(
+        runtimeModel, ConsoleModel.ConsoleMessage.MessageSource.JS, ConsoleModel.ConsoleMessage.MessageLevel.Info, '',
+        undefined, sourceURL, undefined, undefined, undefined, [result], undefined, undefined, undefined, scriptId);
+    ConsoleModel.consoleModel.addMessage(consoleMessage);
   }
 
   /**
-   * @param {!SDK.Target} target
+   * @param {!SDK.RuntimeModel} runtimeModel
    * @param {!Protocol.Runtime.ExceptionDetails} exceptionDetails
    * @param {?string=} sourceURL
    */
-  _printRunOrCompileScriptResultFailure(target, exceptionDetails, sourceURL) {
-    target.consoleModel.addMessage(
-        SDK.ConsoleMessage.fromException(target, exceptionDetails, undefined, undefined, sourceURL || undefined));
+  _printRunOrCompileScriptResultFailure(runtimeModel, exceptionDetails, sourceURL) {
+    ConsoleModel.consoleModel.addMessage(ConsoleModel.ConsoleMessage.fromException(
+        runtimeModel, exceptionDetails, undefined, undefined, sourceURL || undefined));
   }
 
   /**
@@ -324,7 +315,7 @@ Snippets.ScriptSnippetModel = class extends Common.Object {
    * @param {!Workspace.UISourceCode} uiSourceCode
    */
   _releaseSnippetScript(uiSourceCode) {
-    this._mappingForTarget.valuesArray().forEach(function(mapping) {
+    this._mappingForDebuggerModel.valuesArray().forEach(function(mapping) {
       mapping._releaseSnippetScript(uiSourceCode);
     });
   }
@@ -355,7 +346,6 @@ Snippets.SnippetScriptMapping = class {
    * @param {!Snippets.ScriptSnippetModel} scriptSnippetModel
    */
   constructor(debuggerModel, scriptSnippetModel) {
-    this._target = debuggerModel.target();
     this._debuggerModel = debuggerModel;
     this._scriptSnippetModel = scriptSnippetModel;
     /** @type {!Object.<string, !Workspace.UISourceCode>} */
@@ -447,7 +437,7 @@ Snippets.SnippetScriptMapping = class {
    */
   _addScript(script, uiSourceCode) {
     console.assert(!this._scriptForUISourceCode.get(uiSourceCode));
-    Bindings.debuggerWorkspaceBinding.setSourceMapping(this._target, uiSourceCode, this);
+    Bindings.debuggerWorkspaceBinding.setSourceMapping(this._debuggerModel, uiSourceCode, this);
     this._uiSourceCodeForScriptId[script.scriptId] = uiSourceCode;
     this._scriptForUISourceCode.set(uiSourceCode, script);
     Bindings.debuggerWorkspaceBinding.pushSourceMapping(script, this);
@@ -615,10 +605,10 @@ Snippets.SnippetsProject = class extends Bindings.ContentProviderBasedProject {
 
   /**
    * @override
-   * @param {string} url
+   * @param {!Workspace.UISourceCode} uiSourceCode
    */
-  deleteFile(url) {
-    this._model.deleteScriptSnippet(url);
+  deleteFile(uiSourceCode) {
+    this._model.deleteScriptSnippet(uiSourceCode);
   }
 };
 

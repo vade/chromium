@@ -164,10 +164,8 @@ class TestPairingDelegate : public BluetoothDevice::PairingDelegate {
   // Some tests use a message loop since background processing is simulated;
   // break out of those loops.
   void QuitMessageLoop() {
-    if (base::MessageLoop::current() &&
-        base::MessageLoop::current()->is_running()) {
+    if (base::RunLoop::IsRunningOnCurrentThread())
       base::MessageLoop::current()->QuitWhenIdle();
-    }
   }
 };
 
@@ -362,10 +360,8 @@ class BluetoothBlueZTest : public testing::Test {
   // Some tests use a message loop since background processing is simulated;
   // break out of those loops.
   void QuitMessageLoop() {
-    if (base::MessageLoop::current() &&
-        base::MessageLoop::current()->is_running()) {
+    if (base::RunLoop::IsRunningOnCurrentThread())
       base::MessageLoop::current()->QuitWhenIdle();
-    }
   }
 };
 const char BluetoothBlueZTest::kGapUuid[] =
@@ -2820,15 +2816,13 @@ TEST_F(BluetoothBlueZTest, PairTrustedDevice) {
                               kConnectedTrustedNotPairedDeviceAddress);
   ASSERT_TRUE(device != nullptr);
 
-  // On the DBus level the device is trusted but not paired. But the current
-  // implementation of |BluetoothDevice::IsPaired()| returns true in this case.
   bluez::FakeBluetoothDeviceClient::Properties* properties =
       fake_bluetooth_device_client_->GetProperties(
           dbus::ObjectPath(bluez::FakeBluetoothDeviceClient::
                                kConnectedTrustedNotPairedDevicePath));
   EXPECT_FALSE(properties->paired.value());
   EXPECT_TRUE(properties->trusted.value());
-  ASSERT_TRUE(device->IsPaired());
+  ASSERT_FALSE(device->IsPaired());
 
   // The |kConnectedTrustedNotPairedDevicePath| requests a passkey confirmation.
   // Obs.: This is the flow when CrOS triggers pairing with a iOS device.
@@ -4482,69 +4476,6 @@ TEST_F(BluetoothBlueZTest, Shutdown_OnStopDiscoveryError) {
   // and kNumberOfDiscoverySessions errors queued with AddDiscoverySession.
   EXPECT_EQ(0, callback_count_);
   EXPECT_EQ(1 + kNumberOfDiscoverySessions, error_callback_count_);
-}
-
-TEST_F(BluetoothBlueZTest, ServiceDataChanged) {
-  // Simulate a change of service data of a device.
-  GetAdapter();
-
-  BluetoothDevice* device = adapter_->GetDevice(
-      bluez::FakeBluetoothDeviceClient::kPairedDeviceAddress);
-
-  // Install an observer; expect the DeviceChanged method to be called
-  // when we change the service data.
-  TestBluetoothAdapterObserver observer(adapter_);
-
-  bluez::FakeBluetoothDeviceClient::Properties* properties =
-      fake_bluetooth_device_client_->GetProperties(dbus::ObjectPath(
-          bluez::FakeBluetoothDeviceClient::kPairedDevicePath));
-
-  properties->service_data.set_valid(true);
-
-  // Check that ServiceDataChanged is correctly invoke.
-  properties->service_data.ReplaceValue({{kGapUuid, {1, 2, 3}}});
-  EXPECT_EQ(1, observer.device_changed_count());
-  EXPECT_EQ(device, observer.last_device());
-  EXPECT_EQ(
-      BluetoothDevice::ServiceDataMap({{BluetoothUUID(kGapUuid), {1, 2, 3}}}),
-      device->GetServiceData());
-  EXPECT_EQ(BluetoothDevice::UUIDSet({BluetoothUUID(kGapUuid)}),
-            device->GetServiceDataUUIDs());
-  EXPECT_EQ(std::vector<uint8_t>({1, 2, 3}),
-            *(device->GetServiceDataForUUID(BluetoothUUID(kGapUuid))));
-
-  // Check that we can update service data with same uuid / add more uuid.
-  properties->service_data.ReplaceValue(
-      {{kGapUuid, {3, 2, 1}}, {kGattUuid, {1}}});
-  EXPECT_EQ(2, observer.device_changed_count());
-  EXPECT_EQ(device, observer.last_device());
-
-  EXPECT_EQ(
-      BluetoothDevice::ServiceDataMap({{BluetoothUUID(kGapUuid), {3, 2, 1}},
-                                       {BluetoothUUID(kGattUuid), {1}}}),
-      device->GetServiceData());
-  EXPECT_EQ(BluetoothDevice::UUIDSet(
-                {BluetoothUUID(kGapUuid), BluetoothUUID(kGattUuid)}),
-            device->GetServiceDataUUIDs());
-  EXPECT_EQ(std::vector<uint8_t>({3, 2, 1}),
-            *(device->GetServiceDataForUUID(BluetoothUUID(kGapUuid))));
-  EXPECT_EQ(std::vector<uint8_t>({1}),
-            *(device->GetServiceDataForUUID(BluetoothUUID(kGattUuid))));
-
-  // Check that we can remove uuid / change uuid with same data.
-  properties->service_data.ReplaceValue({{kPnpUuid, {3, 2, 1}}});
-  EXPECT_EQ(3, observer.device_changed_count());
-  EXPECT_EQ(device, observer.last_device());
-
-  EXPECT_EQ(
-      BluetoothDevice::ServiceDataMap({{BluetoothUUID(kPnpUuid), {3, 2, 1}}}),
-      device->GetServiceData());
-  EXPECT_EQ(BluetoothDevice::UUIDSet({BluetoothUUID(kPnpUuid)}),
-            device->GetServiceDataUUIDs());
-  EXPECT_EQ(std::vector<uint8_t>({3, 2, 1}),
-            *(device->GetServiceDataForUUID(BluetoothUUID(kPnpUuid))));
-  EXPECT_EQ(nullptr, device->GetServiceDataForUUID(BluetoothUUID(kGapUuid)));
-  EXPECT_EQ(nullptr, device->GetServiceDataForUUID(BluetoothUUID(kGattUuid)));
 }
 
 TEST_F(BluetoothBlueZTest, ManufacturerDataChanged) {

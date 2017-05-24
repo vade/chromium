@@ -5,6 +5,7 @@
 #ifndef IOS_CHROME_BROWSER_SYNC_IOS_CHROME_SYNCED_TAB_DELEGATE_H_
 #define IOS_CHROME_BROWSER_SYNC_IOS_CHROME_SYNCED_TAB_DELEGATE_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -24,6 +25,7 @@ class IOSChromeSyncedTabDelegate
   SessionID::id_type GetWindowId() const override;
   SessionID::id_type GetSessionId() const override;
   bool IsBeingDestroyed() const override;
+  SessionID::id_type GetSourceTabID() const override;
   std::string GetExtensionAppId() const override;
   bool IsInitialBlankNavigation() const override;
   int GetCurrentEntryIndex() const override;

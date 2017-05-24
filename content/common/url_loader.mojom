@@ -11,10 +11,23 @@ struct URLRequest;
 struct URLResponseHead;
 
 [Native]
+struct SSLInfo;
+
+[Native]
 struct URLRequestRedirectInfo;
 
 [Native]
 struct URLLoaderStatus;
+
+// This enum corresponds to net::RequestPriority. See its comments for details.
+enum RequestPriority {
+  kThrottled = 0,
+  kIdle,
+  kLowest,
+  kLow,
+  kMedium,
+  kHighest
+};
 
 // Destroying a URLLoader will cancel the associated request.
 interface URLLoader {
@@ -22,6 +35,11 @@ interface URLLoader {
   // then upon receiving an URLResponse with a non-NULL |redirect_url| field,
   // |FollowRedirect| may be called to load the URL indicated by the redirect.
   FollowRedirect();
+
+  // Sets the request priority.
+  // |intra_priority_value| is a lesser priority which is used to prioritize
+  // requests within a given priority level.
+  SetPriority(RequestPriority priority, int32 intra_priority_value);
 };
 
 // Opaque handle passed from the browser process to a child process to manage
@@ -33,10 +51,13 @@ interface DownloadedTempFile {
 
 
 interface URLLoaderClient {
-  // Called when the response head is received. |downloaded_file| is non-null in
-  // the 'download_to_file' case.
+  // Called when the response head is received.
+  // |downloaded_file| is non-null in the 'download_to_file' case.
+  // |ssl_info| is non-null if kSendSSLInfo was specified to
+  // CreateLoaderAndStart.
   OnReceiveResponse(URLResponseHead head,
-                    associated DownloadedTempFile? downloaded_file);
+                    SSLInfo? ssl_info,
+                    DownloadedTempFile? downloaded_file);
 
   // Called when the request has been redirected. The receiver is expected to
   // call FollowRedirect or cancel the request.

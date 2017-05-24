@@ -25,16 +25,18 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "base/threading/worker_pool.h"
 #include "base/time/default_clock.h"
 #include "base/time/time.h"
+#include "base/trace_event/memory_allocator_dump.h"
+#include "base/trace_event/memory_usage_estimator.h"
+#include "base/trace_event/process_memory_dump.h"
 #include "net/base/cache_type.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/upload_data_stream.h"
 #include "net/disk_cache/disk_cache.h"
-#include "net/http/disk_cache_based_quic_server_info.h"
+#include "net/http/http_cache_lookup_manager.h"
 #include "net/http/http_cache_transaction.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_network_session.h"
@@ -106,6 +108,17 @@ HttpCache::ActiveEntry::~ActiveEntry() {
   }
 }
 
+size_t HttpCache::ActiveEntry::EstimateMemoryUsage() const {
+  // Skip |disk_entry| which is tracked in simple_backend_impl; Skip |readers|
+  // and |pending_queue| because the Transactions are owned by their respective
+  // URLRequestHttpJobs.
+  return 0;
+}
+
+bool HttpCache::ActiveEntry::HasNoTransactions() {
+  return !writer && readers.empty() && pending_queue.empty();
+}
+
 //-----------------------------------------------------------------------------
 
 // This structure keeps track of work items that are attempting to create or
@@ -113,6 +126,14 @@ HttpCache::ActiveEntry::~ActiveEntry() {
 struct HttpCache::PendingOp {
   PendingOp() : disk_entry(NULL) {}
   ~PendingOp() {}
+
+  // Returns the estimate of dynamically allocated memory in bytes.
+  size_t EstimateMemoryUsage() const {
+    // Note that backend isn't counted because it doesn't provide an EMU
+    // function.
+    return base::trace_event::EstimateMemoryUsage(writer) +
+           base::trace_event::EstimateMemoryUsage(pending_queue);
+  }
 
   disk_cache::Entry* disk_entry;
   std::unique_ptr<disk_cache::Backend> backend;
@@ -179,6 +200,9 @@ class HttpCache::WorkItem {
   bool Matches(Transaction* trans) const { return trans == trans_; }
   bool IsValid() const { return trans_ || entry_ || !callback_.is_null(); }
 
+  // Returns the estimate of dynamically allocated memory in bytes.
+  size_t EstimateMemoryUsage() const { return 0; }
+
  private:
   WorkItemOperation operation_;
   Transaction* trans_;
@@ -230,6 +254,8 @@ void HttpCache::MetadataWriter::Write(const GURL& url,
   DCHECK(buf->data());
   request_info_.url = url;
   request_info_.method = "GET";
+
+  // todo (crbug.com/690099): Incorrect usage of LOAD_ONLY_FROM_CACHE.
   request_info_.load_flags =
       LOAD_ONLY_FROM_CACHE | LOAD_SKIP_CACHE_VALIDATION | LOAD_SKIP_VARY_CHECK;
 
@@ -275,34 +301,16 @@ void HttpCache::MetadataWriter::OnIOComplete(int result) {
 }
 
 //-----------------------------------------------------------------------------
-
-class HttpCache::QuicServerInfoFactoryAdaptor : public QuicServerInfoFactory {
- public:
-  explicit QuicServerInfoFactoryAdaptor(HttpCache* http_cache)
-      : http_cache_(http_cache) {
-  }
-
-  std::unique_ptr<QuicServerInfo> GetForServer(
-      const QuicServerId& server_id) override {
-    return base::MakeUnique<DiskCacheBasedQuicServerInfo>(server_id,
-                                                          http_cache_);
-  }
-
- private:
-  HttpCache* const http_cache_;
-};
-
-//-----------------------------------------------------------------------------
 HttpCache::HttpCache(HttpNetworkSession* session,
                      std::unique_ptr<BackendFactory> backend_factory,
-                     bool set_up_quic_server_info)
+                     bool is_main_cache)
     : HttpCache(base::MakeUnique<HttpNetworkLayer>(session),
                 std::move(backend_factory),
-                set_up_quic_server_info) {}
+                is_main_cache) {}
 
 HttpCache::HttpCache(std::unique_ptr<HttpTransactionFactory> network_layer,
                      std::unique_ptr<BackendFactory> backend_factory,
-                     bool set_up_quic_server_info)
+                     bool is_main_cache)
     : net_log_(nullptr),
       backend_factory_(std::move(backend_factory)),
       building_backend_(false),
@@ -316,15 +324,15 @@ HttpCache::HttpCache(std::unique_ptr<HttpTransactionFactory> network_layer,
   // Session may be NULL in unittests.
   // TODO(mmenke): Seems like tests could be changed to provide a session,
   // rather than having logic only used in unit tests here.
-  if (session) {
-    net_log_ = session->net_log();
-    if (set_up_quic_server_info &&
-        !session->quic_stream_factory()->has_quic_server_info_factory()) {
-      // QuicStreamFactory takes ownership of QuicServerInfoFactoryAdaptor.
-      session->quic_stream_factory()->set_quic_server_info_factory(
-          new QuicServerInfoFactoryAdaptor(this));
-    }
-  }
+  if (!session)
+    return;
+
+  net_log_ = session->net_log();
+  if (!is_main_cache)
+    return;
+
+  session->SetServerPushDelegate(
+      base::MakeUnique<HttpCacheLookupManager>(this));
 }
 
 HttpCache::~HttpCache() {
@@ -481,6 +489,23 @@ HttpCache::SetHttpNetworkTransactionFactoryForTesting(
   return old_network_layer;
 }
 
+void HttpCache::DumpMemoryStats(base::trace_event::ProcessMemoryDump* pmd,
+                                const std::string& parent_absolute_name) const {
+  // Skip tracking members like |clock_| and |backend_factory_| because they
+  // don't allocate.
+  std::string name = parent_absolute_name + "/http_cache";
+  base::trace_event::MemoryAllocatorDump* dump = pmd->CreateAllocatorDump(name);
+  size_t size = base::trace_event::EstimateMemoryUsage(active_entries_) +
+                base::trace_event::EstimateMemoryUsage(doomed_entries_) +
+                base::trace_event::EstimateMemoryUsage(playback_cache_map_) +
+                base::trace_event::EstimateMemoryUsage(pending_ops_);
+  if (disk_cache_)
+    size += disk_cache_->DumpMemoryStats(pmd, name);
+
+  dump->AddScalar(base::trace_event::MemoryAllocatorDump::kNameSize,
+                  base::trace_event::MemoryAllocatorDump::kUnitsBytes, size);
+}
+
 //-----------------------------------------------------------------------------
 
 int HttpCache::CreateBackend(disk_cache::Backend** backend,
@@ -632,9 +657,7 @@ void HttpCache::DoomMainEntryForUrl(const GURL& url) {
 
 void HttpCache::FinalizeDoomedEntry(ActiveEntry* entry) {
   DCHECK(entry->doomed);
-  DCHECK(!entry->writer);
-  DCHECK(entry->readers.empty());
-  DCHECK(entry->pending_queue.empty());
+  DCHECK(entry->HasNoTransactions());
 
   auto it = doomed_entries_.find(entry);
   DCHECK(it != doomed_entries_.end());
@@ -657,10 +680,8 @@ HttpCache::ActiveEntry* HttpCache::ActivateEntry(
 void HttpCache::DeactivateEntry(ActiveEntry* entry) {
   DCHECK(!entry->will_process_pending_queue);
   DCHECK(!entry->doomed);
-  DCHECK(!entry->writer);
   DCHECK(entry->disk_entry);
-  DCHECK(entry->readers.empty());
-  DCHECK(entry->pending_queue.empty());
+  DCHECK(entry->HasNoTransactions());
 
   std::string key = entry->disk_entry->GetKey();
   if (key.empty())
@@ -814,7 +835,7 @@ int HttpCache::AddTransactionToEntry(ActiveEntry* entry, Transaction* trans) {
     }
   } else {
     // transaction needs read access to the entry
-    entry->readers.push_back(trans);
+    entry->readers.insert(trans);
   }
 
   // We do this before calling EntryAvailable to force any further calls to
@@ -883,7 +904,7 @@ void HttpCache::DoneWritingToEntry(ActiveEntry* entry, bool success) {
 void HttpCache::DoneReadingFromEntry(ActiveEntry* entry, Transaction* trans) {
   DCHECK(!entry->writer);
 
-  auto it = std::find(entry->readers.begin(), entry->readers.end(), trans);
+  auto it = entry->readers.find(trans);
   DCHECK(it != entry->readers.end());
 
   entry->readers.erase(it);
@@ -899,7 +920,7 @@ void HttpCache::ConvertWriterToReader(ActiveEntry* entry) {
   Transaction* trans = entry->writer;
 
   entry->writer = NULL;
-  entry->readers.push_back(trans);
+  entry->readers.insert(trans);
 
   ProcessPendingQueue(entry);
 }
@@ -998,11 +1019,13 @@ void HttpCache::OnProcessPendingQueue(ActiveEntry* entry) {
   DCHECK(!entry->writer);
 
   // If no one is interested in this entry, then we can deactivate it.
-  if (entry->pending_queue.empty()) {
-    if (entry->readers.empty())
-      DestroyEntry(entry);
+  if (entry->HasNoTransactions()) {
+    DestroyEntry(entry);
     return;
   }
+
+  if (entry->pending_queue.empty())
+    return;
 
   // Promote next transaction from the pending queue.
   Transaction* next = entry->pending_queue.front();

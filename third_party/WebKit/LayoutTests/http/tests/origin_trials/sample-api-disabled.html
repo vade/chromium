@@ -3,10 +3,11 @@
 <title>Test Sample API when trial is disabled (no token)</title>
 <script src="../resources/testharness.js"></script>
 <script src="../resources/testharnessreport.js"></script>
-<script src="resources/origin_trials.js"></script>
+<script src="resources/origintrials.js"></script>
 <script>
 
 // The trial is not enabled, as no token is provided.
 expect_failure();
+expect_failure_bindings();
 
 </script>

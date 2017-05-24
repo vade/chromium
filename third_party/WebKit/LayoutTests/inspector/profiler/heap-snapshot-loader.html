@@ -11,21 +11,21 @@ function test()
     var partSize = sourceStringified.length >> 3;
 
     function injectMockProfile(callback) {
-        var dispatcher = InspectorTest.mainTarget._dispatchers["HeapProfiler"]._dispatcher;
+        var dispatcher = InspectorTest.mainTarget._dispatchers["HeapProfiler"]._dispatchers[0];
         var panel = UI.panels.heap_profiler;
         panel._reset();
 
         var profileType =  Profiler.ProfileTypeRegistry.instance.heapSnapshotProfileType;
 
         InspectorTest.override(InspectorTest.HeapProfilerAgent, "takeHeapSnapshot", takeHeapSnapshotMock);
-        function takeHeapSnapshotMock(reportProgress, callback) {
+        function takeHeapSnapshotMock(reportProgress) {
             if (reportProgress) {
                 profileType._reportHeapSnapshotProgress({data: {done: 50, total: 100, finished: false}});
                 profileType._reportHeapSnapshotProgress({data: {done: 100, total: 100, finished: true}});
             }
             for (var i = 0, l = sourceStringified.length; i < l; i += partSize)
                 dispatcher.addHeapSnapshotChunk(sourceStringified.slice(i, i + partSize));
-            setTimeout(callback, 0);
+            return Promise.resolve();
         }
 
         function tempFileReady()
@@ -33,7 +33,7 @@ function test()
             callback(this);
         }
         InspectorTest.addSniffer(Profiler.HeapProfileHeader.prototype, "_didWriteToTempFile", tempFileReady);
-        profileType._takeHeapSnapshot(function() {});
+        profileType._takeHeapSnapshot();
     }
 
     Common.console.log = function(message) {

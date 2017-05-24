@@ -7,6 +7,8 @@
 
 #include <string>
 
+#include "base/macros.h"
+#include "base/test/scoped_feature_list.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/shell/browser/shell.h"
@@ -33,6 +35,9 @@ class SitePerProcessBrowserTest : public ContentBrowserTest {
 
  private:
   FrameTreeVisualizer visualizer_;
+  base::test::ScopedFeatureList feature_list_;
+
+  DISALLOW_COPY_AND_ASSIGN(SitePerProcessBrowserTest);
 };
 
 }  // namespace content

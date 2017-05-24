@@ -28,10 +28,37 @@ if (__gCrWeb && !__gCrWeb['fillPasswordForm']) {
    */
   __gCrWeb['findPasswordForms'] = function() {
     var formDataList = [];
-    if (__gCrWeb.hasPasswordField()) {
+    if (hasPasswordField_(window)) {
       __gCrWeb.getPasswordFormDataList(formDataList, window);
     }
     return __gCrWeb.stringify(formDataList);
+  };
+
+  /** Returns true if the supplied window or any frames inside contain an input
+   * field of type 'password'.
+   * @private
+   */
+  var hasPasswordField_ = function(win) {
+    var doc = win.document;
+
+    // We may will not be allowed to read the 'document' property from a frame
+    // that is in a different domain.
+    if (!doc) {
+      return false;
+    }
+
+    if (doc.querySelector('input[type=password]')) {
+      return true;
+    }
+
+    var frames = win.frames;
+    for (var i = 0; i < frames.length; i++) {
+      if (hasPasswordField_(frames[i])) {
+        return true;
+      }
+    }
+
+    return false;
   };
 
   /**
@@ -343,10 +370,14 @@ if (__gCrWeb && !__gCrWeb['fillPasswordForm']) {
    *    look for password forms.
    */
   __gCrWeb.getPasswordFormDataList = function(formDataList, win) {
-    var doc = win.document;
+    var doc = null;
 
-    // We may not be allowed to read the 'document' property from a frame
-    // that is in a different domain.
+    try {
+      // Security violations may generate an exception or null to be returned.
+      doc = win.document;
+    } catch(e) {
+    }
+
     if (!doc) {
       return;
     }

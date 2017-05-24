@@ -11,8 +11,8 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
+#include "printing/native_drawing_context.h"
 #include "printing/print_settings.h"
-#include "skia/ext/native_drawing_context.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace base {
@@ -125,6 +125,8 @@ class PRINTING_EXPORT PrintingContext {
     return settings_;
   }
 
+  int job_id() const { return job_id_; }
+
  protected:
   explicit PrintingContext(Delegate* delegate);
 
@@ -145,6 +147,9 @@ class PRINTING_EXPORT PrintingContext {
 
   // Did the user cancel the print job.
   volatile bool abort_printing_;
+
+  // The job id for the current job. The value is 0 if no jobs are active.
+  int job_id_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PrintingContext);

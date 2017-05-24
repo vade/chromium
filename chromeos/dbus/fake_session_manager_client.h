@@ -45,13 +45,19 @@ class FakeSessionManagerClient : public SessionManagerClient {
   void NotifyLockScreenDismissed() override;
   void RetrieveActiveSessions(const ActiveSessionsCallback& callback) override;
   void RetrieveDevicePolicy(const RetrievePolicyCallback& callback) override;
+  RetrievePolicyResponseType BlockingRetrieveDevicePolicy(
+      std::string* policy_out) override;
   void RetrievePolicyForUser(const cryptohome::Identification& cryptohome_id,
                              const RetrievePolicyCallback& callback) override;
-  std::string BlockingRetrievePolicyForUser(
-      const cryptohome::Identification& cryptohome_id) override;
+  RetrievePolicyResponseType BlockingRetrievePolicyForUser(
+      const cryptohome::Identification& cryptohome_id,
+      std::string* policy_out) override;
   void RetrieveDeviceLocalAccountPolicy(
       const std::string& account_id,
       const RetrievePolicyCallback& callback) override;
+  RetrievePolicyResponseType BlockingRetrieveDeviceLocalAccountPolicy(
+      const std::string& account_id,
+      std::string* policy_out) override;
   void StoreDevicePolicy(const std::string& policy_blob,
                          const StorePolicyCallback& callback) override;
   void StorePolicyForUser(const cryptohome::Identification& cryptohome_id,
@@ -69,12 +75,14 @@ class FakeSessionManagerClient : public SessionManagerClient {
   void CheckArcAvailability(const ArcCallback& callback) override;
   void StartArcInstance(const cryptohome::Identification& cryptohome_id,
                         bool disable_boot_completed_broadcast,
+                        bool enable_vendor_privileged,
                         const StartArcInstanceCallback& callback) override;
   void StopArcInstance(const ArcCallback& callback) override;
   void SetArcCpuRestriction(
       login_manager::ContainerCpuRestrictionState restriction_state,
       const ArcCallback& callback) override;
-  void EmitArcBooted() override;
+  void EmitArcBooted(const cryptohome::Identification& cryptohome_id,
+                     const ArcCallback& callback) override;
   void GetArcStartTime(const GetArcStartTimeCallback& callback) override;
   void RemoveArcData(const cryptohome::Identification& cryptohome_id,
                      const ArcCallback& callback) override;

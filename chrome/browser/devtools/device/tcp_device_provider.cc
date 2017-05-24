@@ -55,8 +55,12 @@ class ResolveHostAndOpenSocket final {
     }
     std::unique_ptr<net::StreamSocket> socket(new net::TCPClientSocket(
         address_list_, NULL, NULL, net::NetLogSource()));
-    socket->Connect(
-        base::Bind(&RunSocketCallback, callback_, base::Passed(&socket)));
+    net::StreamSocket* socket_ptr = socket.get();
+    net::CompletionCallback on_connect =
+        base::Bind(&RunSocketCallback, callback_, base::Passed(&socket));
+    result = socket_ptr->Connect(on_connect);
+    if (result != net::ERR_IO_PENDING)
+      on_connect.Run(result);
     delete this;
   }
 
@@ -108,7 +112,7 @@ void TCPDeviceProvider::QueryDeviceInfo(const std::string& serial,
   }
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(callback, device_info));
+      FROM_HERE, base::BindOnce(callback, device_info));
 }
 
 void TCPDeviceProvider::OpenSocket(const std::string& serial,

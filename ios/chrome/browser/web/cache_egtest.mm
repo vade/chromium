@@ -4,7 +4,6 @@
 
 #import <EarlGrey/EarlGrey.h>
 
-#import "base/mac/scoped_nsobject.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
@@ -16,6 +15,7 @@
 #include "ios/chrome/test/app/history_test_util.h"
 #include "ios/chrome/test/app/navigation_test_util.h"
 #include "ios/chrome/test/app/web_view_interaction_test_util.h"
+#import "ios/chrome/test/earl_grey/chrome_assertions.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
@@ -24,6 +24,10 @@
 #include "ios/web/public/test/http_server_util.h"
 #include "ios/web/public/test/response_providers/html_response_provider.h"
 #include "url/gurl.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 using chrome_test_util::WebViewContainingText;
 using web::test::HttpServer;
@@ -156,8 +160,8 @@ class ScopedBlockPopupsPref {
 // Reloads the web view and waits for the loading to complete.
 // TODO(crbug.com/638674): Evaluate if this can move to shared code
 - (void)reloadPage {
-  base::scoped_nsobject<GenericChromeCommand> reloadCommand(
-      [[GenericChromeCommand alloc] initWithTag:IDC_RELOAD]);
+  GenericChromeCommand* reloadCommand =
+      [[GenericChromeCommand alloc] initWithTag:IDC_RELOAD];
   chrome_test_util::RunCommandWithActiveViewController(reloadCommand);
 
   [ChromeEarlGrey waitForPageToFinishLoading];
@@ -166,8 +170,8 @@ class ScopedBlockPopupsPref {
 // Navigates back to the previous webpage.
 // TODO(crbug.com/638674): Evaluate if this can move to shared code.
 - (void)goBack {
-  base::scoped_nsobject<GenericChromeCommand> backCommand(
-      [[GenericChromeCommand alloc] initWithTag:IDC_BACK]);
+  GenericChromeCommand* backCommand =
+      [[GenericChromeCommand alloc] initWithTag:IDC_BACK];
   chrome_test_util::RunCommandWithActiveViewController(backCommand);
 
   [ChromeEarlGrey waitForPageToFinishLoading];
@@ -216,7 +220,6 @@ class ScopedBlockPopupsPref {
 
 // Tests caching behavior when opening new tab. New tab should not use the
 // cached page.
-// TODO(crbug.com/644646): Monitor this test for flakiness.
 - (void)testCachingBehaviorOnOpenNewTab {
   web::test::SetUpHttpServer(base::MakeUnique<CacheTestResponseProvider>());
 
@@ -243,6 +246,7 @@ class ScopedBlockPopupsPref {
   // first allow popups.
   ScopedBlockPopupsPref prefSetter(CONTENT_SETTING_ALLOW);
   chrome_test_util::TapWebViewElementWithId(kCacheTestLinkID);
+  chrome_test_util::AssertMainTabCount(2);
   [ChromeEarlGrey waitForPageToFinishLoading];
   [[EarlGrey selectElementWithMatcher:WebViewContainingText("First Page")]
       assertWithMatcher:grey_notNil()];

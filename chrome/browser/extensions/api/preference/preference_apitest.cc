@@ -25,7 +25,7 @@
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/prefs/pref_service.h"
-#include "components/translate/core/common/translate_pref_names.h"
+#include "components/translate/core/browser/translate_pref_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/webrtc_ip_handling_policy.h"
 #include "extensions/browser/extension_registry.h"
@@ -52,8 +52,8 @@ class ExtensionPreferenceApiTest : public ExtensionApiTest {
     EXPECT_TRUE(prefs->GetBoolean(prefs::kEnableTranslate));
     EXPECT_EQ(chrome_browser_net::NETWORK_PREDICTION_DEFAULT,
               prefs->GetInteger(prefs::kNetworkPredictionOptions));
-    EXPECT_TRUE(prefs->GetBoolean(
-        password_manager::prefs::kPasswordManagerSavingEnabled));
+    EXPECT_TRUE(
+        prefs->GetBoolean(password_manager::prefs::kCredentialsEnableService));
     EXPECT_TRUE(prefs->GetBoolean(prefs::kSafeBrowsingEnabled));
     EXPECT_TRUE(prefs->GetBoolean(prefs::kSearchSuggestEnabled));
   }
@@ -72,8 +72,8 @@ class ExtensionPreferenceApiTest : public ExtensionApiTest {
     EXPECT_FALSE(prefs->GetBoolean(prefs::kEnableTranslate));
     EXPECT_EQ(chrome_browser_net::NETWORK_PREDICTION_NEVER,
               prefs->GetInteger(prefs::kNetworkPredictionOptions));
-    EXPECT_FALSE(prefs->GetBoolean(
-        password_manager::prefs::kPasswordManagerSavingEnabled));
+    EXPECT_FALSE(
+        prefs->GetBoolean(password_manager::prefs::kCredentialsEnableService));
     EXPECT_FALSE(prefs->GetBoolean(prefs::kSafeBrowsingEnabled));
     EXPECT_FALSE(prefs->GetBoolean(prefs::kSearchSuggestEnabled));
   }
@@ -96,8 +96,8 @@ class ExtensionPreferenceApiTest : public ExtensionApiTest {
     // BrowserProcess::Shutdown() needs to be called in a message loop, so we
     // post a task to release the keep alive, then run the message loop.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(&std::unique_ptr<ScopedKeepAlive>::reset,
-                              base::Unretained(&keep_alive_), nullptr));
+        FROM_HERE, base::BindOnce(&std::unique_ptr<ScopedKeepAlive>::reset,
+                                  base::Unretained(&keep_alive_), nullptr));
     content::RunAllPendingInMessageLoop();
 
     ExtensionApiTest::TearDownOnMainThread();
@@ -123,8 +123,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionPreferenceApiTest, MAYBE_Standard) {
   prefs->SetBoolean(prefs::kEnableTranslate, false);
   prefs->SetInteger(prefs::kNetworkPredictionOptions,
                     chrome_browser_net::NETWORK_PREDICTION_NEVER);
-  prefs->SetBoolean(password_manager::prefs::kPasswordManagerSavingEnabled,
-                    false);
+  prefs->SetBoolean(password_manager::prefs::kCredentialsEnableService, false);
   prefs->SetBoolean(prefs::kSafeBrowsingEnabled, false);
   prefs->SetBoolean(prefs::kSearchSuggestEnabled, false);
 #if BUILDFLAG(ENABLE_WEBRTC)

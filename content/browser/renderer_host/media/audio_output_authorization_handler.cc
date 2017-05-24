@@ -10,6 +10,7 @@
 #include "content/browser/renderer_host/media/audio_input_device_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/media_device_id.h"
+#include "media/audio/audio_system.h"
 #include "media/base/limits.h"
 
 namespace {
@@ -34,26 +35,16 @@ media::AudioParameters TryToFixAudioParameters(
              : media::AudioParameters::UnavailableDeviceParams();
 }
 
-media::AudioParameters GetDeviceParametersOnDeviceThread(
-    media::AudioManager* audio_manager,
-    const std::string& unique_id) {
-  DCHECK(audio_manager->GetTaskRunner()->BelongsToCurrentThread());
-
-  return media::AudioDeviceDescription::IsDefaultDevice(unique_id)
-             ? audio_manager->GetDefaultOutputStreamParameters()
-             : audio_manager->GetOutputStreamParameters(unique_id);
-}
-
 }  // namespace
 
 namespace content {
 
 AudioOutputAuthorizationHandler::AudioOutputAuthorizationHandler(
-    media::AudioManager* audio_manager,
+    media::AudioSystem* audio_system,
     MediaStreamManager* media_stream_manager,
     int render_process_id,
     const std::string& salt)
-    : audio_manager_(audio_manager),
+    : audio_system_(audio_system),
       media_stream_manager_(media_stream_manager),
       permission_checker_(base::MakeUnique<MediaDevicesPermissionChecker>()),
       render_process_id_(render_process_id),
@@ -83,8 +74,9 @@ void AudioOutputAuthorizationHandler::RequestDeviceAuthorization(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   if (!IsValidDeviceId(device_id)) {
-    cb.Run(media::OUTPUT_DEVICE_STATUS_ERROR_NOT_FOUND, false,
-           media::AudioParameters::UnavailableDeviceParams(), std::string());
+    std::move(cb).Run(media::OUTPUT_DEVICE_STATUS_ERROR_NOT_FOUND, false,
+                      media::AudioParameters::UnavailableDeviceParams(),
+                      std::string());
     return;
   }
 
@@ -123,6 +115,9 @@ void AudioOutputAuthorizationHandler::RequestDeviceAuthorization(
   // Check security origin if nondefault device is requested.
   if (!MediaStreamManager::IsOriginAllowed(render_process_id_,
                                            security_origin)) {
+    std::move(cb).Run(media::OUTPUT_DEVICE_STATUS_ERROR_NOT_AUTHORIZED, false,
+                      media::AudioParameters::UnavailableDeviceParams(),
+                      std::string());
     bad_message::ReceivedBadMessage(render_process_id_,
                                     bad_message::AOAH_UNAUTHORIZED_URL);
     return;
@@ -132,10 +127,9 @@ void AudioOutputAuthorizationHandler::RequestDeviceAuthorization(
   // nondefault devices.
   permission_checker_->CheckPermission(
       MEDIA_DEVICE_TYPE_AUDIO_OUTPUT, render_process_id_, render_frame_id,
-      security_origin,
-      base::Bind(&AudioOutputAuthorizationHandler::AccessChecked,
-                 weak_factory_.GetWeakPtr(), std::move(cb), device_id,
-                 security_origin));
+      base::BindOnce(&AudioOutputAuthorizationHandler::AccessChecked,
+                     weak_factory_.GetWeakPtr(), std::move(cb), device_id,
+                     security_origin));
 }
 
 void AudioOutputAuthorizationHandler::AccessChecked(
@@ -146,8 +140,9 @@ void AudioOutputAuthorizationHandler::AccessChecked(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   if (!has_access) {
-    cb.Run(media::OUTPUT_DEVICE_STATUS_ERROR_NOT_AUTHORIZED, false,
-           media::AudioParameters::UnavailableDeviceParams(), std::string());
+    std::move(cb).Run(media::OUTPUT_DEVICE_STATUS_ERROR_NOT_AUTHORIZED, false,
+                      media::AudioParameters::UnavailableDeviceParams(),
+                      std::string());
     return;
   }
 
@@ -156,15 +151,15 @@ void AudioOutputAuthorizationHandler::AccessChecked(
   if (media::AudioDeviceDescription::IsDefaultDevice(device_id)) {
     GetDeviceParameters(std::move(cb),
                         media::AudioDeviceDescription::kDefaultDeviceId);
-  } else {
-    MediaDevicesManager::BoolDeviceTypes devices_to_enumerate;
-    devices_to_enumerate[MEDIA_DEVICE_TYPE_AUDIO_OUTPUT] = true;
-    media_stream_manager_->media_devices_manager()->EnumerateDevices(
-        devices_to_enumerate,
-        base::Bind(&AudioOutputAuthorizationHandler::TranslateDeviceID,
-                   weak_factory_.GetWeakPtr(), std::move(cb), device_id,
-                   security_origin));
+    return;
   }
+  MediaDevicesManager::BoolDeviceTypes devices_to_enumerate;
+  devices_to_enumerate[MEDIA_DEVICE_TYPE_AUDIO_OUTPUT] = true;
+  media_stream_manager_->media_devices_manager()->EnumerateDevices(
+      devices_to_enumerate,
+      base::Bind(&AudioOutputAuthorizationHandler::TranslateDeviceID,
+                 weak_factory_.GetWeakPtr(), base::Passed(&cb), device_id,
+                 security_origin));
 }
 
 void AudioOutputAuthorizationHandler::TranslateDeviceID(
@@ -182,8 +177,9 @@ void AudioOutputAuthorizationHandler::TranslateDeviceID(
       return;
     }
   }
-  cb.Run(media::OUTPUT_DEVICE_STATUS_ERROR_NOT_FOUND, false,
-         media::AudioParameters::UnavailableDeviceParams(), std::string());
+  std::move(cb).Run(media::OUTPUT_DEVICE_STATUS_ERROR_NOT_FOUND, false,
+                    media::AudioParameters::UnavailableDeviceParams(),
+                    std::string());
 }
 
 void AudioOutputAuthorizationHandler::GetDeviceParameters(
@@ -191,21 +187,11 @@ void AudioOutputAuthorizationHandler::GetDeviceParameters(
     const std::string& raw_device_id) const {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!raw_device_id.empty());
-  base::PostTaskAndReplyWithResult(
-      // Note: In the case of a shutdown, the task to delete |audio_manager_| is
-      // posted to the audio thread after the IO thread is stopped, so the task
-      // to delete the audio manager hasn't been posted yet. This means that
-      // unretained is safe here.
-      // Mac is a special case. Since the audio manager lives on the UI thread
-      // on Mac, this task is posted to the UI thread, but tasks posted to the
-      // UI task runner will be ignored when the shutdown has progressed to
-      // deleting the audio manager, so this is still safe.
-      audio_manager_->GetTaskRunner(), FROM_HERE,
-      base::Bind(&GetDeviceParametersOnDeviceThread,
-                 base::Unretained(audio_manager_), raw_device_id),
-      base::Bind(&AudioOutputAuthorizationHandler::DeviceParametersReceived,
-                 weak_factory_.GetWeakPtr(), std::move(cb), false,
-                 raw_device_id));
+  audio_system_->GetOutputStreamParameters(
+      raw_device_id,
+      base::BindOnce(&AudioOutputAuthorizationHandler::DeviceParametersReceived,
+                     weak_factory_.GetWeakPtr(), std::move(cb), false,
+                     raw_device_id));
 }
 
 void AudioOutputAuthorizationHandler::DeviceParametersReceived(
@@ -216,10 +202,11 @@ void AudioOutputAuthorizationHandler::DeviceParametersReceived(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!raw_device_id.empty());
 
-  cb.Run(media::OUTPUT_DEVICE_STATUS_OK, should_send_id,
-         output_params.IsValid() ? output_params
-                                 : TryToFixAudioParameters(output_params),
-         raw_device_id);
+  std::move(cb).Run(media::OUTPUT_DEVICE_STATUS_OK, should_send_id,
+                    output_params.IsValid()
+                        ? output_params
+                        : TryToFixAudioParameters(output_params),
+                    raw_device_id);
 }
 
 }  // namespace content

@@ -15,14 +15,8 @@ Polymer({
 
   properties: {
     /**
-     * The browser proxy used to retrieve and change cookies.
-     * @type {settings.SiteSettingsPrefsBrowserProxy}
-     */
-    browserProxy: Object,
-
-    /**
      * The cookie entries for the given site.
-     * @type {!Array<!CookieDataItem>}
+     * @type {!Array<!CookieDetails>}
      * @private
      */
     entries_: Array,
@@ -40,9 +34,15 @@ Polymer({
     siteId_: String,
   },
 
+  /**
+   * The browser proxy used to retrieve and change cookies.
+   * @private {?settings.SiteSettingsPrefsBrowserProxy}
+   */
+  browserProxy_: null,
+
   /** @override */
   ready: function() {
-    this.browserProxy =
+    this.browserProxy_ =
         settings.SiteSettingsPrefsBrowserProxyImpl.getInstance();
 
     this.addWebUIListener('onTreeItemRemoved',
@@ -69,7 +69,7 @@ Polymer({
   getCookieDetails_: function() {
     if (!this.site_)
       return;
-    this.browserProxy.getCookieDetails(this.site_).then(
+    this.browserProxy_.getCookieDetails(this.site_).then(
         this.onCookiesLoaded_.bind(this),
         this.onCookiesLoadFailed_.bind(this));
   },
@@ -83,14 +83,14 @@ Polymer({
   },
 
   /**
-   * @param {!CookieDataSummaryItem} cookies
+   * @param {!CookieList} cookies
    * @private
    */
   onCookiesLoaded_: function(cookies) {
     this.siteId_ = cookies.id;
     this.entries_ = cookies.children;
     // Set up flag for expanding cookie details.
-    this.entries_.map(function(e) { return e.expanded_ = false; });
+    this.entries_.forEach(function(e) { e.expanded_ = false; });
   },
 
   /**
@@ -124,7 +124,7 @@ Polymer({
    * @private
    */
   onRemove_: function(event) {
-    this.browserProxy.removeCookie(
+    this.browserProxy_.removeCookie(
         /** @type {!CookieDetails} */(event.currentTarget.dataset).idPath);
   },
 
@@ -132,7 +132,7 @@ Polymer({
    * A handler for when the user opts to remove all cookies.
    */
   removeAll: function() {
-    this.browserProxy.removeCookie(this.siteId_);
+    this.browserProxy_.removeCookie(this.siteId_);
   },
 });
 

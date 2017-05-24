@@ -29,9 +29,11 @@ const char HttpRequestHeaders::kContentLength[] = "Content-Length";
 const char HttpRequestHeaders::kContentType[] = "Content-Type";
 const char HttpRequestHeaders::kCookie[] = "Cookie";
 const char HttpRequestHeaders::kHost[] = "Host";
+const char HttpRequestHeaders::kIfMatch[] = "If-Match";
 const char HttpRequestHeaders::kIfModifiedSince[] = "If-Modified-Since";
 const char HttpRequestHeaders::kIfNoneMatch[] = "If-None-Match";
 const char HttpRequestHeaders::kIfRange[] = "If-Range";
+const char HttpRequestHeaders::kIfUnmodifiedSince[] = "If-Unmodified-Since";
 const char HttpRequestHeaders::kOrigin[] = "Origin";
 const char HttpRequestHeaders::kPragma[] = "Pragma";
 const char HttpRequestHeaders::kProxyAuthorization[] = "Proxy-Authorization";
@@ -225,7 +227,7 @@ bool HttpRequestHeaders::FromNetLogParam(const base::Value* event_param,
        it != header_list->end();
        ++it) {
     std::string header_line;
-    if (!(*it)->GetAsString(&header_line)) {
+    if (!it->GetAsString(&header_line)) {
       headers->Clear();
       *request_line = "";
       return false;

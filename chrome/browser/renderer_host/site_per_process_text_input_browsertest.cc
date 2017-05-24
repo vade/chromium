@@ -18,7 +18,6 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
-#include "content/public/common/form_field_data.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_utils.h"
@@ -271,40 +270,31 @@ class ViewTextSelectionObserver : public TextInputManagerObserverBase {
   DISALLOW_COPY_AND_ASSIGN(ViewTextSelectionObserver);
 };
 
-// This class is used to verify the result of form field data requests.
-class FormFieldDataVerifier {
+// This class observes all the text selection updates within a WebContents.
+class TextSelectionObserver : public TextInputManagerObserverBase {
  public:
-  FormFieldDataVerifier(const std::string& text, const std::string& placeholder)
-      : text_(text), placeholder_(placeholder), success_(false) {}
-
-  void Verify(const content::FormFieldData& field) {
-    ASSERT_EQ(field.text, text_);
-    ASSERT_EQ(field.placeholder, placeholder_);
-    OnSuccess();
+  explicit TextSelectionObserver(content::WebContents* web_contents)
+      : TextInputManagerObserverBase(web_contents) {
+    tester()->SetOnTextSelectionChangedCallback(base::Bind(
+        &TextSelectionObserver::VerifyChange, base::Unretained(this)));
   }
 
-  // Wait for success_ to be true.
-  void Wait() {
-    if (success_)
-      return;
-    message_loop_runner_ = new content::MessageLoopRunner();
-    message_loop_runner_->Run();
+  void WaitForSelectedText(const std::string& text) {
+    selected_text_ = text;
+    Wait();
   }
 
  private:
-  void OnSuccess() {
-    success_ = true;
-    if (message_loop_runner_)
-      message_loop_runner_->Quit();
+  void VerifyChange() {
+    if (base::UTF16ToUTF8(tester()->GetUpdatedView()->GetSelectedText()) ==
+        selected_text_) {
+      OnSuccess();
+    }
   }
 
-  std::string text_;
-  std::string placeholder_;
+  std::string selected_text_;
 
-  bool success_;
-  scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(FormFieldDataVerifier);
+  DISALLOW_COPY_AND_ASSIGN(TextSelectionObserver);
 };
 
 // This class monitors all the changes in TextInputState and keeps a record of
@@ -440,8 +430,9 @@ class SitePerProcessTextInputManagerTest : public InProcessBrowserTest {
 // creates a sequence of tab presses and verifies that after each key press, the
 // TextInputState.value reflects that of the focused input, i.e., the
 // TextInputManager is correctly tracking TextInputState across frames.
+// flaky: crbug.com/704994
 IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
-                       TrackStateWhenSwitchingFocusedFrames) {
+                       DISABLED_TrackStateWhenSwitchingFocusedFrames) {
   CreateIframePage("a(a,b,c(a,b,d(e, f)),g)");
   std::vector<std::string> values{
       "main",     "node_a",   "node_b",     "node_c",     "node_c_a",
@@ -668,7 +659,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
       GetFrame(IndexVector{1}),    GetFrame(IndexVector{1, 0}),
       GetFrame(IndexVector{1, 1}), GetFrame(IndexVector{2})};
   std::vector<content::RenderWidgetHostView*> views;
-  for (auto frame : frames)
+  for (auto* frame : frames)
     views.push_back(frame->GetView());
   std::vector<std::string> values{"a", "ab", "ac", "aca", "acb", "acd"};
   for (size_t i = 0; i < frames.size(); ++i)
@@ -742,48 +733,6 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
     send_tab_set_composition_wait_for_bounds_change(view);
 }
 
-// TODO(ekaramad): Some of the following tests should be active on Android as
-// well. Enable them when the corresponding feature is implemented for Android
-// (https://crbug.com/602723).
-#if !defined(OS_ANDROID)
-// This test creates a page with multiple child frames and adds an <input> to
-// each frame. Then, sequentially, each <input> is focused by sending a tab key.
-// Then, after |TextInputState.type| for a view is changed to text, another key
-// is pressed (a character) and then the test verifies that TextInputManager
-// receives the corresponding update on the change in selection bounds on the
-// browser side.
-IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
-                       TrackSelectionBoundsForAllFrames) {
-  CreateIframePage("a(b,c(a,b),d)");
-  std::vector<content::RenderFrameHost*> frames{
-      GetFrame(IndexVector{}),     GetFrame(IndexVector{0}),
-      GetFrame(IndexVector{1}),    GetFrame(IndexVector{1, 0}),
-      GetFrame(IndexVector{1, 1}), GetFrame(IndexVector{2})};
-  std::vector<content::RenderWidgetHostView*> views;
-  for (auto* frame : frames)
-    views.push_back(frame->GetView());
-  for (size_t i = 0; i < frames.size(); ++i)
-    AddInputFieldToFrame(frames[i], "text", "", true);
-
-  content::WebContents* web_contents = active_contents();
-
-  auto send_tab_insert_text_wait_for_bounds_change = [&web_contents](
-      content::RenderWidgetHostView* view) {
-    ViewTextInputTypeObserver type_observer(web_contents, view,
-                                            ui::TEXT_INPUT_TYPE_TEXT);
-    SimulateKeyPress(web_contents, ui::DomKey::TAB, ui::DomCode::TAB,
-                     ui::VKEY_TAB, false, false, false, false);
-    type_observer.Wait();
-    ViewSelectionBoundsChangedObserver bounds_observer(web_contents, view);
-    SimulateKeyPress(web_contents, ui::DomKey::FromCharacter('E'),
-                     ui::DomCode::US_E, ui::VKEY_E, false, false, false, false);
-    bounds_observer.Wait();
-  };
-
-  for (auto* view : views)
-    send_tab_insert_text_wait_for_bounds_change(view);
-}
-
 // This test creates a page with multiple child frames and adds an <input> to
 // each frame. Then, sequentially, each <input> is focused by sending a tab key.
 // After focusing each input, a sequence of key presses (character 'E') are sent
@@ -834,43 +783,98 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
   }
 }
 
-// This test creates a page with multiple child frames and adds two <input>
-// elements to each frame. Then, sequentially, each <input> is focused through
-// javascript. For each frame, its text and placeholder attributes are queried
-// through RenderFrameHost and verified against expected values.
+// This test verifies that committing text works as expected for all the frames
+// on the page. Specifically, the test sends an IPC to the RenderWidget
+// corresponding to a focused frame with a focused <input> to commit some text.
+// Then, it verifies that the <input>'s value matches the committed text
+// (https://crbug.com/688842).
 IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
-                       RequestFocusedFormFieldDataForMultipleIFrames) {
-  CreateIframePage("a(b, c)");
-  std::vector<content::RenderFrameHost*> frames{GetFrame(IndexVector{}),
-                                                GetFrame(IndexVector{0}),
-                                                GetFrame(IndexVector{1})};
+                       ImeCommitTextForAllFrames) {
+  CreateIframePage("a(b,c(a))");
+  std::vector<content::RenderFrameHost*> frames{
+      GetFrame(IndexVector{}), GetFrame(IndexVector{0}),
+      GetFrame(IndexVector{1}), GetFrame(IndexVector{1, 0})};
+  for (size_t i = 0; i < frames.size(); ++i)
+    AddInputFieldToFrame(frames[i], "text", "", true);
 
-  std::vector<std::string> values{"main_1",   "main_2",   "node_b_1",
-                                  "node_b_2", "node_c_1", "node_c_2"};
-  std::vector<std::string> placeholders{
-      "placeholder_main_1",   "placeholder_main_2",   "placeholder_node_b_1",
-      "placeholder_node_b_2", "placeholder_node_c_1", "placeholder_node_c_2"};
+  std::vector<std::string> sample_text{"main", "child_b", "child_c", "child_a"};
+  ASSERT_EQ(frames.size(), sample_text.size());
 
-  for (size_t i = 0; i < values.size(); ++i) {
-    AppendInputFieldToFrame(frames[i / 2], "text", values[i], values[i],
-                            placeholders[i]);
+  // An observer of all text selection updates within a WebContents.
+  TextSelectionObserver observer(active_contents());
+  for (size_t index = 0; index < frames.size(); ++index) {
+    // Focus the input and listen to 'input' event inside the frame. When the
+    // event fires, select all the text inside the input. This will trigger a
+    // selection update on the browser side.
+    ASSERT_TRUE(ExecuteScript(frames[index],
+                              "window.focus();"
+                              "var input = document.querySelector('input');"
+                              "input.focus();"
+                              "window.addEventListener('input', function(e) {"
+                              "  input.select();"
+                              "});"))
+        << "Could not run script in frame with index:" << index;
+
+    // Commit some text for this frame.
+    content::SendImeCommitTextToWidget(
+        frames[index]->GetView()->GetRenderWidgetHost(),
+        base::UTF8ToUTF16(sample_text[index]),
+        std::vector<ui::CompositionUnderline>(), gfx::Range(), 0);
+
+    // Verify that the text we committed is now selected by listening to a
+    // selection update from a RenderWidgetHostView which has the expected
+    // selected text.
+    observer.WaitForSelectedText(sample_text[index]);
   }
+}
 
-  for (size_t i = 0; i < values.size(); ++i) {
-    content::RenderFrameHost* frame = frames[i / 2];
-    FocusFormField(frame, values[i]);
-    FormFieldDataVerifier verifier(values[i], placeholders[i]);
-    content::FormFieldDataCallback callback =
-        base::Bind(&FormFieldDataVerifier::Verify, base::Unretained(&verifier));
-    frame->RequestFocusedFormFieldData(callback);
-    verifier.Wait();
-  }
+// TODO(ekaramad): Some of the following tests should be active on Android as
+// well. Enable them when the corresponding feature is implemented for Android
+// (https://crbug.com/602723).
+#if !defined(OS_ANDROID)
+// This test creates a page with multiple child frames and adds an <input> to
+// each frame. Then, sequentially, each <input> is focused by sending a tab key.
+// Then, after |TextInputState.type| for a view is changed to text, another key
+// is pressed (a character) and then the test verifies that TextInputManager
+// receives the corresponding update on the change in selection bounds on the
+// browser side.
+IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
+                       TrackSelectionBoundsForAllFrames) {
+  CreateIframePage("a(b,c(a,b),d)");
+  std::vector<content::RenderFrameHost*> frames{
+      GetFrame(IndexVector{}),     GetFrame(IndexVector{0}),
+      GetFrame(IndexVector{1}),    GetFrame(IndexVector{1, 0}),
+      GetFrame(IndexVector{1, 1}), GetFrame(IndexVector{2})};
+  std::vector<content::RenderWidgetHostView*> views;
+  for (auto* frame : frames)
+    views.push_back(frame->GetView());
+  for (size_t i = 0; i < frames.size(); ++i)
+    AddInputFieldToFrame(frames[i], "text", "", true);
+
+  content::WebContents* web_contents = active_contents();
+
+  auto send_tab_insert_text_wait_for_bounds_change = [&web_contents](
+      content::RenderWidgetHostView* view) {
+    ViewTextInputTypeObserver type_observer(web_contents, view,
+                                            ui::TEXT_INPUT_TYPE_TEXT);
+    SimulateKeyPress(web_contents, ui::DomKey::TAB, ui::DomCode::TAB,
+                     ui::VKEY_TAB, false, false, false, false);
+    type_observer.Wait();
+    ViewSelectionBoundsChangedObserver bounds_observer(web_contents, view);
+    SimulateKeyPress(web_contents, ui::DomKey::FromCharacter('E'),
+                     ui::DomCode::US_E, ui::VKEY_E, false, false, false, false);
+    bounds_observer.Wait();
+  };
+
+  for (auto* view : views)
+    send_tab_insert_text_wait_for_bounds_change(view);
 }
 
 // This test makes sure browser correctly tracks focused editable element inside
 // each RenderFrameHost.
+// Test is flaky. crbug.com/705203
 IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
-                       TrackingFocusedElementForAllFrames) {
+                       DISABLED_TrackingFocusedElementForAllFrames) {
   CreateIframePage("a(a, b(a))");
   std::vector<content::RenderFrameHost*> frames{
       GetFrame(IndexVector{}), GetFrame(IndexVector{0}),
@@ -910,8 +914,15 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
 // focused. Then the <input> inside frame is both focused and blurred and  and
 // in both cases the test verifies that WebContents is aware whether or not a
 // focused editable element exists on the page.
+// Test is flaky on ChromeOS. crbug.com/705289
+#if defined(OS_CHROMEOS)
+#define MAYBE_TrackPageFocusEditableElement \
+  DISABLED_TrackPageFocusEditableElement
+#else
+#define MAYBE_TrackPageFocusEditableElement TrackPageFocusEditableElement
+#endif
 IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
-                       TrackPageFocusEditableElement) {
+                       MAYBE_TrackPageFocusEditableElement) {
   CreateIframePage("a(a, b(a))");
   std::vector<content::RenderFrameHost*> frames{
       GetFrame(IndexVector{}), GetFrame(IndexVector{0}),
@@ -945,8 +956,9 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
 // WebContents knows about the focused editable element. Then it asks the
 // WebContents to clear focused element and verifies that there is no longer
 // a focused editable element on the page.
+// Test is flaky. crbug.com/705203
 IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
-                       ClearFocusedElementOnPage) {
+                       DISABLED_ClearFocusedElementOnPage) {
   CreateIframePage("a(a, b(a))");
   std::vector<content::RenderFrameHost*> frames{
       GetFrame(IndexVector{}), GetFrame(IndexVector{0}),
@@ -1271,8 +1283,9 @@ class TestBrowserClient : public ChromeContentBrowserClient {
 
 // This test verifies that requests for dictionary lookup based on selection
 // range are routed to the focused RenderWidgetHost.
+// Test is flaky: http://crbug.com/710842
 IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
-                       LookUpStringForRangeRoutesToFocusedWidget) {
+                       DISABLED_LookUpStringForRangeRoutesToFocusedWidget) {
   // TestBrowserClient needs to replace the ChromeContenBrowserClient after most
   // things are initialized but before the WebContents is created. Here we make
   // that happen by creating a new WebContents in a new tab. But before the test
@@ -1296,7 +1309,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessTextInputManagerTest,
   std::vector<content::RenderFrameHost*> frames{GetFrame(IndexVector{}),
                                                 GetFrame(IndexVector{0})};
   std::vector<content::RenderWidgetHostView*> views;
-  for (auto frame : frames)
+  for (auto* frame : frames)
     views.push_back(frame->GetView());
   std::vector<std::string> values{"main frame", "child frame"};
 

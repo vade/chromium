@@ -10,6 +10,8 @@
 Polymer({
   is: 'settings-internet-known-networks-page',
 
+  behaviors: [CrPolicyNetworkBehavior],
+
   properties: {
     /**
      * The type of networks to list.
@@ -36,7 +38,16 @@ Polymer({
         return [];
       }
     },
+
+    /** @private */
+    showAddPreferred_: Boolean,
+
+    /** @private */
+    showRemovePreferred_: Boolean,
   },
+
+  /** @private {string} */
+  selectedGuid_: '',
 
   /**
    * Listener function for chrome.networkingPrivate.onNetworksChanged event.
@@ -130,20 +141,66 @@ Polymer({
   },
 
   /**
-   * @param {!{model: !{item: !CrOnc.NetworkStateProperties}}} e
+   * @param {!Event} event
    * @private
    */
-  onRemoveTap_: function(e) {
-    var state = e.model.item;
-    this.networkingPrivate.setProperties(state.GUID, {Priority: 0});
+  onMenuButtonTap_: function(event) {
+    var button = /** @type {!HTMLElement} */ (event.target);
+    this.selectedGuid_ =
+        /** @type {!{model: !{item: !CrOnc.NetworkStateProperties}}} */ (event)
+            .model.item.GUID;
+    // We need to make a round trip to Chrome in order to retrieve the managed
+    // properties for the network. The delay is not noticeable (~5ms) and is
+    // preferable to initiating a query for every known network at load time.
+    this.networkingPrivate.getManagedProperties(
+        this.selectedGuid_, function(properties) {
+          if (chrome.runtime.lastError || !properties) {
+            this.showAddPreferred_ = false;
+            this.showRemovePreferred_ = false;
+            return;
+          }
+          var preferred = button.hasAttribute('preferred');
+          if (this.isNetworkPolicyEnforced(properties.Priority)) {
+            this.showAddPreferred_ = false;
+            this.showRemovePreferred_ = false;
+          } else {
+            this.showAddPreferred_ = !preferred;
+            this.showRemovePreferred_ = preferred;
+          }
+          /** @type {!CrActionMenuElement} */ (this.$.dotsMenu).showAt(button);
+        }.bind(this));
+    event.stopPropagation();
+  },
+
+  /** @private */
+  onRemovePreferredTap_: function() {
+    this.networkingPrivate.setProperties(this.selectedGuid_, {Priority: 0});
+    /** @type {!CrActionMenuElement} */ (this.$.dotsMenu).close();
+  },
+
+  /** @private */
+  onAddPreferredTap_: function() {
+    this.networkingPrivate.setProperties(this.selectedGuid_, {Priority: 1});
+    /** @type {!CrActionMenuElement} */ (this.$.dotsMenu).close();
+  },
+
+  /** @private */
+  onForgetTap_: function() {
+    this.networkingPrivate.forgetNetwork(this.selectedGuid_);
+    /** @type {!CrActionMenuElement} */ (this.$.dotsMenu).close();
   },
 
   /**
-   * @param {!{model: !{item: !CrOnc.NetworkStateProperties}}} e
+   * Fires a 'show-details' event with an item containing a |networkStateList_|
+   * entry in the event model.
+   * @param {Event} event
    * @private
    */
-  onAddTap_: function(e) {
-    var state = e.model.item;
-    this.networkingPrivate.setProperties(state.GUID, {Priority: 1});
+  fireShowDetails_: function(event) {
+    var state =
+        /** @type {!{model: !{item: !CrOnc.NetworkStateProperties}}} */ (event)
+            .model.item;
+    this.fire('show-detail', state);
+    event.stopPropagation();
   },
 });

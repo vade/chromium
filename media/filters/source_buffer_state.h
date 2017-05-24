@@ -9,6 +9,7 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
+#include "base/memory/memory_pressure_listener.h"
 #include "media/base/audio_codecs.h"
 #include "media/base/demuxer.h"
 #include "media/base/demuxer_stream.h"
@@ -38,7 +39,7 @@ class MEDIA_EXPORT SourceBufferState {
   SourceBufferState(std::unique_ptr<StreamParser> stream_parser,
                     std::unique_ptr<FrameProcessor> frame_processor,
                     const CreateDemuxerStreamCB& create_demuxer_stream_cb,
-                    const scoped_refptr<MediaLog>& media_log);
+                    MediaLog* media_log);
 
   ~SourceBufferState();
 
@@ -73,7 +74,18 @@ class MEDIA_EXPORT SourceBufferState {
   // the "Coded Frame Eviction Algorithm" in the Media Source Extensions Spec.
   // Returns false iff buffer is still full after running eviction.
   // https://w3c.github.io/media-source/#sourcebuffer-coded-frame-eviction
-  bool EvictCodedFrames(DecodeTimestamp media_time, size_t newDataSize);
+  bool EvictCodedFrames(base::TimeDelta media_time, size_t newDataSize);
+
+  // Gets invoked when the system is experiencing memory pressure, i.e. there's
+  // not enough free memory. The |media_time| is the media playback position at
+  // the time of memory pressure notification (needed for accurate GC). The
+  // |memory_pressure_listener| indicates memory pressure severity. The
+  // |force_instant_gc| is used to force the MSE garbage collection algorithm to
+  // be run right away, without waiting for the next append.
+  void OnMemoryPressure(
+      DecodeTimestamp media_time,
+      base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level,
+      bool force_instant_gc);
 
   // Returns true if currently parsing a media segment, or false otherwise.
   bool parsing_media_segment() const { return parsing_media_segment_; }
@@ -197,7 +209,7 @@ class MEDIA_EXPORT SourceBufferState {
   DemuxerStreamMap text_streams_;
 
   std::unique_ptr<FrameProcessor> frame_processor_;
-  scoped_refptr<MediaLog> media_log_;
+  MediaLog* media_log_;
   StreamParser::InitCB init_cb_;
 
   State state_;

@@ -31,9 +31,9 @@
 #ifndef FileReaderSync_h
 #define FileReaderSync_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
-#include "wtf/text/WTFString.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -49,12 +49,14 @@ class FileReaderSync final : public GarbageCollected<FileReaderSync>,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static FileReaderSync* create() { return new FileReaderSync(); }
+  static FileReaderSync* Create(ExecutionContext* context) {
+    return new FileReaderSync(context);
+  }
 
   DOMArrayBuffer* readAsArrayBuffer(ScriptState*, Blob*, ExceptionState&);
   String readAsBinaryString(ScriptState*, Blob*, ExceptionState&);
-  String readAsText(ScriptState* scriptState, Blob* blob, ExceptionState& ec) {
-    return readAsText(scriptState, blob, "", ec);
+  String readAsText(ScriptState* script_state, Blob* blob, ExceptionState& ec) {
+    return readAsText(script_state, blob, "", ec);
   }
   String readAsText(ScriptState*,
                     Blob*,
@@ -65,9 +67,9 @@ class FileReaderSync final : public GarbageCollected<FileReaderSync>,
   DEFINE_INLINE_TRACE() {}
 
  private:
-  FileReaderSync();
+  explicit FileReaderSync(ExecutionContext*);
 
-  void startLoading(ExecutionContext*,
+  void StartLoading(ExecutionContext*,
                     FileReaderLoader&,
                     const Blob&,
                     ExceptionState&);

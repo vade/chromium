@@ -9,55 +9,121 @@
 
 namespace blink {
 
+class WebGestureEvent;
+
 // See WebInputEvent.h for details why this pack is here.
 #pragma pack(push, 4)
 
 // WebMouseEvent --------------------------------------------------------------
 
+// TODO(mustaq): We are truncating |float|s to integers whenever setting
+//   coordinate values, to avoid regressions for now. Will be fixed later
+//   on. crbug.com/456625
 class WebMouseEvent : public WebInputEvent, public WebPointerProperties {
  public:
-  // Renderer coordinates. Similar to viewport coordinates but without
-  // DevTools emulation transform or overscroll applied. i.e. the coordinates
-  // in Chromium's RenderView bounds.
-  int x;
-  int y;
+  static constexpr PointerId kMousePointerId = std::numeric_limits<int>::max();
 
-  // DEPRECATED (crbug.com/507787)
-  int windowX;
-  int windowY;
+  int click_count;
 
-  // Screen coordinate
-  int globalX;
-  int globalY;
+  WebMouseEvent(Type type_param,
+                int x_param,
+                int y_param,
+                int global_x_param,
+                int global_y_param,
+                int modifiers_param,
+                double time_stamp_seconds_param,
+                PointerId id_param = kMousePointerId)
+      : WebInputEvent(sizeof(WebMouseEvent),
+                      type_param,
+                      modifiers_param,
+                      time_stamp_seconds_param),
+        WebPointerProperties(id_param),
+        position_in_widget_(x_param, y_param),
+        position_in_screen_(global_x_param, global_y_param) {}
 
-  int movementX;
-  int movementY;
-  int clickCount;
+  WebMouseEvent(Type type_param,
+                WebFloatPoint position,
+                WebFloatPoint global_position,
+                Button button_param,
+                int click_count_param,
+                int modifiers_param,
+                double time_stamp_seconds_param,
+                PointerId id_param = kMousePointerId)
+      : WebInputEvent(sizeof(WebMouseEvent),
+                      type_param,
+                      modifiers_param,
+                      time_stamp_seconds_param),
+        WebPointerProperties(id_param, button_param, PointerType::kMouse),
+        click_count(click_count_param),
+        position_in_widget_(floor(position.x), floor(position.y)),
+        position_in_screen_(floor(global_position.x),
+                            floor(global_position.y)) {}
 
-  WebMouseEvent(Type type, int modifiers, double timeStampSeconds)
-      : WebInputEvent(sizeof(WebMouseEvent), type, modifiers, timeStampSeconds),
-        WebPointerProperties() {}
+  WebMouseEvent(Type type_param,
+                int modifiers_param,
+                double time_stamp_seconds_param,
+                PointerId id_param = kMousePointerId)
+      : WebMouseEvent(sizeof(WebMouseEvent),
+                      type_param,
+                      modifiers_param,
+                      time_stamp_seconds_param,
+                      id_param) {}
 
-  WebMouseEvent()
-      : WebInputEvent(sizeof(WebMouseEvent)), WebPointerProperties() {}
+  WebMouseEvent() : WebMouseEvent(sizeof(WebMouseEvent), kMousePointerId) {}
+
+  bool FromTouch() const {
+    return (GetModifiers() & kIsCompatibilityEventForTouch) != 0;
+  }
 
 #if INSIDE_BLINK
-  BLINK_PLATFORM_EXPORT WebFloatPoint movementInRootFrame() const;
-  BLINK_PLATFORM_EXPORT WebFloatPoint positionInRootFrame() const;
+  BLINK_PLATFORM_EXPORT WebMouseEvent(Type type_param,
+                                      const WebGestureEvent&,
+                                      Button button_param,
+                                      int click_count_param,
+                                      int modifiers_param,
+                                      double time_stamp_seconds_param,
+                                      PointerId id_param = kMousePointerId);
+
+  BLINK_PLATFORM_EXPORT WebFloatPoint MovementInRootFrame() const;
+  BLINK_PLATFORM_EXPORT WebFloatPoint PositionInRootFrame() const;
+
+  // Sets any scaled values to be their computed values and sets |frameScale|
+  // back to 1 and |translateX|, |translateY| back to 0.
+  BLINK_PLATFORM_EXPORT WebMouseEvent FlattenTransform() const;
 #endif
 
- protected:
-  explicit WebMouseEvent(unsigned sizeParam)
-      : WebInputEvent(sizeParam), WebPointerProperties() {}
+  WebFloatPoint PositionInWidget() const { return position_in_widget_; }
+  void SetPositionInWidget(float x, float y) {
+    position_in_widget_ = WebFloatPoint(floor(x), floor(y));
+  }
 
-  WebMouseEvent(unsigned sizeParam,
+  WebFloatPoint PositionInScreen() const { return position_in_screen_; }
+  void SetPositionInScreen(float x, float y) {
+    position_in_screen_ = WebFloatPoint(floor(x), floor(y));
+  }
+
+ protected:
+  WebMouseEvent(unsigned size_param, PointerId id_param)
+      : WebInputEvent(size_param), WebPointerProperties(id_param) {}
+
+  WebMouseEvent(unsigned size_param,
                 Type type,
                 int modifiers,
-                double timeStampSeconds)
-      : WebInputEvent(sizeParam, type, modifiers, timeStampSeconds),
-        WebPointerProperties() {}
+                double time_stamp_seconds,
+                PointerId id_param)
+      : WebInputEvent(size_param, type, modifiers, time_stamp_seconds),
+        WebPointerProperties(id_param) {}
 
-  void flattenTransformSelf();
+  void FlattenTransformSelf();
+
+ private:
+  // Widget coordinate, which is relative to the bound of current RenderWidget
+  // (e.g. a plugin or OOPIF inside a RenderView). Similar to viewport
+  // coordinates but without DevTools emulation transform or overscroll applied.
+  WebFloatPoint position_in_widget_;
+
+  // Screen coordinate
+  WebFloatPoint position_in_screen_;
 };
 
 #pragma pack(pop)

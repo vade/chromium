@@ -213,6 +213,11 @@ class NET_EXPORT HostResolver {
       const PersistCallback& persist_callback,
       std::unique_ptr<const base::Value> old_data);
 
+  // Sets the HostResolver to assume that IPv6 is unreachable when on a wifi
+  // connection. See https://crbug.com/696569 for further context.
+  virtual void SetNoIPv6OnWifi(bool no_ipv6_on_wifi);
+  virtual bool GetNoIPv6OnWifi();
+
   // Creates a HostResolver implementation that queries the underlying system.
   // (Except if a unit-test has changed the global HostResolverProc using
   // ScopedHostResolverProc to intercept requests to the system).

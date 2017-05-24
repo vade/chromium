@@ -18,6 +18,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/task_runner_util.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "net/base/net_errors.h"
 #include "net/nqe/network_quality_estimator.h"
@@ -225,6 +226,7 @@ void NetworkMetricsProvider::OnConnectionTypeChanged(
   if (type != connection_type_ &&
       connection_type_ != net::NetworkChangeNotifier::CONNECTION_NONE) {
     connection_type_is_ambiguous_ = true;
+    effective_connection_type_is_ambiguous_ = true;
   }
   connection_type_ = type;
 

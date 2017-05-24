@@ -20,11 +20,22 @@ source_set("api") {
     "execute_code_function.h",
     "extensions_api_client.cc",
     "extensions_api_client.h",
+    "guest_view/app_view/app_view_guest_internal_api.cc",
+    "guest_view/app_view/app_view_guest_internal_api.h",
+    "guest_view/extension_view/extension_view_internal_api.cc",
+    "guest_view/extension_view/extension_view_internal_api.h",
+    "guest_view/guest_view_internal_api.cc",
+    "guest_view/guest_view_internal_api.h",
+    "guest_view/web_view/web_view_internal_api.cc",
+    "guest_view/web_view/web_view_internal_api.h",
     "web_contents_capture_client.cc",
     "web_contents_capture_client.h",
   ]
 
   public_deps = [
+    "//base",
+    "//content/public/browser",
+    "//content/public/common",
     "//extensions/browser/api/activity_log",
     "//extensions/browser/api/alarms",
     "//extensions/browser/api/app_current_window_internal",
@@ -41,10 +52,7 @@ source_set("api") {
     "//extensions/browser/api/display_source",
     "//extensions/browser/api/dns",
     "//extensions/browser/api/document_scan",
-    "//extensions/browser/api/guest_view",
-    "//extensions/browser/api/guest_view/app_view",
-    "//extensions/browser/api/guest_view/extension_view",
-    "//extensions/browser/api/guest_view/web_view",
+    "//extensions/browser/api/file_handlers",
     "//extensions/browser/api/hid",
     "//extensions/browser/api/idle",
     "//extensions/browser/api/management",
@@ -72,12 +80,28 @@ source_set("api") {
     "//extensions/browser/api/usb",
     "//extensions/browser/api/virtual_keyboard_private",
     "//extensions/browser/api/web_request",
+    "//extensions/common",
+    "//ipc",
   ]
 
   deps = [
     "//base:i18n",
-    "//content/public/browser",
+    "//components/keyed_service/content:content",
+    "//extensions/browser:browser_sources",
+    "//extensions/browser/guest_view",
+    "//extensions/common/api",
     "//extensions/strings",
+  ]
+
+  # TODO(michaelpg): Move these deps to the individual APIs that require them.
+  deps += [
+    "//components/onc",
+    "//components/storage_monitor",
+    "//device/base",
+    "//device/bluetooth",
+    "//device/hid",
+    "//device/power_save_blocker",
+    "//device/serial",
   ]
 
   if (is_chromeos) {
@@ -85,9 +109,12 @@ source_set("api") {
       "//extensions/browser/api/clipboard",
       "//extensions/browser/api/diagnostics",
       "//extensions/browser/api/networking_config",
+      "//extensions/browser/api/virtual_keyboard",
       "//extensions/browser/api/vpn_provider",
       "//extensions/browser/api/webcam_private",
     ]
+
+    deps += [ "//chromeos" ]
   }
 }
 

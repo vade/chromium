@@ -29,17 +29,16 @@
 
 #include "base/base_export.h"
 #include "base/compiler_specific.h"
+#include "base/containers/flat_map.h"
 #include "base/macros.h"
+#include "base/memory/manual_constructor.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 
 namespace base {
 
-class BinaryValue;
 class DictionaryValue;
-class FundamentalValue;
 class ListValue;
-class StringValue;
 class Value;
 
 // The Value class is the base class for Values. A Value can be instantiated
@@ -49,6 +48,10 @@ class Value;
 // See the file-level comment above for more information.
 class BASE_EXPORT Value {
  public:
+  using BlobStorage = std::vector<char>;
+  using DictStorage = base::flat_map<std::string, std::unique_ptr<Value>>;
+  using ListStorage = std::vector<Value>;
+
   enum class Type {
     NONE = 0,
     BOOLEAN,
@@ -61,9 +64,47 @@ class BASE_EXPORT Value {
     // Note: Do not add more types. See the file-level comment above for why.
   };
 
-  virtual ~Value();
+  // For situations where you want to keep ownership of your buffer, this
+  // factory method creates a new BinaryValue by copying the contents of the
+  // buffer that's passed in.
+  // DEPRECATED, use MakeUnique<Value>(const BlobStorage&) instead.
+  // TODO(crbug.com/646113): Delete this and migrate callsites.
+  static std::unique_ptr<Value> CreateWithCopiedBuffer(const char* buffer,
+                                                       size_t size);
 
-  static std::unique_ptr<Value> CreateNullValue();
+  Value(const Value& that);
+  Value(Value&& that) noexcept;
+  Value() noexcept;  // A null value.
+  explicit Value(Type type);
+  explicit Value(bool in_bool);
+  explicit Value(int in_int);
+  explicit Value(double in_double);
+
+  // Value(const char*) and Value(const char16*) are required despite
+  // Value(const std::string&) and Value(const string16&) because otherwise the
+  // compiler will choose the Value(bool) constructor for these arguments.
+  // Value(std::string&&) allow for efficient move construction.
+  // Value(StringPiece) exists due to many callsites passing StringPieces as
+  // arguments.
+  explicit Value(const char* in_string);
+  explicit Value(const std::string& in_string);
+  explicit Value(std::string&& in_string) noexcept;
+  explicit Value(const char16* in_string);
+  explicit Value(const string16& in_string);
+  explicit Value(StringPiece in_string);
+
+  explicit Value(const BlobStorage& in_blob);
+  explicit Value(BlobStorage&& in_blob) noexcept;
+
+  explicit Value(DictStorage&& in_dict) noexcept;
+
+  explicit Value(const ListStorage& in_list);
+  explicit Value(ListStorage&& in_list) noexcept;
+
+  Value& operator=(const Value& that);
+  Value& operator=(Value&& that) noexcept;
+
+  ~Value();
 
   // Returns the name for a given |type|.
   static const char* GetTypeName(Type type);
@@ -73,141 +114,99 @@ class BASE_EXPORT Value {
   // safe to use the Type to determine whether you can cast from
   // Value* to (Implementing Class)*.  Also, a Value object never changes
   // its type after construction.
-  Type GetType() const { return type_; }
+  Type GetType() const { return type_; }  // DEPRECATED, use type().
+  Type type() const { return type_; }
 
   // Returns true if the current object represents a given type.
   bool IsType(Type type) const { return type == type_; }
+  bool is_bool() const { return type() == Type::BOOLEAN; }
+  bool is_int() const { return type() == Type::INTEGER; }
+  bool is_double() const { return type() == Type::DOUBLE; }
+  bool is_string() const { return type() == Type::STRING; }
+  bool is_blob() const { return type() == Type::BINARY; }
+  bool is_dict() const { return type() == Type::DICTIONARY; }
+  bool is_list() const { return type() == Type::LIST; }
+
+  // These will all fatally assert if the type doesn't match.
+  bool GetBool() const;
+  int GetInt() const;
+  double GetDouble() const;  // Implicitly converts from int if necessary.
+  const std::string& GetString() const;
+  const BlobStorage& GetBlob() const;
+
+  ListStorage& GetList();
+  const ListStorage& GetList() const;
 
   // These methods allow the convenient retrieval of the contents of the Value.
   // If the current object can be converted into the given type, the value is
   // returned through the |out_value| parameter and true is returned;
   // otherwise, false is returned and |out_value| is unchanged.
-  virtual bool GetAsBoolean(bool* out_value) const;
-  virtual bool GetAsInteger(int* out_value) const;
-  virtual bool GetAsDouble(double* out_value) const;
-  virtual bool GetAsString(std::string* out_value) const;
-  virtual bool GetAsString(string16* out_value) const;
-  virtual bool GetAsString(const StringValue** out_value) const;
-  virtual bool GetAsString(StringPiece* out_value) const;
-  virtual bool GetAsBinary(const BinaryValue** out_value) const;
+  bool GetAsBoolean(bool* out_value) const;
+  bool GetAsInteger(int* out_value) const;
+  bool GetAsDouble(double* out_value) const;
+  bool GetAsString(std::string* out_value) const;
+  bool GetAsString(string16* out_value) const;
+  bool GetAsString(const Value** out_value) const;
+  bool GetAsString(StringPiece* out_value) const;
   // ListValue::From is the equivalent for std::unique_ptr conversions.
-  virtual bool GetAsList(ListValue** out_value);
-  virtual bool GetAsList(const ListValue** out_value) const;
+  bool GetAsList(ListValue** out_value);
+  bool GetAsList(const ListValue** out_value) const;
   // DictionaryValue::From is the equivalent for std::unique_ptr conversions.
-  virtual bool GetAsDictionary(DictionaryValue** out_value);
-  virtual bool GetAsDictionary(const DictionaryValue** out_value) const;
+  bool GetAsDictionary(DictionaryValue** out_value);
+  bool GetAsDictionary(const DictionaryValue** out_value) const;
   // Note: Do not add more types. See the file-level comment above for why.
 
   // This creates a deep copy of the entire Value tree, and returns a pointer
-  // to the copy.  The caller gets ownership of the copy, of course.
-  //
+  // to the copy. The caller gets ownership of the copy, of course.
   // Subclasses return their own type directly in their overrides;
   // this works because C++ supports covariant return types.
-  virtual Value* DeepCopy() const;
+  // DEPRECATED, use Value's copy constructor instead.
+  // TODO(crbug.com/646113): Delete this and migrate callsites.
+  Value* DeepCopy() const;
   // Preferred version of DeepCopy. TODO(estade): remove the above.
   std::unique_ptr<Value> CreateDeepCopy() const;
 
+  // Comparison operators so that Values can easily be used with standard
+  // library algorithms and associative containers.
+  BASE_EXPORT friend bool operator==(const Value& lhs, const Value& rhs);
+  BASE_EXPORT friend bool operator!=(const Value& lhs, const Value& rhs);
+  BASE_EXPORT friend bool operator<(const Value& lhs, const Value& rhs);
+  BASE_EXPORT friend bool operator>(const Value& lhs, const Value& rhs);
+  BASE_EXPORT friend bool operator<=(const Value& lhs, const Value& rhs);
+  BASE_EXPORT friend bool operator>=(const Value& lhs, const Value& rhs);
+
   // Compares if two Value objects have equal contents.
-  virtual bool Equals(const Value* other) const;
+  // DEPRECATED, use operator==(const Value& lhs, const Value& rhs) instead.
+  // TODO(crbug.com/646113): Delete this and migrate callsites.
+  bool Equals(const Value* other) const;
 
   // Compares if two Value objects have equal contents. Can handle NULLs.
-  // NULLs are considered equal but different from Value::CreateNullValue().
+  // NULLs are considered equal but different from Value(Value::Type::NONE).
+  // DEPRECATED, use operator==(const Value& lhs, const Value& rhs) instead.
+  // TODO(crbug.com/646113): Delete this and migrate callsites.
   static bool Equals(const Value* a, const Value* b);
 
  protected:
-  // These aren't safe for end-users, but they are useful for subclasses.
-  explicit Value(Type type);
-  Value(const Value& that);
-  Value& operator=(const Value& that);
-
- private:
+  // TODO(crbug.com/646113): Make these private once DictionaryValue and
+  // ListValue are properly inlined.
   Type type_;
-};
 
-// FundamentalValue represents the simple fundamental types of values.
-class BASE_EXPORT FundamentalValue : public Value {
- public:
-  explicit FundamentalValue(bool in_value);
-  explicit FundamentalValue(int in_value);
-  explicit FundamentalValue(double in_value);
-  ~FundamentalValue() override;
-
-  // Overridden from Value:
-  bool GetAsBoolean(bool* out_value) const override;
-  bool GetAsInteger(int* out_value) const override;
-  // Values of both type Type::INTEGER and Type::DOUBLE can be obtained as
-  // doubles.
-  bool GetAsDouble(double* out_value) const override;
-  FundamentalValue* DeepCopy() const override;
-  bool Equals(const Value* other) const override;
-
- private:
   union {
-    bool boolean_value_;
-    int integer_value_;
+    bool bool_value_;
+    int int_value_;
     double double_value_;
+    ManualConstructor<std::string> string_value_;
+    ManualConstructor<BlobStorage> binary_value_;
+    ManualConstructor<DictStorage> dict_;
+    ManualConstructor<ListStorage> list_;
   };
-};
-
-class BASE_EXPORT StringValue : public Value {
- public:
-  // Initializes a StringValue with a UTF-8 narrow character string.
-  explicit StringValue(StringPiece in_value);
-
-  // Initializes a StringValue with a string16.
-  explicit StringValue(const string16& in_value);
-
-  ~StringValue() override;
-
-  // Returns |value_| as a pointer or reference.
-  std::string* GetString();
-  const std::string& GetString() const;
-
-  // Overridden from Value:
-  bool GetAsString(std::string* out_value) const override;
-  bool GetAsString(string16* out_value) const override;
-  bool GetAsString(const StringValue** out_value) const override;
-  bool GetAsString(StringPiece* out_value) const override;
-  StringValue* DeepCopy() const override;
-  bool Equals(const Value* other) const override;
 
  private:
-  std::string value_;
-};
-
-class BASE_EXPORT BinaryValue: public Value {
- public:
-  // Creates a BinaryValue with a null buffer and size of 0.
-  BinaryValue();
-
-  // Creates a BinaryValue, taking ownership of the bytes pointed to by
-  // |buffer|.
-  BinaryValue(std::unique_ptr<char[]> buffer, size_t size);
-
-  ~BinaryValue() override;
-
-  // For situations where you want to keep ownership of your buffer, this
-  // factory method creates a new BinaryValue by copying the contents of the
-  // buffer that's passed in.
-  static std::unique_ptr<BinaryValue> CreateWithCopiedBuffer(const char* buffer,
-                                                             size_t size);
-
-  size_t GetSize() const { return size_; }
-
-  // May return NULL.
-  char* GetBuffer() { return buffer_.get(); }
-  const char* GetBuffer() const { return buffer_.get(); }
-
-  // Overridden from Value:
-  bool GetAsBinary(const BinaryValue** out_value) const override;
-  BinaryValue* DeepCopy() const override;
-  bool Equals(const Value* other) const override;
-
- private:
-  std::unique_ptr<char[]> buffer_;
-  size_t size_;
-
-  DISALLOW_COPY_AND_ASSIGN(BinaryValue);
+  void InternalCopyFundamentalValue(const Value& that);
+  void InternalCopyConstructFrom(const Value& that);
+  void InternalMoveConstructFrom(Value&& that);
+  void InternalCopyAssignFromSameType(const Value& that);
+  void InternalCleanup();
 };
 
 // DictionaryValue provides a key-value dictionary with (optional) "path"
@@ -215,25 +214,22 @@ class BASE_EXPORT BinaryValue: public Value {
 // are |std::string|s and should be UTF-8 encoded.
 class BASE_EXPORT DictionaryValue : public Value {
  public:
-  using Storage = std::map<std::string, std::unique_ptr<Value>>;
+  using const_iterator = DictStorage::const_iterator;
+  using iterator = DictStorage::iterator;
+
   // Returns |value| if it is a dictionary, nullptr otherwise.
   static std::unique_ptr<DictionaryValue> From(std::unique_ptr<Value> value);
 
   DictionaryValue();
-  ~DictionaryValue() override;
-
-  // Overridden from Value:
-  bool GetAsDictionary(DictionaryValue** out_value) override;
-  bool GetAsDictionary(const DictionaryValue** out_value) const override;
 
   // Returns true if the current dictionary has a value for the given key.
   bool HasKey(StringPiece key) const;
 
   // Returns the number of Values in this dictionary.
-  size_t size() const { return dictionary_.size(); }
+  size_t size() const { return dict_->size(); }
 
   // Returns whether the dictionary is empty.
-  bool empty() const { return dictionary_.empty(); }
+  bool empty() const { return dict_->empty(); }
 
   // Clears any current contents of this dictionary.
   void Clear();
@@ -245,32 +241,41 @@ class BASE_EXPORT DictionaryValue : public Value {
   // If the key at any step of the way doesn't exist, or exists but isn't
   // a DictionaryValue, a new DictionaryValue will be created and attached
   // to the path in that location. |in_value| must be non-null.
-  void Set(StringPiece path, std::unique_ptr<Value> in_value);
+  // Returns a pointer to the inserted value.
+  Value* Set(StringPiece path, std::unique_ptr<Value> in_value);
   // Deprecated version of the above. TODO(estade): remove.
-  void Set(StringPiece path, Value* in_value);
+  Value* Set(StringPiece path, Value* in_value);
 
   // Convenience forms of Set().  These methods will replace any existing
   // value at that path, even if it has a different type.
-  void SetBoolean(StringPiece path, bool in_value);
-  void SetInteger(StringPiece path, int in_value);
-  void SetDouble(StringPiece path, double in_value);
-  void SetString(StringPiece path, StringPiece in_value);
-  void SetString(StringPiece path, const string16& in_value);
+  Value* SetBoolean(StringPiece path, bool in_value);
+  Value* SetInteger(StringPiece path, int in_value);
+  Value* SetDouble(StringPiece path, double in_value);
+  Value* SetString(StringPiece path, StringPiece in_value);
+  Value* SetString(StringPiece path, const string16& in_value);
+  DictionaryValue* SetDictionary(StringPiece path,
+                                 std::unique_ptr<DictionaryValue> in_value);
+  ListValue* SetList(StringPiece path, std::unique_ptr<ListValue> in_value);
 
   // Like Set(), but without special treatment of '.'.  This allows e.g. URLs to
   // be used as paths.
-  void SetWithoutPathExpansion(StringPiece key,
-                               std::unique_ptr<Value> in_value);
+  Value* SetWithoutPathExpansion(StringPiece key,
+                                 std::unique_ptr<Value> in_value);
   // Deprecated version of the above. TODO(estade): remove.
-  void SetWithoutPathExpansion(StringPiece key, Value* in_value);
+  Value* SetWithoutPathExpansion(StringPiece key, Value* in_value);
 
   // Convenience forms of SetWithoutPathExpansion().
-  void SetBooleanWithoutPathExpansion(StringPiece path, bool in_value);
-  void SetIntegerWithoutPathExpansion(StringPiece path, int in_value);
-  void SetDoubleWithoutPathExpansion(StringPiece path, double in_value);
-  void SetStringWithoutPathExpansion(StringPiece path, StringPiece in_value);
-  void SetStringWithoutPathExpansion(StringPiece path,
-                                     const string16& in_value);
+  Value* SetBooleanWithoutPathExpansion(StringPiece path, bool in_value);
+  Value* SetIntegerWithoutPathExpansion(StringPiece path, int in_value);
+  Value* SetDoubleWithoutPathExpansion(StringPiece path, double in_value);
+  Value* SetStringWithoutPathExpansion(StringPiece path, StringPiece in_value);
+  Value* SetStringWithoutPathExpansion(StringPiece path,
+                                       const string16& in_value);
+  DictionaryValue* SetDictionaryWithoutPathExpansion(
+      StringPiece path,
+      std::unique_ptr<DictionaryValue> in_value);
+  ListValue* SetListWithoutPathExpansion(StringPiece path,
+                                         std::unique_ptr<ListValue> in_value);
 
   // Gets the Value associated with the given path starting from this object.
   // A path has the form "<key>" or "<key>.<key>.[...]", where "." indexes
@@ -295,8 +300,8 @@ class BASE_EXPORT DictionaryValue : public Value {
   bool GetString(StringPiece path, std::string* out_value) const;
   bool GetString(StringPiece path, string16* out_value) const;
   bool GetStringASCII(StringPiece path, std::string* out_value) const;
-  bool GetBinary(StringPiece path, const BinaryValue** out_value) const;
-  bool GetBinary(StringPiece path, BinaryValue** out_value);
+  bool GetBinary(StringPiece path, const Value** out_value) const;
+  bool GetBinary(StringPiece path, Value** out_value);
   bool GetDictionary(StringPiece path,
                      const DictionaryValue** out_value) const;
   bool GetDictionary(StringPiece path, DictionaryValue** out_value);
@@ -333,8 +338,8 @@ class BASE_EXPORT DictionaryValue : public Value {
 
   // Like Remove(), but without special treatment of '.'.  This allows e.g. URLs
   // to be used as paths.
-  virtual bool RemoveWithoutPathExpansion(StringPiece key,
-                                          std::unique_ptr<Value>* out_value);
+  bool RemoveWithoutPathExpansion(StringPiece key,
+                                  std::unique_ptr<Value>* out_value);
 
   // Removes a path, clearing out all dictionaries on |path| that remain empty
   // after removing the value at |path|.
@@ -352,7 +357,7 @@ class BASE_EXPORT DictionaryValue : public Value {
   void MergeDictionary(const DictionaryValue* dictionary);
 
   // Swaps contents with the |other| dictionary.
-  virtual void Swap(DictionaryValue* other);
+  void Swap(DictionaryValue* other);
 
   // This class provides an iterator over both keys and values in the
   // dictionary.  It can't be used to modify the dictionary.
@@ -362,7 +367,7 @@ class BASE_EXPORT DictionaryValue : public Value {
     Iterator(const Iterator& other);
     ~Iterator();
 
-    bool IsAtEnd() const { return it_ == target_.dictionary_.end(); }
+    bool IsAtEnd() const { return it_ == target_.dict_->end(); }
     void Advance() { ++it_; }
 
     const std::string& key() const { return it_->first; }
@@ -370,50 +375,56 @@ class BASE_EXPORT DictionaryValue : public Value {
 
    private:
     const DictionaryValue& target_;
-    Storage::const_iterator it_;
+    DictStorage::const_iterator it_;
   };
 
-  // Overridden from Value:
-  DictionaryValue* DeepCopy() const override;
+  // Iteration.
+  iterator begin() { return dict_->begin(); }
+  iterator end() { return dict_->end(); }
+
+  const_iterator begin() const { return dict_->begin(); }
+  const_iterator end() const { return dict_->end(); }
+
+  // DEPRECATED, use DictionaryValue's copy constructor instead.
+  // TODO(crbug.com/646113): Delete this and migrate callsites.
+  DictionaryValue* DeepCopy() const;
   // Preferred version of DeepCopy. TODO(estade): remove the above.
   std::unique_ptr<DictionaryValue> CreateDeepCopy() const;
-  bool Equals(const Value* other) const override;
-
- private:
-  Storage dictionary_;
-
-  DISALLOW_COPY_AND_ASSIGN(DictionaryValue);
 };
 
 // This type of Value represents a list of other Value values.
 class BASE_EXPORT ListValue : public Value {
  public:
-  using Storage = std::vector<std::unique_ptr<Value>>;
-  using const_iterator = Storage::const_iterator;
-  using iterator = Storage::iterator;
+  using const_iterator = ListStorage::const_iterator;
+  using iterator = ListStorage::iterator;
 
   // Returns |value| if it is a list, nullptr otherwise.
   static std::unique_ptr<ListValue> From(std::unique_ptr<Value> value);
 
   ListValue();
-  ~ListValue() override;
+  explicit ListValue(const ListStorage& in_list);
+  explicit ListValue(ListStorage&& in_list) noexcept;
 
   // Clears the contents of this ListValue
   void Clear();
 
   // Returns the number of Values in this list.
-  size_t GetSize() const { return list_.size(); }
+  size_t GetSize() const { return list_->size(); }
+
+  // Returns the capacity of storage for Values in this list.
+  size_t capacity() const { return list_->capacity(); }
 
   // Returns whether the list is empty.
-  bool empty() const { return list_.empty(); }
+  bool empty() const { return list_->empty(); }
+
+  // Reserves storage for at least |n| values.
+  void Reserve(size_t n);
 
   // Sets the list item at the given index to be the Value specified by
   // the value given.  If the index beyond the current end of the list, null
   // Values will be used to pad out the list.
   // Returns true if successful, or false if the index was negative or
   // the value is a null pointer.
-  bool Set(size_t index, Value* in_value);
-  // Preferred version of the above. TODO(estade): remove the above.
   bool Set(size_t index, std::unique_ptr<Value> in_value);
 
   // Gets the Value at the given index.  Modifies |out_value| (and returns true)
@@ -434,10 +445,12 @@ class BASE_EXPORT ListValue : public Value {
   bool GetDouble(size_t index, double* out_value) const;
   bool GetString(size_t index, std::string* out_value) const;
   bool GetString(size_t index, string16* out_value) const;
-  bool GetBinary(size_t index, const BinaryValue** out_value) const;
-  bool GetBinary(size_t index, BinaryValue** out_value);
+  bool GetBinary(size_t index, const Value** out_value) const;
+  bool GetBinary(size_t index, Value** out_value);
   bool GetDictionary(size_t index, const DictionaryValue** out_value) const;
   bool GetDictionary(size_t index, DictionaryValue** out_value);
+
+  using Value::GetList;
   bool GetList(size_t index, const ListValue** out_value) const;
   bool GetList(size_t index, ListValue** out_value);
 
@@ -446,7 +459,7 @@ class BASE_EXPORT ListValue : public Value {
   // passed out via |out_value|.  If |out_value| is NULL, the removed value will
   // be deleted.  This method returns true if |index| is valid; otherwise
   // it will return false and the ListValue object will be unchanged.
-  virtual bool Remove(size_t index, std::unique_ptr<Value>* out_value);
+  bool Remove(size_t index, std::unique_ptr<Value>* out_value);
 
   // Removes the first instance of |value| found in the list, if any, and
   // deletes it. |index| is the location where |value| was found. Returns false
@@ -461,10 +474,6 @@ class BASE_EXPORT ListValue : public Value {
 
   // Appends a Value to the end of the list.
   void Append(std::unique_ptr<Value> in_value);
-#if !defined(OS_LINUX)
-  // Deprecated version of the above. TODO(estade): remove.
-  void Append(Value* in_value);
-#endif
 
   // Convenience forms of Append.
   void AppendBoolean(bool in_value);
@@ -489,28 +498,20 @@ class BASE_EXPORT ListValue : public Value {
   const_iterator Find(const Value& value) const;
 
   // Swaps contents with the |other| list.
-  virtual void Swap(ListValue* other);
+  void Swap(ListValue* other);
 
   // Iteration.
-  iterator begin() { return list_.begin(); }
-  iterator end() { return list_.end(); }
+  iterator begin() { return list_->begin(); }
+  iterator end() { return list_->end(); }
 
-  const_iterator begin() const { return list_.begin(); }
-  const_iterator end() const { return list_.end(); }
+  const_iterator begin() const { return list_->begin(); }
+  const_iterator end() const { return list_->end(); }
 
-  // Overridden from Value:
-  bool GetAsList(ListValue** out_value) override;
-  bool GetAsList(const ListValue** out_value) const override;
-  ListValue* DeepCopy() const override;
-  bool Equals(const Value* other) const override;
-
+  // DEPRECATED, use ListValue's copy constructor instead.
+  // TODO(crbug.com/646113): Delete this and migrate callsites.
+  ListValue* DeepCopy() const;
   // Preferred version of DeepCopy. TODO(estade): remove DeepCopy.
   std::unique_ptr<ListValue> CreateDeepCopy() const;
-
- private:
-  Storage list_;
-
-  DISALLOW_COPY_AND_ASSIGN(ListValue);
 };
 
 // This interface is implemented by classes that know how to serialize
@@ -543,16 +544,6 @@ class BASE_EXPORT ValueDeserializer {
 // override each specific type. Otherwise, the default template implementation
 // is preferred over an upcast.
 BASE_EXPORT std::ostream& operator<<(std::ostream& out, const Value& value);
-
-BASE_EXPORT inline std::ostream& operator<<(std::ostream& out,
-                                            const FundamentalValue& value) {
-  return out << static_cast<const Value&>(value);
-}
-
-BASE_EXPORT inline std::ostream& operator<<(std::ostream& out,
-                                            const StringValue& value) {
-  return out << static_cast<const Value&>(value);
-}
 
 BASE_EXPORT inline std::ostream& operator<<(std::ostream& out,
                                             const DictionaryValue& value) {

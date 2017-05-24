@@ -56,6 +56,14 @@ std::unique_ptr<base::Value> MappedHostResolver::GetDnsConfigAsValue() const {
   return impl_->GetDnsConfigAsValue();
 }
 
+void MappedHostResolver::SetNoIPv6OnWifi(bool no_ipv6_on_wifi) {
+  impl_->SetNoIPv6OnWifi(no_ipv6_on_wifi);
+}
+
+bool MappedHostResolver::GetNoIPv6OnWifi() {
+  return impl_->GetNoIPv6OnWifi();
+}
+
 int MappedHostResolver::ApplyRules(RequestInfo* info) const {
   HostPortPair host_port(info->host_port_pair());
   if (rules_.RewriteHost(&host_port)) {

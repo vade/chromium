@@ -17,6 +17,7 @@
 
 @class ContentSettingAnimationState;
 @class ContentSettingBubbleController;
+class ContentSettingDecorationTest;
 class ContentSettingImageModel;
 class LocationBarViewMac;
 class Profile;
@@ -48,7 +49,11 @@ class ContentSettingDecoration : public ImageDecoration {
   // be friends.
   virtual void AnimationTimerFired();
 
+ protected:
+  CGFloat DividerPadding() const override;
+
  private:
+  friend class ContentSettingDecorationTest;
 
   void SetToolTip(NSString* tooltip);
 

@@ -90,6 +90,11 @@
   },
   {
     "prefix": "stable",
+    "base": "http/tests/sendbeacon",
+    "args": ["--stable-release-mode"]
+  },
+  {
+    "prefix": "stable",
     "base": "animations-unprefixed",
     "args": ["--stable-release-mode"]
   },
@@ -100,16 +105,76 @@
   },
   {
     "prefix": "stable",
-    "base": "paint/invalidation",
+    "base": "svg/transforms/stable",
     "args": ["--stable-release-mode"]
+  },
+  {
+    "prefix": "disable-spinvalidation",
+    "base": "compositing",
+    "args": ["--disable-slimming-paint-invalidation"]
+  },
+  {
+    "prefix": "disable-spinvalidation",
+    "base": "paint",
+    "args": ["--disable-slimming-paint-invalidation"]
+  },
+  {
+    "prefix": "off-main-thread-fetch",
+    "base": "external/wpt/service-workers",
+    "args": ["--enable-features=OffMainThreadFetch"]
+  },
+  {
+    "prefix": "off-main-thread-fetch",
+    "base": "http/tests/fetch/chromium",
+    "args": ["--enable-features=OffMainThreadFetch"]
+  },
+  {
+    "prefix": "off-main-thread-fetch",
+    "base": "http/tests/fetch/workers",
+    "args": ["--enable-features=OffMainThreadFetch"]
+  },
+  {
+    "prefix": "off-main-thread-fetch",
+    "base": "http/tests/inspector/service-workers",
+    "args": ["--enable-features=OffMainThreadFetch"]
+  },
+  {
+    "prefix": "off-main-thread-fetch",
+    "base": "http/tests/misc",
+    "args": ["--enable-features=OffMainThreadFetch"]
+  },
+  {
+    "prefix": "off-main-thread-fetch",
+    "base": "http/tests/security/cookies",
+    "args": ["--enable-features=OffMainThreadFetch"]
+  },
+  {
+    "prefix": "off-main-thread-fetch",
+    "base": "http/tests/serviceworker",
+    "args": ["--enable-features=OffMainThreadFetch"]
+  },
+  {
+    "prefix": "off-main-thread-fetch",
+    "base": "http/tests/xmlhttprequest/workers",
+    "args": ["--enable-features=OffMainThreadFetch"]
+  },
+  {
+    "prefix": "off-main-thread-fetch",
+    "base": "http/tests/workers",
+    "args": ["--enable-features=OffMainThreadFetch"]
+  },
+  {
+    "prefix": "origin-trials-runtimeflags-disabled",
+    "base": "http/tests/origin_trials/webexposed",
+    "args": ["--disable-blink-features=ForeignFetch,InstalledApp,LinkServiceWorker,LongTaskObserver,SetRootScroller,WebUSB,WebVR,WebShare"]
   },
   {
     "prefix": "android",
     "base": "fullscreen",
-    "args": ["--enable-threaded-compositing",
+    "args": ["--enable-features=OverlayScrollbar", "--enable-threaded-compositing",
              "--enable-fixed-position-compositing", "--enable-prefer-compositing-to-lcd-text",
              "--enable-composited-scrolling-for-frames", "--enable-gesture-tap-highlight", "--enable-pinch",
-             "--force-overlay-fullscreen-video", "--enable-overlay-scrollbars", "--enable-overscroll-notifications",
+             "--force-overlay-fullscreen-video", "--enable-overscroll-notifications",
              "--enable-fixed-layout", "--enable-viewport", "--disable-canvas-aa",
              "--disable-composited-antialiasing"]
   },
@@ -195,12 +260,6 @@
              "--mse-video-buffer-size-limit=1048576"]
   },
   {
-    "prefix": "sharedarraybuffer",
-    "base": "fast/workers",
-    "args": ["--js-flags=--harmony-sharedarraybuffer",
-             "--enable-blink-features=SharedArrayBuffer"]
-  },
-  {
     "prefix": "threaded",
     "base": "fast/idle-callback",
     "args": ["--enable-threaded-compositing"]
@@ -276,14 +335,11 @@
     "args": ["--enable-features=TouchpadAndWheelScrollLatching"]
   },
   {
-    "prefix": "parsehtmlonmainthread_sync",
-    "base": "fast/parser",
-    "args": ["--blink-settings=parseHTMLOnMainThreadSyncTokenize=true"]
-  },
-  {
-    "prefix": "parsehtmlonmainthread_coalesce",
-    "base": "fast/parser",
-    "args": ["--disable-blink-features=ParseHTMLOnMainThread", "--blink-settings=parseHTMLOnMainThreadCoalesceChunks=true"]
+    "prefix": "wheelscrolllatching",
+    "base": "fast/compositor-wheel-scroll-latching",
+    "args": ["--enable-features=TouchpadAndWheelScrollLatching",
+             "--enable-threaded-compositing",
+             "--disable-smooth-scrolling"]
   },
   {
     "prefix": "mojo-loading",
@@ -301,6 +357,11 @@
     "args": ["--enable-blink-features=LoadingWithMojo"]
   },
   {
+    "prefix": "mojo-loading",
+    "base": "fast/table",
+    "args": ["--enable-blink-features=LoadingWithMojo"]
+  },
+  {
     "prefix": "scalefactor150",
     "base": "fast/events/synthetic-events",
     "args": ["--force-device-scale-factor=1.5"]
@@ -311,18 +372,23 @@
     "args": ["--enable-features=WebAssembly"]
   },
   {
+    "prefix": "enable_wasm_streaming",
+    "base": "http/tests/wasm_streaming",
+    "args": ["--enable-features=WebAssemblyStreaming"]
+  },
+  {
     "prefix": "enable_asmjs",
     "base": "http/tests/asmjs",
     "args": ["--enable-features=AsmJsToWebAssembly"]
   },
   {
-    "prefix": "service-worker-navigation-preload",
-    "base": "http/tests/serviceworker",
-    "args": ["--enable-features=ServiceWorkerNavigationPreload"]
+    "prefix": "service-worker-navigation-preload-disabled",
+    "base": "webexposed",
+    "args": ["--disable-features=ServiceWorkerNavigationPreload"]
   },
   {
     "prefix": "service-worker-navigation-preload-disabled",
-    "base": "http/tests/serviceworker/chromium",
+    "base": "http/tests/serviceworker/webexposed",
     "args": ["--disable-features=ServiceWorkerNavigationPreload"]
   },
   {
@@ -337,18 +403,48 @@
   },
   {
     "prefix": "layout_ng",
-    "base": "css2.1/20110323",
+    "base": "fast/block/float",
     "args": ["--enable-blink-features=LayoutNG"]
   },
   {
     "prefix": "layout_ng",
-    "base": "fast/block/float",
+    "base": "external/wpt/css/CSS2/linebox",
+    "args": ["--enable-blink-features=LayoutNG"]
+  },
+  {
+    "prefix": "layout_ng",
+    "base": "external/wpt/css/CSS2/normal-flow",
+    "args": ["--enable-blink-features=LayoutNG"]
+  },
+  {
+    "prefix": "layout_ng",
+    "base": "external/wpt/css/CSS2/abspos",
+    "args": ["--enable-blink-features=LayoutNG"]
+  },
+  {
+    "prefix": "layout_ng",
+    "base": "external/wpt/css/CSS2/positioning",
+    "args": ["--enable-blink-features=LayoutNG"]
+  },
+  {
+    "prefix": "layout_ng",
+    "base": "external/wpt/css/CSS2/floats",
+    "args": ["--enable-blink-features=LayoutNG"]
+  },
+  {
+    "prefix": "layout_ng",
+    "base": "external/wpt/css/CSS2/floats-clear",
     "args": ["--enable-blink-features=LayoutNG"]
   },
   {
     "prefix": "feature-policy",
     "base": "http/tests/feature-policy",
     "args": ["--enable-blink-features=FeaturePolicy"]
+  },
+  {
+    "prefix": "feature-policy-experimental-features",
+    "base": "http/tests/feature-policy-experimental-features",
+    "args": ["--enable-blink-features=FeaturePolicy,FeaturePolicyExperimentalFeatures"]
   },
   {
     "prefix": "mojo-localstorage",
@@ -359,5 +455,25 @@
     "prefix": "mojo-localstorage",
     "base": "storage/domstorage/localstorage",
     "args": ["--mojo-local-storage"]
+  },
+  {
+    "prefix": "print_browser",
+    "base": "print_testharness",
+    "args": ["--enable-print-browser"]
+  },
+  {
+    "prefix": "experimental-canvas-features",
+    "base": "fast/canvas-experimental",
+    "args": ["--enable-experimental-canvas-features"]
+  },
+  {
+    "prefix": "new-remote-playback-pipeline",
+    "base": "media/remoteplayback",
+    "args": ["--enable-features=NewRemotePlaybackPipeline"]
+  },
+  {
+    "prefix": "new-remote-playback-pipeline",
+    "base": "media/controls",
+    "args": ["--enable-features=NewRemotePlaybackPipeline"]
   }
 ]

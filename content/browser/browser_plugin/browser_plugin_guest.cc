@@ -11,6 +11,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/user_metrics.h"
 #include "base/pickle.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -35,7 +36,6 @@
 #include "content/common/browser_plugin/browser_plugin_messages.h"
 #include "content/common/content_constants_internal.h"
 #include "content/common/drag_messages.h"
-#include "content/common/host_shared_bitmap_manager.h"
 #include "content/common/input_messages.h"
 #include "content/common/site_isolation_policy.h"
 #include "content/common/text_input_state.h"
@@ -45,9 +45,9 @@
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/guest_host.h"
 #include "content/public/browser/guest_mode.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_widget_host_view.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/drop_data.h"
 #include "ui/events/blink/web_input_event_traits.h"
@@ -103,7 +103,7 @@ BrowserPluginGuest::BrowserPluginGuest(bool has_render_view,
       is_in_destruction_(false),
       initialized_(false),
       guest_proxy_routing_id_(MSG_ROUTING_NONE),
-      last_drag_status_(blink::WebDragStatusUnknown),
+      last_drag_status_(blink::kWebDragStatusUnknown),
       seen_embedder_system_drag_ended_(false),
       seen_embedder_drag_source_ended_at_(false),
       ignore_dragged_url_(true),
@@ -147,6 +147,8 @@ int BrowserPluginGuest::GetGuestProxyRoutingID() {
   // create a RenderFrameProxyHost for the reverse path, or implement
   // MimeHandlerViewGuest using OOPIF (https://crbug.com/659750).
   SiteInstance* owner_site_instance = delegate_->GetOwnerSiteInstance();
+  if (!owner_site_instance)
+    return MSG_ROUTING_NONE;
   int proxy_routing_id = GetWebContents()
                              ->GetFrameTree()
                              ->root()
@@ -178,8 +180,12 @@ void BrowserPluginGuest::SizeContents(const gfx::Size& new_size) {
 
 void BrowserPluginGuest::WillDestroy() {
   is_in_destruction_ = true;
-  owner_web_contents_ = nullptr;
+
+  // It is important that the WebContents is notified before detaching.
+  GetWebContents()->BrowserPluginGuestWillDetach();
+
   attached_ = false;
+  owner_web_contents_ = nullptr;
 }
 
 RenderWidgetHostImpl* BrowserPluginGuest::GetOwnerRenderWidgetHost() const {
@@ -215,10 +221,10 @@ void BrowserPluginGuest::SetFocus(RenderWidgetHost* rwh,
   if (!rwh)
     return;
 
-  if ((focus_type == blink::WebFocusTypeForward) ||
-      (focus_type == blink::WebFocusTypeBackward)) {
-    static_cast<RenderViewHostImpl*>(RenderViewHost::From(rwh))->
-        SetInitialFocus(focus_type == blink::WebFocusTypeBackward);
+  if ((focus_type == blink::kWebFocusTypeForward) ||
+      (focus_type == blink::kWebFocusTypeBackward)) {
+    static_cast<RenderViewHostImpl*>(RenderViewHost::From(rwh))
+        ->SetInitialFocus(focus_type == blink::kWebFocusTypeBackward);
   }
   rwh->Send(new InputMsg_SetFocus(rwh->GetRoutingID(), focused));
   if (!focused && mouse_locked_)
@@ -300,9 +306,8 @@ void BrowserPluginGuest::InitInternal(
     const BrowserPluginHostMsg_Attach_Params& params,
     WebContentsImpl* owner_web_contents) {
   focused_ = params.focused;
-  OnSetFocus(browser_plugin::kInstanceIDNone,
-             focused_,
-             blink::WebFocusTypeNone);
+  OnSetFocus(browser_plugin::kInstanceIDNone, focused_,
+             blink::kWebFocusTypeNone);
 
   guest_visible_ = params.visible;
   UpdateVisibility();
@@ -339,10 +344,6 @@ void BrowserPluginGuest::InitInternal(
   *renderer_prefs = *owner_web_contents_->GetMutableRendererPrefs();
   renderer_prefs->user_agent_override = guest_user_agent_override;
 
-  // We would like the guest to report changes to frame names so that we can
-  // update the BrowserPlugin's corresponding 'name' attribute.
-  // TODO(fsamuel): Remove this once http://crbug.com/169110 is addressed.
-  renderer_prefs->report_frame_name_changes = true;
   // Navigation is disabled in Chrome Apps. We want to make sure guest-initiated
   // navigations still continue to function inside the app.
   renderer_prefs->browser_handles_all_top_level_requests = false;
@@ -435,17 +436,6 @@ void BrowserPluginGuest::OnRequireSequence(
   GetSurfaceManager()->RequireSequence(id, sequence);
 }
 
-bool BrowserPluginGuest::HandleFindForEmbedder(
-    int request_id,
-    const base::string16& search_text,
-    const blink::WebFindOptions& options) {
-  return delegate_->HandleFindForEmbedder(request_id, search_text, options);
-}
-
-bool BrowserPluginGuest::HandleStopFindingForEmbedder(StopFindAction action) {
-  return delegate_->HandleStopFindingForEmbedder(action);
-}
-
 void BrowserPluginGuest::ResendEventToEmbedder(
     const blink::WebInputEvent& event) {
   if (!attached() || !owner_web_contents_)
@@ -456,24 +446,25 @@ void BrowserPluginGuest::ResendEventToEmbedder(
       static_cast<RenderWidgetHostViewBase*>(GetOwnerRenderWidgetHostView());
 
   gfx::Vector2d offset_from_embedder = guest_window_rect_.OffsetFromOrigin();
-  if (event.type() == blink::WebInputEvent::GestureScrollUpdate) {
+  if (event.GetType() == blink::WebInputEvent::kGestureScrollUpdate) {
     blink::WebGestureEvent resent_gesture_event;
     memcpy(&resent_gesture_event, &event, sizeof(blink::WebGestureEvent));
     resent_gesture_event.x += offset_from_embedder.x();
     resent_gesture_event.y += offset_from_embedder.y();
     // Mark the resend source with the browser plugin's instance id, so the
     // correct browser_plugin will know to ignore the event.
-    resent_gesture_event.resendingPluginId = browser_plugin_instance_id_;
+    resent_gesture_event.resending_plugin_id = browser_plugin_instance_id_;
     ui::LatencyInfo latency_info =
         ui::WebInputEventTraits::CreateLatencyInfoForWebGestureEvent(
             resent_gesture_event);
     view->ProcessGestureEvent(resent_gesture_event, latency_info);
-  } else if (event.type() == blink::WebInputEvent::MouseWheel) {
+  } else if (event.GetType() == blink::WebInputEvent::kMouseWheel) {
     blink::WebMouseWheelEvent resent_wheel_event;
     memcpy(&resent_wheel_event, &event, sizeof(blink::WebMouseWheelEvent));
-    resent_wheel_event.x += offset_from_embedder.x();
-    resent_wheel_event.y += offset_from_embedder.y();
-    resent_wheel_event.resendingPluginId = browser_plugin_instance_id_;
+    resent_wheel_event.SetPositionInWidget(
+        resent_wheel_event.PositionInWidget().x + offset_from_embedder.x(),
+        resent_wheel_event.PositionInWidget().y + offset_from_embedder.y());
+    resent_wheel_event.resending_plugin_id = browser_plugin_instance_id_;
     // TODO(wjmaclean): Initialize latency info correctly for OOPIFs.
     // https://crbug.com/613628
     ui::LatencyInfo latency_info(ui::SourceEventType::WHEEL);
@@ -481,6 +472,29 @@ void BrowserPluginGuest::ResendEventToEmbedder(
   } else {
     NOTIMPLEMENTED();
   }
+}
+
+gfx::Point BrowserPluginGuest::GetCoordinatesInEmbedderWebContents(
+    const gfx::Point& relative_point) {
+  RenderWidgetHostView* owner_rwhv = GetOwnerRenderWidgetHostView();
+  if (!owner_rwhv)
+    return relative_point;
+
+  gfx::Point point(relative_point);
+
+  // Add the offset form the embedder web contents view.
+  point +=
+      owner_rwhv->TransformPointToRootCoordSpace(guest_window_rect_.origin())
+          .OffsetFromOrigin();
+  if (embedder_web_contents()->GetBrowserPluginGuest()) {
+    // |point| is currently with respect to the top-most view (outermost
+    // WebContents). We should subtract a displacement to find the point with
+    // resepct to embedder's WebContents.
+    point -= owner_rwhv->TransformPointToRootCoordSpace(gfx::Point())
+                 .OffsetFromOrigin();
+  }
+
+  return point;
 }
 
 WebContentsImpl* BrowserPluginGuest::GetWebContents() const {
@@ -551,12 +565,12 @@ void BrowserPluginGuest::EndSystemDragIfApplicable() {
   //      BrowserPluginGuest never sees any of these drag status updates,
   //      there we just check whether we've seen any drag status update or
   //      not.
-  if (last_drag_status_ != blink::WebDragStatusOver &&
+  if (last_drag_status_ != blink::kWebDragStatusOver &&
       seen_embedder_drag_source_ended_at_ && seen_embedder_system_drag_ended_) {
     RenderViewHostImpl* guest_rvh = static_cast<RenderViewHostImpl*>(
         GetWebContents()->GetRenderViewHost());
     guest_rvh->GetWidget()->DragSourceSystemDragEnded();
-    last_drag_status_ = blink::WebDragStatusUnknown;
+    last_drag_status_ = blink::kWebDragStatusUnknown;
     seen_embedder_system_drag_ended_ = false;
     seen_embedder_drag_source_ended_at_ = false;
     ignore_dragged_url_ = true;
@@ -640,14 +654,16 @@ void BrowserPluginGuest::SendTextInputTypeChangedToView(
     guest_rwhv->TextInputStateChanged(*last_text_input_state_);
 }
 
-void BrowserPluginGuest::DidCommitProvisionalLoadForFrame(
-    RenderFrameHost* render_frame_host,
-    const GURL& url,
-    ui::PageTransition transition_type) {
-  RecordAction(base::UserMetricsAction("BrowserPlugin.Guest.DidNavigate"));
+void BrowserPluginGuest::DidFinishNavigation(
+    NavigationHandle* navigation_handle) {
+  if (navigation_handle->HasCommitted())
+    RecordAction(base::UserMetricsAction("BrowserPlugin.Guest.DidNavigate"));
 }
 
 void BrowserPluginGuest::RenderViewReady() {
+  if (GuestMode::IsCrossProcessFrameGuest(GetWebContents()))
+    return;
+
   RenderViewHost* rvh = GetWebContents()->GetRenderViewHost();
   // TODO(fsamuel): Investigate whether it's possible to update state earlier
   // here (see http://crbug.com/158151).
@@ -813,6 +829,9 @@ void BrowserPluginGuest::OnDetach(int browser_plugin_instance_id) {
   if (!attached())
     return;
 
+  // It is important that the WebContents is notified before detaching.
+  GetWebContents()->BrowserPluginGuestWillDetach();
+
   // This tells BrowserPluginGuest to queue up all IPCs to BrowserPlugin until
   // it's attached again.
   attached_ = false;
@@ -840,7 +859,7 @@ void BrowserPluginGuest::OnDragStatusUpdate(int browser_plugin_instance_id,
   RenderWidgetHost* widget = host->GetWidget();
   widget->FilterDropData(&filtered_data);
   switch (drag_status) {
-    case blink::WebDragStatusEnter:
+    case blink::kWebDragStatusEnter:
       widget->DragTargetDragEnter(filtered_data, location, location, mask,
                                   drop_data.key_modifiers);
       // Only track the URL being dragged over the guest if the link isn't
@@ -848,16 +867,16 @@ void BrowserPluginGuest::OnDragStatusUpdate(int browser_plugin_instance_id,
       if (!embedder->DragEnteredGuest(this))
         ignore_dragged_url_ = false;
       break;
-    case blink::WebDragStatusOver:
+    case blink::kWebDragStatusOver:
       widget->DragTargetDragOver(location, location, mask,
                                  drop_data.key_modifiers);
       break;
-    case blink::WebDragStatusLeave:
+    case blink::kWebDragStatusLeave:
       embedder->DragLeftGuest(this);
-      widget->DragTargetDragLeave();
+      widget->DragTargetDragLeave(gfx::Point(), gfx::Point());
       ignore_dragged_url_ = true;
       break;
-    case blink::WebDragStatusDrop:
+    case blink::kWebDragStatusDrop:
       widget->DragTargetDrop(filtered_data, location, location,
                              drop_data.key_modifiers);
 
@@ -865,7 +884,7 @@ void BrowserPluginGuest::OnDragStatusUpdate(int browser_plugin_instance_id,
         delegate_->DidDropLink(filtered_data.url);
       ignore_dragged_url_ = true;
       break;
-    case blink::WebDragStatusUnknown:
+    case blink::kWebDragStatusUnknown:
       ignore_dragged_url_ = true;
       NOTREACHED();
   }
@@ -885,24 +904,20 @@ void BrowserPluginGuest::OnExecuteEditCommand(int browser_plugin_instance_id,
 
 void BrowserPluginGuest::OnImeSetComposition(
     int browser_plugin_instance_id,
-    const std::string& text,
-    const std::vector<blink::WebCompositionUnderline>& underlines,
-    int selection_start,
-    int selection_end) {
-  Send(new InputMsg_ImeSetComposition(routing_id(),
-                                      base::UTF8ToUTF16(text), underlines,
-                                      gfx::Range::InvalidRange(),
-                                      selection_start, selection_end));
+    const BrowserPluginHostMsg_SetComposition_Params& params) {
+  Send(new InputMsg_ImeSetComposition(
+      routing_id(), params.text, params.underlines, params.replacement_range,
+      params.selection_start, params.selection_end));
 }
 
 void BrowserPluginGuest::OnImeCommitText(
     int browser_plugin_instance_id,
-    const std::string& text,
+    const base::string16& text,
     const std::vector<blink::WebCompositionUnderline>& underlines,
+    const gfx::Range& replacement_range,
     int relative_cursor_pos) {
-  Send(new InputMsg_ImeCommitText(routing_id(), base::UTF8ToUTF16(text),
-                                  underlines, gfx::Range::InvalidRange(),
-                                  relative_cursor_pos));
+  Send(new InputMsg_ImeCommitText(routing_id(), text, underlines,
+                                  replacement_range, relative_cursor_pos));
 }
 
 void BrowserPluginGuest::OnImeFinishComposingText(bool keep_selection) {

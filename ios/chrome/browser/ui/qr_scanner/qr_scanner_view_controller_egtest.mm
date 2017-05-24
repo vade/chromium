@@ -8,7 +8,7 @@
 
 #import "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/test/scoped_command_line.h"
+#include "base/strings/utf_string_conversions.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/version_info/version_info.h"
 #import "ios/chrome/app/main_controller.h"
@@ -27,7 +27,7 @@
 #import "ios/chrome/test/base/scoped_block_swizzler.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
-#import "ios/testing/earl_grey/disabled_test_macros.h"
+#include "ios/shared/chrome/browser/ui/omnibox/location_bar_delegate.h"
 #include "ios/web/public/test/http_server.h"
 #include "ios/web/public/test/http_server_util.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
@@ -145,8 +145,6 @@ void TapKeyboardReturnKeyInOmniboxWithText(std::string text) {
 @end
 
 @implementation QRScannerViewControllerTestCase {
-  // A scoped command line to enable the QR Scanner experiment.
-  std::unique_ptr<base::test::ScopedCommandLine> scoped_command_line_;
   // A swizzler for the CameraController method cameraControllerWithDelegate:.
   std::unique_ptr<ScopedBlockSwizzler> camera_controller_swizzler_;
   // A swizzler for the WebToolbarController method
@@ -172,11 +170,6 @@ void TapKeyboardReturnKeyInOmniboxWithText(std::string text) {
   _testURLEdited = web::test::HttpServer::MakeUrl(kTestURLEdited);
   _testQuery = web::test::HttpServer::MakeUrl(kTestQueryURL);
   _testQueryEdited = web::test::HttpServer::MakeUrl(kTestQueryEditedURL);
-
-  // Enable the QR Scanner experiment.
-  scoped_command_line_.reset(new base::test::ScopedCommandLine);
-  scoped_command_line_->GetProcessCommandLine()->AppendSwitch(
-      switches::kEnableQRScanner);
 }
 
 - (void)tearDown {

@@ -25,8 +25,6 @@
 #include "services/file/file_service.h"
 #include "services/file/public/interfaces/constants.mojom.h"
 #include "services/file/user_id_map.h"
-#include "services/service_manager/public/cpp/interface_factory.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
 #include "services/service_manager/public/cpp/service_context.h"
 #include "services/service_manager/public/cpp/service_test.h"
 #include "services/service_manager/public/interfaces/service_factory.mojom.h"
@@ -62,11 +60,6 @@ void GetCallback(const base::Closure& callback,
 
 void NoOpGet(bool success, const std::vector<uint8_t>& value) {}
 
-std::vector<uint8_t> String16ToUint8Vector(const base::string16& input) {
-  const uint8_t* data = reinterpret_cast<const uint8_t*>(input.data());
-  return std::vector<uint8_t>(data, data + input.size() * sizeof(base::char16));
-}
-
 class TestLevelDBObserver : public mojom::LevelDBObserver {
  public:
   struct Observation {
@@ -79,10 +72,9 @@ class TestLevelDBObserver : public mojom::LevelDBObserver {
 
   TestLevelDBObserver() : binding_(this) {}
 
-  mojom::LevelDBObserverAssociatedPtrInfo Bind(
-      mojo::AssociatedGroup* associated_group) {
+  mojom::LevelDBObserverAssociatedPtrInfo Bind() {
     mojom::LevelDBObserverAssociatedPtrInfo ptr_info;
-    binding_.Bind(&ptr_info, associated_group);
+    binding_.Bind(mojo::MakeRequest(&ptr_info));
     return ptr_info;
   }
 
@@ -178,7 +170,6 @@ class LocalStorageContextMojoTest : public testing::Test {
   base::ScopedTempDir temp_path_;
   std::map<std::vector<uint8_t>, std::vector<uint8_t>> mock_data_;
   MockLevelDBDatabase db_;
-  mojo::AssociatedGroup associated_group_;
   mojo::AssociatedBinding<leveldb::mojom::LevelDBDatabase> db_binding_;
 
   scoped_refptr<MockDOMStorageTaskRunner> task_runner_;
@@ -461,7 +452,7 @@ TEST_F(LocalStorageContextMojoTest, DeleteStorageNotifiesWrapper) {
 
   TestLevelDBObserver observer;
   context()->OpenLocalStorage(origin1, MakeRequest(&wrapper));
-  wrapper->AddObserver(observer.Bind(wrapper.associated_group()));
+  wrapper->AddObserver(observer.Bind());
   base::RunLoop().RunUntilIdle();
 
   context()->DeleteStorage(origin1);
@@ -505,7 +496,7 @@ TEST_F(LocalStorageContextMojoTest, DeleteStorageWithPendingWrites) {
 
   TestLevelDBObserver observer;
   context()->OpenLocalStorage(origin1, MakeRequest(&wrapper));
-  wrapper->AddObserver(observer.Bind(wrapper.associated_group()));
+  wrapper->AddObserver(observer.Bind());
   wrapper->Put(StdStringToUint8Vector("key2"), value, "source",
                base::Bind(&NoOpSuccess));
   base::RunLoop().RunUntilIdle();
@@ -604,11 +595,11 @@ TEST_F(LocalStorageContextMojoTest, Migration) {
   bool success = false;
   std::vector<uint8_t> result;
   wrapper->Get(
-      String16ToUint8Vector(key),
+      LocalStorageContextMojo::MigrateString(key),
       base::Bind(&GetCallback, run_loop.QuitClosure(), &success, &result));
   run_loop.Run();
   EXPECT_TRUE(success);
-  EXPECT_EQ(String16ToUint8Vector(value), result);
+  EXPECT_EQ(LocalStorageContextMojo::MigrateString(value), result);
 
   // Origin1 should no longer exist in old storage.
   area = local->OpenStorageArea(origin1.GetURL());
@@ -619,19 +610,21 @@ TEST_F(LocalStorageContextMojoTest, Migration) {
 namespace {
 
 class ServiceTestClient : public service_manager::test::ServiceTestClient,
-                          public service_manager::mojom::ServiceFactory,
-                          public service_manager::InterfaceFactory<
-                              service_manager::mojom::ServiceFactory> {
+                          public service_manager::mojom::ServiceFactory {
  public:
   explicit ServiceTestClient(service_manager::test::ServiceTest* test)
-      : service_manager::test::ServiceTestClient(test) {}
+      : service_manager::test::ServiceTestClient(test) {
+    registry_.AddInterface<service_manager::mojom::ServiceFactory>(base::Bind(
+        &ServiceTestClient::BindServiceFactoryRequest, base::Unretained(this)));
+  }
   ~ServiceTestClient() override {}
 
  protected:
-  bool OnConnect(const service_manager::ServiceInfo& remote_info,
-                 service_manager::InterfaceRegistry* registry) override {
-    registry->AddInterface<service_manager::mojom::ServiceFactory>(this);
-    return true;
+  void OnBindInterface(const service_manager::BindSourceInfo& source_info,
+                       const std::string& interface_name,
+                       mojo::ScopedMessagePipeHandle interface_pipe) override {
+    registry_.BindInterface(source_info, interface_name,
+                            std::move(interface_pipe));
   }
 
   void CreateService(service_manager::mojom::ServiceRequest request,
@@ -645,12 +638,14 @@ class ServiceTestClient : public service_manager::test::ServiceTestClient,
     }
   }
 
-  void Create(const service_manager::Identity& remote_identity,
-              service_manager::mojom::ServiceFactoryRequest request) override {
+  void BindServiceFactoryRequest(
+      const service_manager::BindSourceInfo& source_info,
+      service_manager::mojom::ServiceFactoryRequest request) {
     service_factory_bindings_.AddBinding(this, std::move(request));
   }
 
  private:
+  service_manager::BinderRegistry registry_;
   mojo::BindingSet<service_manager::mojom::ServiceFactory>
       service_factory_bindings_;
   std::unique_ptr<service_manager::ServiceContext> file_service_context_;
@@ -662,7 +657,8 @@ class LocalStorageContextMojoTestWithService
     : public service_manager::test::ServiceTest {
  public:
   LocalStorageContextMojoTestWithService()
-      : ServiceTest("content_unittests", false) {}
+      : ServiceTest("content_unittests", false),
+        thread_bundle_(TestBrowserThreadBundle::REAL_FILE_THREAD) {}
   ~LocalStorageContextMojoTestWithService() override {}
 
  protected:
@@ -679,10 +675,6 @@ class LocalStorageContextMojoTestWithService
 
   std::unique_ptr<service_manager::Service> CreateService() override {
     return base::MakeUnique<ServiceTestClient>(this);
-  }
-
-  std::unique_ptr<base::MessageLoop> CreateMessageLoop() override {
-    return nullptr;
   }
 
   const base::FilePath& temp_path() { return temp_path_.GetPath(); }
@@ -726,14 +718,7 @@ class LocalStorageContextMojoTestWithService
   DISALLOW_COPY_AND_ASSIGN(LocalStorageContextMojoTestWithService);
 };
 
-// Enable when http://crbug.com/677194 is fixed and ServiceTest works
-// correctly on Android.
-#if defined(OS_ANDROID)
-#define MAYBE_InMemory DISABLED_InMemory
-#else
-#define MAYBE_InMemory InMemory
-#endif
-TEST_F(LocalStorageContextMojoTestWithService, MAYBE_InMemory) {
+TEST_F(LocalStorageContextMojoTestWithService, InMemory) {
   auto context = base::MakeUnique<LocalStorageContextMojo>(
       connector(), nullptr, base::FilePath(), base::FilePath());
   auto key = StdStringToUint8Vector("key");
@@ -760,14 +745,7 @@ TEST_F(LocalStorageContextMojoTestWithService, MAYBE_InMemory) {
   EXPECT_FALSE(DoTestGet(context.get(), key, &result));
 }
 
-// Enable when http://crbug.com/677194 is fixed and ServiceTest works
-// correctly on Android.
-#if defined(OS_ANDROID)
-#define MAYBE_InMemoryInvalidPath DISABLED_InMemoryInvalidPath
-#else
-#define MAYBE_InMemoryInvalidPath InMemoryInvalidPath
-#endif
-TEST_F(LocalStorageContextMojoTestWithService, MAYBE_InMemoryInvalidPath) {
+TEST_F(LocalStorageContextMojoTestWithService, InMemoryInvalidPath) {
   auto context = base::MakeUnique<LocalStorageContextMojo>(
       connector(), nullptr, base::FilePath(),
       base::FilePath(FILE_PATH_LITERAL("../../")));
@@ -790,14 +768,7 @@ TEST_F(LocalStorageContextMojoTestWithService, MAYBE_InMemoryInvalidPath) {
   EXPECT_TRUE(FirstEntryInDir().empty());
 }
 
-// Enable when http://crbug.com/677194 is fixed and ServiceTest works
-// correctly on Android.
-#if defined(OS_ANDROID)
-#define MAYBE_OnDisk DISABLED_OnDisk
-#else
-#define MAYBE_OnDisk OnDisk
-#endif
-TEST_F(LocalStorageContextMojoTestWithService, MAYBE_OnDisk) {
+TEST_F(LocalStorageContextMojoTestWithService, OnDisk) {
   base::FilePath test_path(FILE_PATH_LITERAL("test_path"));
   auto context = base::MakeUnique<LocalStorageContextMojo>(
       connector(), nullptr, base::FilePath(), test_path);
@@ -822,14 +793,7 @@ TEST_F(LocalStorageContextMojoTestWithService, MAYBE_OnDisk) {
   EXPECT_EQ(value, result);
 }
 
-// Enable when http://crbug.com/677194 is fixed and ServiceTest works
-// correctly on Android.
-#if defined(OS_ANDROID)
-#define MAYBE_InvalidVersionOnDisk DISABLED_InvalidVersionOnDisk
-#else
-#define MAYBE_InvalidVersionOnDisk InvalidVersionOnDisk
-#endif
-TEST_F(LocalStorageContextMojoTestWithService, MAYBE_InvalidVersionOnDisk) {
+TEST_F(LocalStorageContextMojoTestWithService, InvalidVersionOnDisk) {
   base::FilePath test_path(FILE_PATH_LITERAL("test_path"));
 
   // Create context and add some data to it.

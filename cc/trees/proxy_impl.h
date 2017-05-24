@@ -34,7 +34,8 @@ class CC_EXPORT ProxyImpl : public NON_EXPORTED_BASE(LayerTreeHostImplClient),
                                         BrowserControlsState current,
                                         bool animate);
   void InitializeCompositorFrameSinkOnImpl(
-      CompositorFrameSink* compositor_frame_sink);
+      CompositorFrameSink* compositor_frame_sink,
+      base::WeakPtr<ProxyMain> proxy_main_frame_sink_bound_weak_ptr);
   void InitializeMutatorOnImpl(std::unique_ptr<LayerTreeMutator> mutator);
   void MainThreadHasStoppedFlingingOnImpl();
   void SetInputThrottledUntilCommitOnImpl(bool is_throttled);
@@ -55,6 +56,8 @@ class CC_EXPORT ProxyImpl : public NON_EXPORTED_BASE(LayerTreeHostImplClient),
 
   void MainFrameWillHappenOnImplForTesting(CompletionEvent* completion,
                                            bool* main_frame_will_happen);
+
+  NOINLINE void DumpForBeginMainFrameHang();
 
  private:
   // The members of this struct should be accessed on the impl thread only when
@@ -90,6 +93,7 @@ class CC_EXPORT ProxyImpl : public NON_EXPORTED_BASE(LayerTreeHostImplClient),
   void DidPrepareTiles() override;
   void DidCompletePageScaleAnimationOnImplThread() override;
   void OnDrawForCompositorFrameSink(bool resourceless_software_draw) override;
+  void NeedsImplSideInvalidation() override;
 
   // SchedulerClient implementation
   void WillBeginImplFrame(const BeginFrameArgs& args) override;
@@ -102,7 +106,10 @@ class CC_EXPORT ProxyImpl : public NON_EXPORTED_BASE(LayerTreeHostImplClient),
   void ScheduledActionBeginCompositorFrameSinkCreation() override;
   void ScheduledActionPrepareTiles() override;
   void ScheduledActionInvalidateCompositorFrameSink() override;
+  void ScheduledActionPerformImplSideInvalidation() override;
   void SendBeginMainFrameNotExpectedSoon() override;
+  void ScheduledActionBeginMainFrameNotExpectedUntil(
+      base::TimeTicks time) override;
 
   DrawResult DrawInternal(bool forced_draw);
 
@@ -144,6 +151,10 @@ class CC_EXPORT ProxyImpl : public NON_EXPORTED_BASE(LayerTreeHostImplClient),
 
   // Used to post tasks to ProxyMain on the main thread.
   base::WeakPtr<ProxyMain> proxy_main_weak_ptr_;
+
+  // A weak pointer to ProxyMain that is invalidated when CompositorFrameSink is
+  // released.
+  base::WeakPtr<ProxyMain> proxy_main_frame_sink_bound_weak_ptr_;
 
   DISALLOW_COPY_AND_ASSIGN(ProxyImpl);
 };

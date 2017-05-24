@@ -12,14 +12,9 @@
           "reason": "subtree"
         },
         {
-          "object": "LayoutBlockFlow DIV id='inner-editor'",
-          "rect": [11, 11, 135, 13],
-          "reason": "subtree"
-        },
-        {
           "object": "LayoutTextControl TEXTAREA id='editor'",
           "rect": [9, 24, 124, 15],
-          "reason": "scroll"
+          "reason": "scroll control"
         },
         {
           "object": "LayoutText #text",
@@ -29,55 +24,36 @@
         {
           "object": "LayoutTextControl TEXTAREA id='editor'",
           "rect": [133, 24, 15, 15],
-          "reason": "scroll"
+          "reason": "scroll control"
         },
         {
           "object": "LayoutTextControl TEXTAREA id='editor'",
           "rect": [133, 9, 15, 15],
-          "reason": "scroll"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [131, 10, 2, 14],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [131, 10, 2, 14],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [131, 10, 2, 14],
-          "reason": "invalidate paint rectangle"
+          "reason": "scroll control"
         }
       ]
     }
   ],
   "objectPaintInvalidations": [
     {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
       "object": "LayoutTextControl TEXTAREA id='editor'",
       "reason": "subtree"
     },
     {
       "object": "LayoutTextControl TEXTAREA id='editor'",
-      "reason": "scroll"
+      "reason": "geometry"
     },
     {
       "object": "HorizontalScrollbar",
-      "reason": "scroll"
+      "reason": "scroll control"
     },
     {
       "object": "LayoutTextControl TEXTAREA id='editor'",
-      "reason": "scroll"
+      "reason": "geometry"
     },
     {
       "object": "VerticalScrollbar",
-      "reason": "scroll"
+      "reason": "scroll control"
     },
     {
       "object": "LayoutBlockFlow DIV id='inner-editor'",
@@ -89,11 +65,7 @@
     },
     {
       "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
+      "reason": "caret"
     },
     {
       "object": "LayoutText #text",

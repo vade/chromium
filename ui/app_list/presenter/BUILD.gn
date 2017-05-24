@@ -16,6 +16,7 @@ mojom("mojom") {
     "//services/ui/public/interfaces",
   ]
 
+  component_output_prefix = "app_list_presenter_mojom"
   export_class_attribute = "APP_LIST_PRESENTER_EXPORT"
   export_define = "APP_LIST_PRESENTER_IMPLEMENTATION=1"
   export_header = "ui/app_list/presenter/app_list_presenter_export.h"
@@ -98,6 +99,7 @@ test("app_list_presenter_unittests") {
     "//ui/aura:test_support",
     "//ui/base",
     "//ui/gl:test_support",
+    "//ui/views:test_support",
     "//ui/wm:wm",
 
     # Temporary dependency to fix compile flake in http://crbug.com/611898.

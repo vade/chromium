@@ -14,7 +14,7 @@
 #include "build/build_config.h"
 #include "content/browser/browser_process_sub_thread.h"
 #include "content/public/browser/browser_main_runner.h"
-#include "media/audio/audio_manager.h"
+#include "services/resource_coordinator/memory/coordinator/coordinator_impl.h"
 
 #if defined(USE_AURA)
 namespace aura {
@@ -40,6 +40,8 @@ class DiscardableSharedMemoryManager;
 }
 
 namespace media {
+class AudioManager;
+class AudioSystem;
 #if defined(OS_WIN)
 class SystemMessageWindowWin;
 #elif defined(OS_LINUX) && defined(USE_UDEV)
@@ -66,13 +68,12 @@ class NetworkChangeNotifier;
 }  // namespace net
 
 #if defined(USE_OZONE)
-namespace ui {
+namespace gfx {
 class ClientNativePixmapFactory;
-}  // namespace ui
+}  // namespace gfx
 #endif
 
 namespace content {
-class AudioManagerThread;
 class BrowserMainParts;
 class BrowserOnlineStateObserver;
 class BrowserThreadImpl;
@@ -86,8 +87,6 @@ class StartupTaskRunner;
 struct MainFunctionParams;
 
 #if defined(OS_ANDROID)
-class ScreenOrientationDelegate;
-#elif defined(OS_WIN)
 class ScreenOrientationDelegate;
 #endif
 
@@ -137,6 +136,7 @@ class CONTENT_EXPORT BrowserMainLoop {
   int GetResultCode() const { return result_code_; }
 
   media::AudioManager* audio_manager() const { return audio_manager_.get(); }
+  media::AudioSystem* audio_system() const { return audio_system_.get(); }
   MediaStreamManager* media_stream_manager() const {
     return media_stream_manager_.get();
   }
@@ -191,6 +191,7 @@ class CONTENT_EXPORT BrowserMainLoop {
   void EndStartupTracing();
 
   void CreateAudioManager();
+
   bool UsingInProcessGpu() const;
 
   void InitializeMemoryManagementComponent();
@@ -235,10 +236,6 @@ class CONTENT_EXPORT BrowserMainLoop {
 
 #if defined(USE_AURA)
   std::unique_ptr<aura::Env> env_;
-#endif
-
-#if defined(OS_WIN)
-  std::unique_ptr<ScreenOrientationDelegate> screen_orientation_delegate_;
 #endif
 
 #if defined(OS_ANDROID)
@@ -292,9 +289,10 @@ class CONTENT_EXPORT BrowserMainLoop {
 
   // |user_input_monitor_| has to outlive |audio_manager_|, so declared first.
   std::unique_ptr<media::UserInputMonitor> user_input_monitor_;
-  // AudioThread needs to outlive |audio_manager_|.
-  std::unique_ptr<AudioManagerThread> audio_thread_;
-  media::ScopedAudioManagerPtr audio_manager_;
+  std::unique_ptr<media::AudioManager> audio_manager_;
+  // Calls to |audio_system_| must not be posted to the audio thread if it
+  // differs from the UI one. See http://crbug.com/705455.
+  std::unique_ptr<media::AudioSystem> audio_system_;
 
   std::unique_ptr<midi::MidiService> midi_service_;
 
@@ -306,7 +304,7 @@ class CONTENT_EXPORT BrowserMainLoop {
   std::unique_ptr<media::DeviceMonitorMac> device_monitor_mac_;
 #endif
 #if defined(USE_OZONE)
-  std::unique_ptr<ui::ClientNativePixmapFactory> client_native_pixmap_factory_;
+  std::unique_ptr<gfx::ClientNativePixmapFactory> client_native_pixmap_factory_;
 #endif
 
   std::unique_ptr<LoaderDelegateImpl> loader_delegate_;
@@ -316,6 +314,8 @@ class CONTENT_EXPORT BrowserMainLoop {
   std::unique_ptr<discardable_memory::DiscardableSharedMemoryManager>
       discardable_shared_memory_manager_;
   scoped_refptr<SaveFileManager> save_file_manager_;
+  std::unique_ptr<memory_instrumentation::CoordinatorImpl>
+      memory_instrumentation_coordinator_;
 
   // DO NOT add members here. Add them to the right categories above.
 

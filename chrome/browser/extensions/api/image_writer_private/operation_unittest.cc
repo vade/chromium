@@ -35,8 +35,9 @@ class OperationForTest : public Operation {
  public:
   OperationForTest(base::WeakPtr<OperationManager> manager_,
                    const ExtensionId& extension_id,
-                   const std::string& device_path)
-      : Operation(manager_, extension_id, device_path) {}
+                   const std::string& device_path,
+                   const base::FilePath& download_path)
+      : Operation(manager_, extension_id, device_path, download_path) {}
 
   void StartImpl() override {}
 
@@ -85,7 +86,8 @@ class ImageWriterOperationTest : public ImageWriterUnitTestBase {
     operation_ =
         new OperationForTest(manager_.AsWeakPtr(),
                              kDummyExtensionId,
-                             test_utils_.GetDevicePath().AsUTF8Unsafe());
+                             test_utils_.GetDevicePath().AsUTF8Unsafe(),
+                             base::FilePath(FILE_PATH_LITERAL("/var/tmp")));
     operation_->SetImagePath(test_utils_.GetImagePath());
   }
 
@@ -117,10 +119,9 @@ TEST_F(ImageWriterOperationTest, UnzipNonZipFile) {
 
   operation_->Start();
   content::BrowserThread::PostTask(
-      content::BrowserThread::FILE,
-      FROM_HERE,
-      base::Bind(
-          &OperationForTest::Unzip, operation_, base::Bind(&base::DoNothing)));
+      content::BrowserThread::FILE, FROM_HERE,
+      base::BindOnce(&OperationForTest::Unzip, operation_,
+                     base::Bind(&base::DoNothing)));
 
   base::RunLoop().RunUntilIdle();
 }
@@ -141,10 +142,9 @@ TEST_F(ImageWriterOperationTest, UnzipZipFile) {
 
   operation_->Start();
   content::BrowserThread::PostTask(
-      content::BrowserThread::FILE,
-      FROM_HERE,
-      base::Bind(
-          &OperationForTest::Unzip, operation_, base::Bind(&base::DoNothing)));
+      content::BrowserThread::FILE, FROM_HERE,
+      base::BindOnce(&OperationForTest::Unzip, operation_,
+                     base::Bind(&base::DoNothing)));
 
   base::RunLoop().RunUntilIdle();
 
@@ -166,10 +166,9 @@ TEST_F(ImageWriterOperationTest, WriteImageToDevice) {
 
   operation_->Start();
   content::BrowserThread::PostTask(
-      content::BrowserThread::FILE,
-      FROM_HERE,
-      base::Bind(
-          &OperationForTest::Write, operation_, base::Bind(&base::DoNothing)));
+      content::BrowserThread::FILE, FROM_HERE,
+      base::BindOnce(&OperationForTest::Write, operation_,
+                     base::Bind(&base::DoNothing)));
 
   base::RunLoop().RunUntilIdle();
 
@@ -207,11 +206,10 @@ TEST_F(ImageWriterOperationTest, VerifyFileSuccess) {
       test_utils_.GetDevicePath(), kImagePattern, kTestFileSize);
 
   operation_->Start();
-  content::BrowserThread::PostTask(content::BrowserThread::FILE,
-                                   FROM_HERE,
-                                   base::Bind(&OperationForTest::VerifyWrite,
-                                              operation_,
-                                              base::Bind(&base::DoNothing)));
+  content::BrowserThread::PostTask(
+      content::BrowserThread::FILE, FROM_HERE,
+      base::BindOnce(&OperationForTest::VerifyWrite, operation_,
+                     base::Bind(&base::DoNothing)));
 
   base::RunLoop().RunUntilIdle();
 
@@ -244,11 +242,10 @@ TEST_F(ImageWriterOperationTest, VerifyFileFailure) {
       test_utils_.GetDevicePath(), kDevicePattern, kTestFileSize);
 
   operation_->Start();
-  content::BrowserThread::PostTask(content::BrowserThread::FILE,
-                                   FROM_HERE,
-                                   base::Bind(&OperationForTest::VerifyWrite,
-                                              operation_,
-                                              base::Bind(&base::DoNothing)));
+  content::BrowserThread::PostTask(
+      content::BrowserThread::FILE, FROM_HERE,
+      base::BindOnce(&OperationForTest::VerifyWrite, operation_,
+                     base::Bind(&base::DoNothing)));
 
   base::RunLoop().RunUntilIdle();
 

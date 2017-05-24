@@ -168,9 +168,10 @@ Audits.AuditExtensionCategoryResults = class {
      * @this {Audits.AuditExtensionCategoryResults}
      */
     function onEvaluate(error, result, wasThrown) {
-      if (wasThrown)
+      var runtimeModel = this._target.model(SDK.RuntimeModel);
+      if (wasThrown || !runtimeModel)
         return;
-      var object = this._target.runtimeModel.createRemoteObject(result);
+      var object = runtimeModel.createRemoteObject(result);
       callback(object);
     }
 
@@ -192,7 +193,7 @@ Audits.AuditExtensionFormatters = {
   object: function(expression, title, evaluateOptions) {
     var parentElement = createElement('div');
     function onEvaluate(remoteObject) {
-      var section = new Components.ObjectPropertiesSection(remoteObject, title);
+      var section = new ObjectUI.ObjectPropertiesSection(remoteObject, title);
       section.expand();
       section.editable = false;
       parentElement.appendChild(section.element);
@@ -209,22 +210,27 @@ Audits.AuditExtensionFormatters = {
    */
   node: function(expression, evaluateOptions) {
     var parentElement = createElement('div');
-    this.evaluate(expression, evaluateOptions, onEvaluate);
+    this.evaluate(expression, evaluateOptions, async remoteObject => {
+      await append(remoteObject);
+      remoteObject.release();
+    });
+    return parentElement;
 
     /**
      * @param {!SDK.RemoteObject} remoteObject
      */
-    function onEvaluate(remoteObject) {
-      Common.Renderer.renderPromise(remoteObject).then(appendRenderer).then(remoteObject.release.bind(remoteObject));
-
-      /**
-       * @param {!Element} element
-       */
-      function appendRenderer(element) {
-        parentElement.appendChild(element);
-      }
+    async function append(remoteObject) {
+      if (!remoteObject.isNode())
+        return;
+      var domModel = remoteObject.runtimeModel().target().model(SDK.DOMModel);
+      if (!domModel)
+        return;
+      var node = await domModel.pushObjectAsNodeToFrontend(remoteObject);
+      if (!node)
+        return;
+      var element = await Common.Renderer.renderPromise(/** @type {!SDK.DOMNode} */ (node));
+      parentElement.appendChild(element);
     }
-    return parentElement;
   }
 };
 

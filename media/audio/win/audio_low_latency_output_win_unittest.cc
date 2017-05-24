@@ -13,6 +13,7 @@
 
 #include "base/environment.h"
 #include "base/files/file_util.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
@@ -21,10 +22,12 @@
 #include "base/time/time.h"
 #include "base/win/scoped_com_initializer.h"
 #include "media/audio/audio_device_description.h"
+#include "media/audio/audio_device_info_accessor_for_tests.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_manager.h"
 #include "media/audio/audio_unittest_util.h"
 #include "media/audio/mock_audio_source_callback.h"
+#include "media/audio/test_audio_thread.h"
 #include "media/audio/win/core_audio_util_win.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/seekable_buffer.h"
@@ -158,7 +161,8 @@ static bool HasCoreAudioAndOutputDevices(AudioManager* audio_man) {
   // The low-latency (WASAPI-based) version requires Windows Vista or higher.
   // TODO(henrika): note that we use Wave today to query the number of
   // existing output devices.
-  return CoreAudioUtil::IsSupported() && audio_man->HasAudioOutputDevices();
+  return CoreAudioUtil::IsSupported() &&
+         AudioDeviceInfoAccessorForTests(audio_man).HasAudioOutputDevices();
 }
 
 // Convenience method which creates a default AudioOutputStream object but
@@ -235,35 +239,15 @@ class WASAPIAudioOutputStreamTest : public ::testing::Test {
  public:
   WASAPIAudioOutputStreamTest() {
     audio_manager_ =
-        AudioManager::CreateForTesting(message_loop_.task_runner());
+        AudioManager::CreateForTesting(base::MakeUnique<TestAudioThread>());
     base::RunLoop().RunUntilIdle();
   }
-  ~WASAPIAudioOutputStreamTest() override {
-    audio_manager_.reset();
-    base::RunLoop().RunUntilIdle();
-  }
+  ~WASAPIAudioOutputStreamTest() override { audio_manager_->Shutdown(); }
 
  protected:
   base::MessageLoopForUI message_loop_;
-  ScopedAudioManagerPtr audio_manager_;
+  std::unique_ptr<AudioManager> audio_manager_;
 };
-
-// Verify that we can retrieve the current hardware/mixing sample rate
-// for the default audio device.
-// TODO(henrika): modify this test when we support full device enumeration.
-TEST_F(WASAPIAudioOutputStreamTest, HardwareSampleRate) {
-  // Skip this test in exclusive mode since the resulting rate is only utilized
-  // for shared mode streams.
-  if (ExclusiveModeIsEnabled())
-    return;
-  ABORT_AUDIO_TEST_IF_NOT(HasCoreAudioAndOutputDevices(audio_manager_.get()));
-
-  // Default device intended for games, system notification sounds,
-  // and voice commands.
-  int fs = static_cast<int>(
-      WASAPIAudioOutputStream::HardwareSampleRate(std::string()));
-  EXPECT_GE(fs, 0);
-}
 
 // Test Create(), Close() calling sequence.
 TEST_F(WASAPIAudioOutputStreamTest, CreateAndClose) {

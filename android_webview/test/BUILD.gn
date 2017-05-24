@@ -10,12 +10,12 @@ testonly = true
 
 group("test") {
   deps = [
-    ":android_webview_test_apk",
     ":android_webview_unittests",
+    ":webview_instrumentation_test_apk",
   ]
 }
 
-android_apk("android_webview_apk") {
+android_apk("webview_instrumentation_apk") {
   deps = [
     ":android_webview_apk_assets",
     ":android_webview_apk_resources",
@@ -28,7 +28,7 @@ android_apk("android_webview_apk") {
     "//ui/android:ui_java",
   ]
 
-  apk_name = "AndroidWebView"
+  apk_name = "WebViewInstrumentation"
   android_manifest = "shell/AndroidManifest.xml"
   java_files = [
     "shell/src/org/chromium/android_webview/shell/AwShellActivity.java",
@@ -75,6 +75,7 @@ android_assets("android_webview_apk_assets") {
     "shell/assets/full_screen_video_inside_div_test.html",
     "shell/assets/full_screen_video_test.html",
     "shell/assets/full_screen_video_test_not_preloaded.html",
+    "shell/assets/key-system-test.html",
     "shell/assets/platform-media-codec-test.html",
     "shell/assets/video.3gp",
     "shell/assets/video.webm",
@@ -93,22 +94,25 @@ shared_library("libstandalonelibwebviewchromium") {
   deps = [
     "//android_webview:common",
   ]
-  configs -= [ "//build/config/android:hide_native_jni_exports" ]
+  configs -= [ "//build/config/android:hide_all_but_jni_onload" ]
+  configs += [ "//build/config/android:hide_all_but_jni" ]
 }
 
-instrumentation_test_apk("android_webview_test_apk") {
-  apk_name = "AndroidWebViewTest"
-  apk_under_test = ":android_webview_apk"
+instrumentation_test_apk("webview_instrumentation_test_apk") {
+  apk_name = "WebViewInstrumentationTest"
+  apk_under_test = ":webview_instrumentation_apk"
   android_manifest = "../javatests/AndroidManifest.xml"
   deps = [
     "//android_webview:android_webview_crash_services_java",
     "//android_webview:android_webview_java",
+    "//android_webview:android_webview_platform_services_java",
     "//base:base_java",
     "//base:base_java_test_support",
     "//components/minidump_uploader:minidump_uploader_java",
     "//components/minidump_uploader:minidump_uploader_javatests",
     "//components/policy/android:policy_java",
     "//components/policy/android:policy_java_test_support",
+    "//components/safe_browsing_db/android:safe_browsing_java",
     "//components/web_contents_delegate_android:web_contents_delegate_android_java",
     "//content/public/android:content_java",
     "//content/public/test/android:content_java_test_support",
@@ -117,7 +121,6 @@ instrumentation_test_apk("android_webview_test_apk") {
     "//net/android:net_java",
     "//net/android:net_java_test_support",
     "//third_party/android_support_test_runner:runner_java",
-    "//third_party/android_tools:legacy_http_javalib",
     "//ui/android:ui_java",
   ]
   java_files = [
@@ -133,6 +136,7 @@ instrumentation_test_apk("android_webview_test_apk") {
     "../javatests/src/org/chromium/android_webview/test/AwContentsClientGetDefaultVideoPosterTest.java",
     "../javatests/src/org/chromium/android_webview/test/AwContentsClientGetVideoLoadingProgressViewTest.java",
     "../javatests/src/org/chromium/android_webview/test/AwContentsClientOnFormResubmissionTest.java",
+    "../javatests/src/org/chromium/android_webview/test/AwContentsClientOnRenderProcessGoneTest.java",
     "../javatests/src/org/chromium/android_webview/test/AwContentsClientOnScaleChangedTest.java",
     "../javatests/src/org/chromium/android_webview/test/AwContentsClientOnUnhandledKeyEventTest.java",
     "../javatests/src/org/chromium/android_webview/test/AwContentsClientShouldInterceptRequestTest.java",
@@ -144,6 +148,7 @@ instrumentation_test_apk("android_webview_test_apk") {
     "../javatests/src/org/chromium/android_webview/test/AwContentsStaticsTest.java",
     "../javatests/src/org/chromium/android_webview/test/AwContentsTest.java",
     "../javatests/src/org/chromium/android_webview/test/AwDebugTest.java",
+    "../javatests/src/org/chromium/android_webview/test/AwFormDatabaseTest.java",
     "../javatests/src/org/chromium/android_webview/test/AwImeTest.java",
     "../javatests/src/org/chromium/android_webview/test/AwJavaBridgeTest.java",
     "../javatests/src/org/chromium/android_webview/test/AwLayoutSizerTest.java",
@@ -185,8 +190,11 @@ instrumentation_test_apk("android_webview_test_apk") {
     "../javatests/src/org/chromium/android_webview/test/PolicyUrlFilteringTest.java",
     "../javatests/src/org/chromium/android_webview/test/PopupWindowTest.java",
     "../javatests/src/org/chromium/android_webview/test/PostMessageTest.java",
+    "../javatests/src/org/chromium/android_webview/test/RenderProcessGoneHelper.java",
     "../javatests/src/org/chromium/android_webview/test/SaveRestoreStateTest.java",
+    "../javatests/src/org/chromium/android_webview/test/SafeBrowsingTest.java",
     "../javatests/src/org/chromium/android_webview/test/StandaloneAwQuotaManagerBridgeTest.java",
+    "../javatests/src/org/chromium/android_webview/test/TestAwContents.java",
     "../javatests/src/org/chromium/android_webview/test/TestAwContentsClient.java",
     "../javatests/src/org/chromium/android_webview/test/TestAwServiceWorkerClient.java",
     "../javatests/src/org/chromium/android_webview/test/UserAgentTest.java",
@@ -195,7 +203,9 @@ instrumentation_test_apk("android_webview_test_apk") {
     "../javatests/src/org/chromium/android_webview/test/WebViewAsynchronousFindApisTest.java",
     "../javatests/src/org/chromium/android_webview/test/WebViewFindApisTestBase.java",
     "../javatests/src/org/chromium/android_webview/test/WebViewModalDialogOverrideTest.java",
+    "../javatests/src/org/chromium/android_webview/test/crash/CrashReceiverServiceTest.java",
     "../javatests/src/org/chromium/android_webview/test/crash/MinidumpUploaderTest.java",
+    "../javatests/src/org/chromium/android_webview/test/crash/VisualStateCallbackTest.java",
     "../javatests/src/org/chromium/android_webview/test/util/AwQuotaManagerBridgeTestUtil.java",
     "../javatests/src/org/chromium/android_webview/test/util/AwTestTouchUtils.java",
     "../javatests/src/org/chromium/android_webview/test/util/CommonResources.java",
@@ -249,12 +259,19 @@ test("android_webview_unittests") {
     "../browser/test/rendering_test.cc",
     "../browser/test/rendering_test.h",
     "../lib/main/webview_tests.cc",
-    "../native/aw_contents_client_bridge_unittest.cc",
-    "../native/aw_media_url_interceptor_unittest.cc",
-    "../native/input_stream_unittest.cc",
-    "../native/permission/media_access_permission_request_unittest.cc",
-    "../native/permission/permission_request_handler_unittest.cc",
-    "../native/state_serializer_unittest.cc",
+  ]
+
+  # TODO(ctzsm): Remove following block.
+  # Take out old native/ tests files from sources for now
+  # for easier distinguishing them from actual browser/ files.
+  sources += [
+    "../browser/address_parser_unittest.cc",
+    "../browser/aw_contents_client_bridge_unittest.cc",
+    "../browser/aw_media_url_interceptor_unittest.cc",
+    "../browser/input_stream_unittest.cc",
+    "../browser/permission/media_access_permission_request_unittest.cc",
+    "../browser/permission/permission_request_handler_unittest.cc",
+    "../browser/state_serializer_unittest.cc",
   ]
 }
 
@@ -289,5 +306,5 @@ shared_library("libdrawgl") {
   sources = [
     "shell/src/draw_gl/draw_gl.cc",
   ]
-  configs -= [ "//build/config/android:hide_native_jni_exports" ]
+  configs -= [ "//build/config/android:hide_all_but_jni_onload" ]
 }

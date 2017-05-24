@@ -7,24 +7,19 @@
 
 #import <Foundation/Foundation.h>
 
-#import "ios/chrome/browser/native_app_launcher/native_app_navigation_controller_protocol.h"
-#import "ios/web/public/web_state/crw_web_controller_observer.h"
-
-@class Tab;
-
-namespace net {
-class URLRequestContextGetter;
-}  // namespace net
+namespace web {
+class WebState;
+}  // namespace web
 
 // NativeAppNavigationController brings up a GAL Infobar if the webpage directs
 // it to do so and there are no other circumstances that would suppress its
 // display.
-@interface NativeAppNavigationController
-    : NSObject<CRWWebControllerObserver, NativeAppNavigationControllerProtocol>
+@interface NativeAppNavigationController : NSObject
 
-// Designated initializer.
-- (id)initWithRequestContextGetter:(net::URLRequestContextGetter*)context
-                               tab:(Tab*)tab;
+- (instancetype)initWithWebState:(web::WebState*)webState
+    NS_DESIGNATED_INITIALIZER;
+
+- (instancetype)init NS_UNAVAILABLE;
 
 // Copies the list of applications possibly being installed and register to be
 // notified of their installation.

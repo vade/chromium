@@ -13,8 +13,8 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/values.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/shill_device_client.h"
@@ -131,7 +131,7 @@ class TestListener : public internal::ShillPropertyHandler::Listener {
     for (base::ListValue::const_iterator iter = entries.begin();
          iter != entries.end(); ++iter) {
       std::string path;
-      if ((*iter)->GetAsString(&path))
+      if (iter->GetAsString(&path))
         entries_[type].push_back(path);
     }
   }
@@ -163,11 +163,12 @@ class TestListener : public internal::ShillPropertyHandler::Listener {
 class ShillPropertyHandlerTest : public testing::Test {
  public:
   ShillPropertyHandlerTest()
-      : manager_test_(NULL),
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI),
+        manager_test_(NULL),
         device_test_(NULL),
         service_test_(NULL),
-        profile_test_(NULL) {
-  }
+        profile_test_(NULL) {}
   ~ShillPropertyHandlerTest() override {}
 
   void SetUp() override {
@@ -285,7 +286,7 @@ class ShillPropertyHandlerTest : public testing::Test {
     AddService(shill::kTypeCellular, "stub_cellular1", shill::kStateIdle);
   }
 
-  base::MessageLoopForUI message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   std::unique_ptr<TestListener> listener_;
   std::unique_ptr<internal::ShillPropertyHandler> shill_property_handler_;
   ShillManagerClient::TestInterface* manager_test_;
@@ -383,7 +384,7 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerServicePropertyChanged) {
   EXPECT_EQ(1, listener_->initial_property_updates(
       shill::kServiceCompleteListProperty)[kTestServicePath]);
   // Change a property.
-  base::FundamentalValue scan_interval(3);
+  base::Value scan_interval(3);
   DBusThreadManager::Get()->GetShillServiceClient()->SetProperty(
       dbus::ObjectPath(kTestServicePath),
       shill::kScanIntervalProperty,
@@ -398,10 +399,9 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerServicePropertyChanged) {
   // updates.
   listener_->reset_list_updates();
   DBusThreadManager::Get()->GetShillServiceClient()->SetProperty(
-      dbus::ObjectPath(kTestServicePath),
-      shill::kVisibleProperty,
-      base::FundamentalValue(false),
-      base::Bind(&base::DoNothing), base::Bind(&ErrorCallbackFunction));
+      dbus::ObjectPath(kTestServicePath), shill::kVisibleProperty,
+      base::Value(false), base::Bind(&base::DoNothing),
+      base::Bind(&ErrorCallbackFunction));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, listener_->list_updates(shill::kServiceCompleteListProperty));
 
@@ -421,7 +421,7 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerIPConfigPropertyChanged) {
   // Set the properties for an IP Config object.
   const std::string kTestIPConfigPath("test_ip_config_path");
 
-  base::StringValue ip_address("192.168.1.1");
+  base::Value ip_address("192.168.1.1");
   DBusThreadManager::Get()->GetShillIPConfigClient()->SetProperty(
       dbus::ObjectPath(kTestIPConfigPath),
       shill::kAddressProperty, ip_address,
@@ -433,12 +433,12 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerIPConfigPropertyChanged) {
       dbus::ObjectPath(kTestIPConfigPath),
       shill::kNameServersProperty, dns_servers,
       base::Bind(&DoNothingWithCallStatus));
-  base::FundamentalValue prefixlen(8);
+  base::Value prefixlen(8);
   DBusThreadManager::Get()->GetShillIPConfigClient()->SetProperty(
       dbus::ObjectPath(kTestIPConfigPath),
       shill::kPrefixlenProperty, prefixlen,
       base::Bind(&DoNothingWithCallStatus));
-  base::StringValue gateway("192.0.0.1");
+  base::Value gateway("192.0.0.1");
   DBusThreadManager::Get()->GetShillIPConfigClient()->SetProperty(
       dbus::ObjectPath(kTestIPConfigPath),
       shill::kGatewayProperty, gateway,
@@ -454,10 +454,9 @@ TEST_F(ShillPropertyHandlerTest, ShillPropertyHandlerIPConfigPropertyChanged) {
   EXPECT_EQ(1, listener_->initial_property_updates(
       shill::kServiceCompleteListProperty)[kTestServicePath1]);
   DBusThreadManager::Get()->GetShillServiceClient()->SetProperty(
-      dbus::ObjectPath(kTestServicePath1),
-      shill::kIPConfigProperty,
-      base::StringValue(kTestIPConfigPath),
-      base::Bind(&base::DoNothing), base::Bind(&ErrorCallbackFunction));
+      dbus::ObjectPath(kTestServicePath1), shill::kIPConfigProperty,
+      base::Value(kTestIPConfigPath), base::Bind(&base::DoNothing),
+      base::Bind(&ErrorCallbackFunction));
   base::RunLoop().RunUntilIdle();
   // IPConfig property change on the service should trigger an IPConfigs update.
   EXPECT_EQ(1, listener_->property_updates(

@@ -10,7 +10,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/sync_sessions/sync_sessions_client.h"
-
+#include "components/sync_sessions/synced_tab_delegate.h"
 namespace sync_sessions {
 
 namespace {
@@ -35,7 +35,8 @@ bool IsPresentable(SyncSessionsClient* sessions_client,
                    SyncedSession* foreign_session) {
   for (auto iter = foreign_session->windows.begin();
        iter != foreign_session->windows.end(); ++iter) {
-    if (ShouldSyncSessionWindow(sessions_client, *(iter->second))) {
+    if (ShouldSyncSessionWindow(sessions_client,
+                                iter->second->wrapped_window)) {
       return true;
     }
   }
@@ -53,6 +54,8 @@ SyncedSessionTracker::~SyncedSessionTracker() {
 
 void SyncedSessionTracker::SetLocalSessionTag(
     const std::string& local_session_tag) {
+  DCHECK(local_session_tag_.empty());
+  DCHECK(!local_session_tag.empty());
   local_session_tag_ = local_session_tag;
 }
 
@@ -81,7 +84,7 @@ bool SyncedSessionTracker::LookupSessionWindows(
   if (iter == synced_session_map_.end())
     return false;
   for (const auto& window_pair : iter->second->windows)
-    windows->push_back(window_pair.second.get());
+    windows->push_back(&window_pair.second->wrapped_window);
 
   return true;
 }
@@ -90,6 +93,9 @@ bool SyncedSessionTracker::LookupSessionTab(
     const std::string& tag,
     SessionID::id_type tab_id,
     const sessions::SessionTab** tab) const {
+  if (tab_id == kInvalidTabID)
+    return false;
+
   DCHECK(tab);
   auto tab_map_iter = synced_tab_map_.find(tag);
   if (tab_map_iter == synced_tab_map_.end()) {
@@ -107,8 +113,9 @@ bool SyncedSessionTracker::LookupSessionTab(
   return true;
 }
 
-void SyncedSessionTracker::LookupTabNodeIds(const std::string& session_tag,
-                                            std::set<int>* tab_node_ids) {
+void SyncedSessionTracker::LookupForeignTabNodeIds(
+    const std::string& session_tag,
+    std::set<int>* tab_node_ids) const {
   tab_node_ids->clear();
   auto session_iter = synced_session_map_.find(session_tag);
   if (session_iter != synced_session_map_.end()) {
@@ -144,7 +151,9 @@ SyncedSession* SyncedSessionTracker::GetSession(
   return synced_session_map_[session_tag].get();
 }
 
-bool SyncedSessionTracker::DeleteSession(const std::string& session_tag) {
+bool SyncedSessionTracker::DeleteForeignSession(
+    const std::string& session_tag) {
+  DCHECK_NE(local_session_tag_, session_tag);
   unmapped_windows_.erase(session_tag);
   unmapped_tabs_.erase(session_tag);
 
@@ -173,11 +182,11 @@ void SyncedSessionTracker::ResetSessionTracking(
 
   for (auto& window_pair : session->windows) {
     // First unmap the tabs in the window.
-    for (auto& tab : window_pair.second->tabs) {
+    for (auto& tab : window_pair.second->wrapped_window.tabs) {
       SessionID::id_type tab_id = tab->tab_id.id();
       unmapped_tabs_[session_tag][tab_id] = std::move(tab);
     }
-    window_pair.second->tabs.clear();
+    window_pair.second->wrapped_window.tabs.clear();
 
     // Then unmap the window itself.
     unmapped_windows_[session_tag][window_pair.first] =
@@ -188,13 +197,14 @@ void SyncedSessionTracker::ResetSessionTracking(
 
 void SyncedSessionTracker::DeleteForeignTab(const std::string& session_tag,
                                             int tab_node_id) {
+  DCHECK_NE(local_session_tag_, session_tag);
   auto session_iter = synced_session_map_.find(session_tag);
   if (session_iter != synced_session_map_.end()) {
     session_iter->second->tab_node_ids.erase(tab_node_id);
   }
 }
 
-void SyncedSessionTracker::CleanupSession(const std::string& session_tag) {
+void SyncedSessionTracker::CleanupSessionImpl(const std::string& session_tag) {
   for (const auto& window_pair : unmapped_windows_[session_tag])
     synced_window_map_[session_tag].erase(window_pair.first);
   unmapped_windows_[session_tag].clear();
@@ -204,9 +214,20 @@ void SyncedSessionTracker::CleanupSession(const std::string& session_tag) {
   unmapped_tabs_[session_tag].clear();
 }
 
+bool SyncedSessionTracker::IsTabUnmappedForTesting(SessionID::id_type tab_id) {
+  auto it = unmapped_tabs_[local_session_tag_].find(tab_id);
+  return it != unmapped_tabs_[local_session_tag_].end();
+}
+
 void SyncedSessionTracker::PutWindowInSession(const std::string& session_tag,
                                               SessionID::id_type window_id) {
-  std::unique_ptr<sessions::SessionWindow> window;
+  if (GetSession(session_tag)->windows.find(window_id) !=
+      GetSession(session_tag)->windows.end()) {
+    DVLOG(1) << "Window " << window_id << " already added to session "
+             << session_tag;
+    return;
+  }
+  std::unique_ptr<SyncedSessionWindow> window;
 
   auto iter = unmapped_windows_[session_tag].find(window_id);
   if (iter != unmapped_windows_[session_tag].end()) {
@@ -218,14 +239,14 @@ void SyncedSessionTracker::PutWindowInSession(const std::string& session_tag,
                                                             : session_tag);
   } else {
     // Create the window.
-    window = base::MakeUnique<sessions::SessionWindow>();
-    window->window_id.set_id(window_id);
+    window = base::MakeUnique<SyncedSessionWindow>();
+    window->wrapped_window.window_id.set_id(window_id);
     synced_window_map_[session_tag][window_id] = window.get();
     DVLOG(1) << "Putting new window " << window_id << " at " << window.get()
              << "in " << (session_tag == local_session_tag_ ? "local session"
                                                             : session_tag);
   }
-  DCHECK_EQ(window->window_id.id(), window_id);
+  DCHECK_EQ(window->wrapped_window.window_id.id(), window_id);
   DCHECK(GetSession(session_tag)->windows.end() ==
          GetSession(session_tag)->windows.find(window_id));
   GetSession(session_tag)->windows[window_id] = std::move(window);
@@ -233,20 +254,19 @@ void SyncedSessionTracker::PutWindowInSession(const std::string& session_tag,
 
 void SyncedSessionTracker::PutTabInWindow(const std::string& session_tag,
                                           SessionID::id_type window_id,
-                                          SessionID::id_type tab_id,
-                                          size_t tab_index) {
+                                          SessionID::id_type tab_id) {
   // We're called here for two reasons. 1) We've received an update to the
-  // SessionWindow information of a SessionHeader node for a foreign session,
+  // SessionWindow information of a SessionHeader node for a session,
   // and 2) The SessionHeader node for our local session changed. In both cases
   // we need to update our tracking state to reflect the change.
   //
   // Because the SessionHeader nodes are separate from the individual tab nodes
   // and we don't store tab_node_ids in the header / SessionWindow specifics,
-  // the tab_node_ids are not always available when processing headers.
-  // We know that we will eventually process (via GetTab) every single tab node
-  // in the system, so we permit ourselves to use kInvalidTabNodeID here and
-  // rely on the later update to build the mapping (or a restart).
-  GetTabImpl(session_tag, tab_id, TabNodePool::kInvalidTabNodeID);
+  // the tab_node_ids are not always available when processing headers. We know
+  // that we will eventually process (via GetTab) every single tab node in the
+  // system, so we permit ourselves to just call GetTab and ignore the result,
+  // creating a placeholder SessionTab in the process.
+  sessions::SessionTab* tab_ptr = GetTab(session_tag, tab_id);
 
   // The tab should be unmapped.
   std::unique_ptr<sessions::SessionTab> tab;
@@ -254,61 +274,54 @@ void SyncedSessionTracker::PutTabInWindow(const std::string& session_tag,
   if (it != unmapped_tabs_[session_tag].end()) {
     tab = std::move(it->second);
     unmapped_tabs_[session_tag].erase(it);
+  } else {
+    // The tab has already been mapped, possibly because of the tab node id
+    // being reused across tabs. Find the existing tab and move it to the right
+    // window.
+    for (auto& window_iter_pair : GetSession(session_tag)->windows) {
+      auto tab_iter = std::find_if(
+          window_iter_pair.second->wrapped_window.tabs.begin(),
+          window_iter_pair.second->wrapped_window.tabs.end(),
+          [&tab_ptr](const std::unique_ptr<sessions::SessionTab>& tab) {
+            return tab.get() == tab_ptr;
+          });
+      if (tab_iter != window_iter_pair.second->wrapped_window.tabs.end()) {
+        tab = std::move(*tab_iter);
+        window_iter_pair.second->wrapped_window.tabs.erase(tab_iter);
+
+        DVLOG(1) << "Moving tab " << tab_id << " from window "
+                 << window_iter_pair.first << " to " << window_id;
+        break;
+      }
+    }
+    // TODO(zea): remove this once PutTabInWindow isn't crashing anymore.
+    CHECK(tab) << " Unable to find tab " << tab_id
+               << " within unmapped tabs or previously mapped windows."
+               << " crbug.com/639009";
   }
-  DCHECK(tab);
 
   tab->window_id.set_id(window_id);
   DVLOG(1) << "  - tab " << tab_id << " added to window " << window_id;
   DCHECK(GetSession(session_tag)->windows.find(window_id) !=
          GetSession(session_tag)->windows.end());
-  auto& window_tabs = GetSession(session_tag)->windows[window_id]->tabs;
-  if (window_tabs.size() <= tab_index) {
-    window_tabs.resize(tab_index + 1);
-  }
-  DCHECK(!window_tabs[tab_index]);
-  window_tabs[tab_index] = std::move(tab);
+  GetSession(session_tag)
+      ->windows[window_id]
+      ->wrapped_window.tabs.push_back(std::move(tab));
+}
+
+void SyncedSessionTracker::OnTabNodeSeen(const std::string& session_tag,
+                                         int tab_node_id) {
+  GetSession(session_tag)->tab_node_ids.insert(tab_node_id);
 }
 
 sessions::SessionTab* SyncedSessionTracker::GetTab(
     const std::string& session_tag,
-    SessionID::id_type tab_id,
-    int tab_node_id) {
-  DCHECK_NE(TabNodePool::kInvalidTabNodeID, tab_node_id);
-  return GetTabImpl(session_tag, tab_id, tab_node_id);
-}
-
-sessions::SessionTab* SyncedSessionTracker::GetTabImpl(
-    const std::string& session_tag,
-    SessionID::id_type tab_id,
-    int tab_node_id) {
+    SessionID::id_type tab_id) {
+  CHECK_NE(TabNodePool::kInvalidTabNodeID, tab_id) << "crbug.com/673618";
   sessions::SessionTab* tab_ptr = nullptr;
   auto iter = synced_tab_map_[session_tag].find(tab_id);
   if (iter != synced_tab_map_[session_tag].end()) {
     tab_ptr = iter->second;
-    if (tab_node_id != TabNodePool::kInvalidTabNodeID &&
-        tab_id != TabNodePool::kInvalidTabID) {
-      // TabIDs are not stable across restarts of a client. Consider this
-      // example with two tabs:
-      //
-      // http://a.com  TabID1 --> NodeIDA
-      // http://b.com  TabID2 --> NodeIDB
-      //
-      // After restart, tab ids are reallocated. e.g, one possibility:
-      // http://a.com TabID2 --> NodeIDA
-      // http://b.com TabID1 --> NodeIDB
-      //
-      // If that happend on a remote client, here we will see an update to
-      // TabID1 with tab_node_id changing from NodeIDA to NodeIDB, and TabID2
-      // with tab_node_id changing from NodeIDB to NodeIDA.
-      //
-      // We can also wind up here if we created this tab as an out-of-order
-      // update to the header node for this session before actually associating
-      // the tab itself, so the tab node id wasn't available at the time and
-      // is currently kInvalidTabNodeID.
-      //
-      // In both cases, we can safely throw it into the set of node ids.
-      GetSession(session_tag)->tab_node_ids.insert(tab_node_id);
-    }
 
     if (VLOG_IS_ON(1)) {
       std::string title;
@@ -328,7 +341,6 @@ sessions::SessionTab* SyncedSessionTracker::GetTabImpl(
     tab->tab_id.set_id(tab_id);
     synced_tab_map_[session_tag][tab_id] = tab_ptr;
     unmapped_tabs_[session_tag][tab_id] = std::move(tab);
-    GetSession(session_tag)->tab_node_ids.insert(tab_node_id);
     DVLOG(1) << "Getting "
              << (session_tag == local_session_tag_ ? "local session"
                                                    : session_tag)
@@ -337,6 +349,131 @@ sessions::SessionTab* SyncedSessionTracker::GetTabImpl(
   DCHECK(tab_ptr);
   DCHECK_EQ(tab_ptr->tab_id.id(), tab_id);
   return tab_ptr;
+}
+
+void SyncedSessionTracker::CleanupSession(const std::string& session_tag) {
+  CleanupSessionImpl(session_tag);
+}
+
+void SyncedSessionTracker::CleanupLocalTabs(std::set<int>* deleted_node_ids) {
+  DCHECK(!local_session_tag_.empty());
+  for (const auto& tab_pair : unmapped_tabs_[local_session_tag_])
+    local_tab_pool_.FreeTab(tab_pair.first);
+  CleanupSessionImpl(local_session_tag_);
+  local_tab_pool_.CleanupTabNodes(deleted_node_ids);
+  for (int tab_node_id : *deleted_node_ids) {
+    GetSession(local_session_tag_)->tab_node_ids.erase(tab_node_id);
+  }
+}
+
+bool SyncedSessionTracker::GetTabNodeFromLocalTabId(SessionID::id_type tab_id,
+                                                    int* tab_node_id) {
+  DCHECK(!local_session_tag_.empty());
+  // Ensure a placeholder SessionTab is in place, if not already. Although we
+  // don't need a SessionTab to fulfill this request, this forces the creation
+  // of one if it doesn't already exist. This helps to make sure we're tracking
+  // this |tab_id| if |local_tab_pool_| is, and everyone's data structures are
+  // kept in sync and as consistent as possible.
+  GetTab(local_session_tag_, tab_id);  // Ignore result.
+
+  bool reused_existing_tab =
+      local_tab_pool_.GetTabNodeForTab(tab_id, tab_node_id);
+  DCHECK_NE(TabNodePool::kInvalidTabNodeID, *tab_node_id);
+  GetSession(local_session_tag_)->tab_node_ids.insert(*tab_node_id);
+  return reused_existing_tab;
+}
+
+bool SyncedSessionTracker::IsLocalTabNodeAssociated(int tab_node_id) {
+  if (tab_node_id == TabNodePool::kInvalidTabNodeID)
+    return false;
+  return local_tab_pool_.GetTabIdFromTabNodeId(tab_node_id) != kInvalidTabID;
+}
+
+void SyncedSessionTracker::ReassociateLocalTab(int tab_node_id,
+                                               SessionID::id_type new_tab_id) {
+  DCHECK(!local_session_tag_.empty());
+  DCHECK_NE(TabNodePool::kInvalidTabNodeID, tab_node_id);
+  DCHECK_NE(kInvalidTabID, new_tab_id);
+
+  SessionID::id_type old_tab_id =
+      local_tab_pool_.GetTabIdFromTabNodeId(tab_node_id);
+  if (new_tab_id == old_tab_id) {
+    return;
+  }
+
+  local_tab_pool_.ReassociateTabNode(tab_node_id, new_tab_id);
+
+  sessions::SessionTab* tab_ptr = nullptr;
+
+  auto new_tab_iter = synced_tab_map_[local_session_tag_].find(new_tab_id);
+  auto old_tab_iter = synced_tab_map_[local_session_tag_].find(old_tab_id);
+  if (old_tab_id != kInvalidTabID &&
+      old_tab_iter != synced_tab_map_[local_session_tag_].end()) {
+    tab_ptr = old_tab_iter->second;
+    DCHECK(tab_ptr);
+
+    // Remove the tab from the synced tab map under the old id.
+    synced_tab_map_[local_session_tag_].erase(old_tab_iter);
+
+    if (new_tab_iter != synced_tab_map_[local_session_tag_].end()) {
+      // If both the old and the new tab already exist, delete the new tab
+      // and use the old tab in its place.
+      auto unmapped_tabs_iter =
+          unmapped_tabs_[local_session_tag_].find(new_tab_id);
+      if (unmapped_tabs_iter != unmapped_tabs_[local_session_tag_].end()) {
+        unmapped_tabs_[local_session_tag_].erase(unmapped_tabs_iter);
+      } else {
+        sessions::SessionTab* new_tab_ptr = new_tab_iter->second;
+        for (auto& window_iter_pair : GetSession(local_session_tag_)->windows) {
+          auto& window_tabs = window_iter_pair.second->wrapped_window.tabs;
+          auto tab_iter = std::find_if(
+              window_tabs.begin(), window_tabs.end(),
+              [&new_tab_ptr](const std::unique_ptr<sessions::SessionTab>& tab) {
+                return tab.get() == new_tab_ptr;
+              });
+          if (tab_iter != window_tabs.end()) {
+            window_tabs.erase(tab_iter);
+            break;
+          }
+        }
+      }
+
+      synced_tab_map_[local_session_tag_].erase(new_tab_iter);
+    }
+
+    // If the old tab is unmapped, update the tab id under which it is
+    // indexed.
+    auto unmapped_tabs_iter =
+        unmapped_tabs_[local_session_tag_].find(old_tab_id);
+    if (old_tab_id != kInvalidTabID &&
+        unmapped_tabs_iter != unmapped_tabs_[local_session_tag_].end()) {
+      std::unique_ptr<sessions::SessionTab> tab =
+          std::move(unmapped_tabs_iter->second);
+      DCHECK_EQ(tab_ptr, tab.get());
+      unmapped_tabs_[local_session_tag_].erase(unmapped_tabs_iter);
+      unmapped_tabs_[local_session_tag_][new_tab_id] = std::move(tab);
+    }
+  }
+
+  if (tab_ptr == nullptr) {
+    // It's possible a placeholder is already in place for the new tab. If so,
+    // reuse it, otherwise create a new one (which will default to unmapped).
+    tab_ptr = GetTab(local_session_tag_, new_tab_id);
+  }
+
+  // Update the tab id.
+  if (old_tab_id != kInvalidTabID) {
+    DVLOG(1) << "Remapped tab " << old_tab_id << " with node " << tab_node_id
+             << " to tab " << new_tab_id;
+  } else {
+    DVLOG(1) << "Mapped new tab node " << tab_node_id << " to tab "
+             << new_tab_id;
+  }
+  tab_ptr->tab_id.set_id(new_tab_id);
+
+  // Add the tab back into the tab map with the new id.
+  synced_tab_map_[local_session_tag_][new_tab_id] = tab_ptr;
+  GetSession(local_session_tag_)->tab_node_ids.insert(tab_node_id);
 }
 
 void SyncedSessionTracker::Clear() {
@@ -352,6 +489,7 @@ void SyncedSessionTracker::Clear() {
   synced_window_map_.clear();
   synced_tab_map_.clear();
 
+  local_tab_pool_.Clear();
   local_session_tag_.clear();
 }
 

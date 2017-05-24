@@ -15,11 +15,10 @@ import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.browser.ContentSettingsType;
 import org.chromium.chrome.browser.preferences.website.ContentSetting;
 import org.chromium.chrome.browser.preferences.website.ContentSettingException;
-import org.chromium.chrome.browser.preferences.website.GeolocationInfo;
-import org.chromium.chrome.browser.preferences.website.WebsitePreferenceBridge;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -37,19 +36,23 @@ public final class PrefServiceBridge {
     private static final String MIGRATION_PREF_KEY = "PrefMigrationVersion";
     private static final int MIGRATION_CURRENT_VERSION = 4;
 
-    private static final String HTTPS_SCHEME = "https";
+    /** The android permissions associated with requesting location. */
+    private static final String[] LOCATION_PERMISSIONS = {
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION};
+    /** The android permissions associated with requesting access to the camera. */
+    private static final String[] CAMERA_PERMISSIONS = {android.Manifest.permission.CAMERA};
+    /** The android permissions associated with requesting access to the microphone. */
+    private static final String[] MICROPHONE_PERMISSIONS = {
+            android.Manifest.permission.RECORD_AUDIO};
+    /** Signifies there are no permissions associated. */
+    private static final String[] EMPTY_PERMISSIONS = {};
 
-    // Object to notify when "clear browsing data" completes.
-    private OnClearBrowsingDataListener mClearBrowsingDataListener;
     private static final String LOG_TAG = "PrefServiceBridge";
 
     // Constants related to the Contextual Search preference.
     private static final String CONTEXTUAL_SEARCH_DISABLED = "false";
     private static final String CONTEXTUAL_SEARCH_ENABLED = "true";
-
-    // The key to store whether the Location Permission was automatically added for the search
-    // engine set as default.
-    public static final String LOCATION_AUTO_ALLOWED = "search_engine_location_auto_allowed";
 
     /**
      * Structure that holds all the version information about the current Chrome browser.
@@ -70,52 +73,6 @@ public final class PrefServiceBridge {
         public String getOSVersion() {
             return mOSVersion;
         }
-    }
-
-    /**
-     * Interface for a class that is listening to clear browser data events.
-     */
-    public interface OnClearBrowsingDataListener {
-        public abstract void onBrowsingDataCleared();
-    }
-
-    /**
-     * Interface for a class that is fetching important site information.
-     */
-    public interface ImportantSitesCallback {
-        /**
-         * Called when the list of important registerable domains has been fetched from cpp.
-         * See net/base/registry_controlled_domains/registry_controlled_domain.h for more details on
-         * registrable domains and the current list of effective eTLDs.
-         * @param domains Important registerable domains.
-         * @param exampleOrigins Example origins for each domain. These can be used to retrieve
-         *                       favicons.
-         * @param importantReasons Bitfield of reasons why this domain was selected. Pass this back
-         *                         to clearBrowinsgData so we can record metrics.
-         */
-        @CalledByNative("ImportantSitesCallback")
-        void onImportantRegisterableDomainsReady(
-                String[] domains, String[] exampleOrigins, int[] importantReasons);
-    }
-
-    /**
-     * Interface to a class that receives callbacks instructing it to inform the user about other
-     * forms of browsing history.
-     */
-    public interface OtherFormsOfBrowsingHistoryListener {
-        /**
-         * Called by the web history service when it discovers that other forms of browsing history
-         * exist.
-         */
-        @CalledByNative("OtherFormsOfBrowsingHistoryListener")
-        public abstract void enableDialogAboutOtherFormsOfBrowsingHistory();
-
-        /**
-         * Called by the web history service when the conditions for showing the dialog about
-         * other forms of browsing history are met.
-         */
-        @CalledByNative("OtherFormsOfBrowsingHistoryListener")
-        public abstract void showNoticeAboutOtherFormsOfBrowsingHistory();
     }
 
     @CalledByNative
@@ -167,28 +124,6 @@ public final class PrefServiceBridge {
     }
 
     /**
-     * Add a permission entry for Location for the default search engine.
-     * @param allowed Whether to create an Allowed permission or a Denied permission.
-     * @param context The current context to use.
-     */
-    public static void maybeCreatePermissionForDefaultSearchEngine(
-            boolean allowed, Context context) {
-        TemplateUrlService templateUrlService = TemplateUrlService.getInstance();
-        String url = templateUrlService.getSearchEngineUrlFromTemplateUrl(
-                templateUrlService.getDefaultSearchEngineTemplateUrl().getKeyword());
-        if (allowed && !url.startsWith("https:")) return;
-        GeolocationInfo locationSettings = new GeolocationInfo(url, null, false);
-        ContentSetting locationPermission = locationSettings.getContentSetting();
-        if (locationPermission == null || locationPermission == ContentSetting.ASK) {
-            WebsitePreferenceBridge.nativeSetGeolocationSettingForOrigin(url, url,
-                    allowed ? ContentSetting.ALLOW.toInt() : ContentSetting.BLOCK.toInt(), false);
-            SharedPreferences sharedPreferences =
-                    ContextUtils.getAppSharedPreferences();
-            sharedPreferences.edit().putBoolean(LOCATION_AUTO_ALLOWED, true).apply();
-        }
-    }
-
-    /**
      * Returns whether a particular content setting type is enabled.
      * @param contentSettingsType The content setting type to check.
      */
@@ -236,24 +171,24 @@ public final class PrefServiceBridge {
     }
 
     /**
-     * Return the android permission string for a given {@link ContentSettingsType}.  If there
-     * is no corresponding permission, then null will be returned.
+     * Return the list of android permission strings for a given {@link ContentSettingsType}.  If
+     * there is no permissions associated with the content setting, then an empty array is returned.
      *
      * @param contentSettingType The content setting to get the android permission for.
-     * @return The android permission for the given content setting.
+     * @return The android permissions for the given content setting.
      */
     @CalledByNative
-    public static String getAndroidPermissionForContentSetting(int contentSettingType) {
+    public static String[] getAndroidPermissionsForContentSetting(int contentSettingType) {
         if (contentSettingType == ContentSettingsType.CONTENT_SETTINGS_TYPE_GEOLOCATION) {
-            return android.Manifest.permission.ACCESS_FINE_LOCATION;
+            return Arrays.copyOf(LOCATION_PERMISSIONS, LOCATION_PERMISSIONS.length);
         }
         if (contentSettingType == ContentSettingsType.CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC) {
-            return android.Manifest.permission.RECORD_AUDIO;
+            return Arrays.copyOf(MICROPHONE_PERMISSIONS, MICROPHONE_PERMISSIONS.length);
         }
         if (contentSettingType == ContentSettingsType.CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA) {
-            return android.Manifest.permission.CAMERA;
+            return Arrays.copyOf(CAMERA_PERMISSIONS, CAMERA_PERMISSIONS.length);
         }
-        return null;
+        return EMPTY_PERMISSIONS;
     }
 
     /**
@@ -268,10 +203,18 @@ public final class PrefServiceBridge {
     }
 
     /**
-     * @return Whether cookies acceptance is configured by policy
+     * @return Whether cookies acceptance is modifiable by the user
      */
-    public boolean isAcceptCookiesManaged() {
-        return nativeGetAcceptCookiesManaged();
+    public boolean isAcceptCookiesUserModifiable() {
+        return nativeGetAcceptCookiesUserModifiable();
+    }
+
+    /**
+     * @return Whether cookies acceptance is configured by the user's custodian
+     * (for supervised users).
+     */
+    public boolean isAcceptCookiesManagedByCustodian() {
+        return nativeGetAcceptCookiesManagedByCustodian();
     }
 
     public boolean isBlockThirdPartyCookiesEnabled() {
@@ -510,7 +453,7 @@ public final class PrefServiceBridge {
     }
 
     /**
-     * @param Whether Contextual Search should be enabled.
+     * @param enabled Whether Contextual Search should be enabled.
      */
     public void setContextualSearchState(boolean enabled) {
         setContextualSearchPreference(enabled
@@ -532,7 +475,7 @@ public final class PrefServiceBridge {
     }
 
     /**
-     * @param Whether Safe Browsing Extended Reporting should be enabled.
+     * @param enabled Whether Safe Browsing Extended Reporting should be enabled.
      */
     public void setSafeBrowsingExtendedReportingEnabled(boolean enabled) {
         nativeSetSafeBrowsingExtendedReportingEnabled(enabled);
@@ -553,7 +496,7 @@ public final class PrefServiceBridge {
     }
 
     /**
-     * @param Whether Safe Browsing should be enabled.
+     * @param enabled Whether Safe Browsing should be enabled.
      */
     public void setSafeBrowsingEnabled(boolean enabled) {
         nativeSetSafeBrowsingEnabled(enabled);
@@ -650,132 +593,80 @@ public final class PrefServiceBridge {
      * Checks the state of deletion preference for a certain browsing data type.
      * @param dataType The requested browsing data type (from the shared enum
      *      {@link org.chromium.chrome.browser.browsing_data.BrowsingDataType}).
+     * @param clearBrowsingDataTab Indicates if this is a checkbox on the default, basic or advanced
+     *      tab to apply the right preference.
      * @return The state of the corresponding deletion preference.
      */
-    public boolean getBrowsingDataDeletionPreference(int dataType) {
-        return nativeGetBrowsingDataDeletionPreference(dataType);
+    public boolean getBrowsingDataDeletionPreference(int dataType, int clearBrowsingDataTab) {
+        return nativeGetBrowsingDataDeletionPreference(dataType, clearBrowsingDataTab);
     }
 
     /**
      * Sets the state of deletion preference for a certain browsing data type.
      * @param dataType The requested browsing data type (from the shared enum
      *      {@link org.chromium.chrome.browser.browsing_data.BrowsingDataType}).
+     * @param clearBrowsingDataTab Indicates if this is a checkbox on the default, basic or advanced
+     *      tab to apply the right preference.
      * @param value The state to be set.
      */
-    public void setBrowsingDataDeletionPreference(int dataType, boolean value) {
-        nativeSetBrowsingDataDeletionPreference(dataType, value);
+    public void setBrowsingDataDeletionPreference(
+            int dataType, int clearBrowsingDataTab, boolean value) {
+        nativeSetBrowsingDataDeletionPreference(dataType, clearBrowsingDataTab, value);
     }
 
     /**
      * Gets the time period for which browsing data will be deleted.
+     * @param clearBrowsingDataTab Indicates if this is a timeperiod on the default, basic or
+     *      advanced tab to apply the right preference.
      * @return The currently selected browsing data deletion time period (from the shared enum
      *      {@link org.chromium.chrome.browser.browsing_data.TimePeriod}).
      */
-    public int getBrowsingDataDeletionTimePeriod() {
-        return nativeGetBrowsingDataDeletionTimePeriod();
+    public int getBrowsingDataDeletionTimePeriod(int clearBrowsingDataTab) {
+        return nativeGetBrowsingDataDeletionTimePeriod(clearBrowsingDataTab);
     }
 
     /**
      * Sets the time period for which browsing data will be deleted.
+     * @param clearBrowsingDataTab Indicates if this is a timeperiod on the default, basic or
+     *      advanced tab to apply the right preference.
      * @param timePeriod The selected browsing data deletion time period (from the shared enum
      *      {@link org.chromium.chrome.browser.browsing_data.TimePeriod}).
      */
-    public void setBrowsingDataDeletionTimePeriod(int timePeriod) {
-        nativeSetBrowsingDataDeletionTimePeriod(timePeriod);
+    public void setBrowsingDataDeletionTimePeriod(int clearBrowsingDataTab, int timePeriod) {
+        nativeSetBrowsingDataDeletionTimePeriod(clearBrowsingDataTab, timePeriod);
+    }
+
+
+
+    /**
+     * @return The index of the tab last visited by the user in the CBD dialog.
+     *         Index 0 is for the basic tab, 1 is the advanced tab.
+     */
+    public int getLastSelectedClearBrowsingDataTab() {
+        return nativeGetLastClearBrowsingDataTab();
     }
 
     /**
-     * Clear the specified types of browsing data asynchronously.
-     * |listener| is an object to be notified when clearing completes.
-     * It can be null, but many operations (e.g. navigation) are
-     * ill-advised while browsing data is being cleared.
-     * @param listener A listener to call back when the clearing is finished.
-     * @param dataTypes An array of browsing data types to delete, represented as values from
-     *      the shared enum {@link org.chromium.chrome.browser.browsing_data.BrowsingDataType}.
-     * @param timePeriod The time period for which to delete the data, represented as a value from
-     *      the shared enum {@link org.chromium.chrome.browser.browsing_data.TimePeriod}.
+     * Set the index of the tab last visited by the user.
+     * @param tabIndex The last visited tab index, 0 for basic, 1 for advanced.
      */
-    public void clearBrowsingData(
-            OnClearBrowsingDataListener listener, int[] dataTypes, int timePeriod) {
-        clearBrowsingDataExcludingDomains(listener, dataTypes, timePeriod, new String[0],
-                new int[0], new String[0], new int[0]);
+    public void setLastSelectedClearBrowsingDataTab(int tabIndex) {
+        nativeSetLastClearBrowsingDataTab(tabIndex);
     }
 
     /**
-     * Same as above, but now we can specify a list of domains to exclude from clearing browsing
-     * data.
-     * Do not use this method unless caller knows what they're doing. Not all backends are supported
-     * yet, and more data than expected could be deleted. See crbug.com/113621.
-     * @param listener A listener to call back when the clearing is finished.
-     * @param dataTypes An array of browsing data types to delete, represented as values from
-     *      the shared enum {@link org.chromium.chrome.browser.browsing_data.BrowsingDataType}.
-     * @param timePeriod The time period for which to delete the data, represented as a value from
-     *      the shared enum {@link org.chromium.chrome.browser.browsing_data.TimePeriod}.
-     * @param blacklistDomains A list of registerable domains that we don't clear data for.
-     * @param blacklistedDomainReasons A list of the reason metadata for the blacklisted domains.
-     * @param ignoredDomains A list of ignored domains that the user chose to not blacklist. We use
-     *                       these to remove important site entries if the user ignores them enough.
-     * @param ignoredDomainReasons A list of reason metadata for the ignored domains.
+     * Migrate browsing data preferences when the new "clear browsing data" dialog with tabs is
+     * visited.
      */
-    public void clearBrowsingDataExcludingDomains(OnClearBrowsingDataListener listener,
-            int[] dataTypes, int timePeriod, String[] blacklistDomains,
-            int[] blacklistedDomainReasons, String[] ignoredDomains, int[] ignoredDomainReasons) {
-        assert mClearBrowsingDataListener == null;
-        mClearBrowsingDataListener = listener;
-        nativeClearBrowsingData(dataTypes, timePeriod, blacklistDomains, blacklistedDomainReasons,
-                ignoredDomains, ignoredDomainReasons);
+    public void migrateBrowsingDataPreferences() {
+        nativeMigrateBrowsingDataPreferences();
     }
 
-    /*
-     * Whether browser history can be deleted by the user.
+    /**
+     * @return Whether browser history can be deleted by the user.
      */
     public boolean canDeleteBrowsingHistory() {
         return nativeCanDeleteBrowsingHistory();
-    }
-
-    @CalledByNative
-    private void browsingDataCleared() {
-        if (mClearBrowsingDataListener != null) {
-            mClearBrowsingDataListener.onBrowsingDataCleared();
-            mClearBrowsingDataListener = null;
-        }
-    }
-
-    /**
-     * This fetches sites (registerable domains) that we consider important. This combines many
-     * pieces of information, including site engagement and permissions. The callback is called
-     * with the list of important registerable domains.
-     *
-     * See net/base/registry_controlled_domains/registry_controlled_domain.h for more details on
-     * registrable domains and the current list of effective eTLDs.
-     * @param callback The callback that will be used to set the list of important sites.
-     */
-    public static void fetchImportantSites(ImportantSitesCallback callback) {
-        nativeFetchImportantSites(callback);
-    }
-
-    /**
-     * @return The maximum number of important sites that will be returned from the call above.
-     *         This is a constant that won't change.
-     */
-    public static int getMaxImportantSites() {
-        return nativeGetMaxImportantSites();
-    }
-
-    /** This lets us mark an origin as important for testing. */
-    @VisibleForTesting
-    public static void markOriginAsImportantForTesting(String origin) {
-        nativeMarkOriginAsImportantForTesting(origin);
-    }
-
-    /**
-     * Requests that the web history service finds out if we should inform the user about the
-     * existence of other forms of browsing history. The response will be asynchronous, through
-     * {@link OtherFormsOfBrowsingHistoryListener}.
-     */
-    public void requestInfoAboutOtherFormsOfBrowsingHistory(
-            OtherFormsOfBrowsingHistoryListener listener) {
-        nativeRequestInfoAboutOtherFormsOfBrowsingHistory(listener);
     }
 
     public void setAllowCookiesEnabled(boolean allow) {
@@ -839,6 +730,24 @@ public final class PrefServiceBridge {
      */
     public void setAllowPopupsEnabled(boolean allow) {
         setContentSettingEnabled(ContentSettingsType.CONTENT_SETTINGS_TYPE_POPUPS, allow);
+    }
+
+    /**
+     * @return Whether subresource filtering is enabled.
+     */
+    public boolean subresourceFilterEnabled() {
+        return isContentSettingEnabled(
+                ContentSettingsType.CONTENT_SETTINGS_TYPE_SUBRESOURCE_FILTER);
+    }
+
+    /**
+     * Sets the preferences on whether to enable/disable subresource filtering.
+     *
+     * @param allow attribute to enable/disable subresource filtering.
+     */
+    public void setAllowSubresourceFilterEnabled(boolean allow) {
+        setContentSettingEnabled(
+                ContentSettingsType.CONTENT_SETTINGS_TYPE_SUBRESOURCE_FILTER, allow);
     }
 
     /**
@@ -1047,7 +956,8 @@ public final class PrefServiceBridge {
     }
 
     private native boolean nativeGetAcceptCookiesEnabled();
-    private native boolean nativeGetAcceptCookiesManaged();
+    private native boolean nativeGetAcceptCookiesUserModifiable();
+    private native boolean nativeGetAcceptCookiesManagedByCustodian();
     private native boolean nativeGetAutoplayEnabled();
     private native boolean nativeGetBackgroundSyncEnabled();
     private native boolean nativeGetBlockThirdPartyCookiesEnabled();
@@ -1083,19 +993,17 @@ public final class PrefServiceBridge {
     private native void nativeSetTranslateEnabled(boolean enabled);
     private native void nativeResetTranslateDefaults();
     private native void nativeMigrateJavascriptPreference();
-    private native boolean nativeGetBrowsingDataDeletionPreference(int dataType);
-    private native void nativeSetBrowsingDataDeletionPreference(int dataType, boolean value);
-    private native int nativeGetBrowsingDataDeletionTimePeriod();
-    private native void nativeSetBrowsingDataDeletionTimePeriod(int timePeriod);
-    private native void nativeClearBrowsingData(int[] dataTypes, int timePeriod,
-            String[] blacklistDomains, int[] blacklistedDomainReasons, String[] ignoredDomains,
-            int[] ignoredDomainReasons);
-    private native void nativeRequestInfoAboutOtherFormsOfBrowsingHistory(
-            OtherFormsOfBrowsingHistoryListener listener);
+    private native boolean nativeGetBrowsingDataDeletionPreference(
+            int dataType, int clearBrowsingDataTab);
+    private native void nativeSetBrowsingDataDeletionPreference(
+            int dataType, int clearBrowsingDataTab, boolean value);
+    private native int nativeGetBrowsingDataDeletionTimePeriod(int clearBrowsingDataTab);
+    private native void nativeSetBrowsingDataDeletionTimePeriod(
+            int clearBrowsingDataTab, int timePeriod);
+    private native int nativeGetLastClearBrowsingDataTab();
+    private native void nativeSetLastClearBrowsingDataTab(int lastTab);
+    private native void nativeMigrateBrowsingDataPreferences();
     private native boolean nativeCanDeleteBrowsingHistory();
-    private static native void nativeFetchImportantSites(ImportantSitesCallback callback);
-    private static native int nativeGetMaxImportantSites();
-    private static native void nativeMarkOriginAsImportantForTesting(String origin);
     private native void nativeSetAutoplayEnabled(boolean allow);
     private native void nativeSetAllowCookiesEnabled(boolean allow);
     private native void nativeSetBackgroundSyncEnabled(boolean allow);

@@ -16,6 +16,7 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Android wrapper of the TemplateUrlService which provides access from the Java
@@ -68,8 +69,8 @@ public class TemplateUrlService {
 
         @CalledByNative("TemplateUrl")
         public static TemplateUrl create(
-                int id, String shortName, boolean isPrepopulated, String keyword) {
-            return new TemplateUrl(id, shortName, isPrepopulated, keyword);
+                int index, String shortName, boolean isPrepopulated, String keyword) {
+            return new TemplateUrl(index, shortName, isPrepopulated, keyword);
         }
 
         public TemplateUrl(
@@ -119,7 +120,18 @@ public class TemplateUrlService {
             if (!(other instanceof TemplateUrl)) return false;
             TemplateUrl otherTemplateUrl = (TemplateUrl) other;
             return mIndex == otherTemplateUrl.mIndex
+                    && mTemplateUrlType == otherTemplateUrl.mTemplateUrlType
+                    && mIsPrepopulated == otherTemplateUrl.mIsPrepopulated
+                    && TextUtils.equals(mKeyword, otherTemplateUrl.mKeyword)
                     && TextUtils.equals(mShortName, otherTemplateUrl.mShortName);
+        }
+
+        @Override
+        public String toString() {
+            return String.format(Locale.US,
+                    "TemplateURL -- keyword: %s, short name: %s, index: %d, "
+                    + "type: %d, prepopulated: %b",
+                    mKeyword, mShortName, mIndex, mTemplateUrlType, mIsPrepopulated);
         }
     }
 

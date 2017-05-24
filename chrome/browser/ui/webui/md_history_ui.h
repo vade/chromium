@@ -8,15 +8,10 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "content/public/browser/web_ui_controller.h"
-#include "ui/base/layout.h"
-
-class Profile;
 
 namespace base {
 class ListValue;
-class RefCountedMemory;
 }
-
 
 namespace user_prefs {
 class PrefRegistrySyncable;
@@ -27,12 +22,7 @@ class MdHistoryUI : public content::WebUIController {
   explicit MdHistoryUI(content::WebUI* web_ui);
   ~MdHistoryUI() override;
 
-  static bool IsEnabled(Profile* profile);
-
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
-
-  static base::RefCountedMemory* GetFaviconResourceBytes(
-      ui::ScaleFactor scale_factor);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ContinueWhereILeftOffTest, MDHistoryUpgrade);

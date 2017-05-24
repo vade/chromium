@@ -9,6 +9,7 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
+#include "base/sequenced_task_runner.h"
 #include "base/synchronization/waitable_event.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/keyed_service/ios/browser_state_dependency_manager.h"
@@ -219,8 +220,7 @@ ChromeBrowserStateIOData* ChromeBrowserStateImpl::GetIOData() {
 }
 
 net::URLRequestContextGetter* ChromeBrowserStateImpl::CreateRequestContext(
-    ProtocolHandlerMap* protocol_handlers,
-    URLRequestInterceptorScopedVector request_interceptors) {
+    ProtocolHandlerMap* protocol_handlers) {
   ApplicationContext* application_context = GetApplicationContext();
   return io_data_
       ->CreateMainRequestContextGetter(

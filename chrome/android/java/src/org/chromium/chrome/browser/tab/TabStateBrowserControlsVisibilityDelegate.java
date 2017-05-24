@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.tab;
 
+import android.annotation.SuppressLint;
 import android.os.Handler;
 import android.os.Message;
 
@@ -39,6 +40,7 @@ public class TabStateBrowserControlsVisibilityDelegate
         mTab = tab;
 
         mTab.addObserver(new EmptyTabObserver() {
+            @SuppressLint("HandlerLeak")
             private Handler mHandler = new Handler() {
                 @Override
                 public void handleMessage(Message msg) {
@@ -83,9 +85,11 @@ public class TabStateBrowserControlsVisibilityDelegate
             }
 
             @Override
-            public void onDidCommitProvisionalLoadForFrame(Tab tab, long frameId,
-                    boolean isMainFrame, String url, int transitionType) {
-                if (!isMainFrame) return;
+            public void onDidFinishNavigation(Tab tab, String url, boolean isInMainFrame,
+                    boolean isErrorPage, boolean hasCommitted, boolean isSameDocument,
+                    boolean isFragmentNavigation, Integer pageTransition, int errorCode,
+                    int httpStatusCode) {
+                if (!hasCommitted || !isInMainFrame) return;
                 mHandler.removeMessages(MSG_ID_ENABLE_FULLSCREEN_AFTER_LOAD);
                 mHandler.sendEmptyMessageDelayed(
                         MSG_ID_ENABLE_FULLSCREEN_AFTER_LOAD, getLoadDelayMs());
@@ -133,15 +137,14 @@ public class TabStateBrowserControlsVisibilityDelegate
 
         String url = mTab.getUrl();
         boolean enableHidingBrowserControls = url != null;
-        enableHidingBrowserControls &= !url.startsWith(UrlConstants.CHROME_SCHEME);
-        enableHidingBrowserControls &= !url.startsWith(UrlConstants.CHROME_NATIVE_SCHEME);
+        enableHidingBrowserControls &= !url.startsWith(UrlConstants.CHROME_URL_PREFIX);
+        enableHidingBrowserControls &= !url.startsWith(UrlConstants.CHROME_NATIVE_URL_PREFIX);
 
         int securityState = mTab.getSecurityLevel();
         enableHidingBrowserControls &= (securityState != ConnectionSecurityLevel.DANGEROUS
                 && securityState != ConnectionSecurityLevel.SECURITY_WARNING);
 
-        enableHidingBrowserControls &=
-                !AccessibilityUtil.isAccessibilityEnabled(mTab.getApplicationContext());
+        enableHidingBrowserControls &= !AccessibilityUtil.isAccessibilityEnabled();
 
         ContentViewCore cvc = mTab.getContentViewCore();
         enableHidingBrowserControls &= cvc == null || !cvc.isFocusedNodeEditable();

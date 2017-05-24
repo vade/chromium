@@ -202,7 +202,7 @@ syncer::SyncError ArcPackageSyncableService::ProcessSyncChanges(
     const syncer::SyncChangeList& change_list) {
   if (!sync_processor_.get()) {
     return syncer::SyncError(FROM_HERE, syncer::SyncError::DATATYPE_ERROR,
-                             "Arc package syncable service is not started.",
+                             "ARC package syncable service is not started.",
                              syncer::ARC_PACKAGE);
   }
 
@@ -238,7 +238,11 @@ bool ArcPackageSyncableService::SyncStarted() {
 
 // ArcPackageSyncableService private
 void ArcPackageSyncableService::OnPackageRemoved(
-    const std::string& package_name) {
+    const std::string& package_name,
+    bool uninstalled) {
+  if (!uninstalled)
+    return;
+
   SyncItemMap::iterator delete_iter =
       pending_uninstall_items_.find(package_name);
 
@@ -341,7 +345,7 @@ bool ArcPackageSyncableService::ProcessSyncItemSpecifics(
     const sync_pb::ArcPackageSpecifics& specifics) {
   const std::string& package_name = specifics.package_name();
   if (package_name.empty()) {
-    VLOG(2) << "Add/Update Arc package item with empty package name";
+    VLOG(2) << "Add/Update ARC package item with empty package name";
     return false;
   }
 
@@ -370,7 +374,7 @@ bool ArcPackageSyncableService::DeleteSyncItemSpecifics(
     const sync_pb::ArcPackageSpecifics& specifics) {
   const std::string& package_name = specifics.package_name();
   if (package_name.empty()) {
-    VLOG(2) << "Delete Arc package item with empty package name";
+    VLOG(2) << "Delete ARC package item with empty package name";
     return false;
   }
 

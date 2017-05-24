@@ -12,7 +12,7 @@
 namespace blink {
 
 class Dictionary;
-class DOMWindow;
+class LocalDOMWindow;
 class ExceptionState;
 class ScriptState;
 class WorkerGlobalScope;
@@ -25,19 +25,19 @@ class GlobalFetch {
    public:
     virtual ~ScopedFetcher();
 
-    virtual ScriptPromise fetch(ScriptState*,
+    virtual ScriptPromise Fetch(ScriptState*,
                                 const RequestInfo&,
                                 const Dictionary&,
                                 ExceptionState&) = 0;
 
-    static ScopedFetcher* from(DOMWindow&);
-    static ScopedFetcher* from(WorkerGlobalScope&);
+    static ScopedFetcher* From(LocalDOMWindow&);
+    static ScopedFetcher* From(WorkerGlobalScope&);
 
     DECLARE_VIRTUAL_TRACE();
   };
 
   static ScriptPromise fetch(ScriptState*,
-                             DOMWindow&,
+                             LocalDOMWindow&,
                              const RequestInfo&,
                              const Dictionary&,
                              ExceptionState&);

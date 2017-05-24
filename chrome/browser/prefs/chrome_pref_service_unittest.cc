@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/prefs/chrome_command_line_pref_store.h"
 #include "chrome/common/chrome_switches.h"
@@ -60,13 +61,13 @@ class ChromePrefServiceWebKitPrefs : public ChromeRenderViewHostTestHarness {
     sync_preferences::TestingPrefServiceSyncable* pref_services =
         profile()->GetTestingPrefService();
     pref_services->SetUserPref(prefs::kDefaultCharset,
-                               new base::StringValue("utf8"));
+                               base::MakeUnique<base::Value>("utf8"));
     pref_services->SetUserPref(prefs::kWebKitDefaultFontSize,
-                               new base::FundamentalValue(20));
+                               base::MakeUnique<base::Value>(20));
     pref_services->SetUserPref(prefs::kWebKitTextAreasAreResizable,
-                               new base::FundamentalValue(false));
+                               base::MakeUnique<base::Value>(false));
     pref_services->SetUserPref("webkit.webprefs.foo",
-                               new base::StringValue("bar"));
+                               base::MakeUnique<base::Value>("bar"));
   }
 };
 
@@ -78,7 +79,13 @@ TEST_F(ChromePrefServiceWebKitPrefs, PrefsCopied) {
 
   // These values have been overridden by the profile preferences.
   EXPECT_EQ("UTF-8", webkit_prefs.default_encoding);
+#if !defined(OS_ANDROID)
   EXPECT_EQ(20, webkit_prefs.default_font_size);
+#else
+  // This pref is not configurable on Android so the default of 16 is always
+  // used.
+  EXPECT_EQ(16, webkit_prefs.default_font_size);
+#endif
   EXPECT_FALSE(webkit_prefs.text_areas_are_resizable);
 
   // These should still be the default values.

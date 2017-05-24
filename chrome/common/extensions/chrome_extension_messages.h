@@ -36,11 +36,6 @@ IPC_ENUM_TRAITS_MAX_VALUE(extensions::webstore_install::Result,
 
 // Messages sent from the browser to the renderer.
 
-// Toggles visual muting of the render view area. This is on when a constrained
-// window is showing.
-IPC_MESSAGE_ROUTED1(ChromeViewMsg_SetVisuallyDeemphasized,
-                    bool /* deemphazied */)
-
 // Sent to the renderer if install stage updates were requested for an inline
 // install.
 IPC_MESSAGE_ROUTED1(ExtensionMsg_InlineInstallStageChanged,
@@ -105,9 +100,6 @@ IPC_STRUCT_TRAITS_END()
 IPC_STRUCT_BEGIN(ExtensionMsg_AccessibilityEventParams)
   // ID of the accessibility tree that this event applies to.
   IPC_STRUCT_MEMBER(int, tree_id)
-
-  // The global offset of all coordinates in this accessibility tree.
-  IPC_STRUCT_MEMBER(gfx::Vector2d, location_offset)
 
   // The tree update.
   IPC_STRUCT_MEMBER(ui::AXTreeUpdate, update)

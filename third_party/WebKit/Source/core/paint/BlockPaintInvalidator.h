@@ -6,7 +6,7 @@
 #define BlockPaintInvalidator_h
 
 #include "platform/graphics/PaintInvalidationReason.h"
-#include "wtf/Allocator.h"
+#include "platform/wtf/Allocator.h"
 
 namespace blink {
 
@@ -17,15 +17,13 @@ class BlockPaintInvalidator {
   STACK_ALLOCATED();
 
  public:
-  BlockPaintInvalidator(const LayoutBlock& block,
-                        const PaintInvalidatorContext& context)
-      : m_block(block), m_context(context) {}
+  BlockPaintInvalidator(const LayoutBlock& block) : block_(block) {}
 
-  PaintInvalidationReason invalidatePaintIfNeeded();
+  void ClearPreviousVisualRects();
+  PaintInvalidationReason InvalidatePaint(const PaintInvalidatorContext&);
 
  private:
-  const LayoutBlock& m_block;
-  const PaintInvalidatorContext& m_context;
+  const LayoutBlock& block_;
 };
 
 }  // namespace blink

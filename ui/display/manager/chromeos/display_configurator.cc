@@ -11,13 +11,13 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/time/time.h"
 #include "chromeos/system/devicemode.h"
 #include "ui/display/display.h"
 #include "ui/display/display_switches.h"
 #include "ui/display/manager/chromeos/apply_content_protection_task.h"
 #include "ui/display/manager/chromeos/display_layout_manager.h"
-#include "ui/display/manager/chromeos/display_snapshot_virtual.h"
 #include "ui/display/manager/chromeos/display_util.h"
 #include "ui/display/manager/chromeos/update_display_configuration_task.h"
 #include "ui/display/types/display_mode.h"
@@ -30,9 +30,6 @@ namespace display {
 namespace {
 
 typedef std::vector<const DisplayMode*> DisplayModeList;
-
-// The EDID specification marks the top bit of the manufacturer id as reserved.
-const int16_t kReservedManufacturerID = static_cast<int16_t>(1 << 15);
 
 struct DisplayState {
   DisplaySnapshot* display = nullptr;  // Not owned.
@@ -490,13 +487,13 @@ DisplayConfigurator::~DisplayConfigurator() {
   CallAndClearQueuedCallbacks(false);
 
   while (!query_protection_callbacks_.empty()) {
-    query_protection_callbacks_.front().Run(QueryProtectionResponse());
+    query_protection_callbacks_.front().Run(false, 0, 0);
     query_protection_callbacks_.pop();
   }
 
-  while (!enable_protection_callbacks_.empty()) {
-    enable_protection_callbacks_.front().Run(false);
-    enable_protection_callbacks_.pop();
+  while (!set_protection_callbacks_.empty()) {
+    set_protection_callbacks_.front().Run(false);
+    set_protection_callbacks_.pop();
   }
 }
 
@@ -641,16 +638,15 @@ void DisplayConfigurator::ForceInitialConfigure(
   configuration_task_->Run();
 }
 
-DisplayConfigurator::ContentProtectionClientId
-DisplayConfigurator::RegisterContentProtectionClient() {
+uint64_t DisplayConfigurator::RegisterContentProtectionClient() {
   if (!configure_display_ || display_externally_controlled_)
-    return kInvalidClientId;
+    return INVALID_CLIENT_ID;
 
   return next_display_protection_client_id_++;
 }
 
 void DisplayConfigurator::UnregisterContentProtectionClient(
-    ContentProtectionClientId client_id) {
+    uint64_t client_id) {
   client_protection_requests_.erase(client_id);
 
   ContentProtections protections;
@@ -660,7 +656,7 @@ void DisplayConfigurator::UnregisterContentProtectionClient(
     }
   }
 
-  enable_protection_callbacks_.push(base::Bind(&DoNothing));
+  set_protection_callbacks_.push(base::Bind(&DoNothing));
   ApplyContentProtectionTask* task = new ApplyContentProtectionTask(
       layout_manager_.get(), native_display_delegate_.get(), protections,
       base::Bind(&DisplayConfigurator::OnContentProtectionClientUnregistered,
@@ -676,16 +672,16 @@ void DisplayConfigurator::OnContentProtectionClientUnregistered(bool success) {
   DCHECK(!content_protection_tasks_.empty());
   content_protection_tasks_.pop();
 
-  DCHECK(!enable_protection_callbacks_.empty());
-  EnableProtectionCallback callback = enable_protection_callbacks_.front();
-  enable_protection_callbacks_.pop();
+  DCHECK(!set_protection_callbacks_.empty());
+  SetProtectionCallback callback = set_protection_callbacks_.front();
+  set_protection_callbacks_.pop();
 
   if (!content_protection_tasks_.empty())
     content_protection_tasks_.front().Run();
 }
 
 void DisplayConfigurator::QueryContentProtectionStatus(
-    ContentProtectionClientId client_id,
+    uint64_t client_id,
     int64_t display_id,
     const QueryProtectionCallback& callback) {
   // Exclude virtual displays so that protected content will not be recaptured
@@ -693,13 +689,13 @@ void DisplayConfigurator::QueryContentProtectionStatus(
   for (const DisplaySnapshot* display : cached_displays_) {
     if (display->display_id() == display_id &&
         !IsPhysicalDisplayType(display->type())) {
-      callback.Run(QueryProtectionResponse());
+      callback.Run(false, 0, 0);
       return;
     }
   }
 
   if (!configure_display_ || display_externally_controlled_) {
-    callback.Run(QueryProtectionResponse());
+    callback.Run(false, 0, 0);
     return;
   }
 
@@ -715,20 +711,20 @@ void DisplayConfigurator::QueryContentProtectionStatus(
 }
 
 void DisplayConfigurator::OnContentProtectionQueried(
-    ContentProtectionClientId client_id,
+    uint64_t client_id,
     int64_t display_id,
     QueryContentProtectionTask::Response task_response) {
-  QueryProtectionResponse response;
-  response.success = task_response.success;
-  response.link_mask = task_response.link_mask;
+  bool success = task_response.success;
+  uint32_t link_mask = task_response.link_mask;
+  uint32_t protection_mask = 0;
 
   // Don't reveal protections requested by other clients.
   ProtectionRequests::iterator it = client_protection_requests_.find(client_id);
-  if (response.success && it != client_protection_requests_.end()) {
+  if (success && it != client_protection_requests_.end()) {
     uint32_t requested_mask = 0;
     if (it->second.find(display_id) != it->second.end())
       requested_mask = it->second[display_id];
-    response.protection_mask =
+    protection_mask =
         task_response.enabled & ~task_response.unfulfilled & requested_mask;
   }
 
@@ -738,17 +734,17 @@ void DisplayConfigurator::OnContentProtectionQueried(
   DCHECK(!query_protection_callbacks_.empty());
   QueryProtectionCallback callback = query_protection_callbacks_.front();
   query_protection_callbacks_.pop();
-  callback.Run(response);
+  callback.Run(success, link_mask, protection_mask);
 
   if (!content_protection_tasks_.empty())
     content_protection_tasks_.front().Run();
 }
 
-void DisplayConfigurator::EnableContentProtection(
-    ContentProtectionClientId client_id,
+void DisplayConfigurator::SetContentProtection(
+    uint64_t client_id,
     int64_t display_id,
     uint32_t desired_method_mask,
-    const EnableProtectionCallback& callback) {
+    const SetProtectionCallback& callback) {
   if (!configure_display_ || display_externally_controlled_) {
     callback.Run(false);
     return;
@@ -766,10 +762,10 @@ void DisplayConfigurator::EnableContentProtection(
   }
   protections[display_id] |= desired_method_mask;
 
-  enable_protection_callbacks_.push(callback);
+  set_protection_callbacks_.push(callback);
   ApplyContentProtectionTask* task = new ApplyContentProtectionTask(
       layout_manager_.get(), native_display_delegate_.get(), protections,
-      base::Bind(&DisplayConfigurator::OnContentProtectionEnabled,
+      base::Bind(&DisplayConfigurator::OnSetContentProtectionCompleted,
                  weak_ptr_factory_.GetWeakPtr(), client_id, display_id,
                  desired_method_mask));
   content_protection_tasks_.push(
@@ -778,17 +774,17 @@ void DisplayConfigurator::EnableContentProtection(
     content_protection_tasks_.front().Run();
 }
 
-void DisplayConfigurator::OnContentProtectionEnabled(
-    ContentProtectionClientId client_id,
+void DisplayConfigurator::OnSetContentProtectionCompleted(
+    uint64_t client_id,
     int64_t display_id,
     uint32_t desired_method_mask,
     bool success) {
   DCHECK(!content_protection_tasks_.empty());
   content_protection_tasks_.pop();
 
-  DCHECK(!enable_protection_callbacks_.empty());
-  EnableProtectionCallback callback = enable_protection_callbacks_.front();
-  enable_protection_callbacks_.pop();
+  DCHECK(!set_protection_callbacks_.empty());
+  SetProtectionCallback callback = set_protection_callbacks_.front();
+  set_protection_callbacks_.pop();
 
   if (!success) {
     callback.Run(false);
@@ -1037,8 +1033,6 @@ void DisplayConfigurator::RunPendingConfiguration() {
       requested_display_state_, pending_power_state_, pending_power_flags_, 0,
       force_configure_, base::Bind(&DisplayConfigurator::OnConfigured,
                                    weak_ptr_factory_.GetWeakPtr())));
-  configuration_task_->set_virtual_display_snapshots(
-      virtual_display_snapshots_.get());
 
   // Reset the flags before running the task; otherwise it may end up scheduling
   // another configuration.
@@ -1153,45 +1147,6 @@ void DisplayConfigurator::NotifyDisplayStateObservers(
 void DisplayConfigurator::NotifyPowerStateObservers() {
   for (Observer& observer : observers_)
     observer.OnPowerStateChanged(current_power_state_);
-}
-
-int64_t DisplayConfigurator::AddVirtualDisplay(const gfx::Size& display_size) {
-  if (last_virtual_display_id_ == 0xff) {
-    LOG(WARNING) << "Exceeded virtual display id limit";
-    return kInvalidDisplayId;
-  }
-
-  DisplaySnapshotVirtual* virtual_snapshot =
-      new DisplaySnapshotVirtual(GenerateDisplayID(kReservedManufacturerID, 0x0,
-                                                   ++last_virtual_display_id_),
-                                 display_size);
-  virtual_display_snapshots_.push_back(virtual_snapshot);
-  ConfigureDisplays();
-
-  return virtual_snapshot->display_id();
-}
-
-bool DisplayConfigurator::RemoveVirtualDisplay(int64_t display_id) {
-  bool display_found = false;
-  for (auto it = virtual_display_snapshots_.begin();
-       it != virtual_display_snapshots_.end(); ++it) {
-    if ((*it)->display_id() == display_id) {
-      virtual_display_snapshots_.erase(it);
-      ConfigureDisplays();
-      display_found = true;
-      break;
-    }
-  }
-
-  if (!display_found)
-    return false;
-
-  int64_t max_display_id = 0;
-  for (auto* display : virtual_display_snapshots_)
-    max_display_id = std::max(max_display_id, display->display_id());
-  last_virtual_display_id_ = max_display_id & 0xff;
-
-  return true;
 }
 
 bool DisplayConfigurator::IsDisplayOn() const {

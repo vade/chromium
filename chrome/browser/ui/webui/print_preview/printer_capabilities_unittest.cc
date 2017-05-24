@@ -8,7 +8,9 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
+#include "base/task_runner_util.h"
 #include "base/test/values_test_util.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/ui/webui/print_preview/printer_capabilities.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -20,7 +22,7 @@ namespace {
 
 void SettingsReply(std::unique_ptr<base::DictionaryValue>* out,
                    std::unique_ptr<base::DictionaryValue> reply) {
-  out->reset(reply.release());
+  *out = std::move(reply);
 }
 
 std::unique_ptr<base::DictionaryValue> GetSettingsSynchronous(
