@@ -74,6 +74,7 @@ namespace media {
         
         SyphonClient* syphonClient;
         NSOpenGLContext* context;
+
         __block NSSize lastSize;
         // Todo: We create and destroy our FBO / Texture every frame
         // Lets cache them at some point.
@@ -87,6 +88,8 @@ namespace media {
         GLuint* PBOs;
         size_t textureDataLength;        
         
+        base::TimeTicks first_ref_time_;
+
         bool run;
         DISALLOW_COPY_AND_ASSIGN(VideoCaptureDeviceSyphonMac);
     };

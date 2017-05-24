@@ -5,6 +5,7 @@
 #include "media/capture/video/mac/video_capture_device_syphon_mac.h"
 
 #include <utility>
+#include <vector>
 
 #include "base/logging.h"
 #include "base/macros.h"
@@ -12,6 +13,8 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "ui/gl/init/gl_initializer.h"
+#include "ui/gl/init/gl_factory.h"
+#include <OpenGL/CGLRenderers.h>
 
 namespace media {
     
@@ -50,8 +53,8 @@ namespace media {
         
         const media::VideoCaptureFormat format(
                                                gfx::Size(640, 480),
-                                               0.0f,
-                                               PIXEL_FORMAT_RGB32);
+                                               50.0f,
+                                               PIXEL_FORMAT_ARGB);
         VLOG(3) << device.display_name << " "
         << VideoCaptureFormat::ToString(format);
         supported_formats->push_back(format);
@@ -66,8 +69,15 @@ namespace media {
          
          // Because we run OpenGL in our frame callback to read Syphon Frames off of the GPU
          // We need to be sure to initialize a Chrome Mac Desktop Implementation:
-         gl::init::InitializeStaticGLBindings(gl::kGLImplementationDesktopGL);
-         
+//         gl::InitializeNullDrawGLBindings();
+//         gl::DisableNullDrawGLBindings();
+
+//         gl::init::InitializeGLOneOffImplementati
+//         gl::init::InitializeGLOneOffPlatform();
+//         gl::SetGLImplementation(gl::kGLImplementationDesktopGL);
+//         gl::init::InitializeStaticGLBindings(gl::kGLImplementationDesktopGL);
+         gl::init::InitializeGLOneOff();
+
          @autoreleasepool {
              
              // Init our last size to zero
@@ -87,6 +97,9 @@ namespace media {
                  NSOpenGLPFAColorSize, 32,
                  NSOpenGLPFADepthSize, 24,
                  NSOpenGLPFANoRecovery,
+                 NSOpenGLPFAOpenGLProfile,
+                 NSOpenGLProfileVersionLegacy,
+                 (NSOpenGLPixelFormatAttribute)0,
              };
              
              NSOpenGLPixelFormat* format = [[NSOpenGLPixelFormat alloc] initWithAttributes:attributes];
@@ -99,6 +112,9 @@ namespace media {
                  NSOpenGLPixelFormatAttribute attributes[] = {
                      NSOpenGLPFAColorSize, 32,
                      NSOpenGLPFADepthSize, 24,
+                     NSOpenGLPFAOpenGLProfile,
+                     NSOpenGLProfileVersionLegacy,
+                     (NSOpenGLPixelFormatAttribute)0,
                  };
                  
                  NSOpenGLPixelFormat* format = [[NSOpenGLPixelFormat alloc] initWithAttributes:attributes];
@@ -109,17 +125,28 @@ namespace media {
                  {
                      NSLog(@"Unable to create Context - falling back x2");
                      NSOpenGLPixelFormatAttribute attributes[] = {
+                         NSOpenGLPFAOpenGLProfile,
+                         NSOpenGLProfileVersionLegacy,
+                         (NSOpenGLPixelFormatAttribute)0,
                      };
                      
                      NSOpenGLPixelFormat* format = [[NSOpenGLPixelFormat alloc] initWithAttributes:attributes];
                      
                      context = [[NSOpenGLContext alloc] initWithFormat:format shareContext:nil];
+                     
+                     if(context == nil)
+                     {
+                         NSLog(@"Unable to create Context - falling back x3 - using Current Context");
+                         context = [[NSOpenGLContext alloc] initWithCGLContextObj:CGLGetCurrentContext()];
+                     }
                  }
              }
+            
              if(context == nil)
              {
                  NSLog(@"Unable to create Context Final");
              }
+
              
              [context retain];
 
@@ -144,17 +171,26 @@ namespace media {
              if (selectedServerDictionary) {
                  NSLog(@"Found Server: %@", selectedServerDictionary);
  
-                 syphonClient = [[SyphonClient alloc] initWithServerDescription:selectedServerDictionary options:nil newFrameHandler:^(SyphonClient *client) {
+                 this->syphonClient = [[SyphonClient alloc] initWithServerDescription:selectedServerDictionary context:context.CGLContextObj options:nil newFrameHandler:^(SyphonClient *client) {
                      @autoreleasepool {
                          
-                         if(run && context) {
-                             [context makeCurrentContext];
+                         if(this->run && client.context) {
+
+                             CGLSetCurrentContext(client.context) ;
                              
-                             SyphonImage* image = [client newFrameImageForContext:context.CGLContextObj];
+                             SyphonImage* image = [client newFrameImage];
                              
                              if(image) {
                                  
                                  NSSize currentSize = image.textureSize;
+                                 
+                                 // Timing
+                                 base::TimeTicks now = base::TimeTicks::Now();
+                                 
+                                 if (first_ref_time_.is_null())
+                                     first_ref_time_ = now;
+
+                                 base::TimeDelta timestamp = now - first_ref_time_;
                                  
                                  // Rebuild GL resources
                                  if(!NSEqualSizes(this->lastSize, currentSize))
@@ -278,7 +314,7 @@ namespace media {
                                          
                                          const media::VideoCaptureFormat capture_format(
                                                                                         gfx::Size(currentSize.width, currentSize.height),
-                                                                                        0.0f,
+                                                                                        50.0f,
                                                                                         media::PIXEL_FORMAT_ARGB);
                                          // We are not currently tracking frame deltas
                                          // We assume 60Hz here.
@@ -287,8 +323,8 @@ namespace media {
                                                                       this->textureDataLength,
                                                                       capture_format,
                                                                       0,
-                                                                      base::TimeTicks::Now(),
-                                                                      base::TimeDelta::FromMilliseconds(16));
+                                                                      now,
+                                                                      timestamp);
 
                                      }
                                      
@@ -311,7 +347,7 @@ namespace media {
                                  
                                  const media::VideoCaptureFormat capture_format(
                                                                                 gfx::Size(currentSize.width, currentSize.height),
-                                                                                0.0f,
+                                                                                50.0f,
                                                                                 media::PIXEL_FORMAT_ARGB);
                                  // We are not currently tracking frame deltas
                                  // We assume 60Hz here.
@@ -320,8 +356,8 @@ namespace media {
                                                               this->textureDataLength,
                                                               capture_format,
                                                               0,
-                                                              base::TimeTicks::Now(),
-                                                              base::TimeDelta::FromMilliseconds(16));
+                                                              now,
+                                                              timestamp);
 
 #endif
                                  // GL Syncronize contents of FBO / texture
@@ -378,6 +414,9 @@ namespace media {
 
                 [context release];
                 context = nil;
+                
+                gl::init::ShutdownGL();
+
             }
         }
     }
@@ -419,6 +458,8 @@ namespace media {
         DCHECK(thread_checker_.CalledOnValidThread());
         client_ = std::move(client);
         
+        //params.resolution_change_policy = ResolutionChangePolicy::RESOLUTION_POLICY_ANY_WITHIN_LIMIT;
+        
         NSLog(@"Request to allocate and start Syphon Server");
         run = true;
     }
@@ -426,6 +467,7 @@ namespace media {
     void VideoCaptureDeviceSyphonMac::StopAndDeAllocate() {
         run = false;
         [syphonClient stop];
+        
     }
     
 }  // namespace media
