@@ -52,7 +52,7 @@ namespace media {
         
         const media::VideoCaptureFormat format(
                                                gfx::Size(640, 480),
-                                               50.0f,
+                                               0.0f,
                                                PIXEL_FORMAT_ARGB);
         VLOG(3) << device.display_name << " "
         << VideoCaptureFormat::ToString(format);
@@ -316,7 +316,7 @@ namespace media {
                                          
                                          const media::VideoCaptureFormat capture_format(
                                                                                         gfx::Size(currentSize.width, currentSize.height),
-                                                                                        50.0f,
+                                                                                        0.0f,
                                                                                         media::PIXEL_FORMAT_ARGB);
                                          // We are not currently tracking frame deltas
                                          // We assume 60Hz here.
@@ -349,7 +349,7 @@ namespace media {
                                  
                                  const media::VideoCaptureFormat capture_format(
                                                                                 gfx::Size(currentSize.width, currentSize.height),
-                                                                                50.0f,
+                                                                                0.0f,
                                                                                 media::PIXEL_FORMAT_ARGB);
                                  // We are not currently tracking frame deltas
                                  // We assume 60Hz here.
